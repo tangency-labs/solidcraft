@@ -16,7 +16,7 @@ pub(crate) fn scale_specimen(ui: &mut Ui, scale: f32) {
     p.text(
         r.right_top() + vec2(-t.space_8, t.space_8),
         egui::Align2::RIGHT_TOP,
-        solidcraft_ui_text::tr(msg!("prefs.live_preview")).to_uppercase(),
+        tr!("prefs.live_preview").to_uppercase(),
         FontId::proportional(t.font_micro),
         t.form_dim,
     );
@@ -173,11 +173,7 @@ pub(crate) fn pointer_preview(ui: &mut Ui, visible: bool, speed: &str, follows_c
     if visible {
         ui_kit::icons::glyphs::pointer(&ui.painter().with_clip_rect(rect.shrink(t.space_4)), path.get(1).copied().unwrap_or(rect.center()));
     }
-    let caption = if visible {
-        msg!("ai.prefs.pointer_preview_speed", speed = speed).tr()
-    } else {
-        solidcraft_ui_text::tr(msg!("ai.prefs.pointer_preview_hidden")).to_owned()
-    };
+    let caption = if visible { tr!("ai.prefs.pointer_preview_speed", speed = speed) } else { tr!("ai.prefs.pointer_preview_hidden").to_owned() };
     let caption_rect = Rect::from_min_max(rect.min + vec2(t.space_8, t.space_4), pos2(rect.right() - t.space_8, rect.top() + t.space_24));
     ui_kit::paint_text(ui, caption_rect, &caption, FontId::proportional(t.font_small), t.form_dim, false);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), &caption));

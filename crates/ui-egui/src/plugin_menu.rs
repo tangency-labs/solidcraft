@@ -764,14 +764,14 @@ pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
     use crate::app_bar::{FileItem, FileRow};
     let item = |id: String, label: String, enabled: bool| FileRow::Item(FileItem { id, label, key: String::new(), icon: String::new(), enabled });
     let mut rows = vec![
-        item(INSTALL.into(), app.tr(msg!("ui.plugin_menu_install")).into(), true),
-        item(LAST_REPORT.into(), app.tr(msg!("ui.plugin_menu_last_report")).into(), app.import_report.is_some()),
+        item(INSTALL.into(), tr!(app, "ui.plugin_menu_install").into(), true),
+        item(LAST_REPORT.into(), tr!(app, "ui.plugin_menu_last_report").into(), app.import_report.is_some()),
         FileRow::Separator,
     ];
     if app.plugin_menu.listed.iter().all(|plugin| plugin.entries.is_empty()) {
-        rows.push(item("empty".into(), app.tr(msg!("ui.plugin_menu_empty")).into(), false));
+        rows.push(item("empty".into(), tr!(app, "ui.plugin_menu_empty").into(), false));
     } else if !app.plugin_menu.listed.iter().any(|p| shown(app, p)) {
-        rows.push(item("empty".into(), app.tr(msg!("ui.plugin_menu_all_off")).into(), false));
+        rows.push(item("empty".into(), tr!(app, "ui.plugin_menu_all_off").into(), false));
     }
     // A plugin turned off in Preferences › Plugins is left out; the others keep their index.
     for (p, plugin) in app.plugin_menu.listed.iter().enumerate().filter(|(_, p)| shown(app, p) && !p.entries.is_empty()) {
@@ -1116,19 +1116,19 @@ impl EntryDialog {
     /// The parameters to run with, or why Run is off (in words for the dialog).
     pub(crate) fn ready(&self, app: &SolveApp) -> Result<Value, String> {
         if self.session != app.session.uid {
-            return Err(app.tr(msg!("ui.plugin_dialog_other_design")).into());
+            return Err(tr!(app, "ui.plugin_dialog_other_design").into());
         }
         if !shown(app, &self.plugin) {
-            return Err(app.tr(msg!("ui.plugin_dialog_disabled")).into());
+            return Err(tr!(app, "ui.plugin_dialog_disabled").into());
         }
         let missing = missing_groups(app, &self.plugin);
         if !missing.is_empty() {
-            return Err(msg!("ui.plugin_dialog_needs_groups", groups = &missing.join(", ")).tr());
+            return Err(tr!("ui.plugin_dialog_needs_groups", groups = &missing.join(", ")));
         }
-        let Some(fields) = &self.fields else { return Err(app.tr(msg!("ui.plugin_dialog_unsupported")).into()) };
+        let Some(fields) = &self.fields else { return Err(tr!(app, "ui.plugin_dialog_unsupported").into()) };
         params(fields).map_err(|problem| match problem {
-            Problem::Missing(label) => msg!("ui.plugin_dialog_missing", field = &label).tr(),
-            Problem::Invalid(label) => msg!("ui.plugin_dialog_invalid", field = &label).tr(),
+            Problem::Missing(label) => tr!("ui.plugin_dialog_missing", field = &label),
+            Problem::Invalid(label) => tr!("ui.plugin_dialog_invalid", field = &label),
         })
     }
 }
@@ -1229,7 +1229,7 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
 pub(crate) fn check_dispatch(app: &mut SolveApp, req: &solidcraft_control::ControlRequest) -> Result<(), String> {
     let Some(at) = app.plugin_menu.pending.iter().position(|(serial, _)| *serial == req.serial) else { return Ok(()) };
     let (_, session) = app.plugin_menu.pending.remove(at);
-    if session == app.session.uid { Ok(()) } else { Err(app.tr(msg!("ui.plugin_dialog_other_design")).into()) }
+    if session == app.session.uid { Ok(()) } else { Err(tr!(app, "ui.plugin_dialog_other_design").into()) }
 }
 
 /// Take the finished runs' replies: an edit closes its dialog, a read shows its result, an error
@@ -1248,13 +1248,13 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
     let reply = match running.reply.try_recv() {
         Ok(reply) => reply,
         Err(std::sync::mpsc::TryRecvError::Empty) => return,
-        Err(std::sync::mpsc::TryRecvError::Disconnected) => json!({"ok":false,"error":solidcraft_ui_text::tr(msg!("ui.plugin_no_result"))}),
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => json!({"ok":false,"error":tr!("ui.plugin_no_result")}),
     };
     dialog.running = None;
     if reply["ok"] != true {
         let error = reply["error"].as_str().unwrap_or_default();
         let error = error.strip_prefix("plugin: ").unwrap_or(error);
-        dialog.error = Some(msg!("ui.plugin_dialog_failed", error = error).tr());
+        dialog.error = Some(tr!("ui.plugin_dialog_failed", error = error));
         return;
     }
     if dialog.read {
@@ -1262,7 +1262,7 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
         dialog.result = Some(serde_json::to_string_pretty(&result).unwrap_or_default());
         return;
     }
-    let done = msg!("ui.plugin_dialog_done", entry = &dialog.label).tr();
+    let done = tr!("ui.plugin_dialog_done", entry = &dialog.label);
     app.plugin_menu.dialogs.remove(at);
     app.set_status(done, false);
 }
@@ -1282,7 +1282,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
         if let Some((field, listed)) = claim
             && !start_picking_listed(app, id, field, listed)
         {
-            app.set_status(app.tr(msg!("ui.plugin_dialog_finish_tool")).to_owned(), true);
+            app.set_status(tr!(app, "ui.plugin_dialog_finish_tool").to_owned(), true);
         }
         if run_it
             && let Err(error) = run_dialog(app, id)
@@ -1367,20 +1367,20 @@ fn body(
     let missing = missing_groups(app, plugin);
     let other_design = dialog.session != app.session.uid;
     if other_design {
-        ui_kit::status_line(ui, app.tr(msg!("ui.plugin_dialog_other_design")), ui_kit::StatusTone::Warning);
+        ui_kit::status_line(ui, tr!(app, "ui.plugin_dialog_other_design"), ui_kit::StatusTone::Warning);
     } else if !shown(app, plugin) {
-        ui_kit::status_line(ui, app.tr(msg!("ui.plugin_dialog_disabled")), ui_kit::StatusTone::Warning);
+        ui_kit::status_line(ui, tr!(app, "ui.plugin_dialog_disabled"), ui_kit::StatusTone::Warning);
     } else if !missing.is_empty() {
-        let asks = msg!("ui.plugin_dialog_needs_groups", groups = &missing.join(", ")).tr();
+        let asks = tr!("ui.plugin_dialog_needs_groups", groups = &missing.join(", "));
         ui_kit::status_line(ui, &asks, ui_kit::StatusTone::Warning);
     }
     let editable = dialog.running.is_none();
     match dialog.fields.as_mut() {
         None => {
-            ui_kit::status_line(ui, app.tr(msg!("ui.plugin_dialog_unsupported")), ui_kit::StatusTone::Warning);
+            ui_kit::status_line(ui, tr!(app, "ui.plugin_dialog_unsupported"), ui_kit::StatusTone::Warning);
         }
         Some(fields) if fields.is_empty() => {
-            ui_kit::text(ui, app.tr(msg!("ui.plugin_dialog_no_inputs")), ui_kit::Text::Note("plugin_no_inputs"));
+            ui_kit::text(ui, tr!(app, "ui.plugin_dialog_no_inputs"), ui_kit::Text::Note("plugin_no_inputs"));
         }
         Some(fields) => {
             ui.add_enabled_ui(editable, |ui| {
@@ -1416,14 +1416,14 @@ fn body(
             && preview_commands(app).is_some_and(|(id, _, _)| id == dialog.id)
             && let Some(error) = &app.preview.error
         {
-            ui_kit::status_line(ui, &msg!("ui.plugin_dialog_preview_failed", error = error).tr(), ui_kit::StatusTone::Dim);
+            ui_kit::status_line(ui, &tr!("ui.plugin_dialog_preview_failed", error = error), ui_kit::StatusTone::Dim);
         }
     }
     if dialog.picks_cleared {
-        ui_kit::status_line(ui, app.tr(msg!("ui.plugin_dialog_picks_cleared")), ui_kit::StatusTone::Warning);
+        ui_kit::status_line(ui, tr!(app, "ui.plugin_dialog_picks_cleared"), ui_kit::StatusTone::Warning);
     }
     if dialog.running.is_some() {
-        ui_kit::status_line(ui, app.tr(msg!("ui.plugin_dialog_running")), ui_kit::StatusTone::Dim);
+        ui_kit::status_line(ui, tr!(app, "ui.plugin_dialog_running"), ui_kit::StatusTone::Dim);
     } else if let Some(error) = &dialog.error {
         ui_kit::status_line(ui, error, ui_kit::StatusTone::Error);
     } else if let Some(why) = why_not
@@ -1435,7 +1435,7 @@ fn body(
         ui_kit::status_line(ui, why, ui_kit::StatusTone::Dim);
     }
     if let Some(result) = &dialog.result {
-        ui_kit::text(ui, app.tr(msg!("ui.plugin_dialog_result")), ui_kit::Text::Note("plugin_result"));
+        ui_kit::text(ui, tr!(app, "ui.plugin_dialog_result"), ui_kit::Text::Note("plugin_result"));
         ui_kit::read_only_text(ui, result);
     }
 }
@@ -1493,8 +1493,8 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, images: &std::collections::BTree
         }
         (Kind::Number { unit, .. } | Kind::Integer { unit, .. }, Input::Typed(text)) => {
             let hint = match (field.required, unit) {
-                (true, Some(unit)) => format!("{} ({unit})", app.tr(msg!("ui.plugin_dialog_required_hint"))),
-                (true, None) => app.tr(msg!("ui.plugin_dialog_required_hint")).to_owned(),
+                (true, Some(unit)) => format!("{} ({unit})", tr!(app, "ui.plugin_dialog_required_hint")),
+                (true, None) => tr!(app, "ui.plugin_dialog_required_hint").to_owned(),
                 (false, Some(unit)) => unit.clone(),
                 (false, None) => String::new(),
             };
@@ -1503,7 +1503,7 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, images: &std::collections::BTree
         (Kind::Boolean, Input::Boolean(value)) => ui_kit::checkbox(ui, &label, value),
         (Kind::Choice { titles, .. }, Input::Choice(chosen)) => {
             // Until something is chosen the dropdown leads with "Choose…", which is not a value.
-            let choose = app.tr(msg!("ui.plugin_dialog_choose")).to_owned();
+            let choose = tr!(app, "ui.plugin_dialog_choose").to_owned();
             let lead = chosen.is_none();
             let shown: Vec<&str> = lead
                 .then_some(choose.as_str())
@@ -1535,7 +1535,7 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, images: &std::collections::BTree
             response
         }
         (Kind::Text { .. }, Input::Text(text)) => {
-            let hint = if field.required { app.tr(msg!("ui.plugin_dialog_required_hint")) } else { "" };
+            let hint = if field.required { tr!(app, "ui.plugin_dialog_required_hint") } else { "" };
             ui_kit::row(ui, &label, |ui| ui_kit::text_field_reserving(ui, text, hint, 0.0).1)
         }
         _ => ui.response(),

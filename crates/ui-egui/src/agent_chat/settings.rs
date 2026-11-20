@@ -163,10 +163,10 @@ fn listed_for<'a>(
     key: Option<&ListingKey>,
 ) -> (&'a [acp::ModelInfo], Option<String>) {
     match key.and_then(|key| listings.get(key)) {
-        Some(Ok(models)) if models.is_empty() => (&[], Some(tr(msg!("ui.agent_chat_models_none")).to_string())),
+        Some(Ok(models)) if models.is_empty() => (&[], Some(tr!("ui.agent_chat_models_none").to_string())),
         Some(Ok(models)) => (models, None),
         Some(Err(error)) => (&[], Some(trf("ui.agent_chat_models_failed", &[("error", error)]))),
-        None => (&[], key.map(|_| tr(msg!("ui.agent_chat_models_listing")).to_string())),
+        None => (&[], key.map(|_| tr!("ui.agent_chat_models_listing").to_string())),
     }
 }
 
@@ -203,7 +203,7 @@ fn start_listing(app: &mut SolveApp, ctx: &egui::Context, key: ListingKey, secre
         state.endpoint_models.clear();
     }
     let Some(http) = app.services.agent_http.clone() else {
-        state.endpoint_models.insert(key, Err(tr(msg!("ui.ai_no_http")).to_string()));
+        state.endpoint_models.insert(key, Err(tr!("ui.ai_no_http").to_string()));
         return;
     };
     let (tx, rx) = std::sync::mpsc::channel();
@@ -235,7 +235,7 @@ pub(super) fn poll_listing(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(listing) = &state.listing {
         let result = match listing.rx.try_recv() {
             Ok(result) => result,
-            Err(TryRecvError::Disconnected) => Err(tr(msg!("ui.ai_no_answer")).to_string()),
+            Err(TryRecvError::Disconnected) => Err(tr!("ui.ai_no_answer").to_string()),
             Err(TryRecvError::Empty) => return,
         };
         state.endpoint_models.insert(listing.key.clone(), result);
@@ -439,7 +439,7 @@ fn start_test(app: &SolveApp, e: &agents::Entry, key: Option<String>) -> Test {
             });
         }
         Kind::Api => {
-            let Some(http) = app.services.agent_http.clone() else { return Test::Done(Err(TestError::Other(tr(msg!("ui.ai_no_http")).to_string()))) };
+            let Some(http) = app.services.agent_http.clone() else { return Test::Done(Err(TestError::Other(tr!("ui.ai_no_http").to_string()))) };
             let (url, model) = (e.base_url.clone(), e.model.clone());
             let allow_insecure_http = e.allow_insecure_http;
             std::thread::spawn(move || {
@@ -447,7 +447,7 @@ fn start_test(app: &SolveApp, e: &agents::Entry, key: Option<String>) -> Test {
             });
         }
         Kind::Anthropic => {
-            let Some(http) = app.services.agent_http.clone() else { return Test::Done(Err(TestError::Other(tr(msg!("ui.ai_no_http")).to_string()))) };
+            let Some(http) = app.services.agent_http.clone() else { return Test::Done(Err(TestError::Other(tr!("ui.ai_no_http").to_string()))) };
             let (url, model) = (e.base_url.clone(), e.model.clone());
             std::thread::spawn(move || {
                 let _ = tx.send(super::api_client::test_anthropic_endpoint(&http, &url, key.as_deref(), &model).map_err(TestError::Other));
@@ -460,21 +460,21 @@ fn start_test(app: &SolveApp, e: &agents::Entry, key: Option<String>) -> Test {
 /// An endpoint's request timeout field: seconds, 30 s to an hour.
 fn timeout_field(ui: &mut egui::Ui, secs: &mut u64, handle: &str) -> bool {
     let r = ui_kit::number_field(ui, secs, agents::MIN_REQUEST_TIMEOUT_S..=agents::MAX_REQUEST_TIMEOUT_S, 5.0, "")
-        .backing_on_hover_text(tr(msg!("ui.ai_request_timeout_hint")));
+        .backing_on_hover_text(tr!("ui.ai_request_timeout_hint"));
     r.widget_info(|| {
         let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), *secs as f64);
-        info.label = Some(tr(msg!("prefs.assistant_seconds_aria")).to_owned());
+        info.label = Some(tr!("prefs.assistant_seconds_aria").to_owned());
         info
     });
-    ui.label(tr(msg!("prefs.assistant_seconds")));
+    ui.label(tr!("prefs.assistant_seconds"));
     solidcraft_ui_registry::publish_target(handle, r.rect);
     r.changed()
 }
 
 /// The free-text reasoning effort field with its hover hint; true when the text changed.
 fn effort_field(ui: &mut egui::Ui, effort: &mut String, handle: &str) -> bool {
-    let response = ui_kit::cell_editor(ui, ui.scope_id().with("ai_reasoning_effort"), effort, tr(msg!("ui.ai_reasoning_effort_field_hint")), false)
-        .backing_on_hover_text(tr(msg!("ui.ai_reasoning_effort_hint")));
+    let response = ui_kit::cell_editor(ui, ui.scope_id().with("ai_reasoning_effort"), effort, tr!("ui.ai_reasoning_effort_field_hint"), false)
+        .backing_on_hover_text(tr!("ui.ai_reasoning_effort_hint"));
     solidcraft_ui_registry::publish_target(handle, response.rect);
     response.changed()
 }
@@ -482,7 +482,7 @@ fn effort_field(ui: &mut egui::Ui, effort: &mut String, handle: &str) -> bool {
 fn test_line(ui: &mut egui::Ui, test: &Option<&Test>) {
     match test {
         Some(Test::Running(_)) => {
-            ui_kit::text(ui, tr(msg!("ui.ai_testing")), ui_kit::Text::Note("testing"));
+            ui_kit::text(ui, tr!("ui.ai_testing"), ui_kit::Text::Note("testing"));
         }
         Some(Test::Done(Ok(message))) => {
             ui_kit::text(ui, message, ui_kit::Text::Report("test_ok", false));
@@ -498,21 +498,21 @@ fn test_line(ui: &mut egui::Ui, test: &Option<&Test>) {
 /// remain accessible on hover, and high-risk permissions always retain a visible warning.
 pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_page(ui, |ui| {
-        ui_kit::settings_heading(ui, tr(msg!("prefs.assistant")), tr(msg!("ai.prefs.intro")));
-        ui_kit::settings_section(ui, "assistant_availability", tr(msg!("ai.prefs.availability")), |ui| {
+        ui_kit::settings_heading(ui, tr!("prefs.assistant"), tr!("ai.prefs.intro"));
+        ui_kit::settings_section(ui, "assistant_availability", tr!("ai.prefs.availability"), |ui| {
             ui.horizontal(|ui| {
-                let response = ui_kit::checkbox(ui, tr(msg!("ui.ai_show_features")), &mut app.preferences.ai_features)
-                    .backing_on_hover_text(tr(msg!("ui.ai_show_features_note")));
+                let response = ui_kit::checkbox(ui, tr!("ui.ai_show_features"), &mut app.preferences.ai_features)
+                    .backing_on_hover_text(tr!("ui.ai_show_features_note"));
                 solidcraft_ui_registry::publish_handle("prefs:ai_features", response.rect.center());
-                ui_kit::help_icon(ui, tr(msg!("ui.ai_show_features_note")));
+                ui_kit::help_icon(ui, tr!("ui.ai_show_features_note"));
             });
             ui.add_enabled_ui(app.preferences.ai_features && !cfg!(target_arch = "wasm32"), |ui| {
-                let response = ui_kit::checkbox(ui, tr(msg!("ui.ai_toolbar_button")), &mut app.preferences.ai_toolbar_button)
-                    .backing_on_hover_text(tr(msg!("ui.ai_toolbar_button_note")));
+                let response = ui_kit::checkbox(ui, tr!("ui.ai_toolbar_button"), &mut app.preferences.ai_toolbar_button)
+                    .backing_on_hover_text(tr!("ui.ai_toolbar_button_note"));
                 solidcraft_ui_registry::publish_handle("prefs:ai_toolbar_button", response.rect.center());
             });
             if cfg!(target_arch = "wasm32") {
-                ui_kit::text(ui, tr(msg!("ui.agent_chat_desktop_only")), ui_kit::Text::Hint("desktop"));
+                ui_kit::text(ui, tr!("ui.agent_chat_desktop_only"), ui_kit::Text::Hint("desktop"));
             }
         });
         ui.add_enabled_ui(app.preferences.ai_features && !cfg!(target_arch = "wasm32"), |ui| {
@@ -536,7 +536,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui_kit::settings_section(ui, "assistant_connecting", tr(msg!("prefs.assistant_connecting")), |ui| {
+    ui_kit::settings_section(ui, "assistant_connecting", tr!("prefs.assistant_connecting"), |ui| {
         for (label, help, handle, value) in [
             ("ai.prefs.connect_apps", "ai.prefs.connect_apps_note", "connect_ai_apps", &mut app.preferences.connect_ai_apps),
             ("ai.prefs.background_commands", "ui.agent_off_thread_note", "agent_off_thread", &mut app.preferences.agent_off_thread),
@@ -554,46 +554,46 @@ fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 /// Custom instructions (#8220): text every new chat's system note carries.
 fn instructions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui_kit::settings_section(ui, "instructions", tr(msg!("ai.prefs.instructions")), |ui| {
+    ui_kit::settings_section(ui, "instructions", tr!("ai.prefs.instructions"), |ui| {
         // The shown field keeps one fixed id, so its focus and cursor survive a search. Preferences
         // search also lays the section out unseen first; that copy takes an id of its own place,
         // or egui sees one id twice in the frame (#15902).
         let id = if ui.is_visible() { egui::Id::unique("prefs_agent_instructions") } else { ui.scope_id().with("prefs_agent_instructions") };
         let text = &mut app.preferences.agent_instructions;
-        let response = ui_kit::text_area(ui, tr(msg!("ai.prefs.instructions")), id, text, 6, acp::INSTRUCTIONS_LIMIT);
+        let response = ui_kit::text_area(ui, tr!("ai.prefs.instructions"), id, text, 6, acp::INSTRUCTIONS_LIMIT);
         if response.has_focus() {
             // Typed text belongs to the field, not to Preferences search.
             crate::ui_kit::settings_search::note_key_sink(ui.ctx());
         }
         solidcraft_ui_registry::publish_target("prefs:agent_instructions", response.rect);
-        ui_kit::text(ui, tr(msg!("ai.prefs.instructions_note")), ui_kit::Text::Hint("instructions"));
+        ui_kit::text(ui, tr!("ai.prefs.instructions_note"), ui_kit::Text::Hint("instructions"));
     });
 }
 
 fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui_kit::settings_section(ui, "permissions", tr(msg!("ui.ai_permissions")), |ui| {
+    ui_kit::settings_section(ui, "permissions", tr!("ui.ai_permissions"), |ui| {
         let mut selected = Mode::ALL.iter().position(|mode| *mode == app.preferences.ai_permissions).unwrap_or(0);
-        let all_help = format!("{}\n\n{}", tr(msg!("prefs.assistant_use_care")), tr(msg!("ui.ai_mode_all_note")));
+        let all_help = format!("{}\n\n{}", tr!("prefs.assistant_use_care"), tr!("ui.ai_mode_all_note"));
         let choices = [
             ui_kit::SettingsChoice {
                 icon: None,
                 key: "prefs:ai_mode:ask",
-                title: tr(msg!("ai.prefs.permission_ask")),
-                summary: tr(msg!("ai.prefs.permission_ask_summary")),
-                detail: tr(msg!("ui.ai_mode_ask_note")),
+                title: tr!("ai.prefs.permission_ask"),
+                summary: tr!("ai.prefs.permission_ask_summary"),
+                detail: tr!("ui.ai_mode_ask_note"),
             },
             ui_kit::SettingsChoice {
                 icon: None,
                 key: "prefs:ai_mode:edits",
-                title: tr(msg!("ai.prefs.permission_edits")),
-                summary: tr(msg!("ai.prefs.permission_edits_summary")),
-                detail: tr(msg!("ui.ai_mode_edits_note")),
+                title: tr!("ai.prefs.permission_edits"),
+                summary: tr!("ai.prefs.permission_edits_summary"),
+                detail: tr!("ui.ai_mode_edits_note"),
             },
             ui_kit::SettingsChoice {
                 icon: Some("warning"),
                 key: "prefs:ai_mode:all",
-                title: tr(msg!("ai.prefs.permission_all")),
-                summary: tr(msg!("ai.prefs.permission_all_summary")),
+                title: tr!("ai.prefs.permission_all"),
+                summary: tr!("ai.prefs.permission_all_summary"),
                 detail: &all_help,
             },
         ];
@@ -603,9 +603,9 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.preferences.ai_permissions = *mode;
         }
         if app.preferences.ai_permissions == Mode::All {
-            ui_kit::text(ui, tr(msg!("ui.ai_mode_all_warning")), ui_kit::Text::Report("permissions_warning", true));
+            ui_kit::text(ui, tr!("ui.ai_mode_all_warning"), ui_kit::Text::Report("permissions_warning", true));
         }
-        ui_kit::text(ui, tr(msg!("ui.ai_modes_scope")), ui_kit::Text::Hint("permissions_scope"));
+        ui_kit::text(ui, tr!("ui.ai_modes_scope"), ui_kit::Text::Hint("permissions_scope"));
         let remembered: Vec<_> = app
             .preferences
             .agent_always_allow
@@ -613,17 +613,17 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             .filter(|(_, tools)| !tools.is_empty())
             .map(|(agent, tools)| (agent.clone(), tools.clone()))
             .collect();
-        ui_kit::section_count(ui, "always_allowed", tr(msg!("ui.ai_always_allowed")), false, Some(remembered.len()), |ui| {
+        ui_kit::section_count(ui, "always_allowed", tr!("ui.ai_always_allowed"), false, Some(remembered.len()), |ui| {
             if remembered.is_empty() {
-                ui_kit::text(ui, tr(msg!("ai.prefs.no_saved_approvals")), ui_kit::Text::Hint("none"))
-                    .backing_on_hover_text(tr(msg!("ui.ai_always_allowed_none")));
+                ui_kit::text(ui, tr!("ai.prefs.no_saved_approvals"), ui_kit::Text::Hint("none"))
+                    .backing_on_hover_text(tr!("ui.ai_always_allowed_none"));
             }
             let names: std::collections::HashMap<_, _> = agents::entries(app).into_iter().map(|entry| (entry.id, entry.name)).collect();
             for (agent, tools) in remembered {
                 let t = solidcraft_theme::Tokens::get();
                 ui_kit::settings_block(ui, names.get(&agent).unwrap_or(&agent), t.space_24 * 6.0 + t.space_6, |ui| {
                     ui.horizontal(|ui| {
-                        let reset = ui_kit::button(ui, tr(msg!("ui.ai_reset")), ui_kit::Button::Small);
+                        let reset = ui_kit::button(ui, tr!("ui.ai_reset"), ui_kit::Button::Small);
                         solidcraft_ui_registry::publish_target(&format!("prefs:ai_approvals_reset:{agent}"), reset.rect);
                         if reset.clicked() {
                             app.preferences.agent_always_allow.remove(&agent);
@@ -638,25 +638,25 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = solidcraft_theme::Tokens::get();
-    ui_kit::settings_section(ui, "panel", tr(msg!("ui.ai_panel")), |ui| {
-        let label_width = [tr(msg!("ui.assistant")), tr(msg!("ui.agent_chat_thinking")), tr(msg!("ui.agent_chat_turn_limit"))]
+    ui_kit::settings_section(ui, "panel", tr!("ui.ai_panel"), |ui| {
+        let label_width = [tr!("ui.assistant"), tr!("ui.agent_chat_thinking"), tr!("ui.agent_chat_turn_limit")]
             .iter()
             .map(|label| ui_kit::ContentWidth::label(ui, label) + t.space_4)
             .fold(0.0, f32::max);
         ui_kit::settings_form(ui, label_width, |ui| {
-            ui_kit::row(ui, tr(msg!("ui.assistant")), |ui| {
-                ui_kit::checkbox(ui, tr(msg!("ui.agent_chat_own_window")), &mut app.preferences.agent_chat_popped);
+            ui_kit::row(ui, tr!("ui.assistant"), |ui| {
+                ui_kit::checkbox(ui, tr!("ui.agent_chat_own_window"), &mut app.preferences.agent_chat_popped);
             });
-            ui_kit::row(ui, tr(msg!("ui.agent_chat_thinking")), |ui| {
-                let response = ui_kit::checkbox(ui, tr(msg!("ui.agent_thinking_folded")), &mut app.preferences.agent_thinking_folded)
-                    .backing_on_hover_text(tr(msg!("ui.agent_thinking_folded_note")));
+            ui_kit::row(ui, tr!("ui.agent_chat_thinking"), |ui| {
+                let response = ui_kit::checkbox(ui, tr!("ui.agent_thinking_folded"), &mut app.preferences.agent_thinking_folded)
+                    .backing_on_hover_text(tr!("ui.agent_thinking_folded_note"));
                 solidcraft_ui_registry::publish_handle("prefs:agent_thinking_folded", response.rect.center());
             });
-            ui_kit::row(ui, tr(msg!("ui.agent_chat_turn_limit")), |ui| {
+            ui_kit::row(ui, tr!("ui.agent_chat_turn_limit"), |ui| {
                 let p = &mut app.preferences;
                 let previous = usize::from(p.agent_chat_turn_limit != 0);
                 let mut limit = previous;
-                let options = [tr(msg!("ui.agent_chat_turn_unlimited")), tr(msg!("prefs.assistant_limited"))];
+                let options = [tr!("ui.agent_chat_turn_unlimited"), tr!("prefs.assistant_limited")];
                 crate::ui_kit::settings_search::note_current(ui, &options.join(" "));
                 let dropdown_width = ui_kit::ContentWidth::dropdown(ui, &options);
                 let response =
@@ -678,34 +678,33 @@ fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 if limit != 0 {
                     let response = ui_kit::settings_number(ui, &mut p.agent_chat_turn_limit, 1..=200, 1.0)
-                        .backing_on_hover_text(tr(msg!("ai.prefs.turn_limit_hint")));
+                        .backing_on_hover_text(tr!("ai.prefs.turn_limit_hint"));
                     response.widget_info(|| {
                         let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), f64::from(p.agent_chat_turn_limit));
-                        info.label = Some(tr(msg!("prefs.assistant_limit")).to_owned());
+                        info.label = Some(tr!("prefs.assistant_limit").to_owned());
                         info
                     });
                     solidcraft_ui_registry::publish_target("prefs:agent_chat_turn_limit:value", response.rect);
                 }
             });
         });
-        ui_kit::text(ui, tr(msg!("ai.prefs.privacy_note")), ui_kit::Text::Hint("privacy_note"));
+        ui_kit::text(ui, tr!("ai.prefs.privacy_note"), ui_kit::Text::Hint("privacy_note"));
     });
 }
 
 fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui_kit::settings_section(ui, "agent_pointer", tr(msg!("ui.agent_cursor")), |ui| {
+    ui_kit::settings_section(ui, "agent_pointer", tr!("ui.agent_cursor"), |ui| {
         ui_kit::settings_pair(
             ui,
             |ui| {
-                let response = ui_kit::checkbox(ui, tr(msg!("ai.prefs.show_pointer")), &mut app.ui.agent_cursor.show)
+                let response = ui_kit::checkbox(ui, tr!("ai.prefs.show_pointer"), &mut app.ui.agent_cursor.show)
                     .backing_on_hover_text(solidcraft_ui_text::tr_label("Show the pointer an AI agent moves (#35)"));
                 solidcraft_ui_registry::publish_target("prefs:agent_pointer_show", response.rect);
                 ui.add_enabled_ui(app.ui.agent_cursor.show, |ui| {
-                    let speed_label_width =
-                        ui_kit::ContentWidth::label(ui, tr(msg!("ai.prefs.pointer_speed"))) + solidcraft_theme::Tokens::get().space_4;
+                    let speed_label_width = ui_kit::ContentWidth::label(ui, tr!("ai.prefs.pointer_speed")) + solidcraft_theme::Tokens::get().space_4;
                     ui_kit::settings_form(ui, speed_label_width, |ui| {
-                        ui_kit::row(ui, tr(msg!("ai.prefs.pointer_speed")), |ui| {
-                            let name = tr(msg!("prefs.assistant_pointer_speed"));
+                        ui_kit::row(ui, tr!("ai.prefs.pointer_speed"), |ui| {
+                            let name = tr!("prefs.assistant_pointer_speed");
                             crate::ui_kit::settings_search::note_current(ui, name);
                             let response =
                                 ui_kit::named_control(ui, name, |ui| crate::agent_cursor::speed_slider(ui, &mut app.ui.agent_cursor.speed));
@@ -717,19 +716,19 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                             response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), value, name));
                             // The visible row owns Speed and its legacy Motion speed alias. The
                             // native editor's name owns queries that only match Pointer speed.
-                            if !crate::ui_kit::settings_search::texts_hit(ui, &[tr(msg!("ai.prefs.pointer_speed"))]) {
+                            if !crate::ui_kit::settings_search::texts_hit(ui, &[tr!("ai.prefs.pointer_speed")]) {
                                 crate::ui_kit::settings_search::remember(ui, name, response.rect);
                             }
-                            for label in [tr(msg!("ai.prefs.pointer_speed")), name] {
+                            for label in [tr!("ai.prefs.pointer_speed"), name] {
                                 crate::ui_kit::settings_search::follow(ui, label, response.rect);
                             }
                         });
                     });
                     ui.horizontal(|ui| {
-                        let response = ui_kit::checkbox(ui, tr(msg!("ai.prefs.follow_camera")), &mut app.ui.agent_cursor.follow_camera)
-                            .backing_on_hover_text(tr(msg!("prefs.assistant_follow_help")));
+                        let response = ui_kit::checkbox(ui, tr!("ai.prefs.follow_camera"), &mut app.ui.agent_cursor.follow_camera)
+                            .backing_on_hover_text(tr!("prefs.assistant_follow_help"));
                         solidcraft_ui_registry::publish_target("prefs:agent_pointer_follow", response.rect);
-                        ui_kit::help_icon(ui, tr(msg!("prefs.assistant_follow_help")));
+                        ui_kit::help_icon(ui, tr!("prefs.assistant_follow_help"));
                     });
                 });
                 (app.ui.agent_cursor.show, app.ui.agent_cursor.speed.label(), app.ui.agent_cursor.follow_camera)
@@ -745,14 +744,14 @@ fn mcp_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     if cfg!(target_arch = "wasm32") {
         return;
     }
-    ui_kit::settings_section(ui, "mcp_agents", tr(msg!("ui.mcp_agents")), |ui| {
+    ui_kit::settings_section(ui, "mcp_agents", tr!("ui.mcp_agents"), |ui| {
         // Dims with AI features off, as it did under Connecting.
         ui.add_enabled_ui(app.preferences.ai_features, |ui| control_channel(app, ui));
         ui.horizontal(|ui| {
-            let response = ui_kit::checkbox(ui, tr(msg!("ui.mcp_compact")), &mut app.preferences.mcp_compact)
-                .backing_on_hover_text(tr(msg!("ui.mcp_compact_note")));
+            let response =
+                ui_kit::checkbox(ui, tr!("ui.mcp_compact"), &mut app.preferences.mcp_compact).backing_on_hover_text(tr!("ui.mcp_compact_note"));
             solidcraft_ui_registry::publish_handle("prefs:mcp_compact", response.rect.center());
-            ui_kit::help_icon(ui, tr(msg!("ui.mcp_compact_note")));
+            ui_kit::help_icon(ui, tr!("ui.mcp_compact_note"));
         });
     });
 }
@@ -763,38 +762,38 @@ fn control_channel(app: &mut SolveApp, ui: &mut egui::Ui) {
     use crate::control_switch::{MIN_PORT, StartError, Status};
     let status = app.control_switch.status();
     ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
-        let response = ui_kit::checkbox(ui, tr(msg!("ai.prefs.allow_control")), &mut app.preferences.agent_control)
-            .backing_on_hover_text(tr(msg!("ai.prefs.allow_control_note")));
+        let response = ui_kit::checkbox(ui, tr!("ai.prefs.allow_control"), &mut app.preferences.agent_control)
+            .backing_on_hover_text(tr!("ai.prefs.allow_control_note"));
         crate::scenario::publish_handle("prefs:agent_control", response.rect.center());
-        ui_kit::help_icon(ui, tr(msg!("ai.prefs.allow_control_note")));
+        ui_kit::help_icon(ui, tr!("ai.prefs.allow_control_note"));
         let port = |port: u16| port.to_string();
         let badge = match &status {
-            Status::Listening(p) => Some((msg!("ai.prefs.control_listening", port = &port(*p)).tr(), ui_kit::SettingsBadgeTone::Success)),
-            Status::FromLaunch(p) => Some((msg!("ai.prefs.control_listening", port = &port(*p)).tr(), ui_kit::SettingsBadgeTone::Neutral)),
-            Status::Error(_) => Some((tr(msg!("ai.prefs.control_not_listening")).to_owned(), ui_kit::SettingsBadgeTone::Warning)),
+            Status::Listening(p) => Some((tr!("ai.prefs.control_listening", port = &port(*p)), ui_kit::SettingsBadgeTone::Success)),
+            Status::FromLaunch(p) => Some((tr!("ai.prefs.control_listening", port = &port(*p)), ui_kit::SettingsBadgeTone::Neutral)),
+            Status::Error(_) => Some((tr!("ai.prefs.control_not_listening").to_owned(), ui_kit::SettingsBadgeTone::Warning)),
             Status::Off => None,
         };
         if let Some((text, tone)) = badge {
             ui_kit::settings_state_badge(ui, &text, tone);
         }
     });
-    let label = tr(msg!("ai.prefs.control_port"));
+    let label = tr!("ai.prefs.control_port");
     ui_kit::settings_form(ui, ui_kit::ContentWidth::label(ui, label), |ui| {
         ui_kit::row(ui, label, |ui| {
             ui.add_enabled_ui(app.preferences.agent_control, |ui| {
                 let t = solidcraft_theme::Tokens::get();
                 ui_kit::settings_control_width(ui, t.space_24 * 3.0 + t.space_8, |ui| {
                     let response = ui_kit::number_field(ui, &mut app.preferences.agent_control_port, MIN_PORT..=u16::MAX, 1.0, "")
-                        .backing_on_hover_text(tr(msg!("ai.prefs.control_port_note")));
+                        .backing_on_hover_text(tr!("ai.prefs.control_port_note"));
                     crate::scenario::publish_target("prefs:agent_control_port", response.rect);
                 });
             });
         });
     });
     let note = match status {
-        Status::FromLaunch(p) => Some(msg!("ai.prefs.control_from_launch", port = &p.to_string()).tr()),
-        Status::Error(StartError::PortTaken(p)) => Some(msg!("ai.prefs.control_port_taken", port = &p.to_string()).tr()),
-        Status::Error(StartError::Failed(e)) => Some(msg!("ai.prefs.control_failed", error = &e).tr()),
+        Status::FromLaunch(p) => Some(tr!("ai.prefs.control_from_launch", port = &p.to_string())),
+        Status::Error(StartError::PortTaken(p)) => Some(tr!("ai.prefs.control_port_taken", port = &p.to_string())),
+        Status::Error(StartError::Failed(e)) => Some(tr!("ai.prefs.control_failed", error = &e)),
         Status::Listening(_) | Status::Off => None,
     };
     if let Some(note) = note {
@@ -815,14 +814,14 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut reeffort: Option<(String, String)> = None;
     let mut picked_model: Option<(String, ui_kit::Picked)> = None;
     let t = solidcraft_theme::Tokens::get();
-    ui_kit::settings_section_count(ui, "agents", tr(msg!("ui.ai_agents")), Some(&all.len().to_string()), |ui| {
+    ui_kit::settings_section_count(ui, "agents", tr!("ui.ai_agents"), Some(&all.len().to_string()), |ui| {
         if app.agent_chat.detecting.is_some() {
-            ui_kit::text(ui, tr(msg!("ui.agent_chat_detecting")), ui_kit::Text::Hint("detecting"));
+            ui_kit::text(ui, tr!("ui.agent_chat_detecting"), ui_kit::Text::Hint("detecting"));
         } else if all.is_empty() {
             if super::panel::sandboxed() {
                 super::panel::no_agents(ui);
             } else {
-                ui_kit::empty_box(ui, "assistant_agents", tr(msg!("ai.prefs.no_agents")));
+                ui_kit::empty_box(ui, "assistant_agents", tr!("ai.prefs.no_agents"));
             }
         }
         for entry in &all {
@@ -849,7 +848,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     if choice.clicked() {
                                         app.preferences.agent_default = entry.id.clone();
                                     }
-                                    let test_button = ui_kit::button(ui, tr(msg!("ui.ai_test")), ui_kit::Button::Small);
+                                    let test_button = ui_kit::button(ui, tr!("ui.ai_test"), ui_kit::Button::Small);
                                     solidcraft_ui_registry::publish_handle(&format!("prefs:ai_test:{}", entry.id), test_button.rect.center());
                                     let tip = match entry.kind {
                                         Kind::Acp => "ui.ai_test_acp_tip",
@@ -860,48 +859,48 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                         test = Some(entry.clone());
                                     }
                                     if !entry.found {
-                                        let edit_button = ui_kit::button(ui, tr(msg!("ui.ai_edit")), ui_kit::Button::Small);
+                                        let edit_button = ui_kit::button(ui, tr!("ui.ai_edit"), ui_kit::Button::Small);
                                         solidcraft_ui_registry::publish_handle(&format!("prefs:ai_edit:{}", entry.id), edit_button.rect.center());
-                                        if edit_button.backing_on_hover_text(tr(msg!("ui.ai_edit_tip"))).clicked() {
+                                        if edit_button.backing_on_hover_text(tr!("ui.ai_edit_tip")).clicked() {
                                             edit = Some(entry.id.clone());
                                         }
                                     }
                                     if !entry.found {
-                                        let button = ui_kit::button(ui, tr(msg!("ui.ai_remove")), ui_kit::Button::Ghost);
+                                        let button = ui_kit::button(ui, tr!("ui.ai_remove"), ui_kit::Button::Ghost);
                                         solidcraft_ui_registry::publish_target(&format!("prefs:ai_remove:{}", entry.id), button.rect);
                                         if button.clicked() {
                                             remove = Some(entry.id.clone());
                                         }
                                     }
                                     match entry.login {
-                                        "login_found" => ui_kit::settings_badge(ui, tr(msg!("ui.agent_chat_login_found")), false),
-                                        "signed_in" => ui_kit::settings_badge(ui, tr(msg!("ui.agent_chat_signed_in")), false),
-                                        "key" => ui_kit::settings_badge(ui, tr(msg!("ui.agent_chat_key_in_env")), false),
-                                        "signed_out" => ui_kit::settings_badge(ui, tr(msg!("ui.agent_chat_not_signed_in")), true),
+                                        "login_found" => ui_kit::settings_badge(ui, tr!("ui.agent_chat_login_found"), false),
+                                        "signed_in" => ui_kit::settings_badge(ui, tr!("ui.agent_chat_signed_in"), false),
+                                        "key" => ui_kit::settings_badge(ui, tr!("ui.agent_chat_key_in_env"), false),
+                                        "signed_out" => ui_kit::settings_badge(ui, tr!("ui.agent_chat_not_signed_in"), true),
                                         _ => {}
                                     }
                                     if !entry.found {
-                                        ui_kit::settings_badge(ui, tr(msg!("ui.ai_added")), false);
+                                        ui_kit::settings_badge(ui, tr!("ui.ai_added"), false);
                                     }
                                 },
                             );
                             ui_kit::settings_short_note(ui, &detail).backing_on_hover_text(&entry.id);
                             // Wide enough for an endpoint's "Request timeout" or "Reasoning effort" too,
                             // so all rows line up.
-                            let label_w = [tr(msg!("ui.ai_permissions")), tr(msg!("ui.ai_request_timeout")), tr(msg!("ui.ai_reasoning_effort"))]
+                            let label_w = [tr!("ui.ai_permissions"), tr!("ui.ai_request_timeout"), tr!("ui.ai_reasoning_effort")]
                                 .iter()
                                 .map(|label| ui_kit::ContentWidth::label(ui, label) + t.space_4)
                                 .fold(0.0, f32::max);
                             ui_kit::settings_form(ui, label_w, |ui| {
-                                ui_kit::row(ui, tr(msg!("ui.ai_permissions")), |ui| {
+                                ui_kit::row(ui, tr!("ui.ai_permissions"), |ui| {
                                     let current = app.preferences.agent_permissions.get(&entry.id).copied();
-                                    let shown = current.map_or_else(|| tr(msg!("ui.ai_mode_global")).to_owned(), |mode| mode.label().to_owned());
+                                    let shown = current.map_or_else(|| tr!("ui.ai_mode_global").to_owned(), |mode| mode.label().to_owned());
                                     let mut pick: Option<Option<Mode>> = None;
-                                    let options: Vec<_> = std::iter::once(tr(msg!("ui.ai_mode_global"))).chain(Mode::ALL.map(Mode::label)).collect();
+                                    let options: Vec<_> = std::iter::once(tr!("ui.ai_mode_global")).chain(Mode::ALL.map(Mode::label)).collect();
                                     crate::ui_kit::settings_search::note_current(ui, &options.join(" "));
                                     let response = ui_kit::settings_control_width(ui, t.space_24 * 9.0 + t.space_4, |ui| {
                                         ui_kit::dropdown_menu(ui, ("sc_ai_mode", &entry.id), &shown, |ui| {
-                                            if ui_kit::list_picker(ui, "global", tr(msg!("ui.ai_mode_global")), current.is_none()).clicked() {
+                                            if ui_kit::list_picker(ui, "global", tr!("ui.ai_mode_global"), current.is_none()).clicked() {
                                                 pick = Some(None);
                                             }
                                             for mode in Mode::ALL {
@@ -937,14 +936,14 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 && let Some(c) = app.preferences.agents.iter_mut().find(|c| c.id == entry.id)
                             {
                                 ui_kit::settings_form(ui, label_w, |ui| {
-                                    ui_kit::row(ui, tr(msg!("ui.ai_request_timeout")), |ui| {
+                                    ui_kit::row(ui, tr!("ui.ai_request_timeout"), |ui| {
                                         let mut secs = entry.request_timeout_s;
                                         if timeout_field(ui, &mut secs, &format!("prefs:ai_timeout:{}", entry.id)) {
                                             c.request_timeout_s = secs;
                                             retimed = Some((entry.id.clone(), secs));
                                         }
                                     });
-                                    ui_kit::row(ui, tr(msg!("ui.ai_reasoning_effort")), |ui| {
+                                    ui_kit::row(ui, tr!("ui.ai_reasoning_effort"), |ui| {
                                         let mut effort = c.reasoning_effort.clone();
                                         if effort_field(ui, &mut effort, &format!("prefs:ai_reasoning:{}", entry.id)) {
                                             let effort = agents::reasoning_effort(&effort);
@@ -955,13 +954,13 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 });
                             }
                             if app.preferences.agent_permissions.get(&entry.id) == Some(&Mode::All) {
-                                ui_kit::text(ui, tr(msg!("ai.prefs.override_all_warning")), ui_kit::Text::Report("agent_permissions_warning", true))
-                                    .backing_on_hover_text(tr(msg!("ui.ai_mode_all_warning")));
+                                ui_kit::text(ui, tr!("ai.prefs.override_all_warning"), ui_kit::Text::Report("agent_permissions_warning", true))
+                                    .backing_on_hover_text(tr!("ui.ai_mode_all_warning"));
                             }
                             test_line(ui, &app.agent_chat.settings.tests.get(&entry.id));
                         });
                         if let Some(protocol) = entry.kind.protocol() {
-                            ui_kit::row(ui, tr(msg!("ui.ai_model")), |ui| {
+                            ui_kit::row(ui, tr!("ui.ai_model"), |ui| {
                                 let chat = &mut app.agent_chat;
                                 let running = chat.running_id == entry.id && chat.backend.is_some();
                                 let key = listing_key(protocol, &entry.base_url, entry.key, entry.allow_insecure_http);
@@ -1033,12 +1032,12 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         }
         ui.horizontal_wrapped(|ui| {
-            let button = ui_kit::icon_label_button(ui, tr(msg!("ui.ai_add_agent")), "plus", true, false);
+            let button = ui_kit::icon_label_button(ui, tr!("ui.ai_add_agent"), "plus", true, false);
             solidcraft_ui_registry::publish_handle("prefs:ai_add", button.rect.center());
             if button.clicked() {
                 open_add(app);
             }
-            if ui_kit::button(ui, tr(msg!("ui.agent_chat_refresh")), ui_kit::Button::Enabled(app.agent_chat.detecting.is_none())).clicked() {
+            if ui_kit::button(ui, tr!("ui.agent_chat_refresh"), ui_kit::Button::Enabled(app.agent_chat.detecting.is_none())).clicked() {
                 refresh(app, &ui.ctx().clone());
             }
         });
@@ -1119,13 +1118,13 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
         s.refused = None;
     }
     if let Some(url) = app.agent_chat.settings.add.as_ref().and_then(|s| s.confirm_insecure_http.clone()) {
-        let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_ai_http_consent"), "status_warning", tr(msg!("ai.http.allow")))
+        let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_ai_http_consent"), "status_warning", tr!("ai.http.allow"))
             .tone(ui_kit::Tone::Warning)
-            .actions(tr(msg!("ai.http.confirm")), tr(msg!("ui.cancel")), None)
+            .actions(tr!("ai.http.confirm"), tr!("ui.cancel"), None)
             .selected(ui_kit::Action::Cancel)
             .detail(&url)
             .show(ctx, true, |ui| {
-                ui_kit::text(ui, tr(msg!("ai.http.warning")), ui_kit::Text::Report("http_warning", false));
+                ui_kit::text(ui, tr!("ai.http.warning"), ui_kit::Text::Report("http_warning", false));
             });
         for (handle, target) in [("ai_add:http_accept", "dialog:ok"), ("ai_add:http_cancel", "dialog:cancel")] {
             if let Some(rect) = solidcraft_ui_registry::rect_of(target) {
@@ -1166,7 +1165,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
             }
             let kinds = [(AddKind::Installed, "ui.ai_add_installed"), (AddKind::Custom, "ui.ai_add_custom"), (AddKind::Api, "ui.ai_add_endpoint")];
             if !editing {
-                ui_kit::row(ui, tr(msg!("ui.ai_kind")), |ui| {
+                ui_kit::row(ui, tr!("ui.ai_kind"), |ui| {
                     let mut selected = kinds.iter().position(|(k, _)| *k == s.kind).unwrap_or(0);
                     let labels = kinds.map(|(_, key)| tr(key));
                     if ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { compact: true, ..Default::default() })
@@ -1177,7 +1176,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                         s.test = None;
                     }
                     for (_, key) in kinds {
-                        if let Some(at) = solidcraft_ui_registry::handle_at(&format!("dialog:{}:{}", tr(msg!("ui.ai_kind")), tr(key))) {
+                        if let Some(at) = solidcraft_ui_registry::handle_at(&format!("dialog:{}:{}", tr!("ui.ai_kind"), tr(key))) {
                             solidcraft_ui_registry::publish_handle(&format!("ai_add:{key}"), at);
                         }
                     }
@@ -1185,9 +1184,9 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
             }
             match s.kind {
                 AddKind::Installed => {
-                    ui_kit::row(ui, tr(msg!("ui.agent_chat_pick")), |ui| {
+                    ui_kit::row(ui, tr!("ui.agent_chat_pick"), |ui| {
                         if found.is_empty() {
-                            ui_kit::text(ui, tr(msg!("ui.agent_chat_none_found_short")), ui_kit::Text::Inline);
+                            ui_kit::text(ui, tr!("ui.agent_chat_none_found_short"), ui_kit::Text::Inline);
                         } else {
                             let sel = found.get(s.installed).map(|e| e.name.clone()).unwrap_or_default();
                             ui_kit::dropdown_menu(ui, "sc_ai_add_installed", &sel, |ui| {
@@ -1195,7 +1194,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                                     if ui_kit::list_picker(ui, &e.id, &format!("{}  {}", e.name, e.detail()), s.installed == i).clicked() {
                                         s.installed = i;
                                         s.command = e.argv.iter().map(|a| super::panel::quote(a)).collect::<Vec<_>>().join(" ");
-                                        s.name = format!("{} ({})", e.name, tr(msg!("ui.ai_copy_suffix")));
+                                        s.name = format!("{} ({})", e.name, tr!("ui.ai_copy_suffix"));
                                     }
                                 }
                             });
@@ -1205,43 +1204,43 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                         && let Some(e) = found.get(s.installed)
                     {
                         s.command = e.argv.iter().map(|a| super::panel::quote(a)).collect::<Vec<_>>().join(" ");
-                        s.name = format!("{} ({})", e.name, tr(msg!("ui.ai_copy_suffix")));
+                        s.name = format!("{} ({})", e.name, tr!("ui.ai_copy_suffix"));
                     }
-                    ui_kit::row(ui, tr(msg!("ui.ai_name")), |ui| {
+                    ui_kit::row(ui, tr!("ui.ai_name"), |ui| {
                         ui_kit::text_field(ui, &mut s.name, "");
                     });
-                    ui_kit::row(ui, tr(msg!("ui.agent_chat_command")), |ui| {
+                    ui_kit::row(ui, tr!("ui.agent_chat_command"), |ui| {
                         ui_kit::text_field(ui, &mut s.command, "");
                     });
-                    ui_kit::text(ui, tr(msg!("ui.ai_add_installed_note")), ui_kit::Text::Note("installed"));
+                    ui_kit::text(ui, tr!("ui.ai_add_installed_note"), ui_kit::Text::Note("installed"));
                 }
                 AddKind::Custom => {
-                    ui_kit::row(ui, tr(msg!("ui.ai_name")), |ui| {
-                        ui_kit::text_field(ui, &mut s.name, tr(msg!("ui.ai_name_hint")));
+                    ui_kit::row(ui, tr!("ui.ai_name"), |ui| {
+                        ui_kit::text_field(ui, &mut s.name, tr!("ui.ai_name_hint"));
                     });
-                    ui_kit::row(ui, tr(msg!("ui.agent_chat_command")), |ui| {
-                        ui_kit::text_field(ui, &mut s.command, tr(msg!("ui.ai_command_hint")));
+                    ui_kit::row(ui, tr!("ui.agent_chat_command"), |ui| {
+                        ui_kit::text_field(ui, &mut s.command, tr!("ui.ai_command_hint"));
                     });
-                    ui_kit::text(ui, tr(msg!("ui.agent_chat_custom_hint")), ui_kit::Text::Note("custom"));
+                    ui_kit::text(ui, tr!("ui.agent_chat_custom_hint"), ui_kit::Text::Note("custom"));
                 }
                 AddKind::Api => {
-                    ui_kit::row(ui, tr(msg!("ui.ai_protocol")), |ui| {
+                    ui_kit::row(ui, tr!("ui.ai_protocol"), |ui| {
                         let mut selected = if s.protocol == Protocol::Anthropic { 1 } else { 0 };
-                        let labels = [tr(msg!("ui.ai_add_api")), tr(msg!("ui.ai_add_anthropic"))];
+                        let labels = [tr!("ui.ai_add_api"), tr!("ui.ai_add_anthropic")];
                         if ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { compact: true, ..Default::default() })
                             && let Some(protocol) = [Protocol::OpenAi, Protocol::Anthropic].get(selected)
                         {
                             choose_preset(s, *protocol, 0);
                         }
                         for (name, key) in [("openai", "ui.ai_add_api"), ("anthropic", "ui.ai_add_anthropic")] {
-                            if let Some(at) = solidcraft_ui_registry::handle_at(&format!("dialog:{}:{}", tr(msg!("ui.ai_protocol")), tr(key))) {
+                            if let Some(at) = solidcraft_ui_registry::handle_at(&format!("dialog:{}:{}", tr!("ui.ai_protocol"), tr(key))) {
                                 solidcraft_ui_registry::publish_handle(&format!("ai_add:protocol:{name}"), at);
                             }
                         }
                     });
                     let choices: Vec<&str> =
-                        agents::presets(s.protocol).iter().map(|p| p.name).chain(std::iter::once(tr(msg!("ui.ai_custom_url")))).collect();
-                    ui_kit::row(ui, tr(msg!("ui.ai_preset")), |ui| {
+                        agents::presets(s.protocol).iter().map(|p| p.name).chain(std::iter::once(tr!("ui.ai_custom_url"))).collect();
+                    ui_kit::row(ui, tr!("ui.ai_preset"), |ui| {
                         let picker = ui_kit::dropdown_menu(ui, "sc_ai_add_preset", choices.get(s.preset).copied().unwrap_or_default(), |ui| {
                             for (index, preset) in choices.iter().enumerate() {
                                 let response = ui_kit::list_picker(ui, preset, preset, s.preset == index);
@@ -1253,11 +1252,11 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                         });
                         solidcraft_ui_registry::publish_handle("ai_add:preset", picker.rect.center());
                     });
-                    ui_kit::row(ui, tr(msg!("ui.ai_name")), |ui| {
+                    ui_kit::row(ui, tr!("ui.ai_name"), |ui| {
                         ui_kit::text_field(ui, &mut s.name, "");
                     });
-                    ui_kit::row(ui, tr(msg!("ui.ai_base_url")), |ui| {
-                        let r = ui_kit::cell_editor(ui, egui::Id::unique("sc_ai_add_url"), &mut s.base_url, tr(msg!("ui.ai_url_hint")), false);
+                    ui_kit::row(ui, tr!("ui.ai_base_url"), |ui| {
+                        let r = ui_kit::cell_editor(ui, egui::Id::unique("sc_ai_add_url"), &mut s.base_url, tr!("ui.ai_url_hint"), false);
                         s.list_again |= r.lost_focus();
                         if r.changed() {
                             s.insecure_http_url = None;
@@ -1266,11 +1265,11 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                             s.test = None;
                         }
                     });
-                    ui_kit::row(ui, tr(msg!("ui.ai_model")), |ui| {
+                    ui_kit::row(ui, tr!("ui.ai_model"), |ui| {
                         let (models, note) = listed_for(&app.agent_chat.settings.endpoint_models, s.listing.as_ref());
                         let rows = super::model_rows(models);
                         let choices = model_choices(models, &rows);
-                        let current = if s.model.is_empty() { tr(msg!("ui.agent_chat_choose_model")) } else { s.model.as_str() };
+                        let current = if s.model.is_empty() { tr!("ui.agent_chat_choose_model") } else { s.model.as_str() };
                         let picker = ui_kit::search_picker(
                             ui,
                             ui_kit::SearchPicker {
@@ -1292,13 +1291,13 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                             s.error = None;
                         }
                     });
-                    ui_kit::row(ui, tr(msg!("ui.ai_request_timeout")), |ui| {
+                    ui_kit::row(ui, tr!("ui.ai_request_timeout"), |ui| {
                         timeout_field(ui, &mut s.request_timeout_s, "ai_add:request_timeout");
                     });
-                    ui_kit::row(ui, tr(msg!("ui.ai_reasoning_effort")), |ui| {
+                    ui_kit::row(ui, tr!("ui.ai_reasoning_effort"), |ui| {
                         effort_field(ui, &mut s.reasoning_effort, "ai_add:reasoning_effort");
                     });
-                    ui_kit::row(ui, tr(msg!("ui.ai_key")), |ui| {
+                    ui_kit::row(ui, tr!("ui.ai_key"), |ui| {
                         ui.add_enabled_ui(has_keychain, |ui| {
                             let hint = tr(if s.saved_key { "ui.ai_key_keep_hint" } else { "ui.ai_key_hint" });
                             let r = ui_kit::password_field(ui, egui::Id::unique("sc_ai_add_key"), &mut s.key, hint);
@@ -1309,7 +1308,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::text(ui, tr(if has_keychain { "ui.ai_key_note" } else { "ui.ai_no_keychain" }), ui_kit::Text::Note("keychain"));
                     if let Some(url) = s.insecure_http_endpoint() {
                         let mut allow = s.allow_insecure_http();
-                        let r = ui_kit::checkbox(ui, tr(msg!("ai.http.allow")), &mut allow).backing_on_hover_text(tr(msg!("ai.http.warning")));
+                        let r = ui_kit::checkbox(ui, tr!("ai.http.allow"), &mut allow).backing_on_hover_text(tr!("ai.http.warning"));
                         solidcraft_ui_registry::publish_target("ai_add:allow_insecure_http", r.rect);
                         if r.changed() {
                             if allow {
@@ -1321,7 +1320,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                             s.test = None;
                         }
                     }
-                    if ui_kit::button(ui, tr(msg!("ui.ai_test")), ui_kit::Button::Normal).clicked() {
+                    if ui_kit::button(ui, tr!("ui.ai_test"), ui_kit::Button::Normal).clicked() {
                         test = true;
                     }
                     test_line(ui, &s.test.as_ref());
@@ -1370,7 +1369,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
             });
             let result = match url {
                 Ok(_) if (s.saved_key || key.is_some()) && !agents::key_allowed_for(&e.base_url, e.allow_insecure_http) => {
-                    Test::Done(Err(TestError::Other(tr(msg!("ui.ai_key_needs_https")).to_string())))
+                    Test::Done(Err(TestError::Other(tr!("ui.ai_key_needs_https").to_string())))
                 }
                 Ok(_) => start_test(app, &e, key),
                 Err(err) => Test::Done(Err(TestError::Other(err))),
@@ -1403,7 +1402,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
     let Some(s) = app.agent_chat.settings.add.as_ref() else { return Ok(()) };
     // The agent being edited must still be there (it may have been removed meanwhile).
     let editing = match &s.editing {
-        Some(id) => Some(app.preferences.agents.iter().position(|c| &c.id == id).ok_or_else(|| tr(msg!("ui.ai_edit_gone")).to_string())?),
+        Some(id) => Some(app.preferences.agents.iter().position(|c| &c.id == id).ok_or_else(|| tr!("ui.ai_edit_gone").to_string())?),
         None => None,
     };
     let name = s.name.trim().chars().take(80).collect::<String>();
@@ -1413,7 +1412,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
         AddKind::Installed | AddKind::Custom => {
             let cmd = s.command.trim();
             if acp::split_command(cmd).is_empty() {
-                return Err(tr(msg!("ui.ai_need_command")).to_string());
+                return Err(tr!("ui.ai_need_command").to_string());
             }
             c.kind = Kind::Acp;
             c.command = cmd.chars().take(4096).collect();
@@ -1428,7 +1427,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
             c.request_timeout_s = s.request_timeout_s.clamp(agents::MIN_REQUEST_TIMEOUT_S, agents::MAX_REQUEST_TIMEOUT_S);
             c.reasoning_effort = agents::reasoning_effort(&s.reasoning_effort);
             if c.model.is_empty() {
-                return Err(tr(msg!("ui.ai_need_model")).to_string());
+                return Err(tr!("ui.ai_need_model").to_string());
             }
             key = Some(s.key.trim().to_string()).filter(|k| !k.is_empty());
             // Editing with the key field left empty keeps the stored key.
@@ -1437,7 +1436,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
             // Subsequent edits to that disabled endpoint must still be possible.
             let same_endpoint = kept && editing.and_then(|at| app.preferences.agents.get(at)).is_some_and(|old| old.base_url == c.base_url);
             if (key.is_some() || (kept && !same_endpoint)) && !agents::key_allowed_for(&c.base_url, c.allow_insecure_http) {
-                return Err(tr(msg!("ui.ai_key_needs_https")).to_string());
+                return Err(tr!("ui.ai_key_needs_https").to_string());
             }
             c.key = kept;
             c.id = agents::new_id(&app.preferences, c.kind.id());
@@ -1450,7 +1449,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
         c.name = c.id.clone();
     }
     if let Some(k) = key {
-        let Some(store) = &app.services.secrets else { return Err(tr(msg!("ui.ai_no_keychain")).to_string()) };
+        let Some(store) = &app.services.secrets else { return Err(tr!("ui.ai_no_keychain").to_string()) };
         store.set(&c.id, &k).map_err(|e| trf("ui.ai_keychain_error", &[("error", &e)]))?;
         c.key = true;
     }
@@ -1459,7 +1458,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
         return Ok(());
     };
     match app.preferences.agents.get_mut(at) {
-        None => return Err(tr(msg!("ui.ai_edit_gone")).to_string()),
+        None => return Err(tr!("ui.ai_edit_gone").to_string()),
         Some(old) => {
             let revoked = old.allow_insecure_http && !c.allow_insecure_http;
             // An endpoint edited into a program (or one whose key was dropped) leaves no key behind.
@@ -1535,8 +1534,8 @@ mod card_tests {
                 for shape in &h.shapes {
                     crate::test_support::each_shape(&shape.shape, &mut |shape| {
                         if let egui::Shape::Text(text) = shape {
-                            scope_visible |= text.galley.job.text == tr(msg!("ui.ai_modes_scope"));
-                            privacy_visible |= text.galley.job.text == tr(msg!("ai.prefs.privacy_note"));
+                            scope_visible |= text.galley.job.text == tr!("ui.ai_modes_scope");
+                            privacy_visible |= text.galley.job.text == tr!("ai.prefs.privacy_note");
                             page_font |= text.galley.job.text == "Assistant"
                                 && text
                                     .galley
@@ -1713,21 +1712,21 @@ mod card_tests {
         h.frames(4);
         let tree = h.output.accesskit_update.as_ref().unwrap();
         for label in [
-            tr(msg!("ui.ai_toolbar_button")),
-            tr(msg!("ai.prefs.allow_control")),
-            tr(msg!("ai.prefs.connect_apps")),
-            tr(msg!("ai.prefs.background_commands")),
-            tr(msg!("ai.prefs.connect_at_start")),
-            tr(msg!("ai.prefs.open_at_start")),
-            tr(msg!("ai.prefs.show_pointer")),
-            tr(msg!("ai.prefs.follow_camera")),
+            tr!("ui.ai_toolbar_button"),
+            tr!("ai.prefs.allow_control"),
+            tr!("ai.prefs.connect_apps"),
+            tr!("ai.prefs.background_commands"),
+            tr!("ai.prefs.connect_at_start"),
+            tr!("ai.prefs.open_at_start"),
+            tr!("ai.prefs.show_pointer"),
+            tr!("ai.prefs.follow_camera"),
         ] {
             let nodes: Vec<_> =
                 tree.nodes.iter().filter(|(_, node)| node.role() == egui::accesskit::Role::CheckBox && node.label() == Some(label)).collect();
             assert_eq!(nodes.len(), 1, "{label} is retained exactly once");
             assert!(nodes[0].1.is_disabled(), "{label} dims when AI is off");
         }
-        assert!(tree.nodes.iter().any(|(_, node)| node.label() == Some(tr(msg!("ui.ai_show_features"))) && !node.is_disabled()));
+        assert!(tree.nodes.iter().any(|(_, node)| node.label() == Some(tr!("ui.ai_show_features")) && !node.is_disabled()));
         assert!(h.app.agent_chat.detecting.is_none() && h.app.agent_chat.backend.is_none());
         h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
         assert!(h.app.preferences.ai_features);
@@ -1742,7 +1741,7 @@ mod card_tests {
         h.app.preferences.agent_chat_turn_limit = 37;
         h.call("ui.resize", json!({"width":1600,"height":1400}));
         h.call("ui.prefs", json!({"open":"Assistant"}));
-        h.app.prefs_window.shell.filter = tr(msg!("ui.agent_chat_turn_limit")).into();
+        h.app.prefs_window.shell.filter = tr!("ui.agent_chat_turn_limit").into();
         h.frames(4);
         for limit in [1, 37, 199, 200] {
             h.app.preferences.agent_chat_turn_limit = limit;
@@ -1750,12 +1749,10 @@ mod card_tests {
             assert_eq!(h.app.preferences.agent_chat_turn_limit, limit, "rendering preserves every supported value");
         }
         h.step(&json!({"click":{"handle":"prefs:agent_chat_turn_limit:mode"}})).unwrap();
-        h.step(&json!({"click":{"handle":format!("dialog:{}:{}", tr(msg!("ui.agent_chat_turn_limit")), tr(msg!("ui.agent_chat_turn_unlimited")))}}))
-            .unwrap();
+        h.step(&json!({"click":{"handle":format!("dialog:{}:{}", tr!("ui.agent_chat_turn_limit"), tr!("ui.agent_chat_turn_unlimited"))}})).unwrap();
         assert_eq!(h.app.preferences.agent_chat_turn_limit, 0);
         h.step(&json!({"click":{"handle":"prefs:agent_chat_turn_limit:mode"}})).unwrap();
-        h.step(&json!({"click":{"handle":format!("dialog:{}:{}", tr(msg!("ui.agent_chat_turn_limit")), tr(msg!("prefs.assistant_limited")))}}))
-            .unwrap();
+        h.step(&json!({"click":{"handle":format!("dialog:{}:{}", tr!("ui.agent_chat_turn_limit"), tr!("prefs.assistant_limited"))}})).unwrap();
         assert_eq!(h.app.preferences.agent_chat_turn_limit, gate::SEEDED_TURN_LIMIT);
         h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
         assert_eq!(h.app.preferences.agent_chat_turn_limit, 37);
@@ -2212,7 +2209,7 @@ mod card_tests {
         // An empty command is refused as when adding.
         assert!(open_edit(&mut h.app, "custom-1"));
         h.app.agent_chat.settings.add.as_mut().unwrap().command = "  ".into();
-        assert_eq!(add_agent(&mut h.app), Err(tr(msg!("ui.ai_need_command")).to_string()));
+        assert_eq!(add_agent(&mut h.app), Err(tr!("ui.ai_need_command").to_string()));
         assert_eq!(h.app.preferences.agents[0].command, "my-agent --acp --verbose");
     }
 
@@ -2254,7 +2251,7 @@ mod card_tests {
         // A kept key does not go to a plain-HTTP address elsewhere.
         assert!(open_edit(&mut h.app, "api-1"));
         h.app.agent_chat.settings.add.as_mut().unwrap().base_url = "http://example.com/v1".into();
-        assert_eq!(add_agent(&mut h.app), Err(tr(msg!("ui.ai_key_needs_https")).to_string()));
+        assert_eq!(add_agent(&mut h.app), Err(tr!("ui.ai_key_needs_https").to_string()));
         assert_eq!(h.app.preferences.agents[0].base_url, "https://api.openai.com/v1");
         // A new key replaces the stored one.
         assert!(open_edit(&mut h.app, "api-1"));
@@ -2303,7 +2300,7 @@ mod card_tests {
         control(&mut h.app, &h.ctx, &json!({"edit_dialog": "custom-1"})).unwrap();
         assert_eq!(h.app.agent_chat.settings.add.as_ref().and_then(|s| s.editing.as_deref()), Some("custom-1"));
         h.app.preferences.agents.clear();
-        assert_eq!(add_agent(&mut h.app), Err(tr(msg!("ui.ai_edit_gone")).to_string()));
+        assert_eq!(add_agent(&mut h.app), Err(tr!("ui.ai_edit_gone").to_string()));
         assert!(h.app.preferences.agents.is_empty());
     }
 

@@ -127,10 +127,10 @@ pub(crate) fn ago(secs: u64) -> String {
 pub fn ago_between(now: u64, secs: u64) -> String {
     let d = now.saturating_sub(secs);
     match d {
-        0..=59 => msg!("recovery.just_now").tr().to_string(),
-        60..=3599 => msg!("recovery.min_ago", count = &(d / 60).to_string()).tr(),
-        3600..=86_399 => msg!("recovery.hours_ago", count = &(d / 3600).to_string()).tr(),
-        _ => msg!("recovery.days_ago", count = &(d / 86_400).to_string()).tr(),
+        0..=59 => tr!("recovery.just_now").to_string(),
+        60..=3599 => tr!("recovery.min_ago", count = &(d / 60).to_string()),
+        3600..=86_399 => tr!("recovery.hours_ago", count = &(d / 3600).to_string()),
+        _ => tr!("recovery.days_ago", count = &(d / 86_400).to_string()),
     }
 }
 
@@ -168,14 +168,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 act = Some((e.clone(), false));
                             }
                         });
-                        let file = e.path.clone().unwrap_or_else(|| msg!("recovery.never_saved").tr().to_string());
-                        let detail = msg!("recovery.detail", file = &file, features = &e.features.to_string(), when = &ago(e.saved_at)).tr();
+                        let file = e.path.clone().unwrap_or_else(|| tr!("recovery.never_saved").to_string());
+                        let detail = tr!("recovery.detail", file = &file, features = &e.features.to_string(), when = &ago(e.saved_at));
                         ui_kit::text(ui, &detail, ui_kit::Text::Note(&format!("detail:{index}")));
                     }
                 },
                 // Away from Later: it asks first, then discards every listed autosave (#9299).
                 |ui| {
-                    let response = ui_kit::button(ui, msg!("recovery.discard_all").tr(), ui_kit::Button::Normal);
+                    let response = ui_kit::button(ui, tr!("recovery.discard_all"), ui_kit::Button::Normal);
                     crate::scenario::publish_target("recovery:discard_all", response.rect);
                     discard_all = response.clicked();
                 },
@@ -267,22 +267,22 @@ pub fn browser_copies_window(ctx: &egui::Context, language: &str, copies: &[Brow
     let _language = solidcraft_ui_text::scope(language);
     copies.first()?;
     let title = match copies {
-        [one] => msg!("recovery.restore_title_one", name = &crate::i18n::tr_name(one.name), when = &one.when).tr(),
-        _ => msg!("recovery.restore_title").tr().to_string(),
+        [one] => tr!("recovery.restore_title_one", name = &crate::i18n::tr_name(one.name), when = &one.when),
+        _ => tr!("recovery.restore_title").to_string(),
     };
     let mut act = None;
     let _ = ui_kit::Window::new(egui::Id::unique("sc_browser_keep_restore"), "restore", &title).required().show_body(ctx, |ui| {
-        ui_kit::text(ui, msg!("recovery.restore_intro").tr(), ui_kit::Text::Report("intro", false));
+        ui_kit::text(ui, tr!("recovery.restore_intro"), ui_kit::Text::Report("intro", false));
         for (index, c) in copies.iter().enumerate() {
             if copies.len() > 1 {
                 ui_kit::divider(ui, &format!("entry:{index}"));
-                let row = msg!("recovery.restore_row", name = &crate::i18n::tr_name(c.name), when = &c.when).tr();
+                let row = tr!("recovery.restore_row", name = &crate::i18n::tr_name(c.name), when = &c.when);
                 ui_kit::text(ui, &row, ui_kit::Text::Report(&format!("row:{index}"), false));
             }
             ui.horizontal(|ui| {
-                let mut answers = vec![(CopyAnswer::Restore, msg!("recovery.restore").tr())];
+                let mut answers = vec![(CopyAnswer::Restore, tr!("recovery.restore"))];
                 if c.open_saved {
-                    answers.push((CopyAnswer::OpenSaved, msg!("recovery.open_saved").tr()));
+                    answers.push((CopyAnswer::OpenSaved, tr!("recovery.open_saved")));
                 }
                 answers.push((CopyAnswer::Discard, solidcraft_ui_text::tr_label("Discard")));
                 for (answer, text) in answers {
@@ -299,16 +299,13 @@ pub fn browser_copies_window(ctx: &egui::Context, language: &str, copies: &[Brow
 /// Discard all asks first; Cancel (or the close button) goes back to the list unchanged.
 fn confirm_discard_all(app: &mut SolveApp, ctx: &egui::Context) {
     let count = app.recoverable.len();
-    let title = if count == 1 {
-        msg!("recovery.discard_all_title_one").tr().to_string()
-    } else {
-        msg!("recovery.discard_all_title", count = &count.to_string()).tr()
-    };
+    let title =
+        if count == 1 { tr!("recovery.discard_all_title_one").to_string() } else { tr!("recovery.discard_all_title", count = &count.to_string()) };
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_recover_discard_all"), "delete", &title)
         .tone(ui_kit::Tone::Danger)
-        .actions(msg!("recovery.discard_all").tr(), msg!("ui.cancel").tr(), None)
+        .actions(tr!("recovery.discard_all"), tr!("ui.cancel"), None)
         .show(ctx, true, |ui| {
-            ui_kit::text(ui, msg!("recovery.discard_all_detail").tr(), ui_kit::Text::Report("discard_all", false));
+            ui_kit::text(ui, tr!("recovery.discard_all_detail"), ui_kit::Text::Report("discard_all", false));
         });
     match action {
         ui_kit::Action::Ok => {

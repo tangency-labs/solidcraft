@@ -425,7 +425,7 @@ fn export_animation(app: &mut SolveApp, params: Value, name: &str) {
             )
         });
         match made {
-            Ok(_) => app.set_status(msg!("ui.saved_to", path = &path).tr(), false),
+            Ok(_) => app.set_status(tr!("ui.saved_to", path = &path), false),
             Err(e) => app.set_status(e.to_string(), true),
         }
     });
@@ -472,7 +472,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                 crate::ui_kit::section(ui, format!("contact:{id}"), &n, true, |ui| {
                     ui.horizontal(|ui| {
                         let count = s.get("occurrences").and_then(Value::as_array).map_or(0, Vec::len);
-                        ui.label(RichText::new(msg!("contact.components_count", count = &count.to_string()).tr()).color(t.text_dim));
+                        ui.label(RichText::new(tr!("contact.components_count", count = &count.to_string())).color(t.text_dim));
                         let suppress = crate::ui_kit::button(
                             ui,
                             solidcraft_ui_text::tr_label(if off { "Unsuppress" } else { "Suppress" }),
@@ -651,7 +651,7 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
         let labels: Vec<String> = moving.iter().map(|(_, n, _)| n.clone()).collect();
         let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
         let mut pos = moving.iter().position(|(i, _, _)| *i == tr.joint).unwrap_or(0);
-        form_row(ui, &msg!("motion.track_name", number = &(ti + 1).to_string()).tr(), |ui| {
+        form_row(ui, &tr!("motion.track_name", number = &(ti + 1).to_string()), |ui| {
             ui.horizontal(|ui| {
                 let width = (ui.available_width() - t.control_height - t.space_8).max(0.0);
                 ui.allocate_ui(vec2(width, t.control_height), |ui| combo(ui, &format!("ms_joint{ti}"), &refs, &mut pos));

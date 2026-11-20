@@ -75,16 +75,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let file = std::path::Path::new(&ask.path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| ask.path.clone());
     // The symbols themselves (mm, cm, m, in, ft), as everywhere else units are chosen.
     let names: Vec<&str> = UNITS.iter().map(|(name, _)| *name).collect();
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_mesh_units"), "import", solidcraft_ui_text::tr(msg!("ui.point_cloud_units")))
-        .show(ctx, true, |ui| {
-            ui_kit::text(ui, &file, ui_kit::Text::Report("file", false));
-            ui_kit::choice_row(ui, solidcraft_ui_text::tr(msg!("ui.units")), "mesh_units", &mut ask.choice, &names);
-            let origin = ui_kit::checkbox(ui, solidcraft_ui_text::tr(msg!("ui.mesh_import_origin")), &mut ask.origin)
-                .backing_on_hover_text(solidcraft_ui_text::tr(msg!("ui.mesh_import_origin_tip")));
-            // Named like the dialog's buttons: outside a labelled row the checkbox's own handle
-            // is a bare `dialog:`, which scripts can't tell apart.
-            crate::scenario::publish_handle("mesh_units:origin", origin.rect.center());
-        });
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_mesh_units"), "import", tr!("ui.point_cloud_units")).show(ctx, true, |ui| {
+        ui_kit::text(ui, &file, ui_kit::Text::Report("file", false));
+        ui_kit::choice_row(ui, tr!("ui.units"), "mesh_units", &mut ask.choice, &names);
+        let origin = ui_kit::checkbox(ui, tr!("ui.mesh_import_origin"), &mut ask.origin).backing_on_hover_text(tr!("ui.mesh_import_origin_tip"));
+        // Named like the dialog's buttons: outside a labelled row the checkbox's own handle
+        // is a bare `dialog:`, which scripts can't tell apart.
+        crate::scenario::publish_handle("mesh_units:origin", origin.rect.center());
+    });
     for (handle, key) in [("mesh_units:ok", "dialog:ok"), ("mesh_units:cancel", "dialog:cancel")] {
         if let Some(at) = crate::scenario::handle_at(key) {
             crate::scenario::publish_handle(handle, at);

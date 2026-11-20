@@ -72,29 +72,70 @@ impl Parse for Input {
     }
 }
 
-/// A message of the English catalog, by its number: see the crate's documentation.
+/// `msg!("id")` as tokens: the message's `Msg`, or with values its `Filled`.
+fn message(input: &Input) -> syn::Result<proc_macro2::TokenStream> {
+    let ((place, ids), values) = check(input)?;
+    let id = &input.id;
+    let msg = quote!(::solidcraft_ui_text::Msg::checked(#place, #ids, ::solidcraft_ui_text::debug_id!(#id)));
+    Ok(match values {
+        None => msg,
+        Some(values) => {
+            let pairs = values.iter().map(|(name, value)| {
+                let name = name.to_string();
+                quote!((#name, #value))
+            });
+            quote!(::solidcraft_ui_text::Filled::checked(#msg, [#(#pairs),*]))
+        }
+    })
+}
+
+/// A message of the English catalog, by its place: a `Msg`, or with `name = value` for each
+/// placeholder a `Filled`. See the crate's documentation. For the text itself, [`tr!`].
 #[proc_macro]
 pub fn msg(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as Input);
-    match check(&input) {
-        Ok(order) => {
-            let (place, ids) = order.0;
-            let id = &input.id;
-            let msg = quote!(::solidcraft_ui_text::Msg::checked(#place, #ids, ::solidcraft_ui_text::debug_id!(#id)));
-            let order = order.1;
-            match order {
-                None => msg.into(),
-                Some(values) => {
-                    let pairs = values.iter().map(|(name, value)| {
-                        let name = name.to_string();
-                        quote!((#name, #value))
-                    });
-                    quote!(::solidcraft_ui_text::Filled::checked(#msg, [#(#pairs),*])).into()
-                }
-            }
+    message(&input).unwrap_or_else(|e| e.to_compile_error()).into()
+}
+
+/// A reader, if any, then what [`msg!`] takes.
+struct Read {
+    reader: Option<syn::Expr>,
+    message: Input,
+}
+
+impl Parse for Read {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        if input.peek(LitStr) {
+            return Ok(Read { reader: None, message: input.parse()? });
         }
-        Err(e) => e.to_compile_error().into(),
+        let reader: syn::Expr = input.parse()?;
+        input.parse::<Token![,]>()?;
+        Ok(Read { reader: Some(reader), message: input.parse()? })
     }
+}
+
+/// The text of a message of the English catalog, named by its id.
+///
+/// - `tr!("ui.file")`: in this thread's language, a `&'static str`.
+/// - `tr!("recovery.days_ago", count = &days)`: with its placeholders filled, a `String`.
+/// - `tr!(app, "ui.file")`, `tr!(locale, "recovery.days_ago", count = &days)`: in the language of
+///   `app` or `locale`, which is anything with `tr(Msg)` and `fill(Filled)`.
+///
+/// The id is checked as [`msg!`] checks it and is not in the program. An id built at run time
+/// cannot be given: that is `tr_by_id`.
+#[proc_macro]
+pub fn tr(input: TokenStream) -> TokenStream {
+    let read = syn::parse_macro_input!(input as Read);
+    let message = match message(&read.message) {
+        Ok(message) => message,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    match (read.reader, read.message.values.is_some()) {
+        (None, _) => quote!(#message.tr()),
+        (Some(reader), false) => quote!((#reader).tr(#message)),
+        (Some(reader), true) => quote!((#reader).fill(#message)),
+    }
+    .into()
 }
 
 /// `solidcraft_ui_text::numbered::fingerprint`: FNV-1a over the ids, each followed by a newline,

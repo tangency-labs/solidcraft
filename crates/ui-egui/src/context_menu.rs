@@ -457,7 +457,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 .filter(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
                 .map(|f| act("ui.editSketch", &f.name, "sketch").with(json!({"sketch": f.id})))
                 .collect();
-            if items.is_empty() { vec![act("ui.editSketch", app.tr(msg!("ui.edit_sketch_empty")), "sketch").on(false)] } else { items }
+            if items.is_empty() { vec![act("ui.editSketch", tr!(app, "ui.edit_sketch_empty"), "sketch").on(false)] } else { items }
         }
         Target::VisualStyle => crate::navigation_slots::VISUAL_STYLES
             .iter()
@@ -989,7 +989,7 @@ fn replace_sketch_item(app: &SolveApp, id: u64) -> Item {
     if !item.children.is_empty() {
         item.children.push(Item::sep());
     }
-    item.children.push(act("ui.replaceSketchFromFile", app.tr(msg!("ui.replace_sketch.from_file")), "open").with(json!({ "sketch": id })));
+    item.children.push(act("ui.replaceSketchFromFile", tr!(app, "ui.replace_sketch.from_file"), "open").with(json!({ "sketch": id })));
     item
 }
 
@@ -1006,7 +1006,7 @@ fn replace_sketch_from_file(app: &mut SolveApp, sketch: u64, at: Pos2) {
             }
         };
         match sketches.as_slice() {
-            [] => app.set_status(app.tr(msg!("ui.replace_sketch.no_sketches")).to_string(), true),
+            [] => app.set_status(tr!(app, "ui.replace_sketch.no_sketches").to_string(), true),
             [(from, _)] => drop(app.run("sketch.replace", json!({ "sketch": sketch, "from": from, "file": path }))),
             _ => open_for(app, at, Target::ReplaceSketchFile { sketch, path, sketches }),
         }
@@ -1882,7 +1882,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             };
             // The design is open here, so its file's place is already the user's choice. Its saved
             // file is read beside the window, as a picked one is (#11593).
-            let note = (p.get("unsaved").and_then(Value::as_bool) == Some(true)).then(|| msg!("ui.insert_design.saved_file", name = name).tr());
+            let note = (p.get("unsaved").and_then(Value::as_bool) == Some(true)).then(|| tr!("ui.insert_design.saved_file", name = name));
             app.insert_design_async(path, note);
         }
         "ui.insertBrowse" => app.pick_design_to_insert(),
@@ -2223,14 +2223,14 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 let calibrate = item.id == "ui.calibrateCanvas";
                 app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, c, calibrate));
                 if calibrate {
-                    app.set_status(solidcraft_ui_text::tr(msg!("browser.calibrate_click_a")), false);
+                    app.set_status(tr!("browser.calibrate_click_a"), false);
                 }
             }
         }
         "ui.straightenCanvas" => {
             if let Some(c) = id_of(&p, "canvas") {
                 app.tree.canvas_panel = Some(crate::browser::CanvasPanel::straighten(app, c));
-                app.set_status(solidcraft_ui_text::tr(msg!("browser.straighten_click_a")), false);
+                app.set_status(tr!("browser.straighten_click_a"), false);
             }
         }
         "ui.newGroup" | "ui.ungroup" | "ui.groupSelected" => crate::browser::group_action(app, &item.id, &p),
@@ -2268,9 +2268,9 @@ fn sketches_to_parts(app: &mut SolveApp, p: Value) {
         }
     }
     let message = if why.is_empty() {
-        msg!("browser.sketches_to_parts_moved", moved = &count("moved")).tr()
+        tr!("browser.sketches_to_parts_moved", moved = &count("moved"))
     } else {
-        msg!("browser.sketches_to_parts_result", moved = &count("moved"), stayed = &count("stayed"), why = &why.join("; ")).tr()
+        tr!("browser.sketches_to_parts_result", moved = &count("moved"), stayed = &count("stayed"), why = &why.join("; "))
     };
     app.set_status(message, false);
 }
@@ -3276,7 +3276,7 @@ fn workspace_style(item: &Item) -> Option<crate::ui_kit::WorkspaceStyle> {
 
 /// The kit's workspace menu over SolidCraft's workspaces (`items` of [`Target::Workspace`]).
 pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<usize>, height: f32) -> Option<Item> {
-    let menu = crate::ui_kit::WorkspaceMenu { items, style: &workspace_style, footer: solidcraft_ui_text::tr(msg!("ui.workspace_footer")) };
+    let menu = crate::ui_kit::WorkspaceMenu { items, style: &workspace_style, footer: tr!("ui.workspace_footer") };
     crate::ui_kit::workspace_menu(ui, &menu, key_row, height)
 }
 

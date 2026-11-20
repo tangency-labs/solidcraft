@@ -140,19 +140,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(prompt) = app.network_prompt.as_ref() else { return };
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     let hosts = prompt.hosts.iter().map(|h| format!("\\\\{h}")).collect::<Vec<_>>().join(", ");
-    let detail = msg!("network.prompt_detail", host = &hosts).tr();
-    let (closed, action) =
-        ui_kit::Confirm::new(egui::Id::unique("sc_network_prompt"), "status_warning", solidcraft_ui_text::tr(msg!("network.prompt_title")))
-            .tone(ui_kit::Tone::Warning)
-            .actions(
-                solidcraft_ui_text::tr(msg!("network.allow_once")),
-                solidcraft_ui_text::tr(msg!("ui.cancel")),
-                Some(solidcraft_ui_text::tr(msg!("network.always_allow"))),
-            )
-            .selected(ui_kit::Action::Cancel)
-            .show(ctx, true, |ui| {
-                ui_kit::text(ui, &detail, ui_kit::Text::Report("network_prompt", false));
-            });
+    let detail = tr!("network.prompt_detail", host = &hosts);
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_network_prompt"), "status_warning", tr!("network.prompt_title"))
+        .tone(ui_kit::Tone::Warning)
+        .actions(tr!("network.allow_once"), tr!("ui.cancel"), Some(tr!("network.always_allow")))
+        .selected(ui_kit::Action::Cancel)
+        .show(ctx, true, |ui| {
+            ui_kit::text(ui, &detail, ui_kit::Text::Report("network_prompt", false));
+        });
     let mut chosen = match action {
         ui_kit::Action::Ok => Some(Answer::Once),
         ui_kit::Action::Apply => Some(Answer::Always),

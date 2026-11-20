@@ -157,7 +157,7 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut action_theme = None;
     let t = Tokens::get();
     let dark = system_dark(app, ui.ctx()).unwrap_or_else(|| app.prefs_window.system_theme_dark.unwrap_or(app.ui.dark));
-    let label = app.tr(msg!("prefs.picker.import"));
+    let label = tr!(app, "prefs.picker.import");
     let import_width = ui_kit::ContentWidth::name(ui, label) + t.space_14 + t.space_6 + t.space_10 * 2.0;
     let (mode, import_rect) = ui_kit::theme_toolbar(
         ui,
@@ -169,19 +169,19 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui,
                 "mode",
                 &[
-                    ThemeSegment::new(app.tr(msg!("prefs.picker.one")), Glyph::Monitor, None),
-                    ThemeSegment::new(app.tr(msg!("prefs.picker.follow")), Glyph::Contrast, None),
+                    ThemeSegment::new(tr!(app, "prefs.picker.one"), Glyph::Monitor, None),
+                    ThemeSegment::new(tr!(app, "prefs.picker.follow"), Glyph::Contrast, None),
                 ],
                 Some(usize::from(app.preferences.theme == "system")),
                 false,
             );
             if app.preferences.theme == "system" {
-                ui_kit::settings_inline_note(ui, app.tr(msg!("prefs.picker.hint")));
+                ui_kit::settings_inline_note(ui, tr!(app, "prefs.picker.hint"));
             }
             mode
         },
         |ui| {
-            let button = ui_kit::theme_import_button(ui, label).backing_on_hover_text(app.tr(msg!("prefs.theme_import_hint")));
+            let button = ui_kit::theme_import_button(ui, label).backing_on_hover_text(tr!(app, "prefs.theme_import_hint"));
             crate::scenario::publish_target("prefs:theme_import", button.rect);
             if button.clicked() {
                 action = Some("import");
@@ -189,7 +189,7 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
             #[cfg(not(target_arch = "wasm32"))]
             ui_kit::Menu::context(&button, |ui| {
                 ui_kit::Menu::show(ui, t.form_card_width, |ui| {
-                    if ui_kit::MenuItem::new("theme_paste", app.tr(msg!("prefs.theme_paste")), "paste").show(ui).clicked() {
+                    if ui_kit::MenuItem::new("theme_paste", tr!(app, "prefs.theme_paste"), "paste").show(ui).clicked() {
                         action = Some("paste");
                         ui.close();
                     }
@@ -246,8 +246,8 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui,
                 "tone",
                 &[
-                    ThemeSegment::new(app.tr(msg!("ui.light")), Glyph::Sun, Some(state.count(&entries, "tone", false))),
-                    ThemeSegment::new(app.tr(msg!("ui.dark")), Glyph::Moon, Some(state.count(&entries, "tone", true))),
+                    ThemeSegment::new(tr!(app, "ui.light"), Glyph::Sun, Some(state.count(&entries, "tone", false))),
+                    ThemeSegment::new(tr!(app, "ui.dark"), Glyph::Moon, Some(state.count(&entries, "tone", true))),
                 ],
                 state.tone.map(usize::from),
                 false,
@@ -259,8 +259,8 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui,
                 "contrast",
                 &[
-                    ThemeSegment::new(app.tr(msg!("prefs.picker.standard")), Glyph::None, Some(state.count(&entries, "contrast", false))),
-                    ThemeSegment::new(app.tr(msg!("prefs.picker.high")), Glyph::Contrast, Some(state.count(&entries, "contrast", true))),
+                    ThemeSegment::new(tr!(app, "prefs.picker.standard"), Glyph::None, Some(state.count(&entries, "contrast", false))),
+                    ThemeSegment::new(tr!(app, "prefs.picker.high"), Glyph::Contrast, Some(state.count(&entries, "contrast", true))),
                 ],
                 state.high.map(usize::from),
                 false,
@@ -271,7 +271,7 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
             if ui_kit::theme_segments(
                 ui,
                 "imported",
-                &[ThemeSegment::new(app.tr(msg!("prefs.picker.imported")), Glyph::None, Some(state.count(&entries, "imported", true)))],
+                &[ThemeSegment::new(tr!(app, "prefs.picker.imported"), Glyph::None, Some(state.count(&entries, "imported", true)))],
                 state.imported.then_some(0),
                 false,
             )
@@ -286,8 +286,8 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui,
                 "view",
                 &[
-                    ThemeSegment::new(app.tr(msg!("prefs.picker.carousel")), Glyph::Carousel, None),
-                    ThemeSegment::new(app.tr(msg!("prefs.picker.grid")), Glyph::Grid, None),
+                    ThemeSegment::new(tr!(app, "prefs.picker.carousel"), Glyph::Carousel, None),
+                    ThemeSegment::new(tr!(app, "prefs.picker.grid"), Glyph::Grid, None),
                 ],
                 Some(usize::from(state.grid)),
                 true,
@@ -319,7 +319,7 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut card = |ui: &mut egui::Ui, index: usize, width: f32| {
         let Some(e) = visible.get(index) else { return };
         let source = app.tr(if e.imported { "prefs.imported_file" } else { "prefs.built_in" });
-        let note = if e.class.high { msg!("prefs.picker.high_note", source = source).tr() } else { source.to_owned() };
+        let note = if e.class.high { tr!("prefs.picker.high_note", source = source) } else { source.to_owned() };
         let day = system && slot_id(&app.preferences, false) == e.id;
         let night = system && slot_id(&app.preferences, true) == e.id;
         let selected = !following && if system { day || night } else { app.preferences.theme == e.id };
@@ -333,7 +333,7 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
                 night,
                 dark: e.class.dark,
                 high: e.class.high,
-                options: e.options.then(|| app.tr(msg!("prefs.theme_options_badge"))),
+                options: e.options.then(|| tr!(app, "prefs.theme_options_badge")),
                 sample: ui_kit::ThemeSample::from_tokens(&e.palette),
             },
             width,
@@ -376,16 +376,13 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
             card(ui, index, t.space_24 * 5.0);
         }
     } else if visible.is_empty() {
-        ui_kit::theme_empty(ui, app.tr(msg!("prefs.picker.empty")), app.tr(msg!("prefs.picker.clear")), || {
+        ui_kit::theme_empty(ui, tr!(app, "prefs.picker.empty"), tr!(app, "prefs.picker.clear"), || {
             state.tone = None;
             state.high = None;
             state.imported = false;
         });
     } else {
-        let arrows = ui_kit::PageLabels {
-            previous: solidcraft_ui_text::tr(msg!("prefs.appearance.previous_themes")),
-            next: solidcraft_ui_text::tr(msg!("prefs.appearance.next_themes")),
-        };
+        let arrows = ui_kit::PageLabels { previous: tr!("prefs.appearance.previous_themes"), next: tr!("prefs.appearance.next_themes") };
         ui_kit::theme_browser(
             ui,
             "appearance_theme_picker",

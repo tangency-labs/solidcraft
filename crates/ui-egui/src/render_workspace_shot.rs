@@ -54,8 +54,8 @@ fn setup(app: &SolveApp, name: &str) -> RenderSetup {
 
 pub(super) fn aspect_label(app: &SolveApp, setup: &RenderSetup) -> String {
     ASPECTS.get(aspect_index(app, setup)).map_or_else(
-        || app.tr(msg!("render.frame_custom")).to_string(),
-        |(key, ..)| if *key == "custom" { app.tr(msg!("render.frame_custom")).to_string() } else { (*key).into() },
+        || tr!(app, "render.frame_custom").to_string(),
+        |(key, ..)| if *key == "custom" { tr!(app, "render.frame_custom").to_string() } else { (*key).into() },
     )
 }
 
@@ -97,7 +97,7 @@ pub(super) fn edit_settings(app: &mut SolveApp, name: &str, patch: Value) -> Res
 }
 
 pub(super) fn choose_aspect(app: &mut SolveApp, name: &str, index: usize) -> Result<(), String> {
-    let Some((aspect, width, height, _)) = ASPECTS.get(index) else { return Err(app.tr(msg!("render.frame_invalid_aspect")).into()) };
+    let Some((aspect, width, height, _)) = ASPECTS.get(index) else { return Err(tr!(app, "render.frame_invalid_aspect").into()) };
     if *width > 0 {
         edit_settings(app, name, json!({"width":width,"height":height}))?;
     }
@@ -130,7 +130,7 @@ pub(super) fn presets(app: &mut SolveApp, ui: &mut egui::Ui) {
     let name = target(app);
     let current = setup(app, &name);
     let selected = aspect_index(app, &current);
-    let title = app.tr(msg!("render.frame_aspect")).to_string();
+    let title = tr!(app, "render.frame_aspect").to_string();
     ui_kit::section(ui, "render_frame_aspects", &title, true, |ui| {
         let ids: Vec<_> = ASPECTS.iter().map(|(key, ..)| format!("render:frame:aspect:{key}")).collect();
         let tiles: Vec<_> = ASPECTS
@@ -138,7 +138,7 @@ pub(super) fn presets(app: &mut SolveApp, ui: &mut egui::Ui) {
             .enumerate()
             .map(|(index, (key, w, h, _))| ui_kit::AspectTile {
                 id: ids.get(index).map(String::as_str).unwrap_or_default(),
-                label: if *key == "custom" { app.tr(msg!("render.frame_custom")) } else { key },
+                label: if *key == "custom" { tr!(app, "render.frame_custom") } else { key },
                 aspect: if *h == 0 { 1.5 } else { f64::from(*w) / f64::from(*h) },
                 selected: index == selected,
             })
@@ -148,7 +148,7 @@ pub(super) fn presets(app: &mut SolveApp, ui: &mut egui::Ui) {
             result(app, action);
         }
     });
-    let title = app.tr(msg!("render.frame_guides")).to_string();
+    let title = tr!(app, "render.frame_guides").to_string();
     ui_kit::section(ui, "render_frame_guides", &title, true, |ui| guides(app, ui, false));
 }
 
@@ -164,16 +164,16 @@ pub(super) fn rename(app: &mut SolveApp, name: &str, new_name: &str) -> Result<(
 pub(super) fn duplicate(app: &mut SolveApp, name: &str) -> Result<(), String> {
     for number in 1..=32 {
         let mut prefix = name.to_string();
-        let mut destination = msg!("render.frame_copy_name", name = &prefix, number = &number.to_string()).tr();
+        let mut destination = tr!("render.frame_copy_name", name = &prefix, number = &number.to_string());
         while destination.len() > solidcraft_engine::doc::render_settings::MAX_SETUP_NAME_BYTES && prefix.pop().is_some() {
-            destination = msg!("render.frame_copy_name", name = &prefix, number = &number.to_string()).tr();
+            destination = tr!("render.frame_copy_name", name = &prefix, number = &number.to_string());
         }
         if !app.session.doc.render.setups.contains_key(&destination) {
             app.run("render.shot.duplicate", json!({"name":name,"new_name":destination,"expected_revision":app.session.revision}))?;
             return Ok(());
         }
     }
-    Err(app.tr(msg!("render.frame_copy_limit")).into())
+    Err(tr!(app, "render.frame_copy_limit").into())
 }
 
 pub(super) fn revert(app: &mut SolveApp, name: &str) -> Result<(), String> {
@@ -188,7 +188,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
     }
     let mut name = app.render_workspace.view.frame.name.as_ref().map(|(_, text)| text.clone()).unwrap_or_else(|| shot.into());
     let invalid = RenderSettings::validate_name(&name).is_err();
-    let response = ui_kit::row(ui, app.tr(msg!("render.frame_name")), |ui| {
+    let response = ui_kit::row(ui, tr!(app, "render.frame_name"), |ui| {
         ui_kit::bounded_cell_editor(ui, ui.scope_id().with(("shot_name", shot)), &mut name, "", invalid, 128)
     });
     crate::scenario::publish_target("render:shot:name", response.rect);
@@ -202,17 +202,17 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
     let changed = super::shots::camera_modified(app, shot);
     if changed {
         ui_kit::banner(ui, ui_kit::AssistantTone::Warning, |ui| {
-            ui_kit::text(ui, app.tr(msg!("render.shots_camera_changed")), ui_kit::Text::Note("render.shots_camera_changed"));
+            ui_kit::text(ui, tr!(app, "render.shots_camera_changed"), ui_kit::Text::Note("render.shots_camera_changed"));
         });
     }
     ui.horizontal_wrapped(|ui| {
-        let update = ui.add_enabled_ui(changed, |ui| ui_kit::primary_button(ui, app.tr(msg!("render.shots_update")))).inner;
+        let update = ui.add_enabled_ui(changed, |ui| ui_kit::primary_button(ui, tr!(app, "render.shots_update"))).inner;
         crate::scenario::publish_target("render:shot:update", update.rect);
         if update.clicked() {
             let action = edit_settings(app, shot, json!({"camera":app.cam}));
             result(app, action);
         }
-        let response = ui_kit::button(ui, app.tr(msg!("render.shots_revert")), ui_kit::Button::Enabled(changed));
+        let response = ui_kit::button(ui, tr!(app, "render.shots_revert"), ui_kit::Button::Enabled(changed));
         crate::scenario::publish_target("render:shot:revert", response.rect);
         if response.clicked() {
             let action = revert(app, shot);
@@ -231,18 +231,18 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
             }
         }
     });
-    let title = app.tr(msg!("render.page_camera")).to_string();
+    let title = tr!(app, "render.page_camera").to_string();
     ui_kit::section(ui, "render_shot_camera", &title, true, |ui| camera(app, ui, shot));
-    let title = app.tr(msg!("render.shot_lens")).to_string();
+    let title = tr!(app, "render.shot_lens").to_string();
     ui_kit::section(ui, "render_shot_lens", &title, true, |ui| lens(app, ui, shot, &saved));
-    let title = app.tr(msg!("render.shot_exposure_section")).to_string();
+    let title = tr!(app, "render.shot_exposure_section").to_string();
     ui_kit::section(ui, "render_shot_exposure", &title, true, |ui| exposure(app, ui, shot, &saved));
-    let title = app.tr(msg!("render.stage_frame")).to_string();
+    let title = tr!(app, "render.stage_frame").to_string();
     ui_kit::section(ui, "render_shot_frame", &title, true, |ui| {
         let index = aspect_index(app, &saved);
         let mut chosen = None;
         let labels: Vec<_> = ASPECTS.iter().map(|(_, _, _, key)| app.tr(key).to_string()).collect();
-        ui_kit::row(ui, app.tr(msg!("render.frame_aspect")), |ui| {
+        ui_kit::row(ui, tr!(app, "render.frame_aspect"), |ui| {
             let response = ui_kit::dropdown_menu(ui, "render_shot_aspect", labels.get(index).map(String::as_str).unwrap_or_default(), |ui| {
                 for (choice, label) in labels.iter().enumerate() {
                     if ui_kit::list_picker(ui, &format!("render:shot:aspect:{choice}"), label, choice == index).clicked() {
@@ -259,9 +259,9 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
         }
         guides(app, ui, true);
         ui.horizontal_wrapped(|ui| {
-            ui_kit::text(ui, app.tr(msg!("render.shot_size")), ui_kit::Text::Inline);
+            ui_kit::text(ui, tr!(app, "render.shot_size"), ui_kit::Text::Inline);
             ui_kit::text(ui, &format!("{} × {}", saved.width, saved.height), ui_kit::Text::Inline);
-            let response = ui_kit::button(ui, app.tr(msg!("render.shot_edit_output")), ui_kit::Button::Ghost);
+            let response = ui_kit::button(ui, tr!(app, "render.shot_edit_output"), ui_kit::Button::Ghost);
             crate::scenario::publish_target("render:shot:output", response.rect);
             if response.clicked() {
                 let _ = app.run("view.render_select", json!({"kind":"output"}));
@@ -273,7 +273,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
 /// Controls save immediately; navigation alone keeps Update/Revert.
 pub(super) fn set_camera(app: &mut SolveApp, shot: &str, camera: solidcraft_viewport::Camera) -> Result<(), String> {
     if !camera.is_valid() {
-        return Err(app.tr(msg!("render.shot_invalid_camera")).into());
+        return Err(tr!(app, "render.shot_invalid_camera").into());
     }
     edit_settings(app, shot, json!({"camera":camera}))?;
     inspector::apply_camera_draft(app, camera)
@@ -284,11 +284,11 @@ fn camera(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
     let mut projection = usize::from(camera.fov == 0.0);
     // This short label can use the kit's base column, leaving both projection names visible.
     if ui_kit::settings_form(ui, Tokens::get().form_label_width, |ui| {
-        ui_kit::row(ui, app.tr(msg!("render.frame_projection")), |ui| {
+        ui_kit::row(ui, tr!(app, "render.frame_projection"), |ui| {
             ui_kit::segmented(
                 ui,
                 &mut projection,
-                &[app.tr(msg!("render.perspective")), app.tr(msg!("render.stage_orthographic"))],
+                &[tr!(app, "render.perspective"), tr!(app, "render.stage_orthographic")],
                 ui_kit::Segments { compact: true, proportional: true, workspace_accent: true, ..Default::default() },
             )
         })
@@ -297,7 +297,7 @@ fn camera(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
     }
     let mut fov = if projection == 0 { camera.fov.to_degrees() } else { 35.0 };
     ui.add_enabled_ui(projection == 0, |ui| {
-        let response = ui_kit::row(ui, app.tr(msg!("render.frame_fov")), |ui| {
+        let response = ui_kit::row(ui, tr!(app, "render.frame_fov"), |ui| {
             ui_kit::slider(ui, &mut fov, 1.0..=150.0, ui_kit::Slider { format: |v| format!("{v:.0}°"), ..Default::default() })
         });
         if projection == 0 && response.changed() && (response.is_pointer_button_down_on() || response.has_focus()) {
@@ -308,8 +308,8 @@ fn camera(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
     let diagonal = bounds.diagonal();
     let size = if bounds.is_empty() || !diagonal.is_finite() { 1.0 } else { diagonal.max(0.000001) };
     let mut distance = camera.distance / size;
-    let suffix = app.tr(msg!("render.frame_distance_unit")).to_owned();
-    let response = ui_kit::row(ui, app.tr(msg!("render.shot_distance")), |ui| {
+    let suffix = tr!(app, "render.frame_distance_unit").to_owned();
+    let response = ui_kit::row(ui, tr!(app, "render.shot_distance"), |ui| {
         ui_kit::number_field(ui, &mut distance, (0.000001 / size)..=(1e9 / size), 0.01, &suffix)
     });
     crate::scenario::publish_target("render:shot:distance", response.rect);
@@ -317,7 +317,7 @@ fn camera(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
         camera.distance = distance * size;
     }
     let mut target = [camera.target.x, camera.target.y, camera.target.z];
-    ui_kit::row(ui, app.tr(msg!("render.shot_target")), |ui| {
+    ui_kit::row(ui, tr!(app, "render.shot_target"), |ui| {
         ui_kit::number_fields(ui, &mut target, -1e9..=1e9, 0.1, "");
     });
     camera.target = solidcore_record::Vec3::new(target[0], target[1], target[2]);
@@ -333,15 +333,15 @@ fn camera(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
         result(app, action);
     }
     if projection != 0 {
-        ui_kit::text(ui, app.tr(msg!("render.shot_fov_reason")), ui_kit::Text::Note("render.shot_fov_reason"));
+        ui_kit::text(ui, tr!(app, "render.shot_fov_reason"), ui_kit::Text::Note("render.shot_fov_reason"));
     }
     ui.horizontal_wrapped(|ui| {
-        if ui_kit::button(ui, app.tr(msg!("render.shot_frame_subject")), ui_kit::Button::Normal).clicked() {
+        if ui_kit::button(ui, tr!(app, "render.shot_frame_subject"), ui_kit::Button::Normal).clicked() {
             let action = inspector::fit_subject(app).and_then(|()| set_camera(app, shot, app.cam));
             result(app, action);
         }
         let enabled = crate::viewport::selection_bounds(app).is_some();
-        let response = ui_kit::button(ui, app.tr(msg!("render.shot_look_selection")), ui_kit::Button::Enabled(enabled));
+        let response = ui_kit::button(ui, tr!(app, "render.shot_look_selection"), ui_kit::Button::Enabled(enabled));
         crate::scenario::publish_target("render:shot:look-selection", response.rect);
         if response.clicked() {
             let action = look_at_selection(app, shot);
@@ -349,19 +349,19 @@ fn camera(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
         }
     });
     if crate::viewport::selection_bounds(app).is_none() {
-        ui_kit::text(ui, app.tr(msg!("render.shot_selection_reason")), ui_kit::Text::Note("render.shot_selection_reason"));
+        ui_kit::text(ui, tr!(app, "render.shot_selection_reason"), ui_kit::Text::Note("render.shot_selection_reason"));
     }
 }
 
 pub(super) fn look_at_selection(app: &mut SolveApp, shot: &str) -> Result<(), String> {
-    let bounds = crate::viewport::selection_bounds(app).ok_or_else(|| app.tr(msg!("render.shot_selection_reason")).to_string())?;
+    let bounds = crate::viewport::selection_bounds(app).ok_or_else(|| tr!(app, "render.shot_selection_reason").to_string())?;
     set_camera(app, shot, solidcraft_viewport::Camera { target: bounds.center(), ..app.cam })
 }
 
 /// Change only saved lens intent. Camera updates keep their explicit Update shot action.
 pub(super) fn set_lens(app: &mut SolveApp, shot: &str, lens: Option<solidcraft_engine::render::job::ThinLens>) -> Result<(), String> {
     use solidcraft_engine::doc::render_settings::RenderJob;
-    let saved = app.session.doc.render.setups.get(shot).ok_or_else(|| app.tr(msg!("render.ribbon_no_saved_camera")).to_string())?;
+    let saved = app.session.doc.render.setups.get(shot).ok_or_else(|| tr!(app, "render.ribbon_no_saved_camera").to_string())?;
     let active = app.render_workspace.view.name == shot;
     let establishing_job = active && saved.job.is_none();
     let mut candidate = if active {
@@ -371,7 +371,7 @@ pub(super) fn set_lens(app: &mut SolveApp, shot: &str, lens: Option<solidcraft_e
         match &mut candidate.job {
             Some(RenderJob::CpuRaytrace { options, .. }) => options.lens = lens,
             Some(RenderJob::GpuPath { options, .. }) => options.lens = lens,
-            _ => return Err(app.tr(msg!("render.shot_lens_raytrace_reason")).into()),
+            _ => return Err(tr!(app, "render.shot_lens_raytrace_reason").into()),
         }
         candidate
     };
@@ -391,7 +391,7 @@ pub(super) fn set_lens(app: &mut SolveApp, shot: &str, lens: Option<solidcraft_e
         match &mut job {
             Some(RenderJob::CpuRaytrace { options, .. }) => options.lens = lens,
             Some(RenderJob::GpuPath { options, .. }) => options.lens = lens,
-            _ => return Err(app.tr(msg!("render.shot_lens_raytrace_reason")).into()),
+            _ => return Err(tr!(app, "render.shot_lens_raytrace_reason").into()),
         }
         json!({"job":job})
     };
@@ -435,16 +435,15 @@ fn lens(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str, saved: &RenderSetup) 
     // Removing an authored lens remains possible after navigating to orthographic.
     let mut changed = false;
     ui.add_enabled_ui(supported && (on || compatible), |ui| {
-        let response = ui_kit::checkbox(ui, app.tr(msg!("render.shot_dof")), &mut on);
+        let response = ui_kit::checkbox(ui, tr!(app, "render.shot_dof"), &mut on);
         crate::scenario::publish_target("render:shot:dof", response.rect);
         changed |= response.changed();
     });
     ui.add_enabled_ui(on && compatible, |ui| {
-        changed |= ui_kit::row(ui, app.tr(msg!("render.shot_aperture")), |ui| {
-            ui_kit::number_field(ui, &mut value.aperture_radius_mm, 0.0..=1e7, 0.1, " mm")
-        })
-        .changed();
-        changed |= ui_kit::row(ui, app.tr(msg!("render.shot_focus_distance")), |ui| {
+        changed |=
+            ui_kit::row(ui, tr!(app, "render.shot_aperture"), |ui| ui_kit::number_field(ui, &mut value.aperture_radius_mm, 0.0..=1e7, 0.1, " mm"))
+                .changed();
+        changed |= ui_kit::row(ui, tr!(app, "render.shot_focus_distance"), |ui| {
             ui_kit::number_field(ui, &mut value.focus_distance_mm, 1e-6..=1e9, 1.0, " mm")
         })
         .changed();
@@ -473,14 +472,14 @@ fn exposure(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str, saved: &RenderSet
     let limit = if matches!(saved.job, Some(solidcraft_engine::doc::render_settings::RenderJob::CpuRaytrace { .. })) { 16.0 } else { 32.0 };
     let enabled = !matches!(saved.job, None | Some(solidcraft_engine::doc::render_settings::RenderJob::Raster { .. }));
     if !enabled {
-        ui_kit::text(ui, app.tr(msg!("render.shot_exposure_reason")), ui_kit::Text::Note("render.shot_exposure_reason"));
+        ui_kit::text(ui, tr!(app, "render.shot_exposure_reason"), ui_kit::Text::Note("render.shot_exposure_reason"));
     }
     ui.add_enabled_ui(enabled, |ui| {
         if app.render_workspace.view.frame.exposure.as_ref().is_none_or(|(name, observed, _)| name != shot || *observed != saved.exposure_ev) {
             app.render_workspace.view.frame.exposure = Some((shot.into(), saved.exposure_ev, saved.exposure_ev));
         }
         let mut exposure = app.render_workspace.view.frame.exposure.as_ref().map_or(saved.exposure_ev, |(_, _, value)| *value);
-        let response = ui_kit::row(ui, app.tr(msg!("render.frame_exposure")), |ui| {
+        let response = ui_kit::row(ui, tr!(app, "render.frame_exposure"), |ui| {
             ui_kit::slider(ui, &mut exposure, -limit..=limit, ui_kit::Slider { format: |v| format!("{v:+.1} EV"), ..Default::default() })
         });
         crate::scenario::publish_target("render:shot:exposure", response.rect);
@@ -554,7 +553,7 @@ pub(crate) fn overlay(app: &mut SolveApp, ui: &mut egui::Ui, viewport: Rect) {
     crate::scenario::publish_rect("render:frame:overlay", frame);
     let index = aspect_index(app, &saved);
     let aspect = ASPECTS.get(index).map(|(key, ..)| *key).unwrap_or("custom");
-    let aspect = if aspect == "custom" { app.tr(msg!("render.frame_custom")) } else { aspect };
+    let aspect = if aspect == "custom" { tr!(app, "render.frame_custom") } else { aspect };
     let label = format!("{aspect} · {} × {}", saved.width, saved.height);
     ui_kit::Container::navigation_card(
         ui.ctx(),
@@ -568,9 +567,9 @@ pub(crate) fn overlay(app: &mut SolveApp, ui: &mut egui::Ui, viewport: Rect) {
     let lens = if app.cam.fov > 0.0 {
         // Full-frame equivalent using the vertical 24 mm sensor dimension.
         let mm = 12.0 / (app.cam.fov / 2.0).tan();
-        msg!("render.frame_lens", fov = &format!("{:.0}", app.cam.fov.to_degrees()), mm = &format!("{mm:.0}")).tr()
+        tr!("render.frame_lens", fov = &format!("{:.0}", app.cam.fov.to_degrees()), mm = &format!("{mm:.0}"))
     } else {
-        app.tr(msg!("render.stage_orthographic")).to_string()
+        tr!(app, "render.stage_orthographic").to_string()
     };
     ui_kit::Container::navigation_card(
         ui.ctx(),

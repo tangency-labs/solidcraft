@@ -634,7 +634,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     // Views a deferred drawing holds stay out of date without being worked on: their words say so.
     let waiting = view.stale.len() + view.stale_dimensions.len();
     if working {
-        let text = msg!("ui.sheet_page.working", count = &waiting.max(1).to_string()).tr();
+        let text = tr!("ui.sheet_page.working", count = &waiting.max(1).to_string());
         hint(&painter, free_area(app, canvas), &text);
     }
     let area = free_area(app, canvas);
@@ -693,7 +693,7 @@ fn paint_offscreen_arrow(ui: &mut egui::Ui, painter: &egui::Painter, area: Rect,
     let Some((centre, direction)) = offscreen_arrow(area, sheet, diameter * 0.5 + t.space_8) else { return false };
     let rect = Rect::from_center_size(centre, egui::Vec2::splat(diameter));
     let response = ui.interact(rect, ui.make_persistent_id("sheet:offscreen_arrow"), Sense::click());
-    let label = solidcraft_ui_text::tr(msg!("ui.drawing_offscreen.recenter"));
+    let label = tr!("ui.drawing_offscreen.recenter");
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     let clicked = response.clicked();
 
@@ -814,7 +814,7 @@ fn waiting_views(
         let Ok(centre) = drawing.view_centre(*id) else { continue };
         // The words alone, on the chip the other states use: no outline round an empty place.
         let place = Rect::from_center_size(at.screen(centre), egui::Vec2::ZERO);
-        say(painter, place, solidcraft_ui_text::tr(msg!("ui.sheet_page.projecting")).to_owned(), t.text_dim, *id);
+        say(painter, place, tr!("ui.sheet_page.projecting").to_owned(), t.text_dim, *id);
     }
     waiting
 }
@@ -826,11 +826,11 @@ pub(crate) fn words(status: &Status, out_of_date: bool) -> Vec<String> {
     let mut words = Vec::new();
     match status {
         Status::Drawn => {}
-        Status::Placeholder(why) => words.push(msg!("ui.sheet_page.placeholder", reason = &why.to_string()).tr()),
-        Status::Failed(why) => words.push(msg!("ui.sheet_page.failed", reason = why).tr()),
+        Status::Placeholder(why) => words.push(tr!("ui.sheet_page.placeholder", reason = &why.to_string())),
+        Status::Failed(why) => words.push(tr!("ui.sheet_page.failed", reason = why)),
     }
     if out_of_date {
-        words.push(solidcraft_ui_text::tr(msg!("ui.sheet_page.needs_update")).to_owned());
+        words.push(tr!("ui.sheet_page.needs_update").to_owned());
     }
     words
 }
@@ -908,7 +908,7 @@ pub(crate) fn calibration_bar(app: &SolveApp, ui: &mut egui::Ui) {
     painter.text(
         pos2(left + length, y + t.space_8),
         egui::Align2::RIGHT_TOP,
-        app.tr(msg!("ui.sheet_page.calibration_bar")),
+        tr!(app, "ui.sheet_page.calibration_bar"),
         egui::FontId::proportional(t.font_label),
         t.text_dim,
     );
@@ -961,20 +961,14 @@ impl Marks {
         for _ in 0..8 {
             match marks(scene, tol) {
                 Ok((marks, owners)) => {
-                    let error = (tol != tolerance).then(|| solidcraft_ui_text::tr(msg!("ui.sheet_page.coarse")).to_owned());
+                    let error = (tol != tolerance).then(|| tr!("ui.sheet_page.coarse").to_owned());
                     return Marks { generation, tolerance, marks, owners, error };
                 }
                 Err(Fault::TooMany) => tol *= 8.0,
                 Err(Fault::Invalid(why)) => return Marks { generation, tolerance, marks: Vec::new(), owners: Vec::new(), error: Some(why) },
             }
         }
-        Marks {
-            generation,
-            tolerance,
-            marks: Vec::new(),
-            owners: Vec::new(),
-            error: Some(solidcraft_ui_text::tr(msg!("ui.sheet_page.coarse")).to_owned()),
-        }
+        Marks { generation, tolerance, marks: Vec::new(), owners: Vec::new(), error: Some(tr!("ui.sheet_page.coarse").to_owned()) }
     }
 
     fn paint(&self, painter: &egui::Painter, at: &OnScreen, visible: Aabb2, ink: Color32, ppp: f32, pictures: &PictureTextures) {
@@ -1074,7 +1068,7 @@ impl Marks {
                             // Can't be drawn: why, in words beside the frame (D26), not colour alone.
                             if let Some(why) = uploaded.and_then(|u| u.why.as_deref()) {
                                 let t = Tokens::get();
-                                let text = msg!("ui.sheet_page.picture_failed", reason = why).tr();
+                                let text = tr!("ui.sheet_page.picture_failed", reason = why);
                                 let at = r.left_top() + vec2(t.space_4, t.space_4);
                                 painter.text(at, egui::Align2::LEFT_TOP, text, egui::FontId::proportional(t.font_label), dim);
                             }

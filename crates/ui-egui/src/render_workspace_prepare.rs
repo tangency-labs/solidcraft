@@ -167,7 +167,7 @@ mod native {
                     // Never free a returned heavy capture on the interactive UI,
                     // report released credit, or start an unbounded fallback.
                     self.prepared = Some(prepared);
-                    Err(solidcraft_ui_text::tr(msg!("render.preparation_retirement_failed")).into())
+                    Err(tr!("render.preparation_retirement_failed").into())
                 }
             }
         }
@@ -197,13 +197,13 @@ mod native {
     ) -> Result<(), String> {
         if app.render_preparation.pending.is_some() || super::super::live::final_pending(app) || batches::unavailable(&app.render_preparation.batches)
         {
-            return Err(app.tr(msg!("render.ribbon_job_active")).into());
+            return Err(tr!(app, "render.ribbon_job_active").into());
         }
         if kind == Kind::Start && batches::busy(&app.render_preparation.batches, app.session.uid) && request.get("replace") != Some(&json!(true)) {
-            return Err(app.tr(msg!("render.ribbon_job_active")).into());
+            return Err(tr!(app, "render.ribbon_job_active").into());
         }
         if app.file_load.busy() || app.file_picker.is_some() || app.saving.is_some() {
-            return Err(app.tr(msg!("render.ribbon_finish_dialog")).into());
+            return Err(tr!(app, "render.ribbon_finish_dialog").into());
         }
         app.session.set_validation(app.preferences.validation);
         let params = super::super::light::filter_request(app, request.clone())?;
@@ -273,7 +273,7 @@ mod native {
         if pending.committed || pending.applied {
             return false;
         }
-        cancel_pending(pending, solidcraft_ui_text::tr(msg!("render.preparation_cancelled")).into());
+        cancel_pending(pending, tr!("render.preparation_cancelled").into());
         true
     }
     pub(crate) fn document_closing(app: &mut SolveApp, uid: u64) {
@@ -282,7 +282,7 @@ mod native {
             && pending.guard.uid == uid
             && !pending.committed
         {
-            cancel_pending(pending, solidcraft_ui_text::tr(msg!("render.preparation_cancelled")).into());
+            cancel_pending(pending, tr!("render.preparation_cancelled").into());
         }
         batches::cancel_owner(app, &mut state.batches, uid);
         app.render_preparation = state;
@@ -385,7 +385,7 @@ mod native {
     }
     fn answer(pending: &mut Pending) {
         let Some(origin) = pending.origin.take() else { return };
-        let result = pending.completion.take().unwrap_or_else(|| Err(solidcraft_ui_text::tr(msg!("render.preparation_retirement_failed")).into()));
+        let result = pending.completion.take().unwrap_or_else(|| Err(tr!("render.preparation_retirement_failed").into()));
         if let Origin::Control { request, echo } = origin {
             let mut reply = match result {
                 Ok(value) => json!({"ok":true,"result":value}),
@@ -435,7 +435,7 @@ mod native {
                 Ok(reply) => {
                     super::super::cpu::record_checked(app, &pending.unfiltered, reply);
                     super::super::inspector::record_check(app, &pending.unfiltered, reply);
-                    app.set_status(app.tr(msg!("render.image_supported")).to_string(), false);
+                    app.set_status(tr!(app, "render.image_supported").to_string(), false);
                 }
                 Err(error) => super::super::inspector::record_check(app, &pending.unfiltered, &json!({"error":error})),
             }
@@ -479,15 +479,15 @@ mod native {
         };
         if !pending.applied {
             if pending.worker.is_none() && batches::unavailable(&state.batches) {
-                cancel_pending(pending, app.tr(msg!("render.preparation_unavailable")).into());
+                cancel_pending(pending, tr!(app, "render.preparation_unavailable").into());
             }
             if !pending.guard.current(app) {
-                cancel_pending(pending, app.tr(msg!("render.live.final_changed")).into())
+                cancel_pending(pending, tr!(app, "render.live.final_changed").into())
             }
             if let Some(Origin::Control { request, .. }) = &pending.origin
                 && crate::control::chat_turn_cancelled(request.chat_turn.as_deref())
             {
-                cancel_pending(pending, solidcraft_ui_text::tr(msg!("render.preparation_cancelled")).into());
+                cancel_pending(pending, tr!("render.preparation_cancelled").into());
             }
         }
         if pending.worker.is_none() {
@@ -500,7 +500,7 @@ mod native {
                 match spawn(app, pending) {
                     Ok(worker) => {
                         if worker.unavailable_input.is_some() {
-                            pending.unavailable = Some(app.tr(msg!("render.preparation_retirement_failed")).into());
+                            pending.unavailable = Some(tr!(app, "render.preparation_retirement_failed").into());
                         }
                         pending.worker = Some(worker);
                     }
@@ -536,7 +536,7 @@ mod native {
                     pending.completion = Some(Err(error));
                     pending.applied = true
                 }
-                Some(Err(TryRecvError::Disconnected)) => pending.unavailable = Some(app.tr(msg!("render.preparation_retirement_failed")).into()),
+                Some(Err(TryRecvError::Disconnected)) => pending.unavailable = Some(tr!(app, "render.preparation_retirement_failed").into()),
                 _ => {}
             }
             if pending.applied {
@@ -551,9 +551,7 @@ mod native {
                             answer(pending);
                             state.pending = None
                         }
-                        Some(Err(TryRecvError::Disconnected)) => {
-                            pending.unavailable = Some(app.tr(msg!("render.preparation_retirement_failed")).into())
-                        }
+                        Some(Err(TryRecvError::Disconnected)) => pending.unavailable = Some(tr!(app, "render.preparation_retirement_failed").into()),
                         _ => {}
                     }
                 }
@@ -596,7 +594,7 @@ mod native {
         crate::ui_kit::text(ui, app.tr(key), crate::ui_kit::Text::Inline);
         let cancel = crate::ui_kit::button(
             ui,
-            app.tr(msg!("cmd.render_cancel")),
+            tr!(app, "cmd.render_cancel"),
             crate::ui_kit::Button::Enabled(pending.unavailable.is_none() && (!pending.applied || pending.committed)),
         );
         crate::scenario::publish_target("render:preparation-cancel", cancel.rect);
@@ -749,7 +747,7 @@ mod native {
                     }
                     Err(TrySendError::Full(p) | TrySendError::Disconnected(p)) => {
                         self.prepared = Some(p);
-                        Err(solidcraft_ui_text::tr(msg!("render.preparation_retirement_failed")).into())
+                        Err(tr!("render.preparation_retirement_failed").into())
                     }
                 }
             }
@@ -758,7 +756,7 @@ mod native {
                     Ok(()) => Ok(()),
                     Err(TrySendError::Full(input) | TrySendError::Disconnected(input)) => {
                         self._unavailable_input = Some(input);
-                        Err(solidcraft_ui_text::tr(msg!("render.preparation_retirement_failed")).into())
+                        Err(tr!("render.preparation_retirement_failed").into())
                     }
                 }
             }
@@ -866,16 +864,16 @@ mod native {
             level: ParamCheck,
         ) -> Result<(), String> {
             if super::super::super::live::final_pending(app) {
-                return Err(app.tr(msg!("render.ribbon_job_active")).into());
+                return Err(tr!(app, "render.ribbon_job_active").into());
             }
             if unavailable(&app.render_preparation.batches) || app.render_preparation.pending.as_ref().is_some_and(|p| p.unavailable.is_some()) {
-                return Err(app.tr(msg!("render.preparation_unavailable")).into());
+                return Err(tr!(app, "render.preparation_unavailable").into());
             }
             if busy(&app.render_preparation.batches, app.session.uid) {
-                return Err(app.tr(msg!("render.ribbon_job_active")).into());
+                return Err(tr!(app, "render.ribbon_job_active").into());
             }
             if app.file_load.busy() || app.file_picker.is_some() || app.saving.is_some() {
-                return Err(app.tr(msg!("render.ribbon_finish_dialog")).into());
+                return Err(tr!(app, "render.ribbon_finish_dialog").into());
             }
             app.session.set_validation(app.preferences.validation);
             let warnings: Vec<_> = solidcraft_engine::schema::issues("render.batch", &params).into_iter().map(|i| i.message).collect();
@@ -890,7 +888,7 @@ mod native {
                 .slots
                 .iter()
                 .position(Option::is_none)
-                .ok_or_else(|| app.tr(msg!("render.batch_owner_limit")).to_string())?;
+                .ok_or_else(|| tr!(app, "render.batch_owner_limit").to_string())?;
             // UI passes its already-filtered request. Native control preserves
             // the exact supplied API intent, including first-saved fallback.
             let first = First {
@@ -936,7 +934,7 @@ mod native {
                     && slot.uid == uid
                 {
                     found = true;
-                    slot.cancelled.get_or_insert_with(|| solidcraft_ui_text::tr(msg!("render.preparation_cancelled")).into());
+                    slot.cancelled.get_or_insert_with(|| tr!("render.preparation_cancelled").into());
                     if let Some(active) = &mut state.active
                         && active.slot == i
                         && !active.committed
@@ -975,13 +973,13 @@ mod native {
                     }
                     out
                 })
-                .unwrap_or_else(|| Err(solidcraft_ui_text::tr(msg!("render.live.final_changed")).into()))
+                .unwrap_or_else(|| Err(tr!("render.live.final_changed").into()))
             }
         }
         pub(super) fn poll(app: &mut SolveApp, ctx: &Context, state: &mut State) {
             let Some(mut active) = state.active.take() else { return };
             let Some(slot) = state.slots[active.slot].as_mut() else {
-                active.unavailable = Some(app.tr(msg!("render.preparation_retirement_failed")).into());
+                active.unavailable = Some(tr!(app, "render.preparation_retirement_failed").into());
                 state.active = Some(active);
                 return;
             };
@@ -989,14 +987,14 @@ mod native {
             if !active.applied && !active.cleanup_only {
                 let current = crate::documents::render_owner(app, slot.uid);
                 if current.is_none() || slot.first.as_ref().is_some_and(|f| current.is_none_or(|s| !f.source.current(s))) {
-                    slot.cancelled.get_or_insert_with(|| solidcraft_ui_text::tr(msg!("render.live.final_changed")).into());
+                    slot.cancelled.get_or_insert_with(|| tr!("render.live.final_changed").into());
                     active.cancel.cancel();
                 }
                 if slot.first.as_ref().and_then(|f| f.origin.as_ref()).is_some_and(|o| match o {
                     Origin::Control { request, .. } => crate::control::chat_turn_cancelled(request.chat_turn.as_deref()),
                     Origin::Ui => false,
                 }) {
-                    slot.cancelled.get_or_insert_with(|| solidcraft_ui_text::tr(msg!("render.preparation_cancelled")).into());
+                    slot.cancelled.get_or_insert_with(|| tr!("render.preparation_cancelled").into());
                     active.cancel.cancel();
                 }
             }
@@ -1021,7 +1019,7 @@ mod native {
                         active.applied = true;
                         active.completion = Some(result);
                     }
-                    Err(TryRecvError::Disconnected) => active.unavailable = Some(app.tr(msg!("render.preparation_retirement_failed")).into()),
+                    Err(TryRecvError::Disconnected) => active.unavailable = Some(tr!(app, "render.preparation_retirement_failed").into()),
                     Err(TryRecvError::Empty) => {}
                 }
             }
@@ -1048,7 +1046,7 @@ mod native {
                                 state.slots[index] = None;
                             }
                         }
-                        Err(TryRecvError::Disconnected) => active.unavailable = Some(app.tr(msg!("render.preparation_retirement_failed")).into()),
+                        Err(TryRecvError::Disconnected) => active.unavailable = Some(tr!(app, "render.preparation_retirement_failed").into()),
                         Err(TryRecvError::Empty) => {}
                     }
                 }
@@ -1079,13 +1077,13 @@ mod native {
                 }
                 let owner = crate::documents::render_owner(app, slot.uid);
                 if owner.is_none() || slot.first.as_ref().is_some_and(|f| owner.is_none_or(|s| !f.source.current(s))) {
-                    slot.cancelled.get_or_insert_with(|| solidcraft_ui_text::tr(msg!("render.live.final_changed")).into());
+                    slot.cancelled.get_or_insert_with(|| tr!("render.live.final_changed").into());
                 }
                 if slot.first.as_ref().and_then(|f| f.origin.as_ref()).is_some_and(|o| match o {
                     Origin::Control { request, .. } => crate::control::chat_turn_cancelled(request.chat_turn.as_deref()),
                     Origin::Ui => false,
                 }) {
-                    slot.cancelled.get_or_insert_with(|| solidcraft_ui_text::tr(msg!("render.preparation_cancelled")).into());
+                    slot.cancelled.get_or_insert_with(|| tr!("render.preparation_cancelled").into());
                 }
                 if slot.cancelled.is_some() && slot.plan.is_none() {
                     if let Some(first) = &mut slot.first {
@@ -1103,12 +1101,12 @@ mod native {
                 {
                     let q = session.render_queue_state();
                     if q.waiting == 0 {
-                        slot.cancelled = Some(solidcraft_ui_text::tr(msg!("render.preparation_cancelled")).into());
+                        slot.cancelled = Some(tr!("render.preparation_cancelled").into());
                     } else if q.running != 0 {
                         continue;
                     }
                     if !plan.owner_matches(session) {
-                        slot.cancelled = Some(solidcraft_ui_text::tr(msg!("render.live.final_changed")).into());
+                        slot.cancelled = Some(tr!("render.live.final_changed").into());
                     }
                 }
                 // Start the empty receiver before taking any heavy claim/plan.
@@ -1158,7 +1156,7 @@ mod native {
                             None
                         }
                         None => {
-                            slot.cancelled = Some(solidcraft_ui_text::tr(msg!("render.live.final_changed")).into());
+                            slot.cancelled = Some(tr!("render.live.final_changed").into());
                             None
                         }
                     }
@@ -1237,7 +1235,7 @@ mod native {
                 None => "render.batch_waiting_worker",
             };
             crate::ui_kit::text(ui, app.tr(key), crate::ui_kit::Text::Inline);
-            let cancel = crate::ui_kit::button(ui, app.tr(msg!("cmd.render_cancel")), crate::ui_kit::Button::Enabled(!unavailable(state)));
+            let cancel = crate::ui_kit::button(ui, tr!(app, "cmd.render_cancel"), crate::ui_kit::Button::Enabled(!unavailable(state)));
             crate::scenario::publish_target("render:preparation-cancel", cancel.rect);
             if cancel.clicked() {
                 super::super::super::ribbon::perform_job(app, "render.cancel").unwrap_or_else(|e| app.set_status(e, true));

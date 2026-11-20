@@ -156,7 +156,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
                     for (id, label, icon) in [
                         ("docs", "Documentation", "library"),
                         ("about", "About SolidCraft", "help"),
-                        ("updates", solidcraft_ui_text::tr(msg!("update.check_for_updates")), "update"),
+                        ("updates", tr!("update.check_for_updates"), "update"),
                         ("shortcuts", "Keyboard Shortcuts", "list"),
                         ("messages", "Messages…", "list"),
                         ("report", "Report an Issue…", "bug_report"),
@@ -173,7 +173,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
                         }
                         // A layout without the version in the application bar lists it here.
                         if id == "about" && app.header.version == crate::toolbar::VersionPlace::HelpMenu {
-                            let label = msg!("help.version", version = crate::update::current_version()).tr();
+                            let label = tr!("help.version", version = crate::update::current_version());
                             if crate::ui_kit::menu::list_row(ui, &crate::ui_kit::Item::action("version", &label, "update")).is_some() {
                                 pick = Some("version");
                             }
@@ -218,7 +218,7 @@ fn about(app: &mut SolveApp, ctx: &egui::Context) {
         .cards(2.0)
         .actions("", "Close", None)
         .show(ctx, true, |ui| {
-            ui_kit::text(ui, &msg!("help.build", version = VERSION, commit = COMMIT, date = BUILD_DATE).tr(), ui_kit::Text::Report("version", false));
+            ui_kit::text(ui, &tr!("help.build", version = VERSION, commit = COMMIT, date = BUILD_DATE), ui_kit::Text::Report("version", false));
             ui_kit::text(
                 ui,
                 solidcraft_ui_text::tr_label("Open-source parametric 3D CAD in Rust. Licensed MIT OR Apache-2.0."),
@@ -240,13 +240,13 @@ fn about(app: &mut SolveApp, ctx: &egui::Context) {
                 ctx.copy_text(diagnostics(app));
             }
             egui::ScrollArea::vertical().max_height(solidcraft_theme::Tokens::get().control_height * 15.0).show(ui, |ui| {
-                ui_kit::section(ui, "attributions", solidcraft_ui_text::tr(msg!("help.attributions")), false, |ui| {
+                ui_kit::section(ui, "attributions", tr!("help.attributions"), false, |ui| {
                     crate::update::markdown_blocks(ui, &ATTRIBUTION_BLOCKS, &solidcraft_theme::Tokens::get());
                 });
-                ui_kit::section(ui, "fonts", solidcraft_ui_text::tr(msg!("help.fonts")), false, |ui| {
-                    ui_kit::text(ui, solidcraft_ui_text::tr(msg!("help.font_details")), ui_kit::Text::Report("fonts", false));
+                ui_kit::section(ui, "fonts", tr!("help.fonts"), false, |ui| {
+                    ui_kit::text(ui, tr!("help.font_details"), ui_kit::Text::Report("fonts", false));
                 });
-                ui_kit::section(ui, "licences", solidcraft_ui_text::tr(msg!("help.licences")), false, |ui| {
+                ui_kit::section(ui, "licences", tr!("help.licences"), false, |ui| {
                     // Indented, so the licences read as the children of Licences (#14388).
                     ui.spacing_mut().indent = solidcraft_theme::Tokens::get().space_14;
                     ui.indent("licence_list", |ui| {
@@ -257,7 +257,7 @@ fn about(app: &mut SolveApp, ctx: &egui::Context) {
                                 ui_kit::text(ui, text, ui_kit::Text::Report(id, false));
                             });
                         }
-                        ui_kit::section(ui, "third_party", solidcraft_ui_text::tr(msg!("help.third_party")), false, |ui| {
+                        ui_kit::section(ui, "third_party", tr!("help.third_party"), false, |ui| {
                             if ui_kit::button(ui, solidcraft_ui_text::tr_label("Copy all licences"), ui_kit::Button::Normal).clicked() {
                                 ctx.copy_text(solidcraft_engine::licences::all());
                             }

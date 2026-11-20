@@ -275,7 +275,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
         ellipse_as_before(draft.half_axes, &mut params);
         AXIS.with(|axis| *axis.borrow_mut() = None);
         app.run("sketch.dimension", params)?;
-        app.set_status(solidcraft_ui_text::tr(msg!("sketch.dimension_added_driven")), false);
+        app.set_status(tr!("sketch.dimension_added_driven"), false);
         return Ok(());
     }
     EDIT.with(|edit| {
@@ -1460,8 +1460,8 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                     if e.sheet.is_some() {
                         crate::ui_kit::text(ui, &e.param, crate::ui_kit::Text::Inline);
                     } else {
-                        crate::ui_kit::text(ui, &msg!("dialog.dimension_name", name = &e.param).tr(), crate::ui_kit::Text::Inline)
-                            .backing_on_hover_text(solidcraft_ui_text::tr(msg!("dialog.dimension_insert_hint")));
+                        crate::ui_kit::text(ui, &tr!("dialog.dimension_name", name = &e.param), crate::ui_kit::Text::Inline)
+                            .backing_on_hover_text(tr!("dialog.dimension_insert_hint"));
                     }
                     if !e.owned {
                         // The whole value is selected before the field reads its state, every frame
@@ -1565,9 +1565,9 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
                     // The sentence comes from the catalog, so it reads in the interface language (#8863).
                     let named = reply.get("renamed").and_then(|r| r.get("to")).and_then(serde_json::Value::as_str);
                     let status = match (reply.get("defined").and_then(serde_json::Value::as_str), named) {
-                        (Some(name), _) => msg!("sketch.dimension_applied_defined", name = name).tr(),
-                        (None, Some(name)) => msg!("sketch.dimension_applied_renamed", name = name).tr(),
-                        (None, None) => solidcraft_ui_text::tr(msg!("sketch.dimension_applied")).to_string(),
+                        (Some(name), _) => tr!("sketch.dimension_applied_defined", name = name),
+                        (None, Some(name)) => tr!("sketch.dimension_applied_renamed", name = name),
+                        (None, None) => tr!("sketch.dimension_applied").to_string(),
                     };
                     app.set_status(status, false);
                 }

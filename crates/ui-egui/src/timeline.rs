@@ -115,8 +115,7 @@ pub(crate) fn transport_availability(app: &SolveApp, control: crate::ui_kit::His
         }
         return playback_ready(app);
     }
-    let command =
-        solidcraft_engine::find_command("timeline.roll_to").ok_or_else(|| solidcraft_ui_text::tr(msg!("cmd.timeline_roll_to")).to_owned())?;
+    let command = solidcraft_engine::find_command("timeline.roll_to").ok_or_else(|| tr!("cmd.timeline_roll_to").to_owned())?;
     let info = command.info(&app.session);
     if info.enabled { Ok(()) } else { Err(info.disabled_reason.unwrap_or_else(|| info.label.to_owned())) }
 }
@@ -456,7 +455,7 @@ pub(crate) fn menu_targets(app: &SolveApp, id: u64) -> Vec<u64> {
 pub(crate) fn delete_label(count: usize) -> String {
     match count {
         1 => solidcraft_ui_text::tr_label("Delete").to_string(),
-        n => msg!("timeline.delete_many", count = &n.to_string()).tr(),
+        n => tr!("timeline.delete_many", count = &n.to_string()),
     }
 }
 
@@ -639,11 +638,11 @@ pub(crate) fn feature_tooltip(
     let mut lines = Vec::new();
     // Greyed out says only "not shown": say why (#8100).
     if rolled {
-        lines.push(solidcraft_ui_text::tr(msg!("timeline.feature_rolled_back")).to_string());
+        lines.push(tr!("timeline.feature_rolled_back").to_string());
     }
     lines.extend(sketch_state.map(|state| state.text()));
     lines.extend(result.map(|r| format!("{:.1} ms", r.ms)));
-    lines.push(solidcraft_ui_text::tr(msg!("timeline.feature_hint")).to_string());
+    lines.push(tr!("timeline.feature_hint").to_string());
     StatusTip { tail: lines.join("\n"), ..feature_status_tip(name, kind, result) }
 }
 
@@ -701,7 +700,7 @@ pub(crate) fn feature_tip(app: &SolveApp, id: u64) -> Option<StatusTip> {
     if let Some(report) = result.import_report.as_ref().filter(|r| !r.issues.is_empty()) {
         // A blank line before the details.
         tip.tail.push('\n');
-        tip.tail.push_str(solidcraft_ui_text::tr(msg!("import_report.details")));
+        tip.tail.push_str(tr!("import_report.details"));
         for issue in &report.issues {
             tip.tail.push('\n');
             tip.tail.push_str(&issue.detail);
@@ -799,7 +798,7 @@ pub(crate) fn import_summary(report: &ImportReport) -> String {
         |key: &str, n: usize| solidcraft_ui_text::format(&format!("{key}_{}", if n == 1 { "one" } else { "other" }), &[("count", &n.to_string())]);
     let mut out = Vec::new();
     if report.parts > 1 && report.solids < report.parts {
-        out.push(msg!("import_report.solids", solids = &report.solids.to_string(), parts = &report.parts.to_string()).tr());
+        out.push(tr!("import_report.solids", solids = &report.solids.to_string(), parts = &report.parts.to_string()));
     }
     let sentences = [
         ("import_report.not_imported", parts_of(IssueKind::NotImported)),
@@ -815,7 +814,7 @@ pub(crate) fn import_summary(report: &ImportReport) -> String {
     out.extend(sentences.iter().filter(|(_, n)| *n > 0).map(|(key, n)| counted(key, *n)));
     let lost = [IssueKind::NotImported, IssueKind::Refused, IssueKind::ImportedAsSurfaces, IssueKind::FaceLeftOut, IssueKind::OpenBody];
     if lost.iter().any(|k| parts.contains_key(k)) {
-        out.push(solidcraft_ui_text::tr(msg!("import_report.hint")).to_string());
+        out.push(tr!("import_report.hint").to_string());
     }
     out.join(" ")
 }
@@ -956,11 +955,11 @@ fn playback_blocked(app: &SolveApp) -> bool {
 
 fn playback_ready(app: &SolveApp) -> Result<(), String> {
     if app.computing_since().is_some() || playback_blocked(app) {
-        return Err(solidcraft_ui_text::tr(msg!("ui.history_play_finish_action")).into());
+        return Err(tr!("ui.history_play_finish_action").into());
     }
     let n = app.session.doc.features.len();
     if app.session.doc.marker.unwrap_or(n) >= n && !play_starts_over(app) {
-        return Err(solidcraft_ui_text::tr(msg!("ui.history_play_roll_back")).into());
+        return Err(tr!("ui.history_play_roll_back").into());
     }
     Ok(())
 }
@@ -1206,14 +1205,14 @@ impl BarResults {
 /// "Play from the start" while Play starts over (#10798).
 pub(crate) fn play_labels(app: &SolveApp) -> crate::ui_kit::PlayLabels<'static> {
     let play = if play_starts_over(app) { "ui.history_play_from_start" } else { "cmd.timeline_play" };
-    crate::ui_kit::PlayLabels { play: solidcraft_ui_text::tr(play), stop: solidcraft_ui_text::tr(msg!("cmd.timeline_stop")) }
+    crate::ui_kit::PlayLabels { play: solidcraft_ui_text::tr(play), stop: tr!("cmd.timeline_stop") }
 }
 
 /// The bar as SolidCraft describes it; the strip sets the marker's slot and the step count.
 fn bar(app: &SolveApp, floating: bool) -> history_bar::Bar<'static> {
     let t = Tokens::get();
     history_bar::Bar {
-        marker_tip: solidcraft_ui_text::tr(msg!("ui.history_marker_tip")),
+        marker_tip: tr!("ui.history_marker_tip"),
         accent: crate::workspace::tab_accent(&t, &app.ui.tab),
         drag_accent: crate::workspace::tab_accent(&t, "SKETCH"),
         marker: 0,

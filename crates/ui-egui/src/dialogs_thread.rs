@@ -189,7 +189,7 @@ pub(crate) fn hole_rows(
                 drill_enter = submitted;
             }
             None => {
-                ui.label(tr(msg!("thread.select_size")));
+                ui.label(tr!("thread.select_size"));
             }
         }
     });
@@ -450,7 +450,7 @@ pub(crate) fn rows(
     if !f.sizes().is_empty() {
         size_rows(ui, f, designation, suggested);
     }
-    let hint = msg!("thread.fits_the_face", example = &example(f)).tr();
+    let hint = tr!("thread.fits_the_face", example = &example(f));
     let (submitted, changed) = text_row(ui, "Designation", designation, &hint);
     enter |= submitted;
     if let Some(at) = crate::scenario::handle_at("dialog:Designation") {
@@ -496,7 +496,7 @@ pub(crate) fn rows(
             (_, kept) => kept,
         };
         if o.tip != ThreadTip::None {
-            enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr(msg!("ui.iso_4753")));
+            enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr!("ui.iso_4753"));
             // ISO 4753's depth is for ISO metric threads; the other forms give theirs.
             let depth = if f == ThreadForm::Metric { "ui.iso_4753" } else { "thread.chamfer_depth_needed" };
             enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, tr(depth));
@@ -515,7 +515,7 @@ pub(crate) fn end_rows(ui: &mut egui::Ui, ease: &mut Ease) -> bool {
     if !ease.fade {
         return false;
     }
-    let hint = if ease.short { tr(msg!("thread.fade_short")) } else { tr(msg!("thread.fade_standard")) };
+    let hint = if ease.short { tr!("thread.fade_short") } else { tr!("thread.fade_standard") };
     hint_row(ui, "Fade Length", &mut ease.length, hint)
 }
 

@@ -57,17 +57,17 @@ pub(super) fn layer_actions(app: &SolveApp, ui: &mut egui::Ui, prefix: &str, sel
     let mut movement = 0;
     let mut remove = false;
     ui.horizontal_wrapped(|ui| {
-        let up = ui_kit::button(ui, app.tr(msg!("render.layer_up")), ui_kit::Button::Enabled(selected > 0));
+        let up = ui_kit::button(ui, tr!(app, "render.layer_up"), ui_kit::Button::Enabled(selected > 0));
         crate::scenario::publish_target(&format!("render:{prefix}-up"), up.rect);
         if up.clicked() {
             movement = -1;
         }
-        let down = ui_kit::button(ui, app.tr(msg!("render.layer_down")), ui_kit::Button::Enabled(selected + 1 < length));
+        let down = ui_kit::button(ui, tr!(app, "render.layer_down"), ui_kit::Button::Enabled(selected + 1 < length));
         crate::scenario::publish_target(&format!("render:{prefix}-down"), down.rect);
         if down.clicked() {
             movement = 1;
         }
-        let delete = ui_kit::button(ui, app.tr(msg!("render.layer_remove")), ui_kit::Button::Enabled(length > 0));
+        let delete = ui_kit::button(ui, tr!(app, "render.layer_remove"), ui_kit::Button::Enabled(length > 0));
         crate::scenario::publish_target(&format!("render:{prefix}-remove"), delete.rect);
         remove = delete.clicked();
     });
@@ -84,11 +84,11 @@ pub(super) fn presentation_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 fn presentation_editor(app: &mut SolveApp, ui: &mut egui::Ui) {
     let presentation_before = super::ribbon::presentation(app);
-    let title = app.tr(msg!("render.children.tone")).to_string();
+    let title = tr!(app, "render.children.tone").to_string();
     ui_kit::section(ui, "render_effects_tone", &title, true, |ui| {
         let mut selected = usize::from(app.render_workspace.view.studio.tone_map == solidcraft_engine::render::job::ToneMap::AcesFitted);
         let response = ui.scope(|ui| {
-            ui_kit::row(ui, app.tr(msg!("render.studio_tone_map")), |ui| {
+            ui_kit::row(ui, tr!(app, "render.studio_tone_map"), |ui| {
                 if ui_kit::segmented(
                     ui,
                     &mut selected,
@@ -109,9 +109,9 @@ fn presentation_editor(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut editor = std::mem::take(&mut app.render_workspace.view.inspector.effects);
     let before = app.render_workspace.view.studio.finishing;
     let mut finish = before;
-    let title = app.tr(msg!("render.children.looks")).to_string();
+    let title = tr!(app, "render.children.looks").to_string();
     ui_kit::section(ui, "render_creative_looks", &title, true, |ui| {
-        let add = ui_kit::dropdown_menu(ui, "render_look_add", app.tr(msg!("render.look_add")), |ui| {
+        let add = ui_kit::dropdown_menu(ui, "render_look_add", tr!(app, "render.look_add"), |ui| {
             for (index, kind) in LookKind::ALL.into_iter().enumerate() {
                 if ui_kit::list_picker(ui, &format!("look-add-{index}"), app.tr(kind.key()), false).clicked() {
                     match finish.looks.push(LookLayer { kind, ..Default::default() }) {
@@ -150,17 +150,17 @@ fn presentation_editor(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.add_enabled_ui(false, |ui| {
                 let mut enabled = true;
                 let mut strength = 1.0;
-                ui_kit::checkbox(ui, app.tr(msg!("render.layer_enabled")), &mut enabled);
+                ui_kit::checkbox(ui, tr!(app, "render.layer_enabled"), &mut enabled);
                 slider(app, ui, "render.look_strength", &mut strength, 0.0..=1.0, 0.01, "");
             });
         }
         if let Some(layer) = finish.looks.get_mut(editor.selected_look) {
-            let response = ui_kit::checkbox(ui, app.tr(msg!("render.layer_enabled")), &mut layer.enabled);
+            let response = ui_kit::checkbox(ui, tr!(app, "render.layer_enabled"), &mut layer.enabled);
             crate::scenario::publish_target("render:look-enabled", response.rect);
             slider(app, ui, "render.look_strength", &mut layer.strength, 0.0..=1.0, 0.01, "");
         }
     });
-    let title = app.tr(msg!("render.children.lens_effects")).to_string();
+    let title = tr!(app, "render.children.lens_effects").to_string();
     ui_kit::section(ui, "render_photographic_effects", &title, true, |ui| {
         let photo = &mut finish.photographic;
         for key in [
@@ -188,26 +188,26 @@ fn presentation_editor(app: &mut SolveApp, ui: &mut egui::Ui) {
             slider(app, ui, key, field, range, speed, suffix);
             if key == "render.flare_streak" {
                 let response =
-                    ui_kit::row(ui, app.tr(msg!("render.children.ghosts")), |ui| ui_kit::number_field(ui, &mut photo.flare.ghosts, 0..=4, 1.0, ""));
+                    ui_kit::row(ui, tr!(app, "render.children.ghosts"), |ui| ui_kit::number_field(ui, &mut photo.flare.ghosts, 0..=4, 1.0, ""));
                 crate::scenario::publish_target("render:flare-ghosts", response.rect);
             }
         }
-        let response = ui_kit::row(ui, app.tr(msg!("render.effects_seed")), |ui| ui_kit::number_field(ui, &mut photo.seed, 0..=u32::MAX, 1.0, ""));
+        let response = ui_kit::row(ui, tr!(app, "render.effects_seed"), |ui| ui_kit::number_field(ui, &mut photo.seed, 0..=u32::MAX, 1.0, ""));
         crate::scenario::publish_target("render:photo-seed", response.rect);
         note(app, ui, "render.lens_effects_help");
-        if ui_kit::button(ui, app.tr(msg!("render.effects_reset_lens")), ui_kit::Button::Normal).clicked() {
+        if ui_kit::button(ui, tr!(app, "render.effects_reset_lens"), ui_kit::Button::Normal).clicked() {
             *photo = Default::default();
         }
     });
-    let title = app.tr(msg!("render.children.finishing")).to_string();
+    let title = tr!(app, "render.children.finishing").to_string();
     ui_kit::section(ui, "render_effects_finishing", &title, true, |ui| {
-        studio::vector(ui, app.tr(msg!("render.children.rgb_gain")), &mut finish.rgb_gain, 0.1..=8.0, 0.01);
+        studio::vector(ui, tr!(app, "render.children.rgb_gain"), &mut finish.rgb_gain, 0.1..=8.0, 0.01);
         slider(app, ui, "render.post_contrast", &mut finish.contrast, 0.25..=4.0, 0.01, "");
         slider(app, ui, "render.post_saturation", &mut finish.saturation, 0.0..=2.0, 0.01, "");
         slider(app, ui, "render.post_vignette", &mut finish.vignette, 0.0..=1.0, 0.01, "");
         let mut bloom = finish.bloom.unwrap_or(solidcraft_engine::render::job::bloom::Bloom { strength: 0.15, ..Default::default() });
         let mut enabled = finish.bloom.is_some();
-        let response = ui_kit::checkbox(ui, app.tr(msg!("render.children.bloom")), &mut enabled);
+        let response = ui_kit::checkbox(ui, tr!(app, "render.children.bloom"), &mut enabled);
         crate::scenario::publish_target("render:bloom-enable", response.rect);
         if !enabled {
             note(app, ui, "render.children.enable_bloom");
@@ -215,15 +215,14 @@ fn presentation_editor(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui.add_enabled_ui(enabled, |ui| {
             slider(app, ui, "render.bloom_strength", &mut bloom.strength, 0.0..=2.0, 0.01, "");
             slider(app, ui, "render.bloom_threshold", &mut bloom.threshold, 0.0..=1e6, 0.05, "");
-            let response =
-                ui_kit::row(ui, app.tr(msg!("render.children.radius")), |ui| ui_kit::number_field(ui, &mut bloom.radius, 1..=64, 1.0, " px"));
+            let response = ui_kit::row(ui, tr!(app, "render.children.radius"), |ui| ui_kit::number_field(ui, &mut bloom.radius, 1..=64, 1.0, " px"));
             crate::scenario::publish_target("render.bloom_radius", response.rect);
         });
         finish.bloom = enabled.then_some(bloom);
         if app.render_workspace.view.transparent && enabled {
             note(app, ui, "render.bloom_opaque");
         }
-        let response = ui_kit::button(ui, app.tr(msg!("render.children.reset_finishing")), ui_kit::Button::Normal);
+        let response = ui_kit::button(ui, tr!(app, "render.children.reset_finishing"), ui_kit::Button::Normal);
         crate::scenario::publish_target("render:post-reset", response.rect);
         if response.clicked() {
             finish.rgb_gain = [1.0; 3];
@@ -238,7 +237,7 @@ fn presentation_editor(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.render_workspace.view.dirty = true;
     }
     app.render_workspace.view.inspector.effects = editor;
-    let title = app.tr(msg!("render.children.regrade")).to_string();
+    let title = tr!(app, "render.children.regrade").to_string();
     ui_kit::section(ui, "render_effects_regrade", &title, true, |ui| studio::regrade_action(app, ui));
     app.render_workspace.view.dirty |= presentation_before != super::ribbon::presentation(app);
 }

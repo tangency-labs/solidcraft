@@ -76,7 +76,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let title = solidcraft_ui_text::tr_label("Sketch Report");
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_sketch_report"), "inspect", title)
         .fields()
-        .actions("", solidcraft_ui_text::tr(msg!("ui.close")), None)
+        .actions("", tr!("ui.close"), None)
         .show(ctx, true, |ui| match &r.result {
             Err(e) => {
                 ui_kit::text(ui, e, ui_kit::Text::Error("error"));

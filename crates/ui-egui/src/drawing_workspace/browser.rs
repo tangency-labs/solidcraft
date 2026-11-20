@@ -162,8 +162,8 @@ fn show_objects(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, shee
         for (index, object) in ids.into_iter().enumerate() {
             let table_kind = (kind == "table").then(|| drawing.tables.by_id(object)).flatten().map(|table| &table.kind);
             let (label, editor) = match table_kind {
-                Some(table::Kind::PartsList(_)) => (app.tr(msg!("ui.drawing_browser_parts_list")).to_string(), Some("parts_list")),
-                Some(table::Kind::Revision) => (app.tr(msg!("ui.drawing_browser_revision_table")).to_string(), None),
+                Some(table::Kind::PartsList(_)) => (tr!(app, "ui.drawing_browser_parts_list").to_string(), Some("parts_list")),
+                Some(table::Kind::Revision) => (tr!(app, "ui.drawing_browser_revision_table").to_string(), None),
                 None => {
                     let msg = format!("ui.drawing_browser_{kind}");
                     let label = solidcraft_ui_text::format(&msg, &[("number", &(index + 1).to_string())]);
@@ -273,5 +273,5 @@ fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> S
         };
         return app.tr(key).to_string();
     }
-    msg!("ui.drawing_browser_view", number = &number.to_string()).tr()
+    tr!("ui.drawing_browser_view", number = &number.to_string())
 }

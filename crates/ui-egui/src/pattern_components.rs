@@ -86,11 +86,11 @@ pub(crate) fn offer_row(d: &mut Dialog, ui: &mut egui::Ui, s: &Session) {
         return;
     }
     let note = match placements.len() {
-        1 => solidcraft_ui_text::tr(msg!("pattern.whole_component")).to_string(),
-        n => msg!("pattern.whole_components", count = &n.to_string()).tr(),
+        1 => tr!("pattern.whole_component").to_string(),
+        n => tr!("pattern.whole_components", count = &n.to_string()),
     };
     ui.add(egui::Label::new(note).wrap());
-    if ui_kit::button(ui, solidcraft_ui_text::tr(msg!("pattern.use_components")), ui_kit::Button::Normal).clicked()
+    if ui_kit::button(ui, tr!("pattern.use_components"), ui_kit::Button::Normal).clicked()
         && let Some(inp) = d.inputs.first_mut()
     {
         let bodies = std::mem::replace(&mut inp.items, placements.into_iter().map(|path| Sel::Occurrence { path }).collect());

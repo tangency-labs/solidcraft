@@ -187,7 +187,7 @@ pub(crate) fn sync(app: &mut SolveApp) {
 
 pub(crate) fn start(app: &mut SolveApp) {
     let Some(occurrence) = selected_occurrence(app) else {
-        app.set_status(app.tr(msg!("joint_move.select")).to_string(), false);
+        app.set_status(tr!(app, "joint_move.select").to_string(), false);
         return;
     };
     if begin(app, occurrence) {
@@ -245,9 +245,9 @@ impl Blocked {
 
     fn reason(&self, app: &SolveApp) -> String {
         if self.conflicts.is_empty() {
-            app.tr(msg!("joint_move.fixed")).to_string()
+            tr!(app, "joint_move.fixed").to_string()
         } else {
-            msg!("joint_move.conflict", joint = &self.conflicts.join(", ")).tr()
+            tr!("joint_move.conflict", joint = &self.conflicts.join(", "))
         }
     }
 }
@@ -263,9 +263,9 @@ pub(crate) fn show_warning(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let (closed, action) =
-        crate::ui_kit::Confirm::new(egui::Id::unique("sc_joint_move_blocked"), "status_warning", app.tr(msg!("joint_move.blocked_title")))
+        crate::ui_kit::Confirm::new(egui::Id::unique("sc_joint_move_blocked"), "status_warning", tr!(app, "joint_move.blocked_title"))
             .tone(crate::ui_kit::Tone::Warning)
-            .actions(app.tr(msg!("ui.heading_ok")), "", None)
+            .actions(tr!(app, "ui.heading_ok"), "", None)
             .show(ctx, true, |ui| {
                 if !blocked.part.is_empty() {
                     crate::ui_kit::text(ui, &blocked.part, crate::ui_kit::Text::Report("part", false));
@@ -670,7 +670,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
                     ui.label(egui::RichText::new(value).strong());
                     if d.axis.angular {
                         let step = if d.fine { app.preferences.joint_rotation_fine } else { app.preferences.joint_rotation_coarse };
-                        ui.label(format!("{} {step}°", app.tr(msg!("joint_move.step"))));
+                        ui.label(format!("{} {step}°", tr!(app, "joint_move.step")));
                     }
                 });
             });
@@ -681,11 +681,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     host.area(egui::Id::unique("joint_move_help")).fixed_pos(proj.rect.left_bottom() + vec2(16.0, -148.0)).show(ui.ctx(), |ui| {
         let frame = host.frame(ui.ctx(), tk.overlay, crate::frame::Side::Right).inner_margin(tk.space_8);
         Container::show_backing(ui, frame, |ui| {
-            ui.label(app.tr(msg!("joint_move.help")));
+            ui.label(tr!(app, "joint_move.help"));
             if mode.axes.iter().any(|a| a.angular) {
-                ui.label(app.tr(msg!("joint_move.precision")));
+                ui.label(tr!(app, "joint_move.precision"));
             }
-            done = crate::ui_kit::button(ui, app.tr(msg!("joint_move.done")), crate::ui_kit::Button::Normal).clicked();
+            done = crate::ui_kit::button(ui, tr!(app, "joint_move.done"), crate::ui_kit::Button::Normal).clicked();
         });
     });
     if done {

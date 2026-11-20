@@ -30,7 +30,7 @@ pub fn start(app: &mut SolveApp) {
     if !available() {
         return;
     }
-    app.pick_file(tr(msg!("plugin_install.zip_kind")), &["zip"], |app, path| {
+    app.pick_file(tr!("plugin_install.zip_kind"), &["zip"], |app, path| {
         if let Some(path) = path {
             review(app, path);
         }
@@ -42,7 +42,7 @@ pub(crate) fn review(app: &mut SolveApp, path: String) {
     if let Err(error) =
         crate::plugins::start_package(app, "plugin.install", json!({"path": path, "dry_run": true}), crate::plugins::PackageAction::Describe { path })
     {
-        app.set_status(msg!("plugin_install.failed", error = &error).tr(), true);
+        app.set_status(tr!("plugin_install.failed", error = &error), true);
     }
 }
 
@@ -103,24 +103,24 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
             (false, true) => "prefs.plugin_folder_write",
             _ => "prefs.plugin_folder_read",
         });
-        lines.push(msg!("prefs.plugin_folder", name = name, access = access).tr());
+        lines.push(tr!("prefs.plugin_folder", name = name, access = access));
     }
     let opens = list(plugin.get("opens"));
     if !opens.is_empty() {
         let extensions = opens.iter().map(|e| std::format!(".{e}")).collect::<Vec<_>>().join(", ");
-        lines.push(msg!("plugin_install.opens", extensions = &extensions).tr());
+        lines.push(tr!("plugin_install.opens", extensions = &extensions));
     }
     if permissions.and_then(|p| p.get("input_folder")).and_then(Value::as_bool).unwrap_or(false) {
-        lines.push(tr(msg!("plugin_install.input_folder")).to_string());
+        lines.push(tr!("plugin_install.input_folder").to_string());
     }
     if permissions.and_then(|p| p.get("clock")).and_then(Value::as_bool).unwrap_or(false) {
-        lines.push(tr(msg!("plugin_install.clock")).to_string());
+        lines.push(tr!("plugin_install.clock").to_string());
     }
     let commands = list(plugin.get("commands")).len();
     match commands {
         0 => {}
-        1 => lines.push(tr(msg!("plugin_install.command_one")).to_string()),
-        n => lines.push(msg!("plugin_install.commands", count = &n.to_string()).tr()),
+        1 => lines.push(tr!("plugin_install.command_one").to_string()),
+        n => lines.push(tr!("plugin_install.commands", count = &n.to_string())),
     }
     lines
 }
@@ -133,8 +133,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let (name, version, summary) = (text(plugin, "name"), text(plugin, "version"), text(plugin, "description"));
     let replaces = plugin.get("replaces").and_then(Value::as_str).map(str::to_string);
     let lines = permission_lines(plugin);
-    let title = tr(msg!("plugin_install.title")).to_string();
-    let (install, cancel) = (tr(msg!("plugin_install.install")).to_string(), tr(msg!("plugin_install.cancel")).to_string());
+    let title = tr!("plugin_install.title").to_string();
+    let (install, cancel) = (tr!("plugin_install.install").to_string(), tr!("plugin_install.cancel").to_string());
     let valid = crate::plugins::valid_grants(&ask.grants) && !crate::plugins::busy(app);
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_plugin_install"), "import", &title)
         .tone(if replaces.is_some() { ui_kit::Tone::Warning } else { ui_kit::Tone::Info })
@@ -145,16 +145,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 if !summary.is_empty() {
                     ui_kit::text(ui, &summary, ui_kit::Text::Report("plugin_install_summary", false));
                 }
-                ui_kit::text(ui, tr(msg!("plugin_install.asks")), ui_kit::Text::Report("plugin_install_asks", false));
+                ui_kit::text(ui, tr!("plugin_install.asks"), ui_kit::Text::Report("plugin_install_asks", false));
                 if lines.is_empty() && ask.grants.memory_mib.is_none() {
-                    ui_kit::text(ui, tr(msg!("plugin_install.asks_nothing")), ui_kit::Text::Hint("plugin_install_nothing"));
+                    ui_kit::text(ui, tr!("plugin_install.asks_nothing"), ui_kit::Text::Hint("plugin_install_nothing"));
                 }
                 for (i, line) in lines.iter().enumerate() {
                     ui.push_id(i, |ui| ui_kit::text(ui, &std::format!("• {line}"), ui_kit::Text::Hint("plugin_install_permission")));
                 }
                 if let Some(memory) = ask.grants.memory_mib {
-                    let line =
-                        msg!("plugin_install.memory", memory = &memory.to_string(), limit = &app.preferences.plugin_max_memory_mib.to_string()).tr();
+                    let line = tr!("plugin_install.memory", memory = &memory.to_string(), limit = &app.preferences.plugin_max_memory_mib.to_string());
                     ui_kit::text(ui, &std::format!("• {line}"), ui_kit::Text::Hint("plugin_install_memory"));
                 }
                 for grant in &mut ask.grants.folders {
@@ -163,18 +162,18 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         (false, true) => "prefs.plugin_folder_write",
                         _ => "prefs.plugin_folder_read",
                     });
-                    let label = msg!("prefs.plugin_folder", name = &grant.name, access = access).tr();
+                    let label = tr!("prefs.plugin_folder", name = &grant.name, access = access);
                     let mut path = grant.folder.display().to_string();
-                    ui_kit::text_row(ui, &label, &mut path, tr(msg!("prefs.plugin_folder_path")));
+                    ui_kit::text_row(ui, &label, &mut path, tr!("prefs.plugin_folder_path"));
                     grant.folder = path.into();
                 }
                 if !ask.grants.folders.is_empty() {
-                    ui_kit::text(ui, tr(msg!("prefs.plugin_folder_note")), ui_kit::Text::Hint("plugin_folder"));
+                    ui_kit::text(ui, tr!("prefs.plugin_folder_note"), ui_kit::Text::Hint("plugin_folder"));
                 }
                 let entries: Vec<solidcraft_engine::plugin::Entry> =
                     plugin.get("entry_points").cloned().and_then(|value| serde_json::from_value(value).ok()).unwrap_or_default();
                 if !entries.is_empty() {
-                    ui_kit::text(ui, tr(msg!("prefs.plugin_entries")), ui_kit::Text::Report("plugin_entries", false));
+                    ui_kit::text(ui, tr!("prefs.plugin_entries"), ui_kit::Text::Report("plugin_entries", false));
                 }
                 for entry in &entries {
                     ui_kit::text(ui, &entry.name, ui_kit::Text::Hint("plugin_entry"));
@@ -182,9 +181,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         let (key, name) = match slot {
                             solidcraft_engine::plugin::UiSlot::Menu { name } => {
                                 let name = match crate::plugin_slots::menu_name(name) {
-                                    Some("File") => tr(msg!("ui.file")),
-                                    Some("Help") => tr(msg!("ui.help")),
-                                    _ => tr(msg!("ui.plugins")),
+                                    Some("File") => tr!("ui.file"),
+                                    Some("Help") => tr!("ui.help"),
+                                    _ => tr!("ui.plugins"),
                                 };
                                 ("prefs.plugin_slot_menu", name.to_string())
                             }
@@ -192,17 +191,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 "prefs.plugin_slot_ribbon",
                                 // A tab the app doesn't have: the entry goes in the Plugins group.
                                 crate::plugin_slots::ribbon_name(name)
-                                    .map_or_else(|| tr(msg!("ui.plugins")).to_string(), |tab| crate::toolbar::ribbon_label(app, tab)),
+                                    .map_or_else(|| tr!("ui.plugins").to_string(), |tab| crate::toolbar::ribbon_label(app, tab)),
                             ),
                         };
                         ui_kit::text(ui, &format(key, &[("name", &name)]), ui_kit::Text::Hint("plugin_entry_slot"));
                     }
                     if entry.slots.is_empty() {
-                        ui_kit::text(ui, tr(msg!("prefs.plugin_slot_command")), ui_kit::Text::Hint("plugin_entry_command"));
+                        ui_kit::text(ui, tr!("prefs.plugin_slot_command"), ui_kit::Text::Hint("plugin_entry_command"));
                     }
                 }
                 if let Some(replaces) = &replaces {
-                    ui_kit::text(ui, &msg!("plugin_install.replaces", plugin = replaces).tr(), ui_kit::Text::Report("plugin_install_replaces", true));
+                    ui_kit::text(ui, &tr!("plugin_install.replaces", plugin = replaces), ui_kit::Text::Report("plugin_install_replaces", true));
                 }
             });
         });
@@ -233,13 +232,13 @@ fn install_now(app: &mut SolveApp, ask: &Ask) {
         json!({"path": ask.path, "approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"memory_mib":ask.grants.memory_mib,"input_folder":ask.grants.input_folder}}),
         crate::plugins::PackageAction::Install,
     ) {
-        app.set_status(msg!("plugin_install.failed", error = &error).tr(), true);
+        app.set_status(tr!("plugin_install.failed", error = &error), true);
     }
 }
 
 pub(crate) fn installed(app: &mut SolveApp, plugin: &Value) {
     let shown = std::format!("{} {}", text(plugin, "name"), text(plugin, "version"));
-    app.set_status(msg!("plugin_install.done", plugin = &shown).tr(), false);
+    app.set_status(tr!("plugin_install.done", plugin = &shown), false);
 }
 #[cfg(test)]
 mod tests {

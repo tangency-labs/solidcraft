@@ -290,7 +290,7 @@ fn options(ui: &mut egui::Ui, d: &mut BomPanel) {
     });
     ui.scope(|ui| {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-        let response = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr(msg!("bom.group_children")), &mut d.group_children);
+        let response = crate::ui_kit::checkbox(ui, tr!("bom.group_children"), &mut d.group_children);
         crate::panel_runtime::register_content_focus(ui.ctx(), &response);
     });
     if was != (d.top, d.by_definition, d.group_children) {

@@ -644,7 +644,7 @@ impl ui_kit::GridSource for ParamGrid<'_> {
     fn set_cell(&mut self, row: usize, col: usize, text: &str) -> Result<(), String> {
         let Some(r) = self.row(row) else { return Err(String::new()) };
         match col {
-            NAME if text.trim().is_empty() => Err(solidcraft_ui_text::tr(msg!("parameters.grid_name_required")).to_owned()),
+            NAME if text.trim().is_empty() => Err(tr!("parameters.grid_name_required").to_owned()),
             UNIT => unit_from(text).map(|_| ()),
             // Applied as you go, an expression is checked before it is handed back, so a wrong one
             // keeps its box open; held for Apply, it is checked when it is held (#9279).
@@ -773,7 +773,7 @@ const ACTIONS: usize = 6;
 /// The unit a Unit cell's text names: its label ("none" for no unit) or the unit itself.
 fn unit_from(text: &str) -> Result<&'static str, String> {
     let text = text.trim();
-    UNITS.iter().copied().find(|u| *u == text || unit_label(u) == text).ok_or_else(|| msg!("parameters.grid_unknown_unit", unit = text).tr())
+    UNITS.iter().copied().find(|u| *u == text || unit_label(u) == text).ok_or_else(|| tr!("parameters.grid_unknown_unit", unit = text))
 }
 
 /// The grid state of section `salt` in this opening of the window: a new opening starts clean.
@@ -801,16 +801,12 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
         }
     }
     let mut grid = ParamGrid { app, d, rows, salt, name_floor, unit_width, right, live };
-    let out = ui_kit::Grid::new(salt).state(state).empty(solidcraft_ui_text::tr(msg!("manage.empty"))).resizable(columns_id()).show_with(
-        ui,
-        &mut grid,
-        |ui, table, grid| {
-            if grid.salt == "user" && grid.d.adding {
-                let right = grid.right;
-                ui.push_id("parameter_draft", |ui| add_row(grid.app, ui, table, grid.d, right));
-            }
-        },
-    );
+    let out = ui_kit::Grid::new(salt).state(state).empty(tr!("manage.empty")).resizable(columns_id()).show_with(ui, &mut grid, |ui, table, grid| {
+        if grid.salt == "user" && grid.d.adding {
+            let right = grid.right;
+            ui.push_id("parameter_draft", |ui| add_row(grid.app, ui, table, grid.d, right));
+        }
+    });
     if out.add_row {
         d.adding = true;
         d.focus_new = true;
@@ -940,7 +936,7 @@ fn apply_grid(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, row
     let unit = UNITS.get(d.new_unit).copied().unwrap_or("mm");
     for [name, unit_text, expression, comment] in new_rows.into_values() {
         if name.trim().is_empty() || expression.trim().is_empty() {
-            let message = solidcraft_ui_text::tr(msg!("parameters.grid_new_needs")).to_owned();
+            let message = tr!("parameters.grid_new_needs").to_owned();
             ui_kit::Grid::refuse(ctx, grid_state(d, salt), &message);
             d.error = Some(message);
             return;
@@ -1064,8 +1060,8 @@ fn hint(live: bool) -> &'static str {
 fn held_status(count: usize) -> Option<String> {
     match count {
         0 => None,
-        1 => Some(solidcraft_ui_text::tr(msg!("parameters.held_one")).to_string()),
-        n => Some(msg!("parameters.held", count = &n.to_string()).tr()),
+        1 => Some(tr!("parameters.held_one").to_string()),
+        n => Some(tr!("parameters.held", count = &n.to_string())),
     }
 }
 
@@ -1122,8 +1118,8 @@ fn revert_applied(app: &mut SolveApp, d: &mut ParamsDialog) -> bool {
 /// "Apply each change as you leave its field", remembered across sessions (#9279). Turning it
 /// back on applies what was waiting.
 fn apply_live_checkbox(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[Row]) {
-    let response = ui_kit::checkbox(ui, solidcraft_ui_text::tr(msg!("parameters.apply_live")), &mut app.preferences.parameters_apply_live)
-        .backing_on_hover_text(solidcraft_ui_text::tr(msg!("parameters.apply_live_tip")));
+    let response = ui_kit::checkbox(ui, tr!("parameters.apply_live"), &mut app.preferences.parameters_apply_live)
+        .backing_on_hover_text(tr!("parameters.apply_live_tip"));
     crate::scenario::publish_handle("params:apply_live", response.rect.center());
     if response.changed() && app.preferences.parameters_apply_live {
         apply_held(app, d, rows);

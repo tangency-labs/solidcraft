@@ -51,10 +51,10 @@ pub(crate) fn section_setting(app: &SolveApp, origin: [f64; 3], normal: [f64; 3]
     let distance = crate::prefs::show_mm(app, offset, 1);
     let mut text = match axis {
         Some(axis) => format!("{axis} {distance}"),
-        None => msg!("ui.viewport_status_section_tilted", offset = &distance).tr(),
+        None => tr!("ui.viewport_status_section_tilted", offset = &distance),
     };
     if hatch {
-        text = msg!("ui.viewport_status_section_hatch", setting = &text).tr();
+        text = tr!("ui.viewport_status_section_hatch", setting = &text);
     }
     Some(text)
 }
@@ -82,12 +82,12 @@ pub(crate) fn presentation(app: &SolveApp, effect: &Effect) -> Option<StatusItem
     }
     let command = solidcraft_engine::find_command(&effect.command)?;
     let setting = match effect.setting {
-        StatusSetting::Zebra { stripes } => msg!("ui.viewport_status_stripes", count = &stripes.to_string()).tr(),
+        StatusSetting::Zebra { stripes } => tr!("ui.viewport_status_stripes", count = &stripes.to_string()),
         StatusSetting::Draft { pull, angle_deg } => format!("{} · {angle_deg}°", direction(pull)),
         StatusSetting::Environment => String::new(),
-        StatusSetting::Accessibility { direction: from } => msg!("ui.viewport_status_from", direction = &direction(from)).tr(),
+        StatusSetting::Accessibility { direction: from } => tr!("ui.viewport_status_from", direction = &direction(from)),
         StatusSetting::Curvature { radius_mm } => format!("R {}", crate::prefs::show_mm(app, radius_mm, 1)),
-        StatusSetting::Continuity { edge_count } => msg!("ui.viewport_status_edges", count = &edge_count.to_string()).tr(),
+        StatusSetting::Continuity { edge_count } => tr!("ui.viewport_status_edges", count = &edge_count.to_string()),
         StatusSetting::Section { origin_mm, normal, hatch } => section_setting(app, origin_mm, normal, hatch)?,
     };
     Some(StatusItem {

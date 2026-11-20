@@ -6,13 +6,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_page(ui, |ui| {
         let t = Tokens::get();
         let labels = t.space_24 * 6.0 + t.space_6;
-        ui_kit::settings_heading(ui, app.tr(msg!("prefs.security")), app.tr(msg!("prefs.security_note")));
-        ui_kit::settings_section(ui, "signing", app.tr(msg!("prefs.security.signing")), |ui| {
+        ui_kit::settings_heading(ui, tr!(app, "prefs.security"), tr!(app, "prefs.security_note"));
+        ui_kit::settings_section(ui, "signing", tr!(app, "prefs.security.signing"), |ui| {
             setting::sign_saved_designs(app, ui);
             ui_kit::settings_form(ui, labels, |ui| {
-                let tip = app.tr(msg!("prefs.security.signing_key_help")).to_string();
-                ui_kit::settings_row_help(ui, app.tr(msg!("prefs.security.signing_key")), &tip, |ui| {
-                    let hint = app.tr(msg!("prefs.security.signing_key_hint")).to_string();
+                let tip = tr!(app, "prefs.security.signing_key_help").to_string();
+                ui_kit::settings_row_help(ui, tr!(app, "prefs.security.signing_key"), &tip, |ui| {
+                    let hint = tr!(app, "prefs.security.signing_key_hint").to_string();
                     let (_, response) = ui_kit::text_field_reserving(ui, &mut app.preferences.signing_key, &hint, 0.0);
                     crate::scenario::publish_target("prefs:signing_key", response.rect);
                     response
@@ -20,7 +20,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             if cfg!(not(target_arch = "wasm32")) {
                 ui_kit::settings_form(ui, labels, |ui| {
-                    if ui_kit::button(ui, app.tr(msg!("prefs.security.choose_key")), ui_kit::Button::Normal).clicked() {
+                    if ui_kit::button(ui, tr!(app, "prefs.security.choose_key"), ui_kit::Button::Normal).clicked() {
                         list_signing_keys(app);
                     }
                 });
@@ -30,7 +30,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     SigningKeys::Idle => {}
                     SigningKeys::Loading => {
                         ui_kit::settings_form(ui, labels, |ui| {
-                            ui_kit::settings_inline_note(ui, app.tr(msg!("prefs.security.reading_keys")));
+                            ui_kit::settings_inline_note(ui, tr!(app, "prefs.security.reading_keys"));
                             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
                         });
                     }
@@ -38,13 +38,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ui_kit::settings_form(ui, labels, |ui| {
                             match result {
                                 Ok(keys) if keys.is_empty() => {
-                                    ui_kit::settings_inline_note(ui, app.tr(msg!("prefs.security.no_signing_keys")));
+                                    ui_kit::settings_inline_note(ui, tr!(app, "prefs.security.no_signing_keys"));
                                 }
                                 Ok(keys) => {
-                                    ui.label(app.tr(msg!("prefs.security.signing_keys_heading")));
+                                    ui.label(tr!(app, "prefs.security.signing_keys_heading"));
                                     for (index, key) in keys.into_iter().enumerate() {
                                         let suffix =
-                                            if key.on_card { format!(" ({})", app.tr(msg!("prefs.security.key_on_card"))) } else { String::new() };
+                                            if key.on_card { format!(" ({})", tr!(app, "prefs.security.key_on_card")) } else { String::new() };
                                         let label = format!("{}{suffix} — {}", key.user_id, key.fingerprint);
                                         if ui_kit::list_picker(ui, &format!("prefs:signing_key:{index}"), &label, false).clicked() {
                                             app.preferences.signing_key = key.fingerprint.clone();
@@ -53,13 +53,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     }
                                 }
                                 Err(SigningKeysError::Missing) => {
-                                    ui_kit::settings_inline_note(ui, app.tr(msg!("prefs.security.gpg_missing")));
+                                    ui_kit::settings_inline_note(ui, tr!(app, "prefs.security.gpg_missing"));
                                 }
                                 Err(SigningKeysError::Message(error)) => {
                                     ui_kit::settings_inline_note(ui, &error);
                                 }
                             }
-                            if ui_kit::button(ui, app.tr(msg!("prefs.security.refresh_keys")), ui_kit::Button::Normal).clicked() {
+                            if ui_kit::button(ui, tr!(app, "prefs.security.refresh_keys"), ui_kit::Button::Normal).clicked() {
                                 list_signing_keys(app);
                             }
                         });
@@ -68,20 +68,20 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             setting::verify_opened_designs(app, ui);
             ui_kit::settings_form(ui, labels, |ui| {
-                let tip = app.tr(msg!("prefs.security.trusted_keys_help")).to_string();
-                ui_kit::settings_row_help(ui, app.tr(msg!("prefs.security.trusted_keys")), &tip, |ui| {
-                    let hint = app.tr(msg!("prefs.security.trusted_keys_hint")).to_string();
+                let tip = tr!(app, "prefs.security.trusted_keys_help").to_string();
+                ui_kit::settings_row_help(ui, tr!(app, "prefs.security.trusted_keys"), &tip, |ui| {
+                    let hint = tr!(app, "prefs.security.trusted_keys_hint").to_string();
                     let (_, response) = ui_kit::text_field_reserving(ui, &mut app.preferences.trusted_signing_keys, &hint, 0.0);
                     crate::scenario::publish_target("prefs:trusted_signing_keys", response.rect);
                     response
                 });
             });
         });
-        ui_kit::settings_section(ui, "reports", app.tr(msg!("prefs.reports")), |ui| {
+        ui_kit::settings_section(ui, "reports", tr!(app, "prefs.reports"), |ui| {
             setting::report_on_github(app, ui);
         });
-        ui_kit::settings_section(ui, "encryption", app.tr(msg!("prefs.security.encryption")), |ui| {
-            ui_kit::settings_inline_note(ui, app.tr(msg!("prefs.security.encryption_note")));
+        ui_kit::settings_section(ui, "encryption", tr!(app, "prefs.security.encryption"), |ui| {
+            ui_kit::settings_inline_note(ui, tr!(app, "prefs.security.encryption_note"));
         });
     });
 }

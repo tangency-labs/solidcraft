@@ -42,7 +42,7 @@ const HELD_MORE: &str = "agent:held:more";
 
 /// A place in a queue with a name, as the catalog orders them.
 fn numbered(number: usize, name: &str) -> String {
-    msg!("operations.numbered", number = &number.to_string(), name = name).tr()
+    tr!("operations.numbered", number = &number.to_string(), name = name)
 }
 
 /// The keys of the waiting agent commands past [`MAX_WAITING_SHOWN`], in the order they run.
@@ -146,18 +146,18 @@ impl Row {
     /// The text over the bar: the step it is on of how many (`3 / 12`), queued or cancelling.
     pub fn status(&self) -> Option<String> {
         match self.ended {
-            Some(Outcome::Cancelled) => return Some(solidcraft_ui_text::tr(msg!("operations.stopped")).to_string()),
-            Some(Outcome::Failed(_)) => return Some(solidcraft_ui_text::tr(msg!("operations.failed")).to_string()),
+            Some(Outcome::Cancelled) => return Some(tr!("operations.stopped").to_string()),
+            Some(Outcome::Failed(_)) => return Some(tr!("operations.failed").to_string()),
             Some(Outcome::Done) | None => {}
         }
         if self.cancelling {
-            return Some(solidcraft_ui_text::tr(msg!("operations.cancelling")).to_string());
+            return Some(tr!("operations.cancelling").to_string());
         }
         if self.queued {
-            return Some(solidcraft_ui_text::tr(msg!("operations.queued")).to_string());
+            return Some(tr!("operations.queued").to_string());
         }
         if self.waiting {
-            return Some(solidcraft_ui_text::tr(msg!("operations.waiting")).to_string());
+            return Some(tr!("operations.waiting").to_string());
         }
         let (done, total) = self.steps.filter(|(_, total)| *total > 1)?;
         if self.percent {
@@ -182,7 +182,7 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     let mut rows = Vec::new();
     // The bodies of a design just opened, meshed for the view.
     if let Some((done, total)) = crate::open_meshing::progress(app) {
-        rows.push(Row { steps: Some((done, total)), ..Row::new("meshing".into(), solidcraft_ui_text::tr(msg!("operations.meshing")).to_string()) });
+        rows.push(Row { steps: Some((done, total)), ..Row::new("meshing".into(), tr!("operations.meshing").to_string()) });
     }
     if let Some(saving) = &app.saving {
         let command = saving.command();
@@ -223,7 +223,7 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
             Some(command) => Some(command),
             None => job.cmds.first().map(|(id, _)| id.as_str()),
         };
-        let label = command.map_or_else(|| solidcraft_ui_text::tr(msg!("operations.feature")).to_string(), command_name);
+        let label = command.map_or_else(|| tr!("operations.feature").to_string(), command_name);
         rows.push(Row { steps: evaluation_steps(&job.progress), cancel: Some(Cancel::Apply), ..Row::new("apply".into(), label) });
     }
     if let Some(edit) = &app.pending_feature_edit {
@@ -231,7 +231,7 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
         rows.push(Row {
             cancelling,
             cancel: Some(Cancel::FeatureEdit),
-            ..Row::new("feature_edit".into(), solidcraft_ui_text::tr(msg!("operations.feature_edit")).to_string())
+            ..Row::new("feature_edit".into(), tr!("operations.feature_edit").to_string())
         });
     }
     if let Some(check) = &app.delete_check {
@@ -300,11 +300,11 @@ pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
             let _ = cancel(app, &key);
         }
         // One message for the one action, not the last command's.
-        app.set_status(msg!("operations.more_cancelled", count = &count.to_string()).tr(), false);
+        app.set_status(tr!("operations.more_cancelled", count = &count.to_string()), false);
         return Ok(());
     }
     let row = current(app).into_iter().find(|r| r.key == key).ok_or_else(|| format!("no operation `{key}` is under way"))?;
-    let Some(how) = row.cancel else { return Err(msg!("operations.cannot_cancel", name = &row.label).tr()) };
+    let Some(how) = row.cancel else { return Err(tr!("operations.cannot_cancel", name = &row.label)) };
     if row.cancelling {
         return Ok(());
     }
@@ -346,7 +346,7 @@ pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
         Cancel::AgentMore => return Ok(()),
     }
     record(&mut app.operations, &row.key, row.label.clone(), Outcome::Cancelled);
-    app.set_status(msg!("operations.cancelled", name = &row.label).tr(), false);
+    app.set_status(tr!("operations.cancelled", name = &row.label), false);
     Ok(())
 }
 
@@ -546,7 +546,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
     let more = folded(&rows);
     if !more.is_empty() {
         rows.retain(|r| !more.contains(&r.key));
-        let label = msg!("operations.more_waiting", count = &more.len().to_string()).tr();
+        let label = tr!("operations.more_waiting", count = &more.len().to_string());
         rows.push(Row { queued: true, agent: true, cancel: Some(Cancel::AgentMore), ..Row::new(HELD_MORE.into(), label) });
     }
     app.operations.update(rows, now);
@@ -631,9 +631,9 @@ fn paint_row(ui: &egui::Ui, painter: &egui::Painter, t: &Tokens, row: &Row, alph
     let response =
         ui.interact(x, egui::Id::unique(("sc_operation_cancel", &row.key)), if row.cancellable() { Sense::click() } else { Sense::hover() });
     let response = response.backing_on_hover_text(if row.cancellable() {
-        msg!("operations.cancel", name = &row.label).tr()
+        tr!("operations.cancel", name = &row.label)
     } else {
-        msg!("operations.cannot_cancel", name = &row.label).tr()
+        tr!("operations.cannot_cancel", name = &row.label)
     });
     if row.cancellable() && response.hovered() {
         painter.rect_filled(x, t.radius_sm, fade(t.hover));

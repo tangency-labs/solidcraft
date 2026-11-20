@@ -178,7 +178,7 @@ pub(crate) fn start(app: &mut SolveApp, id: &str) -> bool {
             super::enter(app, true)?;
         }
         if id == "appearance.paint" {
-            let look = app.render_workspace.view.assign.look.clone().ok_or_else(|| app.tr(msg!("render.choose_look")).to_string())?;
+            let look = app.render_workspace.view.assign.look.clone().ok_or_else(|| tr!(app, "render.choose_look").to_string())?;
             arm(app, look)
         } else if id == "appearance.pick_up" {
             app.run(id, json!({}))?;
@@ -345,9 +345,9 @@ pub(crate) fn banner(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     }
     let text = if s.sampling {
-        app.tr(msg!("render.pick_up_prompt")).to_string()
+        tr!(app, "render.pick_up_prompt").to_string()
     } else {
-        msg!("render.painting_with", name = s.look.as_ref().and_then(|l| l["name"].as_str()).unwrap_or("")).tr()
+        tr!("render.painting_with", name = s.look.as_ref().and_then(|l| l["name"].as_str()).unwrap_or(""))
     };
     ui_kit::text(ui, &text, ui_kit::Text::Inline);
     if ui_kit::button(ui, app.tr_label("Done"), ui_kit::Button::Normal).clicked() {
@@ -408,8 +408,8 @@ pub(crate) fn menu(app: &SolveApp, body: &str) -> crate::ui_kit::Item {
         .or_else(|| app.session.selection.iter().find(|s| matches!(s,Sel::Face {body:name,..} if name == body)));
     let sel = selected_face.cloned().unwrap_or(Sel::Body { name: body.into() });
     let targets = targets(app, std::slice::from_ref(&sel)).unwrap_or_else(|_| json!({"bodies":[body]}));
-    let mut menu = Item::action("appearance.assign", app.tr(msg!("cmd.appearance_assign")), "");
-    menu.children.push(Item::heading(app.tr(msg!("render.recent_looks"))));
+    let mut menu = Item::action("appearance.assign", tr!(app, "cmd.appearance_assign"), "");
+    menu.children.push(Item::heading(tr!(app, "render.recent_looks")));
     for look in &app.render_workspace.view.assign.recent {
         let mut params = look.clone();
         if let Some(object) = params.as_object_mut() {
@@ -420,18 +420,17 @@ pub(crate) fn menu(app: &SolveApp, body: &str) -> crate::ui_kit::Item {
         menu.children.push(cmd(app, "appearance.assign", look["name"].as_str().unwrap_or("")).with(params));
     }
     menu.children.push(Item::sep());
-    menu.children.push(cmd(app, "appearance.library", app.tr(msg!("render.browse_looks"))));
-    menu.children.push(cmd(app, "appearance.assign", app.tr(msg!("cmd.appearance_assign"))));
-    menu.children.push(cmd(app, "appearance.chain", app.tr(msg!("cmd.appearance_chain"))));
-    menu.children.push(cmd(app, "appearance.replace", app.tr(msg!("render.replace_all"))));
-    menu.children.push(cmd(app, "appearance.pick_up", app.tr(msg!("cmd.appearance_pick_up"))));
+    menu.children.push(cmd(app, "appearance.library", tr!(app, "render.browse_looks")));
+    menu.children.push(cmd(app, "appearance.assign", tr!(app, "cmd.appearance_assign")));
+    menu.children.push(cmd(app, "appearance.chain", tr!(app, "cmd.appearance_chain")));
+    menu.children.push(cmd(app, "appearance.replace", tr!(app, "render.replace_all")));
+    menu.children.push(cmd(app, "appearance.pick_up", tr!(app, "cmd.appearance_pick_up")));
     if let Ok(target) = chain_target(app, &sel) {
-        menu.children.push(cmd(app, "appearance.copy", app.tr(msg!("cmd.appearance_copy"))).with(json!({"target":target})));
+        menu.children.push(cmd(app, "appearance.copy", tr!(app, "cmd.appearance_copy")).with(json!({"target":target})));
     }
-    menu.children.push(
-        cmd(app, "appearance.paste", app.tr(msg!("cmd.appearance_paste"))).with(targets.clone()).on(app.session.appearance_clipboard.is_some()),
-    );
-    menu.children.push(cmd(app, "appearance.assign", app.tr(msg!("render.remove_override"))).with(targets));
+    menu.children
+        .push(cmd(app, "appearance.paste", tr!(app, "cmd.appearance_paste")).with(targets.clone()).on(app.session.appearance_clipboard.is_some()));
+    menu.children.push(cmd(app, "appearance.assign", tr!(app, "render.remove_override")).with(targets));
     menu
 }
 
@@ -450,7 +449,7 @@ pub(crate) fn context(app: &mut SolveApp, candidate: &(Hit, Sel)) {
 pub(crate) fn assigned(app: &mut SolveApp, result: &Value) {
     if let Some(look) = result.get("appearance").filter(|look| !look.is_null()) {
         remember(app, look.clone());
-        app.set_status(msg!("render.look_applied", name = look["name"].as_str().unwrap_or("")).tr(), false);
+        app.set_status(tr!("render.look_applied", name = look["name"].as_str().unwrap_or("")), false);
         app.status_undo = true;
     }
 }
@@ -487,7 +486,7 @@ pub(crate) fn hover_tooltip(app: &mut SolveApp, response: &egui::Response, candi
     let Some((_, sel)) = candidate else { return };
     let Ok(target) = chain_target(app, sel) else { return };
     let Ok(reply) = app.session.execute("appearance.pick_up", &json!({"target":target})) else { return };
-    let tip = msg!("render.hover_look", object = &selection_name(app, sel), look = reply["look"]["name"].as_str().unwrap_or("")).tr();
+    let tip = tr!("render.hover_look", object = &selection_name(app, sel), look = reply["look"]["name"].as_str().unwrap_or(""));
     ui_kit::Container::tooltip(response, &tip);
 }
 
@@ -516,8 +515,7 @@ pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::R
     }
     let Ok(reply) = app.session.execute("appearance.pick_up", &json!({"target":target})) else { return };
     let favorite = is_favorite(app, &reply["look"]);
-    let labels =
-        [app.tr(msg!("cmd.appearance_chain")), app.tr(msg!("render.replace_all")), app.tr(msg!("cmd.appearance_favorite")), app.tr(msg!("ui.hide"))];
+    let labels = [tr!(app, "cmd.appearance_chain"), tr!(app, "render.replace_all"), tr!(app, "cmd.appearance_favorite"), tr!(app, "ui.hide")];
     let actions = ["chain", "reorder", "star", "suppress"]
         .iter()
         .zip(&labels)
@@ -573,13 +571,13 @@ pub(crate) fn replacement_dialog(app: &mut SolveApp, ctx: &egui::Context) {
     let entries = app.session.execute("appearance.library", &json!({})).ok().and_then(|v| v["appearances"].as_array().cloned()).unwrap_or_default();
     let entries: Vec<_> = entries.into_iter().filter(|entry| entry["available"] != false).collect();
     let mut selected = app.render_workspace.view.assign.replacement_index;
-    let title = app.tr(msg!("render.replace_all")).to_string();
+    let title = tr!(app, "render.replace_all").to_string();
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("render_replace_look"), "reorder", &title)
         .actions(&title, app.tr_label("Cancel"), None)
         .show(ctx, !entries.is_empty(), |ui| {
             ui_kit::text(ui, from["name"].as_str().unwrap_or(""), ui_kit::Text::Inline);
             let names: Vec<_> = entries.iter().map(|entry| entry["name"].as_str().unwrap_or("")).collect();
-            ui_kit::choice_row(ui, app.tr(msg!("render.replace_with")), "render_replace_with", &mut selected, &names);
+            ui_kit::choice_row(ui, tr!(app, "render.replace_with"), "render_replace_with", &mut selected, &names);
         });
     app.render_workspace.view.assign.replacement_index = selected;
     if action == ui_kit::Action::Ok {

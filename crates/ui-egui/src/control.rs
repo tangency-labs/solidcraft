@@ -298,10 +298,10 @@ fn has_plugin_management_steps(steps: &[Value]) -> bool {
 /// to another design (send such steps one by one).
 pub(crate) fn batch_refusal(steps: &[Value]) -> Option<String> {
     if steps.iter().any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.run"))) {
-        return Some(solidcraft_ui_text::tr(msg!("ui.plugin_standalone")).into());
+        return Some(tr!("ui.plugin_standalone").into());
     }
     if has_plugin_management_steps(steps) {
-        return Some(solidcraft_ui_text::tr(msg!("ui.plugin_management_standalone")).into());
+        return Some(tr!("ui.plugin_management_standalone").into());
     }
     if let Some((i, c)) = steps.iter().enumerate().find_map(|(i, step)| switches_design(step).map(|c| (i, c))) {
         return Some(format!("engine.batch unavailable: step {i} ({c}) switches to another design"));
@@ -427,10 +427,10 @@ fn batch(app: &mut SolveApp, q: params::Batch) -> Outcome {
 fn script(app: &mut SolveApp, p: &Value) -> Outcome {
     let steps = p.as_array().or_else(|| p.get("commands").and_then(Value::as_array));
     if steps.is_some_and(|steps| steps.iter().any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.run")))) {
-        return err(solidcraft_ui_text::tr(msg!("ui.plugin_standalone")));
+        return err(tr!("ui.plugin_standalone"));
     }
     if steps.is_some_and(|steps| has_plugin_management_steps(steps)) {
-        return err(solidcraft_ui_text::tr(msg!("ui.plugin_management_standalone")));
+        return err(tr!("ui.plugin_management_standalone"));
     }
     let steps = match solidcraft_engine::script_steps(p) {
         Ok(steps) => steps,
@@ -2568,7 +2568,7 @@ pub(crate) mod tests {
         }
         let mut h = crate::scenario::Harness::new();
         h.step(&json!({"panel_fixture":{"preset":"docks"}})).unwrap();
-        let guard = h.app.tr(msg!("ui.panel_fixture.guard")).to_string();
+        let guard = tr!(h.app, "ui.panel_fixture.guard").to_string();
         click_visible_guard(&mut h, &guard);
         let before = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
         let editor = &before["runtime"]["probe"]["controllers"][0];

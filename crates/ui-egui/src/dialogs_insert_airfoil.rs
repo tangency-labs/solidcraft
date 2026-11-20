@@ -43,16 +43,15 @@ pub fn title() -> &'static str {
 
 pub fn rows(ui: &mut egui::Ui, a: &mut Airfoil) {
     let name = std::path::Path::new(&a.path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| a.path.clone());
-    form_row(ui, solidcraft_ui_text::tr(msg!("ui.file")), |ui| {
+    form_row(ui, tr!("ui.file"), |ui| {
         ui.label(name).backing_on_hover_text(&a.path);
     });
-    form_row(ui, solidcraft_ui_text::tr(msg!("insert_airfoil.chord")), |ui| {
+    form_row(ui, tr!("insert_airfoil.chord"), |ui| {
         let r = crate::ui_kit::number_field(ui, &mut a.chord, 0.001..=MAX_CHORD, 1.0, " mm");
         crate::scenario::publish_handle("dialog:insert_airfoil:chord", r.rect.center());
     });
-    form_row(ui, solidcraft_ui_text::tr(msg!("insert_airfoil.pivot")), |ui| {
-        let r = crate::ui_kit::number_field(ui, &mut a.pivot, -10.0..=10.0, 0.01, "")
-            .backing_on_hover_text(solidcraft_ui_text::tr(msg!("insert_airfoil.pivot_help")));
+    form_row(ui, tr!("insert_airfoil.pivot"), |ui| {
+        let r = crate::ui_kit::number_field(ui, &mut a.pivot, -10.0..=10.0, 0.01, "").backing_on_hover_text(tr!("insert_airfoil.pivot_help"));
         crate::scenario::publish_handle("dialog:insert_airfoil:pivot", r.rect.center());
     });
     for (label, v, handle) in [("X", &mut a.x, "dialog:insert_airfoil:x"), ("Y", &mut a.y, "dialog:insert_airfoil:y")] {
@@ -61,12 +60,12 @@ pub fn rows(ui: &mut egui::Ui, a: &mut Airfoil) {
             crate::scenario::publish_handle(handle, r.rect.center());
         });
     }
-    form_row(ui, solidcraft_ui_text::tr(msg!("ui.angle")), |ui| {
+    form_row(ui, tr!("ui.angle"), |ui| {
         let r = crate::ui_kit::number_field(ui, &mut a.angle, -360.0..=360.0, 1.0, "\u{b0}");
         crate::scenario::publish_handle("dialog:insert_airfoil:angle", r.rect.center());
     });
     form_row(ui, "", |ui| {
-        let r = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr(msg!("ui.flip")), &mut a.flip);
+        let r = crate::ui_kit::checkbox(ui, tr!("ui.flip"), &mut a.flip);
         crate::scenario::publish_handle("dialog:insert_airfoil:flip", r.rect.center());
     });
 }

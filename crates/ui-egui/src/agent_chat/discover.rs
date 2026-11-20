@@ -494,7 +494,7 @@ fn detect_in(dirs: &[PathBuf], home: Option<&Path>, limit: Duration) -> Detectio
         argv.extend(k.args.iter().map(|a| a.to_string()));
         let mut result = if k.reports_version { probe(&path, limit) } else { Probe::default() };
         if let Some(version) = result.old_node.as_deref() {
-            result.problem = Some(msg!("ui.agent_chat_node_too_old", version = version).tr());
+            result.problem = Some(tr!("ui.agent_chat_node_too_old", version = version));
             if uses_env_node(&path)
                 && let Some(node) = compatible_node(dirs, limit)
             {

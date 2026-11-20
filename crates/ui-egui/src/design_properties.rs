@@ -114,15 +114,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             // Saved by another tool as something other than text: kept unless typed over.
             if metadata.get(key).is_some() && metadata.text(key).is_none() && d.opened.get(i).is_some_and(String::is_empty) {
-                ui_kit::caption(ui, label, solidcraft_ui_text::tr(msg!("ui.design_properties.not_text")));
+                ui_kit::caption(ui, label, tr!("ui.design_properties.not_text"));
             }
         }
-        ui_kit::text(ui, solidcraft_ui_text::tr(msg!("ui.design_properties.exports")), ui_kit::Text::Note("exports"));
+        ui_kit::text(ui, tr!("ui.design_properties.exports"), ui_kit::Text::Note("exports"));
         let others: Vec<(&String, &Value)> = metadata.others().collect();
         if !others.is_empty() {
-            let heading = format!("{} ({})", solidcraft_ui_text::tr(msg!("ui.design_properties.others")), others.len());
+            let heading = format!("{} ({})", tr!("ui.design_properties.others"), others.len());
             ui_kit::section(ui, "sc_design_properties_others", &heading, false, |ui| {
-                ui_kit::text(ui, solidcraft_ui_text::tr(msg!("ui.design_properties.others_note")), ui_kit::Text::Note("others"));
+                ui_kit::text(ui, tr!("ui.design_properties.others_note"), ui_kit::Text::Note("others"));
                 egui::ScrollArea::vertical().max_height(ui_kit::row_height() * OTHERS_ROWS).show(ui, |ui| {
                     for (key, value) in others {
                         ui_kit::row(ui, key, |ui| ui_kit::text(ui, &preview(value), ui_kit::Text::Cell));
@@ -167,7 +167,7 @@ pub fn open_object(app: &mut SolveApp, command: &str, params: &Value, fallback: 
         match rx.recv_timeout(wait) {
             Ok(reply) => opened(app, reply, fallback),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => app.menu.props_measuring = Some(Measuring { fallback, rx, progress }),
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => app.set_status(app.tr(msg!("ui.properties.measuring_failed")).to_string(), true),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => app.set_status(tr!(app, "ui.properties.measuring_failed").to_string(), true),
         }
         return;
     }
@@ -258,16 +258,16 @@ fn show_measuring(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut m) = app.menu.props_measuring.take() else { return };
     match m.rx.try_recv() {
         Ok(reply) => return opened(app, reply, std::mem::take(&mut m.fallback)),
-        Err(std::sync::mpsc::TryRecvError::Disconnected) => return app.set_status(app.tr(msg!("ui.properties.measuring_failed")).to_string(), true),
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => return app.set_status(tr!(app, "ui.properties.measuring_failed").to_string(), true),
         Err(std::sync::mpsc::TryRecvError::Empty) => {}
     }
     ctx.request_repaint_after(std::time::Duration::from_millis(100));
     // How far it is, once the worker has counted the bodies (#8706).
     let bodies = m.bodies();
-    let heading = app.tr(msg!("ui.properties")).to_string();
+    let heading = tr!(app, "ui.properties").to_string();
     let text = match bodies {
-        Some((done, total)) => msg!("ui.properties.measuring_bodies", done = &done.to_string(), total = &total.to_string()).tr(),
-        None => app.tr(msg!("ui.properties.measuring")).to_string(),
+        Some((done, total)) => tr!("ui.properties.measuring_bodies", done = &done.to_string(), total = &total.to_string()),
+        None => tr!(app, "ui.properties.measuring").to_string(),
     };
     let (closed, action) =
         ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "ui.close", None).show(ctx, true, |ui| {
@@ -355,11 +355,11 @@ fn inertia_rows(app: &SolveApp, total: &Value) -> Vec<(String, Vec<String>)> {
         .collect();
     if let Some(moments) = total["principal_moments_g_mm2"].as_array() {
         let moments = moments.iter().map(|m| number_text(app, m.as_f64().unwrap_or(f64::NAN) * k * k)).collect();
-        rows.push((app.tr(msg!("ui.properties.principal_moments")).to_string(), moments));
+        rows.push((tr!(app, "ui.properties.principal_moments").to_string(), moments));
     }
     for (n, axis) in total["principal_axes"].as_array().into_iter().flatten().enumerate() {
         let Some(e) = point(axis) else { continue };
-        let label = msg!("ui.properties.principal_axis", number = &(n + 1).to_string()).tr();
+        let label = tr!("ui.properties.principal_axis", number = &(n + 1).to_string());
         rows.push((label, [e.x, e.y, e.z].map(|x| format!("{:.4}", if x.abs() < 5e-5 { 0.0 } else { x })).to_vec()));
     }
     rows
@@ -368,11 +368,7 @@ fn inertia_rows(app: &SolveApp, total: &Value) -> Vec<(String, Vec<String>)> {
 /// The window's title: just Properties for the whole design (its name would only be the
 /// file's), else with the name of the component, placement or bodies it measured.
 fn window_title(title: &str, v: &Value) -> String {
-    if v["component"].as_u64() == Some(0) {
-        solidcraft_ui_text::tr(msg!("ui.properties")).to_string()
-    } else {
-        msg!("properties.title", name = title).tr()
-    }
+    if v["component"].as_u64() == Some(0) { tr!("ui.properties").to_string() } else { tr!("properties.title", name = title) }
 }
 
 /// The centre of mass the window shows, its principal axes when it has them, and how long to
@@ -451,18 +447,18 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
         format!("({}) g·{unit}", m.join(", "))
     });
     let inertia = inertia_rows(app, total);
-    let note = msg!("ui.properties.inertia_note", unit = unit).tr();
+    let note = tr!("ui.properties.inertia_note", unit = unit);
     // A component's closed bodies have mass, but a mesh that would not close gave no tensor.
     let unavailable =
         inertia.is_empty() && total["inertia_g_mm2"].is_null() && number(total, "mass_g") > 0.0 && total.get("first_moment_g_mm").is_some();
     let (first_label, section, unavailable_text) = (
-        app.tr(msg!("ui.properties.first_moments")).to_string(),
-        app.tr(msg!("ui.properties.inertia")).to_string(),
-        app.tr(msg!("ui.properties.inertia_unavailable")).to_string(),
+        tr!(app, "ui.properties.first_moments").to_string(),
+        tr!(app, "ui.properties.inertia").to_string(),
+        tr!(app, "ui.properties.inertia_unavailable").to_string(),
     );
     let copy = shown_tensor(app, total).map(|t| tensor_text(&t));
-    let copy_label = app.tr(msg!("ui.properties.copy_matrix")).to_string();
-    let copy_hint = app.tr(msg!("ui.properties.copy_value")).to_string();
+    let copy_label = tr!(app, "ui.properties.copy_matrix").to_string();
+    let copy_hint = tr!(app, "ui.properties.copy_value").to_string();
     let mut copied = false;
     let heading = window_title(&title, &v);
     let (closed, action) =
@@ -510,7 +506,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
             }
         });
     if copied {
-        app.set_status(solidcraft_ui_text::tr(msg!("ui.properties.value_copied")), false);
+        app.set_status(tr!("ui.properties.value_copied"), false);
     }
     if closed || action == ui_kit::Action::Cancel {
         close_object(app);

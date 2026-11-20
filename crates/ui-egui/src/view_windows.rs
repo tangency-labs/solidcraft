@@ -285,10 +285,8 @@ pub(crate) fn drag_window(
     let origin = bounds.min + egui::vec2(rect.x, rect.y) * scale;
     let outline = egui::Rect::from_min_size(origin, egui::vec2(rect.w, rect.h) * scale);
     let number = target.and_then(|target| displays.iter().position(|display| std::ptr::eq(display, target)));
-    let label = number.map_or_else(
-        || app.tr(msg!("multi_window.drag_display")).to_owned(),
-        |index| msg!("multi_window.display_number", n = &(index + 1).to_string()).tr(),
-    );
+    let label = number
+        .map_or_else(|| tr!(app, "multi_window.drag_display").to_owned(), |index| tr!("multi_window.display_number", n = &(index + 1).to_string()));
     let placement = WindowPlacement {
         display: target.map(|display| display.name.clone()),
         x: rect.x,
@@ -319,7 +317,7 @@ fn collect_choices(app: &SolveApp) -> Vec<WindowChoice> {
     let label = |name: &str, display: Option<&str>| {
         let number = displays.iter().position(|entry| display == Some(entry.name.as_str()));
         if let Some(index) = number {
-            let display = msg!("multi_window.display_number", n = &(index + 1).to_string()).tr();
+            let display = tr!("multi_window.display_number", n = &(index + 1).to_string());
             format!("{name} · {display}")
         } else {
             name.to_owned()
@@ -621,7 +619,7 @@ fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId) {
             let action = titlebar.show(ui, rect, |ui, content| {
                 let brand_end = crate::app_bar::paint_brand(ui.painter(), content, &solidcraft_look::glyphs::brand_mark, Some("SolidCraft"));
                 let menu = egui::Rect::from_center_size(egui::pos2(content.right() - 17.0, content.center().y), egui::Vec2::splat(26.0));
-                let menu_tip = app.tr(msg!("multi_window.window_menu"));
+                let menu_tip = tr!(app, "multi_window.window_menu");
                 Menu::button_with(
                     ui,
                     |ui, _| {
@@ -639,8 +637,8 @@ fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId) {
                         response.backing_on_hover_text(menu_tip)
                     },
                     |ui| {
-                        ui.label(app.tr(msg!("multi_window.views_only")));
-                        if crate::ui_kit::menu::button(ui, app.tr(msg!("multi_window.return_views")), "").clicked() {
+                        ui.label(tr!(app, "multi_window.views_only"));
+                        if crate::ui_kit::menu::button(ui, tr!(app, "multi_window.return_views"), "").clicked() {
                             let _ = app.run("tab.window.close", json!({"window":id}));
                             ui.close();
                         }
@@ -780,7 +778,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
                 documents::put_view_window(app, tab, window);
                 if app.now - start >= 2.0 {
                     let _ = close(app, id, false);
-                    app.set_status(msg!("multi_window.open_failed", design = &app.session.doc.name).tr(), true);
+                    app.set_status(tr!("multi_window.open_failed", design = &app.session.doc.name), true);
                     ctx.send_viewport_cmd_to(os_id, ViewportCommand::Close);
                 } else {
                     ctx.show_viewport_deferred(os_id, builder, |_, _| {});
@@ -900,7 +898,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
                 let _ = close(app, id, !refused);
             }
             if refused {
-                app.set_status(msg!("multi_window.open_failed", design = &app.session.doc.name).tr(), true);
+                app.set_status(tr!("multi_window.open_failed", design = &app.session.doc.name), true);
             }
             ctx.send_viewport_cmd_to(os_id, ViewportCommand::Close);
             retired.extend(host.viewport.window_scene_slots());

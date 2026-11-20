@@ -31,7 +31,7 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
     // An assembly reading its links for a part edited in place takes them up when the read is
     // done: a save before then would record a design that is about to change as saved.
     if let Some(name) = crate::edit_in_place::refreshing_assembly(app) {
-        app.set_status(msg!("ui.edit_in_place_save_waits", name = &name).tr(), true);
+        app.set_status(tr!("ui.edit_in_place_save_waits", name = &name), true);
         return false;
     }
     // A save keeps print faces only when the user keeps them (#11512).
@@ -104,7 +104,7 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
     if cancelled {
         // Not an error: the file is as it was, and the design still has its changes to save.
         let name = solidcraft_ui_text::tr_label(crate::command_label(command)).to_string();
-        app.set_status(msg!("operations.cancelled", name = &name).tr(), false);
+        app.set_status(tr!("operations.cancelled", name = &name), false);
     } else {
         app.finish_command(command, &r);
         offer_container(app, &r);

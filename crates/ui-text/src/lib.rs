@@ -321,6 +321,11 @@ impl Locale {
         interpolate(self.text(id), args)
     }
 
+    /// The message `msg` in this language: what `tr!(locale, "id")` calls.
+    pub fn tr(self, msg: Msg) -> &'static str {
+        self.message(msg)
+    }
+
     /// A message with its placeholders' values (`msg!("id", name = value)`), in this language.
     pub fn fill<const N: usize>(self, filled: Filled<'_, N>) -> String {
         filled.fill_in(self)

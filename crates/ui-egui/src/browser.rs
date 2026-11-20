@@ -2595,7 +2595,7 @@ fn canvas_rows(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &mut
         if r.slow_rename {
             start_inline_rename(app, crate::context_menu::RenameWhat::Canvas(id), r.name_at());
         } else if r.double && locked {
-            app.set_status(solidcraft_ui_text::tr(msg!("browser.canvas_locked")), true);
+            app.set_status(tr!("browser.canvas_locked"), true);
         } else if r.double {
             app.tree.canvas_panel = Some(CanvasPanel::new(app, id, false));
         }
@@ -2620,9 +2620,9 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let visible = canvas.is_some_and(|c| c.visible);
     // A locked canvas (#12310) is not moved, calibrated or deleted until it is unlocked.
     let locked = canvas.is_some_and(|c| c.locked);
-    let why = locked.then(|| solidcraft_ui_text::tr(msg!("browser.canvas_locked")).to_string());
+    let why = locked.then(|| tr!("browser.canvas_locked").to_string());
     // An anchored canvas is placed by its sketch's points: change the sketch instead.
-    let follows = canvas.is_some_and(|c| c.anchor.is_some()).then(|| solidcraft_ui_text::tr(msg!("browser.canvas_anchored")).to_string());
+    let follows = canvas.is_some_and(|c| c.anchor.is_some()).then(|| tr!("browser.canvas_anchored").to_string());
     let placed = why.clone().or(follows);
     vec![
         Item::action("ui.editCanvas", "Edit Canvas", "canvas").with(json!({ "canvas": id })).off_because(why.clone()),
@@ -2817,7 +2817,7 @@ impl Entry {
             row_key: format!("b:{world}"),
             patterns: None,
             // A part the modelling kernel refuses says so (Repair Part is in its menu).
-            label: if b.body.smlib_refused().is_some() { msg!("browser.needs_repair", name = &b.name).tr() } else { b.name.clone() },
+            label: if b.body.smlib_refused().is_some() { tr!("browser.needs_repair", name = &b.name) } else { b.name.clone() },
             icon,
             tip: Some(tip),
             visible: app.body_visible(&world),
@@ -2844,9 +2844,9 @@ impl Entry {
             thing: Thing::Sketch(f.id),
             patterns: crate::sketch_pattern_tree::has_patterns(app, f.id).then(|| format!("s:{}/patterns", f.id)),
             label: if lost {
-                msg!("browser.sketch_attachment_lost", name = &crate::i18n::tr_name(&f.name)).tr()
+                tr!("browser.sketch_attachment_lost", name = &crate::i18n::tr_name(&f.name))
             } else if active {
-                msg!("browser.sketch_editing", name = &crate::i18n::tr_name(&f.name)).tr()
+                tr!("browser.sketch_editing", name = &crate::i18n::tr_name(&f.name))
             } else {
                 f.name.clone()
             },
@@ -3218,7 +3218,7 @@ fn folder_level(
         } else {
             &group.label
         };
-        let count = if render && !gopen { msg!("render.tree_more", count = &group.count.to_string()).tr() } else { String::new() };
+        let count = if render && !gopen { tr!("render.tree_more", count = &group.count.to_string()) } else { String::new() };
         // The top of the row puts the drop before the group; the rest puts it inside.
         let level_of = app.session.doc.group_level(id);
         let fits = |d: &ItemDrag, parent_level: usize| {

@@ -9,7 +9,6 @@ use solidcraft_engine::geom::prelude::*;
 use crate::SolveApp;
 use crate::tool_modifiers::{Audit, Binding, Match, ModAction, ModifierCombo, Scope, ToolModifiers, Trigger};
 use crate::viewport::{Hit, Proj, pick_for_tool as pick, sketch_point_at};
-use solidcraft_ui_text::tr;
 
 const DRAW_SCOPES: &[Scope] = &[Scope::SketchDraw, Scope::SketchDrag];
 
@@ -186,24 +185,24 @@ impl Tool {
 
 pub fn hint(id: &str) -> String {
     match id {
-        "sketch.line" => tr(msg!("sketch.hint.line")).into(),
-        "sketch.rectangle.two_point" => tr(msg!("sketch.hint.rectangle.two_point")).into(),
-        "sketch.rectangle.center" => tr(msg!("sketch.hint.rectangle.center")).into(),
-        "sketch.rectangle.rounded" => tr(msg!("sketch.hint.rectangle.rounded")).into(),
-        "sketch.rectangle.three_point" => tr(msg!("sketch.hint.rectangle.three_point")).into(),
-        "sketch.circle.center" => tr(msg!("sketch.hint.circle.center")).into(),
-        "sketch.arc.three_point" => tr(msg!("sketch.hint.arc.three_point")).into(),
-        "sketch.arc3d" => tr(msg!("sketch.hint.arc3d")).into(),
-        "sketch.line3d" => tr(msg!("sketch.hint.line3d")).into(),
-        "sketch.spline3d" => tr(msg!("sketch.hint.spline3d")).into(),
-        "sketch.point3d" => tr(msg!("sketch.hint.point3d")).into(),
-        "sketch.arc.center_point" => tr(msg!("sketch.hint.arc.center_point")).into(),
-        "sketch.dimension" => tr(msg!("sketch.hint.dimension")).into(),
-        "sketch.constraint.horizontal_vertical" => tr(msg!("sketch.hint.constraint.horizontal_vertical")).into(),
-        "sketch.slot.center_to_center" | "sketch.slot.overall" => tr(msg!("sketch.hint.slot")).into(),
-        "sketch.constraint.midpoint" => tr(msg!("sketch.hint.constraint.midpoint")).into(),
-        _ if id.starts_with("sketch.constraint.") => tr(msg!("sketch.hint.constraint.generic")).into(),
-        _ => crate::sketch_tools::hint(id).unwrap_or_else(|| tr(msg!("sketch.hint.fallback")).into()),
+        "sketch.line" => tr!("sketch.hint.line").into(),
+        "sketch.rectangle.two_point" => tr!("sketch.hint.rectangle.two_point").into(),
+        "sketch.rectangle.center" => tr!("sketch.hint.rectangle.center").into(),
+        "sketch.rectangle.rounded" => tr!("sketch.hint.rectangle.rounded").into(),
+        "sketch.rectangle.three_point" => tr!("sketch.hint.rectangle.three_point").into(),
+        "sketch.circle.center" => tr!("sketch.hint.circle.center").into(),
+        "sketch.arc.three_point" => tr!("sketch.hint.arc.three_point").into(),
+        "sketch.arc3d" => tr!("sketch.hint.arc3d").into(),
+        "sketch.line3d" => tr!("sketch.hint.line3d").into(),
+        "sketch.spline3d" => tr!("sketch.hint.spline3d").into(),
+        "sketch.point3d" => tr!("sketch.hint.point3d").into(),
+        "sketch.arc.center_point" => tr!("sketch.hint.arc.center_point").into(),
+        "sketch.dimension" => tr!("sketch.hint.dimension").into(),
+        "sketch.constraint.horizontal_vertical" => tr!("sketch.hint.constraint.horizontal_vertical").into(),
+        "sketch.slot.center_to_center" | "sketch.slot.overall" => tr!("sketch.hint.slot").into(),
+        "sketch.constraint.midpoint" => tr!("sketch.hint.constraint.midpoint").into(),
+        _ if id.starts_with("sketch.constraint.") => tr!("sketch.hint.constraint.generic").into(),
+        _ => crate::sketch_tools::hint(id).unwrap_or_else(|| tr!("sketch.hint.fallback").into()),
     }
 }
 

@@ -417,9 +417,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
         }
     });
     let mut enabled = k.pbr.is_some();
-    let toggle =
-        ui_kit::row(ui, app.tr(msg!("appearance.surface_response")), |ui| ui_kit::checkbox(ui, app.tr(msg!("appearance.pbr_opaque")), &mut enabled))
-            .backing_on_hover_text(app.tr(msg!("appearance.pbr_help")));
+    let toggle = ui_kit::row(ui, tr!(app, "appearance.surface_response"), |ui| ui_kit::checkbox(ui, tr!(app, "appearance.pbr_opaque"), &mut enabled))
+        .backing_on_hover_text(tr!(app, "appearance.pbr_help"));
     crate::scenario::publish_handle("appearance:pbr", toggle.rect.center());
     if toggle.changed() {
         detach_preset(k);
@@ -517,7 +516,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
         ui_kit::search_field(ui, id, &mut k.search, "Appearance name")
     });
     crate::scenario::publish_handle("appearance:search", search.rect.center());
-    ui_kit::row(ui, "", |ui| ui_kit::checkbox(ui, app.tr(msg!("appearance.only_available")), &mut k.only_available));
+    ui_kit::row(ui, "", |ui| ui_kit::checkbox(ui, tr!(app, "appearance.only_available"), &mut k.only_available));
     let want = cats.get(k.category).cloned().unwrap_or_default();
     let query = k.search.trim().to_lowercase();
     let shown: Vec<(usize, &Look)> = lib

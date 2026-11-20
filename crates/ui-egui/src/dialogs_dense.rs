@@ -241,13 +241,13 @@ fn fillet_corner_rows(
         let least = r.and_then(|r| crate::dialogs::fillet_least_setback(ui.ctx(), s, items, &corners, r));
         let warning = least
             .filter(|least| length(&shown).is_some_and(|v| v <= least * (1.0 + 1e-9)))
-            .map(|least| msg!("ui.fillet_setback_least", least = &crate::length_input::shown(&s.doc, least)).tr());
+            .map(|least| tr!("ui.fillet_setback_least", least = &crate::length_input::shown(&s.doc, least)));
         let mut text = shown.clone();
         let row = ui.scope(|ui| {
-            let hint = msg!("ui.fillet_setback_hint", factor = &factor).tr();
+            let hint = tr!("ui.fillet_setback_hint", factor = &factor);
             ui_kit::checked_row(ui, "ui.fillet_setback", &mut text, &hint, warning.as_deref())
         });
-        row.response.backing_on_hover_text(msg!("ui.fillet_setback_tip", factor = &factor).tr());
+        row.response.backing_on_hover_text(tr!("ui.fillet_setback_tip", factor = &factor));
         let (accepted, field) = row.inner;
         enter |= accepted;
         if text != shown {
@@ -393,7 +393,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         ui_kit::text(ui, &prompt, ui_kit::Text::Hint("tool")).backing_on_hover_text(&prompt);
         if matches!(&d.kind, Kind::SketchModify(k) if k.previews()) {
             let label = d.active_input().map(|input| tr(input.label)).unwrap_or_else(|| tr("Objects"));
-            let step = msg!("dialog.selection_step", step = &(d.active + 1).to_string(), total = &d.inputs.len().to_string(), input = label).tr();
+            let step = tr!("dialog.selection_step", step = &(d.active + 1).to_string(), total = &d.inputs.len().to_string(), input = label);
             ui_kit::text(ui, &step, ui_kit::Text::Hint("step")).backing_on_hover_text(tr("dialog.selection_guidance"));
         }
     }
@@ -1023,7 +1023,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             if *normal {
                 ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
             } else {
-                let extend_label = solidcraft_ui_text::tr(msg!("ui.rib_extend_ends"));
+                let extend_label = tr!("ui.rib_extend_ends");
                 ui_kit::options(ui, "feature_options", &mut [("Flip", flip), (extend_label, extend)]);
             }
         }
@@ -1034,7 +1034,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 ui_kit::segmented(ui, &mut i, &["Emboss", "Deboss"], Default::default());
                 *deboss = i == 1;
             });
-            ui.add(egui::Label::new(solidcraft_ui_text::tr(msg!("ui.emboss_wrap_note"))).wrap());
+            ui.add(egui::Label::new(tr!("ui.emboss_wrap_note")).wrap());
         }
         Kind::Align { flip, components, axes: [ax, ay, az], angle } => {
             // Where on the picked face or edge to snap: as picked (a face turns to meet
@@ -1269,7 +1269,7 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
     for (i, it) in r["items"].as_array().into_iter().flatten().enumerate() {
         let lines = crate::quick_measure::item_lines(app, it);
         for (k, line) in lines.into_iter().enumerate() {
-            let label = if k == 0 { msg!("measure.item", number = &(i + 1).to_string()).tr() } else { String::new() };
+            let label = if k == 0 { tr!("measure.item", number = &(i + 1).to_string()) } else { String::new() };
             // Coordinates need all three values; a fixed-height form cell elides the end.
             let text = if label.is_empty() { line } else { format!("{label}  {line}") };
             ui_kit::text(ui, &text, ui_kit::Text::Report(&format!("measure_item_{i}_{k}"), false));

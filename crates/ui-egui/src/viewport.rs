@@ -7091,19 +7091,15 @@ pub(crate) fn preview_should_roll_back(app: &SolveApp, held: crate::tool_modifie
 /// in the theme's text colour, rather than showing an empty view.
 fn unavailable_note(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
     let t = Tokens::get();
-    let galley = painter.layout(
-        app.tr(msg!("starting.view_unavailable")).to_owned(),
-        FontId::proportional(t.font_body),
-        t.text,
-        (rect.width() * 0.6).max(200.0),
-    );
+    let galley =
+        painter.layout(tr!(app, "starting.view_unavailable").to_owned(), FontId::proportional(t.font_body), t.text, (rect.width() * 0.6).max(200.0));
     painter.galley(rect.center() - galley.size() / 2.0, galley, t.text);
 }
 
 /// The view's pipelines are still compiling: a quiet line where the model will be drawn.
 fn preparing_note(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
     let t = Tokens::get();
-    painter.text(rect.center(), Align2::CENTER_CENTER, app.tr(msg!("starting.view")), FontId::proportional(t.font_body), t.text_dim);
+    painter.text(rect.center(), Align2::CENTER_CENTER, tr!(app, "starting.view"), FontId::proportional(t.font_body), t.text_dim);
 }
 
 impl ViewportState {
@@ -7435,7 +7431,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // coarser.
         if !app.viewport.lowered_noted && app.viewport.draw_stats.as_ref().is_some_and(|s| s.lock().is_ok_and(|s| s.lowered)) {
             app.viewport.lowered_noted = true;
-            app.set_status(app.tr(msg!("ui.gpu_memory_lowered")), false);
+            app.set_status(tr!(app, "ui.gpu_memory_lowered"), false);
         }
     } else if app.viewport.gpu_unavailable {
         unavailable_note(app, &painter, rect);
@@ -8232,9 +8228,9 @@ fn agent_chip(app: &mut SolveApp, ui: &egui::Ui, view: Rect, taken: &[Rect]) -> 
     let painter = ui.painter().clone();
     if let Some((since, label)) = app.agent_computing() {
         let seconds = ((crate::now_ms() - since) / 1000.0).floor().max(0.0);
-        let computing = msg!("dialog.computing", seconds = &format!("{seconds:.0}")).tr();
+        let computing = tr!("dialog.computing", seconds = &format!("{seconds:.0}"));
         let galley = painter.layout_no_wrap(format!("{label} · {computing}"), FontId::proportional(t.font_label), t.text);
-        let stop = painter.layout_no_wrap(solidcraft_ui_text::tr(msg!("ui.agent_chat_stop")).to_string(), FontId::proportional(t.font_label), t.text);
+        let stop = painter.layout_no_wrap(tr!("ui.agent_chat_stop").to_string(), FontId::proportional(t.font_label), t.text);
         let size = vec2(galley.size().x + stop.size().x + 54.0, galley.size().y.max(stop.size().y) + 8.0);
         // Above the navigation bar while it sits on the bottom edge; a bar on top leaves the bottom free.
         let nav = app
@@ -8392,9 +8388,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
             tips: &tips,
             ..Default::default()
         };
-        if let Some(toast) =
-            paint_toast_ext(ui, free, solidcraft_ui_text::tr(msg!("ui.3d_mouse_offer")).to_string(), ToastLead::Dot(false), &labels, extras)
-        {
+        if let Some(toast) = paint_toast_ext(ui, free, tr!("ui.3d_mouse_offer").to_string(), ToastLead::Dot(false), &labels, extras) {
             let r = toast.rect;
             crate::scenario::publish_rect("toast:space_mouse_offer", r);
             for (index, button) in toast.buttons.iter().enumerate() {
@@ -8431,9 +8425,9 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
             let actions = if undo {
                 vec![(solidcraft_ui_text::tr_label("Undo"), ToastKind::Secondary)]
             } else if save_sc {
-                vec![(solidcraft_ui_text::tr(msg!("document.save_as_sc")), ToastKind::Primary)]
+                vec![(tr!("document.save_as_sc"), ToastKind::Primary)]
             } else if report {
-                vec![(solidcraft_ui_text::tr(msg!("report.report_action")), ToastKind::Secondary)]
+                vec![(tr!("report.report_action"), ToastKind::Secondary)]
             } else {
                 Vec::new()
             };
@@ -8441,7 +8435,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
                 close: Some("toast:status:close"),
                 countdown: Some((countdown_left(0.0, shown_ms / 1000.0, STATUS_TOAST_MS / 1000.0), STATUS_TOAST_MS / 1000.0)),
                 // Without Undo, a click anywhere else on it opens the run's messages.
-                card_hint: (!undo).then(|| solidcraft_ui_text::tr(msg!("messages.chip_hint"))),
+                card_hint: (!undo).then(|| tr!("messages.chip_hint")),
                 ..Default::default()
             };
             let reported = report.then(|| msg.clone());
@@ -8488,7 +8482,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
     }
     if let Some(since) = computing_since {
         let seconds = ((crate::now_ms() - since) / 1000.0).floor().max(0.0);
-        let text = msg!("dialog.computing", seconds = &format!("{seconds:.0}")).tr();
+        let text = tr!("dialog.computing", seconds = &format!("{seconds:.0}"));
         // A history command or a delete's check can be given up on (#8266); a feature edit
         // applying has the dialog's Cancel instead.
         let cancel = app.tr_label("Cancel").to_string();
@@ -9670,15 +9664,15 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     // Sketch status, unless the status bar shows it (#7243).
     if let Some(r) = app.viewport.layout.as_ref().map(|l| l.content).filter(|_| !crate::status_bar::shown(app)) {
         let status = if !ss.report.shown_ok() {
-            solidcraft_ui_text::tr(msg!("sketch.status_conflict")).to_string()
+            tr!("sketch.status_conflict").to_string()
         } else if !crate::sketch_palette::has_geometry(sk) {
-            solidcraft_ui_text::tr(msg!("ui.no_geometry_yet")).to_string()
+            tr!("ui.no_geometry_yet").to_string()
         } else if ss.report.shown_dof() == 0 {
-            solidcraft_ui_text::tr(msg!("sketch.status_fully_constrained")).to_string()
+            tr!("sketch.status_fully_constrained").to_string()
         } else if ss.report.shown_dof() == 1 {
-            solidcraft_ui_text::tr(msg!("ui.1_degree_of_freedom")).to_string()
+            tr!("ui.1_degree_of_freedom").to_string()
         } else {
-            msg!("sketch.degrees_of_freedom", count = &ss.report.shown_dof().to_string()).tr()
+            tr!("sketch.degrees_of_freedom", count = &ss.report.shown_dof().to_string())
         };
         let msg = format!("{} — {status}", crate::i18n::tr_name(&ss.name));
         let c = if ss.report.shown_ok() { v.sketch_accent } else { v.error };

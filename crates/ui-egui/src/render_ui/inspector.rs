@@ -49,10 +49,8 @@ fn body(app: &mut SolveApp, ui: &mut egui::Ui, selection: &RenderSelection) {
         });
         crate::scenario::publish_rect("render:appearance-footer", band.response.rect);
     } else if *selection == RenderSelection::Output {
-        let labels = [
-            app.tr(msg!("cmd.render_start")).to_owned(),
-            msg!("render.batch_all_shots", count = &app.session.doc.render.setups.len().to_string()).tr(),
-        ];
+        let labels =
+            [tr!(app, "cmd.render_start").to_owned(), tr!("render.batch_all_shots", count = &app.session.doc.render.setups.len().to_string())];
         let stacked = ui_kit::icon_label_width(ui, &labels[0], Some("play"), true)
             + ui.spacing().item_spacing.x
             + ui_kit::icon_label_width(ui, &labels[1], Some("play"), false)
@@ -153,7 +151,7 @@ fn title(app: &SolveApp, selection: &RenderSelection) -> (String, &'static str) 
                     solidcraft_engine::Sel::Occurrence { path } => app.session.occurrence_placement(path).ok().map(|p| p.name),
                     _ => None,
                 })
-                .unwrap_or_else(|| app.tr(msg!("render.page_appearance")).to_owned());
+                .unwrap_or_else(|| tr!(app, "render.page_appearance").to_owned());
             return (name, "body");
         }
         RenderSelection::Shot(name) => return (name.clone(), "camera"),
@@ -162,7 +160,7 @@ fn title(app: &SolveApp, selection: &RenderSelection) -> (String, &'static str) 
                 .ok()
                 .and_then(|rows| rows.into_iter().find(|row| &row.id == id))
                 .map(|row| light::name(app, &row))
-                .unwrap_or_else(|| app.tr(msg!("render.tree_lights")).to_owned());
+                .unwrap_or_else(|| tr!(app, "render.tree_lights").to_owned());
             return (name, "render_scene");
         }
         RenderSelection::Wear => ("render.wear_title", "appearance"),

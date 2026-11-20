@@ -485,13 +485,13 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
     let id = egui::Id::unique("personal_hole_presets_panel");
     let mut state = if reset { PanelState::default() } else { ui.ctx().data_mut(|data| data.get_temp::<PanelState>(id)).unwrap_or_default() };
     ui_kit::section(ui, "personal_hole_presets", "hole_presets.title", false, |ui| {
-        ui.label(tr(msg!("hole_presets.scope")));
+        ui.label(tr!("hole_presets.scope"));
         crate::dialogs::form_row(ui, "hole_presets.preset", |ui| {
             let before = library.find(&state.selected).map_or(0, |index| index + 1);
             let mut selected = before;
             let dirty = library.modified(&state.selected, d, doc);
             let display = library.find(&state.selected).and_then(|index| library.0.get(index)).map_or_else(
-                || tr(msg!("hole_presets.select")).to_string(),
+                || tr!("hole_presets.select").to_string(),
                 |preset| {
                     if dirty { format!("* {}", preset.name) } else { preset.name.clone() }
                 },
@@ -500,14 +500,11 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
             let width = (ui.available_width() - height - ui.spacing().item_spacing.x).max(1.0);
             ui.allocate_ui_with_layout(egui::vec2(width, height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 let response = ui_kit::dropdown_menu(ui, "personal_hole_preset_choice", &display, |ui| {
-                    let placeholder = ui_kit::list_picker(ui, "hole_presets_select", tr(msg!("hole_presets.select")), selected == 0);
+                    let placeholder = ui_kit::list_picker(ui, "hole_presets_select", tr!("hole_presets.select"), selected == 0);
                     if placeholder.clicked() {
                         selected = 0;
                     }
-                    crate::scenario::publish_handle(
-                        &format!("dialog:hole_presets.preset:{}", tr(msg!("hole_presets.select"))),
-                        placeholder.rect.center(),
-                    );
+                    crate::scenario::publish_handle(&format!("dialog:hole_presets.preset:{}", tr!("hole_presets.select")), placeholder.rect.center());
                     for (index, preset) in library.0.iter().enumerate() {
                         let option = ui_kit::list_picker(ui, &format!("hole_preset_{index}"), &preset.name, selected == index + 1);
                         if option.clicked() {
@@ -517,7 +514,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
                     }
                 });
                 response.widget_info(|| {
-                    let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), tr(msg!("hole_presets.preset")));
+                    let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), tr!("hole_presets.preset"));
                     info.current_text_value = Some(display.clone());
                     info
                 });
@@ -532,7 +529,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
             let modified = library.modified(&state.selected, d, doc);
             ui.add_enabled_ui(modified, |ui| {
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(height, height), egui::Sense::hover());
-                let save = ui_kit::icon_button_at(ui, rect, "save", tr(msg!("hole_presets.overwrite")));
+                let save = ui_kit::icon_button_at(ui, rect, "save", tr!("hole_presets.overwrite"));
                 crate::scenario::publish_target("dialog:hole_presets:overwrite", save.rect);
                 if save.clicked() {
                     state.error = library.overwrite(&state.selected, d, doc).err();
@@ -542,31 +539,31 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, library: &mut Library, doc
         });
         let chosen = library.find(&state.selected);
         ui.horizontal_wrapped(|ui| {
-            if ui_kit::button(ui, tr(msg!("hole_presets.save")), Button::Normal).clicked() {
+            if ui_kit::button(ui, tr!("hole_presets.save"), Button::Normal).clicked() {
                 state.prompt = Some(NamePrompt { name: String::new(), renaming: false });
                 state.error = None;
                 state.confirming_delete = false;
             }
-            if ui_kit::button(ui, tr(msg!("hole_presets.rename")), ui_kit::Button::Enabled(chosen.is_some())).clicked() {
+            if ui_kit::button(ui, tr!("hole_presets.rename"), ui_kit::Button::Enabled(chosen.is_some())).clicked() {
                 state.prompt = Some(NamePrompt { name: state.selected.clone(), renaming: true });
                 state.error = None;
                 state.confirming_delete = false;
             }
-            if ui_kit::button(ui, tr(msg!("hole_presets.delete")), ui_kit::Button::Enabled(chosen.is_some())).clicked() {
+            if ui_kit::button(ui, tr!("hole_presets.delete"), ui_kit::Button::Enabled(chosen.is_some())).clicked() {
                 state.confirming_delete = true;
                 state.error = None;
             }
         });
         if state.confirming_delete {
-            ui.label(tr(msg!("hole_presets.delete_prompt")));
+            ui.label(tr!("hole_presets.delete_prompt"));
             ui.horizontal_wrapped(|ui| {
-                if ui_kit::button(ui, tr(msg!("hole_presets.confirm_delete")), Button::Normal).clicked() {
+                if ui_kit::button(ui, tr!("hole_presets.confirm_delete"), Button::Normal).clicked() {
                     if let Some(index) = library.find(&state.selected) {
                         library.0.remove(index);
                     }
                     state = PanelState::default();
                 }
-                if ui_kit::button(ui, tr(msg!("ui.cancel")), Button::Normal).clicked() {
+                if ui_kit::button(ui, tr!("ui.cancel"), Button::Normal).clicked() {
                     state.confirming_delete = false;
                 }
             });
@@ -600,9 +597,9 @@ pub(crate) fn name_prompt(ctx: &egui::Context, d: &mut Dialog, library: &mut Lib
     let Some(mut prompt) = state.prompt.take() else { return false };
     let title = tr(if prompt.renaming { "hole_presets.rename" } else { "hole_presets.save" });
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("personal_hole_preset_name"), "save", title)
-        .actions(if prompt.renaming { tr(msg!("hole_presets.rename")) } else { solidcraft_ui_text::tr_label("Save") }, "Cancel", None)
+        .actions(if prompt.renaming { tr!("hole_presets.rename") } else { solidcraft_ui_text::tr_label("Save") }, "Cancel", None)
         .show(ctx, true, |ui| {
-            ui_kit::row(ui, "hole_presets.name", |ui| ui_kit::focused_text_field(ui, &mut prompt.name, tr(msg!("hole_presets.name_hint"))));
+            ui_kit::row(ui, "hole_presets.name", |ui| ui_kit::focused_text_field(ui, &mut prompt.name, tr!("hole_presets.name_hint")));
             // Retain over-limit names for a clear validation error, but bound UI storage too.
             if prompt.name.len() > MAX_EXPRESSION {
                 let end = prompt.name.char_indices().map(|(index, _)| index).take_while(|index| *index <= MAX_EXPRESSION).last().unwrap_or(0);

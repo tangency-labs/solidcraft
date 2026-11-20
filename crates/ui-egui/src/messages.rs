@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use crate::SolveApp;
 use solidcraft_theme::Tokens;
-use solidcraft_ui_text::{format, tr};
+use solidcraft_ui_text::format;
 
 /// Messages kept (the oldest go first).
 pub const KEEP: usize = 200;
@@ -115,17 +115,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let t = Tokens::get();
     let now = crate::now_ms();
-    let (closed, _) = crate::ui_kit::Window::new(egui::Id::unique("sc_messages"), "list", tr(msg!("messages.title")))
-        .fields()
-        .actions("", "", None)
-        .show(ctx, true, |ui| {
+    let (closed, _) = crate::ui_kit::Window::new(egui::Id::unique("sc_messages"), "list", tr!("messages.title")).fields().actions("", "", None).show(
+        ctx,
+        true,
+        |ui| {
             ui.horizontal(|ui| {
-                let copy = crate::ui_kit::button(ui, tr(msg!("messages.copy_all")), crate::ui_kit::Button::Enabled(app.messages.iter().len() > 0));
+                let copy = crate::ui_kit::button(ui, tr!("messages.copy_all"), crate::ui_kit::Button::Enabled(app.messages.iter().len() > 0));
                 crate::scenario::publish_handle("messages:copy", copy.rect.center());
                 if copy.clicked() {
                     ctx.copy_text(app.messages.as_text(now));
                 }
-                let clear = crate::ui_kit::button(ui, tr(msg!("messages.clear")), crate::ui_kit::Button::Enabled(app.messages.iter().len() > 0));
+                let clear = crate::ui_kit::button(ui, tr!("messages.clear"), crate::ui_kit::Button::Enabled(app.messages.iter().len() > 0));
                 crate::scenario::publish_handle("messages:clear", clear.rect.center());
                 if clear.clicked() {
                     app.messages.clear();
@@ -133,7 +133,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             });
             ui.separator();
             if app.messages.iter().len() == 0 {
-                ui.label(RichText::new(tr(msg!("messages.none"))).color(t.text_dim));
+                ui.label(RichText::new(tr!("messages.none")).color(t.text_dim));
                 return;
             }
             egui::ScrollArea::vertical().max_height(solidcraft_theme::Tokens::get().form_card_width).auto_shrink([false, true]).show(ui, |ui| {
@@ -145,7 +145,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     });
                 }
             });
-        });
+        },
+    );
     if closed {
         app.messages.open = false;
     }

@@ -5,17 +5,17 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_page(ui, |ui| {
         let t = Tokens::get();
         let labels = t.space_24 * 6.0 + t.space_6;
-        ui_kit::settings_heading_with_tag(ui, app.tr(msg!("prefs.general")), app.tr(msg!("prefs.general_note")), Some(crate::settings_profiles::tag));
+        ui_kit::settings_heading_with_tag(ui, tr!(app, "prefs.general"), tr!(app, "prefs.general_note"), Some(crate::settings_profiles::tag));
         crate::settings_profiles::section(app, ui);
-        ui_kit::settings_section(ui, "language", app.tr(msg!("ui.language")), |ui| {
+        ui_kit::settings_section(ui, "language", tr!(app, "ui.language"), |ui| {
             ui_kit::settings_form(ui, labels, |ui| {
-                ui_kit::row(ui, app.tr(msg!("prefs.interface_language")), |ui| {
+                ui_kit::row(ui, tr!(app, "prefs.interface_language"), |ui| {
                     ui_kit::settings_control_width(ui, t.space_24 * 11.0 + t.space_16, |ui| {
                         ui_kit::dropdown_menu(
                             ui,
                             "pref_language",
                             &if app.preferences.language == solidcraft_ui_text::SYSTEM {
-                                app.tr(msg!("prefs.language_system")).to_owned()
+                                tr!(app, "prefs.language_system").to_owned()
                             } else {
                                 solidcraft_ui_text::Locale::for_language(&app.preferences.language).display_name().into_owned()
                             },
@@ -23,7 +23,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 if ui_kit::list_picker(
                                     ui,
                                     solidcraft_ui_text::SYSTEM,
-                                    app.tr(msg!("prefs.language_system")),
+                                    tr!(app, "prefs.language_system"),
                                     app.preferences.language == solidcraft_ui_text::SYSTEM,
                                 )
                                 .clicked()
@@ -41,9 +41,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
-        ui_kit::settings_section(ui, "startup", app.tr(msg!("ui.on_startup")), |ui| {
+        ui_kit::settings_section(ui, "startup", tr!(app, "ui.on_startup"), |ui| {
             ui_kit::settings_form(ui, labels, |ui| {
-                ui_kit::row(ui, app.tr(msg!("ui.on_startup")), |ui| {
+                ui_kit::row(ui, tr!(app, "ui.on_startup"), |ui| {
                     let selected = app.tr(if app.preferences.show_home_on_startup { "ui.home" } else { "ui.new_design" }).to_string();
                     let choice = ui_kit::dropdown_menu(ui, "pref_startup", &selected, |ui| {
                         for (home, key) in [(true, "ui.home"), (false, "ui.new_design")] {
@@ -57,57 +57,53 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     });
                     crate::scenario::publish_rect("prefs:startup", choice.rect);
                 });
-                ui_kit::text(ui, app.tr(msg!("ui.on_startup_note")), ui_kit::Text::Note("startup"));
+                ui_kit::text(ui, tr!(app, "ui.on_startup_note"), ui_kit::Text::Note("startup"));
             });
         });
-        ui_kit::settings_section(ui, "saving", app.tr(msg!("prefs.saving")), |ui| {
-            ui_kit::checkbox(
-                ui,
-                app.tr(msg!("Reopen the designs that were open when SolidCraft was last closed")),
-                &mut app.preferences.reopen_designs,
-            );
+        ui_kit::settings_section(ui, "saving", tr!(app, "prefs.saving"), |ui| {
+            ui_kit::checkbox(ui, tr!(app, "Reopen the designs that were open when SolidCraft was last closed"), &mut app.preferences.reopen_designs);
             // Only the web app keeps designs in the browser (#10220).
             if app.services.browser_files.is_some() {
-                let tip = app.tr(msg!("prefs.keep_unsaved_in_browser_tip")).to_string();
-                ui_kit::checkbox(ui, app.tr(msg!("prefs.keep_unsaved_in_browser")), &mut app.preferences.keep_unsaved_in_browser)
+                let tip = tr!(app, "prefs.keep_unsaved_in_browser_tip").to_string();
+                ui_kit::checkbox(ui, tr!(app, "prefs.keep_unsaved_in_browser"), &mut app.preferences.keep_unsaved_in_browser)
                     .backing_on_hover_text(tip);
                 if app.preferences.keep_unsaved_in_browser {
-                    let tip = app.tr(msg!("prefs.keep_unsaved_also_asks_tip")).to_string();
-                    ui_kit::checkbox(ui, app.tr(msg!("prefs.keep_unsaved_also_asks")), &mut app.preferences.keep_unsaved_also_asks)
+                    let tip = tr!(app, "prefs.keep_unsaved_also_asks_tip").to_string();
+                    ui_kit::checkbox(ui, tr!(app, "prefs.keep_unsaved_also_asks"), &mut app.preferences.keep_unsaved_also_asks)
                         .backing_on_hover_text(tip);
                 }
             }
-            setting::save_prompt_one_at_a_time(app, ui).on_hover_text(app.tr(msg!("prefs.save_prompt_one_at_a_time_help")));
+            setting::save_prompt_one_at_a_time(app, ui).on_hover_text(tr!(app, "prefs.save_prompt_one_at_a_time_help"));
             ui_kit::settings_form(ui, labels, |ui| {
-                let shown = ui_kit::settings_row_help(ui, app.tr(msg!("ui.autosave_every")), solidcraft_ui_text::tr_label("0 turns it off"), |ui| {
+                let shown = ui_kit::settings_row_help(ui, tr!(app, "ui.autosave_every"), solidcraft_ui_text::tr_label("0 turns it off"), |ui| {
                     let number = ui_kit::settings_number(ui, &mut app.autosave_minutes, 0.0..=120.0, 0.5);
                     number.widget_info(|| {
                         let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), app.autosave_minutes);
-                        info.label = Some(app.tr(msg!("prefs.general.minutes")).to_owned());
+                        info.label = Some(tr!(app, "prefs.general.minutes").to_owned());
                         info
                     });
                     crate::scenario::publish_target("prefs:autosave_minutes", number.rect);
                     if number.changed() {
                         set_autosave(app);
                     }
-                    ui_kit::settings_inline_note(ui, app.tr(msg!("prefs.minutes")));
+                    ui_kit::settings_inline_note(ui, tr!(app, "prefs.minutes"));
                     ui.is_visible()
                 });
                 if shown {
-                    ui_kit::below_row_control(ui, app.tr(msg!("ui.autosave_every")), t.space_24 * 10.0 + t.space_16 + t.space_4, |ui| {
+                    ui_kit::below_row_control(ui, tr!(app, "ui.autosave_every"), t.space_24 * 10.0 + t.space_16 + t.space_4, |ui| {
                         super::figures::autosave_timeline(ui, app.autosave_minutes)
                     });
                 }
             });
         });
-        ui_kit::settings_section(ui, "files", app.tr(msg!("FILES")), |ui| {
+        ui_kit::settings_section(ui, "files", tr!(app, "FILES"), |ui| {
             file_size_rows(app, ui, labels);
             ui.horizontal(|ui| {
                 let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
                 ui.allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     setting::network_locations(app, ui);
                 });
-                ui_kit::help_icon(ui, app.tr(msg!("prefs.network_locations_note")));
+                ui_kit::help_icon(ui, tr!(app, "prefs.network_locations_note"));
             });
             if app.preferences.network_locations {
                 let mut remove = None;
@@ -121,7 +117,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             ui_kit::SettingsChip {
                                 key: Some(host),
                                 monospace: true,
-                                remove: Some(app.tr(msg!("prefs.network_host_remove"))),
+                                remove: Some(tr!(app, "prefs.network_host_remove")),
                                 ..Default::default()
                             },
                         );
@@ -136,8 +132,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
             ui.horizontal(|ui| {
-                let (single, tip) =
-                    (app.tr(msg!("ui.slicer_single_instance")).to_string(), app.tr(msg!("ui.slicer_single_instance_tip")).to_string());
+                let (single, tip) = (tr!(app, "ui.slicer_single_instance").to_string(), tr!(app, "ui.slicer_single_instance_tip").to_string());
                 let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
                 ui.allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui_kit::checkbox(ui, &single, &mut app.preferences.slicer_single_instance).backing_on_hover_text(&tip);
@@ -145,8 +140,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::help_icon(ui, &tip);
             });
             ui.horizontal(|ui| {
-                let (only, tip) =
-                    (app.tr(msg!("ui.export_selects_only_body")).to_string(), app.tr(msg!("ui.export_selects_only_body_tip")).to_string());
+                let (only, tip) = (tr!(app, "ui.export_selects_only_body").to_string(), tr!(app, "ui.export_selects_only_body_tip").to_string());
                 let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
                 ui.allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui_kit::checkbox(ui, &only, &mut app.preferences.export_selects_only_body).backing_on_hover_text(&tip);
@@ -154,7 +148,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::help_icon(ui, &tip);
             });
             ui.horizontal(|ui| {
-                let (keep, tip) = (app.tr(msg!("prefs.keep_print_faces")).to_string(), app.tr(msg!("prefs.keep_print_faces_tip")).to_string());
+                let (keep, tip) = (tr!(app, "prefs.keep_print_faces").to_string(), tr!(app, "prefs.keep_print_faces_tip").to_string());
                 let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
                 ui.allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     let response = ui_kit::checkbox(ui, &keep, &mut app.preferences.keep_print_faces).backing_on_hover_text(&tip);
@@ -163,7 +157,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::help_icon(ui, &tip);
             });
             ui_kit::settings_form(ui, labels, |ui| {
-                ui_kit::settings_row_help(ui, app.tr(msg!("prefs.print_face_highlight")), app.tr(msg!("prefs.print_face_highlight_tip")), |ui| {
+                ui_kit::settings_row_help(ui, tr!(app, "prefs.print_face_highlight"), tr!(app, "prefs.print_face_highlight_tip"), |ui| {
                     ui_kit::settings_control_width(ui, t.space_24 * 10.0, |ui| {
                         ui.spacing_mut().interact_size.x = t.space_24 + t.space_16 + t.space_4;
                         ui.spacing_mut().button_padding.x = t.space_4;
@@ -178,38 +172,38 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
-        ui_kit::settings_section(ui, "freecad", app.tr(msg!("prefs.freecad_files")), |ui| {
+        ui_kit::settings_section(ui, "freecad", tr!(app, "prefs.freecad_files"), |ui| {
             setting::freecad_history(app, ui);
         });
-        ui_kit::settings_section(ui, "cadmpeg", app.tr(msg!("prefs.cadmpeg_import")), |ui| {
+        ui_kit::settings_section(ui, "cadmpeg", tr!(app, "prefs.cadmpeg_import"), |ui| {
             let cadmpeg = setting::cadmpeg_import(app, ui);
             crate::scenario::publish_target("prefs:cadmpeg_import", cadmpeg.rect);
         });
-        ui_kit::settings_section(ui, "dialogs", app.tr(msg!("prefs.dialogs")), |ui| {
+        ui_kit::settings_section(ui, "dialogs", tr!(app, "prefs.dialogs"), |ui| {
             let right_click = setting::right_click_confirms(app, ui);
             crate::scenario::publish_target("prefs:right_click_confirms", right_click.rect);
             let first_letter =
-                setting::dialog_first_letter_buttons(app, ui).backing_on_hover_text(app.tr(msg!("prefs.dialog_first_letter_buttons_help")));
+                setting::dialog_first_letter_buttons(app, ui).backing_on_hover_text(tr!(app, "prefs.dialog_first_letter_buttons_help"));
             crate::scenario::publish_target("prefs:dialog_first_letter_buttons", first_letter.rect);
         });
-        ui_kit::settings_section(ui, "community", app.tr(msg!("prefs.community")), |ui| {
-            let donate = setting::show_donate_button(app, ui).backing_on_hover_text(app.tr(msg!("prefs.show_donate_button_help")));
+        ui_kit::settings_section(ui, "community", tr!(app, "prefs.community"), |ui| {
+            let donate = setting::show_donate_button(app, ui).backing_on_hover_text(tr!(app, "prefs.show_donate_button_help"));
             crate::scenario::publish_target("prefs:show_donate_button", donate.rect);
-            let discord = setting::show_discord_button(app, ui).backing_on_hover_text(app.tr(msg!("prefs.show_discord_button_help")));
+            let discord = setting::show_discord_button(app, ui).backing_on_hover_text(tr!(app, "prefs.show_discord_button_help"));
             crate::scenario::publish_target("prefs:show_discord_button", discord.rect);
         });
-        ui_kit::settings_section(ui, "updates", app.tr(msg!("prefs.updates")), |ui| {
+        ui_kit::settings_section(ui, "updates", tr!(app, "prefs.updates"), |ui| {
             crate::update::prefs_rows(app, ui);
         });
-        ui_kit::settings_section(ui, "crash_reports", app.tr(msg!("prefs.general.crash_reports")), |ui| {
+        ui_kit::settings_section(ui, "crash_reports", tr!(app, "prefs.general.crash_reports"), |ui| {
             ui.horizontal(|ui| {
                 let count = app.crashes.saved_count();
-                let label = msg!("prefs.reports_saved", n = &count.to_string()).tr();
+                let label = tr!("prefs.reports_saved", n = &count.to_string());
                 let tone = if count == 0 { ui_kit::SettingsBadgeTone::Neutral } else { ui_kit::SettingsBadgeTone::Warning };
                 let badge = ui_kit::settings_state_badge(ui, &label, tone);
                 crate::scenario::publish_rect("prefs:crash_count", badge.rect);
-                if ui_kit::button(ui, app.tr(msg!("prefs.crash_reports")), ui_kit::Button::Normal)
-                    .backing_on_hover_text(app.tr(msg!("prefs.crash_reports_note")))
+                if ui_kit::button(ui, tr!(app, "prefs.crash_reports"), ui_kit::Button::Normal)
+                    .backing_on_hover_text(tr!(app, "prefs.crash_reports_note"))
                     .clicked()
                 {
                     crate::crash_ui::open(app);
@@ -225,19 +219,18 @@ fn file_size_rows(app: &mut SolveApp, ui: &mut egui::Ui, labels: f32) {
     use solidcraft_engine::io::limits;
     if !limits::ADJUSTABLE {
         ui.horizontal(|ui| {
-            ui_kit::text(ui, app.tr(msg!("prefs.max_file_size")), ui_kit::Text::Inline);
-            ui_kit::help_icon(ui, app.tr(msg!("prefs.max_file_size_web")));
+            ui_kit::text(ui, tr!(app, "prefs.max_file_size"), ui_kit::Text::Inline);
+            ui_kit::help_icon(ui, tr!(app, "prefs.max_file_size_web"));
         });
         return;
     }
     let top = limits::ceiling() / limits::MB;
-    let (step, design) = (app.tr(msg!("prefs.max_file_size_step")), app.tr(msg!("prefs.max_file_size_design")));
-    let (step_caption, design_caption, group) =
-        (app.tr(msg!("prefs.general.step_import")), app.tr(msg!("ui.design")), app.tr(msg!("prefs.max_file_size")));
-    let mut help = app.tr(msg!("prefs.max_file_size_note")).to_string();
+    let (step, design) = (tr!(app, "prefs.max_file_size_step"), tr!(app, "prefs.max_file_size_design"));
+    let (step_caption, design_caption, group) = (tr!(app, "prefs.general.step_import"), tr!(app, "ui.design"), tr!(app, "prefs.max_file_size"));
+    let mut help = tr!(app, "prefs.max_file_size_note").to_string();
     if let Some(bytes) = limits::override_bytes() {
         help.push('\n');
-        help.push_str(&msg!("prefs.max_file_size_flag", size = &limits::describe(bytes)).tr());
+        help.push_str(&tr!("prefs.max_file_size_flag", size = &limits::describe(bytes)));
     }
     let t = Tokens::get();
     let rows = [
@@ -249,7 +242,7 @@ fn file_size_rows(app: &mut SolveApp, ui: &mut egui::Ui, labels: f32) {
             ui.spacing_mut().item_spacing.x = t.space_16 + t.space_4;
             for (label, caption, handle, default, value) in rows {
                 let size = limits::describe(value.saturating_mul(limits::MB));
-                let unit = solidcraft_ui_text::tr(msg!("prefs.megabytes"));
+                let unit = tr!("prefs.megabytes");
                 let note = if *value >= 1024 { format!("{unit} ({size})") } else { unit.to_owned() };
                 let number_width = t.space_24 * 3.0;
                 let width = (number_width + t.space_4 + ui_kit::ContentWidth::label(ui, &note))

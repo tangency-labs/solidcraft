@@ -351,7 +351,7 @@ pub(crate) fn menu_items(app: &SolveApp) -> Vec<Item> {
         .into_iter()
         .map(|style| {
             let (label, icon) = match style {
-                NavigatorStyle::Axes => (app.tr(msg!("prefs.axes")), "origin"),
+                NavigatorStyle::Axes => (tr!(app, "prefs.axes"), "origin"),
                 NavigatorStyle::Custom => (solidcraft_ui_text::tr_label("Custom"), "body"),
             };
             act("ui.navigatorStyle", label, icon).with(json!({ "style": style })).key(if app.preferences.navigator_style == style {
@@ -505,23 +505,23 @@ pub(crate) fn rows(app: &SolveApp, ui: &mut egui::Ui, form: &mut Form, inputs: &
     if let Some((_, Err(reason))) = &form.preview {
         ui_kit::text(ui, solidcraft_ui_text::tr(reason), ui_kit::Text::Error("view_gizmo_refused"));
     }
-    ui_kit::row(ui, solidcraft_ui_text::tr(msg!("view_gizmo.texture")), |ui| {
+    ui_kit::row(ui, tr!("view_gizmo.texture"), |ui| {
         let mut texture = usize::from(form.texture == NavigatorTexture::Modeled);
         let changed = ui_kit::segmented(
             ui,
             &mut texture,
-            &[solidcraft_ui_text::tr(msg!("view_gizmo.themed")), solidcraft_ui_text::tr_label("Modeled")],
+            &[tr!("view_gizmo.themed"), solidcraft_ui_text::tr_label("Modeled")],
             ui_kit::Segments { intrinsic: true, ..Default::default() },
         );
         if changed {
             form.texture = if texture == 1 { NavigatorTexture::Modeled } else { NavigatorTexture::Themed };
         }
     });
-    let arrows = ui_kit::checkbox(ui, solidcraft_ui_text::tr(msg!("view_gizmo.arrows")), &mut form.arrows);
+    let arrows = ui_kit::checkbox(ui, tr!("view_gizmo.arrows"), &mut form.arrows);
     crate::scenario::publish_target("view_gizmo:arrows", arrows.rect);
-    let home = ui_kit::checkbox(ui, solidcraft_ui_text::tr(msg!("view_gizmo.home")), &mut form.home);
+    let home = ui_kit::checkbox(ui, tr!("view_gizmo.home"), &mut form.home);
     crate::scenario::publish_target("view_gizmo:home", home.rect);
-    ui_kit::text(ui, solidcraft_ui_text::tr(msg!("view_gizmo.note")), ui_kit::Text::Note("view_gizmo_note"));
+    ui_kit::text(ui, tr!("view_gizmo.note"), ui_kit::Text::Note("view_gizmo_note"));
 }
 
 /// OK: the custom navigator with the panel's body (or the one it has), texture, arrows and Home.

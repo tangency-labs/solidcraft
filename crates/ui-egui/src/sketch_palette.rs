@@ -273,7 +273,7 @@ fn image_tool_presentation(app: &SolveApp) -> Option<crate::panel_runtime::Panel
 /// The frame mode as a Feature Options checkbox; whether it was clicked.
 fn frame_mode_row(ui: &mut egui::Ui, framing: bool) -> bool {
     let section = crate::ui_kit::section(ui, "feature", "Feature Options", true, |ui| {
-        crate::ui_kit::checkbox_row(ui, "frame_image", solidcraft_ui_text::tr(msg!("ui.palette_frame_image")), framing)
+        crate::ui_kit::checkbox_row(ui, "frame_image", tr!("ui.palette_frame_image"), framing)
     });
     section_alias("sketch_palette:feature_fold", "Feature Options");
     section.unwrap_or(false)
@@ -357,11 +357,8 @@ pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime
     let world = crate::open_meshing::session_world(&app.session);
     let sketch = world.sketch(app.session.active_sketch?)?;
     let solved = sketch.report.shown_ok();
-    let title = if sketch.name.trim().is_empty() || sketch.name.len() > 256 {
-        app.tr(msg!("ui.palette_sketch_options")).to_owned()
-    } else {
-        sketch.name.clone()
-    };
+    let title =
+        if sketch.name.trim().is_empty() || sketch.name.len() > 256 { tr!(app, "ui.palette_sketch_options").to_owned() } else { sketch.name.clone() };
     Some(crate::panel_runtime::PanelPresentation {
         title,
         icon: "sketch".into(),
@@ -397,7 +394,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let fraction = constrained_fraction(remaining, total, solved && geometry);
     let option_label =
         |label: &'static str| if matches!(label, "ui.profile" | "ui.points") { solidcraft_ui_text::tr(label) } else { app.tr_label(label) };
-    let more = solidcraft_ui_text::tr(msg!("ui.palette_more"));
+    let more = tr!("ui.palette_more");
     let shown = |key: &str| match key {
         "grid" => !opts.hide_grid,
         "snap" => !opts.no_snap,
@@ -448,15 +445,15 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::scenario::publish_rect("sketch_palette:meter", meter.rect);
         crate::scenario::publish_count("sketch_palette:constrained_fraction", f64::from(fraction));
         if open_ends > 0 {
-            let text = msg!("sketch.open_ends", count = &open_ends.to_string()).tr();
-            ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr(msg!("ui.open_ends_tip")));
+            let text = tr!("sketch.open_ends", count = &open_ends.to_string());
+            ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(tr!(app, "ui.open_ends_tip"));
         }
         if untied_ends > 0 {
             ui.horizontal(|ui| {
-                let text = msg!("sketch.untied_ends", count = &untied_ends.to_string()).tr();
-                ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr(msg!("ui.untied_ends_tip")));
-                let button = crate::ui_kit::button(ui, app.tr(msg!("ui.tie_ends")), crate::ui_kit::Button::Normal)
-                    .backing_on_hover_text(app.tr(msg!("ui.tie_ends_tip")));
+                let text = tr!("sketch.untied_ends", count = &untied_ends.to_string());
+                ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(tr!(app, "ui.untied_ends_tip"));
+                let button = crate::ui_kit::button(ui, tr!(app, "ui.tie_ends"), crate::ui_kit::Button::Normal)
+                    .backing_on_hover_text(tr!(app, "ui.tie_ends_tip"));
                 crate::panel_runtime::register_content_focus(ui.ctx(), &button);
                 crate::scenario::publish_handle("sketch_palette:tie_ends", button.rect.center());
                 tie = button.clicked();
@@ -494,8 +491,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             // selection a click converts it; without, it picks the mode new curves use.
             let segments = LINE_TYPES.map(|(key, icon, name)| {
                 let name = app.tr_label(name);
-                let tip =
-                    if has_curves { msg!("sketch.make_selection", linetype = name).tr() } else { msg!("sketch.draw_curves", linetype = name).tr() };
+                let tip = if has_curves { tr!("sketch.make_selection", linetype = name) } else { tr!("sketch.draw_curves", linetype = name) };
                 crate::ui_kit::IconSegment { key, icon, tip }
             });
             let mut selected = row_types.iter().position(|on| *on).unwrap_or(usize::MAX);
@@ -514,12 +510,8 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                 set = Some((key.to_string(), !shown(key)));
             }
         }
-        construction = crate::ui_kit::checkbox_row(
-            ui,
-            "construction_mode",
-            solidcraft_ui_text::tr(msg!("ui.palette_construction_mode")),
-            row_types.get(1).copied().unwrap_or(false),
-        );
+        construction =
+            crate::ui_kit::checkbox_row(ui, "construction_mode", tr!("ui.palette_construction_mode"), row_types.get(1).copied().unwrap_or(false));
         crate::ui_kit::section(ui, "more", more, false, |ui| {
             for (key, label) in TOGGLES {
                 if !["show_constraints", "show_dimensions", "show_points", "snap"].contains(&key)
@@ -542,7 +534,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             "sketch_palette",
             [false, opts.slice],
             [
-                crate::ui_kit::PairButton { key: "look_at", label: solidcraft_ui_text::tr(msg!("ui.look_at")), icon: Some("lookat") },
+                crate::ui_kit::PairButton { key: "look_at", label: tr!("ui.look_at"), icon: Some("lookat") },
                 crate::ui_kit::PairButton { key: "slice", label: "Slice", icon: None },
             ],
         );

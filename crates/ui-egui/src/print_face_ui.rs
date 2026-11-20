@@ -57,7 +57,7 @@ pub(crate) fn toggle(app: &mut SolveApp) {
         _ => None,
     };
     let Some((face, body, index)) = picked else {
-        app.set_status(solidcraft_ui_text::tr(msg!("ui.print_face_pick")), true);
+        app.set_status(tr!("ui.print_face_pick"), true);
         return;
     };
     let clear = is_print_face(app, &body, index);

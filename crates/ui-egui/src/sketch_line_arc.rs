@@ -178,7 +178,7 @@ fn switch(app: &mut SolveApp) {
     next.hover = old.hover.clone();
     next.chain = LineChain { curve: old.chain.curve.clone(), back_to_lines: !to_arc, back: old.chain.back.clone(), ..LineChain::default() };
     app.tool = Some(next);
-    let hint = if to_arc { app.tr(msg!("ui.line_arc_hint")).to_string() } else { crate::tools::hint(LINE) };
+    let hint = if to_arc { tr!(app, "ui.line_arc_hint").to_string() } else { crate::tools::hint(LINE) };
     app.set_status(hint, false);
 }
 

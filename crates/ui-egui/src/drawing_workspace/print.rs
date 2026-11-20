@@ -16,6 +16,7 @@ use serde_json::json;
 
 use crate::SolveApp;
 
+#[cfg(test)]
 fn tr(id: impl solidcraft_ui_text::Key<'static>) -> &'static str {
     solidcraft_ui_text::tr(id)
 }
@@ -57,7 +58,7 @@ pub(crate) fn start(app: &mut SolveApp) {
         let folder = match private_folder() {
             Ok(folder) => folder,
             Err(e) => {
-                app.set_status(format!("{}: {e}", tr(msg!("ui.drawing_print.failed"))), true);
+                app.set_status(format!("{}: {e}", tr!("ui.drawing_print.failed")), true);
                 return;
             }
         };
@@ -71,13 +72,13 @@ pub(crate) fn start(app: &mut SolveApp) {
         return;
     }
     // In a browser: made at once, its bytes as they are, then shown in a new tab.
-    let bytes = solidcraft_engine::print_pdf(&mut app.session).map_err(|e| format!("{}: {e}", tr(msg!("ui.drawing_print.failed"))));
+    let bytes = solidcraft_engine::print_pdf(&mut app.session).map_err(|e| format!("{}: {e}", tr!("ui.drawing_print.failed")));
     match (bytes, &app.services.open_bytes) {
         (Ok(bytes), Some(open)) => match open(&name, "application/pdf", &bytes) {
-            Ok(()) => app.set_status(tr(msg!("ui.drawing_print.opened")), false),
-            Err(e) => app.set_status(format!("{}: {e}", tr(msg!("ui.drawing_print.failed"))), true),
+            Ok(()) => app.set_status(tr!("ui.drawing_print.opened"), false),
+            Err(e) => app.set_status(format!("{}: {e}", tr!("ui.drawing_print.failed")), true),
         },
-        (Ok(_), None) => app.set_status(tr(msg!("ui.drawing_print.unavailable")), true),
+        (Ok(_), None) => app.set_status(tr!("ui.drawing_print.unavailable"), true),
         (Err(e), _) => app.set_status(e, true),
     }
 }
@@ -87,11 +88,11 @@ pub(crate) fn start(app: &mut SolveApp) {
 pub(crate) fn written(app: &mut SolveApp, path: &str) {
     let opened = match &app.services.open_path {
         Some(open) => open(path),
-        None => Err(tr(msg!("ui.drawing_print.unavailable")).into()),
+        None => Err(tr!("ui.drawing_print.unavailable").into()),
     };
     match opened {
-        Ok(()) => app.set_status(tr(msg!("ui.drawing_print.opened")), false),
-        Err(e) => app.set_status(msg!("ui.drawing_print.not_opened", path = path, reason = &e).tr(), true),
+        Ok(()) => app.set_status(tr!("ui.drawing_print.opened"), false),
+        Err(e) => app.set_status(tr!("ui.drawing_print.not_opened", path = path, reason = &e), true),
     }
 }
 

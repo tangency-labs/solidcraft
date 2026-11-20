@@ -24,13 +24,13 @@ pub(super) struct Dialog {
 
 fn label(action: Action) -> &'static str {
     match action {
-        Action::Open => solidcraft_ui_text::tr(msg!("library.action_open")),
-        Action::Insert => solidcraft_ui_text::tr(msg!("library.action_insert")),
-        Action::Rename => solidcraft_ui_text::tr(msg!("library.action_rename")),
-        Action::Move => solidcraft_ui_text::tr(msg!("library.action_move")),
-        Action::Copy => solidcraft_ui_text::tr(msg!("library.action_copy")),
-        Action::Trash => solidcraft_ui_text::tr(msg!("library.action_trash")),
-        Action::Reveal => solidcraft_ui_text::tr(msg!("library.action_reveal")),
+        Action::Open => tr!("library.action_open"),
+        Action::Insert => tr!("library.action_insert"),
+        Action::Rename => tr!("library.action_rename"),
+        Action::Move => tr!("library.action_move"),
+        Action::Copy => tr!("library.action_copy"),
+        Action::Trash => tr!("library.action_trash"),
+        Action::Reveal => tr!("library.action_reveal"),
     }
 }
 
@@ -48,7 +48,7 @@ pub(super) fn context_menu(app: &mut SolveApp, ui: &egui::Ui, response: &egui::R
                 ui.separator();
             }
             if action == Action::Reveal {
-                crate::ui_kit::Menu::button(ui, app.tr(msg!("library.highlight")), |ui| {
+                crate::ui_kit::Menu::button(ui, tr!(app, "library.highlight"), |ui| {
                     ui.set_min_width(140.0);
                     let current = app.library.highlights.get(&entry.path).copied();
                     for choice in std::iter::once(None).chain(Highlight::ALL.into_iter().map(Some)) {
@@ -85,7 +85,7 @@ pub(super) fn context_menu(app: &mut SolveApp, ui: &egui::Ui, response: &egui::R
 
 fn perform(app: &mut SolveApp, entry: Entry, action: Action) {
     let Some(path) = entry.path.to_str() else {
-        app.set_status(solidcraft_ui_text::tr(msg!("library.utf8")), true);
+        app.set_status(tr!("library.utf8"), true);
         return;
     };
     match action {
@@ -138,7 +138,7 @@ fn execute(app: &mut SolveApp, entry: &Entry, action: Action, destination: Optio
     let command_check = app.session.command_check();
     let scope = solidcraft_engine::io::vfs::current_scope();
     let (tx, rx) = std::sync::mpsc::channel();
-    let protected = solidcraft_ui_text::tr(msg!("library.close_using_file")).to_owned();
+    let protected = tr!("library.close_using_file").to_owned();
     let language = solidcraft_ui_text::language();
     let spawned = std::thread::Builder::new().name("library-file-action".into()).spawn(move || {
         let _language = solidcraft_ui_text::scope(language);
@@ -153,19 +153,17 @@ fn execute(app: &mut SolveApp, entry: &Entry, action: Action, destination: Optio
         let _ = tx.send(result);
     });
     if let Err(error) = spawned {
-        app.library.error = Some(msg!("library.worker_start_failed", error = &error.to_string()).tr());
+        app.library.error = Some(tr!("library.worker_start_failed", error = &error.to_string()));
         return false;
     }
     let entry = entry.clone();
     let destination = destination.map(std::path::Path::to_path_buf);
-    app.set_status(solidcraft_ui_text::tr(msg!("library.file_working")), false);
+    app.set_status(tr!("library.file_working"), false);
     app.begin_file_task(
         std::future::poll_fn(move |_| match rx.try_recv() {
             Ok(result) => std::task::Poll::Ready(result),
             Err(std::sync::mpsc::TryRecvError::Empty) => std::task::Poll::Pending,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                std::task::Poll::Ready((true, Err(solidcraft_ui_text::tr(msg!("library.worker_stopped")).into())))
-            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => std::task::Poll::Ready((true, Err(tr!("library.worker_stopped").into()))),
         }),
         move |app, (attempted, result)| {
             let _language = solidcraft_ui_text::scope(&app.preferences.language);
@@ -205,7 +203,7 @@ fn finish(
                 }
                 app.home.recent.retain(|p| !p.is_empty());
             }
-            app.set_status(msg!("library.completed", action = label(action)).tr(), false);
+            app.set_status(tr!("library.completed", action = label(action)), false);
             true
         }
         Err(error) => {
@@ -221,7 +219,7 @@ pub(super) fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     let mut confirm = false;
     let mut cancel = false;
     let (closed, action) = crate::ui_kit::Window::new(egui::Id::unique("library_file_action"), "folder", label(dialog.action))
-        .actions(label(dialog.action), solidcraft_ui_text::tr(msg!("ui.cancel")), None)
+        .actions(label(dialog.action), tr!("ui.cancel"), None)
         .fields()
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, true, |ui| {
@@ -235,14 +233,14 @@ pub(super) fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                     dialog.error.is_some(),
                     255,
                 );
-                input.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, solidcraft_ui_text::tr(msg!("library.new_filename"))));
+                input.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, tr!("library.new_filename")));
                 if dialog.focus {
                     input.request_focus();
                     dialog.focus = false;
                 }
                 confirm |= input.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             } else {
-                ui.label(solidcraft_ui_text::tr(msg!("library.confirm_trash")));
+                ui.label(tr!("library.confirm_trash"));
             }
             if let Some(error) = &dialog.error {
                 ui.label(error);
@@ -258,7 +256,7 @@ pub(super) fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
         let destination = if dialog.action == Action::Rename {
             let name = dialog.name.trim();
             if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
-                dialog.error = Some(solidcraft_ui_text::tr(msg!("library.invalid_name")).into());
+                dialog.error = Some(tr!("library.invalid_name").into());
                 app.library.action_dialog = Some(dialog);
                 return;
             }

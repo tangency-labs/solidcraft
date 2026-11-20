@@ -15,7 +15,6 @@ use egui::text::{LayoutJob, TextFormat};
 use egui::{Color32, FontId, Margin, RichText, Stroke, vec2};
 
 use solidcraft_theme::Tokens;
-use solidcraft_ui_text::tr;
 
 /// The parsed blocks of `src`, kept in the context's temporary memory under `slot` (the item's
 /// index) and replaced when the text changes.
@@ -172,7 +171,7 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str, selected: bool) {
                             egui::Label::new(RichText::new(text).monospace().size(size - (t.font_button - t.font_body)).color(t.text)).wrap(),
                             selected,
                         );
-                        if crate::ui_kit::button(ui, tr(msg!("ui.agent_chat_copy")), crate::ui_kit::Button::Small).clicked() {
+                        if crate::ui_kit::button(ui, tr!("ui.agent_chat_copy"), crate::ui_kit::Button::Small).clicked() {
                             ui.ctx().copy_text(text.clone());
                         }
                     },

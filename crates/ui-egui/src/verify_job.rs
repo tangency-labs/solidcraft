@@ -35,11 +35,11 @@ fn start_with(app: &mut SolveApp, after_reuse: bool) -> bool {
         return false;
     }
     if app.saving.is_some() || app.file_picker.is_some() || (!after_reuse && app.file_load_holds()) {
-        app.set_status(solidcraft_ui_text::tr(msg!("ui.verify_waits_for_file_operation")).to_string(), true);
+        app.set_status(tr!("ui.verify_waits_for_file_operation").to_string(), true);
         return false;
     }
     let Some(path) = app.session.path.clone() else {
-        app.set_status(solidcraft_ui_text::tr(msg!("ui.verify_needs_file")).to_string(), true);
+        app.set_status(tr!("ui.verify_needs_file").to_string(), true);
         return false;
     };
     let disk = solidcraft_engine::io::design_lock::stamp(&path);
@@ -53,7 +53,7 @@ fn start_with(app: &mut SolveApp, after_reuse: bool) -> bool {
         });
         if spawned.is_ok() {
             app.verifying = Some(Verifying { path, disk, done: rx });
-            app.set_status(solidcraft_ui_text::tr(msg!("ui.verify_checking")).to_string(), false);
+            app.set_status(tr!("ui.verify_checking").to_string(), false);
             return true;
         }
         // No thread to read on: check here, as the menu would have before there was a worker.
@@ -84,20 +84,20 @@ fn apply(
     result: Result<Option<ProvenanceReport>, String>,
 ) {
     let Some(path) = path else {
-        app.set_status(solidcraft_ui_text::tr(msg!("ui.verify_stopped")).to_string(), true);
+        app.set_status(tr!("ui.verify_stopped").to_string(), true);
         return;
     };
     if app.session.path.as_deref() != Some(path.as_str()) {
         return;
     }
     if solidcraft_engine::io::design_lock::stamp(&path) != disk {
-        app.set_status(solidcraft_ui_text::tr(msg!("ui.verify_file_changed")).to_string(), true);
+        app.set_status(tr!("ui.verify_file_changed").to_string(), true);
         return;
     }
     let report = match result {
         Ok(report) => report,
         Err(reason) => {
-            app.set_status(msg!("ui.verify_failed", reason = &reason).tr(), true);
+            app.set_status(tr!("ui.verify_failed", reason = &reason), true);
             return;
         }
     };
@@ -109,7 +109,7 @@ fn apply(
             let invalid = matches!(report.status, solidcraft_engine::io::ProvenanceStatus::Invalid(_));
             app.set_status(text, invalid);
         }
-        None => app.set_status(solidcraft_ui_text::tr(msg!("ui.verify_unsigned")).to_string(), false),
+        None => app.set_status(tr!("ui.verify_unsigned").to_string(), false),
     }
 }
 
