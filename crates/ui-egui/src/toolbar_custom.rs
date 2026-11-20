@@ -41,11 +41,12 @@ pub struct ToolbarCustom {
 pub const MAX_QUICK_ACCESS: usize = 24;
 
 impl ToolbarCustom {
-    /// Whether a command still uses a compact gallery cell in this panel.
-    pub fn in_gallery(&self, tab: &str, panel: &str, id: &str) -> bool {
+    /// Whether a command still uses a compact gallery cell in this panel. `pinned`: constraints
+    /// the user pinned join the default six (the `pinned_constraints_in_grid` preference).
+    pub fn in_gallery(&self, tab: &str, panel: &str, id: &str, pinned: bool) -> bool {
         tab == "SKETCH"
             && panel == "CONSTRAIN"
-            && crate::workspace::CONSTRAINT_GALLERY.contains(&id)
+            && (crate::workspace::CONSTRAINT_GALLERY.contains(&id) || (pinned && crate::workspace::constraint_cell(id)))
             && !self.gallery_buttons.get(&format!("{WORKSPACE}/{tab}")).is_some_and(|ids| ids.iter().any(|c| c == id))
     }
 
@@ -204,6 +205,25 @@ fn key(tab: &str, panel: &str) -> String {
 
 /// The buttons a panel shows: the user's list, or the first `promoted` commands of the panel.
 pub fn buttons(app: &SolveApp, tab: &str, panel: &str, cmds: &[&'static CommandSpec], promoted: usize) -> Vec<&'static CommandSpec> {
+    if tab == "DRAWING LAYOUT" && panel == "VIEWS" {
+        let flat_pattern = "drawing.view.flat_pattern";
+        let sheet_metal = crate::workspace::sheet_body(app).is_some();
+        if let Some(ids) = app.toolbar_custom.panels.get(&key(tab, panel)) {
+            return ids
+                .iter()
+                .filter(|id| id.as_str() != "drawing.view.projected.planned" && (id.as_str() != flat_pattern || sheet_metal))
+                .filter_map(|id| solidcraft_engine::find_command(id))
+                .collect();
+        }
+        let mut shown: Vec<_> = cmds.iter().take(promoted).copied().collect();
+        if sheet_metal
+            && let Some(flat) = cmds.iter().find(|command| command.id == flat_pattern)
+            && let Some(break_view) = shown.iter_mut().find(|command| command.id == "drawing.view.break")
+        {
+            *break_view = *flat;
+        }
+        return shown;
+    }
     match app.toolbar_custom.panels.get(&key(tab, panel)) {
         Some(ids) => ids.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect(),
         None => cmds.iter().take(promoted).copied().collect(),
@@ -287,6 +307,11 @@ pub fn remove(app: &mut SolveApp, tab: &str, id: &str) {
     app.toolbar_custom.panels.insert(key(tab, panel), ids);
 }
 
+/// [`ToolbarCustom::in_gallery`] with the user's preference.
+pub fn in_gallery(app: &SolveApp, tab: &str, panel: &str, id: &str) -> bool {
+    app.toolbar_custom.in_gallery(tab, panel, id, app.preferences.pinned_constraints_in_grid)
+}
+
 /// Move a button before another one (`before`: None puts it at the end of `panel`).
 pub fn reorder(app: &mut SolveApp, tab: &str, id: &str, panel: &str, before: Option<&str>) {
     if fixed(tab, panel, id) {
@@ -294,8 +319,11 @@ pub fn reorder(app: &mut SolveApp, tab: &str, id: &str, panel: &str, before: Opt
     }
     // A gallery command dropped on a gallery cell goes (back) into the gallery; dropped anywhere
     // else it becomes a full-size button.
-    if tab == "SKETCH" && crate::workspace::CONSTRAINT_GALLERY.contains(&id) {
-        let into_gallery = before.is_some_and(|b| app.toolbar_custom.in_gallery(tab, panel, b));
+    if tab == "SKETCH"
+        && (crate::workspace::CONSTRAINT_GALLERY.contains(&id)
+            || (app.preferences.pinned_constraints_in_grid && crate::workspace::constraint_cell(id)))
+    {
+        let into_gallery = before.is_some_and(|b| in_gallery(app, tab, panel, b));
         let ids = app.toolbar_custom.gallery_buttons.entry(format!("{WORKSPACE}/{tab}")).or_default();
         ids.retain(|c| c != id);
         if !into_gallery {
@@ -447,8 +475,7 @@ pub fn export(app: &SolveApp) -> Value {
 pub const MAX_IMPORT_BYTES: usize = 1 << 20;
 
 pub fn import(app: &mut SolveApp, v: &Value) -> Result<(), String> {
-    // "solvecraft-shortcuts/1": files exported before the rename (compatibility shim).
-    if !matches!(v.get("format").and_then(Value::as_str), Some("solidcraft-shortcuts/1" | "solvecraft-shortcuts/1")) {
+    if v.get("format").and_then(Value::as_str) != Some("solidcraft-shortcuts/1") {
         return Err("not a SolidCraft shortcuts file".into());
     }
     let navigation_bar = v
@@ -473,8 +500,13 @@ pub fn import(app: &mut SolveApp, v: &Value) -> Result<(), String> {
     Ok(())
 }
 
+/// A command's icon in the Customize Toolbar list: the one its ribbon button shows right now.
+fn row_icon(app: &SolveApp, command: &CommandSpec) -> &'static str {
+    crate::render_workspace::interactive_command_info(app, command).icon
+}
+
 /// Customize Toolbar: every command of the tab's panels with a check box (on the toolbar or
-/// not), how to drag them, and Reset Toolbar.
+/// not) and its ribbon icon, how to drag them, and Reset Toolbar.
 pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
     if !app.toolbar_custom.customizing {
         return;
@@ -491,7 +523,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
         ui_kit::Window::new(egui::Id::unique("sc_toolbar_customize"), "settings", solidcraft_ui_text::tr_label("Customize Toolbar"))
             .placed(egui::Align2::LEFT_TOP, origin)
             .cards(2.0)
-            .actions("", "Close", None)
+            .actions("", "ui.close", None)
             .show(ctx, true, |ui| {
                 ui_kit::text(
                     ui,
@@ -512,7 +544,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
                                 let shown = buttons(app, &tab, panel, &cmds, n);
                                 for c in &cmds {
                                     let mut on = shown.iter().any(|b| b.id == c.id) || pinned_on(app, &tab, c.id).is_some();
-                                    let r = ui_kit::checkbox(ui, app.tr_label(c.label), &mut on);
+                                    let r = ui_kit::checkbox_icon(ui, app.tr_label(c.label), row_icon(app, c), &mut on);
                                     crate::scenario::publish_handle(&format!("customize:{}", c.id), r.rect.center());
                                     if r.changed() {
                                         changes.push((c.id, on));
@@ -538,6 +570,30 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
         reset(app, &tab);
     }
     app.toolbar_custom.customizing = !closed && action != ui_kit::Action::Cancel;
+}
+
+#[cfg(test)]
+mod row_icon_tests {
+    use super::*;
+    use crate::scenario::Harness;
+
+    /// A row shows the icon its ribbon button shows, also while the command's state changes it:
+    /// Play History shows Stop while History plays.
+    #[test]
+    fn a_row_follows_the_ribbon_icon_of_play_history() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        for corner in [[0, 0, 0], [30, 0, 0]] {
+            h.app.run("solid.box", json!({"corner": corner, "length": 10, "width": 10, "height": 10})).unwrap();
+        }
+        h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+        let command = solidcraft_engine::find_command("timeline.play").unwrap();
+        assert_eq!(row_icon(&h.app, command), "timeline_play");
+        h.app.start(command.id);
+        assert!(h.app.timeline_playback.is_some(), "History plays");
+        assert_eq!(row_icon(&h.app, command), "timeline_stop");
+        assert_eq!(row_icon(&h.app, command), crate::render_workspace::interactive_command_info(&h.app, command).icon);
+    }
 }
 
 #[cfg(test)]

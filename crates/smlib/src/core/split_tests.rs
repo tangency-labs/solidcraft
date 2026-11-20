@@ -77,7 +77,7 @@ fn rel(a: f64, b: f64) -> f64 {
 
 fn valid(name: &str, b: &Body) {
     let (rec, _) = native(&to_arrays(b).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-    solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+    solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
 }
 
 fn judge(name: &str, who: &str, got: Got) -> Got {
@@ -175,10 +175,28 @@ fn a_sheet_is_not_split_into_two_bodies() {
         let c = Curve::from(create_line_segment(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0))?);
         create_linear_sweep(k, &[Some(&c)], Vec3::new(0.0, 1.0, 0.0), 10.0, false)
     })
-    .map(Body::new)
+    .map(Body::from_kernel)
     .unwrap();
     assert!(rel(area(&sheet, 1e-8).unwrap(), 100.0) < 1e-9);
     assert_eq!(split_body(&sheet, &plane_x(5.0)).err(), Some(Error::NotSolid));
+}
+
+/// A sheet is no solid to split by a closed tool either: the whole sphere's split (the body's
+/// intersection and difference with the ball) checks the body first, as the slice does (#14214).
+#[test]
+fn a_sheet_is_not_split_by_a_whole_sphere() {
+    use solidcore::curve::curve::Curve;
+    use solidcore::geom::vector3d::Vec3;
+    use solidcore::primitive::api_curves::create_line_segment;
+    use solidcore::sweep::api_brep::create_linear_sweep;
+    let sheet = super::run("sheet", |k| {
+        let c = Curve::from(create_line_segment(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0))?);
+        create_linear_sweep(k, &[Some(&c)], Vec3::new(0.0, 1.0, 0.0), 10.0, false)
+    })
+    .map(Body::from_kernel)
+    .unwrap();
+    let ball = Spec::Sphere { center: [5.0, 5.0, 0.0], xaxis: X, yaxis: Y, radius: 3.0, lon_deg: [0.0, 360.0], lat_deg: [-90.0, 90.0] };
+    assert_eq!(split_body(&sheet, &ball).err(), Some(Error::NotSolid));
 }
 
 /// Faces of the box -20..5 x -20..20 x -20..5 copied off it into a sheet (`CopyFaces` with merge,
@@ -193,7 +211,7 @@ fn lid(side: bool) -> Body {
     use solidcore::topology::brep::p7::copy_faces;
     let slab = make_box([-20.0; 3], [25.0, 40.0, 25.0]).unwrap();
     super::run("sheet", |k| {
-        let mut whole = solidcore::topology::brep::p3::brep_copy(k, &slab.0.lock().unwrap())?;
+        let mut whole = solidcore::topology::brep::p3::brep_copy(k, &slab.kernel())?;
         let mut picked = Vec::new();
         for f in faces(&whole, None)? {
             let p = face_internal_point(k, &mut whole, f)?;
@@ -214,7 +232,7 @@ fn lid(side: bool) -> Body {
         w.refresh_cached_topology();
         Ok(w)
     })
-    .map(Body::new)
+    .map(Body::from_kernel)
     .unwrap()
 }
 
@@ -292,7 +310,7 @@ fn a_spline_sheet_is_cut_by_strips_inside_it() {
         b.refresh_cached_topology();
         Ok(b)
     })
-    .map(Body::new)
+    .map(Body::from_kernel)
     .unwrap();
     assert_eq!(counts(&sheet).unwrap(), [1, 4, 4]);
     let whole = area(&sheet, 1e-8).unwrap();

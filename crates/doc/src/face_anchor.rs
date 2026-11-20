@@ -130,6 +130,57 @@ impl Document {
         self.resolve_attached_plane_noted(vals, plane, author, state, framed).map(|(plane, _)| plane)
     }
 
+    /// A sketch attached by 0.30.1 to the cap of an extrude (an `extrude_cap` certificate), whose
+    /// cap the SMLib kernel no longer marks as that extrude's after a join (#13323): the attachment
+    /// also stores the cap's history name, a point on it and the plane the sketch was in. The sketch
+    /// keeps that plane when exactly that face is still there: the name finds the face, made by
+    /// the extrude the certificate names, on a body whose certified cap is nowhere else, a saved
+    /// point lies on it, and it still lies in the saved plane. A moved or edited face stays lost.
+    fn old_cap_plane(
+        &self,
+        anchor: &FaceAnchor,
+        name: Option<&str>,
+        at: solidcore_record::Vec3,
+        saved: &Plane,
+        state: &ModelState,
+    ) -> Option<(Plane, Option<String>)> {
+        let target = &anchor.target;
+        let Some(crate::config::FaceCertificate::ExtrudeCap { sketch, high, outer, holes }) = &target.certificate else { return None };
+        if !anchor.path.is_empty() || !anchor.author_path.is_empty() || anchor.placement.is_some() {
+            return None;
+        }
+        let name = name.filter(|n| crate::persistent_name::made_by(crate::naming::strip_piece(n)) == Some(target.origin_feature))?;
+        let body = state.body(&target.body)?;
+        let solid = self.feature(target.origin_feature).is_some_and(|f| matches!(f.kind, FeatureKind::Extrude { thin: None, .. }));
+        if !solid || body.body.is_mesh() || body.definition_name() != target.body || !at.is_finite() {
+            return None;
+        }
+        // The checks below compare the body as built, before its offset: an offset body stays lost.
+        if self.model_body_offset(body).is_some_and(|offset| *offset != crate::IDENTITY) {
+            return None;
+        }
+        // The certified cap must be gone: while some body still has it, the attachment is exact.
+        let certified = |source: &Option<solidcraft_kernel::FaceSource>| {
+            matches!(source, Some(solidcraft_kernel::FaceSource::CertifiedExtrudeCap { producer, sketch: from, high: end, outer: around, holes: inside, .. })
+                if *producer == target.origin_feature && from == sketch && end == high && around == outer && inside == holes)
+        };
+        if state.bodies.iter().any(|other| other.body.face_sources().is_some_and(|sources| sources.iter().any(certified))) {
+            return None;
+        }
+        let indices = self.lineage_face_indices(body, name).ok()?;
+        let tolerance = (body.body.size() * 1e-6).max(1e-6);
+        let same_plane = |index: usize| {
+            body.body.planar_face(index).is_some_and(|face| {
+                face.normal().dot(saved.normal()) > 1. - 1e-8 && (face.origin - saved.origin).dot(saved.normal()).abs() <= tolerance
+            })
+        };
+        if indices.is_empty() || !indices.iter().all(|index| same_plane(*index)) || !crate::name_lookup::locate_on(body, name, at)?.on_point {
+            return None;
+        }
+        let note = format!("the face this sketch sits on was found again by its name `{name}`: its extrude-cap certificate no longer marks it");
+        Some((*saved, Some(note)))
+    }
+
     /// [`Document::resolve_attached_plane`] with the note of an attachment found by fallback
     /// ([`Document::anchored_face_indices`]).
     pub fn resolve_attached_plane_noted(
@@ -145,8 +196,12 @@ impl Document {
                 return Err(DocError::Invalid("attached plane nesting exceeds budget".into()));
             }
             match plane {
-                PlaneRef::Face { anchor: Some(anchor), .. } => {
-                    let (resolved, note) = doc.resolve_face_anchor_noted(anchor, author, state)?;
+                PlaneRef::Face { anchor: Some(anchor), name, at, plane: saved } => {
+                    let found = match doc.resolve_face_anchor_noted(anchor, author, state) {
+                        Ok(found) => found,
+                        Err(error) => doc.old_cap_plane(anchor, name.as_deref(), *at, saved, state).ok_or(error)?,
+                    };
+                    let (resolved, note) = found;
                     *plane = PlaneRef::Custom { plane: resolved };
                     Ok(note)
                 }
@@ -159,24 +214,23 @@ impl Document {
         }
         let mut resolved = plane.clone();
         let note = replace(self, &mut resolved, author, state, 0)?;
-        Ok((self.resolve_plane_in(vals, &resolved, 0, Some(framed))?, note))
+        Ok((self.resolve_plane_in(vals, &resolved, 0, author, Some(framed))?, note))
     }
 }
 
-/// All status planes are world-space. A lost plane is a repair guide only. `Sheet` is a sketch on
-/// a flat face of a sheet metal body, attached by the name of its panel (`sheet::sheet_face_name`).
+/// All status planes are world-space. A lost plane is a repair guide only. A sketch a design saved
+/// before kept on a flat face of a sheet metal body by the name of its panel
+/// (`sheet::sheet_face_name`) is `Lost`: no sheet names a face so now.
 #[derive(Clone, Debug)]
 pub enum FaceAttachmentStatus {
     Fixed { plane: Option<Plane> },
     Legacy { plane: Option<Plane> },
-    Sheet { plane: Option<Plane> },
     Healthy { plane: Plane, target: ConfigFaceTarget, path: Vec<u64> },
     Lost { message: String, repair_plane: Option<Plane> },
 }
 
 fn map_plane(matrix: &crate::Mat, plane: &Plane) -> Result<Plane> {
-    Plane::new(crate::apply_point(matrix, plane.origin), crate::apply_vector(matrix, plane.x), crate::apply_vector(matrix, plane.y))
-        .ok_or_else(|| DocError::Invalid("attached plane transform is degenerate".into()))
+    crate::map_plane(matrix, plane).ok_or_else(|| DocError::Invalid("attached plane transform is degenerate".into()))
 }
 
 impl Document {
@@ -382,12 +436,9 @@ impl Document {
                 self.resolve_plane(&vals, plane, 0).ok()
             });
             let current = world.and_then(|world| current.and_then(|plane| map_plane(&world, &plane).ok()));
+            // Attached by the sheet's name for a face, which no sheet gives a face now.
             if crate::sheet::plane_sheet_face(plane).is_some() {
-                let state = model.state_before(feature.id);
-                return match crate::eval::sheet_face_plane_in_frame(self, &state, feature.component, plane) {
-                    Ok(_) => FaceAttachmentStatus::Sheet { plane: current },
-                    Err(error) => FaceAttachmentStatus::Lost { message: error.to_string(), repair_plane: current },
-                };
+                return FaceAttachmentStatus::Lost { message: crate::eval::lost_sheet_face(plane).to_string(), repair_plane: current };
             }
             return if has_face_reference(plane) {
                 FaceAttachmentStatus::Legacy { plane: current }

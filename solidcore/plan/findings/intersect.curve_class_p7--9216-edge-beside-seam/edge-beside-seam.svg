@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="900" height="600" viewBox="0 0 900 600">
+  <title>edge-beside-seam</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="900" height="600" fill="#ffffff"/>
+    <circle id="tolerance_zone_of_V" data-name="tolerance zone of V" cx="430" cy="300" r="55" fill="#dce9f5"/>
+    <polyline id="r_60_circle" data-name="r 60 circle" points="150,255.3 165,260.1 180,264.6 195,268.8 210,272.7 225,276.3 240,279.7 255,282.8 270,285.7 285,288.2 300,290.6 315,292.6 330,294.4 345,296 360,297.3 375,298.3 390,299.1 405,299.7 420,299.9 435,300 450,299.8 465,299.3 480,298.6 495,297.6 510,296.4 525,295 540,293.3 555,291.3 570,289 585,286.6 600,283.8 615,280.8 630,277.5 645,273.9 660,270.1 675,266 690,261.6 705,257 720,252 735,246.7 750,241.2" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <line id="line_y___-60" data-name="line y = -60" x1="150" y1="300" x2="750" y2="300" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <circle id="r_3.5_circle" data-name="r 3.5 circle" cx="470" cy="430" r="130" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="dim_V" data-name="dim V" x1="430" y1="300" x2="430" y2="226" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="4 3"/>
+    <line id="dim_S" data-name="dim S" x1="470" y1="300" x2="470" y2="226" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="4 3"/>
+    <line id="dim_gap" data-name="dim gap" x1="430" y1="231" x2="470" y2="231" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10"/>
+    <circle id="V" cx="430" cy="300" r="5" fill="#000000"/>
+    <circle id="S" cx="470" cy="300" r="5" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 40 45)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">#9216: a vertex beside the r 3.5 wall&apos;s seam (plan view, not to scale)</tspan></text>
+    <text transform="matrix(1 0 0 1 40 70)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">Before: an edge beside the seam at V withheld V&apos;s tolerance, so the gap failed face test 36. Now only an edge that bounds a face with the seam&apos;s own edge</tspan><tspan x="0" y="26.4">(a sliver) withholds it.</tspan></text>
+    <text transform="matrix(1 0 0 1 480 236)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">2.6e-8 across the seam: past 1e-9, inside V&apos;s 2e-5</tspan></text>
+    <text transform="matrix(1 0 0 1 560 180)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">ring (material)</tspan></text>
+    <text transform="matrix(1 0 0 1 150 160)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">V&apos;s tolerance zone (2e-5)</tspan></text>
+    <line id="leader_tol" data-name="leader tol" x1="300" y1="166" x2="395" y2="256" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 150 360)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">vertex V: the loops meet here</tspan></text>
+    <line id="leader_V" data-name="leader V" x1="330" y1="348" x2="426" y2="304" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 150 250)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">slit B (empty)</tspan></text>
+    <line id="leader_B" data-name="leader B" x1="200" y1="255" x2="250" y2="292" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 680 330)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">slit C (empty)</tspan></text>
+    <line id="leader_C" data-name="leader C" x1="700" y1="318" x2="660" y2="294" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 610 385)" x="0" y="14" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="14">S: the seam edge of the r 3.5 wall, one full</tspan><tspan x="0" y="30.8">cylinder, seen end-on</tspan></text>
+    <line id="leader_S" data-name="leader S" x1="608" y1="392" x2="474" y2="304" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 470 450)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">r 3.5 hole</tspan></text>
+    <text transform="matrix(1 0 0 1 150 440)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">lug (material)</tspan></text>
+    <text transform="matrix(1 0 0 1 610 460)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">The tips of slits B and C are edges beside the seam</tspan><tspan x="0" y="26.4">at V, on the slits&apos; own walls. No face lies between</tspan><tspan x="0" y="40.8">them and S, so there is no sliver.</tspan></text>
+  </g>
+</svg>

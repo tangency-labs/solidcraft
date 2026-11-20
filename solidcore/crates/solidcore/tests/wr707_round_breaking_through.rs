@@ -1,7 +1,5 @@
-//! WR-707 (#2299): with `fixes.fillet_refuse_rounds_breaking_through` (and
-//! `fixes.fillet_gn_section_generator`), a convex round whose section between its rails
-//! would cross a face of the part inside that face is refused, naming the largest radius
-//! that stays inside, with that radius less the fit margin on the refusal
+//! WR-707 (#2299): a convex round whose section between its rails would cross a face of the
+//! part inside that face is refused, naming the largest radius that stays inside, with that radius less the fit margin on the refusal
 //! ([`SolidError::FilletRefused`]).
 //!
 //! The case (SolidCraft #1668, filed as #2299): a 104 x 64 x 42 box shelled outward by 2,
@@ -31,12 +29,11 @@ use solidcore::query::api_queries::edge_closest_point;
 use solidcore::topology::EdgeId;
 use solidcore::{Brep, Kernel, SolidError};
 
-fn kernel(fix: bool) -> Kernel {
-    let mut k = Kernel::default();
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_refuse_rounds_breaking_through = fix;
-    k.fixes = fixes;
-    k
+fn kernel() -> Kernel {
+    Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    }
 }
 
 fn pick(k: &Kernel, b: &Brep, q: Point3) -> EdgeId {
@@ -75,7 +72,7 @@ fn round(k: &mut Kernel, b: &mut Brep, r: f64) -> solidcore::Result<()> {
 
 #[test]
 fn a_round_breaking_through_a_thin_wall_is_refused_naming_the_radius_that_stays_inside() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = shelled(&mut k);
     let err = round(&mut k, &mut b, 7.0).expect_err("refused");
     eprintln!("{err:?}");
@@ -101,7 +98,7 @@ fn a_round_breaking_through_a_thin_wall_is_refused_naming_the_radius_that_stays_
         fit.size
     );
     // the fit builds: the round inside the wall
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = shelled(&mut k);
     round(&mut k, &mut b, fit.size).unwrap();
     let want = 39552.0 - (1.0 - std::f64::consts::FRAC_PI_4) * fit.size * fit.size * 104.0;
@@ -113,29 +110,10 @@ fn a_round_breaking_through_a_thin_wall_is_refused_naming_the_radius_that_stays_
 /// shelled box's 104 64 42 - 100 60 40 = 39552.
 #[test]
 fn a_round_inside_the_wall_builds() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = shelled(&mut k);
     round(&mut k, &mut b, 5.0).unwrap();
     let want = 39552.0 - (1.0 - std::f64::consts::FRAC_PI_4) * 25.0 * 104.0;
     let v = volume(&k, &mut b);
     assert!((v - want).abs() <= 1e-7 * want, "{v} vs {want}");
-}
-
-/// Without the flag the round r7 is not refused for breaking through (#2299's result).
-#[test]
-fn without_the_flag_the_break_through_is_not_judged() {
-    let mut k = kernel(false);
-    let mut b = shelled(&mut k);
-    if let Err(err) = round(&mut k, &mut b, 7.0) {
-        assert!(
-            !matches!(
-                err,
-                SolidError::FilletRefused {
-                    reason: Some(NoRoomReason::BreaksThrough),
-                    ..
-                }
-            ),
-            "{err:?}"
-        );
-    }
 }

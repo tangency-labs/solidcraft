@@ -552,7 +552,7 @@ fn runner_output(
     let on = |c: &Option<Curve2>, s: &Surface| -> (Vec<[f64; 2]>, Vec<V3>) {
         let Some(c) = c else { return (Vec::new(), Vec::new()) };
         let Some(ivl) = c.interval() else { return (Vec::new(), Vec::new()) };
-        params(ivl).filter_map(|t| solidcraft_geom::brep::pcurve::eval(c, t)).filter_map(|q| s.evaluate(q[0], q[1]).ok().map(|p| (q, p))).unzip()
+        params(ivl).filter_map(|t| solidcore_ops::pcurve::eval(c, t)).filter_map(|q| s.evaluate(q[0], q[1]).ok().map(|p| (q, p))).unzip()
     };
     let mut curves = Vec::new();
     for c in r.curves {
@@ -620,7 +620,8 @@ fn global_intersect_scores() -> Vec<Score> {
 /// solidcore passes exactly the cases [`GSI_1E6_PASS`] lists: a case that starts passing is
 /// added there, one that stops is a regression. The self-crossing curves (Viviani's figure eight,
 /// the crossing loops) are split at their crossings since solidcore's
-/// `ssi_split_curves_at_singular_points` (tangency-labs/solidcore#2110).
+/// singular-point split (WR-77; once the opt-in `ssi_split_curves_at_singular_points`,
+/// tangency-labs/solidcore#2110).
 #[test]
 fn solidcore_global_intersect_at_1e_6() {
     let scores = global_intersect_scores();

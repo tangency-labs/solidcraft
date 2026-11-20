@@ -5,6 +5,29 @@ use solidcraft_engine::geom::prelude::*;
 use crate::SolveApp;
 use crate::viewport::{Hit, pick, pick_all, projection};
 
+#[test]
+fn only_an_outline_pick_builds_the_display_outline_index() {
+    use solidcore_record::Vec3;
+    let mesh = std::sync::Arc::new(solidcraft_engine::geom::Mesh {
+        positions: vec![Vec3::ZERO, Vec3::X, Vec3::Y],
+        triangles: vec![[0, 1, 2]],
+        edges: vec![vec![Vec3::ZERO, Vec3::X]],
+        display_only_edges: true,
+        ..Default::default()
+    });
+    let indexes = super::PickIndexes::default();
+    let faces = indexes.of(&mesh).unwrap();
+    let o = Vec3::new(0.25, 0.25, 1.0);
+    assert_eq!(faces.raycast(&mesh, o, -Vec3::Z), Some((1.0, 0)));
+    assert!(super::segments_near(Some(&faces), &mesh, o, -Vec3::Z, (0.3, 0.0)).is_empty());
+    assert_eq!(indexes.len(), 1);
+
+    let outlines = indexes.for_edges(&mesh).unwrap();
+    assert_eq!(super::segments_near(Some(&outlines), &mesh, o, -Vec3::Z, (0.3, 0.0)), vec![(0, 0)]);
+    assert_eq!(indexes.len(), 2);
+    assert!(std::sync::Arc::ptr_eq(&outlines, &indexes.for_edges(&mesh).unwrap()));
+}
+
 /// Overlapping bodies with flat and curved faces, filleted edges and seams.
 fn assembly() -> SolveApp {
     let mut s = solidcraft_engine::Session::default();
@@ -122,7 +145,9 @@ fn pick_timing_on_curved_models() {
         app.set_origin_shown(false);
         (app.cam.yaw, app.cam.pitch) = (0.6, pitch);
         let st = app.session.world_state().unwrap();
-        app.cam.fit(&st.bodies.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, b| a.union(&b.mesh_bounds())));
+        app.cam.fit(&solidcraft_engine::render::view_bounds(
+            &st.bodies.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, b| a.union(&b.mesh_bounds())),
+        ));
         let (tris, segs) = st
             .bodies
             .iter()

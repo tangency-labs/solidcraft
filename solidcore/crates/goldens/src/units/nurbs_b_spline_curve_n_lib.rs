@@ -526,7 +526,9 @@ fn dump_state(o: &mut Vec<f64>, c: &BSplineCurve) {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -2115,5 +2117,103 @@ mod tests {
             built >= 80 && refused >= 4,
             "{built} built, {refused} refused"
         );
+    }
+
+    /// The Euclidean points and weights of `c`'s control points.
+    fn euclid(c: &BSplineCurve) -> Vec<(Vec3, f64)> {
+        let cur = c.gw_nurb().unwrap();
+        cur.cpts()
+            .iter()
+            .map(|p| {
+                let z = if p.z == NOZ { 0.0 } else { p.z / p.w };
+                (Vec3::new(p.x / p.w, p.y / p.w, z), p.w)
+            })
+            .collect()
+    }
+
+    /// The departures of the rational quadratic Bezier span `(p0, p1, p2)` from an exact
+    /// arc of the circle of radius `r` about the origin: its ends off the circle
+    /// (`|P|^2 - r^2`), its middle point off either end's tangent (`(P1 - P) . P`), and its
+    /// normalized middle weight off the cosine of the half angle. All three vanish exactly
+    /// when the span is the arc between its ends (the conic is then the circle).
+    fn arc_departures(span: &[(Vec3, f64)], r: f64) -> [f64; 3] {
+        let [(e0, w0), (e1, w1), (e2, w2)] = [span[0], span[1], span[2]];
+        let on = (e0.dot(e0) - r * r).abs().max((e2.dot(e2) - r * r).abs());
+        let tangent = ((e1 - e0).dot(e0)).abs().max(((e1 - e2).dot(e2)).abs());
+        let cos = e0.dot(e2) / (r * r);
+        let weight = (w1 / (w0 * w2).sqrt() - ((1.0 + cos) / 2.0).sqrt()).abs();
+        [on, tangent, weight]
+    }
+
+    /// WR-575's own trim cases (`issue1529_*`, `issue1114_*`, the moved rows of the flag
+    /// retirement): a half circle, its knot at 0.5, trimmed 1e-7 (radius 16) or 3.5e-6
+    /// (radius 0.14) past the knot. The trim keeps the short end span, so the result is
+    /// the requested interval with the knot kept, both spans are exact arcs of the
+    /// circle, and together they run from the circle's point at `a` through its point at
+    /// the knot to its point at `b`, in its plane (to a rounding allowance of 256 ulps of
+    /// `r`, `r^2` and 1, a chosen margin rather than a derived bound). The values
+    /// blessed before, upstream's removal of the span, are a single span whose middle
+    /// point is off its end tangent by 5.3e-5 (`r^2`-scaled) and whose middle weight is
+    /// off the half-angle cosine by 1.3e-7, far past that allowance: the conic it gives
+    /// is not the circle.
+    #[test]
+    fn wr575_trim_cases_keep_the_exact_arc() {
+        let u = f64::EPSILON;
+        let mut checked = 0;
+        for text in [
+            include_str!("../../../../fixtures/nurbs.b_spline_curve_n_lib/issue1529_short_end_span.json"),
+            include_str!("../../../../fixtures/nurbs.b_spline_curve_n_lib/issue1114_uv_trim_spans.json"),
+        ] {
+            let fixtures: Value = serde_json::from_str(text).unwrap();
+            for case in fixtures["cases"].as_array().unwrap() {
+                let name = case["name"].as_str().unwrap();
+                let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
+                let OpIn::Trim { a, b, mode } = i.op else {
+                    panic!("{name}: not a trim");
+                };
+                if mode == 2 {
+                    continue;
+                }
+                let mut c = build_this(i.this.as_ref().unwrap()).unwrap();
+                let r = euclid(&c)[0].0.length();
+                let mut ivl = Extent1d::from_min_max(a, b);
+                c.trim(&Kernel::default(), &mut ivl, trim_mode(mode).unwrap())
+                    .unwrap();
+                assert_eq!(ivl, Extent1d::from_min_max(a, b), "{name}");
+                let knots = c.gw_nurb().unwrap().knots().to_vec();
+                assert_eq!(knots, vec![a, a, a, 0.5, 0.5, b, b, b], "{name}");
+                let pts = euclid(&c);
+                assert_eq!(pts.len(), 5, "{name}");
+                // which arc: in the circle's plane, from the circle's point at `a` through
+                // its point at the knot, (0, r), to its point at `b`
+                let orig = build_this(i.this.as_ref().unwrap()).unwrap();
+                let close = |p: Vec3, q: Vec3| (p - q).length() <= 256.0 * u * r;
+                assert!(pts.iter().all(|(p, _)| p.z == 0.0), "{name}: off the plane");
+                assert!(close(pts[0].0, orig.evaluate_point(a).unwrap()), "{name}: start");
+                assert!(close(pts[2].0, Vec3::new(0.0, r, 0.0)), "{name}: knot");
+                assert!(close(pts[4].0, orig.evaluate_point(b).unwrap()), "{name}: end");
+                for span in [&pts[0..3], &pts[2..5]] {
+                    let [on, tangent, weight] = arc_departures(span, r);
+                    assert!(on <= 256.0 * u * r * r, "{name}: end off the circle {on}");
+                    assert!(tangent <= 256.0 * u * r * r, "{name}: off a tangent {tangent}");
+                    assert!(weight <= 256.0 * u, "{name}: weight {weight}");
+                }
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 12);
+
+        // a real defect is still caught: the row blessed before for
+        // `issue1529_r16_head_notify` (homogeneous control points)
+        let old = [
+            [4.525483134627358e-6, 15.999998125483136, 0.0, 0.999999882842736],
+            [-9.05096679918781, 12.25096679918781, 0.0, 0.7656854249492381],
+            [-13.860386719675125, 4.260386719675123, 0.0, 0.9062741699796952],
+        ]
+        .map(|[x, y, z, w]| (Vec3::new(x / w, y / w, z / w), w));
+        let u16 = 256.0 * u * 16.0 * 16.0;
+        let [_, tangent, weight] = arc_departures(&old, 16.0);
+        assert!(tangent > 1e5 * u16, "{tangent}");
+        assert!(weight > 1e5 * 256.0 * u, "{weight}");
     }
 }

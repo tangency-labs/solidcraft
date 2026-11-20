@@ -288,22 +288,22 @@ fn counted(n: usize, thing: &str) -> String {
 
 fn folder_menu(app: &mut SolveApp, ui: &mut egui::Ui, folder: &Folder, view: &crate::timeline_fold::View, at: egui::Pos2) {
     let fold = if folder.open { "Fold Features" } else { "Show Each Feature" };
-    if crate::context_menu::button(ui, fold, "list").clicked() {
+    if crate::ui_kit::menu::button(ui, fold, "list").clicked() {
         set_open(app, folder.id, !folder.open);
         ui.close();
     }
-    if crate::context_menu::button(ui, "Rename", "rename").clicked() {
+    if crate::ui_kit::menu::button(ui, "Rename", "rename").clicked() {
         crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(folder.id), at);
         ui.close();
     }
     crate::timeline::edit_holes_item(app, ui, folder.id);
-    if crate::context_menu::button(ui, "Ungroup", "feature_group").backing_on_hover_text("Keep its features and folders in the history").clicked() {
+    if crate::ui_kit::menu::button(ui, "Ungroup", "feature_group").backing_on_hover_text("Keep its features and folders in the history").clicked() {
         app.tree.picked_timeline_groups.retain(|g| *g != folder.id);
         let _ = app.run("timeline.ungroup", json!({ "group": folder.id }));
         ui.close();
     }
     ui.separator();
-    if crate::context_menu::button(ui, "Select Features", "select").clicked() {
+    if crate::ui_kit::menu::button(ui, "Select Features", "select").clicked() {
         let features = &app.session.doc.features;
         let items: Vec<_> = view
             .indices(folder.start, folder.end)
@@ -316,7 +316,7 @@ fn folder_menu(app: &mut SolveApp, ui: &mut egui::Ui, folder: &Folder, view: &cr
         let _ = app.run("select.set", json!({ "items": items }));
         ui.close();
     }
-    if crate::context_menu::button(ui, "Roll History Marker Here", "rollback").clicked() {
+    if crate::ui_kit::menu::button(ui, "Roll History Marker Here", "rollback").clicked() {
         let end = view.index(folder.end);
         let position = if end >= app.session.doc.features.len() { json!({}) } else { json!({ "position": end }) };
         let _ = app.run_heavy("timeline.roll_to", position);
@@ -391,14 +391,12 @@ mod tests {
         assert_eq!(depth, super::DEPTH_MAX, "nesting stops at the deepest allowed level");
     }
 
-    /// An inserted assembly's folder holds its whole rigid group, also the joints inside its
-    /// sub-assemblies, whose two ends meet in a component below the import's own; none is left
-    /// for the joints chip after the history.
+    /// An inserted assembly's one rigid group holds its sub-assemblies' contents too, at any
+    /// depth, so there are no joints for its folder or for the joints chip after the history.
     #[test]
-    fn an_import_folder_holds_the_joints_of_its_sub_assemblies() {
+    fn an_import_holds_its_sub_assemblies_with_one_rigid_group() {
         use serde_json::json;
         use solidcraft_engine::Session;
-        use solidcraft_engine::doc::joints::JointKind;
         let run = |s: &mut Session, command: &str, params: serde_json::Value| s.execute(command, &params).unwrap();
         // Outer holds a plate and Inner, placed twice: the file nests Inner in Outer.
         let mut s = Session::default();
@@ -416,12 +414,10 @@ mod tests {
         let mut s = Session::default();
         let folder = run(&mut s, "file.insert_step", json!({"path": path, "folder": true}))["group"].as_u64().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
-        let mut rigid: Vec<u64> = s.doc.assembly.joints.iter().filter(|j| j.kind == JointKind::Rigid).map(|j| j.id).collect();
-        rigid.sort_unstable();
-        let mut held = super::Folders::of(&s.doc).joints.get(&folder).cloned().unwrap_or_default();
-        held.sort_unstable();
-        assert!(rigid.len() >= 3, "the plate and both Inner placements are held: {rigid:?}");
-        assert_eq!(held, rigid, "every joint of the import is in its folder");
+        // One rigid group holds the plate and both Inner placements; the folder holds the feature.
+        let [group] = s.doc.assembly.rigid_groups.as_slice() else { panic!("one rigid group: {:?}", s.doc.assembly.rigid_groups) };
+        assert!(s.doc.rigid_group_members(group).len() >= 3, "the plate and both Inner placements are held");
+        assert!(super::Folders::of(&s.doc).joints.get(&folder).is_none_or(Vec::is_empty), "no joints to put in the folder");
     }
 
     /// A new folder goes in the innermost folder holding all the features grouped.

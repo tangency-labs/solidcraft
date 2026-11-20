@@ -3,13 +3,13 @@
 use super::{BaseColorMode, TextureBinding, TextureMap, normal_direction_variance, unit_normal_texel};
 use crate::{
     job::{CancelToken, ErrorCode, JobError, Result},
-    surface::{MIN_ROUGHNESS, srgb8_to_linear},
     surface_patterns::ShadingSurface,
     texture_input::{MapRole, png_metadata::PngMetadata},
     texture_sampling::{TextureView, mips},
 };
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
+use solidcraft_viewport::surface::{MIN_ROUGHNESS, srgb8_to_linear};
 use std::{
     io::{self, BufRead, Read, Seek, SeekFrom},
     sync::Arc,
@@ -530,9 +530,9 @@ impl PreparedMap {
         rgb: [f64; 3],
         minification: f64,
     ) -> Result<ShadingSurface> {
-        let shading = crate::surface::unit_direction(original.shading_normal).map_err(|error| invalid(error.to_string()))?;
-        let geometric = crate::surface::unit_direction(point.geometric_normal).map_err(|error| invalid(error.to_string()))?;
-        let view = crate::surface::unit_direction(point.view_direction).map_err(|error| invalid(error.to_string()))?;
+        let shading = solidcraft_viewport::surface::unit_direction(original.shading_normal).map_err(|error| invalid(error.to_string()))?;
+        let geometric = solidcraft_viewport::surface::unit_direction(point.geometric_normal).map_err(|error| invalid(error.to_string()))?;
+        let view = solidcraft_viewport::surface::unit_direction(point.view_direction).map_err(|error| invalid(error.to_string()))?;
         if geometric.dot(view) <= 0.0 {
             return Err(invalid("CPU mapped surface view crosses its oriented geometric surface"));
         }

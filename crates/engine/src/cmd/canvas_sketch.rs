@@ -17,12 +17,20 @@ use solidcraft_io::Geom2;
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
+use crate::schema::canvas::{CanvasToSketchParams, CanvasTraced};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("canvas.to_sketch", "Canvas to Sketch", to_sketch).icon("canvas").params(concat!(
-    "canvas?: id or name (default: the last canvas); name?: the new sketch's name. Traces the canvas image (dark drawing on a light background, ",
-    "or the reverse) into a new sketch on the canvas plane, lying exactly on the image: lines, splines and holes"
-))];
+const TO_SKETCH_CONTRACT: TypedContract<CanvasToSketchParams> = TypedContract::new();
+
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("canvas.to_sketch", "Canvas to Sketch", crate::checked!("canvas.to_sketch", to_sketch))
+    .icon("canvas")
+    .contract(&TO_SKETCH_CONTRACT)
+    .output(output_schema_for::<CanvasTraced>)
+    .params(concat!(
+        "canvas?: id or name (default: the last canvas); name?: the new sketch's name. Traces the canvas image (dark drawing on a light background, ",
+        "or the reverse) into a new sketch on the canvas plane, lying exactly on the image: lines, splines and holes"
+    ))];
 
 const WORK_RES: u32 = 512;
 const MAX_LOOPS: usize = 2000;
@@ -49,12 +57,32 @@ fn to_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     if loops.is_empty() {
         return Err(bad(cmd, "no outline found in the image (it needs a drawing that stands out from its background)"));
     }
+    // An anchored canvas is traced where its frame shows it: into its sketch's plane, each pixel
+    // placed through the frame's corners (stretched, turned and mirrored as shown).
+    let anchored = canvas.anchor.as_ref().and_then(|a| {
+        let frame = s.doc.canvas_anchor_frame(&canvas, a, &s.model.state()).ok()?;
+        match s.doc.feature(a.sketch).map(|f| &f.kind) {
+            Some(solidcraft_doc::FeatureKind::Sketch { plane, .. }) => Some((plane.clone(), frame)),
+            _ => None,
+        }
+    });
     // Image pixels -> canvas plane: width as the canvas, centred, turned and mirrored like it.
-    let sc = canvas.width / w as f64;
+    let sc = match &anchored {
+        Some((_, [bl, br, _, _])) => (*br - *bl).len() / w as f64,
+        None => canvas.width / w as f64,
+    };
     let (half_w, half_h) = (w as f64 * sc / 2.0, h as f64 * sc / 2.0);
     let (sin, cos) = canvas.angle.sin_cos();
     let (center, flip) = (canvas.center, canvas.flip);
+    let frame = anchored.as_ref().map(|(_, k)| *k);
+    let (wf, hf) = (w as f64, h as f64);
     let tf = move |q: Vec2| -> Vec2 {
+        if let Some([bl, br, _, tl]) = frame {
+            // Pixel (0, h) is the image's bottom-left corner, (w, h) its bottom-right, (0, 0) its top-left.
+            let xyz = |p: Vec2| [p.x, p.y, 0.0];
+            let [x, y, _] = solidcore_ops::affine::parallelogram_point(xyz(bl), xyz(br - bl), xyz(tl - bl), q.x / wf, 1.0 - q.y / hf);
+            return Vec2::new(x, y);
+        }
         let mut u = q.x * sc - half_w;
         let v = half_h - q.y * sc;
         if flip {
@@ -74,11 +102,13 @@ fn to_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             cur = seg.end();
         }
     }
-    let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| format!("{} sketch", canvas.name));
-    let r = super::sketch::create_sketch_with_plane(s, &json!({ "name": name }), canvas.plane.clone(), None)?;
-    let id = r.get("sketch").and_then(Value::as_u64);
+    let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| s.doc.free_sketch_name(&format!("{} sketch", canvas.name)));
+    let plane = anchored.map_or_else(|| canvas.plane.clone(), |(plane, _)| plane);
+    let r = super::sketch::create_sketch_with_plane(s, &json!({ "name": name }), plane, None)?;
+    // `sketch.create` always reports the id of the sketch it made.
+    let id = r.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "could not start a sketch on the canvas"))?;
     let tol = (sc * 0.01).max(1e-6);
-    let made = super::sketch::edit(s, &json!({}), cmd, false, |sk, _| {
+    let made = super::sketch::edit_solve(s, &json!({}), cmd, false, |sk, _| {
         let (cs, _) = super::sketch_import::add_geometry(sk, &geom, &|q| q, 1.0, tol)?;
         Ok(cs.len())
     });
@@ -92,7 +122,10 @@ fn to_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     };
     finish(s, &json!({}))?;
     let holes = loops.iter().filter(|l| l.depth % 2 == 1).count();
-    Ok(json!({"sketch": id, "name": name, "canvas": canvas.id, "curves": curves, "outlines": loops.len() - holes, "holes": holes, "info": info}))
+    super::sketch_canvas::canvas_reply(
+        cmd,
+        CanvasTraced { sketch: id, name, canvas: canvas.id, curves, outlines: loops.len() - holes, holes, info, param_warnings: Vec::new() },
+    )
 }
 
 fn pick(s: &Session, p: &Value, cmd: &str) -> Result<Canvas> {

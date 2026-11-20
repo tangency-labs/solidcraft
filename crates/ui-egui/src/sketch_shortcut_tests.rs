@@ -207,7 +207,6 @@ fn move_key_keeps_sketch_mode_behavior_and_honors_a_sketch_move_binding() {
 
     press(&mut h, "M");
     assert!(h.app.dialog.is_none(), "the default body Move shortcut is disabled in a sketch");
-    assert!(h.app.tree.occurrence_move.is_none());
     assert_eq!(h.app.session.active_sketch, sketch);
     assert_eq!(h.app.session.selection, selection);
 
@@ -217,7 +216,7 @@ fn move_key_keeps_sketch_mode_behavior_and_honors_a_sketch_move_binding() {
     assert!(matches!(dialog.kind, crate::dialogs::Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. })));
     assert_eq!(dialog.inputs[0].items, selection);
     assert_eq!(h.app.session.active_sketch, sketch);
-    assert!(h.app.tree.occurrence_move.is_none(), "M must not open component Move while editing its sketch");
+    assert!(crate::dialogs_move::moving(&h.app).is_none(), "M must not open component Move while editing its sketch");
 }
 
 /// With Keep model keys out of sketches on, sketches and the model have their own keys: with M
@@ -247,12 +246,35 @@ fn sketch_and_model_keys_are_kept_apart() {
     assert!(e.contains("already used"), "{e}");
 }
 
-/// #2459: by default a tool's shortcut pressed again starts the tool again, in the mode the key
-/// is bound to; the preference is off.
+/// Pressing an active tool or dialog's shortcut again closes it by default; auto-repeat does not,
+/// and with `shortcut_again_ends_tool` off the key starts the tool again as before.
 #[test]
-fn a_tools_shortcut_pressed_again_restarts_it_by_default() {
+fn a_tools_shortcut_pressed_again_closes_it_by_default() {
     let mut h = Harness::new();
     assert!(!h.app.preferences.shortcut_cycles_modes, "off by default");
+    assert!(h.app.preferences.shortcut_again_ends_tool, "on by default");
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.settle();
+    press(&mut h, "L");
+    assert_eq!(tool(&h), Some("sketch.line"));
+    crate::keymap::press(&mut h.app, "L", true);
+    assert_eq!(tool(&h), Some("sketch.line"), "key repeat keeps the tool");
+    press(&mut h, "L");
+    assert_eq!(tool(&h), None, "pressing L again closes the tool");
+    crate::keymap::press(&mut h.app, "L", true);
+    assert_eq!(tool(&h), None, "key repeat after closing does not reopen the tool");
+    h.app.finish_sketch();
+    h.settle();
+    press(&mut h, "E");
+    assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
+    crate::keymap::press(&mut h.app, "E", true);
+    assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"), "key repeat keeps the dialog");
+    press(&mut h, "E");
+    assert!(h.app.dialog.is_none(), "pressing E again closes the extrude dialog");
+    crate::keymap::press(&mut h.app, "E", true);
+    assert!(h.app.dialog.is_none(), "key repeat after closing does not reopen the dialog");
+    // The old way, behind the preference: pressing the key again restarts the tool.
+    h.app.preferences.shortcut_again_ends_tool = false;
     h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
     h.settle();
     press(&mut h, "R");
@@ -671,6 +693,76 @@ fn a_line_starts_on_projected_geometry_and_in_construction_mode() {
             _ => false,
         });
         assert!(tied, "{case}: the line's start is not tied to the edge it was started on: {:?}", sketch.constraints);
+    }
+}
+
+/// The Line tool's first click starts a line on the edges a sketch projects from the face it
+/// sits on: a rectangle drawn in a sketch and extruded, a new sketch picked on the extruded face,
+/// and a line started on each of the four edges that face projects. Reported as #14796.
+#[test]
+fn a_line_starts_on_the_projected_edges_of_a_picked_extruded_face() {
+    use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Shape};
+    for edge in 0..4 {
+        let mut h = Harness::new();
+        h.app.set_origin_shown(false);
+        // A rectangle drawn in a sketch and extruded: the extruded body has a cap face on top.
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,40]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"distance":10})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.call("ui.view", json!({"view":"fit"}));
+        h.settle();
+        // A new sketch picked on that face: the face's edges are projected into it.
+        h.step(&json!({"start":"sketch.create"})).unwrap();
+        h.step(&json!({"click":{"world":[20,20,10]}})).unwrap();
+        h.settle();
+        let state = h.app.session.world_state().unwrap();
+        let ss = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let sketch = &ss.sketch;
+        let projected: Vec<usize> = (0..sketch.curves.len()).filter(|&c| sketch.curves[c].link.is_some()).collect();
+        assert_eq!(projected.len(), 4, "the picked face projects its four edges: {:?}", sketch.curves);
+        // The middle of every projected edge, in world coordinates, and their middle: the middle
+        // of the projected rectangle lies on no edge.
+        let middles: Vec<_> = projected
+            .iter()
+            .map(|&c| {
+                let (a, b) = match sketch.shape(c).unwrap() {
+                    Shape::Line { a, b } => (a, b),
+                    other => panic!("a projected edge is not a line: {other:?}"),
+                };
+                ss.plane.to_world((a + b) / 2.0)
+            })
+            .collect();
+        let start = middles[edge];
+        let n = middles.len() as f64;
+        let end = [
+            middles.iter().map(|v| v.x).sum::<f64>() / n,
+            middles.iter().map(|v| v.y).sum::<f64>() / n,
+            middles.iter().map(|v| v.z).sum::<f64>() / n,
+        ];
+        let before = sketch.curves.len();
+        h.step(&json!({"start":"sketch.line"})).unwrap();
+        h.step(&json!({"click":{"world":[start.x, start.y, start.z]}})).unwrap();
+        h.step(&json!({"move":{"world":end}})).unwrap();
+        h.step(&json!({"click":{"world":end}})).unwrap();
+        h.settle();
+        let state = h.app.session.world_state().unwrap();
+        let ss = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let sketch = &ss.sketch;
+        assert_eq!(sketch.curves.len(), before + 1, "edge {edge}: no line from the first click; {:?}", h.app.status);
+        let new = sketch.curves.last().unwrap();
+        let CurveKind::Line { a, .. } = new.kind else { panic!("edge {edge}: the new curve is not a line") };
+        let at = ss.plane.to_world(sketch.point(a).unwrap());
+        assert!(
+            (at.x - start.x).abs() < 1e-3 && (at.y - start.y).abs() < 1e-3 && (at.z - start.z).abs() < 1e-3,
+            "edge {edge}: the line starts at {at:?}, expected {start:?}"
+        );
+        let tied = sketch.constraints.iter().any(|c| match c.kind {
+            ConstraintKind::PointOnCurve { p, c } | ConstraintKind::Midpoint { p, l: c } => p == a && projected.contains(&c),
+            _ => false,
+        });
+        assert!(tied, "edge {edge}: the line's start is not tied to the projected edge it was started on: {:?}", sketch.constraints);
     }
 }
 

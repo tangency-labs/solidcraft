@@ -26,6 +26,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::error::nurbs::nlib_number;
 use solidcore::nurbs::crv_basic::Curve;
 use solidcore::nurbs::funcs_basic::CurveFunction;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
@@ -250,7 +251,7 @@ fn dump_crv(o: &mut Vec<f64>, c: &Curve) {
 /// Status of a Rust error: the NLib number, `-1` for anything else.
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::Nlib { code, .. } => f64::from(code.code()),
+        e if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         _ => -1.0,
     }
 }

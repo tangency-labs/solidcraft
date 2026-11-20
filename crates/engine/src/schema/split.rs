@@ -30,6 +30,10 @@ pub struct SplitBodyParams {
     /// `line` is given.
     #[serde(default)]
     pub tool: Option<ToolFace>,
+    /// With `tool`: use only the face's infinite plane, which follows the face. The face must
+    /// remain planar. Default: false, use its extended surface and its sheet.
+    #[serde(default)]
+    pub tool_plane: Option<bool>,
     /// With `line`: the sketch, by feature id (not its name), whose line splits the body.
     #[serde(default)]
     pub sketch: Option<SketchFeatureId>,
@@ -64,6 +68,11 @@ pub struct SplitFaceParams {
     /// `tool` is given.
     #[serde(default)]
     pub sketch: Option<SketchRef>,
+    /// With `sketch`: true joins its curves end to end first, so a closed loop of lines and arcs
+    /// splits the faces along the loop only. Default: false, each curve on its own, an open one
+    /// extended past its ends.
+    #[serde(default)]
+    pub loops: Option<bool>,
     /// The plane to split along. Read when neither `tool` nor `sketch` is given; then it is
     /// required.
     #[serde(default)]

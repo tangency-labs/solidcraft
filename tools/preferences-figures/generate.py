@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile docs/design/preferences/figures/*.svg into ui_kit/preferences_figure_data.rs.
+"""Compile docs/design/preferences/figures/*.svg into crates/ui-kit/src/preferences_figure_data.rs.
 
 Each figure becomes a list of drawing operations (rectangles, circles, flattened polygons, text) in
 the figure's own coordinates, with colours as roles (`Ink`) instead of hex values. A role is the
@@ -18,7 +18,7 @@ import xml.etree.ElementTree as ET
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 FIGS = os.path.join(ROOT, 'docs/design/preferences/figures')
-OUT = os.path.join(ROOT, 'crates/ui-egui/src/ui_kit/preferences_figure_data.rs')
+OUT = os.path.join(ROOT, 'crates/ui-kit/src/preferences_figure_data.rs')
 
 # Skipped: the Orientation figures already exist in ui_kit and stay as they are.
 SKIP = {'orientation-z-up', 'orientation-y-up', 'style-shaded-edges'}

@@ -64,6 +64,7 @@ impl Document {
         self.body_components.retain(|_, c| !inside.contains(c));
         self.body_offsets.retain(|name, _| !bodies.contains(name));
         self.components.retain(|c| !inside.contains(&c.id));
+        self.assembly.rigid_groups.retain(|g| !inside.contains(&g.component));
         self.parts.retain(|c, _| !inside.contains(c));
         self.links.retain(|c, _| !inside.contains(c));
         self.remove_configuration_components(&components);
@@ -78,7 +79,7 @@ impl Document {
             .assembly
             .joints
             .iter()
-            .filter(|j| occurrences.contains(&j.a.occurrence) || occurrences.contains(&j.b.occurrence))
+            .filter(|j| j.a.occurrences().chain(j.b.occurrences()).any(|o| occurrences.contains(&o)))
             .map(|j| j.id)
             .collect();
         for group in &mut self.timeline_groups {
@@ -87,7 +88,7 @@ impl Document {
         let assembly = &mut self.assembly;
         assembly.joints.retain(|j| !joints.contains(&j.id));
         assembly.links.retain(|l| !joints.contains(&l.a) && !joints.contains(&l.b));
-        assembly.origins.retain(|o| !occurrences.contains(&o.origin.occurrence));
+        assembly.origins.retain(|o| !o.origin.occurrences().any(|o| occurrences.contains(&o)));
         for set in &mut assembly.contact_sets {
             set.occurrences.retain(|o| !occurrences.contains(o));
         }
@@ -96,6 +97,9 @@ impl Document {
         }
         for view in &mut assembly.exploded {
             view.moves.retain(|(o, _)| !occurrences.contains(o));
+        }
+        for group in &mut assembly.rigid_groups {
+            group.members.retain(|o| !occurrences.contains(o));
         }
         self.occurrences.retain(|o| !occurrences.contains(&o.id));
         joints

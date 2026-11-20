@@ -18,6 +18,80 @@ use crate::selection::{AXES, CURVES, POINTS, SelInput};
 use crate::sketch_modify_ui::{Mod, commands};
 
 #[test]
+fn break_and_trim_click_select_the_same_piece() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0,0], [100,0]], "ids": ["target"], "infer": false})).unwrap();
+    for x in [20, 70] {
+        h.app.run("sketch.line", json!({"points": [[x,-10], [x,10]], "infer": false})).unwrap();
+    }
+    h.app.run("sketch.point", json!({"point": "on:target:40,0"})).unwrap();
+    h.app.run("sketch.point", json!({"point": [60,0], "connect": false})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.view", json!({"view": "fit"}));
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+
+    // The second pick is within the snap radius of the constrained point, on its left.
+    for (pick, lo, hi) in [(50.0, 40.0, 70.0), (39.5, 20.0, 40.0)] {
+        let outer = [(0.0, lo), (hi, 100.0)];
+        let all = [outer[0], (lo, hi), outer[1]];
+        for (command, expected) in [("sketch.break", all.as_slice()), ("sketch.trim", outer.as_slice())] {
+            h.step(&json!({"start": command})).unwrap();
+            if command == "sketch.trim" {
+                h.step(&json!({"move": {"sketch": [pick,0]}})).unwrap();
+                let preview = crate::sketch_tools::trim_hover_piece(&h.app, sid, "target").unwrap();
+                assert!((preview.first().unwrap().x - lo).abs() < 1e-6 && (preview.last().unwrap().x - hi).abs() < 1e-6, "{pick}: {preview:?}");
+            }
+            h.step(&json!({"click": {"sketch": [pick,0]}})).unwrap();
+            let state = h.app.session.model.state();
+            let sk = &state.sketch(sid).unwrap().sketch;
+            let mut pieces: Vec<_> = sk
+                .curves
+                .iter()
+                .filter_map(|c| {
+                    let (a, b) = c.kind.ends()?;
+                    let (a, b) = (sk.point(a)?, sk.point(b)?);
+                    (a.y.abs() < 1e-6 && b.y.abs() < 1e-6).then_some((a.x.min(b.x), a.x.max(b.x)))
+                })
+                .collect();
+            pieces.sort_by(|a, b| a.0.total_cmp(&b.0));
+            assert_eq!(pieces.len(), expected.len(), "{command} at {pick}: {pieces:?}");
+            for ((a, b), (lo, hi)) in pieces.iter().zip(expected) {
+                assert!((a - lo).abs() < 1e-6 && (b - hi).abs() < 1e-6, "{command} at {pick}: {pieces:?}");
+            }
+            h.step(&json!({"key": "Escape"})).unwrap();
+            h.app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(h.app.session.model.state().sketch(sid).unwrap().sketch, before);
+        }
+    }
+}
+
+#[test]
+fn break_can_still_pick_a_shared_endpoint() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0,0], [20,0], [20,10]], "ids": ["first", "second"], "infer": false})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.view", json!({"view": "fit"}));
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    let shared = |h: &Harness| {
+        let state = h.app.session.model.state();
+        let sk = &state.sketch(sid).unwrap().sketch;
+        assert_eq!(sk.curves.len(), 2);
+        sk.curves[0].kind.ends().unwrap().1 == sk.curves[1].kind.ends().unwrap().0
+    };
+    assert!(shared(&h));
+    h.step(&json!({"start": "sketch.break"})).unwrap();
+    h.step(&json!({"click": {"sketch": [19.95,0]}})).unwrap();
+    assert!(!shared(&h));
+}
+
+#[test]
 fn existing_patterns_reopen_from_menu_and_badge_and_edit_without_changing_surviving_ids() {
     for circular in [false, true] {
         let mut h = Harness::new();
@@ -551,6 +625,31 @@ fn a_plain_move_takes_the_geometry_with_it() {
     let ys: Vec<f64> = sk.points.iter().filter(|p| corners.contains(&p.id)).map(|p| p.pos.y).collect();
     assert_eq!(ys.len(), 4, "{ys:?}");
     assert!(ys.iter().all(|y| (*y - 15.0).abs() < 1e-6 || (*y - 25.0).abs() < 1e-6), "the rectangle moved up by 5 mm: {ys:?}");
+    assert!(!h.app.status_undo, "nothing tied it to what stays, so nothing is let go: {:?}", h.app.status);
+}
+
+/// #2980: a rectangle drawn from the origin moves whole, and the status line says its corner's
+/// coincidence with the origin was let go; its Undo button undoes the move.
+#[test]
+fn a_move_that_lets_go_of_the_origin_says_so_and_offers_undo() {
+    let mut h = rectangle();
+    let sid = h.app.session.active_sketch.unwrap();
+    h.step(&json!({"start": "sketch.move"})).unwrap();
+    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = picks;
+        d.kind = Kind::SketchModify(Mod::Move { x: "15 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: false });
+    }
+    h.frames(2);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    let (msg, _, error) = h.app.status.clone().expect("the move says what it let go");
+    assert!(!error, "{msg}");
+    assert!(msg.contains("1 constraint") && msg.contains("Coincident"), "{msg}");
+    assert!(h.app.status_undo, "the message offers Undo");
+    let xs: Vec<f64> = h.app.session.model.state().sketch(sid).unwrap().sketch.points.iter().filter(|p| p.id != "origin").map(|p| p.pos.x).collect();
+    assert!(xs.iter().all(|x| (*x - 15.0).abs() < 1e-6 || (*x - 35.0).abs() < 1e-6), "the rectangle moved whole: {xs:?}");
 }
 
 #[test]

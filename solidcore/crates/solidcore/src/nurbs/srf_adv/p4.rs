@@ -6,7 +6,7 @@
 //!
 //! | Rust                                   | Upstream                         |
 //! |----------------------------------------|----------------------------------|
-//! | [`create_b_vectors`]                   | `N_CreateBVectors`               |
+//! | [`create_b_vectors`], [`create_b_vectors_closing`] | `N_CreateBVectors` |
 //! | [`create_coons_srf`]                   | `N_CreateCoonsSrf`               |
 //! | [`create_skin_srf_boundary_derivs`]    | `N_CreateSkinSrfBoundaryDerivs`  |
 //! | [`merge_knot_vectors`]                 | `N_MergeKnotVectors`             |
@@ -26,13 +26,19 @@
 //!   inserted) are `&mut` and modified the same way. Upstream's in-place modes
 //!   (`surP == surQ`, `derP == derQ`) compute the same values as the copying modes,
 //!   so the caller replaces its input with the returned value.
-//! - Errors are [`SolidError::Nlib`] values with the upstream `NL_*_ERR` number. A bare
+//! - Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the upstream `NL_*_ERR` number. A bare
 //!   upstream error flag (`NL_QUIT` without an error number: the sanity exit of
 //!   `N_MergeKnotVectors`, the missing-input exit of `ST_GetRotationRateOfChange`) is
 //!   `InvalidInput` with reason [`BARE_FLAG_REASON`].
 //! - `ST_GetRotationRateOfChange`'s optional pointers become a [`ZSource`]: a curve, or
 //!   a vector with its optional neighbours (both missing is the bare error). The rate
-//!   matrix `RM[i][j]` is a `[[f64; 3]; 3]` (rows `i`).
+//!   matrix `RM[i][j]` is a `[[f64; 3]; 3]` (rows `i`). Not upstream (the SolidCraft
+//!   fork's upright sweep): [`ZSource::Up`], z the up direction made square to the
+//!   trajectory's tangent, its derivative in closed form. Not upstream (#16959):
+//!   [`ZSource::RotationMinimizing`], a projection normal sample with that method's own
+//!   rate in closed form, and [`create_b_vectors_closing`], which also says whether a
+//!   closed curve's vectors were corrected to close and (#18117) corrects them by spreading
+//!   the closing angle evenly along the curve instead of upstream's backward averages.
 //! - `N_SweepCrossTangentCrv` ignores failures of `N_CrvEval` on the cross section
 //!   (the accumulated sample parameter can round past the last knot) and keeps the
 //!   previous sample, as does the Rust function; only a failure on the very first
@@ -57,7 +63,7 @@
 //!   `NL_DEGREE` is a `short`) is `InvalidInput`; sample arrays that cannot be
 //!   allocated are `NL_MEM_ERR`.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::PTOL;
 use crate::nurbs::bezier::{srf_extend_4d, ExtendAt};
@@ -122,9 +128,83 @@ fn ends(k: &[f64], op: &'static str) -> Result<(f64, f64)> {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Geometry`] when a vector cannot be normalised; errors of
+/// [`NurbsFailure::Geometry`] when a vector cannot be normalised; errors of
 /// [`Curve::eval_tangent`]; `InvalidInput` for an empty `t`.
 pub fn create_b_vectors(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<Vec<Vec3>> {
+    const OP: &str = OP_BVEC;
+    let (mut b, tg) = projection_b_vectors(cur, b0, t)?;
+    let k = t.len().checked_sub(1).ok_or_else(|| oob(OP))?;
+
+    // Correct for closed curves.
+    if closing_gap(cur, &b)? {
+        let first = at(&b, 0, OP)?;
+        put(&mut b, k, first, OP)?;
+        for i in (2..=k).rev() {
+            let bi = at(&b, i, OP)?;
+            let ti = at(&tg, i - 1, OP)?;
+            let dot = bi.dot(ti);
+            let (a, _) = normalize(combine2_pts(1.0, bi, -dot, ti))?;
+            let avg = combine2_pts(0.5, at(&b, i - 1, OP)?, 0.5, a);
+            let (bm, _) = normalize(avg)?;
+            put(&mut b, i - 1, bm, OP)?;
+        }
+    }
+    Ok(b)
+}
+
+/// The vectors of [`create_b_vectors`] made to close on a closed curve in another way
+/// (not upstream, #16959, #18117), and whether they were: where upstream would correct
+/// them (its test, the last vector missing the first by more than `NL_MTOL`), each vector
+/// is turned about its own tangent by its share of the closing angle, the angle about the
+/// last tangent that turns the last vector onto the first, in proportion to its parameter
+/// along `t` (Wang, Jüttler, Zheng and Liu, "Computation of rotation minimizing frames",
+/// ACM Transactions on Graphics 27(1), 2008, section 6: a closed curve's rotation minimizing
+/// frame is closed by spreading that angle along the curve). The frame then turns by the
+/// angle at one even rate in the parameter on top of the method's own, so it meets itself
+/// at the closure as smoothly as it runs anywhere else; upstream's backward averages put the
+/// whole turn into the last few vectors, a crease across the closure of the surface swept
+/// along them. The last vector is the first, so the last section lies on the first. The
+/// vectors are no longer the projection normal method's alone, so their rate is not
+/// [`ZSource::RotationMinimizing`]'s.
+///
+/// # Errors
+///
+/// Those of [`create_b_vectors`]; `InvalidInput` for parameters that do not ascend from
+/// the first to the last.
+pub fn create_b_vectors_closing(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<(Vec<Vec3>, bool)> {
+    const OP: &str = OP_BVEC;
+    let (mut b, tg) = projection_b_vectors(cur, b0, t)?;
+    if !closing_gap(cur, &b)? {
+        return Ok((b, false));
+    }
+    let k = t.len().checked_sub(1).ok_or_else(|| oob(OP))?;
+    let (first, last) = (at(&b, 0, OP)?, at(&b, k, OP)?);
+    let t_last = at(&tg, k, OP)?;
+    // the signed angle about the last tangent from the last vector to the first
+    let angle = last.cross(first).dot(t_last).atan2(last.dot(first));
+    let (t0, tk) = (at(t, 0, OP)?, at(t, k, OP)?);
+    let span = tk - t0;
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+    if !(span > 0.0) || !angle.is_finite() {
+        return Err(SolidError::InvalidInput {
+            operation: OP,
+            reason: "a closed curve's parameters do not ascend",
+        });
+    }
+    for i in 1..k {
+        let turn = angle * (at(t, i, OP)? - t0) / span;
+        let (bi, ti) = (at(&b, i, OP)?, at(&tg, i, OP)?);
+        // B[i] is square to T[i]: turned about it, it stays so
+        let (turned, _) = normalize(combine2_pts(turn.cos(), bi, turn.sin(), ti.cross(bi)))?;
+        put(&mut b, i, turned, OP)?;
+    }
+    put(&mut b, k, first, OP)?;
+    Ok((b, true))
+}
+
+/// The projection normal method's vectors `B` and the unit tangents `T` along `cur` at
+/// `t` (`T[0]` is not computed: zero), before any correction for a closed curve.
+fn projection_b_vectors(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<(Vec<Vec3>, Vec<Vec3>)> {
     const OP: &str = OP_BVEC;
     let k = t.len().checked_sub(1).ok_or_else(|| oob(OP))?;
     let mut b = vec![Vec3::ZERO; k + 1];
@@ -144,25 +224,20 @@ pub fn create_b_vectors(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<Vec<Vec3>> {
         let (bi, _) = normalize(combine2_pts(1.0, bp, -dot, ti))?;
         put(&mut b, i, bi, OP)?;
     }
+    Ok((b, tg))
+}
 
-    // Correct for closed curves.
-    if cur.is_closed() {
-        let dis = dist_pt_pt(at(&b, 0, OP)?, at(&b, k, OP)?);
-        if dis > MODEL_TOL {
-            let first = at(&b, 0, OP)?;
-            put(&mut b, k, first, OP)?;
-            for i in (2..=k).rev() {
-                let bi = at(&b, i, OP)?;
-                let ti = at(&tg, i - 1, OP)?;
-                let dot = bi.dot(ti);
-                let (a, _) = normalize(combine2_pts(1.0, bi, -dot, ti))?;
-                let avg = combine2_pts(0.5, at(&b, i - 1, OP)?, 0.5, a);
-                let (bm, _) = normalize(avg)?;
-                put(&mut b, i - 1, bm, OP)?;
-            }
-        }
+/// Whether upstream corrects the vectors `b` along `cur` to close: the curve is closed and
+/// its last vector misses the first by more than `NL_MTOL`.
+fn closing_gap(cur: &Curve, b: &[Vec3]) -> Result<bool> {
+    const OP: &str = OP_BVEC;
+    if !cur.is_closed() {
+        return Ok(false);
     }
-    Ok(b)
+    let (Some(&first), Some(&last)) = (b.first(), b.last()) else {
+        return Err(oob(OP));
+    };
+    Ok(dist_pt_pt(first, last) > MODEL_TOL)
 }
 
 // ---- N_CreateCoonsSrf ---------------------------------------------------------------
@@ -298,7 +373,7 @@ fn combine_coons(sa: &Surface, sb: &Surface, sc: &Surface, op: &'static str) -> 
 ///
 /// # Errors
 ///
-/// Errors of [`extrude_crv`] ([`NlibCode::Geometry`] for a zero `v`).
+/// Errors of [`extrude_crv`] ([`NurbsFailure::Geometry`] for a zero `v`).
 pub fn create_skin_srf_boundary_derivs(
     cur: &mut Curve,
     v: Vec3,
@@ -350,7 +425,7 @@ pub fn create_skin_srf_boundary_derivs(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when the end knots differ; `InvalidInput` with reason
+/// [`NurbsFailure::Input`] when the end knots differ; `InvalidInput` with reason
 /// [`BARE_FLAG_REASON`] for upstream's sanity exit (an index past the knots) or
 /// overflow of the starting index `p + 1`;
 /// `InvalidInput` for knots that compare unordered.
@@ -368,7 +443,7 @@ pub fn merge_knot_vectors(
     let s = |j: usize| at(sk, j, OP);
 
     if (r(0)? - s(0)?).abs() > PTOL || (r(mr)? - s(ms)?).abs() > PTOL {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     let tol = PTOL * (r(mr)? - r(0)?);
@@ -458,6 +533,18 @@ pub enum ZSource<'a> {
         /// `nextZ` and its parameter.
         next: Option<(Vec3, f64)>,
     },
+    /// Not upstream (the fork's upright sweep): the unit up direction `up`, z its part
+    /// square to the trajectory's unit tangent `x`, `w = up - (up . x) x`, made unit, and
+    /// `z'` from `w' = -(up . x') x - (up . x) x'`.
+    Up(Vec3),
+    /// Not upstream (#16959): `z`, a sample of the projection normal method
+    /// ([`create_b_vectors`]), and `z'` that method's own rate, `z' = -(z . x') x`. Each
+    /// step of the method takes away only the new tangent's component, so in the limit z
+    /// turns only toward the tangent, and staying square to it gives
+    /// `z' . x = -z . x'`. The rate is the trajectory's at `u`: at a piece's end it is
+    /// that piece's, where [`ZSource::Samples`] reaches the neighbouring sample, which
+    /// can lie on the next piece of a path that turns in another plane there.
+    RotationMinimizing(Vec3),
 }
 
 /// Rate of change `[x' | y' | z']` of the sweep frame `M = [x | y | z]` at `u`
@@ -471,6 +558,22 @@ pub enum ZSource<'a> {
 /// [`ZSource::Samples`] without neighbours (upstream's return code 1).
 pub fn rotation_rate_of_change(traj: &Curve, u: f64, zsrc: ZSource<'_>) -> Result<Mat3> {
     const OP: &str = OP_ROT;
+    // Get sweep trajectory evaluations.
+    let t = traj.derivs(u, Side::Left, 2)?;
+    let (t1, t2) = (at(&t, 1, OP)?, at(&t, 2, OP)?);
+    let mag = (t1.x * t1.x + t1.y * t1.y + t1.z * t1.z).sqrt();
+    let mag3 = mag * mag * mag;
+    let d12 = t1.x * t2.x + t1.y * t2.y + t1.z * t2.z;
+
+    // X = t'/|t'|.
+    let x = Vec3::new(t1.x / mag, t1.y / mag, t1.z / mag);
+    // dX = t''/|t'| - t' (t'.t'')/|t'|**3.
+    let dx = Vec3::new(
+        t2.x / mag - t1.x * d12 / mag3,
+        t2.y / mag - t1.y * d12 / mag3,
+        t2.z / mag - t1.z * d12 / mag3,
+    );
+
     let (m_z, dm_z) = match zsrc {
         ZSource::Curve(cur_z) => {
             // Evaluate z and z'.
@@ -508,23 +611,25 @@ pub fn rotation_rate_of_change(traj: &Curve, u: f64, zsrc: ZSource<'_>) -> Resul
             );
             (z, dm_z)
         }
+        ZSource::RotationMinimizing(z) => (z, x * -z.dot(dx)),
+        ZSource::Up(up) => {
+            // w = up - (up . x) x and w' = -(up . x') x - (up . x) x'
+            let (ux, udx) = (up.dot(x), up.dot(dx));
+            let w = up - x * ux;
+            let dw = -(x * udx) - dx * ux;
+            let mag = w.length();
+            #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+            if !(mag > 0.0) {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "an up direction along the trajectory",
+                ));
+            }
+            let mag3 = mag * mag * mag;
+            let d = w.dot(dw);
+            (w * (1.0 / mag), dw * (1.0 / mag) - w * (d / mag3))
+        }
     };
-
-    // Get sweep trajectory evaluations.
-    let t = traj.derivs(u, Side::Left, 2)?;
-    let (t1, t2) = (at(&t, 1, OP)?, at(&t, 2, OP)?);
-    let mag = (t1.x * t1.x + t1.y * t1.y + t1.z * t1.z).sqrt();
-    let mag3 = mag * mag * mag;
-    let d12 = t1.x * t2.x + t1.y * t2.y + t1.z * t2.z;
-
-    // X = t'/|t'|.
-    let x = Vec3::new(t1.x / mag, t1.y / mag, t1.z / mag);
-    // dX = t''/|t'| - t' (t'.t'')/|t'|**3.
-    let dx = Vec3::new(
-        t2.x / mag - t1.x * d12 / mag3,
-        t2.y / mag - t1.y * d12 / mag3,
-        t2.z / mag - t1.z * d12 / mag3,
-    );
 
     // dy = cross_product(z',x) + cross_product(z,x').
     let dy = Vec3::new(
@@ -658,7 +763,7 @@ fn cross_tangent_row(
 ///
 /// # Errors
 ///
-/// Errors of [`srf_extend_4d`] ([`NlibCode::Input`] when the strip is not Bezier in
+/// Errors of [`srf_extend_4d`] ([`NurbsFailure::Input`] when the strip is not Bezier in
 /// the extended direction); `InvalidInput` for [`Direction::UV`] where an extension
 /// is needed.
 pub fn adjust_deriv_srf(
@@ -713,7 +818,7 @@ pub fn adjust_deriv_srf(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Geometry`] when a line intersection fails (parallel lines) or the
+/// [`NurbsFailure::Geometry`] when a line intersection fails (parallel lines) or the
 /// final division is bad; errors of [`isect_line_line`].
 pub fn adjust_weight_scale(pw: CPoint, qw: CPoint, rw: CPoint) -> Result<(f64, f64)> {
     const OP: &str = OP_ADJ_WEIGHT;
@@ -734,20 +839,20 @@ pub fn adjust_weight_scale(pw: CPoint, qw: CPoint, rw: CPoint) -> Result<(f64, f
         let ls1 = LineSeg::new(a_s, q - p, false);
         let ls2 = LineSeg::new(ps, qs - ps, false);
         bs = isect_line_line(ls1, ls2)?
-            .ok_or_else(|| SolidError::nlib(OP, NlibCode::Geometry))?
+            .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Geometry))?
             .p;
     }
 
     let ls1 = LineSeg::new(qs, rs - qs, false);
     let ls2 = LineSeg::new(Vec3::ZERO, bs - Vec3::ZERO, false);
     let ds = isect_line_line(ls1, ls2)?
-        .ok_or_else(|| SolidError::nlib(OP, NlibCode::Geometry))?
+        .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Geometry))?
         .p;
 
     let d1 = dist_pt_pt(qs, ds);
     let d2 = dist_pt_pt(qs, rs);
     if float_op_is_bad(d1, d2, FloatOp::Division) {
-        return Err(SolidError::nlib(OP, NlibCode::Geometry));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Geometry));
     }
     Ok((wr, d1 / d2))
 }
@@ -765,7 +870,7 @@ pub fn adjust_weight_scale(pw: CPoint, qw: CPoint, rw: CPoint) -> Result<(f64, f
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] for a rational `der_p`; [`NlibCode::Knot`] when a new knot
+/// [`NurbsFailure::Input`] for a rational `der_p`; [`NurbsFailure::Knots`] when a new knot
 /// falls outside its end span; errors of [`vectors_angle`], [`Curve::derivs`],
 /// [`Curve::insert_knot`] and [`Curve::refine`]; `InvalidInput` for curves with
 /// fewer than two control points or an end angle equal to `eps` (see the module
@@ -780,7 +885,7 @@ pub fn approx_cross_boundary_derivs(
 
     // Check if angular tolerance is maintained.
     if der_p.is_rational() {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     let mut repeat = false;
@@ -832,7 +937,7 @@ pub fn approx_cross_boundary_derivs(
             let d = (sne * p as f64 * a) / (b + sne * c);
             ts = at(up, p, OP)? + d;
             if ts > at(up, p + 1, OP)? {
-                return Err(SolidError::nlib(OP, NlibCode::Knot));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Knots));
             }
             mx_ += 1;
         }
@@ -845,7 +950,7 @@ pub fn approx_cross_boundary_derivs(
             let d = (sne * p as f64 * a) / (b + sne * c);
             te = at(up, n + 1, OP)? - d;
             if te < at(up, n, OP)? {
-                return Err(SolidError::nlib(OP, NlibCode::Knot));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Knots));
             }
             mx_ += 1;
         }
@@ -954,7 +1059,7 @@ fn make_four_compatible(cs: [&mut Curve; 4]) -> Result<()> {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] for a rational curve, differing parameter domains, or a
+/// [`NurbsFailure::Input`] for a rational curve, differing parameter domains, or a
 /// failed compatibility check; errors of [`make_compatible`], [`Curve::eval`],
 /// [`Curve::derivs`] and [`make_compatible_uv`]; `InvalidInput` for curves whose
 /// sizes disagree after being made compatible.
@@ -974,7 +1079,7 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
         &bnd.top_deriv,
     ];
     if all.iter().any(|c| c.is_rational()) {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     let one_3 = 1.0 / 3.0;
@@ -984,7 +1089,7 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
     for c in [&bnd.top, &bnd.bottom_deriv, &bnd.top_deriv] {
         let (d1, d2) = c.param_bounds();
         if us != d1 || ue != d2 {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
     }
     let du = ue - us;
@@ -993,7 +1098,7 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
     for c in [&bnd.right, &bnd.left_deriv, &bnd.right_deriv] {
         let (d1, d2) = c.param_bounds();
         if vs != d1 || ve != d2 {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
     }
     let dv = ve - vs;
@@ -1036,10 +1141,10 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
             let da = (a - cd1).length();
             let db = (b - cd2).length();
             if da > MODEL_TOL {
-                return Err(SolidError::nlib(OP, NlibCode::Input));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Input));
             }
             if db > MODEL_TOL {
-                return Err(SolidError::nlib(OP, NlibCode::Input));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Input));
             }
         }
     }
@@ -1050,7 +1155,7 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
         let (_, cd2) = first_derivs(c2, t2, OP)?;
         let mag = (cd1 - cd2).length();
         if cpf && mag > twist_tol {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         Ok(combine2_pts(0.5, cd1, 0.5, cd2))
     };
@@ -1192,7 +1297,7 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
 ///
 /// # Errors
 ///
-/// [`NlibCode::Geometry`] when a tangent cannot be normalised or a line
+/// [`NurbsFailure::Geometry`] when a tangent cannot be normalised or a line
 /// intersection fails; errors of [`Curve::derivs`], [`Curve::rat_first_deriv`],
 /// [`CurveFunction::multiply_crv`] and [`Curve::sum_diff`].
 pub fn create_cross_boundary_deriv_crv(
@@ -1223,7 +1328,7 @@ pub fn create_cross_boundary_deriv_crv(
         let ls1 = LineSeg::new(p1, v1, false);
         let ls2 = LineSeg::new(p2, v2, false);
         Ok(isect_line_line(ls1, ls2)?
-            .ok_or_else(|| SolidError::nlib(OP, NlibCode::Geometry))?
+            .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Geometry))?
             .p)
     };
     // Signed coordinates at one end.
@@ -1329,9 +1434,9 @@ mod tests {
         let ks = KnotVector::from_slice(&s).unwrap();
         assert_eq!(
             merge_knot_vectors(&kr, &ks, usize::MAX),
-            Err(SolidError::nlib(
+            Err(SolidError::nurbs(
                 "nurbs::srf_adv::p4::merge_knot_vectors",
-                NlibCode::Input,
+                NurbsFailure::Input,
             ))
         );
     }
@@ -1421,6 +1526,78 @@ mod tests {
                 &bad,
             );
             assert!(r.is_err());
+        }
+    }
+
+    /// The upright frame `[x | y | z]` of `traj` at `u` with the unit up direction `up`: `x` the
+    /// unit tangent, `z` the up direction made square to it and unit, `y = z x x`.
+    fn upright_frame(traj: &Curve, u: f64, up: Vec3) -> [Vec3; 3] {
+        let (_, x) = traj.eval_tangent(u, Side::Left).unwrap();
+        let w = up - x * up.dot(x);
+        let z = w * (1.0 / w.length());
+        [x, z.cross(x), z]
+    }
+
+    /// The closed-form rate of the upright frame ([`ZSource::Up`]) against central differences
+    /// of the frame itself, at five parameters round a closed saddle loop (sixteen points of
+    /// `(10 cos t, 10 sin t, 3 cos 2t)` interpolated closed, chord-length parameters on
+    /// `[a, b]`).
+    ///
+    /// Step and tolerance: the step is `h = 1e-5 (b - a)`. A central difference is off by
+    /// `h^2 |M3| / 6` (`M3` the frame's third derivative) plus its rounding, about
+    /// `eps |M| / h`. The loop's radius of curvature stays above about 5 mm and its
+    /// parameter runs over about 70 mm of arc, so per unit of the parameter `|M'| <~ 14` and
+    /// `|M3| <~ 14^3 ~ 3e3`: truncation below `(1e-5)^2 3e3 / 6 ~ 5e-8` and rounding below
+    /// `2.2e-16 / 1e-5 ~ 2e-11`. The tolerance, `1e-5` of the rate's largest entry (at least
+    /// 1), stands above both, and far below what a dropped or flipped term costs: the loop's
+    /// slope `up . x` reaches about 0.5 and its turn `|x'|` about 14, so either term of
+    /// `w' = -(up . x') x - (up . x) x'`, or the `w (w . w')` term of the unit's derivative,
+    /// is of the rate's own order, and a sign flip changes the rate by twice the term.
+    #[test]
+    fn the_upright_rate_is_the_frames_derivative() {
+        let points: Vec<Vec3> = (0..16)
+            .map(|i| {
+                let t = std::f64::consts::TAU * f64::from(i) / 16.0;
+                Vec3::new(10.0 * t.cos(), 10.0 * t.sin(), 3.0 * (2.0 * t).cos())
+            })
+            .collect();
+        let traj = crate::nurbs::b_spline_curve::BSplineCurve::interpolate_points(
+            &points,
+            None,
+            3,
+            None,
+            None,
+            true,
+            crate::nurbs::crv_fit::p1::ParamMethod::ChordLength,
+        )
+        .unwrap()
+        .nurb
+        .clone()
+        .unwrap();
+        let up = Vec3::Z;
+        let (a, b) = traj.param_bounds();
+        let h = 1e-5 * (b - a);
+        for f in [0.1, 0.27, 0.45, 0.62, 0.81] {
+            let u = a + f * (b - a);
+            let rate = rotation_rate_of_change(&traj, u, ZSource::Up(up)).unwrap();
+            let (lo, hi) = (
+                upright_frame(&traj, u - h, up),
+                upright_frame(&traj, u + h, up),
+            );
+            let mut size = 1.0_f64;
+            for row in &rate {
+                for v in row {
+                    size = size.max(v.abs());
+                }
+            }
+            for (j, (p, q)) in lo.iter().zip(&hi).enumerate() {
+                let fd = (*q - *p) * (1.0 / (2.0 * h));
+                let closed = Vec3::new(rate[0][j], rate[1][j], rate[2][j]);
+                assert!(
+                    (closed - fd).length() <= 1e-5 * size,
+                    "at {f} of the loop, column {j}: closed form {closed:?}, differences {fd:?}"
+                );
+            }
         }
     }
 }

@@ -266,6 +266,10 @@ pub enum ChamferClass {
     Declined(&'static str),
     /// The event's configuration, but the corner type does not exist there.
     Refused(ChamferRefusal),
+    /// The event's configuration (straight edges, distinct planes, constant widths) at a
+    /// vertex of three, but for chamfers of both convexities: no corner builds their mitre
+    /// yet.
+    MixedConvexity,
 }
 
 // ---- the closed forms ------------------------------------------------------------------
@@ -631,7 +635,9 @@ fn unsupported(why: String) -> ChamferClass {
 /// event, and of type `kind`. It is where every edge is a straight line and every face a
 /// plane, the faces distinct, the chamfers of one convexity, each of constant width
 /// (a constant ball or a constant chord), and at three chamfers the faces' normals
-/// independent; else it declines, naming why, and the corner is the pinned one. The event
+/// independent; else it declines, naming why, and the corner is the pinned one. Three
+/// chamfers that are otherwise the event's but for their convexities are
+/// [`ChamferClass::MixedConvexity`], which the session refuses where the corner is a bevel. The event
 /// is refused where its type does not exist: a mitre point outside the corner (with the
 /// too wide chamfer's fit), a mitre of four or more chamfers, a facet whose crossings are
 /// not in one plane or that would cut the chamfers; and it is refused where the chamfer
@@ -652,7 +658,12 @@ pub fn classify_chamfer(
     tol: f64,
     solvers: &dyn ChamferSolvers,
 ) -> Result<ChamferClass> {
-    let nul = || SolidError::null_pointer(OP_CLASSIFY);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_CLASSIFY,
+            "topology or a solver the chamfer corner's classification reads",
+        )
+    };
     let n = all_eus.len();
     if !(3..=MAX_CHAMFERS).contains(&n) {
         return Ok(ChamferClass::Declined(
@@ -661,10 +672,11 @@ pub fn classify_chamfer(
     }
     let v = vertex::point(b, vertex)?;
 
-    // the edges: straight lines leaving V, of one convexity
+    // the edges: straight lines leaving V
     let mut t = Vec::new();
     let mut edges = Vec::new();
     let mut concave0 = None;
+    let mut mixed = false;
     for &eu in all_eus {
         let e = eu1::edge(b, eu)?.ok_or_else(nul)?;
         let curve = edge::curve(b, e)?.ok_or_else(nul)?;
@@ -688,11 +700,7 @@ pub fn classify_chamfer(
             dir = -dir;
         }
         let concave = is_concave_edge(k, b, e)?;
-        if concave0.is_some_and(|c| c != concave) {
-            return Ok(ChamferClass::Declined(
-                "chamfers of both convexities meet at the vertex",
-            ));
-        }
+        mixed |= concave0.is_some_and(|c| c != concave);
         concave0 = Some(concave);
         t.push(dir);
         edges.push(e);
@@ -766,6 +774,14 @@ pub fn classify_chamfer(
                     next: offset(1 - rail.min(1))?,
                 }
             }
+        });
+    }
+    // every other test of the configuration has passed: only the convexities differ
+    if mixed {
+        return Ok(if n == 3 {
+            ChamferClass::MixedConvexity
+        } else {
+            ChamferClass::Declined("chamfers of both convexities meet at the vertex")
         });
     }
     let planes = match chamfer_planes(&t, &widths) {
@@ -989,11 +1005,11 @@ fn corner_patch(
 /// `SM_ERR` where the corner is not as its topology made it or a solved crossing is not
 /// at its exact point; [`SolidError::null_pointer`] without the event.
 pub fn place_chamfer_vertices(pseudo: &mut FilletBrep, corner: &FilletCorner) -> Result<()> {
-    let err = || SolidError::sm_err(OP_PLACE);
+    let err = || SolidError::blend_failed(OP_PLACE, "a chamfer vertex could not be placed");
     let event = &corner
         .chamfer_corner
         .as_ref()
-        .ok_or_else(|| SolidError::null_pointer(OP_PLACE))?
+        .ok_or_else(|| SolidError::blend_missing(OP_PLACE, "the chamfer corner's event"))?
         .definition;
     let count = event.crossings.len();
     if corner.vertices.len() != count + usize::from(event.mitre.is_some()) {
@@ -1073,8 +1089,14 @@ pub fn chamfer_corner_edge_geom(
     pseudo: &mut FilletBrep,
     corner: &mut FilletCorner,
 ) -> Result<()> {
-    let nul = || SolidError::null_pointer(OP_EDGES);
-    let err = || SolidError::sm_err(OP_EDGES);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_EDGES,
+            "topology or geometry the chamfer corner's edges are built from",
+        )
+    };
+    let err =
+        || SolidError::blend_failed(OP_EDGES, "the chamfer corner's edges could not be built");
     let event = &corner.chamfer_corner.as_ref().ok_or_else(nul)?.definition;
     let mitre = event.is_mitre();
     let mut size = 1.0_f64;
@@ -1250,9 +1272,9 @@ fn bilinear_face(
     let mut curves_3d = Vec::new();
     let mut uv_curves = Vec::new();
     for (i, &(p, a)) in corners.iter().enumerate() {
-        let (q, b) = *corners
-            .get((i + 1) % 4)
-            .ok_or_else(|| SolidError::sm_err(OP_EDGES))?;
+        let (q, b) = *corners.get((i + 1) % 4).ok_or_else(|| {
+            SolidError::blend_failed(OP_EDGES, "a corner past the bilinear face's four")
+        })?;
         let curve = Curve::from(Line::create_line_segment(3, p, q, None)?);
         let ivl = curve.natural_interval();
         uv_curves.push(uv_segment(a, b, [ivl.min(), ivl.max()])?);
@@ -1278,7 +1300,7 @@ fn bilinear_face(
 /// `SM_ERR` where the order does not cover the crossings; those of the surface and curve
 /// constructions.
 fn patch_faces(event: &mut ChamferCorner, patch: &ChamferPatch) -> Result<()> {
-    let err = || SolidError::sm_err(OP_EDGES);
+    let err = || SolidError::blend_failed(OP_EDGES, "the chamfer patch's faces could not be built");
     let xs = &event.definition.crossings;
     let n = patch.around.len();
     if n != xs.len() || n < 4 {
@@ -1325,7 +1347,7 @@ pub fn create_chamfer_patch(
     corner: &mut FilletCorner,
     env: &mut CornerPatchEnv<'_, '_>,
 ) -> Result<()> {
-    let nul = || SolidError::null_pointer(OP_PATCH);
+    let nul = || SolidError::blend_missing(OP_PATCH, "the chamfer corner's event or topology");
     let event = corner.chamfer_corner.as_mut().ok_or_else(nul)?;
     let faces = std::mem::take(&mut event.faces);
     if faces.is_empty() {

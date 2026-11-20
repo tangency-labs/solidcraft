@@ -5,6 +5,7 @@
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcraft_geom::MeshGeom;
 
 use crate::Session;
 
@@ -454,7 +455,7 @@ fn blend_seams_are_a_rounds_contacts_and_the_blends_beside_it() {
 /// that round's own faces are not its own: where it runs into the cylinder the earlier round
 /// rolls on, its end face, is no seam of it (a block's arc at a cylinder rounded r2, then the
 /// block's top edge with the round's end curve on its side face rounded r1; the earlier round's
-/// name holds a `|` of its own, `F3:blend:F1:+z|F2:side`).
+/// name holds a `|` of its own, `F3:blend(F1:+z|F2:side)`).
 #[test]
 fn a_round_of_a_round_s_end_has_no_seam_with_that_round_s_faces() {
     use solidcraft_doc::naming::{blend_seams, face_names};
@@ -473,7 +474,7 @@ fn a_round_of_a_round_s_end_has_no_seam_with_that_round_s_faces() {
     for seam in &seams {
         let faces = sides(seam.edge);
         if faces.iter().any(|n| n.starts_with("F2:side")) {
-            assert!(faces.iter().any(|n| n.starts_with("F3:blend:")), "a seam of the r2 round only: {faces:?}");
+            assert!(faces.iter().any(|n| n.starts_with("F3:blend(")), "a seam of the r2 round only: {faces:?}");
         }
     }
 }
@@ -574,7 +575,7 @@ fn a_cut_through_one_of_two_bosses_names_only_its_own_walls() {
     assert_eq!(wall(&s), boss);
     run(&mut s, "solid.fillet", json!({"edges": [[6.35, 6.35, 10], [-6.35, 6.35, 10], [-6.35, -6.35, 10], [6.35, -6.35, 10]], "radius": 1.5}));
     let filleted = listed(&mut s, "Arm");
-    let blends = filleted.iter().filter(|(n, _, _)| n.starts_with("F7:blend:")).count();
+    let blends = filleted.iter().filter(|(n, _, _)| n.starts_with("F7:blend(")).count();
     assert_eq!(blends, 4, "{filleted:?}");
     assert_eq!(wall(&s), boss);
 }
@@ -821,8 +822,8 @@ fn a_chamfer_running_past_the_side_edges_it_takes_up_is_named_by_its_edge() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": "Bracket", "distance": 23, "body_name": "Bracket"}));
     run(&mut s, "solid.chamfer", json!({"edges": [[0, 0, 0]], "distance": 220, "distance2": 11}));
-    let blends: Vec<String> = names(&s, "Bracket").into_iter().map(|(n, _)| n).filter(|n| n.starts_with("F3:blend:")).collect();
-    assert_eq!(blends, vec!["F3:blend:F2:side:l1|F2:start".to_string()]);
+    let blends: Vec<String> = names(&s, "Bracket").into_iter().map(|(n, _)| n).filter(|n| n.starts_with("F3:blend(")).collect();
+    assert_eq!(blends, vec!["F3:blend(F2:side:l1|F2:start)".to_string()]);
     // On the chamfer's plane, through (x, -11, 0) and (x, 0, 220): below and above z = 85.
     let on = |z: f64| Vec3::new(0.0, -11.0 * (1.0 - z / 220.0), z);
     let at = solidcraft_doc::naming::face_names_at(&s.model.state(), &[on(40.0), on(150.0)]);
@@ -847,8 +848,8 @@ fn a_sketch_on_a_thickened_surface_follows_the_face() {
     assert!(named.iter().all(|(_, exact)| *exact), "a thickened face must keep exact history: {named:?}");
     // Kept face keeps the sheet's name; the offset and the edge walls are the thicken feature's.
     assert!(named.iter().any(|(n, _)| n == "F2:side:l1"), "{named:?}");
-    assert!(named.iter().any(|(n, _)| n == "F3:inner:F2:side:l1"), "{named:?}");
-    assert_eq!(named.iter().filter(|(n, _)| n.starts_with("F3:blend:")).count(), 4, "{named:?}");
+    assert!(named.iter().any(|(n, _)| n == "F3:inner(F2:side:l1)"), "{named:?}");
+    assert_eq!(named.iter().filter(|(n, _)| n.starts_with("F3:blend(")).count(), 4, "{named:?}");
     run(&mut s, "sketch.circle.center", json!({"center": [20, 15], "radius": 3}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": "OnFace", "distance": 4, "operation": "join", "name": "Boss"}));
@@ -885,4 +886,186 @@ fn a_sketch_on_a_thickened_surface_follows_the_face() {
     let (volume, min_y) = slab(&cold);
     assert!((volume - (4800.0 + boss)).abs() < 0.05 && (min_y - (-8.0)).abs() < 1e-6, "reopened: {volume} {min_y}");
     assert_eq!(error(&cold, "Boss"), None);
+}
+
+/// A fillet replaces the edge between two faces with a face of its own, named after that edge: the
+/// two no longer touch. A reference saved while the edge was still there names one of them by the
+/// other (`F2:side:l1#[F2:top]`), and the blend is what tells them apart now, so the reference
+/// still finds its face and the feature on it still works (#4325).
+#[test]
+fn a_reference_told_apart_by_a_face_a_blend_replaced_still_finds_its_face() {
+    let mut s = Session::default();
+    block(&mut s);
+    let block = id(&s, "Block");
+    // Round the block's top front edge: the front side meets the top only through the blend.
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 2, "name": "Round"}));
+    let round = id(&s, "Round");
+    let blend = format!("F{round}:blend(F{block}:side:l1|F{block}:top)");
+    assert!(names(&s, "Body1").iter().any(|(n, exact)| n == &blend && *exact), "{:?}", names(&s, "Body1"));
+    // The front side, pushed out 2 mm while its name still says the top told it apart.
+    run(&mut s, "solid.offset_face", json!({"faces": [[20, 0, 5]], "distance": 2, "name": "Push"}));
+    let push = id(&s, "Push");
+    assert_eq!(s.doc.feature(push).unwrap().face_names, vec![format!("F{block}:side:l1")]);
+    let stored = format!("F{block}:side:l1#[F{block}:top]");
+    s.doc_mut().feature_mut(push).unwrap().face_names = vec![stored.clone()];
+    s.refresh();
+    assert_eq!(reselect(&s, "Push").as_deref(), None, "{:?}", error(&s, "Push"));
+    assert_eq!(warning(&s, "Push"), None, "found exactly, through the blend");
+    // The wall stands 2 mm further out, and the round is still on the corner.
+    assert!(solid_at(&s, [20.0, -1.0, 5.0]), "the front side moved out");
+    let bounds = s.model.state().body("Body1").unwrap().mesh().bounds();
+    assert!((bounds.min.y + 2.0).abs() < 1e-6, "{}", bounds.min.y);
+    assert!(names(&s, "Body1").iter().any(|(n, _)| n.contains(":blend(")), "{:?}", names(&s, "Body1"));
+    // A qualifier the blend does not separate from the wall still asks for the face again.
+    let other = format!("F{block}:side:l1#[F{block}:side:l3]");
+    s.doc_mut().feature_mut(push).unwrap().face_names = vec![other.clone()];
+    s.refresh();
+    assert_eq!(reselect(&s, "Push"), Some(other), "{:?}", error(&s, "Push"));
+}
+
+/// Create Sketch on a rim that a join left flush with a boss attaches exactly, and follows the rim
+/// when an upstream dimension changes (#4325).
+#[test]
+fn a_sketch_attaches_to_a_rim_a_join_left_flush_with_a_boss() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "height", "expression": "20 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": "height", "body_name": "Body1"}));
+    run(&mut s, "solid.shell", json!({"faces": [[20, 10, 20]], "thickness": 1}));
+    // Rounding the floor keeps the body off the exact prism route the join would otherwise take.
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 1, 1]], "radius": 2}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 19, "base": [10, 10, 1], "operation": "new", "body_name": "Boss"}));
+    run(&mut s, "solid.combine", json!({"target": "Body1", "tools": ["Boss"], "operation": "join"}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane": {"face": [0.5, 10, 20]}, "name": "Rim"}));
+    assert_eq!(sketch["attachment"], "exact_face");
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 10], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Rim", "distance": 5, "operation": "join", "name": "Peg"}));
+    let top = |s: &Session| s.model.state().bodies.iter().map(|b| b.mesh().bounds().max.z).fold(f64::MIN, f64::max);
+    assert!((top(&s) - 25.0).abs() < 1e-6, "{}", top(&s));
+    // The rim is 10 mm higher: the sketch goes with it, and so does the peg.
+    change(&mut s, "height", "30 mm");
+    assert_eq!(error(&s, "Peg"), None);
+    assert!((top(&s) - 35.0).abs() < 1e-6, "{}", top(&s));
+}
+
+/// Two pieces of the same face that both answer to a stored name are not guessed between: the
+/// feature asks for the face again, as it does for any name that finds several faces (#4325).
+#[test]
+fn two_pieces_that_both_answer_to_a_stored_name_are_not_guessed_between() {
+    let mut s = Session::default();
+    block(&mut s);
+    let block = id(&s, "Block");
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 2, "name": "Round"}));
+    // A slot through the front wall, top to bottom: the wall is two pieces, and each keeps the
+    // round's face along its own top edge.
+    run(&mut s, "solid.box", json!({"length": 10, "width": 12, "height": 12, "corner": [15, -1, 0], "body_name": "Slot"}));
+    run(&mut s, "solid.combine", json!({"target": "Body1", "tools": ["Slot"], "operation": "cut", "name": "SlotCut"}));
+    run(&mut s, "solid.offset_face", json!({"faces": [[5, 0, 4]], "distance": 2, "name": "Push"}));
+    let push = id(&s, "Push");
+    let stored = format!("F{block}:side:l1#[F{block}:top]");
+    s.doc_mut().feature_mut(push).unwrap().face_names = vec![stored.clone()];
+    s.refresh();
+    // Both pieces answer the same name: the feature asks for the face again rather than pick one.
+    assert_eq!(reselect(&s, "Push"), Some(stored), "{:?}", error(&s, "Push"));
+    // Without the slot the wall is one piece again and the same name finds it, so the refusal
+    // above was the second piece answering, not a name that finds nothing.
+    run(&mut s, "timeline.suppress", json!({"feature": "SlotCut", "suppressed": true}));
+    assert_eq!(error(&s, "Push"), None, "{:?}", error(&s, "Push"));
+    assert!(solid_at(&s, [20.0, -1.0, 5.0]), "the front side moved out");
+}
+
+/// A sketch on a face of a cut with two sides keeps its attachment (#12124).
+#[test]
+fn a_sketch_on_a_face_of_a_two_sided_cut_keeps_its_attachment() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, -10], "body_name": "Body1"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Cut"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [30, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    // Two sides on the same side of the sketch plane: the direction fixes the two sides and
+    // the sign of a distance turns over only its own side, so a negative first distance and a
+    // positive second one put both ends of the cut's tool below the plane; both caps claimed
+    // one name and neither face could be told from the other.
+    run(&mut s, "solid.extrude", json!({"sketch": "Cut", "distance": -7, "distance2": 3, "operation": "cut", "name": "Pocket"}));
+    // A sketch on either of the two faces the cut left keeps its attachment.
+    for (name, point) in [("OnUpper", [20.0, 15.0, -3.0]), ("OnLower", [20.0, 15.0, -7.0])] {
+        let made = s.execute("sketch.create", &json!({"plane": {"face": point}, "name": name}));
+        let refused = made.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(refused.is_empty(), "the sketch on the cut's face at {point:?} was refused: {refused}");
+        assert_eq!(error(&s, name), None);
+    }
+    // The two faces have a name each, so the history can tell them apart.
+    let cut = id(&s, "Pocket");
+    let named = names(&s, "Body1");
+    assert!(named.iter().all(|(_, exact)| *exact), "{named:?}");
+    assert!(named.iter().any(|(n, _)| n == &format!("F{cut}:bottom")), "{named:?}");
+    assert!(named.iter().any(|(n, _)| n == &format!("F{cut}:top")), "{named:?}");
+    // The attachment is kept when the design is opened again.
+    let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(error(&cold, "OnUpper"), None);
+    assert_eq!(error(&cold, "OnLower"), None);
+}
+
+/// A sketch and an offset plane on the end face of a turned part keep their attachment after a
+/// modelled Thread on its side (#18460): the thread's cut keeps its history, so the end face it
+/// never touched keeps its exact name, and no groove face named from geometry takes that name.
+#[test]
+fn a_sketch_and_a_plane_on_the_end_face_of_a_threaded_revolve_keep_their_attachment() {
+    let mut s = Session::default();
+    // The XZ sketch's vertical runs along -Z: a round bar of radius 4 from z = -20 to z = 0.
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [4, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"axis": "y", "angle": "360 deg", "body_name": "Part"}));
+    run(&mut s, "solid.thread", json!({"face": [4, 0, -10], "designation": "M8", "length": 10, "from": [4, 0, -20], "modeled": true}));
+    for (name, attach) in [
+        ("OnEnd", ("sketch.create", json!({"plane": {"face": [1, 0, 0]}, "name": "OnEnd"}))),
+        ("Above", ("construct.plane.offset", json!({"base": {"face": [1, 0, 0]}, "offset": 5, "name": "Above"}))),
+    ] {
+        let refused = s.execute(attach.0, &attach.1).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(refused.is_empty(), "{name} on the end face was refused: {refused}");
+        if attach.0 == "sketch.create" {
+            run(&mut s, "sketch.finish", json!({}));
+        }
+        assert_eq!(error(&s, name), None);
+    }
+}
+
+/// The faces of a modelled thread's groove are named by their index, which moves when the
+/// thread's length changes. No exact name leans on one (#18460): a feature on a face beside the
+/// groove finds that same face after the change, or fails asking for it again, never another.
+#[test]
+fn a_reference_beside_a_thread_s_groove_never_moves_to_another_face_when_the_thread_grows() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [4, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"axis": "y", "angle": "360 deg", "body_name": "Part"}));
+    let thread = json!({"face": [4, 0, -10], "designation": "M8", "length": 10, "from": [4, 0, -20], "modeled": true, "name": "Thread"});
+    run(&mut s, "solid.thread", thread);
+    let no_exact_index = |s: &mut Session, when: &str| {
+        let faces = listed(s, "Part");
+        assert!(faces.iter().all(|(n, exact, _)| !*exact || !n.contains(":face:")), "{when}: {faces:?}");
+    };
+    no_exact_index(&mut s, "threaded");
+    // Planes on both end faces: the threaded end, which the groove runs into, and the other.
+    run(&mut s, "construct.plane.offset", json!({"base": {"face": [1, 0, -20]}, "offset": 5, "name": "Below"}));
+    run(&mut s, "construct.plane.offset", json!({"base": {"face": [1, 0, 0]}, "offset": 5, "name": "Above"}));
+    let stored = |s: &Session, name: &str| s.doc.find_feature(name).map(|f| f.face_names.clone()).unwrap_or_default();
+    let before = [stored(&s, "Below"), stored(&s, "Above")];
+    assert!(before.iter().flatten().all(|n| !n.contains(":face:")), "{before:?}");
+    run(&mut s, "timeline.edit", json!({"feature": "Thread", "set": {"length": "14"}}));
+    no_exact_index(&mut s, "grown");
+    for ((name, z), names) in [("Below", -20.0), ("Above", 0.0)].into_iter().zip(before) {
+        if error(&s, name).is_some() {
+            assert!(reselect(&s, name).is_some(), "{name} failed without asking for its face: {:?}", error(&s, name));
+            continue;
+        }
+        // Found: the stored name still names the end face it was made on.
+        let faces = listed(&mut s, "Part");
+        for n in &names {
+            let on: Vec<f64> = faces.iter().filter(|(f, _, _)| f == n).map(|(_, _, c)| c[2]).collect();
+            assert!(on.len() == 1 && (on[0] - z).abs() < 1e-3, "{name}: {n} is now at {on:?} in {faces:?}");
+        }
+    }
 }

@@ -34,6 +34,36 @@ fn said(s: &Session, feature: &str) -> String {
     format!("{}{}", r.error.clone().unwrap_or_default(), r.warning.clone().unwrap_or_default())
 }
 
+/// A valid counterbore cannot be checked against a made-up through-all depth after its body
+/// disappears. Report the missing body, and recover the hole when the deletion is undone.
+#[test]
+fn a_hole_without_its_body_reports_the_missing_body_and_recovers_on_undo() {
+    for command in ["timeline.delete", "timeline.suppress"] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 6, "name": "Plate"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 6, "name": "HolePts"}));
+        run(&mut s, "sketch.point", json!({"point": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(
+            &mut s,
+            "solid.hole",
+            json!({"sketch": "HolePts", "diameter": 3.4, "type": "counterbore", "cb_diameter": 6.5, "cb_depth": 3.3, "name": "Hole"}),
+        );
+        assert_eq!(said(&s, "Hole"), "");
+        let drilled_volume = volume(&mut s);
+        run(&mut s, command, json!({"feature": "Plate"}));
+        assert!(s.model.state().bodies.is_empty());
+        assert_eq!(said(&s, "Hole"), "there is no body to cut or intersect", "{command}");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(said(&s, "Hole"), "");
+        assert_eq!(s.model.state().bodies.len(), 1);
+        near(volume(&mut s), drilled_volume);
+        run(&mut s, "edit.redo", json!({}));
+        assert!(s.model.state().bodies.is_empty());
+        assert_eq!(said(&s, "Hole"), "there is no body to cut or intersect", "{command} after redo");
+    }
+}
+
 #[test]
 fn a_hole_the_face_no_longer_reaches_stays_where_it_was_placed_and_says_so() {
     let mut s = Session::default();
@@ -58,6 +88,26 @@ fn a_hole_the_face_no_longer_reaches_stays_where_it_was_placed_and_says_so() {
     change(&mut s, "length", "100 mm");
     assert_eq!(said(&s, "Hole"), "");
     assert!(drilled_at_80(&s));
+}
+
+#[test]
+fn a_hole_placed_by_expressions_is_checked_where_they_evaluate_now_not_where_it_was_made() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "100 mm"}));
+    run(&mut s, "solid.box", json!({"length": "L", "width": 40, "height": 10, "center": [0, 0, 5], "name": "Plate", "body_name": "Plate"}));
+    // A window cut that moves with L: at L = 100 it spans x -5..25, at L = 180 it spans 35..65.
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 30, "width": 20, "height": 20, "center": ["L/2 - 40", 0, 5], "operation": "cut", "targets": ["Plate"], "name": "Window"}),
+    );
+    run(&mut s, "solid.hole", json!({"position": ["L/2 - 10", 0, 10], "diameter": 5, "name": "Hole"}));
+    assert_eq!(said(&s, "Hole"), "");
+    // The hole follows to x = 80, which is on the top face. Its made-at point, x = 40, now lies
+    // in the window: the hole must not say it stayed where it was placed.
+    change(&mut s, "L", "180 mm");
+    assert!(!solid_at(&s, 80.0, 0.0, 5.0) && solid_at(&s, 75.0, 0.0, 5.0), "the bore is at x = 80");
+    assert_eq!(said(&s, "Hole"), "");
 }
 
 #[test]
@@ -133,6 +183,70 @@ fn sketch_under_the_part_drills_up_into_it() {
     drill(&mut s, &ids, json!({"depth": 8}));
     near(removed(&mut s), 628.3);
     assert!(!solid_at(&s, 20.0, 20.0, 4.0) && solid_at(&s, 20.0, 20.0, 10.0));
+}
+
+#[test]
+fn a_hole_on_a_sketch_alone_skips_arc_centres() {
+    // A rounded corner's arc centre is the arc's geometry, not a hole site (#18429): only the
+    // stand-alone point drills, one Ø10 x 8 hole (628.3 mm³).
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [5, 5], "start": [0, 5], "end": [5, 0]}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "mine"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "diameter": 10, "depth": 8, "name": "H"}));
+    near(removed(&mut s), 628.3);
+    assert!(!solid_at(&s, 20.0, 20.0, 4.0) && solid_at(&s, 5.0, 5.0, 4.0));
+}
+
+#[test]
+fn a_hole_on_a_sketch_alone_skips_a_construction_rectangles_centre() {
+    // A construction rectangle's centre is reference geometry, not a hole site (#18429): only the
+    // stand-alone point drills, one Ø10 x 8 hole (628.3 mm³).
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [8, 8], "corner": [12, 12], "construction": true}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "mine"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "diameter": 10, "depth": 8, "name": "H"}));
+    near(removed(&mut s), 628.3);
+    assert!(!solid_at(&s, 20.0, 20.0, 4.0) && solid_at(&s, 8.0, 8.0, 4.0));
+}
+
+#[test]
+fn a_hole_on_a_sketch_alone_drills_a_point_at_a_lone_construction_lines_midpoint() {
+    // Only a whole construction rectangle makes its centre reference geometry: a point held at the
+    // midpoint of one construction line is still a hole site, one Ø10 x 8 hole (628.3 mm³).
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+    run(&mut s, "sketch.line", json!({"points": [[15, 20], [25, 20]], "construction": true, "ids": ["guide"]}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "mine"}));
+    run(&mut s, "sketch.constraint.midpoint", json!({"point": "mine", "line": "guide"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "diameter": 10, "depth": 8, "name": "H"}));
+    near(removed(&mut s), 628.3);
+    assert!(!solid_at(&s, 20.0, 20.0, 4.0));
+}
+
+#[test]
+fn a_hole_on_a_sketch_alone_drills_a_rectangle_centre_with_a_regular_diagonal() {
+    // A construction rectangle whose second diagonal is regular geometry is not all reference:
+    // its centre drills, with the stand-alone point, two Ø10 x 8 holes (1256.6 mm³).
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+    let r = run(&mut s, "sketch.rectangle.center", json!({"center": [8, 8], "corner": [12, 12], "construction": true}));
+    // the four edges come first; the diagonals follow them, the second one last
+    assert_eq!(r["curves"], json!(["l1", "l2", "l3", "l4"]), "{r}");
+    run(&mut s, "sketch.construction", json!({"curves": ["l6"], "value": false}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "mine"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "diameter": 10, "depth": 8, "name": "H"}));
+    near(removed(&mut s), 1256.6);
+    assert!(!solid_at(&s, 20.0, 20.0, 4.0) && !solid_at(&s, 8.0, 8.0, 4.0));
 }
 
 #[test]
@@ -494,6 +608,26 @@ fn a_hole_wider_than_the_part_says_it_removes_all_of_it() {
     assert_eq!(said(&s, "H1"), "");
 }
 
+/// A hole across the part's width that touches none of its sides keeps the rest, in one piece and
+/// silently, and says so once a parameter widens it past the whole part. The same hole touching a
+/// side along a line is the case above.
+#[test]
+fn a_hole_across_the_part_clear_of_its_sides_keeps_the_rest_silently() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "hd", "expression": "40 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "name": "Plate"}));
+    run(&mut s, "solid.hole", json!({"position": [10, 15, 10], "diameter": "hd", "name": "H1"}));
+    assert_eq!(said(&s, "H1"), "");
+    assert_eq!(s.model.state().bodies.len(), 1);
+    // The plate less the part of the 40 mm circle inside it, 10 mm deep.
+    assert!((volume(&mut s) - 3623.4382).abs() < 1e-3, "{}", volume(&mut s));
+    change(&mut s, "hd", "100 mm");
+    assert!(s.model.state().bodies.is_empty());
+    assert!(said(&s, "H1").contains("the hole removes all of Body1"), "{}", said(&s, "H1"));
+    change(&mut s, "hd", "5 mm");
+    assert_eq!(said(&s, "H1"), "");
+}
+
 /// The volume of one body.
 fn body_volume(s: &mut Session, name: &str) -> f64 {
     let m = run(s, "inspect.measure", json!({}));
@@ -575,4 +709,153 @@ fn a_hole_placed_on_another_parts_face_drills_its_own_part_behind_it() {
     let mut opened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
     assert!(hole_direction(&opened, "H").z > 0.999);
     drilled_base_only(&mut opened);
+}
+
+/// #11538: a sketch on an offset plane inside the part is where the hole starts, not the part's
+/// top face above it. A 5 mm blind hole from z 12 removes z 7..12.
+#[test]
+fn hole_from_a_sketch_on_an_offset_plane_inside_the_part_starts_at_the_plane() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "12 mm", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let base = volume(&mut s);
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    // The tool runs a hair past its start, so the walls are checked, not the volume.
+    assert!(solid_at(&s, 20.0, 20.0, 6.5) && !solid_at(&s, 20.0, 20.0, 7.5) && !solid_at(&s, 20.0, 20.0, 11.5));
+    assert!(solid_at(&s, 20.0, 20.0, 14.5) && solid_at(&s, 20.0, 20.0, 18.0) && base - volume(&mut s) < pi() * 25.0 * 6.0);
+    // Nothing above the plane goes: the tool's reach above a face is not used inside the part.
+    assert!(solid_at(&s, 20.0, 20.0, 12.05) && solid_at(&s, 20.0, 20.0, 12.3), "the material just above the plane stays");
+}
+
+/// #11538: a sketch plane just under the top face (z 19.95 in a 20 mm part) is still a start
+/// inside the part: the tool's reach above a face, wider than the 0.05 mm roof, does not open it.
+#[test]
+fn hole_from_a_sketch_plane_just_under_the_top_face_keeps_the_roof() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "19.95 mm", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    assert!(!solid_at(&s, 20.0, 20.0, 17.0) && !solid_at(&s, 20.0, 20.0, 19.9), "the hole is drilled below the plane");
+    assert!(solid_at(&s, 20.0, 20.0, 19.98), "the roof above the plane stays");
+}
+
+/// A sketch on a standard plane through the middle of a part keeps drilling from the part's
+/// surface, as before #11538 limited the new rule to derived planes.
+#[test]
+fn hole_from_a_sketch_on_a_standard_plane_inside_the_part_still_starts_at_the_surface() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "corner": [-20, -20, -10], "name": "Part"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [0, 0], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    // Starts at the top (z 10) going down, not at z 0.
+    assert!(!solid_at(&s, 0.0, 0.0, 7.5) && solid_at(&s, 0.0, 0.0, 3.0) && solid_at(&s, 0.0, 0.0, -3.0));
+}
+
+/// The copies of a hole from a sketch on an offset plane start at the plane too (#11538).
+#[test]
+fn patterned_copy_of_an_offset_plane_hole_starts_at_the_plane_too() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "12 mm", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [10, 20], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["H"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 15, "name": "Row"}));
+    for x in [10.0, 25.0] {
+        assert!(solid_at(&s, x, 20.0, 6.5) && !solid_at(&s, x, 20.0, 7.5) && !solid_at(&s, x, 20.0, 11.5) && solid_at(&s, x, 20.0, 14.5), "x {x}");
+    }
+}
+
+/// A design saved before #11538 keeps its hole from a sketch on an offset plane inside the part
+/// where it was: starting at the top face (z 20) and 5 mm deep, also after an edit.
+#[test]
+fn a_saved_offset_plane_hole_keeps_starting_at_the_surface() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "12 mm", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    // As the release before saved it: the last folded format, none of today's pending changes.
+    let mut v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    v["format"] = json!("solidcraft/50");
+    v.as_object_mut().unwrap().remove("format_pending");
+    let mut opened = Session::new(solidcraft_doc::Document::from_json(&v.to_string()).unwrap());
+    let from_surface = |s: &Session| {
+        !solid_at(s, 20.0, 20.0, 19.0) && !solid_at(s, 20.0, 20.0, 15.5) && solid_at(s, 20.0, 20.0, 14.0) && solid_at(s, 20.0, 20.0, 11.5)
+    };
+    assert!(from_surface(&opened));
+    run(&mut opened, "timeline.edit", json!({"feature": "H", "set": {"diameter": 8}}));
+    assert!(from_surface(&opened), "an edited saved hole still starts at the surface");
+}
+
+/// #10697: a countersink's cone stops at the hole's depth. A 3.1 mm deep countersunk hole in a
+/// 3.2 mm plate leaves its 0.1 mm floor (the cone used to run on to 90 % of the hole radius and
+/// open the bottom); a hole shallower than its countersink is cut to the hole's depth only.
+#[test]
+fn a_countersink_stops_at_the_depth_of_its_hole() {
+    let plate = |s: &mut Session| run(s, "solid.box", json!({"length": 40, "width": 40, "height": 3.2, "center": [0, 0, 1.6], "body_name": "Block"}));
+    let hole = |depth: f64| json!({"position": [0, 0, 3.2], "diameter": 6, "depth": depth, "type": "countersink", "cs_diameter": 12, "cs_angle": 90, "name": "CS"});
+    let mut s = Session::default();
+    plate(&mut s);
+    run(&mut s, "solid.hole", hole(3.1));
+    assert!(solid_at(&s, 0.0, 0.0, 0.05), "the 0.1 mm floor is still there");
+    assert!(!solid_at(&s, 0.0, 0.0, 0.2), "the hole is open above its floor");
+    // Depth 2: the cone is cut at 2 mm, a frustum from radius 6 to 4: pi h / 3 (R^2 + R r + r^2).
+    let mut s = Session::default();
+    plate(&mut s);
+    run(&mut s, "solid.hole", hole(2.0));
+    let frustum = std::f64::consts::PI * 2.0 / 3.0 * (36.0 + 24.0 + 16.0);
+    let expected = 40.0 * 40.0 * 3.2 - frustum;
+    let v = volume(&mut s);
+    assert!((v - expected).abs() < 1e-3 * expected, "{v} vs {expected}");
+}
+
+/// #17873: a hole drilled To Object on the far side of a 3 mm wall comes out through that side
+/// whole. The sides lean 1e-5 rad apart (as a sketch can leave them), so the hole's floor, square
+/// to its axis on the near side, used to cross the far side and the cut left half of it across
+/// the exit. A drilled hole to that side comes out as a through hole too: its bore runs on past
+/// the exit, and neither it nor a drill point reaches the plate standing 0.5 mm beyond.
+#[test]
+fn a_hole_to_the_far_side_of_a_wall_opens_the_whole_exit() {
+    let (near_side, far_side) = (3.1e-6, 1.31e-5);
+    let wall = |s: &mut Session| {
+        run(s, "sketch.create", json!({"plane": "XY", "name": "Wall"}));
+        let corners = [[0.0, 5.5], [40.0, 5.5 + 40.0 * near_side], [40.0, 8.5 + 40.0 * far_side], [0.0, 8.5]];
+        run(s, "sketch.line", json!({"points": corners, "closed": true}));
+        run(s, "sketch.finish", json!({}));
+        run(s, "solid.extrude", json!({"sketch": "Wall", "distance": 30, "body_name": "Body1"}));
+    };
+    let hole = |kind: Value| {
+        let mut h = json!({"position": [20, 5.5 + 20.0 * near_side, 15], "to": [20, 8.5 + 20.0 * far_side, 15], "diameter": 8, "name": "Hole2"});
+        h.as_object_mut().unwrap().extend(kind.as_object().unwrap().clone());
+        h
+    };
+    let mut s = Session::default();
+    wall(&mut s);
+    run(&mut s, "solid.hole", hole(json!({"type": "countersink", "cs_diameter": 10, "cs_angle": 90})));
+    assert_eq!(said(&s, "Hole2"), "");
+    let faces = run(&mut s, "model.faces", json!({"body": "Body1"}))["faces"].as_array().cloned().unwrap();
+    let floor: Vec<_> = faces.iter().filter(|f| f["name"].as_str().is_some_and(|n| n.ends_with(":bore:base"))).collect();
+    assert!(floor.is_empty(), "no floor is left across the exit: {floor:?}");
+    // Areas are measured on the faces' tessellation: the whole Ø8 exit takes about 49 mm² of the
+    // far side's 1200, half of it about 24.5.
+    let side: f64 = faces.iter().filter(|f| f["plane_normal"][1].as_f64().is_some_and(|n| n > 0.99)).map(|f| f["area"].as_f64().unwrap()).sum();
+    assert!(side < 1200.0 - 45.0, "the far side lost the whole exit: {side} mm² left");
+
+    let mut s = Session::default();
+    wall(&mut s);
+    run(&mut s, "solid.box", json!({"length": 40, "width": 3, "height": 30, "center": [20, 10.5, 15], "body_name": "Beyond"}));
+    run(&mut s, "solid.hole", hole(json!({"type": "drilled", "tip_angle": 118})));
+    assert_eq!(said(&s, "Hole2"), "");
+    let faces = run(&mut s, "model.faces", json!({"body": "Body1"}))["faces"].as_array().cloned().unwrap();
+    assert!(!faces.iter().any(|f| f["name"].as_str().is_some_and(|n| n.ends_with(":bore:base"))), "a through bore: {faces:?}");
+    near(body_volume(&mut s, "Body1"), 3600.0 - 48.0 * std::f64::consts::PI);
+    near(body_volume(&mut s, "Beyond"), 3600.0);
 }

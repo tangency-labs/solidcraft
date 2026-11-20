@@ -21,7 +21,6 @@ use crate::ui_kit::BackingTooltipExt as _;
 use std::collections::{HashMap, HashSet};
 
 use serde_json::json;
-use solidcraft_engine::Sel;
 use solidcraft_engine::doc::Component;
 
 use crate::SolveApp;
@@ -411,16 +410,8 @@ impl Opens for Shown<'_> {
 fn marks(app: &SolveApp, strip: &Strip, view: &View) -> Vec<Marks> {
     let flags: HashMap<u64, (bool, bool)> = app.session.model.results.iter().map(|r| (r.id, (r.error.is_some(), r.warning.is_some()))).collect();
     let in_dialog = app.dialog.as_ref().map(|d| d.items()).unwrap_or_default();
-    let picked: HashSet<u64> = app
-        .session
-        .selection
-        .iter()
-        .chain(in_dialog.iter())
-        .filter_map(|s| match s {
-            Sel::Feature { id } => Some(*id),
-            _ => None,
-        })
-        .collect();
+    let picked: HashSet<u64> =
+        app.session.selection.iter().chain(in_dialog.iter()).filter_map(|s| crate::timeline::feature_of_sel(&app.session.doc, s)).collect();
     let last_done = strip.marker.checked_sub(1).filter(|_| strip.floating);
     let features = &app.session.doc.features;
     view.indices(0, view.len())
@@ -509,11 +500,11 @@ fn fold(app: &mut SolveApp, group: &Group, view: &View) {
 
 fn group_menu(app: &mut SolveApp, ui: &mut egui::Ui, group: &Group, view: &View) {
     let fold_label = if group.open { "Fold Features" } else { "Show Each Feature" };
-    if crate::context_menu::button(ui, fold_label, "list").clicked() {
+    if crate::ui_kit::menu::button(ui, fold_label, "list").clicked() {
         fold(app, group, view);
         ui.close();
     }
-    if crate::context_menu::button(ui, "Select Features", "select").clicked() {
+    if crate::ui_kit::menu::button(ui, "Select Features", "select").clicked() {
         let features = &app.session.doc.features;
         let items: Vec<_> = view
             .indices(group.start, group.end)
@@ -526,7 +517,7 @@ fn group_menu(app: &mut SolveApp, ui: &mut egui::Ui, group: &Group, view: &View)
         let _ = app.run("select.set", json!({ "items": items }));
         ui.close();
     }
-    if crate::context_menu::button(ui, solidcraft_ui_text::tr_label("Roll History Marker Here"), "rollback").clicked() {
+    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Roll History Marker Here"), "rollback").clicked() {
         let end = view.index(group.end);
         let position = if end >= app.session.doc.features.len() { json!({}) } else { json!({ "position": end }) };
         let _ = app.run_heavy("timeline.roll_to", position);

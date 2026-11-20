@@ -202,7 +202,10 @@ pub fn order_curves(k: &Kernel, curves: &[Curve]) -> Result<Vec<usize>> {
     let loops = order_curves_into_loops(k, curves, ZONE_TOL_3D)?;
     loops.status()?;
     if loops.ordered.is_empty() {
-        return Err(SolidError::sm_err(OP_ORDER));
+        return Err(SolidError::primitive_failed(
+            OP_ORDER,
+            "the curves make no loop",
+        ));
     }
     Ok(loops.ordered)
 }

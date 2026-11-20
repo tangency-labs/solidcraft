@@ -935,7 +935,7 @@ fn cpp_null_deref(label: &str, symbol: &str) -> Fail {
 fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
     match r {
         Ok(_) => Ok(0.0),
-        Err(SolidError::Upstream { code, .. }) => Ok(f64::from(*code)),
+        Err(e) if solidcore::error::upstream_status(e).is_some() => Ok(f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))),
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(SM_ERR_INVALID_INPUT),
         Err(e) => Err(match Output::unported(e) {
             Some(o) => Fail::Deferred(Box::new(o)),
@@ -1261,7 +1261,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, built: Option<Brep>) -> Record {
                 records: &mut records,
                 next_key: 1u64 << 50,
             };
-            let r = p7::read_from_file(k, &mut b, bytes, FileType::Ascii, *rebuild, &mut env);
+            let r = crate::refit::read_from_file(k, &mut b, bytes, FileType::Ascii, *rebuild, &mut env);
             let mut o = vec![status(&r)?];
             if r.is_ok() {
                 o.extend(brep_counts(&b));
@@ -1578,6 +1578,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, built: Option<Brep>) -> Record {
                 o.push(s);
                 made += r.as_ref().map_or(0, |(f, _)| f.len());
             }
+            crate::trim_hook::observe(&mut dest);
             o.push(made as f64);
             o.extend(brep_counts(&dest));
             // The whole destination graph after every copy (CopyFaces resets the new-face

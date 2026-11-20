@@ -17,7 +17,7 @@ use solidcraft_doc::expr::{Kind, definition};
 use crate::{
     Result, Session,
     params::{bad, bool_, expr, str_},
-    schema::sketch_dimensioned::DrawDimensionedResult,
+    schema::{frame::SketchSolve, sketch_dimensioned::DrawDimensionedResult},
 };
 
 /// The dimension roles of a sketch creator, in the order `as_drawn` adds them, or None when
@@ -65,16 +65,23 @@ fn wanted<'a>(roles: &[&'a str], given: &'a Map<String, Value>, as_drawn: bool) 
 
 pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.draw.dimensioned";
+    let on_sheet = s.sheet_sketching();
     let create = str_(p, "command").ok_or_else(|| bad(cmd, "`command` must name a supported sketch creator"))?;
     let roles = dimension_roles(create).ok_or_else(|| bad(cmd, "unsupported sketch creator"))?;
     let as_drawn = bool_(p, "as_drawn").unwrap_or(false);
     let locate = bool_(p, "locate").unwrap_or(false);
+    if on_sheet && (as_drawn || locate) {
+        return Err(bad(cmd, "not supported yet: automatic dimensions and origin location in a sheet sketch; provide explicit dimensions"));
+    }
     let mut params = p.get("params").filter(|v| v.is_object()).cloned().ok_or_else(|| bad(cmd, "`params` must be an object"))?;
     let none = Map::new();
     let dimensions = match p.get("dimensions") {
         None if as_drawn || locate => &none,
         given => given.and_then(Value::as_object).ok_or_else(|| bad(cmd, "`dimensions` must be an object"))?,
     };
+    if on_sheet {
+        super::super::sketch_store::sheet_target(s, &params, cmd)?;
+    }
     if dimensions.len() > roles.len() || dimensions.keys().any(|key| !roles.contains(&key.as_str())) {
         return Err(bad(cmd, "unsupported dimension role for this creator"));
     }
@@ -90,12 +97,15 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
         let kind = if role == "angle" || role == "sweep" { Kind::Angle } else { Kind::Length };
         // `name = expression` is checked by its right-hand side, read as the user parameter
         // `sketch.dimension` defines will hold it (a bare number in the design's unit) (#7567).
+        if on_sheet && definition(&e).is_some() {
+            return Err(bad(cmd, "a sheet dimension cannot define source parameters; use a paper expression or a read-only source parameter"));
+        }
         let rhs = match definition(&e) {
             Some((name, "")) => return Err(bad(cmd, format!("{role}: `{name} =` needs a value after the `=`"))),
             Some((_, rhs)) => rhs,
             None => e.as_str(),
         };
-        let evaluated = s.doc.eval(&s.doc.with_design_unit(rhs, kind), kind)?;
+        let evaluated = if on_sheet { s.doc.eval(rhs, kind)? } else { s.doc.eval(&s.doc.with_design_unit(rhs, kind), kind)? };
         if role == "length" {
             overall_length = Some(evaluated);
         }
@@ -186,7 +196,9 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
             // typed `name = expression` defines the parameter `name` (the reply's `defined`).
             Some(value) => {
                 dimension["value"] = value.clone();
-                dimension["if_redundant"] = json!("driven");
+                if !on_sheet {
+                    dimension["if_redundant"] = json!("driven");
+                }
                 let result = scratch.execute("sketch.dimension", &dimension)?;
                 if let Some(name) = result.get("defined").and_then(Value::as_str) {
                     defined.push(name.to_string());
@@ -204,12 +216,18 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let located = if locate {
-        // The freedom left once the shape and its sizes are in: the last reply that reports it.
-        let dof = added.values().rev().chain([&out]).find_map(dof_of);
+        // The freedom left once the shape and its sizes are in, read from the sketch itself: `added`
+        // is keyed by role, so its last entry is not the last dimension placed.
+        let dof = solve_now(&scratch, &params).map(|solve| solve.dof as u64);
         place_from_origin(&mut scratch, &out, &params, dof)
     } else {
         Vec::new()
     };
+    // The creator's `sketch` is its solve before the dimensions: the reply's is the sketch's now.
+    let mut out = out;
+    if let (Some(solve), Some(object)) = (solve_now(&scratch, &params), out.as_object_mut()) {
+        object.insert("sketch".to_string(), serde_json::to_value(solve).map_err(|e| bad(cmd, e.to_string()))?);
+    }
     // Session::execute records the wrapper's before snapshot. Nested history must not leak.
     scratch.undo.clear();
     s.accept_computed(scratch);
@@ -217,9 +235,19 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
+/// The solve of the target sketch as it is now (what `sketch.dimension` reports after an edit), or
+/// None when the sketch cannot be read or solved.
+fn solve_now(scratch: &Session, params: &Value) -> Option<SketchSolve> {
+    let id = super::sketch_store::target(scratch, params, "sketch.draw.dimensioned").ok()?;
+    let mut sketch = super::sketch_store::read(&scratch.doc, id).ok()?.clone();
+    let report = super::solve_current(&mut sketch, &scratch.doc).ok()?;
+    Some(super::solve_info(&report))
+}
+
 /// The sketch's degrees of freedom as a command reported them.
+/// The planar sketch's, where the reply gives it apart from its 3D curves' (#10608).
 fn dof_of(reply: &Value) -> Option<u64> {
-    reply.get("sketch").and_then(|s| s.get("dof")).and_then(Value::as_u64)
+    reply.get("sketch").and_then(|s| s.get("planar_dof").or_else(|| s.get("dof"))).and_then(Value::as_u64)
 }
 
 /// More points than any creator makes: a cap on the work `locate` does.

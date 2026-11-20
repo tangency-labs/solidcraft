@@ -1,6 +1,6 @@
 //! Stable palette slots for the model scene.
 //!
-//! Cached block bytes index a scene palette (`solidcraft_gpu::view::Palette`). A body's faces,
+//! Cached block bytes index a scene palette (`solidcraft_viewport_gpu::view::Palette`). A body's faces,
 //! edges and placement keep their slots while the scene rebuilds, so an appearance or theme edit
 //! changes only palette entries — never a block's vertex bytes. Slots are append-only for the
 //! session and are reset when a different design replaces the one they belonged to.
@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use crate::gpu::{MAX_PALETTE, PaletteIndex};
+use crate::gpu::{MAX_PALETTE, Material, PaletteIndex};
 
 /// The stable slots of one body: its own colour, its face range, its edges and its instances.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,6 +40,10 @@ impl BodySlots {
 pub(crate) struct PaletteArena {
     entries: Vec<[u8; 4]>,
     bodies: HashMap<String, BodySlots>,
+    /// The bodies whose slots are another key's ([`Self::shared`]), by name.
+    shared: std::collections::HashSet<String>,
+    /// PBR finishes by slot (none past its end): the model and highlight scenes both draw them.
+    materials: Vec<Material>,
     /// Bumped when the arena is reset (a different design); cached blocks must rebuild then.
     generation: u64,
 }
@@ -54,8 +58,31 @@ impl PaletteArena {
         self.generation
     }
 
-    /// The slots of `name`, allocating them (and `face_count` face slots) the first time.
+    /// The slots of `name`, allocating them (and `face_count` face slots) the first time. A body
+    /// that shared another key's slots until now ([`Self::shared`]) gets its own.
     pub fn body(&mut self, name: &str, face_count: usize) -> BodySlots {
+        if self.shared.remove(name) {
+            self.bodies.remove(name);
+        }
+        self.own(name, face_count)
+    }
+
+    /// Body `name` drawn in the slots of `key` (allocated the first time, as [`Self::body`]):
+    /// copies of one part placed many times share one set of slots, which a slot per face of
+    /// every placement would exhaust. Looking `name` up ([`Self::slots`]) finds them.
+    pub fn shared(&mut self, name: &str, key: &str, face_count: usize) -> BodySlots {
+        let slots = self.own(key, face_count);
+        if self.bodies.get(name) != Some(&slots) {
+            self.bodies.insert(name.to_string(), slots);
+        }
+        // Most rebuilds find every copy already there: no name copied for each.
+        if !self.shared.contains(name) {
+            self.shared.insert(name.to_string());
+        }
+        slots
+    }
+
+    fn own(&mut self, name: &str, face_count: usize) -> BodySlots {
         if let Some(slots) = self.bodies.get(name).copied() {
             let grown = self.grow_faces(&slots, face_count);
             // Written back only when it grew: most rebuilds find every body as it was.
@@ -127,6 +154,26 @@ impl PaletteArena {
         }
     }
 
+    /// Set a slot's PBR finish (`Material::default()`: none). The list grows only for a real
+    /// finish, so a design without one keeps it empty.
+    pub fn set_material(&mut self, slot: PaletteIndex, m: Material) {
+        let at = slot.0 as usize;
+        if at >= self.materials.len() {
+            if !m.pbr || at >= self.entries.len() {
+                return;
+            }
+            self.materials.resize(at + 1, Material::default());
+        }
+        if let Some(entry) = self.materials.get_mut(at) {
+            *entry = m;
+        }
+    }
+
+    /// The PBR finishes by slot, for the scene's palette.
+    pub fn materials(&self) -> Vec<Material> {
+        self.materials.clone()
+    }
+
     /// Drop every body when the scene belongs to a different design (no body name survives).
     /// A design that removed every body and then adds one keeps its slots (the empty set does
     /// not reset the arena).
@@ -140,7 +187,9 @@ impl PaletteArena {
         }
         if !names.any(|n| self.bodies.contains_key(n)) {
             self.entries.clear();
+            self.materials.clear();
             self.bodies.clear();
+            self.shared.clear();
             self.generation = self.generation.wrapping_add(1);
         }
     }
@@ -164,11 +213,19 @@ mod tests {
         let grown = arena.body("A", 4);
         assert_eq!(grown.faces, first.faces);
         assert_ne!(grown.face(3), grown.body);
+        // A plain slot leaves the finishes empty; a real one grows them to its slot, no further.
+        arena.set_material(grown.face(3), Material::default());
+        assert!(arena.materials().is_empty());
+        let brass = Material { metallic: 1.0, roughness: 0.3, pbr: true, ..Default::default() };
+        arena.set_material(grown.face(3), brass);
+        arena.set_material(PaletteIndex(u32::MAX), brass);
+        assert_eq!(arena.materials().len(), grown.face(3).0 as usize + 1);
+        assert_eq!(arena.materials().last(), Some(&brass));
         // A new design with no shared names resets the slots.
         let generation = arena.generation();
         arena.sync(["B"]);
         assert_eq!(arena.generation(), generation.wrapping_add(1));
-        assert!(arena.entries().is_empty());
+        assert!(arena.entries().is_empty() && arena.materials().is_empty());
         // An empty scene does not reset.
         let before = arena.generation();
         arena.sync([]);
@@ -184,5 +241,24 @@ mod tests {
         assert_eq!(slots.face(3), slots.body);
         // Every push after the cap is index 0, never an out-of-range write.
         assert_eq!(arena.push(), PaletteIndex(0));
+    }
+
+    /// Placements of one part that look the same share one set of slots, found by each
+    /// placement's name; a placement that stops sharing gets slots of its own.
+    #[test]
+    fn placements_share_their_parts_slots_until_one_looks_different() {
+        let mut arena = PaletteArena::default();
+        let a = arena.shared("Base (Bracket:1)", "part", 3);
+        let b = arena.shared("Base (Bracket:2)", "part", 3);
+        assert_eq!(a, b);
+        let used = arena.entries().len();
+        for k in 3..100 {
+            arena.shared(&format!("Base (Bracket:{k})"), "part", 3);
+        }
+        assert_eq!(arena.entries().len(), used, "more placements take no more slots");
+        assert_eq!(arena.slots("Base (Bracket:2)"), Some(a));
+        let own = arena.body("Base (Bracket:2)", 3);
+        assert_ne!(own, a);
+        assert_eq!(arena.slots("Base (Bracket:1)"), Some(a), "the others still share");
     }
 }

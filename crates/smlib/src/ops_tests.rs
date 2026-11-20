@@ -161,6 +161,59 @@ fn shell_a_box_open_at_the_top() {
     assert_untouched(&c, 8000.0, [6, 12, 8]);
 }
 
+/// The top of an extruded closed spline outline, its top edge rounded r1.6 all round, moved up 10
+/// and down 2 (#18575): the round follows, taken off and put back. Taking it off intersects the
+/// top's plane with the spline's extrusion, a solve that needed the faces' trimmed caches, which
+/// are not ported for a surface's face. Each moved body is the extrusion's section times its new
+/// height, less the round's material, measured on the body before the move.
+#[test]
+fn offset_face_beside_a_round_all_round_a_spline_outline_moves_the_round() {
+    let pts: [[f64; 2]; 10] = [
+        [30.0, 0.0],
+        [30.0, 14.0],
+        [12.0, 22.0],
+        [-12.0, 22.0],
+        [-30.0, 14.0],
+        [-30.0, -14.0],
+        [-12.0, -22.0],
+        [12.0, -22.0],
+        [30.0, -14.0],
+        [30.0, 0.0],
+    ];
+    let mut knots = vec![0.0; 4];
+    knots.extend((1..7).map(|i| f64::from(i) / 7.0));
+    knots.extend([1.0; 4]);
+    // a closed clamped cubic, smooth where it closes (its end tangents both along +y)
+    let outline = crate::sweeps::Curve::Nurbs { degree: 3, points: pts.iter().map(|&[x, y]| [x, y, 0.0, 1.0]).collect(), knots };
+    let plain = Brep::extrude(&[outline], [0.0, 0.0, 1.0], 25.0, 0.0, crate::sweeps::DraftCorner::default(), true).unwrap();
+    let section = volume(&plain) / 25.0;
+    // through the record, as the app hands SMLib a body
+    let rounded = Brep::from_record(&plain.fillet(&[[-28.0, 0.0, 25.0]], 3.0, 1.6).unwrap().to_native().unwrap(), true).unwrap();
+    let round = volume(&plain) - volume(&rounded);
+    // the round's section (1 - pi/4) 1.6^2 along the outline, some 158 mm round
+    assert!((round / ((1.0 - std::f64::consts::FRAC_PI_4) * 1.6 * 1.6) - 158.0).abs() < 10.0, "round {round}");
+    for (distance, height) in [(10.0, 35.0), (-2.0, 23.0)] {
+        let moved = rounded.offset_faces(&[[0.0, 0.0, 25.0]], 0.1, distance).unwrap();
+        shot(&moved, &format!("offset_face_spline_round_{distance}"));
+        assert_close(volume(&moved), section * height - round, 1e-7, "moved top");
+        assert_eq!(moved.counts().unwrap()[0], rounded.counts().unwrap()[0], "the same faces");
+    }
+}
+
+/// Moving the top of a closed hollow out keeps the hollow (#18570): the faces moved are rebuilt
+/// with the cavity's walls, which were taken for walls between two pieces of material and
+/// deleted, filling the cavity in (a solid 20 × 20 × 25 block).
+#[test]
+fn offset_face_of_a_closed_hollow_keeps_the_hollow() {
+    let c = cube(20.0);
+    let hollow = c.shell(&[], 0.1, -2.0).unwrap();
+    let raised = hollow.offset_faces(&[[10.0, 10.0, 20.0]], 0.1, 5.0).unwrap();
+    shot(&raised, "offset_face_closed_hollow");
+    assert_close(volume(&raised), 20.0 * 20.0 * 25.0 - 16.0f64.powi(3), 1e-9, "raised hollow volume");
+    // The outside's 6 faces and the cavity's 6.
+    assert_eq!(raised.counts().unwrap()[0], 12);
+}
+
 #[test]
 fn fillet_takes_exactly_the_picked_edges() {
     // Round the vertical edge x = y = 20 first (r = 5): the top rim is then line, arc, line,

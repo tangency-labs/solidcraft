@@ -21,6 +21,20 @@ Setting `SOLIDCRAFT_SAFE_MODE=1` does the same. From 0.10.2, if two launches in 
 before the window opens, the next one starts in safe mode by itself. `SOLIDCRAFT_RENDERER=cpu`
 uses only the software renderer and keeps your settings.
 
+## Safe graphics mode
+
+If a launch stops before it is up, or the graphics device is lost (the driver was reset), the
+next launch starts in safe graphics mode: your graphics card and settings, but drawn the plain way
+early versions did. The graphics API is the one wgpu picks by itself (no Direct3D 12 first, no
+retries), with no anti-aliasing, ambient occlusion, blur behind panels, studio shading or GPU
+path tracer. The view says "Started in safe graphics mode"; **Try full graphics** goes back to
+full graphics at the next start and offers a restart.
+
+The launch after a single failure tries full graphics again. If two full-graphics launches in a
+row fail, safe graphics mode stays on until you click **Try full graphics**. A full-graphics
+launch that runs a minute without losing its device clears the failures. To try it yourself, tick
+Preferences › Graphics › **Start in safe graphics mode**; it applies to the next launch only.
+
 ## A design won't open or hangs while opening
 
 - **A design that stopped the app while it was being reopened is skipped once.** If SolidCraft
@@ -55,8 +69,7 @@ with a bug report.
 | Linux (Flatpak) | `~/.var/app/io.tangencylabs.solidcraft/data/solidcraft` | (the same folder) |
 
 On Windows, paste `%APPDATA%` or `%LOCALAPPDATA%` into the Explorer address bar to open the
-folder. Releases before the rename used `SolveCraft` folders next to these; SolidCraft only
-reads them, so you can leave them alone.
+folder.
 
 - The **`recovery`** folder holds autosaves of designs that were never saved. Rename the data
   folder rather than deleting it, so you can still open those autosaves (`.sc` files, or `.solidcraft` from earlier releases)
@@ -76,7 +89,7 @@ be opened at all, SolidCraft tries the software renderer once and otherwise show
 saying what failed (earlier versions closed without a word).
 
 On Windows, if the graphics API cannot create the window's renderer, SolidCraft tries the
-remaining APIs in order: Direct3D 12 → Vulkan → OpenGL, then software rendering. The status
+remaining APIs in order: Vulkan → Direct3D 12 → OpenGL, then software rendering. The status
 message and **Preferences › Graphics** say which API failed and why. The saved graphics
 preference stays unchanged. With an explicit `WGPU_BACKEND`, a failed start shows the error
 and exits without switching; change or remove that variable to try another API.
@@ -102,16 +115,18 @@ D300/D500/D700 (Mac Pro 2013). On another GPU that does this, start SolidCraft w
 ## The interface looks blurry on Linux with display scaling
 
 On Linux, SolidCraft runs through XWayland whenever an X display is available, because file
-drag and drop from a file manager only works there (niri is the exception and stays on native
-Wayland). A compositor that doesn't let X11 apps scale themselves draws an XWayland window at
-100 % and stretches it to the monitor's scale, so text and icons look soft. That happens with
-fractional scaling (125 %, 140 %), and on GNOME 47 (RHEL and Rocky Linux 10) at any scale,
-200 % included. The diagnostics in a bug report show it as about 1 physical pixel per point at
-a scale of 200 %.
+drag and drop from a file manager only works there (niri and Hyprland stay on native Wayland
+when Automatic is selected). A compositor that doesn't let X11 apps scale themselves draws an
+XWayland window at 100 % and stretches it to the monitor's scale, so text and icons look soft.
+That happens with fractional scaling (125 %, 140 %), and on GNOME 47 (RHEL and Rocky Linux 10)
+at any scale, 200 % included. The diagnostics in a bug report show it as about 1 physical pixel
+per point at a scale of 200 %. On Hyprland with `force_zero_scaling` and `GDK_SCALE` set, an
+XWayland UI can instead look ~2.5× oversized relative to the desktop (#10480).
 
 Run SolidCraft on native Wayland instead: Preferences › Graphics › **Window system** ›
-Wayland, which applies at the next start. Versions without that setting (0.21.0 and earlier)
-take `SOLIDCRAFT_WAYLAND=1` in the environment:
+Wayland, which applies at the next start (Automatic already picks Wayland on niri and Hyprland).
+Versions without that setting (0.21.0 and earlier) take `SOLIDCRAFT_WAYLAND=1` in the
+environment:
 
 ```
 SOLIDCRAFT_WAYLAND=1 solidcraft
@@ -119,7 +134,7 @@ SOLIDCRAFT_WAYLAND=1 solidcraft
 
 On native Wayland, dropping files onto the window doesn't work; use File > Open or pass the file
 on the command line.
-[Wayland, XWayland and niri](https://github.com/tangency-labs/solidcraft/blob/main/docs/nix.md#wayland-xwayland-and-niri)
+[Wayland, XWayland, niri and Hyprland](https://github.com/tangency-labs/solidcraft/blob/main/docs/nix.md#wayland-xwayland-niri-and-hyprland)
 has the details.
 
 ## Trackpad pinch does nothing on Linux
@@ -136,21 +151,53 @@ A graphics driver can crash the app while it starts, before SolidCraft can show 
 old Intel Vulkan driver, `igvk64.dll`, did). Windows' Event Viewer names the driver under
 *Windows Logs › Application* ("Faulting module name").
 
-From 0.11.1, SolidCraft on Windows starts Direct3D 12 first and loads no other graphics API
-when Direct3D 12 has a graphics card; Vulkan and then OpenGL are tried only on a computer
-without one. Earlier versions started Vulkan, Direct3D 12 and OpenGL together and preferred
-Vulkan. To choose the graphics API yourself, in any version, open a Command Prompt and start
-SolidCraft from it:
+SolidCraft on Windows starts Vulkan first and loads no other graphics API when Vulkan has a
+graphics card. Direct3D 12 and then OpenGL are tried only on a computer without one (older Intel
+graphics, virtual machines, Remote Desktop), each only with a graphics card, and software
+rendering only after both. A Vulkan device that fails to start falls back to Direct3D 12, then to
+software rendering, and later launches of that version go straight to the API that worked. From 0.11.1 until this change Direct3D 12 came first;
+before 0.11.1 the app started Vulkan, Direct3D 12 and OpenGL together.
 
-```
-set WGPU_BACKEND=dx12
-"C:\Program Files\SolidCraft\solidcraft.exe"
-```
+If a graphics driver crashes the app while it starts a graphics API, the next launch knows
+which API it was and skips it on this computer, going on in the same order. Safe mode and
+software rendering leave it out too, so that driver is not loaded again (unless every API has
+crashed, when all are tried again). A new SolidCraft version tries it once more. Choosing the API in **Preferences > Graphics > Graphics
+API**, or setting `WGPU_BACKEND`, still starts it. This works the same on every system.
 
-`vulkan` and `gl` are the other choices. `setx WGPU_BACKEND dx12` keeps it for apps started
-from the Start menu after you sign in again. From 0.11.1 the setting can also live in
-`graphics.json` in the settings folder, as `{"msaa": 4, "backend": "dx12"}` (`auto` is the
-order above). Safe mode ignores it and always uses the software renderer.
+Choose **Preferences > Graphics > Graphics API** to select an API for the next start.
+The page shows the current API separately from the saved choice. **Automatic** keeps
+the Windows order above. **Vulkan** enables GPU path tracing when the graphics device
+supports it. **Direct3D 12** and **OpenGL** remain available for compatibility.
+
+Use **Restart now** to apply the saved choice. SolidCraft asks about unsaved designs
+before it closes and reopens saved designs after restarting. Canceling that save prompt
+keeps the app open; the selected API remains saved for the next start. Canceling
+Preferences restores the setting from when the dialog opened.
+
+A newly selected API gets one guarded startup attempt. If the app stops before its first
+frame is presented, the next normal launch restores the previous choice. A handled
+startup failure restores it before retrying. A failure to save the guard uses software
+rendering for that launch. The guard does not detect a blank image or a hang after the
+first frame; normal device-loss recovery still applies.
+
+Safe mode uses the software renderer without consuming a pending API choice. An explicit
+launch override still takes precedence and is shown in Graphics. Changing the API in
+Preferences does not require commands, environment variables or editing settings files.
+
+## GPU path tracing is unavailable in a Direct3D 12 session
+
+On Windows, GPU path tracing needs a Vulkan session. SolidCraft does not load Vulkan
+behind a Direct3D 12 window, because initializing another installed driver can crash
+the process.
+
+In Render, select **GPU path tracing**, then **Restart with Vulkan** in the backend
+message. Alternatively, choose **Vulkan** in **Preferences > Graphics > Graphics API**
+and use **Restart now**. Both use the saved setting and the startup recovery described
+above. CPU image methods remain available.
+
+A successful Vulkan window does not guarantee that every GPU supports the path tracer.
+If shader setup or a device capability still fails, Render reports that reason.
+The API switch does not reduce shader compiler memory use.
 
 With OpenGL on Windows, the window has the Windows title bar above SolidCraft's application bar
 instead of using the application bar as its title bar. Some OpenGL drivers (older Intel HD and

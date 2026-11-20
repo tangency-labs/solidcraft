@@ -18,6 +18,7 @@ Each of `a` and `b` in `joint.create` is one of these:
 | Named | `"Hinge on frame"` | Made first with `joint.origin {"name":..., "occurrence":..., "point":[...], "z":[...]}`. |
 
 - `occurrence` is an occurrence name (`Wing:1`), an id, or a component name (its first occurrence). Without it, the body nearest the point is used, which can be the wrong part where two touch.
+- **A part in a sub-assembly placed more than once:** add `"path"`, the occurrence ids from the root down to `occurrence` (`occurrence.properties` reports a placement's `path`). Without it, `occurrence` alone means the part in the first copy. The origin is then on that copy: `joint.list` names the copy as its occurrence, and a joint there holds or moves the whole copy.
 - **Use the same form on both sides.** `point` picks its x axis from z. A `frame` with an `x` on one side and a `point` on the other turned a test panel 90 degrees when it was joined.
 - **`flip`:** `false` (the default) mates the origins as two faces meet: b's z points against a's. Two origins at one point with the same `z` then turn part b 180 degrees about the axis, and a joint that closes a loop reports a conflict ("off by 71 mm and 180 degrees" on SELENE). `true` lines b's z up with a's, so parts stay where they are. `joint.edit {"joint":..., "flip":true}` changes it afterwards.
 - **Moving a side:** `joint.edit` takes `a` or `b` in joint.create's form (a joint origin, or a name), so a joint moves its attachment without being deleted and recreated; its limits, values and expressions stay.
@@ -147,7 +148,7 @@ The same pattern moved the solar wings of the SELENE rover (`Rover-v7.solidcraft
 | Call | Size |
 |---|---|
 | `component.list` | **140 KB** on SELENE (a 4x4 transform per occurrence). Avoid it; use `occurrence.properties`. |
-| `joint.list` | about 0.5 KB per joint: 16 KB for 29 joints |
+| `joint.list` | about 0.5 KB per joint: 16 KB for 29 joints, 230 KB for an imported assembly of 682 rigid joints; `moving_only`, `exclude_rigid_groups`, `occurrences` and `dof_free_only` cut that to the rows that matter, `omitted` counts the rest |
 | `motion.play` | about 0.2 KB per occurrence, per step: 9 KB on SELENE |
 | `motion.export` | the same per sample; pass `samples`, or `path` to write it to a file |
 | `joint.create`, `joint.drive`, `joint.motion_link`, `joint.gear`, `joint.rack_pinion`, `joint.screw` | the `dof` list of every occurrence again, 40 B each; `quiet: true` leaves it out |

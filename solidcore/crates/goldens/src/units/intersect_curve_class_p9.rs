@@ -45,7 +45,7 @@ use solidcore::surface::surface_cache::p1::{
 use solidcore::surface::trim_srf_cache::TrimSrfCache;
 use solidcore::surface::volume::Volume;
 use solidcore::topology::{Brep, EdgeId, VertexId};
-use solidcore::{EntityRef, Result as ScResult, SolidError};
+use solidcore::{EntityRef, Result as ScResult};
 
 /// Differential runner for the two part-9 methods.
 pub struct Runner;
@@ -497,6 +497,7 @@ fn rust(i: &Input) -> ScResult<Output> {
                     interval: Extent1d::from_min_max(0., 1.),
                     face_gap: None,
                     zone_tol_3d: 0.,
+                    seam: None,
                 },
                 trim_curve: Some(H::Trim(j)),
             });
@@ -528,6 +529,7 @@ fn rust(i: &Input) -> ScResult<Output> {
             interval: Extent1d::from_min_max(e.interval[0], e.interval[1]),
             face_gap: None,
             zone_tol_3d: live_zone,
+            seam: None,
         });
     }
     let interval = Extent1d::from_min_max(i.interval[0], i.interval[1]);
@@ -571,7 +573,9 @@ fn rust(i: &Input) -> ScResult<Output> {
         }
     }
     let status = result.as_ref().err().map_or(0., |e| match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         _ => 1007.,
     });
     let mut out = vec![

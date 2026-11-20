@@ -1,6 +1,5 @@
 //! WR-696 (#2273, step 5 of the generic blend; the fork's tangency-labs/smlib#79, a3d6d81,
-//! 49f393d and 5e8c9c1): with `fixes.fillet_gn_section_generator` a blend refused as larger
-//! than its faces notes the largest size that builds: where its rails stay on their faces
+//! 49f393d and 5e8c9c1): a blend refused as larger than its faces notes the largest size that builds: where its rails stay on their faces
 //! (`LargestSizeOnItsFaces`, a ball or a chord through a boundary point, `BallThrough`),
 //! where a band reaches a circular top's centre, and where two bands on a face meet
 //! (`BandsMeetAt`). The public API carries it on the refusal
@@ -35,12 +34,11 @@ use solidcore::topology::brep::p1::regions;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel, SolidError};
 
-fn kernel(gn: bool) -> Kernel {
-    let mut k = Kernel::default();
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_gn_section_generator = gn;
-    k.fixes = fixes;
-    k
+fn kernel() -> Kernel {
+    Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    }
 }
 
 fn pick(k: &Kernel, b: &Brep, q: Point3) -> EdgeId {
@@ -128,7 +126,7 @@ fn l_wall(k: &mut Kernel) -> Brep {
 /// 7.9900000000000002.
 #[test]
 fn a_concave_round_past_a_wall_fits_where_its_rail_reaches_the_top() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = l_wall(&mut k);
     let refusal = blend(
         &mut k,
@@ -153,7 +151,7 @@ fn a_concave_round_past_a_wall_fits_where_its_rail_reaches_the_top() {
 /// (open). The fork's build: 11.303708498984761, kind `SM_FIT_CHORD`.
 #[test]
 fn a_chord_past_a_wall_fits_at_the_chord_of_the_ball_reaching_the_top() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = l_wall(&mut k);
     let refusal = blend(
         &mut k,
@@ -173,33 +171,30 @@ fn a_chord_past_a_wall_fits_at_the_chord_of_the_ball_reaching_the_top() {
     );
 }
 
-/// A can (r10, h20) whose top rim is chamfered 10: the cone takes the whole top. The band
-/// reaches the top's centre at the ball touching it there and the side, 10 (open). The
-/// fork's build: 9.9899999999999967.
+/// A can (r10, h20) whose top rim is chamfered 10: the cone takes the whole top, its apex on
+/// the axis at the top's centre (#17198; the fork refused it, `FacesOutlastTheirBlends`,
+/// naming 9.9899999999999967). It builds: the can (pi 100 20) less the ring between the
+/// r 10, h 10 cylinder and the cone in it (2/3 pi 1000), pi 2000 (2/3), one solid of 3
+/// faces (the cone, the wall and the bottom).
 #[test]
 fn a_chamfer_taking_a_can_top_fits_where_its_band_reaches_the_centre() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = create_cylinder(&mut k, Point3::ZERO, 10.0, 20.0).unwrap();
-    let refusal = blend(
-        &mut k,
-        &mut b,
-        &[Point3::new(
+    let rim = pick(
+        &k,
+        &b,
+        Point3::new(
             10.0 * 100.0_f64.to_radians().cos(),
             10.0 * 100.0_f64.to_radians().sin(),
             20.0,
-        )],
-        10.0,
-        0,
-        false,
-    )
-    .expect_err("refused");
-    check(
-        &refusal,
-        NoRoomReason::FaceConsumed,
-        FitKind::Radius,
-        10.0 - 0.01,
-        9.9899999999999967,
+        ),
     );
+    fillet_edges(&mut k, &mut b, &[rim], 10.0, 0, 2, 0.0).unwrap();
+    let want = PI * 2000.0 * (2.0 / 3.0);
+    let got = volume_of(&k, &mut b);
+    assert!((got - want).abs() <= 1e-6 * want, "{got} vs {want}");
+    assert_eq!(lumps(&b), 1);
+    assert_eq!(b.face_list().len(), 3);
 }
 
 /// The bossed can (r7 h48.2, a boss r2.7 on its top) with its top rim rounded 6.9: the
@@ -207,7 +202,7 @@ fn a_chamfer_taking_a_can_top_fits_where_its_band_reaches_the_centre() {
 /// (open). The fork's build: 4.2899999999999938.
 #[test]
 fn a_round_past_a_boss_footprint_fits_where_its_rail_reaches_it() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let can = create_cylinder(&mut k, Point3::ZERO, 7.0, 48.2).unwrap();
     let boss = create_cylinder(&mut k, Point3::new(0.0, 0.0, 48.2), 2.7, 2.0).unwrap();
     let mut b = boolean_union(&mut k, can, boss).unwrap();
@@ -228,7 +223,7 @@ fn a_round_past_a_boss_footprint_fits_where_its_rail_reaches_it() {
 /// The fork's build: 7.4999999999997264.
 #[test]
 fn two_rounds_on_a_narrow_end_fit_where_their_bands_meet() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = create_box(&mut k, Point3::ZERO, 80.0, 15.0, 20.0).unwrap();
     let refusal = blend(
         &mut k,
@@ -258,10 +253,8 @@ fn two_rounds_on_a_narrow_end_fit_where_their_bands_meet() {
 /// `wr696_band_cuts.rs` derives for the same body, edge and size, graded to the same 1e-8.
 #[test]
 fn fillet_edges_returns_the_fit_on_the_refusal() {
-    let mut k = kernel(true);
-    // the round on the continued top; with `fillet_round_ends_on_outline` it ends on the
-    // body's outline and keeps the bridge (`wr730_round_ends_on_outline.rs`)
-    k.fixes.fillet_round_ends_on_outline = false;
+    let mut k = kernel();
+    // the round on the continued top, trimmed at its crease
     let block = create_box(&mut k, Point3::ZERO, 20.0, 4.0, 10.0).unwrap();
     let slot = create_box(&mut k, Point3::new(8.0, -1.0, -1.0), 4.0, 6.0, 10.0).unwrap();
     let mut b = boolean_difference(&mut k, block, slot).unwrap();
@@ -288,41 +281,13 @@ fn fillet_edges_returns_the_fit_on_the_refusal() {
     );
 }
 
-/// Without the flag no fit is noted and the refusal stays the plain status it was before:
-/// the L's concave round 9 is refused (`fixes.fillet_cliff_overflow`) as
-/// `SolidError::Upstream`, not `FilletRefused`.
-#[test]
-fn without_the_flag_no_fit_is_noted() {
-    let mut k = kernel(false);
-    let mut b = l_wall(&mut k);
-    let refusal = blend(
-        &mut k,
-        &mut b,
-        &[Point3::new(2.0, 10.0, 2.0)],
-        9.0,
-        1,
-        false,
-    )
-    .expect_err("refused");
-    assert_eq!(refusal.reason, Some(NoRoomReason::ConcaveOverflow));
-    assert!(refusal.fit.is_none(), "{refusal:?}");
-    let mut k = kernel(false);
-    let mut b = l_wall(&mut k);
-    let e = pick(&k, &b, Point3::new(2.0, 10.0, 2.0));
-    let err = fillet_edges(&mut k, &mut b, &[e], 9.0, 1, 2, 0.0).expect_err("refused");
-    assert!(
-        matches!(err, SolidError::Upstream { code: 1001, .. }),
-        "{err:?}"
-    );
-}
-
 /// The three edges at a 20 cube's corner rounded 20 (the fork's capi test
 /// `scenario_cube_corner_rounds_as_wide_as_faces_refused`): the corner takes each edge's
 /// whole length; the corner takes `r <u, e> = r` of it, so the largest radius that keeps a
 /// length is 20 / 1 (open), less the margin. The fork's build: 19.989999999999998.
 #[test]
 fn rounds_whose_corner_takes_their_edges_fit_at_the_edge_length() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = create_box(&mut k, Point3::ZERO, 20.0, 20.0, 20.0).unwrap();
     let refusal = blend(
         &mut k,
@@ -385,7 +350,7 @@ fn backed_block(k: &mut Kernel) -> Brep {
 /// take 20 (1 - pi/4) (9 + r^2) off the block (to 1e-6, as the fork), one solid.
 #[test]
 fn a_round_onto_a_tangent_round_fits_where_its_rail_stays_on_the_top() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = backed_block(&mut k);
     let front = pick(&k, &b, FRONT);
     let margin = 1000.0 * edge::tolerance(&b, front).unwrap();
@@ -406,7 +371,7 @@ fn a_round_onto_a_tangent_round_fits_where_its_rail_stays_on_the_top() {
         fit.size
     );
 
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = backed_block(&mut k);
     let front = pick(&k, &b, FRONT);
     fillet_edges(&mut k, &mut b, &[front], fit.size, 1, 2, 0.0)

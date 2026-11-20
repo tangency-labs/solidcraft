@@ -14,33 +14,32 @@ pub(crate) fn same_item(a: &Sel, b: &Sel) -> bool {
     match (a, b) {
         (Sel::Edge { body: a, index: i, .. }, Sel::Edge { body: b, index: j, .. })
         | (Sel::Face { body: a, index: i, .. }, Sel::Face { body: b, index: j, .. }) => a == b && i == j,
+        // A curve of another sketch is the same item whether a click picked it (`SketchCurve`
+        // naming its sketch, #3726) or a chain or box did (`ExternalSketchCurve`).
+        (Sel::SketchCurve { id: a, sketch: Some(s) }, Sel::ExternalSketchCurve { sketch: t, id: b })
+        | (Sel::ExternalSketchCurve { sketch: t, id: b }, Sel::SketchCurve { id: a, sketch: Some(s) }) => a == b && s == t,
         _ => a == b,
     }
 }
 
-/// Two distinct point intents for the alignment command, without creating sketch points.
-pub(crate) fn alignment_points(selection: &[Sel]) -> Option<[serde_json::Value; 2]> {
-    let [a, b] = selection else { return None };
-    let point = |s: &Sel| match s {
-        Sel::SketchPoint { id } => Some(serde_json::json!(id)),
-        Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
-        _ => None,
-    };
-    let (a, b) = (point(a)?, point(b)?);
-    (a != b).then_some([a, b])
+/// Whether the selection holds the body `body`: selected on its own, or through a selected
+/// occurrence (the bodies its placement shows, as its Browser row lists them).
+pub(crate) fn holds_body(session: &solidcraft_engine::Session, body: &str) -> bool {
+    session.selection.iter().any(|s| match s {
+        Sel::Body { name } => name == body,
+        Sel::Occurrence { path } => session.occurrence_bodies_shared(path, true).is_ok_and(|b| b.iter().any(|n| n == body)),
+        _ => false,
+    })
 }
 
-/// Coincident's two operands for a two-item selection: points and curves by id, a line's
-/// midpoint as `{midpoint: line}`, which the command ties a point to (#10311).
+/// Two distinct point intents for the alignment command, without creating sketch points.
+pub(crate) fn alignment_points(selection: &[Sel]) -> Option<[serde_json::Value; 2]> {
+    solidcraft_engine::sketch_selection::alignment_points(selection)
+}
+
+/// Coincident's two operands for a two-item selection.
 pub(crate) fn coincident_operands(selection: &[Sel]) -> Option<serde_json::Value> {
-    let [a, b] = selection else { return None };
-    let operand = |s: &Sel| match s {
-        Sel::SketchPoint { id } | Sel::SketchCurve { id, .. } => Some(serde_json::json!(id)),
-        Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
-        _ => None,
-    };
-    let (a, b) = (operand(a)?, operand(b)?);
-    (a != b).then(|| serde_json::json!({"a": a, "b": b}))
+    solidcraft_engine::sketch_selection::coincident_operands(selection)
 }
 
 /// The current middle of a finite straight sketch edge.
@@ -54,7 +53,7 @@ pub(crate) fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, line: usize)
 }
 
 /// What a selection input accepts (bit set).
-pub type Accept = u16;
+pub type Accept = u32;
 pub const PROFILES: Accept = 1;
 pub const EDGES: Accept = 2;
 pub const FACES: Accept = 4;
@@ -83,6 +82,11 @@ pub const SKETCH_LINES: Accept = 8192;
 pub const EXTERNAL_POINTS: Accept = 16384;
 /// Named construction points.
 pub const CONSTRUCTION_POINTS: Accept = 32768;
+/// Snap points: an edge or face hovered wakes its centre, middle and ends (`snap_wake`).
+pub const SNAP_POINTS: Accept = 65536;
+/// Placements of components (a pattern of components): a pick in the view or the Browser takes
+/// the placement under the active component, as Align's Components do.
+pub const OCCURRENCES: Accept = 131072;
 /// What a 3D axis input takes (Revolve, Circular Pattern, Plane at Angle, Move's Rotate): an
 /// origin or construction axis, a straight sketch line, and an edge or face of the model that
 /// has an axis (a straight or circular edge, a cylinder, cone or torus face; the dialog takes
@@ -103,11 +107,15 @@ pub struct SelInput {
     /// nothing leaves under the form (#10428). Without one the tooltip names what it takes.
     pub tip: Option<&'static str>,
     pub items: Vec<Sel>,
+    /// Where the points picked into this input came from when a hovered flat face offered them
+    /// (#11476): a corner, an edge's middle or a hole's centre of that face, with the face, its
+    /// outward normal and the edge. A joint origin there lies on the face and follows it by name.
+    pub from_face: Vec<(Sel, solidcraft_engine::snap::SnapKind, solidcraft_engine::snap::SnapSource)>,
 }
 
 impl SelInput {
     pub fn new(label: &'static str, accept: Accept, multi: bool) -> SelInput {
-        SelInput { label, accept, multi, places: false, tip: None, items: Vec::new() }
+        SelInput { label, accept, multi, places: false, tip: None, items: Vec::new(), from_face: Vec::new() }
     }
 
     /// This input with face picks as places (see [`SelInput::places`]).
@@ -120,6 +128,15 @@ impl SelInput {
     pub fn tip(mut self, id: &'static str) -> SelInput {
         self.tip = Some(id);
         self
+    }
+
+    /// Joint-origin inputs (`SNAPS`) have no snap for a sketch curve: `fits`/`accepts` let
+    /// `Sel::SketchCurve` through via its `AXES` bit, but `snap_of` can't resolve it. Reject it
+    /// here so every path into a `SNAPS` input shares one definition. Only an input that takes
+    /// exactly the joint-origin kinds: one that takes more besides them (Measure's items take
+    /// sketch curves too) handles them itself.
+    pub fn rejects(&self, sel: &Sel) -> bool {
+        self.accept == crate::dialogs_assembly::SNAPS && matches!(sel, Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. })
     }
 
     /// The selection a hit stands for, if this input accepts it. A curve of another sketch than
@@ -136,6 +153,12 @@ impl SelInput {
             Hit::Plane { name, .. } if a & PLANES != 0 => Some(Sel::Plane { name: name.clone() }),
             Hit::Axis { name } if a & AXES != 0 => Some(Sel::Axis { name: name.clone() }),
             Hit::ConstructionPoint { name } if a & CONSTRUCTION_POINTS != 0 => Some(Sel::ConstructionPoint { name: name.clone() }),
+            Hit::ConstructionPoint { name }
+                if solidcraft_engine::origins::item(name).is_some_and(|(_, item)| item == "O") && a & (ORIGIN | SNAP_POINTS) != 0 =>
+            {
+                Some(Sel::ConstructionPoint { name: name.clone() })
+            }
+            Hit::SketchPoint3d { sketch, id, .. } if a & POINTS != 0 => Some(Sel::SketchPoint { id: format!("{sketch}:{id}") }),
             // A straight sketch line stands for an axis only in an input that takes axes for
             // what they are: an input that takes curves too (Measure) takes the line as its curve.
             Hit::SketchCurve { sketch, id, straight: true, .. } if a & AXES != 0 && a & CURVES == 0 => Some(curve_pick(id, *sketch, active)),
@@ -144,7 +167,10 @@ impl SelInput {
             Hit::SketchPoint { sketch, id, .. } if a & EXTERNAL_POINTS != 0 => Some(Sel::ExternalSketchPoint { sketch: *sketch, id: id.clone() }),
             Hit::SketchPoint { id, .. } if a & SKETCH_POINTS != 0 => Some(Sel::SketchPoint { id: id.clone() }),
             Hit::SketchPoint { sketch, id, .. } if a & POINTS != 0 => Some(Sel::SketchPoint { id: format!("{sketch}:{id}") }),
-            Hit::Vertex { body, point } if body.is_empty() && a & ORIGIN != 0 => Some(Sel::Vertex { body: String::new(), point: *point }),
+            // The origin, or a snap point of a sketch curve (a line's middle).
+            Hit::Vertex { body, point } if body.is_empty() && a & (ORIGIN | SNAP_POINTS) != 0 => {
+                Some(Sel::Vertex { body: String::new(), point: *point })
+            }
             Hit::Vertex { body, point } if !body.is_empty() && a & VERTICES != 0 => Some(Sel::Vertex { body: body.clone(), point: *point }),
             _ => None,
         }
@@ -184,7 +210,7 @@ pub(crate) fn curve_pick(id: &str, sketch: u64, active: Option<u64>) -> Sel {
     Sel::SketchCurve { id: id.to_string(), sketch: (active != Some(sketch)).then_some(sketch) }
 }
 
-/// Projections preserve pick order and repetitions; callers own any deduplication or frames.
+/// Projections preserve pick order; profile identities occur once, other picks retain repetitions.
 pub(crate) trait SelectionExt {
     fn body_names(&self) -> Vec<String>;
     fn curve_ids(&self) -> Vec<String>;
@@ -208,7 +234,11 @@ impl SelectionExt for [Sel] {
         named.all(|k| k == Some(first)).then_some(first)
     }
     fn profiles(&self) -> Vec<(u64, usize)> {
-        self.iter().filter_map(|x| if let Sel::Profile { sketch, index } = x { Some((*sketch, *index)) } else { None }).collect()
+        let mut seen = std::collections::BTreeSet::new();
+        self.iter()
+            .filter_map(|x| if let Sel::Profile { sketch, index } = x { Some((*sketch, *index)) } else { None })
+            .filter(|profile| seen.insert(*profile))
+            .collect()
     }
     fn edge_points(&self) -> Vec<Vec3> {
         self.iter().filter_map(|x| if let Sel::Edge { point, .. } = x { Some(*point) } else { None }).collect()
@@ -380,7 +410,7 @@ fn segments_cross(p: Pos2, q: Pos2, r: Pos2, s: Pos2) -> bool {
 mod tests {
     use super::*;
     use egui::pos2;
-    use solidcraft_engine::render::{Camera, StandardView};
+    use solidcraft_viewport::{Camera, StandardView};
 
     #[test]
     fn origin_widget_keeps_its_screen_size() {
@@ -486,5 +516,33 @@ mod shared_geometry_baseline_tests {
         assert_eq!(polyline_mid(&[p, p + Vec3::X, p + Vec3::X * 10.0]), p + Vec3::X * 5.0);
         assert_eq!(polyline_mid(&[p, p, p + Vec3::X * 2.0, p + Vec3::X * 2.0 + Vec3::Y * 6.0]), p + Vec3::X * 2.0 + Vec3::Y * 2.0);
         assert_eq!(polyline_mid(&[p, Vec3::new(f64::NAN, 0.0, 0.0)]), p);
+    }
+
+    /// Each kind of pick has its own bit: two kinds on one bit make every input that takes one
+    /// take the other too (snap points and sketch lines once shared 8192, so Project's
+    /// other-sketch line picked its middle as a vertex of no body).
+    #[test]
+    fn accept_bits_are_distinct() {
+        let bits = [
+            PROFILES,
+            EDGES,
+            FACES,
+            PLANAR_FACES,
+            BODIES,
+            PLANES,
+            AXES,
+            VERTICES,
+            CURVES,
+            POINTS,
+            FEATURES,
+            SKETCH_POINTS,
+            ORIGIN,
+            SKETCH_LINES,
+            EXTERNAL_POINTS,
+            CONSTRUCTION_POINTS,
+            SNAP_POINTS,
+        ];
+        assert!(bits.iter().all(|b| b.count_ones() == 1));
+        assert_eq!(bits.iter().fold(0, |all, b| all | b).count_ones() as usize, bits.len());
     }
 }

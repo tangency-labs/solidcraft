@@ -6,10 +6,8 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
-use solidcraft_render::{
-    surface::OpaqueSurface,
-    transmission::{Transmission, subsurface::Subsurface},
-};
+use solidcraft_render::transmission::{Transmission, subsurface::Subsurface};
+use solidcraft_viewport::surface::OpaqueSurface;
 use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

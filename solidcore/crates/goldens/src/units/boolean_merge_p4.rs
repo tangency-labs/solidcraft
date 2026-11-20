@@ -316,14 +316,15 @@ impl UnitDiff for Runner {
                 .chain(state.other_components.iter_mut())
             {
                 canonical_loop_starts(b)?;
+                crate::trim_hook::observe(b);
             }
         }
         match result {
             Err(e) if e.is_unported() => {
                 Ok(Output::unported(&e).ok_or_else(|| error("missing deferral"))?)
             }
-            Err(SolidError::Upstream { code, .. }) => rust_snapshot(
-                code,
+            Err(e @ (SolidError::Upstream { .. } | SolidError::Failed(_))) => rust_snapshot(
+                e.sm_status().unwrap_or(solidcore::error::SM_ERR),
                 false,
                 &kernels,
                 primary.as_ref(),
