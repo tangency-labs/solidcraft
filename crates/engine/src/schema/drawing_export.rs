@@ -43,6 +43,17 @@ pub struct ExportParams {
     pub paper: ExportPaper,
 }
 
+/// Print the whole open drawing: its PDF, written to a file or returned.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct PrintParams {
+    /// The .pdf file to write. The app's own print takes the PDF's bytes in-process instead.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub path: Option<String>,
+}
+
 /// [`sheet_ref`], for a key that may be absent (`null` is refused).
 fn some_sheet<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     sheet_ref(d).map(Some)

@@ -832,3 +832,26 @@ fn a_sheet_exports_as_dxf_with_a_layer_for_each_kind_of_line() {
     let shaded = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "dxf"}));
     assert_eq!(shaded["report"]["pictures_left_out"], json!(1), "{}", shaded["report"]);
 }
+
+/// `drawing.print` is the whole drawing's PDF, as `drawing.export` makes it with no sheet named:
+/// the same bytes, every sheet a page, asking to print at actual size, written to its path. The app's
+/// own print takes the same bytes in-process (`print_pdf`); the command never puts them in its reply.
+#[test]
+fn print_is_the_whole_drawings_pdf() {
+    let (mut s, first, _) = front_and_top();
+    let added = run(&mut s, "drawing.sheet.add", json!({}));
+    let second = added["sheet"].clone();
+    let folder = Folder::new("drawing-print");
+    let path = folder.path("Drawing.pdf");
+    let printed = run(&mut s, "drawing.print", json!({"path": path}));
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(bytes, exported(&mut s, json!({"format": "pdf"})));
+    assert_eq!(printed["pages"], json!([ids::encode(first), second]), "{printed}");
+    assert!(String::from_utf8_lossy(&bytes).contains("/PrintScaling /None"));
+    assert_eq!(super::print_pdf(&mut s).unwrap(), bytes, "the app's print: the same bytes");
+    assert!(s.execute("drawing.print", &json!({})).unwrap_err().to_string().contains("give `path`"));
+    for (p, why) in [(json!({"path": folder.path("Drawing.svg")}), "path must be a .pdf file"), (json!({"sheet": "Sheet 1"}), "sheet")] {
+        let message = s.execute("drawing.print", &p).unwrap_err().to_string();
+        assert!(message.contains(why), "{p}: {message}");
+    }
+}

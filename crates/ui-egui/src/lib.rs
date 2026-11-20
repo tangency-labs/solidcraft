@@ -534,6 +534,10 @@ pub struct Services {
     /// Select the local document library root; unavailable in browser hosts.
     pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
     pub show_in_folder: Option<Box<dyn Fn(&str)>>,
+    /// Open a file in the program the system opens its kind with (a PDF in its viewer, to print).
+    pub open_path: Option<Box<dyn Fn(&str) -> Result<(), String>>>,
+    /// A browser: open a document made in memory (its name, its media type, its bytes) in a new tab.
+    pub open_bytes: Option<Box<dyn Fn(&str, &str, &[u8]) -> Result<(), String>>>,
     /// Where the host reads the anti-aliasing preference at start (a small JSON file).
     pub graphics_path: Option<String>,
     /// Linux: the window system this run uses, `wayland` or `x11` (Preferences shows it, #3083).

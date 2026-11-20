@@ -66,6 +66,7 @@ use serde_json::Value;
 use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Model, ModelState};
 
+pub use cmd::drawing_export::print_pdf;
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::sketch_selection;
 pub use cmd::{
