@@ -22,7 +22,7 @@ pub(crate) static WIN10_BUILD_VERSION: Lazy<Option<u32>> = Lazy::new(|| {
     if let Some(rtl_get_version) = handle {
         unsafe {
             let mut vi = OSVERSIONINFOW {
-                dwOSVersionInfoSize: 0,
+                dwOSVersionInfoSize: std::mem::size_of::<OSVERSIONINFOW>() as u32,
                 dwMajorVersion: 0,
                 dwMinorVersion: 0,
                 dwBuildNumber: 0,

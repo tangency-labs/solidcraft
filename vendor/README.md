@@ -143,5 +143,7 @@ SolidCraft changes:
   boundary and its size drifted (#9336). Same behaviour as rust-windowing/winit#4341 (winit 0.31
   only; the 0.30 backport rust-windowing/winit#4637 was closed), except that the maximized path
   stays as it was. On this path a size the application writes through the `InnerSizeWriter` of
-  `ScaleFactorChanged` is not applied; nothing in SolidCraft writes one. eframe 0.37 requires
+  `ScaleFactorChanged` is not applied; nothing in SolidCraft writes one. The version query in
+  `dark_mode.rs` passes the structure size to `RtlGetVersion`, as its documentation requires,
+  since this choice depends on the build number it returns. eframe 0.37 requires
   winit 0.30, so this cannot come from a newer winit.
