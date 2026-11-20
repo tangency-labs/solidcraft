@@ -529,7 +529,7 @@ impl NetSurface {
         // offset across a join where its base is not C^1, the offset's jump there),
         // `g = C - S(W)` is `g~ - e`, `g~ = C - S~(W)` and `e = S(W) - S~(W)`, `|e| <= J`
         // (0 off the part). The term bounds `g~` against its ends' chord `ℓ~`, and
-        // `ℓ~ = ℓ - ℓe` (the chords of `g` and of `e`), so
+        // `ℓ~ = ℓ + ℓe` (the chords of `g` and of `e`), so
         // `|g(t)| <= |ℓ(t)| + |g~(t) - ℓ~(t)| + |e(t) - ℓe(t)| <= ends + term + 2 J`,
         // `|ℓ(t)|` at most the ends' gap and `|e - ℓe|` at most `J + J` (the Lipschitz and
         // corner paths alike: `|g(t)| <= |g(a)| + |g~(t) - g~(a)| + |e(t)| + |e(a)|`). That
@@ -578,7 +578,11 @@ impl NetSurface {
                     }
                 }
             }
-            slack = (Ivl::from(slack) + Ivl::from(2.0) * Ivl::from(jump)).hi;
+            // (only with a part past a knot line: the rounded sum would make a slack of
+            // exactly 0, which callers take as none, a subnormal)
+            if jump > 0.0 {
+                slack = (Ivl::from(slack) + Ivl::from(2.0) * Ivl::from(jump)).hi;
+            }
         }
         Ok((out, slack))
     }
@@ -3970,15 +3974,15 @@ mod tests {
     }
 
     /// The bound is to the image `S(W)` itself, not only to the surface's closure (#18219
-    /// review, CodeRabbit), end to end: the base is flat for `u <= 1` and past it (degree 1
+    /// review), end to end: the base is flat for `u <= 1` and past it (degree 1
     /// in `u`, a C^0 join) tilts by `+10` degrees at `v = 0` and `v = 1` but by `-10`
     /// degrees at `v = 1/2` (its far row quadratic in `v`), offset by `d = 5`. The trim is at
     /// `u = 1.0005`, just past the join, at both ends and at `v* = 1/2` (an interior point of
     /// the one piece), and dips to about `0.97` between. Its curve is the flat sheet's plane
-    /// continued, moved so it meets the image at both ends: `C = S~(W) + D`. Over the part
-    /// past the join `g = C - S(W)` is `D - e` with `e = S(W) - S~(W)` the offset's jump,
-    /// `+e` at the ends and nearly `-e` at `v*`, so the gap there is near `2 |e|`, while the
-    /// ends' gap is 0: the bound must cover it. (Here the jump's enclosure over the
+    /// continued, moved so it meets the image at the first end (and nearly at the other):
+    /// `C = S~(W) + D`. Over the part past the join `g = C - S(W)` is `D - e` with
+    /// `e = S(W) - S~(W)` the offset's jump, `+e` at the ends and nearly `-e` at `v*`, so the
+    /// gap there is near `2 |e|` while the ends' gap is near 0: the bound must cover it. (Here the jump's enclosure over the
     /// piece's wide `v` range is loose enough that one `sup |e|` would too; the slack itself
     /// is checked against twice the jump where its enclosure is tight, in
     /// `an_offset_across_its_bases_kink_has_twice_its_jump_in_the_slack`.)
@@ -4188,13 +4192,13 @@ mod tests {
     }
 
     /// The jump's deviation from its chord along a piece reaches twice its size (#18219
-    /// review, CodeRabbit): one way at a piece's ends, the other way at a point between, as
+    /// review): one way at a piece's ends, the other way at a point between, as
     /// where the base's kink tilts one way at the ends' `v` and the other at that point's.
     /// The bound to the image point `S(W)` (`g = g~ - e`, `e = S(W) - S~(W)`) needs
     /// `|e - ℓe| <= 2 sup |e|` on top of the ends' gap and the term, so the slack holds twice
     /// the jump: the flat-and-45-degree kink at `u = 1` offset by `0.5`, a box whose upper
     /// part `[1, 1.02]` is past it, where the jump's enclosure is tight (it is the same all
-    /// along `v`). Without the second `J` the slack is about `0.39` against `0.77`.
+    /// along `v`). Without the second `J` the slack is about `0.41` against `0.77`.
     #[test]
     fn an_offset_across_its_bases_kink_has_twice_its_jump_in_the_slack() {
         use crate::nurbs::b_spline_surface::BSplineSurface;

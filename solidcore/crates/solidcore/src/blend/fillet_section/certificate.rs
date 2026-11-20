@@ -1689,8 +1689,8 @@ pub(crate) type KnotPieces = Vec<(f64, f64, usize)>;
 /// short part lies within the first partials' size times the width of its value at `x`,
 /// the limit of the surface from the kept side (a point of the surface's closure), so
 /// `|C - S~(W)|` plus that slack bounds `C`'s distance to the surface; a caller that takes
-/// point values from the surface's own piece `S` over the short part adds `sup |S - S~|`
-/// there too (`NetSurface::partials`). (#18219: a trim along a face's boundary that is a
+/// point values from the surface's own piece `S` over the short part and bounds the gap
+/// to the image point `S(W)` adds `sup |S - S~|` there twice (`NetSurface::partials`). (#18219: a trim along a face's boundary that is a
 /// C^0 join of an extended net crosses the join by rounding at every depth.) `None` when
 /// the box crosses no such line or more than one, the short part is wider than `limit`,
 /// or another knot lies strictly inside the short part (its surface is then more than one
