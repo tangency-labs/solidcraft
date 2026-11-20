@@ -139,9 +139,8 @@ fn scenario_tests() {
 
 /// `$OUT_DIR/locales/<id>.tbl`: each catalog as a table of its texts in the order of the English
 /// catalog's sorted ids (`solidcraft_ui_text::numbered`), for messages named by their place
-/// (`msg!`). A text is stored as it is shown (a right-to-left catalog's in display order, as
-/// `Catalog::shown` gives them) and with a mark for each placeholder, counted in the order the
-/// English text names them.
+/// (`msg!`) and for the catalogs that are embedded without their JSON. A text is stored as it is
+/// shown: a right-to-left catalog's in display order, as `Catalog::shown` gives them.
 fn numbered_tables(
     catalogs: &std::collections::BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
     out: &std::path::Path,
@@ -155,13 +154,8 @@ fn numbered_tables(
         let right_to_left = catalog.values().filter_map(|text| text.as_str()).any(bidi::has_rtl);
         let mut texts = std::collections::BTreeMap::new();
         for (id, text) in catalog {
-            let (Some(text), Some(source)) = (text.as_str(), english.get(id).and_then(|t| t.as_str())) else { continue };
-            let order = numbered::placeholders(source);
-            if order.len() > numbered::MAX_PLACEHOLDERS {
-                return Err(format!("`{id}` has more than {} placeholders", numbered::MAX_PLACEHOLDERS));
-            }
-            let shown = if right_to_left { bidi::visual_template(text) } else { text.into() };
-            texts.insert(id.as_str(), numbered::template(&shown, &order));
+            let Some(text) = text.as_str().filter(|_| english.contains_key(id)) else { continue };
+            texts.insert(id.as_str(), if right_to_left { bidi::visual_template(text).into_owned() } else { text.to_string() });
         }
         let bytes =
             numbered::encode(&ids, |id| texts.get(id).map(String::as_str)).ok_or_else(|| format!("{locale}: the catalog does not fit a table"))?;

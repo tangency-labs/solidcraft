@@ -13,8 +13,7 @@
 //!
 //! - `msg!("id")`: the id is a message of the English catalog. A `Msg`.
 //! - `msg!("id", name = value, ...)`: and the names are exactly the message's `{placeholders}`.
-//!   A `Filled`, its values (`&str`) put in the order the English text names them, so the names
-//!   are not in the program either.
+//!   A `Filled`, with its values (`&str`).
 //!
 //! Anything else stops the build at the literal, with the nearest id when there is one. Only the
 //! English catalog is read: whether another language has the message stays with
@@ -85,7 +84,13 @@ pub fn msg(input: TokenStream) -> TokenStream {
             let order = order.1;
             match order {
                 None => msg.into(),
-                Some(values) => quote!(::solidcraft_ui_text::Filled::checked(#msg, [#(#values),*])).into(),
+                Some(values) => {
+                    let pairs = values.iter().map(|(name, value)| {
+                        let name = name.to_string();
+                        quote!((#name, #value))
+                    });
+                    quote!(::solidcraft_ui_text::Filled::checked(#msg, [#(#pairs),*])).into()
+                }
             }
         }
         Err(e) => e.to_compile_error().into(),
@@ -102,11 +107,10 @@ fn fingerprint<'a>(ids: impl IntoIterator<Item = &'a str>) -> u32 {
     (hash ^ (hash >> 32)) as u32
 }
 
-/// The message's place and its catalog's fingerprint, with the values in the order the English
-/// text names their placeholders (`None` for a message given without values), or why the
-/// message is refused.
+/// The message's place and its catalog's fingerprint, with the values given (`None` for a
+/// message given without values), or why the message is refused.
 #[allow(clippy::type_complexity)]
-fn check(input: &Input) -> syn::Result<((u32, u32), Option<Vec<&syn::Expr>>)> {
+fn check(input: &Input) -> syn::Result<((u32, u32), Option<&[(Ident, syn::Expr)]>)> {
     let (catalog, ids) = catalog().as_ref().map_err(|why| syn::Error::new(input.id.span(), why))?;
     let ids = *ids;
     let id = input.id.value();
@@ -133,14 +137,10 @@ fn check(input: &Input) -> syn::Result<((u32, u32), Option<Vec<&syn::Expr>>)> {
     if let Some((extra, _)) = values.iter().find(|(name, _)| !wanted.contains(&name.to_string())) {
         return Err(syn::Error::new(extra.span(), format!("`{id}` has no placeholder `{{{extra}}}`: its text is {text:?}")));
     }
-    let mut ordered = Vec::new();
-    for name in &wanted {
-        match values.iter().find(|(given, _)| given == name) {
-            Some((_, value)) => ordered.push(value),
-            None => return Err(syn::Error::new(input.id.span(), format!("`{id}` also has the placeholder `{{{name}}}`: its text is {text:?}"))),
-        }
+    if let Some(missing) = wanted.iter().find(|name| !values.iter().any(|(given, _)| given == name)) {
+        return Err(syn::Error::new(input.id.span(), format!("`{id}` also has the placeholder `{{{missing}}}`: its text is {text:?}")));
     }
-    Ok(((place, ids), Some(ordered)))
+    Ok(((place, ids), Some(values)))
 }
 
 /// The names in `{braces}` in `text`, each once, in order. A name is letters, digits and `_`;

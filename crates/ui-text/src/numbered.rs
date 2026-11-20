@@ -15,9 +15,8 @@
 //! the list's [`fingerprint`] and a table refuses a message numbered against another list
 //! (a crate compiled before a message was added) instead of showing a neighbour's text.
 //!
-//! A text's `{placeholders}` are stored as marks that say which argument goes there
-//! ([`template`]), counted in the order the English text names them, so a filled message takes
-//! its values by position ([`Filled`]) and no placeholder name is kept either.
+//! A text is stored as it is shown, `{placeholders}` and all, so it is filled as a message read
+//! by its id is ([`Filled`]).
 
 /// What tells one sorted list of ids from another: FNV-1a over the ids, each followed by a
 /// newline, folded to 32 bits. `msg!` computes the same (crates/ui-text-macros).
@@ -84,12 +83,8 @@ impl Msg {
     /// the ids, so a host that uses it keeps them.
     pub fn of(id: &str) -> Option<Self> {
         let english = crate::english();
-        let messages = english.messages();
-        messages.contains_key(id).then(|| Self {
-            id: "",
-            place: messages.range::<str, _>((std::ops::Bound::Unbounded, std::ops::Bound::Excluded(id))).count() as u32,
-            ids: table_fingerprint(english.table),
-        })
+        let place = english.ids().binary_search(&id).ok()?;
+        Some(Self { place: u32::try_from(place).ok()?, ids: table_fingerprint(english.table), id: "" })
     }
 
     /// The message in this thread's language (English where the language lacks it).
@@ -98,17 +93,17 @@ impl Msg {
     }
 }
 
-/// A message with its placeholders' values, in the order its English text names them.
+/// A message with its placeholders' values, by name.
 #[derive(Clone, Copy, Debug)]
 pub struct Filled<'a, const N: usize> {
     msg: Msg,
-    values: [&'a str; N],
+    values: [(&'static str, &'a str); N],
 }
 
 impl<'a, const N: usize> Filled<'a, N> {
-    /// `msg!` writes this, with the values put in the English text's order.
+    /// `msg!` writes this, after finding that the names are exactly the message's placeholders.
     #[doc(hidden)]
-    pub const fn checked(msg: Msg, values: [&'a str; N]) -> Self {
+    pub const fn checked(msg: Msg, values: [(&'static str, &'a str); N]) -> Self {
         Self { msg, values }
     }
 
@@ -118,76 +113,12 @@ impl<'a, const N: usize> Filled<'a, N> {
     }
 
     pub(crate) fn fill_in(&self, locale: crate::Locale) -> String {
-        fill(locale.message(self.msg), &self.values)
+        crate::interpolate(locale.message(self.msg), &self.values)
     }
-}
-
-/// The mark that stands for a placeholder in a table's text; the character after it says which
-/// argument: `0`–`9`, then `a`–`z`.
-const MARK: char = '\u{1}';
-/// The most placeholders a message may have.
-pub const MAX_PLACEHOLDERS: usize = 36;
-
-/// The placeholder names of `text`, each once, in the order they first stand.
-pub fn placeholders(text: &str) -> Vec<&str> {
-    let mut names: Vec<&str> = Vec::new();
-    let mut rest = text;
-    while let Some((_, after)) = rest.split_once('{') {
-        rest = after;
-        if let Some((name, tail)) = after.split_once('}')
-            && !name.is_empty()
-            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
-            if !names.contains(&name) {
-                names.push(name);
-            }
-            rest = tail;
-        }
-    }
-    names
-}
-
-/// `text` with each `{name}` of `order` replaced by the mark of its place in `order`. A name
-/// that is not in `order` (a translation's mistake) stays as it is written.
-pub fn template(text: &str, order: &[&str]) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some((before, after)) = rest.split_once('{') {
-        out.push_str(before);
-        let place = after.split_once('}').and_then(|(name, tail)| Some((order.iter().position(|n| *n == name)?, tail)));
-        match place.and_then(|(index, tail)| Some((char::from_digit(u32::try_from(index).ok()?, 36)?, tail))) {
-            Some((digit, tail)) => {
-                out.push(MARK);
-                out.push(digit);
-                rest = tail;
-            }
-            None => {
-                out.push('{');
-                rest = after;
-            }
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
-/// `template` with each mark replaced by its value. A mark with no value stays out.
-fn fill(template: &str, values: &[&str]) -> String {
-    let mut out = String::with_capacity(template.len() + values.iter().map(|v| v.len()).sum::<usize>());
-    let mut chars = template.chars();
-    while let Some(c) = chars.next() {
-        if c != MARK {
-            out.push(c);
-        } else if let Some(value) = chars.next().and_then(|d| d.to_digit(36)).and_then(|i| values.get(i as usize)) {
-            out.push_str(value);
-        }
-    }
-    out
 }
 
 /// A catalog as a table. `ids` are the English catalog's ids, sorted; `texts` gives this
-/// catalog's text for an id it has, already as it is to be shown and with marks for its
-/// placeholders. `None` when a size does not fit.
+/// catalog's text for an id it has, already as it is to be shown. `None` when a size does not fit.
 pub fn encode<'a>(ids: &[&str], texts: impl Fn(&str) -> Option<&'a str>) -> Option<Vec<u8>> {
     let count = u32::try_from(ids.len()).ok()?;
     let mut has = vec![0u8; ids.len().div_ceil(8)];
@@ -298,23 +229,5 @@ mod tests {
         for hostile in [&[][..], &[0xff; 3], &[0xff; 64]] {
             assert_eq!(lookup(leak(hostile.to_vec()), Msg::checked(7, 0xffff_ffff, "")), None);
         }
-    }
-
-    #[test]
-    fn placeholders_become_marks_in_the_english_order_and_are_filled_by_place() {
-        let english = "Could not save {name}: {reason}";
-        let order = placeholders(english);
-        assert_eq!(order, ["name", "reason"]);
-        // A translation may name them in another order.
-        let japanese = template("{reason} のため {name} を保存できません", &order);
-        assert!(!japanese.contains('{'));
-        assert_eq!(fill(&japanese, &["a.sc", "disk full"]), "disk full のため a.sc を保存できません");
-        assert_eq!(fill(&template(english, &order), &["a.sc", "disk full"]), "Could not save a.sc: disk full");
-        // A value is put in as it is, braces and marks included.
-        assert_eq!(fill(&template("{name}!", &["name"]), &["{reason}"]), "{reason}!");
-        // A name the English text lacks, and braces that are not a placeholder, stay as written.
-        assert_eq!(template("{other} and {name} and { x } and {", &order), "{other} and \u{1}0 and { x } and {");
-        // A mark with no value is left out.
-        assert_eq!(fill("a\u{1}5b", &[]), "ab");
     }
 }

@@ -61,23 +61,27 @@ pub struct Catalog {
     shown: OnceLock<Option<Messages>>,
     /// English text → the ids with that text, for resolving a source label (see [`Locale::label`]).
     label_ids: OnceLock<BTreeMap<&'static str, Vec<&'static str>>>,
+    /// The ids, sorted: a message's place among them is its number in a table ([`numbered`]).
+    ids: OnceLock<Vec<&'static str>>,
 }
 
 impl Catalog {
     pub const fn new(id: &'static str, name: &'static str, source: &'static str) -> Self {
-        Self { id, name, source, table: &[], messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new() }
+        Self { id, name, source, table: &[], messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new(), ids: OnceLock::new() }
     }
 
-    /// [`Catalog::new`] with the catalog's table of numbered texts, for messages named by number
-    /// ([`Msg`]): what a build script made of the same messages with [`numbered::encode`].
+    /// [`Catalog::new`] with the catalog's table of numbered texts ([`numbered::encode`], made by
+    /// a build script of the same messages). A catalog with a table is read from it, by id as by
+    /// number, so only the English one needs its JSON too (for the ids, and for the labels that
+    /// are found by their English text): the others may give an empty `source`.
     pub const fn numbered(id: &'static str, name: &'static str, source: &'static str, table: &'static [u8]) -> Self {
-        Self { id, name, source, table, messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new() }
+        Self { id, name, source, table, messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new(), ids: OnceLock::new() }
     }
 
     /// The messages in reading order, as the catalog holds them. An invalid catalog is logged and
     /// reads as empty.
     pub fn messages(&'static self) -> &'static Messages {
-        self.messages.get_or_init(|| match serde_json::from_str(self.source) {
+        self.messages.get_or_init(|| match serde_json::from_str(if self.source.is_empty() { "{}" } else { self.source }) {
             Ok(messages) => messages,
             Err(error) => {
                 log::error!("invalid embedded {} message catalog: {error}", self.id);
@@ -112,6 +116,11 @@ impl Catalog {
             }
             ids
         })
+    }
+
+    /// The ids, sorted by their bytes.
+    pub(crate) fn ids(&'static self) -> &'static [&'static str] {
+        self.ids.get_or_init(|| self.messages().keys().map(String::as_str).collect())
     }
 
     /// The language's own name as the language list draws it.
@@ -273,8 +282,17 @@ impl Locale {
         key.read(self)
     }
 
-    fn text_by_id(self, id: &str) -> &str {
-        self.0.shown().get(id).or_else(|| english().messages().get(id)).map_or(id, String::as_str)
+    /// This catalog's own text for `id`, as it is shown: from its table when it has one, else from
+    /// its JSON. No fall back to English.
+    fn own(self, id: &str) -> Option<&'static str> {
+        if self.0.table.is_empty() {
+            return self.0.shown().get(id).map(String::as_str);
+        }
+        numbered::lookup(self.0.table, Msg::of(id)?)
+    }
+
+    fn text_by_id<'a>(self, id: &'a str) -> &'a str {
+        self.own(id).or_else(|| english().messages().get(id).map(String::as_str)).unwrap_or(id)
     }
 
     /// Translate source labels from engine/UI tables, preserving unknown labels.
@@ -283,13 +301,13 @@ impl Locale {
         let english = english();
         // Stable IDs are authoritative. An untranslated legacy ID identical to its
         // English caption can still use another translated ID for that source label.
-        if english.messages().get(label).is_some_and(|text| text != label || self.0.messages().contains_key(label)) {
+        if english.messages().get(label).is_some_and(|text| text != label || self.own(label).is_some()) {
             return self.text(label);
         }
         if let Some(candidates) = english.label_ids().get(label) {
             // Preserve the old last-ID preference among available translations. A new
             // English-only alias must not hide a translation that already exists here.
-            if let Some(text) = candidates.iter().rev().find_map(|id| self.0.shown().get(*id)) {
+            if let Some(text) = candidates.iter().rev().find_map(|id| self.own(id)) {
                 return text;
             }
             if let Some(id) = candidates.last() {
@@ -309,8 +327,7 @@ impl Locale {
     }
 
     /// The message `msg` in this language, then in English, then its id where the build kept it
-    /// (development and tests; a release build has no ids to show, and shows nothing). Its
-    /// placeholders are marks: fill them with [`Filled::tr`].
+    /// (development and tests; a release build has no ids to show, and shows nothing).
     pub fn message(self, msg: Msg) -> &'static str {
         numbered::lookup(self.0.table, msg).or_else(|| numbered::lookup(english().table, msg)).unwrap_or(msg.unread())
     }
@@ -318,7 +335,7 @@ impl Locale {
 
 /// One-pass substitution: argument values are literal, even when they contain braces.
 /// Missing arguments remain visible rather than crashing or silently removing text.
-fn interpolate(template: &str, args: &[(&str, &str)]) -> String {
+pub(crate) fn interpolate(template: &str, args: &[(&str, &str)]) -> String {
     let mut output = String::with_capacity(template.len());
     let mut remaining = template;
     while let Some((before, after)) = remaining.split_once('{') {

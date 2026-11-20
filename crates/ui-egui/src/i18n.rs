@@ -4,229 +4,61 @@
 
 use solidcraft_ui_text::{Catalog, Locale};
 
+/// A catalog's JSON, for the tests that read it (the catalogs' coverage and wording). The app
+/// reads every catalog but English from its table (`build.rs`, `numbered_tables`), so outside
+/// tests the JSON is left out of the program.
+macro_rules! json {
+    ($locale:literal) => {
+        if cfg!(test) { include_str!(concat!(env!("OUT_DIR"), "/locales/", $locale, ".json")) } else { "" }
+    };
+}
+
 static ENGLISH: Catalog = Catalog::numbered(
     "en",
     "English",
     include_str!(concat!(env!("OUT_DIR"), "/locales/en.json")),
     include_bytes!(concat!(env!("OUT_DIR"), "/locales/en.tbl")),
 );
-static ARABIC: Catalog = Catalog::numbered(
-    "ar",
-    "العربية",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/ar.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/ar.tbl")),
-);
-static BULGARIAN: Catalog = Catalog::numbered(
-    "bg",
-    "Български",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/bg.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/bg.tbl")),
-);
-static BOSNIAN: Catalog = Catalog::numbered(
-    "bs",
-    "Bosanski",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/bs.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/bs.tbl")),
-);
-static CATALAN: Catalog = Catalog::numbered(
-    "ca",
-    "Català",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/ca.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/ca.tbl")),
-);
-static CZECH: Catalog = Catalog::numbered(
-    "cs",
-    "Čeština",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/cs.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/cs.tbl")),
-);
-static DANISH: Catalog = Catalog::numbered(
-    "da",
-    "Dansk",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/da.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/da.tbl")),
-);
-static GERMAN: Catalog = Catalog::numbered(
-    "de",
-    "Deutsch",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/de.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/de.tbl")),
-);
+static ARABIC: Catalog = Catalog::numbered("ar", "العربية", json!("ar"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ar.tbl")));
+static BULGARIAN: Catalog = Catalog::numbered("bg", "Български", json!("bg"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/bg.tbl")));
+static BOSNIAN: Catalog = Catalog::numbered("bs", "Bosanski", json!("bs"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/bs.tbl")));
+static CATALAN: Catalog = Catalog::numbered("ca", "Català", json!("ca"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ca.tbl")));
+static CZECH: Catalog = Catalog::numbered("cs", "Čeština", json!("cs"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/cs.tbl")));
+static DANISH: Catalog = Catalog::numbered("da", "Dansk", json!("da"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/da.tbl")));
+static GERMAN: Catalog = Catalog::numbered("de", "Deutsch", json!("de"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/de.tbl")));
 /// English in UK spelling: only the messages whose spelling differs; the rest are English's.
-static ENGLISH_UK: Catalog = Catalog::numbered(
-    "en-GB",
-    "English (UK)",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/en-GB.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/en-GB.tbl")),
-);
-static SPANISH: Catalog = Catalog::numbered(
-    "es",
-    "Español (España)",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/es.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/es.tbl")),
-);
-static BASQUE: Catalog = Catalog::numbered(
-    "eu",
-    "Euskara",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/eu.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/eu.tbl")),
-);
-static FINNISH: Catalog = Catalog::numbered(
-    "fi",
-    "Suomi",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/fi.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/fi.tbl")),
-);
-static FRENCH: Catalog = Catalog::numbered(
-    "fr",
-    "Français",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/fr.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/fr.tbl")),
-);
-static GALICIAN: Catalog = Catalog::numbered(
-    "gl",
-    "Galego",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/gl.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/gl.tbl")),
-);
-static HEBREW: Catalog = Catalog::numbered(
-    "he",
-    "עברית",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/he.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/he.tbl")),
-);
-static CROATIAN: Catalog = Catalog::numbered(
-    "hr",
-    "Hrvatski",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/hr.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/hr.tbl")),
-);
-static HUNGARIAN: Catalog = Catalog::numbered(
-    "hu",
-    "Magyar",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/hu.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/hu.tbl")),
-);
-static INDONESIAN: Catalog = Catalog::numbered(
-    "id",
-    "Bahasa Indonesia",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/id.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/id.tbl")),
-);
-static ITALIAN: Catalog = Catalog::numbered(
-    "it",
-    "Italiano",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/it.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/it.tbl")),
-);
-static JAPANESE: Catalog = Catalog::numbered(
-    "ja",
-    "日本語",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/ja.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/ja.tbl")),
-);
-static GEORGIAN: Catalog = Catalog::numbered(
-    "ka",
-    "ქართული",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/ka.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/ka.tbl")),
-);
-static KOREAN: Catalog = Catalog::numbered(
-    "ko",
-    "한국어",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/ko.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/ko.tbl")),
-);
-static LATVIAN: Catalog = Catalog::numbered(
-    "lv",
-    "Latviešu",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/lv.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/lv.tbl")),
-);
-static MALAY: Catalog = Catalog::numbered(
-    "ms",
-    "Bahasa Melayu",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/ms.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/ms.tbl")),
-);
-static NORWEGIAN: Catalog = Catalog::numbered(
-    "nb",
-    "Norsk bokmål",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/nb.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/nb.tbl")),
-);
-static DUTCH: Catalog = Catalog::numbered(
-    "nl",
-    "Nederlands",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/nl.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/nl.tbl")),
-);
-static POLISH: Catalog = Catalog::numbered(
-    "pl",
-    "Polski",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/pl.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/pl.tbl")),
-);
-static PORTUGUESE_BR: Catalog = Catalog::numbered(
-    "pt-BR",
-    "Português (Brasil)",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/pt-BR.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/pt-BR.tbl")),
-);
-static ROMANIAN: Catalog = Catalog::numbered(
-    "ro",
-    "Română",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/ro.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/ro.tbl")),
-);
-static RUSSIAN: Catalog = Catalog::numbered(
-    "ru",
-    "Русский",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/ru.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/ru.tbl")),
-);
-static SERBIAN: Catalog = Catalog::numbered(
-    "sr",
-    "Српски",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/sr.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/sr.tbl")),
-);
-static SWEDISH: Catalog = Catalog::numbered(
-    "sv",
-    "Svenska",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/sv.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/sv.tbl")),
-);
-static TURKISH: Catalog = Catalog::numbered(
-    "tr",
-    "Türkçe",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/tr.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/tr.tbl")),
-);
-static UKRAINIAN: Catalog = Catalog::numbered(
-    "uk",
-    "Українська",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/uk.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/uk.tbl")),
-);
-static VIETNAMESE: Catalog = Catalog::numbered(
-    "vi",
-    "Tiếng Việt",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/vi.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/vi.tbl")),
-);
-static CHINESE: Catalog = Catalog::numbered(
-    "zh",
-    "中文",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/zh.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/zh.tbl")),
-);
-static CHINESE_TRADITIONAL: Catalog = Catalog::numbered(
-    "zh-TW",
-    "繁體中文",
-    include_str!(concat!(env!("OUT_DIR"), "/locales/zh-TW.json")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/locales/zh-TW.tbl")),
-);
+static ENGLISH_UK: Catalog =
+    Catalog::numbered("en-GB", "English (UK)", json!("en-GB"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/en-GB.tbl")));
+static SPANISH: Catalog = Catalog::numbered("es", "Español (España)", json!("es"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/es.tbl")));
+static BASQUE: Catalog = Catalog::numbered("eu", "Euskara", json!("eu"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/eu.tbl")));
+static FINNISH: Catalog = Catalog::numbered("fi", "Suomi", json!("fi"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/fi.tbl")));
+static FRENCH: Catalog = Catalog::numbered("fr", "Français", json!("fr"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/fr.tbl")));
+static GALICIAN: Catalog = Catalog::numbered("gl", "Galego", json!("gl"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/gl.tbl")));
+static HEBREW: Catalog = Catalog::numbered("he", "עברית", json!("he"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/he.tbl")));
+static CROATIAN: Catalog = Catalog::numbered("hr", "Hrvatski", json!("hr"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/hr.tbl")));
+static HUNGARIAN: Catalog = Catalog::numbered("hu", "Magyar", json!("hu"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/hu.tbl")));
+static INDONESIAN: Catalog = Catalog::numbered("id", "Bahasa Indonesia", json!("id"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/id.tbl")));
+static ITALIAN: Catalog = Catalog::numbered("it", "Italiano", json!("it"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/it.tbl")));
+static JAPANESE: Catalog = Catalog::numbered("ja", "日本語", json!("ja"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ja.tbl")));
+static GEORGIAN: Catalog = Catalog::numbered("ka", "ქართული", json!("ka"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ka.tbl")));
+static KOREAN: Catalog = Catalog::numbered("ko", "한국어", json!("ko"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ko.tbl")));
+static LATVIAN: Catalog = Catalog::numbered("lv", "Latviešu", json!("lv"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/lv.tbl")));
+static MALAY: Catalog = Catalog::numbered("ms", "Bahasa Melayu", json!("ms"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ms.tbl")));
+static NORWEGIAN: Catalog = Catalog::numbered("nb", "Norsk bokmål", json!("nb"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/nb.tbl")));
+static DUTCH: Catalog = Catalog::numbered("nl", "Nederlands", json!("nl"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/nl.tbl")));
+static POLISH: Catalog = Catalog::numbered("pl", "Polski", json!("pl"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/pl.tbl")));
+static PORTUGUESE_BR: Catalog =
+    Catalog::numbered("pt-BR", "Português (Brasil)", json!("pt-BR"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/pt-BR.tbl")));
+static ROMANIAN: Catalog = Catalog::numbered("ro", "Română", json!("ro"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ro.tbl")));
+static RUSSIAN: Catalog = Catalog::numbered("ru", "Русский", json!("ru"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ru.tbl")));
+static SERBIAN: Catalog = Catalog::numbered("sr", "Српски", json!("sr"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/sr.tbl")));
+static SWEDISH: Catalog = Catalog::numbered("sv", "Svenska", json!("sv"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/sv.tbl")));
+static TURKISH: Catalog = Catalog::numbered("tr", "Türkçe", json!("tr"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/tr.tbl")));
+static UKRAINIAN: Catalog = Catalog::numbered("uk", "Українська", json!("uk"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/uk.tbl")));
+static VIETNAMESE: Catalog = Catalog::numbered("vi", "Tiếng Việt", json!("vi"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/vi.tbl")));
+static CHINESE: Catalog = Catalog::numbered("zh", "中文", json!("zh"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/zh.tbl")));
+static CHINESE_TRADITIONAL: Catalog =
+    Catalog::numbered("zh-TW", "繁體中文", json!("zh-TW"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/zh-TW.tbl")));
 /// English first (the fallback), then by language id, one per line so that adding a language
 /// doesn't edit a line another addition edits.
 #[rustfmt::skip]
@@ -1146,26 +978,31 @@ mod tests {
         assert_eq!(Locale::for_language("en").label("motion.plot_quantity"), "Quantity");
     }
 
-    /// A message named by its place reads as it does by its id, in every language: the text as
-    /// it is shown (a right-to-left catalog's in display order, English where the language lacks
-    /// it), with a mark where each placeholder stood.
+    /// A catalog's table reads as its JSON does, in every language, whether a message is named
+    /// by its id or by its place: the text as it is shown (a right-to-left catalog's in display
+    /// order), and English where the language lacks it.
     #[test]
-    fn a_numbered_message_reads_as_the_same_message_by_id_in_every_language() {
-        use solidcraft_ui_text::numbered::{placeholders, template};
+    fn a_table_reads_as_the_json_it_was_made_from_in_every_language() {
         install();
         let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
         let mut read = 0;
         for catalog in solidcraft_ui_text::locales() {
+            let json: Messages = serde_json::from_str(catalog.source).unwrap();
+            assert!(!json.is_empty(), "{}", catalog.id);
+            let right_to_left = json.values().any(|text| solidcraft_ui_text::bidi::has_rtl(text));
             let locale = Locale::for_language(catalog.id);
             for (id, source) in &english {
-                let by_number = locale.message(solidcraft_ui_text::Msg::of(id).unwrap());
-                assert_eq!(by_number, template(locale.text(id), &placeholders(source)), "{}: {id}", catalog.id);
+                let own =
+                    json.get(id).map(|text| if right_to_left { solidcraft_ui_text::bidi::visual_template(text).into_owned() } else { text.clone() });
+                let expected = own.as_deref().unwrap_or(source);
+                assert_eq!(locale.text(id), expected, "{}: {id}", catalog.id);
+                assert_eq!(locale.message(solidcraft_ui_text::Msg::of(id).unwrap()), expected, "{}: {id}", catalog.id);
                 read += 1;
             }
         }
         assert!(read > 200_000, "{read} messages read");
         assert!(solidcraft_ui_text::Msg::of("ui.no_such_message").is_none());
-        // `msg!` names the same message, and fills it by the names.
+        // `msg!` names the same message, and fills it by the names, in any order.
         let japanese = Locale::for_language("ja");
         assert_eq!(japanese.message(msg!("ui.cancel")), japanese.text("ui.cancel"));
         let _scope = solidcraft_ui_text::scope("ja");
