@@ -340,6 +340,7 @@ impl MovePreview {
             bounds,
             layer,
             joints: Vec::new(),
+            plugin_view: None,
         };
         // One motion for every body that the GPU can take, in a view that draws a layer, of
         // bodies a layer draws as finely as building them does: nothing is built at this change
