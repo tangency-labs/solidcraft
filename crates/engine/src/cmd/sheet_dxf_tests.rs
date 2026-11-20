@@ -1217,6 +1217,22 @@ mod byte_regressions {
         ("tray-arcs-etch-bends-true-single.dxf", 41076, "eee0e2d5a25faf63942bfa408257aad8c65f894bed6f65bb98cf4b96e13a7906"),
     ];
 
+    // The same files under macOS's math functions on Apple Silicon (macOS 15, aarch64), captured
+    // there the same way: exact pairs, as above.
+    const MACOS_AARCH64_MATH_OUTPUTS: &[ExpectedOutput] = &[
+        ("cubic-spline-arcs.dxf", 13553, "f7da22b3058918033ec888279dc2581a03db59fb4e52d7eadae4822e091849c8"),
+        ("degree-nine-arcs.dxf", 14320, "44868d54ff9d521867d6f9dbb69a4cd4a3cad186f93272a9126e3650a989fdfc"),
+        ("tray-arcs-cut-bends-true-roles.dxf", 42626, "866f0aa7e4de22e2101b0d3db55a8be5fdd16dd561ebd4c18c6a6ee54dd01401"),
+        ("tray-arcs-cut-bends-true-single.dxf", 41076, "1ff3b6fdb98acafa0d99809a001511be1ad055361fcc6dbca1f077de789489ee"),
+        ("tray-arcs-cut-bends-false-roles.dxf", 42104, "45a257a14bb3253542d47a90084715c3416a34e7d35ff0cbe31bb3184bf82f00"),
+        ("tray-arcs-cut-bends-false-single.dxf", 40580, "3f579d05dade45dccb8e48f7a0ff1ad9677f97cc9a79a28e6fc2792deb05b64c"),
+        ("tray-arcs-etch-bends-true-roles.dxf", 42626, "3a5efef0004f73f1d0045db022baba527c5c2af63bcd6b74d7837a050dcec548"),
+        ("tray-arcs-etch-bends-true-single.dxf", 41076, "1ff3b6fdb98acafa0d99809a001511be1ad055361fcc6dbca1f077de789489ee"),
+        ("tray-arcs-etch-bends-false-roles.dxf", 42104, "a5c681168ad7bcc623f2eeee46950b1ba8204d4c2ffc90ecf7d4c3ac8469163c"),
+        ("tray-arcs-etch-bends-false-single.dxf", 40580, "3f579d05dade45dccb8e48f7a0ff1ad9677f97cc9a79a28e6fc2792deb05b64c"),
+        ("pocket-and-engraved-text-arcs.dxf", 39082, "d4a3d48aba5e8d90112a8a6c5772ac231cee48795c8216efa896b8a29da31202"),
+    ];
+
     struct BytePins {
         expected: &'static [ExpectedOutput; 53],
         next: usize,
@@ -1236,8 +1252,10 @@ mod byte_regressions {
             assert_eq!(name, expected_name, "original-output case {} changed order or name", self.next + 1);
             let actual_sha256 = format!("{:x}", Sha256::digest(bytes));
             let primary_matches = bytes.len() == expected_len && actual_sha256 == expected_sha256;
-            let platform_matches =
-                UBUNTU_MATH_OUTPUTS.iter().any(|&(case, len, digest)| case == name && bytes.len() == len && actual_sha256 == digest);
+            let platform_matches = UBUNTU_MATH_OUTPUTS
+                .iter()
+                .chain(MACOS_AARCH64_MATH_OUTPUTS)
+                .any(|&(case, len, digest)| case == name && bytes.len() == len && actual_sha256 == digest);
             if !(primary_matches || platform_matches) {
                 self.changed.push(format!("(\"{name}\", {}, \"{actual_sha256}\"),", bytes.len()));
             }
