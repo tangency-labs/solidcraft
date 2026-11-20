@@ -1301,12 +1301,8 @@ mod tests {
         let title = crate::test_support::text_shapes(&output).find(|shape| shape.galley.text() == "Review").unwrap();
         let point = title.pos + title.galley.size() * 0.5;
         for (folded, already_selected) in [(true, false), (false, true)] {
-            let button = |pressed| egui::Event::PointerButton {
-                pos: point,
-                button: egui::PointerButton::Primary,
-                pressed,
-                modifiers: Default::default(),
-            };
+            let button =
+                |pressed| egui::Event::PointerButton { pos: point, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
             let _ = frame(&mut h, vec![egui::Event::PointerMoved(point), button(true)], folded);
             let (clicked, _) = frame(&mut h, vec![button(false)], folded);
             assert_eq!(clicked, Some(already_selected), "folded ribbon closing uses the previous selection");
