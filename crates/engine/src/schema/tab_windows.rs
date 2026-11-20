@@ -4,12 +4,14 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// PR 1 opens a new pop-out. Moving to an existing window will add a numeric target.
+/// The destination can be a new pop-out or the id of an open window.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TabWindowTarget {
     #[default]
     New,
+    #[serde(untagged)]
+    Existing(u32),
 }
 
 /// The supported level of a new pop-out.
@@ -34,9 +36,15 @@ pub enum TabWindowDisplay {
 pub struct TabViewMoveToWindowParams {
     /// The open view's id, as reported by `tab.view.list`.
     pub view: u64,
-    /// Open a new window.
+    /// Open a new window by default, or move to an existing window (main is 0).
     #[serde(default)]
     pub window: TabWindowTarget,
+    /// Zero-based insertion position in an existing strip, after removing the view if it was there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+    /// A tile placement in an existing destination window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<super::tab_views::TabViewPlacement>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display: Option<TabWindowDisplay>,
     /// Horizontal position in logical points relative to the selected display.
@@ -51,8 +59,9 @@ pub struct TabViewMoveToWindowParams {
     /// Height in logical points.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub h: Option<f32>,
-    #[serde(default)]
-    pub level: TabNewWindowLevel,
+    /// The chrome level of a new window. Defaults to Views only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<TabNewWindowLevel>,
 }
 
 /// A request naming a window of the active design. The main window has id 0.
