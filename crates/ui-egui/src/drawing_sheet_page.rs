@@ -477,7 +477,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         page.fitted = None;
     }
     if page.fitted != Some(key) {
-        let area = free_area(app, canvas);
+        // Keep the full canvas for painting; frame the paper in the host's unoccupied room.
+        let area = app
+            .viewport
+            .layout
+            .as_ref()
+            .and_then(|layout| layout.usable.as_ref())
+            .and_then(|usable| usable.largest_rect())
+            .map(crate::panel_runtime::egui_rect)
+            .unwrap_or_else(|| free_area(app, canvas));
         let (target, scale) = framed(canvas, area, size, base);
         let page = &mut app.drawing_workspace.page;
         page.cam.target.x = target.x;

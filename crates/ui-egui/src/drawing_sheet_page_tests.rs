@@ -843,6 +843,77 @@ fn fit_sheet_frames_beside_a_short_browser_not_under_it() {
     assert!(paper.min.x >= short.right() - 1.0, "the paper {paper:?} is framed beside the Browser {short:?}");
 }
 
+/// Fit uses the production host's actual room with the View Editor open or closed, in both layouts.
+#[test]
+fn fit_sheet_keeps_the_paper_clear_of_the_production_view_editor() {
+    let inspector = |h: &Harness| {
+        h.app
+            .universal_panel_frame()
+            .unwrap()
+            .layout
+            .sections
+            .iter()
+            .find(|section| section.instance.0 == "drawing-inspector")
+            .map(|section| crate::panel_runtime::egui_rect(section.outer))
+    };
+    for layout in ["floating", "docked"] {
+        for (width, height) in [(1280, 720), (1024, 640)] {
+            for editor in [false, true] {
+                let (mut h, front) = plate_sheet();
+                let (doc, undo, revision, cam) = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.design_revision(), h.app.cam);
+                h.call("ui.set", json!({"layout": layout}));
+                h.call("ui.resize", json!({"width": width, "height": height}));
+                h.frames(8);
+                let expected_layout = if layout == "docked" { "compact" } else { "floating" };
+                assert_eq!(serde_json::to_value(h.app.ui.layout).unwrap(), json!(expected_layout));
+                assert_eq!(h.ctx.content_rect().size(), vec2(width as f32, height as f32));
+                if editor {
+                    let view = h.app.run("drawing.view.inspect", json!({"view": front})).unwrap();
+                    let bounds = &view["boundary_mm"];
+                    let point = Vec2::new(
+                        (number(&bounds["min"][0]) + number(&bounds["max"][0])) / 2.0,
+                        (number(&bounds["min"][1]) + number(&bounds["max"][1])) / 2.0,
+                    );
+                    let from = OnScreen::of(&h.app.drawing_workspace.page.cam, h.app.viewport.rect.unwrap()).screen(point);
+                    h.step(&json!({"click": [from.x, from.y]})).unwrap();
+                    h.frames(4);
+                    let drawing = h.app.session.drawing("drawing.inspect").unwrap().id;
+                    assert_eq!(
+                        h.app.session.selection,
+                        [solidcraft_engine::Sel::Drawing { drawing, object: solidcraft_engine::doc::ids::decode(&front).unwrap() }]
+                    );
+                    h.call("ui.start", json!({"command": "drawing.view.edit"}));
+                    h.frames(8);
+                }
+                assert_eq!(inspector(&h).is_some_and(|rect| rect.is_positive()), editor, "{layout} {width}x{height}: actual editor mounted");
+                assert_eq!(h.at(&json!({"handle": "dialog:Scale"})).is_ok(), editor, "the editor's Scale field is drawn");
+                // Selection refreshes the view revision; Fit itself must leave that revision alone.
+                let view_revision = h.app.session.revision;
+                h.call("ui.view", json!({"view": "fit"}));
+                h.frames(4);
+                let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+                let usable = h.app.viewport.layout.as_ref().unwrap().usable.as_ref().unwrap();
+                assert!(h.app.viewport.rect.unwrap().contains_rect(paper), "the whole sheet remains in the canvas");
+                assert!(!paper.intersects(h.app.viewport.layout.as_ref().unwrap().navigation), "the navigation bar stays clear");
+                if let Some(rect) = inspector(&h) {
+                    assert!(!paper.intersects(rect), "{layout} {width}x{height}: actual editor {rect:?} covers paper {paper:?}");
+                }
+                assert!(
+                    usable.contains_rect(crate::panel_runtime::logical_rect(paper)),
+                    "{layout} {width}x{height} editor={editor}: paper {paper:?} is outside the host's free room: {usable:?}"
+                );
+                assert_eq!(inspector(&h).is_some_and(|rect| rect.is_positive()), editor, "Fit preserves the mounted editor");
+                assert_eq!(h.at(&json!({"handle": "dialog:Scale"})).is_ok(), editor);
+                assert_eq!(h.app.session.revision, view_revision, "Fit preserves the view revision");
+                assert_eq!(
+                    (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.design_revision(), h.app.cam),
+                    (doc, undo, revision, cam)
+                );
+            }
+        }
+    }
+}
+
 /// Fit Sheet shows the whole sheet, and comes back after any zoom; typed and wheeled zooms stay
 /// within 5 % to 3200 %, and a zoom that isn't a number changes nothing.
 #[test]
