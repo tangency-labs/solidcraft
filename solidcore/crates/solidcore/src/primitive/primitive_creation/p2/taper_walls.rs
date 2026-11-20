@@ -33,6 +33,7 @@
 //! | `half_quadratic_roots` (private) | the quadratic of `sm_DraftSeamPcurve` |
 //! | `has_corner`                  | `sm_DraftHasCorner`                   |
 //! | `draft_input` (private)       | `sm_DraftInput`                       |
+//! | `straight_bspline` (private)  | none (#16639)                         |
 //! | `lines_and_arcs`              | `sm_DraftLinesAndArcs`                |
 //! | `curvature_keeping_walls`     | `sm_CreateCurvatureKeepingWalls`      |
 //!
@@ -63,7 +64,9 @@
 //! every loop is bounded by the profile's curve count or a fixed sample count (the arc span
 //! count is at most the arc's angle over a quarter turn). Walls whose sections all shrink to
 //! one point close the whole section there, a pyramid's apex or a ridge's far end, where the
-//! fork refused the draft (#17265).
+//! fork refused the draft (#17265). A B-spline input that is a straight line is a line (the
+//! fork takes only its lines, and drafts a square of B-spline segments by the offset method,
+//! #16639).
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-safe tests
 
@@ -83,6 +86,7 @@ use crate::nurbs::b_spline_curve::p1::{BSplineCurve, BSplineCurveForm, Canonical
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p1::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::math::NOW;
 use crate::surface::cone::Cone;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p7::FaceCurvesInput;
@@ -95,7 +99,8 @@ const OP: &str = "primitive::primitive_creation::p2::taper_walls";
 pub enum TaperCornerRefusal {
     /// `SM_TCR_APART`: the continued curves do not meet.
     Apart,
-    /// `SM_TCR_NOT_EXACT`: a curve there is neither a line nor an arc, so its wall has
+    /// `SM_TCR_NOT_EXACT`: a curve there is neither a line (or a straight B-spline) nor
+    /// an arc, so its wall has
     /// no exact continuation (or the seam is not exact on its walls).
     NotExact,
     /// `SM_TCR_WALL_CLOSES`: a wall closes before the far end: its neighbours meet
@@ -890,9 +895,47 @@ pub(super) fn has_corner(k: &Kernel, composite: &CompositeCurve, n: Vec3) -> boo
     false
 }
 
+/// Whether `input` is a B-spline whose control points have positive weights (or none) and
+/// lie within `tol` of the segment `a b` between its ends, which is longer than `tol`: the
+/// whole curve lies in their convex hull, so within `tol` of that segment, and it is that
+/// straight line (#16639; the fork takes only lines). Each point `q`'s distance from the
+/// segment is proved: its foot on the chord (clamped to the segment) and the residual round
+/// as in [`touch_bound`], the point's Euclidean form once more, taken as `gamma_16` of
+/// `|q| + |a| + |b - a|`; the computed distance plus that bound is at most `tol`.
+fn straight_bspline(input: &Curve, tol: f64) -> bool {
+    let CurveKind::BSpline(c) = input.kind() else {
+        return false;
+    };
+    let Some(nurb) = c.gw_nurb() else {
+        return false;
+    };
+    let pts = nurb.cpts();
+    let (Some(first), Some(last)) = (pts.first(), pts.last()) else {
+        return false;
+    };
+    let a = first.to_euclid();
+    let d = last.to_euclid() - a;
+    let dd = d.dot(d);
+    let chord = dd.sqrt();
+    if !(chord > tol) {
+        return false;
+    }
+    pts.iter().all(|p| {
+        if !(p.w == NOW || p.w > 0.0) {
+            return false;
+        }
+        let q = p.to_euclid();
+        let w = q - a;
+        let t = (d.dot(w) / dd).clamp(0.0, 1.0);
+        let off = (w - d * t).length();
+        off + gamma(16) * (q.length() + a.length() + chord) <= tol
+    })
+}
+
 /// The line or circle among `inputs` that the profile's segment `c` is (its copy,
 /// split at tangent breaks, is a plain B-spline; a line or a circle has none, so it is
-/// the one with the same ends and middle), or `None` (`sm_DraftInput`).
+/// the one with the same ends and middle), or `None` (`sm_DraftInput`). A straight
+/// B-spline ([`straight_bspline`]) is a line here.
 fn draft_input<'a>(
     k: &Kernel,
     c: &Curve,
@@ -904,7 +947,10 @@ fn draft_input<'a>(
     let end = c.evaluate_point(k, ivl.max())?;
     let mid = c.evaluate_point(k, ivl.mid())?;
     for input in inputs {
-        if !(input.is_kind_of(CIRCLE_TYPE) || input.is_kind_of(LINE_TYPE)) {
+        if !(input.is_kind_of(CIRCLE_TYPE)
+            || input.is_kind_of(LINE_TYPE)
+            || straight_bspline(input, tol))
+        {
             continue;
         }
         let j = input.natural_interval();
@@ -922,7 +968,8 @@ fn draft_input<'a>(
     Ok(None)
 }
 
-/// Whether every segment of the profile `composite` is a line or an arc among
+/// Whether every segment of the profile `composite` is a line (or a straight B-spline) or
+/// an arc among
 /// `inputs` (`sm_DraftLinesAndArcs`).
 pub(super) fn lines_and_arcs(
     k: &Kernel,
@@ -952,7 +999,7 @@ pub(super) struct WallsInput<'a> {
     pub tangent: bool,
     /// The profile, one closed chain.
     pub composite: &'a CompositeCurve,
-    /// The curves it was made from (its lines and circles).
+    /// The curves it was made from (its lines, straight B-splines and circles).
     pub inputs: &'a [Curve],
     /// The unit normal the height runs along (`CreateTaperExtrude`'s): the profile's
     /// plane's, or near it where `CreateTaperExtrude` snapped a normal near Z to Z (the
@@ -2197,6 +2244,68 @@ pub(super) fn curvature_keeping_walls(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The quadratic from (0, 0) to (2, 0) whose middle control point is at (1, `y`).
+    fn quadratic(y: f64, weights: Option<&[f64]>) -> Result<Curve> {
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &[
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(1.0, y, 0.0),
+                Point3::new(2.0, 0.0, 0.0),
+            ],
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[3, 3],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights,
+            trim: None,
+        })
+        .map(Curve::from)
+    }
+
+    #[test]
+    fn a_straight_bspline_is_one_whose_control_points_are_on_its_chord() {
+        let tol = 1e-6;
+        let segment = |b: f64| {
+            Curve::from(
+                BSplineCurve::create_line_segment(3, Point3::ZERO, Point3::new(b, 0.0, 0.0))
+                    .unwrap(),
+            )
+        };
+        assert!(straight_bspline(&segment(4.0), tol));
+        // a chord no longer than the tolerance is no line
+        assert!(!straight_bspline(&segment(0.5 * tol), tol));
+        // bowed out by half its middle control point's offset
+        assert!(straight_bspline(&quadratic(0.5 * tol, None).unwrap(), tol));
+        assert!(!straight_bspline(&quadratic(4.0 * tol, None).unwrap(), tol));
+        // rational: on the chord with positive weights; a negative weight is refused by
+        // the constructor, or not straight
+        // points beside the segment's start, within `tol` of its line and of its extension
+        // by `tol` but 0.9 sqrt 2 `tol` from the segment: the curve leaves it by over `tol`
+        let mut control = vec![Point3::new(-0.9 * tol, -0.9 * tol, 0.0); 9];
+        control[0] = Point3::ZERO;
+        control[8] = Point3::new(100.0, 0.0, 0.0);
+        let hooked = BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 8,
+            control_points: &control,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[9, 9],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap();
+        assert!(!straight_bspline(&Curve::from(hooked), tol));
+        let rational = quadratic(0.0, Some(&[1.0, 2.0, 1.0])).unwrap();
+        assert!(straight_bspline(&rational, tol));
+        if let Ok(negative) = quadratic(0.0, Some(&[1.0, -0.5, 1.0])) {
+            assert!(!straight_bspline(&negative, tol));
+        }
+    }
 
     #[test]
     fn quartic_multiplies_bernstein_quadratics() {

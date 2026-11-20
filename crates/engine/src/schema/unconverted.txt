@@ -3,16 +3,7 @@
 # type, remove its line. Never add one: a new command comes with both schemas. Sorted, one id
 # per line.
 face.delete
-render.aging.describe
-render.backends
-render.effects.describe
-render.scene
 solid.hole
 solid.loft
-solid.mirror
 solid.offset_face
-solid.pattern.path
-solid.pattern.rectangular
 solid.thread
-surface.extrude
-surface.revolve

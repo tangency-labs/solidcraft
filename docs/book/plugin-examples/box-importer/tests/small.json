@@ -1,0 +1,8 @@
+{
+  "entry": "convert",
+  "file": "small.box",
+  "expect": {
+    "reply": {"bodies": 1, "loss_report": {"summary": "A 20 x 10 x 3 mm box"}},
+    "model": {"total": {"volume_mm3": 600}}
+  }
+}

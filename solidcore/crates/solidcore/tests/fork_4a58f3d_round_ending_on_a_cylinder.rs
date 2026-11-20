@@ -48,14 +48,12 @@ use solidcore::topology::face::p2 as face;
 use solidcore::topology::{vertex, EdgeId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity` (as `wr697_end_and_join.rs`).
+/// Every fix (as `wr697_end_and_join.rs`).
 fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -207,11 +205,15 @@ fn a_round_ending_on_a_cylinder_meets_it_along_a_certified_rib() {
     // The fork printed 16.714056916, which this pinned to its last digit until
     // `brep_volume` closed the tolerant edges' gaps (#16735): the fork's integrator, as the
     // old one here, leaked through them, 1.8e-6 over the closed form. The removed volume is
-    // now the closed form to 1.85e-7 (MEASURED; the rib's 4.2e-6 fit), held to 2.5e-7, and
-    // pinned to the last digits as the fork's figure was (5e-10).
-    assert!((removed - want).abs() <= 2.5e-7, "{removed} vs {want}");
+    // now the section's integral to 4.2e-12 (MEASURED: the body is a fit, its rib 4.22e-6
+    // off, so this is a measured margin, not a bound the integral proves), held to 1e-11, and
+    // pinned to its last digits. Since the trim pieces integrate by Gauss-Kronrod (#14460):
+    // with Runge-Kutta trim pieces at this accuracy it was 16.71405529192498, 1.85e-7 over
+    // the integral; forced to accuracy 1e-12 both integrators give 16.71405510728937
+    // (Gauss-Kronrod to 2.3e-16 relative).
+    assert!((removed - want).abs() <= 1e-11, "{removed} vs {want}");
     assert!(
-        (removed - 16.714_055_291_924_98).abs() <= 5e-10,
+        (removed - 16.714_055_107_289_37).abs() <= 1e-12,
         "{removed}"
     );
     assert!((off[0] - 4.22e-6).abs() <= 5e-9, "{off:?}");

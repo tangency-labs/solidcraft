@@ -134,6 +134,10 @@ fn a_freecad_history_comes_in_as_editable_features() {
     run(&mut d, "file.insert_step", json!({"path": path}));
     run(&mut d, "file.insert_step", json!({"path": path}));
     assert_eq!(body_names(&d), ["Bracket", "Bracket (2)"]);
+    // Both files have sketches called Profile and HoleSketch: the second file's are numbered, not refused.
+    let sketches: Vec<&str> =
+        d.doc.features.iter().filter(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. })).map(|f| f.name.as_str()).collect();
+    assert_eq!(sketches, ["Profile", "HoleSketch", "Profile (2)", "HoleSketch (2)"]);
     assert!((volume(&mut d) - 2.0 * expected).abs() < 0.1, "each copy's pocket and fillet act on its own body");
 
     let mut d = Session::default();
@@ -171,6 +175,7 @@ fn a_rebuilt_history_that_cannot_be_inserted_falls_back_to_solids() {
         link_faces: Vec::new(),
         link_threads: Vec::new(),
         touching: solidcraft_doc::Touching::Separate,
+        profile_frame: None,
         kind: solidcraft_doc::FeatureKind::Sketch {
             plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() },
             sketch: solidcraft_doc::sketch::Sketch::new(),
@@ -194,4 +199,35 @@ fn a_rebuilt_history_that_cannot_be_inserted_falls_back_to_solids() {
     assert!(s.doc.params.iter().all(|p| !p.model), "the failed attempt's parameters are gone");
     assert_eq!(s.doc.components.len(), 1, "only the solids import made a component");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `reader` chooses how a FreeCAD or Rhino file's solids are read: by default (`solidcraft`)
+/// cadmpeg's STEP writer restates them and the Import feature keeps that STEP text, as before the
+/// records route; `cadmpeg` reads cadmpeg's model straight into records, with no STEP text. Both
+/// bring the same block, through `file.insert_step` and `doc.open`; another word is refused.
+#[test]
+fn the_reader_option_chooses_the_step_route_or_the_records() {
+    for (tag, name, bytes) in [("rdfc", "block.FCStd", BLOCK_FCSTD), ("rdrh", "block.3dm", BLOCK_3DM)] {
+        let (dir, path) = file(tag, name, bytes);
+        for (reader, records) in [(None, false), (Some("solidcraft"), false), (Some(" CADMPEG "), true)] {
+            for cmd in ["file.insert_step", "doc.open"] {
+                let mut s = Session::default();
+                let mut p = json!({"path": path, "history": "solids"});
+                if let Some(reader) = reader {
+                    p["reader"] = json!(reader);
+                }
+                run(&mut s, cmd, p);
+                let import = s.doc.features.iter().find_map(|f| match &f.kind {
+                    crate::doc::FeatureKind::Import { step, records, .. } => Some((step.is_empty(), records.is_some())),
+                    _ => None,
+                });
+                assert_eq!(import, Some((records, records)), "{name} {cmd} reader={reader:?}");
+                assert!((volume(&mut s) - 6000.0).abs() < 1e-6, "{name} {cmd} reader={reader:?}");
+            }
+        }
+        let mut s = Session::default();
+        let e = s.execute("file.insert_step", &json!({"path": path, "reader": "other"})).expect_err("an unknown reader");
+        assert!(e.to_string().contains("reader"), "{e}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

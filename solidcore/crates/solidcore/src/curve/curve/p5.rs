@@ -122,6 +122,7 @@ use crate::geom::a_object::{CacheId, ObjectCacheType};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
+use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{
     circle_center_from_3_points, circle_coplanar_circle_intersect, line_coplanar_circle_intersect,
     line_point_distance, plane_drop_point, plane_evaluate_point, plane_point_distance,
@@ -355,6 +356,21 @@ pub fn make_curve_cache_with_zone_tol<O: Copy + PartialEq>(
     Ok(cache)
 }
 
+/// The top box of the tree of the cache [`make_curve_cache_with_zone_tol`] returns for
+/// `curve` at `zone_tol_3d`, when the curve's memo holds that build (not upstream,
+/// #14453): read in place, with no cache copied. `None` when the memo is off, the curve
+/// is not memoised, its memo holds another build or none, or the tree has no top node.
+/// A memo hit's copy keeps every box of the tree as it is, and a fresh build of the same
+/// key is the same tree (the memo's premise), so this is the box that cache's tree has.
+pub(crate) fn memoized_cache_top_box(
+    k: &Kernel,
+    curve: &Curve,
+    zone_tol_3d: Option<f64>,
+) -> Option<Extent3d> {
+    let key = CurveMemoKey::of(k, curve, zone_tol_3d)?;
+    curve.memo().top_box(&key)
+}
+
 /// The kernel and curve state [`make_curve_cache`]'s build reads besides the curve's
 /// geometry (not upstream): the tolerances, the context's scalar state and the upstream fixes. A memo
 /// entry is valid for a later build only when its key is equal (the context scalars
@@ -497,6 +513,17 @@ impl CurveMemo {
             .as_ref()
             .filter(|e| e.key == *key)
             .and_then(|e| e.cache.retag(handle))
+    }
+
+    /// The top box of the memoised cache's tree for `key` (not upstream, #14453), copied
+    /// out without copying the cache.
+    fn top_box(&self, key: &CurveMemoKey) -> Option<Extent3d> {
+        let slot = self.0.get()?;
+        let entry = slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tree = entry.as_ref().filter(|e| e.key == *key)?.cache.tree()?;
+        tree.node(tree.top_node()?).ok().map(|n| n.bbox)
     }
 
     fn store(&self, key: &CurveMemoKey, cache: CurveCache<()>) {

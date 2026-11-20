@@ -40,6 +40,8 @@ impl BodySlots {
 pub(crate) struct PaletteArena {
     entries: Vec<[u8; 4]>,
     bodies: HashMap<String, BodySlots>,
+    /// The bodies whose slots are another key's ([`Self::shared`]), by name.
+    shared: std::collections::HashSet<String>,
     /// PBR finishes by slot (none past its end): the model and highlight scenes both draw them.
     materials: Vec<Material>,
     /// Bumped when the arena is reset (a different design); cached blocks must rebuild then.
@@ -56,8 +58,31 @@ impl PaletteArena {
         self.generation
     }
 
-    /// The slots of `name`, allocating them (and `face_count` face slots) the first time.
+    /// The slots of `name`, allocating them (and `face_count` face slots) the first time. A body
+    /// that shared another key's slots until now ([`Self::shared`]) gets its own.
     pub fn body(&mut self, name: &str, face_count: usize) -> BodySlots {
+        if self.shared.remove(name) {
+            self.bodies.remove(name);
+        }
+        self.own(name, face_count)
+    }
+
+    /// Body `name` drawn in the slots of `key` (allocated the first time, as [`Self::body`]):
+    /// copies of one part placed many times share one set of slots, which a slot per face of
+    /// every placement would exhaust. Looking `name` up ([`Self::slots`]) finds them.
+    pub fn shared(&mut self, name: &str, key: &str, face_count: usize) -> BodySlots {
+        let slots = self.own(key, face_count);
+        if self.bodies.get(name) != Some(&slots) {
+            self.bodies.insert(name.to_string(), slots);
+        }
+        // Most rebuilds find every copy already there: no name copied for each.
+        if !self.shared.contains(name) {
+            self.shared.insert(name.to_string());
+        }
+        slots
+    }
+
+    fn own(&mut self, name: &str, face_count: usize) -> BodySlots {
         if let Some(slots) = self.bodies.get(name).copied() {
             let grown = self.grow_faces(&slots, face_count);
             // Written back only when it grew: most rebuilds find every body as it was.
@@ -164,6 +189,7 @@ impl PaletteArena {
             self.entries.clear();
             self.materials.clear();
             self.bodies.clear();
+            self.shared.clear();
             self.generation = self.generation.wrapping_add(1);
         }
     }
@@ -215,5 +241,24 @@ mod tests {
         assert_eq!(slots.face(3), slots.body);
         // Every push after the cap is index 0, never an out-of-range write.
         assert_eq!(arena.push(), PaletteIndex(0));
+    }
+
+    /// Placements of one part that look the same share one set of slots, found by each
+    /// placement's name; a placement that stops sharing gets slots of its own.
+    #[test]
+    fn placements_share_their_parts_slots_until_one_looks_different() {
+        let mut arena = PaletteArena::default();
+        let a = arena.shared("Base (Bracket:1)", "part", 3);
+        let b = arena.shared("Base (Bracket:2)", "part", 3);
+        assert_eq!(a, b);
+        let used = arena.entries().len();
+        for k in 3..100 {
+            arena.shared(&format!("Base (Bracket:{k})"), "part", 3);
+        }
+        assert_eq!(arena.entries().len(), used, "more placements take no more slots");
+        assert_eq!(arena.slots("Base (Bracket:2)"), Some(a));
+        let own = arena.body("Base (Bracket:2)", 3);
+        assert_ne!(own, a);
+        assert_eq!(arena.slots("Base (Bracket:1)"), Some(a), "the others still share");
     }
 }
