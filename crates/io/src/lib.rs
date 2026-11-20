@@ -1515,9 +1515,21 @@ pub fn read_design(bytes: &[u8]) -> Result<Document> {
     })
 }
 
-/// Design file bytes.
-pub fn write_design(doc: &Document) -> Vec<u8> {
-    doc.to_json().into_bytes()
+/// What a refused JSON save says, so a caller can offer a container instead.
+pub const JSON_CANT_CARRY: &str = "a .json design can't carry";
+
+/// Plain JSON design file bytes. A design that holds binary data (plugin files) can't be one:
+/// that data is kept only in a container, as its own parts, never as text. Saving such a design as
+/// JSON is refused, naming what it holds, rather than leaving the data out.
+pub fn write_design(doc: &Document) -> Result<Vec<u8>> {
+    let binary = doc.binary_data();
+    if !binary.is_empty() {
+        return Err(IoError::Invalid(format!(
+            "this design holds {} that {JSON_CANT_CARRY}: save it as a .{DESIGN_EXT} design",
+            binary.join(" and ")
+        )));
+    }
+    Ok(doc.to_json().into_bytes())
 }
 
 /// Parse a binary or ASCII STL (used by tests and round-trip checks): triangles.
@@ -1969,7 +1981,7 @@ mod tests {
         let (doc, m) = model();
         let s = String::from_utf8(export(&m.state(), &[], Format::Step, "t").unwrap()).unwrap();
         assert!(s.starts_with("ISO-10303-21;") && s.contains("CLOSED_SHELL"));
-        let back = read_design(&write_design(&doc)).unwrap();
+        let back = read_design(&write_design(&doc).unwrap()).unwrap();
         assert_eq!(back, doc);
         assert!(read_design(b"\xff\xfe").is_err());
         let dwg = read_design(b"AC1032\0\0\0\0\0\xff\xfe").unwrap_err().to_string();

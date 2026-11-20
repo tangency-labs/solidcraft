@@ -1344,8 +1344,8 @@ fn a_read_stays_out_of_the_document() {
     let _ = std::fs::remove_file(&path);
     assert!(matches!(opened.design(), std::borrow::Cow::Borrowed(_)), "nothing read: nothing to copy");
     assert_eq!(opened.doc.drawing(drawing).unwrap().dimension(dimension).unwrap().last_good, Some(80.0));
-    let bytes = solidcraft_io::write_design(&opened.design());
-    assert_eq!(solidcraft_io::write_design(&solidcraft_io::read_design(&bytes).unwrap()), bytes, "save, open, save: the same bytes");
+    let bytes = solidcraft_io::write_design(&opened.design()).unwrap();
+    assert_eq!(solidcraft_io::write_design(&solidcraft_io::read_design(&bytes).unwrap()).unwrap(), bytes, "save, open, save: the same bytes");
 }
 
 /// A saved value is only ever what it last read: measured now, a dimension reads the model and has
@@ -1418,7 +1418,7 @@ fn background_saves_and_autosaves_keep_the_last_good_value() {
 fn opening_a_design_starts_with_no_last_good_values() {
     let (mut s, _, _) = read_once();
     let path = std::env::temp_dir().join(format!("solidcraft-last-good-open-{}.json", std::process::id()));
-    std::fs::write(&path, solidcraft_io::write_design(&s.doc)).unwrap();
+    std::fs::write(&path, solidcraft_io::write_design(&s.doc).unwrap()).unwrap();
     run(&mut s, "doc.open", json!({"path": path}));
     let _ = std::fs::remove_file(&path);
     assert!(s.dimension_values.is_empty());

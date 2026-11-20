@@ -88,7 +88,7 @@ fn transfer(s: &mut Session, p: &Value, moving: bool) -> Result<Value> {
     let mut moved = std::borrow::Cow::Borrowed(&doc);
     super::design_link::filed(&mut moved, Some(path), destination);
     let contents = if let std::borrow::Cow::Owned(doc) = moved {
-        if destination.to_lowercase().ends_with(".json") { solidcraft_io::write_design(&doc) } else { solidcraft_io::write_design_container(&doc)? }
+        if destination.to_lowercase().ends_with(".json") { solidcraft_io::write_design(&doc)? } else { solidcraft_io::write_design_container(&doc)? }
     } else {
         original.clone()
     };
@@ -129,7 +129,7 @@ mod tests {
         }
         fn design(&self, name: &str) -> std::path::PathBuf {
             let path = self.0.join(name);
-            std::fs::write(&path, solidcraft_io::write_design(&solidcraft_doc::Document::new(name))).unwrap();
+            std::fs::write(&path, solidcraft_io::write_design(&solidcraft_doc::Document::new(name)).unwrap()).unwrap();
             path
         }
     }
@@ -219,7 +219,7 @@ mod tests {
         let assembly = f.0.join("Assembly.solidcraft");
         let mut doc = solidcraft_doc::Document::new("Assembly");
         doc.links.insert(1, solidcraft_doc::DesignLink { path: "Part.solidcraft".into(), feature: 1, ..Default::default() });
-        std::fs::write(&assembly, solidcraft_io::write_design(&doc)).unwrap();
+        std::fs::write(&assembly, solidcraft_io::write_design(&doc).unwrap()).unwrap();
         let mut s = session();
         s.path = Some(original.to_string_lossy().into_owned());
         assert!(s.execute("file.move", &json!({"path":original,"destination":f.0.join("Other.solidcraft")})).is_err());
