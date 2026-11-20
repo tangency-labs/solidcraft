@@ -195,11 +195,8 @@ impl Request {
     }
     fn answer_response(&self, response: Value) {
         if let Some(reply) = &self.reply {
-            let mut response = if crate::control::chat_turn_cancelled(self.chat_turn.as_deref()) {
-                crate::control::cancelled_chat_response()
-            } else {
-                response
-            };
+            let mut response =
+                if crate::control::chat_turn_cancelled(self.chat_turn.as_deref()) { crate::control::cancelled_chat_response() } else { response };
             if let Some((level, warnings)) = &self.param_check {
                 crate::control::add_param_warnings(&mut response, warnings.clone());
                 if let Some(o) = response.as_object_mut() {
