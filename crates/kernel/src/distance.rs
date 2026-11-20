@@ -203,8 +203,8 @@ fn settle(a: &DistanceShape, fa: Feature, b: &DistanceShape, fb: Feature, pb: Ve
 /// the other's): classify a point of it.
 pub fn boundary_gap(a: &Body, b: &Body, width: f64) -> Result<[f64; 2]> {
     let unavailable = || crate::KernelError::Invalid("a boundary distance needs two B-rep bodies".into());
-    let (ka, _) = a.ops_body().ok_or_else(unavailable)?;
-    let (kb, _) = b.ops_body().ok_or_else(unavailable)?;
+    let (fa, fb) = (a.ops_body().ok_or_else(unavailable)?, b.ops_body().ok_or_else(unavailable)?);
+    let ((ka, _), (kb, _)) = (&*fa, &*fb);
     guard("boundary distance", || match ka.boundary_distance(kb, width) {
         Ok(g) => Ok([g.lower, g.upper]),
         Err(solidcore_ops::Error::ContactUndecided { lower, upper, .. }) => Ok([lower, upper]),
