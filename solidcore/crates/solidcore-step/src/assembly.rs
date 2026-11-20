@@ -526,8 +526,7 @@ impl<'t> Assembly<'t> {
                 };
                 let eval = CurveEval::new(curve).map_err(|m| m.to_string())?;
                 let mut gap = 0.0f64;
-                for k in 0..=EDGE_GAP_SAMPLES {
-                    let t = if k == EDGE_GAP_SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64) };
+                for t in gap_samples(curve, [t0, t1]) {
                     let Some(p) = eval.point(t) else { continue };
                     // A point with no nearest point is the pcurves' to refuse, with why.
                     let Some(s) = on.project_with(&starts, p, None, f64::INFINITY).and_then(|q| on.point(q)) else { continue };
@@ -1877,6 +1876,25 @@ fn uses_of<'e>(edges: &'e [EdgeB], edge_loops: &[Vec<(u32, bool)>], given: Optio
 }
 
 /// A spline surface's parameter box: its knot ranges.
+/// Where an edge's gap from a face's surface is measured: [`EDGE_GAP_SAMPLES`] even steps over
+/// `[t0, t1]`, and a spline's knot spans' middles there, the points its closed-form pcurve is
+/// checked at. A spline whose knots crowd into one step can lie off the surface only between the
+/// even samples (#11652).
+fn gap_samples(curve: &BCurve, [t0, t1]: [f64; 2]) -> Vec<f64> {
+    let mut ts: Vec<f64> =
+        (0..=EDGE_GAP_SAMPLES).map(|k| if k == EDGE_GAP_SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64) }).collect();
+    if let BCurve::Spline { knots, .. } | BCurve::RationalSpline { knots, .. } = curve {
+        let mut cut = vec![t0];
+        cut.extend(knots.iter().copied().filter(|k| *k > t0 && *k < t1));
+        cut.push(t1);
+        ts.extend(cut.windows(2).filter_map(|w| match w {
+            [a, b] if a < b => Some(0.5 * (a + b)),
+            _ => None,
+        }));
+    }
+    ts
+}
+
 fn natural_box(s: &BSurface) -> Option<[[f64; 2]; 2]> {
     match solidcore_ops::label::surface_natural(s) {
         [Natural::Range(a, b), Natural::Range(c, d)] if [a, b, c, d].iter().all(|x| x.is_finite()) => Some([[a, b], [c, d]]),
