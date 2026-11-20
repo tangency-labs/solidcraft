@@ -61,6 +61,11 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Refuse latest without a release tag
+        if: github.event_name == 'workflow_dispatch' && inputs.latest && inputs.tag == ''
+        run: |
+          echo "::error::latest moves only to a release: set tag (for example v0.45.0), or untick latest"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag || github.ref }}
@@ -88,10 +93,11 @@ jobs:
         with:
           images: ${{ steps.image.outputs.name }}
           flavor: |
-            latest=${{ github.event_name == 'workflow_dispatch' && (inputs.latest && 'true' || 'false') || 'auto' }}
+            latest=${{ github.event_name == 'workflow_dispatch' && (inputs.latest && inputs.tag != '' && 'true' || 'false') || 'auto' }}
+          # With a hand-given tag, that tag is the only version source, whichever ref the run started from.
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},enable=${{ inputs.tag == '' }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ inputs.tag == '' }}
             type=semver,pattern={{version}},value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
             type=edge,branch=main,enable=${{ inputs.tag == '' }}
