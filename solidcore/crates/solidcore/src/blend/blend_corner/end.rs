@@ -1103,10 +1103,10 @@ const END_FACE_SOLVE_STEPS: usize = 60;
 /// enclosed: a larger ball between two of them, away from the largest walked, is not seen,
 /// which can only make the size named smaller than the largest that ends on E.
 ///
-/// With `missed`, only a rail is judged whose end the corner's vertices looked for on E's
-/// surface and did not find (`SM_FIL_SURF_INT_FAILURE`, from the rail curve's intersection
-/// with that surface): that the round's rail misses E is then that search's finding, not
-/// this walk's.
+/// With `missed`, only a rail is judged for which the corner's vertices' own search, run
+/// again here (the rail curve's crossings with that surface, `rail_crossing_nearest`), finds
+/// no end on E's surface: that the round's rail misses E is then that search's finding, not
+/// this walk's, and not a status another failure may have left.
 ///
 /// `Some(largest)` of a constant round where a rail's largest ball is smaller than the round
 /// and `margin` together (a round within `margin` of that ball ends on E only where its rail
@@ -1179,16 +1179,15 @@ pub fn largest_ball_ending_on_end_face(
         {
             continue;
         }
-        if missed && pseudo.fillet_vertex(fv)?.status() != FilStatus::SurfIntFailure {
-            continue;
-        }
-        // the end rib at this rail end, its geometry and solver
+        // the end rib at this rail end and its rail, its geometry and solver
         let mut rib = None;
+        let mut rail = None;
         for e in vertex::edges(pseudo.brep(), fv, None)? {
-            if pseudo.fillet_edge(e)?.fillet_edge_type() == FilletEdgeType::FilletXSideFace
-                && rib.is_none()
-            {
+            let edge_type = pseudo.fillet_edge(e)?.fillet_edge_type();
+            if edge_type == FilletEdgeType::FilletXSideFace && rib.is_none() {
                 rib = Some(e);
+            } else if edge_type == FilletEdgeType::Rail && rail.is_none() {
+                rail = Some(e);
             }
         }
         let Some(rib) = rib else {
@@ -1240,6 +1239,25 @@ pub fn largest_ball_ending_on_end_face(
                 .ok_or_else(nul)?
                 .clone_for_evaluation()?,
         };
+        if missed {
+            // the corner's vertices' own search, run again: the rail curve's crossings with
+            // E's surface. A rail it finds an end for on E is not judged, nor one without a
+            // curve to search
+            let Some(rail_curve) = rail.and_then(|e| pseudo.brep().edge(e).ok()?.curve.clone())
+            else {
+                continue;
+            };
+            let found = crate::blend::fillet_geom::p4::rail_crossing_nearest(
+                k,
+                &rail_curve,
+                &end_surface,
+                start,
+                fs.this_approx_tol_3d(),
+            )?;
+            if found.is_some() {
+                continue;
+            }
+        }
         let f_domain = f.natural_uv_domain_with_nurb(k)?;
         let e_domain = end_surface.natural_uv_domain_with_nurb(k)?;
         let zone = zone_tol3d(k, target.face(f_face)?.tolerance);
@@ -1413,7 +1431,9 @@ pub fn largest_ball_ending_on_end_face(
             walked.get(at),
             walked.get(at + 1),
         ) {
-            // (a probe off F, or with no ball solved, ends the search and adds nothing)
+            // (a probe off F, or with no ball solved, ends the search and adds nothing; a
+            // probe whose ball is the round's is kept whatever the other probe gives)
+            let probe_reaches = std::cell::Cell::new(false);
             let rho_at = |target: &mut Brep, x: f64| -> Result<Option<f64>> {
                 let guess = if x < 0.0 {
                     here + (before - here) * -x
@@ -1427,7 +1447,10 @@ pub fn largest_ball_ending_on_end_face(
                     return Ok(None);
                 }
                 Ok(match ball(target, q)? {
-                    CrossingBall::Reaches => Some(most_judged),
+                    CrossingBall::Reaches => {
+                        probe_reaches.set(true);
+                        Some(most_judged)
+                    }
                     CrossingBall::Radius(rho) => Some(rho),
                     CrossingBall::OnOtherFace | CrossingBall::Unknown => None,
                 })
@@ -1455,6 +1478,10 @@ pub fn largest_ball_ending_on_end_face(
                     e = a + gold * (b - a);
                     at_e = rho_at(target, e)?;
                 }
+            }
+            // the round's rail reaches C at a probe: nothing is judged of this rail
+            if probe_reaches.get() {
+                continue;
             }
         }
         if most >= most_judged {
