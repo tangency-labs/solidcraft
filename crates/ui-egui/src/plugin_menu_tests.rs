@@ -41,6 +41,77 @@ fn each_schema_type_becomes_its_field_with_limits_labels_and_defaults() {
 }
 
 #[test]
+fn described_field_labels_and_values_show_the_same_tooltip() {
+    field_tooltips(true);
+}
+
+#[test]
+fn fields_without_descriptions_have_no_label_or_value_tooltip() {
+    field_tooltips(false);
+}
+
+fn field_tooltips(described: bool) {
+    for mut property in [
+        json!({"type":"number","default":2}),
+        json!({"type":"number"}),
+        json!({"type":"integer","default":3}),
+        json!({"type":"integer"}),
+        json!({"type":"boolean"}),
+        json!({"type":"string","enum":["one","two"]}),
+        json!({"type":"string"}),
+        json!({"type":"array","x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
+    ] {
+        property["title"] = json!("Saw kerf");
+        if described {
+            property["description"] = json!("Width removed by the saw blade");
+        }
+        let mut h = crate::scenario::Harness::new();
+        let mut command = entry("cut", "edit", json!([]));
+        command.input_schema = json!({"type":"object","required":["kerf"],"properties":{"kerf":property}});
+        h.app.plugin_menu.listed = vec![listed("saw", vec![command])];
+        h.app.plugin_menu.loaded = true;
+        h.app.home.open = false;
+        open_entry(&mut h.app, 0, 0);
+        h.app.plugin_menu.dialogs.last_mut().unwrap().preview = false;
+        h.ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+        h.frames(4);
+        // Selection fields have both an active native picker and an idle pick control.
+        let selection = property["type"] == "array";
+        for idle in 0..=usize::from(selection) {
+            if idle == 1 {
+                h.app.dialog = None;
+                h.frames(3);
+            }
+            for label in [true, false] {
+                h.frame_with(vec![egui::Event::PointerGone]);
+                h.frames(3);
+                let at = if label && property["type"] != "boolean" {
+                    crate::scenario::rect_of("dialog:label:Saw kerf *").expect("field label").center()
+                } else {
+                    crate::scenario::handle_at("plugin_dialog:field:kerf").expect("field value")
+                };
+                h.frame_with(vec![egui::Event::PointerMoved(at)]);
+                h.frames(4);
+                let context = format!("{property}: label={label}, idle={idle}");
+                if described {
+                    let mut found = false;
+                    for shape in &h.shapes {
+                        crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                            if let egui::Shape::Text(text) = shape {
+                                found |= text.galley.text() == "Width removed by the saw blade";
+                            }
+                        });
+                    }
+                    assert!(found, "description is painted on hover: {context}");
+                } else {
+                    assert!(egui::Tooltip::seconds_since_last_tooltip(&h.ctx) > 0.0, "no tooltip on hover: {context}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn choice_options_show_their_titles_and_send_their_values() {
     let schema = json!({"type":"object","properties":{"up":{"type":"string","title":"Up axis","default":"as_is","oneOf":[
         {"const":"as_is","title":"As in the file"},{"const":"stand_up","title":"Stand up (Y-up to Z-up)","description":"Turns the design"},{"const":"raw"}
