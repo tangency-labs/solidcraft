@@ -20,7 +20,7 @@ pub struct Importer {
 }
 
 /// Reads only `plugin.json` from a package folder, through the caller's file scope.
-fn read_manifest(folder: &str) -> Result<Manifest> {
+pub(super) fn read_manifest(folder: &str) -> Result<Manifest> {
     let dir = Path::new(folder);
     let id = dir.file_name().and_then(|s| s.to_str()).ok_or_else(|| error("package needs an id folder"))?;
     let bytes = solidcraft_io::vfs::read(&dir.join("plugin.json").to_string_lossy(), MAX_MANIFEST_BYTES).map_err(|e| error(e.to_string()))?;
@@ -28,7 +28,7 @@ fn read_manifest(folder: &str) -> Result<Manifest> {
 }
 
 /// The installed plugins' folders, by id: the plugins folder, plus packages inspected this session.
-fn package_folders(session: &Session) -> BTreeMap<String, String> {
+pub(super) fn package_folders(session: &Session) -> BTreeMap<String, String> {
     #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
     let mut folders = session.plugin_state.packages.clone();
     #[cfg(not(target_arch = "wasm32"))]
@@ -52,7 +52,8 @@ pub fn importers(session: &Session) -> Vec<Importer> {
         if session.disabled_plugins.contains(&id) {
             continue;
         }
-        let Ok(manifest) = read_manifest(&folder) else { continue };
+        // An installed importer is read with the app's authority: a caller names a file, not it.
+        let Ok(manifest) = with_installed(session, &folder, || read_manifest(&folder)) else { continue };
         let Some(runtime) = manifest.runtime.as_ref().filter(|r| r.is_importer()) else { continue };
         for entry in &runtime.entries {
             found.push(Importer {
@@ -111,10 +112,16 @@ pub fn describe(session: &Session) -> Vec<ImporterInfo> {
 }
 
 /// Run `importer` on `path` and make its design this session's, as a new design that is not saved
-/// anywhere yet. Nothing changes unless the whole import succeeds; a trap names the plugin and file.
+/// anywhere yet. Nothing changes unless the whole import succeeds; a failure starts with the
+/// plugin's name and the file's.
 pub fn import_file(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
+    session.plugin_state.refresh_stored();
     let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
-    let package = read_package(&importer.folder)?;
+    convert(session, importer, path, options).map_err(super::messages::named(&importer.name, Some(&file)))
+}
+
+fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
+    let package = with_installed(session, &importer.folder, || read_package(&importer.folder))?;
     if package.manifest.id != importer.plugin_id || session.disabled_plugins.contains(&importer.plugin_id) {
         return Err(error("plugin is disabled or was replaced; open the file again"));
     }
@@ -149,6 +156,7 @@ pub fn import_file(session: &mut Session, importer: &Importer, path: &str, optio
             view: None,
             groups: BTreeSet::new(),
             file_folders: Vec::new(),
+            file_read_folders: Vec::new(),
             evaluation: None,
         };
         // The guest's stack is on this thread's: run it on a thread with room for the stack the
@@ -171,17 +179,12 @@ pub fn import_file(session: &mut Session, importer: &Importer, path: &str, optio
                 .join()
                 .map_err(|_| HostError::Trap { reason: "the import stopped unexpectedly".into() })?
         });
-        let imported = result.map_err(|e| match e {
-            HostError::Trap { reason } => HostError::Trap { reason: format!("{} failed on {file}: {reason}", package.manifest.name) },
-            e => e,
-        })?;
+        let imported = result?;
         if solidcraft_doc::progress::cancelled() {
             return Err(HostError::Cancelled.into());
         }
-        let mut doc = solidcraft_io::read_design(&imported.design).map_err(|e| HostError::InvalidInput {
-            field: "design".into(),
-            reason: format!("{} wrote a design SolidCraft can't read: {e}", package.manifest.name),
-        })?;
+        let mut doc = solidcraft_io::read_design(&imported.design)
+            .map_err(|e| HostError::InvalidInput { field: "design".into(), reason: format!("it wrote a design SolidCraft can't read: {e}") })?;
         if let Some(stem) = Path::new(path).file_stem().map(|s| s.to_string_lossy().into_owned())
             && doc.name.trim().is_empty()
         {
@@ -210,7 +213,7 @@ pub fn import_file(session: &mut Session, importer: &Importer, path: &str, optio
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
-        let _ = (package, input_folder, file);
+        let _ = (package, input_folder);
         Err(error("opening a file with an importer plugin needs the desktop app"))
     }
 }

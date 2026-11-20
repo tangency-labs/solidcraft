@@ -483,6 +483,43 @@ mod tests {
         assert!(off.is_ok_and(|b| b.is_some()) && !deferred);
     }
 
+    /// The SMLib steps of shell, offset faces, draft and thicken (`crate::offset_backend::run`)
+    /// follow the mode as a boolean does (#17601). Offset Faces first heals the body through it:
+    /// on a body SMLib's check already refuses, that step is refused there under each_step,
+    /// saying the body failed it before; left to the end under each_feature, where the kept
+    /// body's check refuses it; and built under off.
+    #[test]
+    fn the_offset_steps_on_a_body_the_check_refuses_follow_the_mode() {
+        use solidcore_record::Vec3;
+        let good = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let mut record = good.record().clone();
+        record.vertices[0].point[2] += 0.05;
+        // The side across the box from the moved corner, which stays flat.
+        let far_x = if record.vertices[0].point[0] < 5.0 { 10.0 } else { 0.0 };
+        let bad = Body::from_record(record).unwrap();
+        assert!(check_kept(&bad).is_err());
+        let heal = |b: &Body| crate::heal::heal(b, &[]);
+        let (step, deferred) = validating(Validation::EachStep, || heal(&bad));
+        let e = step.unwrap_err().to_string();
+        assert!(e.contains("SMLib healing: SMLib's check refuses the result (the body already fails it)") && !deferred, "{e}");
+        let (healed, deferred) = validating(Validation::EachFeature, || heal(&bad));
+        assert!(deferred);
+        let e = check_kept(&healed.unwrap()).unwrap_err().to_string();
+        assert!(e.contains("SMLib healing: SMLib's check refuses the result"), "{e}");
+        let (healed, deferred) = validating(Validation::Off, || heal(&bad));
+        assert!(healed.is_ok() && !deferred, "{healed:?}");
+        // Offset Faces under off is no longer refused by the check (SMLib's own operation may
+        // still refuse a body this far off).
+        let side = [Vec3::new(far_x, 5.0, 5.0)];
+        let (off, _) = validating(Validation::Off, || crate::offset_faces(&bad, &side, 1.0));
+        assert!(off.as_ref().err().is_none_or(|e| !e.to_string().contains("SMLib's check refuses")), "{off:?}");
+        // A body the check accepts is moved under every mode, and passes the check kept.
+        for mode in Validation::ALL {
+            let (moved, _) = validating(mode, || crate::offset_faces(&good, &side, 1.0));
+            assert!(moved.as_ref().is_ok_and(|m| check_kept(m).is_ok()), "{mode:?}: {moved:?}");
+        }
+    }
+
     #[test]
     fn modes_are_named_as_they_are_saved() {
         for v in Validation::ALL {

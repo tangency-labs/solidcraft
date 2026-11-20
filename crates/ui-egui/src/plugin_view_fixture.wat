@@ -1,5 +1,7 @@
 ;; Original test component. `home` inserts a box and calls view.home. `edit` inserts a box
-;; farther away and calls no view command. Any other entry calls view.home and then traps.
+;; farther away and calls no view command. `place` makes a component with a box in it and moves
+;; the component 100 mm along X. `move` only moves an existing component.
+;; `both` moves the existing component and makes a box. Any other entry calls view.home and then traps.
 (component
   (type $ty-PLUGIN_PACKAGE/types@PLUGIN_VERSION (;0;)
     (instance
@@ -9,7 +11,7 @@
       (export "command-failure" (type $command-failure-export (eq $command-failure)))
       (type $field-failure (record (field "field" string) (field "reason" string)))
       (export "field-failure" (type $field-failure-export (eq $field-failure)))
-      (type $plugin-error (variant (case "permission-denied" string) (case "command-failed" $command-failure-export) (case "limit-exceeded" string) (case "invalid-manifest" $field-failure-export) (case "invalid-input" $field-failure-export) (case "trap" string) (case "cancelled")))
+      (type $plugin-error (variant (case "permission-denied" string) (case "command-failed" $command-failure-export) (case "limit-exceeded" string) (case "invalid-manifest" $field-failure-export) (case "invalid-input" $field-failure-export) (case "trap" string) (case "cancelled") (case "unsupported" string)))
       (export "plugin-error" (type (eq $plugin-error)))
     )
   )
@@ -76,7 +78,30 @@
       i32.const 0
       call $run
     )
-    (func $execute (;5;) (type 1) (param i32 i32 i32 i32) (result i32)
+    (func $place (;5;) (type 2)
+      i32.const 700
+      i32.const 16
+      i32.const 1500
+      i32.const 32
+      i32.const 0
+      call $run
+      call $box_origin
+      i32.const 760
+      i32.const 15
+      i32.const 1600
+      i32.const 45
+      i32.const 0
+      call $run
+    )
+    (func $move (type 2)
+      i32.const 760
+      i32.const 15
+      i32.const 1600
+      i32.const 45
+      i32.const 0
+      call $run
+    )
+    (func $execute (;6;) (type 1) (param i32 i32 i32 i32) (result i32)
       (local i32)
       local.get 0
       i32.load8_u
@@ -93,8 +118,30 @@
         if
           call $box_far
         else
-          call $home
-          unreachable
+          local.get 4
+          i32.const 112
+          i32.eq
+          if
+            call $place
+          else
+            local.get 4
+            i32.const 109
+            i32.eq
+            if
+              call $move
+            else
+              local.get 4
+              i32.const 98
+              i32.eq
+              if
+                call $move
+                call $box_far
+              else
+                call $home
+                unreachable
+              end
+            end
+          end
         end
       end
       i32.const 0
@@ -104,6 +151,10 @@
     (data (;2;) (i32.const 1024) "{\22length\22:10,\22width\22:10,\22height\22:10,\22corner\22:[0,0,0],\22operation\22:\22new_body\22}")
     (data (;3;) (i32.const 1200) "{\22length\22:10,\22width\22:10,\22height\22:10,\22corner\22:[20,0,0],\22operation\22:\22new_body\22}")
     (data (;4;) (i32.const 1400) "{}")
+    (data (;5;) (i32.const 700) "component.create")
+    (data (;6;) (i32.const 760) "occurrence.move")
+    (data (;7;) (i32.const 1500) "{\22name\22:\22Part\22,\22grounded\22:false}")
+    (data (;8;) (i32.const 1600) "{\22occurrence\22:\22Part:1\22,\22translate\22:[100,0,0]}")
     (@producers
       (processed-by "wit-component" "0.254.0")
     )

@@ -188,8 +188,8 @@ fn host_keeps_legacy_canvas_cloud_and_attachment_drafts_with_only_visible_footpr
     png.extend(400u32.to_be_bytes());
     png.extend(200u32.to_be_bytes());
     png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-    let canvas = h.app.run("canvas.insert", json!({"data":data,"plane":"XY","width":80})).unwrap()["canvas"].as_u64().unwrap();
+    let data = crate::scenario::image_file(&png);
+    let canvas = h.app.run("canvas.insert", json!({"path":data,"plane":"XY","width":80})).unwrap()["canvas"].as_u64().unwrap();
     let path = h.dir.join("legacy-editor.xyz");
     std::fs::write(&path, "0 0 0 255 0 0\n1 0 0 0 255 0\n").unwrap();
     let cloud = h.app.run("pointcloud.insert", json!({"path":path.to_string_lossy()})).unwrap()["cloud"].as_u64().unwrap();

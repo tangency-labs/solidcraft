@@ -31,6 +31,10 @@ pub struct RunParams {
     pub entry: String,
     #[serde(default = "empty_params")]
     pub params: Value,
+    /// Called by name (`<plugin>.<entry>`, as a tool): a missing grant or a read entry's refusal
+    /// comes back naming the plugin, the grant and how to approve it, or the refused import.
+    #[serde(default)]
+    pub named: bool,
 }
 fn empty_params() -> Value {
     Value::Object(Default::default())
@@ -108,6 +112,59 @@ pub struct ListResult {
     pub param_warnings: Vec<String>,
 }
 
+/// List the installed, enabled plugins' entries as tools for agents (`plugin.tools`).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ToolsParams {
+    /// Only this tool (`<plugin>.<entry>`), with its `approval`. Without it every tool is
+    /// listed, without approvals, and no component is read.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ToolsResult {
+    /// One tool per entry of every installed, enabled plugin, sorted by name.
+    pub tools: Vec<PluginTool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+/// What a plugin tool does when it is called.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginToolKind {
+    /// A command entry: called as the `<plugin>.<entry>` command with the entry's inputs, one
+    /// undo step.
+    Command,
+    /// An importer entry: opens a file it claims as a new design through `file.import`.
+    Importer,
+}
+/// One installed plugin entry as a tool. Every text field except `name`, `plugin` and `entry`
+/// comes from the plugin's own manifest: plugin text, not SolidCraft's.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct PluginTool {
+    /// `<plugin>.<entry>`: the tool's name and, for a command entry, the command it runs.
+    pub name: String,
+    pub kind: PluginToolKind,
+    /// The plugin's id.
+    pub plugin: String,
+    pub entry: String,
+    /// The plugin's name, version and description, from its manifest.
+    pub plugin_name: String,
+    pub plugin_version: String,
+    pub description: String,
+    pub effect: crate::plugin::Effect,
+    /// The extensions an importer opens, lowercase, without the dot; empty for a command.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extensions: Vec<String>,
+    /// The tool's arguments: a command entry's declared inputs, strict (no undeclared field); an
+    /// importer's `{path, options}`, `options` its declared options.
+    pub input_schema: Value,
+    /// A command entry's package hash, which its `<plugin>.<entry>` call passes as `approval`;
+    /// given when the tool is asked for by `name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<String>,
+}
+
 /// An installed importer entry.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ImporterInfo {
@@ -134,6 +191,10 @@ pub struct ImportParams {
     /// The importer's declared options. Default: its defaults.
     #[serde(default = "empty_params")]
     pub options: Value,
+    /// Called as the importer's tool: a missing grant comes back naming the plugin, the grant and
+    /// how to approve it.
+    #[serde(default)]
+    pub named: bool,
 }
 
 /// What an importer made: the new design, and what it could not carry over.
@@ -234,6 +295,60 @@ pub struct RemoveResult {
     pub param_warnings: Vec<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GrantsParams {}
+/// Whether a stored approval still applies to the installed plugin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GrantStatus {
+    /// It was approved for the installed manifest and component.
+    Current,
+    /// The installed plugin changed since: it runs only after it is installed and approved again.
+    Changed,
+    /// No plugin of this id is installed.
+    NotInstalled,
+    /// The installed plugin could not be read (the caller's file scope, a damaged package).
+    Unreadable,
+}
+/// What the user approved for one plugin.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct StoredGrant {
+    pub id: String,
+    pub status: GrantStatus,
+    /// The exact manifest and component approved (`approval` of `plugin.install`); none for a
+    /// record from before approvals were bound to a package, which needs approval again.
+    pub package_hash: Option<String>,
+    pub command_groups: std::collections::BTreeSet<String>,
+    pub folders: Vec<crate::plugin::FileGrant>,
+    /// Memory in MiB approved above the app's ceiling for plugins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_mib: Option<usize>,
+    /// Whether an importer may read the files beside the one it opens.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub input_folder: bool,
+}
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GrantsResult {
+    pub grants: Vec<StoredGrant>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RevokeParams {
+    pub id: String,
+}
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RevokeResult {
+    pub id: String,
+    /// Whether anything was approved for it.
+    pub revoked: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// A subset of the manifest's requested permissions; no unrequested access is accepted.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -274,4 +389,59 @@ impl From<InstallApproval> for crate::plugin::Grants {
             input_folder: approve.input_folder,
         }
     }
+}
+
+/// Check a plugin package without running it: what Install and a call would check.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CheckParams {
+    /// A package folder (`plugin.json` and its component; its `tests` folder is left out) or a
+    /// plugin `.zip`; subject to the caller's file scope.
+    pub path: String,
+}
+
+/// How bad a problem is: an error stops the plugin installing or running; a warning does not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    Error,
+    Warning,
+}
+
+/// One thing wrong with a package, and how to fix it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct CheckProblem {
+    pub severity: Severity,
+    /// The manifest field (`runtime.limits.fuel`), `plugin.json`, `package` or `component`.
+    pub field: String,
+    /// What is wrong, as the app says it when it refuses the package.
+    pub problem: String,
+    /// What to change.
+    pub fix: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CheckResult {
+    /// Whether the package has no errors: it installs, and its component links to this app.
+    pub ok: bool,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// `command`, `importer`, or `metadata` for a manifest with no runtime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// SHA-256 of the exact manifest and component, as `plugin.inspect` and `plugin.install` report it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<String>,
+    /// The entries it declares.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entries: Vec<craft_plugin::Entry>,
+    /// Every problem found, errors first.
+    pub problems: Vec<CheckProblem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }

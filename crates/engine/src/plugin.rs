@@ -2,16 +2,32 @@
 
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
-    API, Effect, Entry, EntryKind, FileGrant, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
-    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, valid_id,
+    API, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
+    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, valid_id,
 };
-use craft_plugin::{CommandSchema, HostError, PluginHost};
+use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 static PROCESS_HOST_LIMITS: std::sync::OnceLock<HostLimits> = std::sync::OnceLock::new();
+/// The command line's and headless MCP's plugins: the plugins folder of every session of the process
+/// (`None`: the per-user one) and whether its grants are kept in that folder's grant store between
+/// runs. Unset: the per-user folder, with grants that last for the session.
+static PROCESS_PLUGINS: std::sync::OnceLock<(Option<PathBuf>, bool)> = std::sync::OnceLock::new();
+/// Make every session this process opens from now on use the plugins folder `plugins` (`None`: the
+/// per-user one) and, with `keep_grants`, keep approved grants in that folder's grant store and read
+/// them back there, as the desktop app does. Without it, approvals last for the session, as before
+/// there was a store. The command line and headless MCP call this once, before any session.
+pub fn configure_process_plugins(plugins: Option<PathBuf>, keep_grants: bool) -> Result<()> {
+    if let Some(dir) = &plugins
+        && !dir.is_absolute()
+    {
+        return Err(error("the plugins folder must be an absolute path"));
+    }
+    PROCESS_PLUGINS.set((plugins, keep_grants)).map_err(|_| error("the process plugins folder is already configured"))
+}
 pub fn configure_process_host_limits(limits: HostLimits) -> Result<()> {
     limits.validate()?;
     PROCESS_HOST_LIMITS.set(limits).map_err(|_| error("process plugin host limits are already configured"))
@@ -56,6 +72,13 @@ pub struct AppState {
     /// Where `plugin.install` writes and `plugin.list` looks; `None`: the per-user
     /// `plugins` folder ([`crate::recovery::data_dir`]).
     pub plugins_dir: Option<PathBuf>,
+    /// The plugin whose run is under way, when it keeps data in designs (`storage@0.1`): the only
+    /// one that may change plugin data, and only its own. Set by the host for that run alone.
+    pub storage_caller: Option<storage::StorageCaller>,
+    /// Set when `grants` is kept in the plugins folder's grant store between sessions (the command
+    /// line and headless MCP with `--keep-plugin-approvals`): what this session last read from or wrote to it. `None`: the
+    /// grants live only in this session, or the app keeps them itself (the desktop app).
+    pub stored: Option<grant_store::Synced>,
 }
 
 impl AppState {
@@ -65,6 +88,48 @@ impl AppState {
             return None;
         }
         self.plugins_dir.clone().or_else(|| crate::recovery::data_dir().map(|p| p.join("plugins")))
+    }
+
+    /// A new session's plugin state: the process's plugins folder ([`configure_process_plugins`]),
+    /// and when the process keeps grants between runs, one that reads and writes its grant store.
+    pub fn for_process() -> Self {
+        match PROCESS_PLUGINS.get() {
+            Some((plugins, keep)) => Self { plugins_dir: plugins.clone(), stored: keep.then(Default::default), ..Default::default() },
+            None => Self::default(),
+        }
+    }
+
+    /// Take in grants another program stored or revoked since this session last looked. Nothing
+    /// to do unless this session keeps its grants in the store.
+    ///
+    /// The store is read with the app's own authority, whatever the caller's file scope: what the
+    /// user approved for a plugin applies whoever calls it, so an agent confined to its folders
+    /// runs a plugin with its approvals, not with none. Writes still need the caller's scope.
+    pub fn refresh_stored(&mut self) {
+        let Some(dir) = self.plugins_dir().filter(|_| self.stored.is_some()) else { return };
+        if let Some(synced) = self.stored.as_mut() {
+            let grants = &mut self.grants;
+            solidcraft_io::vfs::scoped(None, || synced.refresh(&dir, grants));
+        }
+    }
+
+    /// Delete plugin `id`'s record from the store, when this session keeps its grants there, even
+    /// one this session never read: a removed or revoked plugin leaves no approval behind.
+    pub fn forget_stored(&mut self, id: &str) -> Result<()> {
+        let Some(dir) = self.plugins_dir().filter(|_| self.stored.is_some()) else { return Ok(()) };
+        match self.stored.as_mut() {
+            Some(synced) => synced.forget(&dir, id).map_err(|e| error(format!("could not take back the approvals for later sessions: {e}"))),
+            None => Ok(()),
+        }
+    }
+
+    /// Write this session's changed grants to the store, when it keeps them there.
+    pub fn persist_stored(&mut self) -> Result<()> {
+        let Some(dir) = self.plugins_dir().filter(|_| self.stored.is_some()) else { return Ok(()) };
+        match self.stored.as_mut() {
+            Some(synced) => synced.persist(&dir, &self.grants).map_err(|e| error(format!("could not save the approvals for later sessions: {e}"))),
+            None => Ok(()),
+        }
     }
 
     /// Discovery must not replace a package path explicitly selected by inspection.
@@ -90,7 +155,11 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
                 format!("unknown command group `{group}`; SolidCraft has {}", COMMAND_GROUPS.join(", ")),
             ));
         }
+        let storage = manifest.capabilities.iter().any(|capability| capability.starts_with("storage@"));
         for command in &runtime.commands {
+            if command.starts_with("storage.") && !storage {
+                return Err(refuse("runtime.commands", format!("`{command}` needs the storage capability: add \"storage@0.1\" to capabilities")));
+            }
             if catalog_command(command).is_none() {
                 return Err(refuse(
                     "runtime.commands",
@@ -133,6 +202,22 @@ const FILE_COMMANDS: &[&str] = &[
     "timeline.export_script",
 ];
 
+/// Only reviewed input readers can access a folder granted for read without write.
+/// A new command defaults to needing both permissions until its file effects are audited.
+fn input_only_command(id: &str) -> bool {
+    matches!(id, "file.insert_step" | "file.insert_mesh" | "file.insert_gerber" | "file.gerber_files" | "sketch.insert_dxf" | "sketch.insert_svg")
+}
+
+/// Both the manifest and the user must approve a folder for the intended access.
+/// Writers retain the existing requirement that both read and write are approved.
+fn approved_file_folders(granted: &[FileGrant], requested: &[craft_plugin::FilePermission], write: bool) -> Vec<PathBuf> {
+    granted
+        .iter()
+        .filter(|g| g.read && (!write || g.write) && requested.iter().any(|r| r.name == g.name && r.read && (!write || r.write)))
+        .map(|g| g.folder.clone())
+        .collect()
+}
+
 /// The sensitive group of a command, or `None` when it acts on the open design alone.
 pub fn command_group(id: &str) -> Option<&'static str> {
     let family = id.split_once('.').map_or(id, |(family, _)| family);
@@ -173,6 +258,20 @@ pub fn read_package(path: &str) -> Result<Package> {
     Ok(Package { manifest, approval: package_hash(&bytes, &component), component })
 }
 
+/// Whether `folder` is an installed package in the app's own plugins folder (`{plugins}/<id>`).
+pub fn is_installed_folder(session: &Session, folder: &str) -> bool {
+    let path = Path::new(folder);
+    session.plugin_state.plugins_dir().is_some_and(|root| path.parent() == Some(root.as_path()))
+        && path.file_name().and_then(|n| n.to_str()).is_some_and(valid_id)
+}
+
+/// Reads an installed package with the app's authority, whatever the caller's file scope: a
+/// plugin tool call names a plugin, never a path, and the plugins folder is the app's own. Any
+/// other folder is read through the caller's scope, as `plugin.inspect` reads it.
+pub fn with_installed<T>(session: &Session, folder: &str, read: impl FnOnce() -> T) -> T {
+    if is_installed_folder(session, folder) { solidcraft_io::vfs::scoped(None, read) } else { read() }
+}
+
 /// The ceilings a package runs under: the app's, raised to the memory the user approved for this
 /// exact manifest and component at install. A grant for another package hash raises nothing.
 pub fn host_limits_for(session: &Session, id: &str, approval: &str) -> HostLimits {
@@ -183,6 +282,19 @@ pub fn host_limits_for(session: &Session, id: &str, approval: &str) -> HostLimit
         limits.max_memory_mib = limits.max_memory_mib.max(memory.min(MAX_MEMORY_MIB));
     }
     limits
+}
+
+/// Take back what was approved for plugin `id`, keeping it installed: it then runs with nothing
+/// granted until it is installed again with approvals. Whether there was anything to take back.
+pub fn revoke(s: &mut Session, id: &str) -> Result<bool> {
+    if !valid_id(id) {
+        return Err(HostError::InvalidInput { field: "id".into(), reason: "invalid plugin id".into() }.into());
+    }
+    s.plugin_state.refresh_stored();
+    let revoked = s.plugin_state.grants.remove(id).is_some();
+    s.plugin_state.persist_stored()?;
+    s.plugin_state.forget_stored(id)?;
+    Ok(revoked)
 }
 
 /// The most files and folders one plugin folder holds; install and removal both stop there.
@@ -197,7 +309,14 @@ pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
     format!("{:x}", digest.finalize())
 }
 
+/// Runs `entry` of `package`. A failure starts with the plugin's name.
 pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {
+    let name = package.manifest.name.clone();
+    run_package(session, package, entry, params).map_err(messages::named(&name, None))
+}
+
+fn run_package(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {
+    session.plugin_state.refresh_stored();
     if session.disabled_plugins.contains(&package.manifest.id) {
         return Err(error("plugin is disabled"));
     }
@@ -211,9 +330,10 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
     }
     let rt = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
     host_limits_for(session, &package.manifest.id, &package.approval).check(&rt.limits)?;
-    if !rt.entries.iter().any(|e| e.name == entry) {
-        return Err(error("unknown entry"));
-    }
+    let declared = rt.entries.iter().find(|e| e.name == entry).ok_or_else(|| error("unknown entry"))?;
+    let prepared =
+        conditions::has_conditions(&declared.input_schema).then(|| craft_plugin::prepare_input(&declared.input_schema, params)).transpose()?;
+    let params = prepared.as_ref().unwrap_or(params);
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         // What this call may reach: the groups both the manifest asks for and the user granted,
@@ -222,6 +342,15 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
         let groups: BTreeSet<String> = rt.permissions.command_groups.intersection(&grants.command_groups).cloned().collect();
         let mut scratch = session.scratch();
         scratch.plugin_state.file_grants = grants.folders;
+        scratch.plugin_state.storage_caller =
+            rt.data_format.filter(|_| package.manifest.capabilities.iter().any(|c| c.starts_with("storage@"))).map(|data_format| {
+                storage::StorageCaller {
+                    id: package.manifest.id.clone(),
+                    name: package.manifest.name.clone(),
+                    version: package.manifest.version.clone(),
+                    data_format,
+                }
+            });
         let host = SolidCraftHost {
             session: scratch,
             transaction: None,
@@ -229,15 +358,14 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
             view: None,
             groups,
             file_folders: Vec::new(),
+            file_read_folders: Vec::new(),
             evaluation: None,
         };
-        let file_folders = host
-            .granted_folders()
-            .into_iter()
-            .filter(|g| g.read && g.write && rt.permissions.files.iter().any(|r| r.name == g.name && r.read && r.write))
-            .map(|g| g.folder)
-            .collect();
-        let (host, result) = craft_plugin_wasm::run(SolidCraftHost { file_folders, ..host }, &package.manifest, &package.component, entry, params);
+        let approved = host.granted_folders();
+        let file_read_folders = approved_file_folders(&approved, &rt.permissions.files, false);
+        let file_folders = approved_file_folders(&approved, &rt.permissions.files, true);
+        let (host, result) =
+            craft_plugin_wasm::run(SolidCraftHost { file_folders, file_read_folders, ..host }, &package.manifest, &package.component, entry, params);
         let value = result?;
         if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
             || session.active_sketch != host.session.active_sketch
@@ -258,16 +386,23 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
     }
 }
 
+pub mod check;
+pub mod grant_store;
 mod import;
 pub mod install;
+pub mod messages;
 #[cfg(not(target_arch = "wasm32"))]
 mod package;
+pub mod storage;
 #[cfg(not(target_arch = "wasm32"))]
 pub use package::{remove, store_grants, validate_grants};
 
 pub use import::{Importer, describe as describe_importers, import_file, importer_for, importers, open_filters};
+pub use messages::PluginFailure;
 #[cfg(test)]
 mod tests;
+mod tools;
+pub use tools::{explain_importer, explain_named, missing_grant, structured_error as structured_tool_error, tools};
 
 /// The application adapter owns a scratch transaction. Wasmtime sees only PluginHost.
 pub struct SolidCraftHost {
@@ -281,6 +416,8 @@ pub struct SolidCraftHost {
     groups: BTreeSet<String>,
     /// The file scope of a granted `file` command; every other command has none.
     file_folders: Vec<PathBuf>,
+    /// Approved folders used only by known read-only input commands.
+    file_read_folders: Vec<PathBuf>,
     /// An importer's own design, opened to check it (`evaluate@0.1`), apart from every open design.
     evaluation: Option<Box<Session>>,
 }
@@ -348,9 +485,13 @@ impl PluginHost for SolidCraftHost {
         {
             return Err(HostError::PermissionDenied { permission: format!("command {name} needs the `{group}` permission, which is not granted") });
         }
-        // Only a granted `file` or `doc` command reaches files, and only the folders granted for it.
+        // Read-only grants apply only to known input readers. File writers retain their
+        // previous read-and-write scope; unknown commands default to that stricter scope.
         let scope = match group {
-            Some("file" | "doc") => solidcraft_io::vfs::PathScope::new(self.file_folders.iter().cloned()),
+            Some("file" | "doc") => {
+                let folders = if input_only_command(name) { &self.file_read_folders } else { &self.file_folders };
+                solidcraft_io::vfs::PathScope::new(folders.iter().cloned())
+            }
             _ => Default::default(),
         };
         let s = self.transaction.as_mut().ok_or_else(|| HostError::CommandFailed { command: name.into(), reason: "no active transaction".into() })?;
@@ -469,20 +610,15 @@ pub fn resolve_call(s: &Session, id: &str, params: &Value) -> Result<Option<Valu
     }
     let approval =
         params.get("approval").and_then(Value::as_str).ok_or_else(|| crate::params::bad(id, "approval from plugin.inspect is required"))?;
-    Ok(Some(json!({"path":path,"approval":approval,"entry":entry,"params":params.get("params").cloned().unwrap_or(json!({}))})))
+    let inputs = params.get("params").cloned().unwrap_or(json!({}));
+    // Preserve direct calls' input pass-through; tool callers validate their listed schema.
+    // `named`: a refusal comes back in words an agent can act on (`tools::explain`).
+    Ok(Some(json!({"path":path,"approval":approval,"entry":entry,"params":inputs,"named":true})))
 }
 
+/// `engine.describe` of an installed, enabled plugin's entry: a command entry as the
+/// `<plugin>.<entry>` command, an importer as the tool that opens its files; each with the
+/// schema `tools/list` gives it. Read with the app's authority, whatever the caller's folders.
 pub fn describe_entry(s: &Session, id: &str) -> Result<Option<Value>> {
-    if crate::find_command(id).is_some() {
-        return Ok(None);
-    }
-    let Some((package, name)) = id.split_once('.') else { return Ok(None) };
-    let Some(path) = s.plugin_state.packages.get(package) else { return Ok(None) };
-    let package = read_package(path)?;
-    let Some(runtime) = package.manifest.runtime else { return Ok(None) };
-    let Some(entry) = runtime.entries.iter().find(|e| e.name == name && e.kind == EntryKind::Command) else { return Ok(None) };
-    Ok(Some(json!({"id":id,"label":name,"params":"approval, params: declared entry inputs",
-        "input":{"type":"object","required":["approval","params"],"additionalProperties":false,"properties":{
-            "approval":{"type":"string"},"params":entry.input_schema}},
-        "output":{},"effect":entry.effect,"slots":entry.slots})))
+    tools::describe(s, id)
 }
