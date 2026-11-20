@@ -1930,8 +1930,7 @@ mod exporters {
             assert!(files(&root).is_empty(), "invalid options leave no files or folders");
         }
         for (slot, name) in targets {
-            s.execute("file.export", &json!({"path":at(&root,name),"format":format!("smp.{slot}"),"options":{"mode":false,"size":"large"}}))
-                .unwrap();
+            s.execute("file.export", &json!({"path":at(&root,name),"format":format!("smp.{slot}"),"options":{"mode":false,"size":"large"}})).unwrap();
         }
     }
 
