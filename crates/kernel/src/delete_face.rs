@@ -841,4 +841,67 @@ mod tests {
         let want = 37.0 * 26.0 / 2.0 * 50.0 + 20.0 * 5.0 * 26.0;
         assert!((volume(&back) - want).abs() < 1e-9 * want, "{} against {want}", volume(&back));
     }
+
+    /// A round beside a curved neighbour goes to fillet removal: the sharp boss comes back.
+    #[test]
+    fn deleting_a_round_beside_a_cylinder_gives_the_sharp_boss() {
+        let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 5.0)).unwrap();
+        let boss = cylinder(Vec3::new(20.0, 15.0, 5.0), Vec3::Z, 5.0, 8.0).unwrap();
+        let bossed = boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
+        let sharp = 6000.0 + 200.0 * std::f64::consts::PI;
+        let round_at = |b: &crate::Body| {
+            let record = crate::brep_record(b).unwrap();
+            (0..record.faces.len())
+                .filter(|i| {
+                    !matches!(crate::offset::surf_of(&record, *i), Some(crate::offset::Surf::Plane { .. } | crate::offset::Surf::Cylinder { .. }))
+                })
+                .collect::<Vec<usize>>()
+        };
+        for edge in [Vec3::new(25.0, 15.0, 5.0), Vec3::new(25.0, 15.0, 13.0)] {
+            let rounded = fillet(&bossed, &[edge], 1.0).unwrap();
+            let round = round_at(&rounded);
+            assert_eq!(round.len(), 1, "{edge:?}: {round:?}");
+            let back = delete_faces(&rounded, &round).unwrap();
+            // Exact, not the meshed volume: a 1e-3 chord loses ~0.06 on the Ø10 boss.
+            let v = back.volume_at(1e-3).unwrap();
+            assert!((v - sharp).abs() < 1e-6 * sharp, "{edge:?}: {v}");
+            assert_eq!(back.face_count(), 8, "{edge:?}");
+            assert_eq!(back.unmeshed_faces(), 0);
+        }
+    }
+
+    #[test]
+    fn deleting_a_round_on_a_small_boss_gives_the_sharp_boss() {
+        let plate = box_solid(Vec3::ZERO, Vec3::new(0.4, 0.3, 0.05)).unwrap();
+        let boss = cylinder(Vec3::new(0.2, 0.15, 0.05), Vec3::Z, 0.05, 0.08).unwrap();
+        let bossed = boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
+        let sharp = 0.006 + 0.0002 * std::f64::consts::PI;
+        let rounded = fillet(&bossed, &[Vec3::new(0.25, 0.15, 0.05)], 0.01).unwrap();
+        let record = crate::brep_record(&rounded).unwrap();
+        let round: Vec<usize> = (0..record.faces.len())
+            .filter(|i| {
+                !matches!(crate::offset::surf_of(&record, *i), Some(crate::offset::Surf::Plane { .. } | crate::offset::Surf::Cylinder { .. }))
+            })
+            .collect();
+        assert_eq!(round.len(), 1, "{round:?}");
+        let back = delete_faces(&rounded, &round).unwrap();
+        let v = back.volume_at(1e-9).unwrap();
+        assert!((v - sharp).abs() < 1e-6 * sharp, "{v}");
+        assert_eq!(back.face_count(), 8);
+    }
+
+    /// A chamfer beside a curved neighbour is refused with the curved-neighbour text.
+    #[test]
+    fn a_chamfer_beside_a_cylinder_is_still_refused() {
+        let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 5.0)).unwrap();
+        let pin = cylinder(Vec3::new(20.0, 15.0, -1.0), Vec3::Z, 3.0, 7.0).unwrap();
+        let holed = boolean(&plate, &pin, BoolOp::Cut).unwrap().unwrap();
+        let chamfered = chamfer(&holed, &[Vec3::new(23.0, 15.0, 5.0)], 1.0).unwrap();
+        let record = crate::brep_record(&chamfered).unwrap();
+        let cone: Vec<usize> =
+            (0..record.faces.len()).filter(|i| matches!(crate::offset::surf_of(&record, *i), Some(crate::offset::Surf::Cone { .. }))).collect();
+        assert_eq!(cone.len(), 1, "{cone:?}");
+        let e = delete_faces(&chamfered, &cone).unwrap_err().to_string();
+        assert!(e.contains("only planar neighbours can extend"), "{e}");
+    }
 }
