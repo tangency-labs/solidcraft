@@ -4021,10 +4021,7 @@ impl Trims for ParabolicTrims {
                 };
                 let (p, m, q) = (inverse(a), inverse(0.5 * (a + z)), inverse(z));
                 // A quadratic Bezier's middle coefficient is 2 C(1/2) - (C(0)+C(1))/2.
-                pcs.push(Curve2::Spline {
-                    knots: vec![a, a, a, z, z, z],
-                    points: vec![p, [0, 1].map(|d| 2.0 * m[d] - 0.5 * (p[d] + q[d])), q],
-                });
+                pcs.push(Curve2::Spline { knots: vec![a, a, a, z, z, z], points: vec![p, [0, 1].map(|d| 2.0 * m[d] - 0.5 * (p[d] + q[d])), q] });
             }
             out.push(pcs);
         }
