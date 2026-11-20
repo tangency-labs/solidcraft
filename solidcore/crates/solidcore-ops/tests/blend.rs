@@ -35,7 +35,7 @@ use solidcore::topology::{edge, loopuse};
 use solidcore::{EdgeId, FaceId, Point2, Vec3};
 use solidcore_record::brep::Brep as Record;
 
-use solidcore_ops::sweep::{extrude, Curve, DraftCorner, SweepFrame};
+use solidcore_ops::sweep::{extrude, loft_to_point, Curve, DraftCorner, SweepFrame};
 use solidcore_ops::{
     blend, blend_ordered, blend_with, chamfer_sides, chamfer_sides_facing, edge_faces_along,
     edges_share_wedge, fillet_variable, fillet_variable_from, make_box, make_cone, make_cylinder,
@@ -3588,6 +3588,106 @@ fn a_round_ending_on_a_ridge_names_the_largest_ball_along_its_end_faces_crossing
     blend(&b, Blend::Round, &[line], &[fits], &[], Corners::Filled).unwrap();
     assert!(b.check(CheckLevel::All).unwrap().is_valid());
     assert!(b.volume(1e-12).unwrap() > before);
+}
+
+/// The volume of the tetrahedron `v` with every edge rounded `r` and a ball at every corner:
+/// the inner tetrahedron (`v` drawn in about its incentre until its faces are `r` nearer,
+/// by `k = (rho - r) / rho`, rho the inradius `3 V / S`) with the ball of radius `r` rolled
+/// all over it, by Steiner's formula `V k^3 + S k^2 r + M k r^2 + 4 pi r^3 / 3`, where
+/// `M` is half the sum over the edges of each edge's length times the angle between its
+/// faces' outward normals.
+fn tetrahedron_rounded_all_over(v: &[Vec3; 4], r: f64) -> f64 {
+    let centre = (v[0] + v[1] + v[2] + v[3]) * 0.25;
+    let volume = (v[1] - v[0]).cross(v[2] - v[0]).dot(v[3] - v[0]).abs() / 6.0;
+    let faces = [[0, 1, 2], [0, 1, 3], [1, 2, 3], [2, 0, 3]];
+    let mut normals = Vec::new();
+    let mut area = 0.0;
+    for f in faces {
+        let n = (v[f[1]] - v[f[0]]).cross(v[f[2]] - v[f[0]]);
+        area += 0.5 * n.length();
+        let n = n.unitize().unwrap();
+        normals.push(if n.dot(v[f[0]] - centre) < 0.0 { -n } else { n });
+    }
+    let mut mean = 0.0;
+    for i in 0..4 {
+        for j in i + 1..4 {
+            let shared: Vec<usize> = faces[i]
+                .iter()
+                .copied()
+                .filter(|a| faces[j].contains(a))
+                .collect();
+            let turn = normals[i].dot(normals[j]).clamp(-1.0, 1.0).acos();
+            mean += 0.5 * (v[shared[0]] - v[shared[1]]).length() * turn;
+        }
+    }
+    let k = (3.0 * volume / area - r) / (3.0 * volume / area);
+    volume * k.powi(3) + area * k * k * r + mean * k * r * r + 4.0 * PI * r.powi(3) / 3.0
+}
+
+/// A tetrahedron's corner is sharp: its three faces' normals stand far apart, and so do the
+/// contacts of the ball that three equal rounds end on there. The Ball's face was one patch
+/// of the sphere between those contacts, which holds only up to a regular tetrahedron's
+/// corner (normals arccos(-1/3) apart). At a sharper one, and at the regular one itself, the
+/// three rounds failed with "Corner Edge Computation Failure"; the triangle is now three
+/// patches about the ball's point facing the vertex.
+///
+/// The tetrahedron on the triangle of circumradius 16.3 with its apex 16.33 above the
+/// middle (its base corners' normals 116.5, 116.5 and 101.6 degrees apart, its apex's
+/// 101.6 each, which was one patch already), and the regular one on the same base (apex
+/// `16.3 sqrt 2` up): the three edges at a base corner build, and every edge rounded at 0.1
+/// and at 2 gives the closed form of a solid rounded all over
+/// (`tetrahedron_rounded_all_over`). Its faces are the 4 faces, the 6 rounds, and at each
+/// corner one patch where the triangle is one (the first one's apex) and three where it is
+/// not: 20 and 22.
+#[test]
+fn every_edge_of_a_tetrahedron_rounds_to_its_closed_form() {
+    rig_fixes();
+    let base: [[f64; 2]; 3] = [-30.0_f64, 90.0, 210.0].map(|a| {
+        let a = a.to_radians();
+        [16.3 * a.cos(), 16.3 * a.sin()]
+    });
+    for (height, faces) in [(16.33, 20), (16.3 * 2.0_f64.sqrt(), 22)] {
+        let apex = [0.0, 0.0, height];
+        let section: Vec<Curve> = (0..3)
+            .map(|i| Curve::Line {
+                start: [base[i][0], base[i][1], 0.0],
+                end: [base[(i + 1) % 3][0], base[(i + 1) % 3][1], 0.0],
+            })
+            .collect();
+        let tetrahedron = || loft_to_point(&section, apex).unwrap();
+        let v = [
+            Vec3::new(base[0][0], base[0][1], 0.0),
+            Vec3::new(base[1][0], base[1][1], 0.0),
+            Vec3::new(base[2][0], base[2][1], 0.0),
+            Vec3::new(0.0, 0.0, height),
+        ];
+        let middle = |i: usize, j: usize| {
+            let m = (v[i] + v[j]) * 0.5;
+            [m.x, m.y, m.z]
+        };
+        // the three edges at the base corner 0: two base edges and the edge to the apex
+        let b = tetrahedron();
+        let corner = [(0, 1), (0, 2), (0, 3)].map(|(i, j)| nearest_edge(&b, middle(i, j)));
+        blend(&b, Blend::Round, &corner, &[2.0], &[], Corners::Filled).unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid());
+        for r in [0.1, 2.0] {
+            let b = tetrahedron();
+            let whole = b.volume(1e-12).unwrap();
+            let sharp = (v[1] - v[0]).cross(v[2] - v[0]).dot(v[3] - v[0]).abs() / 6.0;
+            assert!(rel(whole, sharp) < 1e-12, "{whole} {sharp}");
+            let all = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]
+                .map(|(i, j)| nearest_edge(&b, middle(i, j)));
+            blend(&b, Blend::Round, &all, &[r], &[], Corners::Filled).unwrap();
+            assert!(b.check(CheckLevel::All).unwrap().is_valid());
+            let want = tetrahedron_rounded_all_over(&v, r);
+            let got = b.volume(1e-12).unwrap();
+            assert!(
+                rel(got, want) < 1e-11,
+                "height {height}, r {r}: {got} {want}"
+            );
+            assert_eq!(b.counts().unwrap()[0], faces, "height {height}, r {r}");
+        }
+    }
 }
 
 /// In the Roll-over's second pass only the corner at V (where the concave chain meets the

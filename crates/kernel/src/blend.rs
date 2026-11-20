@@ -3134,6 +3134,63 @@ mod tests {
         assert!(most_at_apex >= 2, "no seed ran on into two edges at the apex");
     }
 
+    /// The four-sided die of #19583: the tetrahedron on a triangle of circumradius 16.3 with
+    /// its apex 16.33 above the middle. Its corners are sharp: at a base corner the faces'
+    /// normals stand 116.5°, 116.5° and 101.6° apart, past the arccos(-1/3) = 109.47° of a
+    /// regular tetrahedron's corner, up to which the kernel's ball between three rounds was one
+    /// patch. Rounding every edge at such a corner failed ("Corner Edge Computation Failure").
+    ///
+    /// The reporter's five edges build at 2 mm, and all six give the solid rounded all over:
+    /// the tetrahedron drawn in about its incentre by k = (ρ - r) / ρ (ρ = 3 V / S its
+    /// inradius) with the ball of radius r rolled over it, V k³ + S k² r + M k r² + 4 π r³ / 3
+    /// (Steiner), M half the sum of each edge's length times the angle between its faces'
+    /// normals. Its faces: the 4 faces, the 6 rounds, one patch for the apex's ball (its
+    /// normals are 101.6° apart, one patch as before) and three for each base corner's: 20.
+    #[test]
+    fn every_edge_of_a_tetrahedron_rounds_with_a_ball_at_each_corner() {
+        let (radius, height, r) = (16.3_f64, 16.33_f64, 2.0_f64);
+        let apex = Vec3::new(0.0, 0.0, height);
+        let base = [-30.0_f64, 90.0, 210.0].map(|a| Vec3::new(radius * a.to_radians().cos(), radius * a.to_radians().sin(), 0.0));
+        let mut planes = vec![crate::HalfSpace { n: Vec3::new(0.0, 0.0, -1.0), d: 0.0 }];
+        for i in 0..3 {
+            let n = (base[i] - apex).cross(base[(i + 1) % 3] - apex).normalized().unwrap();
+            let n = if n.z < 0.0 { n * -1.0 } else { n };
+            planes.push(crate::HalfSpace { n, d: n.dot(apex) });
+        }
+        let body = crate::convex_polyhedron(&planes).unwrap();
+        let before = crate::measure(&body).unwrap();
+        assert_eq!((before.faces, before.edges, before.vertices), (4, 6, 4));
+        // its vertices, and each face's (the base, then the side on base edge i)
+        let v = [base[0], base[1], base[2], apex];
+        let faces = [[0, 1, 2], [0, 1, 3], [1, 2, 3], [2, 0, 3]];
+        let pairs = [(0, 1), (1, 2), (2, 0), (0, 3), (1, 3), (2, 3)];
+        let middles = pairs.map(|(i, j)| (v[i] + v[j]) * 0.5);
+        let volume = (v[1] - v[0]).cross(v[2] - v[0]).dot(v[3] - v[0]).abs() / 6.0;
+        assert!((before.volume - volume).abs() < 1e-9 * volume, "{} against {volume}", before.volume);
+        let area: f64 =
+            faces.iter().map(|f| 0.5 * (v[f[1]] - v[f[0]]).cross(v[f[2]] - v[f[0]]).dot((v[f[1]] - v[f[0]]).cross(v[f[2]] - v[f[0]])).sqrt()).sum();
+        let mean: f64 = pairs
+            .iter()
+            .map(|&(i, j)| {
+                let on: Vec<usize> = (0..4).filter(|&f| faces[f].contains(&i) && faces[f].contains(&j)).collect();
+                0.5 * (v[i] - v[j]).dot(v[i] - v[j]).sqrt() * planes[on[0]].n.dot(planes[on[1]].n).clamp(-1.0, 1.0).acos()
+            })
+            .sum();
+        let k = (3.0 * volume / area - r) / (3.0 * volume / area);
+        let all_over = volume * k.powi(3) + area * k * k * r + mean * k * r * r + 4.0 * std::f64::consts::PI * r.powi(3) / 3.0;
+
+        // the reporter's five edges: the base's three and two of the apex's
+        let five = fillet(&body, &middles[..5], r).unwrap();
+        let m = crate::measure(&five).unwrap();
+        assert!(m.shells == 1 && five.validity().is_empty(), "{:?}", five.validity());
+        assert!(m.volume < before.volume && m.volume > all_over, "{}", m.volume);
+        let all = fillet(&body, &middles, r).unwrap();
+        let m = crate::measure(&all).unwrap();
+        assert!(m.shells == 1 && all.validity().is_empty(), "{:?}", all.validity());
+        assert!((m.volume - all_over).abs() < 1e-9 * all_over, "{} against {all_over}", m.volume);
+        assert_eq!(m.faces, 20);
+    }
+
     /// A very flat pyramid (0.42 high over a base of radius 30) whose 8 base corners come in
     /// near-opposite pairs, so from the apex every lateral edge runs on into two others, each
     /// within 2°.
