@@ -57,7 +57,7 @@ pub(crate) fn check_value(schema: &Value, value: &Value) -> Result<()> {
 
 /// The schema as a tool lists it, with the same default-closed object rules as [`check_input`].
 pub fn strict_input_schema(schema: &Value) -> Value {
-    fn strict(schema: &mut Value, depth: usize, closed: bool) {
+    fn strict(schema: &mut Value, depth: usize, closed: bool, selection: bool) {
         if depth > MAX_DEPTH {
             return;
         }
@@ -66,27 +66,30 @@ pub fn strict_input_schema(schema: &Value) -> Value {
         if object && defaults_closed(o, closed) && !o.contains_key("additionalProperties") {
             o.insert("additionalProperties".into(), Value::Bool(false));
         }
+        let selection = selection || o.contains_key("x-solidcraft-selection");
         if let Some(Value::Object(properties)) = o.get_mut("properties") {
-            for property in properties.values_mut() {
-                strict(property, depth + 1, true);
+            for (key, property) in properties {
+                strict(property, depth + 1, true, matches!(key.as_str(), "selection" | "target" | "targets"));
             }
         }
         if let Some(extra @ Value::Object(_)) = o.get_mut("additionalProperties") {
-            strict(extra, depth + 1, true);
+            strict(extra, depth + 1, true, false);
         }
         if let Some(items) = o.get_mut("items") {
-            strict(items, depth + 1, true);
+            let generic_pick =
+                selection && items.as_object().is_some_and(|p| p.len() == 1 && p.get("type").and_then(Value::as_str) == Some("object"));
+            strict(items, depth + 1, !generic_pick, false);
         }
         for key in ["oneOf", "anyOf"] {
             if let Some(Value::Array(options)) = o.get_mut(key) {
                 for option in options.iter_mut().take(256) {
-                    strict(option, depth + 1, false);
+                    strict(option, depth + 1, false, false);
                 }
             }
         }
     }
     let mut schema = schema.clone();
-    strict(&mut schema, 0, true);
+    strict(&mut schema, 0, true, false);
     schema
 }
 
@@ -229,11 +232,15 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
             return Err(bad(field, "has too many items"));
         }
         if let Some(item) = schema.get("items") {
+            let selection =
+                schema.contains_key("x-solidcraft-selection") || matches!(field.rsplit('.').next(), Some("selection" | "target" | "targets"));
+            let generic_pick = selection && item.as_object().is_some_and(|p| p.len() == 1 && p.get("type").and_then(Value::as_str) == Some("object"));
             for (i, value) in items.iter().enumerate() {
-                check(item, value, &format!("{field}[{i}]"), depth + 1, steps, true, conditional)?;
+                check(item, value, &format!("{field}[{i}]"), depth + 1, steps, !generic_pick, conditional)?;
             }
         }
     }
+
     if let Some(object) = value.as_object() {
         let properties = schema.get("properties").and_then(Value::as_object);
         let conditions = if conditional { crate::conditions::InputConditions::from_properties(properties)? } else { Default::default() };

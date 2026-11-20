@@ -11,6 +11,31 @@ fn parse(value: &Value) -> Result<Manifest> {
 }
 
 #[test]
+fn conditional_selection_items_keep_shared_pick_objects() {
+    let schema = json!({"type":"object","properties":{
+        "has_pick":{"type":"boolean"},
+        "faces":{"type":"array","items":{"type":"object"},"x-solidcraft-selection":{"version":1,"accept":["face"]},
+            "x-solidcraft-visible-when":{"field":"has_pick","eq":true}}
+    }});
+    let values = json!({"has_pick":true,"faces":[{"type":"face","body":"Box","index":0,"point":[0,0,0]}]});
+    assert_eq!(prepare_input(&schema, &values).unwrap(), values);
+    assert!(
+        strict_input_schema(&schema)["properties"]["faces"]["items"].get("additionalProperties").is_none(),
+        "the MCP schema accepts the same shared pick objects"
+    );
+}
+
+#[test]
+fn forms_capability_is_additive_and_versioned() {
+    let mut value = manifest();
+    value["capabilities"] = json!(["commands@0.1", "forms@0.1"]);
+    assert!(parse(&value).is_ok());
+    value["capabilities"] = json!(["commands@0.1", "forms@0.2"]);
+    assert!(matches!(parse(&value), Err(HostError::UnsupportedCapability { .. })));
+    assert!(parse(&manifest()).is_ok(), "existing plugins still link without forms");
+}
+
+#[test]
 fn metadata_normalization_and_legacy_entries() {
     let parsed = parse(&manifest()).unwrap();
     assert_eq!(parsed.name, "Sample");

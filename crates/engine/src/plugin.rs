@@ -360,6 +360,8 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
             file_folders: Vec::new(),
             file_read_folders: Vec::new(),
             evaluation: None,
+            forms: Vec::new(),
+            form_source: Some((package.manifest.id.clone(), rt.entries.clone())),
         };
         let approved = host.granted_folders();
         let file_read_folders = approved_file_folders(&approved, &rt.permissions.files, false);
@@ -377,7 +379,14 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
                 session.echo(message);
             }
         }
-        Ok(crate::schema::plugin::RunResult { result: value, sketch_exits: host.sketch_exits, view: host.view, param_warnings: vec![] })
+        Ok(crate::schema::plugin::RunResult {
+            result: value,
+            forms: host.forms,
+            form_validation: None,
+            sketch_exits: host.sketch_exits,
+            view: host.view,
+            param_warnings: vec![],
+        })
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
@@ -387,7 +396,9 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
 }
 
 pub mod check;
+mod form;
 pub mod grant_store;
+pub use form::form_errors;
 mod import;
 pub mod install;
 pub mod messages;
@@ -420,6 +431,8 @@ pub struct SolidCraftHost {
     file_read_folders: Vec<PathBuf>,
     /// An importer's own design, opened to check it (`evaluate@0.1`), apart from every open design.
     evaluation: Option<Box<Session>>,
+    forms: Vec<crate::schema::plugin::FormRequest>,
+    form_source: Option<(String, Vec<Entry>)>,
 }
 
 impl SolidCraftHost {
@@ -443,6 +456,9 @@ impl SolidCraftHost {
 /// `timeline.roll_to` moves only that private session's marker.
 pub const EVALUATE_COMMANDS: &[&str] = &["document.inspect", "inspect.measure", "model.edges", "model.faces", "timeline.roll_to"];
 impl PluginHost for SolidCraftHost {
+    fn open_form(&mut self, entry: &str, params: &Value) -> craft_plugin::Result<()> {
+        self.request_form(entry, params)
+    }
     fn evaluate_open(&mut self, design: &[u8]) -> craft_plugin::Result<()> {
         let doc = solidcraft_io::read_design(design)
             .map_err(|e| HostError::InvalidInput { field: "design".into(), reason: format!("SolidCraft can't read this design: {e}") })?;
@@ -544,6 +560,7 @@ impl PluginHost for SolidCraftHost {
     fn rollback_transaction(&mut self) -> craft_plugin::Result<()> {
         self.transaction = None;
         self.sketch_exits.clear();
+        self.forms.clear();
         self.view = None;
         Ok(())
     }

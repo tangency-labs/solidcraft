@@ -1,9 +1,9 @@
 //! One-shot plugins share the engine's command surface, file scope and undo history.
 use super::CommandSpec;
 use crate::schema::plugin::{
-    CheckParams, GrantStatus, GrantsParams, GrantsResult, ImportParams, ImportedDesign, InspectParams, InspectResult, InstallParams, InstallResult,
-    ListParams, ListResult, ListedPlugin, MeshParams, MeshResult, RemoveParams, RemoveResult, RevokeParams, RevokeResult, RunParams, RunResult,
-    StoredGrant, ToolsParams, ToolsResult,
+    CheckParams, EditParams, FormValidation, GrantStatus, GrantsParams, GrantsResult, ImportParams, ImportedDesign, InspectParams, InspectResult,
+    InstallParams, InstallResult, ListParams, ListResult, ListedPlugin, MeshParams, MeshResult, RemoveParams, RemoveResult, RevokeParams,
+    RevokeResult, RunParams, RunResult, StoredGrant, ToolsParams, ToolsResult,
 };
 use crate::{
     Result, Session, checked,
@@ -23,6 +23,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("plugin.check", "Check Plugin", checked!("plugin.check", check)).icon("inspect").noundo().read_only().doc_only()
         .contract(&TypedContract::<CheckParams>::new()).output(output_schema_for::<crate::schema::plugin::CheckResult>)
         .params("path: plugin package folder or .zip; checks it as Install and a call would (manifest, size limits, permissions, the component's WIT world and version) and lists each problem with how to fix it; runs no plugin code and installs nothing"),
+    CommandSpec::new("plugin.edit", "Edit Plugin Operation", checked!("plugin.edit", edit)).icon("edit").noundo().read_only().doc_only()
+        .contract(&TypedContract::<EditParams>::new()).output(output_schema_for::<RunResult>)
+        .params("plugin, entry, params: open the normal form through ui.start; scripts and MCP receive interactive_required; call the entry with params instead"),
     CommandSpec::new("plugin.grants", "Plugin Approvals", checked!("plugin.grants", grants)).icon("inspect").noundo().doc_only()
         .contract(&TypedContract::<GrantsParams>::new()).output(output_schema_for::<GrantsResult>)
         .params("What the user approved for each plugin (command groups, folders, memory, input_folder), the package each approval is bound to and its status: current, changed (install and approve again), not_installed or unreadable; runs no plugin code"),
@@ -159,6 +162,14 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
     })
     .map_err(|e| bad("plugin.install", e.to_string()))
 }
+fn edit(_s: &mut Session, p: &Value) -> Result<Value> {
+    let p: EditParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.edit", e.to_string()))?;
+    if !plugin::valid_id(&p.plugin) || !plugin::valid_id(&p.entry) {
+        return Err(bad("plugin.edit", "invalid plugin or entry id"));
+    }
+    Err(plugin::HostError::InteractiveRequired { entry: format!("{}.{}", p.plugin, p.entry) }.into())
+}
+
 fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let p: RunParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.run", e.to_string()))?;
     // Called by name, an installed plugin is read with the app's authority (a tool call names
@@ -166,6 +177,28 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let package = if p.named { plugin::with_installed(s, &p.path, || plugin::read_package(&p.path))? } else { plugin::read_package(&p.path)? };
     if p.approval != package.approval {
         return Err(bad("plugin.run", "approval does not match this manifest and component; inspect and review again"));
+    }
+    if let Some(guard) = &p.form_guard {
+        let entry = package
+            .manifest
+            .runtime
+            .as_ref()
+            .and_then(|rt| rt.entries.iter().find(|e| e.name == p.entry))
+            .ok_or_else(|| bad("plugin.run", "unknown entry"))?;
+        let revision = s.design_revision();
+        let errors = plugin::form_errors(s, &entry.input_schema, &p.params);
+        let changed = guard.document_id != s.document_id || guard.revision != revision;
+        if changed || !errors.is_empty() {
+            return serde_json::to_value(RunResult {
+                result: Value::Null,
+                forms: vec![],
+                form_validation: Some(FormValidation { revision, changed, errors }),
+                sketch_exits: vec![],
+                view: None,
+                param_warnings: vec![],
+            })
+            .map_err(|e| bad("plugin.run", e.to_string()));
+        }
     }
     let manifest = p.named.then(|| package.manifest.clone());
     let result = plugin::run(s, package, &p.entry, &p.params).map_err(|e| match &manifest {

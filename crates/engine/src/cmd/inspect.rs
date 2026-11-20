@@ -545,6 +545,7 @@ fn sketch_inspect(s: &mut Session, p: &Value) -> Result<Value> {
 static NEXT_REVISION: AtomicU64 = AtomicU64::new(1);
 
 /// The design as `document.revision` last saw it, which its revision names.
+#[derive(Clone)]
 pub(crate) struct Followed {
     /// Held weakly: a design something holds weakly is never changed in place (`Arc::make_mut`
     /// moves it), and its address can't go to another design meanwhile.

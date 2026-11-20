@@ -187,6 +187,12 @@ pub fn structured_error(text: &str) -> Option<Value> {
     if text.len() > 8192 {
         return None;
     }
+    if let Some((_, rest)) = text.split_once("interactive_required: opening ")
+        && let Some((entry, _)) = rest.split_once(" requires the app form;")
+        && entry.split('.').all(valid_id)
+    {
+        return Some(json!({"kind":"interactive_required","entry":entry,"action":"call_entry_with_params"}));
+    }
     let start = text.find("plugin `")?;
     let rest = &text[start + "plugin `".len()..];
     let (plugin, rest) = rest.split_once('`')?;
