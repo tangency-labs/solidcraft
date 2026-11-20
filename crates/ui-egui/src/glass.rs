@@ -135,7 +135,7 @@ fn shown_view(ctx: &Context) -> Option<Rect> {
 
 /// The view's picture, as the viewport's renderer drew it last.
 fn picture(resources: &egui_wgpu::CallbackResources) -> Option<(egui_wgpu::wgpu::TextureView, bool)> {
-    resources.get::<crate::gpu::Renderer>()?.picture()
+    resources.get::<crate::gpu::Renderer>()?.backdrop_picture()
 }
 
 /// The glass under one fill: the theme's preset with the theme's blur, bend and reach, the window's

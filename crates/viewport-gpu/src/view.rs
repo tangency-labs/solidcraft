@@ -3146,7 +3146,7 @@ struct Supersampled {
 
 /// A frame filtered down to the viewport's own pixels, for a still view to blit as it is.
 struct CachedPicture {
-    /// Kept for the bind group, which samples it ([`Renderer::picture`] too).
+    /// Kept for the bind group, which samples it ([`Renderer::backdrop_picture`] too).
     view: wgpu::TextureView,
     bind: wgpu::BindGroup,
 }
@@ -4622,7 +4622,7 @@ impl Renderer {
     /// The picture the last frame drew offscreen (one sample, in [`Self::target`]'s format) and
     /// whether that format is sRGB, for a host that shows it elsewhere too (the app's glass panels
     /// refract it). `None` when the frame was drawn straight into the window's pass.
-    pub fn picture(&self) -> Option<(wgpu::TextureView, bool)> {
+    pub fn backdrop_picture(&self) -> Option<(wgpu::TextureView, bool)> {
         if !self.pic.ss_ready {
             return None;
         }
