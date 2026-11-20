@@ -820,65 +820,8 @@ fn the_agents_own_questions_are_answered_by_the_mode_or_asked() {
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "remembered");
 }
 
-/// Claude Code's read tools are off until a message sends a file or folder by path: then the
-/// session is opened again with them on (the same conversation) and the message waits for it to be
-/// ready. Later messages don't reopen it; New chat turns them off again.
-#[test]
-fn the_first_message_sent_by_path_turns_the_read_tools_on() {
-    let d = attachable("reads-on");
-    let (mut app, script, ctx) = app_with_script();
-    with_coding_agent(&mut app);
-    script.reopens_for_reads.store(true, std::sync::atomic::Ordering::Relaxed);
-    send(&mut app, &ctx, "hello".into());
-    ended(&script, "");
-    poll(&mut app, &ctx);
-    assert!(!script.calls().iter().any(|c| c.starts_with("reads:")), "nothing sent by path yet: {:?}", script.calls());
-    attach_path(&mut app, &d.to_string_lossy()).unwrap();
-    send(&mut app, &ctx, "look in this folder".into());
-    assert_eq!(script.calls().iter().filter(|c| *c == "reads: true").count(), 1, "{:?}", script.calls());
-    assert_eq!(script.prompts().len(), 1, "the message waits for the session to open again");
-    assert_eq!(app.agent_chat.state(), State::Starting);
-    script.report(Event::Ready { agent: "Test".into(), images: true });
-    poll(&mut app, &ctx);
-    assert_eq!(script.prompts().len(), 2, "sent once it is ready");
-    assert!(text_of(&script.prompts()[1]).starts_with("look in this folder"), "{}", text_of(&script.prompts()[1]));
-    ended(&script, "");
-    poll(&mut app, &ctx);
-    attach_path(&mut app, &d.to_string_lossy()).unwrap();
-    send(&mut app, &ctx, "and again".into());
-    assert_eq!(script.prompts().len(), 3, "already on: sent at once");
-    assert_eq!(script.calls().iter().filter(|c| c.starts_with("reads: true")).count(), 1);
-    ended(&script, "");
-    poll(&mut app, &ctx);
-    new_chat(&mut app);
-    assert!(script.calls().iter().any(|c| c == "reads: false"), "New chat turns them off: {:?}", script.calls());
-    let _ = std::fs::remove_dir_all(&d);
-}
-
-/// New chat while the session is being opened again with Claude Code's read tools on replaces it
-/// too, with them off, so that opening's reply can't bring back the conversation (Review: the
-/// chat waits in Starting then, which New chat used to leave to the agent).
-#[test]
-fn new_chat_while_the_read_tools_come_on_starts_afresh() {
-    let d = attachable("reads-new-chat");
-    let (mut app, script, ctx) = app_with_script();
-    with_coding_agent(&mut app);
-    script.reopens_for_reads.store(true, std::sync::atomic::Ordering::Relaxed);
-    attach_path(&mut app, &d.to_string_lossy()).unwrap();
-    send(&mut app, &ctx, "look in this folder".into());
-    assert_eq!(app.agent_chat.state(), State::Starting, "the session is being opened again");
-    new_chat(&mut app);
-    let calls = script.calls();
-    assert!(calls.ends_with(&["reads: false".to_string(), "new_session".to_string()]), "{calls:?}");
-    assert!(app.agent_chat.pending.is_empty() && app.agent_chat.items.is_empty());
-    script.report(Event::Ready { agent: "Test".into(), images: true });
-    poll(&mut app, &ctx);
-    assert!(script.prompts().is_empty(), "the cleared message isn't sent");
-    let _ = std::fs::remove_dir_all(&d);
-}
-
-/// A file whose line the message's cap cut off was never named to the agent, so its reads still
-/// ask (Review: every file sent by path was taken as named).
+/// A file whose line the message's cap cut off was never named to the agent, so it doesn't count
+/// as attached (Review: every file sent by path was taken as named).
 #[test]
 fn a_path_cut_off_by_the_cap_is_not_read_without_asking() {
     let d = attachable("cut-path");
@@ -897,84 +840,70 @@ fn a_path_cut_off_by_the_cap_is_not_read_without_asking() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
-/// The first file or folder attached in a chat with Claude Code makes the chat say once that
-/// sending it turns Claude Code's read tools on; other agents' own tools are theirs, so nothing is
-/// said for them.
-#[test]
-fn attaching_by_path_warns_once_that_it_turns_claudes_read_tools_on() {
-    let d = attachable("reads-warn");
-    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-    app.preferences.agents.push(agents::AgentConfig {
-        id: "codex-test".into(),
-        name: "Codex".into(),
-        command: "codex-acp".into(),
-        ..Default::default()
-    });
-    with_coding_agent(&mut app);
-    let warnings = |app: &SolveApp| {
-        app.agent_chat
-            .items
-            .iter()
-            .filter(|i| matches!(i, Item::Notice { text, error: false } if text.contains("turns on Claude Code's read tools")))
-            .count()
-    };
-    app.agent_chat.agent_id = Some("codex-test".into());
-    attach_path(&mut app, &d.to_string_lossy()).unwrap();
-    assert_eq!(warnings(&app), 0, "another agent's tools are its own");
-    app.agent_chat.agent_id = Some("claude-test".into());
-    attach_path(&mut app, &at(&d, "brief.md")).unwrap();
-    assert_eq!(warnings(&app), 1, "a file goes by its path too");
-    attach_path(&mut app, &d.to_string_lossy()).unwrap();
-    assert_eq!(warnings(&app), 1, "said once");
-    let _ = std::fs::remove_dir_all(&d);
-}
-
 /// Claude Code's own read tools ask before every read. A read inside a file or folder sent by
-/// path in this conversation is answered at once, and the chat says so; a read before anything
-/// was sent, of anything else, through a link in the folder that leads out of it, or after New
-/// chat waits for the user.
+/// path in this conversation is answered at once, and the chat says so. Any other is declined
+/// without asking, even under Allow everything with the title remembered: a read before anything
+/// was sent, of anything else, stepping out of the folder, through a link in it that leads out,
+/// or after New chat. Another agent's reads are its own, and go through the user's mode.
 #[test]
-fn reads_of_what_was_sent_by_path_are_allowed_and_others_wait() {
+fn claude_code_reads_only_what_was_sent_by_path() {
     let d = attachable("reads");
     let (photos, outside) = (d.join("photos"), d.join("outside"));
     std::fs::create_dir_all(&photos).unwrap();
     std::fs::create_dir_all(&outside).unwrap();
     std::fs::write(photos.join("a.jpg"), b"x").unwrap();
     std::fs::write(outside.join("secret.txt"), b"x").unwrap();
-    let (mut app, _script, ctx) = app_with_script();
+    let (mut app, script, ctx) = app_with_script();
     with_coding_agent(&mut app);
+    app.agent_chat.running_id = "claude-test".into();
+    app.preferences.agent_permissions.insert("claude-test".into(), agents::Mode::All);
     let opts = || {
         vec![
             PermissionOption { id: "allow".into(), name: "Allow".into(), kind: "allow_once".into() },
+            PermissionOption { id: "always".into(), name: "Always".into(), kind: "allow_always".into() },
             PermissionOption { id: "no".into(), name: "Reject".into(), kind: "reject_once".into() },
         ]
     };
-    let asked = |app: &SolveApp| matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. }));
+    let answer = |key: u64| script.calls().into_iter().rev().find(|c| c.starts_with(&format!("permission: {key} ")));
+    let declined = |key: u64| answer(key).as_deref() == Some(&*format!("permission: {key} Some(\"no\")"));
     let photo = photos.join("a.jpg");
+    let secret = outside.join("secret.txt");
     on_permission(&mut app, 1, "Read photos/a.jpg".into(), Some("read"), opts(), Some(&photo));
-    assert!(asked(&app), "nothing was sent by path yet");
+    assert!(declined(1), "nothing was sent by path yet: {:?}", script.calls());
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { text, error: false }) if text.contains("Read photos/a.jpg")));
     attach_path(&mut app, &photos.to_string_lossy()).unwrap();
     send(&mut app, &ctx, "look at these".into());
     on_permission(&mut app, 2, "Read photos/a.jpg".into(), Some("read"), opts(), Some(&photo));
+    assert_eq!(answer(2).as_deref(), Some("permission: 2 Some(\"allow\")"));
     assert!(
         matches!(app.agent_chat.items.last(), Some(Item::Notice { text, error: false }) if text.contains("Read photos/a.jpg") && text.contains("attached")),
         "answered at once"
     );
     on_permission(&mut app, 3, "Find photos".into(), Some("search"), opts(), Some(&photos));
-    assert!(!asked(&app), "the folder itself");
-    on_permission(&mut app, 4, "Read secret.txt".into(), Some("read"), opts(), Some(&outside.join("secret.txt")));
-    assert!(asked(&app), "outside what was sent");
+    assert_eq!(answer(3).as_deref(), Some("permission: 3 Some(\"allow\")"), "the folder itself");
+    agents::remember(&mut app.preferences, "claude-test", "Read secret.txt");
+    on_permission(&mut app, 4, "Read secret.txt".into(), Some("read"), opts(), Some(&secret));
+    assert!(declined(4), "outside what was sent, though remembered and under Allow everything");
     on_permission(&mut app, 5, "Read secret.txt".into(), Some("read"), opts(), Some(&photos.join("../outside/secret.txt")));
-    assert!(asked(&app), "stepping out of the folder");
+    assert!(declined(5), "stepping out of the folder");
+    on_permission(&mut app, 6, "Find /".into(), Some("search"), opts(), None);
+    assert!(declined(6), "a pattern that can't be checked");
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(outside.join("secret.txt"), photos.join("link.txt")).unwrap();
-        on_permission(&mut app, 6, "Read link.txt".into(), Some("read"), opts(), Some(&photos.join("link.txt")));
-        assert!(asked(&app), "a link in the folder that leads out of it");
+        std::os::unix::fs::symlink(&secret, photos.join("link.txt")).unwrap();
+        on_permission(&mut app, 7, "Read link.txt".into(), Some("read"), opts(), Some(&photos.join("link.txt")));
+        assert!(declined(7), "a link in the folder that leads out of it");
     }
+    assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::Permission { .. })), "nothing waits for the user");
     new_chat(&mut app);
-    on_permission(&mut app, 7, "Read photos/a.jpg".into(), Some("read"), opts(), Some(&photo));
-    assert!(asked(&app), "a new chat starts with nothing sent");
+    on_permission(&mut app, 8, "Read photos/a.jpg".into(), Some("read"), opts(), Some(&photo));
+    assert!(declined(8), "a new chat starts with nothing sent");
+
+    app.agent_chat.running_id = "codex".into();
+    app.preferences.agent_permissions.insert("codex".into(), agents::Mode::Ask);
+    app.agent_chat.items.clear();
+    on_permission(&mut app, 9, "Read secret.txt".into(), Some("read"), opts(), Some(&secret));
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. })), "another agent's read goes to the user");
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -1020,9 +949,6 @@ struct Script {
     events: Arc<Mutex<Vec<Event>>>,
     /// Every prompt in full (its text and pictures).
     prompts: Arc<Mutex<Vec<Vec<PromptPart>>>>,
-    /// Turning the read tools on opens the session again (as Claude Code's adapter does), so the
-    /// panel waits for Ready.
-    reopens_for_reads: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Script {
@@ -1060,10 +986,6 @@ impl ChatBackend for Script {
     }
     fn set_config_option(&mut self, id: &str, value: &str) {
         self.calls.lock().unwrap().push(format!("set_config_option: {id}={value}"));
-    }
-    fn set_reads_files(&mut self, on: bool) -> bool {
-        self.calls.lock().unwrap().push(format!("reads: {on}"));
-        on && self.reopens_for_reads.load(std::sync::atomic::Ordering::Relaxed)
     }
     fn authenticate(&mut self, _: &str) {}
     fn shutdown(&mut self, _: bool) {}
@@ -1879,7 +1801,7 @@ fn new_chat_clears_everything_and_keeps_the_agent_and_mode() {
     send(&mut app, &ctx, "queued".into());
     assert!(new_chat_needs_confirm(&app), "a running message and a queue ask first");
     new_chat(&mut app);
-    assert_eq!(script.calls(), ["prompt: first", "cancel", "reads: false", "new_session"], "New chat starts with the read tools off");
+    assert_eq!(script.calls(), ["prompt: first", "cancel", "new_session"]);
     assert!(app.agent_chat.items.is_empty() && app.agent_chat.pending.is_empty());
     assert_eq!(app.agent_chat.state(), State::Starting);
     assert_eq!(app.agent_chat.agent_id.as_deref(), Some("claude"));

@@ -117,8 +117,6 @@ pub enum Event {
     },
     /// Something failed; the backend is still running unless [`Event::Exited`] follows.
     Error(String),
-    /// Something the user should know that is no error: the chat goes on.
-    Notice(String),
     /// It ended; its last error output.
     Exited {
         tail: Vec<String>,
@@ -152,14 +150,6 @@ pub trait ChatBackend {
     /// The user's custom instructions (#8220), added to the system note of every session that
     /// starts after this call. The panel sets them before the first session and before New chat.
     fn set_instructions(&mut self, _text: &str) {}
-    /// Whether the agent's own read tools are on, asking before every read (only Claude Code's can
-    /// be told): off when a conversation starts, on once it sends a file or folder by path. Turning
-    /// them on in a running session resumes it with them on (the same conversation); true then, and
-    /// the panel waits for [`Event::Ready`] before it sends. Otherwise it applies to the next
-    /// session.
-    fn set_reads_files(&mut self, _on: bool) -> bool {
-        false
-    }
     /// Answer an [`Event::Permission`] with one of its options (`None`: cancelled).
     fn answer_permission(&mut self, key: u64, option: Option<&str>);
     /// Ask the backend to sign in by itself with one of its methods (it opens the browser).

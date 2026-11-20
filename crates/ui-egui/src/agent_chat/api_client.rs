@@ -37,6 +37,10 @@ const DROPPED_VIEW_NOTE: &str = "[an earlier picture of the view, removed to kee
 /// What an older PDF becomes in the history.
 const DROPPED_DOCUMENT_NOTE: &str = "[an earlier PDF, removed to keep the request small]";
 const DROPPED_THINKING_NOTE: &str = "[earlier reasoning, removed with older history]";
+/// The pictures and PDFs one request may carry, as sent (base64): 18 MB of files. It leaves room
+/// for the words under Anthropic's 32 MB request limit and OpenAI's 32 MB of files per request.
+/// Older ones go first; a message whose own are over it is refused before it is sent.
+const MAX_REQUEST_MEDIA: usize = 24 * 1024 * 1024;
 /// How long one tool call may take (it may wait for the user's Allow, declined after four
 /// minutes). It does not depend on the endpoint's request timeout: a tool call is SolidCraft's own
 /// work and the user's answer, never a wait for the model, so a longer request timeout does not
@@ -932,11 +936,30 @@ impl Worker {
 
     fn turn(&mut self, parts: Vec<PromptPart>) {
         self.history.push(user_message(self.cfg.protocol, &parts));
-        let dropped = drop_old_views(&mut self.history, MAX_HISTORY_IMAGES);
+        let mut dropped = drop_old_views(&mut self.history, MAX_HISTORY_IMAGES);
+        // The whole request has to fit: older pictures and PDFs go first, one kind-pair at a time.
+        let mut keep = MAX_HISTORY_IMAGES;
+        while keep > 0 && media_bytes(&self.history) > MAX_REQUEST_MEDIA {
+            keep -= 1;
+            dropped |= drop_old_views(&mut self.history, keep);
+        }
         let trimmed = self.trim_history();
         if (dropped || trimmed) && self.cfg.protocol == Protocol::Anthropic {
             drop_thinking(&mut self.history);
         }
+        // What is left over the limit is this message's own: it isn't sent, and nothing of it is
+        // dropped without the user knowing.
+        let media = media_bytes(&self.history);
+        if media > MAX_REQUEST_MEDIA {
+            self.history.pop();
+            let mb = |b: usize| format!("{:.1}", (b / 4 * 3) as f64 / (1024.0 * 1024.0));
+            let max = ((MAX_REQUEST_MEDIA / 4 * 3) / (1024 * 1024)).to_string();
+            self.emit(Event::Error(solidcraft_ui_text::format("ui.ai_request_too_big", &[("size", &mb(media)), ("max", &max)])));
+            self.emit(Event::TurnEnded { reason: "error".into() });
+            return;
+        }
+        let carries_media = self.history.last().is_some_and(|m| media_bytes(std::slice::from_ref(m)) > 0);
+        let mut first = true;
         // No cap on requests: Stop sets `cancel`, checked at the top of every round.
         loop {
             // The history as of here is complete (every tool call answered): a cancelled request
@@ -958,12 +981,22 @@ impl Worker {
                     self.emit(Event::TurnEnded { reason: "cancelled".into() });
                     return;
                 }
+                // Refused before any reply: a message with pictures or PDFs is taken back out, so
+                // the next message doesn't send a file the endpoint won't take again. After a reply
+                // or a tool call the history stays: those happened.
+                Err(e) if first && carries_media => {
+                    self.history.truncate(sound.saturating_sub(1));
+                    self.emit(Event::Error(format!("{e} ({})", solidcraft_ui_text::tr("ui.ai_media_message_dropped"))));
+                    self.emit(Event::TurnEnded { reason: "error".into() });
+                    return;
+                }
                 Err(e) => {
                     self.emit(Event::Error(e));
                     self.emit(Event::TurnEnded { reason: "error".into() });
                     return;
                 }
             };
+            first = false;
             for (thought, text) in reply.text {
                 self.emit(Event::Text { thought, text });
             }
@@ -1576,6 +1609,25 @@ fn drop_old_views(history: &mut [Value], keep: usize) -> bool {
         }
     }
     dropped
+}
+
+/// The bytes of the pictures and PDFs in these messages, as sent (their text, base64 included).
+fn media_bytes(history: &[Value]) -> usize {
+    fn text(v: &Value) -> usize {
+        match v {
+            Value::String(s) => s.len(),
+            Value::Array(a) => a.iter().map(text).sum(),
+            Value::Object(o) => o.values().map(text).sum(),
+            _ => 0,
+        }
+    }
+    history
+        .iter()
+        .filter_map(|m| m.get("content").and_then(Value::as_array))
+        .flatten()
+        .filter(|p| matches!(p.get("type").and_then(Value::as_str), Some("image_url" | "image" | "file" | "document")))
+        .map(text)
+        .sum()
 }
 
 /// Takes Anthropic thinking blocks out of every earlier reply. Each one is signed against all
@@ -3186,6 +3238,99 @@ mod tests {
         let fourth = replies(3);
         assert_eq!(fourth[..2], third[..]);
         assert_eq!(fourth[2][0]["signature"], "s3");
+    }
+
+    /// An Anthropic endpoint whose POSTs answer with the given statuses in turn (then 200), and
+    /// the request bodies it was sent.
+    fn recording_endpoint(statuses: Vec<u16>) -> (ApiBackend, Arc<std::sync::Mutex<Vec<Value>>>) {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let log = seen.clone();
+        let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+            if r.method == "GET" {
+                return Ok((200, b"{\"data\":[]}".to_vec()));
+            }
+            let n = {
+                let mut l = log.lock().unwrap();
+                l.push(serde_json::from_slice(r.body.as_deref().unwrap_or(b"null")).unwrap());
+                l.len()
+            };
+            let status = statuses.get(n - 1).copied().unwrap_or(200);
+            let body = if status == 200 {
+                json!({"content": [{"type": "text", "text": format!("Seen {n}.")}], "stop_reason": "end_turn"})
+            } else {
+                json!({"error": {"message": "the document could not be read"}})
+            };
+            Ok((status, body.to_string().into_bytes()))
+        });
+        let cfg = ApiConfig {
+            name: "Test".into(),
+            protocol: Protocol::Anthropic,
+            base_url: "http://localhost:1".into(),
+            model: "m".into(),
+            allow_insecure_http: false,
+            key: Some("sk-secret".into()),
+            http,
+            request_timeout_s: 300,
+            reasoning_effort: String::new(),
+        };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        (ApiBackend::start(cfg, ctx).unwrap(), seen)
+    }
+
+    fn pdf_of(name: &str, base64_len: usize) -> PromptPart {
+        PromptPart::Document { name: name.into(), uri: String::new(), mime: "application/pdf".into(), base64: "A".repeat(base64_len) }
+    }
+
+    /// A message with a PDF the endpoint refuses before any reply is taken back out of the
+    /// history, so the next message doesn't send it again (Review: one refused PDF failed every
+    /// later message). A refused message with only words stays.
+    #[test]
+    fn a_refused_pdf_is_not_sent_again() {
+        let (mut b, seen) = recording_endpoint(vec![400]);
+        b.prompt(&[PromptPart::Text("read this".into()), pdf_of("locked.pdf", 16)]);
+        assert!(wait_for_turn(&mut b).iter().any(|e| matches!(e, Event::Error(_))));
+        b.prompt(&[PromptPart::Text("and now?".into())]);
+        wait_for_turn(&mut b);
+        b.shutdown(true);
+        let sent = seen.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        assert_eq!(media_bytes(sent[1]["messages"].as_array().unwrap()), 0, "{}", sent[1]["messages"]);
+        assert_eq!(sent[1]["messages"].as_array().unwrap().len(), 1, "only the new message");
+
+        let (mut b, seen) = recording_endpoint(vec![503]);
+        b.prompt(&[PromptPart::Text("hello".into())]);
+        wait_for_turn(&mut b);
+        b.prompt(&[PromptPart::Text("again".into())]);
+        wait_for_turn(&mut b);
+        b.shutdown(true);
+        assert_eq!(seen.lock().unwrap()[1]["messages"].as_array().unwrap().len(), 2, "words alone stay");
+    }
+
+    /// The pictures and PDFs of one request stay under `MAX_REQUEST_MEDIA`: older ones go first,
+    /// and a message whose own are over it is refused before anything is sent (Review: eight
+    /// 12 MB PDFs made a 128 MB request).
+    #[test]
+    fn a_request_keeps_its_pictures_and_pdfs_under_the_limit() {
+        let (mut b, seen) = recording_endpoint(Vec::new());
+        let big = MAX_REQUEST_MEDIA / 2 + 1;
+        b.prompt(&[PromptPart::Text("one".into()), pdf_of("a.pdf", big)]);
+        wait_for_turn(&mut b);
+        b.prompt(&[PromptPart::Text("two".into()), pdf_of("b.pdf", big)]);
+        wait_for_turn(&mut b);
+        b.prompt(&[PromptPart::Text("three".into()), pdf_of("c.pdf", big), pdf_of("d.pdf", big)]);
+        let events = wait_for_turn(&mut b);
+        b.prompt(&[PromptPart::Text("four".into())]);
+        wait_for_turn(&mut b);
+        b.shutdown(true);
+        let sent = seen.lock().unwrap();
+        assert_eq!(sent.len(), 3, "the third message is never sent");
+        assert!(events.iter().any(|e| matches!(e, Event::Error(_))), "{events:?}");
+        let second = sent[1]["messages"].as_array().unwrap();
+        assert!(media_bytes(second) <= MAX_REQUEST_MEDIA);
+        assert_eq!(second[0]["content"][1]["text"], DROPPED_DOCUMENT_NOTE, "the older PDF went first");
+        assert!(media_bytes(&second[2..]) >= big, "the new one went whole");
+        let fourth = sent[2]["messages"].as_array().unwrap();
+        assert!(!fourth.iter().any(|m| m.to_string().contains("three")), "the refused message is not kept");
     }
 
     #[test]

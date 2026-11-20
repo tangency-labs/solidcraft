@@ -254,7 +254,13 @@ pub fn read(path: &Path) -> Result<Attachment, String> {
             if meta.len() > MAX_PDF_BYTES {
                 return Err(refused("ui.agent_chat_file_pdf_too_big", &name, &[("max", &(MAX_PDF_BYTES / 1024 / 1024).to_string())]));
             }
-            let bytes = std::fs::read(&path).map_err(|e| failed(&name, e))?;
+            // The limit holds for what is read, too: a file that grew since `meta` is refused.
+            use std::io::Read as _;
+            let mut bytes = Vec::new();
+            std::fs::File::open(&path).and_then(|f| f.take(MAX_PDF_BYTES + 1).read_to_end(&mut bytes)).map_err(|e| failed(&name, e))?;
+            if bytes.len() as u64 > MAX_PDF_BYTES {
+                return Err(refused("ui.agent_chat_file_pdf_too_big", &name, &[("max", &(MAX_PDF_BYTES / 1024 / 1024).to_string())]));
+            }
             Ok(Attachment { id: 0, name, content: Content::Pdf { bytes: Arc::new(bytes), path }, thumb: None })
         }
         Kind::Other if matches!(path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("heic" | "heif")) => {
@@ -795,6 +801,9 @@ mod tests {
         let big = d.join("drawing set.pdf");
         std::fs::write(&big, vec![b'x'; usize::try_from(MAX_PDF_BYTES).unwrap() + 1]).unwrap();
         assert!(read(&big).unwrap_err().contains("at most 12 MB"), "too big to send");
+        let full = d.join("full.pdf");
+        std::fs::write(&full, vec![b'x'; usize::try_from(MAX_PDF_BYTES).unwrap()]).unwrap();
+        assert!(matches!(read(&full).map(|a| a.content), Ok(Content::Pdf { bytes, .. }) if bytes.len() as u64 == MAX_PDF_BYTES), "at the limit");
         let _ = std::fs::remove_dir_all(&d);
     }
 

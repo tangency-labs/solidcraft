@@ -159,7 +159,11 @@ files with its own tools: it gets every file and folder by its path instead
   a file. Drop a DXF on the design instead to bring it in as a sketch.
 - The conversation keeps every picture and PDF of the newest message, and two of each from the
   messages before it; older ones are swapped for a short note, as every request carries the
-  whole conversation.
+  whole conversation. One request carries at most 18 MB of pictures and PDFs: older ones go first,
+  and a message whose own come to more isn't sent (the chat says how much it holds). An endpoint
+  that doesn't take PDFs, such as some OpenAI-compatible servers, refuses the message.
+- A message with pictures or PDFs that the endpoint refuses before it answers is taken out of the
+  conversation, so the next message doesn't send them again; send it again to retry.
 - Every file is named in the message. In the conversation the attached pictures show under it as
   thumbnails (hold the pointer over one for a bigger preview, click it to open the viewer, where
   the file's name is shown and ‹ › step through the message's pictures, together with the picture
@@ -188,11 +192,12 @@ file and folder by its path, up to 200 on one message, whatever their type:
 - Their chips show the file's type, or a folder; holding the pointer over one shows its path. The
   chips scroll past about three rows, so the text box and the conversation stay in view.
 - A pasted picture has no path, so it still goes in the message, at most eight.
-- Claude Code's read tools are off until a message sends a file or folder by path; the first one
-  on the chips makes the chat say that sending it turns them on for this chat. Then they ask
-  before every read, and the chat answers them by itself for what you sent
-  (*Auto-allowed* in the chat); any other read waits for **Allow** or **Deny** (see
-  [What it can't do](#what-it-cant-do)).
+- Each path is a line in the message's text, which stops at 100,000 characters. A file or folder
+  whose line falls past that isn't named to the agent and doesn't count as sent: shorten the
+  message, or send the rest in another message.
+- Claude Code reads what you sent by path without asking (*Auto-allowed* in the chat), and the
+  chat declines any other read of its own (see [What it can't do](#what-it-cant-do)). Another
+  coding agent reads with its own tools and asks as its own mode says.
 
 ## Typing while the agent works
 
@@ -560,7 +565,8 @@ follow the agent's own mode, which you pick in the panel's header. When an agent
 using one of the chat's own SolidCraft tools and names it exactly as the Claude adapter does
 (`mcp__solidcraft-app__batch`), SolidCraft answers for you, since its own gate checks the call,
 and notes it in the chat as *Auto-allowed*. So it does when Claude Code reads something you sent
-by path in this conversation (see below). Any other question appears in the panel, including
+by path in this conversation, and it declines any other read of Claude Code's whatever the mode
+(see below). Any other question appears in the panel, including
 a SolidCraft tool an agent words differently and a SolidCraft MCP server you added to the agent
 yourself. With **Allow everything**, or after **Always allow**, those questions are answered the
 same way and noted too.
@@ -588,14 +594,13 @@ saves, opens or inserts. A sweep's or pattern's `path` (curve ids) and an occurr
 - **Its own tools stay off where we can turn them off.** SolidCraft declares no file system and
   no terminal to the agent, runs it in an empty working folder of its own, and asks the Claude
   Code adapter to turn off its shell, file-writing and web tools for the session.
-- **Claude Code reads only what you sent, unless you allow more.** Its read tools (Read, Glob,
-  Grep) are off until a message sends a file or folder by path. Then the chat turns them on for the
-  rest of the conversation (it opens the same session again with them on, so the agent loses
-  nothing), and they ask before every read. The chat answers a read of a file or folder you sent by
-  path; any other read waits for **Allow** or **Deny**, as does a search whose pattern starts at a
-  root or your home folder or steps up with `..`. A path counts once links are followed, so a link
-  in a folder you sent that leads out of it still asks. **New chat** turns them off again;
-  **Allow everything** lets every read through.
+- **Claude Code reads only what you sent.** Its read tools (Read, Glob, Grep) are on, but they ask
+  before every read. The chat allows a read inside a file or folder you sent by path in this
+  conversation, and declines any other without asking you, whatever the mode and even after
+  **Always allow**: a file you didn't send, a search whose pattern starts at a root or your home
+  folder or steps up with `..`, or a link in a folder you sent that leads out of it (a path counts
+  once links are followed). To let it read another file, attach it. **New chat** starts with
+  nothing sent.
 
 When the panel's agent is stopped, another agent is picked, or SolidCraft quits, the agent and
 every program it started (the CLI it wraps, its MCP server) are stopped.

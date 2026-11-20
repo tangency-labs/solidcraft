@@ -278,7 +278,7 @@ measure or inspect_design. Before building anything beyond one primitive, read `
 SKILL.md has the workflow, its reference.md the command shapes and this version's traps), work the numbers out first, and after \
 each stage compare `measure` with them. Prefer one `batch` over many small calls. Saving, opening or exporting files waits for the user's approval in \
 the chat, and each message allows a limited number of changes. Don't use shell tools and don't write files: work through the SolidCraft \
-tools. Read a file or folder with your own read tools only when the user attached it by path or asks you to. Keep answers short.";
+tools. Read a file or folder with your own read tools only when the user attached it by path; to read another, ask the user to attach it. Keep answers short.";
 
 /// The most of the user's custom instructions (#8220) a session gets, in characters: the
 /// Preferences field takes no more, and a longer text from an edited settings file is cut here.
@@ -297,15 +297,14 @@ pub fn system_note(instructions: &str) -> String {
 
 /// The Claude Code adapter's own tools that reach the computer rather than the design: turned off
 /// for the session (`_meta.claudeCode.options.disallowedTools`), so it works through SolidCraft's.
-/// Its read tools ([`CLAUDE_ASK_TOOLS`]) are among them until the conversation sends a file or
-/// folder by path ([`turn_on_reads`]).
+/// Its read tools are not among them: they ask instead ([`CLAUDE_ASK_TOOLS`]).
 pub const CLAUDE_DISALLOWED_TOOLS: &[&str] =
-    &["Bash", "BashOutput", "KillShell", "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep", "WebFetch", "WebSearch", "Task"];
+    &["Bash", "BashOutput", "KillShell", "Write", "Edit", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch", "Task"];
 
-/// The Claude Code adapter's read tools. Once the conversation sends a file or folder by path they
-/// are on, but every call asks (a `permissions.ask` rule in the session's settings), so the
-/// question reaches the panel: the chat answers it by itself for a path the user sent
-/// ([`read_path`]), and any other read waits for the user.
+/// The Claude Code adapter's read tools. They are on in every session, but every call asks (a
+/// `permissions.ask` rule in the session's settings), so the question reaches the panel: the chat
+/// allows it by itself for a path the user attached by path to this conversation ([`read_path`])
+/// and declines any other, whatever the mode.
 pub const CLAUDE_ASK_TOOLS: &[&str] = &["Read", "Glob", "Grep"];
 
 /// The `session/new` parameters. `init` is the agent's `initialize` reply: agents read the system
@@ -318,8 +317,13 @@ pub fn session_new_params(cwd: &std::path::Path, bridge: Option<&McpBridge>, ini
         "systemPrompt": {"append": note},
         // Hosts may opt a session out of "bypass permissions" (the Claude adapter reads it):
         // every tool call the agent asks about reaches the panel.
-        // Its own shell and file tools are off: the agent works through SolidCraft's tools.
-        "claudeCode": {"options": {"allowDangerouslySkipPermissions": false, "disallowedTools": CLAUDE_DISALLOWED_TOOLS}},
+        // Its own shell and write tools are off: the agent works through SolidCraft's tools. Its
+        // read tools ask, so the chat sees every read.
+        "claudeCode": {"options": {
+            "allowDangerouslySkipPermissions": false,
+            "disallowedTools": CLAUDE_DISALLOWED_TOOLS,
+            "settings": {"permissions": {"ask": CLAUDE_ASK_TOOLS}},
+        }},
     });
     if takes_antigravity_note(init)
         && let Some(meta) = meta.as_object_mut()
@@ -339,22 +343,8 @@ pub fn session_new_params(cwd: &std::path::Path, bridge: Option<&McpBridge>, ini
     params
 }
 
-/// `session/new` parameters with Claude Code's read tools on behind an ask rule
-/// ([`CLAUDE_ASK_TOOLS`]); with `resume`, the session continues that conversation (the adapter's
-/// `_meta.claudeCode.options.resume`), so turning them on mid-chat loses nothing.
-pub fn turn_on_reads(params: &mut Value, resume: Option<&str>) {
-    let Some(options) = params.pointer_mut("/_meta/claudeCode/options").and_then(Value::as_object_mut) else { return };
-    if let Some(off) = options.get_mut("disallowedTools").and_then(Value::as_array_mut) {
-        off.retain(|tool| !tool.as_str().is_some_and(|t| CLAUDE_ASK_TOOLS.contains(&t)));
-    }
-    options.insert("settings".into(), json!({"permissions": {"ask": CLAUDE_ASK_TOOLS}}));
-    if let Some(session) = resume {
-        options.insert("resume".into(), json!(session));
-    }
-}
-
-/// The agent is Claude Code's ACP adapter, the one agent whose read tools SolidCraft turns off and
-/// on: its program (or the package `npx` starts) is `claude-agent-acp` or the older
+/// The agent is Claude Code's ACP adapter, the one agent whose own tools SolidCraft turns off or
+/// limits: its program (or the package `npx` starts) is `claude-agent-acp` or the older
 /// `claude-code-acp`.
 pub fn is_claude_adapter(argv: &[String]) -> bool {
     argv.iter().any(|arg| {
@@ -1089,38 +1079,21 @@ mod tests {
         assert_eq!(config_options(&json!({"configOptions":[{"type":"select","id":"broken"}]})), ConfigParse::Invalid);
     }
 
-    /// A session starts with Claude Code's read tools off, as before. Turned on, they ask before
-    /// every call and the session resumes the same conversation; its shell, write and web tools
-    /// stay off either way.
+    /// Claude Code's read tools are on in every session and ask before every call; its shell,
+    /// write and web tools stay off.
     #[test]
-    fn claudes_read_tools_are_off_until_turned_on_and_then_ask() {
-        let off = |p: &Value| -> Vec<String> {
-            p["_meta"]["claudeCode"]["options"]["disallowedTools"]
-                .as_array()
-                .map(|t| t.iter().filter_map(Value::as_str).map(str::to_string).collect())
-                .unwrap_or_default()
-        };
-        let mut p = session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE);
-        for tool in ["Bash", "Write", "Read", "Glob", "Grep"] {
-            assert!(off(&p).iter().any(|t| t == tool), "{tool} off at first: {:?}", off(&p));
-        }
-        assert!(p["_meta"]["claudeCode"]["options"].get("settings").is_none());
-        turn_on_reads(&mut p, Some("s1"));
+    fn claudes_read_tools_ask_and_its_other_tools_are_off() {
+        let p = session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE);
         let options = &p["_meta"]["claudeCode"]["options"];
+        let off: Vec<&str> = options["disallowedTools"].as_array().map(|t| t.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
         for tool in ["Bash", "Write", "Edit", "WebFetch", "WebSearch", "Task"] {
-            assert!(off(&p).iter().any(|t| t == tool), "{tool} still off: {:?}", off(&p));
+            assert!(off.contains(&tool), "{tool} off: {off:?}");
         }
         for tool in CLAUDE_ASK_TOOLS {
-            assert!(!off(&p).iter().any(|t| t == tool), "{tool} on: {:?}", off(&p));
+            assert!(!off.contains(tool), "{tool} on: {off:?}");
         }
         assert_eq!(options["settings"]["permissions"]["ask"], json!(["Read", "Glob", "Grep"]));
-        assert_eq!(options["resume"], "s1", "the same conversation goes on");
-        let mut fresh = session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE);
-        turn_on_reads(&mut fresh, None);
-        assert!(fresh["_meta"]["claudeCode"]["options"].get("resume").is_none());
-        let mut other = json!({"cwd": "/tmp"});
-        turn_on_reads(&mut other, Some("s1"));
-        assert_eq!(other, json!({"cwd": "/tmp"}), "no Claude options: nothing to change");
+        assert!(options.get("resume").is_none());
         assert!(SYSTEM_NOTE.contains("attached it by path"), "{SYSTEM_NOTE}");
         let argv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert!(is_claude_adapter(&argv(&["/opt/homebrew/bin/claude-agent-acp"])));

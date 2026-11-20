@@ -227,19 +227,22 @@ ACP lets the client offer a file system and a terminal; the chat offers neither,
 agent in an empty working folder of SolidCraft's own (`<data>/agent-chat/work`), not the
 design's folder. The Claude Code adapter has shell, file and web tools of its own anyway: the
 session asks it to turn them off (`_meta.claudeCode.options.disallowedTools`) and not to offer
-"bypass permissions". Once a message sends a file or folder by path, its read tools (Read, Glob,
-Grep) come on behind a `permissions.ask` rule (`_meta.claudeCode.options.settings`): a running
-session is opened again with `session/new` and `_meta.claudeCode.options.resume` set to its id,
-which keeps the conversation (`acp::turn_on_reads`), and the message waits for its Ready. A
-session that has had no message yet can't be resumed ("Resource not found"), and has nothing to
-keep, so it is opened fresh. The first such file on the chips makes the chat say so. Every read
-then arrives as `session/request_permission` with the path in `rawInput` (`file_path` for Read,
-`path` and `pattern` for Glob, `path` or `file_path` and `glob` for Grep). `acp::read_path`
-accepts only that form, with an absolute path and a pattern that can't leave it; the chat answers
-allow-once when the path, links followed, lies inside a file or folder sent by path in this
-conversation (`AgentChat::by_path`, cleared by New chat with the tools turned off again), and asks
-the user otherwise. Checked with `claude-agent-acp` 0.107.0: without the rule these tools read any
-path without asking, and a resumed session keeps what was said before. The chat sees only the
+"bypass permissions". Its read tools (Read, Glob, Grep) are on in every session, behind a
+`permissions.ask` rule (`_meta.claudeCode.options.settings`), so every read arrives as
+`session/request_permission` with the path in `rawInput` (`file_path` for Read, `path` and
+`pattern` for Glob, `path` or `file_path` and `glob` for Grep). `acp::read_path` accepts only
+that form, with an absolute path and a pattern that can't leave it; the chat answers allow-once
+when the path, links followed, lies inside a file or folder sent by path in this conversation
+(`AgentChat::by_path`, cleared by New chat), and declines any other read of Claude Code's (kind
+`read` or `search`) without asking, whatever the mode or a remembered answer. Checked with
+`claude-agent-acp` 0.107.0: without the rule these tools read any path without asking.
+
+An earlier version kept the read tools off until a message first sent a file by path, then opened
+the session again with them on (`session/new` with `_meta.claudeCode.options.resume`). That
+reopen raced New chat and the first session's opening, could lose another agent's conversation
+(only Claude Code knows `resume`), and needed a notice when a resume failed. With the tools on
+from the start and every unsent read declined, the agent can read exactly what it could then,
+with none of those cases. The chat sees only the
 path a Glob or Grep starts from, not where its walk goes, so a link inside an attached folder
 that points out of it is safe only because Claude Code's walk doesn't follow links. Checked with
 0.107.0, with a linked folder and a linked file that both point outside: Glob `**/*`, a Grep over

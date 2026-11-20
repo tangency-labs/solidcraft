@@ -15,8 +15,6 @@ use super::process::{AgentProcess, FromAgent};
 enum Pending {
     Initialize,
     SessionNew,
-    /// `session/new` resuming the open session with Claude Code's read tools on.
-    SessionResume,
     Prompt,
     Authenticate,
     SetMode,
@@ -39,14 +37,6 @@ pub struct AcpBackend {
     init: Value,
     /// The system note the next session gets ([`acp::system_note`]).
     note: String,
-    /// Claude Code's read tools are on (asking), for the next session ([`ChatBackend::set_reads_files`]).
-    reads_files: bool,
-    /// The session that is open, or being opened, was asked for with them on.
-    session_reads: bool,
-    /// The open session has had a message: Claude Code has its conversation on disk, so it can be
-    /// resumed. A session that has had none can't be ("Resource not found"), and has nothing to
-    /// keep.
-    prompted: bool,
     next_id: u64,
     pending: HashMap<u64, Pending>,
     session: Option<String>,
@@ -77,9 +67,6 @@ impl AcpBackend {
             bridge,
             init: Value::Null,
             note: acp::SYSTEM_NOTE.to_string(),
-            reads_files: false,
-            session_reads: false,
-            prompted: false,
             next_id: 0,
             pending: HashMap::new(),
             session: None,
@@ -106,30 +93,9 @@ impl AcpBackend {
 
     fn new_session(&mut self) {
         self.config_pending = None;
-        // A session still being opened (or opened again with the read tools) is dropped too: its
-        // late reply must not bring back the conversation New chat cleared.
-        self.pending.retain(|_, request| !matches!(request, Pending::SetConfig | Pending::SessionNew | Pending::SessionResume));
-        let mut params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init, &self.note);
-        if self.reads_files {
-            acp::turn_on_reads(&mut params, None);
-        }
-        self.session_reads = self.reads_files;
-        self.prompted = false;
+        self.pending.retain(|_, request| *request != Pending::SetConfig);
+        let params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init, &self.note);
         self.request(Pending::SessionNew, "session/new", params);
-    }
-
-    /// The open session again, with Claude Code's read tools on: resumed when it has had a message,
-    /// so the same conversation goes on; a fresh one when it hasn't, as there is nothing to keep
-    /// (and Claude Code can't resume it).
-    fn resume_with_reads(&mut self) {
-        if !self.prompted {
-            self.new_session();
-            return;
-        }
-        let mut params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init, &self.note);
-        acp::turn_on_reads(&mut params, self.session.as_deref());
-        self.session_reads = true;
-        self.request(Pending::SessionResume, "session/new", params);
     }
 
     fn handle(&mut self, msg: Incoming, out: &mut Vec<Event>) {
@@ -148,14 +114,7 @@ impl AcpBackend {
                         self.init = v;
                         self.new_session();
                     }
-                    // Resuming with the read tools on failed: a fresh session with them, so the
-                    // message that turned them on still goes, and the chat says what was lost.
-                    (Pending::SessionResume, Err((code, message))) => {
-                        log::warn!("Claude Code did not resume its session with read tools on ({code}): {message}");
-                        self.new_session();
-                        out.push(Event::Notice(solidcraft_ui_text::tr("ui.agent_chat_reads_fresh_session").to_string()));
-                    }
-                    (Pending::SessionNew | Pending::SessionResume, Ok(v)) => match v.get("sessionId").and_then(Value::as_str) {
+                    (Pending::SessionNew, Ok(v)) => match v.get("sessionId").and_then(Value::as_str) {
                         Some(s) => {
                             // New chat has opened successfully: retire the old turn before Ready.
                             // Its late reply and cancellation deadline must not end the new turn.
@@ -164,12 +123,6 @@ impl AcpBackend {
                                 out.push(Event::TurnEnded { reason: "cancelled".into() });
                             }
                             self.session = Some(s.to_string());
-                            // Read tools were turned on while this session was being opened: open it
-                            // again with them on before saying it is ready.
-                            if self.reads_files && !self.session_reads {
-                                self.resume_with_reads();
-                                return;
-                            }
                             match acp::config_options(&v) {
                                 acp::ConfigParse::Snapshot(options) => {
                                     self.modern_config = true;
@@ -308,7 +261,6 @@ impl ChatBackend for AcpBackend {
 
     fn prompt(&mut self, parts: &[PromptPart]) {
         if let Some(s) = self.session.clone() {
-            self.prompted = true;
             self.request(Pending::Prompt, "session/prompt", acp::prompt_params(&s, parts));
         }
     }
@@ -341,19 +293,6 @@ impl ChatBackend for AcpBackend {
 
     fn set_instructions(&mut self, text: &str) {
         self.note = acp::system_note(text);
-    }
-
-    fn set_reads_files(&mut self, on: bool) -> bool {
-        if on == self.reads_files {
-            return false;
-        }
-        self.reads_files = on;
-        let opening = self.pending.values().any(|p| matches!(p, Pending::SessionNew | Pending::SessionResume));
-        if on && self.session.is_some() && !self.session_reads && !opening {
-            self.resume_with_reads();
-            return true;
-        }
-        false
     }
 
     fn answer_permission(&mut self, key: u64, option: Option<&str>) {
@@ -452,69 +391,6 @@ mod tests {
         backend.handle(Incoming::Reply { id: 1, result: Ok(json!({"agentInfo":{"name":"fake"}})) }, &mut events);
         backend.handle(Incoming::Reply { id: 2, result: Ok(json!({"sessionId":"s1"})) }, &mut events);
         Ok(backend)
-    }
-
-    /// Turning the read tools on in an open session opens it again before it is ready: resumed when
-    /// it has had a message (the same conversation goes on), fresh when it hasn't (Claude Code
-    /// answers "Resource not found" to resuming such a session, and there is nothing to keep).
-    /// Turned on while the first session is still being opened, that one is opened again as soon
-    /// as it answers, so no message goes out without them. A resume that fails still ends in a
-    /// session with them, and says so.
-    #[test]
-    fn turning_reads_on_reopens_the_session_before_it_is_ready() {
-        let mut backend = ready_backend().unwrap();
-        assert!(backend.set_reads_files(true), "an open session is opened again");
-        assert!(!backend.set_reads_files(true), "once");
-        assert!(backend.pending.values().any(|p| *p == Pending::SessionNew), "no message yet: a fresh session, not a resume");
-        let mut events = Vec::new();
-        backend.handle(Incoming::Reply { id: backend.next_id, result: Ok(json!({"sessionId":"s2"})) }, &mut events);
-        assert!(matches!(events.last(), Some(Event::Ready { .. })), "{events:?}");
-        backend.shutdown(true);
-
-        let mut talked = ready_backend().unwrap();
-        talked.prompt(&[PromptPart::Text("hello".into())]);
-        let mut events = Vec::new();
-        talked.handle(Incoming::Reply { id: talked.next_id, result: Ok(json!({"stopReason":"end_turn"})) }, &mut events);
-        assert!(talked.set_reads_files(true));
-        assert!(talked.pending.values().any(|p| *p == Pending::SessionResume), "a session that has had a message is resumed");
-        events.clear();
-        talked.handle(Incoming::Reply { id: talked.next_id, result: Err((-32002, "Resource not found".into())) }, &mut events);
-        assert!(matches!(events.as_slice(), [Event::Notice(_)]), "a failed resume is said, not an error: {events:?}");
-        assert!(talked.pending.values().any(|p| *p == Pending::SessionNew), "and a fresh session with them follows");
-        events.clear();
-        talked.handle(Incoming::Reply { id: talked.next_id, result: Ok(json!({"sessionId":"s3"})) }, &mut events);
-        assert!(matches!(events.last(), Some(Event::Ready { .. })), "{events:?}");
-        talked.shutdown(true);
-
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
-        let mut starting = AcpBackend::start(&["sh".into(), "-c".into(), "cat >/dev/null".into()], ctx).unwrap();
-        let mut events = Vec::new();
-        starting.handle(Incoming::Reply { id: 1, result: Ok(json!({"agentInfo":{"name":"fake"}})) }, &mut events);
-        assert!(!starting.set_reads_files(true), "no session yet: it opens with them");
-        starting.handle(Incoming::Reply { id: 2, result: Ok(json!({"sessionId":"s1"})) }, &mut events);
-        assert!(!events.iter().any(|e| matches!(e, Event::Ready { .. })), "opened again first: {events:?}");
-        assert!(starting.pending.values().any(|p| *p == Pending::SessionNew), "fresh: it has had no message");
-        starting.handle(Incoming::Reply { id: starting.next_id, result: Ok(json!({"sessionId":"s1"})) }, &mut events);
-        assert!(matches!(events.last(), Some(Event::Ready { .. })), "{events:?}");
-        starting.shutdown(true);
-
-        // New chat while the session is being opened again: that opening's late reply is
-        // dropped, so the old conversation can't come back, and the new session has them off.
-        let mut cleared = ready_backend().unwrap();
-        cleared.prompt(&[PromptPart::Text("hello".into())]);
-        let mut events = Vec::new();
-        cleared.handle(Incoming::Reply { id: cleared.next_id, result: Ok(json!({"stopReason":"end_turn"})) }, &mut events);
-        assert!(cleared.set_reads_files(true));
-        let resume = cleared.next_id;
-        cleared.set_reads_files(false);
-        ChatBackend::new_session(&mut cleared);
-        events.clear();
-        cleared.handle(Incoming::Reply { id: resume, result: Ok(json!({"sessionId":"old"})) }, &mut events);
-        assert!(events.is_empty(), "the reopened session's reply is dropped: {events:?}");
-        cleared.handle(Incoming::Reply { id: cleared.next_id, result: Ok(json!({"sessionId":"new"})) }, &mut events);
-        assert!(matches!(events.last(), Some(Event::Ready { .. })), "{events:?}");
-        assert_eq!((cleared.session.as_deref(), cleared.session_reads), (Some("new"), false));
-        cleared.shutdown(true);
     }
 
     #[test]

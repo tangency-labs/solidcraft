@@ -491,14 +491,6 @@ pub struct AgentChat {
     /// Files and folders sent by path in this conversation, as their real paths: the agent's own
     /// read tools may read inside them without asking the user (see [`on_permission`]).
     by_path: Vec<std::path::PathBuf>,
-    /// This conversation sent a file or folder by path, so Claude Code's read tools are on (asking
-    /// before each read) for the rest of it; off again after New chat.
-    reads_files: bool,
-    /// The chat said that sending by path turns those tools on ([`warn_reads`]).
-    reads_warned: bool,
-    /// The session is being opened again with Claude Code's read tools on ([`submit`]): New chat
-    /// replaces it, or its reply would bring back the conversation New chat cleared.
-    reads_reopening: bool,
     /// Files still being read for the next message.
     pub(crate) loading: Vec<Loading>,
     /// Where the chat was drawn last frame (the panel, or its folded strip), for drops; `None`
@@ -917,7 +909,6 @@ impl AgentChat {
                 self.agent = agent;
                 self.images = images;
                 self.state = Some(State::Ready);
-                self.reads_reopening = false;
                 self.picking = Some(false);
                 // Keep the mode across a new chat.
                 if self.config_options.is_none()
@@ -1073,7 +1064,6 @@ impl AgentChat {
                 }
                 return Some(Outcome::TurnEnd);
             }
-            Event::Notice(text) => self.notice(text, false),
             Event::Error(e) => {
                 self.notice(e, true);
                 match self.state() {
@@ -1296,8 +1286,6 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     match started {
         Ok(mut b) => {
             b.set_instructions(&app.preferences.agent_instructions);
-            b.set_reads_files(chat.reads_files);
-            chat.reads_reopening = false;
             app.preferences.agent_last = entry.id.clone();
             chat.backend = Some(b);
             chat.argv = entry.argv.clone();
@@ -1790,18 +1778,6 @@ fn submit(app: &mut SolveApp, ctx: &egui::Context, text: String, image: bool, co
     let at = app.agent_chat.items.len().checked_sub(1);
     // The agent gets the selection as text after the message; the conversation shows chips.
     let text = context::with_context(&text, &context);
-    // The first message that sends a file or folder by path turns Claude Code's read tools on: a
-    // running session is opened again with them (the same conversation), and the message goes once
-    // it is ready.
-    if files.iter().any(attach::Attachment::by_place) && !app.agent_chat.reads_files {
-        app.agent_chat.reads_files = true;
-        let restarting = app.agent_chat.backend.as_mut().is_some_and(|b| b.set_reads_files(true));
-        if restarting && app.agent_chat.state() == State::Ready {
-            app.agent_chat.restore_mode = Some(app.agent_chat.mode.clone()).filter(|m| !m.is_empty());
-            app.agent_chat.state = Some(State::Starting);
-            app.agent_chat.reads_reopening = true;
-        }
-    }
     match app.agent_chat.state() {
         State::Ready => start_turn_with(app, text, image, at, files, interrupted.then_some(INTERRUPT_NOTE)),
         s => {
@@ -1901,8 +1877,6 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.pending.clear();
     chat.attachments.clear();
     chat.by_path.clear();
-    chat.reads_files = false;
-    chat.reads_warned = false;
     chat.loading.clear();
     chat.pending_edit = None;
     chat.queued = None;
@@ -1913,15 +1887,12 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.seen = None;
     chat.discard_end = running;
     chat.model_revert = None;
-    // A session being opened again with the read tools on is replaced as a ready one is.
-    let reopening = std::mem::take(&mut chat.reads_reopening) && chat.state() == State::Starting;
-    if matches!(chat.state(), State::Ready | State::Busy) || reopening {
+    if matches!(chat.state(), State::Ready | State::Busy) {
         chat.restore_mode = Some(chat.mode.clone()).filter(|m| !m.is_empty());
         chat.state = Some(State::Starting);
         if let Some(b) = chat.backend.as_mut() {
             // Instructions edited since the last session apply from this one on.
             b.set_instructions(&app.preferences.agent_instructions);
-            b.set_reads_files(false);
             b.new_session();
         }
     }
@@ -2075,21 +2046,7 @@ fn attach_by_path(app: &mut SolveApp, path: &str) -> std::result::Result<String,
     }
     let p = std::path::Path::new(path);
     let file = if p.is_dir() { attach::folder(p)? } else { attach::reference(p)? };
-    warn_reads(app);
     Ok(app.agent_chat.add_file(file))
-}
-
-/// The first file or folder on the chips that goes by its path, in a conversation with Claude Code
-/// whose read tools are still off: the chat says, once, that sending it turns them on for the rest
-/// of the chat (asking before every read, and reading what was sent without asking).
-fn warn_reads(app: &mut SolveApp) {
-    if app.agent_chat.reads_files || app.agent_chat.reads_warned {
-        return;
-    }
-    if agents::current(app).is_some_and(|entry| acp::is_claude_adapter(&entry.argv)) {
-        app.agent_chat.reads_warned = true;
-        app.agent_chat.notice(tr("ui.agent_chat_reads_warning").to_string(), false);
-    }
 }
 
 /// Add a picture from the clipboard (RGBA rows, as the system gives them) to the next message. It
@@ -2222,12 +2179,24 @@ pub fn answer_permission(app: &mut SolveApp, index: usize, option: Option<&str>)
 /// [`acp::read_path`]); otherwise the mode or an earlier "always allow" may answer, and the chat
 /// says so; otherwise the user is asked.
 fn on_permission(app: &mut SolveApp, key: u64, title: String, kind: Option<&str>, options: Vec<PermissionOption>, reads: Option<&std::path::Path>) {
+    let attached = reads.is_some_and(|path| app.agent_chat.attached_by_path(path));
+    // Claude Code's read tools are on in every session, but read only what was attached by path to
+    // this conversation: any other read, or one whose path or pattern can't be checked, is declined
+    // without asking, whatever the mode or a remembered answer.
+    if !attached && matches!(kind, Some("read" | "search")) && !acp::is_bridge_tool(&title, kind) && runs_claude_code(app) {
+        let reject = options.iter().find(|o| o.kind == "reject_once").or_else(|| options.iter().find(|o| o.kind.starts_with("reject")));
+        if let Some(b) = app.agent_chat.backend.as_mut() {
+            b.answer_permission(key, reject.map(|o| o.id.as_str()));
+        }
+        app.agent_chat.push(Item::Notice { text: trf("ui.ai_declined_read", &[("title", &title)]), error: false });
+        return;
+    }
     let agent = app.agent_chat.running_id.clone();
     let mode = agents::mode_for(&app.preferences, &agent);
     let remembered = agents::always_allowed(&app.preferences, &agent, &title);
     let why = if acp::is_bridge_tool(&title, kind) {
         Some("ui.ai_auto_ours")
-    } else if reads.is_some_and(|path| app.agent_chat.attached_by_path(path)) {
+    } else if attached {
         Some("ui.ai_auto_attached")
     } else if remembered {
         Some("ui.ai_auto_remembered")
@@ -2248,6 +2217,12 @@ fn on_permission(app: &mut SolveApp, key: u64, title: String, kind: Option<&str>
         }
         _ => app.agent_chat.push(Item::Permission { key, title, options, answer: None }),
     }
+}
+
+/// The running agent is Claude Code's ACP adapter.
+fn runs_claude_code(app: &SolveApp) -> bool {
+    let running = &app.agent_chat.running_id;
+    agents::entries(app).iter().any(|entry| &entry.id == running && acp::is_claude_adapter(&entry.argv))
 }
 
 fn approve_with(app: &mut SolveApp, id: u64, allow: bool, why: &str) {
