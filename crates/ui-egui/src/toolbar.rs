@@ -237,11 +237,14 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let idle = !app.file_load_holds();
             // Save, Undo and Redo use the same actions as the File menu and shortcuts.
             let shown = design_shown(app) && idle;
-            let tip = |id: &str, key: &str| {
+            // The keys as the platform names them (Cmd on macOS); Redo has two (#12902).
+            let tip = |id: &str, keys: &[&str]| {
                 let label = app.tr(id);
-                if shown { format!("{label} ({key})") } else { solidcraft_ui_text::format("ui.needs_design", &[("command", label)]) }
+                let keys = keys.iter().map(|key| crate::ui_kit::chord_label(key)).collect::<Vec<_>>().join(", ");
+                if shown { format!("{label} ({keys})") } else { solidcraft_ui_text::format("ui.needs_design", &[("command", label)]) }
             };
-            let (save_tip, undo_tip, redo_tip) = (tip("ui.save", "Ctrl+S"), tip("ui.undo", "Ctrl+Z"), tip("ui.redo", "Ctrl+Y"));
+            let (save_tip, undo_tip, redo_tip) =
+                (tip("ui.save", &["Ctrl+S"]), tip("ui.undo", &["Ctrl+Z"]), tip("ui.redo", &["Ctrl+Y", "Ctrl+Shift+Z"]));
             let prefs_tip = if cfg!(target_os = "macos") {
                 format!("{} (Cmd+,)", app.tr("ui.preferences"))
             } else {
@@ -250,11 +253,14 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let version = format!("v{}", crate::update::current_version());
             let url = crate::update::release_notes_url(crate::update::current_version(), crate::update::release_build());
             let file_open = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
-            let quick = app.toolbar_custom.quick_access.iter().filter(|id| solidcraft_engine::find_command(id).is_some()).count();
+            let quick_ids: Vec<_> =
+                app.toolbar_custom.quick_access.iter().filter(|id| solidcraft_engine::find_command(id).is_some()).map(String::as_str).collect();
             let action = |id, icon, tip, enabled, wide_only| app_bar::BarButton { id, icon, tip, enabled, narrow: true, wide_only };
             let palette_shortcut = crate::keymap::display_for(app, "ui.palette");
             // Narrow windows retain Save; Undo and Redo remain available from their shortcuts and menus.
             let bar = app_bar::AppBar {
+                items: Some(&app.toolbar_custom.app_bar),
+                quick_ids: &quick_ids,
                 mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
                 name: "SolidCraft",
                 leading: (crate::library::available(app) && !app.home.open).then_some(vec2(26.0, 26.0)),
@@ -266,7 +272,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     action("undo", "undo", &undo_tip, shown, true),
                     action("redo", "redo", &redo_tip, shown, true),
                 ],
-                quick,
+                quick: quick_ids.len(),
                 help: app_bar::BarButton { id: "help", icon: "help", tip: app.tr("ui.help"), enabled: true, narrow: false, wide_only: false },
                 settings: app_bar::BarButton { id: "settings", icon: "settings", tip: &prefs_tip, enabled: true, narrow: false, wide_only: false },
                 report: app_bar::Report {
@@ -344,9 +350,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app_bar::BarAction::App { id } => run_overflow_control(app, id),
                 }
             }
-            if let Some((first, step)) = out.quick {
-                quick_access_bar(app, ui, r, first, step, shown, out.quick_count);
-            }
+            quick_access_bar(app, ui, r, &out.quick_slots, shown);
             if search_in_header(app) {
                 // Overflow must clear the previous frame's anchor, or the search editor would
                 // still paint over the controls that have taken its old slot.
@@ -2105,21 +2109,20 @@ struct QuickAccessDrag(String);
 /// The quick-access bar (#10223): the commands added from a command's menu, after Save, Undo and
 /// Redo, each with its own icon. A click starts the command as its ribbon button does, a
 /// right-click opens the command's menu (Remove from Quick Access), and a drag along the bar
-/// reorders the buttons. They start at `x`, `step` apart ([`app_bar::BarOut::quick`]).
-fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32, step: f32, shown: bool, count: usize) {
+/// reorders the buttons. Each button uses its own [`app_bar::BarOut::quick_slots`] position.
+fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, slots: &[(usize, f32)], shown: bool) {
     let t = Tokens::get();
-    let ids: Vec<&'static solidcraft_engine::CommandSpec> =
-        app.toolbar_custom.quick_access.iter().filter_map(|id| solidcraft_engine::find_command(id)).take(count).collect();
+    let commands: Vec<_> = app.toolbar_custom.quick_access.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect();
+    let mut ids: Vec<_> = slots.iter().filter_map(|&(i, x)| commands.get(i).map(|c| (*c, x))).collect();
+    ids.sort_by(|a, b| a.1.total_cmp(&b.1));
     if ids.is_empty() {
         return;
     }
-    let first = x;
     let mut buttons = Vec::with_capacity(ids.len());
     let mut start = None;
     let mut menu = None;
-    for c in &ids {
-        let br = Rect::from_center_size(pos2(x, bar.center().y), vec2(32.0, 32.0));
-        x += step;
+    for (c, x) in &ids {
+        let br = Rect::from_center_size(pos2(*x, bar.center().y), vec2(32.0, 32.0));
         let info = c.info(&app.session);
         let enabled = shown && info.enabled;
         let resp = ui.interact(br, ui.scope_id().with(("quick_access", c.id)), Sense::click_and_drag());
@@ -2146,7 +2149,7 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
         }
         buttons.push((c.id, br));
     }
-    let span = Rect::from_min_max(pos2(first - step / 2.0, bar.top()), pos2(x - step / 2.0, bar.bottom()));
+    let span = buttons.iter().map(|(_, rect)| *rect).reduce(Rect::union).unwrap_or(Rect::NOTHING).expand(1.0);
     crate::scenario::publish_rect("appbar:quick_access", span);
     // Dragged along the bar: the line shows where it goes; let go and it moves there.
     if let Some(drag) = egui::DragAndDrop::payload::<QuickAccessDrag>(ui.ctx())
@@ -2154,12 +2157,12 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
     {
         let before = buttons.iter().find(|(_, br)| p.x < br.center().x).map(|(id, _)| *id);
         let line = before.and_then(|b| buttons.iter().find(|(id, _)| *id == b)).map_or(span.right(), |(_, br)| br.left());
-        if span.expand2(vec2(step, 0.0)).contains(p) {
+        if buttons.iter().any(|(_, rect)| rect.expand2(vec2(35.0, 1.0)).contains(p)) {
             ui_kit::insertion_marker(ui.painter(), line, bar.top() + 6.0, bar.bottom() - 6.0);
         }
         if ui.input(|i| i.pointer.any_released()) {
             egui::DragAndDrop::clear_payload(ui.ctx());
-            if span.expand2(vec2(step, 0.0)).contains(p) {
+            if buttons.iter().any(|(_, rect)| rect.expand2(vec2(35.0, 1.0)).contains(p)) {
                 crate::toolbar_custom::quick_move(app, &drag.0, before);
             }
         }
@@ -2901,6 +2904,8 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                         drop(app.run("tab.view.close", json!({})));
                     }
                 }
+                // Ctrl+Shift+Z redoes like Ctrl+Y (#12902): it used to fall into Undo, Shift ignored.
+                Key::Z if mods.shift => drop(app.run("edit.redo", json!({}))),
                 Key::Z => {
                     if !crate::tools::undo_spline_point(app) {
                         drop(app.run("edit.undo", json!({})));
@@ -4975,6 +4980,113 @@ mod dropdown_toggle_tests {
 #[cfg(test)]
 mod app_bar_tests {
     use super::*;
+
+    #[test]
+    fn app_bar_reset_command_runs_from_control_and_the_palette_without_a_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.show(h.app.session.revision);
+        assert!(h.app.home.open && h.app.session.doc.features.is_empty());
+        crate::toolbar_custom::quick_add(&mut h.app, "solid.box").unwrap();
+        h.app.preferences.show_donate_button = false;
+        h.app.preferences.show_discord_button = false;
+        h.app.preferences.ai_toolbar_button = false;
+        let defaults = h.app.toolbar_custom.app_bar.clone();
+        let mut custom = defaults.clone();
+        custom.items.reverse();
+        custom.items.iter_mut().find(|p| p.id == "save").unwrap().shown = false;
+        custom.items.iter_mut().find(|p| p.id == "quick:solid.box").unwrap().zone = ui_kit::app_bar_items::Zone::End;
+        let before = (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        let row = crate::shortcut_box::search(&h.app, "Reset App Bar").into_iter().find(|row| row.0 == "ui.appBarReset").unwrap();
+        assert_eq!(row.1, "Reset App Bar");
+        assert!(solidcraft_engine::find_command(row.0).unwrap().info(&h.app.session).enabled);
+        h.app.toolbar_custom.apply_app_bar(custom.clone());
+        h.app.session.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+        let invalid = h.call("engine.execute", json!({"command":"ui.appBarReset","params":{"reset":false}}));
+        assert_eq!(invalid["ok"], false, "{invalid}");
+        assert_eq!(h.app.toolbar_custom.app_bar, custom, "validation precedes the UI effect");
+        let result = h.call("engine.execute", json!({"command":"UI.APPBARRESET","params":{}}));
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(result["result"], json!({"reset":true}));
+        assert_eq!(h.app.toolbar_custom.app_bar, defaults);
+        assert!(h.app.home.open);
+        h.app.toolbar_custom.apply_app_bar(custom.clone());
+        let started = h.call("ui.start", json!({"command":"ui.appBarReset"}));
+        assert_eq!(started["ok"], true, "{started}");
+        assert_eq!(h.app.toolbar_custom.app_bar, defaults);
+        assert!(h.app.home.open);
+        // The existing palette is rendered in the editor. No design is loaded or created.
+        h.app.home.open = false;
+        h.app.toolbar_custom.apply_app_bar(custom);
+        h.call("ui.palette", json!({"text":"Reset App Bar"}));
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"menu:ui.appBarReset"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.toolbar_custom.app_bar, defaults, "the palette reaches the registered UI dispatch");
+        assert!(h.app.dialog.is_none() && h.app.tool.is_none());
+        assert!(!h.app.preferences.show_donate_button && !h.app.preferences.show_discord_button && !h.app.preferences.ai_toolbar_button);
+        assert_eq!((h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), before);
+    }
+
+    #[test]
+    fn app_bar_layout_and_legacy_visibility_switches_both_gate_drawing() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1920,"height":720}));
+        for flags in 0..8 {
+            h.app.preferences.show_donate_button = flags & 1 != 0;
+            h.app.preferences.show_discord_button = flags & 2 != 0;
+            h.app.preferences.ai_toolbar_button = flags & 4 != 0;
+            h.app.toolbar_custom.load(&json!({"version":3,"quick_access":["solid.box"]}));
+            h.frames(2);
+            assert_eq!(crate::scenario::rect_of("titlebar:kofi").is_some(), flags & 1 != 0);
+            assert_eq!(crate::scenario::rect_of("titlebar:discord").is_some(), flags & 2 != 0);
+            if flags & 4 == 0 {
+                assert!(crate::scenario::rect_of("titlebar:assistant").is_none());
+            }
+        }
+        h.app.preferences.show_donate_button = false;
+        h.app.preferences.show_discord_button = false;
+        h.app.preferences.ai_toolbar_button = false;
+        h.frames(3);
+        for id in ["titlebar:kofi", "titlebar:discord", "titlebar:assistant"] {
+            assert!(crate::scenario::rect_of(id).is_none(), "{id}");
+        }
+        // A layout reset preserves the old preferences, including after migrating old pins.
+        crate::toolbar_custom::run(&mut h.app, "ui.appBarReset", &json!({}));
+        assert!(!h.app.preferences.show_donate_button && !h.app.preferences.show_discord_button && !h.app.preferences.ai_toolbar_button);
+        h.app.preferences.show_donate_button = true;
+        h.app.preferences.show_discord_button = true;
+        let mut custom = h.app.toolbar_custom.app_bar.clone();
+        custom.items.iter_mut().find(|p| p.id == "donate").unwrap().shown = false;
+        h.app.toolbar_custom.apply_app_bar(custom);
+        h.frames(3);
+        assert!(crate::scenario::rect_of("titlebar:kofi").is_none());
+        assert!(h.app.preferences.show_donate_button);
+        h.app.toolbar_custom.reset_app_bar();
+        h.frames(2);
+        for id in ["kofi", "discord"] {
+            let handle = format!("titlebar:{id}:hide");
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            h.frames(2);
+            assert!(!(crate::links::by_id(id).unwrap().shown)(&h.app.preferences));
+        }
+        let mut custom = h.app.toolbar_custom.app_bar.clone();
+        for p in &mut custom.items {
+            if p.id == "save" || p.id == "quick:solid.box" {
+                p.shown = false;
+            }
+            if p.id == "settings" {
+                p.zone = ui_kit::app_bar_items::Zone::Start;
+            }
+        }
+        h.app.toolbar_custom.apply_app_bar(custom);
+        h.frames(3);
+        assert!(crate::scenario::rect_of("appbar:save").is_none());
+        assert!(crate::scenario::rect_of("appbar:quick:solid.box").is_none());
+        let settings = crate::scenario::rect_of("titlebar:preferences").unwrap();
+        let tabs = crate::scenario::rect_of("tab:design:0").unwrap();
+        assert!(settings.right() <= tabs.left());
+    }
 
     #[test]
     fn plugins_host_menu_and_ribbon_slots_show_identity_and_obey_disabled_policy() {

@@ -31,7 +31,7 @@ fn each_schema_type_becomes_its_field_with_limits_labels_and_defaults() {
     assert_eq!(fields[2].1, Input::Typed(String::new()), "a number without a default starts empty");
     assert_eq!((&fields[3].0.kind, &fields[3].1), (&Kind::Boolean, &Input::Boolean(false)));
     assert_eq!(fields[4].0.label, "name", "no title: the key");
-    assert_eq!(fields[4].0.kind, Kind::Text { min_length: None, max_length: Some(8) });
+    assert_eq!(fields[4].0.kind, Kind::Text { min_length: None, max_length: Some(8), directory: false });
     let angles: Vec<String> = vec!["14.5".into(), "20".into(), "25".into()];
     assert_eq!(fields[5].0.kind, Kind::Choice { values: angles.clone(), titles: angles }, "enum: each value shown as it is");
     assert_eq!(fields[5].1, Input::Choice(Some(1)), "the default");
@@ -233,6 +233,28 @@ fn conditional_defaults_cascade_and_hidden_empty_fields_do_not_gate_run() {
     assert_eq!(params(&fields), Err(Problem::Missing("empty".into())));
     set_input(&mut fields, "z_mode", Input::Boolean(true));
     assert_eq!(params(&fields), Ok(json!({"z_mode":true,"b_value":2,"a_value":20})));
+}
+
+#[test]
+fn conditional_dialog_and_composed_input_share_hidden_controllers() {
+    let controller = json!({"gate":{"type":"boolean","default":false},"mode":{"type":"boolean","default":true,"x-solidcraft-visible-when":{"field":"gate","eq":true}}});
+    let dependent = json!({"mode":{"type":"boolean"},"secret":{"type":"integer","default":7,"x-solidcraft-visible-when":{"field":"mode","eq":true}}});
+    let composed =
+        json!({"type":"object","additionalProperties":true,"properties":controller,"oneOf":[{"required":["secret"],"properties":dependent}]});
+    // Composition remains a CLI/agent form. Its equivalent dialog must send the same values.
+    let mut flat = json!({"type":"object","required":["secret"],"properties":controller});
+    flat["properties"]["secret"] = dependent["secret"].clone();
+    let mut fields = form(&flat).unwrap();
+    for gate in [false, true, false] {
+        set_input(&mut fields, "gate", Input::Boolean(gate));
+        let expected = if gate { json!({"gate":true,"mode":true,"secret":7}) } else { json!({"gate":false}) };
+        assert_eq!(params(&fields), Ok(expected));
+        let secret = if gate { json!(7) } else { json!("hidden") };
+        assert_eq!(solidcraft_engine::plugin::check_input(&composed, &json!({"gate":gate,"mode":true,"secret":secret})), Ok(()));
+        for key in ["mode", "secret"] {
+            assert_eq!(fields.iter().find(|(f, _)| f.key == key).unwrap().0.visible, gate);
+        }
+    }
 }
 
 #[test]
@@ -907,6 +929,93 @@ fn ungranted_command_groups_keep_run_off_and_are_named() {
     assert!(app.plugin_menu.dialog().unwrap().ready(&app).is_ok());
 }
 
+/// A directory field gets Browse when the host has a folder picker, and no button otherwise.
+/// The picked folder is the value sent to the plugin. A plain string field stays a text box.
+/// Run refuses a folder outside the install grant, and the grant is unchanged. Paste still
+/// fills either field.
+#[test]
+fn a_directory_field_browses_a_folder_and_an_outside_folder_stays_ungranted() {
+    let schema = json!({"type":"object","properties":{
+        "folder":{"type":"string","title":"Folder","format":"directory"},
+        "note":{"type":"string","title":"Note"}
+    }});
+    let parsed = form(&schema).expect("drawn");
+    assert!(matches!(parsed[0].0.kind, Kind::Text { directory: true, .. }), "format directory is remembered");
+    assert!(matches!(parsed[1].0.kind, Kind::Text { directory: false, .. }));
+
+    let mut h = crate::scenario::Harness::new();
+    let granted = h.dir.join("granted");
+    let outside = h.dir.join("outside");
+    std::fs::create_dir_all(&granted).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let mut command = entry("export", "edit", json!([]));
+    command.input_schema = schema;
+    h.app.plugin_menu.listed = vec![listed("files", vec![command])];
+    let grants = solidcraft_engine::plugin::Grants {
+        folders: vec![solidcraft_engine::plugin::FileGrant { name: "work".into(), folder: granted.clone(), read: true, write: true }],
+        ..Default::default()
+    };
+    h.app.session.plugin_state.grants.insert("files".into(), grants.clone());
+    h.app.preferences.plugin_grants.insert("files".into(), grants);
+    open_entry(&mut h.app, 0, 0);
+    h.frames(2);
+    let browse = h.app.tr("ui.plugin_dialog_browse").to_owned();
+    assert!(h.widgets(&browse).is_empty(), "without a folder picker, Browse is not shown");
+    assert!(!h.widgets("Folder").is_empty(), "the folder field stays a text box");
+    let folder_text = |h: &crate::scenario::Harness| match &h
+        .app
+        .plugin_menu
+        .dialog()
+        .unwrap()
+        .fields
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|(f, _)| f.key == "folder")
+        .unwrap()
+        .1
+    {
+        Input::Text(text) => text.clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(folder_text(&h), "", "the text box starts empty");
+
+    let picked = outside.to_string_lossy().into_owned();
+    let answer = picked.clone();
+    h.app.services.pick_folder = Some(Box::new(move || Box::pin(std::future::ready(Some(answer.clone())))));
+    h.frames(2);
+    assert_eq!(h.widgets(&browse).len(), 1, "only the directory field has Browse");
+    let y = |label: &str| h.widgets(label)[0][1];
+    assert!((y(&browse) - y("Folder")).abs() < (y(&browse) - y("Note")).abs(), "Browse sits on the folder row, not the plain string");
+    let grants = h.app.session.plugin_state.grants["files"].folders.clone();
+    h.step(&json!({"widget": browse})).unwrap();
+    h.frames(2);
+    assert_eq!(folder_text(&h), picked, "the picked folder is the field value");
+    assert!(!h.widgets(&picked).is_empty(), "the text box shows the picked folder, so paste can replace it");
+    let fields = h.app.plugin_menu.dialog().unwrap().fields.clone().unwrap();
+    assert_eq!(params(&fields), Ok(json!({"folder": picked})), "that path is the value sent to the plugin");
+    let err = run(&mut h.app).unwrap_err();
+    assert!(err.contains("file path has no applicable folder grant"), "{err}");
+    assert!(h.app.control_held.is_empty(), "Run does not go ahead with a folder outside the grant");
+    assert_eq!(h.app.session.plugin_state.grants["files"].folders, grants, "picking a folder does not widen the install grant");
+
+    let allowed = granted.to_string_lossy().into_owned();
+    {
+        let fields = h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap();
+        fields.iter_mut().find(|(field, _)| field.key == "folder").unwrap().1 = Input::Text(allowed.clone());
+        fields.iter_mut().find(|(field, _)| field.key == "note").unwrap().1 = Input::Text("pasted".into());
+    }
+    let sent = json!({"folder": allowed, "note": "pasted"});
+    assert_eq!(
+        h.app.plugin_menu.dialog().unwrap().ready(&h.app).as_ref().unwrap(),
+        &sent,
+        "a pasted path inside the grant, and a pasted string, are sent"
+    );
+    run(&mut h.app).unwrap();
+    let request = h.app.control_held.back().expect("the allowed folder is sent to the plugin");
+    assert_eq!(request.params["params"]["params"], sent);
+}
+
 #[test]
 fn a_previewed_run_has_none_of_the_plugins_grants() {
     let mut session = solidcraft_engine::Session::default();
@@ -1154,10 +1263,15 @@ mod native {
             "length":{"type":"number","exclusiveMinimum":0,"default":20},
             "width":{"type":"number","exclusiveMinimum":0,"default":10},
             "height":{"type":"number","exclusiveMinimum":0,"default":3}}});
+        let mut sketch = entry("sketch", "Sketch");
+        sketch["input_schema"] = json!({"type":"object","required":["solid"],"properties":{
+            "solid":{"type":"boolean","default":false}}});
+        let mut zero = sketch.clone();
+        zero["name"] = json!("zero");
         let manifest = json!({"id":"frames","name":"Frames","version":"0.1.0","capabilities":["commands@0.1"],"runtime":{
             "module":"plugin.wasm",
-            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail"), entry("place", "Place"), entry("move", "Move"), entry("both", "Both"), fit],
-            "commands":["solid.box", "view.fit", "view.home", "component.create", "occurrence.move"]}});
+            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail"), entry("place", "Place"), entry("move", "Move"), entry("both", "Both"), fit, sketch, zero],
+            "commands":["solid.box", "view.fit", "view.home", "component.create", "occurrence.move", "sketch.create", "sketch.rectangle.two_point", "sketch.finish"]}});
         std::fs::write(dir.join("plugin.json"), manifest.to_string()).unwrap();
         root
     }
@@ -1402,6 +1516,72 @@ mod native {
         iso.set_view(solidcraft_viewport::StandardView::Iso);
         assert_eq!((h.app.cam.yaw, h.app.cam.pitch), (iso.yaw, iso.pitch), "Home turns to the home direction");
         assert!(h.app.cam.distance < parked.distance, "Home fits the previewed box");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_sketch_only_first_plugin_preview_fits_once_and_a_later_solid_keeps_the_camera() {
+        let root = view_package("preview-sketch-fit");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.plugin_menu.loaded = true;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        let sketch = h.app.plugin_menu.listed[0].entries.iter().position(|e| e.name == "sketch").unwrap();
+        h.app.cam.set_view(solidcraft_viewport::StandardView::Top);
+        h.app.cam.distance = 800.0;
+        let parked = h.app.cam;
+        open_entry(&mut h.app, 0, sketch);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the sketch preview is ready: {:?}", h.app.preview.error);
+        assert_eq!(h.app.preview.sketches.len(), 1);
+        assert_eq!(h.app.preview.bounds.max.z, 0.0, "the first result is a planar sketch");
+        // The rectangle spans (100,20)..(120,30) in the XY plane, away from the origin.
+        let bounds =
+            solidcraft_engine::geom::Aabb3 { min: solidcore_record::Vec3::new(100.0, 20.0, 0.0), max: solidcore_record::Vec3::new(120.0, 30.0, 0.0) };
+        let expected = h.app.fitted_bounds(parked, &bounds);
+        assert!(same_camera(&expected, &h.app.cam), "Fit frames the preview's sketch geometry");
+        assert!(h.app.plugin_menu.dialogs[0].preview_drawn, "the first sketch result consumes the view action");
+        assert!(h.app.session.doc.features.is_empty(), "the sketch is only previewed");
+
+        h.step(&json!({"call":"ui.scroll","params":{"x":800,"y":600,"delta":-100}})).unwrap();
+        h.frames(20);
+        let moved = h.app.cam;
+        assert!(!same_camera(&expected, &moved), "navigation is available after the sketch preview");
+        let key = h.app.preview.key;
+        h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "solid").unwrap().1 = Input::Boolean(true);
+        previewed(&mut h);
+        assert_ne!(h.app.preview.key, key);
+        assert!(h.app.preview.active, "the solid preview is ready: {:?}", h.app.preview.error);
+        assert_eq!(h.app.preview.bounds.max.z.round(), 10.0, "the field change produces a solid");
+        assert!(same_camera(&moved, &h.app.cam), "a later solid leaves the user's camera alone");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_empty_first_plugin_preview_applies_home_once_and_a_later_solid_keeps_the_camera() {
+        let root = view_package("preview-empty-home");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.plugin_menu.loaded = true;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        let zero = h.app.plugin_menu.listed[0].entries.iter().position(|e| e.name == "zero").unwrap();
+        h.app.cam.set_view(solidcraft_viewport::StandardView::Front);
+        h.app.cam.distance = 800.0;
+        let mut iso = h.app.cam;
+        iso.set_view(solidcraft_viewport::StandardView::Iso);
+        open_entry(&mut h.app, 0, zero);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the empty result is ready: {:?}", h.app.preview.error);
+        assert!(h.app.preview.bounds.is_empty());
+        assert!(h.app.plugin_menu.dialogs[0].preview_drawn, "an empty result consumes the first preview");
+        assert_eq!((h.app.cam.yaw, h.app.cam.pitch), (iso.yaw, iso.pitch), "Home needs no bounds");
+        h.step(&json!({"call":"ui.scroll","params":{"x":800,"y":600,"delta":-100}})).unwrap();
+        h.frames(20);
+        let moved = h.app.cam;
+        h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "solid").unwrap().1 = Input::Boolean(true);
+        previewed(&mut h);
+        assert!(!h.app.preview.bounds.is_empty(), "the later preview contains a solid");
+        assert!(same_camera(&moved, &h.app.cam), "the later solid does not apply Home again");
         let _ = std::fs::remove_dir_all(root);
     }
 

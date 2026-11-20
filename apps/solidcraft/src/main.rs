@@ -680,7 +680,20 @@ struct DialogFolderState {
 impl DialogFolder {
     /// A file was chosen in a dialog: the next one opens in its folder.
     fn chosen(&self, file: &std::path::Path) {
-        if let (Some(folder), Ok(mut state)) = (file.parent().filter(|f| !f.as_os_str().is_empty()), self.0.lock()) {
+        if let Some(folder) = file.parent().filter(|f| !f.as_os_str().is_empty()) {
+            self.remember(folder);
+        }
+    }
+
+    /// A folder was chosen: the next dialog opens in that folder, not in its parent.
+    fn chosen_folder(&self, folder: &std::path::Path) {
+        if !folder.as_os_str().is_empty() {
+            self.remember(folder);
+        }
+    }
+
+    fn remember(&self, folder: &std::path::Path) {
+        if let Ok(mut state) = self.0.lock() {
             state.folder = Some(folder.to_path_buf());
         }
     }
@@ -702,6 +715,15 @@ impl DialogFolder {
     fn answer(&self, picked: Option<rfd::FileHandle>) -> Option<String> {
         let picked = picked?;
         self.chosen(picked.path());
+        Some(picked.path().to_string_lossy().into_owned())
+    }
+
+    /// A folder picker's answer as a path. The picked folder itself is remembered, so the next
+    /// dialog opens there. [`answer`] remembers a file's parent, which would open one level above
+    /// a folder the user just chose.
+    fn answer_folder(&self, picked: Option<rfd::FileHandle>) -> Option<String> {
+        let picked = picked?;
+        self.chosen_folder(picked.path());
         Some(picked.path().to_string_lossy().into_owned())
     }
 
@@ -788,7 +810,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let program_parent = parent.clone();
     let file_parent = parent.clone();
     let folder_parent = parent.clone();
-    let (open_folder, file_folder, save_folder) = (folder.clone(), folder.clone(), folder.clone());
+    let (open_folder, file_folder, save_folder, browse_folder) = (folder.clone(), folder.clone(), folder.clone(), folder.clone());
     Services {
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The chooser that opens may not be the desktop's own (#10159).
@@ -838,15 +860,16 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             let folder = file_folder.clone();
             Box::pin(async move { folder.answer(future.await) })
         })),
-        pick_folder: Some(Box::new(move || {
-            let future = folder_parent.clone().set_title("Choose a folder").pick_folder();
-            Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
-        })),
         pick_program: Some(Box::new(move || {
             let dialog = program_parent.clone().set_title("Choose your slicer");
             let dialog = if cfg!(target_os = "windows") { dialog.add_filter("Programs", &["exe"]) } else { dialog };
             let future = dialog.pick_file();
             Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
+        })),
+        pick_folder: Some(Box::new(move || {
+            let future = browse_folder.start(folder_parent.clone()).set_title("Choose a folder").pick_folder();
+            let folder = browse_folder.clone();
+            Box::pin(async move { folder.answer_folder(future.await) })
         })),
         pick_save: Some(Box::new(move |name: &str, exts: &[&str]| {
             let dialog = save_folder.start(parent.clone()).set_file_name(name);
@@ -2492,6 +2515,19 @@ mod dialog_folder_tests {
         // A bare file name has no folder to remember.
         folder.chosen(Path::new("bracket.step"));
         assert_eq!(folder.folder(), Some(PathBuf::from("/work/prints")));
+    }
+
+    /// A folder picker remembers the folder itself. Remembering its parent would open the next
+    /// dialog one level above the folder the user chose.
+    #[test]
+    fn a_folder_picker_remembers_the_picked_folder_itself() {
+        let folder = DialogFolder::default();
+        folder.chosen(Path::new("/work/project/assets"));
+        assert_eq!(folder.folder(), Some(PathBuf::from("/work/project")), "a file's parent");
+        folder.chosen_folder(Path::new("/work/project/assets"));
+        assert_eq!(folder.folder(), Some(PathBuf::from("/work/project/assets")));
+        folder.chosen_folder(Path::new(""));
+        assert_eq!(folder.folder(), Some(PathBuf::from("/work/project/assets")), "an empty path leaves the last folder");
     }
 
     /// Save As starts beside the open design (#7756), and a folder chosen since wins until another

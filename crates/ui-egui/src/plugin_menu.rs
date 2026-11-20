@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 use solidcraft_engine::Sel;
-use solidcraft_engine::plugin::conditions::{FieldConditions, InputConditions, validate_conditions};
+use solidcraft_engine::plugin::conditions::{FieldConditions, InputConditions, validate_conditions, visible_values};
 
 use crate::selection::{Accept, SelInput};
 
@@ -121,6 +121,9 @@ pub(crate) enum Kind {
     Text {
         min_length: Option<usize>,
         max_length: Option<usize>,
+        /// `format` is `directory`: when the host has a folder picker, a Browse button fills
+        /// this field. Without one, including the browser build, the field stays a text box.
+        directory: bool,
     },
     /// Geometry picked in the viewport: what it takes, how many, and whether it sends body names
     /// (a `bodies` or `body_ids` list) rather than selection references.
@@ -202,8 +205,7 @@ pub(crate) fn form(schema: &Value) -> Option<Vec<(Field, Input)>> {
         field.conditions = conditions.fields.get(&field.key).cloned().unwrap_or_default();
         field.order = conditions.order.iter().position(|name| name == &field.key).unwrap_or(usize::MAX);
     }
-    refresh_conditions(&mut fields);
-    Some(fields)
+    refresh_conditions(&mut fields).then_some(fields)
 }
 
 fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> {
@@ -309,7 +311,8 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         "string" => {
             let length = |k: &str| p.get(k).and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok());
             let input = Input::Text(default.and_then(Value::as_str).unwrap_or_default().to_owned());
-            (Kind::Text { min_length: length("minLength"), max_length: length("maxLength") }, input)
+            let directory = p.get("format").and_then(Value::as_str).is_some_and(|format| format.trim() == "directory");
+            (Kind::Text { min_length: length("minLength"), max_length: length("maxLength"), directory }, input)
         }
         _ => return None,
     };
@@ -500,10 +503,11 @@ fn default_input(field: &Field, value: &Value) -> Option<Input> {
 }
 
 /// Controllers are evaluated first, including chains of defaults and hidden controllers.
-fn refresh_conditions(fields: &mut [(Field, Input)]) {
+fn refresh_conditions(fields: &mut [(Field, Input)]) -> bool {
     let mut order: Vec<(usize, usize)> = fields.iter().enumerate().map(|(i, (f, _))| (f.order, i)).collect();
     order.sort_unstable();
-    let mut values: Map<String, Value> = fields.iter().filter_map(|(f, i)| scalar_value(f, i).map(|v| (f.key.clone(), v))).collect();
+    let raw: Map<String, Value> = fields.iter().filter_map(|(f, i)| scalar_value(f, i).map(|v| (f.key.clone(), v))).collect();
+    let Ok(mut values) = visible_values(&raw, fields.iter().map(|(f, _)| (f.key.as_str(), &f.conditions))) else { return false };
     for (_, index) in order {
         let Some((field, input)) = fields.get_mut(index) else { continue };
         let controls: Map<String, Value> =
@@ -538,6 +542,7 @@ fn refresh_conditions(fields: &mut [(Field, Input)]) {
             values.remove(&field.key);
         }
     }
+    true
 }
 
 /// The parameters the fields make, or why Run stays off. An optional field left empty is left out,
@@ -640,7 +645,7 @@ fn within(kind: &Kind, value: &Value) -> bool {
             above && below && stepped
         }
         Kind::Integer { min, max, .. } => value.as_i64().is_some_and(|n| min.is_none_or(|m| n >= m) && max.is_none_or(|m| n <= m)),
-        Kind::Text { min_length, max_length } => value.as_str().is_some_and(|s| {
+        Kind::Text { min_length, max_length, .. } => value.as_str().is_some_and(|s| {
             let n = s.chars().count();
             min_length.is_none_or(|m| n >= m) && max_length.is_none_or(|m| n <= m)
         }),
@@ -1129,11 +1134,28 @@ impl EntryDialog {
             return Err(solidcraft_ui_text::format("ui.plugin_dialog_needs_groups", &[("groups", &missing.join(", "))]));
         }
         let Some(fields) = &self.fields else { return Err(app.tr("ui.plugin_dialog_unsupported").into()) };
-        params(fields).map_err(|problem| match problem {
+        let value = params(fields).map_err(|problem| match problem {
             Problem::Missing(label) => solidcraft_ui_text::format("ui.plugin_dialog_missing", &[("field", &label)]),
             Problem::Invalid(label) => solidcraft_ui_text::format("ui.plugin_dialog_invalid", &[("field", &label)]),
-        })
+        })?;
+        // A picked or pasted folder does not add a grant. Run uses the install grant's check.
+        directories_allowed(app, &self.plugin.id, fields, &value)?;
+        Ok(value)
     }
+}
+
+/// A directory field's path must already lie in a folder approved at install.
+fn directories_allowed(app: &SolveApp, plugin_id: &str, fields: &[(Field, Input)], value: &Value) -> Result<(), String> {
+    let grants = app.session.plugin_state.grants.get(plugin_id).map(|grants| grants.folders.as_slice()).unwrap_or(&[]);
+    let Some(object) = value.as_object() else { return Ok(()) };
+    for (field, _) in fields {
+        let Kind::Text { directory: true, .. } = field.kind else { continue };
+        let Some(path) = object.get(&field.key).and_then(Value::as_str) else { continue };
+        if let Err(error) = solidcraft_engine::plugin::require_folder_grant(grants, Path::new(path)) {
+            return Err(error.to_string());
+        }
+    }
+    Ok(())
 }
 
 /// Whether a plugin command that edits this design has an open dialog.
@@ -1170,7 +1192,9 @@ pub(crate) fn preview_drawn(app: &mut SolveApp, id: u64, view: Option<Value>) {
     }
     dialog.preview_drawn = true;
     if let Some(view) = view.filter(|view| matches!(view.get("kind").and_then(Value::as_str), Some("fit" | "home"))) {
-        app.apply_plugin_view(&json!({"view": view}), Some(app.preview.bounds));
+        // Home also works for an empty result; without preview geometry use the normal view path.
+        let bounds = (!app.preview.bounds.is_empty()).then_some(app.preview.bounds);
+        app.apply_plugin_view(&json!({"view": view}), bounds);
     }
 }
 
@@ -1337,6 +1361,7 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     let title = dialog.label.clone();
     let run_key = if dialog.opens.is_some() { "ui.plugin_dialog_choose_file" } else { "ui.plugin_dialog_run" };
     let (run_label, close_label) = (app.tr(run_key).to_owned(), app.tr(if dialog.read { "ui.close" } else { "ui.cancel" }).to_owned());
+    let mut browse = None;
     // This dialog's picker, when the viewport picks into its fields: drawn here, then put back.
     let mut picker = if picking(app) == Some(dialog.id) { app.dialog.take() } else { None };
     let mut claim = None;
@@ -1344,7 +1369,9 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     let (closed, action) = ui_kit::Window::new(dialog_window_id(dialog, app.preferences.plugin_remember_dialog_position), &icon, &title)
         .fields()
         .actions(&run_label, &close_label, None)
-        .show(ctx, ready.is_ok() && !running, |ui| body(app, ui, dialog, ready.as_ref().err(), &mut picker, &mut claim));
+        .show(ctx, ready.is_ok() && !running, |ui| {
+            browse = body(app, ui, dialog, ready.as_ref().err(), &mut picker, &mut claim);
+        });
     if let Some(picker) = picker {
         take_picks(dialog, &picker, &app.session.doc.clone());
         app.dialog = Some(picker);
@@ -1361,9 +1388,30 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
         }
         return (false, false, None);
     }
+    if let Some(key) = browse {
+        let id = dialog.id;
+        app.pick_folder(move |app, path| {
+            if let Some(path) = path {
+                apply_browsed_folder(app, id, &key, path);
+            }
+        });
+    }
     (true, action == ui_kit::Action::Ok, claim)
 }
 
+/// Write a picked folder into that dialog's directory field. A missing picker answers nothing.
+fn apply_browsed_folder(app: &mut SolveApp, id: u64, key: &str, path: String) {
+    let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|dialog| dialog.id == id) else { return };
+    let Some(fields) = dialog.fields.as_mut() else { return };
+    let Some((field, input)) = fields.iter_mut().find(|(field, _)| field.key == key) else { return };
+    if matches!(field.kind, Kind::Text { directory: true, .. })
+        && let Input::Text(text) = input
+    {
+        *text = path;
+    }
+}
+
+/// Draws the dialog. Returns the key of a directory field whose Browse button was pressed.
 fn body(
     app: &SolveApp,
     ui: &mut egui::Ui,
@@ -1371,7 +1419,7 @@ fn body(
     why_not: Option<&String>,
     picker: &mut Option<crate::dialogs::Dialog>,
     claim: &mut Claim,
-) {
+) -> Option<String> {
     let id = dialog.id;
     let plugin = &dialog.plugin;
     let about = if plugin.description.is_empty() {
@@ -1391,6 +1439,7 @@ fn body(
         ui_kit::status_line(ui, &asks, ui_kit::StatusTone::Warning);
     }
     let editable = dialog.running.is_none();
+    let mut browse = None;
     match dialog.fields.as_mut() {
         None => {
             ui_kit::status_line(ui, app.tr("ui.plugin_dialog_unsupported"), ui_kit::StatusTone::Warning);
@@ -1414,8 +1463,8 @@ fn body(
                         ui_kit::with_row_label_tooltip(ui, field.tip.as_deref(), |ui| {
                             if let Input::Selection(items) = input {
                                 selection_row(app, ui, id, pick_index, field, items, picker, claim);
-                            } else {
-                                field_row(app, ui, &plugin.images, field, input);
+                            } else if field_row(app, ui, &plugin.images, field, input) {
+                                browse = Some(field.key.clone());
                             }
                         });
                     });
@@ -1456,6 +1505,7 @@ fn body(
         ui_kit::text(ui, app.tr("ui.plugin_dialog_result"), ui_kit::Text::Note("plugin_result"));
         ui_kit::read_only_text(ui, result);
     }
+    browse
 }
 
 /// Selection field `index` (among the dialog's selection fields), drawn by the native dialogs'
@@ -1493,9 +1543,12 @@ fn selection_row(
     }
 }
 
-fn field_row(app: &SolveApp, ui: &mut egui::Ui, images: &std::collections::BTreeMap<String, String>, field: &Field, input: &mut Input) {
+/// Draws one field. Returns whether its Browse button was pressed. `images` are the package's
+/// pictures, used by a choice whose options each name one.
+fn field_row(app: &SolveApp, ui: &mut egui::Ui, images: &std::collections::BTreeMap<String, String>, field: &Field, input: &mut Input) -> bool {
     let label = if field.required { format!("{} *", field.label) } else { field.label.clone() };
     let suffix = |unit: &Option<String>| unit.as_ref().map(|u| format!(" {u}")).unwrap_or_default();
+    let mut browse = false;
     let response = match (&field.kind, input) {
         (Kind::Number { min, max, step, unit, .. }, Input::Number(value)) => {
             let range = min.unwrap_or(f64::NEG_INFINITY)..=max.unwrap_or(f64::INFINITY);
@@ -1552,6 +1605,25 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, images: &std::collections::BTree
             *chosen = (if lead { index.checked_sub(1) } else { Some(index) }).and_then(|i| field.available.get(i).copied());
             response
         }
+        (Kind::Text { directory: true, .. }, Input::Text(text)) => {
+            let hint = if field.required { app.tr("ui.plugin_dialog_required_hint") } else { "" };
+            // The browser build has no folder picker, so Browse is not offered there.
+            let can_browse = !cfg!(target_arch = "wasm32") && app.services.pick_folder.is_some();
+            ui_kit::row(ui, &label, |ui| {
+                if can_browse {
+                    let browse_label = app.tr("ui.plugin_dialog_browse");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let button = ui_kit::button(ui, browse_label, ui_kit::Button::Normal);
+                        browse = button.clicked();
+                        let field = ui_kit::text_field_reserving(ui, text, hint, 0.0).1;
+                        field.union(button)
+                    })
+                    .inner
+                } else {
+                    ui_kit::text_field_reserving(ui, text, hint, 0.0).1
+                }
+            })
+        }
         (Kind::Text { .. }, Input::Text(text)) => {
             let hint = if field.required { app.tr("ui.plugin_dialog_required_hint") } else { "" };
             ui_kit::row(ui, &label, |ui| ui_kit::text_field_reserving(ui, text, hint, 0.0).1)
@@ -1562,6 +1634,7 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, images: &std::collections::BTree
     if let Some(tip) = &field.tip {
         response.backing_on_hover_text(tip);
     }
+    browse
 }
 
 #[cfg(test)]
