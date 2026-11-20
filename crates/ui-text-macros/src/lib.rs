@@ -73,8 +73,8 @@ impl Parse for Input {
 }
 
 /// `msg!("id")` as tokens: the message's `Msg`, or with values its `Filled`.
-fn message(input: &Input) -> syn::Result<proc_macro2::TokenStream> {
-    let ((place, ids), values) = check(input)?;
+fn message(input: &Input, unfilled: bool) -> syn::Result<proc_macro2::TokenStream> {
+    let ((place, ids), values) = check(input, unfilled)?;
     let id = &input.id;
     let msg = quote!(::solidcraft_ui_text::Msg::checked(#place, #ids, ::solidcraft_ui_text::debug_id!(#id)));
     Ok(match values {
@@ -94,7 +94,7 @@ fn message(input: &Input) -> syn::Result<proc_macro2::TokenStream> {
 #[proc_macro]
 pub fn msg(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as Input);
-    message(&input).unwrap_or_else(|e| e.to_compile_error()).into()
+    message(&input, false).unwrap_or_else(|e| e.to_compile_error()).into()
 }
 
 /// A reader, if any, then what [`msg!`] takes.
@@ -126,7 +126,7 @@ impl Parse for Read {
 #[proc_macro]
 pub fn tr(input: TokenStream) -> TokenStream {
     let read = syn::parse_macro_input!(input as Read);
-    let message = match message(&read.message) {
+    let message = match message(&read.message, false) {
         Ok(message) => message,
         Err(e) => return e.to_compile_error().into(),
     };
@@ -134,6 +134,27 @@ pub fn tr(input: TokenStream) -> TokenStream {
         (None, _) => quote!(#message.tr()),
         (Some(reader), false) => quote!((#reader).tr(#message)),
         (Some(reader), true) => quote!((#reader).fill(#message)),
+    }
+    .into()
+}
+
+/// The text of a message as the catalog has it, placeholders unfilled: for the few places that
+/// want the template itself (a hint that shows `{design}-{body}` as written, a template handed
+/// to a component that fills it). Checked and numbered as [`tr!`] does; `template!("id")` in this
+/// thread's language, `template!(app, "id")` in the reader's. Anywhere else, `tr!` with values.
+#[proc_macro]
+pub fn template(input: TokenStream) -> TokenStream {
+    let read = syn::parse_macro_input!(input as Read);
+    if let Some((name, _)) = read.message.values.as_ref().and_then(|values| values.first()) {
+        return syn::Error::new(name.span(), "`template!` gives the text unfilled: to fill it, use `tr!`").to_compile_error().into();
+    }
+    let message = match message(&read.message, true) {
+        Ok(message) => message,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    match read.reader {
+        None => quote!(#message.tr()),
+        Some(reader) => quote!((#reader).tr(#message)),
     }
     .into()
 }
@@ -151,7 +172,7 @@ fn fingerprint<'a>(ids: impl IntoIterator<Item = &'a str>) -> u32 {
 /// The message's place and its catalog's fingerprint, with the values given (`None` for a
 /// message given without values), or why the message is refused.
 #[allow(clippy::type_complexity)]
-fn check(input: &Input) -> syn::Result<((u32, u32), Option<&[(Ident, syn::Expr)]>)> {
+fn check(input: &Input, unfilled: bool) -> syn::Result<((u32, u32), Option<&[(Ident, syn::Expr)]>)> {
     let (catalog, ids) = catalog().as_ref().map_err(|why| syn::Error::new(input.id.span(), why))?;
     let ids = *ids;
     let id = input.id.value();
@@ -169,6 +190,7 @@ fn check(input: &Input) -> syn::Result<((u32, u32), Option<&[(Ident, syn::Expr)]
     let Some(values) = &input.values else {
         return match wanted.first() {
             None => Ok(((place, ids), None)),
+            Some(_) if unfilled => Ok(((place, ids), None)),
             Some(first) => Err(syn::Error::new(
                 input.id.span(),
                 format!("`{id}` has the placeholder `{{{first}}}`: give it a value, `{first} = ...`; its text is {text:?}"),

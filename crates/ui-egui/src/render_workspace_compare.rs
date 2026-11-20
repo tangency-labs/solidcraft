@@ -173,7 +173,7 @@ fn label(app: &SolveApp, side: Option<JobId>) -> String {
             tr!(
                 "render.compare_side",
                 number = &result.frame.job.serial.to_string(),
-                shot = result.shot.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr_by_id("render.results_unnamed"))
+                shot = result.shot.as_deref().unwrap_or_else(|| tr!("render.results_unnamed"))
             )
         },
     )
@@ -186,7 +186,7 @@ pub(super) fn summary(app: &SolveApp, ui: &mut egui::Ui) {
     ui_kit::completion_text(ui, app.tr_by_id(if stale { "render.image_stale" } else { "render.result_current" }), !stale);
     let summary = tr!(
         "render.compare_summary",
-        shot = reference.shot.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr_by_id("render.results_unnamed")),
+        shot = reference.shot.as_deref().unwrap_or_else(|| tr!("render.results_unnamed")),
         width = &reference.frame.width.to_string(),
         height = &reference.frame.height.to_string(),
         seconds = &format!("{:.0}", reference.seconds),

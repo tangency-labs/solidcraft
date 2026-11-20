@@ -2041,10 +2041,10 @@ impl SolveApp {
                                     .and_then(Value::as_str)
                                     .or_else(|| signature.get("fingerprint").and_then(Value::as_str))
                                     .unwrap_or("");
-                                self.tr_by_id("ui.design_saved_signed").replace("{path}", &p).replace("{key}", key)
+                                tr!(self, "ui.design_saved_signed", path = &p, key = key)
                             }
-                            None if earlier => self.tr_by_id("ui.design_saved_earlier_signature").replace("{path}", &p),
-                            None => self.tr_by_id("ui.design_saved").replace("{path}", &p),
+                            None if earlier => tr!(self, "ui.design_saved_earlier_signature", path = &p),
+                            None => tr!(self, "ui.design_saved", path = &p),
                         };
                         self.set_status(saved, false);
                     }

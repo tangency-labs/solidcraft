@@ -409,7 +409,7 @@ fn inspector_header(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, in
 fn available(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = Tokens::get().space_6;
-        let caption = tr!("navbar.custom.available", available = app.tr_by_id("ui.workspace_available"));
+        let caption = tr!("navbar.custom.available", available = tr!(app, "ui.workspace_available"));
         ui.horizontal(|ui| {
             ui_kit::settings_inline_note(ui, tr!(app, "ui.workspace_available"));
             ui_kit::help_icon(ui, &caption);

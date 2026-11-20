@@ -1661,10 +1661,7 @@ fn physical_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id:
                     id = property["source_id"].as_str().unwrap_or(""),
                     locator = property["source_locator"].as_str().unwrap_or("")
                 ));
-                ui.small(tr!(
-                    "render.property_qualifier",
-                    value = property["qualifier"].as_str().unwrap_or(solidcraft_ui_text::tr_by_id("render.property_unknown"))
-                ));
+                ui.small(tr!("render.property_qualifier", value = property["qualifier"].as_str().unwrap_or(tr!("render.property_unknown"))));
                 ui.small(tr!("render.property_conditions", value = &property["conditions"].to_string()));
                 ui.small(tr!("render.property_uncertainty", value = &property["uncertainty"].to_string()));
                 ui.small(property["note"].as_str().unwrap_or(""));

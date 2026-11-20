@@ -346,7 +346,7 @@ fn measure_text(app: &SolveApp, name: &str, face: Option<Vec3>, skip: &[Vec3]) -
     let m = solidcraft_engine::doc::measure_sheet_body(mb, face, skip, &solidcraft_engine::doc::IDENTITY).map_err(|e| e.to_string())?;
     let radii: Vec<String> = m.radii.iter().map(|r| format!("R {r:.3}")).collect();
     let bends = if radii.is_empty() { "-".to_string() } else { radii.join(", ") };
-    Ok(solidcraft_ui_text::tr_by_id("sheet.recognize_measured").replace("{thickness}", &format!("{:.3}", m.thickness)).replace("{bends}", &bends))
+    Ok(tr!("sheet.recognize_measured", thickness = &format!("{:.3}", m.thickness), bends = &bends))
 }
 
 /// Convert's inputs (#6748): the body (a solid or a surface body), the bend edges, the faces left
@@ -575,7 +575,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 *thin = Some((name, own));
             }
             if let Some((_, Some(t))) = thin.as_ref() {
-                let hint = solidcraft_ui_text::tr_by_id("sheet.convert_thin_hint").replace("{thickness}", &format!("{t:.3}"));
+                let hint = tr!("sheet.convert_thin_hint", thickness = &format!("{t:.3}"));
                 crate::ui_kit::status_line(ui, &hint, crate::ui_kit::StatusTone::Dim);
             }
         }

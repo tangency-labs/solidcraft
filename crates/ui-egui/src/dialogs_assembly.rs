@@ -2036,11 +2036,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             let occs = occurrences(s, items);
             if occs.len() < 2 {
                 if occs.len() == 1 && items.len() > 1 && items.iter().all(|x| matches!(x, Sel::Body { .. })) {
-                    return Err(tr!(
-                        "joint.rigid_group_one_component",
-                        count = &items.len().to_string(),
-                        command = solidcraft_ui_text::tr_by_id("cmd.component_from_bodies")
-                    ));
+                    return Err(tr!("joint.rigid_group_one_component", count = &items.len().to_string(), command = tr!("cmd.component_from_bodies")));
                 }
                 return Err(tr!("joint.rigid_group_select_components").into());
             }

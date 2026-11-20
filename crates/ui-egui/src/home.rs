@@ -872,7 +872,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         name: tr!(app, "ui.start_page").into(),
         interactive,
         back: Some(start_page::Back {
-            template: app.tr_by_id("home.back").into(),
+            template: template!(app, "home.back").into(),
             document: app.session.doc.name.as_str().into(),
             shortcut: "Esc".into(),
             chosen: FileAction::Back,
@@ -1053,8 +1053,8 @@ fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_pag
             .as_deref()
             .is_some_and(|fingerprint| crate::documents::trusted_fingerprint(&app.preferences.trusted_signing_keys, fingerprint));
         security = Some(match (trusted, &summary.signer, &summary.fingerprint) {
-            (true, Some(signer), _) => app.tr_by_id("home.signed_by").replace("{key}", signer),
-            (_, _, Some(fingerprint)) => app.tr_by_id("home.signed_by").replace("{key}", fingerprint),
+            (true, Some(signer), _) => tr!(app, "home.signed_by", key = signer),
+            (_, _, Some(fingerprint)) => tr!(app, "home.signed_by", key = fingerprint),
             _ => tr!(app, "home.signed_unchecked").to_string(),
         });
     }
@@ -1151,7 +1151,7 @@ fn recovery_body(app: &SolveApp) -> start_page::Reviews<'_, FileAction> {
             title: entry.name.as_str().into(),
             detail: tr!(
                 "recovery.detail",
-                file = entry.path.as_deref().unwrap_or(app.tr_by_id("recovery.never_saved")),
+                file = entry.path.as_deref().unwrap_or(tr!(app, "recovery.never_saved")),
                 features = &entry.features.to_string(),
                 when = &crate::recovery_ui::ago(entry.saved_at)
             )

@@ -5808,7 +5808,7 @@ fn link_status(app: &SolveApp, cmd: &str, reply: &Value) -> Option<String> {
     let linked = links.iter().any(|l| l.get("link").is_some_and(|l| !l.is_null()));
     if linked && sketch.is_some_and(|sk| sk.view.hide_projected) {
         text.push(' ');
-        text.push_str(&tr!("ui.sketch_links_hidden", option = solidcraft_ui_text::tr_by_id("ui.show_projected_geometries")));
+        text.push_str(&tr!("ui.sketch_links_hidden", option = tr!("ui.show_projected_geometries")));
     }
     Some(text)
 }

@@ -123,10 +123,12 @@ fn estimate(values: &mut [String], entry: &PackRule, doc: &Document, method: Ben
             *slot = format!("{k:.2}");
         }
         notes.push((
-            tr_by_id("sheet.library.k_estimate")
-                .replace("{k}", &format!("{k:.2}"))
-                .replace("{method}", tr_by_id(METHOD_KEYS.get(method_index(method)).copied().unwrap_or("")))
-                .replace("{ratio}", &format!("{:.2}", r / thickness)),
+            tr!(
+                "sheet.library.k_estimate",
+                k = &format!("{k:.2}"),
+                method = tr_by_id(METHOD_KEYS.get(method_index(method)).copied().unwrap_or("")),
+                ratio = &format!("{:.2}", r / thickness)
+            ),
             false,
         ));
     }
@@ -134,7 +136,7 @@ fn estimate(values: &mut [String], entry: &PackRule, doc: &Document, method: Ben
         && r < min - 1e-9
     {
         let min = format!("{min:.2} mm");
-        notes.push((tr_by_id("sheet.library.under_minimum").replace("{material}", &entry.rule.material).replace("{min}", &min), true));
+        notes.push((tr!("sheet.library.under_minimum", material = &entry.rule.material, min = &min), true));
     }
     notes
 }
@@ -270,14 +272,14 @@ fn import(app: &mut SolveApp, path: &str) -> (String, bool) {
     };
     let rules: Vec<_> = read.pack.rules.iter().map(|r| r.rule.clone()).collect();
     let (added, left_out) = app.preferences.personal_sheet_rules.import(&rules);
-    let mut message = tr_by_id("sheet.library.imported").replace("{count}", &added.to_string());
+    let mut message = tr!("sheet.library.imported", count = &added.to_string());
     if !left_out.is_empty() {
         message.push(' ');
-        message.push_str(&tr_by_id("sheet.library.left_out").replace("{names}", &left_out.join(", ")));
+        message.push_str(&tr!("sheet.library.left_out", names = &left_out.join(", ")));
     }
     if !read.skipped.is_empty() {
         message.push(' ');
-        message.push_str(&tr_by_id("sheet.library.skipped").replace("{fields}", &read.skipped.join(", ")));
+        message.push_str(&tr!("sheet.library.skipped", fields = &read.skipped.join(", ")));
     }
     (message, false)
 }
@@ -287,16 +289,16 @@ fn export(app: &mut SolveApp, path: &str) -> (String, bool) {
     let count = rules.len();
     if count == 0 {
         // Every personal rule has values a newer version saved: nothing this version can write.
-        return (tr_by_id("sheet.library.export_newer").replace("{names}", &left_out.join(", ")), true);
+        return (tr!("sheet.library.export_newer", names = &left_out.join(", ")), true);
     }
     let pack = RulePack { rules: rules.into_iter().map(PackRule::of).collect(), ..RulePack::default() };
     let text = if path.to_lowercase().ends_with(".csv") { library::write_csv(&pack) } else { library::write_json(&pack) };
     match solidcraft_engine::io::vfs::write(path, text.as_bytes()) {
         Ok(()) => {
-            let mut message = tr_by_id("sheet.library.exported").replace("{count}", &count.to_string());
+            let mut message = tr!("sheet.library.exported", count = &count.to_string());
             if !left_out.is_empty() {
                 message.push(' ');
-                message.push_str(&tr_by_id("sheet.library.export_newer").replace("{names}", &left_out.join(", ")));
+                message.push_str(&tr!("sheet.library.export_newer", names = &left_out.join(", ")));
             }
             (message, false)
         }

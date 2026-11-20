@@ -272,7 +272,7 @@ fn export_name(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
         ui_kit::settings_form(ui, label_width, |ui| {
             let tip = tr!("prefs.export_name_tip", placeholders = &crate::export_name::placeholder_list());
             ui_kit::settings_row_help(ui, tr!(app, "prefs.export_name"), &tip, |ui| {
-                let hint = app.tr_by_id("prefs.export_name_hint").to_string();
+                let hint = template!(app, "prefs.export_name_hint").to_string();
                 let (_, response) = ui_kit::text_field_reserving(ui, &mut app.preferences.export_name, &hint, 0.0);
                 crate::scenario::publish_target("prefs:export_name", response.rect);
             });
