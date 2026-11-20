@@ -444,7 +444,8 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
         | PlaneRef::AxisPoint { .. }
         | PlaneRef::ThreePoints { .. }
         | PlaneRef::AlongPath { .. }
-        | PlaneRef::Perpendicular { .. } => {
+        | PlaneRef::Perpendicular { .. }
+        | PlaneRef::SquareToLine { .. } => {
             for r in p.refs_mut() {
                 map_geo_ref(m, r);
             }
@@ -555,6 +556,52 @@ impl Document {
     /// World transform of a component's frame (through its first occurrence and its parents').
     pub fn component_transform(&self, component: u64) -> Mat {
         transform_through(component, |c| self.occurrence_of(c))
+    }
+
+    /// Ancestor chain of `component` from itself up to root (bounded by [`MAX_PLACEMENT_DEPTH`]).
+    fn component_ancestors(&self, mut component: u64) -> Vec<u64> {
+        let mut chain = vec![component];
+        for _ in 0..MAX_PLACEMENT_DEPTH {
+            let Some(occ) = self.occurrence_of(component) else { break };
+            if chain.contains(&occ.parent) {
+                break;
+            }
+            component = occ.parent;
+            chain.push(component);
+        }
+        chain
+    }
+
+    /// Lowest common ancestor of two components (`0` / root when they share no closer ancestor).
+    pub fn common_ancestor(&self, a: u64, b: u64) -> u64 {
+        if a == 0 || b == 0 {
+            return 0;
+        }
+        if a == b {
+            return a;
+        }
+        let ancestors_a = self.component_ancestors(a);
+        for c in self.component_ancestors(b) {
+            if ancestors_a.contains(&c) {
+                return c;
+            }
+        }
+        0
+    }
+
+    /// Rigid transform of `component` relative to `ancestor` (`IDENTITY` when `component == ancestor`
+    /// or `ancestor` is not above `component`).
+    pub fn component_transform_in(&self, mut component: u64, ancestor: u64) -> Mat {
+        let mut m = IDENTITY;
+        for _ in 0..MAX_PLACEMENT_DEPTH {
+            if component == ancestor {
+                break;
+            }
+            let Some(occ) = self.occurrence_of(component) else { break };
+            m = mat_mul(&occ.transform, &m);
+            component = occ.parent;
+        }
+        m
     }
 
     /// One placement: the component the occurrence `path` from the root leads to (the root for

@@ -54,7 +54,9 @@ use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, rea
 use solidcraft_doc::drawing::fold::{FoldFor, FoldRefusal, FoldSide, auxiliary_side};
 use solidcraft_doc::drawing::note::Note;
 use solidcraft_doc::drawing::thread_lines::{ThreadPiece, ThreadStroke};
-use solidcraft_doc::drawing::view::{Beside, ResolvedView, SetBy, Setting, View, ViewKind, ViewLabel, ViewPlace, check_occurrence_paths, check_pose};
+use solidcraft_doc::drawing::view::{
+    Beside, DetailBoundary, ResolvedView, SetBy, Setting, View, ViewKind, ViewLabel, ViewPlace, check_occurrence_paths, check_pose,
+};
 use solidcraft_doc::drawing_view::{
     Exploded, JointPose, Looking, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides,
 };
@@ -78,12 +80,12 @@ use crate::drawing_view::{
 use crate::params::bad;
 use crate::schema::drawing_view::{
     AccuracyResult, AlongParam, AngleFromParam, AuxiliaryParams, BaseParams, BoxResult, ChoicesResult, ConfigurationParam, ConfigurationResult,
-    CopyParams, CreateResult, DPI_RANGE, DrawnJointResult, DrawnRowResult, EditParams, EditResult, ExplodedParam, ExtentsResult, FlatParams,
-    FromResult, InspectParams, InspectResult, LabelResult, LabelSet, LineResult, LinesStatusResult, MeasureParam, MeasurementResult, MoveParams,
-    OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams, ProjectionForParams,
-    ProjectionForResult, ScaleResult, SceneResult, SectionParams, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult,
-    StandardParams, StandardResult, StudyPoseParam, StudyStepResult, ThreadPieceResult, ThreadResult, ToSheetResult, ViewLineParam, ViewMoveParams,
-    ViewMoveResult, ViewResult, ViewSet,
+    CopyParams, CreateResult, DPI_RANGE, DetailBoundaryParam, DetailParams, DrawnJointResult, DrawnRowResult, EditParams, EditResult, ExplodedParam,
+    ExtentsResult, FlatParams, FromResult, InspectParams, InspectResult, LabelResult, LabelSet, LineResult, LinesStatusResult, MeasureParam,
+    MeasurementResult, MoveParams, OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams,
+    ProjectionForParams, ProjectionForResult, ScaleResult, SceneResult, SectionParams, SettingResult, SettingsResult, SnapshotParams, SnapshotResult,
+    SourceResult, StandardParams, StandardResult, StudyPoseParam, StudyStepResult, ThreadPieceResult, ThreadResult, ToSheetResult, ViewLineParam,
+    ViewMoveParams, ViewMoveResult, ViewResult, ViewSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -114,6 +116,8 @@ const FLAT_CONTRACT: TypedContract<FlatParams> = TypedContract::new();
 /// How far from its parent's centre `drawing.view.projection_for` takes a point, either way, in
 /// paper millimetres: the most two points of one sheet are apart along an axis.
 const MAX_OFFSET_MM: f64 = 2.0 * MAX_SIDE_MM;
+const DETAIL: &str = "drawing.view.detail";
+const DETAIL_CONTRACT: TypedContract<DetailParams> = TypedContract::new();
 const SECTION: &str = "drawing.view.section";
 const SECTION_CONTRACT: TypedContract<SectionParams> = TypedContract::new();
 
@@ -204,6 +208,13 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .contract(&FLAT_CONTRACT)
         .output(output_schema_for::<CreateResult>)
         .params("sheet: id or name; body?: a sheet-metal body's name (default the last one made); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space and off its title block; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); turn?: 0 (default), 90, 180 or 270 degrees counter-clockwise → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?}. The flat pattern as sheet.flat_pattern reports it: its outlines and cut-outs as visible lines, bends up as chain lines (long dash, dot) and bends down as double-chain lines (long dash, two dots), narrow. Refused as sheet.flat_pattern refuses the body. One undo step; no model is evaluated."),
+    CommandSpec::new(DETAIL, "Detail View", crate::checked!("drawing.view.detail", detail))
+        .icon("new")
+        .in_drawing()
+        .doc_only()
+        .contract(&DETAIL_CONTRACT)
+        .output(output_schema_for::<CreateResult>)
+        .params("parent: a saved view's id; boundary: {circle: {centre: [x, y], radius}} or {rectangle: {min: [x, y], max: [x, y]}}, the region on the parent's plane in model mm, or boundary_mm: the same drawn round the parent on its sheet, in paper mm (give one); scale?: \"paper:model\" (default twice the parent's); place?: {at: [x, y]} (default right of the parent, a gap past its boundary) → {view, sheet, scale: {text, factor, fitted}, boundary_mm, letter, outside?}. A detail view: the parent's region drawn again at its own scale, its lines cut to the region, labelled DETAIL and its letter; the parent shows the region's outline, thin, and the letter beside it. Its parent's settings except its scale; a view made from it, and a shaded one, are not supported yet. One undo step; no model is evaluated."),
     CommandSpec::new(SECTION, "Section View", crate::checked!("drawing.view.section", section))
         .icon("new")
         .in_drawing()
@@ -1155,6 +1166,11 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
                 ViewKind::Auxiliary { parent, toward } => {
                     view.kind = ViewKind::Auxiliary { parent: copy_of(*parent).unwrap_or(*parent), toward: *toward }
                 }
+                // A detail copied stays a detail of its parent, as a section does: its region is what
+                // it shows.
+                ViewKind::Detail { parent, boundary } => {
+                    view.kind = ViewKind::Detail { parent: copy_of(*parent).unwrap_or(*parent), boundary: *boundary }
+                }
                 ViewKind::Base { .. } | ViewKind::Flat { .. } => {}
             }
             // A copy never shares its original's letter: one that needs a letter is given its own below.
@@ -1686,6 +1702,62 @@ fn place_beside(s: &Session, staged: &Drawing, parent: u64, id: u64, beside: Bes
             Vec2::new(past(right, theirs.min.x, theirs.max.x, half.x), past(up, theirs.min.y, theirs.max.y, half.y))
         }
     })
+}
+
+/// The gap between a parent's boundary and its detail view placed beside it, in paper millimetres.
+const DETAIL_GAP_MM: f64 = 20.0;
+
+fn detail(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: DetailParams = crate::schema::read(DETAIL, p)?;
+    let record = s.drawing(DETAIL)?.clone();
+    let (parent, sheet) = find(&record, request.parent.0, DETAIL).map(|v| (v.id, v.sheet))?;
+    record.can_detail(parent).map_err(|e| bad(DETAIL, e.to_string()))?;
+    let resolved = record.resolve_view(parent).map_err(|e| bad(DETAIL, e.to_string()))?;
+    let on = crate::drawing_view::on_sheet(s, &record, parent, DETAIL)?;
+    let parent_centre = record.view_centre(parent).map_err(|e| bad(DETAIL, e.to_string()))?;
+    let frame = crate::drawing_view::view_frame(&resolved, &on.extents.model, parent_centre, DETAIL)?;
+    // A region drawn on the sheet goes onto the parent's plane: views never turn, so it is the map's
+    // scale and offset undone.
+    let map = frame.paper_map();
+    let to_plane = |p: Vec2| (p - map.apply(Vec2::ZERO)) * (1.0 / map.scale());
+    let boundary = match (request.boundary, request.boundary_mm) {
+        (Some(_), Some(_)) => return Err(bad(DETAIL, "give `boundary` or `boundary_mm`, not both")),
+        (None, None) => return Err(bad(DETAIL, "`boundary` or `boundary_mm` is needed: the region of the parent it shows")),
+        (Some(DetailBoundaryParam::Circle { centre, radius }), None) => DetailBoundary::Circle { centre: centre.0.into(), radius },
+        (Some(DetailBoundaryParam::Rectangle { min, max }), None) => DetailBoundary::Rectangle { min: min.0.into(), max: max.0.into() },
+        (None, Some(DetailBoundaryParam::Circle { centre, radius })) => {
+            DetailBoundary::Circle { centre: to_plane(centre.0).into(), radius: radius / map.scale() }
+        }
+        (None, Some(DetailBoundaryParam::Rectangle { min, max })) => {
+            DetailBoundary::Rectangle { min: to_plane(min.0).into(), max: to_plane(max.0).into() }
+        }
+    };
+    let region = boundary.geometry().map_err(|e| bad(DETAIL, e.to_string()))?;
+    let factor = resolved.scale.value.factor() * 2.0;
+    let scale = match request.scale {
+        Some(scale) => scale.0,
+        None => Scale::new(factor.max(1.0), (1.0 / factor).max(1.0)).map_err(|e| bad(DETAIL, e.to_string()))?,
+    };
+    let half = |b: Aabb2| (b.max - b.min) * 0.5;
+    let window = region.shape().bounds();
+    let place = request.place.map_or_else(
+        || {
+            let along = half(on.boundary).x + DETAIL_GAP_MM + half(window).x * scale.factor();
+            ViewPlace::At([on.boundary.center().x + along, on.boundary.center().y])
+        },
+        |place| place.0,
+    );
+    let id = record.allocate_id(&mut s.ids).map_err(|e| bad(DETAIL, e.to_string()))?;
+    let kind = ViewKind::Detail { parent, boundary };
+    let settings = ViewOverrides { scale: Some(scale), ..ViewOverrides::default() };
+    let view = View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, label: None };
+    s.edit_drawing(DETAIL, |d| {
+        d.add_views([Arc::new(view)]);
+        d.give_letter(id).map_err(|e| bad(DETAIL, e.to_string()))?;
+        d.name_detail(id);
+        Ok(())
+    })?;
+    created(s, DETAIL, id, request.scale.is_none())
 }
 
 fn section(s: &mut Session, p: &Value) -> Result<Value> {

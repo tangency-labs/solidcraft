@@ -79,6 +79,9 @@
 //! completes the merged face's seam (`HasSeamProblem`, then `SplitAtSeam`:
 //! [`crate::topology::face::p1::complete_merged_face_seam`]), as the boolean cleanup does
 //! under WR-599: a merged face on a periodic surface keeps its seam whatever the fix set.
+//! Not upstream (#18166): [`stitch_and_orient`] keeps each edge its stitch raised covering
+//! the faces it holds no trim on across the orientation, which rewrites their surfaces
+//! (`StitchRaises`).
 
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
@@ -2909,7 +2912,7 @@ pub fn stitch_and_orient_with_identity(
     options: &StitchAndOrientOptions,
     identity: Option<crate::query::brep::BrepIdentity<'_>>,
 ) -> Result<()> {
-    stitch_and_orient_searching(k, b, options, identity, None)
+    stitch_and_orient_searching(k, b, options, identity, None, true)
 }
 
 /// [`stitch_and_orient_with_identity`] of the faces of one solid, in a B-rep that held
@@ -2932,17 +2935,105 @@ pub(crate) fn stitch_and_orient_one_solid(
     identity: Option<crate::query::brep::BrepIdentity<'_>>,
     outside: FaceuseId,
 ) -> Result<()> {
-    stitch_and_orient_searching(k, b, options, identity, Some(outside))
+    stitch_and_orient_searching(k, b, options, identity, Some(outside), true)
 }
 
+/// Not upstream (#18166): the edge tolerances of a B-rep before [`stitch_and_orient`]'s
+/// stitch, to find the edges the stitch raised. The stitch covers the faces its joins give an
+/// edge when it ends ([`crate::heal::stitch::p1::Stitch::finish_joins`]); the orientation
+/// that follows reverses surfaces (`OrientTrimmedSurfaces`), on which a face's proved bound
+/// comes out a rounding apart, so each raised edge's covered trimless faces are taken before
+/// the orientation ([`crate::topology::edgeuse::p3::covered_trimless_faces`]) and kept
+/// covered after it ([`crate::topology::edgeuse::p3::keep_trimless_faces_covered`]). Edges
+/// the stitch did not raise are left as upstream leaves them.
+struct StitchRaises(BTreeMap<EdgeId, u64>);
+
+impl StitchRaises {
+    /// The tolerance of every edge of `b`.
+    fn before(b: &Brep) -> Self {
+        Self(
+            b.edges()
+                .iter()
+                .map(|(e, rec)| (e, rec.tolerance.to_bits()))
+                .collect(),
+        )
+    }
+
+    /// The faces each edge of `b` raised since [`StitchRaises::before`] (or made since)
+    /// covers without a trim; empty where they cannot be bounded (left as upstream).
+    ///
+    /// # Errors
+    ///
+    /// The kernel's unported and cancelled statuses.
+    fn covered(&self, k: &Kernel, b: &Brep) -> Result<Vec<(EdgeId, FaceId)>> {
+        let raised: Vec<EdgeId> = b
+            .edges()
+            .iter()
+            .filter(|(e, rec)| {
+                self.0
+                    .get(e)
+                    .is_none_or(|&was| rec.tolerance > f64::from_bits(was))
+            })
+            .map(|(e, _)| e)
+            .collect();
+        Ok(
+            crate::error::ignored(crate::topology::edgeuse::p3::covered_trimless_faces(
+                k, b, &raised,
+            ))?
+            .unwrap_or_default(),
+        )
+    }
+}
+
+/// Not upstream (#18166): [`StitchRaises`]' cover after the orientation.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+fn keep_stitch_raises(k: &Kernel, b: &mut Brep, covered: &[(EdgeId, FaceId)]) -> Result<()> {
+    crate::error::ignored(crate::topology::edgeuse::p3::keep_trimless_faces_covered(
+        k, b, covered,
+    ))?;
+    Ok(())
+}
+
+/// [`stitch_and_orient_with_identity`] of faces whose lamina edges are the body's open
+/// boundary by construction: the first pass only. Upstream runs a second pass, at ten or
+/// twenty times the first's tolerance, whenever the first leaves more than one lamina
+/// edge, and that pass squeezes out every open edge shorter than its tolerance that is
+/// lamina or wire (`squeeze_small_edges`, with `making_manifold_solid` as the primitives
+/// stitch). For the walls of an uncapped sweep the lamina edges are the profile's copies
+/// at its ends, so the first pass's count says nothing about a gap. There the second pass
+/// squeezed out a profile edge between the two tolerances, and its wall's loop was left
+/// open by the edge's length in 3D and the wall's whole width in UV. Walls whose edges lie
+/// apart by more than the first tolerance stay apart, as an open slit; the second pass
+/// glued them without covering the gap, and the check refused the sheet. Not upstream
+/// (WR-18515); the caller answers for the premise.
+///
+/// # Errors
+///
+/// Those of [`stitch_and_orient`].
+pub(crate) fn stitch_and_orient_open(
+    k: &mut Kernel,
+    b: &mut Brep,
+    options: &StitchAndOrientOptions,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
+) -> Result<()> {
+    stitch_and_orient_searching(k, b, options, identity, None, false)
+}
+
+/// The stitch passes and the orientation; with `second_pass`, a second pass at the larger
+/// tolerance when the first leaves more than one lamina edge.
 fn stitch_and_orient_searching(
     k: &mut Kernel,
     b: &mut Brep,
     options: &StitchAndOrientOptions,
     identity: Option<crate::query::brep::BrepIdentity<'_>>,
     outside: Option<FaceuseId>,
+    second_pass: bool,
 ) -> Result<()> {
     k.check_cancelled(OP)?;
+    let raises = StitchRaises::before(b);
     let mut lamina = 0;
     let mut tolerance = initial_stitch_tolerance(b.tolerance(), options.stitch_tolerance);
     stitch_faces(
@@ -2954,7 +3045,7 @@ fn stitch_and_orient_searching(
         identity,
         outside,
     )?;
-    if lamina > 1 {
+    if second_pass && lamina > 1 {
         tolerance = if options.stitch_tolerance <= 0.0 {
             tolerance * 20.0
         } else {
@@ -2970,6 +3061,7 @@ fn stitch_and_orient_searching(
             outside,
         )?;
     }
+    let covered = raises.covered(k, b)?;
     plain_edit(k, b, |k, b, env| {
         orient_trimmed_surfaces(
             k,
@@ -2980,7 +3072,8 @@ fn stitch_and_orient_searching(
             options.faces_to_swap.as_deref(),
         )?;
         Ok(())
-    })
+    })?;
+    keep_stitch_raises(k, b, &covered)
 }
 
 /// [`stitch_and_orient`] inside the caller's edit: the stitch passes and the orientation
@@ -3001,6 +3094,7 @@ pub(crate) fn stitch_and_orient_notified(
     curve_identity: crate::topology::brep::p9::CurveIdentity<'_>,
 ) -> Result<()> {
     k.check_cancelled(OP)?;
+    let raises = StitchRaises::before(b);
     let mut lamina = 0;
     let mut tolerance = initial_stitch_tolerance(b.tolerance(), options.stitch_tolerance);
     stitch_faces_notified(
@@ -3028,6 +3122,7 @@ pub(crate) fn stitch_and_orient_notified(
             curve_identity,
         )?;
     }
+    let covered = raises.covered(k, b)?;
     orient_trimmed_surfaces(
         k,
         b,
@@ -3036,7 +3131,7 @@ pub(crate) fn stitch_and_orient_notified(
         options.just_unify.unwrap_or(lamina > 0),
         options.faces_to_swap.as_deref(),
     )?;
-    Ok(())
+    keep_stitch_raises(k, b, &covered)
 }
 
 /// [`stitch_faces`] editing through `env` ([`stitch_and_orient_notified`]).

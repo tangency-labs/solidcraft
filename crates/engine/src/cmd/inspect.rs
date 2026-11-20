@@ -652,12 +652,14 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|(i, f)| {
                 let r = s.model.result(f.id);
                 let (error, warning) = (r.and_then(|r| r.error.clone()), r.and_then(|r| r.warning.clone()));
+                let error_code = r.and_then(|r| r.error_code.as_ref()).map(Into::into);
                 if timeline_detail == TimelineDetail::Summary {
                     return TimelineRow::Summary(TimelineSummary {
                         id: f.id,
                         name: f.name.clone(),
                         kind: f.kind.type_name().to_string(),
                         error,
+                        error_code,
                         warning,
                         suppressed: f.suppressed.then_some(true),
                         rolled_back: (i >= marker).then_some(true),
@@ -670,6 +672,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
                     suppressed: f.suppressed,
                     rolled_back: i >= marker,
                     error,
+                    error_code,
                     warning,
                     ms: r.map(|r| r.ms),
                 })

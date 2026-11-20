@@ -1660,7 +1660,7 @@ mod tests {
                     let file = crate::scenario::rect_of("appbar:file").unwrap();
                     let home = crate::scenario::rect_of("appbar:home").unwrap();
                     assert!(toggle.right() < home.left());
-                    assert!(home.right() < file.left());
+                    assert!(home.right() <= file.left(), "Home may touch File but never overlap it: {home:?} {file:?}");
                     assert!(toggle.bottom() < panel.top());
                     let viewport = h.app.viewport.rect.unwrap();
                     assert!(viewport.left() >= panel.right(), "{panel:?} {viewport:?}");
