@@ -50,9 +50,14 @@
 //!   makes the angle `d / r` at a step `d`. The zero sector's class is kept while the steps
 //!   grow (three times each round) until its faces are apart, and a coincidence of faces the
 //!   definitions show to lie on different surfaces
-//!   ([`crate::query::face::p1::faces_on_other_surfaces`]) is held back likewise. Where the
+//!   ([`crate::query::face::p1::faces_on_other_surfaces`]), or on surfaces of different kinds
+//!   (a blend and a cylinder in G2 contact) once the steps show them part by more than
+//!   rounding, is held back likewise. Where the
 //!   faces part by more than the tolerance the sector decides; where a step leaves a face
-//!   or the rounds run out first, the class is returned. Three planes are read once, at
+//!   or the rounds run out first, the class is returned. A step that leaves only one face of
+//!   the sector while the classified face is held to the other, tangent to it at the edge
+//!   (under `EFF_ZERO_SQRT` rad, not crossing it at a small angle), keeps that face's last step:
+//!   a sliver cut off along the tangent line of a blend is left long before the faces part. Three planes are read once, at
 //!   the edge: two of them closer than 0.001° there are coincident only where their faces
 //!   stay within the tolerance band of each other's plane; walls 3.3e-7 rad apart through
 //!   the edge, 2.8e-5 apart 85 mm from it, are classified by their exact binormals.
@@ -74,6 +79,7 @@ use crate::math::{Point3, Vec3, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::{BoundingBoxRequest, BoundingBoxes};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::p2::PLANE_TYPE;
+use crate::surface::surface::SurfaceKind;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p2::{evaluate_binormal_step_off_into, BinormalEval, StepOffOptions};
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId};
@@ -559,31 +565,83 @@ fn on_plane(brep: &Brep, eu: EdgeuseId) -> Result<bool> {
         .is_kind_of(PLANE_TYPE)
 }
 
-/// Whether the definitions show the faces of two loop edge uses to lie on different surfaces
-/// ([`crate::query::face::p1::faces_on_other_surfaces`]), asked once and kept in `known`.
+/// Whether the faces of two loop edge uses may lie on different surfaces, so that their
+/// coincidence is read from where they part rather than from their angle near the edge:
+/// the definitions show the surfaces to differ
+/// ([`crate::query::face::p1::faces_on_other_surfaces`]), or the surfaces are of different
+/// kinds that the definitions cannot compare (a blend and a cylinder, a B-spline and a
+/// plane). Faces of different kinds are one surface only where they stay within the
+/// tolerance of each other, and the held steps read exactly that: a coincidence that holds
+/// until a step leaves a face or the rounds run out is returned as before. Asked once and
+/// kept in `known`.
+///
+/// Different kinds alone prove nothing: a swept wall can be the very plane of the face it
+/// meets. [`Surfaces::Kinds`] tells that case apart, so a held coincidence can ask for the
+/// steps to show the faces parting first ([`holds_coincidence`]).
 fn on_other_surfaces(
     k: &Kernel,
     brep: &Brep,
     eu: EdgeuseId,
     other: &Brep,
     other_eu: EdgeuseId,
-    known: &mut Option<bool>,
-) -> Result<bool> {
+    known: &mut Option<Surfaces>,
+) -> Result<Surfaces> {
     if let Some(apart) = *known {
         return Ok(apart);
     }
     let face = |b: &Brep, eu: EdgeuseId| {
         eu1::face(b, eu)?.ok_or_else(|| null(OP_RADIAL, "edge use without face"))
     };
-    let apart = crate::query::face::p1::faces_on_other_surfaces(
-        k,
-        brep,
-        face(brep, eu)?,
-        other,
-        face(other, other_eu)?,
-    )?;
+    let (f, other_f) = (face(brep, eu)?, face(other, other_eu)?);
+    let kind = |b: &Brep, f: FaceId| -> Result<std::mem::Discriminant<SurfaceKind>> {
+        Ok(std::mem::discriminant(
+            b.face(f)?
+                .surface
+                .as_ref()
+                .ok_or_else(|| null(OP_RADIAL, "face without surface"))?
+                .kind(),
+        ))
+    };
+    let apart = if crate::query::face::p1::faces_on_other_surfaces(k, brep, f, other, other_f)? {
+        Surfaces::Other
+    } else if kind(brep, f)? != kind(other, other_f)? {
+        Surfaces::Kinds
+    } else {
+        Surfaces::Same
+    };
     *known = Some(apart);
     Ok(apart)
+}
+
+/// What [`on_other_surfaces`] knows of the surfaces of two faces.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Surfaces {
+    /// Nothing shows them to differ: a coincidence near the edge is the surfaces'.
+    Same,
+    /// The definitions show the surfaces to differ.
+    Other,
+    /// Surfaces of different kinds the definitions cannot compare.
+    Kinds,
+}
+
+/// Whether a coincidence of two faces near the edge is held back while the steps grow
+/// (not upstream). Faces on surfaces the definitions show to differ always are. Faces on
+/// surfaces of different kinds are held only once the steps show them part: their step
+/// points `gap` apart at the same step is more than rounding ([`EFF_ZERO`]). A blend in G2
+/// contact with a cylinder (#18166) parts as a power of the step: its points are 1.0e-9
+/// apart at the coincidence's step of 7.7e-3 and part by 5.6e-4 at 0.21. A swept wall on
+/// the plane of the face it meets stays at 1e-14 for over a millimetre and then parts
+/// where the wall turns, far from the edge: read there, the side of a coincident face
+/// came out of a feature the edge does not touch (rig sweeps/5037, status 1001).
+/// [`EFF_ZERO`] is absolute, as upstream's coincidence tests: far from the origin a step
+/// point's own rounding can exceed it, and a coincidence such as sweeps/5037's would be held
+/// there. Scaling it by the points' magnitude is a known limit, not done here.
+fn holds_coincidence(surfaces: Surfaces, gap: f64) -> bool {
+    match surfaces {
+        Surfaces::Same => false,
+        Surfaces::Other => true,
+        Surfaces::Kinds => gap > EFF_ZERO,
+    }
 }
 
 /// `SmEdge::RadialSectorClassify`: where the face of `classify_eu` lies relative to
@@ -726,45 +784,49 @@ pub fn radial_sector_classify_between(
     // while the steps grow to see whether the two part; whether the sector face's and the
     // radial partner's surfaces are other surfaces than the classified face's.
     let mut held = false;
-    let mut other_than_sector: Option<bool> = None;
-    let mut other_than_radial: Option<bool> = None;
+    let mut other_than_sector: Option<Surfaces> = None;
+    let mut other_than_radial: Option<Surfaces> = None;
 
     // the step-off vectors (Bin = binormal)
     let mut s1 = StepOffVectors::default();
     let mut s2 = StepOffVectors::default();
     let mut s3 = StepOffVectors::default();
 
+    // A sector face that a step has left while the classified face, tangent to the sector's
+    // other face on another surface, is still followed: its last step is kept (not upstream).
+    let mut sector_left = false;
+    let mut radial_left = false;
+
     while !done {
+        let (last1, last2) = (s1, s2);
         // 1. get Edgeuse->Face stepoff binormal
-        let mut stepped_off_surface = stepped_off(evaluate_binormal_step_off(
-            k,
-            brep,
-            sector_eu,
-            this_param,
-            step_off_distance,
-            &mut s1,
-            Some(start_point),
-            None,
-        ))?;
-        let norm1 = s1.tangent.cross(s1.binormal);
+        let off1 = !sector_left
+            && stepped_off(evaluate_binormal_step_off(
+                k,
+                brep,
+                sector_eu,
+                this_param,
+                step_off_distance,
+                &mut s1,
+                Some(start_point),
+                None,
+            ))?;
 
         // 2. get Edgeuse->RadialPartner->face stepoff binormal
-        if stepped_off(evaluate_binormal_step_off(
-            k,
-            brep,
-            eu_radial,
-            this_param,
-            step_off_distance,
-            &mut s2,
-            Some(start_point),
-            Some(s1.tangent),
-        ))? {
-            stepped_off_surface = true;
-        }
-        let norm2 = s2.tangent.cross(s2.binormal);
+        let off2 = !radial_left
+            && stepped_off(evaluate_binormal_step_off(
+                k,
+                brep,
+                eu_radial,
+                this_param,
+                step_off_distance,
+                &mut s2,
+                Some(start_point),
+                Some(s1.tangent),
+            ))?;
 
         // 3. get ClassifyEdge->face stepoff binormal
-        if stepped_off(evaluate_binormal_step_off(
+        let off3 = stepped_off(evaluate_binormal_step_off(
             k,
             match other_brep.as_deref_mut() {
                 Some(o) => o,
@@ -776,9 +838,66 @@ pub fn radial_sector_classify_between(
             &mut s3,
             Some(start_point),
             Some(s1.tangent),
-        ))? {
-            stepped_off_surface = true;
+        ))?;
+
+        // (not upstream) A step that leaves one face of the sector only does not end the
+        // classification while the classified face, tangent to the sector's other face, is
+        // on another surface than that face: tangent faces on two surfaces are one only while
+        // they stay within the tolerance, and that is read where the steps show them part
+        // (the exit below) or leave one of the two. The sector's left face keeps its last
+        // step. A sliver face cut off by an intersection curve along the tangent line of a
+        // blend (#18166) is left within a few tolerances of the edge, long before the faces
+        // part, and read alone it makes the classified face coincide with the blend face.
+        // Only faces still tangent at the last step are followed: their angle there (`ang2`
+        // or `ang3`, computed at the end of the previous round) under `EFF_ZERO_SQRT`, the
+        // bound this classifier takes for faces parallel at the edge (the zero sector test
+        // below). A pair whose angle has grown past it by the step reached (faces tangent at
+        // the edge with other curvatures, whose angle grows as `d / R`) is not followed and
+        // keeps upstream's classification. Faces that cross at a small angle part linearly from the edge, and their
+        // angle is the classifier's own coincidence test: two fillets of one radius a 1e-4
+        // translate apart cross at 5e-5 rad and stay within 1e-4 of each other over their
+        // whole width (issue_3012's sliver), where following one to its far end read a
+        // 1.05e-4 parting as a side and lost the coincidence (status 1001). The G2 blend's
+        // faces meet at 5.5e-13 rad and part faster than the square of the step
+        // (6.8e-6 at 0.069, 5.6e-4 at 0.21).
+        if count > 0 && !off3 && off1 != off2 && zero_sector.is_none() {
+            let classify_brep = other_brep.as_deref().unwrap_or(&*brep);
+            let follow = if off2 {
+                ang2 <= ang3 + EFF_ZERO
+                    && ang2 < EFF_ZERO_SQRT
+                    && on_other_surfaces(
+                        k,
+                        brep,
+                        sector_eu,
+                        classify_brep,
+                        classify_eu,
+                        &mut other_than_sector,
+                    )? != Surfaces::Same
+            } else {
+                ang3 <= ang2 + EFF_ZERO
+                    && ang3 < EFF_ZERO_SQRT
+                    && on_other_surfaces(
+                        k,
+                        brep,
+                        eu_radial,
+                        classify_brep,
+                        classify_eu,
+                        &mut other_than_radial,
+                    )? != Surfaces::Same
+            };
+            if follow {
+                if off1 {
+                    s1 = last1;
+                    sector_left = true;
+                } else {
+                    s2 = last2;
+                    radial_left = true;
+                }
+            }
         }
+        let stepped_off_surface = (off1 && !sector_left) || (off2 && !radial_left) || off3;
+        let norm1 = s1.tangent.cross(s1.binormal);
+        let norm2 = s2.tangent.cross(s2.binormal);
         let norm3 = s3.tangent.cross(s3.binormal);
 
         // Project the binormal into the plane defined by sTan1.
@@ -998,14 +1117,17 @@ pub fn radial_sector_classify_between(
             let on_radial = ang3 <= ang2 + EFF_ZERO && ang3 < 0.5 * PI / 180.0;
             if on_sector
                 && (done
-                    || !on_other_surfaces(
-                        k,
-                        brep,
-                        sector_eu,
-                        classify_brep,
-                        classify_eu,
-                        &mut other_than_sector,
-                    )?)
+                    || !holds_coincidence(
+                        on_other_surfaces(
+                            k,
+                            brep,
+                            sector_eu,
+                            classify_brep,
+                            classify_eu,
+                            &mut other_than_sector,
+                        )?,
+                        diff2,
+                    ))
             {
                 return Ok(if norm1.dot(norm3) < 0.0 {
                     RadialSectorClass::CoincidentSectorMate
@@ -1014,14 +1136,17 @@ pub fn radial_sector_classify_between(
                 });
             } else if on_radial
                 && (done
-                    || !on_other_surfaces(
-                        k,
-                        brep,
-                        eu_radial,
-                        classify_brep,
-                        classify_eu,
-                        &mut other_than_radial,
-                    )?)
+                    || !holds_coincidence(
+                        on_other_surfaces(
+                            k,
+                            brep,
+                            eu_radial,
+                            classify_brep,
+                            classify_eu,
+                            &mut other_than_radial,
+                        )?,
+                        diff3,
+                    ))
             {
                 let norm4 = s2.tangent.cross(s2.binormal);
                 let norm5 = s3.tangent.cross(bin3);

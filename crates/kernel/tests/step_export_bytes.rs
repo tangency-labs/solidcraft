@@ -57,7 +57,9 @@ const NO_READ_BACK: &[&str] = &["tests/step-regressions/thread_crest_band.step"]
 
 /// (fixture, digest of its export) as written before the move, plus new fixtures; the torus-ring spline
 /// is now an exact torus (#16297), and an edge on a rational spline that is exactly a circular arc
-/// is written as that circle (#17929).
+/// is written as that circle (#17929). Kernel-case 3208 differs only in its uncertainty (line #8,
+/// the largest edge tolerance): 1e-6 where main wrote 1.3356874714460462e-6, as the lazy UV trim
+/// no longer raises its edge past the trim's proved distance, which 1e-6 covers (#18166).
 /// Entries whose export's bytes differ only on macOS's math functions, beside the pinned values
 /// above: the reader's seam split now lands on the edge's own knot, and the pcurves made beside it
 /// carry macOS libm's rounding for these fixtures (on Linux the split solves within the export's
@@ -109,7 +111,7 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/kernel-cases/import/258-cone-to-point/input.step", "112fb1ed128b8863"),
     ("tests/kernel-cases/import/258-tiny-pin/input.step", "7b4b8437f83a83a3"),
     ("tests/kernel-cases/import/3098-bspline-edges-over-tiny-knot-span/input.step", "b570b62268740b6a"),
-    ("tests/kernel-cases/import/3208-extruded-ellipse-face-over-parameter-seam/input.step", "ec8784dcbe789ac8"),
+    ("tests/kernel-cases/import/3208-extruded-ellipse-face-over-parameter-seam/input.step", "cb1a867bf1b66556"),
     ("tests/kernel-cases/import/3352-vertex-off-its-edge-curve/input.step", "5e6454bed8d85bc3"),
     ("tests/kernel-cases/import/3730-void-oriented-shell-false/input.step", "e461e3732a479928"),
     ("tests/kernel-cases/import/3880-cylinder-seam-edge/input.step", "183935caa3bdda17"),

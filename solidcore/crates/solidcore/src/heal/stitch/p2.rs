@@ -461,6 +461,9 @@ impl Stitch<'_> {
         let old_doing_boolean = k.context.doing_boolean();
         k.context.set_doing_boolean(true);
         let r = self.do_stitching_body(k, b, candidate_vertices, candidate_edges, &mut out);
+        // (not upstream, #18166: the joins' covers, on the final trims and faces, while
+        // editing is still enabled)
+        let r = self.finish_joins(k, b, r);
         k.context.set_doing_boolean(old_doing_boolean);
         b.set_editing_enabled(old_editing);
         r.map(|()| out)

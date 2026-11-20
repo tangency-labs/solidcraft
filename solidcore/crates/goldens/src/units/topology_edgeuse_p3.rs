@@ -175,6 +175,8 @@ fn status_of(e: &SolidError) -> Option<f64> {
 
 /// The tail every op reports: the edge use's and its mate's state and the edge state.
 fn put_states(k: &Kernel, o: &mut Vec<f64>, b: &Brep, eu: EdgeuseId) -> Result<(), SolidError> {
+    #[cfg(test)]
+    crate::certify::written(b);
     let mate = eu1::mate(b, eu).ok().flatten();
     put_eu_state(k, o, b, Some(eu))?;
     put_eu_state(k, o, b, mate)?;

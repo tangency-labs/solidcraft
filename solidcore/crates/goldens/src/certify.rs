@@ -348,6 +348,43 @@ pub(crate) fn take_kept() -> Option<solidcore::topology::Brep> {
     KEPT.with(|k| k.borrow_mut().take())
 }
 
+#[cfg(test)]
+thread_local! {
+    static WRITTEN: std::cell::RefCell<Option<Vec<solidcore::topology::Brep>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Starts keeping a copy of every B-rep a runner hands to [`written`] on this thread, for
+/// [`take_written`] ([`trim_tolerance`]).
+#[cfg(test)]
+pub(crate) fn watch_written() {
+    WRITTEN.with(|w| *w.borrow_mut() = Some(Vec::new()));
+}
+
+/// A runner's B-rep whose tolerances it is writing into its output: copied while
+/// [`watch_written`] is on, ignored otherwise.
+///
+/// # Panics
+///
+/// When the B-rep cannot be copied.
+#[cfg(test)]
+pub(crate) fn written(b: &solidcore::topology::Brep) {
+    WRITTEN.with(|w| {
+        if let Some(kept) = w.borrow_mut().as_mut() {
+            kept.push(b.clone_standing_for_self().expect("a copy of the B-rep"));
+        }
+    });
+}
+
+/// Stops [`watch_written`] and returns the copies kept since.
+#[cfg(test)]
+pub(crate) fn take_written() -> Vec<solidcore::topology::Brep> {
+    WRITTEN.with(|w| w.borrow_mut().take().unwrap_or_default())
+}
+
+#[cfg(test)]
+pub(crate) mod trim_tolerance;
+
 /// One edge's tolerance and what it must cover: the largest certified upper end of its
 /// uses' sampled edge-face gaps ([`sampled_max`] over `CalcMaxEdgeFaceGap`'s 20-sample gap
 /// function) and their largest lower end.
