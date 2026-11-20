@@ -121,19 +121,38 @@ impl DragPaint {
 pub(crate) struct WindowCard {
     bounds: Rect,
     shapes: Vec<ClippedShape>,
+    /// How high the card's row of actions is at the top of the copy; 0 without one.
+    action_row: f32,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl WindowCard {
-    /// `body` is the part of the card below its header.
-    pub(super) fn copy(ctx: &Context, card: &CardPaint, body: Rect) -> Self {
+    /// `body` is the part of the card below its header, whose top `action_row`
+    /// is the card's row of actions.
+    pub(super) fn copy(ctx: &Context, card: &CardPaint, body: Rect, action_row: f32) -> Self {
         let shapes = ctx.graphics(|graphics| graphics.get(card.layer).map_or_else(Vec::new, |list| card_entries(list, card).cloned().collect()));
-        Self { bounds: body, shapes }
+        Self { bounds: body, shapes, action_row: action_row.clamp(0.0, body.height().max(0.0)) }
+    }
+
+    /// A copy made of `shapes` painted in `body`, for tests.
+    #[cfg(test)]
+    pub(crate) fn of(body: Rect, shapes: Vec<ClippedShape>, action_row: f32) -> Self {
+        Self { bounds: body, shapes, action_row }
     }
 
     /// Paint the panel's body at `bounds` on `ui`'s layer.
     pub(crate) fn paint(&self, ui: &Ui, bounds: Rect) {
-        let clip = ui.clip_rect();
+        self.paint_clipped(ui, bounds, ui.clip_rect());
+    }
+
+    /// As `paint`, without the card's row of actions: what is below that row
+    /// starts at the top of `bounds`.
+    pub(crate) fn paint_body(&self, ui: &Ui, bounds: Rect) {
+        let whole = Rect::from_min_max(bounds.min - egui::vec2(0.0, self.action_row), bounds.max);
+        self.paint_clipped(ui, whole, ui.clip_rect().intersect(bounds));
+    }
+
+    fn paint_clipped(&self, ui: &Ui, bounds: Rect, clip: Rect) {
         ui.ctx().graphics_mut(|graphics| {
             let list = graphics.entry(ui.layer_id());
             for (clip, shape) in relocated(self.shapes.iter().cloned(), self.bounds, bounds, clip, 1.0) {

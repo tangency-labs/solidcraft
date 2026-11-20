@@ -378,10 +378,11 @@ impl WorkspacePanelHost {
         }
     }
 
-    /// The panel's content takes its title's place (`set_header_content`).
+    /// The narrowest width of the panel's content in its title's place, when it
+    /// takes that place (`set_header_content`).
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn has_header_content(&self, instance: &InstanceId) -> bool {
-        self.options.geometry.header_content.contains_key(instance)
+    pub(crate) fn header_content(&self, instance: &InstanceId) -> Option<f32> {
+        self.options.geometry.header_content.get(instance).copied()
     }
 
     /// The panel's header action is hidden (`set_header_action_visible`).
@@ -1819,10 +1820,12 @@ impl WorkspacePanelHost {
                         .or_else(|| frame.layout.sections.iter().find(|section| &section.instance == source))
                 }))
                 .map(|(card, section)| {
-                    // The window's title bar takes the header's place: copy the body only.
+                    // The window's title bar takes the header's place: copy the body only,
+                    // with the row of actions the card has above it.
                     let header = (section.header.origin.y + section.header.size.height - section.outer.origin.y).max(0.0);
                     let body = egui::Rect::from_min_max(card.bounds.min + egui::vec2(0.0, header), card.bounds.max);
-                    WindowCard::copy(ui.ctx(), card, body)
+                    let action_row = section.action_bar.map_or(0.0, |row| row.size.height);
+                    WindowCard::copy(ui.ctx(), card, body, action_row)
                 });
         }
         if source.is_none() && drag_cards.is_empty() {

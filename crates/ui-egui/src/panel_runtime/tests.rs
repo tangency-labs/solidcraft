@@ -14704,12 +14704,18 @@ fn paint_panel_window(
     PaintedWindow { body: slots.body.expect("the window mounts the panel's body"), title: slots.title, buttons: frame_buttons(&output) }
 }
 
-/// One frame of the window a drag shows for a panel: its buttons by accessible name.
-fn paint_drop_window(window: egui::Rect, look: Option<super::native_ui::CardWindow>, title: &str) -> Vec<(String, egui::Rect)> {
+/// One frame of the window a drag shows for a panel with `actions`: its buttons
+/// by accessible name.
+fn paint_drop_window(
+    window: egui::Rect,
+    look: Option<super::native_ui::CardWindow>,
+    title: &str,
+    actions: &[super::native_ui::WindowControl],
+) -> Vec<(String, egui::Rect)> {
     let ctx = crate::fonts::test_context();
     ctx.enable_accesskit();
     let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(window), focused: true, ..Default::default() }, |ui| {
-        super::native_ui::paint_drop(ui, None, 30.0, look, &id("editor"), title, false);
+        super::native_ui::paint_drop(ui, None, 30.0, look, &id("editor"), title, false, actions);
     });
     output.textures_delta.clear();
     frame_buttons(&output)
@@ -14765,34 +14771,86 @@ fn panel_windows_have_the_app_title_bar_and_card_layout_unless_the_preference_ke
     assert!((body.top() - chrome).abs() < 0.5, "the fitted height counts what the earlier layout draws: {body:?} {chrome}");
     assert_eq!((body.left(), body.right(), body.bottom()), (window.left(), window.right(), window.bottom()), "{body:?}");
     // So is the window a drag shows: nothing but the panel's paint.
-    assert!(paint_drop_window(window, None, &title).is_empty());
+    let actions = super::native_ui::window_actions(&h.runtime, &id("editor"), None).unwrap();
+    assert_eq!(actions.len(), 2);
+    assert!(paint_drop_window(window, None, &title, &actions).is_empty());
 
     // By default: the app's title bar with the panel's title and grip, and the
-    // panel's menu at its trailing end; the actions in the card's action row from
-    // the trailing edge; the body with the card's inset, under the content header
-    // and above the footer's reserve.
+    // panel's menu at its trailing end. The panel's actions fit beside the title,
+    // so they are in the title bar too, in their declared order up to the menu, as
+    // in a docked header: they take no row. The body has the card's inset, under
+    // the content header and above the footer's reserve.
+    use super::native_ui::{ActionPlace, action_place, bar_holds_actions};
+    let ctx = crate::fonts::test_context();
     let card = super::native_ui::CardWindow::of(crate::window_chrome::TitleBar::default(), None);
     let metrics = card.metrics;
+    // Where a window that wide shows the panel's actions; text is measured in a frame.
+    let place = |h: &PanelMountHarness, width: f32| {
+        let mut place = None;
+        let mut output = crate::fonts::test_context().run_ui(egui::RawInput::default(), |ui| {
+            place = Some(action_place(ui.ctx(), &h.runtime, None, card, &id("editor"), width));
+        });
+        output.textures_delta.clear();
+        place.unwrap()
+    };
+    assert_eq!(place(&h, window.width()), ActionPlace::TitleBar);
     let PaintedWindow { body: inset, title: none, buttons } = paint_panel_window(&mut h, &host, window, None, Some(card));
     assert_eq!(none, None, "the panel asked for nothing in the title's place");
     let grip = named(&buttons, &title).expect("the title bar has the panel's title and grip");
     assert!(grip.bottom() <= bar && grip.right() < window.center().x, "{grip:?}");
     let button = named(&buttons, menu).expect("the title bar has the panel's menu");
     assert!(button.bottom() <= bar && button.left() > window.center().x, "{button:?}");
-    let margin = ((metrics.header_height - metrics.control_extent) / 2.0).max(0.0);
     let (apply, cancel) = (named(&buttons, "apply").unwrap(), named(&buttons, "cancel").unwrap());
-    assert!((cancel.right() - (window.right() - margin)).abs() < 1e-3 && (apply.right() - cancel.left()).abs() < 1e-3, "{apply:?} {cancel:?}");
-    assert!((apply.top() - bar).abs() < 1e-3 && (apply.height() - metrics.control_extent).abs() < 1e-3, "{apply:?}");
+    assert!((cancel.right() - button.left()).abs() < 1e-3 && (apply.right() - cancel.left()).abs() < 1e-3, "{apply:?} {cancel:?} {button:?}");
+    assert!((apply.center().y - button.center().y).abs() < 1e-3 && (apply.height() - metrics.control_extent).abs() < 1e-3, "{apply:?}");
+    assert!(grip.right() <= apply.left(), "the title keeps its width beside the actions: {grip:?} {apply:?}");
     let card_body = egui::Rect::from_min_max(
-        egui::pos2(window.left(), bar + metrics.control_extent + metrics.content_header_height),
+        egui::pos2(window.left(), bar + metrics.content_header_height),
         egui::pos2(window.right(), window.bottom() - metrics.footer_height),
     );
     assert_eq!(inset, super::workspace::content_inset(card_body));
-    let chrome = super::native_ui::window_chrome(&crate::fonts::test_context(), Some(card), true);
+    let chrome = super::native_ui::window_chrome(&ctx, Some(card), false);
     assert!((chrome - (card_body.top() + metrics.footer_height)).abs() < 1e-3, "{chrome} {card_body:?}");
-    // The window a drag shows has that same title bar, so it is the window kept on release.
-    let shown = paint_drop_window(window, Some(card), &title);
-    assert_eq!((named(&shown, &title), named(&shown, menu)), (Some(grip), Some(button)), "{shown:?}");
+    // The window a drag shows has that same title bar, the actions in it, so it is
+    // the window kept on release.
+    let shown = paint_drop_window(window, Some(card), &title, &actions);
+    assert_eq!(
+        (named(&shown, &title), named(&shown, "apply"), named(&shown, "cancel"), named(&shown, menu)),
+        (Some(grip), Some(apply), Some(cancel), Some(button)),
+        "{shown:?}"
+    );
+
+    // A window too narrow for the actions beside the title has them in the card's
+    // action row under the title bar, from the trailing edge, and the body under
+    // that row.
+    let narrow = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(160.0, 500.0));
+    assert_eq!(place(&h, narrow.width()), ActionPlace::Row);
+    let PaintedWindow { body: under_row, buttons, .. } = paint_panel_window(&mut h, &host, narrow, None, Some(card));
+    let margin = ((metrics.header_height - metrics.control_extent) / 2.0).max(0.0);
+    let (apply, cancel) = (named(&buttons, "apply").unwrap(), named(&buttons, "cancel").unwrap());
+    assert!((cancel.right() - (narrow.right() - margin)).abs() < 1e-3 && (apply.right() - cancel.left()).abs() < 1e-3, "{apply:?} {cancel:?}");
+    assert!((apply.top() - bar).abs() < 1e-3 && (apply.height() - metrics.control_extent).abs() < 1e-3, "{apply:?}");
+    let row_body = egui::Rect::from_min_max(
+        egui::pos2(narrow.left(), bar + metrics.control_extent + metrics.content_header_height),
+        egui::pos2(narrow.right(), narrow.bottom() - metrics.footer_height),
+    );
+    assert_eq!(under_row, super::workspace::content_inset(row_body));
+    let chrome = super::native_ui::window_chrome(&ctx, Some(card), true);
+    assert!((chrome - (row_body.top() + metrics.footer_height)).abs() < 1e-3, "{chrome} {row_body:?}");
+    // The window a drag shows then has no action in its title bar either: the card's
+    // paint brings its row.
+    let shown = paint_drop_window(narrow, Some(card), &title, &actions);
+    assert!(named(&shown, "apply").is_none() && named(&shown, "cancel").is_none() && named(&shown, menu).is_some(), "{shown:?}");
+
+    // The rule, as a docked header's: the title, the actions and the menu side by
+    // side. The OS's window controls take their part of the bar. A panel with no
+    // action has none to place.
+    let needed = 100.0 + 3.0 * metrics.control_extent + card.gutter + margin + solidcraft_theme::Tokens::get().space_2;
+    assert!(bar_holds_actions(card, needed + 0.5, 100.0, 2) && !bar_holds_actions(card, needed - 0.5, 100.0, 2));
+    let lights = super::native_ui::CardWindow { title_bar: crate::window_chrome::TitleBar { traffic_lights: true, caption_buttons: false }, ..card };
+    let reserve = crate::window_chrome::TRAFFIC_LIGHTS;
+    assert!(!bar_holds_actions(lights, needed + 0.5, 100.0, 2) && bar_holds_actions(lights, needed + reserve + 0.5, 100.0, 2));
+    assert!(!bar_holds_actions(card, 4000.0, 100.0, 0));
 
     // As in the docked header, the panel's own content takes the title's place when
     // the app's host says so (a search box): the title bar keeps the grip alone, the
@@ -14805,9 +14863,11 @@ fn panel_windows_have_the_app_title_bar_and_card_layout_unless_the_preference_ke
     let only_grip = named(&searching.buttons, &title).expect("the grip stays, named as the panel");
     assert!(only_grip.width() < grip.width() && only_grip.left() == grip.left(), "{only_grip:?} {grip:?}");
     let slot = searching.title.expect("the panel's content draws in the title's place");
-    assert!(slot.left() >= only_grip.right() && slot.right() <= button.left() && slot.top() >= 0.0 && slot.bottom() <= bar, "{slot:?}");
+    assert!(named(&searching.buttons, "apply").is_none(), "{:?}", searching.buttons);
+    let kept = named(&searching.buttons, "cancel").expect("the action the host shows stays before the menu");
+    assert!((kept.right() - button.left()).abs() < 1e-3 && kept.bottom() <= bar, "{kept:?}");
+    assert!(slot.left() >= only_grip.right() && slot.right() <= kept.left() && slot.top() >= 0.0 && slot.bottom() <= bar, "{slot:?}");
     assert!(slot.width() >= 120.0, "{slot:?}");
-    assert!(named(&searching.buttons, "apply").is_none() && named(&searching.buttons, "cancel").is_some(), "{:?}", searching.buttons);
     assert_eq!(named(&searching.buttons, menu), Some(button));
     assert_eq!(searching.body, inset, "the body keeps its place");
     // The system's window has no title's place: the panel keeps that content in its
@@ -14819,7 +14879,6 @@ fn panel_windows_have_the_app_title_bar_and_card_layout_unless_the_preference_ke
 
     // What a dragged-out window has in place of its card's header: the title bar, or
     // in the system's window the row of actions, which a side card has in its paint.
-    let ctx = crate::fonts::test_context();
     assert_eq!(super::native_ui::drop_chrome(&ctx, Some(card), true, false), bar);
     assert_eq!(super::native_ui::drop_chrome(&ctx, Some(card), false, true), bar);
     assert_eq!(super::native_ui::drop_chrome(&ctx, None, true, false), super::native_ui::window_chrome(&ctx, None, true));
@@ -14839,6 +14898,37 @@ fn panel_windows_have_the_app_title_bar_and_card_layout_unless_the_preference_ke
     assert!((rtl[2].left() - (row.left() + margin)).abs() < 1e-3, "{rtl:?}");
     assert!(rtl.windows(2).all(|pair| (pair[1].right() - pair[0].left()).abs() < 1e-3), "{rtl:?}");
     assert!(super::native_ui::card_action_row(row, 0, metrics, false).is_empty());
+}
+
+#[test]
+fn a_dragged_cards_copy_leaves_out_its_action_row_under_a_title_bar_that_holds_the_actions() {
+    // A card's paint below its header: a row of actions 28 high, then the body.
+    let copied = egui::Rect::from_min_size(egui::pos2(100.0, 200.0), egui::vec2(300.0, 400.0));
+    let dot = |y: f32| egui::epaint::ClippedShape::new(copied, egui::Shape::circle_filled(egui::pos2(150.0, y), 2.0, egui::Color32::WHITE));
+    let card = super::drag_paint::WindowCard::of(copied, vec![dot(214.0), dot(260.0)], 28.0);
+    let dots = |body: bool, target: egui::Rect| {
+        let mut output = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
+            if body {
+                card.paint_body(ui, target);
+            } else {
+                card.paint(ui, target);
+            }
+        });
+        output.textures_delta.clear();
+        let dots = output.shapes.iter().filter(|shape| matches!(shape.shape, egui::Shape::Circle(_)));
+        dots.map(|shape| (shape.clip_rect, shape.shape.visual_bounding_rect().center().y)).collect::<Vec<_>>()
+    };
+    // Whole, in the content of a window whose title bar has no room for the
+    // actions: the row, then the body.
+    let whole = egui::Rect::from_min_size(egui::pos2(0.0, 36.0), copied.size());
+    assert_eq!(dots(false, whole).iter().map(|(_, y)| *y).collect::<Vec<_>>(), vec![50.0, 96.0]);
+    // Under a title bar that holds the actions, the window is lower by that row:
+    // the body starts at the top of the content, and the row is clipped away.
+    let body = egui::Rect::from_min_size(whole.min, copied.size() - egui::vec2(0.0, 28.0));
+    let painted = dots(true, body);
+    assert_eq!(painted.iter().map(|(_, y)| *y).collect::<Vec<_>>(), vec![22.0, 68.0]);
+    assert!(painted.iter().all(|(clip, _)| body.contains_rect(*clip)), "{painted:?}");
+    assert!(painted[0].1 < body.top() && body.y_range().contains(painted[1].1), "only the body's dot is in view: {painted:?}");
 }
 
 #[test]

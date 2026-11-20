@@ -366,12 +366,14 @@ then Close. As in the docked header, a panel's own content takes the title's
 place when the app's host gives it that place (`set_header_content`, the
 Browser's search box): the title bar keeps the grip alone, the panel draws its
 `ContentSlot::Title` between the grip and the menu, before its body, and a
-header action the host hides is left out. The window lays out the panel's
-actions and body as its docked card does, with the same metrics and content
-inset. The window shown while a panel is dragged out has the same title bar and
-layout, so nothing moves on release. With that preference off, a panel window is
-the system's window with the earlier layout, also during a drag out; it has no
-title's place, so such content stays in the panel's body.
+header action the host hides is left out. The panel's actions sit in the title
+bar too, before the menu, when they fit beside the title, by the rule of a
+docked header; a narrower window has them in a row under the title bar, as the
+docked card's action row. The body has the docked card's metrics and content
+inset. The window shown while a panel is dragged out has the same title bar,
+actions and layout, so nothing moves on release. With that preference off, a
+panel window is the system's window with the earlier layout, also during a drag
+out; it has no title's place, so such content stays in the panel's body.
 
 Panels in the workspace use the ribbon's theme fill and backdrop blur. The
 system's Reduce Transparency setting keeps the panels opaque. Explicit opacity
