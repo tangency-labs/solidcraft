@@ -890,6 +890,7 @@ impl FilletCorner {
         // locals
         let mut is_open_end_corner = false;
         let mut is_chamfer_corner = true;
+        let mut is_constant_round_corner = true;
 
         // get first to-be-filleted edgeuse connected to vertex
         let start_eu = *solver_eus
@@ -991,7 +992,13 @@ impl FilletCorner {
                     is_chamfer_corner = false;
                 }
             }
+            is_constant_round_corner &= constant_offsets(edge_use)
+                && solver.fsg.as_ref().is_some_and(|generator| {
+                    generator.fillet_surface_generator_type()
+                        == FilletSurfaceGeneratorType::Circular
+                });
         }
+        let can_join_at_cliff = is_chamfer_corner || is_constant_round_corner;
 
         let tan_tol_deg = rad_to_deg(tangency_tol_radians);
         let make = |kind| {
@@ -1025,7 +1032,7 @@ impl FilletCorner {
                 if edge::is_closed(b, e)? {
                     // The fork's (WR-697, smlib#79 step 4d, 543d25a): a closed edge meeting
                     // itself G1 is the blend corner's Join (its shared section)
-                    let cliff_join = if is_chamfer_corner {
+                    let cliff_join = if can_join_at_cliff {
                         super::topology::join::tangent_cliff_join(
                             k,
                             b,
@@ -1339,7 +1346,7 @@ impl FilletCorner {
                                     tan_tol_deg,
                                     join_deg,
                                 )?;
-                                if is_chamfer_corner && !blend.is_join() {
+                                if can_join_at_cliff && !blend.is_join() {
                                     if let Some(event) = super::topology::join::tangent_cliff_join(
                                         k, b, vertex, solver_eus, &all_eus, join_deg,
                                     )? {
