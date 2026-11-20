@@ -35,13 +35,40 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 }
 
 #[test]
+fn large_ribbon_lists_survive_profile_export_import_apply_and_restart() {
+    let mut h = Harness::new();
+    h.app.preferences.ribbon_large_list_icons = true;
+    h.app.preferences.ribbon_icon_grid = false;
+    run(&mut h, "settings.profile.save", json!({"name":"Large ribbon lists"}));
+    let profile = run(&mut h, "settings.profile.export", json!({"name":"Large ribbon lists"}))["profile"].clone();
+    assert_eq!(profile["preferences"]["ribbon_large_list_icons"], true);
+    assert_eq!(profile["preferences"]["ribbon_icon_grid"], false);
+
+    let mut imported = Harness::new();
+    imported.app.preferences.ribbon_icon_grid = true;
+    run(&mut imported, "settings.profile.import", json!({"profile":profile}));
+    let out = run(&mut imported, "settings.profile.apply", json!({"name":"Large ribbon lists"}));
+    assert_eq!(out["skipped"], json!([]), "the menu preferences are accepted: {out}");
+    assert!(imported.app.preferences.ribbon_large_list_icons);
+    assert!(!imported.app.preferences.ribbon_icon_grid, "applying the list profile replaces grid mode");
+
+    let mut restarted = Harness::new();
+    restarted.app.load_prefs(&imported.app.prefs());
+    assert!(restarted.app.preferences.ribbon_large_list_icons);
+    assert!(!restarted.app.preferences.ribbon_icon_grid);
+    restarted.app.preferences.ribbon_large_list_icons = false;
+    run(&mut restarted, "settings.profile.apply", json!({"name":"Large ribbon lists"}));
+    assert!(restarted.app.preferences.ribbon_large_list_icons, "the saved profile also survives restart");
+}
+
+#[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
     // Test change: show_design_view_switcher, the setting the owner asked for, is a portable key.
     assert_eq!(
         keys.len(),
-        108,
-        "include document browser visibility and sizing and the repeated-shortcut preference among the current portable settings"
+        109,
+        "include document browser settings, repeated shortcuts, the design view switcher and large ribbon lists among the portable settings"
     );
     for key in [
         "nav",
@@ -60,6 +87,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "language",
         "library_thumbnail_size",
         "show_document_browser",
+        "ribbon_large_list_icons",
         "suppress_sketch_snap",
     ] {
         assert!(keys.contains(&key), "{key} belongs in a profile");
@@ -864,6 +892,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "ribbon_click_ends_tool",
         "ribbon_icon_grid",
         "ribbon_labels",
+        "ribbon_large_list_icons",
         "ribbon_menus_follow_hover",
         "ribbon_menus_skip_pinned",
         "ribbon_reveal",
@@ -920,7 +949,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
-    assert_eq!(expected.len(), 108);
+    assert_eq!(expected.len(), 109);
     assert_eq!(actual, expected);
 }
 
