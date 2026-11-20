@@ -64,7 +64,9 @@ pub struct Component<'a> {
 pub struct SheetBody<'a> {
     /// The name of the sheet rule it was made with.
     pub rule: &'a str,
+    /// The sheet's thickness, in mm.
     pub thickness: f64,
+    /// The K-factor its bends unfold by (no unit), as its rule works it out.
     pub k_factor: f64,
     /// The inner radius every bend of its bend table shares: none when it has no bend, its bends
     /// differ, or its flat doesn't describe it.
@@ -80,11 +82,19 @@ pub struct SheetBody<'a> {
 /// longer side and its width the shorter, whichever way its axes run.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SheetMetal {
+    /// The sheet thickness, a length in the drawing's units; none when the bodies differ.
     pub thickness: Option<String>,
+    /// The name of the sheet rule; none when the bodies were made with different rules.
     pub sheet_rule: Option<String>,
+    /// The K-factor (no unit); none when the bodies differ.
     pub k_factor: Option<String>,
+    /// The inner radius all bends share, a length in the drawing's units; none when a body has
+    /// no bend, bends differ in radius, or a flat doesn't describe its body.
     pub bend_radius: Option<String>,
+    /// The flat pattern's longer side, a length in the drawing's units; none when the bodies'
+    /// flats differ or a flat doesn't describe its body.
     pub flat_length: Option<String>,
+    /// The flat pattern's shorter side, a length in the drawing's units; none as for `flat_length`.
     pub flat_width: Option<String>,
 }
 
