@@ -1680,6 +1680,103 @@ fn a_mirror_in_a_turned_part_of_its_own_features_copies_them_in_its_frame() {
     assert!(axes.len() == 2 && near2(axes[0], [-28.0, -18.0]) && near2(axes[1], [8.0, -18.0]), "{axes:?}");
 }
 
+/// Base, a root body moved into Part by a transfer, with Pocket, an untargeted cut of x 0..6,
+/// y −15..−10 5 deep into its top, Boss, an untargeted join of x 20..26, y 5..10 on its top, 5
+/// high, and BossBlend, a 1 mm `blend` (`solid.fillet` or `solid.chamfer`) of the boss's upright
+/// edges at x 26, naming Base; then Part placed turned 180° about Z and lifted 20. Where it is
+/// shown, Base is at x −30..10, y −20..20, z 20..30, the pocket at x −6..0, y 10..15 and the
+/// boss at x −26..−20, y −10..−5.
+fn transferred_part_with_a_blended_boss(blend: &str) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-10, -20, 0], "body_name": "Base"}));
+    run(&mut s, "component.create", json!({"name": "Part", "parent": "root", "grounded": false, "activate": false}));
+    run(&mut s, "component.move_bodies", json!({"bodies": ["Base"], "component": "Part"}));
+    run(&mut s, "component.activate", json!({"component": "Part"}));
+    for (name, p0, p1) in [("Pocket", [0, -15], [6, -10]), ("Boss", [20, 5], [26, 10])] {
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": p0, "p1": p1}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"distance": 5, "operation": "join", "name": name});
+        if name == "Pocket" {
+            p["operation"] = json!("cut");
+            p["direction"] = json!("negative");
+        }
+        run(&mut s, "solid.extrude", p);
+    }
+    let mut p = json!({"edges": [[26, 10, 12.5], [26, 5, 12.5]], "body": "Base", "name": "BossBlend"});
+    p[if blend == "solid.fillet" { "radius" } else { "distance" }] = json!(1);
+    run(&mut s, blend, p);
+    place_the_part(&mut s);
+    s
+}
+
+/// What a 1 mm `blend` takes off one upright 5 mm edge of the boss.
+fn boss_blend(blend: &str) -> f64 {
+    if blend == "solid.fillet" { BOSS_ROUND } else { 2.5 }
+}
+
+/// The x − y = −8 plane where it is shown, square to Z: not one the part's turn leaves in place.
+fn diagonal_plane() -> Value {
+    json!({"origin": [-8, 0, 0], "normal": [1, -1, 0]})
+}
+
+/// Base's volume, pocket floors, boss tops (each within 0.3 mm: the blend takes their corners
+/// off) and rounds after `copies` mirrored copies of Pocket, Boss and BossBlend.
+fn assert_blended_copies(s: &mut Session, blend: &str, copies: usize, floors: &[[f64; 2]], tops: &[[f64; 2]], rounds: &[[f64; 2]]) {
+    let v = pockets(s, "Base").0;
+    let (got_floors, got_tops) = (pocket_ends_at(s, "Base", 25.0), pocket_ends_at(s, "Base", 35.0));
+    let case = format!("{blend}: {v}, floors {got_floors:?}, tops {got_tops:?}");
+    assert!(rel(v, 16000.0 - 2.0 * (copies + 1) as f64 * boss_blend(blend)) < 1e-9, "{case}");
+    assert!(got_floors.len() == floors.len() && got_floors.iter().zip(floors).all(|(a, w)| near2(*a, *w)), "{case}");
+    let close = |a: &[f64; 2], w: &[f64; 2]| (a[0] - w[0]).hypot(a[1] - w[1]) < 0.3;
+    assert!(got_tops.len() == tops.len() && got_tops.iter().zip(tops).all(|(a, w)| close(a, w)), "{case}");
+    if blend == "solid.fillet" {
+        let axes = round_axes(s, "Base", 1.0);
+        assert!(axes.len() == rounds.len() && axes.iter().zip(rounds).all(|(a, w)| near2(*a, *w)), "{blend}: {axes:?}");
+    }
+}
+
+/// #19451: a root mirror across a diagonal plane of a pocket, a boss and a blend of the boss's
+/// edges in a part placed turned, its body moved there by a transfer, makes each copy at its
+/// world image, the blend by its edges' names and by its picks: the pocket's image at x 2..7,
+/// y 2..8, the boss's at x −18..−13, y −18..−12, its rounds about y −17. Once the pocket's copy
+/// had changed Base, the copies took Base for a root body: the boss's copy was made through the
+/// part's placement twice and the blend's looked for its edges at their image in the part's own
+/// frame, off Base, and blended the nearest body there.
+#[test]
+fn a_mirrored_blend_in_a_transferred_turned_part_lands_at_its_world_image() {
+    for (blend, by_name) in [("solid.fillet", true), ("solid.fillet", false), ("solid.chamfer", true)] {
+        let mut s = transferred_part_with_a_blended_boss(blend);
+        if !by_name {
+            let f = s.doc_mut().features.iter_mut().find(|f| f.name == "BossBlend").unwrap();
+            f.edge_names.clear();
+            f.edge_refs.clear();
+        }
+        let r = s.execute("solid.mirror", &json!({"features": ["Pocket", "Boss", "BossBlend"], "plane": diagonal_plane()}));
+        assert!(r.as_ref().is_ok_and(|r| r["warning"].is_null()), "{blend} by name {by_name}: {r:?}");
+        let rounds = [[-25.0, -9.0], [-25.0, -6.0], [-17.0, -17.0], [-14.0, -17.0]];
+        assert_blended_copies(&mut s, blend, 1, &[[-3.0, 12.5], [4.5, 5.0]], &[[-23.0, -7.5], [-15.5, -15.0]], &rounds);
+    }
+}
+
+/// #19451: a root mirror across XZ of that mirror makes every copy of its copies there too: a
+/// third pocket at x 2..7, y −8..−2, a third boss at x −18..−13, y 12..18 and its rounds about
+/// y 17. It looked for the blend's edges in the part's own frame, and refused the smooth edge it
+/// found there.
+#[test]
+fn a_mirror_of_a_mirrored_blend_in_a_transferred_turned_part_lands_every_copy() {
+    for blend in ["solid.fillet", "solid.chamfer"] {
+        let mut s = transferred_part_with_a_blended_boss(blend);
+        run(&mut s, "solid.mirror", json!({"features": ["Pocket", "Boss", "BossBlend"], "plane": diagonal_plane(), "name": "Mirror"}));
+        let r = s.execute("solid.mirror", &json!({"features": ["Mirror"], "plane": "XZ"}));
+        assert!(r.as_ref().is_ok_and(|r| r["warning"].is_null()), "{blend}: {r:?}");
+        let floors = [[-3.0, 12.5], [4.5, -5.0], [4.5, 5.0]];
+        let tops = [[-23.0, -7.5], [-15.5, -15.0], [-15.5, 15.0]];
+        let rounds = [[-25.0, -9.0], [-25.0, -6.0], [-17.0, -17.0], [-17.0, 17.0], [-14.0, -17.0], [-14.0, 17.0]];
+        assert_blended_copies(&mut s, blend, 2, &floors, &tops, &rounds);
+    }
+}
+
 /// #19451: a root mirror of a hole placed at a point picked on B's top, kept in BoxB's frame,
 /// drills the world image of the hole: bores ending at x 2 and x 8, y 7.5, z 25. The copy was
 /// drilled at the image in BoxB's own frame, x −12 where it is shown.
