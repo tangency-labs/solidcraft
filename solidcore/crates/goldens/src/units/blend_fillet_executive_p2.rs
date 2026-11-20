@@ -26,8 +26,8 @@ use solidcore::blend::fillet_custom_solver::ConstantRadiusAssistedFs;
 use solidcore::blend::fillet_executive::p1::ExecutiveObjects;
 use solidcore::blend::fillet_executive::p2::FilletParameters;
 use solidcore::blend::fillet_executive::p3::{
-    ContextMark, CornerView, ErrorInfo, ExecutionOptions, ExecutiveAccess, FilletExecutive,
-    StitchAttempt, StitchSettings, TopoEdgeView,
+    ContextMark, CornerView, ErrorInfo, ExecutiveAccess, FilletExecutive, StitchAttempt,
+    StitchSettings, TopoEdgeView,
 };
 use solidcore::blend::fillet_geom::p1::{FilStatus, FilletEdgeType};
 use solidcore::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
@@ -1577,56 +1577,18 @@ fn box_access(bx: &BoxIn) -> Result<Result<Access, Output>, HarnessError> {
 
 /// The executive state the C++ constructor leaves (`SmFilletExecutive(ctx, target)`).
 fn executive(target: Option<Handle>) -> FilletExecutive<Handle> {
-    let mut executive = FilletExecutive {
+    let mut executive = FilletExecutive::new(
         target,
-        fillet: None,
-        corners: vec![],
-        solvers: vec![],
-        topo_edges: vec![],
-        edge_attribute: None,
-        initialized: false,
-        options: ExecutionOptions {
-            piecewise_merge: false,
-            topology_insertion: true,
-            global_merge: false,
-            trimming: true,
-            classification: true,
+        ExecutiveObjects {
+            executive: Handle::Brep(0),
+            pseudo_brep: Handle::Brep(0),
+            edge_attribute: Handle::Brep(0),
         },
-        error: ErrorInfo::default(),
-        intersector: TopologyIntersector::new(
-            None,
-            None,
-            solidcore::math::EFF_ZERO_SQ,
-            30.0 * (solidcore::math::PI / 180.0),
-        ),
-        intersection_edges: vec![],
-        intersection_vertices: vec![],
-        law_sequence_edges: vec![],
-        pseudo_brep: None,
-        surface_generators: vec![],
-        filleted_vertices: Vec::new(),
-        vertex_corner_map: BTreeMap::new(),
-        edgeuse_solver_map: BTreeMap::new(),
-        self_intersection_handler: None,
-        mark_corner_patches: false,
-        cliff_overflow: false,
-        open_ends: Vec::new(),
-        overflow_first: false,
-        classify_only: false,
-        roll_over_pass: false,
-        overflow_edges: Vec::new(),
-        mitred_edges: Vec::new(),
-        fan_split_points: Vec::new(),
-        earlier_pass_faces: Vec::new(),
-        // the fork's refusal fit (WR-696): none noted, as `FilletExecutive::new` leaves it
-        fit_radius: -1.0,
-        fit_edge: None,
-        fit_kind: solidcore::blend::fillet_executive::FitKind::Radius,
-        fit_setback: -1.0,
-        rollover_adjusting: false,
-        rolled_beside_band: false,
-    };
-    executive.intersector.ignore_tangency = true;
+    );
+    // The fixture does not allocate these objects.
+    executive.edge_attribute = None;
+    executive.pseudo_brep = None;
+    executive.error = ErrorInfo::default();
     executive
 }
 
