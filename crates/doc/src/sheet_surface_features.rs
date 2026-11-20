@@ -861,7 +861,7 @@ impl SurfaceSheet {
     pub fn add_fold(&mut self, a: Vec3, b: Vec3, angle: f64, radius: f64, position: &str, flip: bool, stays: FoldSide) -> Result<usize> {
         let f = self.fold_setup(a, b, angle, radius, flip)?;
         let n = if stays == FoldSide::Left { f.across } else { -f.across };
-        match self.plan_fold(f.i, (&f.place, f.places.as_slice()), &f.region, f.line, n, &f.bend, position)? {
+        match self.plan_fold(f.i, (&f.place, f.places.as_slice()), (&f.region, &f.cuts), f.line, n, &f.bend, position)? {
             Ok(plan) => Ok(self.apply_fold(f.i, plan)),
             Err(why) => err(why),
         }
@@ -893,9 +893,9 @@ impl SurfaceSheet {
         };
         let n = if moves_across { f.across } else { -f.across };
         let at = (&f.place, f.places.as_slice());
-        let n = match self.plan_fold(f.i, at, &f.region, f.line, n, &f.bend, position)? {
+        let n = match self.plan_fold(f.i, at, (&f.region, &f.cuts), f.line, n, &f.bend, position)? {
             Ok(_) => n,
-            Err(why) => match self.plan_fold(f.i, at, &f.region, f.line, -n, &f.bend, position) {
+            Err(why) => match self.plan_fold(f.i, at, (&f.region, &f.cuts), f.line, -n, &f.bend, position) {
                 Ok(Ok(plan)) if fixed.is_none_or(|q| !plan.moves.iter().any(|m| crate::sheet_surface_cuts::region_holds(&m.region, q))) => -n,
                 _ => return err(why),
             },
@@ -961,7 +961,20 @@ impl SurfaceSheet {
             relief: (Relief::None, Relief::None),
         };
         let flat_area = dev.panels.iter().map(|p| p.as_ref().map_or(0.0, |p| p.region.area())).collect();
-        Ok(FoldSetup { i, place, places: folded.places, region, line, across: d.perp(), bend, flat_area })
+        // The sheet's cuts across joints, each drawn in the chart of a panel it reaches, in this
+        // panel's chart: through the flat, where every panel's chart has its place.
+        let back = dev.placements.get(i).copied().flatten().map(|p| p.inverse());
+        let cuts = self
+            .sheet
+            .cuts
+            .iter()
+            .filter_map(|c| match (c.panel == i, back, dev.placements.get(c.panel).copied().flatten()) {
+                (true, _, _) => Some(c.region.clone()),
+                (false, Some(back), Some(there)) => Some(back.region(&there.region(&c.region))),
+                _ => None,
+            })
+            .collect();
+        Ok(FoldSetup { i, place, places: folded.places, region, cuts, line, across: d.perp(), bend, flat_area })
     }
 
     /// How much of the sheet lies on either side of a fold's line `x · across = from` in its
@@ -1005,8 +1018,9 @@ impl SurfaceSheet {
         Ok((along, against))
     }
 
-    /// How a fold folds panel `i` (its region `region`; where it and every panel lie in space,
-    /// `at`) along `line` (in the panel's chart), the side along `n` moving: worked out before
+    /// How a fold folds panel `i` (its region `region`, and the sheet's cuts across joints in its
+    /// chart, `sheet_cuts`; where it and every panel lie in space, `at`) along `line` (in the panel's
+    /// chart), the side along `n` moving: worked out before
     /// anything of the sheet changes (see [`SurfaceSheet::add_fold`]). `Ok(Err(why))` where that
     /// side can't be the one that moves, the other side perhaps can: the side that stays falls
     /// apart, or a piece that would fold hangs from two pieces of the zone (it joins the rest
@@ -1016,13 +1030,13 @@ impl SurfaceSheet {
         &self,
         i: usize,
         (here, places): (&Rigid3, &[Option<Rigid3>]),
-        region: &Region2,
+        (region, sheet_cuts): (&Region2, &[Region2]),
         line: [Vec2; 2],
         n: Vec2,
         bend: &Bend,
         position: &str,
     ) -> Result<std::result::Result<FoldPlan, &'static str>> {
-        let planned = self.plan_fold_outline(i, (here, places), region, line, n, bend, position);
+        let planned = self.plan_fold_outline(i, (here, places), (region, sheet_cuts), line, n, bend, position);
         // A round-ended notch can connect the zone while separating the material beyond it
         // (#18560). Close its mouth for the panel/joint recipe, then keep the original notch
         // as a cross-joint cut: the rebuilt surface model cuts it from panels and bends alike.
@@ -1052,7 +1066,7 @@ impl SurfaceSheet {
             return planned;
         }
         let closed = Region2 { outer, holes: region.holes.clone() };
-        match self.plan_fold_outline(i, (here, places), &closed, line, n, bend, position)? {
+        match self.plan_fold_outline(i, (here, places), (&closed, sheet_cuts), line, n, bend, position)? {
             Ok(mut plan) => {
                 plan.cuts.extend(notches.into_iter().map(|outer| Region2 { outer, holes: Vec::new() }));
                 Ok(Ok(plan))
@@ -1066,7 +1080,7 @@ impl SurfaceSheet {
         &self,
         i: usize,
         (here, places): (&Rigid3, &[Option<Rigid3>]),
-        region: &Region2,
+        (region, sheet_cuts): (&Region2, &[Region2]),
         line: [Vec2; 2],
         n: Vec2,
         bend: &Bend,
@@ -1283,7 +1297,15 @@ impl SurfaceSheet {
                         if an.panel != i {
                             continue;
                         }
-                        let (s, e) = (side(an.origin), side(an.origin + an.dir * length));
+                        // Only what the sheet's cuts leave of a bend can be in the way: where a cut
+                        // took the bend away, the fold may run past its line (#17543).
+                        let left = left_along(an, length, sheet_cuts, tol);
+                        let left = if left.is_empty() { vec![(0.0, length)] } else { left };
+                        let at = |x: f64| side(an.origin + an.dir * x);
+                        let (s, e) = left.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &(a, b)| {
+                            let (sa, sb) = (at(a), at(b));
+                            (lo.min(sa).min(sb), hi.max(sa).max(sb))
+                        });
                         if s.min(e) >= ba - tol {
                             if let Some(p) = piece_along(an.origin, an.origin + an.dir * length).or_else(|| piece_at(an.origin)) {
                                 anchors.push((k, on_a, p));
@@ -2284,6 +2306,20 @@ fn runs_along(r: &Region2, a: Vec2, b: Vec2) -> bool {
     })
 }
 
+/// The stretches of a joint's anchor `an`, `length` long, that none of `cuts` (in its panel's
+/// chart) takes, as lengths along it from its origin: what a cut across a bend leaves of it. A
+/// stretch no longer than `tol` is none.
+fn left_along(an: &Anchor, length: f64, cuts: &[Region2], tol: f64) -> Vec<(f64, f64)> {
+    let mut left: Vec<(f64, f64)> = vec![(0.0, length)];
+    for c in cuts {
+        let inside = crate::sheet_surface_convert::crossings_across(c, (an.origin, an.dir));
+        for &[lo, hi] in inside.as_chunks::<2>().0 {
+            left = left.into_iter().flat_map(|(a, b)| [(a, b.min(lo)), (a.max(hi), b)]).filter(|(a, b)| b - a > tol).collect();
+        }
+    }
+    left
+}
+
 /// How far (mm) a rip's cut may differ along it and still be one cut, as the development takes it.
 const RIP_EVEN: f64 = 1e-9;
 
@@ -2363,6 +2399,7 @@ struct FoldSetup {
     place: Rigid3,
     places: Vec<Option<Rigid3>>,
     region: Region2,
+    cuts: Vec<Region2>,
     line: [Vec2; 2],
     across: Vec2,
     bend: Bend,
