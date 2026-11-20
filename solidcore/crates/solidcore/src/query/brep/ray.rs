@@ -518,8 +518,8 @@ mod tests {
     /// without loop uses, as the merged face mid-Boolean is) the context reader
     /// ([`SurfaceSolveContext::surface_cache_without_get_tree`]) and the live reader
     /// (`live_face_fast_drop_test`) both see point testing on while the tree is
-    /// deferred, as upstream does; once a solve's `GetTree` has built the context's
-    /// kept cache, the context reader sees it off.
+    /// deferred, as upstream does (main's answer in the rollover case). (This face's
+    /// own tree build fails: no edge use grows its face domain.)
     #[test]
     fn fast_drop_point_test_on_a_face_without_loops_while_the_tree_is_deferred() {
         let mut k = Kernel::default();
@@ -580,16 +580,6 @@ mod tests {
         assert!(state.tree().is_none());
         assert!(on(&state));
         assert_eq!(live_on, Some(on(&state)));
-
-        // a solve's GetTree builds the kept cache: point testing off on this face
-        let built = services.build_surface_cache(&k, &surface, handle).unwrap();
-        assert!(built.tree().is_some());
-        assert!(!built.point_test_enabled);
-        let state = services
-            .surface_cache_without_get_tree(&k, &surface, handle)
-            .unwrap();
-        assert!(state.tree().is_some());
-        assert!(!on(&state));
     }
 
     #[test]
