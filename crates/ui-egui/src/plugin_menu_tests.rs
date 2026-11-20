@@ -263,7 +263,25 @@ fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
         approval: String::new(),
         groups: BTreeSet::new(),
         entries,
+        images: Default::default(),
     }
+}
+
+#[test]
+fn a_numeric_plugin_editor_interrupts_external_joint_drive() {
+    use crate::control::tests::{assert_local_editor_interrupts_joint_drive, joint_drive_design};
+
+    let (mut h, arm, _) = joint_drive_design();
+    let mut make = entry("make", "edit", json!([]));
+    make.input_schema = json!({"type":"object","properties":{"length":{"type":"number","default":20}}});
+    h.app.plugin_menu.listed = vec![listed("boxes", vec![make])];
+    h.app.plugin_menu.loaded = true;
+    assert_local_editor_interrupts_joint_drive(&mut h, arm, |app| {
+        open_entry(app, 0, 0);
+        assert!(app.dialog.is_none(), "the editor has no viewport pick field");
+        assert_eq!(app.plugin_menu.dialog().unwrap().ready(app), Ok(json!({"length":20.0})));
+        assert!(preview_commands(app).is_some());
+    });
 }
 
 #[test]
@@ -272,16 +290,17 @@ fn the_menu_lists_install_then_entries_with_a_submenu_for_several() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     let empty = rows(&app);
     assert!(matches!(&empty[0], FileRow::Item(i) if i.id == INSTALL));
-    assert!(matches!(&empty[1], FileRow::Separator));
-    assert!(matches!(&empty[2], FileRow::Item(i) if i.label == app.tr("ui.plugin_menu_empty") && !i.enabled));
+    assert!(matches!(&empty[1], FileRow::Item(i) if i.id == LAST_REPORT && !i.enabled), "no import yet: nothing to show again");
+    assert!(matches!(&empty[2], FileRow::Separator));
+    assert!(matches!(&empty[3], FileRow::Item(i) if i.label == app.tr("ui.plugin_menu_empty") && !i.enabled));
     app.plugin_menu.listed = vec![
         listed("gears", vec![entry("spur", "edit", json!([{"kind":"menu","name":"Spur Gear"}]))]),
         listed("tools", vec![entry("measure", "read", json!([])), entry("tidy", "edit", json!([{"kind":"ribbon","name":"x"}]))]),
     ];
     let listed_rows = rows(&app);
-    assert_eq!(listed_rows.len(), 4);
-    assert!(matches!(&listed_rows[2], FileRow::Item(i) if i.id == "entry:0:0" && i.label == "Spur Gear…"), "menu slot names the row");
-    let FileRow::Sub { label, rows: sub } = &listed_rows[3] else { panic!("several entries: a submenu") };
+    assert_eq!(listed_rows.len(), 5);
+    assert!(matches!(&listed_rows[3], FileRow::Item(i) if i.id == "entry:0:0" && i.label == "Spur Gear…"), "menu slot names the row");
+    let FileRow::Sub { label, rows: sub } = &listed_rows[4] else { panic!("several entries: a submenu") };
     assert_eq!(label, "tools plugin");
     let labels: Vec<&str> = sub.iter().map(|r| if let FileRow::Item(i) = r { i.label.as_str() } else { "" }).collect();
     assert_eq!(labels, ["measure…", "tidy…"]);
@@ -306,8 +325,8 @@ fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plu
     assert!(app.plugin_menu.dialogs.is_empty(), "listing opens nothing");
 
     let menu = rows(&app);
-    assert!(matches!(&menu[2], FileRow::Item(i) if i.id == "entry:0:0" && i.label == "gears plugin…"));
-    assert!(matches!(&menu[3], FileRow::Sub { label, rows } if label == "tools plugin" && rows.len() == 2));
+    assert!(matches!(&menu[3], FileRow::Item(i) if i.id == "entry:0:0" && i.label == "gears plugin…"));
+    assert!(matches!(&menu[4], FileRow::Sub { label, rows } if label == "tools plugin" && rows.len() == 2));
 
     // The ribbon button opens that one command's dialog, titled by it alone.
     assert!(choose_ribbon(&mut app, "plugin_entry:tools:tidy"));
@@ -328,15 +347,15 @@ fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plu
     let ids: Vec<String> = ribbon_buttons(&app).into_iter().map(|b| b.id).collect();
     assert_eq!(ids, ["plugin_entry:tools:measure", "plugin_entry:tools:tidy"], "off: no ribbon button");
     let menu = rows(&app);
-    assert_eq!(menu.len(), 3, "off: no menu row");
-    assert!(matches!(&menu[2], FileRow::Sub { label, .. } if label == "tools plugin"));
+    assert_eq!(menu.len(), 4, "off: no menu row");
+    assert!(matches!(&menu[3], FileRow::Sub { label, .. } if label == "tools plugin"));
     choose_ribbon(&mut app, "plugin_entry:gears:spur");
     choose(&mut app, "entry:0:0");
     assert!(app.plugin_menu.dialogs.is_empty(), "a plugin turned off opens nothing");
 
     app.preferences.disabled_plugins.insert("tools".into());
     assert!(ribbon_buttons(&app).is_empty());
-    assert!(matches!(&rows(&app)[2], FileRow::Item(i) if i.label == app.tr("ui.plugin_menu_all_off") && !i.enabled));
+    assert!(matches!(&rows(&app)[3], FileRow::Item(i) if i.label == app.tr("ui.plugin_menu_all_off") && !i.enabled));
 }
 
 #[test]
@@ -414,6 +433,44 @@ fn each_plugin_entry_has_its_own_dialog_with_its_own_values() {
     h.app.plugin_menu.dialogs.remove(0);
     h.frames(2);
     assert_eq!(h.app.plugin_menu.dialogs.iter().map(|d| d.entry.as_str()).collect::<Vec<_>>(), ["hex"]);
+}
+
+/// A reopened plugin command keeps its window position within the design. Another entry gets
+/// a separate window, while the serial id of each new run still changes (#18684).
+#[test]
+fn plugin_dialog_reopen_remembers_dragged_window_position() {
+    let mut h = crate::scenario::Harness::new();
+    assert!(!h.app.preferences.plugin_remember_dialog_position);
+    h.app.preferences.plugin_remember_dialog_position = true;
+    h.app.plugin_menu.listed = vec![listed("gears", vec![entry("spur", "edit", json!([])), entry("hex", "edit", json!([]))])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    h.frames(4);
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    let (first_serial, first_id) = (dialog.id, dialog_window_id(dialog, true));
+    assert_ne!(dialog_window_id(dialog, false), first_id, "opt-out uses the old serial-based identity");
+    let first = h.ctx.memory(|m| m.area_rect(first_id)).expect("window is placed");
+    let header = crate::scenario::rect_of("dialog:header").unwrap();
+    let from = egui::pos2(header.left() + 48.0, header.center().y);
+    h.call("ui.drag", json!({"x0":from.x,"y0":from.y,"x1":from.x-105.0,"y1":from.y+55.0,"steps":8}));
+    h.frames(5);
+    let dragged = h.ctx.memory(|m| m.area_rect(first_id)).unwrap();
+    assert!((dragged.min - first.min).length() > 30.0, "drag moved the window: {first:?} -> {dragged:?}");
+
+    h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.plugin_menu.dialogs.is_empty(), "Cancel closes the old instance");
+    open_entry(&mut h.app, 0, 0);
+    h.frames(4);
+    let reopened = h.app.plugin_menu.dialog().unwrap();
+    assert_ne!(reopened.id, first_serial, "a new run gets a new serial");
+    assert_eq!(dialog_window_id(reopened, true), first_id, "the command's window keeps its egui identity");
+    let again = h.ctx.memory(|m| m.area_rect(first_id)).unwrap();
+    assert!((again.min - dragged.min).length() <= 2.0, "reopening keeps the moved position: {dragged:?} -> {again:?}");
+
+    open_entry(&mut h.app, 0, 1);
+    let other = h.app.plugin_menu.dialog().unwrap();
+    assert_ne!(dialog_window_id(other, true), first_id, "a different entry has its own position");
 }
 
 /// A 20 x 20 x 10 box in the home view, with a plugin whose one command has [`pick_schema`].
@@ -803,6 +860,257 @@ mod native {
         assert!(h.app.plugin_menu.dialogs.is_empty());
         h.frames(2);
         assert!(!h.app.preview.active, "no dialog, no preview");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A package with `home` (a box, then view.home), `edit` (a box and no view command),
+    /// `fail`, `place` (a new component moved 100 mm along X), `move` (only the move), and
+    /// `both` (move the existing component, then make another box).
+    fn view_package(tag: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("solidcraft-plugin-view-{}-{tag}", std::process::id()));
+        let dir = root.join("frames");
+        std::fs::create_dir_all(&dir).unwrap();
+        let (name, version) = solidcraft_engine::plugin::API.rsplit_once('@').unwrap();
+        let wat = include_str!("plugin_view_fixture.wat").replace("PLUGIN_PACKAGE", name).replace("PLUGIN_VERSION", version);
+        std::fs::write(dir.join("plugin.wasm"), wat::parse_str(&wat).unwrap()).unwrap();
+        let entry = |entry_name: &str, label: &str| json!({"name": entry_name, "effect": "edit", "input_schema": {"type": "object"}, "slots": [{"kind": "menu", "name": label}]});
+        let manifest = json!({"id":"frames","name":"Frames","version":"0.1.0","capabilities":["commands@0.1"],"runtime":{
+            "module":"plugin.wasm",
+            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail"), entry("place", "Place"), entry("move", "Move"), entry("both", "Both")],
+            "commands":["solid.box", "view.home", "component.create", "occurrence.move"]}});
+        std::fs::write(dir.join("plugin.json"), manifest.to_string()).unwrap();
+        root
+    }
+
+    /// A run that makes a component and moves it is previewed where the run leaves it, also in
+    /// a design where nothing was placed before: the preview used to show it on the origin
+    /// then, and where it goes only once the design had a moved component.
+    #[test]
+    fn a_component_a_run_makes_and_moves_is_previewed_where_it_goes() {
+        let root = view_package("place");
+        let mut h = crate::scenario::Harness::new();
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        h.app.plugin_menu.loaded = true;
+        assert!(!solidcraft_engine::frames::placed(&h.app.session), "a design with nothing placed");
+        open_entry(&mut h.app, 0, 3);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the moved box is drawn: {:?}", h.app.preview.error);
+        let b = h.app.preview.bounds;
+        assert_eq!((b.min.x.round(), b.max.x.round()), (100.0, 110.0), "where the run moved it, not on the origin");
+        // The triangles the preview draws are the box there, not only the bounds it reports.
+        let (_, id, cmds) = preview_commands(&h.app).expect("the dialog is previewed");
+        let mut scratch = h.app.session.scratch();
+        dry_run(&mut scratch, &id);
+        let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get());
+        let built = crate::preview::compute(&scratch, &cmds, colors).unwrap();
+        let (vertices, rest) = built.scene.tris.as_chunks::<{ crate::gpu::TRI_SIZE }>();
+        assert!(rest.is_empty() && !vertices.is_empty(), "the box is drawn");
+        let xs = vertices.iter().map(|v| f32::from_le_bytes([v[0], v[1], v[2], v[3]]));
+        let (lo, hi) = xs.fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+        assert_eq!((lo.round(), hi.round()), (100.0, 110.0), "drawn where the run moved it");
+        // Run leaves it there too.
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        use solidcraft_engine::geom::MeshGeom as _;
+        let world = h.app.session.world_state().unwrap();
+        let placed = world.bodies.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |acc, body| acc.union(&body.mesh().bounds()));
+        assert_eq!((placed.min.x.round(), placed.max.x.round()), (100.0, 110.0));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Moving an existing component adds no material, even before the design has a placement.
+    #[test]
+    fn a_component_a_run_only_moves_keeps_its_body_colour_in_the_preview() {
+        let root = view_package("move-colour");
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new_body"})).unwrap();
+        h.app.preferences.preview_tint_new_faces = true;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        h.app.plugin_menu.loaded = true;
+        assert!(!solidcraft_engine::frames::placed(&h.app.session), "the component starts at its definition");
+        let (doc, undo) = (h.app.session.doc.clone(), h.app.session.undo.len());
+        let entry = h.app.plugin_menu.listed[0].entries.iter().position(|entry| entry.name == "move").unwrap();
+        open_entry(&mut h.app, 0, entry);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the moved box is drawn: {:?}", h.app.preview.error);
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc), "the preview leaves the design untouched");
+        assert_eq!(h.app.session.undo.len(), undo, "the preview adds no undo step");
+
+        let (_, id, cmds) = preview_commands(&h.app).expect("the dialog is previewed");
+        let mut scratch = h.app.session.scratch();
+        dry_run(&mut scratch, &id);
+        let colors = crate::preview::Colors { tint_new: true, ..crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get()) };
+        assert_ne!(colors.body, colors.added);
+        assert_ne!(colors.body, colors.new_body);
+        let built = crate::preview::compute(&scratch, &cmds, colors).unwrap();
+        let (vertices, rest) = built.scene.tris.as_chunks::<{ crate::gpu::TRI_SIZE }>();
+        assert!(rest.is_empty() && !vertices.is_empty(), "the box has preview triangles");
+        let xs = vertices.iter().map(|v| f32::from_le_bytes([v[0], v[1], v[2], v[3]]));
+        let (lo, hi) = xs.fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+        assert_eq!((lo.round(), hi.round()), (100.0, 110.0), "the preview moves the existing box 100 mm along X");
+        assert!(!built.scene.ghost.is_empty(), "the old placement remains visible as a ghost");
+        let count = |colour| {
+            vertices
+                .iter()
+                .filter(|v| {
+                    let index = u32::from_le_bytes([v[24], v[25], v[26], v[27]]);
+                    built.scene.palette.get(crate::gpu::PaletteIndex(index)) == Some(colour)
+                })
+                .count()
+        };
+        if let Some(path) = std::env::var_os("SOLIDCRAFT_PLUGIN_PREVIEW_SHOT") {
+            const SIZE: u32 = 512;
+            h.app.cam.target = solidcore_record::Vec3::new(105.0, 5.0, 5.0);
+            h.app.cam.distance = 35.0;
+            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(SIZE as f32, SIZE as f32));
+            let proj = crate::viewport::projection(&h.app, rect);
+            let e = proj.cam.eye().to_f32();
+            let eye = [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }];
+            let pixels = crate::gpu::render_offscreen_preview(
+                crate::gpu::GpuScene::default(),
+                built.scene.clone(),
+                None,
+                proj.vp.to_f32(),
+                proj.cam.back().to_f32(),
+                eye,
+                SIZE,
+            )
+            .expect("a GPU adapter is required for the requested preview capture");
+            image::RgbaImage::from_raw(SIZE, SIZE, pixels).unwrap().save(path).unwrap();
+        }
+        let counts = (count(colors.body), count(colors.added), count(colors.new_body));
+        let _ = std::fs::remove_dir_all(root);
+        assert_eq!(counts, (vertices.len(), 0, 0), "moving an existing body adds no new surface or body");
+    }
+
+    /// Each body keeps its own preview role when a plugin moves a part and makes material.
+    #[test]
+    fn a_run_tints_only_new_bodies_even_when_an_existing_component_was_already_placed() {
+        for (start, entry_name) in [(0, "both"), (20, "move"), (20, "both")] {
+            let root = view_package(&format!("mixed-colour-{start}-{entry_name}"));
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap();
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new_body"})).unwrap();
+            if start != 0 {
+                h.app.run("occurrence.move", json!({"occurrence": "Part:1", "translate": [start, 0, 0]})).unwrap();
+            }
+            assert_eq!(solidcraft_engine::frames::placed(&h.app.session), start != 0);
+            h.app.plugin_menu.listed = list(&h.app, Some(&root));
+            h.app.plugin_menu.loaded = true;
+            let (doc, undo) = (h.app.session.doc.clone(), h.app.session.undo.len());
+            let entry = h.app.plugin_menu.listed[0].entries.iter().position(|entry| entry.name == entry_name).unwrap();
+            open_entry(&mut h.app, 0, entry);
+            let (_, id, cmds) = preview_commands(&h.app).expect("the dialog is previewed");
+            let mut scratch = h.app.session.scratch();
+            dry_run(&mut scratch, &id);
+            let colors = crate::preview::Colors { tint_new: true, ..crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get()) };
+            assert_ne!(colors.body, colors.added);
+            assert_ne!(colors.body, colors.new_body);
+            let built = crate::preview::compute(&scratch, &cmds, colors).unwrap();
+            assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc), "the preview leaves the design untouched");
+            assert_eq!(h.app.session.undo.len(), undo, "the preview adds no undo step");
+            assert!(built.scene.xray.is_empty(), "moving and making bodies removes no material");
+            let (vertices, rest) = built.scene.tris.as_chunks::<{ crate::gpu::TRI_SIZE }>();
+            assert!(rest.is_empty() && !vertices.is_empty());
+            let mut moved = Vec::new();
+            let mut made = Vec::new();
+            for vertex in vertices {
+                let index = u32::from_le_bytes([vertex[24], vertex[25], vertex[26], vertex[27]]);
+                let colour = built.scene.palette.get(crate::gpu::PaletteIndex(index));
+                let x = f32::from_le_bytes([vertex[0], vertex[1], vertex[2], vertex[3]]);
+                if colour == Some(colors.body) {
+                    moved.push(x);
+                } else {
+                    assert_eq!(colour, Some(colors.new_body), "{entry_name} from {start}: no existing surface is new");
+                    made.push(x);
+                }
+            }
+            let span = |xs: &[f32]| xs.iter().copied().fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+            // The original box spans 0..10; its old placement and the plugin's 100 mm move add.
+            assert_eq!(span(&moved), ((start + 100) as f32, (start + 110) as f32), "{entry_name}: the existing box stays body-coloured");
+            if entry_name == "both" {
+                // solid.box takes world coordinates, even inside the now-moved component.
+                assert_eq!(span(&made), (20.0, 30.0), "only the second box is new material");
+            } else {
+                assert!(made.is_empty(), "a move alone makes no new body");
+            }
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    fn same_camera(a: &solidcraft_viewport::Camera, b: &solidcraft_viewport::Camera) -> bool {
+        let near =
+            |p: solidcore_record::Vec3, q: solidcore_record::Vec3| (p.x - q.x).abs() < 1e-6 && (p.y - q.y).abs() < 1e-6 && (p.z - q.z).abs() < 1e-6;
+        near(a.target, b.target) && (a.distance - b.distance).abs() < 1e-6 && (a.yaw - b.yaw).abs() < 1e-9 && (a.pitch - b.pitch).abs() < 1e-9
+    }
+
+    #[test]
+    fn a_view_command_from_a_plugin_moves_the_camera_and_an_edit_without_one_leaves_it() {
+        let root = view_package("camera");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        assert_eq!(h.app.plugin_menu.listed.len(), 1);
+        let index = |name: &str| h.app.plugin_menu.listed[0].entries.iter().position(|entry| entry.name == name).expect(name);
+        let home = index("home");
+        let _ = (index("edit"), index("fail"));
+        h.app.cam.set_view(solidcraft_viewport::StandardView::Front);
+        h.app.cam.distance = 800.0;
+        h.app.cam.target = solidcore_record::Vec3::ZERO;
+        let parked = h.app.cam;
+
+        open_entry(&mut h.app, 0, home);
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        h.frames(2);
+        assert_eq!(h.app.session.doc.features.len(), 1, "the entry inserted its box");
+        let from_plugin = h.app.cam;
+        h.app.cancel_view_animation();
+        h.app.cam = parked;
+        h.app.run("view.home", json!({})).unwrap();
+        h.frames(2);
+        assert!(same_camera(&from_plugin, &h.app.cam), "view.home frames the inserted box the way Home does: {from_plugin:?} vs {:?}", h.app.cam);
+        let centre = h.app.cam.target;
+        let on_box = (centre.x - 5.0).abs() < 5.0 && (centre.y - 5.0).abs() < 5.0 && (centre.z - 5.0).abs() < 5.0;
+        assert!(on_box, "the frame is on that box: {centre:?}");
+
+        let stayed = h.app.cam;
+        // A frame can open the Plugins menu, and that reads the installed plugins again.
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        let edit = h.app.plugin_menu.listed[0].entries.iter().position(|entry| entry.name == "edit").expect("edit");
+        open_entry(&mut h.app, 0, edit);
+        let opened = h.app.plugin_menu.dialog().map(|d| d.entry.clone());
+        assert_eq!(
+            opened.as_deref(),
+            Some("edit"),
+            "the second entry's dialog opened; listed {:?}",
+            h.app.plugin_menu.listed.iter().map(|p| (p.id.clone(), p.entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>())).collect::<Vec<_>>()
+        );
+        run(&mut h.app).unwrap();
+        assert!(h.app.plugin_menu.dialog().is_some_and(|d| d.running.is_some()), "the second entry was queued");
+        settle(&mut h);
+        h.frames(2);
+        let why = h
+            .app
+            .plugin_menu
+            .dialog()
+            .map(|d| d.error.clone().unwrap_or_else(|| format!("dialog still open for {}", d.entry)))
+            .unwrap_or_else(|| "dialog closed".into());
+        let names: Vec<_> = h.app.session.doc.features.iter().map(|f| f.name.clone()).collect();
+        assert_eq!(h.app.session.doc.features.len(), 2, "the second entry edited the design: {why}; features {names:?}; status {:?}", h.app.status);
+        assert!(same_camera(&h.app.cam, &stayed), "an edit with no view command leaves the camera: {:?} vs {stayed:?}", h.app.cam);
+
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        let fail = h.app.plugin_menu.listed[0].entries.iter().position(|entry| entry.name == "fail").expect("fail");
+        open_entry(&mut h.app, 0, fail);
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        h.frames(2);
+        let error = h.app.plugin_menu.dialog().and_then(|d| d.error.clone()).expect("the failed run stays in the dialog");
+        assert!(!error.is_empty(), "{error}");
+        assert_eq!(h.app.session.doc.features.len(), 2, "the failed run changes nothing");
+        assert!(same_camera(&h.app.cam, &stayed), "a failed run does not move the camera: {:?} vs {stayed:?}", h.app.cam);
         let _ = std::fs::remove_dir_all(root);
     }
 }

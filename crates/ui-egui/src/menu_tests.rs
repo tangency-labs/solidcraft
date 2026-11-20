@@ -667,6 +667,56 @@ fn component_menu_activates_grounds_and_pastes() {
     assert_eq!(app.session.doc.components.len(), 2);
 }
 
+/// The Browser's Hide action takes every selected component or placement rather than only
+/// the row under the pointer. Each action uses one visibility command (#18716).
+#[test]
+fn browser_hide_applies_to_selected_components_and_occurrences() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    for (name, x) in [("Base", 0), ("Lid", 25)] {
+        app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
+    }
+    for name in ["Base", "Lid"] {
+        app.run("component.from_bodies", json!({"bodies":[name]})).unwrap();
+    }
+    let ids: Vec<u64> = app.session.doc.components.iter().map(|c| c.id).collect();
+    assert_eq!(ids.len(), 2);
+    let (a, b) = (ids[0], ids[1]);
+    app.tree.picked_components = ids;
+    let bodies = crate::browser::selected_component_bodies(&app, a);
+    assert_eq!(bodies.len(), 2);
+
+    let menu = Target::Component { id: a };
+    let hide = find(&context_menu::items(&app, &menu), "Show/Hide");
+    let listed: Vec<String> = serde_json::from_value(hide.params.as_ref().unwrap()["bodies"].clone()).unwrap();
+    assert_eq!(listed.len(), 2, "the menu acts on both components");
+    let before = app.session.undo.len();
+    context_menu::run_item(&mut app, &hide, pos2(0.0, 0.0));
+    assert!(bodies.iter().all(|body| app.session.visibility.hidden_bodies.contains(body)), "{:?}", app.session.visibility.hidden_bodies);
+    assert_eq!(app.session.undo.len(), before + 1, "the batch is one undo step");
+
+    // The same selection rule applies to instances, whose paths distinguish copies.
+    let paths: Vec<Vec<u64>> = [a, b].into_iter().map(|id| app.session.doc.first_path(id)).collect();
+    app.run("select.set", json!({"items":paths.iter().map(|path| json!({"type":"occurrence","path":path})).collect::<Vec<_>>()})).unwrap();
+    assert_eq!(crate::browser::selected_occurrence_paths(&app, &paths[0]), paths);
+    let row = Target::Occurrence { path: paths[0].clone() };
+    let hide = find(&context_menu::items(&app, &row), "Show/Hide");
+    assert_eq!(hide.params.as_ref().unwrap()["paths"], json!(paths));
+    context_menu::run_item(&mut app, &hide, pos2(0.0, 0.0));
+    assert!(paths.iter().all(|path| app.session.occurrence_hidden(path)));
+
+    // An empty component can still open the Show/Hide action when a populated component
+    // is selected with it. The batch target set, not the clicked row, enables it.
+    let empty = app.run("component.create", json!({"name":"Empty"})).unwrap()["component"].as_u64().unwrap();
+    app.tree.picked_components = vec![empty, a];
+    let empty_menu = Target::Component { id: empty };
+    let item = find(&context_menu::items(&app, &empty_menu), "Show/Hide");
+    assert!(item.enabled, "a selected populated component provides a visibility target");
+    assert_eq!(item.params.as_ref().unwrap()["bodies"], json!(["Base"]));
+
+    // Clicking a row outside the selection does not change the selected rows.
+    assert_eq!(crate::browser::selected_occurrence_paths(&app, &[u64::MAX]), vec![vec![u64::MAX]]);
+}
+
 #[test]
 fn move_shortcut_uses_the_selected_nested_instance_and_pending_position() {
     let mut app = SolveApp::new(Session::default(), Services::default());
@@ -1405,6 +1455,95 @@ fn v_with_a_menu_open_shows_or_hides_what_the_menu_is_for() {
     assert!(h.app.session.visibility.hidden_bodies.contains(&b), "V without a menu acts on the selection");
 }
 
+/// #14554: V with an origin plane, axis, or point selected in the browser toggles its visibility.
+#[test]
+fn v_on_selected_origin_plane_axis_or_point_toggles_visibility() {
+    let mut h = crate::scenario::Harness::new();
+    h.settle();
+
+    // Ensure the Origin folder is open so its items are present.
+    if !crate::browser::is_open(&h.app, "origin", false) {
+        h.step(&json!({"click": {"handle": "row:Origin"}})).unwrap();
+    }
+
+    // Toggle plane XY
+    h.step(&json!({"click": {"handle": "row:XY"}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Plane { name: "XY".into() }]);
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(h.app.session.visibility.hidden_origin.iter().any(|h| h == "XY"), "V hides XY plane");
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(!h.app.session.visibility.hidden_origin.iter().any(|h| h == "XY"), "V shows XY plane again");
+
+    // Toggle axis Z
+    h.step(&json!({"click": {"handle": "row:Z"}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Axis { name: "Z".into() }]);
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(h.app.session.visibility.hidden_origin.iter().any(|h| h == "Z"), "V hides Z axis");
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(!h.app.session.visibility.hidden_origin.iter().any(|h| h == "Z"), "V shows Z axis again");
+
+    // Toggle origin point O
+    h.step(&json!({"click": {"handle": "row:O"}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }]);
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(h.app.session.visibility.hidden_origin.iter().any(|h| h == "O"), "V hides origin point O");
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(!h.app.session.visibility.hidden_origin.iter().any(|h| h == "O"), "V shows origin point O again");
+
+    // Context menu on OriginPoint has Show/Hide bound to V
+    let items = context_menu::items(&h.app, &Target::OriginPoint { name: "O".into() });
+    assert_eq!(find(&items, "Show/Hide").shortcut, "V");
+}
+
+/// #14554: Clicking origin point O in the Browser sends a pick that SNAP_POINTS inputs accept (e.g. Offset Plane).
+#[test]
+fn origin_point_in_browser_picks_into_snap_points_input() {
+    let mut h = crate::scenario::Harness::new();
+    h.settle();
+
+    // Start Offset Plane dialog: input 0 is Plane (PLANES), input 1 is "Through point" (SNAP_POINTS).
+    h.app.start("construct.plane.offset");
+    h.frames(1);
+    assert!(h.app.dialog.is_some(), "Offset Plane dialog is open");
+
+    // Activate the "Through point" input which accepts SNAP_POINTS
+    let d = h.app.dialog.as_mut().unwrap();
+    d.active = 1;
+
+    // Ensure the Origin folder is open
+    if !crate::browser::is_open(&h.app, "origin", false) {
+        h.step(&json!({"click": {"handle": "row:Origin"}})).unwrap();
+    }
+
+    // Clicking O row in the Browser picks into the Through point input
+    h.step(&json!({"click": {"handle": "row:O"}})).unwrap();
+
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(
+        d.inputs[1].items,
+        vec![solidcraft_engine::Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }],
+        "Through point input (SNAP_POINTS) takes the origin point O"
+    );
+}
+
+#[test]
+fn view_ribbon_save_view_keeps_the_screen_camera() {
+    use solidcraft_viewport::UpAxis;
+
+    let mut app = sample_app();
+    app.cam.roll = 0.45;
+    app.cam.up = UpAxis::Y;
+    let before = app.cam;
+    app.start("view.save");
+    assert_eq!(app.session.doc.named_views.len(), 1, "the ribbon command saved the view");
+    assert_eq!(app.session.doc.named_views[0].roll, before.roll);
+    assert_eq!(app.session.doc.named_views[0].up, before.up);
+
+    app.cam.set_view(solidcraft_viewport::StandardView::Top);
+    crate::browser::restore_view(&mut app, "Named View1");
+    assert_eq!(app.cam_anim.map(|animation| animation.to), Some(before));
+}
+
 #[test]
 fn named_views_save_restore_rename_and_delete() {
     let mut app = sample_app();
@@ -1702,13 +1841,16 @@ fn the_old_construct_layout_is_kept_with_the_toolbar_preference() {
 }
 
 #[test]
-fn the_workspace_menu_lists_design_and_render_and_greys_future_workspaces() {
+fn the_workspace_menu_lists_design_drawing_and_render_only() {
     let app = sample_app();
     let items = context_menu::items(&app, &Target::Workspace);
     assert!(find(&items, "Design").enabled);
     assert!(find(&items, "Render").enabled);
-    assert!(!find(&items, "Animation").enabled);
     assert!(!items.iter().any(|i| i.label.contains("Generative")));
+    // Drawing comes second, right after Design (the owner's order), then Render; workspaces still to
+    // come (Animation, Simulation, Manufacture) aren't listed.
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).filter(|l| !l.is_empty()).collect();
+    assert_eq!(labels, ["Design", "Drawing", "Render"], "{labels:?}");
 }
 
 /// A right-click on a construction plane's browser row opens its menu, like a body's or a
@@ -2044,7 +2186,8 @@ fn every_context_target_has_identified_icon_rows_including_submenus() {
         Target::ViewGizmo,
         Target::NamedView { name: "Top".into() },
         Target::Canvas { id: 1 },
-        Target::Section,
+        Target::Section { plane: 1 },
+        Target::Analysis,
         Target::Folder { component: 0, folder: "bodies".into(), scope: "c0".into() },
         Target::Timeline { feature },
     ] {
@@ -2182,6 +2325,37 @@ fn mesh_export_from_a_selected_browser_body_takes_the_selected_bodies() {
             assert_eq!(dialog.inputs[0].items, bodies, "{label}: clicked {clicked}, selected {selected:?}");
         }
     }
+}
+
+/// A selected browser body exports the *full* body selection, just as Save As Mesh and
+/// Send to Slicer do (#18902). A body outside the selection exports only itself.
+#[test]
+fn export_from_a_selected_browser_body_includes_all_selected_bodies() {
+    let cases = [
+        ("One", vec!["One", "Two"], vec!["One", "Two"]),
+        ("Two", vec!["One", "Two"], vec!["One", "Two"]),
+        ("Other", vec!["One", "Two"], vec!["Other"]),
+        ("One", vec!["One"], vec!["One"]),
+        ("Other", vec!["One", "Two", "Other"], vec!["One", "Two", "Other"]),
+    ];
+    for (clicked, selected, expected) in cases {
+        let mut app = appearance_selection_app();
+        let items: Vec<_> = selected.iter().map(|name| json!({"type":"body","name":name})).collect();
+        app.run("select.set", json!({"items":items})).unwrap();
+        let export = find(&context_menu::items(&app, &Target::Body { name: clicked.into() }), "Export…");
+        assert_eq!(export.id, "ui.export");
+        assert_eq!(export.params.as_ref().unwrap()["bodies"], json!(expected), "clicked {clicked}, selected {selected:?}");
+        let mesh = find(&context_menu::items(&app, &Target::Body { name: clicked.into() }), "Save As Mesh");
+        assert_eq!(
+            export.params.as_ref().unwrap()["bodies"],
+            mesh.params.as_ref().unwrap()["bodies"],
+            "Export and Save As Mesh target the same bodies"
+        );
+    }
+    let mut app = appearance_selection_app();
+    app.run("select.set", json!({"items":[{"type":"body","name":"Two"},{"type":"body","name":"One"}]})).unwrap();
+    let export = find(&context_menu::items(&app, &Target::Viewport), "Export…");
+    assert_eq!(export.params.as_ref().unwrap()["bodies"], json!(["Two", "One"]), "viewport export also respects selection order");
 }
 
 #[test]
@@ -2694,7 +2868,8 @@ fn ui_menu_refuses_a_target_the_design_does_not_have() {
         (json!({"type": "component", "id": 999}), "no component `999`"),
         (json!({"type": "joint", "id": 7}), "no joint `7`"),
         (json!({"type": "timeline", "feature": 999}), "no feature `999`"),
-        (json!({"type": "section"}), "no section"),
+        (json!({"type": "section", "plane": 1}), "no section `1`"),
+        (json!({"type": "analysis"}), "no analysis"),
         (json!({"type": "folder", "component": 0, "folder": "drawings", "scope": "c0"}), "no `drawings` folder of component 0 under `c0`"),
         (json!({"type": "folder", "component": 0, "folder": "bodies", "scope": "o:999"}), "no `bodies` folder of component 0 under `o:999`"),
         (json!({"type": "group", "id": group, "scope": "c7"}), bad_group.as_str()),

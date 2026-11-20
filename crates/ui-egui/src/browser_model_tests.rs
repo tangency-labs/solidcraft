@@ -22,6 +22,25 @@ fn navigating_and_selecting_reuse_placements_but_rows_read_live_view_state() {
     assert!(Arc::ptr_eq(&after, &super::model_placement(&mut h.app, &[occurrence]).unwrap()));
 }
 
+/// The component rows' defect tips are worded in the interface language: changing it alone
+/// words them again.
+#[test]
+fn a_language_change_words_the_cached_defect_tips_again() {
+    let (h, _, _) = fixture();
+    let mut cache = super::cache::Cache::default();
+    let sentinel = crate::ui_kit::StatusTip { head: "stale".into(), error: None, warning: None, tail: String::new() };
+    {
+        let _en = solidcraft_ui_text::scope("en");
+        cache.prepare(&h.app);
+        cache.defects.insert(u64::MAX, sentinel);
+        cache.prepare(&h.app);
+        assert!(cache.defects.contains_key(&u64::MAX), "nothing changed: the cache is kept");
+    }
+    let _ja = solidcraft_ui_text::scope("ja");
+    cache.prepare(&h.app);
+    assert!(!cache.defects.contains_key(&u64::MAX), "a new language words the tips again");
+}
+
 #[test]
 fn pending_and_reverted_moves_replace_cached_transforms() {
     let (mut h, _, occurrence) = fixture();
@@ -377,6 +396,16 @@ fn construction_rows_include_points_and_axes() {
     }
     h.app.session.visibility.hidden_origin.push("Point1".into());
     assert!(!super::entries(&h.app, 0, "construction")[0].visible);
+    // The cached rows outlive a visibility change (Show/Hide Reference Geometry, #18131): their
+    // eyes read the session, as a plane's does, not what the row held when it was built.
+    h.app.session.visibility.hidden_origin.push("Axis1".into());
+    for row in &rows {
+        assert!(!row.is_visible(&h.app), "{} still shows an open eye", row.label);
+    }
+    h.app.session.visibility.hidden_origin.clear();
+    for row in &rows {
+        assert!(row.is_visible(&h.app), "{} still shows a closed eye", row.label);
+    }
     h.app.run("selection.delete", json!({"items": rows.iter().map(|r| r.sel.clone().unwrap()).collect::<Vec<_>>()})).unwrap();
     super::prepare_model(&mut h.app);
     assert!(super::entries(&h.app, 0, "construction").is_empty());

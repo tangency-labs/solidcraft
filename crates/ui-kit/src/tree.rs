@@ -74,6 +74,9 @@ pub struct Row<'a> {
     pub subtitle: &'a str,
     pub actions: &'a [TreeAction<'a>],
     pub radio_hint: &'a str,
+    /// Bytes of the label to draw strong: the part a search matched. Kept only while the label is
+    /// shown exactly as given (a name not reordered for right-to-left text).
+    pub emphasis: Option<std::ops::Range<usize>>,
 }
 
 /// How a row relates to what the selection and the 3D view's pointer light.
@@ -403,7 +406,20 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     }
     let room = (right - name_action_width - x).max(0.0);
     out.label_rect = Some(Rect::from_min_max(pos2(x, r.top() + 1.0), pos2(x + room, cy + row_height / 2.0 - 1.0)));
-    let mut job = egui::text::LayoutJob::simple(label_display.to_string(), font, col, room);
+    let emphasis = row.emphasis.clone().filter(|span| label_display == row.label && label_display.get(span.clone()).is_some());
+    let mut job = match emphasis {
+        Some(span) => {
+            let plain = egui::TextFormat::simple(font, col);
+            let strong = egui::TextFormat::simple(crate::type_face::semibold(t.font_label), col);
+            let mut job = egui::text::LayoutJob::default();
+            job.append(label_display.get(..span.start).unwrap_or_default(), 0.0, plain.clone());
+            job.append(label_display.get(span.clone()).unwrap_or_default(), 0.0, strong);
+            job.append(label_display.get(span.end..).unwrap_or_default(), 0.0, plain);
+            job.wrap.max_width = room;
+            job
+        }
+        None => egui::text::LayoutJob::simple(label_display.to_string(), font, col, room),
+    };
     job.wrap.max_rows = 1;
     job.wrap.break_anywhere = true;
     job.wrap.overflow_character = Some('\u{2026}');
