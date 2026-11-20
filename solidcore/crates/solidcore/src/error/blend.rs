@@ -1343,8 +1343,8 @@ mod tests {
     }
 
     /// What builds a phrase cause in source: the helpers, and each phrase cause by name. A
-    /// new cause is placed here (the match has no wildcard), so the ratchet below counts
-    /// every phrase cause there is.
+    /// new cause is placed here (the match has no wildcard), so the test below checks it
+    /// names every phrase cause there is.
     fn phrase_needle(cause: &BlendFailure) -> Option<&'static str> {
         match cause {
             BlendFailure::NoRoom(_)
@@ -1372,14 +1372,10 @@ mod tests {
         }
     }
 
-    /// The blend sites not yet converted to a typed cause: the library code of the blend
-    /// routines builds exactly this many phrase causes (read by the scanner the bare-status
-    /// ratchet uses). A phrase cause is neither a defect nor a refusal, so this is the set of
-    /// blend failures nobody has classed yet, and it may only shrink: a change that converts
-    /// sites lowers the pin to the new count, and a new site builds a typed cause.
+    /// `phrase_needle` names a cause exactly when it is a phrase cause, so the per-file pins
+    /// in `error/phrase_sites.rs`, which search for those names, count every phrase cause.
     #[test]
-    fn the_phrase_cause_sites_only_go_down() {
-        const PHRASE_CAUSE_SITES: usize = 897;
+    fn phrase_needle_names_exactly_the_phrase_causes() {
         use crate::blend::fillet_executive::NoRoomReason as R;
         let causes = [
             BlendFailure::NoRoom(R::BallDoesNotFit),
@@ -1430,31 +1426,12 @@ mod tests {
                 status: SM_ERR,
             },
         ];
-        let mut needles = vec![
-            "SolidError::blend_failed(",
-            "SolidError::blend_missing(",
-            "SolidError::blend_invalid_value(",
-        ];
         for cause in &causes {
-            let needle = phrase_needle(cause);
-            assert_eq!(needle.is_some(), cause.is_phrase(), "{cause:?}");
-            needles.extend(needle);
+            assert_eq!(
+                phrase_needle(cause).is_some(),
+                cause.is_phrase(),
+                "{cause:?}"
+            );
         }
-        let per_file: Vec<(String, usize)> = super::super::bare_scan::library_files("blend", 100)
-            .into_iter()
-            .filter_map(|(relative, text)| {
-                let code = super::super::bare_scan::library_code(&text);
-                let n: usize = needles.iter().map(|n| code.matches(n).count()).sum();
-                (n > 0).then_some((relative, n))
-            })
-            .collect();
-        let found: usize = per_file.iter().map(|(_, n)| n).sum();
-        assert_eq!(
-            found, PHRASE_CAUSE_SITES,
-            "the blend routines build {found} phrase causes, pinned at {PHRASE_CAUSE_SITES}: \
-             the number may only go down. Converting sites to a typed cause lowers the pin to \
-             the new count; a new site builds a typed cause, not a phrase. Per file: \
-             {per_file:?}"
-        );
     }
 }
