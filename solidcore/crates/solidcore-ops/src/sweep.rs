@@ -40,7 +40,8 @@ use solidcore::sweep::api_brep::{
     CornerRefusal as KRefusal, OffsetCornerType, TaperExtrude,
 };
 use solidcore::sweep::api_surfaces::{
-    create_skin_primitive, create_skin_primitive_with_sources, SkinSources,
+    create_skin_primitive, create_skin_primitive_with_ends, create_skin_primitive_with_sources,
+    SkinSources,
 };
 use solidcore::sweep::directed;
 use solidcore::sweep::extrude::{self as kextrude, Draft, ExtrudeTolerances};
@@ -48,6 +49,7 @@ use solidcore::sweep::screw;
 use solidcore::sweep::segments::{
     build_faces, line_placements, sweep_along_segments, turn_placements,
 };
+use solidcore::sweep::skin_ends::SkinEnd;
 use solidcore::topology::brep::p1::ParallelProjectionOptions;
 use solidcore::topology::brep::p3::new_brep;
 use solidcore::topology::brep::p4::stitch_faces;
@@ -1132,6 +1134,83 @@ fn nurbs_line(c: &Curve) -> Curve {
         },
         _ => c.clone(),
     }
+}
+
+/// How a [`loft_with_ends`] leaves its first section or arrives at its last.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum LoftEnd {
+    /// As the skin through the sections runs: no condition.
+    #[default]
+    Free,
+    /// Square to the section's plane, towards the side the next section is on. Each point
+    /// of the section leaves with `weight` times the speed of its straight way to the point it
+    /// is joined to in the next section: 1 is that speed, less turns towards the next section
+    /// sooner, more runs on square to the plane for longer.
+    Square {
+        /// The weight, above 0.
+        weight: f64,
+    },
+}
+
+/// A capped skin through `sections` as [`loft`] makes it, cubic across them, with how it
+/// leaves its first section and arrives at its last (`ends`; at least one of them
+/// [`LoftEnd::Square`]). Two sections and one square end make a quadratic skin: three
+/// conditions.
+///
+/// # Errors
+/// [`Error::Argument`] for a section or number refused, both ends free, and a weight that is
+/// not a number above 0; the kernel's status (sections that are not closed planar loops, an
+/// end whose next section's centre lies in its plane); [`Error::Empty`], [`Error::NotSolid`].
+pub fn loft_with_ends(sections: &[Vec<Curve>], cap: bool, ends: [LoftEnd; 2]) -> Result<Body> {
+    if sections.len() < 2 || sections.len() > MAX_CURVES {
+        return Err(Error::Argument);
+    }
+    let all: Vec<Curve> = sections.iter().flatten().cloned().collect();
+    making("loft_with_ends", |k| {
+        let made = parsed!(parse(k, &all));
+        if sections
+            .iter()
+            .any(|s| s.is_empty() || s.len() > MAX_CURVES)
+        {
+            return Ok(Err(Error::Argument));
+        }
+        let counts: Vec<usize> = sections.iter().map(Vec::len).collect();
+        match skin_with_ends(k, &counts, &made.refs(), cap, ends) {
+            Ok(Ok(b)) => finish(k, b, if cap { Expect::SOLID } else { Expect::FACES }),
+            Ok(Err(e)) => Ok(Err(e)),
+            Err(e) => Ok(Err(status(e))),
+        }
+    })
+}
+
+/// The skin of [`loft_with_ends`] on the caller's kernel `k`, as the kernel made it (not yet
+/// checked for faces or closedness): the profiles of `curves`, `counts` curves each, cubic
+/// across them, `ends` as [`loft_with_ends`] takes them. One recipe for [`loft_with_ends`] and
+/// for an application that runs its sweeps on its own kernel.
+///
+/// # Errors
+/// The kernel's, as it reports them; inside, [`Error::Argument`] for both ends free and a
+/// weight that is not a number above 0.
+pub fn skin_with_ends(
+    k: &mut Kernel,
+    counts: &[usize],
+    curves: &[Option<&KCurve>],
+    cap: bool,
+    ends: [LoftEnd; 2],
+) -> solidcore::Result<std::result::Result<Brep, Error>> {
+    if ends == [LoftEnd::Free; 2] {
+        return Ok(Err(Error::Argument));
+    }
+    let mut kernel_ends = [SkinEnd::Free; 2];
+    for (to, end) in kernel_ends.iter_mut().zip(ends) {
+        if let LoftEnd::Square { weight } = end {
+            if !(weight > 0.0 && weight.is_finite()) {
+                return Ok(Err(Error::Argument));
+            }
+            *to = SkinEnd::Square { weight };
+        }
+    }
+    create_skin_primitive_with_ends(k, counts, curves, 3, cap, kernel_ends).map(|r| Ok(r.brep))
 }
 
 /// A pyramid from the planar `section` (one closed loop of lines, in order) to `apex` (off the

@@ -32,6 +32,25 @@ fn edit_form_prefill_validates_fields_and_programmatic_open_is_refused() {
 }
 
 #[test]
+fn edit_form_prefill_uses_visible_controllers_and_reports_condition_errors() {
+    let s = Session::default();
+    let mut schema = json!({"type":"object","required":["secret"],"properties":{
+        "gate":{"type":"boolean"},
+        "mode":{"type":"boolean","x-solidcraft-visible-when":{"field":"gate","eq":true}},
+        "secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}
+    }});
+    let before = s.doc.clone();
+    assert!(form_errors(&s, &schema, &json!({"gate":false,"mode":true,"secret":"hidden"})).is_empty());
+    assert!(form_errors(&s, &schema, &json!({"gate":false,"mode":true})).is_empty());
+    assert!(form_errors(&s, &schema, &json!({"gate":true,"mode":true,"secret":"invalid"})).contains_key("secret"));
+    assert!(form_errors(&s, &schema, &json!({"gate":true,"mode":true})).contains_key("secret"));
+    schema["properties"]["mode"]["x-solidcraft-visible-when"] = json!({"field":"missing","eq":true});
+    let errors = form_errors(&s, &schema, &json!({"gate":false,"mode":true}));
+    assert!(matches!(errors.get("params"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })));
+    assert_eq!(s.doc, before, "validating visibility never changes the design");
+}
+
+#[test]
 fn edit_form_accepts_approximate_pick_coordinates_without_substituting_indices() {
     use solidcore_record::Vec3;
     let mut s = Session::default();

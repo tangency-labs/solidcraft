@@ -18,7 +18,13 @@ pub fn form_errors(session: &Session, schema: &Value, params: &Value) -> BTreeMa
             return errors;
         }
     };
-    let controls = rules.visible_values(values);
+    let controls = match rules.visible_values(values) {
+        Ok(controls) => controls,
+        Err(error) => {
+            errors.insert("params".into(), invalid(error.to_string()));
+            return errors;
+        }
+    };
     let properties = schema.get("properties").and_then(Value::as_object);
     if values.len() > 256 || properties.is_some_and(|p| p.len() > 256) {
         errors.insert("params".into(), invalid("at most 256 form fields".into()));

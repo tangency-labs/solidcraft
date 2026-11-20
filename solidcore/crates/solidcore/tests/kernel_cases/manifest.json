@@ -104,23 +104,23 @@
       "ungraded": {}
     },
     "fillets": {
-      "cases": 315,
+      "cases": 318,
       "chain": {
-        "1": 11,
+        "1": 13,
         "13": 8,
         "14": 1,
         "17": 1,
         "2": 6,
         "21": 2,
         "26": 3,
-        "4": 258,
+        "4": 259,
         "5": 6,
         "7": 2,
         "8": 1
       },
-      "expressible": 92,
+      "expressible": 95,
       "not_expressible": 16,
-      "operation_expressible": 299,
+      "operation_expressible": 302,
       "reasons": {
         "SolidCraft has no command for it yet": 2,
         "refused or failed in SolidCraft, not in a kernel operation": 14
