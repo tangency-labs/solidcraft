@@ -279,7 +279,9 @@ applies only to object scopes declaring conditional rules; plain object scopes s
 
 All applicable scopes share the same visible controller values. When any scope hides a
 controller, conditions in every scope see it as missing. Required checks and choice filters
-use that same view.
+use that same view. Loading checks visibility dependency cycles across each combination of
+enclosing scopes and selected branches, including nested objects and array items. Mutually
+exclusive branches are checked separately.
 
 Put `x-solidcraft-when` on a `oneOf` option to offer it only when its condition is true. If the
 current choice becomes unavailable, the dialog selects a matching conditional default, or the

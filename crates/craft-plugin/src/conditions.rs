@@ -379,6 +379,82 @@ pub(crate) fn selected_branch<'a>(options: &'a [Value], value: &Value, budget: &
     Ok(None)
 }
 
+// Expand alternatives independently: combining all alternatives would invent cycles between
+// mutually exclusive branches. Children inherit the same combination of enclosing scopes.
+fn validate_visibility_combinations(schemas: &[&Value], path: &str, depth: usize, budget: &mut usize) -> Result<()> {
+    #[derive(Clone, Copy)]
+    enum Pending<'a> {
+        Schema(&'a Value),
+        Choice(&'a [Value]),
+    }
+    fn spend(budget: &mut usize, amount: usize, path: &str) -> Result<()> {
+        *budget = budget.checked_sub(amount).ok_or_else(|| invalid(path, "conditional scope combinations are too large"))?;
+        Ok(())
+    }
+    if depth > 32 {
+        return Err(invalid(path, "schema is too deeply nested"));
+    }
+    let mut combinations = vec![(schemas.iter().copied().map(Pending::Schema).collect::<Vec<_>>(), Vec::new())];
+    'combinations: while let Some((mut pending, mut applied)) = combinations.pop() {
+        while let Some(next) = pending.pop() {
+            spend(budget, 1, path)?;
+            match next {
+                Pending::Schema(schema) => {
+                    applied.push(schema);
+                    for key in ["oneOf", "anyOf"] {
+                        if let Some(options) = schema.get(key).and_then(Value::as_array)
+                            && options.iter().any(|option| contains_conditions(option, false))
+                        {
+                            pending.push(Pending::Choice(options));
+                        }
+                    }
+                }
+                Pending::Choice(options) => {
+                    for option in options {
+                        spend(budget, pending.len() + applied.len() + 1, path)?;
+                        let mut branch = pending.clone();
+                        branch.push(Pending::Schema(option));
+                        combinations.push((branch, applied.clone()));
+                    }
+                    continue 'combinations;
+                }
+            }
+        }
+        let mut conditions = Vec::new();
+        for schema in &applied {
+            let rules = InputConditions::parse(schema)?;
+            spend(budget, rules.fields.len() + rules.fields.values().map(|field| field.dependencies.len()).sum::<usize>(), path)?;
+            conditions.push(rules);
+        }
+        visible_values(&Map::new(), conditions.iter().flat_map(|scope| scope.fields.iter().map(|(name, rules)| (name.as_str(), rules))))?;
+        let mut names = BTreeSet::new();
+        for schema in &applied {
+            if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
+                spend(budget, properties.len(), path)?;
+                names.extend(properties.keys().map(String::as_str));
+            }
+        }
+        for name in names {
+            let children: Vec<_> = applied
+                .iter()
+                .filter_map(|schema| {
+                    schema.get("properties").and_then(|properties| properties.get(name)).or_else(|| schema.get("additionalProperties"))
+                })
+                .collect();
+            if children.iter().any(|child| contains_conditions(child, false)) {
+                validate_visibility_combinations(&children, &format!("{path}.properties.{name}"), depth + 1, budget)?;
+            }
+        }
+        for key in ["items", "additionalProperties"] {
+            let children: Vec<_> = applied.iter().filter_map(|schema| schema.get(key)).collect();
+            if children.iter().any(|child| contains_conditions(child, false)) {
+                validate_visibility_combinations(&children, &format!("{path}.{key}"), depth + 1, budget)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Validate every object scope at load, including schemas the GUI does not draw.
 pub fn validate_conditions(schema: &Value) -> Result<()> {
     fn visit(schema: &Value, path: &str, depth: usize, budget: &mut usize) -> Result<()> {
@@ -423,5 +499,10 @@ pub fn validate_conditions(schema: &Value) -> Result<()> {
         }
         Ok(())
     }
-    visit(schema, "input_schema", 0, &mut 100_000)
+    let mut budget = 100_000;
+    visit(schema, "input_schema", 0, &mut budget)?;
+    if contains_conditions(schema, false) {
+        validate_visibility_combinations(&[schema], "input_schema", 0, &mut budget)?;
+    }
+    Ok(())
 }
