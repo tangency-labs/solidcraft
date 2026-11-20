@@ -3298,7 +3298,8 @@ impl FilletCorner {
         ) {
             Ok(()) => {}
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(sm_err()), // Unable to convert
+            // Unable to convert (the re-solve's error is kept as the cause, #13790)
+            Err(e) => return Err(keeping_cause(sm_err(), e)),
         }
 
         // EdgeUse current UVTrimCurves
@@ -3683,6 +3684,17 @@ fn make_face(
     Ok(made.face)
 }
 
+/// `error`, a failure this module builds in place of a routine's error, keeping `cause`,
+/// that routine's error (guide rule 6). Its operation, reason and status stay `error`'s. An
+/// error that is not a [`SolidError::Failed`] has no record to keep a cause in and is
+/// returned as it is.
+pub(super) fn keeping_cause(error: SolidError, cause: SolidError) -> SolidError {
+    match error {
+        SolidError::Failed(failure) => (*failure).caused_by(cause).into_error(),
+        other => other,
+    }
+}
+
 /// What [`FilletCorner::drop_end_rib`] did with an Nx1 corner's end rib.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EndRibDrop {
@@ -3958,6 +3970,26 @@ mod tests {
                 &cause,
             );
         }
+    }
+
+    /// A constant-radius conversion whose re-solve fails is reported as before (the
+    /// failure its `sm_err` builds), keeping the re-solve's error as its cause.
+    #[test]
+    fn a_failed_constant_radius_re_solve_keeps_its_error() {
+        let phrase = "the corner cannot be made a constant-radius fillet";
+        for cause in calculator_errors() {
+            let e = keeping_cause(
+                SolidError::blend_failed(OP_CONST_RAD, phrase),
+                cause.clone(),
+            );
+            assert_corner_failure_keeps(&e, OP_CONST_RAD, phrase, &cause);
+        }
+        // an error without a record has no cause to keep
+        let bare = SolidError::sm_err(OP_CONST_RAD);
+        assert_eq!(
+            keeping_cause(bare.clone(), SolidError::sm_err("re-solve")),
+            bare
+        );
     }
 
     /// `SqueezeEdge` moves one rail vertex use at a time: a closed rail at the vertex to

@@ -1667,7 +1667,8 @@ impl FilletCorner {
         ) {
             Ok(()) => {}
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(sm_err()), // Unable to convert
+            // Unable to convert (the re-solve's error is kept as the cause, #13790)
+            Err(e) => return Err(super::p1::keeping_cause(sm_err(), e)),
         }
 
         if self.corner_type() == FilletCornerType::NByNConcave {
@@ -2379,6 +2380,48 @@ mod tests {
         let (mut pseudo, mut c) = loop_corner(FilletCornerKind::ConvexNByN, 4);
         let r = with_env(&mut pseudo, |env| c.make_variable_radius_fillet(env));
         assert!(r.is_err_and(|e| e.upstream_status().is_some()));
+    }
+
+    /// A variable-radius conversion whose re-solve fails is reported as before (the
+    /// failure its `sm_err` builds: operation, phrase, status), keeping the re-solve's error
+    /// as its cause, whose class it takes (#13790).
+    #[test]
+    fn a_failed_variable_radius_re_solve_keeps_its_error() {
+        use crate::blend::fillet_executive::NoRoomReason;
+        use crate::error::blend::BlendFailure;
+        let phrase = "the corner cannot be made a variable-radius fillet";
+        for cause in [
+            SolidError::blend(
+                "re-solve",
+                BlendFailure::NoRoom(NoRoomReason::BallDoesNotFit),
+            ),
+            SolidError::blend("re-solve", BlendFailure::StageFailed),
+            SolidError::sm_err("re-solve"),
+        ] {
+            let e = super::super::p1::keeping_cause(
+                SolidError::blend_failed(OP_VAR_RAD, phrase),
+                cause.clone(),
+            );
+            assert_eq!(e.operation(), OP_VAR_RAD, "{e:?}");
+            assert_eq!(
+                e.blend_failure(),
+                Some(&BlendFailure::Failed(phrase)),
+                "{e:?}"
+            );
+            assert_eq!(e.sm_status(), Some(crate::error::SM_ERR), "{e:?}");
+            assert_eq!(
+                e.kind(),
+                crate::error::ErrorKind::of_status(crate::error::SM_ERR),
+                "{e:?}"
+            );
+            assert_eq!(e.cause(), Some(&cause), "{e:?}");
+            assert_eq!(
+                e.to_string(),
+                format!("{OP_VAR_RAD}: {phrase}; caused by {cause}")
+            );
+            assert_eq!(e.is_defect(), cause.is_defect(), "{e:?}");
+            assert_eq!(e.is_refusal(), cause.is_refusal(), "{e:?}");
+        }
     }
 
     #[test]
