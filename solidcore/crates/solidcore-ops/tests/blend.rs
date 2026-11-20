@@ -4049,6 +4049,98 @@ fn both_flat_face_loops_of_a_notched_half_torus_round() {
     assert!(rel(actual, expected) < 1e-8, "{actual} vs {expected}");
 }
 
+/// The volume a round of radius `r` (`chamfer: false`) or a chamfer of distance `r` takes off
+/// one rim of the upper half of a torus (ring radius `a`, tube radius `b`) cut by the plane
+/// through its axis' middle: the outer rim for `side` 1, the inner for -1. The blend is the
+/// revolved meridian blend of the tube's circle and the cut line, which meet square. Both are
+/// fixed by where the circle's and the line's offsets by `r` meet, the centre (x, r) with
+/// |x - a| = sqrt((b - r)^2 - r^2): the round is the circle about it, and the chamfer joins its
+/// feet, (x, 0) on the line and the point of the tube's circle along the centre's direction from
+/// the tube's centre. By Pappus, the volume is 2 pi times the first moment about the axis of the
+/// region between the blend and the corner, integrated over z (the substitution
+/// z = h (1 - cos t) / 2 takes the square roots' ends smoothly).
+fn half_torus_rim_blend_takes(a: f64, b: f64, r: f64, side: f64, chamfer: bool) -> f64 {
+    let x = a + side * ((b - r).powi(2) - r * r).sqrt();
+    let foot = [a + (x - a) * b / (b - r), r * b / (b - r)];
+    let n = 20_000;
+    let mut moment = 0.0;
+    for i in 0..n {
+        let t = (f64::from(i) + 0.5) * PI / f64::from(n);
+        let z = foot[1] * (1.0 - t.cos()) / 2.0;
+        let dz = foot[1] * t.sin() / 2.0 * PI / f64::from(n);
+        let tube = a + side * (b * b - z * z).sqrt();
+        let blend = if chamfer {
+            x + (foot[0] - x) * z / foot[1]
+        } else {
+            x + side * (r * r - (z - r).powi(2)).max(0.0).sqrt()
+        };
+        moment += (tube * tube - blend * blend).abs() / 2.0 * dz;
+    }
+    2.0 * PI * moment
+}
+
+/// #18270: a round or a chamfer of both rims of a half torus's flat face took minutes on a
+/// Ø300 / Ø80 ring and did not finish at Ø3000 / Ø800 or on the Ø1000 / Ø1 ring, the time
+/// growing with the edges' length in tolerances; the rims are circles, so the blend is exact
+/// (#19190). Each ring is the issue's (blend size 0.05 x the tube's diameter) and takes the
+/// closed-form volume.
+#[test]
+fn both_flat_face_rims_of_a_large_half_torus_blend_to_their_closed_forms() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::revolve;
+    use solidcore_ops::BooleanOp;
+
+    all_fixes();
+    for (a, b) in [(150.0, 40.0), (1500.0, 400.0), (500.0, 0.5)] {
+        let r = 0.1 * b;
+        for kind in [Blend::Round, Blend::Chamfer] {
+            let ring = revolve(
+                &[Curve::Arc {
+                    center: [a, 0.0, 0.0],
+                    axis: [0.0, -1.0, 0.0],
+                    reference: [1.0, 0.0, 0.0],
+                    radius: b,
+                    start: 0.0,
+                    end: 2.0 * PI,
+                }],
+                [0.0; 3],
+                [0.0, 0.0, 1.0],
+                2.0 * PI,
+                true,
+            )
+            .unwrap();
+            let reach = a + b + 1.0;
+            let below = make_box(
+                [-reach, -reach, -b - 1.0],
+                [2.0 * reach, 2.0 * reach, b + 1.0],
+            )
+            .unwrap();
+            let body = boolean(ring, below, BooleanOp::Subtract).unwrap().unwrap();
+            let picks: Vec<_> = [[0.0, -(a + b), 0.0], [0.0, -(a - b), 0.0]]
+                .into_iter()
+                .map(|point| nearest_edge(&body, point))
+                .collect();
+            let edges = tangent_chain(&body, None, &picks, &[], 2.0 * PI / 180.0)
+                .unwrap()
+                .members;
+            let result = blend(&body, kind, &edges, &[r], &[], Corners::Filled).unwrap();
+            assert!(result.dropped.iter().all(|dropped| !dropped));
+            let report = body.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{}", report.text);
+            assert_eq!(body.solid_count().unwrap(), 1);
+            let chamfer = kind == Blend::Chamfer;
+            let expected = PI * PI * a * b * b
+                - half_torus_rim_blend_takes(a, b, r, 1.0, chamfer)
+                - half_torus_rim_blend_takes(a, b, r, -1.0, chamfer);
+            let actual = volume(&body);
+            assert!(
+                rel(actual, expected) < 1e-6,
+                "{kind:?} a {a} b {b}: {actual} vs {expected}"
+            );
+        }
+    }
+}
+
 /// A revolved r8 corner, clipped on x = +/-10. Its torus support must survive the
 /// round's definition record and reload, including the partial generator's parameters.
 #[test]
