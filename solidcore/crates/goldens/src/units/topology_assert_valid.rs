@@ -968,6 +968,7 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::Runner;
+    use crate::compare::{floor_of, values_agree};
     use crate::UnitDiff;
 
     /// The near-zero gaps of tests 13 and 1 carry an absolute floor so they agree
@@ -978,6 +979,18 @@ mod tests {
         let floors = Runner.abs_floors();
         let keys: Vec<_> = floors.iter().map(|f| f.key).collect();
         assert_eq!(keys, ["edge_test13_max_gap", "vertex_test1_max_gap_3d"]);
-        assert!(floors.iter().all(|f| f.abs > 0.0 && f.abs < 1e-6));
+        for key in keys {
+            let floor = floor_of(floors, key);
+            // A passing body's zero gap against last-bit noise, up to the floor itself.
+            assert!(values_agree(0.0, 5e-13, floor), "{key}: noise below the floor");
+            assert!(values_agree(0.0, 1e-12, floor), "{key}: noise at the floor");
+            // Anything bigger is a real change: just above the floor, and a failing
+            // edge or vertex off by the tolerance.
+            assert!(!values_agree(0.0, 2e-12, floor), "{key}: just above the floor");
+            assert!(!values_agree(0.0, 1e-5, floor), "{key}: a real gap");
+        }
+        // Other keys keep the relative rule alone.
+        let other = floor_of(floors, "max_vertex_edge_face_gaps");
+        assert!(!values_agree(0.0, 5e-13, other));
     }
 }
