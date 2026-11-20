@@ -2021,12 +2021,18 @@ pub(crate) fn cover_joined_faces(
         else {
             continue;
         };
-        // UNPROVED fallback (#18166): a bound the B-rep check refuses as an edge tolerance
-        // is the enclosure's limit, not a distance to raise to (`create_cylindrical_box` at
-        // radius 1e4, thickness 1e-3: 3.49 for a joined arc, B-rep tolerance 1e-5). The edge
-        // is left as upstream leaves it, not proved to cover the face.
+        // UNPROVED fallback (#18166): a bound the B-rep check refuses as an edge tolerance is
+        // taken only where the edge is seen that far from the face: more than
+        // `1 / COVER_CONVERGED` of it at a sample ([`sampled_face_gap`]; a stitch over a real
+        // gap, `heal.stitch_p1` `cov_tjunc9_into_shell`). Otherwise it is the enclosure not
+        // converging (`create_cylindrical_box` at radius 1e4, thickness 1e-3: 3.49 for a
+        // joined arc whose samples lie within rounding of the cylinder, B-rep tolerance
+        // 1e-5), and the edge is left as upstream leaves it, not proved to cover the face.
         if !within_edge_tolerance_limit(b, gap) {
-            continue;
+            match sampled_face_gap(k, b, e, f)? {
+                Some(seen) if gap <= COVER_CONVERGED * seen => {}
+                _ => continue,
+            }
         }
         settle.push((f, f64::INFINITY));
         if gap > tol {
@@ -2040,6 +2046,46 @@ pub(crate) fn cover_joined_faces(
         cover_vertex_ends(k, b, e)?;
     }
     Ok(())
+}
+
+/// How many times the largest sampled distance ([`sampled_face_gap`]) a face bound past the
+/// B-rep check's edge tolerance limit may be and still be taken by [`cover_joined_faces`]: a
+/// bound within a small factor of what is seen is an enclosure that converged (the goal
+/// #19784 sets for trim bounds), one far above it is not.
+const COVER_CONVERGED: f64 = 2.0;
+
+/// How many pieces [`sampled_face_gap`] cuts the edge's interval into.
+const COVER_SAMPLES: u32 = 32;
+
+/// Not upstream (#18166): the largest distance from `e`'s curve, at the ends of
+/// [`COVER_SAMPLES`] equal pieces of its interval, to the closest point found on the surface
+/// of face `f` (`surface_closest_point`). Each is a distance to a point of the surface, so
+/// at least the true distance at that sample: a sample, not a bound, used only to tell a
+/// real gap from an enclosure that did not converge. `None` without a curve or surface, or
+/// where a sample is not evaluated or dropped.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; the kernel's unported and cancelled statuses.
+fn sampled_face_gap(k: &Kernel, b: &Brep, e: EdgeId, f: FaceId) -> Result<Option<f64>> {
+    let rec = b.edge(e)?;
+    let (Some(curve), Some(surface)) = (rec.curve.as_ref(), b.face(f)?.surface.as_ref()) else {
+        return Ok(None);
+    };
+    let surface = surface.clone_for_evaluation()?;
+    let mut most = 0.0_f64;
+    for i in 0..=COVER_SAMPLES {
+        let t = rec.interval.evaluate(f64::from(i) / f64::from(COVER_SAMPLES));
+        let Ok(p) = curve.evaluate_point(k, t) else {
+            return Ok(None);
+        };
+        match crate::query::api_queries::surface_closest_point(k, &surface, p) {
+            Ok(c) => most = most.max(c.closest.distance),
+            Err(err) if err.is_unported_or_cancelled() => return Err(err),
+            Err(_) => return Ok(None),
+        }
+    }
+    Ok(Some(most))
 }
 
 /// Not upstream (#18166): after the cover raised `e` ([`cover_joined_faces`]), raises it once
@@ -2306,12 +2352,7 @@ fn settle_face_bounds(k: &Kernel, b: &mut Brep, e: EdgeId, faces: &[(FaceId, f64
         for &(f, reach) in faces {
             let tol = b.edge(e)?.tolerance;
             match edge_face_gap_bound(k, b, e, f, tol, [tol, f64::INFINITY])? {
-                Some(again)
-                    if again.is_finite()
-                        && again > tol
-                        && again < reach
-                        && within_edge_tolerance_limit(b, again) =>
-                {
+                Some(again) if again.is_finite() && again > tol && again < reach => {
                     crate::topology::edge::set_tolerance(b, e, again, true, true)?;
                     raised = true;
                 }
