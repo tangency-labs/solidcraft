@@ -61,9 +61,9 @@ impl Renderer {
         let scopes = [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation].map(|f| device.push_error_scope(f));
         let result = self.probe_pixels(device, queue, blank_samples);
         // Discard the probe's uploads and picture even on errors, before the real scene arrives.
-        self.model = Batches::default();
-        self.sketch = Batches::default();
-        self.highlight = Batches::default();
+        self.pic.model = Batches::default();
+        self.pic.sketch = Batches::default();
+        self.pic.highlight = Batches::default();
         self.preview = Batches::default();
         self.pic.ss = None;
         self.pic.ss_key = None;

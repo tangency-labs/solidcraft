@@ -146,7 +146,7 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
         }
         Some(craft_plugin::prepare_input(&entry.input_schema, &update.values)?)
     } else {
-        None
+        conditions::has_conditions(&importer.input_schema).then(|| craft_plugin::prepare_input(&importer.input_schema, options)).transpose()?
     };
     let options = hooked.as_ref().unwrap_or(options);
     // The caller's file scope covers the file, and with input_folder, the folder it is in. The
@@ -224,7 +224,7 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
-        let _ = (package, input_folder);
+        let _ = (package, input_folder, options);
         Err(error("opening a file with an importer plugin needs the desktop app"))
     }
 }

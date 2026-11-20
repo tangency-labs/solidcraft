@@ -877,9 +877,42 @@ fn solved_surface(
         }
         SolvedSurfaceGeometry::Torus(t) => {
             let minor = t.minor_radius().get();
+            let (major, f) = (
+                t.major_radius().get(),
+                frame(point(t.center().get()), t.frame()),
+            );
+            // A torus whose tube reaches its axis (a spindle or horn torus: major radius at most
+            // the minor, as cadmpeg reads a STEP torus written with a negative major radius) is
+            // its tube's meridian circle revolved about its axis, as the STEP reader reads one: the
+            // circle about `C + R x` in the x–z plane, its parameter from x towards z, so the
+            // revolution is ISO 10303-42's torus with the same normal (∂angle × ∂profile). The
+            // face's boundary keeps the sheet it is on (the lemon or the apple).
+            if major <= minor.abs() {
+                let (x, y) = (Vec3::from(f.x_axis), Vec3::from(f.y_axis));
+                let z = x.cross(y);
+                let circle = BCurve::Circle {
+                    frame: Frame {
+                        origin: a(Vec3::from(f.origin) + x * major),
+                        x_axis: a(x),
+                        y_axis: a(z),
+                    },
+                    radius: minor.abs(),
+                };
+                return Ok((
+                    (
+                        FaceSurface::Swept(SweptSurface::Revolution {
+                            profile: circle,
+                            origin: f.origin,
+                            axis: a(z),
+                        }),
+                        minor < 0.0,
+                    ),
+                    bound,
+                ));
+            }
             let torus = BSurface::Torus {
-                frame: frame(point(t.center().get()), t.frame()),
-                major_radius: t.major_radius().get(),
+                frame: f,
+                major_radius: major,
                 minor_radius: minor.abs(),
                 tube_start: 0.0,
             };
