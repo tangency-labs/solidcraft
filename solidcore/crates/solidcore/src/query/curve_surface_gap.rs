@@ -472,6 +472,14 @@ impl NetSurface {
                     Err(e) if lift > 0 => {
                         let (cuts, sliver, lower) =
                             past_one_low_line(knots, p, count, a, b, need, slack_range).ok_or(e)?;
+                        // (a part past the net's end next to the short part would continue
+                        // the short side's polynomial while the short part continues the
+                        // kept side's: the continued surface would jump at the end)
+                        if (lower && lo < d0) || (!lower && hi > d1) {
+                            return Err(refused(
+                                "a part past a knot line next to a part past the net's end",
+                            ));
+                        }
                         // the short part, on the span the surface truly has there
                         let short = if lower { cuts.first() } else { cuts.last() }
                             .map(|c| (c.0, c.1, span(knots, p, count, c.0)));
@@ -3938,6 +3946,35 @@ mod tests {
             g >= lift && g <= lift * (1.0 + 2.0 * CLOSE_RELATIVE) + 1.0e-12,
             "{g:e} against {lift:e}"
         );
+        // a box whose part past the join `u = 1` runs on past the net's end `1 + e`: the
+        // end's part would continue the last span while the part past the join continues
+        // the one before it, so the continued surface would jump at the end (#18219 review)
+        let probes = [Point2::new(0.5, 0.5)];
+        let net = NetSurface::of_exact(&k, &surface, &probes)
+            .unwrap()
+            .unwrap();
+        let box_at = |hi: f64| V3 {
+            x: Ivl::new(0.5, hi),
+            y: Ivl::new(0.4, 0.6),
+            z: Ivl::from(0.0),
+        };
+        assert!(net.partials(&[box_at(1.0 + 0.5 * e)], 1, 1).is_ok());
+        assert!(net.partials(&[box_at(1.0 + 1.5 * e)], 1, 1).is_err());
+    }
+
+    /// A short part past a low knot line holding another knot (#18219 review): a cubic
+    /// net with a C^0 line at `1` and a simple knot at `1.01`. The short part `[1, 1.02]`
+    /// would be two spans of the surface while its jump is enclosed on one, so it is not
+    /// taken; `[1, 1.005]` is one span and is.
+    #[test]
+    fn a_short_part_past_a_low_line_is_one_span() {
+        let knots = [
+            0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.01, 1.5, 2.0, 2.0, 2.0, 2.0,
+        ];
+        let n = knots.len() - 4;
+        assert!(past_one_low_line(&knots, 3, n, 0.95, 1.02, 1, 0.1).is_none());
+        let (cuts, sliver, lower) = past_one_low_line(&knots, 3, n, 0.95, 1.005, 1, 0.1).unwrap();
+        assert!(!lower && (sliver - 0.005).abs() < 1e-15, "{cuts:?}");
     }
 
     /// An offset across a real kink of its base (#18219 review): the base is flat for
@@ -3951,7 +3988,8 @@ mod tests {
     /// between the two not added, the bound would come out near the short part's slack
     /// (about 0.02) where the curve's distance to the surface is at least the smaller of
     /// its distances to the two sheets' planes at a dip (about 0.07). Any bound given is at
-    /// least that.
+    /// least that; the slack assertion is the enclosure's proof, the end-to-end check only
+    /// applies when a bound is given.
     #[test]
     fn an_offset_across_its_bases_kink_is_never_bounded_below_its_distance() {
         use crate::nurbs::b_spline_surface::BSplineSurface;

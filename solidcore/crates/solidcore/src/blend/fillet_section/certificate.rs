@@ -1692,7 +1692,9 @@ pub(crate) type KnotPieces = Vec<(f64, f64, usize)>;
 /// point values from the surface's own piece `S` over the short part adds `sup |S - S~|`
 /// there too (`NetSurface::partials`). (#18219: a trim along a face's boundary that is a
 /// C^0 join of an extended net crosses the join by rounding at every depth.) `None` when
-/// the box crosses no such line or more than one, or the short part is wider than `limit`.
+/// the box crosses no such line or more than one, the short part is wider than `limit`,
+/// or another knot lies strictly inside the short part (its surface is then more than one
+/// span).
 pub(crate) fn past_one_low_line(
     knots: &[f64],
     p: usize,
@@ -1715,6 +1717,12 @@ pub(crate) fn past_one_low_line(
     }
     let x = line?;
     let (below, above) = (x - lo, hi - x);
+    // (the short part's true surface is one span: no other knot strictly inside it, so
+    // `sup |S - S~|` over it is that span's polynomial against the kept side's)
+    let (s0, s1) = if below < above { (lo, x) } else { (x, hi) };
+    if knots.iter().any(|&k| k > s0 && k < s1) {
+        return None;
+    }
     if below < above {
         if !matches!(
             below.partial_cmp(&limit),
