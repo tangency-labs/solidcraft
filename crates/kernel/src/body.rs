@@ -582,6 +582,17 @@ pub struct RayPick {
     pub depth: f64,
 }
 
+/// How a hole's entry face stands over its rim ([`Body::hole_mouth`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HoleMouth {
+    /// The hole enters no face of the body at its spot.
+    NotEntered,
+    /// The entry face's greatest height over the rim, above the plane across the axis.
+    Lip(f64),
+    /// The entry face is neither planar nor a convex cylinder, cone or sphere, has no normal at the spot, or the body has no exact form.
+    Undecided,
+}
+
 /// Where a point lies against a body ([`Body::classify_point`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PointClass {
@@ -1899,6 +1910,14 @@ impl Body {
         }
     }
 
+    /// How high the faces at `spot` stand over the rim of a hole of `radius` along `dir` ([`solidcore_ops::Body::hole_mouth_lip`]).
+    pub fn hole_mouth(&self, spot: Vec3, dir: Vec3, radius: f64) -> HoleMouth {
+        if self.is_mesh() {
+            return HoleMouth::NotEntered;
+        }
+        hole_mouth_of(self.ops_body().map(|(body, _)| body.hole_mouth_lip([spot.x, spot.y, spot.z], [dir.x, dir.y, dir.z], radius)))
+    }
+
     /// Where face `face_index` lies along `direction` when it is a plane square to it: its level
     /// from `origin` and the face's own tolerance ([`solidcore_ops::Body::face_square_level`]),
     /// exact, no mesh. `None` for a face that is not, a mesh body, an index out of range or a
@@ -2175,6 +2194,25 @@ fn curve_hull(c: &Curve, interval: [f64; 2], b: &mut Aabb3) {
         }
         Curve::SurfaceIntersection { leader, .. } => curve_hull(leader, interval, b),
     }
+}
+
+/// A body with no exact form, or a lip query that fails, is undecided: its hole is drilled as on main.
+fn hole_mouth_of(found: Option<std::result::Result<Option<f64>, solidcore_ops::Error>>) -> HoleMouth {
+    match found {
+        Some(Ok(Some(lip))) => HoleMouth::Lip(lip),
+        Some(Ok(None)) => HoleMouth::NotEntered,
+        _ => HoleMouth::Undecided,
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn a_hole_mouth_query_that_fails_is_undecided() {
+    assert_eq!(hole_mouth_of(None), HoleMouth::Undecided);
+    assert_eq!(hole_mouth_of(Some(Err(solidcore_ops::Error::Status(1001)))), HoleMouth::Undecided);
+    assert_eq!(hole_mouth_of(Some(Err(solidcore_ops::Error::Argument))), HoleMouth::Undecided);
+    assert_eq!(hole_mouth_of(Some(Ok(None))), HoleMouth::NotEntered);
+    assert_eq!(hole_mouth_of(Some(Ok(Some(1.5)))), HoleMouth::Lip(1.5));
 }
 
 #[cfg(test)]
