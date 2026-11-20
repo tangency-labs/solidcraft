@@ -2579,7 +2579,6 @@ fn classify_edge_crossing_inner(
     tolerance: f64,
     edge: crate::topology::EdgeId,
 ) -> Result<EdgeCrossing> {
-    use crate::geom::extent1d::Extent1d;
     let clear = EdgeCrossing {
         event: CrossEvent::Clear,
         proof: None,
@@ -2678,7 +2677,12 @@ fn classify_edge_crossing_inner(
     // the clip path below, where the certificate decides or the operation refuses
     // typed
     // (the band is decided above; the inner sees only cuts past it)
-    if (1.0 - width) * chord <= tolerance {
+    if (1.0 - width) * chord <= tolerance
+        // the certified claim behind the untouched read (issue #18655's counterexample):
+        // the ends' length rule alone cleared a span whose crossings and kept island the
+        // model could not see
+        && clear_claim_holds(shape, t0, t1, tolerance, chord)
+    {
         // the cut trims off no part of the edge the model resolves (the clip is at its
         // very end, or the whole edge is clear of it): the edge is untouched
         return Ok(clear);
@@ -2806,6 +2810,37 @@ fn trim_claim_holds(
             }
         }
         clearance::CutShape::Whole { removed_side } => clip_at_end && !removed_side,
+    }
+}
+
+/// The untouched claim, certified (the `Clear` decision's conservative gate in the
+/// length model's own metric): nothing of the edge the model resolves is removed —
+/// every certified removed piece measures at most the tolerance the length model
+/// resolves (a fraction of the span's chord, not an arc length: deliberately
+/// conservative, never a complete geometric-clearance proof), and a complex span (a
+/// kept island between crossings) or a whole removed span holds no claim. The
+/// endpoint-rounding hair (a zero-length side at an end) reads clear as it always
+/// did.
+fn clear_claim_holds(
+    shape: clearance::CutShape,
+    t0: f64,
+    t1: f64,
+    tolerance: f64,
+    chord: f64,
+) -> bool {
+    let span = t1 - t0;
+    let removed = |from: f64, to: f64| ((to - from) / span) * chord;
+    match shape {
+        clearance::CutShape::Complex => false,
+        clearance::CutShape::Whole { removed_side } => !removed_side,
+        clearance::CutShape::Single {
+            crossing,
+            low_kept,
+            high_kept,
+        } => {
+            (low_kept || removed(t0, crossing) <= tolerance)
+                && (high_kept || removed(crossing, t1) <= tolerance)
+        }
     }
 }
 
@@ -8222,6 +8257,179 @@ mod tests {
                 ))
             ),
             "{err:?}"
+        );
+    }
+
+    /// The untouched claim's cases (the `Clear` decision's conservative gate in the
+    /// length model's own metric): both orientations with the removed side below, at
+    /// and above the tolerance, the zero-length end sides (the endpoint-rounding
+    /// hair), and the shapes that hold no claim.
+    #[test]
+    fn the_untouched_claim_reads_the_certified_removed_length() {
+        use clearance::CutShape;
+        let (t0, t1) = (0.0_f64, 1.0_f64);
+        // binary-exact values, so the equal case is exactly equal
+        let (tolerance, chord) = (0.125, 1.0);
+        // a whole kept span holds; a whole removed span holds nothing
+        assert!(clear_claim_holds(
+            CutShape::Whole {
+                removed_side: false
+            },
+            t0,
+            t1,
+            tolerance,
+            chord
+        ));
+        assert!(!clear_claim_holds(
+            CutShape::Whole { removed_side: true },
+            t0,
+            t1,
+            tolerance,
+            chord
+        ));
+        // a kept island between crossings holds nothing
+        assert!(!clear_claim_holds(
+            CutShape::Complex,
+            t0,
+            t1,
+            tolerance,
+            chord
+        ));
+        // the removed low side: below, at and above the tolerance
+        for (crossing, holds) in [(0.0625, true), (0.125, true), (0.25, false)] {
+            let shape = CutShape::Single {
+                crossing,
+                low_kept: false,
+                high_kept: true,
+            };
+            assert_eq!(
+                clear_claim_holds(shape, t0, t1, tolerance, chord),
+                holds,
+                "low {crossing}"
+            );
+        }
+        // the removed high side: below, at and above the tolerance
+        for (crossing, holds) in [(0.9375, true), (0.875, true), (0.75, false)] {
+            let shape = CutShape::Single {
+                crossing,
+                low_kept: true,
+                high_kept: false,
+            };
+            assert_eq!(
+                clear_claim_holds(shape, t0, t1, tolerance, chord),
+                holds,
+                "high {crossing}"
+            );
+        }
+        // the zero-length end sides: the hair reads clear
+        let end_low = CutShape::Single {
+            crossing: t0,
+            low_kept: false,
+            high_kept: true,
+        };
+        assert!(clear_claim_holds(end_low, t0, t1, tolerance, chord));
+        let end_high = CutShape::Single {
+            crossing: t1,
+            low_kept: true,
+            high_kept: false,
+        };
+        assert!(clear_claim_holds(end_high, t0, t1, tolerance, chord));
+    }
+
+    /// The kept-side endpoint rounding (the `Clear` decision's own hair case): a cut
+    /// rounding a hair outside an end on the KEPT side leaves the edge untouched — the
+    /// length model's read, now certified (the removed side is the zero-length end).
+    /// Both ends read the same.
+    #[test]
+    fn a_cut_rounding_a_hair_outside_an_end_on_the_kept_side_clears() {
+        use crate::curve::line::Line;
+        use crate::geom::extent1d::Extent1d;
+        let k = Kernel::default();
+        let face = cut_face(
+            FaceId::from_index(0),
+            Surface::from(Plane::from_normal(Point3::ZERO, Vec3::Z)),
+            Extent2d::from_bounds(-10.0, -10.0, 10.0, 10.0),
+        );
+        // the whole line on the kept side, the cut a hair beyond one end
+        for (p0, p1) in [
+            (Point3::new(0.0, 0.0, -2.0), Point3::new(0.0, 0.0, -1.0e-5)),
+            (Point3::new(0.0, 0.0, -1.0e-5), Point3::new(0.0, 0.0, -2.0)),
+        ] {
+            let line = Curve::from(Line::from_points(p0, p1, 3));
+            let crossing = classify_edge_crossing(
+                &k,
+                &line,
+                &Extent1d::from_min_max(0.0, 1.0),
+                &face,
+                2.0e-5,
+                crate::topology::EdgeId::from_index(0),
+            )
+            .unwrap();
+            assert!(
+                matches!(crossing.event, CrossEvent::Clear),
+                "{:?} -> {:?}",
+                p0,
+                crossing.event
+            );
+        }
+    }
+
+    /// The uncertified untouched read (issue #18655's counterexample in the `Clear`
+    /// decision): C(t) = (t, 0, -1 + 8t(1 - t)) on [0, 1] has both ends on the kept
+    /// side and crosses the cut twice inside its span, with a removed island between
+    /// the roots. The ends' length rule reads width 1 and cleared the edge (red before
+    /// the certified claim); with it the operation refuses typed — a span the
+    /// certified decomposition does not hold is never cleared.
+    #[test]
+    fn a_curve_crossing_the_cut_between_its_ends_is_not_clear() {
+        use crate::error::offset::ReconstructionRefusal;
+        use crate::geom::extent1d::Extent1d;
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        let k = Kernel::default();
+        // the quadratic Bezier z(t) = -1 + 8t(1 - t), x(t) = t: controls (0, 0, -1),
+        // (0.5, 0, 3), (1, 0, -1)
+        let quadratic = Curve::from(
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 2,
+                control_points: &[
+                    Point3::new(0.0, 0.0, -1.0),
+                    Point3::new(0.5, 0.0, 3.0),
+                    Point3::new(1.0, 0.0, -1.0),
+                ],
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[3, 3],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        );
+        let face = cut_face(
+            FaceId::from_index(0),
+            Surface::from(Plane::from_normal(Point3::ZERO, Vec3::Z)),
+            Extent2d::from_bounds(-10.0, -10.0, 10.0, 10.0),
+        );
+        let r = classify_edge_crossing(
+            &k,
+            &quadratic,
+            &Extent1d::from_min_max(0.0, 1.0),
+            &face,
+            2.0e-5,
+            crate::topology::EdgeId::from_index(0),
+        );
+        assert!(
+            matches!(
+                r.unwrap_err().failure().map(|f| &f.reason),
+                Some(crate::error::Reason::Offset(
+                    OffsetFailure::Reconstruction {
+                        why: ReconstructionRefusal::ClipUncertified { .. }
+                    }
+                ))
+            ),
+            "a span with a kept island was not refused typed"
         );
     }
 
