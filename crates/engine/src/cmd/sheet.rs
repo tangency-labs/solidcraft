@@ -89,7 +89,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("sheet.hardware", "Press-in Hardware", crate::checked!("sheet.hardware", hardware))
         .at("SHEET METAL", "CREATE")
-        .icon("hole")
+        .icon("press_in_hardware")
         .contract(&HARDWARE_CONTRACT)
         .output(output_schema_for::<HardwareResult>)
         .params(
