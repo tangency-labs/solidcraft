@@ -428,14 +428,14 @@ mod tests {
                 assert!(clip.contains_rect(pill), "{pill:?} in {clip:?}");
                 assert!(pill.max.x <= x.2.x + 12.0, "it grew leftward from the right edge");
                 // Room on neither side alone, but enough in all (panels close on both sides): the
-            // pill slides back inside.
-            let names = [("view", solidcraft_ui_text::tr(view_name("x"))), ("opposite", solidcraft_ui_text::tr(view_name("-x")))];
-            let wide = solidcraft_ui_text::format("ui.view_compass_reverse", &names);
-            let w = ui.painter().layout_no_wrap(wide, crate::type_face::bold(Tokens::get().font_compass), egui::Color32::WHITE).size().x;
-            let narrow = Rect::from_min_max(pos2(x.2.x - w / 2.0 - 20.0, 0.0), pos2(x.2.x + w / 2.0 + 20.0, 400.0));
-            let pill = label(ui.painter(), narrow, c, (x.0, x.1, x.2, 1.0), Tokens::get());
-            assert!(narrow.contains_rect(pill), "{pill:?} in {narrow:?}");
-            let minus_x = tips(&FRONT, pos2(200.0, 200.0)).into_iter().find(|t| t.0 == "-x").unwrap();
+                // pill slides back inside.
+                let names = [("view", solidcraft_ui_text::tr(view_name("x"))), ("opposite", solidcraft_ui_text::tr(view_name("-x")))];
+                let wide = solidcraft_ui_text::format("ui.view_compass_reverse", &names);
+                let w = ui.painter().layout_no_wrap(wide, crate::type_face::bold(Tokens::get().font_compass), egui::Color32::WHITE).size().x;
+                let narrow = Rect::from_min_max(pos2(x.2.x - w / 2.0 - 20.0, 0.0), pos2(x.2.x + w / 2.0 + 20.0, 400.0));
+                let pill = label(ui.painter(), narrow, c, (x.0, x.1, x.2, 1.0), Tokens::get());
+                assert!(narrow.contains_rect(pill), "{pill:?} in {narrow:?}");
+                let minus_x = tips(&FRONT, pos2(200.0, 200.0)).into_iter().find(|t| t.0 == "-x").unwrap();
                 let pill = label(ui.painter(), clip, pos2(200.0, 200.0), minus_x, Tokens::get());
                 assert!(pill.max.x <= minus_x.2.x + 12.0, "a left tip grows leftward");
             },
