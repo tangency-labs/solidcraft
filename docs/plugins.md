@@ -328,6 +328,16 @@ rejected when loading the plugin. `solidcraft-cli plugin check` reports these er
 running Wasm. An invalid schema leaves the dialog's Run button off with the existing CLI/agent
 note. Conditions are bounded in depth and size.
 
+Hidden-key removal also follows the applicable `oneOf` and `anyOf` object branches, including
+nested objects and arrays. A composition containing conditional object rules must have one
+branch, or object branches distinguished pairwise by a required, unconditional scalar property
+with disjoint `const` or `enum` values. The parent or every branch must declare `"type":"object"`
+for these discriminators. This makes the applicable branch unambiguous before hidden keys are
+removed. Conditional object rules inside ambiguous compositions or `allOf` are rejected
+at load time with an `invalid_manifest` error naming the composition's schema location. Scalar
+choice options using `x-solidcraft-when` remain supported. The 1,024-property condition limit
+applies only to object scopes declaring conditional rules; plain object scopes skip that limit.
+
 Put `x-solidcraft-when` on a `oneOf` option to offer it only when its condition is true. If the
 current choice becomes unavailable, the dialog selects a matching conditional default, or the
 first available option in schema order. With no available option, the choice is empty; a required
@@ -338,7 +348,8 @@ Conditional defaults use the first matching rule in `x-solidcraft-defaults`. The
 it on opening and when a controlling value changes, until the user edits that field. Custom
 values survive later controller changes, except that unavailable choices must still reset.
 Programs provide their own values; conditional defaults do not overwrite program inputs.
-Schemas with these annotations opt into validation and hidden-key removal before direct calls.
+Command inputs and importer options with these annotations opt into validation and hidden-key
+removal before direct calls.
 Direct calls to schemas without conditional annotations keep their existing pass-through behaviour.
 For example:
 

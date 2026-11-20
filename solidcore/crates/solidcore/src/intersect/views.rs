@@ -34,7 +34,7 @@ use crate::error::intersect::IntersectFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::tol::{approx_tol3d, USE_DEFAULT};
 use crate::geom::vector3d::Vec3;
-use crate::intersect::api_intersectors::{intersect_surfaces_within, NO_SURFACE_INTERSECTION};
+use crate::intersect::api_intersectors::intersect_surfaces_within;
 use crate::kernel::Kernel;
 use crate::math::EFF_ZERO_RAD;
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -44,10 +44,6 @@ use crate::surface::surface::Surface;
 use crate::sweep::api_surfaces::create_extrude;
 
 const OP: &str = "intersect::views::curves_from_views";
-
-/// The phrase of [`curves_from_views`]'s failure when the two views have no point in common
-/// (read with [`views_do_not_meet`]).
-pub const NO_MEETING: &str = "the views do not meet";
 
 /// How many times the bound on a meeting point's distance from its curve each extrusion
 /// reaches on either side of the curve: past the bound by as much again, so that no meeting
@@ -67,8 +63,8 @@ pub const REACH_MARGIN: f64 = 2.0;
 ///
 /// `InvalidInput` for a direction not finite or shorter than the kernel's zero, directions
 /// within [`EFF_ZERO_RAD`] of parallel (either way), or curves whose box has no size or one
-/// not finite; [`crate::SolidError::Failed`] with [`IntersectFailure::Failed`] of
-/// [`NO_MEETING`] when the extrusions do not meet ([`views_do_not_meet`]); `Unsupported` for a
+/// not finite; [`crate::SolidError::Failed`] with [`IntersectFailure::NoIntersection`] when
+/// the extrusions do not meet ([`views_do_not_meet`]); `Unsupported` for a
 /// meeting curve with no B-spline form; those of the extrusions and of
 /// [`intersect_surfaces_within`].
 pub fn curves_from_views(
@@ -107,12 +103,12 @@ pub fn curves_from_views(
     let (curves, status) = intersect_surfaces_within(k, &a_sweep, &b_sweep, Some(tol));
     match status {
         Ok(()) => curves.iter().map(|c| spline(k, c)).collect(),
+        // the extrusions do not meet: an empty search (rule 7), refused as this routine's
         Err(e)
             if curves.is_empty()
-                && e.intersect_failure()
-                    == Some(&IntersectFailure::Failed(NO_SURFACE_INTERSECTION)) =>
+                && e.intersect_failure() == Some(&IntersectFailure::NoIntersection) =>
         {
-            Err(SolidError::intersect_failed(OP, NO_MEETING))
+            Err(SolidError::intersect(OP, IntersectFailure::NoIntersection))
         }
         Err(e) => Err(e),
     }
@@ -121,7 +117,7 @@ pub fn curves_from_views(
 /// Whether `e` is [`curves_from_views`]'s refusal of two views that do not meet.
 #[must_use]
 pub fn views_do_not_meet(e: &SolidError) -> bool {
-    e.intersect_failure() == Some(&IntersectFailure::Failed(NO_MEETING))
+    e.operation() == OP && e.intersect_failure() == Some(&IntersectFailure::NoIntersection)
 }
 
 /// The smallest box holding both boxes.

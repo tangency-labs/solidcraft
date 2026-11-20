@@ -809,6 +809,53 @@ mod tests {
         let _ = std::fs::remove_dir_all(folder);
     }
 
+    /// Relative links are judged by the file the reader opens for them, as `component.links`
+    /// reports it: these two are outside the design's folder, so neither is read as it opens.
+    #[cfg(unix)]
+    #[test]
+    fn resolves_like_the_reader_for_relative_links() {
+        let top = std::env::temp_dir().join(format!("solidcraft-links-reader-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        let real = top.join("a").join("r");
+        std::fs::create_dir_all(real.join("sub")).unwrap();
+        std::fs::create_dir_all(top.join("a").join("view")).unwrap();
+        let up = top.join("x.solidcraft");
+        let beside = top.join("a").join("view").join("x.solidcraft");
+        save_part(&up, [10.0, 20.0, 30.0], false);
+        save_part(&beside, [10.0, 20.0, 30.0], false);
+        let case = real.join("case.solidcraft");
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.run("component.insert_design", json!({"path": up})).unwrap();
+        app.run("component.insert_design", json!({"path": beside})).unwrap();
+        app.run("file.save", json!({"path": case})).unwrap();
+        drop(app);
+        // How the design keeps the links.
+        let (saved, _) = solidcraft_engine::io::read_design_file(&case.to_string_lossy(), None::<fn(solidcraft_engine::io::DesignPreview)>).unwrap();
+        let mut kept: Vec<&str> = saved.links.values().map(|l| l.path.as_str()).collect();
+        kept.sort_unstable();
+        assert_eq!(kept, ["../../x.solidcraft", "../view/x.solidcraft"], "how the design keeps the links");
+        save_part(&up, [10.0, 20.0, 30.0], true);
+        save_part(&beside, [10.0, 20.0, 30.0], true);
+        let view = real.join("sub").join("view");
+        std::os::unix::fs::symlink(&real, &view).unwrap();
+        let through = view.join("case.solidcraft");
+        let mut opened = Session::default();
+        opened.execute("doc.open", &json!({"path": through})).unwrap();
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        crate::documents::adopt(&mut app, opened);
+        assert!(app.file_load.idle(), "neither link is read as the design opens");
+        assert!((volume(&app) - 12000.0).abs() < 1e-6, "{}", volume(&app));
+        let links = app.session.execute("component.links", &json!({})).unwrap();
+        let files: Vec<std::path::PathBuf> =
+            links["links"].as_array().unwrap().iter().map(|l| std::path::PathBuf::from(l["file"].as_str().unwrap())).collect();
+        let (up, beside) = (up.canonicalize().unwrap(), beside.canonicalize().unwrap());
+        assert!(files.contains(&up) && files.contains(&beside), "the reader opens the files outside the folder: {files:?}");
+        assert!(links["links"].as_array().unwrap().iter().all(|l| l["changed"] == true), "both stay out of date: {links}");
+        let design = through.to_string_lossy().into_owned();
+        assert!(app.session.doc.links.values().all(|l| !inside_design_folder(Some(&design), &l.path)), "{:?}", app.session.doc.links);
+        let _ = std::fs::remove_dir_all(top);
+    }
+
     #[test]
     fn cancelling_a_close_all_reads_what_the_tab_left_in_front_missed() {
         let (assembly, folder, plate, _) = two_links("cancelled");

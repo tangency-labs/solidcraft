@@ -1224,7 +1224,7 @@ mod web {
             self.space_mouse.raw_input_hook(ctx, self.app.preferences.space_mouse_enabled, raw);
             self.app.raw_input_hook_with_taps(ctx, raw, taps);
         }
-        fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
             self.linked.tick(&mut self.app, ui.ctx());
             self.restored();
             UNSAVED.with(|u| u.set(self.asks_before_unload()));
@@ -1238,6 +1238,7 @@ mod web {
                 });
             }
             self.app.ui(ui);
+            self.app.retain_view_pictures(frame.wgpu_render_state());
             let ctx = ui.ctx().clone();
             if self.launch.persists() {
                 self.file_panel(&ctx);

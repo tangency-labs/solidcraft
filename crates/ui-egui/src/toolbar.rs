@@ -2569,6 +2569,9 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
 
 /// Global keyboard shortcuts (when no text field has focus).
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
+    if crate::view_window_drag::keyboard_active(app, ctx) {
+        return;
+    }
     crate::viewport_status::reconcile(app, ctx);
     crate::browser::update_folder_pick(app, ctx);
     let chat_owner = crate::agent_chat::owns_keyboard_input(app, ctx);
@@ -2623,6 +2626,11 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     if crate::params_dialog::cancel_on_escape(app, ctx) {
+        return;
+    }
+    if crate::view_tiles::cancel_placement_on_escape(app, ctx) {
+        app.esc_handled = true;
+        app.last_escape = None;
         return;
     }
     // A dimension value that is taking the keyboard: letters belong to it (a parameter name
@@ -2730,7 +2738,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             && !mods.shift
             && let Some(place) = view_place(k)
         {
-            drop(app.run("tab.view.activate", json!({"index": place})));
+            let key = crate::keymap::key_name(k, mods);
+            if crate::keymap::commands_for(app, &key).is_empty() {
+                drop(app.run("tab.view.activate", json!({"index": place})));
+            } else {
+                crate::keymap::press(app, &key, repeat);
+            }
             continue;
         }
         if mods.command {
@@ -2739,7 +2752,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 Key::N | Key::O | Key::S | Key::W | Key::Comma if app.embed_editor => {}
                 Key::N => crate::documents::new_design(app),
                 Key::Comma => crate::prefs::open_at(app, 0),
-                Key::O => {
+                Key::O if !mods.alt => {
                     app.pick_open(|app, path| {
                         if let Some(path) = path {
                             app.open_chosen_file(&path);
@@ -2759,7 +2772,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 // Ctrl+Shift+W closes the design shown. A design is closed asking first when it is
                 // unsaved; closing the last one shows the start page (#5366).
                 Key::W if !mods.alt => {
-                    if mods.shift || app.docs.views.len() < 2 {
+                    let key = crate::keymap::key_name(k, mods);
+                    if mods.shift && !crate::keymap::commands_for(app, &key).is_empty() {
+                        crate::keymap::press(app, &key, repeat);
+                    } else if !mods.shift && app.docs.views.len() < 2 && app.view_windows.close_current() {
+                        continue;
+                    } else if mods.shift || app.docs.views.len() < 2 {
                         crate::documents::close(app, app.docs.active, false);
                     } else {
                         drop(app.run("tab.view.close", json!({})));
@@ -2914,6 +2932,23 @@ fn dropdown_cell(
 #[cfg(test)]
 mod header_report_tests {
     use super::*;
+
+    #[test]
+    fn custom_view_chords_run_before_builtin_view_shortcuts() {
+        for (chord, input) in [("Alt+1", json!({"key":"1", "alt":true})), ("Ctrl+Shift+W", json!({"key":"W", "cmd":true, "shift":true}))] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            let second = h.app.docs.views.open(solidcraft_views::ViewKind::Model, None, false);
+            crate::keymap::bind_at(&mut h.app, "view.grid", None, chord, true).unwrap();
+            h.frames(2);
+            let grid = h.app.ui.show_grid;
+            h.call("ui.key", input);
+            h.frames(2);
+            assert_eq!(h.app.ui.show_grid, !grid, "{chord} runs its assigned command");
+            assert_eq!(h.app.docs.views.active().id, second, "{chord} does not activate or close a view");
+            assert!(!h.app.home.open && h.app.docs.closing.is_none(), "{chord} does not close the design");
+        }
+    }
 
     #[test]
     fn escape_closes_file_menu_on_home_and_over_a_sketch_without_cancelling_it() {

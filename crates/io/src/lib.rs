@@ -598,7 +598,7 @@ pub fn mesh_import_feature_in_prepared(
         _ => stem,
     };
     // Drop the decoded arrays before building a body from the packed arrays.
-    let meshes: Vec<_> = objects
+    let mut meshes: Vec<_> = objects
         .into_iter()
         .map(|object| solidcraft_doc::MeshData {
             name: object.name,
@@ -609,7 +609,11 @@ pub fn mesh_import_feature_in_prepared(
         })
         .collect();
     // Check every mesh now, so the command fails rather than the timeline.
-    let prepared = solidcraft_doc::PreparedMeshImport::build(&meshes).map_err(|e| IoError::Invalid(e.to_string()))?;
+    let prepared = match meshes.as_mut_slice() {
+        [mesh] if ext == "stl" => solidcraft_doc::PreparedMeshImport::build_indexed_flat(mesh),
+        meshes => solidcraft_doc::PreparedMeshImport::build(meshes),
+    }
+    .map_err(|e| IoError::Invalid(e.to_string()))?;
     let file_name = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
     let feature = MeshFeature {
         name,
@@ -1494,6 +1498,12 @@ pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<V
     Ok(solidcraft_kernel::step_export_products(&products, 0, &step_header(format!("{name}.step"), &doc.metadata))?.into_bytes())
 }
 
+/// Whether the bytes are an AutoCAD DWG: every DWG starts with its version (`AC1032`),
+/// whatever the file is called (#9328).
+pub(crate) fn is_dwg(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"AC1")
+}
+
 /// Read a design file's bytes.
 pub fn read_design(bytes: &[u8]) -> Result<Document> {
     let _span = solidcraft_profile::span("io", "read_design");
@@ -1501,8 +1511,7 @@ pub fn read_design(bytes: &[u8]) -> Result<Document> {
     if is_design_container(bytes) {
         return design::read(bytes);
     }
-    // Every DWG starts with its version (`AC1032`), whatever the file is called (#9328).
-    if bytes.starts_with(b"AC1") {
+    if is_dwg(bytes) {
         return Err(IoError::Invalid(
             "this is a DWG file, which SolidCraft can't read: export the model as STEP and open that, or the drawing as DXF and use Insert DXF in a sketch".into(),
         ));
@@ -1735,7 +1744,17 @@ mod tests {
             let feature = mesh_import_feature_in(&stl, "t.stl", mm).unwrap();
             let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = feature.kind else { panic!() };
             let want: Vec<f64> = triangles.iter().flatten().flatten().map(|v| f64::from(*v) * mm).collect();
-            assert_eq!(&*meshes[0].positions, want.as_slice(), "{unit}");
+            let mesh = &meshes[0];
+            assert_eq!(mesh.positions.len(), 4 * 3, "{unit}");
+            let actual: Vec<f64> = mesh
+                .triangles
+                .iter()
+                .flat_map(|&vertex| {
+                    let first = vertex as usize * 3;
+                    mesh.positions[first..first + 3].iter().copied()
+                })
+                .collect();
+            assert_eq!(actual, want, "{unit}");
         }
     }
 

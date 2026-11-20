@@ -619,19 +619,28 @@ fn on_material(s: Vec2, e: Vec2, regions: &[Region2]) -> Vec<(Vec2, Vec2)> {
 }
 
 /// Where a region's outline crosses a line (a point and a unit direction), as lengths along the
-/// line from its point: the least and the greatest. `None` where it doesn't. Read off the curves
+/// line from its point: the least and the greatest. `None` where it doesn't. See
+/// [`crossings_across`].
+pub(crate) fn extent_across(r: &Region2, line: (Vec2, Vec2)) -> Option<(f64, f64)> {
+    let at = crossings_across(r, line);
+    at.first().copied().zip(at.last().copied())
+}
+
+/// Where a region's outline crosses a line (a point and a unit direction), as lengths along the
+/// line from its point, in order: the line runs inside the region from the first to the second,
+/// from the third to the fourth, and so on. Read off the curves
 /// themselves: an outline crosses where it passes from the line's left to its right or back, a
 /// point on the line counted with its right, and each segment ending where the next one starts
 /// (see [`crate::sheet_surface_cuts::holds`]). A line's crossing is found in closed form, and an
 /// arc's, in pieces between its circle's points furthest to either side of the line, along each
 /// of which it only nears the line or only leaves it; any other curve's by
 /// [`solidcraft_develop::crossings`], each crossing of its chords followed onto the curve itself.
-pub(crate) fn extent_across(r: &Region2, (p, u): (Vec2, Vec2)) -> Option<(f64, f64)> {
+pub(crate) fn crossings_across(r: &Region2, (p, u): (Vec2, Vec2)) -> Vec<f64> {
     use std::f64::consts::PI;
     let n = u.perp();
     let side = |q: Vec2| (q - p).dot(n);
-    let mut out: Option<(f64, f64)> = None;
-    let mut take = |along: f64| out = Some(out.map_or((along, along), |(lo, hi)| (lo.min(along), hi.max(along))));
+    let mut out: Vec<f64> = Vec::new();
+    let mut take = |along: f64| out.push(along);
     for l in std::iter::once(&r.outer).chain(&r.holes) {
         let ends = l.segs.iter().skip(1).chain(l.segs.first()).map(Seg2::start);
         for (s, end) in l.segs.iter().zip(ends) {
@@ -689,6 +698,7 @@ pub(crate) fn extent_across(r: &Region2, (p, u): (Vec2, Vec2)) -> Option<(f64, f
             }
         }
     }
+    out.sort_by(f64::total_cmp);
     out
 }
 

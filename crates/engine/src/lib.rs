@@ -27,6 +27,7 @@ pub mod drawing_scene;
 mod drawing_table_paper;
 pub mod drawing_view;
 pub mod easyprint;
+mod failure_codes;
 pub mod frames;
 pub mod fuzz;
 #[cfg(not(target_arch = "wasm32"))]
@@ -66,6 +67,7 @@ use serde_json::Value;
 use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Model, ModelState};
 
+pub use cmd::drawing_export::print_pdf;
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::sketch_selection;
 pub use cmd::{
@@ -98,6 +100,10 @@ pub enum EngineError {
     BadParams { cmd: String, msg: String },
     #[error("{0}")]
     Other(String),
+    /// A feature that failed with a kernel call's error: its error, as [`EngineError::Other`]
+    /// words it, and the call's stable code ([`solidcraft_kernel::failure`]).
+    #[error("{}", .0.error)]
+    Feature(Box<FeatureFailure>),
     #[error("plugin: {0}")]
     Plugin(#[from] craft_plugin::HostError),
     /// A plugin failed while it ran or was refused before it ran: named, with its file.
@@ -149,10 +155,35 @@ impl EngineError {
             _ => None,
         }
     }
-    /// The error a failed feature's result reports: internal when the kernel caught a panic.
+    /// The error a failed feature's result reports: internal when the kernel caught a panic,
+    /// with the kernel call's code when the result has one.
     pub(crate) fn of_feature(r: &solidcraft_doc::FeatureResult, error: String) -> EngineError {
-        if r.internal { EngineError::Internal(String::new(), error) } else { EngineError::Other(error) }
+        match &r.error_code {
+            _ if r.internal => EngineError::Internal(String::new(), error),
+            Some(code) => {
+                failure_codes::note(&error, code);
+                EngineError::Feature(Box::new(FeatureFailure { error, code: code.clone() }))
+            }
+            None => EngineError::Other(error),
+        }
     }
+    /// The stable code of the kernel call this error was made from, when it was made from one: a
+    /// failed feature's ([`EngineError::Feature`]).
+    pub fn error_code(&self) -> Option<&solidcraft_kernel::ErrorCode> {
+        match self {
+            EngineError::Feature(f) => Some(&f.code),
+            _ => None,
+        }
+    }
+}
+
+/// A feature that failed with a kernel call's error ([`EngineError::Feature`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FeatureFailure {
+    /// The feature's error, as its result words it.
+    pub error: String,
+    /// The kernel call's stable code.
+    pub code: solidcraft_kernel::ErrorCode,
 }
 impl From<solidcraft_io::IoError> for EngineError {
     fn from(e: solidcraft_io::IoError) -> Self {
@@ -161,6 +192,8 @@ impl From<solidcraft_io::IoError> for EngineError {
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;
+
+pub use failure_codes::failure_code_of;
 
 /// Why [`Session::drawn`] gives no design for a drawing's source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1006,6 +1039,9 @@ pub enum CombPick {
 /// while the design stays one. [`Session::inspect`] reads it and [`Session::set_inspect`] shows it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct InspectState {
+    // Retaining the snapshot makes document mutation change its copy-on-write identity.
+    source: Arc<Document>,
+    pub colored_components: Option<()>,
     pub section: SectionState,
     pub analysis: Option<SurfaceAnalysis>,
     pub continuity: Vec<ContinuitySeam>,
@@ -1017,6 +1053,8 @@ impl Session {
     /// What the session shows now: the section and the analyses.
     pub fn inspect(&self) -> InspectState {
         InspectState {
+            source: self.doc.clone(),
+            colored_components: self.colored_components,
             section: self.section_state(),
             analysis: self.analysis,
             continuity: self.continuity.clone(),
@@ -1027,13 +1065,22 @@ impl Session {
 
     /// Show `state` in place of what is shown now.
     pub fn set_inspect(&mut self, state: InspectState) {
-        // Restore a passive view snapshot without publishing another display edit.
+        let current = Arc::ptr_eq(&state.source, &self.doc);
+        self.colored_components = state.colored_components;
+        // Passive view swaps restore the complete cut without publishing a display edit or
+        // changing the shared window's status ordering on every tile paint.
         let SectionState { planes, hidden, hatch, folder } = state.section;
         (self.section, self.section_hidden, self.section_hatch, self.section_folder) = (planes, hidden, hatch, folder);
         self.analysis = state.analysis;
-        self.continuity = state.continuity;
+        // Requested analysis survives an edit; sampled world geometry does not.
+        self.continuity = if current { state.continuity } else { Vec::new() };
         self.isocurves = state.isocurves;
-        self.comb = state.comb;
+        self.comb = state.comb.map(|mut comb| {
+            if !current {
+                comb.teeth.clear();
+            }
+            comb
+        });
     }
 }
 
