@@ -19,9 +19,10 @@ use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list,
 use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
     BendTableFormat, BendTableParams, BendTableResult, ConvertParams, DxfFile, ExportDxfParams, ExportDxfResult, FlangeParams, FlatCircle,
-    FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HardwareInfo, HardwareKindParam, HardwareParams, HardwareResult,
-    HemParams, LibraryRule, LibrarySource, ListedRule, ManageRulesParams, ManageRulesResult, MeasureBodyParams, PathFlangeParams, PerforateParams,
-    RecognizeParams, RuleFeatureError, RuleLibraryParams, RuleLibraryResult, RuleReply, RulesParams, RulesResult, SheetBodyMeasure, UnfoldParams,
+    FlatHardware, FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HardwareInfo, HardwareKindParam, HardwareParams,
+    HardwareResult, HemParams, LibraryRule, LibrarySource, ListedRule, ManageRulesParams, ManageRulesResult, MeasureBodyParams, PathFlangeParams,
+    PerforateParams, RecognizeParams, RuleFeatureError, RuleLibraryParams, RuleLibraryResult, RuleReply, RulesParams, RulesResult, SheetBodyMeasure,
+    UnfoldParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -1403,6 +1404,24 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
         "perforations": perforations, "bend_zones": bend_zones, "rolls": sk.rolls});
     if !bores.is_empty() {
         out["bores"] = Value::Array(bores);
+    }
+    // Press-in hardware: what each mounting hole is for, where it is in the flat (as read).
+    let hardware: Vec<FlatHardware> = sk
+        .hardware_holes()
+        .into_iter()
+        .map(|h| FlatHardware {
+            feature: h.feature,
+            kind: kind_param(h.kind),
+            thread: h.thread.clone(),
+            length: h.length,
+            part: h.part.clone(),
+            position: [h.center.x, h.center.y],
+            // The reply gives the hole's diameter, as the table does: twice the radius the flat holds.
+            hole_diameter: h.radius * 2.0,
+        })
+        .collect();
+    if !hardware.is_empty() {
+        out["hardware"] = serde_json::to_value(hardware).unwrap_or(Value::Null);
     }
     // Where stretches of a split edge bend to opposite sides, the blank is cut along their
     // junction: a cut with no width, from the bend line out, beside the outline.

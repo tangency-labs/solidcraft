@@ -5130,17 +5130,39 @@ fn absorb_sheet_cuts(
             *slot = sk;
         }
     }
-    note_press_in_hardware(before, after, f, warning);
+    note_press_in_hardware(doc, before, after, f, warning);
     Ok(())
 }
 
-/// What the sheet can't hold of the press-in hardware a hole made in it (#17752) is a warning,
-/// never an error: a change of gauge or of a bend must not break the timeline. Every sheet the
-/// feature changed is read, whether it was cut straight into (a hole's prism) or built again from
-/// the body.
-fn note_press_in_hardware(before: &ModelState, after: &ModelState, f: &Feature, warning: &mut Option<String>) {
-    let FeatureKind::Hole { hardware: Some(hardware), .. } = &f.kind else { return };
-    for sk in &after.surface_sheets {
+/// Press-in hardware a hole made in a sheet (#17752): what the sheet can't hold is a warning,
+/// never an error (a change of gauge or of a bend must not break the timeline), and the holes it
+/// cut are kept as the hardware's, for the flat pattern. Every sheet the feature changed is read,
+/// whether it was cut straight into (a hole's prism) or built again from the body.
+fn note_press_in_hardware(doc: &Document, before: &ModelState, after: &mut ModelState, f: &Feature, warning: &mut Option<String>) {
+    let hardware = match crate::sheet_hardware::hardware_source(doc, f, 0) {
+        crate::sheet_hardware::Source::One(hardware) => hardware,
+        crate::sheet_hardware::Source::None => return,
+        // Copies of a hardware hole beside a plain hole, or of different hardware: each copy is cut, none is
+        // recorded as hardware (a plain hole's copy is no nut), and that is said.
+        crate::sheet_hardware::Source::Mixed => {
+            let changed = after
+                .surface_sheets
+                .iter()
+                .any(|sk| before.surface_sheets.iter().find(|b| b.body == sk.body).is_none_or(|o| o.regions != sk.regions));
+            if changed {
+                append_warning(
+                    warning,
+                    format!(
+                        "{} copies holes for different press-in hardware, or a plain hole with it: the copies are not recorded as hardware (copy each kind in a pattern of its own)",
+                        f.name
+                    ),
+                );
+            }
+            return;
+        }
+    };
+    let length = hardware.length.as_ref().and_then(|e| doc.eval(e, Kind::Length).ok());
+    for sk in after.surface_sheets.iter_mut() {
         let old = before.surface_sheets.iter().find(|b| b.body == sk.body);
         if old.is_some_and(|o| o.regions == sk.regions) {
             continue;
@@ -5148,6 +5170,8 @@ fn note_press_in_hardware(before: &ModelState, after: &ModelState, f: &Feature, 
         for note in crate::sheet_hardware::findings(old, sk, hardware) {
             append_warning(warning, note);
         }
+        let marks = crate::sheet_hardware::marks(old, sk, f.id, hardware, length);
+        sk.hardware.extend(marks);
     }
 }
 
