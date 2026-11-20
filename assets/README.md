@@ -21,7 +21,7 @@ assets/
   styles/web/loading.css             # web loading/canvas styles
   appearances/library.rs             # built-in visual presets
   materials/library.rs               # physical defaults and colours
-  fonts/biz-udp-gothic/              # unmodified font and OFL licence
+  fonts/<family>/                    # unmodified fonts and OFL licences
   locales/{en,de,ja,ko}.json          # shared offline catalogs
   platforms/{macos,linux,windows}/    # bundle, freedesktop and WiX templates
   platforms/macos/dmg/                # disk image window: layout, dmgbuild settings, background art
@@ -78,7 +78,7 @@ The CLI still supports arbitrary PNG/ICO exports with `solidcraft-cli icon`.
 | Linux, Nix, deb/rpm, tar, Flatpak, Snap | Copy canonical hicolor images; icon name stays `io.tangencylabs.solidcraft` |
 | AppImage | Uses the Linux 256 px image and `.DirIcon` alias |
 | FreeBSD | Shares Linux hicolor images and freedesktop metadata |
-| Web | HTML/Trunk and `manifest.webmanifest` stay in `apps/solidcraft-web/`; copies Japanese font/licence to `fonts/`, uses the collected CSS, and copies the Linux 32/256/512 px images to `icons/` for the favicon and installed app |
+| Web | HTML/Trunk and `manifest.webmanifest` stay in `apps/solidcraft-web/`; copies the Japanese font/licence to `fonts/` and the Noto Sans Arabic, KR, SC and TC fonts with their licences to `fonts/<family>/` (fetched when a drawing's text needs them), uses the collected CSS, and copies the Linux 32/256/512 px images to `icons/` for the favicon and installed app |
 | Docs and link previews | `xtask book` copies the shared card to the existing `/solidcraft/og.png` public path |
 
 ## Code and provenance

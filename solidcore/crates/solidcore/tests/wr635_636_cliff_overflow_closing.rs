@@ -1,6 +1,7 @@
 //! WR-635 / WR-636 (#960; the SolidCraft fork's tangency-labs/smlib@eddf0ed and bba9914,
-//! branch `replay/1.0.1`): the removal region of a cliff overflow also
-//! closes
+//! branch `replay/1.0.1`): the fork's removal region of a cliff overflow also closed as
+//! below. Since `fillet_overflow_trim_at_creases` was removed the blend is trimmed at its
+//! creases with the body instead (WR-695), and these blends still build:
 //!
 //! - (WR-635) where an Nx1 corner of mixed convexity ends the blend on a face of the sheet
 //!   on the end wall's surface extended (that face's lamina edges pass onto the next wall;
@@ -9,8 +10,9 @@
 //! - (WR-636) where the sheet's boundary on a face is a closed chain round a loop of that
 //!   face whose every edge is blended (a pocket's rim chamfered all round).
 //!
-//! Without the flag the same blends are refused (`NoRoom`), as before; with it but without
-//! these two changes they were refused by the construction (the comments below).
+//! Before the cliff overflow (`fillet_cliff_overflow`) the same blends were refused (`NoRoom`);
+//! with it but without these two changes they were refused by the closing (the comments
+//! below).
 //!
 //! The expected volumes are closed forms: the body less the convex region the blend
 //! removes, clipped to the body.
@@ -150,7 +152,7 @@ fn deep_pocketed_plate(k: &mut Kernel) -> Brep {
 }
 
 #[test]
-fn a_pocket_rim_chamfer_past_the_floor_is_subtracted() {
+fn a_pocket_rim_chamfer_past_the_floor_is_trimmed() {
     // The fork's bba9914: the rim loop chamfered d = 5.5 (and 6): the legs on the 5 high
     // walls run past the floor, and the sheet's boundary on the top is a closed chain round
     // the rim. Before WR-636: "a cliff overflow's fillet boundary closes on one face".
@@ -282,7 +284,7 @@ impl Basin {
 }
 
 #[test]
-fn a_sloped_basin_rim_chamfer_past_the_slab_front_is_subtracted() {
+fn a_sloped_basin_rim_chamfer_past_the_slab_front_is_trimmed() {
     // solidcraft#1080's sloped basin (the fork's eddf0ed): the front rim edge chamfered d, its
     // leg on the top running off the rim over the slab's front face. Each end of the edge is
     // an Nx1 corner of mixed convexity (the end wall's top edge convex, the pocket's corner

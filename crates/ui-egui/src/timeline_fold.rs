@@ -21,7 +21,6 @@ use crate::ui_kit::BackingTooltipExt as _;
 use std::collections::{HashMap, HashSet};
 
 use serde_json::json;
-use solidcraft_engine::Sel;
 use solidcraft_engine::doc::Component;
 
 use crate::SolveApp;
@@ -411,16 +410,8 @@ impl Opens for Shown<'_> {
 fn marks(app: &SolveApp, strip: &Strip, view: &View) -> Vec<Marks> {
     let flags: HashMap<u64, (bool, bool)> = app.session.model.results.iter().map(|r| (r.id, (r.error.is_some(), r.warning.is_some()))).collect();
     let in_dialog = app.dialog.as_ref().map(|d| d.items()).unwrap_or_default();
-    let picked: HashSet<u64> = app
-        .session
-        .selection
-        .iter()
-        .chain(in_dialog.iter())
-        .filter_map(|s| match s {
-            Sel::Feature { id } => Some(*id),
-            _ => None,
-        })
-        .collect();
+    let picked: HashSet<u64> =
+        app.session.selection.iter().chain(in_dialog.iter()).filter_map(|s| crate::timeline::feature_of_sel(&app.session.doc, s)).collect();
     let last_done = strip.marker.checked_sub(1).filter(|_| strip.floating);
     let features = &app.session.doc.features;
     view.indices(0, view.len())

@@ -48,30 +48,13 @@ pub struct Mesh {
     pub size: f64,
 }
 
-/// The fixes the app runs with, as the kernel rig and solidcore's tests name them
-/// (`crates/smlib/src/core.rs` checks that the two lists agree).
-const APP_FIXES: &str = include_str!("../../solidcore/tests/kernel_cases/fixes.json");
-
-/// The fix set [`APP_FIXES`] names.
-fn app_fixes() -> Result<UpstreamFixes, String> {
-    let names: Vec<String> =
-        serde_json::from_str(APP_FIXES).map_err(|e| format!("reading the fixes preset: {e}"))?;
-    let mut fixes = UpstreamFixes::default();
-    for name in &names {
-        *fixes
-            .flag_mut(name)
-            .ok_or_else(|| format!("the fixes preset names an unknown fix `{name}`"))? = true;
-    }
-    Ok(fixes)
-}
-
 /// Reads `path` as `SmBrep::ReadFromFile` does, into a B-rep that names its geometry by
 /// arena identity, as a kernel-built one does. The kernel runs with the app's fixes, so a body
 /// the app reads is read here too (#17756).
 pub fn read(path: &Path, binary: bool, rebuild: bool) -> Result<Body, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut kernel = Kernel {
-        fixes: app_fixes()?,
+        fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
     let fail = |e: solidcore::SolidError| format!("reading {}: {e}", path.display());
@@ -226,8 +209,8 @@ fn surface_name(kind: &SurfaceKind) -> &'static str {
 mod tests {
     use super::*;
 
-    /// A body is read with the fixes the app, the kernel rig and solidcore's tests run with,
-    /// not with every fix off: the tool sees a body as the app does (#17756).
+    /// A body is read with the fixes the app, the kernel rig and solidcore's tests run with
+    /// (every fix on), not with every fix off: the tool sees a body as the app does (#17756).
     #[test]
     fn a_body_is_read_with_the_apps_fixes() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -240,7 +223,7 @@ mod tests {
             .filter(|(_, on)| *on)
             .map(|(name, _)| name)
             .collect();
-        let preset: Vec<String> = serde_json::from_str(APP_FIXES).unwrap();
+        let preset: Vec<&str> = UpstreamFixes::NAMES.to_vec();
         assert!(!preset.is_empty());
         assert_eq!(on, preset);
     }

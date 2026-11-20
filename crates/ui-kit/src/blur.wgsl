@@ -1,5 +1,5 @@
 // Original SolidCraft backdrop dual-Kawase and rounded surface composition.
-struct Params { a: vec4<f32>, rect: vec4<f32>, corners: vec4<f32>, top: vec4<f32>, bottom: vec4<f32>, outside: vec4<f32> }
+struct Params { a: vec4<f32>, rect: vec4<f32>, corners: vec4<f32> }
 @group(0) @binding(0) var image: texture_2d<f32>;
 @group(0) @binding(1) var filtering: sampler;
 @group(0) @binding(2) var<uniform> p: Params;
@@ -39,15 +39,6 @@ fn sample_at(uv: vec2<f32>) -> vec4<f32> {
         + 2.0 * (sample_at(v.uv + d) + sample_at(v.uv - d)
         + sample_at(v.uv + d * vec2<f32>(1.0, -1.0)) + sample_at(v.uv + d * vec2<f32>(-1.0, 1.0)))) / 12.0;
 }
-@fragment fn background(v: Vertex) -> @location(0) vec4<f32> {
-    let q = v.position.xy;
-    var c = p.outside;
-    if all(q >= p.rect.xy) && all(q < p.rect.zw) && all(q >= p.corners.xy) && all(q < p.corners.zw) {
-        c = mix(p.top, p.bottom, clamp((q.y - p.rect.y) / max(1.0, p.rect.w - p.rect.y), 0.0, 1.0));
-    }
-    if p.a.z > 0.5 { return vec4<f32>(linear(c.rgb), 1.0); }
-    return vec4<f32>(c.rgb, 1.0);
-}
 @fragment fn panel(v: Vertex) -> @location(0) vec4<f32> {
     let center = (p.rect.xy + p.rect.zw) * 0.5;
     let half_size = (p.rect.zw - p.rect.xy) * 0.5;
@@ -57,9 +48,9 @@ fn sample_at(uv: vec2<f32>) -> vec4<f32> {
     let r = min(radius, min(half_size.x, half_size.y));
     let d = abs(relative) - half_size + vec2<f32>(r);
     let distance = min(max(d.x, d.y), 0.0) + length(max(d, vec2<f32>(0.0))) - r;
-    let alpha = clamp(0.5 - distance, 0.0, 1.0) * p.a.w;
+    let alpha = clamp(0.5 - distance, 0.0, 1.0);
     let c = textureSample(image, filtering, v.position.xy / vec2<f32>(textureDimensions(image)));
-    // Match egui: coverage/opacity multiply gamma-premultiplied RGB BEFORE the
+    // Match egui: coverage multiplies gamma-premultiplied RGB BEFORE the
     // framebuffer conversion. The sampled backdrop remains linear color.
     let premultiplied_gamma = gamma(c.rgb) * alpha;
     let rgb = select(premultiplied_gamma, linear(premultiplied_gamma), p.a.z > 0.5);

@@ -325,6 +325,7 @@ pub(super) fn build(
         o.transform = transform;
         // A copy starts free, even of a grounded part (#2804); the parts inside it keep theirs.
         o.grounded = false;
+        o.bom_type = source_occurrence.as_ref().and_then(|o| o.bom_type);
     }
     if let Some(o) = &source_occurrence {
         occurrences.insert(o.id, root_occurrence);
@@ -339,6 +340,7 @@ pub(super) fn build(
         let id = scratch.doc_mut().add_occurrence(child, owner, pose)?;
         if let Some(o) = scratch.doc_mut().occurrences.iter_mut().find(|o| o.id == id) {
             o.grounded = old.grounded;
+            o.bom_type = old.bom_type;
         }
         occurrences.insert(old.id, id);
     }
@@ -413,7 +415,7 @@ pub(super) fn build(
             unique(&format!("{} Base", body.name), &mut used_features, false)
         };
         let id = scratch.doc_mut().add_feature(
-            FeatureKind::Import { file: format!("{} independent base", body.name), step, components: Vec::new(), skip: Vec::new() },
+            FeatureKind::Import { file: format!("{} independent base", body.name), step, components: Vec::new(), skip: Vec::new(), records: None },
             Some(&feature_name),
         )?;
         if let Some(f) = scratch.doc_mut().feature_mut(id) {
@@ -542,7 +544,10 @@ pub(super) fn build(
         {
             face.author_path = cloned_path(source, &face.author_path, component, &clone_path, &occurrences)?;
         }
-        if let (FeatureKind::Sketch { plane, .. }, FeatureKind::Sketch { plane: old_plane, .. }) = (&mut f.kind, &old.kind)
+        if let (
+            FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane },
+            FeatureKind::Sketch { plane: old_plane, .. } | FeatureKind::ConstructionPlane { plane: old_plane },
+        ) = (&mut f.kind, &old.kind)
             && let (Some(anchor), Some(original)) = (super::sketch::face::anchor_mut(plane), super::sketch::face::anchor(old_plane))
         {
             if bodies.contains_key(&original.target.body) {
@@ -698,7 +703,7 @@ pub(super) fn build(
                 }
             }
         }
-        if let FeatureKind::Sketch { plane, .. } = &feature.kind
+        if let FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } = &feature.kind
             && let Some(anchor) = super::sketch::face::anchor(plane)
             && !bodies.contains_key(&anchor.target.body)
         {
@@ -723,6 +728,12 @@ pub(super) fn build(
                     ));
                 }
             }
+        }
+        // A turn rotates a member it does not copy.
+        if let FeatureKind::FrameMemberTurn { member, .. } = &feature.kind
+            && !features.contains_key(&member.feature.0)
+        {
+            notices.push(format!("{} retains external feature reference {}", feature.name, member.feature));
         }
         for id in feature.kind.input_sketches() {
             if !features.contains_key(&id) {

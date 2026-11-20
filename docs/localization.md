@@ -1,6 +1,6 @@
 # UI localization
 
-SolidCraft embeds its translations and works offline. English, Arabic, Bosnian, Czech, Danish, German, English (UK), Spanish, Finnish, French, Galician, Hebrew, Croatian, Italian,
+SolidCraft embeds its translations and works offline. English, Arabic, Bosnian, Czech, Danish, German, English (UK), Spanish, Basque, Finnish, French, Galician, Hebrew, Croatian, Italian,
 Japanese, Georgian, Korean, Latvian, Malay, Norwegian Bokmål, Dutch, Polish, Brazilian Portuguese, Russian, Serbian, Turkish, Ukrainian and Chinese are currently registered in `crates/ui-egui/src/i18n.rs`. Adding a language requires an
 embedded catalog and one registration there; the preferences selector and validation use the same
 registry.
@@ -62,7 +62,7 @@ that looks untranslated. Two guards catch that in the build:
 - `every_complete_catalog_carries_every_english_message` — adding a key to `en.json`
   without giving it to a complete catalog fails the tests. English is the source catalog,
   Arabic, Hebrew, Japanese and Chinese are delivered complete; Bosnian, Croatian, Serbian, Georgian and Latvian carry
-  every English message today but are not held to it, so a new label may follow later in them; Danish, German, Spanish, Finnish, Galician, Italian, Korean, Malay, Norwegian Bokmål, Polish, Brazilian Portuguese, Russian, French, Ukrainian and
+  every English message today but are not held to it, so a new label may follow later in them; Danish, German, Spanish, Basque, Finnish, Galician, Italian, Korean, Malay, Norwegian Bokmål, Polish, Brazilian Portuguese, Russian, French, Ukrainian and
   Turkish are partial — their gaps fall back to English and are reported by `cargo xtask i18n` without
   failing the build. A new label needs en, ar, he, ja, zh, de and ko; Russian, French, Ukrainian and Malay may
   follow later.
@@ -146,7 +146,8 @@ widgets; UTF-8 byte lengths do not describe their displayed width.
 
 The desktop host tries system CJK fonts across Windows, macOS and Linux, the Flatpak host font
 folders (`/run/host/fonts`, `/run/host/user-fonts`), the folders listed in `SOLIDCRAFT_FONT_DIRS`
-and an optional `CRAFT_FONTS_DIR` font pack, and skips files that cannot be parsed. Chinese uses its own fallback
+and an optional `CRAFT_FONTS_DIR` font pack, and skips files that cannot be parsed. The lists of known fonts per script are in
+`sketch::fonts::fallback`. Chinese uses its own fallback
 chain after the general CJK font: many Japanese CJK fonts (Hiragino Gothic, Meiryo, Yu Gothic)
 match the CJK font search but lack simplified characters, so a second fallback found by the
 Chinese font-name list (`PingFang`, `Microsoft YaHei`, `Noto Sans CJK SC`, …) covers them per
@@ -166,13 +167,19 @@ third-party servers:
 
 A CJK interface language fetches the matching face on demand. With any other interface language, the
 first time Japanese text (kana, kanji or full-width forms in a design name, file name, body name or
-typed text) is drawn, the Japanese face is fetched (#720). A session that never shows such text
-downloads no script font. If the needed face fails to load, the web interface shows English for that
-session only to prevent missing glyphs (tofu); the saved language preference is kept, so the next
-visit tries again. The Korean subset covers the whole Hangul syllable block and the Hangul jamo, so
-Korean text typed into a design renders as well. It carries no Hanja (CJK ideographs): a Korean
-interface fetches the Korean face alone, so Hanja in a design name is not drawn unless the Japanese
-face is fetched too, and the desktop falls back to the system Hangul font, which covers Hanja.
+typed text) is drawn, the Japanese face is fetched (#720).
+
+A drawing's text takes whole fonts, not the interface's subsets, each fetched once from the same origin
+the first time a drawing's text needs it: BIZ UDPGothic for kana and Japanese Han, Noto Sans KR for
+Hangul and Korean Han, Noto Sans SC or TC for simplified or traditional Chinese Han (by the drawing's
+language, as on the desktop), and Noto Sans Arabic (`./fonts/noto-sans-*/`, each with its OFL.txt). A
+script none of them has (Thai) is refused by name. A session that never shows such text downloads no
+script font. If the needed face fails to load, the web interface
+shows English for that session only to prevent missing glyphs (tofu); the saved language preference is
+kept, so the next visit tries again. The Korean subset covers the whole Hangul syllable block and the
+Hangul jamo, so Korean text typed into a design renders as well. It carries no Hanja (CJK ideographs):
+a Korean interface fetches the Korean face alone, so Hanja in a design name is not drawn unless the
+Japanese face is fetched too, and the desktop falls back to the system Hangul font, which covers Hanja.
 
 ## Right-to-left text
 
