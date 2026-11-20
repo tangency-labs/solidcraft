@@ -1251,15 +1251,21 @@ fn a_ball_with_its_poles_on_a_plane_or_a_cone_is_cut() {
 
 /// SolidCraft's cone (#18546): a frustum revolved about +z, radius 3 at z = 0 to 0.5 at
 /// z = 1000, its seam in the half plane y = 0, x > 0. A round notch, r 0.06, centred on the top
-/// rim and extruded from z = 999.5 to the top, crosses the rim 9.2e-5 rad past the seam. Two of
-/// the boolean's proto edges there overlap along a piece, running opposite ways; the boolean
-/// split and combined them, then removed the second one at end proto vertices that no longer
-/// listed it, refused as "the proto edge is not listed". It is one
-/// valid solid of 5 faces, 10 edges and 7 vertices (the notch rotated off the seam has 9 and 6:
-/// the seam ends on the notch wall's curve on the cone, which splits it), and of V = the frustum
-/// less the notch, the notch the integral over z of the area the r 0.06 disc shares with the
-/// cone's circle there (two circles' lens, in closed form), by Simpson's rule.
+/// rim and extruded from z = 999.5 to the top, crosses the rim 9.2e-5 rad past the seam. The
+/// curve where the notch's wall meets the cone crosses the seam at a slant of about 2e-4 rad,
+/// so the two lie within tolerance of each other along a short piece of the seam: two proto
+/// edges overlapping there, running opposite ways. The boolean combined them and then
+/// removed the second at proto vertices that no longer listed it, refused as "the proto edge
+/// is not listed". It is one valid solid of 5 faces (side, base, top, notch wall, notch
+/// floor), 10 edges and 7 vertices: the base circle, the seam below the overlap, the overlap
+/// shared by the seam and the wall's curve, the wall's curve before and after it, the floor's
+/// arcs on the cone and on the wall, the wall's curve on the cone's far side, the rim and the
+/// top's arc on the wall; a vertex at the seam's foot, at each end of the overlap, and where
+/// the floor and the top each meet the cone on either side. V = the frustum less the notch,
+/// the notch the integral over z of the area the r 0.06 disc shares with the cone's circle
+/// there (two circles' lens, in closed form), by Simpson's rule.
 #[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn a_round_notch_overlapping_a_cones_seam_backwards_is_cut() {
     all_fixes();
     let (r_base, r_top, height, r, depth) = (3.0, 0.5, 1000.0_f64, 0.06, 0.5);
