@@ -5972,6 +5972,80 @@ fn an_edge_flange_feature_can_tear_its_corners_under_a_notch_rule() {
     assert!((volume(&mut s) - v0 - want).abs() < 0.02, "{} - {v0} vs {want}", volume(&mut s));
 }
 
+/// A 120 x 90 tray, its walls 30 high (inside), under a rule of thickness `t`, radius `r`, K 0.5,
+/// gap `g` and the corner relief `shape`: the long walls one edge flange and the short walls a
+/// second (`two`), or all four one feature.
+fn butt_tray(shape: &str, t: f64, r: f64, g: f64, two: bool) -> Session {
+    let mut s = Session::default();
+    let rule = json!({"name": "T", "thickness": format!("{t} mm"), "k_factor": 0.5, "bend_radius": format!("{r} mm"), "gap": format!("{g} mm"), "corner_relief_shape": shape, "active": true});
+    run(&mut s, "sheet.manage_rules", rule);
+    base(&mut s, 120.0, 90.0);
+    let (long, short) = ([[60.0, 0.0, t], [60.0, 90.0, t]], [[120.0, 45.0, t], [0.0, 45.0, t]]);
+    let picks: Vec<Vec<[f64; 3]>> = if two { vec![long.to_vec(), short.to_vec()] } else { vec![[long, short].concat()] };
+    for edges in picks {
+        run(&mut s, "sheet.flange", json!({"edges": edges, "height": 30, "angle": "90 deg", "position": "inside"}));
+    }
+    s
+}
+
+/// The flat's area (see [`flat_area`]), its size and its bends' lengths, longest first.
+fn flat_area_size_and_bends(s: &mut Session) -> (f64, [f64; 2], Vec<f64>) {
+    let f = flat(s);
+    let area = flat_area(&f);
+    let size = [0, 1].map(|i| f["flat_size_mm"][i].as_f64().unwrap_or(f64::NAN));
+    let mut bends: Vec<f64> = f["bends"].as_array().into_iter().flatten().map(|b| b["length"].as_f64().unwrap_or(f64::NAN)).collect();
+    bends.sort_by(|x, y| y.total_cmp(x));
+    (area, size, bends)
+}
+
+/// Ported from main's tests for #7126 (#7136, `a_butt_corner_tears_both_bends_to_their_panels_ends`
+/// and `a_butt_corner_tears_in_every_thickness`, written for the flat model): a corner between the
+/// flanges of two features, under a tear rule, was left open while a corner between the flanges
+/// of one feature was torn. A corner belongs to its joints, not to the feature that made either
+/// wall, so the long walls made first and the short walls second tear all four corners exactly as
+/// the four walls made together do: the same solid, the same flat and the same bends, in sheets
+/// from 0.9 to 3 mm (the thicknesses and radii of #7136). Each torn corner gives back, at each of
+/// its two bend ends, (R + K·T)·(R·(1 − cos θ) − √2·(g/2)·θ/2), [`tear_gives`] for any T, R and
+/// gap.
+#[test]
+fn a_corner_between_the_flanges_of_two_features_is_torn_as_one_features_corner_is() {
+    let th = FRAC_PI_2;
+    for (t, r, g) in
+        [(1.0, 1.0, 0.6), (0.9, 0.9, 0.8), (1.0, 1.0, 0.8), (1.0, 1.18, 0.8), (1.5, 1.928, 0.8), (2.0, 2.0, 0.8), (3.0, 3.0, 0.8), (3.0, 4.5, 0.8)]
+    {
+        let what = format!("T {t} R {r} gap {g}");
+        let mut two = butt_tray("tear", t, r, g, true);
+        assert!(no_errors_or_warnings(&two), "{what}: {:?}", two.model.results);
+        let torn = two
+            .model
+            .state()
+            .surface_sheets
+            .last()
+            .map_or(0, |k| k.sheet.corners.iter().filter(|c| c.relief == solidcraft_develop::CornerRelief::Tear).count());
+        assert_eq!(torn, 4, "{what}");
+        // The same tray as one feature makes.
+        let mut one = butt_tray("tear", t, r, g, false);
+        let v = volume(&mut one);
+        assert!(rel(volume(&mut two), v) < 1e-9, "{what}: {} vs {v}", volume(&mut two));
+        let (area, size, bends) = flat_area_size_and_bends(&mut one);
+        let (got_area, got_size, got_bends) = flat_area_size_and_bends(&mut two);
+        assert!(rel(got_area, area) < 1e-9, "{what}: {got_area} vs {area}");
+        assert!((0..2).all(|i| (got_size[i] - size[i]).abs() < 1e-6), "{what}: {got_size:?} vs {size:?}");
+        assert!(got_bends.len() == 4 && got_bends.iter().zip(&bends).all(|(x, y)| (x - y).abs() < 1e-6), "{what}: {got_bends:?} vs {bends:?}");
+        // Torn, not left as the notch: each corner gives back its two bend ends' share, T thick
+        // (K = 0.5 keeps a bend's volume).
+        let notched = volume(&mut butt_tray("notch", t, r, g, true));
+        let gives = (r + 0.5 * t) * (r * (1.0 - th.cos()) - std::f64::consts::SQRT_2 * (g / 2.0) * th / 2.0);
+        let want = 4.0 * 2.0 * gives * t;
+        let got = volume(&mut two) - notched;
+        assert!((got - want).abs() < 0.005 + 3e-4 * want, "{what}: {got} vs {want}");
+        // And it stays so through unfold and refold.
+        run(&mut two, "sheet.unfold", json!({}));
+        run(&mut two, "sheet.refold", json!({}));
+        assert!(rel(volume(&mut two), v) < 1e-9, "{what}: refolded {} vs {v}", volume(&mut two));
+    }
+}
+
 #[test]
 fn only_an_edge_flange_takes_a_corner_relief_of_its_own() {
     let mut s = Session::default();
@@ -7408,6 +7482,46 @@ fn perforated_sheet_takes_a_thousand_round_holes() {
     let removed = flat - volume(&mut s);
     let expected = 1000.0 * std::f64::consts::PI * 0.5 * 0.5 * 0.8;
     assert!((removed - expected).abs() / expected < 0.05, "removed {removed:.1} mm³, 1000 holes are {expected:.1} mm³");
+}
+
+/// #10356 (#8707): a 1200 x 600 x 1.5 channel with two 40 mm inside walls (R 1.5, K 0.5) and 800
+/// round holes of 3 mm cut through its base in one cut, a 40 x 20 grid at a 28 mm pitch from
+/// (40, 30). The cut builds instead of running out of the flat budget. Every hole is in the base,
+/// clear of the bends, which start R + T = 3 in from the long edges (the outer rows reach
+/// 30 − 1.5 and 562 + 1.5). Flat: the base 1200 x (600 − 2(R + T)), the bends 2 x 1200 x BA with
+/// BA = (π/2)(R + K T) = 1.125π, the walls 2 x 1200 x (40 − (R + T)), less 800 x π 1.5²:
+/// 804427.433388 mm², 1200 by 594 + 2(BA + 37) across. With K = 0.5 the folded volume is the
+/// flat area times T.
+#[test]
+fn eight_hundred_round_holes_cut_through_a_channels_base_in_one_cut() {
+    let (t, r) = (1.5, 1.5);
+    let (ba, leg) = (FRAC_PI_2 * (r + 0.5 * t), 40.0 - (r + t));
+    let area = 1200.0 * (600.0 - 2.0 * (r + t)) + 2.0 * 1200.0 * (ba + leg) - 800.0 * PI * 1.5 * 1.5;
+    let across = 600.0 - 2.0 * (r + t) + 2.0 * (ba + leg);
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Steel", "thickness": "1.5 mm", "active": true, "bend_radius": "1.5 mm", "k_factor": 0.5}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [1200, 600]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"type": "base", "sketch": "Base"}));
+    run(&mut s, "sheet.flange", json!({"type": "edge", "height": 40, "angle": 90, "position": "inside", "edges": [[600, 0, 1.5], [600, 600, 1.5]]}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Holes"}));
+    for i in 0..40 {
+        for j in 0..20 {
+            run(&mut s, "sketch.circle.center", json!({"center": [40.0 + 28.0 * f64::from(i), 30.0 + 28.0 * f64::from(j)], "diameter": 3}));
+        }
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Holes", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    let v = volume(&mut s);
+    assert!(rel(v, area * t) < 1e-6, "the channel holds {v} mm³, not {}", area * t);
+    let f = flat(&mut s);
+    let size = [0, 1].map(|i| f["flat_size_mm"][i].as_f64().unwrap_or(f64::NAN));
+    assert!((size[0] - 1200.0).abs() < 1e-6 && (size[1] - across).abs() < 1e-6, "{size:?} vs 1200 x {across}");
+    let shapes = f["cutout_shapes"].as_array().cloned().unwrap_or_default();
+    let round = shapes.iter().filter(|c| c["circle"]["radius"].as_f64().is_some_and(|d| (d - 1.5).abs() < 1e-9)).count();
+    assert!(shapes.len() == 800 && round == 800, "{} cut-outs, {round} of them circles of R 1.5", shapes.len());
 }
 
 // ---- #732 sheet.perforate: a perforation field stored on the sheet, not cut into the B-rep ----------------------
