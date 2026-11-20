@@ -749,7 +749,14 @@ impl JsonSchema for ActivateParams {
     }
 }
 
-/// What `component.activate` returns.
+/// Make the parent of the active component the active one, at the placement the active one sits
+/// in: one level up a call, the design at the top. Refused while the design itself is active. A
+/// change of what is active, not an undo step. Replies as `component.activate` does.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ActivateParentParams {}
+
+/// What `component.activate` and `component.activate.parent` return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ActivateResult {
     /// The active component now, by id.

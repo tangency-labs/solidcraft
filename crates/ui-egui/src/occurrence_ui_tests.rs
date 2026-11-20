@@ -1104,3 +1104,103 @@ fn construction_features_keep_their_labels_and_styling() {
     // The design's own origin keeps its bare name: not a placement's item, feature or not.
     assert_eq!(crate::viewport::component_origin_item(&h.app, "XY"), None);
 }
+
+/// A part inside an assembly, active, with a closed sketch of its own on XY: (harness, assembly,
+/// part).
+fn nested_part_active() -> (Harness, u64, u64) {
+    let mut h = Harness::new();
+    let assembly = h.app.run("component.create", json!({"name":"Assembly","grounded":false})).unwrap()["component"].as_u64().unwrap();
+    let part = h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap()["component"].as_u64().unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,20]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.ui.tab = "MODEL".into();
+    h.settle();
+    (h, assembly, part)
+}
+
+/// While a component other than the design is active, the MODEL tab ends with Activate Parent,
+/// which goes up one level a click; with the design active the group is gone (#18516).
+#[test]
+fn activate_parent_is_on_the_model_tab_only_while_a_component_is_active() {
+    let (mut h, assembly, _) = nested_part_active();
+    let group = || crate::scenario::rect_of("panel:MODEL:ACTIVE COMPONENT");
+    assert!(group().is_some(), "the part is active");
+    crate::test_support::click(&mut h, "button:component.activate.parent");
+    assert_eq!(h.app.session.active_component, assembly);
+    assert!(group().is_some(), "the assembly is active");
+    crate::test_support::click(&mut h, "button:component.activate.parent");
+    assert_eq!(h.app.session.active_component, 0);
+    assert!(group().is_none(), "the design is active: nothing to return from");
+    assert!(crate::scenario::handle_at("button:component.activate.parent").is_none());
+}
+
+/// A double-click on empty space in the view goes up one level, as Activate Parent does: only
+/// where nothing is under the pointer, with no window or sketch open, no key held, and
+/// "Double-click components" on (#18516).
+#[test]
+fn a_double_click_in_empty_space_returns_to_the_parent() {
+    let (mut h, assembly, part) = nested_part_active();
+    let cam = h.app.cam;
+    let rect = h.app.viewport.rect.unwrap();
+    let proj = crate::viewport::projection(&h.app, rect);
+    let drawable = h.app.viewport.layout.as_ref().unwrap().drawable;
+    let empty = [(0.3, 0.7), (0.7, 0.7), (0.3, 0.3), (0.7, 0.3), (0.5, 0.85)]
+        .into_iter()
+        .map(|(x, y)| drawable.left_top() + egui::vec2(drawable.width() * x, drawable.height() * y))
+        .find(|p| crate::viewport::pick(&h.app, &proj, *p).is_empty() && !crate::shell::covered(&h.app, *p))
+        .expect("a spot in the view with nothing under it");
+    let double = |h: &mut Harness, extra: serde_json::Value| {
+        // Past egui's double-click window, so this is a new double-click and not a triple.
+        h.frames(40);
+        h.app.cam = cam;
+        let mut click = json!({"x": empty.x, "y": empty.y, "double": true});
+        click.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        h.call("ui.click", click);
+        crate::test_support::play(h);
+    };
+    // Something under the pointer (the part's own sketch): it stays active.
+    h.step(&json!({"click":{"world":[10,10,0]},"double":true})).unwrap();
+    crate::test_support::play(&mut h);
+    assert_eq!(h.app.session.active_component, part, "a double-click on the sketch");
+    // The preference off, a window open, a sketch open, or Shift held: nothing changes.
+    h.app.preferences.double_click_components = false;
+    double(&mut h, json!({}));
+    assert_eq!(h.app.session.active_component, part, "the preference is off");
+    h.app.preferences.double_click_components = true;
+    h.app.start("solid.box");
+    h.frames(4);
+    assert!(h.app.dialog.is_some());
+    double(&mut h, json!({}));
+    assert_eq!(h.app.session.active_component, part, "a window is open");
+    crate::dialogs::cancel(&mut h.app);
+    h.settle();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    double(&mut h, json!({}));
+    assert_eq!(h.app.session.active_component, part, "a sketch is open");
+    h.app.run("sketch.cancel", json!({})).unwrap();
+    h.settle();
+    double(&mut h, json!({"shift": true}));
+    assert_eq!(h.app.session.active_component, part, "Shift is held");
+    // Up one level a double-click, then the design, where a double-click does nothing.
+    double(&mut h, json!({}));
+    assert_eq!(h.app.session.active_component, assembly);
+    double(&mut h, json!({}));
+    assert_eq!(h.app.session.active_component, 0);
+    double(&mut h, json!({}));
+    assert_eq!(h.app.session.active_component, 0);
+    assert!(h.app.messages.iter().all(|m| !m.error), "no refusal is shown for the design");
+}
+
+/// While the view moves, the pick under the pointer isn't taken, so nothing is under it as far as
+/// the view knows: a double-click then is not one in empty space, and the part stays active (#18516).
+#[test]
+fn a_double_click_while_the_view_moves_keeps_the_part_active() {
+    let (mut h, _, part) = nested_part_active();
+    let still = solidcraft_viewport::CameraAnim::new(h.app.cam, h.app.cam, h.app.now);
+    h.app.cam_anim = Some(solidcraft_viewport::CameraAnim { duration: 1e9, ..still });
+    h.step(&json!({"click":{"world":[10,10,0]},"double":true})).unwrap();
+    crate::test_support::play(&mut h);
+    assert!(h.app.cam_anim.is_some(), "the view is still moving");
+    assert_eq!(h.app.session.active_component, part, "a double-click on the sketch while the view moves");
+}

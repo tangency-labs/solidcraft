@@ -6990,12 +6990,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // highlight (`drag_layer::holds_pointer`). A part dragged along its joint owns the pointer
     // too: nothing under it lights up (#5137).
     let dragging_layer = drag_layer::holds_pointer(app, layered, manipulator_dragging);
-    let hits = hover
-        .filter(|_| {
-            inside && app.viewport.boxsel.is_none() && !crate::joint_drag::active(app) && !joint_handle_pointer && !navigating && !dragging_layer
-        })
-        .map(|p| pick_cached(app, &proj, p))
-        .unwrap_or_default();
+    // Where the pick under the pointer runs: nowhere while something else owns the pointer. An
+    // empty `hits` means empty space only where it ran (`picked`).
+    let picked = hover.filter(|_| {
+        inside && app.viewport.boxsel.is_none() && !crate::joint_drag::active(app) && !joint_handle_pointer && !navigating && !dragging_layer
+    });
+    let hits = picked.map(|p| pick_cached(app, &proj, p)).unwrap_or_default();
     // The Fillet and Chamfer window resolves its own corners: the nearest sketch point to a
     // corner drawn from the origin is the fixed origin, which ends no two curves.
     let corner = hover.filter(|_| inside && !navigating).and_then(|p| crate::sketch_modify_ui::corner_hit(app, &proj, p));
@@ -7506,6 +7506,24 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !crate::edit_in_place::double_click_face(app, &body)
         {
             app.edit_feature_of_face(&body, index, point);
+        }
+        // Double-click empty space with a component active: go back to its parent, as the
+        // ribbon's Activate Parent does. The same preference as a double-click on a face.
+        if resp.double_clicked()
+            && picked.is_some()
+            && hits.is_empty()
+            && !pen_select
+            && !held
+            && !dim_edit
+            && !reference_pick
+            && mods.is_none()
+            && app.tool.is_none()
+            && app.dialog.is_none()
+            && app.session.active_sketch.is_none()
+            && app.session.active_component != 0
+            && app.preferences.double_click_components
+        {
+            let _ = app.run("component.activate.parent", json!({}));
         }
         // A right-click, unless the same press opened the mouse gestures' ring: it finishes a
         // tool, confirms a dialog's input (when that preference is on), or opens the menu. egui's
