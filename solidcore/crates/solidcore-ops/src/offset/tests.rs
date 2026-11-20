@@ -218,7 +218,10 @@ fn a_post_in_a_conical_recess_shells_open_at_its_bottom() {
         let report = body.check(crate::CheckLevel::All).unwrap();
         assert!(report.is_valid(), "t {t}: {}", report.text);
         let actual = volume(&body);
-        assert!(rel(actual, hollow) < 1e-9, "t {t}: shell volume {actual:.17}");
+        assert!(
+            rel(actual, hollow) < 1e-9,
+            "t {t}: shell volume {actual:.17}"
+        );
     }
 }
 
