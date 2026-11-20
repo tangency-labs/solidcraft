@@ -309,12 +309,14 @@ pub enum Item {
         output: Option<String>,
     },
     Plan(Vec<(String, String)>),
-    /// The agent asks before running something of its own (its options, its words).
+    /// The agent asks before running something of its own (its options, its words); `plan`: the
+    /// plan it asks the user to approve, shown with the question.
     Permission {
         key: u64,
         title: String,
         options: Vec<PermissionOption>,
         answer: Option<String>,
+        plan: Option<String>,
     },
     /// A request of the agent's that SolidCraft holds for the user (files, replacing the design,
     /// or any change while the mode is "ask"); `tool`: what "Always allow" remembers.
@@ -616,6 +618,9 @@ pub struct AgentChat {
     /// Files and folders sent by path in this conversation, as their real paths: the agent's own
     /// read tools may read inside them without asking the user (see [`on_permission`]).
     by_path: Vec<std::path::PathBuf>,
+    /// Claude Code's plan folder for the running agent ([`acp::PLANS_FOLDER`] in its working
+    /// folder): its writes there are allowed (see [`on_permission`]). `None` before it starts.
+    plans: Option<std::path::PathBuf>,
     /// Files still being read for the next message.
     pub(crate) loading: Vec<Loading>,
     /// Where the chat was drawn last frame (the panel, or its folded strip), for drops; `None`
@@ -1131,8 +1136,8 @@ impl AgentChat {
                     self.push(Item::Plan(entries));
                 }
             }
-            Event::Permission { key, title, kind, options, reads, claude_tool } => {
-                return Some(Outcome::Permission { key, title, kind, options, reads, claude_tool });
+            Event::Permission { key, title, kind, options, reads, writes, plan, claude_tool } => {
+                return Some(Outcome::Permission(Question { key, title, kind, options, reads, writes, plan, claude_tool }));
             }
             Event::Unasked { tool } => return Some(Outcome::Unasked { tool }),
             Event::Modes { current, available } => {
@@ -1267,16 +1272,23 @@ enum Outcome {
     /// A message was answered (or the agent stopped): the turn's bookkeeping ends.
     TurnEnd,
     /// The agent asks before running something of its own: answered by the mode, or asked.
-    Permission {
-        key: u64,
-        title: String,
-        kind: Option<String>,
-        options: Vec<PermissionOption>,
-        reads: Option<std::path::PathBuf>,
-        claude_tool: Option<String>,
-    },
-    /// One of Claude Code's read tools ran without asking ([`Event::Unasked`]): the message stops.
+    Permission(Question),
+    /// One of Claude Code's read or write tools ran without asking ([`Event::Unasked`]): the
+    /// message stops.
     Unasked { tool: String },
+}
+
+/// A permission question of the agent's, as [`Event::Permission`] brings it.
+struct Question {
+    key: u64,
+    title: String,
+    kind: Option<String>,
+    options: Vec<PermissionOption>,
+    reads: Option<std::path::PathBuf>,
+    writes: Option<std::path::PathBuf>,
+    plan: Option<String>,
+    /// Which of Claude Code's own tools it is about, when its adapter says ([`acp::ClaudeCalls`]).
+    claude_tool: Option<String>,
 }
 
 /// The AI features are on (the master switch in Settings → AI) and this is the desktop app.
@@ -1435,7 +1447,11 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     chat.tools_available = Some(bridge.is_some());
     chat.tools_bridged = bridge.is_some();
     let wake = ctx.clone();
-    let start = backend::StartContext { cwd: working_dir(), bridge, tools: chat.tools_tx.clone(), wake: Box::new(move || wake.request_repaint()) };
+    let cwd = working_dir();
+    let plans = cwd.join(acp::PLANS_FOLDER);
+    tidy_plans(&plans, std::time::SystemTime::now());
+    chat.plans = Some(plans);
+    let start = backend::StartContext { cwd, bridge, tools: chat.tools_tx.clone(), wake: Box::new(move || wake.request_repaint()) };
     let started: Result<Box<dyn ChatBackend>, String> = match entry.kind {
         agents::Kind::Acp if entry.argv.is_empty() => Err(tr("ui.agent_chat_none_found").to_string()),
         agents::Kind::Acp => acp_client::AcpBackend::start(&entry.argv, start).map(|b| Box::new(b) as Box<dyn ChatBackend>),
@@ -2579,27 +2595,21 @@ pub fn answer_permission(app: &mut SolveApp, index: usize, option: Option<&str>)
 /// The agent asks before running something of its own. The chat's own MCP tools are checked by
 /// SolidCraft's gate, so they're allowed here (no double question, see [`acp::is_bridge_tool`]);
 /// so is a read of a file or folder the user attached by path in this conversation (`reads`, see
-/// [`acp::read_path`]); otherwise the mode or an earlier "always allow" may answer, and the chat
-/// says so; otherwise the user is asked. `claude_tool`: which of Claude Code's own tools the
-/// question is about, when its adapter says ([`acp::ClaudeCalls`]).
-fn on_permission(
-    app: &mut SolveApp,
-    key: u64,
-    title: String,
-    kind: Option<&str>,
-    options: Vec<PermissionOption>,
-    reads: Option<&std::path::Path>,
-    claude_tool: Option<&str>,
-) {
-    let attached = reads.is_some_and(|path| app.agent_chat.attached_by_path(path));
-    // Claude Code reads only what was attached by path to this conversation: any other read, or
-    // one whose path or pattern can't be checked, is declined without asking, whatever the mode or
-    // a remembered answer. A question is Claude Code's read when its adapter names one of its read
-    // tools, whatever command started it, or when the agent is that adapter and the question is
-    // of kind read or search (not one of the chat's own tools).
-    let claude_read = claude_tool.is_some_and(|tool| acp::CLAUDE_ASK_TOOLS.contains(&tool))
-        || (matches!(kind, Some("read" | "search")) && !acp::is_bridge_tool(&title, kind) && runs_claude_code(app));
-    if !attached && claude_read {
+/// [`acp::read_path`]), and Claude Code writing its plan in its plan folder (`writes`, see
+/// [`is_plan_file`]) or reading it back. Claude Code's read and write tools are on only for these:
+/// any other read or write of Claude Code's is declined without asking, whatever the mode or a
+/// remembered answer. A question is Claude Code's when its adapter names one of those tools
+/// (`claude_tool`, [`acp::ClaudeCalls`]), whatever command started it, or when the agent is that
+/// adapter. A question that brings a plan to approve always goes to the user. Otherwise the mode
+/// or an earlier "always allow" may answer, and the chat says so; otherwise the user is asked.
+fn on_permission(app: &mut SolveApp, question: Question) {
+    let Question { key, title, kind, options, reads, writes, plan, claude_tool } = question;
+    let attached = reads.as_deref().is_some_and(|path| app.agent_chat.attached_by_path(path));
+    let plan_read = writes.is_none() && reads.as_deref().zip(app.agent_chat.plans.as_deref()).is_some_and(|(path, plans)| is_plan_file(plans, path));
+    let named = |tools: &[&str]| claude_tool.as_deref().is_some_and(|tool| tools.contains(&tool));
+    let claude_read = named(acp::CLAUDE_ASK_TOOLS)
+        || (matches!(kind.as_deref(), Some("read" | "search")) && !acp::is_bridge_tool(&title, kind.as_deref()) && runs_claude_code(app));
+    if !attached && !plan_read && claude_read {
         let reject = options.iter().find(|o| o.kind == "reject_once").or_else(|| options.iter().find(|o| o.kind.starts_with("reject")));
         if let Some(b) = app.agent_chat.backend.as_mut() {
             b.answer_permission(key, reject.map(|o| o.id.as_str()));
@@ -2608,12 +2618,28 @@ fn on_permission(
         return;
     }
     let agent = app.agent_chat.running_id.clone();
+    let plan_file = writes.as_deref().zip(app.agent_chat.plans.as_deref()).is_some_and(|(path, plans)| is_plan_file(plans, path));
+    if !plan_file && (named(acp::CLAUDE_PLAN_TOOLS) || (writes.is_some() && runs_claude_code(app))) {
+        let decline = options.iter().find(|o| o.kind == "reject_once").map(|o| o.id.clone());
+        if let Some(b) = app.agent_chat.backend.as_mut() {
+            b.answer_permission(key, decline.as_deref());
+        }
+        app.agent_chat.push(Item::Notice { text: trf("ui.ai_declined_write", &[("title", &title)]), error: false });
+        return;
+    }
     let mode = agents::mode_in_force(app, &agent);
     let remembered = agents::always_allowed_in_force(app, &agent, &title);
-    let why = if acp::is_bridge_tool(&title, kind) {
+    let why = if plan.is_some() {
+        // A plan to approve is always the user's to read and answer.
+        None
+    } else if acp::is_bridge_tool(&title, kind.as_deref()) {
         Some("ui.ai_auto_ours")
     } else if attached {
         Some("ui.ai_auto_attached")
+    } else if plan_read {
+        Some("ui.ai_auto_plan_read")
+    } else if plan_file {
+        Some("ui.ai_auto_plan_file")
     } else if remembered {
         Some("ui.ai_auto_remembered")
     } else if mode == agents::Mode::All {
@@ -2631,7 +2657,7 @@ fn on_permission(
             }
             app.agent_chat.push(Item::Notice { text: trf("ui.ai_auto_allowed", &[("title", &title), ("why", tr(why))]), error: false });
         }
-        _ => app.agent_chat.push(Item::Permission { key, title, options, answer: None }),
+        _ => app.agent_chat.push(Item::Permission { key, title, options, answer: None, plan }),
     }
 }
 
@@ -2641,6 +2667,41 @@ fn runs_claude_code(app: &SolveApp) -> bool {
     let running = &app.agent_chat.running_id;
     app.agent_chat.backend.as_ref().is_some_and(|b| b.claude_code())
         || agents::entries(app).iter().any(|entry| &entry.id == running && acp::is_claude_adapter(&entry.argv))
+}
+
+/// `path` is a plan file in the plan folder `plans`: a Markdown file right in it, not a link that
+/// leads out of it. A path through a link to the folder still counts; the folder must exist.
+fn is_plan_file(plans: &std::path::Path, path: &std::path::Path) -> bool {
+    let (Ok(plans), Some(folder), Some(name)) = (std::fs::canonicalize(plans), path.parent(), path.file_name()) else { return false };
+    let markdown = std::path::Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("md"));
+    let in_folder = std::fs::canonicalize(folder).is_ok_and(|folder| folder == plans);
+    // A file that is already there (a plan being revised) must really be in the folder.
+    let stays = std::fs::canonicalize(path).map_or(true, |real| real.parent() == Some(plans.as_path()));
+    markdown && in_folder && stays
+}
+
+/// How long a plan file is kept after its last change: long enough for any conversation still going.
+const PLAN_KEPT: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+
+/// Make Claude Code's plan folder, and delete the plans in it not changed for [`PLAN_KEPT`]: every
+/// plan Claude Code writes stays there, and nothing else reads them once the conversation is over.
+#[cfg(not(target_arch = "wasm32"))]
+fn tidy_plans(plans: &std::path::Path, now: std::time::SystemTime) {
+    let _ = std::fs::create_dir_all(plans);
+    let Ok(entries) = std::fs::read_dir(plans) else { return };
+    for entry in entries.flatten() {
+        // The entry's own metadata: a link is not a file here, so it stays, and what it leads to too.
+        let old = entry
+            .metadata()
+            .ok()
+            .filter(std::fs::Metadata::is_file)
+            .and_then(|m| m.modified().ok())
+            .and_then(|changed| now.duration_since(changed).ok())
+            .is_some_and(|age| age > PLAN_KEPT);
+        if old {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 fn approve_with(app: &mut SolveApp, id: u64, allow: bool, why: &str) {
@@ -3061,18 +3122,17 @@ pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
                 end_turn(app);
                 after_turn(app, ctx);
             }
-            Some(Outcome::Permission { key, .. }) if app.agent_chat.turn.is_none() => {
+            Some(Outcome::Permission(Question { key, .. })) if app.agent_chat.turn.is_none() => {
                 if let Some(b) = app.agent_chat.backend.as_mut() {
                     b.answer_permission(key, None);
                 }
             }
-            Some(Outcome::Permission { key, title, kind, options, reads, claude_tool }) => {
-                on_permission(app, key, title, kind.as_deref(), options, reads.as_deref(), claude_tool.as_deref())
-            }
+            Some(Outcome::Permission(question)) => on_permission(app, question),
             Some(Outcome::Unasked { tool }) => {
-                // Claude Code's reads must ask (its session's ask rule) so that the chat can check
-                // each one; one that didn't means its adapter no longer honours the rule.
-                app.agent_chat.push(Item::Notice { text: trf("ui.ai_unasked_read", &[("tool", &tool)]), error: true });
+                // Claude Code's reads and writes must ask (its session's ask rule) so that the chat
+                // can check each one; one that didn't means its adapter no longer honours the rule.
+                let key = if acp::CLAUDE_PLAN_TOOLS.contains(&tool.as_str()) { "ui.ai_unasked_write" } else { "ui.ai_unasked_read" };
+                app.agent_chat.push(Item::Notice { text: trf(key, &[("tool", &tool)]), error: true });
                 if app.agent_chat.turn.is_some() {
                     cancel(app);
                 }
@@ -3652,8 +3712,8 @@ pub fn status(app: &SolveApp) -> Value {
                 json!({"tool": id, "title": title, "kind": kind, "status": status.map(|s| format!("{s:?}")), "input": input, "output": output})
             }
             Item::Plan(p) => json!({"plan": p}),
-            Item::Permission { title, options, answer, .. } => {
-                json!({"permission": title, "options": options.iter().map(|o| json!({"id": o.id, "name": o.name, "kind": o.kind})).collect::<Vec<_>>(), "answer": answer})
+            Item::Permission { title, options, answer, plan, .. } => {
+                json!({"permission": title, "options": options.iter().map(|o| json!({"id": o.id, "name": o.name, "kind": o.kind})).collect::<Vec<_>>(), "answer": answer, "plan": plan})
             }
             Item::Approval { title, answer, .. } => json!({"approval": title, "answer": answer}),
             Item::Changes { steps, summary, features, undone, .. } => {

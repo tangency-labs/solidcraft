@@ -268,7 +268,10 @@ read from the adapter's `_meta.claudeCode.toolName`, which it puts on every tool
 (the question carries the call's `toolCallId`): such a question is declined unless it reads what
 was sent, whatever command started the agent. The same names catch an adapter that stops
 honouring the ask rule: a read tool call that completes without having asked
-(`acp::ClaudeCalls`) stops the message with an error, so the rule can't be lost quietly.
+(`acp::ClaudeCalls`) stops the message with an error, so the rule can't be lost quietly. Its
+write tools (Write, Edit, for its plan) follow the same rule: off unless the adapter was
+recognised, a write the adapter names declined unless it writes a plan file, and one that never
+asked stops the message.
 
 An earlier version kept the read tools off until a message first sent a file by path, then opened
 the session again with them on (`session/new` with `_meta.claudeCode.options.resume`). That
@@ -281,8 +284,28 @@ that points out of it is safe only because Claude Code's walk doesn't follow lin
 0.107.0, with a linked folder and a linked file that both point outside: Glob `**/*`, a Grep over
 the folder, and patterns that name a link (`linkdir/**/*`, `linkfile*`) returned only the
 folder's own file, even with a ripgrep config saying `--follow` (`RIPGREP_CONFIG_PATH`). Check
-this again when the adapter's version moves. Other agents' own
-permission requests appear in the panel with their options.
+this again when the adapter's version moves.
+
+Claude Code's plan mode needs its write tools (#19571). It writes the plan to a Markdown file in
+its `plansDirectory`, and `ExitPlanMode`'s "Approve Plan" question (`session/request_permission`,
+kind `switch_mode`) carries that file's text as `rawInput.plan`. With Write off, the write fails
+and the question arrives with `rawInput: {}`; asking the agent in the system note to write the
+plan in its reply worked for a first plan but never for a revised one. So Write and Edit aren't in
+`disallowedTools`, every session's settings ask for them (`permissions.ask`, beside the read
+tools) and set `plansDirectory: "plans"`, which Claude Code resolves against the
+working folder: `<data>/agent-chat/work/plans`, not the user's `~/.claude/plans`.
+`acp::write_path` takes the file from a `Write <path>` or `Edit <path>` question of kind `edit`
+with an absolute `rawInput.file_path`; the chat allows it when the file is a `.md` right in that
+folder, links followed (`is_plan_file`), and declines any other write of Claude Code's before the
+user's mode or remembered answers are consulted. A Read of a plan file is allowed the same way,
+so Claude Code can read its plan back before revising it. `acp::plan_text` takes the plan (at most 20 000
+characters) and the panel draws it as Markdown inside the question, above its answers; a question
+with a plan is never answered by the mode or a remembered answer. Starting
+the agent makes the folder and deletes plans not changed for seven days (`tidy_plans`); several
+SolidCraft windows share the folder, so nothing deletes a plan a running conversation may still
+read. Checked with `claude-agent-acp` 0.107.0 and Sonnet: with these options, a first plan and a
+revised one both arrived in the question (two runs each), and Claude Code wrote nowhere else.
+Other agents' own permission requests appear in the panel with their options, writes included.
 
 A coding agent gets every attached file and folder by its path (`attach::reference`,
 `attach::folder`); an endpoint, which has no tool that opens a path, gets pictures, text and PDFs

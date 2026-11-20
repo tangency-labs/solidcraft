@@ -608,10 +608,11 @@ follow the agent's own mode, which you pick in the panel's header. When an agent
 using one of the chat's own SolidCraft tools and names it exactly as the Claude adapter does
 (`mcp__solidcraft-app__batch`), SolidCraft answers for you, since its own gate checks the call,
 and notes it in the chat as *Auto-allowed*. So it does when Claude Code reads something you sent
-by path in this conversation, and it declines any other read of Claude Code's whatever the mode
-(see below). Any other question appears in the panel, including a SolidCraft tool an agent words
-differently and a SolidCraft MCP server you added to an agent other than Claude Code yourself.
-With **Allow everything**, or after **Always allow**, those questions are answered the
+by path in this conversation, or writes its plan or reads it back, and it declines any other
+read or write of Claude Code's whatever the mode (see below). Any other question appears in the
+panel, including a SolidCraft tool an agent words differently and a SolidCraft MCP server you
+added to an agent other than Claude Code yourself. With **Allow everything**, or after
+**Always allow**, those questions are answered the
 same way and noted too.
 
 What counts as "a command given a file name": a parameter that holds a file or folder (`file`,
@@ -637,20 +638,29 @@ saves, opens or inserts. A sweep's or pattern's `path` (curve ids) and an occurr
   chat itself.
 - **Its own tools stay off where we can turn them off.** SolidCraft declares no file system and
   no terminal to the agent, runs it in an empty working folder of its own, and asks the Claude
-  Code adapter for a session with none of its own tools but the one that ends plan mode and its
-  read tools (below), and with SolidCraft's MCP server as its only one. Your claude.ai
-  connectors, your own MCP servers, and Claude Code's shell, file-writing, web, scheduling and
-  messaging tools aren't there.
+  Code adapter for a session with none of its own tools but the one that ends plan mode, its read
+  tools and the file-writing tools it writes only its plan with (below), and with SolidCraft's
+  MCP server as its only one. Your claude.ai connectors, your own MCP servers, and Claude Code's
+  shell, web, scheduling and messaging tools aren't there.
 - **Claude Code reads only what you sent.** Its read tools (Read, Glob, Grep) are on, but they ask
   before every read. The chat allows a read inside a file or folder you sent by path in this
-  conversation, and declines any other without asking you, whatever the mode and even after
-  **Always allow**: a file you didn't send, a search whose pattern starts at a root or your home
-  folder or steps up with `..`, or a link in a folder you sent that leads out of it (a path counts
-  once links are followed). To let it read another file, attach it. **New chat** starts with
-  nothing sent. The read tools are on only when the agent's command names the Claude Code adapter
+  conversation, and of its own plan (below), and declines any other without asking you, whatever
+  the mode and even after **Always allow**: a file you didn't send, a search whose pattern starts
+  at a root or your home folder or steps up with `..`, or a link in a folder you sent that leads
+  out of it (a path counts once links are followed). To let it read another file, attach it.
+  **New chat** starts with nothing sent.
+- **Claude Code writes only its plan.** In plan mode (the **Plan** choice in the panel's header)
+  Claude Code writes its plan to a file, then asks you to approve it: the plan is shown in that
+  question, so you see what you approve, and again after you ask for a change. That question
+  always waits for you, even with **Allow everything**. Its Write and Edit
+  tools are on for that and ask before every write. The chat allows a Markdown file right in
+  Claude Code's plan folder (`plans` in the chat's working folder, not `~/.claude/plans`) and
+  declines any other write without asking you, even with **Allow everything**. Plans not changed
+  for a week are deleted when the agent next starts.
+- Its read and write tools are on only when the agent's command names the Claude Code adapter
   (`claude-agent-acp`, or the older `claude-code-acp`); started any other way, through a script
-  of your own say, it can't read at all. If it ever reads without asking first, the chat stops
-  the message and says so.
+  of your own say, it can neither read nor write. If it ever reads or writes without asking
+  first, the chat stops the message and says so.
 
 When the panel's agent is stopped, another agent is picked, or SolidCraft quits, the agent and
 every program it started (the CLI it wraps, its MCP server) are stopped.
