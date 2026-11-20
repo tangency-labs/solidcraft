@@ -48,12 +48,13 @@ pub(crate) fn review(app: &mut SolveApp, path: String) {
     }
 }
 
-/// A checked package from the install command; updates start with the stored named folders.
+/// A checked package from the install command; updates can start with the stored named folders.
 pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
     let permissions = plugin.get("permissions");
     let stored = plugin
         .get("replaces")
         .and_then(Value::as_str)
+        .filter(|_| app.preferences.plugin_update_prefill_folders)
         .and_then(|_| plugin.get("id").and_then(Value::as_str))
         .and_then(|id| app.session.plugin_state.grants.get(id));
     let grants = solidcraft_engine::plugin::Grants {
@@ -403,8 +404,25 @@ mod tests {
     }
 
     #[test]
+    fn plugin_install_update_starts_empty_when_prefill_is_off() {
+        let mut h = crate::scenario::Harness::new();
+        let old_folder = h.dir.join("Old exports");
+        std::fs::create_dir(&old_folder).unwrap();
+        install_folder_package(&mut h, &old_folder);
+        let approved = h.app.session.plugin_state.grants.clone();
+        crate::prefs::set(&mut h.app, &json!({"plugin_update_prefill_folders":false})).unwrap();
+        review_folder_package(&mut h, "0.2.0", json!([{"name":"source","read":true},{"name":"exports","write":true}]));
+        let ask = h.app.plugin_install.ask.as_ref().unwrap();
+        assert!(ask.grants.folders.iter().all(|grant| grant.folder.as_os_str().is_empty()));
+        assert!(!crate::plugins::valid_grants(&ask.grants));
+        assert_eq!(h.app.session.plugin_state.grants, approved, "review does not change the installed version's grants");
+        assert_eq!(h.app.preferences.plugin_grants, approved);
+    }
+
+    #[test]
     fn plugin_install_update_prefills_stored_folder_by_name() {
         let mut h = crate::scenario::Harness::new();
+        assert_eq!(serde_json::to_value(&h.app.preferences).unwrap()["plugin_update_prefill_folders"], true);
         let old_folder = h.dir.join("Old exports");
         let chosen = h.dir.join("New exports");
         std::fs::create_dir(&old_folder).unwrap();

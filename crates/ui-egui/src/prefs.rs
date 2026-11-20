@@ -2015,11 +2015,21 @@ preference_settings! {
     /// Remember a moved plugin command window's position for the current design, until the
     /// application closes (#18684). Off keeps the previously centred reopen behaviour.
     plugin_remember_dialog_position: bool = false, PAGE_PLUGINS;
+    /// Start plugin updates with the installed version's named folder grants. Off restores
+    /// the empty review fields; either way only Install approves the displayed folders.
+    plugin_update_prefill_folders: bool = true, PAGE_PLUGINS => check_id_help("prefs.plugin_update_prefill_folders", "prefs.plugin_update_prefill_folders_help");
     /// Approved install permissions survive page resets and Cancel, like installed files.
     plugin_grants: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants> = std::collections::BTreeMap::new();
     /// User ceilings, not automatic increases to a package's approved execution budget.
     plugin_max_fuel: u64 = solidcraft_engine::plugin::HostLimits::default().max_fuel, PAGE_PLUGINS;
     plugin_max_memory_mib: usize = solidcraft_engine::plugin::HostLimits::default().max_memory_mib, PAGE_PLUGINS;
+}
+
+pub(crate) fn plugin_update_options(app: &mut SolveApp, ui: &mut egui::Ui) {
+    ui.scope(|ui| {
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+        setting::plugin_update_prefill_folders(app, ui);
+    });
 }
 
 /// What a middle-button double-click in the view does.
@@ -5450,6 +5460,66 @@ mod tests {
         app.preferences.trackpad_zoom_modifier = TrackpadZoomModifier::Cmd;
         reset_preferences(&mut app.preferences, PAGE_NAVIGATION);
         assert_eq!(app.preferences.trackpad_zoom_modifier, TrackpadZoomModifier::Off);
+    }
+
+    #[test]
+    fn plugin_update_prefill_folders_defaults_persists_cancels_and_resets() {
+        const KEY: &str = "plugin_update_prefill_folders";
+        assert_eq!(serde_json::to_value(Prefs::default()).unwrap()[KEY], true);
+        assert_eq!(serde_json::to_value(lenient(&json!({}))).unwrap()[KEY], true, "older preference files get the default");
+        assert_eq!(serde_json::to_value(lenient(&json!({KEY:"invalid"}))).unwrap()[KEY], true);
+        assert_eq!(FIELD_PAGES.iter().find(|(field, _)| *field == KEY).map(|(_, page)| *page), Some(Some(PAGE_PLUGINS)));
+        let mut h = crate::scenario::Harness::new();
+        h.app.session.plugin_state.plugins_dir = Some(h.dir.join("plugins"));
+        h.call("ui.prefs", json!({"open":"Plugins"}));
+        h.step(&json!({"widget":"Start an update with the folders the installed version was granted"})).unwrap();
+        assert_eq!(h.call("ui.prefs", json!({}))["result"][KEY], false, "the Plugins checkbox changes the preference");
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert_eq!(serde_json::to_value(&restored.preferences).unwrap()[KEY], true, "an unapplied edit is not saved");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.call("ui.prefs", json!({}))["result"][KEY], true);
+        h.call("ui.prefs", json!({"open":"Plugins",KEY:false,"button":"apply"}));
+        restored.load_prefs(&h.app.prefs());
+        assert_eq!(serde_json::to_value(&restored.preferences).unwrap()[KEY], false, "an applied edit survives reopening");
+        h.call("ui.prefs", json!({"open":"General","button":"defaults"}));
+        assert_eq!(h.call("ui.prefs", json!({}))["result"][KEY], false, "another page's reset keeps the choice");
+        h.call("ui.prefs", json!({"open":"Plugins","button":"defaults"}));
+        assert_eq!(h.call("ui.prefs", json!({}))["result"][KEY], true, "Plugins reset restores the default");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.call("ui.prefs", json!({}))["result"][KEY], false, "Cancel reverses the reset");
+        for invalid in [json!("false"), json!(null), json!(0), json!([])] {
+            assert!(set(&mut h.app, &json!({KEY:invalid})).is_err());
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap()[KEY], false);
+        }
+        if let Ok(directory) = std::env::var("SOLIDCRAFT_PLUGIN_UPDATE_EVIDENCE") {
+            h.call("ui.prefs", json!({"open":"Plugins",KEY:true}));
+            std::fs::create_dir_all(&directory).unwrap();
+            for (width, height) in [(1280, 720), (640, 480)] {
+                let ctx = crate::fonts::test_context();
+                let screen = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(width as f32, height as f32));
+                let mut textures = std::collections::HashMap::new();
+                for frame in 0..6 {
+                    let mut output = ctx
+                        .run_ui(egui::RawInput { screen_rect: Some(screen), time: Some(frame as f64 / 60.0), ..Default::default() }, |ui| {
+                            crate::ui_kit::scope(ui, |ui| show(&mut h.app, ui.ctx()))
+                        });
+                    crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+                    output.textures_delta.clear();
+                    if frame == 5 {
+                        let label = crate::test_support::text_shapes(&output)
+                            .find(|text| text.galley.text() == "Start an update with the folders the installed version was granted")
+                            .expect("the preference label is painted");
+                        assert!(!label.galley.elided);
+                        let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+                        assert!(body.contains_rect(label.visual_bounding_rect()), "the full label fits at {width}x{height}");
+                        crate::ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, screen, &textures)
+                            .save(std::path::Path::new(&directory).join(format!("plugins-prefill-{width}x{height}.png")))
+                            .unwrap();
+                    }
+                }
+            }
+        }
     }
 
     #[test]
