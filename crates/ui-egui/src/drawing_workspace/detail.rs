@@ -73,13 +73,20 @@ fn outline(painter: &egui::Painter, at: OnScreen, rectangle: bool, centre: Vec2,
     }
 }
 
+/// Starts the tool again when `sheet` isn't the one its clicks were on, keeping the shape: clicks on
+/// one sheet never join clicks on another. The sheet page calls it every frame the tool is in hand,
+/// wherever the pointer is, so a visit to another sheet and back starts again too.
+pub(crate) fn follow_sheet(app: &mut SolveApp, sheet: u64) {
+    let draft = app.drawing_workspace.detail.unwrap_or_default();
+    if draft.sheet != Some(sheet) {
+        app.drawing_workspace.detail = Some(Draft { rectangle: draft.rectangle, sheet: Some(sheet), ..Draft::default() });
+    }
+}
+
 /// The tool on the sheet, the pointer at `point`: its preview, and what a click does.
 pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen, objects: &[SheetObject], sheet: u64, point: Vec2, clicked: bool) {
+    follow_sheet(app, sheet);
     let mut draft = app.drawing_workspace.detail.unwrap_or_default();
-    // Clicks on one sheet never join clicks on another: the region and its view are this sheet's.
-    if draft.sheet != Some(sheet) {
-        draft = Draft { rectangle: draft.rectangle, sheet: Some(sheet), ..Draft::default() };
-    }
     match (draft.centre, draft.half) {
         (None, _) => {
             if clicked {
@@ -186,6 +193,13 @@ mod tests {
         on_sheet(&mut h.app, &painter, at, &objects, sheet, centre, true);
         on_sheet(&mut h.app, &painter, at, &objects, sheet + 1, centre + Vec2::new(10.0, 0.0), false);
         assert_eq!(h.app.drawing_workspace.detail.map(|d| (d.centre, d.half, d.sheet)), Some((None, None, Some(sheet + 1))));
+        // A region fixed on one sheet, a visit to another with the pointer off its paper, and back:
+        // the tool starts again.
+        on_sheet(&mut h.app, &painter, at, &objects, sheet, centre, true);
+        on_sheet(&mut h.app, &painter, at, &objects, sheet, centre + Vec2::new(10.0, 0.0), true);
+        follow_sheet(&mut h.app, sheet + 1);
+        follow_sheet(&mut h.app, sheet);
+        assert_eq!(h.app.drawing_workspace.detail.map(|d| (d.centre, d.half)), Some((None, None)));
     }
 
     /// The parameters: a circle by its centre and radius, a rectangle by its corners, both on the

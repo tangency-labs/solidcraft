@@ -533,10 +533,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let on_paper = hover.filter(|p| (0.0..=size.x).contains(&p.x) && (0.0..=size.y).contains(&p.y));
     let placement_painter = painter.with_clip_rect(sheet_rect.intersect(painter.clip_rect()));
     let placing = crate::drawing_workspace::placement::on_sheet(app, &placement_painter, at, &drawing, sheet, on_paper, response.clicked());
-    if crate::drawing_workspace::placing_detail(app)
-        && let Some(point) = on_paper
-    {
-        crate::drawing_workspace::detail::on_sheet(app, &placement_painter, at, &view.objects, sheet, point, response.clicked());
+    if crate::drawing_workspace::placing_detail(app) {
+        crate::drawing_workspace::detail::follow_sheet(app, sheet);
+        if let Some(point) = on_paper {
+            crate::drawing_workspace::detail::on_sheet(app, &placement_painter, at, &view.objects, sheet, point, response.clicked());
+        }
     }
     let placing_note = crate::drawing_workspace::placing_note(app);
     if placing_note && let Some(point) = on_paper {
