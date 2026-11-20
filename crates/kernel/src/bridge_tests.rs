@@ -4,6 +4,25 @@
 use super::*;
 use crate::{box_solid, cylinder};
 
+#[test]
+fn nearest_distance_uses_a_point_on_the_curve_not_its_chord() {
+    let curve = solidcore_record::brep::Curve::Circle {
+        frame: solidcore_record::brep::Frame { origin: [0.0, 0.0, 0.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] },
+        radius: 1.0,
+    };
+    let end = std::f64::consts::FRAC_PI_2;
+    let line = ChainLine {
+        curves: vec![(CurveEval::new(&curve).unwrap(), [0.0, end])],
+        samples: vec![
+            Sample { p: Vec3::new(1.0, 0.0, 0.0), s: 0.0, edge: 0, t: 0.0 },
+            Sample { p: Vec3::new(0.0, 1.0, 0.0), s: 2.0_f64.sqrt(), edge: 0, t: end },
+        ],
+        closed: false,
+    };
+    let distance = line.nearest_with_distance(Vec3::new(0.5, 0.5, 0.0)).1.unwrap();
+    assert!((distance - (1.0 - 0.5_f64.sqrt())).abs() < 1e-12, "{distance}");
+}
+
 /// The shape of a bridge's cross-section at the parameter `u`, measured off the finished face (not
 /// from the construction): position, unit tangent, curvature vector and the arclength derivative
 /// of that curvature vector at the start of the cross-section. The samples run inwards from the
@@ -271,6 +290,24 @@ fn worst_turn(body: &Body) -> f64 {
             angle_deg(Vec3::new(a.x, a.y, 0.0), Vec3::new(b.x, b.y, 0.0))
         })
         .fold(0.0, f64::max)
+}
+
+#[test]
+fn a_bridge_on_a_rim_chord_reports_the_circular_gap() {
+    let tube = open_tube(0.0, 0.0, 30.0);
+    let rim = ChainLine::of(&tube, &chain(&tube, &rim_at(30.0)).unwrap()).unwrap();
+    let (a, b) = (rim.samples[0].p, rim.samples[1].p);
+    let mid = (a + b) * 0.5;
+    let expected = 10.0 - mid.x.hypot(mid.y);
+    assert!(expected > 1e-5);
+    let row = |dz: f64| -> Vec<Frame> {
+        (0..5)
+            .map(|i| Frame { p: a + (b - a) * (f64::from(i) / 4.0) + Vec3::Z * dz, leave: Vec3::Z, bend: Vec3::ZERO, bend_change: Vec3::ZERO })
+            .collect()
+    };
+    let sheet = bridge(&row(0.0), &row(1.0), [Continuity::G0; 2], [0.0; 2]).unwrap();
+    let gap = boundary_gap(&sheet, &rim, false).unwrap();
+    assert!((gap - expected).abs() < 1e-10, "boundary gap {gap}, circular sagitta {expected}");
 }
 
 #[test]
