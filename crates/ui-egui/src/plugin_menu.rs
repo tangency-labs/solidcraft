@@ -121,7 +121,8 @@ pub(crate) enum Kind {
     Text {
         min_length: Option<usize>,
         max_length: Option<usize>,
-        /// `format` is `directory`: a Browse button fills this field from the folder picker.
+        /// `format` is `directory`: when the host has a folder picker, a Browse button fills
+        /// this field. Without one, including the browser build, the field stays a text box.
         directory: bool,
     },
     /// Geometry picked in the viewport: what it takes, how many, and whether it sends body names
@@ -1603,15 +1604,21 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, images: &std::collections::BTree
         }
         (Kind::Text { directory: true, .. }, Input::Text(text)) => {
             let hint = if field.required { app.tr("ui.plugin_dialog_required_hint") } else { "" };
-            let browse_label = app.tr("ui.plugin_dialog_browse");
+            // The browser build has no folder picker, so Browse is not offered there.
+            let can_browse = !cfg!(target_arch = "wasm32") && app.services.pick_folder.is_some();
             ui_kit::row(ui, &label, |ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let button = ui_kit::button(ui, browse_label, ui_kit::Button::Normal);
-                    browse = button.clicked();
-                    let field = ui_kit::text_field_reserving(ui, text, hint, 0.0).1;
-                    field.union(button)
-                })
-                .inner
+                if can_browse {
+                    let browse_label = app.tr("ui.plugin_dialog_browse");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let button = ui_kit::button(ui, browse_label, ui_kit::Button::Normal);
+                        browse = button.clicked();
+                        let field = ui_kit::text_field_reserving(ui, text, hint, 0.0).1;
+                        field.union(button)
+                    })
+                    .inner
+                } else {
+                    ui_kit::text_field_reserving(ui, text, hint, 0.0).1
+                }
             })
         }
         (Kind::Text { .. }, Input::Text(text)) => {

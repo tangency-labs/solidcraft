@@ -907,9 +907,10 @@ fn ungranted_command_groups_keep_run_off_and_are_named() {
     assert!(app.plugin_menu.dialog().unwrap().ready(&app).is_ok());
 }
 
-/// A directory field gets Browse. The picked folder is the value sent to the plugin. A plain
-/// string field stays a text box. A folder outside the install grant is refused by the same
-/// permission check, and the grant is unchanged. Paste still fills either field.
+/// A directory field gets Browse when the host has a folder picker, and no button otherwise.
+/// The picked folder is the value sent to the plugin. A plain string field stays a text box.
+/// Run refuses a folder outside the install grant, and the grant is unchanged. Paste still
+/// fills either field.
 #[test]
 fn a_directory_field_browses_a_folder_and_an_outside_folder_stays_ungranted() {
     let schema = json!({"type":"object","properties":{
@@ -937,12 +938,8 @@ fn a_directory_field_browses_a_folder_and_an_outside_folder_stays_ungranted() {
     open_entry(&mut h.app, 0, 0);
     h.frames(2);
     let browse = h.app.tr("ui.plugin_dialog_browse").to_owned();
-    assert_eq!(h.widgets(&browse).len(), 1, "only the directory field has Browse");
-    let y = |label: &str| h.widgets(label)[0][1];
-    assert!((y(&browse) - y("Folder")).abs() < (y(&browse) - y("Note")).abs(), "Browse sits on the folder row, not the plain string");
-
-    h.step(&json!({"widget": browse})).unwrap();
-    h.frames(2);
+    assert!(h.widgets(&browse).is_empty(), "without a folder picker, Browse is not shown");
+    assert!(!h.widgets("Folder").is_empty(), "the folder field stays a text box");
     let folder_text = |h: &crate::scenario::Harness| match &h
         .app
         .plugin_menu
@@ -959,11 +956,15 @@ fn a_directory_field_browses_a_folder_and_an_outside_folder_stays_ungranted() {
         Input::Text(text) => text.clone(),
         other => panic!("{other:?}"),
     };
-    assert_eq!(folder_text(&h), "", "with no folder picker, Browse leaves the text box alone");
+    assert_eq!(folder_text(&h), "", "the text box starts empty");
 
     let picked = outside.to_string_lossy().into_owned();
     let answer = picked.clone();
     h.app.services.pick_folder = Some(Box::new(move || Box::pin(std::future::ready(Some(answer.clone())))));
+    h.frames(2);
+    assert_eq!(h.widgets(&browse).len(), 1, "only the directory field has Browse");
+    let y = |label: &str| h.widgets(label)[0][1];
+    assert!((y(&browse) - y("Folder")).abs() < (y(&browse) - y("Note")).abs(), "Browse sits on the folder row, not the plain string");
     let grants = h.app.session.plugin_state.grants["files"].folders.clone();
     h.step(&json!({"widget": browse})).unwrap();
     h.frames(2);

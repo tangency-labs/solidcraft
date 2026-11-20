@@ -83,7 +83,8 @@ impl SolveApp {
     }
 
     /// Ask for a folder: a plugin field's Browse button, or the document library's folder.
-    /// Without a host dialog, the answer is a cancel and nothing is changed.
+    /// The plugin dialog shows Browse only when this service is set. Without a host dialog,
+    /// the answer is a cancel and nothing is changed.
     pub(crate) fn pick_folder(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
         if self.file_picker_busy() {
             return;
