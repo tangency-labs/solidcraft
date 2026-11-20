@@ -5475,6 +5475,9 @@ fn a_detail_views_region_and_what_it_refuses() {
     let (ga, gb) = (a.geometry().unwrap().shape().bounds(), b.geometry().unwrap().shape().bounds());
     assert!((ga.min - gb.min).len() < 1e-9 && (ga.max - gb.max).len() < 1e-9, "{a:?} {b:?}");
     let first = ids::decode(on_plane["view"].as_str().unwrap()).unwrap();
+    let line = json!({"kind": "full", "points": [[50.0, -10.0], [50.0, 70.0]], "arrows": "right"});
+    let made = run(&mut s, "drawing.view.section", json!({"parent": ids::encode(front), "line": line, "place": {"at": [300.0, 60.0]}}));
+    let section = ids::decode(made["view"].as_str().unwrap()).unwrap();
     for (p, why) in [
         (json!({"parent": ids::encode(front)}), "`boundary` or `boundary_mm` is needed"),
         (json!({"parent": ids::encode(front), "boundary": {"circle": {"centre": [0, 0], "radius": 0}}}), "radius"),
@@ -5487,6 +5490,10 @@ fn a_detail_views_region_and_what_it_refuses() {
             "not supported yet: a view made from a detail view",
         ),
         (json!({"parent": ids::encode(front), "boundary": {"square": {}}}), "boundary"),
+        (
+            json!({"parent": ids::encode(section), "boundary": {"circle": {"centre": [50, 10], "radius": 2}}}),
+            "not supported yet: a detail of a section view",
+        ),
     ] {
         let message = s.execute("drawing.view.detail", &p).unwrap_err().to_string();
         assert!(message.contains(why), "{p}: {message}");

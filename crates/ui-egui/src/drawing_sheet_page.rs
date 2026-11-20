@@ -536,7 +536,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     if crate::drawing_workspace::placing_detail(app)
         && let Some(point) = on_paper
     {
-        crate::drawing_workspace::detail::on_sheet(app, &placement_painter, at, &view.objects, point, response.clicked());
+        crate::drawing_workspace::detail::on_sheet(app, &placement_painter, at, &view.objects, sheet, point, response.clicked());
     }
     let placing_note = crate::drawing_workspace::placing_note(app);
     if placing_note && let Some(point) = on_paper {

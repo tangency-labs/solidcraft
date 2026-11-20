@@ -27,6 +27,8 @@ pub(crate) struct Draft {
     pub(crate) centre: Option<(u64, Vec2)>,
     /// The region's half size on the sheet, once fixed: its radius, or its half width and height.
     pub(crate) half: Option<Vec2>,
+    /// The sheet the clicks are on: another sheet shown starts the tool again.
+    pub(crate) sheet: Option<u64>,
 }
 
 fn tr(id: &'static str) -> &'static str {
@@ -72,8 +74,12 @@ fn outline(painter: &egui::Painter, at: OnScreen, rectangle: bool, centre: Vec2,
 }
 
 /// The tool on the sheet, the pointer at `point`: its preview, and what a click does.
-pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen, objects: &[SheetObject], point: Vec2, clicked: bool) {
+pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen, objects: &[SheetObject], sheet: u64, point: Vec2, clicked: bool) {
     let mut draft = app.drawing_workspace.detail.unwrap_or_default();
+    // Clicks on one sheet never join clicks on another: the region and its view are this sheet's.
+    if draft.sheet != Some(sheet) {
+        draft = Draft { rectangle: draft.rectangle, sheet: Some(sheet), ..Draft::default() };
+    }
     match (draft.centre, draft.half) {
         (None, _) => {
             if clicked {
@@ -166,15 +172,20 @@ mod tests {
         let painter = egui::Painter::new(egui::Context::default(), egui::LayerId::background(), egui::Rect::EVERYTHING);
         let at = OnScreen::for_test();
         let centre = Vec2::new(150.0, 150.0);
-        on_sheet(&mut h.app, &painter, at, &objects, centre, true);
-        on_sheet(&mut h.app, &painter, at, &objects, centre + Vec2::new(10.0, 0.0), true);
+        on_sheet(&mut h.app, &painter, at, &objects, sheet, centre, true);
+        on_sheet(&mut h.app, &painter, at, &objects, sheet, centre + Vec2::new(10.0, 0.0), true);
         assert_eq!(h.app.drawing_workspace.detail.and_then(|d| d.half), Some(Vec2::new(10.0, 10.0)));
-        on_sheet(&mut h.app, &painter, at, &objects, Vec2::new(300.0, 100.0), true);
+        on_sheet(&mut h.app, &painter, at, &objects, sheet, Vec2::new(300.0, 100.0), true);
         let d = h.app.session.drawing("drawing.inspect").unwrap().clone();
         let detail =
             d.views.iter().find(|v| matches!(v.kind, solidcraft_engine::doc::drawing::view::ViewKind::Detail { parent, .. } if parent == front));
         assert!(detail.is_some(), "a detail of the front view");
         assert!(h.app.drawing_workspace.options.is_none(), "the tool is put away");
+        // Begun on one sheet, the tool starts again on another: no region joins a point there.
+        h.step(&json!({"click":{"handle":"button:drawing.view.detail.planned"}})).unwrap();
+        on_sheet(&mut h.app, &painter, at, &objects, sheet, centre, true);
+        on_sheet(&mut h.app, &painter, at, &objects, sheet + 1, centre + Vec2::new(10.0, 0.0), false);
+        assert_eq!(h.app.drawing_workspace.detail.map(|d| (d.centre, d.half, d.sheet)), Some((None, None, Some(sheet + 1))));
     }
 
     /// The parameters: a circle by its centre and radius, a rectangle by its corners, both on the
