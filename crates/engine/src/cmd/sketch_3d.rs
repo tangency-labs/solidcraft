@@ -1003,15 +1003,16 @@ pub(super) fn lift(s: &mut Session, p: &Value, cmd: &str, curves: &[String], poi
         which.dedup();
         // Points moved on their own: lone ones, and ones on curves that stay where they are
         // (those curves are lifted in place, then just the point moves).
-        let mut alone: Vec<(usize, Vec3)> = Vec::new();
+        let mut alone: Vec<(String, Vec3)> = Vec::new();
         let mut on_curves: Vec<usize> = Vec::new();
         let mut in_place: Vec<usize> = Vec::new();
         for r in points {
             let pi = sk.resolve_point(r).filter(|i| *i != 0).ok_or_else(|| bad(cmd, format!("no point `{r}`")))?;
             let through: Vec<usize> = sk.curves.iter().enumerate().filter(|(_, c)| c.kind.uses(pi)).map(|(i, _)| i).collect();
             if through.is_empty() {
-                if !alone.iter().any(|(q, _)| *q == pi) {
-                    alone.push((pi, sk.points.get(pi).map(|q| comp(q.pos)).ok_or_else(|| bad(cmd, "the point is missing"))?));
+                let q = sk.points.get(pi).ok_or_else(|| bad(cmd, "the point is missing"))?;
+                if !alone.iter().any(|(id, _)| *id == q.id) {
+                    alone.push((q.id.clone(), comp(q.pos)));
                 }
             } else if !through.iter().all(|c| which.contains(c)) {
                 on_curves.push(pi);
@@ -1034,7 +1035,7 @@ pub(super) fn lift(s: &mut Session, p: &Value, cmd: &str, curves: &[String], poi
             lifted.push((ids, fit));
         }
         sk.remove_curves(&all);
-        let gone: Vec<usize> = alone.iter().map(|(q, _)| *q).collect();
+        let gone: Vec<usize> = alone.iter().filter_map(|(id, _)| sk.point_index(id)).collect();
         sk.remove_points(&gone);
         let mut made = Vec::new();
         // Where each point moved on its own sits on the drawn curves (curve id, fit index).
