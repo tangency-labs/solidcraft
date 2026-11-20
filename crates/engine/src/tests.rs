@@ -27,6 +27,17 @@ impl Drop for Folder {
 
 pub(crate) mod mesh_convert;
 
+/// Writes `bytes` to an image file of its own for a test and returns its path: an image is given
+/// to `canvas.insert` and `canvas.decal` as a file, never as text.
+pub(crate) fn image_file(bytes: &[u8]) -> String {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-test-images-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{}.img", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    std::fs::write(&path, bytes).unwrap();
+    path.to_string_lossy().into_owned()
+}
+
 /// Counts the copies `Session::doc_mut` makes of a shared document.
 pub(crate) mod doc_copies {
     use std::cell::Cell;
@@ -2855,6 +2866,58 @@ fn section_folder_hides_and_shows_its_planes() {
     assert_eq!(s.section_folder, None);
     assert!(s.execute("inspect.section", &json!({"folder": false, "hide": 1})).is_err());
     assert!(s.execute("inspect.section", &json!({"folder": "no"})).is_err());
+}
+
+/// Switching linked views restores every section plane, its hidden-folder state and hatch,
+/// without turning a passive paint swap into a model, history or display edit.
+#[test]
+fn inspect_snapshots_keep_independent_multi_plane_sections_without_refreshing_display() {
+    let mut s = Session::default();
+    for params in [
+        json!({"plane": "XZ", "at": 15, "hatch": false}),
+        json!({"plane": "YZ", "at": 20, "add": true}),
+        json!({"plane": "XY", "at": 5, "add": true}),
+        json!({"hide": 3}),
+        json!({"folder": false}),
+    ] {
+        run(&mut s, "inspect.section", params);
+    }
+    s.colored_components = Some(());
+    let hidden_section = s.section_state();
+    assert!(hidden_section.planes.is_empty());
+    assert_eq!(hidden_section.hidden.len(), 3);
+    assert_eq!(hidden_section.folder, Some(vec![1, 2]));
+    assert!(!hidden_section.hatch);
+    let hidden_view = s.inspect();
+
+    for params in [
+        json!({"plane": "XZ", "at": -7, "hatch": true}),
+        json!({"plane": "YZ", "at": 11, "add": true}),
+        json!({"plane": "XY", "at": 2, "add": true}),
+        json!({"hide": 2}),
+    ] {
+        run(&mut s, "inspect.section", params);
+    }
+    s.colored_components = None;
+    let shown_section = s.section_state();
+    assert_eq!((shown_section.planes.len(), shown_section.hidden.len()), (2, 1));
+    assert_eq!(shown_section.folder, None);
+    assert!(shown_section.hatch);
+    let shown_view = s.inspect();
+    let doc = s.doc.clone();
+    let world = s.model.state();
+    let unchanged = (s.revision, s.visibility_revision, s.undo.len(), s.redo.len());
+    for _ in 0..3 {
+        s.set_inspect(hidden_view.clone());
+        assert_eq!(s.section_state(), hidden_section);
+        assert_eq!(s.inspect(), hidden_view);
+        s.set_inspect(shown_view.clone());
+        assert_eq!(s.section_state(), shown_section);
+        assert_eq!(s.inspect(), shown_view);
+        assert!(std::sync::Arc::ptr_eq(&s.doc, &doc));
+        assert!(std::sync::Arc::ptr_eq(&s.model.state(), &world));
+        assert_eq!((s.revision, s.visibility_revision, s.undo.len(), s.redo.len()), unchanged);
+    }
 }
 
 /// Hostile `inspect.section` parameters are refused and leave the section as it was.

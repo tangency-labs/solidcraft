@@ -789,20 +789,16 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     let axes = if caps.orbit { axis_rect(app, input_rect) } else { Rect::NOTHING };
     // So is the View angles readout under it (#6032).
     let readout = crate::view_angles::readout_rect(ui.ctx(), input_rect).filter(|_| caps.orbit && app.preferences.show_view_angles);
+    let nav_bar = app.viewport.layout.as_ref().filter(|layout| layout.viewport == input_rect).map_or(Rect::NOTHING, |layout| layout.navigation);
+    let on_control = |p| axes.contains(p) || nav_bar.contains(p) || readout.is_some_and(|r| r.contains(p));
     // Floating windows and menus own input over the model, including wheel navigation. egui's
     // hit test also counts the model as under the pointer a few points past its own edge and
     // inside a window's or a list's edge (#678), so the pointer must be in the viewport too,
     // with no window or menu above it.
-    let inside = ui.is_enabled()
-        && resp.contains_pointer()
-        && ui.rect_contains_pointer(input_rect)
-        && hover.is_some_and(|p| !axes.contains(p) && !readout.is_some_and(|r| r.contains(p)));
-    // A touch release can remove hover in the same frame. Its response owns the full input
-    // surface, including letterbox outside the camera's projection rectangle.
+    let inside = ui.is_enabled() && resp.contains_pointer() && ui.rect_contains_pointer(input_rect) && hover.is_some_and(|p| !on_control(p));
+    // A touch release can remove hover in the same frame.
     let inside = if ui.input(|i| i.pointer.hover_pos().is_none()) {
-        ui.is_enabled()
-            && (resp.clicked() || resp.drag_stopped())
-            && hover.is_some_and(|p| resp.rect.contains(p) && !axes.contains(p) && !readout.is_some_and(|r| r.contains(p)))
+        ui.is_enabled() && (resp.clicked() || resp.drag_stopped()) && hover.is_some_and(|p| resp.rect.contains(p) && !on_control(p))
     } else {
         inside
     };
@@ -815,16 +811,15 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
             && !crate::value_step::enabled(ui.ctx())
             && !hover.is_some_and(|p| crate::dim_view::window::covers(ui.ctx(), p))
             && hover.is_some_and(|p| {
-                input_rect.contains(p)
-                    && !axes.contains(p)
-                    && !readout.is_some_and(|r| r.contains(p))
-                    && ui.ctx().layer_id_at(p).is_some_and(crate::ui_kit::container::is_canvas)
+                input_rect.contains(p) && !on_control(p) && ui.ctx().layer_id_at(p).is_some_and(crate::ui_kit::container::is_canvas)
             }));
     app.viewport.mouse = hover.filter(|_| inside);
     // Sketch snap suppression is set once in `viewport::show` from preferences.
     middle_double_click(app, ui, inside);
     // The 3D mouse's motion this frame, with what this page's camera may do.
-    device(app, rect, caps);
+    if !app.viewport.card {
+        device(app, rect, caps);
+    }
 
     // Pencil mode assigns finger gestures to navigation even when the separate preference is off.
     let touch_enabled = (app.preferences.navigation.touchscreen_navigation || app.preferences.pencil_mode)
@@ -1050,9 +1045,9 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     };
     // The full canvas response can report a drag whose press belonged to a panel above it.
     // A camera drag that started in free space keeps its capture when it crosses a panel.
-    let press_in_view = ui.input(|input| input.pointer.press_origin()).is_some_and(|at| {
-        input_rect.contains(at) && !axes.contains(at) && !readout.is_some_and(|rect| rect.contains(at)) && !crate::shell::covered(app, at)
-    });
+    let press_in_view = ui
+        .input(|input| input.pointer.press_origin())
+        .is_some_and(|at| input_rect.contains(at) && !on_control(at) && !crate::shell::covered(app, at));
     let captured = button.is_some_and(|button| app.viewport.orbit_from.is_some() || app.viewport.button_nav.is_some_and(|(held, _)| held == button));
     let dragging = captured || (press_in_view && (resp.dragged() || (inside && (button.is_some() || (space_pan && primary_down)))));
     // A middle or right drag keeps the mode it started with until its button is released, as a
@@ -1179,7 +1174,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         let (pressed, key, dt) = ui.input(|i| {
             (
                 i.pointer.any_pressed() && inside && !i.pointer.press_origin().is_some_and(|p| bar.contains(p)),
-                i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. })),
+                !app.viewport.card && i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. })),
                 i.stable_dt,
             )
         });

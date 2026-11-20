@@ -1609,6 +1609,7 @@
   "delete.and_more": "… e mais {count}",
   "diagnostic.empty_boolean_component": "não há corpo para cortar ou interceptar no componente '{component}'; a ferramenta pode sobrepor '{body}' no componente '{other}' — ative esse componente ou escolha o corpo como destino",
   "diagnostic.reselect_reference": "{feature}: a referência `{reference}` não existe mais como foi escolhida; selecione-a novamente",
+  "diagnostic.whole_profile_too_many_curves": "Os perfis selecionados têm curvas demais para serem acompanhadas. Selecione menos perfis de cada vez ou desenhe os contornos com menos curvas.",
   "dialog.bodies_count": "{count} corpos",
   "dialog.clearance_invalid": "a folga deve ser um comprimento maior ou igual a 0",
   "dialog.compute": "Calcular",

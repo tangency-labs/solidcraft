@@ -1609,81 +1609,89 @@ fn a_ring_of_links_closes_and_drives() {
     assert!(after.dist(before) > 1.0, "the link did not move: {before:?} to {after:?}");
 }
 
+/// A joint of the folding cube toy: a pin (cylindrical) or the planar joint beside it.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Toy {
+    Pin,
+    Flat,
+}
+
 /// #18880: a folding cube toy, 8 cubes on a ring of 8 hinges, each hinge a plate on two pins, and
 /// on every pin a cylindrical joint (a quarter turn of limits) with a planar joint that keeps the
-/// plate against its cube (the joints of the report's design, at their places). Every pin sits at
-/// one end of its limits, and the toy has two ways to fold: hinges 1 and 8 on one line, or hinges
-/// 4 and 5 on another; the other four hinges can't turn. The loop solver cut each step back to
-/// the limits after solving it, so the pins that could not turn kept the loops open and the drive
-/// stopped a tenth of a degree in. Each fold moves through its pin's whole quarter turn now, and
-/// the hinges off its line stay where they are.
-#[test]
-fn a_ring_of_hinged_cubes_folds_both_ways() {
-    enum Kind {
-        Pin,
-        Flat,
-    }
-    use Kind::{Flat, Pin};
-    // (joint, a, b, world point, z, angle limits from where it is, degrees)
-    #[rustfmt::skip]
-    let joints: [(Kind, &str, &str, [f64; 3], [f64; 3], Option<(f64, f64)>); 32] = [
-        (Pin, "A1", "H1", [-14.955, 10.121, 8.442], [-1.0, 0.0, 0.0], Some((-90.0, 0.0))),
-        (Pin, "H1", "B1", [-1.62, 10.121, 2.346], [1.0, 0.0, 0.0], Some((0.0, 90.0))),
-        (Flat, "A1", "H1", [-14.955, 10.121, 5.394], [-1.0, 0.0, 0.0], None),
-        (Flat, "H1", "B1", [-1.62, 10.121, 2.346], [-1.0, 0.0, 0.0], None),
-        (Pin, "H2", "A1", [-14.701, -2.96, 21.269], [0.0, -1.0, 0.0], Some((0.0, 90.0))),
-        (Flat, "A1", "H2", [-17.749, -2.96, 21.269], [0.0, -1.0, 0.0], None),
-        (Pin, "B2", "H2", [-20.797, 10.375, 21.269], [0.0, 1.0, 0.0], Some((-90.0, 0.0))),
-        (Flat, "B2", "H2", [-17.749, 10.375, 21.269], [0.0, 1.0, 0.0], None),
-        (Flat, "H3", "B1", [-14.701, 10.375, -10.481], [0.0, -1.0, 0.0], None),
-        (Pin, "H3", "B1", [-14.701, 10.375, -10.481], [0.0, 1.0, 0.0], Some((0.0, 90.0))),
-        (Flat, "A2", "H3", [-17.749, 10.375, -10.481], [0.0, 1.0, 0.0], None),
-        (Pin, "A2", "H3", [-20.797, -2.96, -10.481], [0.0, -1.0, 0.0], Some((-90.0, 0.0))),
-        (Flat, "H4", "B2", [-33.624, -2.706, 21.523], [0.0, 0.0, -1.0], None),
-        (Pin, "H4", "B2", [-33.624, -2.706, 21.523], [0.0, 0.0, 1.0], Some((-90.0, 0.0))),
-        (Flat, "H4", "A3", [-39.72, -2.706, 21.523], [0.0, 0.0, -1.0], None),
-        (Pin, "H4", "A3", [-39.72, -2.706, 8.188], [0.0, 0.0, -1.0], Some((-90.0, 0.0))),
-        (Flat, "H5", "A2", [-33.624, -2.706, -10.735], [0.0, 0.0, 1.0], None),
-        (Pin, "H5", "A2", [-33.624, -2.706, 2.6], [0.0, 0.0, 1.0], Some((-90.0, 0.0))),
-        (Flat, "B3", "H5", [-36.672, -2.706, 2.6], [0.0, 0.0, 1.0], None),
-        (Pin, "B3", "H5", [-39.72, -2.706, -10.735], [0.0, 0.0, -1.0], Some((0.0, 90.0))),
-        (Flat, "H6", "B3", [-52.547, 10.375, -10.481], [0.0, -1.0, 0.0], None),
-        (Pin, "H6", "B3", [-52.547, -2.96, -10.481], [0.0, -1.0, 0.0], Some((-90.0, 0.0))),
-        (Flat, "A4", "H6", [-55.595, 10.375, -10.481], [0.0, 1.0, 0.0], None),
-        (Pin, "H6", "A4", [-58.643, -2.96, -10.481], [0.0, -1.0, 0.0], Some((0.0, 90.0))),
-        (Flat, "H7", "A3", [-52.547, 10.375, 21.269], [0.0, -1.0, 0.0], None),
-        (Pin, "H7", "A3", [-52.547, -2.96, 21.269], [0.0, -1.0, 0.0], Some((0.0, 90.0))),
-        (Flat, "B4", "H7", [-55.595, 10.375, 21.269], [0.0, 1.0, 0.0], None),
-        (Pin, "B4", "H7", [-58.643, 10.375, 21.269], [0.0, 1.0, 0.0], Some((-90.0, 0.0))),
-        (Flat, "H8", "B4", [-71.724, 10.121, 8.442], [1.0, 0.0, 0.0], None),
-        (Pin, "H8", "B4", [-58.389, 10.121, 8.442], [1.0, 0.0, 0.0], Some((-90.0, 0.0))),
-        (Flat, "H8", "A4", [-71.724, 10.121, 2.346], [1.0, 0.0, 0.0], None),
-        (Pin, "H8", "A4", [-58.389, 10.121, 2.346], [1.0, 0.0, 0.0], Some((0.0, 90.0))),
-    ];
+/// plate against its cube (the joints of the report's design, at their places; the parts have no
+/// bodies). Joint `Jn` is row n: (kind, a, b, world point, z, angle limits from where it is,
+/// degrees). Every pin sits at one end of its limits; A2 is grounded.
+#[rustfmt::skip]
+pub(super) const CUBE_RING: [(Toy, &str, &str, [f64; 3], [f64; 3], Option<(f64, f64)>); 32] = [
+        (Toy::Pin, "A1", "H1", [-14.955, 10.121, 8.442], [-1.0, 0.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Pin, "H1", "B1", [-1.62, 10.121, 2.346], [1.0, 0.0, 0.0], Some((0.0, 90.0))),
+        (Toy::Flat, "A1", "H1", [-14.955, 10.121, 5.394], [-1.0, 0.0, 0.0], None),
+        (Toy::Flat, "H1", "B1", [-1.62, 10.121, 2.346], [-1.0, 0.0, 0.0], None),
+        (Toy::Pin, "H2", "A1", [-14.701, -2.96, 21.269], [0.0, -1.0, 0.0], Some((0.0, 90.0))),
+        (Toy::Flat, "A1", "H2", [-17.749, -2.96, 21.269], [0.0, -1.0, 0.0], None),
+        (Toy::Pin, "B2", "H2", [-20.797, 10.375, 21.269], [0.0, 1.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "B2", "H2", [-17.749, 10.375, 21.269], [0.0, 1.0, 0.0], None),
+        (Toy::Flat, "H3", "B1", [-14.701, 10.375, -10.481], [0.0, -1.0, 0.0], None),
+        (Toy::Pin, "H3", "B1", [-14.701, 10.375, -10.481], [0.0, 1.0, 0.0], Some((0.0, 90.0))),
+        (Toy::Flat, "A2", "H3", [-17.749, 10.375, -10.481], [0.0, 1.0, 0.0], None),
+        (Toy::Pin, "A2", "H3", [-20.797, -2.96, -10.481], [0.0, -1.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "H4", "B2", [-33.624, -2.706, 21.523], [0.0, 0.0, -1.0], None),
+        (Toy::Pin, "H4", "B2", [-33.624, -2.706, 21.523], [0.0, 0.0, 1.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "H4", "A3", [-39.72, -2.706, 21.523], [0.0, 0.0, -1.0], None),
+        (Toy::Pin, "H4", "A3", [-39.72, -2.706, 8.188], [0.0, 0.0, -1.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "H5", "A2", [-33.624, -2.706, -10.735], [0.0, 0.0, 1.0], None),
+        (Toy::Pin, "H5", "A2", [-33.624, -2.706, 2.6], [0.0, 0.0, 1.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "B3", "H5", [-36.672, -2.706, 2.6], [0.0, 0.0, 1.0], None),
+        (Toy::Pin, "B3", "H5", [-39.72, -2.706, -10.735], [0.0, 0.0, -1.0], Some((0.0, 90.0))),
+        (Toy::Flat, "H6", "B3", [-52.547, 10.375, -10.481], [0.0, -1.0, 0.0], None),
+        (Toy::Pin, "H6", "B3", [-52.547, -2.96, -10.481], [0.0, -1.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "A4", "H6", [-55.595, 10.375, -10.481], [0.0, 1.0, 0.0], None),
+        (Toy::Pin, "H6", "A4", [-58.643, -2.96, -10.481], [0.0, -1.0, 0.0], Some((0.0, 90.0))),
+        (Toy::Flat, "H7", "A3", [-52.547, 10.375, 21.269], [0.0, -1.0, 0.0], None),
+        (Toy::Pin, "H7", "A3", [-52.547, -2.96, 21.269], [0.0, -1.0, 0.0], Some((0.0, 90.0))),
+        (Toy::Flat, "B4", "H7", [-55.595, 10.375, 21.269], [0.0, 1.0, 0.0], None),
+        (Toy::Pin, "B4", "H7", [-58.643, 10.375, 21.269], [0.0, 1.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "H8", "B4", [-71.724, 10.121, 8.442], [1.0, 0.0, 0.0], None),
+        (Toy::Pin, "H8", "B4", [-58.389, 10.121, 8.442], [1.0, 0.0, 0.0], Some((-90.0, 0.0))),
+        (Toy::Flat, "H8", "A4", [-71.724, 10.121, 2.346], [1.0, 0.0, 0.0], None),
+        (Toy::Pin, "H8", "A4", [-58.389, 10.121, 2.346], [1.0, 0.0, 0.0], Some((0.0, 90.0))),
+];
+
+/// The cube toy, built joint by joint, without the joints `without` (row numbers).
+pub(super) fn cube_ring(without: &[usize]) -> Session {
     let mut s = Session::default();
     for part in ["A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4", "H1", "H2", "H3", "H4", "H5", "H6", "H7", "H8"] {
         run(&mut s, "component.create", json!({"name": part, "grounded": part == "A2"}));
         run(&mut s, "component.activate", json!({"component": "root"}));
     }
-    for (n, (kind, a, b, p, z, limits)) in joints.iter().enumerate() {
+    for (n, (kind, a, b, p, z, limits)) in CUBE_RING.iter().enumerate().filter(|(n, _)| !without.contains(n)) {
         let at = json!({"occurrence": a, "point": p, "z": z});
-        let mut params = match kind {
-            Pin => json!({"type": "cylindrical", "a": a, "b": b, "at": at, "name": format!("J{n}")}),
-            Flat => json!({"type": "planar", "a": a, "b": b, "at": at, "name": format!("J{n}")}),
-        };
+        let kind = if *kind == Toy::Pin { "cylindrical" } else { "planar" };
+        let mut params = json!({"type": kind, "a": a, "b": b, "at": at, "name": format!("J{n}")});
         if let Some((lo, hi)) = limits {
             params["limits"] = json!([[lo, hi], null]);
         }
         let r = run(&mut s, "joint.as_built", params);
         assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "J{n}: {r}");
     }
+    s
+}
+
+/// #18880: the cube toy (`CUBE_RING`) has two ways to fold: hinges 1 and 8 on one line, or
+/// hinges 4 and 5 on another; the other four hinges can't turn. The loop solver cut each step
+/// back to the limits after solving it, so the pins that could not turn kept the loops open and
+/// the drive stopped a tenth of a degree in. Each fold moves through its pin's whole quarter turn
+/// now, and the hinges off its line stay where they are.
+#[test]
+fn a_ring_of_hinged_cubes_folds_both_ways() {
+    let mut s = cube_ring(&[]);
     // The pin joints of hinge `h`.
     let pins = |h: usize| -> Vec<String> {
         let plate = format!("H{h}");
-        joints
+        CUBE_RING
             .iter()
             .enumerate()
-            .filter(|(_, (kind, a, b, ..))| matches!(kind, Pin) && (*a == plate || *b == plate))
+            .filter(|(_, (kind, a, b, ..))| *kind == Toy::Pin && (*a == plate || *b == plate))
             .map(|(n, _)| format!("J{n}"))
             .collect()
     };
@@ -2463,7 +2471,7 @@ fn joint_visibility_lookup_cost_by_hidden_joint_count() {
 fn older_designs_show_every_joint_and_new_joints_start_shown() {
     let (dir, path) = temp_design("legacy", "json");
     let mut s = hinged();
-    let mut legacy: Value = serde_json::from_slice(&solidcraft_io::write_design(&s.doc)).unwrap();
+    let mut legacy: Value = serde_json::from_slice(&solidcraft_io::write_design(&s.doc).unwrap()).unwrap();
     legacy["format"] = json!("solidcraft/19");
     legacy["visibility"] =
         json!({"hidden_bodies": [], "hidden_occurrences": [], "hidden_origin": ["XY"], "hidden_sketches": [], "shown_sketches": []});

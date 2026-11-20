@@ -7,7 +7,7 @@ use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
 
 use crate::construct::switch;
-use crate::model::{ConstraintKind, Sketch};
+use crate::model::{ConstraintKind, CurveKind, Sketch};
 use crate::solver::{DrivingValues, solve, solve_after_value_edit};
 
 struct Lcg(u64);
@@ -410,5 +410,58 @@ fn an_aligned_point_distance_edited_through_zero_keeps_its_side() {
             let at = sk.points[p].pos;
             assert!(rep.ok() && (at.x - want.0).abs() < 1e-6 && (at.y - want.1).abs() < 1e-6, "{vertical} {value}: {at:?} {rep:?}");
         }
+    }
+}
+
+/// Two hexagons, each on a construction circle centred on an end of a horizontal construction
+/// line whose midpoint is the origin: the line made four times as long in one edit (100 to 400)
+/// moves each hexagon out with its end. The seed put each circle's centre on its new end and
+/// left the corners where they were, 150 mm away from a circle of radius 8; the iteration then
+/// met every constraint by pulling a hexagon's six corners into one, its sides squeezed to
+/// points (#19301). Carried with the centre, the corners start on the circle.
+#[test]
+fn a_large_edit_moves_hexagons_on_a_lines_ends_instead_of_squeezing_their_sides() {
+    let mut sk = Sketch::new();
+    let axis = sk.add_line(Vec2::new(50.0, 0.0), Vec2::new(-50.0, 0.0), None, None, None).unwrap();
+    sk.add_constraint(ConstraintKind::Midpoint { p: 0, l: axis }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Length { l: axis, value: 100.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Horizontal { l: axis }, None).unwrap();
+    let (start, end) = sk.curves[axis].kind.ends().unwrap();
+    let mut sides = Vec::new();
+    for (x, on) in [(-50.0, end), (50.0, start)] {
+        let center = Vec2::new(x, 0.0);
+        let circle = sk.add_circle(center, 8.0, None, None).unwrap();
+        let CurveKind::Circle { c, .. } = sk.curves[circle].kind else { panic!("a circle") };
+        sk.add_constraint(ConstraintKind::Coincident { p: on, q: c }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Radius { c: circle, value: 8.0 }, None).unwrap();
+        let corners: Vec<usize> = (0..6)
+            .map(|k| {
+                let a = std::f64::consts::FRAC_PI_3 * (k + 4) as f64;
+                sk.add_point(center + Vec2::new(a.cos(), a.sin()) * 8.0, None).unwrap()
+            })
+            .collect();
+        let lines: Vec<usize> = (0..6).map(|k| sk.add_line_pts(corners[k], corners[(k + 1) % 6], None).unwrap()).collect();
+        for k in 0..5 {
+            sk.add_constraint(ConstraintKind::Equal { a: lines[k], b: lines[k + 1] }, None).unwrap();
+        }
+        for &p in &corners {
+            sk.add_constraint(ConstraintKind::PointOnCurve { p, c: circle }, None).unwrap();
+        }
+        sk.add_constraint(ConstraintKind::Horizontal { l: lines[3] }, None).unwrap();
+        sides.extend(lines);
+    }
+    assert!(solve(&mut sk).ok());
+    let old = sk.driving_values();
+    for c in &mut sk.constraints {
+        if let ConstraintKind::Length { value, .. } = &mut c.kind {
+            *value = 400.0;
+        }
+    }
+    let rep = solve_after_value_edit(&mut sk, &old);
+    assert!(rep.ok(), "{rep:?}");
+    for &l in &sides {
+        let (a, b) = sk.curves[l].kind.ends().unwrap();
+        let side = sk.points[a].pos.dist(sk.points[b].pos);
+        assert!((side - 8.0).abs() < 1e-6, "{}: {side}", sk.curves[l].id);
     }
 }

@@ -6,6 +6,8 @@
 use serde_json::{Value, json};
 use solidcraft_viewport::ViewSpec;
 
+use crate::tiles::{Edge, Placement, Preset, Tiles};
+
 /// Most views one design keeps open (and most a saved set may hold).
 pub const MAX_VIEWS: usize = 64;
 /// Longest view name, in characters (what `tab.view.rename` takes too).
@@ -30,6 +32,11 @@ pub enum ViewKind {
 impl ViewKind {
     /// Every kind, in the order the "+" menu lists them.
     pub const ALL: [ViewKind; 5] = [ViewKind::Model, ViewKind::Sketch, ViewKind::Sheet, ViewKind::Render, ViewKind::Animation];
+
+    /// This workspace can draw its contents in the frame of a tile.
+    pub fn can_tile(self) -> bool {
+        matches!(self, Self::Model | Self::Render)
+    }
 
     /// The kind's stable key: its name in commands and in the saved form.
     pub fn key(self) -> &'static str {
@@ -82,6 +89,8 @@ pub struct ViewSet {
     /// Closed views with the place each had, the latest last.
     closed: Vec<(usize, DesignView)>,
     next_id: u64,
+    /// How the window lays its views out side by side. Dormant while the active view is outside it.
+    tiles: Option<Tiles>,
 }
 
 impl Default for ViewSet {
@@ -94,7 +103,7 @@ impl ViewSet {
     /// A design's first views: one Model view, active.
     pub fn new() -> Self {
         let model = DesignView { id: 1, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None };
-        ViewSet { views: vec![model], active: 1, closed: Vec::new(), next_id: 2 }
+        ViewSet { views: vec![model], active: 1, closed: Vec::new(), next_id: 2, tiles: None }
     }
 
     /// The views in tab order (never empty).
@@ -132,11 +141,20 @@ impl ViewSet {
         !self.closed.is_empty()
     }
 
+    /// Whether a view can still be shown, including by reopening it.
+    pub fn has_open_or_closed(&self, id: u64) -> bool {
+        self.get(id).is_some() || self.closed.iter().any(|(_, view)| view.id == id)
+    }
+
     /// Open a view of `kind` showing `subject` and make it the active one. With `reuse`, a view
     /// already showing the same kind and subject is activated instead. A new view is named by
     /// kind and number ("Sketch 2") and goes last. Full (`MAX_VIEWS`): the active view stays.
+    /// An oversized subject or exhausted id space also keeps the active view unchanged.
     /// Returns the id of the view that is active now.
     pub fn open(&mut self, kind: ViewKind, subject: Option<String>, reuse: bool) -> u64 {
+        if subject.as_ref().is_some_and(|subject| subject.len() > MAX_SUBJECT) {
+            return self.active;
+        }
         if reuse && let Some(view) = self.views.iter().find(|view| view.kind == kind && view.subject == subject) {
             self.active = view.id;
             return view.id;
@@ -144,7 +162,7 @@ impl ViewSet {
         if self.views.len() >= MAX_VIEWS {
             return self.active;
         }
-        let id = self.take_id();
+        let Some(id) = self.take_id() else { return self.active };
         let name = self.default_name(kind);
         self.views.push(DesignView { id, kind, name, subject, spec: None });
         self.active = id;
@@ -182,6 +200,7 @@ impl ViewSet {
         if self.active == id {
             self.active = self.views[i.saturating_sub(1)].id;
         }
+        self.prune_tiles();
         true
     }
 
@@ -190,6 +209,14 @@ impl ViewSet {
     /// back. The set keeps one view: when none would be left, a Model view takes their place. When
     /// the active view goes, the one left of it takes over (else the first). True when any went.
     pub fn drop_views(&mut self, keep: impl Fn(&DesignView) -> bool) -> bool {
+        // A replacement needs a fresh identity. Refuse before changing anything if the saved
+        // allocation watermark is exhausted, rather than emptying the set or reusing an id.
+        let replacement = if self.views.iter().any(&keep) {
+            None
+        } else {
+            let Some(id) = self.take_id() else { return false };
+            Some(id)
+        };
         let closed = self.closed.len();
         self.closed.retain(|(_, view)| keep(view));
         let Some(first_gone) = self.views.iter().position(|view| !keep(view)) else {
@@ -198,8 +225,7 @@ impl ViewSet {
         let left = self.index_of(self.active).unwrap_or(first_gone);
         let fallback = self.views.iter().take(left).rev().find(|view| keep(view)).map(|view| view.id);
         self.views.retain(&keep);
-        if self.views.is_empty() {
-            let id = self.take_id();
+        if let Some(id) = replacement {
             self.views.push(DesignView { id, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None });
         }
         if self.get(self.active).is_none() {
@@ -217,6 +243,7 @@ impl ViewSet {
             self.remove_closed(i);
         }
         self.active = id;
+        self.prune_tiles();
     }
 
     /// Close the views after the one with `id`; when the active view was among them, `id` takes over.
@@ -228,6 +255,7 @@ impl ViewSet {
         if self.index_of(self.active).is_none() {
             self.active = id;
         }
+        self.prune_tiles();
     }
 
     /// Bring back the view closed last, in its old place, and make it active. None when no view
@@ -275,7 +303,7 @@ impl ViewSet {
             return None;
         }
         let (kind, subject, spec) = (self.views[i].kind, self.views[i].subject.clone(), self.views[i].spec);
-        let copy = DesignView { id: self.take_id(), kind, name: self.default_name(kind), subject, spec };
+        let copy = DesignView { id: self.take_id()?, kind, name: self.default_name(kind), subject, spec };
         self.active = copy.id;
         self.views.insert(i + 1, copy);
         Some(self.active)
@@ -291,6 +319,189 @@ impl ViewSet {
         self.views.insert(to, view);
     }
 
+    /// The layout views are shown together in (None: one at a time).
+    pub fn tiles(&self) -> Option<&Tiles> {
+        self.tiles.as_ref()
+    }
+
+    /// The active view is shown together with others: the window draws [`Self::tiles`].
+    pub fn is_tiled(&self) -> bool {
+        self.tiles.as_ref().is_some_and(|tiles| tiles.contains(self.active))
+    }
+
+    /// Show the available workspace views as `preset`, in tab order, with the active one among them.
+    pub fn set_layout(&mut self, preset: Preset) -> usize {
+        let order = self.layout_order(preset.tiles().max(1));
+        self.tiles = Tiles::preset(preset, &order).filter(|tiles| tiles.len() > 1);
+        self.tiles.as_ref().map_or(1, Tiles::len)
+    }
+
+    /// Like [`Self::set_layout`], but a place without a view is an empty cell.
+    pub fn set_layout_padded(&mut self, preset: Preset) -> usize {
+        let order = self.layout_order(preset.tiles().max(1));
+        self.tiles = if order.is_empty() { None } else { Tiles::preset_padded(preset, &order).filter(|tiles| tiles.len() > 1) };
+        self.tiles.as_ref().map_or(1, Tiles::len)
+    }
+
+    /// Number of views that can fill the current layout's preset, before adding new angles.
+    pub fn layout_view_count(&self) -> usize {
+        self.layout_order(crate::MAX_TILES).len()
+    }
+
+    fn layout_order(&self, limit: usize) -> Vec<u64> {
+        if !self.active().kind.can_tile() {
+            return Vec::new();
+        }
+        // The Render workspace owns one preview and one selected result for this design.
+        let render = if self.active().kind == ViewKind::Render {
+            Some(self.active)
+        } else {
+            self.tiles
+                .as_ref()
+                .filter(|tiles| tiles.contains(self.active))
+                .and_then(|tiles| self.views.iter().find(|view| view.kind == ViewKind::Render && tiles.contains(view.id)).map(|view| view.id))
+        };
+        let mut order: Vec<_> = self
+            .views
+            .iter()
+            .filter(|view| view.kind.can_tile() && (view.kind != ViewKind::Render || render == Some(view.id)))
+            .map(|view| view.id)
+            .take(limit)
+            .collect();
+        if !order.contains(&self.active)
+            && let Some(last) = order.last_mut()
+        {
+            *last = self.active;
+        }
+        if limit > 1
+            && let Some(render) = render
+            && !order.contains(&render)
+            && let Some(other) = order.iter_mut().rev().find(|id| **id != self.active)
+        {
+            *other = render;
+        }
+        order
+    }
+
+    /// Both views have tile canvases and can share one layout.
+    pub fn can_tile_with(&self, id: u64, other: u64) -> bool {
+        let kind = |id| self.get(id).map(|view| view.kind).filter(|kind| kind.can_tile());
+        match (kind(id), kind(other)) {
+            (Some(ViewKind::Render), Some(ViewKind::Render)) => id == other,
+            (Some(_), Some(_)) => true,
+            _ => false,
+        }
+    }
+
+    /// Whether the view could join the layout without replacing an occupied cell.
+    pub fn can_show_beside(&self, id: u64) -> bool {
+        id != self.active
+            && self.can_tile_with(id, self.active)
+            && self
+                .tiles
+                .as_ref()
+                .filter(|tiles| tiles.contains(self.active))
+                .is_none_or(|tiles| !tiles.contains(id) && tiles.views().into_iter().all(|other| self.can_tile_with(id, other)))
+    }
+
+    /// Show the open view `id` in the empty cell number `ordinal` of the layout.
+    pub fn fill_empty(&mut self, ordinal: usize, id: u64) -> bool {
+        self.is_tiled() && self.can_show_beside(id) && self.tiles.as_mut().is_some_and(|tiles| tiles.fill_empty(ordinal, id))
+    }
+
+    /// Close the empty cell number `ordinal`; a layout left with one cell is none.
+    pub fn remove_empty(&mut self, ordinal: usize) -> bool {
+        let removed = self.tiles.as_mut().is_some_and(|tiles| tiles.remove_empty(ordinal));
+        if removed && self.tiles.as_ref().is_some_and(|tiles| tiles.len() < 2) {
+            self.tiles = None;
+        }
+        removed
+    }
+
+    /// Show the view `id` beside the active one, on `edge` of it.
+    pub fn show_beside(&mut self, id: u64, edge: Edge) -> bool {
+        if !self.can_show_beside(id) {
+            return false;
+        }
+        let tiles = self.tiles.get_or_insert(Tiles::Leaf(self.active));
+        if !tiles.contains(self.active) {
+            *tiles = Tiles::Leaf(self.active);
+        }
+        let shown = tiles.split_at(self.active, id, edge);
+        self.prune_tiles();
+        shown
+    }
+
+    /// What the window would show if it placed this view at the given target.
+    pub fn preview_placement(&self, id: u64, placement: Placement) -> Option<Tiles> {
+        if !self.get(id).is_some_and(|view| view.kind.can_tile()) || !self.active().kind.can_tile() {
+            return None;
+        }
+        let next = if let Some(tiles) = self.tiles.as_ref().filter(|tiles| tiles.contains(self.active)) {
+            tiles.placed(id, placement)
+        } else if matches!(placement, Placement::Split { .. }) {
+            Tiles::Leaf(self.active).placed(id, placement)
+        } else {
+            None
+        }?;
+        next.views().into_iter().all(|other| other == id || self.can_tile_with(id, other)).then_some(next)
+    }
+
+    /// Place an open view in the current window. Keep focus if it still has a cell.
+    pub fn place_tile(&mut self, id: u64, placement: Placement) -> bool {
+        let Some(tiles) = self.preview_placement(id, placement) else { return false };
+        if !tiles.contains(self.active) {
+            self.active = id;
+        }
+        self.tiles = Some(tiles);
+        true
+    }
+
+    /// Move a splitter of the layout ([`Tiles::set_ratio`]).
+    pub fn set_split(&mut self, splitter: usize, ratio: f32) -> bool {
+        self.tiles.as_mut().is_some_and(|tiles| tiles.set_ratio(splitter, ratio))
+    }
+
+    /// Swap the places of two shown views.
+    pub fn swap_tiles(&mut self, a: u64, b: u64) -> bool {
+        self.tiles.as_mut().is_some_and(|tiles| tiles.swap(a, b))
+    }
+
+    /// Stop showing `id` beside the others: it stays open as a view of its own, reached from the
+    /// bar. False when it is not one of the views shown together.
+    pub fn unshow(&mut self, id: u64) -> bool {
+        let removed = self.tiles.as_mut().is_some_and(|tiles| tiles.remove(id));
+        if removed && self.tiles.as_ref().is_some_and(|tiles| tiles.len() < 2) {
+            self.tiles = None;
+        }
+        removed
+    }
+
+    /// One view at a time again; the views stay open.
+    pub fn untile(&mut self) {
+        self.tiles = None;
+    }
+
+    /// Drop views that are gone, lack a tile canvas or duplicate the Render workspace.
+    fn prune_tiles(&mut self) {
+        let Some(tiles) = &mut self.tiles else { return };
+        let kind = |id| self.views.iter().find(|view| view.id == id).map(|view| view.kind);
+        let members = tiles.views();
+        let render = if tiles.contains(self.active) && kind(self.active) == Some(ViewKind::Render) {
+            Some(self.active)
+        } else {
+            members.iter().copied().find(|id| kind(*id) == Some(ViewKind::Render))
+        };
+        for id in members {
+            if kind(id).is_none_or(|kind| !kind.can_tile() || (kind == ViewKind::Render && render != Some(id))) {
+                tiles.remove(id);
+            }
+        }
+        if tiles.len() < 2 {
+            self.tiles = None;
+        }
+    }
+
     /// The set as saved with the design.
     pub fn to_json(&self) -> Value {
         let view_json =
@@ -300,6 +511,7 @@ impl ViewSet {
             "next_id": self.next_id,
             "views": self.views.iter().map(view_json).collect::<Vec<_>>(),
             "closed": self.closed.iter().map(|(at, view)| json!({"at": at, "view": view_json(view)})).collect::<Vec<_>>(),
+            "tiles": self.tiles.as_ref().map(Tiles::to_json),
         })
     }
 
@@ -318,7 +530,9 @@ impl ViewSet {
             return None;
         }
         let mut closed = Vec::new();
-        for entry in value.get("closed").and_then(Value::as_array).into_iter().flatten() {
+        // Normal history is capped on write. Hostile histories cannot make loading allocate
+        // or compare an unbounded collection of discarded entries.
+        for entry in value.get("closed").and_then(Value::as_array).into_iter().flatten().rev().take(CLOSED_CAP) {
             let at = entry.get("at").and_then(Value::as_u64).and_then(|at| usize::try_from(at).ok());
             let view = entry.get("view").and_then(view_from_json);
             if let (Some(at), Some(view)) = (at, view)
@@ -328,18 +542,23 @@ impl ViewSet {
                 closed.push((at.min(MAX_VIEWS), view));
             }
         }
-        let skip = closed.len().saturating_sub(CLOSED_CAP);
-        closed.drain(..skip);
+        closed.reverse();
         let highest = used.iter().copied().max().unwrap_or(0);
         let next_id = value.get("next_id").and_then(Value::as_u64).unwrap_or(0).clamp(highest + 1, MAX_ID + 1);
         let active = value.get("active").and_then(Value::as_u64).filter(|id| views.iter().any(|view| view.id == *id)).unwrap_or(views[0].id);
-        Some(ViewSet { views, active, closed, next_id })
+        let tiles = value.get("tiles").and_then(Tiles::from_json);
+        let mut set = ViewSet { views, active, closed, next_id, tiles };
+        set.prune_tiles();
+        Some(set)
     }
 
-    fn take_id(&mut self) -> u64 {
+    fn take_id(&mut self) -> Option<u64> {
+        if self.next_id > MAX_ID {
+            return None;
+        }
         let id = self.next_id;
         self.next_id += 1;
-        id
+        Some(id)
     }
 
     /// "Sketch 1", "Sketch 2"…: the first name of the kind no open view has. The first Model
@@ -597,6 +816,63 @@ mod tests {
     }
 
     #[test]
+    fn exhausted_saved_ids_never_allocate_an_unsaveable_view_or_empty_the_set() {
+        let mut saved = ViewSet::new().to_json();
+        saved["next_id"] = json!(MAX_ID);
+        let mut set = ViewSet::from_json(&saved).unwrap();
+        let last = set.open(ViewKind::Model, None, false);
+        assert_eq!(last, MAX_ID, "the final exact id remains usable");
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap(), set);
+        let exhausted = set.clone();
+        assert_eq!(set.open(ViewKind::Sheet, None, false), last);
+        assert_eq!(set.duplicate(1), None);
+        assert!(!set.drop_views(|_| false), "a fresh fallback identity cannot be allocated");
+        assert_eq!(set, exhausted, "refusal happens before any open or closed view changes");
+        assert!(set.close(last));
+        assert_eq!(set.reopen(), Some(last), "existing identities can still be reopened");
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap(), set);
+
+        saved["views"][0]["id"] = json!(MAX_ID);
+        saved["active"] = json!(MAX_ID);
+        saved["next_id"] = json!(u64::MAX);
+        let mut set = ViewSet::from_json(&saved).unwrap();
+        assert_eq!(set.open(ViewKind::Model, None, false), MAX_ID);
+        assert_eq!(set.duplicate(MAX_ID), None);
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap(), set);
+    }
+
+    #[test]
+    fn subjects_opened_at_the_byte_limit_round_trip_and_oversized_subjects_are_refused() {
+        let mut set = ViewSet::new();
+        let subject = "é".repeat(MAX_SUBJECT / 2);
+        let id = set.open(ViewKind::Sheet, Some(subject.clone()), false);
+        assert_eq!(set.get(id).unwrap().subject.as_ref(), Some(&subject));
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap(), set);
+        let before = set.clone();
+        for reuse in [false, true] {
+            assert_eq!(set.open(ViewKind::Sheet, Some(format!("{subject}x")), reuse), id);
+            assert_eq!(set, before, "the subject is not truncated or admitted into unsaveable state");
+        }
+    }
+
+    #[test]
+    fn hostile_closed_history_reads_only_the_bounded_latest_tail() {
+        let mut saved = ViewSet::new().to_json();
+        let entry = |id| json!({"at": 1, "view": {"id": id, "kind": "model", "name": "Closed"}});
+        let mut history = vec![entry(MAX_ID); 4096];
+        history.extend((2..=CLOSED_CAP as u64 + 1).map(entry));
+        saved["closed"] = json!(history);
+        saved["next_id"] = json!(0);
+        let mut set = ViewSet::from_json(&saved).unwrap();
+        assert_eq!(set.closed.len(), CLOSED_CAP);
+        assert_eq!(set.next_id, CLOSED_CAP as u64 + 2, "discarded history cannot affect allocation");
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap(), set);
+        for id in (2..=CLOSED_CAP as u64 + 1).rev() {
+            assert_eq!(set.reopen(), Some(id), "the latest valid history keeps its original order");
+        }
+        assert_eq!(set.reopen(), None);
+    }
+    #[test]
     fn json_round_trips_views_active_closed_and_ids() {
         let mut set = sketches(3);
         set.open(ViewKind::Render, None, false);
@@ -676,5 +952,123 @@ mod tests {
         assert_eq!(ViewSet::from_json(&saved).unwrap().active().spec, None);
         saved["views"][0]["spec"] = json!("nonsense");
         assert_eq!(ViewSet::from_json(&saved).unwrap().active().spec, None);
+    }
+
+    fn models(count: usize) -> ViewSet {
+        let mut set = ViewSet::new();
+        for _ in 1..count {
+            set.open(ViewKind::Model, None, false);
+        }
+        set
+    }
+
+    #[test]
+    fn a_layout_shows_the_model_views_in_tab_order() {
+        let mut set = models(3);
+        set.open(ViewKind::Sketch, None, false);
+        set.activate_index(1);
+        assert_eq!(set.set_layout(Preset::Grid), 3, "three Model views fill three of the four places");
+        assert!(set.is_tiled());
+        assert_eq!(set.tiles().unwrap().views().len(), 3);
+        assert_eq!(set.set_layout(Preset::SideBySide), 2);
+        assert!(set.tiles().unwrap().contains(set.active().id), "the active view is always among the shown");
+        assert_eq!(set.set_layout(Preset::Single), 1);
+        assert!(set.tiles().is_none() && !set.is_tiled());
+    }
+
+    #[test]
+    fn render_and_model_share_presets_and_picker_cells() {
+        let mut set = models(2);
+        let first = set.open(ViewKind::Render, None, false);
+        let second = set.duplicate(first).unwrap();
+        assert_eq!(set.set_layout(Preset::Grid), 3);
+        assert!(set.tiles().unwrap().contains(second));
+        assert!(!set.tiles().unwrap().contains(first));
+        set.activate_index(0);
+        assert!(!set.show_beside(first, Edge::Bottom));
+        set.untile();
+        assert!(set.show_beside(first, Edge::Right));
+        set.activate(first);
+        assert_eq!(set.set_layout_padded(Preset::Grid), 4);
+        assert!(!set.fill_empty(0, second));
+        let model = set.open(ViewKind::Model, None, false);
+        set.activate(first);
+        assert!(set.fill_empty(0, model));
+        assert_eq!(ViewSet::from_json(&set.to_json()), Some(set.clone()));
+        assert!(set.activate_index(0));
+        assert_eq!(set.set_layout(Preset::SideBySide), 2);
+        assert!(set.tiles().unwrap().contains(first), "a preset keeps the Render tile already shown");
+        set.untile();
+        assert_eq!(set.set_layout(Preset::SideBySide), 2);
+        assert!(!set.tiles().unwrap().contains(first), "a hidden Render tab does not replace a Model preset angle");
+    }
+
+    #[test]
+    fn a_view_taken_out_of_the_layout_stays_open() {
+        let mut set = models(3);
+        set.set_layout(Preset::Grid);
+        let other = set.views().iter().map(|view| view.id).find(|id| *id != set.active().id).unwrap();
+        assert!(set.unshow(other));
+        assert_eq!(set.len(), 3, "no view closes");
+        assert!(!set.tiles().unwrap().contains(other));
+        let last = set.tiles().unwrap().views().into_iter().find(|id| *id != set.active().id).unwrap();
+        assert!(set.unshow(last));
+        assert!(!set.is_tiled(), "under two views there is no layout");
+        assert!(!set.unshow(last), "it is not shown any more");
+    }
+
+    #[test]
+    fn a_sketch_is_never_tiled_and_leaves_the_layout_dormant() {
+        let mut set = models(2);
+        let sketch = set.open(ViewKind::Sketch, None, false);
+        assert_eq!(set.set_layout(Preset::SideBySide), 1, "the active view is not a Model view");
+        set.activate_index(0);
+        set.set_layout(Preset::SideBySide);
+        set.activate(sketch);
+        assert!(set.tiles().is_some() && !set.is_tiled(), "the layout waits while a Sketch shows alone");
+        set.activate_index(0);
+        assert!(set.is_tiled());
+        assert!(!set.show_beside(sketch, Edge::Right), "only implemented canvases are shown beside");
+    }
+
+    #[test]
+    fn show_beside_splits_the_active_view_up_to_four() {
+        let mut set = models(5);
+        let ids: Vec<u64> = set.views().iter().map(|view| view.id).collect();
+        set.activate(ids[0]);
+        assert!(set.show_beside(ids[1], Edge::Right));
+        assert!(set.show_beside(ids[2], Edge::Bottom));
+        assert!(set.show_beside(ids[3], Edge::Left));
+        assert!(!set.show_beside(ids[4], Edge::Left), "at most four views are shown");
+        assert!(!set.show_beside(ids[1], Edge::Left), "a shown view is not shown twice");
+        assert_eq!(set.tiles().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn closing_views_shrinks_the_layout_and_the_last_pair_ends_it() {
+        let mut set = models(3);
+        set.set_layout(Preset::LargeAndTwo);
+        let ids: Vec<u64> = set.views().iter().map(|view| view.id).collect();
+        assert!(set.close(ids[2]));
+        assert_eq!(set.tiles().unwrap().len(), 2);
+        assert!(set.close(ids[1]));
+        assert!(set.tiles().is_none(), "one view left is no layout");
+        let mut set = models(3);
+        set.set_layout(Preset::LargeAndTwo);
+        set.close_others(set.active().id);
+        assert!(set.tiles().is_none());
+    }
+
+    #[test]
+    fn a_layout_is_saved_and_a_stale_one_is_repaired() {
+        let mut set = models(3);
+        set.set_layout(Preset::LargeAndTwo);
+        assert!(set.set_split(0, 0.7));
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap(), set);
+        let mut saved = set.to_json();
+        saved["tiles"] = Tiles::preset(Preset::SideBySide, &[1, 99]).unwrap().to_json();
+        assert!(ViewSet::from_json(&saved).unwrap().tiles().is_none(), "a layout naming a view that is not there is dropped");
+        saved["tiles"] = json!("nonsense");
+        assert!(ViewSet::from_json(&saved).unwrap().tiles().is_none());
     }
 }

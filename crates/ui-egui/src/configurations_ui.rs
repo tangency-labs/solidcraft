@@ -72,7 +72,7 @@ pub(super) fn configurations_rows(
             if index == labels.len() - 1 {
                 ui_kit::Column::new(label, 0.0)
                     .icon_only()
-                    .min_content_width(solidcraft_theme::Tokens::get().control_height + solidcraft_theme::Tokens::get().space_12)
+                    .min_content_width(3.0 * solidcraft_theme::Tokens::get().control_height + solidcraft_theme::Tokens::get().space_12)
             } else {
                 let weight = if index == 0 {
                     1.6
@@ -116,6 +116,10 @@ pub(super) fn configurations_rows(
             crate::scenario::publish_handle("config:as_columns", toggle.rect.center());
             if toggle.changed() {
                 ui.ctx().data_mut(|m| m.insert_persisted(swapped_id(), swapped));
+                // An edit in progress is kept, as leaving its cell would keep it.
+                for ((row, column), text) in std::mem::take(&mut rule_editor.drafts) {
+                    *error = app.run("config.row", json!({"name":row,"values":{&column:cell_value(&column,&text)}})).err();
+                }
             }
             swapped
         })
@@ -151,8 +155,31 @@ pub(super) fn configurations_rows(
                         ui.allocate_ui_with_layout(
                             egui::vec2(name_width, ui_kit::row_height()),
                             egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                ui_kit::text(ui, name, ui_kit::Text::NameCell(true));
+                            |ui| match &mut rule_editor.renaming {
+                                Some((old, new)) if old == name => {
+                                    let id = ui.make_persistent_id(("configuration_rename", name));
+                                    let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
+                                    let response = ui_kit::cell_editor(ui, id, new, "Name", false);
+                                    crate::scenario::publish_handle(&format!("config:rename:{name}"), response.rect.center());
+                                    let entered = focused && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                                    if response.lost_focus() || entered {
+                                        let (old, new) = (old.clone(), new.trim().to_owned());
+                                        if !new.is_empty() && new != old {
+                                            run(app, error, "config.row", json!({"name":old,"rename":new}));
+                                        }
+                                        rule_editor.renaming = None;
+                                    } else if !response.has_focus() {
+                                        response.request_focus();
+                                    }
+                                }
+                                _ => {
+                                    let response =
+                                        ui_kit::name_cell_with_hint(ui, name, true, solidcraft_ui_text::tr_label("Double-click to rename"));
+                                    crate::scenario::publish_handle(&format!("config:name:{name}"), response.rect.center());
+                                    if response.double_clicked() {
+                                        rule_editor.renaming = Some((name.clone(), name.clone()));
+                                    }
+                                }
                             },
                         );
                         status_controls(app, ui, name, active, matches, error, rule_editor);
@@ -171,9 +198,23 @@ pub(super) fn configurations_rows(
                         });
                     }
                     row.cell(|ui| {
-                        if ui_kit::bin_button(ui, "Delete the row").clicked() {
-                            run(app, error, "config.row", json!({"name":name,"delete":true}));
-                        }
+                        ui.horizontal(|ui| {
+                            for (glyph, tip, side, target) in [
+                                (ui_kit::MOVE_UP, "Move up", "up", row_index.checked_sub(1)),
+                                (ui_kit::MOVE_DOWN, "Move down", "down", (row_index + 1 < tb.rows.len()).then_some(row_index + 1)),
+                            ] {
+                                let response = ui_kit::compact_button(ui, glyph, tip, target.is_some(), false);
+                                crate::scenario::publish_handle(&format!("config:{side}:{name}"), response.rect.center());
+                                if response.clicked()
+                                    && let Some(target) = target
+                                {
+                                    run(app, error, "config.row", json!({"name":name,"index":target}));
+                                }
+                            }
+                            if ui_kit::bin_button(ui, "Delete the row").clicked() {
+                                run(app, error, "config.row", json!({"name":name,"delete":true}));
+                            }
+                        });
                     });
                 });
             }
@@ -838,6 +879,9 @@ fn swapped_table(
                     let active = tb.active.as_deref() == Some(*name);
                     status_controls(app, ui, name, active, matches, error, rule_editor);
                     if ui_kit::bin_button(ui, solidcraft_ui_text::tr("config.delete_configuration")).clicked() {
+                        // Its cells are drawn after this one: an edit in one of them goes with it,
+                        // rather than making the configuration again as the cell is left.
+                        rule_editor.drafts.retain(|(row, _), _| row.as_str() != *name);
                         *error = app.run("config.row", json!({"name":name,"delete":true})).err();
                     }
                 });

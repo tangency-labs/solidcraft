@@ -12,12 +12,14 @@ use crate::ui_kit::{self, Container, Edge, Surface};
 use solidcraft_theme::Tokens;
 
 pub(crate) mod browser;
+pub(crate) mod detail;
 pub(crate) mod dimension;
 pub(crate) mod export;
 mod first_sheet;
 pub(crate) mod note;
 mod panels;
 pub(crate) mod placement;
+pub(crate) mod print;
 
 use panels::Tool;
 
@@ -31,6 +33,7 @@ pub struct State {
     placement: Option<placement::Placement>,
     note: Option<note::Draft>,
     view_edit: Option<panels::ViewEdit>,
+    detail: Option<detail::Draft>,
     export: Option<export::ExportForm>,
     dimension: Option<dimension::Draft>,
     dimension_hover: Option<dimension::Hover>,
@@ -82,6 +85,7 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
         app.drawing_workspace.placement = None;
         app.drawing_workspace.note = None;
         app.drawing_workspace.view_edit = None;
+        app.drawing_workspace.detail = None;
         app.drawing_workspace.dimension = None;
         app.drawing_workspace.dimension_hover = None;
         app.drawing_workspace.dimension_edit = None;
@@ -148,6 +152,10 @@ pub fn reset_document(app: &mut SolveApp) {
 
 pub(crate) fn placing_view(app: &SolveApp) -> bool {
     app.drawing_workspace.placement.is_some()
+}
+
+pub(crate) fn placing_detail(app: &SolveApp) -> bool {
+    app.drawing_workspace.options == Some(Tool::Detail)
 }
 
 pub(crate) fn placing_note(app: &SolveApp) -> bool {
@@ -256,6 +264,10 @@ pub fn start(app: &mut SolveApp, id: &str) -> bool {
         if let Err(error) = app.run("select.all", serde_json::json!({"sheet": sheet})) {
             app.set_status(error, true);
         }
+        return true;
+    }
+    if id == "drawing.print" && active(app) && app.session.open_drawing.is_some() {
+        print::start(app);
         return true;
     }
     if !active(app) || !can_open_options(id) {
@@ -1048,6 +1060,10 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
         note::editor(app, ui, selected);
     } else if let Some(Tool::Edit(view)) = app.drawing_workspace.options {
         if panels::view_editor(app, ui, view) {
+            close_panel(app);
+        }
+    } else if app.drawing_workspace.options == Some(Tool::Detail) {
+        if detail::panel(app, ui) {
             close_panel(app);
         }
     } else if app.drawing_workspace.options == Some(Tool::Export) {
@@ -1951,5 +1967,22 @@ mod tests {
             );
             assert_eq!(h.app.preferences.drawing_sheet_dock, "top");
         }
+    }
+
+    /// A template asked for as .json goes beside it as .scdwg, and the status line says so.
+    #[test]
+    fn a_json_template_name_is_saved_as_scdwg_and_says_so() {
+        use serde_json::json;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":60,"width":35,"height":12})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", json!({})).unwrap();
+        let path = h.dir.join("Shop.json");
+        let saved = h.app.run("drawing.template.save", json!({"path": path.to_string_lossy()})).unwrap();
+        assert!(saved["path"].as_str().is_some_and(|p| p.ends_with("Shop.scdwg")), "{saved}");
+        let (text, _, error) = h.app.status.clone().unwrap();
+        assert!(!error && text.contains("Shop.scdwg") && text.contains(".scdwg"), "{text}");
+        assert!(!path.exists() && h.dir.join("Shop.scdwg").is_file());
     }
 }

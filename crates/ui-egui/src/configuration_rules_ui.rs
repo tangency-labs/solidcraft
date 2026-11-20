@@ -16,6 +16,8 @@ pub struct Editor {
     pub(super) new_values: std::collections::BTreeMap<String, String>,
     pub(super) adding_row: bool,
     pub(super) focus_new_row: bool,
+    /// The row being renamed (its name, the text typed so far), opened by a double-click on its name.
+    pub(super) renaming: Option<(String, String)>,
     pub(super) drafts: std::collections::BTreeMap<(String, String), String>,
     /// The configuration table at a design revision: the command's answer and its shown cells.
     pub(super) table: Option<std::sync::Arc<(u64, Value, super::Table)>>,
@@ -45,6 +47,7 @@ impl Default for Editor {
             new_values: Default::default(),
             adding_row: false,
             focus_new_row: false,
+            renaming: None,
             drafts: Default::default(),
             table: None,
             column_filter: String::new(),

@@ -1425,7 +1425,7 @@ mod tests {
         drop(autosaver);
         let entry = crate::recovery::orphans(&recovery).pop().unwrap();
         // Older autosaves hold paths relative to the design, not the recovery folder.
-        std::fs::write(recovery.join(format!("{}.solidcraft", entry.id)), solidcraft_io::write_design(&s.design())).unwrap();
+        std::fs::write(recovery.join(format!("{}.solidcraft", entry.id)), solidcraft_io::write_design(&s.design()).unwrap()).unwrap();
         let mut recovered = Session::default();
         run(&mut recovered, "doc.recover", json!({"dir": recovery, "id": entry.id}));
         assert_eq!(run(&mut recovered, "component.links", json!({}))["links"][0]["found"], true);

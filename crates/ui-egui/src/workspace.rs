@@ -196,6 +196,7 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
                     "construct.plane.tangent",
                     "construct.plane.along_path",
                     "construct.plane.perpendicular",
+                    "construct.plane.square_to_line",
                 ],
             },
             CommandGroup {
@@ -283,7 +284,7 @@ pub const SECTIONS: &[Section] = &[
         ids: &[
             "drawing.view.base.planned",
             "drawing.view.section.planned",
-            "drawing.view.detail",
+            "drawing.view.detail.planned",
             "drawing.view.break",
             "drawing.view.auxiliary.planned",
             "drawing.view.pictorial",
@@ -1206,7 +1207,7 @@ mod tests {
         let buttons = crate::toolbar_custom::buttons(&h.app, "DRAWING LAYOUT", "VIEWS", &views, count);
         assert_eq!(
             buttons.iter().map(|command| command.id).collect::<Vec<_>>(),
-            ["drawing.view.base.planned", "drawing.view.section.planned", "drawing.view.detail", "drawing.view.break"]
+            ["drawing.view.base.planned", "drawing.view.section.planned", "drawing.view.detail.planned", "drawing.view.break"]
         );
         assert!(views.iter().any(|command| command.id == "drawing.view.flat_pattern"));
         assert!(!views.iter().any(|command| command.id == "drawing.view.projected.planned"));
@@ -1224,7 +1225,7 @@ mod tests {
         let buttons = crate::toolbar_custom::buttons(&h.app, "DRAWING LAYOUT", "VIEWS", &views, count);
         assert_eq!(
             buttons.iter().map(|command| command.id).collect::<Vec<_>>(),
-            ["drawing.view.base.planned", "drawing.view.section.planned", "drawing.view.detail", "drawing.view.flat_pattern"]
+            ["drawing.view.base.planned", "drawing.view.section.planned", "drawing.view.detail.planned", "drawing.view.flat_pattern"]
         );
     }
 

@@ -1123,13 +1123,12 @@ fn a_design_with_a_missing_plugins_data_opens_and_names_the_plugin() {
     app.session.plugin_state.plugins_dir = Some(dir.join("plugins"));
     let mut design = Session::default();
     design.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
-    let b64 = solidcraft_engine::doc::canvas::base64_encode;
-    let meta = b64(br#"{"plugin":"manufacture","name":"Manufacture","plugin_version":"1.4","format":3}"#);
+    let meta = br#"{"plugin":"manufacture","name":"Manufacture","plugin_version":"1.4","format":3}"#;
     let data = design.doc_mut();
     data.plugin_data.insert("manufacture/meta.json".into(), meta.into());
-    data.plugin_data.insert("manufacture/data.json".into(), b64(br#"{"setups":[]}"#).into());
-    let path = dir.join("with-data.json");
-    std::fs::write(&path, design.doc.to_json()).unwrap();
+    data.plugin_data.insert("manufacture/data.json".into(), br#"{"setups":[]}"#.into());
+    let path = dir.join("with-data.sc");
+    std::fs::write(&path, solidcraft_engine::io::write_design_container(&design.doc).unwrap()).unwrap();
 
     app.open_path(&path.to_string_lossy());
 
