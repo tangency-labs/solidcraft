@@ -133,7 +133,7 @@ cadmpeg-registry = { version = "=0.6.12", default-features = false, features = [
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }
 
 # Ends a process group with the system call (MIT; already in the tree through zip).
-nix = { version = "0.31", default-features = false, features = ["signal"] }
+nix = { version = "0.31", default-features = false, features = ["signal", "user"] }
 
 # images
 image = { version = "0.25", default-features = false, features = ["png", "hdr"] }
