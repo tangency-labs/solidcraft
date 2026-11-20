@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 use std::io::Write;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 mod drawing;
 mod import_cache;
@@ -117,25 +118,79 @@ const LIMITS: Limits = Limits {
 /// is still written in full, never refused (data loss), and the caller says it is over the limit.
 const SAVE_LIMITS: Limits = Limits { max_expanded: || usize::MAX, part_limit: |_| usize::MAX, ..LIMITS };
 
-/// A Compact save's budgets: the same, with the model cache deflated at [`COMPACT_CACHE_LEVEL`].
+/// A Compact save's budgets: the same, with the model cache deflated at [`CACHE_LEVELS`]`.compact`.
 const COMPACT_SAVE_LIMITS: Limits = Limits { level: compact_part_level, ..SAVE_LIMITS };
+
+/// A Fast save's budgets while the experimental smaller saves are on
+/// ([`set_smaller_default_saves`]): the model cache at [`CACHE_LEVELS`]`.smaller_default`.
+const SMALLER_SAVE_LIMITS: Limits = Limits { level: smaller_part_level, ..SAVE_LIMITS };
 
 /// The Deflate level of a part: STEP sources take [`STEP_LEVEL`], and so does a mesh past the file
 /// limit: level 1 of a large payload leaves more on disk, and that part exists only because
-/// compression is what makes it fit. Everything else is level 1.
+/// compression is what makes it fit. The model cache takes [`CACHE_LEVELS`]`.fast`. Everything
+/// else is level 1.
 fn part_level(name: &str, length: usize) -> i64 {
-    if name.ends_with(".step") || name.ends_with(".records") || (name.ends_with(".mesh") && length > max_part()) { STEP_LEVEL } else { 1 }
+    cache_or_part_level(name, length, CACHE_LEVELS.fast)
 }
 
-/// Deflate level of the model cache in a Compact save. Level 1 uses fixed Huffman codes: an
-/// 11.8 MB `cache/bodies.bin` took 14 ms to 1.77 MB, level 6 46 ms to 0.93 MB, level 9 79 ms to
-/// 0.85 MB; reading it back took 13, 10 and 9 ms. Fast saves keep level 1.
-const COMPACT_CACHE_LEVEL: i64 = 6;
+/// The Deflate level of the model cache (`cache/bodies.bin`, `cache/model.json`) for each kind of
+/// save, in one place (#19988). Level 1 uses fixed Huffman codes: an 11.8 MB `cache/bodies.bin`
+/// took 14 ms to 1.77 MB, level 4 30 ms to 1.11 MB, level 6 46 ms to 0.93 MB, level 9 79 ms to
+/// 0.85 MB; reading it back took 13, 10.7, 9.6 and 9.2 ms. Every release reads every level, so
+/// changing a number here changes no format.
+struct CacheLevels {
+    /// A Fast save, the default.
+    fast: i64,
+    /// A Compact save (`file.save {compression: "compact"}`).
+    compact: i64,
+    /// A Fast save while the experimental smaller saves are on.
+    smaller_default: i64,
+}
 
-/// A Compact save's level of a part: the model cache takes [`COMPACT_CACHE_LEVEL`], the rest as a
-/// Fast save.
+const CACHE_LEVELS: CacheLevels = CacheLevels { fast: 1, compact: 6, smaller_default: 6 };
+
+/// A part's level with the model cache at `cache_level` and the rest as [`part_level`] says.
+fn cache_or_part_level(name: &str, length: usize, cache_level: i64) -> i64 {
+    if native_cache::ENTRIES.contains(&name) {
+        cache_level
+    } else if name.ends_with(".step") || name.ends_with(".records") || (name.ends_with(".mesh") && length > max_part()) {
+        STEP_LEVEL
+    } else {
+        1
+    }
+}
+
+/// A Compact save's level of a part: the model cache takes [`CACHE_LEVELS`]`.compact`.
 fn compact_part_level(name: &str, length: usize) -> i64 {
-    if native_cache::ENTRIES.contains(&name) { COMPACT_CACHE_LEVEL } else { part_level(name, length) }
+    cache_or_part_level(name, length, CACHE_LEVELS.compact)
+}
+
+/// A smaller Fast save's level of a part: the model cache takes [`CACHE_LEVELS`]`.smaller_default`.
+fn smaller_part_level(name: &str, length: usize) -> i64 {
+    cache_or_part_level(name, length, CACHE_LEVELS.smaller_default)
+}
+
+/// Whether Fast saves deflate the model cache harder (experimental, off by default; #19988).
+static SMALLER_DEFAULT_SAVES: AtomicBool = AtomicBool::new(false);
+
+/// Every Fast save from now on deflates the model cache at [`CACHE_LEVELS`]`.smaller_default`
+/// (on) or `.fast` (off, the default). The app sets it from Preferences › General › Saving.
+pub fn set_smaller_default_saves(on: bool) {
+    SMALLER_DEFAULT_SAVES.store(on, Ordering::Relaxed);
+}
+
+/// Whether Fast saves deflate the model cache harder ([`set_smaller_default_saves`]).
+pub fn smaller_default_saves() -> bool {
+    SMALLER_DEFAULT_SAVES.load(Ordering::Relaxed)
+}
+
+/// The budgets of a save under `compression`, the Fast ones as the experimental switch says.
+fn save_limits(compression: DesignCompression, smaller: bool) -> Limits {
+    match compression {
+        DesignCompression::Fast if smaller => SMALLER_SAVE_LIMITS,
+        DesignCompression::Fast => SAVE_LIMITS,
+        DesignCompression::Compact => COMPACT_SAVE_LIMITS,
+    }
 }
 
 /// A design container being written, within [`LIMITS`].
@@ -168,10 +223,7 @@ fn part_limit(name: &str) -> usize {
 
 impl PackageWriter {
     fn new(compression: DesignCompression) -> PackageWriter {
-        PackageWriter(Writer::new(match compression {
-            DesignCompression::Fast => SAVE_LIMITS,
-            DesignCompression::Compact => COMPACT_SAVE_LIMITS,
-        }))
+        PackageWriter(Writer::new(save_limits(compression, smaller_default_saves())))
     }
     fn finish(self) -> Result<Vec<u8>> {
         Ok(self.0.finish()?)
@@ -1811,8 +1863,10 @@ mod tests {
     /// model, and every other part keeps its level.
     #[test]
     fn compact_saves_deflate_the_model_cache_harder_and_read_it_back() {
-        assert_eq!(compact_part_level("cache/bodies.bin", 1), COMPACT_CACHE_LEVEL);
-        assert_eq!(compact_part_level("cache/model.json", 1), COMPACT_CACHE_LEVEL);
+        for name in native_cache::ENTRIES {
+            assert_eq!(part_level(name, 1), CACHE_LEVELS.fast, "{name}");
+            assert_eq!(compact_part_level(name, 1), CACHE_LEVELS.compact, "{name}");
+        }
         for name in ["document.json", "blobs/a.step", "blobs/a.mesh", "cache/preview.bin"] {
             assert_eq!(compact_part_level(name, 1), part_level(name, 1), "{name}");
         }
@@ -1831,6 +1885,37 @@ mod tests {
         assert_eq!(read.records, model.records);
         assert_eq!(read.bodies.len(), model.bodies.len());
         assert_eq!(crate::read_design(&compact).unwrap().to_json(), doc.to_json());
+    }
+
+    /// The experimental smaller saves (#19988) make a Fast save deflate the model cache at
+    /// `smaller_default` and leave every other part, and Compact, as they are. Off (the default),
+    /// a Fast save is as before. The switch itself is not flipped here: other tests save at once.
+    #[test]
+    fn smaller_default_saves_deflate_only_the_fast_model_cache_harder() {
+        assert!(!smaller_default_saves(), "off unless the app turns it on");
+        let level = |compression, smaller, name: &str| (save_limits(compression, smaller).level)(name, 1);
+        for name in native_cache::ENTRIES {
+            assert_eq!(level(DesignCompression::Fast, false, name), CACHE_LEVELS.fast, "{name}");
+            assert_eq!(level(DesignCompression::Fast, true, name), CACHE_LEVELS.smaller_default, "{name}");
+            assert_eq!(level(DesignCompression::Compact, true, name), CACHE_LEVELS.compact, "{name}");
+        }
+        for name in ["document.json", "container.json", "blobs/a.step", "blobs/a.mesh", "drawings/a.json"] {
+            assert_eq!(level(DesignCompression::Fast, true, name), part_level(name, 1), "{name}");
+        }
+        use solidcore_record::Vec3;
+        let bodies = (0..4).map(|i| solidcraft_kernel::box_solid(Vec3::new(f64::from(i) * 20., 0., 0.), Vec3::new(10., 20., 30.)).unwrap());
+        let fast = write_design_container_with_cache(&document(), DesignCompression::Fast, None, Some(&saved_model(bodies.collect()))).unwrap();
+        let raw = parts(&fast)["cache/bodies.bin"].clone();
+        let packed = |smaller| {
+            let mut writer = Writer::new(save_limits(DesignCompression::Fast, smaller));
+            writer.part("cache/bodies.bin", &raw, true).unwrap();
+            let bytes = writer.finish().unwrap();
+            let size = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap().by_name("cache/bodies.bin").unwrap().compressed_size();
+            (size, parts(&bytes)["cache/bodies.bin"].clone())
+        };
+        let ((loose, plain), (tight, unpacked)) = (packed(false), packed(true));
+        assert!(tight < loose, "bodies: {tight} vs {loose}");
+        assert_eq!(unpacked, plain, "the same bodies, only packed tighter");
     }
 
     #[test]

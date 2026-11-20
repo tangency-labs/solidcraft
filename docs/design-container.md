@@ -153,7 +153,11 @@ few tens of milliseconds. `fast` uses level one, whose fixed Huffman codes are q
 `compact` uses level six, which roughly halves the stored cache again. Measured with the
 container's own Deflate on an 11.8 MB `cache/bodies.bin`: level one 1.77 MB in 14 ms,
 level six 0.93 MB in 46 ms (a whole save of that design took about 180 ms); reading it
-back took 13 and 10 ms. A modelled part's 571 KB cache went from 74 KB to 38 KB.
+back took 13 and 10 ms. A modelled part's 571 KB cache went from 74 KB to 38 KB. The
+experimental preference **Smaller saved files** (Preferences › General › Saving, off by
+default, #19988) makes `fast` saves deflate the cache at level six too, and nothing
+else. The three levels are one table, `CACHE_LEVELS` in `crates/io/src/design.rs`.
+Every release reads every level, so none of this changes the format.
 
 `cache/bodies.bin` holds every distinct body once, in
 [SolidCraft's native B-rep encoding](native-brep.md), as contiguous slices. The

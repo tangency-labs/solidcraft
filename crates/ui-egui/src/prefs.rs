@@ -1010,6 +1010,12 @@ pub fn apply_tolerance_heal(p: &Prefs) {
     solidcraft_engine::kernel::set_heals_tolerance_defects(p.heal_tolerance_defects);
 }
 
+/// The experimental switches from now on, as Preferences › General › Saving says: saved designs
+/// deflate their model cache harder (#19988).
+pub fn apply_experiments(p: &Prefs) {
+    solidcraft_engine::io::set_smaller_default_saves(p.experimental_smaller_saves);
+}
+
 /// Perspective view's default field of view (about 34°), in radians.
 const PERSPECTIVE_FOV: f64 = 0.6;
 
@@ -1496,6 +1502,10 @@ preference_settings! {
     reopen_designs: bool = true, PAGE_GENERAL;
     /// Ask separately when closing several unsaved designs, as before grouped saving.
     save_prompt_one_at_a_time: bool = false, PAGE_GENERAL => check_id("prefs.save_prompt_one_at_a_time");
+    /// Experimental (#19988): every save deflates the model cache inside the design harder, about
+    /// half its size for a few tens of ms on a large design ([`apply_experiments`]). Off by
+    /// default: saves are as before. No format change; every release opens such a file.
+    experimental_smaller_saves: bool = false, PAGE_GENERAL => check_id("prefs.experimental_smaller_saves");
     /// Those designs' files, in tab order, as the last quit left them.
     open_designs: Vec<String> = Vec::new(), PAGE_GENERAL;
     /// Web app (#10220): keep each open design's unsaved changes current in the browser's
@@ -2412,6 +2422,7 @@ impl Snapshot {
         sync_surface_analysis(app);
         crate::render_workspace::apply_memory_policy(app);
         apply_tolerance_heal(&app.preferences);
+        apply_experiments(&app.preferences);
         app.preferences.stand_up_answers = stand_up_answers;
         app.preferences.update = update;
         if units_changed {
@@ -2713,6 +2724,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
     sync_surface_analysis(app);
     crate::render_workspace::apply_memory_policy(app);
     apply_tolerance_heal(&app.preferences);
+    apply_experiments(&app.preferences);
     if app.preferences.default_units != units {
         default_units_changed(app);
     }
@@ -2831,6 +2843,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     apply_file_limits(&app.preferences);
     apply_sketch_limit(&app.preferences);
     apply_tolerance_heal(&app.preferences);
+    apply_experiments(&app.preferences);
     // The viewport's display quality (an unknown saved value draws at Normal).
     solidcraft_engine::doc::display_quality::set_current(
         solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default(),
@@ -5053,6 +5066,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     apply_file_limits(&app.preferences);
     apply_sketch_limit(&app.preferences);
     apply_tolerance_heal(&app.preferences);
+    apply_experiments(&app.preferences);
     if units_changed {
         default_units_changed(app);
     }
