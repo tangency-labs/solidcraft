@@ -248,7 +248,10 @@ pub fn offset_tool(b: &Body, faces: Option<&[Vec3]>, distance: f64, round: Optio
             }
             let chosen = crate::offset::with_same_surface(&healed, &chosen);
             let step = crate::offset_backend::offset_faces(&healed, &chosen, distance)?;
-            // The moved faces are those still made from a chosen face.
+            if round.is_none() {
+                return Ok(crate::record::after(step, &healed, &crate::record::counts(&[b])));
+            }
+            // The moved faces, for the rounds: those still made from a chosen face.
             let moved = step
                 .history()
                 .map(|h| {
