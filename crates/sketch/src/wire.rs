@@ -327,6 +327,7 @@ impl Sketch {
                 face_name: None,
                 edge_name: None,
                 vertex_name: None,
+                curve_edges: Vec::new(),
                 auto_face: false,
                 lost: false,
                 name_dropped: false,

@@ -4909,7 +4909,7 @@
 {"case":"surf_sphere150_rebuild_v0_gaps","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[22.000000000000007,22.000000000000007,274.0]],"n":25}}}
 {"case":"surf_sphere150_rebuild_v0_q","deferred":null,"error":null,"ints":{"q":{"blocks":[[16042,16361]],"n":31}},"topology":null,"values":{}}
 {"case":"surf_sphere150_rebuild_v0_topo","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,1.0,1.0,1.0,0.0,1.0,1.0,1.0,0.0]}}
-{"case":"surf_sphere150_rebuild_v3_gaps","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[20.0,20.0,242.0]],"n":25}}}
+{"case":"surf_sphere150_rebuild_v3_gaps","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[20.0,20.0,243.0]],"n":25}}}
 {"case":"surf_sphere150_rebuild_v3_q","deferred":null,"error":null,"ints":{"q":{"blocks":[[16044,16380]],"n":31}},"topology":null,"values":{}}
 {"case":"surf_sphere150_rebuild_v3_topo","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,1.0,0.0,1.0,0.0,1.0,1.0,1.0,1.0]}}
 {"case":"surf_sphere150_v0_common","deferred":null,"error":null,"ints":{"q":[2,0,1,2,0,1]},"topology":null,"values":{}}

@@ -58,6 +58,15 @@
 //!   are swallowed here too, except that [`SolidError::Unported`] always propagates.
 //!   The double tolerances passed to `GlobalPointSolve` convert to `SmZoneTol3d`
 //!   (`USE_DEFAULT` becomes the zone tolerance, then `fabs`).
+//! - **Failures (#15034).** No check in this file decides a refusal (where a missed
+//!   intersection matters to the caller, the vertex's status says so, as
+//!   `SurfIntFailure` does for a rail that misses the end face): every failure is a step
+//!   that could not go on (an object that is not there, a vertex across an edge not
+//!   processed yet, a seam that does not close, an intersection or a drop that found
+//!   nothing or too much, a rail that is not a blending rail), so each is a
+//!   [`BlendFailure::StageFailed`], a defect, built where it happens (its origin is that
+//!   file and line, or the caller's for the edge-use helpers) and keeping upstream's
+//!   status for the goldens: `SM_ERR_NULL_POINTER` for a `NER`, `SM_ERR` otherwise.
 //! - **Surface/surface intersections.** `sm_SrfSrfIntersection` is
 //!   `blend.fillet_geom_p2`'s, called with the fillet vertices' points; its curves are
 //!   retained as their actual B-spline-derived objects for virtual operations, and
@@ -92,7 +101,8 @@
 
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGeneratorType};
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -276,6 +286,25 @@ fn solution_uv<O: SolutionObject>(
         .get(i)
         .ok_or_else(|| SolidError::invalid_input(op, "solution index out of range"))?;
     Ok(Point2::new(s.start.parameters[0], s.start.parameters[1]))
+}
+
+/// `NER(p)`: an object the routine `op` holds or looks up that is not there. A
+/// [`BlendFailure::StageFailed`], a defect, keeping upstream's `SM_ERR_NULL_POINTER` for the
+/// goldens; the failure's origin is the call's file and line (#15034 rules 2 and 4).
+#[track_caller]
+fn missing(op: &'static str) -> SolidError {
+    Failure::new(op, BlendFailure::StageFailed)
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// `SER(p)`: a step of the routine `op` that could not go on (a vertex across an edge not
+/// processed yet, a seam that does not close, an intersection or a drop that found nothing
+/// or too much). A [`BlendFailure::StageFailed`], a defect: a search that stops proves
+/// nothing about the geometry (#15034 rules 2 and 5).
+#[track_caller]
+fn stage_failed(op: &'static str) -> SolidError {
+    SolidError::blend(op, BlendFailure::StageFailed)
 }
 
 /// A B-spline 3D or UV curve held as a [`Curve`] (`SM_CAST_PTR(SmBSplineCurve, ..)`):
@@ -634,20 +663,14 @@ pub fn create_uv_curve_on_face(
         let srf_pt00 = surface.evaluate_point(k, uv00)?;
         let srf_pt10 = surface.evaluate_point(k, uv10)?;
         if srf_pt00.distance(srf_pt10) > approx_tol {
-            return Err(SolidError::blend_failed(
-                OP_UV,
-                "the surface is not closed at its low-v corners",
-            ));
+            return Err(stage_failed(OP_UV));
         }
 
         // evaluate Vmax corners
         let srf_pt01 = surface.evaluate_point(k, uv01)?;
         let srf_pt11 = surface.evaluate_point(k, uv11)?;
         if srf_pt01.distance(srf_pt11) > approx_tol {
-            return Err(SolidError::blend_failed(
-                OP_UV,
-                "the surface is not closed at its high-v corners",
-            ));
+            return Err(stage_failed(OP_UV));
         }
 
         // Now check which v-direction is indicated by Start & End verts
@@ -672,10 +695,7 @@ pub fn create_uv_curve_on_face(
 
             // Not currently handling it if both corners are cut off.
             if direction == 0 {
-                return Err(SolidError::blend_failed(
-                    OP_UV,
-                    "both seam corners are cut off",
-                ));
+                return Err(stage_failed(OP_UV));
             }
 
             which_corner_cut = -1;
@@ -718,10 +738,7 @@ pub fn create_uv_curve_on_face(
                 SolverOperation::Minimize,
             )?;
             if !dropped.success {
-                return Err(SolidError::blend_failed(
-                    OP_UV,
-                    "the cut corner's point did not drop to the iso-curve",
-                ));
+                return Err(stage_failed(OP_UV));
             }
             let drop_param = dropped.parameter;
 
@@ -768,7 +785,7 @@ pub fn create_uv_curve_on_face(
     let bbox = surface
         .calculate_bounding_box(k, &uv_domain, [true, false, false], true)?
         .normal_box
-        .ok_or_else(|| SolidError::blend_missing(OP_UV, "the surface's bounding box"))?;
+        .ok_or_else(|| missing(OP_UV))?;
     let mut dropping_tol = 1.0e-9 * bbox.size().max_dimension();
 
     // Param tolerance
@@ -874,10 +891,7 @@ pub fn create_uv_curve_on_face(
 
     // failure case: start or end pt failed to drop to surface
     if num_solutions1 == 0 || num_solutions2 == 0 {
-        return Err(SolidError::blend_failed(
-            OP_UV,
-            "the start or end point did not drop to the surface",
-        ));
+        return Err(stage_failed(OP_UV));
     }
 
     // Discard solutions within dParamTol of the first one
@@ -954,10 +968,7 @@ pub fn create_uv_curve_on_face(
     // when start point still dropped to surface multiple times
     if num_solutions1 > 2 {
         if num_solutions2 > 2 {
-            return Err(SolidError::blend_failed(
-                OP_UV,
-                "both ends drop to the surface more than twice",
-            )); // Should not happen!!
+            return Err(stage_failed(OP_UV)); // Should not happen!!
         }
 
         // Start point lies on degenerate edge
@@ -972,10 +983,7 @@ pub fn create_uv_curve_on_face(
                 start_uv1.x = end_uv1.x;
             }
         } else {
-            return Err(SolidError::blend_failed(
-                OP_UV,
-                "the start point's solutions are not on a degenerate edge",
-            ));
+            return Err(stage_failed(OP_UV));
         }
     }
 
@@ -993,10 +1001,7 @@ pub fn create_uv_curve_on_face(
                 end_uv1.x = start_uv1.x;
             }
         } else {
-            return Err(SolidError::blend_failed(
-                OP_UV,
-                "the end point's solutions are not on a degenerate edge",
-            ));
+            return Err(stage_failed(OP_UV));
         }
     }
 
@@ -1022,10 +1027,7 @@ pub fn create_uv_curve_on_face(
     {
         // SM_CAST_PTR(SmBSplineSurface, pSurface): upstream dereferences the result
         if b_spline_net(surface).is_none() {
-            return Err(SolidError::blend_missing(
-                OP_UV,
-                "the surface's B-spline form",
-            ));
+            return Err(missing(OP_UV));
         }
 
         // StartPt to EndPt 3d unit-vector
@@ -1178,41 +1180,42 @@ fn curve_ends(k: &Kernel, curve: &Curve) -> Result<(Extent1d, Point3, Point3)> {
 impl FilletBrep {
     /// The fillet surface and solver tolerances of the fillet geometry of edge use
     /// `eu`.
+    #[track_caller]
     fn eu_geom_solver_with<'s>(
         &self,
         eu: EdgeuseId,
         context: &'s impl super::p5::FilletEdgeContext,
         op: &'static str,
     ) -> Result<(FilletGeomId, &'s FilletSolver)> {
-        let g = self
-            .fillet_edgeuse(eu)?
-            .fillet_geom()
-            .ok_or_else(|| SolidError::blend_missing(op, "the edge use's fillet geometry"))?;
-        let sid = self
-            .geom(g)?
-            .fillet_solver()
-            .ok_or_else(|| SolidError::blend_missing(op, "the fillet geometry's solver"))?;
+        let Some(g) = self.fillet_edgeuse(eu)?.fillet_geom() else {
+            return Err(missing(op));
+        };
+        let Some(sid) = self.geom(g)?.fillet_solver() else {
+            return Err(missing(op));
+        };
         Ok((g, context.solver(sid)?))
     }
 
     /// The primary edge use of `e` and its mate.
+    #[track_caller]
     fn prim_and_mate(&self, e: EdgeId, op: &'static str) -> Result<(EdgeuseId, EdgeuseId)> {
-        let (prim, mate) = self.prim_and_opt_mate(e, op)?;
-        Ok((
-            prim,
-            mate.ok_or_else(|| SolidError::blend_missing(op, "the primary edge use's mate"))?,
-        ))
+        match self.prim_and_opt_mate(e, op)? {
+            (prim, Some(mate)) => Ok((prim, mate)),
+            (_, None) => Err(missing(op)),
+        }
     }
 
     /// The primary edge use of `e` and its mate, if any (`pPrimEU->GetMate()`, which
     /// upstream fetches early but dereferences only where it is used).
+    #[track_caller]
     fn prim_and_opt_mate(
         &self,
         e: EdgeId,
         op: &'static str,
     ) -> Result<(EdgeuseId, Option<EdgeuseId>)> {
-        let prim = primary_edgeuse(self.brep(), e)?
-            .ok_or_else(|| SolidError::blend_missing(op, "the edge's primary edge use"))?;
+        let Some(prim) = primary_edgeuse(self.brep(), e)? else {
+            return Err(missing(op));
+        };
         Ok((prim, eu1::mate(self.brep(), prim)?))
     }
 
@@ -1284,12 +1287,7 @@ impl FilletBrep {
         for e in vertex::edges(self.brep(), fv, None)? {
             match self.fillet_edge(e)?.fillet_edge_type() {
                 FilletEdgeType::CrossSection => {
-                    let prim = primary_edgeuse(self.brep(), e)?.ok_or_else(|| {
-                        SolidError::blend_missing(
-                            OP_NX2,
-                            "the cross-section edge's primary edge use",
-                        )
-                    })?;
+                    let prim = primary_edgeuse(self.brep(), e)?.ok_or_else(|| missing(OP_NX2))?;
                     let (g, fs) = self.eu_geom_solver_with(prim, context, OP_NX2)?;
                     approx_tol = smin(approx_tol, fs.approx_tol_3d);
                     ang_tol = smin(ang_tol, fs.ang_tol_rad);
@@ -1300,18 +1298,10 @@ impl FilletBrep {
                     }
                 }
                 FilletEdgeType::FilletXSideFace => {
-                    let other_fv =
-                        edge::other_vertex(self.brep(), e, Some(fv))?.ok_or_else(|| {
-                            SolidError::blend_missing(
-                                OP_NX2,
-                                "the fillet/side-face edge's other vertex",
-                            )
-                        })?;
+                    let other_fv = edge::other_vertex(self.brep(), e, Some(fv))?
+                        .ok_or_else(|| missing(OP_NX2))?;
                     if !self.fillet_vertex(other_fv)?.is_processed() {
-                        return Err(SolidError::blend_failed(
-                            OP_NX2,
-                            "the vertex across the fillet/side-face edge is not processed",
-                        ));
+                        return Err(stage_failed(OP_NX2));
                     }
                     ref_pnt = self.vertex_point(other_fv)?;
                 }
@@ -1323,10 +1313,7 @@ impl FilletBrep {
         let ref_point = self.vertex_point(fv)?;
         // pFV->GetFilletCorner()->GetContext(): the kernel; the corner is dereferenced
         if self.fillet_vertex(fv)?.fillet_corner().is_none() {
-            return Err(SolidError::blend_missing(
-                OP_NX2,
-                "the fillet vertex's corner",
-            ));
+            return Err(missing(OP_NX2));
         }
         // GetFilletSurface() of each geometry; NULL when no cross-section edge was
         // seen or the geometry has no fillet surface yet
@@ -1353,10 +1340,7 @@ impl FilletBrep {
             ),
             // sm_SrfSrfIntersection starts with NER(pSurf1); NER(pSurf2): a failed
             // intersection for the caller
-            _ => Err(SolidError::blend_missing(
-                OP_NX2,
-                "a fillet surface to intersect",
-            )),
+            _ => Err(missing(OP_NX2)),
         };
         let curve_3d = match result {
             Ok(SrfSrfCurves {
@@ -1366,10 +1350,7 @@ impl FilletBrep {
             _ => {
                 self.fillet_vertex_mut(fv)?
                     .set_status(FilStatus::SurfIntFailure);
-                return Err(SolidError::blend_failed(
-                    OP_NX2,
-                    "the two fillet surfaces do not intersect",
-                ));
+                return Err(stage_failed(OP_NX2));
             }
         };
 
@@ -1432,7 +1413,7 @@ impl FilletBrep {
         let corner = self
             .fillet_vertex(v)?
             .fillet_corner()
-            .ok_or_else(|| SolidError::blend_missing(OP_INT2, "the fillet vertex's corner"))?;
+            .ok_or_else(|| missing(OP_INT2))?;
         let filleted_vertex = corners.corner(corner)?.filleted_vertex();
 
         // Intersection curves of fillet #1 & #2 and of #2 & #3 (their edges)
@@ -1445,27 +1426,23 @@ impl FilletBrep {
                 continue;
             }
 
-            let other_fv =
-                edge::other_vertex(self.brep(), curr_edge, Some(v))?.ok_or_else(|| {
-                    SolidError::blend_missing(OP_INT2, "the fillet/fillet edge's other vertex")
-                })?;
+            let other_fv = edge::other_vertex(self.brep(), curr_edge, Some(v))?
+                .ok_or_else(|| missing(OP_INT2))?;
             if !self.fillet_vertex(other_fv)?.is_processed() {
-                return Err(SolidError::blend_failed(
-                    OP_INT2,
-                    "the vertex across the fillet/fillet edge is not processed",
-                ));
+                return Err(stage_failed(OP_INT2));
             }
             let other_pnt = self.vertex_point(other_fv)?;
 
             // Do surface/surface intersection
             let (prim, mate) = self.prim_and_mate(curr_edge, OP_INT2)?;
-            let g1 = self.fillet_edgeuse(prim)?.fillet_geom().ok_or_else(|| {
-                SolidError::blend_missing(OP_INT2, "the primary edge use's fillet geometry")
-            })?;
+            let g1 = self
+                .fillet_edgeuse(prim)?
+                .fillet_geom()
+                .ok_or_else(|| missing(OP_INT2))?;
             let g2 = self
                 .fillet_edgeuse(mate)?
                 .fillet_geom()
-                .ok_or_else(|| SolidError::blend_missing(OP_INT2, "the mate's fillet geometry"))?;
+                .ok_or_else(|| missing(OP_INT2))?;
             let (Some(fillet_surface1), Some(fillet_surface2)) = (
                 self.geom(g1)?.fillet_surface(None)?,
                 self.geom(g2)?.fillet_surface(None)?,
@@ -1483,9 +1460,7 @@ impl FilletBrep {
                 min_tol = approx_tol;
             }
             let filleted_pnt = target
-                .vertex(filleted_vertex.ok_or_else(|| {
-                    SolidError::blend_missing(OP_INT2, "the corner's filleted vertex")
-                })?)?
+                .vertex(filleted_vertex.ok_or_else(|| missing(OP_INT2))?)?
                 .point;
             let mut dir = filleted_pnt - other_pnt;
             let skip_two_pnts_intersection = true;
@@ -1516,10 +1491,7 @@ impl FilletBrep {
                         .set_status(FilStatus::SurfIntFailure);
                     self.fillet_edge_mut(curr_edge)?
                         .set_status(FilStatus::SurfIntFailure);
-                    return Err(SolidError::blend_failed(
-                        OP_INT2,
-                        "the two fillet surfaces do not intersect",
-                    ));
+                    return Err(stage_failed(OP_INT2));
                 }
             };
             let (mut uv_curve1, mut uv_curve2) = (uv_curve1, uv_curve2);
@@ -1539,11 +1511,11 @@ impl FilletBrep {
                 ivl = new_3d_curve.reverse_parameterization(k, &ivl)?;
                 ivl = uv_curve1
                     .as_mut()
-                    .ok_or_else(|| SolidError::blend_missing(OP_INT2, "the first UV curve"))?
+                    .ok_or_else(|| missing(OP_INT2))?
                     .reverse_parameterization(k, &ivl)?;
                 let _ = uv_curve2
                     .as_mut()
-                    .ok_or_else(|| SolidError::blend_missing(OP_INT2, "the second UV curve"))?
+                    .ok_or_else(|| missing(OP_INT2))?
                     .reverse_parameterization(k, &ivl)?;
             }
             self.set_edge_curves(
@@ -1564,15 +1536,14 @@ impl FilletBrep {
         }
 
         // Now find the common intersection of all the curves.
-        let curve_of =
-            |e: Option<EdgeId>| -> Result<&Curve> {
-                let e = e.ok_or_else(|| {
-                    SolidError::blend_missing(OP_INT2, "an intersection curve's edge")
-                })?;
-                self.brep().edge(e)?.curve.as_ref().ok_or_else(|| {
-                    SolidError::blend_missing(OP_INT2, "the intersection edge's curve")
-                })
-            };
+        let curve_of = |e: Option<EdgeId>| -> Result<&Curve> {
+            let e = e.ok_or_else(|| missing(OP_INT2))?;
+            self.brep()
+                .edge(e)?
+                .curve
+                .as_ref()
+                .ok_or_else(|| missing(OP_INT2))
+        };
         let c1 = curve_of(curve1)?;
         let c2 = curve_of(curve2)?;
         // the solutions name the two curves (`this` and `rCurve2`) and their analytic
@@ -1593,14 +1564,9 @@ impl FilletBrep {
             },
         )?;
         if solutions.len() != 1 {
-            return Err(SolidError::blend_failed(
-                OP_INT2,
-                "the intersection curves do not meet in exactly one point",
-            ));
+            return Err(stage_failed(OP_INT2));
         }
-        let sol = solutions.get(0).ok_or_else(|| {
-            SolidError::blend_failed(OP_INT2, "the intersection curves' meeting point")
-        })?;
+        let sol = solutions.get(0).ok_or_else(|| stage_failed(OP_INT2))?;
         let vert_geom = c1.evaluate_point(k, sol.start.parameters[0])?;
         set_vertex_point(self.brep_mut(), v, vert_geom)?;
         self.fillet_vertex_mut(v)?.set_status(FilStatus::Processed);
@@ -1679,9 +1645,7 @@ impl FilletBrep {
                 break;
             }
         }
-        let curr_edge = curr_edge.ok_or_else(|| {
-            SolidError::blend_missing(OP_EXT, "a classified fillet edge at the vertex")
-        })?;
+        let curr_edge = curr_edge.ok_or_else(|| missing(OP_EXT))?;
 
         // get FilletSurface stored in filletEdge->PrimaryEU->FilletGeom->FilletSurface
         // pMateEU is dereferenced only by the final SetUVCurve
@@ -1689,7 +1653,7 @@ impl FilletBrep {
         let fillet_geom = self
             .fillet_edgeuse(prim)?
             .fillet_geom()
-            .ok_or_else(|| SolidError::blend_missing(OP_EXT, "the edge use's fillet geometry"))?;
+            .ok_or_else(|| missing(OP_EXT))?;
         if !self.geom(fillet_geom)?.has_fillet_surface() {
             // Need fillet surface, will process it later
             return Ok(());
@@ -1697,11 +1661,7 @@ impl FilletBrep {
         // pFilletGeom->GetFilletSolver(), dereferenced where upstream does
         let sid = self.geom(fillet_geom)?.fillet_solver();
         let fil_solver =
-            || -> Result<&FilletSolver> {
-                context.solver(sid.ok_or_else(|| {
-                    SolidError::blend_missing(OP_EXT, "the fillet geometry's solver")
-                })?)
-            };
+            || -> Result<&FilletSolver> { context.solver(sid.ok_or_else(|| missing(OP_EXT))?) };
 
         // get OtherFaceSurface
         let mut other_fv = None;
@@ -1711,12 +1671,7 @@ impl FilletBrep {
             // Will intersect fillet with a side-face of the original brep
             let side_eu = match self.fillet_vertex(v)?.point_class_object() {
                 Some(EntityRef::Edgeuse(eu)) => eu,
-                None => {
-                    return Err(SolidError::blend_missing(
-                        OP_EXT,
-                        "the vertex's classification object",
-                    ))
-                }
+                None => return Err(missing(OP_EXT)),
                 Some(_) => {
                     return Err(SolidError::invalid_input(
                         OP_EXT,
@@ -1725,13 +1680,10 @@ impl FilletBrep {
                 }
             };
             let mut sf = eu1::face(target, side_eu)?;
-            let radial = eu1::radial(target, side_eu)?
-                .ok_or_else(|| SolidError::blend_missing(OP_EXT, "the side edge use's radial"))?;
+            let radial = eu1::radial(target, side_eu)?.ok_or_else(|| missing(OP_EXT))?;
             let mut of = eu1::face(target, radial)?;
             for kk in 0..2 {
-                let eu = fil_solver()?
-                    .edgeuse(kk)?
-                    .ok_or_else(|| SolidError::blend_missing(OP_EXT, "the solver's edge use"))?;
+                let eu = fil_solver()?.edgeuse(kk)?.ok_or_else(|| missing(OP_EXT))?;
                 if eu1::face(target, eu)? == sf {
                     core::mem::swap(&mut sf, &mut of);
                     break;
@@ -1741,32 +1693,25 @@ impl FilletBrep {
             on_face = of;
         } else {
             let ofv = edge::other_vertex(self.brep(), curr_edge, Some(v))?
-                .ok_or_else(|| SolidError::blend_missing(OP_EXT, "the edge's other vertex"))?;
+                .ok_or_else(|| missing(OP_EXT))?;
 
             // check state - the other filletVertex is already processed
             if !self.fillet_vertex(ofv)?.is_processed() {
-                return Err(SolidError::blend_failed(
-                    OP_EXT,
-                    "the vertex across the edge is not processed",
-                ));
+                return Err(stage_failed(OP_EXT));
             }
             other_fv = Some(ofv);
 
             // get face upon which this filletEdge was originated
             side_face = self.fillet_edge(curr_edge)?.original_face();
         }
-        let side_face = side_face
-            .ok_or_else(|| SolidError::blend_missing(OP_EXT, "the edge's original face"))?;
+        let side_face = side_face.ok_or_else(|| missing(OP_EXT))?;
 
         // get face->extendedSurface
-        let corner =
-            corner.ok_or_else(|| SolidError::blend_missing(OP_EXT, "the vertex's corner"))?;
+        let corner = corner.ok_or_else(|| missing(OP_EXT))?;
         let surface2 = context
             .extended_surface(corners.corner(corner)?, side_face)?
             .filter(|s| b_spline_net(s).is_some())
-            .ok_or_else(|| {
-                SolidError::blend_missing(OP_EXT, "the side face's extended B-spline surface")
-            })?;
+            .ok_or_else(|| missing(OP_EXT))?;
 
         // locals surface/surface intersection
         let approx_tol = fil_solver()?.approx_tol_3d;
@@ -1774,7 +1719,7 @@ impl FilletBrep {
         let fillet_surface = self
             .geom(fillet_geom)?
             .fillet_surface(None)?
-            .ok_or_else(|| SolidError::blend_missing(OP_EXT, "the fillet surface"))?;
+            .ok_or_else(|| missing(OP_EXT))?;
 
         let result = srf_srf_intersection(
             k,
@@ -1802,10 +1747,7 @@ impl FilletBrep {
                     .set_status(FilStatus::SurfIntFailure);
                 self.fillet_edge_mut(curr_edge)?
                     .set_status(FilStatus::SurfIntFailure);
-                return Err(SolidError::blend_failed(
-                    OP_EXT,
-                    "the fillet surface does not meet the side face's surface",
-                ));
+                return Err(stage_failed(OP_EXT));
             }
         };
 
@@ -1814,8 +1756,7 @@ impl FilletBrep {
 
         if b3x2_mixed_corner_case {
             // Find which end point lies on the pOnFace (the curves are dropped)
-            let on_face = on_face
-                .ok_or_else(|| SolidError::blend_missing(OP_EXT, "the face the vertex is on"))?;
+            let on_face = on_face.ok_or_else(|| missing(OP_EXT))?;
             // pOnFace->GetSurface(): the face owns it, so the fast drop's trim test
             // classifies on the face (`pFace->PointClassify`); the solve reads a copy
             // sharing the surface's cache slot
@@ -1823,7 +1764,7 @@ impl FilletBrep {
                 .face(on_face)?
                 .surface
                 .as_ref()
-                .ok_or_else(|| SolidError::blend_missing(OP_EXT, "the face's surface"))?
+                .ok_or_else(|| missing(OP_EXT))?
                 .clone_for_evaluation()?;
             let tol = fil_solver()?.approx_tol_3d;
             let domain = surf1.natural_uv_domain_with_nurb(k)?;
@@ -1846,18 +1787,13 @@ impl FilletBrep {
                     return Ok(());
                 }
             }
-            return Err(SolidError::blend_failed(
-                OP_EXT,
-                "neither end of the intersection curve lies on the face",
-            ));
+            return Err(stage_failed(OP_EXT));
         }
 
         // arrive here for SM_FE_FILLET_X_SIDE_FACE cases
         let mut vert_geom = pnt1;
         let mut reverse_curves = false;
-        let other_pnt = self.vertex_point(
-            other_fv.ok_or_else(|| SolidError::blend_missing(OP_EXT, "the other fillet vertex"))?,
-        )?;
+        let other_pnt = self.vertex_point(other_fv.ok_or_else(|| missing(OP_EXT))?)?;
 
         // make sure curve is parameterized from edge->StartVert to edge->EndVert
         let near_start = other_pnt.distance(pnt1) < other_pnt.distance(pnt2);
@@ -1880,17 +1816,16 @@ impl FilletBrep {
             ivl = new_3d_curve.reverse_parameterization(k, &ivl)?;
             ivl = uv_curve1
                 .as_mut()
-                .ok_or_else(|| SolidError::blend_missing(OP_EXT, "the first UV curve"))?
+                .ok_or_else(|| missing(OP_EXT))?
                 .reverse_parameterization(k, &ivl)?;
             ivl = uv_curve2
                 .as_mut()
-                .ok_or_else(|| SolidError::blend_missing(OP_EXT, "the second UV curve"))?
+                .ok_or_else(|| missing(OP_EXT))?
                 .reverse_parameterization(k, &ivl)?;
         }
 
         // Set edge geometry (pMateEU->SetUVCurve dereferences the mate)
-        let mate =
-            mate.ok_or_else(|| SolidError::blend_missing(OP_EXT, "the primary edge use's mate"))?;
+        let mate = mate.ok_or_else(|| missing(OP_EXT))?;
         self.set_edge_curves(
             curr_edge,
             prim,
@@ -1930,11 +1865,10 @@ impl FilletBrep {
         target: &Brep,
     ) -> Result<()> {
         const OP: &str = "blend::fillet_geom::p4::FilletBrep::calc_rail_int_end_surface";
-        let nul = |what| SolidError::blend_missing(OP, what);
         let corner = corners.corner(
             self.fillet_vertex(v)?
                 .fillet_corner()
-                .ok_or_else(|| nul("the vertex's corner"))?,
+                .ok_or_else(|| missing(OP))?,
         )?;
 
         // the end rib and this vertex's rail
@@ -1948,14 +1882,13 @@ impl FilletBrep {
                 rail = Some(e);
             }
         }
-        let rib = rib.ok_or_else(|| nul("the end rib"))?;
-        let rail = rail.ok_or_else(|| nul("the vertex's rail"))?;
-        let rib_eu = primary_edgeuse(self.brep(), rib)?
-            .ok_or_else(|| nul("the end rib's primary edge use"))?;
+        let rib = rib.ok_or_else(|| missing(OP))?;
+        let rail = rail.ok_or_else(|| missing(OP))?;
+        let rib_eu = primary_edgeuse(self.brep(), rib)?.ok_or_else(|| missing(OP))?;
         let fillet_geom = self
             .fillet_edgeuse(rib_eu)?
             .fillet_geom()
-            .ok_or_else(|| nul("the end rib's fillet geometry"))?;
+            .ok_or_else(|| missing(OP))?;
         let rail_curve = edge::curve(self.brep(), rail)?.cloned();
         let (true, Some(rail_curve)) = (self.geom(fillet_geom)?.has_fillet_surface(), rail_curve)
         else {
@@ -1971,14 +1904,14 @@ impl FilletBrep {
             let end_face = self
                 .fillet_edge(rib)?
                 .original_face()
-                .ok_or_else(|| nul("the end rib's original face"))?;
+                .ok_or_else(|| missing(OP))?;
             match context.extended_surface(corner, end_face)? {
                 Some(s) => s.clone(),
                 None => target
                     .face(end_face)?
                     .surface
                     .as_ref()
-                    .ok_or_else(|| nul("the end face's surface"))?
+                    .ok_or_else(|| missing(OP))?
                     .clone_for_evaluation()?,
             }
         };
@@ -1986,24 +1919,16 @@ impl FilletBrep {
         let sid = self
             .geom(fillet_geom)?
             .fillet_solver()
-            .ok_or_else(|| nul("the geometry's fillet solver"))?;
+            .ok_or_else(|| missing(OP))?;
         let tol = context.solver(sid)?.this_approx_tol_3d();
 
-        let vert_pnt = vertex::point(
-            target,
-            corner
-                .filleted_vertex()
-                .ok_or_else(|| nul("the corner's filleted vertex"))?,
-        )?;
+        let vert_pnt = vertex::point(target, corner.filleted_vertex().ok_or_else(|| missing(OP))?)?;
         let best = rail_crossing_nearest(k, &rail_curve, &end_surface, vert_pnt, tol)?;
         let Some((_, best)) = best else {
             self.fillet_vertex_mut(v)?
                 .set_status(FilStatus::SurfIntFailure);
             // SER_MSG: the rail does not meet the end face's surface
-            return Err(SolidError::blend_failed(
-                OP,
-                "the rail does not meet the end face's surface",
-            ));
+            return Err(stage_failed(OP));
         };
 
         set_vertex_point(self.brep_mut(), v, best)?;
@@ -2022,8 +1947,7 @@ impl FilletBrep {
     /// dereferences it); `SM_ERR` from `GetRailIndexOfVertexuse` when no rail end
     /// matches.
     pub fn rail_index_of_vertex(&self, g: FilletGeomId, fvtx: Option<VertexId>) -> Result<usize> {
-        let fvtx =
-            fvtx.ok_or_else(|| SolidError::blend_missing(OP_RAIL_IDX, "the fillet vertex"))?;
+        let fvtx = fvtx.ok_or_else(|| missing(OP_RAIL_IDX))?;
 
         // Find the FilletVertexuse of this FilletVertex
         let mut fvu_to_use = None;
@@ -2031,7 +1955,7 @@ impl FilletBrep {
             for j in 0..2 {
                 let fvu_tmp = self
                     .rail_vertexuse(g, i, j)?
-                    .ok_or_else(|| SolidError::blend_missing(OP_RAIL_IDX, "a rail vertex use"))?;
+                    .ok_or_else(|| missing(OP_RAIL_IDX))?;
                 if self.brep().vertexuse(fvu_tmp)?.vertex == Some(fvtx) {
                     fvu_to_use = Some(fvu_tmp);
                     break 'outer;
@@ -2114,13 +2038,11 @@ impl FilletBrep {
         env: &mut edge::NotifyEnv<'_>,
         surface_backend: FaceSurfaceBackend,
     ) -> Result<()> {
-        let nul = |what| SolidError::blend_missing(OP_FACE, what);
-
         // check state - must have a FilletSurface
         let uv_domain = self
             .geom(g)?
             .fillet_surface(None)?
-            .ok_or_else(|| nul("the fillet surface"))?
+            .ok_or_else(|| missing(OP_FACE))?
             .natural_uv_domain_with_nurb(k)?;
         let (geom_type, solver_id, rails, other_rails1, other_rails2, side_eus) = {
             let geom = self.geom(g)?;
@@ -2149,12 +2071,12 @@ impl FilletBrep {
                     .get(ii)
                     .copied()
                     .flatten()
-                    .ok_or_else(|| nul("a rail of the geometry"))?;
-                let prim = primary_edgeuse(self.brep(), this_rail)?
-                    .ok_or_else(|| nul("the rail's primary edge use"))?;
+                    .ok_or_else(|| missing(OP_FACE))?;
+                let prim =
+                    primary_edgeuse(self.brep(), this_rail)?.ok_or_else(|| missing(OP_FACE))?;
                 let uv_curve = eu1::uv_trim_curve(self.brep(), prim)?
                     .0
-                    .ok_or_else(|| nul("the rail's UV curve"))?;
+                    .ok_or_else(|| missing(OP_FACE))?;
                 let t = self.brep().edge(this_rail)?.interval.evaluate(0.5);
                 *slot = uv_curve.evaluate_point(k, t)?;
             }
@@ -2163,7 +2085,7 @@ impl FilletBrep {
         }
 
         // pick 2d or 3d tolerance depending on bUseUVCurve
-        let sid = solver_id.ok_or_else(|| nul("the geometry's fillet solver"))?;
+        let sid = solver_id.ok_or_else(|| missing(OP_FACE))?;
         // SmApproxTol3d sApproxTol3d = GetThisApproxTol3d(): USE_DEFAULT, then fabs
         let approx_tol_3d = crate::geom::tol::approx_tol3d(k, resolve(sid, OP_FACE)?.approx_tol_3d);
         let d3d_tol = approx_tol_3d;
@@ -2178,7 +2100,7 @@ impl FilletBrep {
                 uv_dir,
                 self.geom(g)?
                     .fillet_surface(None)?
-                    .ok_or_else(|| nul("the fillet surface"))?,
+                    .ok_or_else(|| missing(OP_FACE))?,
             )?;
         }
 
@@ -2187,7 +2109,7 @@ impl FilletBrep {
                 .edge(e)?
                 .curve
                 .clone()
-                .ok_or_else(|| nul("the rail's curve"))
+                .ok_or_else(|| missing(OP_FACE))
         };
         let eu_uv_curve = |fb: &Self, eu: EdgeuseId| -> Result<Option<Curve>> {
             Ok(eu1::uv_trim_curve(fb.brep(), eu)?.0.cloned())
@@ -2201,9 +2123,8 @@ impl FilletBrep {
             .get(start_rail_indx)
             .copied()
             .flatten()
-            .ok_or_else(|| nul("the start rail"))?;
-        let mut prim = primary_edgeuse(self.brep(), rail0)?
-            .ok_or_else(|| nul("the start rail's primary edge use"))?;
+            .ok_or_else(|| missing(OP_FACE))?;
+        let mut prim = primary_edgeuse(self.brep(), rail0)?.ok_or_else(|| missing(OP_FACE))?;
         let uv_curve0 = if use_uv_curves {
             eu_uv_curve(self, prim)?
         } else {
@@ -2233,8 +2154,7 @@ impl FilletBrep {
         // Next Add MinV OtherRails
         let total = other_rails.len();
         for (ii, &other_rail) in other_rails.iter().enumerate() {
-            prim = primary_edgeuse(self.brep(), other_rail)?
-                .ok_or_else(|| nul("the other rail's primary edge use"))?;
+            prim = primary_edgeuse(self.brep(), other_rail)?.ok_or_else(|| missing(OP_FACE))?;
             lists1.curves_3d.push(Some(rail_curve(self, other_rail)?));
             lists1.uv_curves.push(eu_uv_curve(self, prim)?);
             lists1.orients.push(OrientType::Same);
@@ -2251,7 +2171,7 @@ impl FilletBrep {
             .get(1 - start_rail_indx)
             .copied()
             .flatten()
-            .ok_or_else(|| nul("the end rail"))?;
+            .ok_or_else(|| missing(OP_FACE))?;
         let mut start_fv1 = edge::vertex(self.brep(), rail1)?;
         let mut end_fv1 = edge::other_vertex(self.brep(), rail1, start_fv1)?;
         let other_rails1 = if start_rail_indx == 1 {
@@ -2262,8 +2182,7 @@ impl FilletBrep {
 
         // For this side go backwards
         for (ii, &other_rail) in other_rails1.iter().enumerate().rev() {
-            prim = primary_edgeuse(self.brep(), other_rail)?
-                .ok_or_else(|| nul("the other rail's primary edge use"))?;
+            prim = primary_edgeuse(self.brep(), other_rail)?.ok_or_else(|| missing(OP_FACE))?;
             lists2.curves_3d.push(Some(rail_curve(self, other_rail)?));
             lists2.uv_curves.push(eu_uv_curve(self, prim)?);
             lists2.orients.push(OrientType::Opposite);
@@ -2276,8 +2195,7 @@ impl FilletBrep {
         }
 
         // Finally load the MaxV rail into OrderedEdge List2.
-        prim = primary_edgeuse(self.brep(), rail1)?
-            .ok_or_else(|| nul("the end rail's primary edge use"))?;
+        prim = primary_edgeuse(self.brep(), rail1)?.ok_or_else(|| missing(OP_FACE))?;
         lists2.curves_3d.push(Some(rail_curve(self, rail1)?));
         lists2.uv_curves.push(eu_uv_curve(self, prim)?);
         lists2.orients.push(OrientType::Opposite);
@@ -2314,7 +2232,7 @@ impl FilletBrep {
                 approx_tol_3d,
                 self.geom(g)?
                     .fillet_surface(None)?
-                    .ok_or_else(|| nul("the fillet surface"))?,
+                    .ok_or_else(|| missing(OP_FACE))?,
                 [
                     (last.as_ref(), OrientType::Same),
                     (first.as_ref(), OrientType::Same),
@@ -2357,7 +2275,7 @@ impl FilletBrep {
                 approx_tol_3d,
                 self.geom(g)?
                     .fillet_surface(None)?
-                    .ok_or_else(|| nul("the fillet surface"))?,
+                    .ok_or_else(|| missing(OP_FACE))?,
                 [
                     (last.as_ref(), OrientType::Opposite),
                     (first.as_ref(), OrientType::Opposite),
@@ -2375,7 +2293,7 @@ impl FilletBrep {
                 .curves_3d
                 .get(m)
                 .and_then(Option::as_ref)
-                .ok_or_else(|| nul("a boundary curve"))?
+                .ok_or_else(|| missing(OP_FACE))?
                 .is_degenerate(k, EFF_ZERO, None)?;
             if degenerate {
                 lists1.curves_3d.remove(m);
@@ -2396,18 +2314,15 @@ impl FilletBrep {
         let mut curves_3d = Vec::with_capacity(lists1.curves_3d.len());
         let mut uv_curves = Vec::with_capacity(lists1.uv_curves.len());
         for (c, uv) in lists1.curves_3d.iter().zip(&lists1.uv_curves) {
-            let c = c.as_ref().ok_or_else(|| nul("a boundary curve"))?;
-            as_b_spline(c).ok_or_else(|| nul("the boundary curve's B-spline form"))?;
+            let c = c.as_ref().ok_or_else(|| missing(OP_FACE))?;
+            as_b_spline(c).ok_or_else(|| missing(OP_FACE))?;
             let copy = c.copy(k)?;
-            as_b_spline(&copy).ok_or_else(|| nul("the copied boundary curve's B-spline form"))?;
+            as_b_spline(&copy).ok_or_else(|| missing(OP_FACE))?;
             curves_3d.push(copy);
 
             // skip copying uvTrimCurves when not using them
             if use_uv_curves {
-                uv_curves.push(
-                    uv.clone()
-                        .ok_or_else(|| nul("a boundary curve's UV curve"))?,
-                );
+                uv_curves.push(uv.clone().ok_or_else(|| missing(OP_FACE))?);
             }
         }
 
@@ -2424,7 +2339,7 @@ impl FilletBrep {
             let surface = self
                 .geom(g)?
                 .fillet_surface(None)?
-                .ok_or_else(|| nul("the fillet surface"))?
+                .ok_or_else(|| missing(OP_FACE))?
                 .clone();
             if use_uv_curves {
                 let input = FaceCurvesInput {
@@ -2477,7 +2392,7 @@ impl FilletBrep {
                 .geom_mut(g)?
                 .fillet_surface
                 .take()
-                .ok_or_else(|| nul("the fillet surface"))?;
+                .ok_or_else(|| missing(OP_FACE))?;
             let super::p1::FilletSurfaceStorage::Owned(surface) = owned else {
                 // Earlier checked reads already reject a transferred surface.
                 self.geom_mut(g)?.fillet_surface = Some(owned);
@@ -2534,7 +2449,7 @@ impl FilletBrep {
                 .geom_mut(g)?
                 .fillet_surface
                 .take()
-                .ok_or_else(|| nul("the fillet surface"))?;
+                .ok_or_else(|| missing(OP_FACE))?;
             let super::p1::FilletSurfaceStorage::Owned(surface) = owned else {
                 self.geom_mut(g)?.fillet_surface = Some(owned);
                 return Err(SolidError::invalid_input(
@@ -2579,14 +2494,13 @@ impl FilletBrep {
         ends: [(Option<&Option<Curve>>, OrientType); 2],
         caps: &mut CurveLists,
     ) -> Result<()> {
-        let nul = |what| SolidError::blend_missing(OP_FACE, what);
         let [(c1, o1), (c2, o2)] = ends;
         let c1 = c1
             .and_then(Option::as_ref)
-            .ok_or_else(|| nul("the first end curve"))?;
+            .ok_or_else(|| missing(OP_FACE))?;
         let c2 = c2
             .and_then(Option::as_ref)
-            .ok_or_else(|| nul("the second end curve"))?;
+            .ok_or_else(|| missing(OP_FACE))?;
         let mut curves_3d = Vec::new();
         let mut uv_curves = Vec::new();
         let mut orients = Vec::new();
@@ -2628,12 +2542,11 @@ impl FilletBrep {
         target: &mut Brep,
         context: &mut impl IntersectionTopologyContext,
     ) -> Result<()> {
-        let nul = |what| SolidError::blend_missing(OP_INSERT, what);
         let Some(solver_id) = self.geom(g)?.fillet_solver() else {
-            return Err(nul("the geometry's fillet solver"));
+            return Err(missing(OP_INSERT));
         };
         if solver.executive.is_none() {
-            return Err(nul("the solver's executive"));
+            return Err(missing(OP_INSERT));
         }
         context.begin_intersection(solver)?;
         let fillet_surface = context.surface_binding(self, g)?;
@@ -2641,7 +2554,7 @@ impl FilletBrep {
 
         for ii in 0..2 {
             let geom = self.geom(g)?;
-            let mut rails = vec![geom.rail(ii).ok_or_else(|| nul("the geometry's rail"))?];
+            let mut rails = vec![geom.rail(ii).ok_or_else(|| missing(OP_INSERT))?];
             rails.extend_from_slice(if ii == 0 {
                 &geom.other_rails1
             } else {
@@ -2656,7 +2569,7 @@ impl FilletBrep {
                     .edge(rail)?
                     .curve
                     .as_ref()
-                    .ok_or_else(|| nul("the rail's curve"))?;
+                    .ok_or_else(|| missing(OP_INSERT))?;
                 // Native evaluates degeneracy before the nullable face/edge checks.
                 if curve.is_degenerate(context.kernel(), EFF_ZERO, None)? {
                     continue;
@@ -2711,8 +2624,7 @@ impl FilletBrep {
         }
         let side_eus = self.geom(g)?.side_eus.clone();
         for side_eu in side_eus {
-            let edge =
-                eu1::edge(self.brep(), side_eu)?.ok_or_else(|| nul("the side edge use's edge"))?;
+            let edge = eu1::edge(self.brep(), side_eu)?.ok_or_else(|| missing(OP_INSERT))?;
             let face = self.fillet_edge(edge)?.original_face();
             let managed_edge = self.fillet_edge(edge)?.fillet_brep_edge();
             let users = context.attribute_edges()?;
@@ -2781,11 +2693,10 @@ impl FilletBrep {
         solvers: &[FilletSolver],
         target: &mut Brep,
     ) -> Result<()> {
-        let nul = |what| SolidError::blend_missing(OP_BLEND, what);
         let sid = self
             .geom(g)?
             .fillet_solver()
-            .ok_or_else(|| nul("the geometry's fillet solver"))?;
+            .ok_or_else(|| missing(OP_BLEND))?;
         let fil_solver = solver_of(solvers, sid, OP_BLEND)?;
         self.calc_blending_geom_of_solver(k, g, fil_solver, target)
     }
@@ -2807,9 +2718,8 @@ impl FilletBrep {
         fil_solver: &FilletSolver,
         target: &mut Brep,
     ) -> Result<()> {
-        let nul = |what| SolidError::blend_missing(OP_BLEND, what);
         if self.geom(g)?.fillet_solver().is_none() {
-            return Err(nul("the geometry's fillet solver"));
+            return Err(missing(OP_BLEND));
         }
         let approx_tol_3d = fil_solver.approx_tol_3d;
         let tangency_tol_radians = fil_solver.tangency_tolerance;
@@ -2817,15 +2727,9 @@ impl FilletBrep {
         // Recreate each rail curve by sampling points evenly spaced in arc length
         // (m_vRails[i] is read as the loop reaches it: a failure on rail 0 comes first)
         for i in 0..2 {
-            let rail = self
-                .geom(g)?
-                .rail(i)
-                .ok_or_else(|| nul("the geometry's rail"))?;
+            let rail = self.geom(g)?.rail(i).ok_or_else(|| missing(OP_BLEND))?;
             if self.fillet_edge(rail)?.fillet_edge_type() != FilletEdgeType::BlendingRail {
-                return Err(SolidError::blend_failed(
-                    OP_BLEND,
-                    "the rail is not a blending rail",
-                ));
+                return Err(stage_failed(OP_BLEND));
             }
             self.calc_blending_rail(k, rail, target)?;
             let rail_curve = self
@@ -2833,24 +2737,24 @@ impl FilletBrep {
                 .edge(rail)?
                 .curve
                 .clone()
-                .ok_or_else(|| nul("the rail's curve"))?;
-            as_b_spline(&rail_curve).ok_or_else(|| nul("the rail curve's B-spline form"))?;
+                .ok_or_else(|| missing(OP_BLEND))?;
+            as_b_spline(&rail_curve).ok_or_else(|| missing(OP_BLEND))?;
             let (_, mate) = self.prim_and_mate(rail, OP_BLEND)?;
             let uv_curve = eu1::uv_trim_curve(self.brep(), mate)?
                 .0
                 .cloned()
-                .ok_or_else(|| nul("the rail mate's UV curve"))?;
+                .ok_or_else(|| missing(OP_BLEND))?;
             let face = self
                 .fillet_edge(rail)?
                 .original_face()
-                .ok_or_else(|| nul("the rail's original face"))?;
+                .ok_or_else(|| missing(OP_BLEND))?;
             // the face's own surface (evaluated as a copy: the lift's trimmed surface
             // cache is made on `target` through the face, as upstream's GetFace())
             let base_surf = &target
                 .face(face)?
                 .surface
                 .as_ref()
-                .ok_or_else(|| nul("the face's surface"))?
+                .ok_or_else(|| missing(OP_BLEND))?
                 .clone_for_evaluation()?;
             let ivl = rail_curve.natural_interval();
             let accuracy = approx_tol_3d / 10.0;
@@ -2907,32 +2811,27 @@ impl FilletBrep {
         }
 
         // pRail1, pRail2 (both processed above)
-        let rail1 = self.geom(g)?.rail(0).ok_or_else(|| nul("the first rail"))?;
-        let rail2 = self
-            .geom(g)?
-            .rail(1)
-            .ok_or_else(|| nul("the second rail"))?;
+        let rail1 = self.geom(g)?.rail(0).ok_or_else(|| missing(OP_BLEND))?;
+        let rail2 = self.geom(g)?.rail(1).ok_or_else(|| missing(OP_BLEND))?;
 
         // Create ruled surface if we have linear cross sections
-        let fsg = fil_solver
-            .fsg
-            .ok_or_else(|| nul("the solver's surface generator"))?;
+        let fsg = fil_solver.fsg.ok_or_else(|| missing(OP_BLEND))?;
         if fsg.fillet_surface_generator_type() == FilletSurfaceGeneratorType::Linear {
             let c1 = self
                 .brep()
                 .edge(rail1)?
                 .curve
                 .as_ref()
-                .ok_or_else(|| nul("the first rail's curve"))?;
+                .ok_or_else(|| missing(OP_BLEND))?;
             let c2 = self
                 .brep()
                 .edge(rail2)?
                 .curve
                 .as_ref()
-                .ok_or_else(|| nul("the second rail's curve"))?;
+                .ok_or_else(|| missing(OP_BLEND))?;
             let ruled = BSplineSurface::create_ruled_surface(
-                as_b_spline(c1).ok_or_else(|| nul("the first rail curve's B-spline form"))?,
-                as_b_spline(c2).ok_or_else(|| nul("the second rail curve's B-spline form"))?,
+                as_b_spline(c1).ok_or_else(|| missing(OP_BLEND))?,
+                as_b_spline(c2).ok_or_else(|| missing(OP_BLEND))?,
                 SurfParamType::V,
             )?;
             self.geom_mut(g)?
@@ -2942,7 +2841,7 @@ impl FilletBrep {
 
         // Find 2 side edges (with type SM_FE_CROSS_SECTION)
         let cross_section_at = |fb: &Self, v: Option<VertexId>| -> Result<Option<EdgeId>> {
-            let v = v.ok_or_else(|| nul("the rail's end vertex"))?;
+            let v = v.ok_or_else(|| missing(OP_BLEND))?;
             for e in vertex::edges(fb.brep(), v, None)? {
                 if fb.fillet_edge(e)?.fillet_edge_type() == FilletEdgeType::CrossSection {
                     return Ok(Some(e));
@@ -2954,8 +2853,8 @@ impl FilletBrep {
         let start_edge = cross_section_at(self, start_vert)?;
         let end_vert = edge::other_vertex(self.brep(), rail1, start_vert)?;
         let end_edge = cross_section_at(self, end_vert)?;
-        let start_edge = start_edge.ok_or_else(|| nul("the start cross-section edge"))?;
-        let end_edge = end_edge.ok_or_else(|| nul("the end cross-section edge"))?;
+        let start_edge = start_edge.ok_or_else(|| missing(OP_BLEND))?;
+        let end_edge = end_edge.ok_or_else(|| missing(OP_BLEND))?;
 
         let fil_edges = [start_edge, rail1, end_edge, rail2];
         let orients = [
@@ -2974,11 +2873,11 @@ impl FilletBrep {
                 FilletEdgeType::BlendingRail
                 | FilletEdgeType::RailRailInterpolation
                 | FilletEdgeType::SetbackRail => {
-                    let mate = mate.ok_or_else(|| nul("the edge's mate"))?;
+                    let mate = mate.ok_or_else(|| missing(OP_BLEND))?;
                     let face = self
                         .fillet_edge(fe)?
                         .original_face()
-                        .ok_or_else(|| nul("the edge's original face"))?;
+                        .ok_or_else(|| missing(OP_BLEND))?;
                     (
                         eu1::uv_trim_curve(self.brep(), mate)?.0,
                         target.face(face)?.surface.as_ref(),
@@ -2988,7 +2887,7 @@ impl FilletBrep {
                     let fg = self
                         .fillet_edgeuse(prim)?
                         .fillet_geom()
-                        .ok_or_else(|| nul("the edge use's fillet geometry"))?;
+                        .ok_or_else(|| missing(OP_BLEND))?;
                     (
                         eu1::uv_trim_curve(self.brep(), prim)?.0,
                         self.geom(fg)?.fillet_surface(None)?,
@@ -3001,12 +2900,8 @@ impl FilletBrep {
                 .edge(fe)?
                 .curve
                 .as_ref()
-                .ok_or_else(|| nul("the boundary edge's curve"))?;
-            ordered_3d.push(
-                as_b_spline(c)
-                    .ok_or_else(|| nul("the boundary curve's B-spline form"))?
-                    .clone(),
-            );
+                .ok_or_else(|| missing(OP_BLEND))?;
+            ordered_3d.push(as_b_spline(c).ok_or_else(|| missing(OP_BLEND))?.clone());
             ordered_surfs.push(base_surface);
         }
         let nets: Vec<Option<BlendNeighbour<'_>>> = ordered_surfs
@@ -3026,7 +2921,7 @@ impl FilletBrep {
         let first = surfaces
             .into_iter()
             .next()
-            .ok_or_else(|| nul("the blending surface"))?;
+            .ok_or_else(|| missing(OP_BLEND))?;
         self.geom_mut(g)?
             .set_fillet_surface(Some(Surface::from(first)));
         Ok(())
@@ -3037,12 +2932,12 @@ impl FilletBrep {
 mod tests {
     use super::*;
     use crate::blend::fillet_geom::p1::{FilletGeom, FilletVertex};
-    use crate::error::blend::BlendFailure;
-    use crate::error::{SM_ERR, SM_ERR_NULL_POINTER};
+    use crate::error::SM_ERR;
 
-    /// The typed blend failure of `e` and the upstream status it keeps (#13790).
-    fn failure(e: &SolidError) -> (Option<&BlendFailure>, Option<i32>) {
-        (e.blend_failure(), e.upstream_status())
+    /// The operation of `e`, its typed blend failure and the upstream status it keeps
+    /// (#13790).
+    fn failure(e: &SolidError) -> (&'static str, Option<&BlendFailure>, Option<i32>) {
+        (e.operation(), e.blend_failure(), e.upstream_status())
     }
 
     fn kernel() -> Kernel {
@@ -3112,12 +3007,7 @@ mod tests {
         let e = create_uv_curve(&k, &fb, v[0], v[1], true, &srf, 1e-6).unwrap_err();
         assert_eq!(
             failure(&e),
-            (
-                Some(&BlendFailure::Failed(
-                    "the surface is not closed at its low-v corners"
-                )),
-                Some(SM_ERR)
-            )
+            (OP_UV, Some(&BlendFailure::StageFailed), Some(SM_ERR))
         );
     }
 
@@ -3211,12 +3101,7 @@ mod tests {
         let e = fb.calc_nx2_vert_fillet_x_fillet(&k, v[0], &[]).unwrap_err();
         assert_eq!(
             failure(&e),
-            (
-                Some(&BlendFailure::Failed(
-                    "the two fillet surfaces do not intersect"
-                )),
-                Some(SM_ERR)
-            )
+            (OP_NX2, Some(&BlendFailure::StageFailed), Some(SM_ERR))
         );
         assert_eq!(
             fb.fillet_vertex(v[0]).unwrap().status(),
@@ -3234,7 +3119,8 @@ mod tests {
         assert_eq!(
             failure(&e),
             (
-                Some(&BlendFailure::Missing("the fillet vertex's corner")),
+                OP_INT2,
+                Some(&BlendFailure::StageFailed),
                 Some(SM_ERR_NULL_POINTER)
             )
         );
@@ -3264,7 +3150,9 @@ mod tests {
         assert_eq!(
             failure(&e),
             (
-                Some(&BlendFailure::Missing("the vertex's corner")),
+                // the corner is looked up first, in CalcRailIntEndSurface
+                "blend::fillet_geom::p4::FilletBrep::calc_rail_int_end_surface",
+                Some(&BlendFailure::StageFailed),
                 Some(SM_ERR_NULL_POINTER)
             )
         );
@@ -3278,7 +3166,8 @@ mod tests {
         assert_eq!(
             failure(&e),
             (
-                Some(&BlendFailure::Missing("the fillet vertex's corner")),
+                OP_NX2,
+                Some(&BlendFailure::StageFailed),
                 Some(SM_ERR_NULL_POINTER)
             )
         );
@@ -3316,7 +3205,8 @@ mod tests {
         assert_eq!(
             failure(&e),
             (
-                Some(&BlendFailure::Missing("the geometry's fillet solver")),
+                OP_BLEND,
+                Some(&BlendFailure::StageFailed),
                 Some(SM_ERR_NULL_POINTER)
             )
         );

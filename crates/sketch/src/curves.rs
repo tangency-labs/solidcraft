@@ -389,6 +389,9 @@ pub fn spline_point_mode(p: &[Vec2], control: bool, degree: u8, periodic: bool, 
     if let Some(nurbs) = nurbs {
         return nurbs.point(p, degree, t).unwrap_or_else(|| p.first().copied().unwrap_or_default());
     }
+    if periodic && control {
+        return closed_control_point(p, degree, t);
+    }
     if !periodic {
         return spline_point(p, control, degree, t);
     }
@@ -414,6 +417,9 @@ pub fn spline_polyline_mode(p: &[Vec2], control: bool, degree: u8, periodic: boo
     if let Some(nurbs) = nurbs {
         return nurbs.polyline(p, degree);
     }
+    if periodic && control {
+        return closed_control_polyline(p, degree);
+    }
     if !periodic {
         return spline_polyline(p, control, degree);
     }
@@ -432,7 +438,43 @@ pub fn spline_polyline_mode(p: &[Vec2], control: bool, degree: u8, periodic: boo
     }
     out
 }
+/// Point of a closed control spline at `t` in [0, 1], over its pieces in turn.
+fn closed_control_point(p: &[Vec2], degree: u8, t: f64) -> Vec2 {
+    let Some(pieces) = crate::nurbs::closed_control_beziers(p, degree) else {
+        return p.first().copied().unwrap_or_default();
+    };
+    let x = t.clamp(0.0, 1.0) * pieces.len() as f64;
+    let i = (x.floor() as usize).min(pieces.len().saturating_sub(1));
+    let Some(seg) = pieces.get(i).and_then(|piece| solidcraft_geom::bezier(piece)) else {
+        return Vec2::ZERO;
+    };
+    seg.point_at((x - i as f64).clamp(0.0, 1.0))
+}
+
+/// Polyline of a closed control spline, its pieces sampled in turn; the last point is the first.
+fn closed_control_polyline(p: &[Vec2], degree: u8) -> Vec<Vec2> {
+    let Some(pieces) = crate::nurbs::closed_control_beziers(p, degree) else {
+        return Vec::new();
+    };
+    let mut out: Vec<Vec2> = Vec::new();
+    for seg in pieces.iter().filter_map(|piece| solidcraft_geom::bezier(piece)) {
+        for q in seg.polyline(CLOSED_SPLINE_TOL) {
+            if out.last().is_none_or(|l| l.dist(q) > 1e-12) {
+                out.push(q);
+            }
+        }
+    }
+    out
+}
+
+/// Sampling tolerance (mm) of a closed control spline's polyline.
+const CLOSED_SPLINE_TOL: f64 = 1e-3;
+
 pub fn spline_end_tangent_mode(p: &[Vec2], control: bool, periodic: bool, at_end: bool) -> Option<Vec2> {
+    if periodic && control {
+        // A closed control spline has no end, and its control points lie off the curve.
+        return None;
+    }
     if !periodic {
         return spline_end_tangent(p, control, at_end);
     }

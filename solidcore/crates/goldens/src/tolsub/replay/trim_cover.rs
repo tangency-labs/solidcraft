@@ -295,15 +295,6 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
         0xbcaae00cd12b54fb,
     ),
     (
-        "corpus.parity",
-        "Solids__boolean_trees.smp",
-        0xfeef7aa7ef37be9b,
-    ),
-    ("corpus.parity", "ss_plane_sph1.smp", 0xd99d8e796be91147),
-    ("corpus.parity", "ss_plane_sph2.smp", 0x636f1d1ad6b901ce),
-    ("corpus.parity", "ss_plane_sph3.smp", 0x25e92907174d3b69),
-    ("corpus.parity", "ss_plane_sph4.smp", 0x5e13d8cf951b9990),
-    (
         "heal.stitch_p1",
         "file_boolean_trees_result.smb_advanced",
         0x21af45adf9b9c154,

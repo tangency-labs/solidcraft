@@ -1375,6 +1375,7 @@ impl Default for EvalCache {
 #[derive(Clone, Debug)]
 struct CachedEval<S> {
     error: Option<String>,
+    error_code: Option<kernel::ErrorCode>,
     warning: Option<String>,
     import_report: Option<Arc<kernel::ImportReport>>,
     repair: Option<Arc<kernel::RepairReport>>,
@@ -1541,6 +1542,7 @@ impl<S> CachedEval<S> {
     fn with<T>(&self, state: T) -> CachedEval<T> {
         CachedEval {
             error: self.error.clone(),
+            error_code: self.error_code.clone(),
             warning: self.warning.clone(),
             import_report: self.import_report.clone(),
             repair: self.repair.clone(),
@@ -1721,6 +1723,10 @@ pub struct FeatureResult {
     pub id: u64,
     pub name: String,
     pub error: Option<String>,
+    /// The stable code of the kernel call `error` was made from ([`kernel::failure`]), when it was
+    /// made from one: to group and replay failures by, without reading `error`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<kernel::ErrorCode>,
     /// `error` is the kernel's internal error (a panic it caught, [`kernel::KernelError::Internal`]),
     /// not the feature's failure: the command that made the feature reports it as one.
     #[serde(skip)]
@@ -1798,6 +1804,8 @@ pub struct Model {
     /// Results another copy of this model evaluated (ahead, off the window thread) that
     /// `evaluate` takes for features they match ([`Model::prime`]), with that copy's context.
     primed: Option<(u64, Arc<std::collections::HashMap<u64, FeatureResult>>)>,
+    /// Mesh bodies from the import reader, offered to the next evaluation only.
+    prepared_meshes: Option<(u64, PreparedMeshImport)>,
     /// Shared with copies of this evaluator; states hold only a weak reference.
     frame_bodies: Arc<std::sync::Mutex<FrameBodies>>,
     /// When SMLib's check runs on the features this model evaluates ([`Model::set_validation`]).
@@ -2246,6 +2254,14 @@ fn chain_fingerprint(
         }
         fp = h.finish();
     }
+    // A frame member is built turned by the Rotate steps after it, which the chain up to it
+    // doesn't cover.
+    if let Some(turns) = turns_digest(doc, vals, f) {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        fp.hash(&mut h);
+        turns.hash(&mut h);
+        fp = h.finish();
+    }
     // A pattern or mirror of features replays its sources' definitions wherever they are in the
     // timeline. One made with the timeline rolled back comes before them, where the chain doesn't
     // cover them: its copies kept the size the sources had when they were made.
@@ -2255,12 +2271,33 @@ fn chain_fingerprint(
     {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         fp.hash(&mut h);
+        // When frame members become patternable or mirrorable, fold `turns_digest` into the replay.
         for g in replayed_sources(doc, features) {
             fingerprint(doc, 0, g, vals, false, steps).hash(&mut h);
         }
         fp = h.finish();
     }
     fp
+}
+
+/// The Rotate steps after frame member `f` that may turn it ([`frame_member::turn_steps`]), every
+/// one, since one whose angle fails gives way to an earlier one, and the values of the parameters
+/// their angles use. None for a frame member without them and any other feature, whose keys are
+/// then as they were before Rotate steps.
+fn turns_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature) -> Option<u64> {
+    let FeatureKind::FrameMember { .. } = &f.kind else { return None };
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let mut any = false;
+    for (line, e) in frame_member::turn_steps(doc, crate::FeatureId(f.id)) {
+        any = true;
+        line.hash(&mut h);
+        e.hash(&mut h);
+        for n in expr::references(e) {
+            // Its unit too: `30` and `30 rad` are the same number.
+            vals.get(&n).map(|v| (v.v.to_bits(), v.len, v.ang)).hash(&mut h);
+        }
+    }
+    any.then(|| h.finish())
 }
 
 /// The features a pattern or mirror of `features` replays: each source, and the sources of one
@@ -2653,7 +2690,11 @@ impl EvalKey {
         steps: &ImportDigests,
         geo: u64,
     ) -> EvalKey {
-        let local = fingerprint(doc, 0, f, vals, false, steps) ^ placement_digest(doc, f, Some(st)) ^ construct_digest(doc, vals, f, Some(st));
+        // A frame member is built turned by the Rotate steps after it.
+        let local = fingerprint(doc, 0, f, vals, false, steps)
+            ^ placement_digest(doc, f, Some(st))
+            ^ construct_digest(doc, vals, f, Some(st))
+            ^ turns_digest(doc, vals, f).unwrap_or(0);
         let whole = cache_key(f, fp, local, ctx, st);
         let reads = f.reads(doc, st).map(|read| {
             let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -3251,10 +3292,11 @@ fn plane_datum_paths(p: &PlaneRef, out: &mut Vec<Vec<u64>>) {
             plane_datum_paths(base, out);
             geo_datum_paths(point, out);
         }
-        PlaneRef::Midplane { a, b }
+        PlaneRef::Midplane { a, b, .. }
         | PlaneRef::TwoEdges { a, b }
         | PlaneRef::AxisPoint { axis: a, point: b }
-        | PlaneRef::Perpendicular { plane: a, line: b } => {
+        | PlaneRef::Perpendicular { plane: a, line: b }
+        | PlaneRef::SquareToLine { line: a, point: b } => {
             geo_datum_paths(a, out);
             geo_datum_paths(b, out);
         }
@@ -3298,16 +3340,32 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     let mut reads = PlacementReads::default();
     let mut frame = None;
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    // A sketch, profile or path of another component is moved through both placements.
-    for (sketch, _) in f.kind.profile_sels() {
-        if doc.feature(sketch).is_some_and(|s| s.component != f.component) {
-            reads.sketch(doc, sketch);
-            // A later transfer can preserve this profile's historical frame. Changes to that
-            // boundary (including suppression and rollback) must invalidate the constructor.
-            if let Some(relative) = crate::body_transfer::profile_frame(doc, f, sketch) {
-                "transferred profile".hash(&mut h);
-                sketch.hash(&mut h);
-                hash_placement(&relative, &mut h);
+    let mut has_captured_profile = false;
+    // A sketch, profile or path of another component is moved through both placements, unless the
+    // feature captured its component's frame at creation time (in which case only the sketch's
+    // component motion relative to their common ancestor affects the local profile).
+    if let Some(consumer_in_lca) = f.profile_frame
+        && let Some(sketch) = f.kind.constructor_profile_sketch()
+    {
+        let owner = doc.feature(sketch).map(|s| s.component).unwrap_or(0);
+        let lca = doc.common_ancestor(f.component, owner);
+        let owner_in_lca = doc.component_transform_in(owner, lca);
+        "captured profile frame".hash(&mut h);
+        sketch.hash(&mut h);
+        hash_placement(&consumer_in_lca, &mut h);
+        hash_placement(&owner_in_lca, &mut h);
+        has_captured_profile = true;
+    } else {
+        for (sketch, _) in f.kind.profile_sels() {
+            if doc.feature(sketch).is_some_and(|s| s.component != f.component) {
+                reads.sketch(doc, sketch);
+                // A later transfer can preserve this profile's historical frame. Changes to that
+                // boundary (including suppression and rollback) must invalidate the constructor.
+                if let Some(relative) = crate::body_transfer::profile_frame(doc, f, sketch) {
+                    "transferred profile".hash(&mut h);
+                    sketch.hash(&mut h);
+                    hash_placement(&relative, &mut h);
+                }
             }
         }
     }
@@ -3473,7 +3531,7 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     }
     reads.paths.extend(datums);
     if reads.is_empty() {
-        return 0;
+        return if has_captured_profile { h.finish() } else { 0 };
     }
     let frame = frame.unwrap_or_else(|| doc.component_transform(f.component));
     let Some(inverse) = crate::mat_inverse(&frame) else { return placements_hash(doc) };
@@ -3898,6 +3956,12 @@ impl Model {
         self.primed = None;
     }
 
+    /// Offer the import reader's validated bodies for the new feature's first evaluation.
+    pub fn prime_mesh_import(&mut self, id: u64, meshes: PreparedMeshImport) {
+        self.prepared_meshes = Some((id, meshes));
+        self.placement_inputs = None;
+    }
+
     /// When SMLib's check runs on the features this model evaluates.
     pub fn validation(&self) -> kernel::Validation {
         self.validation
@@ -3921,6 +3985,7 @@ impl Model {
 
     /// Re-evaluate the document, reusing results up to the first changed feature.
     pub fn evaluate(&mut self, doc: &Document) {
+        let prepared_meshes = self.prepared_meshes.take();
         // A failed sketch held for its editor is built again from the evaluated design: when the
         // sketch and every feature after it fail, the results end in the state they ended in
         // before, which would keep showing the sketch as it was before the edit.
@@ -4081,6 +4146,7 @@ impl Model {
                         id: f.id,
                         name: f.name.clone(),
                         error: None,
+                        error_code: None,
                         internal: false,
                         warning: None,
                         import_report: None,
@@ -4116,6 +4182,7 @@ impl Model {
                         id: f.id,
                         name: f.name.clone(),
                         error: Some(e),
+                        error_code: None,
                         internal: false,
                         warning: None,
                         import_report: None,
@@ -4163,6 +4230,7 @@ impl Model {
                         id: f.id,
                         name: f.name.clone(),
                         error: c.error,
+                        error_code: c.error_code,
                         internal: false,
                         warning: c.warning,
                         import_report: c.import_report,
@@ -4205,6 +4273,8 @@ impl Model {
                 // Each feature computed is a profiler span named after its kind.
                 let _feature_span = solidcraft_profile::span("feature", f.kind.type_name());
                 let before = state.clone();
+                // A kernel call that failed before this feature is not its failure.
+                kernel::failure::clear();
                 let t0 = now();
                 let (mut next, cached) = match reused {
                     Some((next, c)) => {
@@ -4251,6 +4321,9 @@ impl Model {
                 // The bodies whose check runs beside the features after this one.
                 let mut apart: Option<(Vec<(String, kernel::KeptCheck)>, Vec<(String, Body, bool)>)> = None;
                 let refused = checks.refused(i);
+                // The feature failed in the kernel (not for a parameter, a reference or a rule of
+                // the design's): its kernel call's code is the last that failed on this thread.
+                let kernel_failed = std::cell::Cell::new(false);
                 let mut r = match frame_error.or(bad_param) {
                     _ if cached.is_some() => Ok(()),
                     Some(e) => Err(kernel::KernelError::Failed(e)),
@@ -4268,7 +4341,8 @@ impl Model {
                         let _val_guard = EvalValidationGuard::new(validation);
                         let (r, deferred) = kernel::validating(validation, || {
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = self.import_digests.heals(f.id).cloned());
-                            let r = eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair, heal);
+                            let meshes = prepared_meshes.as_ref().filter(|(id, _)| *id == f.id).map(|(_, meshes)| meshes);
+                            let r = eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair, heal, meshes);
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = None);
                             r
                         });
@@ -4276,6 +4350,7 @@ impl Model {
                             // A panic the kernel caught stays one.
                             crate::DocError::Kernel(kernel::KernelError::Internal(m)) => kernel::KernelError::Internal(m),
                             e => {
+                                kernel_failed.set(matches!(e, crate::DocError::Kernel(_)));
                                 if let crate::DocError::LostProjections { links, .. } = &e {
                                     lost_projections = Some(Arc::new(links.clone()));
                                 }
@@ -4408,12 +4483,21 @@ impl Model {
                     }
                     Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
                 };
+                // The kernel call it failed with, when it failed in the kernel; a result taken from the
+                // cache keeps the code it was made with.
+                let error_code = match (&cached, &error) {
+                    (Some(c), Some(_)) => c.error_code.clone(),
+                    (None, Some(_)) if kernel_failed.get() => kernel::failure::last(),
+                    (None, Some(_)) => None,
+                    (_, None) => None,
+                };
                 let lost_projections = lost_projections.filter(|_| error.is_some());
                 // A panic is no result to reuse: the kernel was replaced after it. Work its watcher
                 // stopped may have been cut short (a boolean that gave up): it is not kept either.
                 if !self.no_cache && !watched.cancelled() && !internal {
                     let whole = CachedEval {
                         error: error.clone(),
+                        error_code: error_code.clone(),
                         warning: warning.clone(),
                         import_report: import_report.clone(),
                         repair: repair.clone(),
@@ -4439,6 +4523,7 @@ impl Model {
                     id: f.id,
                     name: f.name.clone(),
                     error,
+                    error_code,
                     internal,
                     warning,
                     import_report,
@@ -4672,15 +4757,21 @@ fn point(vals: &BTreeMap<String, Value>, p: &crate::PointExpr) -> Result<Vec3> {
 }
 
 pub(crate) fn val(vals: &BTreeMap<String, Value>, e: &str, k: Kind) -> Result<f64> {
+    val_with(vals, e, k, None)
+}
+
+/// [`val`], with the coordinates of points the expression may read (`p1.x`): `members`
+/// resolves the point's name and the coordinate (`x` or `y`) to its value.
+pub(crate) fn val_with(vals: &BTreeMap<String, Value>, e: &str, k: Kind, members: Option<&dyn Fn(&str, &str) -> Result<Value>>) -> Result<f64> {
     let scale = vals.get(DESIGN_LEN).map(|x| x.v).unwrap_or(1.0);
+    let look = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
     // Non-literal lengths (a parameter ± a bare number) must read that bare number in the design's
     // units during the expression, not only when the whole result is unit-less (#9015).
     if k == Kind::Length && scale != 1.0 && !expr::is_literal(e) {
         let defaults = expr::Defaults { len: scale, ..expr::Defaults::default() };
-        let look = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
-        return expr::eval_with_defaults(e, &look, defaults)?.to_kind_in(k, defaults);
+        return expr::eval_with_defaults_members(e, &look, members, defaults)?.to_kind_in(k, defaults);
     }
-    Document::eval_in(vals, e, k)
+    expr::eval_with_defaults_members(e, &look, members, expr::Defaults::default())?.to_kind(k)
 }
 
 #[cfg(test)]
@@ -4944,13 +5035,13 @@ fn absorb_sheet_cuts(
     for (i, absorbed) in crate::sheet_surface_cuts::absorb(before, after, f, weigh || !cuts, drawn.as_ref())? {
         let (mut sk, built) = match absorbed {
             crate::sheet_surface_cuts::Absorbed::Read(sk, built) => (*sk, built),
-            // An intersect keeps what lies in its tool and takes the rest: refused, it says so in
-            // the words a flat-first sheet uses for machining it can't keep.
+            // An intersect keeps what lies in its tool and takes the rest: refused, it says what
+            // the sheet can read back instead.
             crate::sheet_surface_cuts::Absorbed::Refused(why)
                 if cuts && matches!(&f.kind, FeatureKind::Extrude { operation: Operation::Intersect, .. }) =>
             {
                 return Err(DocError::Invalid(format!(
-                    "{why}; this sheet machining cannot be preserved in its flat material: use a parallel extrude, or unfold the sheet before intersecting"
+                    "{why}; this sheet machining cannot be read back onto the sheet: use a parallel extrude, or unfold the sheet before intersecting"
                 )));
             }
             crate::sheet_surface_cuts::Absorbed::Refused(why) if cuts => return Err(DocError::Invalid(why)),
@@ -5164,8 +5255,10 @@ fn intersection_tool_union(tools: Vec<Traced>) -> Result<Vec<Traced>> {
 }
 
 /// Refuses a cut or intersect of `tools` that would change the sheet's body `body`, for machining
-/// the sheet can't keep: a cut that meets the body changes it, as does an intersect whose tools
-/// leave some of it out.
+/// the sheet can't read back: a cut is a 3D boolean on the folded body, which the sheet reads back
+/// onto its panels square through them or as a pocket, so walls not square to the sheet have no
+/// place on it. A cut that meets the body changes it, as does an intersect whose tools leave some
+/// of it out.
 fn sheet_boolean_unchanged(body: &Body, tools: &[Body], op: Operation) -> Result<()> {
     let united;
     let tools: &[Body] = if op == Operation::Intersect {
@@ -5177,7 +5270,7 @@ fn sheet_boolean_unchanged(body: &Body, tools: &[Body], op: Operation) -> Result
     let test = if op == Operation::Cut { BoolOp::Intersect } else { BoolOp::Cut };
     for tool in tools {
         if kernel::boolean(body, tool, test)?.is_some() {
-            return Err(DocError::Invalid("this sheet machining cannot be preserved in its flat material: use a parallel, untapered extrude pocket/cut, or unfold before intersecting; unsupported 3D sheet machining is refused to prevent material restoration".into()));
+            return Err(DocError::Invalid("this sheet machining cannot be read back onto the sheet: its walls are not square to the sheet (a tapered cut that stops inside a panel's thickness, or a tapered intersect); use a parallel, untapered extrude cut or pocket, or unfold the sheet before intersecting".into()));
         }
     }
     Ok(())
@@ -5634,6 +5727,13 @@ fn apply_traced_with(
         }
         v
     };
+    // A surface body is no solid to join a solid tool with: the union of the two fails in the
+    // kernel. A join that names no target leaves the surface bodies alone, Thicken's own source
+    // among them (#12326), and joins the solids; with none it makes a new body. A named surface
+    // target is not dropped here, and a tool that is itself a surface keeps its targets.
+    if op == Operation::Join && !named && tools.iter().all(|t| !t.body.is_mesh() && !t.body.is_surface()) {
+        target_idx.retain(|&i| state.bodies.get(i).is_none_or(|b| !b.is_surface()));
+    }
     // Bodies that take part besides the feature's own targets: the body a Join extrude runs to
     // joins with the tool (#6424), when it is in the feature's own component. A body of another
     // component (the shell a connector's boss runs up to) joins only when the feature names it:
@@ -8535,6 +8635,9 @@ fn feature_tools_with_constructor(
                 &*axis_state(doc, st, f.component, axis)?,
                 &|name| construction_axis_in(Some(doc), st, name, f.component),
                 &|owner, curve| {
+                    if owner == sketch.0 {
+                        return sketch_line_world(&ss, curve);
+                    }
                     let solved =
                         st.sketch(owner).ok_or_else(|| DocError::Unknown(format!("sketch {owner} (it must come earlier in the timeline)")))?;
                     sketch_line_world(&sketch_in_feature_frame(doc, solved, f.component)?, curve)
@@ -8977,6 +9080,17 @@ fn sketch_in_feature_frame(doc: &Document, sketch: &SolvedSketch, consumer: u64)
 }
 
 fn constructor_profile_in_frame(doc: &Document, sketch: &SolvedSketch, feature: &Feature) -> Result<SolvedSketch> {
+    if let Some(consumer_in_lca) = feature.profile_frame {
+        if !crate::is_placement(&consumer_in_lca) {
+            return Err(DocError::Invalid("stored profile frame is invalid".into()));
+        }
+        let owner = doc.feature(sketch.feature).map(|f| f.component).unwrap_or(0);
+        let lca = doc.common_ancestor(feature.component, owner);
+        let owner_in_lca = doc.component_transform_in(owner, lca);
+        let inverse = crate::mat_inverse(&consumer_in_lca).ok_or_else(|| DocError::Invalid("stored profile frame is singular".into()))?;
+        let relative = crate::mat_mul(&inverse, &owner_in_lca);
+        return profile_with_transform(sketch, &relative);
+    }
     match crate::body_transfer::profile_frame(doc, feature, sketch.feature) {
         Some(relative) => profile_with_transform(sketch, &relative),
         None => sketch_in_feature_frame(doc, sketch, feature.component),
@@ -9541,7 +9655,13 @@ fn feature_op(f: &Feature) -> (Operation, Vec<String>) {
         FeatureKind::Pipe { operation, targets, .. } => (*operation, crate::plain(targets)),
         FeatureKind::Loft { operation, targets, .. } | FeatureKind::Sweep { operation, targets, .. } => (*operation, crate::plain(targets)),
         FeatureKind::Coil { operation, targets, .. } => (*operation, crate::plain(targets)),
-        FeatureKind::CellGrid { targets, .. } => (Operation::Cut, crate::plain(targets)),
+        FeatureKind::CellGrid { targets, mode, .. } => (
+            match mode {
+                crate::CellGridMode::Cut => Operation::Cut,
+                crate::CellGridMode::Raised => Operation::Join,
+            },
+            crate::plain(targets),
+        ),
         FeatureKind::Rib { .. } => (Operation::Join, Vec::new()),
         _ => (Operation::NewBody, Vec::new()),
     }
@@ -10172,6 +10292,9 @@ fn count_copy_misses(
 /// axis of a straight hole through a plate), within that box. `target_box` is `target`'s exact
 /// box and `tool_box` `tool`'s ([`more::exact_box`]), each worked out once by the caller; none,
 /// as when it can't be worked out, is no answer. `false` says nothing.
+/// The points of a line are classified in one call for the tool and one for the target
+/// ([`classified_inside`]), not one call a point: the kernel makes the body's copy and its
+/// search structures once for all the points of a call.
 fn shares_material(
     target: &Body,
     target_box: Option<&solidcraft_geom::Aabb3>,
@@ -10191,14 +10314,39 @@ fn shares_material(
     let mut all = lines.to_vec();
     all.extend(round_face_axes(tool, MAX_PROBED_FACES));
     all.extend([(c, Vec3::X), (c, Vec3::Y), (c, Vec3::Z)]);
-    let inside = |b: &Body, p: Vec3| matches!(b.classify_point(p), Ok(kernel::PointClass::Inside));
     all.iter().any(|&(o, d)| {
         let Some((lo, hi)) = line_in_box(&both, o, d) else { return false };
-        (0..SAMPLES_PER_LINE).any(|k| {
-            let p = o + d * (lo + (hi - lo) * (k as f64 + 0.5) / SAMPLES_PER_LINE as f64);
-            inside(tool, p) && inside(target, p)
-        })
+        let points: Vec<Vec3> = (0..SAMPLES_PER_LINE).map(|k| o + d * (lo + (hi - lo) * (k as f64 + 0.5) / SAMPLES_PER_LINE as f64)).collect();
+        // The points of the line are classified in one call for the tool and one for the
+        // target: the kernel makes the body's copy and its search structures once for all
+        // the points of a call, and again for every call a point makes on its own (#11257:
+        // the six copies of the pattern of the report asked for 130 classifications, against
+        // ten).
+        let in_tool = classified_inside(tool, &points);
+        let wanted: Vec<Vec3> = points.iter().zip(&in_tool).filter(|&(_, &b)| b).map(|(p, _)| *p).collect();
+        if wanted.is_empty() {
+            return false;
+        }
+        classified_inside(target, &wanted).iter().any(|&b| b)
     })
+}
+
+/// Which of `points` lie in the material of `body`: the kernel classifies them all in one
+/// call, which makes the body's copy and its search structures once for all of them. The
+/// points are classified one by one when the kernel refuses them all together, as before.
+fn classified_inside(body: &Body, points: &[Vec3]) -> Vec<bool> {
+    match body.classify_points(points) {
+        Ok(classes) => {
+            #[cfg(test)]
+            cost_tests::count(|c| c.classifications += 1);
+            classes.into_iter().map(|c| c == kernel::PointClass::Inside).collect()
+        }
+        Err(_) => {
+            #[cfg(test)]
+            cost_tests::count(|c| c.classifications += points.len());
+            points.iter().map(|p| matches!(body.classify_point(*p), Ok(kernel::PointClass::Inside))).collect()
+        }
+    }
 }
 
 /// Points tried on each line by [`shares_material`].
@@ -11629,9 +11777,10 @@ fn eval_feature(
     import_report: &mut Option<Arc<kernel::ImportReport>>,
     repair: &mut Option<Arc<kernel::RepairReport>>,
     heal: bool,
+    prepared_meshes: Option<&PreparedMeshImport>,
 ) -> Result<()> {
     JOINED_TARGETS.with(|n| n.borrow_mut().clear());
-    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal);
+    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes);
     for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
         append_warning(warning, note);
     }
@@ -11651,6 +11800,7 @@ fn eval_feature_kind(
     import_report: &mut Option<Arc<kernel::ImportReport>>,
     repair: &mut Option<Arc<kernel::RepairReport>>,
     heal: bool,
+    prepared_meshes: Option<&PreparedMeshImport>,
 ) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
@@ -11775,12 +11925,22 @@ fn eval_feature_kind(
             unchanged(st, warning);
             Ok(())
         }
-        FeatureKind::CellGrid { targets, .. } => {
+        FeatureKind::CellGrid { targets, mode, .. } => {
             let tools = cell_grid::tools(doc, vals, f, st, warning)?;
             // A grid beside the body, or cut the wrong way, changes nothing: say so, as a cut does.
+            // Raised cells are joined, as a join extrude's tool is: with no body to join they are
+            // a new body, and one that stands inside the body changes nothing, with no warning.
             let before: Vec<Body> = st.bodies.iter().map(|b| b.body.clone()).collect();
-            apply_traced(doc, st, f, tools, Operation::Cut, &crate::plain(targets))?;
-            if !before.is_empty() && st.bodies.len() == before.len() && st.bodies.iter().zip(&before).all(|(b, old)| old.same(&b.body)) {
+            let op = match mode {
+                crate::CellGridMode::Cut => Operation::Cut,
+                crate::CellGridMode::Raised => Operation::Join,
+            };
+            apply_traced(doc, st, f, tools, op, &crate::plain(targets))?;
+            if op == Operation::Cut
+                && !before.is_empty()
+                && st.bodies.len() == before.len()
+                && st.bodies.iter().zip(&before).all(|(b, old)| old.same(&b.body))
+            {
                 append_warning(warning, "the cut removes no material; check where its profile lies, the direction and the depth".into());
             }
             Ok(())
@@ -12681,6 +12841,7 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
+        FeatureKind::FrameMemberTurn { .. } => frame_member::check_turn(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
         FeatureKind::BoundingSolid { bodies, margin, contents, margins } => {
             let m = val(vals, margin, Kind::Length)?;
@@ -12802,7 +12963,7 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::MeshImport { meshes, .. } => {
-            for (k, (name, b)) in mesh_bodies(meshes)?.into_iter().enumerate() {
+            for (k, (name, b)) in mesh_bodies(meshes, prepared_meshes)?.into_iter().enumerate() {
                 let name = copy_body_name(st, f, k, &name);
                 st.bodies.push(ModelBody::new(name, b, f.id));
             }
@@ -12960,26 +13121,50 @@ fn moved_copy(source: &ModelBody, copy: Body, instance: usize) -> Traced {
     Traced::step(copy, &[&source.before_as(crate::lineage::Operand::Copy { body: source.name.clone(), instance })])
 }
 
-/// Mesh bodies of a MeshImport feature.
-fn mesh_bodies(meshes: &[crate::MeshData]) -> Result<Vec<(String, Body)>> {
-    let mut out = Vec::with_capacity(meshes.len());
-    for m in meshes {
-        let positions: Vec<Vec3> = m.positions.as_chunks::<3>().0.iter().map(|c| Vec3::new(c[0], c[1], c[2])).collect();
-        let triangles: Vec<[u32; 3]> = m.triangles.as_chunks::<3>().0.to_vec();
-        if !m.corner_normals.is_empty() && m.corner_normals.len() != m.triangles.len().saturating_mul(3) {
-            return Err(DocError::Invalid(format!("mesh `{}`: invalid shading normal count", m.name)));
-        }
-        let normals: Vec<[Vec3; 3]> = m
-            .corner_normals
-            .as_chunks::<9>()
-            .0
-            .iter()
-            .map(|c| [Vec3::new(c[0], c[1], c[2]), Vec3::new(c[3], c[4], c[5]), Vec3::new(c[6], c[7], c[8])])
-            .collect();
-        let b = kernel::mesh_body_with_normals(&positions, &triangles, &normals).map_err(|e| DocError::Invalid(format!("mesh `{}`: {e}", m.name)))?;
-        out.push((m.name.clone(), b.with_color(m.color)));
+/// Meshes validated by the import reader for a newly added MeshImport feature.
+#[derive(Clone, Debug)]
+pub struct PreparedMeshImport(Vec<(crate::MeshData, Body)>);
+
+impl PreparedMeshImport {
+    /// Build the exact inputs that the timeline would use. Prepare before adding the feature
+    /// so a malformed source is reported as an import error.
+    pub fn build(meshes: &[crate::MeshData]) -> Result<Self> {
+        let bodies: Result<Vec<_>> = meshes.iter().map(|m| Ok((m.clone(), build_import_mesh(m)?))).collect();
+        bodies.map(Self)
     }
-    Ok(out)
+
+    fn body(&self, index: usize, mesh: &crate::MeshData) -> Option<&Body> {
+        let (input, body) = self.0.get(index)?;
+        // The command can generate different shading normals before it adds the feature.
+        // Keep the input arrays to prove that the body was built from these exact values.
+        (Arc::ptr_eq(&input.positions, &mesh.positions)
+            && Arc::ptr_eq(&input.triangles, &mesh.triangles)
+            && Arc::ptr_eq(&input.corner_normals, &mesh.corner_normals))
+        .then_some(body)
+    }
+}
+
+fn build_import_mesh(mesh: &crate::MeshData) -> Result<Body> {
+    if !mesh.corner_normals.is_empty() && mesh.corner_normals.len() != mesh.triangles.len().saturating_mul(3) {
+        return Err(DocError::Invalid(format!("mesh `{}`: invalid shading normal count", mesh.name)));
+    }
+    Body::from_packed_mesh(mesh.positions.as_chunks::<3>().0, mesh.triangles.as_chunks::<3>().0, mesh.corner_normals.as_chunks::<9>().0)
+        .map_err(|e| DocError::Invalid(format!("mesh `{}`: {e}", mesh.name)))
+}
+
+/// Mesh bodies of a MeshImport feature.
+fn mesh_bodies(meshes: &[crate::MeshData], prepared: Option<&PreparedMeshImport>) -> Result<Vec<(String, Body)>> {
+    meshes
+        .iter()
+        .enumerate()
+        .map(|(index, mesh)| {
+            let body = match prepared.and_then(|prepared| prepared.body(index, mesh)) {
+                Some(body) => body.clone(),
+                None => build_import_mesh(mesh)?,
+            };
+            Ok((mesh.name.clone(), body.with_color(mesh.color)))
+        })
+        .collect()
 }
 
 /// The names an Import feature gives the file's bodies, added after the bodies of `st`, in the
@@ -13154,6 +13339,7 @@ fn plane_reads_geometry(plane: &PlaneRef) -> bool {
         | PlaneRef::ThreePoints { .. }
         | PlaneRef::Tangent { .. }
         | PlaneRef::AlongPath { .. }
+        | PlaneRef::SquareToLine { .. }
         | PlaneRef::Perpendicular { .. }
         | PlaneRef::Face { .. } => true,
     }

@@ -52,10 +52,9 @@ fn rigid(m: &Mat) -> bool {
 }
 
 /// What an import's file says about its structure.
-#[derive(Clone, Copy)]
 pub(crate) enum Tree<'a> {
-    /// Nothing: every body in the import's component.
-    Flat,
+    /// Every body in the import's component, optionally already built by the reader.
+    Flat(Option<solidcraft_doc::PreparedMeshImport>),
     /// A STEP file's products and placements.
     Step(&'a StepImport),
     /// A STEP file brought in flat (`file.insert_step`'s `flatten`): every solid a body of the
@@ -486,13 +485,13 @@ pub(crate) fn add_in_component(
     tree: Tree<'_>,
 ) -> Result<(u64, Placed)> {
     let (top, top_occ) = new_component(s, name)?;
-    let (plan, imp) = match tree {
-        Tree::Flat => (Plan::default(), None),
-        Tree::Step(imp) => (Plan::of(imp), Some(imp)),
+    let (plan, imp, prepared) = match tree {
+        Tree::Flat(prepared) => (Plan::default(), None, prepared),
+        Tree::Step(imp) => (Plan::of(imp), Some(imp), None),
         // The Import feature builds every body where the file places it, in the import's frame:
         // with nothing to move and nothing skipped, that is the flat import.
-        Tree::StepFlat(imp) => (Plan::default(), Some(imp)),
-        Tree::Mesh(m) => (Plan::of_mesh(m).ok_or_else(|| EngineError::Other("import: the file's node tree can't be placed".into()))?, None),
+        Tree::StepFlat(imp) => (Plan::default(), Some(imp), None),
+        Tree::Mesh(m) => (Plan::of_mesh(m).ok_or_else(|| EngineError::Other("import: the file's node tree can't be placed".into()))?, None, None),
     };
     // The components, each made at its first placement; the others are further occurrences.
     let mut comps: Vec<u64> = Vec::with_capacity(plan.slots.len());
@@ -542,6 +541,9 @@ pub(crate) fn add_in_component(
     put_bodies(s, &names, &moves);
     let rigid_group = if plan.places.is_empty() { None } else { Some(add_rigid_group(s, top, made)?) };
     s.active_sketch = None;
+    if let Some(prepared) = prepared {
+        s.model.prime_mesh_import(id, prepared);
+    }
     s.refresh();
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));

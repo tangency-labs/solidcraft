@@ -290,7 +290,8 @@ fn bad_parameters_are_refused_before_a_feature_is_made() {
         json!({"depth": 1, "web": 0}),
         json!({"depth": 1, "shape": "polygon", "sides": 2}),
         json!({"depth": 1, "shape": "blob"}),
-        json!({"depth": 1, "mode": "raised"}),
+        json!({"depth": 1, "mode": "flat"}),
+        json!({"through_all": true, "mode": "raised"}),
         json!({"depth": 1, "clip": "x"}),
     ] {
         assert!(cut(&mut s, p.clone()).is_err(), "{p}");
@@ -298,12 +299,92 @@ fn bad_parameters_are_refused_before_a_feature_is_made() {
     assert!(s.doc.features.iter().all(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::CellGrid { .. })));
 }
 
-/// Cuts hexagons of 5 mm through a 3 mm plate, from a few to about 300, and prints what it took.
+#[test]
+fn raised_cells_add_the_volume_a_cut_of_the_same_field_removes() {
+    // Same field and plan: the cut goes up into the plate, the raised cells stand below it.
+    let mut s = plate(62.0, 3.0);
+    let r = cut(&mut s, json!({"mode": "raised", "depth": 1.5, "direction": "negative"})).unwrap();
+    assert!(r["warning"].is_null(), "{r}");
+    assert!((volume(&s) - (62.0 * 62.0 * 3.0 + 25.0 * 100.0 * 1.5)).abs() < 1e-6, "{}", volume(&s));
+    assert_eq!(s.model.state().bodies.len(), 1, "the cells join the plate");
+}
+
+#[test]
+fn raised_and_cut_cells_have_the_same_shape_and_count_in_every_clip() {
+    for (shape, clip) in [("hexagon", "snap"), ("hexagon", "free"), ("circle", "whole"), ("triangle", "snap")] {
+        let mut a = plate(62.0, 3.0);
+        cut(&mut a, json!({"shape": shape, "clip": clip, "depth": 1.5})).unwrap();
+        let removed = 62.0 * 62.0 * 3.0 - volume(&a);
+        let mut b = plate(62.0, 3.0);
+        cut(&mut b, json!({"shape": shape, "clip": clip, "mode": "raised", "depth": 1.5, "direction": "negative"})).unwrap();
+        let added = volume(&b) - 62.0 * 62.0 * 3.0;
+        assert!(removed > 1.0, "{shape} {clip}");
+        assert!((removed - added).abs() < 1e-6 * removed, "{shape} {clip}: cut {removed} raised {added}");
+    }
+}
+
+#[test]
+fn raised_cells_with_no_body_to_join_are_a_new_body() {
+    let field = || {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Field"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [62, 62]}));
+        run(&mut s, "sketch.finish", json!({}));
+        s
+    };
+    let mut s = field();
+    cut(&mut s, json!({"mode": "raised", "depth": 2})).unwrap();
+    assert_eq!(s.model.state().bodies.len(), 1);
+    assert!((volume(&s) - 25.0 * 100.0 * 2.0).abs() < 1e-6, "{}", volume(&s));
+    // A cut has nothing to cut there.
+    assert!(cut(&mut field(), json!({"depth": 2})).is_err());
+}
+
+#[test]
+fn raised_cells_stand_as_deep_as_depth_and_never_through_all() {
+    let mut s = plate(62.0, 3.0);
+    let e = cut(&mut s, json!({"mode": "raised", "through_all": true})).unwrap_err().to_string();
+    assert!(e.contains("through_all") && e.contains("depth"), "{e}");
+    assert!(cut(&mut s, json!({"mode": "raised"})).is_err(), "raised needs a depth");
+    assert!(s.doc.features.iter().all(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::CellGrid { .. })));
+    // Symmetric: half the depth each side of the plane, so half of it stands outside the plate.
+    cut(&mut s, json!({"mode": "raised", "depth": 2, "direction": "symmetric"})).unwrap();
+    assert!((volume(&s) - (62.0 * 62.0 * 3.0 + 25.0 * 100.0)).abs() < 1e-6, "{}", volume(&s));
+}
+
+/// Cuts grids of square cells (10 mm on a 12 mm pitch) through a 3 mm plate, from 250 to 1000
+/// cells (a tool of more than 1024 cells fails in the kernel: 39 x 38 ended in "shell count"), and prints what each took. Cells are whole, so a `cols` x `rows` plate cuts exactly that many.
 /// Run by hand, on a quiet machine: `cargo test --profile ci -p solidcraft-engine cell_grid_speed -- --ignored --nocapture`.
+/// `CELL_GRID_SPEED=cols x rows,...` (for example `16x16,45x44`) picks other grids.
 #[test]
 #[ignore = "timing: run by hand"]
 fn cell_grid_speed() {
-    for side in [40.0, 70.0, 100.0] {
+    let spec = std::env::var("CELL_GRID_SPEED").unwrap_or_else(|_| "16x16,22x23,32x31".into());
+    for grid in spec.split(',') {
+        let Some((cols, rows)) = grid.split_once('x').and_then(|(c, r)| Some((c.trim().parse::<usize>().ok()?, r.trim().parse::<usize>().ok()?)))
+        else {
+            panic!("CELL_GRID_SPEED wants cols x rows, got {grid:?}");
+        };
+        let (w, h) = (12.0 * cols as f64, 12.0 * rows as f64);
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": w, "width": h, "height": 3, "body_name": "Plate"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Field"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [w, h]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let t = std::time::Instant::now();
+        let r = cut(&mut s, json!({"through_all": true}));
+        let secs = t.elapsed().as_secs_f64();
+        let removed = w * h * 3.0 - volume(&s);
+        eprintln!("{cols}x{rows} = {} cells: cut in {secs:.2} s (volume removed {removed:.0}); {:?}", cols * rows, r.map(|v| v["warning"].clone()));
+    }
+}
+
+/// Cuts hexagons of 5 mm through a 3 mm plate, from a few to about 300, and prints what it took.
+/// Run by hand, on a quiet machine: `cargo test --profile ci -p solidcraft-engine cell_grid_hex_speed -- --ignored --nocapture`.
+#[test]
+#[ignore = "timing: run by hand"]
+fn cell_grid_hex_speed() {
+    for side in [40.0, 70.0, 100.0, 140.0] {
         let mut s = plate(side, 3.0);
         let t = std::time::Instant::now();
         let r = run(&mut s, "solid.cell_grid", json!({"sketch": "Field", "shape": "hexagon", "size": 5, "web": 1, "depth": 3, "clip": "whole"}));
@@ -312,6 +393,25 @@ fn cell_grid_speed() {
         let cells = (removed / (3.0 * 25.0 * 3f64.sqrt() / 2.0)).round();
         eprintln!("side {side}: ~{cells} cells cut in {secs:.2} s; warning {:?}; feature ms {:?}", r["warning"], r["ms"]);
     }
+}
+
+#[test]
+fn a_grid_over_the_old_cap_is_cut_and_one_over_the_cap_is_refused() {
+    // 12 mm pitch from (6, 6): a plate 12 x CAP+1 mm holds one row of CAP+1 cells, which is refused
+    // before any cutting. 256 cells (16 x 16) were refused when the cap was 250; they are cut now.
+    let mut s = plate(192.0, 3.0);
+    cut(&mut s, json!({"through_all": true})).unwrap();
+    assert!((volume(&s) - (192.0 * 192.0 * 3.0 - 256.0 * 100.0 * 3.0)).abs() < 1e-6, "{}", volume(&s));
+
+    let over = solidcraft_doc::MAX_CUT_CELLS + 1;
+    let len = 12.0 * over as f64;
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": len, "width": 12, "height": 3, "body_name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Field"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [len, 12]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = cut(&mut s, json!({"through_all": true})).unwrap_err().to_string();
+    assert!(e.contains(&format!("{over} cells")) && e.contains(&solidcraft_doc::MAX_CUT_CELLS.to_string()), "{e}");
 }
 
 #[test]

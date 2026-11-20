@@ -341,6 +341,25 @@ fn norm_upper(v: V3<Ivl>) -> Option<f64> {
     (v.x.is_finite() && v.y.is_finite() && v.z.is_finite() && hi.is_finite()).then_some(hi)
 }
 
+/// `sqrt(x^2 + y^2 + z^2)` of an enclosure, a lower bound (each component's least
+/// magnitude); `None` unless finite.
+fn norm_lower(v: V3<Ivl>) -> Option<f64> {
+    let sq = |a: Ivl| {
+        let m = if a.lo > 0.0 {
+            a.lo
+        } else if a.hi < 0.0 {
+            -a.hi
+        } else {
+            0.0
+        };
+        let m = Ivl::from(m);
+        m * m
+    };
+    let s = sq(v.x) + sq(v.y) + sq(v.z);
+    let lo = s.sqrt().lo.max(0.0);
+    (v.x.is_finite() && v.y.is_finite() && v.z.is_finite() && lo.is_finite()).then_some(lo)
+}
+
 fn scaled(v: V3<Ivl>, a: Ivl) -> V3<Ivl> {
     V3 {
         x: v.x * a,
@@ -551,7 +570,7 @@ fn kinks(cn: &NurbsCurve, lo: f64, hi: f64) -> Vec<f64> {
 /// # Errors
 ///
 /// The kernel's unported and cancelled statuses.
-pub(crate) fn curve_uv_gap_bound(
+pub fn curve_uv_gap_bound(
     k: &Kernel,
     curve: &BSplineCurve,
     uv: &BSplineCurve,
@@ -575,6 +594,63 @@ pub(crate) fn curve_uv_gap_bound(
         return Ok(None);
     };
     certified_gap(k, curve, uv, &net, range, FIRST_PIECES, floor)
+}
+
+/// A proved lower bound on `|C(t) − S(W(t))|` at the one parameter `t`, for the curves and
+/// surface of [`curve_uv_gap_bound`]: the same enclosures of `C(t)`, `W(t)` and the net's
+/// point over the box `W(t)` encloses, every rounding included, and the norm's lower end.
+/// It bounds the supremum [`curve_uv_gap_bound`] encloses from below (not upstream,
+/// tangency-labs/solidcraft#18195, a witness for ranking two gaps).
+///
+/// `None` when the gap at `t` is not enclosed: `t` outside either curve's domain or not
+/// finite, a surface that is not a NURBS net or whose net's parameters are not the
+/// surface's (probed at `W(t)`), or a box `W(t)` too far past the net's end. A box past the
+/// end by rounding has the continued polynomial's slack taken off.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub fn curve_uv_gap_lower_bound(
+    k: &Kernel,
+    curve: &BSplineCurve,
+    uv: &BSplineCurve,
+    surface: &Surface,
+    t: f64,
+) -> Result<Option<f64>> {
+    // (the homogeneous points as stored, so the curves enclosed are the ones evaluated: a
+    // rebuild from the Euclidean points rounds a rational point's `x w`)
+    let (Some(cn), Some(wn)) = (
+        polynomial_pieces::stored_nurbs(curve),
+        polynomial_pieces::stored_nurbs(uv),
+    ) else {
+        return Ok(None);
+    };
+    let inside = |n: &NurbsCurve| matches!((n.u.get(n.p), n.u.get(n.n)), (Some(&d0), Some(&d1)) if d0 <= t && t <= d1);
+    if !(t.is_finite() && inside(&cn) && inside(&wn)) {
+        return Ok(None);
+    }
+    let Ok(w) = uv.evaluate_point(t) else {
+        return Ok(None);
+    };
+    let surface = surface.clone_for_evaluation()?;
+    let Some(net) = NetSurface::of(k, &surface, &[Point2::new(w.x, w.y)])? else {
+        return Ok(None);
+    };
+    let at = Ivl::from(t);
+    let c = curve_derivs_over(&cn, at, 0, None)?;
+    let w = curve_derivs_over(&wn, at, 0, None)?;
+    let Some(c0) = c.first().copied() else {
+        return Ok(None);
+    };
+    // a box past the net's end (rounding of a parameter on the boundary) is the continued
+    // polynomial `S~` there: `|C - S(clamp W)| >= |C - S~(W)| - slack`, the slack of
+    // [`NetSurface::partials`] bounding `|S~(W) - S(clamp W)|`
+    let (surf, slack) = match net.partials(&w, 1, 0) {
+        Ok((p, slack)) => (p.at(0, 0), slack),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    Ok(norm_lower(minus(c0, surf)).map(|d| (Ivl::from(d) - Ivl::from(slack)).lo.max(0.0)))
 }
 
 /// A proved upper bound on the distance from every point of `curve` over its parameters
@@ -1149,6 +1225,85 @@ mod tests {
             matches!(&stopped, Err(e) if e.is_cancelled()),
             "{stopped:?}"
         );
+    }
+
+    /// [`curve_uv_gap_lower_bound`] of a line `lift` above the bilinear plane patch z = 0 (x,
+    /// y in 0..1) at its UV line: at every parameter the gap is exactly `lift`, and the lower
+    /// bound is at most that (and at most [`curve_uv_gap_bound`]'s upper bound) and below it
+    /// by no more than rounding, a UV point on the net's end (`u = 1`) included. Read at the
+    /// reversed UV line, at `t = 0` the gap is the shadow's whole length. Nothing is enclosed
+    /// at a parameter outside the domain or not finite, nor where the UV line runs far past
+    /// the net's end.
+    #[test]
+    fn a_line_over_its_uv_line_has_its_height_as_lower_bound() {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::{
+            BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
+        };
+        let k = Kernel::default();
+        let plane = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(1.0, 1.0, 0.0),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let surface = Surface::from(plane);
+        let line = |a: [f64; 3], b: [f64; 3]| {
+            let c = NurbCurve::new(
+                vec![
+                    CPoint::new(a[0], a[1], a[2], NOW),
+                    CPoint::new(b[0], b[1], b[2], NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap();
+            BSplineCurve::from_nurb(c, 3, false)
+        };
+        let lift = 4.2e-7;
+        let lower = |c: &BSplineCurve, w: &BSplineCurve, t: f64| {
+            curve_uv_gap_lower_bound(&k, c, w, &surface, t).unwrap()
+        };
+        // (to the net's end u = 1 at t = 1)
+        let curve = line([0.2, 0.3, lift], [1.0, 0.6, lift]);
+        let uv = line([0.2, 0.3, 0.0], [1.0, 0.6, 0.0]);
+        let upper = curve_uv_gap_bound(&k, &curve, &uv, &surface, [0.0, 1.0], 1e-9)
+            .unwrap()
+            .unwrap();
+        // the bound gives up rounding only: coordinates near 1 cost a few ulps of 1 (at
+        // t = 1 the UV box rounds past the net's end, and the continuation's slack, about
+        // 6e-15, is taken off)
+        for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let lo = lower(&curve, &uv, t).unwrap_or_else(|| panic!("t {t}: not enclosed"));
+            assert!(
+                lo <= lift && lo <= upper && lo >= lift - 1e-13,
+                "t {t}: {lo:e} against {lift:e} (upper {upper:e})"
+            );
+        }
+        let reversed = line([1.0, 0.6, 0.0], [0.2, 0.3, 0.0]);
+        let full = (0.8_f64 * 0.8 + 0.3 * 0.3 + lift * lift).sqrt();
+        let lo = lower(&curve, &reversed, 0.0).unwrap();
+        assert!(lo <= full && lo >= full * (1.0 - 1e-12), "{lo:e} {full:e}");
+        for t in [-0.5, 1.5, f64::NAN, f64::INFINITY] {
+            assert_eq!(lower(&curve, &uv, t), None, "t {t}");
+        }
+        let far = line([0.2, 0.3, 0.0], [1.5, 0.3, 0.0]);
+        let over = line([0.2, 0.3, lift], [1.5, 0.3, lift]);
+        assert!(lower(&over, &far, 0.0).is_some());
+        assert_eq!(lower(&over, &far, 1.0), None);
     }
 
     /// The top face (`z = 3`) of a 1 x 2 x 3 box: its surface, a plane with a net.

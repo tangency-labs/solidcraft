@@ -118,7 +118,13 @@ pub(super) fn status(r: SolidResult<()>) -> SolidResult<f64> {
 
 // ---- geometry samples (the shim's `put_geometry`) ------------------------------------
 
-fn curve_samples(k: &Kernel, out: &mut Vec<f64>, c: Option<&solidcore::curve::curve::Curve>) {
+/// A curve's record block: `-1`, or its type, natural interval and five samples at even
+/// steps, each `0, x, y, z` or `1` (not evaluated).
+pub(crate) fn curve_samples(
+    k: &Kernel,
+    out: &mut Vec<f64>,
+    c: Option<&solidcore::curve::curve::Curve>,
+) {
     let Some(c) = c else {
         out.push(-1.);
         return;
