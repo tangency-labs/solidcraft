@@ -6530,6 +6530,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-ui-text-macros"
+version = "0.45.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_json",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "solidcraft-viewport"
 version = "0.45.0"
 dependencies = [

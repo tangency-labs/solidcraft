@@ -41,6 +41,7 @@ solidcraft-ui-registry = { path = "crates/ui-registry" }
 solidcraft-color = { path = "crates/color" }
 solidcraft-display-units = { path = "crates/display-units" }
 solidcraft-ui-text = { path = "crates/ui-text" }
+solidcraft-ui-text-macros = { path = "crates/ui-text-macros" }
 solidcraft-theme = { path = "crates/theme" }
 solidcraft-viewport = { path = "crates/viewport" }
 solidcraft-views = { path = "crates/views" }
