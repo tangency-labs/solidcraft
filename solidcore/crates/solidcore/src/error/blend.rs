@@ -24,6 +24,8 @@
 //! | [`BlendFailure::CreasePieceEndUnbuildable`] | [`ErrorKind::Unsupported`] (5)           |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
 //! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
+//! | [`BlendFailure::InputMissing`]         | [`ErrorKind::InvalidInput`] (1): the caller's missing input |
+//! | [`BlendFailure::QuadricReadbackMismatch`] | [`ErrorKind::NotWithinTolerance`] (9) |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -35,7 +37,7 @@
 //! |----------------------------------------|-----------------------------------|
 //! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`]               | `SM_ERR`                          |
-//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`] | `SM_ERR_NULL_POINTER` |
+//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::InputMissing`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`            |
 //! | [`BlendFailure::Inconsistent`]         | `SM_ERR_ASSERT_FAILURE`           |
 //! | [`BlendFailure::BadIntersections`]     | `SM_ERR_BAD_INTERSECTIONS`        |
@@ -43,7 +45,7 @@
 //! | [`BlendFailure::OutsideDomain`]        | `SM_ERR_OUTSIDE_OF_DOMAIN`        |
 //! | [`BlendFailure::NotWithinTolerance`]   | `SM_ERR_NOT_WITHIN_TOLERANCE`     |
 //! | [`BlendFailure::PassedOn`]             | the status of the stage passed on |
-//! | [`BlendFailure::NotCertified`]         | `SM_ERR`                          |
+//! | [`BlendFailure::NotCertified`], [`BlendFailure::QuadricReadbackMismatch`] | `SM_ERR` |
 //!
 //! **The phrase causes** ([`BlendFailure::Failed`] to [`BlendFailure::PassedOn`]) are the
 //! shape the blend sites were converted to before the record, some of them refusals not yet
@@ -55,10 +57,12 @@
 //! [`BlendFailure::StageFailed`] is the form of a defect not yet reviewed, also counted per
 //! file. The conversion guide: `docs/failure-codes-and-reproduction.md` §6.
 //!
-//! Deviations: not upstream. The failure's `operation` path says which routine. No cause
-//! names an entity of its own: a failure is at the entity the site it replaces named
-//! (`SolidError::blend_at`), until the site moves onto the typed [`super::Site`]. The
-//! failures that are checks of a caller's arguments stay
+//! Deviations: not upstream. The failure's `operation` path says which routine.
+//! [`BlendFailure::InputMissing`] names the caller's slot or topology whose input is
+//! absent. Other causes name no entity of their own: a failure is at the entity the site
+//! it replaces named (`SolidError::blend_at`), until the site moves onto the typed
+//! [`super::Site`]. Checks of caller arguments stay on the typed record when preserving a
+//! status ([`BlendFailure::InputMissing`]); those with no status stay
 //! [`crate::SolidError::InvalidInput`]. Every cause stands in for the status its site
 //! returned ([`BlendFailure::replaces_upstream_status`]), so the decisions that read an
 //! upstream status read these alike. Only part of `crate::blend` uses these yet; the files
@@ -232,6 +236,69 @@ pub enum BlendFailure {
     /// kind of that status ([`ErrorKind::Missing`]), as the phrase cause it replaces; typed,
     /// so not a phrase cause ([`BlendFailure::is_phrase`]).
     BandInputMissing(BandInput),
+    /// An input supplied by the blend routine's caller (a solver slot or the body's
+    /// topology or geometry) is not there: invalid input ([`ErrorKind::InvalidInput`]),
+    /// not a defect or refusal. Status `SM_ERR_NULL_POINTER`; not a phrase cause.
+    InputMissing(BlendInput),
+    /// The natural quadric read off a support surface is not that surface at the point:
+    /// its distance exceeds the tolerance or its normal turns from the surface's.
+    /// Not within tolerance ([`ErrorKind::NotWithinTolerance`]); status `SM_ERR`.
+    QuadricReadbackMismatch {
+        /// The point's distance from the quadric.
+        distance: f64,
+        /// The largest distance allowed.
+        tolerance: f64,
+        /// The quadric normal dotted with the surface normal.
+        normal_dot: f64,
+        /// The smallest normal dot product allowed.
+        minimum_normal_dot: f64,
+    },
+}
+
+/// Which caller-supplied input of a blend routine is missing ([`BlendFailure::InputMissing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BlendInput {
+    /// The solver's edge use on a rail.
+    SolverEdgeuse {
+        /// The rail's index.
+        rail: usize,
+    },
+    /// The edge of an edge use in the caller's body.
+    EdgeuseEdge {
+        /// The edge use whose edge is missing.
+        edgeuse: crate::topology::EdgeuseId,
+    },
+    /// The evaluation curve of an edge in the caller's body.
+    EdgeCurve {
+        /// The edge whose evaluation curve is missing.
+        edge: crate::topology::EdgeId,
+    },
+    /// The solver's support surface on a rail.
+    SupportSurface {
+        /// The rail's index.
+        rail: usize,
+    },
+    /// The solver's surface generator.
+    SurfaceGenerator,
+}
+
+impl BlendInput {
+    /// What is missing, including the rail or topology id where known.
+    #[must_use]
+    pub fn what(self) -> String {
+        match self {
+            Self::SolverEdgeuse { rail } => format!("the solver's edge use on rail {rail}"),
+            Self::EdgeuseEdge { edgeuse } => {
+                format!("the edge use's edge (edge use {})", edgeuse.index())
+            }
+            Self::EdgeCurve { edge } => {
+                format!("the edge's evaluation curve (edge {})", edge.index())
+            }
+            Self::SupportSurface { rail } => format!("the solver's support surface on rail {rail}"),
+            Self::SurfaceGenerator => "the solver's surface generator".into(),
+        }
+    }
 }
 
 /// Which input of the planar-band contact query is missing ([`BlendFailure::BandInputMissing`]).
@@ -458,8 +525,11 @@ impl BlendFailure {
             | Self::BallsNest { .. }
             | Self::CreasePieceEndUnbuildable { .. }
             | Self::NotCertified { .. }
+            | Self::QuadricReadbackMismatch { .. }
             | Self::Failed(_) => SM_ERR,
-            Self::Missing(_) | Self::BandInputMissing(_) => SM_ERR_NULL_POINTER,
+            Self::Missing(_) | Self::BandInputMissing(_) | Self::InputMissing(_) => {
+                SM_ERR_NULL_POINTER
+            }
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::BadIntersections(_) => SM_ERR_BAD_INTERSECTIONS,
@@ -479,7 +549,9 @@ impl BlendFailure {
     /// [`BlendFailure::SkinPastStationCap`] and for a surface not certified within its
     /// tolerance in its work budget ([`BlendFailure::NotCertified`]), and
     /// [`ErrorKind::BallsFold`] for [`BlendFailure::BallsNest`], and
-    /// [`ErrorKind::Unsupported`] for [`BlendFailure::CreasePieceEndUnbuildable`]. A phrase
+    /// [`ErrorKind::Unsupported`] for [`BlendFailure::CreasePieceEndUnbuildable`],
+    /// [`ErrorKind::InvalidInput`] for [`BlendFailure::InputMissing`] and
+    /// [`ErrorKind::NotWithinTolerance`] for [`BlendFailure::QuadricReadbackMismatch`]. A phrase
     /// cause keeps the kind of its status ([`ErrorKind::Failed`], [`ErrorKind::Missing`],
     /// [`ErrorKind::InvalidInput`], ...), as before the record ([`BlendFailure::is_phrase`]).
     #[must_use]
@@ -492,12 +564,13 @@ impl BlendFailure {
             Self::StageFailed | Self::Defect { .. } | Self::SkinMeasureNotFinite { .. } => {
                 ErrorKind::StageFailed
             }
-            Self::SkinPastStationCap { .. } | Self::NotCertified { .. } => {
-                ErrorKind::NotWithinTolerance
-            }
+            Self::SkinPastStationCap { .. }
+            | Self::NotCertified { .. }
+            | Self::QuadricReadbackMismatch { .. } => ErrorKind::NotWithinTolerance,
             Self::BallsNest { .. } => ErrorKind::BallsFold,
             Self::CreasePieceEndUnbuildable { .. } => ErrorKind::Unsupported,
             Self::BandInputMissing(_) => ErrorKind::Missing,
+            Self::InputMissing(_) => ErrorKind::InvalidInput,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -530,6 +603,8 @@ impl BlendFailure {
             | Self::BallsNest { .. }
             | Self::CreasePieceEndUnbuildable { .. }
             | Self::BandInputMissing(_)
+            | Self::InputMissing(_)
+            | Self::QuadricReadbackMismatch { .. }
             | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
@@ -565,6 +640,8 @@ impl BlendFailure {
             | Self::BallsNest { .. }
             | Self::CreasePieceEndUnbuildable { .. }
             | Self::BandInputMissing(_)
+            | Self::InputMissing(_)
+            | Self::QuadricReadbackMismatch { .. }
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -643,6 +720,16 @@ impl core::fmt::Display for BlendFailure {
             | Self::PassedOn { what, .. } => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::BandInputMissing(input) => write!(f, "{} is missing", input.what()),
+            Self::InputMissing(input) => write!(f, "{} is missing", input.what()),
+            Self::QuadricReadbackMismatch {
+                distance,
+                tolerance,
+                normal_dot,
+                minimum_normal_dot,
+            } => write!(
+                f,
+                "the quadric read off the support surface does not match it: distance {distance} (tolerance {tolerance}), normal dot {normal_dot} (minimum {minimum_normal_dot})"
+            ),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::NotCertified { halvings, stations } => write!(
                 f,
@@ -1033,6 +1120,71 @@ mod tests {
     }
 
     #[test]
+    fn missing_blend_inputs_are_invalid_inputs_with_the_null_pointer_status() {
+        use crate::topology::{EdgeId, EdgeuseId};
+        let cases = [
+            (
+                BlendInput::SolverEdgeuse { rail: 0 },
+                "the solver's edge use on rail 0 is missing",
+            ),
+            (
+                BlendInput::EdgeuseEdge {
+                    edgeuse: EdgeuseId::from_index(4),
+                },
+                "the edge use's edge (edge use 4) is missing",
+            ),
+            (
+                BlendInput::EdgeCurve {
+                    edge: EdgeId::from_index(7),
+                },
+                "the edge's evaluation curve (edge 7) is missing",
+            ),
+            (
+                BlendInput::SupportSurface { rail: 1 },
+                "the solver's support surface on rail 1 is missing",
+            ),
+            (
+                BlendInput::SurfaceGenerator,
+                "the solver's surface generator is missing",
+            ),
+        ];
+        for (input, message) in cases {
+            let cause = BlendFailure::InputMissing(input);
+            assert_eq!(cause.class(), ErrorKind::InvalidInput);
+            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            let e = SolidError::blend("blend::op", cause);
+            assert_eq!(e.kind(), ErrorKind::InvalidInput);
+            assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+            assert!(!e.is_defect() && !e.is_refusal() && !e.sized());
+            assert_eq!(e.blend_failure(), Some(&cause));
+            assert_eq!(e.to_string(), format!("blend::op: {message}"));
+        }
+    }
+
+    #[test]
+    fn a_quadric_readback_mismatch_names_its_measurements_and_keeps_sm_err() {
+        let cause = BlendFailure::QuadricReadbackMismatch {
+            distance: 0.25,
+            tolerance: 0.01,
+            normal_dot: 0.9,
+            minimum_normal_dot: 0.99,
+        };
+        assert_eq!(cause.class(), ErrorKind::NotWithinTolerance);
+        assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+        let e = SolidError::blend("blend::op", cause);
+        assert_eq!(e.kind(), ErrorKind::NotWithinTolerance);
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert!(!e.is_defect() && !e.is_refusal() && !e.sized());
+        assert_eq!(e.blend_failure(), Some(&cause));
+        assert_eq!(
+            e.to_string(),
+            "blend::op: the quadric read off the support surface does not match it: distance 0.25 (tolerance 0.01), normal dot 0.9 (minimum 0.99)"
+        );
+    }
+
+    #[test]
     fn a_fillet_removal_refusal_is_a_refusal_no_size_decides() {
         use RemovalRefusal as R;
         let cases = [
@@ -1345,7 +1497,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 22;
+    const VARIANTS: usize = 24;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -1374,6 +1526,8 @@ mod tests {
             BlendFailure::OutsideDomain(_) => (19, Some("OutsideDomain")),
             BlendFailure::NotWithinTolerance(_) => (20, Some("NotWithinTolerance")),
             BlendFailure::PassedOn { .. } => (21, Some("PassedOn")),
+            BlendFailure::InputMissing(_) => (22, None),
+            BlendFailure::QuadricReadbackMismatch { .. } => (23, None),
         }
     }
 
@@ -1419,6 +1573,13 @@ mod tests {
                 t: 0.0,
             },
             BlendFailure::BandInputMissing(BandInput::SharedFace),
+            BlendFailure::InputMissing(BlendInput::SurfaceGenerator),
+            BlendFailure::QuadricReadbackMismatch {
+                distance: 0.0,
+                tolerance: 0.0,
+                normal_dot: 0.0,
+                minimum_normal_dot: 0.0,
+            },
             BlendFailure::TrimLoopOpen,
             BlendFailure::TrimLoopDoesNotSeparate,
             BlendFailure::RemovalRefused(RemovalRefusal::FaceGrowsPastDomain),
