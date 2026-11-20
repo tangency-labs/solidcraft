@@ -104,6 +104,7 @@ mod sheet_surface_cuts;
 mod sheet_surface_features;
 mod sheet_surface_fold;
 mod sheet_surface_perforation;
+mod sheet_surface_profile;
 mod sheet_surface_shadow;
 pub mod sketch_equation;
 pub use sheet_surface_convert::{
@@ -111,6 +112,7 @@ pub use sheet_surface_convert::{
     measure_sheet_body,
 };
 pub use sheet_surface_cuts::{Loose, Recess};
+pub use sheet_surface_profile::PROFILE_OFF_PLANE;
 pub mod text_params;
 pub mod thread_forms;
 pub mod tolerance;

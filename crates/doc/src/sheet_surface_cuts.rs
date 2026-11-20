@@ -333,7 +333,7 @@ fn perimeter(regions: &[Region2]) -> f64 {
 
 /// Whether loops `a` and `b` are one loop, within `tol`: as many pieces, starting at the same
 /// points, as long.
-fn same_loop(a: &Loop2, b: &Loop2, tol: f64) -> bool {
+pub(crate) fn same_loop(a: &Loop2, b: &Loop2, tol: f64) -> bool {
     if a.segs.len() != b.segs.len() {
         return false;
     }
