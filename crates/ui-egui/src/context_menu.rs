@@ -151,8 +151,8 @@ pub enum Target {
 pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
     let info = solidcraft_engine::find_command(id).map(|c| c.info(&app.session));
     let shortcut = match id {
-        "edit.undo" => "Ctrl+Z".to_string(),
-        "edit.redo" => "Ctrl+Y".to_string(),
+        "edit.undo" => crate::ui_kit::chord_label("Ctrl+Z"),
+        "edit.redo" => [crate::ui_kit::chord_label("Ctrl+Y"), crate::ui_kit::chord_label("Ctrl+Shift+Z")].join(", "),
         _ => crate::keymap::display_for(app, id).unwrap_or_default(),
     };
     Item {
