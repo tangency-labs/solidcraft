@@ -191,6 +191,9 @@ pub struct Body {
     /// ([`Body::flat_spline_face`]): made on first use, shared by clones as `smlib` is. None
     /// when the record was refused, kept like `smlib`'s refusal so it is not tried again.
     pub(crate) ops: std::sync::Arc<std::sync::OnceLock<Option<(solidcore_ops::Body, solidcore_ops::Order)>>>,
+    /// The record prepared for its outline ([`Body::outline_prepared`]): made on first use,
+    /// shared by clones as `smlib` is.
+    pub(crate) outline: std::sync::Arc<OutlinePrep>,
     /// Bounding-box diagonal of the vertices, measured when the body was made; 0 means "not
     /// measured, walk the geometry". Every kernel tolerance is a fraction of it.
     pub(crate) size: f64,
@@ -647,7 +650,39 @@ impl SurfaceKind {
     }
 }
 
+/// A record prepared for hidden lines with [`OUTLINE_TRIM_SAMPLES`], or why it could not be.
+#[derive(Default)]
+pub(crate) struct OutlinePrep(std::sync::OnceLock<Option<solidcraft_geom::hlr::Prepared>>);
+
+impl std::fmt::Debug for OutlinePrep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.get().is_some() { "OutlinePrep(made)" } else { "OutlinePrep" })
+    }
+}
+
+/// Boundary samples per curve piece of the faces' trims when a body is prepared for its outline
+/// ([`Body::outline_prepared`]).
+pub const OUTLINE_TRIM_SAMPLES: usize = 1024;
+
 impl Body {
+    /// The record prepared for hidden lines ([`solidcraft_geom::hlr::prepare`] with
+    /// [`OUTLINE_TRIM_SAMPLES`] on one thread), as a whole-body projection traces its outline:
+    /// made the first time it is asked for and shared by clones, which share the record. None
+    /// for a mesh body and when the record cannot be prepared.
+    pub fn outline_prepared(&self) -> Option<&solidcraft_geom::hlr::Prepared> {
+        self.outline
+            .0
+            .get_or_init(|| {
+                if self.is_mesh() {
+                    return None;
+                }
+                let opts =
+                    solidcraft_geom::hlr::Options { trim_samples: OUTLINE_TRIM_SAMPLES, threads: 1, ..solidcraft_geom::hlr::Options::default() };
+                solidcraft_geom::hlr::prepare(self.record(), &opts).ok()
+            })
+            .as_ref()
+    }
+
     /// A body with `record` and nothing else set.
     fn bare(record: Brep, mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>) -> Body {
         let size = span_of(&record);
@@ -656,6 +691,7 @@ impl Body {
             placing: std::sync::Arc::default(),
             smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
             ops: std::sync::Arc::new(std::sync::OnceLock::new()),
+            outline: std::sync::Arc::default(),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
             bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -1235,6 +1271,7 @@ impl Body {
             placing: self.placing.clone(),
             smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
             ops: std::sync::Arc::new(std::sync::OnceLock::new()),
+            outline: std::sync::Arc::default(),
             // A rigid motion keeps the size and the volume.
             size: self.size,
             volume: self.volume.clone(),
@@ -1516,7 +1553,9 @@ impl Body {
         if self.is_mesh() {
             return Ok(Vec::new());
         }
-        const MAX_SEGMENTS: usize = 20_000;
+        // The crossing test below sweeps the segments along u, so its cost follows the segments
+        // that overlap in u, not every pair: the cap only bounds hostile input.
+        const MAX_SEGMENTS: usize = 100_000;
         let size = self.size();
         let tol = (size * 1e-6).max(1e-9);
         let chord = (size * 1e-3).max(1e-4);
@@ -1528,26 +1567,31 @@ impl Body {
                 let d = p - o;
                 (d.dot(u), d.dot(v))
             };
-            // Each loop's segments, in the face's plane.
-            let mut loops: Vec<Vec<((f64, f64), (f64, f64))>> = Vec::new();
-            let mut total = 0usize;
-            for l in &f.loops {
-                let Loop::Edges { edges } = l else { continue };
+            // The face's boundary segments, in its plane: each edge followed at its own chord
+            // ([`edge_chord`]), or, where that is more than the cap, at the body's chord. A face
+            // too large for either is not checked.
+            let segments = |fine: bool| -> Result<Option<Vec<((f64, f64), (f64, f64))>>> {
                 let mut segs = Vec::new();
-                for u in edges {
-                    let e = self.record.edges.get(u.edge as usize).ok_or_else(|| KernelError::Invalid("edge reference".into()))?;
-                    let pts = edge_points(e, chord)?;
-                    segs.extend(pts.windows(2).filter_map(|q| Some((flat(*q.first()?), flat(*q.get(1)?)))));
+                for l in &f.loops {
+                    let Loop::Edges { edges } = l else { continue };
+                    for use_ in edges {
+                        let e = self.record.edges.get(use_.edge as usize).ok_or_else(|| KernelError::Invalid("edge reference".into()))?;
+                        let pts = edge_points(e, if fine { edge_chord(e, chord) } else { chord })?;
+                        segs.extend(pts.windows(2).filter_map(|q| Some((flat(*q.first()?), flat(*q.get(1)?)))));
+                        if segs.len() > MAX_SEGMENTS {
+                            return Ok(None);
+                        }
+                    }
                 }
-                total = total.saturating_add(segs.len());
-                if total > MAX_SEGMENTS {
-                    break;
-                }
-                loops.push(segs);
-            }
-            if total > MAX_SEGMENTS {
-                continue;
-            }
+                Ok(Some(segs))
+            };
+            let all = match segments(true)? {
+                Some(s) => s,
+                None => match segments(false)? {
+                    Some(s) => s,
+                    None => continue,
+                },
+            };
             // Proper crossings only: each segment's ends strictly on either side of the other.
             let side = |a: (f64, f64), b: (f64, f64), p: (f64, f64)| {
                 let (dx, dy) = (b.0 - a.0, b.1 - a.1);
@@ -1559,8 +1603,25 @@ impl Body {
                 let (d3, d4) = (side(t.0, t.1, s.0), side(t.0, t.1, s.1));
                 ((d1 > tol && d2 < -tol) || (d1 < -tol && d2 > tol)) && ((d3 > tol && d4 < -tol) || (d3 < -tol && d4 > tol))
             };
-            let all: Vec<&((f64, f64), (f64, f64))> = loops.iter().flatten().collect();
-            let bad = all.iter().enumerate().any(|(i, s)| all.iter().skip(i + 1).any(|t| cross(s, t)));
+            // Two segments cross only where their spans in u and in v overlap: sweep them in
+            // order of their lowest u, keeping those still open there.
+            let span = |s: &((f64, f64), (f64, f64))| (s.0.0.min(s.1.0), s.0.0.max(s.1.0), s.0.1.min(s.1.1), s.0.1.max(s.1.1));
+            let mut order: Vec<usize> = (0..all.len()).collect();
+            order.sort_by(|a, b| span(&all[*a]).0.total_cmp(&span(&all[*b]).0));
+            let mut open: Vec<usize> = Vec::new();
+            let mut bad = false;
+            'sweep: for &i in &order {
+                let (u0, _, v0, v1) = span(&all[i]);
+                open.retain(|&j| span(&all[j]).1 >= u0 - tol);
+                for &j in &open {
+                    let (_, _, w0, w1) = span(&all[j]);
+                    if w0 <= v1 + tol && v0 <= w1 + tol && cross(&all[i], &all[j]) {
+                        bad = true;
+                        break 'sweep;
+                    }
+                }
+                open.push(i);
+            }
             if bad {
                 let k = all.len().max(1) as f64;
                 let (su, sv) = all.iter().fold((0.0, 0.0), |acc, s| (acc.0 + s.0.0, acc.1 + s.0.1));
@@ -1936,7 +1997,7 @@ impl Body {
     /// mesh, a volume that isn't positive. Empty when it is sound.
     pub fn validity(&self) -> Vec<String> {
         if let Some(m) = &self.mesh {
-            return if crate::meshbody::is_closed(m) { Vec::new() } else { vec!["the mesh is not closed".into()] };
+            return if m.closed { Vec::new() } else { vec!["the mesh is not closed".into()] };
         }
         let mut out = Vec::new();
         for (i, shell) in self.record.shells.iter().enumerate() {
@@ -2049,6 +2110,18 @@ impl Body {
         }
         Ok(contacts)
     }
+}
+
+/// `chord`, or a thousandth of the edge's own extent where that is finer: the body's size says
+/// nothing of how finely a small edge on a large body must be followed (a 1 mm chord on a 1 m body
+/// draws a Ø0.9 mm circle as two segments over its diameter, which cross a notch beside it, #19687).
+fn edge_chord(e: &brep::Edge, chord: f64) -> f64 {
+    let mut b = Aabb3::EMPTY;
+    curve_hull(e.parameters(), e.interval, &mut b);
+    if b.is_empty() {
+        return chord;
+    }
+    chord.min((b.diagonal() * 1e-3).max(1e-9))
 }
 
 /// Points of an edge's curve over its interval, within `chord` of it: lines by their ends, the

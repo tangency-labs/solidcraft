@@ -275,8 +275,8 @@ never returns "no kind": a configuration the table does not name is a Setback.
 | **Join** | two blends meeting G1 and continuing each other, or one closed blend meeting itself G1, every other edge at the vertex tangent, its faces meeting so closely that the two balls are one within the corner's tolerance (faces meeting at an angle a put balls of radius r a distance r a apart), so an upright edge a degree or two off tangent between them makes a Turn | one shared section |
 | **Turn** | two blends sharing a face, turning at a sharp unrounded side edge (a boss base, a pocket's floor or rim; also blends meeting G1 where a side edge between their faces is sharp, such as a ruled loft's side edge at its rim), or one closed blend meeting itself at an angle (a teardrop's tip) | **Mitre** (default) or **Swept** (option) |
 | **Ball** | three equal rounds of one convexity at a vertex of three faces, the vertex not set back | the corner ball's sphere |
-| **Chamfer** | every edge at the vertex chamfered, each chamfer a plane between two planes | **Mitre** (default): the chamfer planes run on to their common point; or **Facet** (option): one plane through the rails' crossings |
-| **Roll-over** | a convex round and a concave round sharing a face at the vertex, with no crossing to mitre on, every other edge at the vertex unblended | one Roll-over event runs the convex pass, then the concave pass: the convex round ends as it would alone; the concave round rolls over the convex round's surface and end face, and any overflow is trimmed at the crease (§3.4). The order is fixed by convexity, convex first, so the result does not depend on the order of selection. Every face is exact: the corner is a `Circle`-class torus where the convex round is a cylinder square to the end face, otherwise a procedural blend; the crease is certified with its pcurve (`crease.rs` of the Roll-over build). Until that build lands, this corner is refused with `CornerUnsupported` (`FilletErrorType`, from `session/trim_at_creases.rs`: "a corner's face between blends that add and blends that take off material"; `tests/fork_smlib125_open_setbacks.rs`) |
+| **Chamfer** | every edge at the vertex chamfered, each chamfer a plane between two planes, the chamfers of one convexity | **Mitre** (default): the chamfer planes run on to their common point; or **Facet** (option): one plane through the rails' crossings |
+| **Roll-over** | a convex round and a concave round sharing a face at the vertex, with no crossing to mitre on, every other edge at the vertex unblended | one Roll-over event runs the convex pass, then the concave pass: the convex round ends as it would alone; the concave round rolls over the convex round's surface and end face, and any overflow is trimmed at the crease (§3.4). The order is fixed by convexity, convex first, so the result does not depend on the order of selection. Every face is exact: the corner is a `Circle`-class torus where the convex round is a cylinder square to the end face, otherwise a procedural blend; the crease is certified with its pcurve (`crease.rs` of the Roll-over build). Until that build lands, this corner is refused with `CornerUnsupported` (`FilletErrorType`, from `session/trim_at_creases.rs`: "a corner's face between blends that add and blends that take off material"; `tests/fork_smlib125_open_setbacks.rs`) The second pass asked on its own also takes a concave round along the foot of a cylinder that stands through its end face (a tube above a fin's top whose root is rounded tangent into the tube): the cylinder is in B1's place, and the round has a cliff at each end (#19476). A seam of that cylinder is no event: where its vertex lies on the chain and the round has no whole section there (its rail leaves the end face at the seam's section), the pass turns the cylinder's face about its axis in its own copy, so the seam misses the chain, and gives the face its surface back afterwards, so the result's seam is on the input's ruling (#19505). |
 | **Setback** | every corner not named above: unequal radii, four or more blends, mixed convexity with every edge rounded, any corner where G2 is selected, and three equal constant rounds of one convexity between planes at a vertex set back by a given distance (marked set back with no distance, such a vertex stays the N x N corner; a marked corner of rounds the Setback does not take, such as variable rounds or G1 rounds of mixed convexity, keeps the N x N corner's uncertified patch. A marked corner beside a curved face keeps that patch too until the curved Setback is the default; the design makes it a Setback, and the curved Setback of `blend_setback/curved.rs` is that step) | the setback hole and its certified fill: convex at a corner of one convexity, a saddle with a certified normal at a mixed one |
 
 ![Plan views of the four corner kinds: mitre crease, swept torus, ball sphere patch, setback hole.](generic-blend/corner-events.svg)
@@ -294,9 +294,15 @@ ball's sphere. Setback: the rounds stop short and a 2n-sided hole is filled.*
   edge; the section is revolved about the side edge through the corner's turn. Between planes at a
   straight side edge this is an exact torus segment (a horn torus touching the axis at the side
   vertex), G1 to both rounds. It is the ball kept touching the side edge: the offset of an edge is a
-  cylinder about it, so the spine there is a circle and the envelope a torus [37, 6, 18, 8]. A ball
-  cannot pass a sharp concave side edge, so Swept there is refused, naming the corner radius that
-  would let it pass (R ≥ r).
+  cylinder about it, so the spine there is a circle and the envelope a torus [37, 6, 18, 8]. The
+  ball can circle the side edge only where its own side of the faces there is the wide one: a
+  concave round's ball lies in the air, a convex round's in the material, and a sharp concave
+  side edge leaves the air a narrow wedge, a convex one the material. So Swept builds where the
+  side edge and the rounds differ in convexity (a boss base's concave rounds about its convex
+  upright edge; an L's convex top rounds about its concave inner edge), and is refused where they
+  agree (a pocket rim's concave rounds at its concave corner edge; a box's convex rounds at its
+  convex corner edge), naming the corner radius that would let it pass (R ≥ r). Rounds of
+  different convexity are not swept yet.
 - **Ball.** Three equal rounds at three faces end on the corner ball's sphere [37, 6]. The corner
   face is always one rational patch exactly on the sphere, of degree (4, 2) by stereographic
   construction [8], with no analytic sphere special case: one code path.
@@ -313,7 +319,8 @@ ball's sphere. Setback: the rounds stop short and a 2n-sided hole is filled.*
   to each other and to each chamfer (at four sides, the one bilinear patch of the crossings).
   Chamfer planes so nearly coplanar
   that the points where they meet are not determined to the part's rounding are refused, naming
-  that. The corner keeps its definition: its chamfers and the points they meet in (opt-in, WR-716).
+  that. Three chamfers of both convexities between planes are refused, naming the vertex, until
+  their mitre is built. The corner keeps its definition: its chamfers and the points they meet in (opt-in, WR-716).
 - **Setback** [44, 43]. Each blend stops at a setback distance from the vertex. The hole has 2n
   sides: n profile curves (the blends' end sections) alternating with n spring curves on the faces.
   Plain trimlines that simply meet give poor shapes for unequal radii, edges far from 90° and
@@ -414,18 +421,6 @@ Concave overflow is designed to keep the cliff edge instead: the added material 
 with the cliff faces continued, so it never passes the cliff, the default of T-FLEX on Parasolid
 [52]. This is the Roll-over's trim (§3.2), and the Roll-over build provides it; until it lands, no
 concave overflow is trimmed this way. Convex overflow still moves the sharp edge.
-
-A round bigger than the wall it rolls on ends on the body's outline (#2541, opt-in
-`fillet_round_ends_on_outline`, WR-730). This applies where the round on the continued wall
-would pass inside the wall's rim, cutting into the material beyond the face it leaves. The
-ball then touches the rim and stays tangent to the face it keeps. It rolls on the surface
-tangent to it along the rim: the wall's plane turned about the rim, or its cylinder leaned
-into a cone. Where the kept face is too narrow as well, the ball touches both rims.
-
-This is built for a lone round along a straight edge between planes, or along a circular
-edge between a plane square to its axis and a coaxial cylinder
-(`crate::blend::fillet_outline`). A round that passes the rim within the tolerance, or
-whose rail stays on its wall, is trimmed at its crease as above.
 
 ### 3.5 Refusals name the size that fits
 
@@ -566,7 +561,6 @@ certificate), `fillet_solver` (the trace and the §3.3 checks), `fillet_overflow
 | [#2361](https://github.com/tangency-labs/solidcore/issues/2361) | several concave rounds at one vertex; mixed corners with every edge blended |
 | [#2343](https://github.com/tangency-labs/solidcore/issues/2343) | the Setback beside curved faces. The curved Setback is carried in steps (`blend_setback/curved.rs` is the fill; the ledge corner's Roll-over is a separate build); step 3 (the cylinder's free coefficient) and step 5 (four or more rounds, and the cone grown or placed) are queued |
 | [#2344](https://github.com/tangency-labs/solidcore/issues/2344) | the least certifying setback scale; streamed QP rows |
-| [#2345](https://github.com/tangency-labs/solidcore/issues/2345) | chamfers meeting at a vertex |
 | [#2346](https://github.com/tangency-labs/solidcore/issues/2346) | a G2 setback fill beside circular rounds |
 | [#2347](https://github.com/tangency-labs/solidcore/issues/2347) | the G2 setback fill held convex |
 | [#2348](https://github.com/tangency-labs/solidcore/issues/2348) | four blends over three faces |

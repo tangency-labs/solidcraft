@@ -89,12 +89,13 @@
 //!   line direction. Pinned v1.0.1 takes the largest eigenvector of `C = del I - M` built
 //!   with un-negated off-diagonals, a perpendicular or skewed direction (`WR-10`).
 //! - [`circle_coplanar_circle_intersect_in_contact`] takes two circles that overlap past
-//!   touching (from outside each other or with one inside the other) by less than a
-//!   contact tolerance of its own, apart from the near-miss band `tolerance`, as tangent
-//!   (WR-787, #15429). Upstream's band for an overlap is `SM_EFF_ZERO · (1 + r1 + r2)`
-//!   alone, which [`circle_coplanar_circle_intersect`] keeps (contact tolerance zero), and
-//!   an overlap δ above it gives two crossings `2√(2δ r1 r2 / (r1 ± r2))` apart, far
-//!   beyond δ, while the circles stay within δ of each other between them. Nested circles
+//!   touching (from outside each other or with one inside the other) by up to a contact
+//!   tolerance of its own (read by [`within_contact_tol`]), apart from the near-miss band
+//!   `tolerance`, as tangent (WR-787, #15429). Upstream's band for an overlap is
+//!   `SM_EFF_ZERO · (1 + r1 + r2)` alone, which [`circle_coplanar_circle_intersect`]
+//!   keeps (contact tolerance zero), and an overlap δ above it gives two crossings
+//!   `2√(2δ r1 r2 / (r1 ± r2))` apart, far beyond δ, while the circles stay within δ of
+//!   each other between them. Nested circles
 //!   that stay within the contact tolerance of each other all round keep their crossings:
 //!   they touch along no single point.
 //!   In both functions the tangent point is on the side the smaller of the two overlaps
@@ -103,7 +104,7 @@
 //!   outside by between that and its band `SM_EFF_ZERO · (1 + r1 + r2)` got a tangent
 //!   point off by the smaller radius.
 //! - [`line_coplanar_circle_intersect_distinct`] takes a line that overlaps the circle past
-//!   touching by less than its contact tolerance as tangent too (WR-787, #14599): upstream
+//!   touching by up to its contact tolerance as tangent too (WR-787, #14599): upstream
 //!   merges the two crossings `2√(2rδ)` apart only when they are closer than its band, so
 //!   a line a hair inside a large circle crossed it twice. A circle that lies within the
 //!   contact tolerance of the line all round keeps its crossings.
@@ -116,7 +117,7 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::matrix::Matrix;
 use crate::geom::polynomial::{solve_quadratic, Roots};
-use crate::geom::tol::{are_same_to_tol, is_zero};
+use crate::geom::tol::{are_same_to_tol, is_zero, within_contact_tol};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{acos as sm_acos, sqrt as sm_sqrt, Point3, Vec3};
 use crate::math::{rad_to_deg, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
@@ -792,8 +793,9 @@ pub fn line_coplanar_circle_intersect(
 /// (none beyond it). Apart from the contact tolerance below, its two crossings are merged
 /// into one tangent point only when that point (the chord's midpoint) lies within
 /// `point_tolerance` of the circle. A line tangent to the circle up to rounding stays one
-/// point however long its numerical chord. A line that overlaps the circle past touching by less than
-/// `contact_tolerance` touches it at the chord's midpoint however long the chord, unless
+/// point however long its numerical chord. A line that overlaps the circle past touching by up
+/// to `contact_tolerance` (not proved past it, [`within_contact_tol`]) touches it at the
+/// chord's midpoint however long the chord, unless
 /// the whole circle lies within `contact_tolerance` of the line; zero keeps upstream's.
 ///
 /// Not upstream: `smgu_LineCoPlanarCircleIntersect` merges the two crossings whenever
@@ -856,8 +858,10 @@ pub fn line_coplanar_circle_intersect_distinct(
 
     // Not upstream (WR-787, #14599): an overlap below the contact tolerance touches too,
     // unless the line lies within it of the whole circle (it touches no single point).
-    if circle_radius - dist_to_ctr < contact_tolerance
-        && circle_radius + dist_to_ctr > contact_tolerance
+    let size = cl_pt.max_dimension().max(circle_center.max_dimension()) + circle_radius;
+    if contact_tolerance > 0.0
+        && within_contact_tol(circle_radius - dist_to_ctr, contact_tolerance, size)
+        && !within_contact_tol(circle_radius + dist_to_ctr, contact_tolerance, size)
     {
         return Ok(vec![t / scale]);
     }
@@ -948,7 +952,8 @@ pub fn circle_coplanar_circle_intersect(
 /// [`circle_coplanar_circle_intersect`] with the near-miss band and the contact
 /// tolerance apart: circles up to `tolerance` apart still touch (none beyond it), and
 /// circles that overlap past touching (from outside each other or with one inside the
-/// other) touch too while the overlap is below `contact_tolerance`, at the point midway
+/// other) touch too while the overlap is within `contact_tolerance` (not proved past it,
+/// [`within_contact_tol`]), at the point midway
 /// between their nearest points; past it they cross at two points. A `contact_tolerance`
 /// of zero keeps upstream's, `SM_EFF_ZERO · (1 + r1 + r2)`.
 ///
@@ -998,17 +1003,25 @@ pub fn circle_coplanar_circle_intersect_in_contact(
     // with one inside the other: within the contact tolerance either way they touch (#15429).
     let outside = circle1_radius + circle2_radius - cc_dist;
     let inside = cc_dist - (circle1_radius - circle2_radius).abs();
+    let overlap = outside.min(inside);
     let zero = EFF_ZERO * (1.0 + circle1_radius + circle2_radius);
-    // nested circles within the contact tolerance of each other all round touch nowhere in
-    // particular: only their overlap past upstream's zero is tangent
-    let contact = if inside < outside
-        && (circle1_radius - circle2_radius).abs() + cc_dist <= contact_tolerance
-    {
-        0.0
-    } else {
-        contact_tolerance
-    };
-    if outside.min(inside) < zero.max(contact) {
+    // the contact as every site reads it, not proved past the tolerance
+    // (`within_contact_tol`); nested circles within the contact tolerance of each other all
+    // round touch nowhere in particular: only their overlap past upstream's zero is tangent
+    let size = circle1_center
+        .max_dimension()
+        .max(circle2_center.max_dimension())
+        + circle1_radius.max(circle2_radius);
+    let all_round = inside < outside
+        && within_contact_tol(
+            (circle1_radius - circle2_radius).abs() + cc_dist,
+            contact_tolerance,
+            size,
+        );
+    let in_contact = contact_tolerance > 0.0
+        && !all_round
+        && within_contact_tol(overlap, contact_tolerance, size);
+    if overlap < zero || in_contact {
         // Tangent intersection - from either inside or outside.
         let mut vec = circle2_center - circle1_center;
         vec /= cc_dist; // Unitize
@@ -2097,6 +2110,89 @@ mod tests {
             let p = line + t * Vec3::X;
             assert!((p.length() - r).abs() < 1e-15, "{t}");
         }
+    }
+
+    /// A contact at the tolerance is one decision whichever copy of the circles a site has.
+    /// A boss of radius 2.4 at x = 17.60001 on the flat top (z = 15) of a ball of radius 25
+    /// cut at that height (stress corpus S0051) overhangs the rim, a circle of radius 20, by
+    /// exactly the contact tolerance, 1e-5. The boolean meets that pair as the edges' own
+    /// circles and as the faces' intersection curves, whose centres and radii differ by a
+    /// few roundings: the overlap read 9.99999999962e-6 from one copy and 1.0000000000673e-5
+    /// from another, so one site touched where another crossed. Every copy now touches,
+    /// at the point midway, 5e-6 past the rim, and so does a line exactly the tolerance
+    /// inside a circle; an overlap proved past the tolerance (by 1e-11) crosses at every
+    /// copy, `2√(2δ r1 r2 / (r1 − r2))` = 0.0148 apart to first order.
+    #[test]
+    fn a_contact_at_the_tolerance_is_one_decision_at_every_copy() {
+        let boss = (v(17.60001, 0.0, 15.0), 2.4);
+        let copies = [
+            (
+                v(
+                    -4.139_201_635_374_940_5e-14,
+                    -1.024_462_510_578_263_2e-14,
+                    14.999_999_999_999_964,
+                ),
+                20.000_000_000_000_004,
+            ),
+            (
+                v(-1.065_814_103_640_150_3e-14, 0.0, 15.0),
+                20.000_000_000_000_001,
+            ),
+            (v(0.0, 0.0, 15.0), 20.0),
+        ];
+        for (centre, radius) in copies {
+            for (c1, r1, c2, r2) in [
+                (centre, radius, boss.0, boss.1),
+                (boss.0, boss.1, centre, radius),
+            ] {
+                let hit = circle_coplanar_circle_intersect_in_contact(
+                    Vec3::Z,
+                    c1,
+                    r1,
+                    c2,
+                    r2,
+                    1e-5,
+                    1e-5,
+                )
+                .unwrap();
+                let CircleCircle::Tangent(p) = hit else {
+                    panic!("{c1:?} r {r1} and {c2:?} r {r2}: {hit:?}, want a touch");
+                };
+                assert!(p.distance(v(20.000_005, 0.0, 15.0)) < 1e-9, "{p:?}");
+            }
+        }
+        let past = v(17.600_010_000_01, 0.0, 15.0);
+        let hit = circle_coplanar_circle_intersect_in_contact(
+            Vec3::Z,
+            v(0.0, 0.0, 15.0),
+            20.0,
+            past,
+            2.4,
+            1e-5,
+            1e-5,
+        )
+        .unwrap();
+        let CircleCircle::Crossing(p, q) = hit else {
+            panic!("an overlap past the tolerance crosses: {hit:?}");
+        };
+        let delta: f64 = 1.000_001e-5;
+        let chord = 2.0 * (2.0 * delta * 20.0 * 2.4 / (20.0 - 2.4)).sqrt();
+        // (to first order in δ)
+        assert!((p.distance(q) - chord).abs() < 1e-4 * chord, "{p:?} {q:?}");
+        // a line the tolerance inside a circle of radius 20 about (17.6, 3, 15)
+        let hits = line_coplanar_circle_intersect_distinct(
+            v(0.0, 3.0 + 20.0 - 1e-5, 15.0),
+            Vec3::X,
+            v(17.6, 3.0, 15.0),
+            Vec3::Z,
+            20.0,
+            1e-4,
+            1e-5,
+            1e-5,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        assert!((hits[0] - 17.6).abs() < 1e-9, "{hits:?}");
     }
 
     /// A line tangent to a circle of radius 3 up to rounding (1e-12 inside) has a
