@@ -19,9 +19,11 @@
 //! - an occurrence of a text the scan names (the bare statuses, counted as text);
 //! - a call of a local *wrapper*: a `let` closure, a private `fn` or a `macro_rules!` that
 //!   builds one of the above in the way the scan's [`Wrappers`] says. The wrapper's body is
-//!   not a site; each call of it in its scope is, and so is each use of a closure's or a
-//!   `fn`'s name as a value (`ok_or_else(fail)`, as an argument or a result; a field, a
-//!   method or a path segment of the same name is not one). The scope is the rest of the
+//!   not a site; each call of it in its scope is. For a [`Wrappers::Thin`] wrapper, so is
+//!   each use of a closure's or a `fn`'s name as a value (`ok_or_else(fail)`, as an argument
+//!   or a result; a field, a method or a path segment of the same name is not one). A
+//!   [`Wrappers::Phrase`] wrapper takes its phrase as a parameter, so its name passed as a
+//!   value carries no phrase of the site's own and is not counted there. The scope is the rest of the
 //!   enclosing block for a closure and the file for a `fn` or a macro, less what follows a
 //!   `let` that binds the closure's or the `fn`'s name again, within that `let`'s block. A
 //!   macro is always a wrapper when its body builds one, whatever its body holds: each call
@@ -687,9 +689,16 @@ fn base_occurrences(scan: &Scan, code: &str, file: &str) -> Vec<Occurrence> {
     out
 }
 
-/// The calls of the wrapper `def` in its scope; `param` is the parameter it passes on as
-/// the phrase (`None` for a macro: every argument).
-fn wrapper_calls(code: &str, def: &Def, param: Option<usize>, wraps: &str) -> Vec<Occurrence> {
+/// The calls of the wrapper `def` in its scope, and with `values` the uses of its name as a
+/// value; `param` is the parameter it passes on as the phrase (`None` for a macro: every
+/// argument).
+fn wrapper_calls(
+    code: &str,
+    def: &Def,
+    param: Option<usize>,
+    wraps: &str,
+    values: bool,
+) -> Vec<Occurrence> {
     let s = code.as_bytes();
     let via = format!("{} (wraps {wraps})", def.name);
     words(code, &def.name)
@@ -737,15 +746,15 @@ fn wrapper_calls(code: &str, def: &Def, param: Option<usize>, wraps: &str) -> Ve
                 });
             }
             // the name passed as a value (`ok_or_else(fail)`): each such use is a site too
-            (def.kind != Kind::Macro && is_value_use(code, at, def.name.len())).then(|| {
-                Occurrence {
+            (values && def.kind != Kind::Macro && is_value_use(code, at, def.name.len())).then(
+                || Occurrence {
                     at,
                     phrase: Vec::new(),
                     via: via.clone(),
                     wrapped: true,
                     pattern: false,
-                }
-            })
+                },
+            )
         })
         .collect()
 }
@@ -859,7 +868,8 @@ pub(in crate::error) fn sites_in(scan: &Scan, code: &str, file: &str) -> Vec<Sit
                         Wrappers::Phrase => param,
                         Wrappers::Thin => None,
                     };
-                    let calls = wrapper_calls(code, &defs[d], param, &occ.via);
+                    let values = scan.wrappers == Wrappers::Thin;
+                    let calls = wrapper_calls(code, &defs[d], param, &occ.via, values);
                     wrapped[d] = Some(!calls.is_empty());
                     if calls.is_empty() && scan.wrappers == Wrappers::Thin {
                         sites.push(Site {

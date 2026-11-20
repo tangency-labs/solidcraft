@@ -19,8 +19,8 @@
 //!   expression that builds one of the above, or a `macro_rules!` whose body builds one
 //!   (a macro is a wrapper whatever its body holds, `let`s included: each call expands it)
 //!   ([`super::site_scan::Wrappers::Thin`]: `let missing = ||
-//!   SolidError::offset_stage_failed(OP, SM_ERR_NULL_POINTER)` counts at each call). Its body
-//!   is not a site.
+//!   SolidError::offset_stage_failed(OP, SM_ERR_NULL_POINTER)` counts at each call, and at
+//!   each use of its name as a value, `x.ok_or_else(missing)`). Its body is not a site.
 //!
 //! Comments, strings and tests are not sites. A function visible outside its file is not a
 //! wrapper (its calls elsewhere would not be seen), so its body is the site, as is the body
@@ -56,15 +56,15 @@ pub(in crate::error) const STAGE: Scan = Scan {
 #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
 const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/blend_setback.rs", 3),
-    ("solidcore/src/blend/fillet_corner/p1.rs", 4),
+    ("solidcore/src/blend/fillet_corner/p1.rs", 6),
     ("solidcore/src/blend/fillet_corner/p3.rs", 1),
     ("solidcore/src/blend/fillet_exact/rational.rs", 2),
-    ("solidcore/src/blend/fillet_executive/session.rs", 3),
+    ("solidcore/src/blend/fillet_executive/session.rs", 5),
     ("solidcore/src/blend/fillet_executive/session/law_corners.rs", 1),
     ("solidcore/src/blend/fillet_executive/session/tangent_rollover.rs", 2),
     ("solidcore/src/blend/fillet_executive/session/trim_at_creases.rs", 4),
     ("solidcore/src/blend/fillet_geom/p1.rs", 62),
-    ("solidcore/src/blend/fillet_geom/p2.rs", 122),
+    ("solidcore/src/blend/fillet_geom/p2.rs", 123),
     ("solidcore/src/blend/fillet_geom/p3.rs", 47),
     ("solidcore/src/blend/fillet_geom/p4.rs", 120),
     ("solidcore/src/blend/fillet_geom/p5.rs", 131),
@@ -84,7 +84,7 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/nurbs/b_spline_curve/p3.rs", 2),
     ("solidcore/src/offset/offset_executive/reach.rs", 1),
     ("solidcore/src/offset/offset_executive/step_gaps.rs", 5),
-    ("solidcore/src/offset/offset_geometry_creation.rs", 14),
+    ("solidcore/src/offset/offset_geometry_creation.rs", 17),
     ("solidcore/src/topology/proto_topology/p2.rs", 3),
 ];
 

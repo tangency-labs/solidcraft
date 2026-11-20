@@ -1292,7 +1292,7 @@ mod tests {
             &[
                 ("offset/offset_executive/p1.rs", 79),
                 ("offset/offset_executive/p2.rs", 57),
-                ("offset/offset_faces.rs", 29),
+                ("offset/offset_faces.rs", 31),
                 ("offset/offset_geometry_creation.rs", 32),
             ],
         );

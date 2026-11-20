@@ -105,7 +105,7 @@ Three kinds of site are not there yet. Tests count them per file, and each count
 - **bare statuses**: `SolidError::sm_err(`, `null_pointer(`, `Upstream {` and `nl_ser(`. The lists are in each area's error file (`assert_waiting`).
 - **unreviewed stage failures**: an area's `StageFailed`, and the helpers that build one (`SolidError::curve_stage_failed(`). The list is `PINNED` in `src/error/stage_sites.rs`.
 
-A call of a local wrapper counts once for each call. `src/error/site_scan.rs` says exactly what counts. A PR that converts sites lowers its files' counts in the same PR. A file whose count reaches 0 loses its line. The test failure prints the list as found.
+A call of a local wrapper counts once for each call, and so does each use of its name as a value (`ok_or_else(fail)`). `src/error/site_scan.rs` says exactly what counts. A PR that converts sites lowers its files' counts in the same PR. A file whose count reaches 0 loses its line. The test failure prints the list as found.
 
 ### 1. Keep the status
 
@@ -127,7 +127,7 @@ A `Missing` site is a defect unless the missing thing came from the caller.
 - A solve that stops with its numbers: a named cause that carries them (the residual, the tolerance, the iterations). It is a defect. `BlendFailure::StationDidNotConverge` is the model.
 - A refusal only where a separate check measures the fit. Then the refusal carries the fit.
 - A drop or an intersection that stops with no numbers: `Defect { why }` only when the site establishes that the stop is the kernel's fault (the inputs were proved fit, and the step still stopped).
-- Where the area's contract already names a refusal for the situation, the site keeps that refusal, or builds it. The surface-surface intersection's contract is one: a contact it cannot prove is refused by name, as `Tangent` (`docs/ssi.md` §1 and its refusals, `crates/ssi/src/lib.rs`). Such a contact is never a `Defect`.
+- Where the area's contract already names a refusal for the situation, the site keeps that refusal, or builds it. For code that calls the `ssi` crate, the surface-surface intersection's contract is one: a contact it cannot prove is refused by name, as `Tangent` (`docs/ssi.md` §1 and its refusals, `crates/ssi/src/lib.rs`). Such a contact is never a `Defect`.
 
 ### 4. What a `why` is
 
@@ -142,7 +142,47 @@ If you cannot write the second half, the site may be a refusal. Find the check t
 
 A local wrapper or a shared helper is split per site when its file is converted. Each call gets its own outcome. A helper with a misleading name, such as a local `sm_err` that builds something else, is renamed in the same PR.
 
-### 6. What the PR shows
+Before you convert the sites beneath a wrapper that replaces their errors with a phrase, fix the wrapper so it passes the cause through. Otherwise the class you choose at a site never reaches the caller.
+
+### 6. A caught error passes its cause on
+
+A site that catches another routine's error chains that error as its cause, and takes its class from it. It never replaces a typed cause with `Defect` or `StageFailed`.
+
+```rust
+let curves = intersect(a, b).map_err(|e| Failure::new(OP, cause).caused_by(e).into_error())?;
+```
+
+A catch-all arm must not merge "the routine returned an error" with "the routine found nothing": the first passes the error on as above, the second is rule 7.
+
+### 7. An empty search is not a missing pointer
+
+A search that can find nothing on valid geometry is a refusal or a named cause. Examples: no crossing, no intersection curve near the points, a rail that does not meet an edge. This holds even where the ported code treated the empty result as a null pointer.
+
+### 8. A kind the routine cannot handle
+
+A surface or curve kind the routine cannot handle, such as one with no B-spline form, is a named "unsupported kind" cause. The cause carries the entity. It is not a defect.
+
+### 9. The caller's own input
+
+A check on the caller's own argument is an invalid-input cause in the area's enum. So is a check on the caller's body as supplied, such as an edge with no curve or a face with no surface. Rule 1 still holds: the cause stays on the typed record.
+
+### 10. Control flow is not a failure
+
+Some errors are caught by every caller and turned into another path. Such an error is control flow. Return a value instead, such as an `Option` or an enum, and write no reason for it.
+
+```rust
+fn foot(..) -> Option<Point2>   // not: fn foot(..) -> Result<Point2>, with every caller matching Err
+```
+
+### 11. Unreachable sites are deleted
+
+A site that cannot be reached is deleted, not converted. Examples: it repeats a check that already passed, or it follows an unconditional early return. The PR says why the site is unreachable.
+
+### 12. One condition, one class
+
+The same condition gets the same class everywhere in a file.
+
+### 13. What the PR shows
 
 - For each site, or each group of identical sites: the outcome chosen and the evidence. "No site in this file decides a refusal" alone is not evidence.
 - The tests that assert an old phrase are updated in the same PR.
@@ -153,7 +193,7 @@ The reviewer checks four things:
 - each `why` meets rule 4;
 - no new phrase cause, bare status or `StageFailed` site.
 
-### 7. What does not change
+### 14. What does not change
 
 - `PortInvariant` is not a conversion target.
 - Class 127 (`ErrorKind::StageFailed`) and its name `stage_failed` do not change in this work. A `Defect { why }` has that class, so a converted defect reads exactly as the stage failure it replaces, except for its message.

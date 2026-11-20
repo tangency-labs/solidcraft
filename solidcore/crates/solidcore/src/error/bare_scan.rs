@@ -6,9 +6,10 @@
 //! A bare status counts where it is written, and through a local wrapper at each call: a
 //! private `fn`, a `let` closure or a `macro_rules!` whose body is one expression that
 //! builds it (`fn sm_err() -> SolidError { SolidError::sm_err(OP) }`,
-//! `|v| v.ok_or_else(|| SolidError::null_pointer(OP))`) counts once per call, and its body
-//! does not ([`super::site_scan::Wrappers::Thin`]). A pattern that names one, a function
-//! visible outside its file and a wrapper never called count where they stand. The
+//! `|v| v.ok_or_else(|| SolidError::null_pointer(OP))`) counts once per call and per use of
+//! its name as a value (`x.ok_or_else(sm_err)`), and its body does not
+//! ([`super::site_scan::Wrappers::Thin`]). A pattern that names one, a function visible
+//! outside its file and a wrapper never called count where they stand. The
 //! conversion guide (`docs/failure-codes-and-reproduction.md` §6) says how a site is
 //! converted.
 //!
