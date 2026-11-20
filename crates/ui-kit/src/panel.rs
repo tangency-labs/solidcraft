@@ -702,7 +702,7 @@ impl<'a> Panel<'a> {
                 card.y_range(),
             );
             let resize =
-                ui.interact(rail, ui.scope_id().with("workspace_resize"), egui::Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+                ui.interact(rail, ui.scope_id().with("workspace_resize"), egui::Sense::DRAG).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
             solidcraft_ui_registry::publish_target(&format!("{}:resize", options.id), rail);
             if resize.dragged() && !options.compact {
                 let delta = ui.input(|i| i.pointer.delta().x) * if left { 1.0 } else { -1.0 };
