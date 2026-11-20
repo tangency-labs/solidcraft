@@ -163,11 +163,12 @@ fn a_failed_view_is_named_and_nothing_is_written() {
     let (mut s, sheet, [front, top]) = front_and_top();
     let folder = Folder::new("drawing-export-failed");
     let path = folder.path("sheet.svg");
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}}));
+    crate::drawing_scene::tests::not_drawable_yet(&mut s, top);
     let why = refused(&mut s, json!({"sheet": ids::encode(sheet), "path": path}));
-    assert!(why.contains(&format!("views on the sheet failed: {} (not supported yet: shaded views with lines", ids::encode(top))), "{why}");
+    let reason = crate::drawing_scene::tests::NOT_DRAWABLE_YET;
+    assert!(why.contains(&format!("views on the sheet failed: {} ({reason}", ids::encode(top))), "{why}");
     assert!(!why.contains(&ids::encode(front)) && !std::path::Path::new(&path).exists(), "{why}");
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "visible"}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "visible", "pose": null}}));
     for level in 0..=MAX_PLACEMENT_DEPTH as u64 + 1 {
         nest(&mut s, level);
     }
@@ -497,7 +498,7 @@ fn failed_sheet_sketches_are_named_before_any_file_is_written() {
     assert_eq!(std::fs::read(&existing).unwrap(), b"existing drawing bytes");
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
     assert_eq!((s.evaluations, s.undo.len(), s.redo.len()), (evaluations, undo, redo));
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}}));
+    crate::drawing_scene::tests::not_drawable_yet(&mut s, top);
     let why = refused(&mut s, json!({"sheet": ids::encode(sheet), "path": missing}));
     assert!(why.contains(&format!("views on the sheet failed: {} (", ids::encode(top))), "{why}");
     assert!(why.contains(&format!("sketches on the sheet failed: {bad} (")), "{why}");

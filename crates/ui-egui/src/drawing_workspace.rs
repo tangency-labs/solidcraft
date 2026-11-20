@@ -1331,8 +1331,8 @@ mod tests {
         assert!(h.app.session.drawing("drawing.inspect").unwrap().view(id).is_some(), "and Ctrl+Z brings it back");
     }
 
-    /// A view's panel offers Shaded beside the line styles: picking it and OK saves the view shaded,
-    /// drawn by its picture.
+    /// A view's panel offers every visual style, the shaded ones too: picking Shaded with visible
+    /// edges and OK saves the view in it.
     #[test]
     fn a_views_panel_shades_it() {
         use serde_json::json;
@@ -1349,14 +1349,14 @@ mod tests {
         edit(&mut h.app, view, egui::pos2(400.0, 300.0));
         h.frames(4);
         assert_eq!(h.app.drawing_workspace.options, Some(Tool::Edit(Some(view))));
-        h.step(&json!({"widget": "Visible edges", "near": "Visual style"})).unwrap();
+        h.step(&json!({"click": {"handle": "drawing:edit:style"}})).unwrap();
         h.frames(2);
-        h.step(&json!({"widget": "Shaded"})).unwrap();
+        h.step(&json!({"widget": "Shaded with visible edges"})).unwrap();
         h.frames(2);
         h.step(&json!({"widget": "OK"})).unwrap();
         h.frames(2);
         let style = h.app.session.drawing("drawing.inspect").unwrap().resolve_view(view).unwrap().visual_style.value;
-        assert_eq!(style, VisualStyle::Shaded);
+        assert_eq!(style, VisualStyle::ShadedVisible);
         assert!(h.app.drawing_workspace.options.is_none(), "OK closes the panel");
     }
 

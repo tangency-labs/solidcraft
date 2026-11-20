@@ -910,8 +910,7 @@ fn draw(
     };
     let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: why.clone(), hatches: Vec::new() };
     let styles = Styles::from(view);
-    let not_drawable = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
-    let not_drawable = not_drawable.or_else(|| crate::drawing_view::not_cut_yet(view));
+    let not_drawable = crate::drawing_view::not_cut_yet(view);
     if let Some(why) = not_drawable.or_else(|| crate::drawing_view::not_drawable_apart(view)) {
         return none(Status::Failed(why.into()));
     }
