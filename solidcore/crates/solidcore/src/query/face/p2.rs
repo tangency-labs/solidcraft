@@ -2409,7 +2409,19 @@ fn curve_on_classify_body<O: ClassObject>(
 
         // WR-305: an interval running along a boundary edge between two points on it is
         // on that edge (straight pieces by their ends, curved ones by `curve_runs_along`)
-        cc.classify_edge_interval(k, &*objects, ii)?;
+        if let Some(raise) = cc.classify_edge_interval(k, &*objects, ii)? {
+            // Not upstream (#18065): the interval runs along the edge at the certified distance
+            // the classification found; raised on the face's B-rep (cascading to its
+            // vertices) it is on the edge, else left for the face classification
+            let edge = match objects.topology_entity(raise.edge) {
+                Some((b, EntityRef::Edge(e))) if core::ptr::eq(b, objects.brep()) => Some(e),
+                _ => None,
+            };
+            if let (Some(e), Some(tolerance)) = (edge, raise.tolerance) {
+                crate::topology::edge::set_tolerance(objects.brep_mut(), e, tolerance, true, true)?;
+                cc.set_edge_interval(&raise)?;
+            }
+        }
 
         // classify the interval - avoiding point classification if possible
         if cc.at(ii)?.mid.point_class() == PointClassType::Unknown {
