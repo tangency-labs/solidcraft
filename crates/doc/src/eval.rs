@@ -11294,8 +11294,8 @@ fn replay(
 /// What `f`'s copies of `src` do and change: `src`'s operation, its targets, else its participants
 /// (a primitive's or a hole's, #1108, #2755), and the feature whose scope takes them when it names
 /// none. That is `f`, or `f` in `src`'s component for an untargeted join, cut or intersect where
-/// `f`'s component has no body for it (#12996): a join's copies join that component's bodies, as
-/// the join did, not new bodies of `f` (#19451).
+/// `f`'s component has no body for it (#12996), those `f`'s earlier copies made aside: a join's
+/// copies join that component's bodies, as the join did, not new bodies of `f` (#19451).
 fn copy_targets<'a>(st: &ModelState, f: &'a Feature, src: &Feature) -> (Operation, Vec<String>, std::borrow::Cow<'a, Feature>) {
     let (op, targets) = feature_op(src);
     let targets = if targets.is_empty() { src.participants.clone() } else { targets };
@@ -11303,7 +11303,7 @@ fn copy_targets<'a>(st: &ModelState, f: &'a Feature, src: &Feature) -> (Operatio
         && targets.is_empty()
         && f.participants.is_empty()
         && src.component != f.component
-        && !st.bodies.iter().any(|b| b.in_default_scope(f));
+        && !st.bodies.iter().any(|b| b.in_default_scope(f) && b.feature != f.id);
     let scope = if own { std::borrow::Cow::Owned(Feature { component: src.component, ..f.clone() }) } else { std::borrow::Cow::Borrowed(f) };
     (op, targets, scope)
 }

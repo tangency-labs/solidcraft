@@ -1787,6 +1787,27 @@ fn a_mirror_of_a_mirrored_blend_in_a_transferred_turned_part_lands_every_copy() 
     }
 }
 
+/// #19451: a root mirror whose first copy makes a body (Spare's copy) joins a later untargeted
+/// join's copy to the part, as the join did: the bodies the mirror makes are not the root's to
+/// join. The boss's copy went into Spare's copy as a separate piece, off Base.
+#[test]
+fn a_copied_untargeted_join_after_a_copied_body_joins_the_part() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-10, -20, 0], "body_name": "Base"}));
+    run(&mut s, "solid.move", json!({"bodies": ["Base"], "translate": [0, 0, 50], "copy": true, "name": "Spare"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "BossSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [20, 5], "p1": [26, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "join", "name": "Boss"}));
+    place_the_part(&mut s);
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Spare", "Boss"], "plane": "MirrorPlane"}));
+    assert!(r["warning"].is_null(), "{r}");
+    let (v, _, tops) = pockets(&mut s, "Base");
+    let want = [[-23.0, -7.5, 35.0], [3.0, -7.5, 35.0]];
+    assert!(rel(v, 16000.0 + 2.0 * 150.0) < 1e-9 && tops.len() == 2 && tops.iter().zip(want).all(|((_, at), w)| near(*at, w)), "{v} {tops:?}");
+}
+
 /// #19451: a root mirror of a hole placed at a point picked on B's top, kept in BoxB's frame,
 /// drills the world image of the hole: bores ending at x 2 and x 8, y 7.5, z 25. The copy was
 /// drilled at the image in BoxB's own frame, x −12 where it is shown.
