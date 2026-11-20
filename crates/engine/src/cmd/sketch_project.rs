@@ -500,6 +500,9 @@ fn add_link_unless_present(
         None => Vec::new(),
     };
     let link = sk.add_link_with_wires(kind, r.source, &r.geom, &r.wires)?;
+    // A face's curves keep the names of the edges they stand for, which find them again when
+    // the face is read in another order (#18711).
+    sk.set_link_curve_edges(&link, &r.geom, &r.edge_names);
     // The wires' exact curves, as a refresh of the link gives them (an included edge's record
     // curve): a link made now is the one its sketch would resolve.
     sk.set_link_wire_curves(&link, &r.exact)?;
@@ -1030,6 +1033,7 @@ pub(super) fn project_internal_faces(s: &mut Session, id: u64, body: &str, indic
     for &index in indices {
         let resolved = solidcraft_doc::project::resolve_face_indices(&state, &plane, LinkKind::Project, body, &[index])?;
         let link = sk.add_link_with_wires(LinkKind::Project, resolved.source, &resolved.geom, &resolved.wires)?;
+        sk.set_link_curve_edges(&link, &resolved.geom, &resolved.edge_names);
         if let Some(entry) = sk.links.iter_mut().find(|entry| entry.id == link) {
             entry.face_name = names.get(index).cloned();
         }
@@ -1060,6 +1064,7 @@ pub(super) fn auto_project_face(s: &mut Session, id: u64, _at: Vec3) -> Result<O
     let resolved = solidcraft_doc::project::resolve_anchored_face(&doc, &state, &plane, LinkKind::Project, &anchor)?;
     let mut sk = sketch_store::read(&doc, id)?.clone();
     let link = sk.add_link_with_wires(LinkKind::Project, resolved.source, &resolved.geom, &resolved.wires)?;
+    sk.set_link_curve_edges(&link, &resolved.geom, &resolved.edge_names);
     if let Some(link) = sk.links.iter_mut().find(|entry| entry.id == link) {
         link.face_name = Some(anchor.target.name.clone());
         link.auto_face = true;

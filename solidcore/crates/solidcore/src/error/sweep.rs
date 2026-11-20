@@ -15,6 +15,11 @@
 //! | [`SweepFailure::LoftMatchTooLarge`]   | `SM_ERR`                 |
 //! | [`SweepFailure::Failed`]              | `SM_ERR`                 |
 //! | [`SweepFailure::Missing`]             | `SM_ERR_NULL_POINTER`    |
+//! | [`SweepFailure::Defect`]              | `SM_ERR` (or the site's, through `with_status`) |
+//!
+//! [`SweepFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
+//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
+//! not yet converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. A failure says in a phrase what went wrong; the failure's
 //! `operation` path says which routine. No failure names an entity: the sites they replace named
@@ -62,6 +67,14 @@ pub enum SweepFailure {
     /// Something a sweep routine needs is missing, as the phrase says (for example "the
     /// edge's curve").
     Missing(&'static str),
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
 }
 
 impl SweepFailure {
@@ -71,14 +84,16 @@ impl SweepFailure {
             Self::RailPastStationCap { .. }
             | Self::LoftSectionsTooLarge { .. }
             | Self::LoftMatchTooLarge { .. }
-            | Self::Failed(_) => SM_ERR,
+            | Self::Failed(_)
+            | Self::Defect { .. } => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
         }
     }
 
     /// Its stable [`ErrorKind`]: [`ErrorKind::NotWithinTolerance`] for
     /// [`SweepFailure::RailPastStationCap`] (the result is not within the tolerance asked),
-    /// [`ErrorKind::Missing`] for [`SweepFailure::Missing`], [`ErrorKind::Failed`] otherwise.
+    /// [`ErrorKind::Missing`] for [`SweepFailure::Missing`], [`ErrorKind::StageFailed`] for
+    /// [`SweepFailure::Defect`], [`ErrorKind::Failed`] otherwise.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
@@ -86,12 +101,13 @@ impl SweepFailure {
             Self::LoftSectionsTooLarge { .. } | Self::LoftMatchTooLarge { .. } => {
                 ErrorKind::Unsupported
             }
+            Self::Defect { .. } => ErrorKind::StageFailed,
             Self::Failed(_) | Self::Missing(_) => ErrorKind::of_status(self.comparison_status()),
         }
     }
 
     /// True for a failure that replaced a C++ status the routine returns
-    /// ([`SweepFailure::Failed`], [`SweepFailure::Missing`]): it answers with that status the
+    /// ([`SweepFailure::Failed`], [`SweepFailure::Missing`], [`SweepFailure::Defect`]): it answers with that status the
     /// way the `Upstream` it replaced did ([`crate::error::upstream_status`]). A railed loft's
     /// refusal is solidcore's own and replaced none.
     #[must_use]
@@ -100,7 +116,7 @@ impl SweepFailure {
             Self::RailPastStationCap { .. }
             | Self::LoftSectionsTooLarge { .. }
             | Self::LoftMatchTooLarge { .. } => false,
-            Self::Failed(_) | Self::Missing(_) => true,
+            Self::Failed(_) | Self::Missing(_) | Self::Defect { .. } => true,
         }
     }
 }
@@ -110,6 +126,7 @@ impl core::fmt::Display for SweepFailure {
         match *self {
             Self::Failed(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
             Self::RailPastStationCap {
                 asked,
                 reached,
@@ -240,5 +257,68 @@ mod tests {
     #[test]
     fn the_sweep_routines_build_no_bare_statuses() {
         super::super::bare_scan::assert_waiting("sweep", 21, &[]);
+    }
+
+    /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
+    /// and says why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why =
+            "the swept edge the sweep just made has no curve, which the sweep always gives it";
+        let defect = SweepFailure::Defect { why };
+        let op = "sweep::op";
+        super::super::tests::assert_defect(
+            &SolidError::sweep(op, defect),
+            &SolidError::sweep(op, SweepFailure::Failed("x")),
+            op,
+            SM_ERR,
+            &format!("{op}: stage_failed: {why}"),
+        );
+        let missing = Failure::new(op, defect)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error();
+        super::super::tests::assert_defect(
+            &missing,
+            &SolidError::sweep(op, SweepFailure::Missing("x")),
+            op,
+            SM_ERR_NULL_POINTER,
+            &format!("{op}: stage_failed: {why}"),
+        );
+        assert_eq!(missing.sweep_failure(), Some(&defect));
+    }
+
+    /// The sites that build a sweep phrase cause only fall:
+    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
+    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
+    /// files' counts here, and a file at 0 loses its line (the conversion guide:
+    /// `docs/failure-codes-and-reproduction.md` §6).
+    #[test]
+    fn the_sweep_phrase_cause_sites_only_shrink() {
+        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
+        const PHRASES: Scan = Scan {
+            builders: &[
+                Builder::Variant("SweepFailure", "Failed"),
+                Builder::Variant("SweepFailure", "Missing"),
+                Builder::Method("sweep_failed", Some(1)),
+                Builder::Method("sweep_missing", Some(1)),
+            ],
+            wrappers: Wrappers::Phrase,
+        };
+        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
+        const PINNED: &[(&str, usize)] = &[
+            ("solidcore/src/sweep/api_surfaces.rs", 4),
+            ("solidcore/src/sweep/cornered.rs", 2),
+            ("solidcore/src/sweep/rotational_sweep_geometry.rs", 26),
+            ("solidcore/src/sweep/screw.rs", 10),
+            ("solidcore/src/sweep/segments.rs", 1),
+            ("solidcore/src/sweep/topology_sweep.rs", 4),
+            ("solidcore/src/sweep/topology_sweep/access.rs", 4),
+            ("solidcore/src/sweep/topology_sweep/engine.rs", 14),
+            ("solidcore/src/sweep/topology_sweep/geometry.rs", 11),
+            ("solidcore/src/sweep/topology_sweep/store.rs", 3),
+            ("solidcore/src/sweep/topology_sweep/store/merge.rs", 6),
+            ("solidcore/src/sweep/trans_sweep_geometry.rs", 13),
+        ];
+        assert_pinned("sweep phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

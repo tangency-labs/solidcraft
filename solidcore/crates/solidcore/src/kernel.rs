@@ -167,6 +167,7 @@ pub struct WorkCounters {
     shell_traversal_faces: Cell<u64>,
     proto_vertex_point_solves: Cell<u64>,
     merge_record_visits: Cell<u64>,
+    infinite_region_searches: Cell<u64>,
     face_extreme_control_points: Cell<u64>,
     feet_tm_coefficients: Cell<u64>,
     mass_iso_evaluations: Cell<u64>,
@@ -243,6 +244,13 @@ impl WorkCounters {
     #[must_use]
     pub fn merge_record_visits(&self) -> u64 {
         self.merge_record_visits.get()
+    }
+
+    /// Searches for a B-rep's infinite region (`FindInfiniteRegion`): each time a B-rep
+    /// of more than one region goes on to choose a ray and classify it. Not the fork's.
+    #[must_use]
+    pub fn infinite_region_searches(&self) -> u64 {
+        self.infinite_region_searches.get()
     }
 
     /// Control points of the B-spline nets the trimmed-face tight box's directed solves
@@ -371,6 +379,7 @@ impl WorkCounters {
         self.shell_traversal_faces.set(0);
         self.proto_vertex_point_solves.set(0);
         self.merge_record_visits.set(0);
+        self.infinite_region_searches.set(0);
         self.face_extreme_control_points.set(0);
         self.feet_tm_coefficients.set(0);
         self.mass_iso_evaluations.set(0);
@@ -436,6 +445,12 @@ impl WorkCounters {
     pub(crate) fn add_merge_record_visits(&self, visits: u64) {
         self.merge_record_visits
             .set(self.merge_record_visits.get().saturating_add(visits));
+    }
+
+    /// Counts one search for a B-rep's infinite region.
+    pub(crate) fn add_infinite_region_search(&self) {
+        self.infinite_region_searches
+            .set(self.infinite_region_searches.get().saturating_add(1));
     }
 
     /// Counts the control points of the net one trimmed-face extreme solve ran on.
@@ -1238,9 +1253,10 @@ mod tests {
                 w.shell_traversal_faces(),
                 w.proto_vertex_point_solves(),
                 w.merge_record_visits(),
+                w.infinite_region_searches(),
             )
         };
-        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
         w.add_face_pair();
         w.add_face_pair();
         w.add_loop_classified();
@@ -1253,11 +1269,13 @@ mod tests {
         w.add_shell_traversal_face();
         w.add_proto_vertex_point_solve();
         w.add_merge_record_visits(3);
-        assert_eq!(counts(w), (2, 1, 1, 1, 3, 1, 1, 1, 3));
+        w.add_infinite_region_search();
+        w.add_infinite_region_search();
+        assert_eq!(counts(w), (2, 1, 1, 1, 3, 1, 1, 1, 3, 2));
         // each kernel counts its own work
         assert_eq!(Kernel::default().work_counters.face_pairs(), 0);
         w.reset();
-        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
     }
 
     #[test]

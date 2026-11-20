@@ -893,6 +893,25 @@ impl Curve {
         &self.kind
     }
 
+    /// Not upstream: the same curve by definition, exactly: the same kind and equal
+    /// defining data (IEEE `==`, so a NaN refuses). Equal definitions give the same
+    /// point and derivatives at every parameter, so this is an identity, not a sample.
+    /// Only the B-spline kinds whose definition is their own data (B-spline, line,
+    /// ellipse and circle, hyperbola, parabola) are compared; every other kind (curves
+    /// on or over other geometry, composites, offsets) answers `false`, which callers
+    /// treat as "not known to be the same".
+    #[must_use]
+    pub fn same_definition(&self, other: &Self) -> bool {
+        match (&self.kind, &other.kind) {
+            (CurveKind::BSpline(a), CurveKind::BSpline(b)) => a.same_definition(b),
+            (CurveKind::Line(a), CurveKind::Line(b)) => a.same_definition(b),
+            (CurveKind::Ellipse(a), CurveKind::Ellipse(b)) => a.same_definition(b),
+            (CurveKind::Hyperbola(a), CurveKind::Hyperbola(b)) => a.same_definition(b),
+            (CurveKind::Parabola(a), CurveKind::Parabola(b)) => a.same_definition(b),
+            _ => false,
+        }
+    }
+
     /// `GetInsideOut` of a curve derived from `SmBSplineCurve`: only lines and conic
     /// circles and ellipses have the bit; every other kind is `false`.
     #[must_use]

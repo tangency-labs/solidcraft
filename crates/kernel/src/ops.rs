@@ -74,11 +74,7 @@ pub fn apart(a: &Body, b: &Body) -> Result<bool> {
     }
     // Every vertex lies in the body's exact box, so where the boxes of the two bodies' vertices,
     // grown alike, meet, their exact boxes meet too, and nothing need be measured.
-    let vertices = |x: &Body| {
-        let b: solidcraft_geom::Aabb3 = x.record().vertices.iter().map(|v| crate::body::v3(v.point)).collect();
-        (!b.is_empty()).then(|| b.inflated(2.0 * x.record().tolerance))
-    };
-    if let (Some(va), Some(vb)) = (vertices(a), vertices(b))
+    if let (Some(va), Some(vb)) = (vertex_box(a), vertex_box(b))
         && va.meets(&vb)
     {
         return Ok(false);
@@ -103,33 +99,56 @@ fn with_operand_roles(a: &Body, b: &Body, op: BoolOp, r: Result<Option<Body>>) -
 
 /// The union of bodies when no two of them meet or touch, as one body of several pieces (see
 /// [`join_apart`]); `None` when fewer than two are given, one is a mesh, or two of them are not
-/// apart (their exact boxes, grown by the bodies' tolerances, overlap).
+/// apart (their exact boxes, grown by the bodies' tolerances, overlap; two bodies whose vertex
+/// boxes overlap are not apart without measuring the exact boxes).
 pub fn union_apart(bodies: &[Body]) -> Result<Option<Body>> {
     crate::profile::timed(crate::profile::Kind::Boolean, "union_apart", || {
         if bodies.len() < 2 || bodies.len() > 10_000 || bodies.iter().any(Body::is_mesh) {
+            return Ok(None);
+        }
+        // Every vertex lies in its body's exact box, so where two bodies' vertex boxes, grown alike,
+        // meet, their exact boxes meet too: the answer is `None` without measuring any exact box,
+        // which on a rounded spline body can take tens of seconds.
+        let vertex_boxes: Vec<solidcraft_geom::Aabb3> = bodies.iter().filter_map(vertex_box).collect();
+        if any_two_meet(&vertex_boxes) {
             return Ok(None);
         }
         let mut boxes = Vec::with_capacity(bodies.len());
         for b in bodies {
             boxes.push(b.exact_bounds()?.inflated(2.0 * b.record().tolerance));
         }
-        // Sweep along x: only boxes whose x ranges overlap are compared.
-        let mut order: Vec<usize> = (0..boxes.len()).collect();
-        order.sort_by(|&i, &j| boxes.get(i).map(|b| b.min.x).unwrap_or(0.0).total_cmp(&boxes.get(j).map(|b| b.min.x).unwrap_or(0.0)));
-        for (k, &i) in order.iter().enumerate() {
-            let Some(a) = boxes.get(i) else { continue };
-            for &j in order.iter().skip(k + 1) {
-                let Some(b) = boxes.get(j) else { continue };
-                if b.min.x > a.max.x {
-                    break;
-                }
-                if a.meets(b) {
-                    return Ok(None);
-                }
-            }
+        if any_two_meet(&boxes) {
+            return Ok(None);
         }
         join_apart(bodies)
     })
+}
+
+/// The box of a B-rep body's vertices, grown by twice its record's tolerance (as its exact box is
+/// in [`apart`] and [`union_apart`]); `None` for a body without vertices. It lies inside the grown
+/// exact box, so where two of them meet, the exact boxes meet too.
+fn vertex_box(x: &Body) -> Option<solidcraft_geom::Aabb3> {
+    let b: solidcraft_geom::Aabb3 = x.record().vertices.iter().map(|v| crate::body::v3(v.point)).collect();
+    (!b.is_empty()).then(|| b.inflated(2.0 * x.record().tolerance))
+}
+
+/// Whether any two of `boxes` meet, swept along x: only boxes whose x ranges overlap are compared.
+fn any_two_meet(boxes: &[solidcraft_geom::Aabb3]) -> bool {
+    let mut order: Vec<usize> = (0..boxes.len()).collect();
+    order.sort_by(|&i, &j| boxes.get(i).map(|b| b.min.x).unwrap_or(0.0).total_cmp(&boxes.get(j).map(|b| b.min.x).unwrap_or(0.0)));
+    for (k, &i) in order.iter().enumerate() {
+        let Some(a) = boxes.get(i) else { continue };
+        for &j in order.iter().skip(k + 1) {
+            let Some(b) = boxes.get(j) else { continue };
+            if b.min.x > a.max.x {
+                break;
+            }
+            if a.meets(b) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Bodies the caller knows are apart (no two meet or touch), as one body of several pieces,

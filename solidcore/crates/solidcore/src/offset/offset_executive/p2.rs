@@ -1235,6 +1235,7 @@ impl OffsetExecutive {
             // offset's vertex where two consecutive edges' offsets run parallel), then split
             // the edges that run past a step wall's corner (after WR-531's caps below, in the
             // fork's order)
+            self.reconstruct_periodic_boundaries(kernel, original, notifications)?;
             self.close_loop_gaps(kernel, original, notifications)?;
 
             // Not upstream (WR-531; the fork's tangency-labs/smlib@d5dadaa): a vertex where

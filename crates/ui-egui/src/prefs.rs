@@ -1116,7 +1116,7 @@ preference_settings! {
     /// theme's dark sheet in a dark one), `white`, `blueprint` or `prussian_blue`
     /// (`crate::drawing_sheet_page::SheetColour`). Screen only: printed
     /// and exported sheets are always white, and nothing reaches the design or undo.
-    drawing_sheet_colour: String = "auto".into(), PAGE_DESIGN;
+    drawing_sheet_colour: String = "white".into(), PAGE_DESIGN;
     /// The on-screen drawing canvas pattern: datum_cloud, grid or none (default none, a plain background).
     drawing_sheet_backdrop: String = "none".into(), PAGE_DESIGN;
     /// Where the Drawing workspace shows its sheet chooser.
@@ -1894,6 +1894,13 @@ preference_settings! {
     construction_line_classic: bool = false, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
     sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
+    /// An image (Canvas or Decal) placed on the plane of the sketch being edited gets a
+    /// construction rectangle around it in that sketch and follows it, so the sketch's constraints
+    /// and dimensions place and size the image (#18405). A mode of the Canvas and Decal tools, set
+    /// in the Sketch Palette while one runs and kept for the next time; no Preferences page shows
+    /// or resets it. Off by default, so placing an image works as it always has: on its own, with
+    /// Frame Sketch to tie it to a rectangle when asked.
+    frame_images_in_sketch: bool = false;
     /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
     /// starts the tool or dialog again.
     shortcut_again_ends_tool: bool = true, PAGE_SKETCH;
@@ -3236,9 +3243,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             ok: "OK",
             cancel: "Cancel",
             apply: "Apply",
-            search: solidcraft_ui_text::tr("prefs.search"),
-            no_results: solidcraft_ui_text::tr("prefs.search_empty"),
-            restore_defaults: solidcraft_ui_text::tr("prefs.restore_page_defaults"),
             restore_defaults_hint: solidcraft_ui_text::tr(if layout_page {
                 "ui.panel_layout.page_defaults_hint"
             } else {
@@ -4091,9 +4095,6 @@ fn blur_availability_for(app: &SolveApp, offered: bool) -> crate::theme_options:
     if reduced == Some(true) {
         return Unavailable("prefs.blur_reduce_transparency");
     }
-    if app.home.open || crate::render_workspace::result_active(app) {
-        return Unavailable("prefs.blur_source");
-    }
     match capability {
         crate::blur::Capability::Available => Available,
         crate::blur::Capability::Unavailable(_) => Unavailable("prefs.blur_device"),
@@ -4833,7 +4834,7 @@ fn prepare_preferences(
         return Err("`drawing_sheets_visibility` must be multiple, always, off or legacy".into());
     }
     if !accepted::drawing_calibration(&new) || crate::drawing_sheet_page::SheetColour::parse(&new.drawing_sheet_colour).is_none() {
-        return Err("`drawing_calibration` must be 0.5…2 and `drawing_sheet_colour` auto, white, blueprint or prussian_blue".into());
+        return Err("`drawing_calibration` must be 0.5…2 and `drawing_sheet_colour` white, theme, blueprint or prussian_blue".into());
     }
     if !accepted::drawing_panel_width(&new)
         || !["top", "bottom", "under_browser"].contains(&new.drawing_sheet_dock.as_str())

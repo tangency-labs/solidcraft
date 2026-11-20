@@ -494,6 +494,26 @@ mod soundness_probe {
 }
 
 #[cfg(test)]
+mod nurb_fillet_raise_tests {
+    use super::*;
+
+    /// #18166: `Solids/nurb_fillet.smb` with faces replaced by planes (fc0006) is edited, not
+    /// refused. A refit trim's bound that did not converge (one bisection piece at its deepest
+    /// across a steep step of the reparametrisation, bounds 0.43 and 8.7e-3 for trims 1.2e-6
+    /// and 1.2e-7 from their edges by dense samples) raised edges past the B-rep check's limit
+    /// (1000 times the B-rep's tolerance, `ValidatePointers` test 59), and the edit was refused
+    /// with status 1001, the input put back.
+    #[test]
+    fn nurb_fillet_fc0006_is_edited_not_refused() {
+        let case = crate::case::regression_case(&Runner, "fc0006");
+        let Edited::Done(d) = edited(&case).unwrap() else {
+            panic!("fc0006 ends before the edit");
+        };
+        assert_eq!(d.record.first(), Some(&0.0), "edit status");
+    }
+}
+
+#[cfg(test)]
 mod result_breps_tests {
     use super::*;
 

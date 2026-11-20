@@ -22,10 +22,10 @@ use crate::schema::sketch_session::{
     MovePointsParams, MovePointsResult, MovedPoint, OptionsParams, OptionsReply, OptionsResult, SketchOptions, SolveParams, SolveResult,
 };
 use crate::schema::sketch_shapes::{
-    ArcCenterPointParams, ArcThreePointParams, CircleCenterParams, CircleThreePointParams, CircleTwoPointParams, Created, DrawResult, LineParams,
-    PointParams, PointResult, PolygonCircumscribedParams, PolygonEdgeParams, PolygonInscribedParams, PolygonResult, RectCenterParams, RectCorners,
-    RectResult, RectRoundedParams, RectSides, RectThreePointParams, RectTwoPointParams, RoundedRectResult, SlotCenterToCenterParams,
-    SlotOverallParams,
+    ArcCenterPointParams, ArcThreePointParams, CircleCenterParams, CircleThreePointParams, CircleTwoPointParams, Created, DrawResult,
+    EdgeCenterRectCorners, EdgeCenterRectResult, EdgeCenterRectSides, LineParams, PointParams, PointResult, PolygonCircumscribedParams,
+    PolygonEdgeParams, PolygonInscribedParams, PolygonResult, RectCenterParams, RectCorners, RectEdgeCenterParams, RectResult, RectRoundedParams,
+    RectSides, RectThreePointParams, RectTwoPointParams, RoundedRectResult, SlotCenterToCenterParams, SlotOverallParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session, SketchEntry, Snapshot};
@@ -93,6 +93,7 @@ const RECT_TWO_POINT_CONTRACT: TypedContract<RectTwoPointParams> = TypedContract
 const RECT_THREE_POINT_CONTRACT: TypedContract<RectThreePointParams> = TypedContract::new();
 const RECT_ROUNDED_CONTRACT: TypedContract<RectRoundedParams> = TypedContract::new();
 const RECT_CENTER_CONTRACT: TypedContract<RectCenterParams> = TypedContract::new();
+const RECT_EDGE_CENTER_CONTRACT: TypedContract<RectEdgeCenterParams> = TypedContract::new();
 const POLYGON_INSCRIBED_CONTRACT: TypedContract<PolygonInscribedParams> = TypedContract::new();
 const POLYGON_CIRCUMSCRIBED_CONTRACT: TypedContract<PolygonCircumscribedParams> = TypedContract::new();
 const POLYGON_EDGE_CONTRACT: TypedContract<PolygonEdgeParams> = TypedContract::new();
@@ -129,7 +130,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&LINE_CONTRACT)
         .output(output_schema_for::<DrawResult>)
-        .params(concat!("points: [[x,y] | \"l1.end\" | {at, ref}…] (x and y each a number or an expression over the design's parameters, \"W / 2\": such a point is fixed where it comes to and follows the parameters, while text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point; likewise wherever a point argument also takes a point id), closed?: bool, construction?: bool, ids?: [..], infer?: bool (add horizontal/vertical)", connect_doc!(), created_doc!())),
+        .params(concat!("points: [[x,y] | \"l1.end\" | {at, ref}…] (x and y each a number or an expression over the design's parameters and the sketch's other points (\"p1.x\"), \"W / 2\": such a point is fixed where it comes to and follows the parameters, while text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point; likewise wherever a point argument also takes a point id), closed?: bool, construction?: bool, ids?: [..], infer?: bool (add horizontal/vertical)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.draw.dimensioned", "Draw Dimensioned Sketch Geometry", crate::checked!("sketch.draw.dimensioned", draw_dimensioned)).in_sketch_part().icon("dimension")
         .enabled(in_sketch)
         .contract(&DRAW_DIMENSIONED_CONTRACT)
@@ -143,7 +144,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&RECT_TWO_POINT_CONTRACT)
         .output(output_schema_for::<RectResult>)
-        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters: the corner is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner); construction?. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the corner is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner); construction?. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.three_point", "3-Point Rectangle", crate::checked!("sketch.rectangle.three_point", rect_three_point))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -159,7 +160,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&RECT_ROUNDED_CONTRACT)
         .output(output_schema_for::<RoundedRectResult>)
-        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters: the corner is fixed and follows them, as in `sketch.rectangle.two_point`; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner); radius: expr (the corner radius, less than half the shorter side); construction?. A 2-point rectangle whose four corners are filleted alike: one radius dimension (`param`), the other arcs equal to it. Returns sides {bottom, right, top, left} (line ids) and arcs (the corner arcs: bottom-left, bottom-right, top-right, top-left), diagonal (construction, between the bottom-left and top-right arc centres) and centre (the point held at its midpoint)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the corner is fixed and follows them, as in `sketch.rectangle.two_point`; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner); radius: expr (the corner radius, less than half the shorter side); construction?. A 2-point rectangle whose four corners are filleted alike: one radius dimension (`param`), the other arcs equal to it. Returns sides {bottom, right, top, left} (line ids) and arcs (the corner arcs: bottom-left, bottom-right, top-right, top-left), diagonal (construction, between the bottom-left and top-right arc centres) and centre (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.center", "Center Rectangle", crate::checked!("sketch.rectangle.center", rect_center))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -167,7 +168,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&RECT_CENTER_CONTRACT)
         .output(output_schema_for::<RectResult>)
-        .params(concat!("center, corner: [x,y] (a coordinate may be an expression over the design's parameters: the point is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point); construction?: bool. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
+        .params(concat!("center, corner: [x,y] (a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the point is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point); construction?: bool. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
+    CommandSpec::new("sketch.rectangle.edge_center", "Edge Center Rectangle", crate::checked!("sketch.rectangle.edge_center", rect_edge_center))
+        .at("SKETCH", "CREATE")
+        .icon("rect_edge_center")
+        .enabled(in_sketch)
+        .contract(&RECT_EDGE_CENTER_CONTRACT)
+        .output(output_schema_for::<EdgeCenterRectResult>)
+        .params(concat!("anchor: [x,y], a point id or \"mid:<line>\" (the midpoint of one edge); corner: [x,y] (a corner of the opposite edge); orientation of the anchored edge, one of direction: [dx,dy] | line: curve id (parallel to it) | none when anchor is \"mid:<line>\" (that line's direction); construction?: bool. The rectangle extends from the anchor toward the corner: its width is the corner's distance from the anchored edge, its half-length the corner's offset along the edge. Returns sides {anchor, side_a, far, side_b} (line ids) and corners {anchor_start, anchor_end, far_end, far_start} (point ids)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.circle.center", "Center Diameter Circle", crate::checked!("sketch.circle.center", circle_center))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -177,7 +185,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CIRCLE_CENTER_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!(
-            "center: [x,y] or point ref (a coordinate may be an expression over the design's parameters: the centre is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the centre), radius | diameter: number or expression (an expression naming a parameter is a dimension driven by it; with `through` a point ref, that and the point both fix the radius); through?: point ref (a point the circle passes through, kept on it: where the tool's second click snapped); construction?: bool",
+            "center: [x,y] or point ref (a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the centre is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the centre), radius | diameter: number or expression (an expression naming a parameter is a dimension driven by it; with `through` a point ref, that and the point both fix the radius); through?: point ref (a point the circle passes through, kept on it: where the tool's second click snapped); construction?: bool",
             connect_doc!(),
             created_doc!()
         )),
@@ -246,7 +254,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SLOT_OVERALL_CONTRACT)
         .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
         .params(concat!("p0, p1: overall ends, width: number or expression (an expression naming a parameter is a dimension driven by it); returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
-    CommandSpec::new("sketch.point", "Point", crate::checked!("sketch.point", draw_point)).in_sketch_part().at("SKETCH", "CREATE").icon("point").enabled(in_sketch).contract(&POINT_CONTRACT).output(output_schema_for::<PointResult>).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
+    CommandSpec::new("sketch.point", "Point", crate::checked!("sketch.point", draw_point)).in_sketch_part().at("SKETCH", "CREATE").icon("point").enabled(in_sketch).contract(&POINT_CONTRACT).output(output_schema_for::<PointResult>).params(concat!("point: [x,y] (each a number or an expression over the design's parameters and the sketch's other points (\"p1.x\"): the point is then fixed where it comes to and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", crate::checked!("sketch.dimension", dimension))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -902,7 +910,7 @@ pub(super) fn parg_in(sk: &mut Sketch, doc: &solidcraft_doc::Document, v: &Value
     if let Some(p) = vec2(v) {
         return Ok(PArg::At(p));
     }
-    if let Some((at, exprs)) = expr_point_in(doc, v, cmd, paper)? {
+    if let Some((at, exprs)) = expr_point_in(doc, sk, v, cmd, paper)? {
         return Ok(match exprs {
             Some(exprs) => PArg::Ref(add_placed_point(sk, at, exprs, None)?, at),
             None => PArg::At(at),
@@ -968,16 +976,52 @@ pub(crate) fn point_arg_form(v: &Value, snaps: bool) -> std::result::Result<(), 
 }
 
 /// A point given as `[x, y]` with a coordinate typed as text: where it is now and, when a
-/// coordinate names a parameter, the expressions that place it (none: a plain point).
-fn expr_point_in(doc: &solidcraft_doc::Document, v: &Value, cmd: &str, paper: bool) -> Result<Option<(Vec2, Option<PointExprs>)>> {
+/// coordinate names a parameter or another point, the expressions that place it (none: a
+/// plain point).
+fn expr_point_in(doc: &solidcraft_doc::Document, sk: &Sketch, v: &Value, cmd: &str, paper: bool) -> Result<Option<(Vec2, Option<PointExprs>)>> {
     let Some([x, y]) = v.as_array().map(Vec::as_slice) else { return Ok(None) };
     if !x.is_string() && !y.is_string() {
         return Ok(None);
     }
-    let (px, ex) = super::sketch_create::text_number_in(doc, x, cmd, "point x", POINT_MUST, false, paper)?;
-    let (py, ey) = super::sketch_create::text_number_in(doc, y, cmd, "point y", POINT_MUST, false, paper)?;
+    let (px, ex) = point_number_in(doc, sk, x, cmd, "point x", POINT_MUST, paper)?;
+    let (py, ey) = point_number_in(doc, sk, y, cmd, "point y", POINT_MUST, paper)?;
     let exprs = (ex.is_some() || ey.is_some()).then_some(PointExprs { x: ex, y: ey });
     Ok(Some((Vec2::new(px, py), exprs)))
+}
+
+/// A point's coordinate typed as text: a number, or an expression over the design's
+/// parameters and the sketch's other points (`p1.x`). The expression is kept when it names
+/// a parameter or a point, so that the point follows them.
+fn point_number_in(
+    doc: &solidcraft_doc::Document,
+    sk: &Sketch,
+    v: &Value,
+    cmd: &str,
+    key: &str,
+    must: &str,
+    paper: bool,
+) -> Result<(f64, Option<String>)> {
+    match v {
+        Value::Number(n) => {
+            let x = n.as_f64().and_then(crate::params::finite).ok_or_else(|| bad(cmd, must))?;
+            Ok((x, None))
+        }
+        Value::String(e) if !e.trim().is_empty() && e.len() <= 4096 => {
+            let e = if paper { e.trim().to_string() } else { doc.with_design_unit(e.trim(), Kind::Length) };
+            match doc.eval_point_expr(sk, &e) {
+                Ok(x) => {
+                    let x = crate::params::finite(x).ok_or_else(|| bad(cmd, must))?;
+                    // The expression is kept when it names a parameter or a point, so the point
+                    // follows them.
+                    let follows = !solidcraft_doc::expr::references(&e).is_empty() || !solidcraft_doc::expr::point_members(&e).is_empty();
+                    Ok((x, follows.then_some(e)))
+                }
+                // Say what is wrong with it (an unknown parameter, a length where an angle goes).
+                Err(error) => Err(bad(cmd, format!("{key}: {error}"))),
+            }
+        }
+        _ => Err(bad(cmd, must)),
+    }
 }
 
 /// A new point placed by parameters: fixed where its expressions come to, and moved there
@@ -1135,9 +1179,18 @@ pub(crate) fn custom_plane_form(v: &Value) -> std::result::Result<Plane, &'stati
         None | Some(Value::Null) => Vec3::ZERO,
         Some(o) => vec3(o).ok_or("plane `origin` must be three numbers [x, y, z] in mm")?,
     };
-    let x = v.get("x_dir").and_then(vec3).ok_or("plane needs x_dir")?;
-    let y = v.get("y_dir").and_then(vec3).ok_or("plane needs y_dir")?;
+    let x = plane_direction(v, "x_dir", "plane needs x_dir", "plane `x_dir` must be three numbers [x, y, z]: only `origin` takes expressions")?;
+    let y = plane_direction(v, "y_dir", "plane needs y_dir", "plane `y_dir` must be three numbers [x, y, z]: only `origin` takes expressions")?;
     Plane::new(origin, x, y).ok_or("degenerate plane")
+}
+
+/// A plane's `x_dir` or `y_dir`: three numbers. Absent, it is `missing`; given as something else
+/// (an expression), `not_numbers`, so the message names what is wrong rather than "needs" it (#19965).
+fn plane_direction(v: &Value, key: &str, missing: &'static str, not_numbers: &'static str) -> std::result::Result<Vec3, &'static str> {
+    match v.get(key) {
+        None | Some(Value::Null) => Err(missing),
+        Some(d) => vec3(d).ok_or(not_numbers),
+    }
 }
 
 /// An explicit plane whose origin has length expressions (`{origin: ["0 mm", "station", 0], x_dir,
@@ -1398,8 +1451,6 @@ fn sketch_on_plane(s: &mut Session, p: &Value, mut plane: PlaneRef, internal_bod
     let attachment = s.doc.feature(id).and_then(|feature| match &feature.kind {
         FeatureKind::Sketch { plane, .. } => Some(if face::anchor(plane).is_some() {
             Attachment::ExactFace
-        } else if solidcraft_doc::sheet::plane_sheet_face(plane).is_some() {
-            Attachment::SheetFace
         } else if internal_body.is_some() {
             Attachment::InternalLegacyFace
         } else {
@@ -1854,9 +1905,9 @@ fn rect_result(sk_out: (Vec<String>, Vec<String>), (sides, corners): (RectSides,
 /// A rectangle corner (or an ellipse's centre and major end): `[x, y]` of numbers, or with a
 /// coordinate typed as an expression (as a `sketch.line` point is): where it is now and the
 /// expressions that place it.
-pub(super) fn corner_arg(doc: &solidcraft_doc::Document, p: &Value, k: &str, cmd: &str, paper: bool) -> Result<(Vec2, PointExprs)> {
+pub(super) fn corner_arg(doc: &solidcraft_doc::Document, sk: &Sketch, p: &Value, k: &str, cmd: &str, paper: bool) -> Result<(Vec2, PointExprs)> {
     let v = p.get(k).ok_or_else(|| bad(cmd, format!("`{k}` must be a point [x, y]")))?;
-    match expr_point_in(doc, v, cmd, paper)? {
+    match expr_point_in(doc, sk, v, cmd, paper)? {
         Some((at, exprs)) => Ok((at, exprs.unwrap_or_default())),
         None => Ok((req_vec2(cmd, p, k)?, PointExprs::default())),
     }
@@ -1875,7 +1926,10 @@ pub(super) fn place_point(sk: &mut Sketch, i: Option<&usize>, exprs: PointExprs)
 
 fn rect_two_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.rectangle.two_point";
-    let ((a, ea), (b, eb)) = (corner_arg(&s.doc, p, "p0", cmd, s.sheet_sketching())?, corner_arg(&s.doc, p, "p1", cmd, s.sheet_sketching())?);
+    // The corners may read another point's coordinate: they are worked out against the sketch.
+    let sk = sketch_store::read_for_command(s, p, cmd)?;
+    let ((a, ea), (b, eb)) =
+        (corner_arg(&s.doc, &sk, p, "p0", cmd, s.sheet_sketching())?, corner_arg(&s.doc, &sk, p, "p1", cmd, s.sheet_sketching())?);
     if (a.x - b.x).abs() < 1e-9 || (a.y - b.y).abs() < 1e-9 {
         return Err(bad(cmd, "the corners must differ in x and y"));
     }
@@ -1903,7 +1957,8 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.rectangle.rounded";
     // The corners may be typed as expressions: `sketch.rectangle.two_point` below places them, so
     // here they are only worked out to check the radius against the sides.
-    let ((a, _), (b, _)) = (corner_arg(&s.doc, p, "p0", cmd, s.sheet_sketching())?, corner_arg(&s.doc, p, "p1", cmd, s.sheet_sketching())?);
+    let sk = sketch_store::read_for_command(s, p, cmd)?;
+    let ((a, _), (b, _)) = (corner_arg(&s.doc, &sk, p, "p0", cmd, s.sheet_sketching())?, corner_arg(&s.doc, &sk, p, "p1", cmd, s.sheet_sketching())?);
     let r_expr = req_expr(cmd, p, "radius")?;
     let r = s.doc.eval(&r_expr, Kind::Length).map_err(|e| bad(cmd, format!("radius: {e}")))?;
     if !(r > 1e-9 && r < 1e8) {
@@ -1987,7 +2042,11 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.rectangle.center";
-    let ((c, ec), (k, ek)) = (corner_arg(&s.doc, p, "center", cmd, s.sheet_sketching())?, corner_arg(&s.doc, p, "corner", cmd, s.sheet_sketching())?);
+    // The centre and the corner may read another point's coordinate: they are worked out
+    // against the sketch.
+    let sk = sketch_store::read_for_command(s, p, cmd)?;
+    let ((c, ec), (k, ek)) =
+        (corner_arg(&s.doc, &sk, p, "center", cmd, s.sheet_sketching())?, corner_arg(&s.doc, &sk, p, "corner", cmd, s.sheet_sketching())?);
     let h = Vec2::new((k.x - c.x).abs(), (k.y - c.y).abs());
     if h.x < 1e-9 || h.y < 1e-9 {
         return Err(bad(cmd, "the corner must differ from the centre in x and y"));
@@ -2025,6 +2084,106 @@ fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(((ids_of(sk, &l), cons), rect_names(sk, &l, &pts)))
     })?;
     rect_result(out, names, info)
+}
+
+/// The direction of the anchored edge of an edge-centre rectangle: `direction`, else the
+/// direction of `line`, else that of the line an `anchor` of the form `mid:<line>` snaps to.
+/// Never a default axis: a rectangle with no orientation is an error.
+fn edge_direction(sk: &Sketch, p: &Value, cmd: &str) -> Result<Vec2> {
+    if let Some(v) = p.get("direction") {
+        let d = vec2(v).ok_or_else(|| bad(cmd, "`direction` must be [dx, dy]"))?;
+        return d.normalized().filter(|d| d.is_finite()).ok_or_else(|| bad(cmd, "`direction` must be a non-zero vector"));
+    }
+    let line = match (str_(p, "line"), p.get("mid_line").and_then(Value::as_str)) {
+        (Some(l), _) | (None, Some(l)) => l,
+        _ => {
+            return Err(bad(
+                cmd,
+                "the edge's orientation is ambiguous: give `direction` [dx, dy] or `line` (a line it is parallel to), or anchor on a line's midpoint with \"mid:<line>\"",
+            ));
+        }
+    };
+    let c = sk.curve_index(line).ok_or_else(|| bad(cmd, format!("unknown sketch curve `{line}`")))?;
+    let Some(solidcraft_sketch::Shape::Line { a, b }) = sk.shape(c) else { return Err(bad(cmd, format!("`{line}` is not a line"))) };
+    (b - a).normalized().ok_or_else(|| bad(cmd, format!("`{line}` has no length")))
+}
+
+/// A rectangle from the midpoint of one edge (`anchor`) and a corner of the opposite edge (#4798).
+/// The anchored edge runs along the given direction; the corner's offset along it is the
+/// half-length and its offset across it the width, so the rectangle lies on the corner's side of
+/// the anchor.
+fn rect_edge_center(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.rectangle.edge_center";
+    // A `mid:<line>` anchor becomes a point id when snapped; remember its line for the direction.
+    let mut p = p.clone();
+    if let Some(line) = p.get("anchor").and_then(Value::as_str).and_then(|a| a.strip_prefix("mid:")).map(str::to_string)
+        && let Some(o) = p.as_object_mut()
+    {
+        o.insert("mid_line".into(), Value::String(line));
+    }
+    let p = &super::sketch_project::snap_points(s, &p, cmd)?;
+    let k = req_vec2(cmd, p, "corner")?;
+    let ((out, names), info) = edit(s, p, cmd, false, |sk, doc| {
+        let first = sk.points.len();
+        let anchor = req_parg(sk, doc, p, "anchor", cmd)?;
+        let d = edge_direction(sk, p, cmd)?;
+        let n = d.perp();
+        let a = anchor.pos();
+        let (w, h) = ((k - a).dot(n), (k - a).dot(d).abs());
+        // Relative to the sketch's scale, so a tiny or huge rectangle is judged alike.
+        let scale = a.len().max(k.len()).max(1.0);
+        if !(w.is_finite() && h.is_finite()) || w.abs() < 1e-9 * scale || h < 1e-9 * scale {
+            return Err(bad(cmd, "the corner must be off the anchored edge and off its perpendicular through the anchor"));
+        }
+        let (c0, c1) = (a - d * h, a + d * h);
+        let (l, pts) = polygon_lines(sk, &[c0, c1, c1 + n * w, c0 + n * w])?;
+        let mut cons = Vec::new();
+        if let [l0, l1, l2, l3] = l[..] {
+            let kinds = if d.y.abs() < 1e-12 {
+                // Along the sketch's x axis: horizontal and vertical sides, as the other rectangles.
+                [
+                    ConstraintKind::Horizontal { l: l0 },
+                    ConstraintKind::Horizontal { l: l2 },
+                    ConstraintKind::Vertical { l: l1 },
+                    ConstraintKind::Vertical { l: l3 },
+                ]
+                .to_vec()
+            } else if d.x.abs() < 1e-12 {
+                [
+                    ConstraintKind::Vertical { l: l0 },
+                    ConstraintKind::Vertical { l: l2 },
+                    ConstraintKind::Horizontal { l: l1 },
+                    ConstraintKind::Horizontal { l: l3 },
+                ]
+                .to_vec()
+            } else {
+                [ConstraintKind::Perpendicular { a: l0, b: l1 }, ConstraintKind::Parallel { a: l0, b: l2 }, ConstraintKind::Parallel { a: l1, b: l3 }]
+                    .to_vec()
+            };
+            for k in kinds {
+                cons.push(add_c(sk, k)?);
+            }
+            // The anchor stays at the middle of its edge.
+            let ap = match anchor.idx() {
+                Some(i) => i,
+                None => sk.add_point(a, None)?,
+            };
+            cons.push(add_c(sk, ConstraintKind::Midpoint { p: ap, l: l0 })?);
+        }
+        mark_construction(sk, &l, p);
+        cons.extend(connect_points(sk, first, p)?);
+        drop_implied_axes(sk, &mut cons);
+        let curve = |i: usize| l.get(i).and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone());
+        let point = |i: usize| pts.get(i).and_then(|q| sk.points.get(*q)).map(|q| q.id.clone());
+        let names = (
+            EdgeCenterRectSides { anchor: curve(0), side_a: curve(1), far: curve(2), side_b: curve(3) },
+            EdgeCenterRectCorners { anchor_start: point(0), anchor_end: point(1), far_end: point(2), far_start: point(3) },
+        );
+        Ok(((ids_of(sk, &l), cons), names))
+    })?;
+    let ((curves, constraints), (sides, corners)) = (out, names);
+    let reply = EdgeCenterRectResult { curves, constraints, sketch: info, sides, corners, created: None, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn rect_three_point(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2517,7 +2676,7 @@ fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {
         return point_reply(pid, Vec::new(), info);
     }
     let ((pid, cons), info) = edit(s, p, cmd, false, |sk, doc| {
-        let i = match expr_point_in(doc, p.get("point").unwrap_or(&Value::Null), cmd, paper)? {
+        let i = match expr_point_in(doc, sk, p.get("point").unwrap_or(&Value::Null), cmd, paper)? {
             Some((at, Some(exprs))) => add_placed_point(sk, at, exprs, id.as_deref())?,
             Some((at, None)) => sk.add_point(at, id.as_deref())?,
             None => sk.add_point(req_vec2(cmd, p, "point")?, id.as_deref())?,

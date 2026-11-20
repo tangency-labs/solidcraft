@@ -2857,3 +2857,80 @@ fn mirror_axis_does_not_drift_when_dimensioning_mirrored_geometry() {
     assert!((before_axis.0 - after_axis.0).len() < 1e-6, "axis moved");
     assert!((before_axis.1 - after_axis.1).len() < 1e-6, "axis moved");
 }
+
+/// The 30 knot spans of a degree 3 clamped spline over 33 points, the knot steps 1/64 (28 of
+/// them), 1/2 and 1/16: not uniform, and exact in binary (#19524).
+fn non_uniform_knots() -> Vec<f64> {
+    let spacings: Vec<f64> = std::iter::repeat_n(1.0 / 64.0, 28).chain([0.5, 1.0 / 16.0]).collect();
+    let mut knots = vec![0.0; 4];
+    let mut at = 0.0;
+    for s in spacings.iter().take(29) {
+        at += s;
+        knots.push(at);
+    }
+    knots.extend([1.0; 4]);
+    knots
+}
+
+/// The spline's point at `u` by the Cox–de Boor recursion, independent of the de Boor evaluation
+/// the sketch uses. `u` in [0, 1).
+fn cox_de_boor(knots: &[f64], pts: &[[f64; 2]], degree: usize, u: f64) -> [f64; 2] {
+    fn basis(knots: &[f64], i: usize, p: usize, u: f64) -> f64 {
+        if p == 0 {
+            return if knots[i] <= u && u < knots[i + 1] { 1.0 } else { 0.0 };
+        }
+        let left = if knots[i + p] > knots[i] { (u - knots[i]) / (knots[i + p] - knots[i]) * basis(knots, i, p - 1, u) } else { 0.0 };
+        let right = if knots[i + p + 1] > knots[i + 1] {
+            (knots[i + p + 1] - u) / (knots[i + p + 1] - knots[i + 1]) * basis(knots, i + 1, p - 1, u)
+        } else {
+            0.0
+        };
+        left + right
+    }
+    pts.iter().enumerate().fold([0.0, 0.0], |acc, (i, q)| {
+        let w = basis(knots, i, degree, u);
+        [acc[0] + w * q[0], acc[1] + w * q[1]]
+    })
+}
+
+/// A control spline with its own non-uniform clamped knots over 33 points evaluates as the
+/// Cox–de Boor sum at its own parameters, and its exact pieces are its 30 knot spans (#19524).
+#[test]
+fn a_clamped_spline_with_non_uniform_knots_evaluates_as_the_cox_de_boor_sum() {
+    let raw: Vec<[f64; 2]> = (0..33).map(|i| [i as f64 * 0.7, (i as f64 * 0.9).sin() * 3.0]).collect();
+    let knots = non_uniform_knots();
+    let nurbs = Nurbs { knots: knots.clone(), weights: Vec::new() };
+    let ctrl: Vec<Vec2> = raw.iter().map(|q| v(q[0], q[1])).collect();
+    for k in 0..512 {
+        let t = k as f64 / 512.0;
+        let got = nurbs.point(&ctrl, 3, t).unwrap();
+        let want = cox_de_boor(&knots, &raw, 3, t);
+        assert!((got.x - want[0]).abs() < 1e-12 && (got.y - want[1]).abs() < 1e-12, "t={t}: {got:?} vs {want:?}");
+    }
+    let end = nurbs.point(&ctrl, 3, 1.0).unwrap();
+    assert!(end.dist(ctrl[32]) < 1e-12);
+    let mut sk = Sketch::new();
+    let pts: Vec<usize> = ctrl.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
+    let c =
+        sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: Some(nurbs), handles: Vec::new() }, None).unwrap();
+    assert_eq!(sk.exact_pieces(c).len(), 30);
+}
+
+/// A point of a spline with its own knots is not removed: the knots would no longer fit the
+/// points, so the spline is left as it was (#19524).
+#[test]
+fn removing_a_point_from_a_spline_with_its_own_knots_is_refused() {
+    let mut sk = Sketch::new();
+    let ctrl = [v(0.0, 0.0), v(1.0, 2.0), v(2.0, 2.0), v(3.0, 0.0), v(4.0, -2.0), v(5.0, -2.0), v(6.0, 0.0)];
+    let nurbs = Nurbs { knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 3.0], weights: Vec::new() };
+    let pts: Vec<usize> = ctrl.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
+    let c = sk
+        .add_curve(
+            CurveKind::Spline { pts: pts.clone(), control: true, degree: 3, periodic: false, nurbs: Some(nurbs.clone()), handles: Vec::new() },
+            None,
+        )
+        .unwrap();
+    assert!(sk.remove_spline_point(c, pts[3]).is_err());
+    let CurveKind::Spline { pts: kept, nurbs: Some(now), .. } = &sk.curves[c].kind else { panic!("{:?}", sk.curves[c].kind) };
+    assert_eq!((kept.len(), now), (7, &nurbs));
+}

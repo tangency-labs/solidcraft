@@ -1789,6 +1789,31 @@ pub(crate) fn stitch_faces_with_identity(
     stitch_faces_with_context(k, b, xsect_tol_3d, faces, allow_spine_edges, identity, None)
 }
 
+/// [`stitch_faces_with_identity`] of every face of a B-rep that holds one solid's faces
+/// and nothing else, of which `outside` is a face use on the solid's outside: the glue
+/// that closes the shell fires no ray ([`crate::heal::stitch::p1::Stitch::outside`]).
+pub(crate) fn stitch_one_solid_with_identity(
+    k: &mut Kernel,
+    b: &mut Brep,
+    xsect_tol_3d: f64,
+    allow_spine_edges: bool,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
+    outside: FaceuseId,
+) -> Result<StitchOutcome> {
+    let mut callback = DefaultStitchCallback::new();
+    stitch_faces_configured(
+        k,
+        b,
+        xsect_tol_3d,
+        None,
+        allow_spine_edges,
+        identity,
+        None,
+        &mut callback,
+        Some(outside),
+    )
+}
+
 /// Stitch with the actual caller's notification state; no call-local edit stores.
 pub(crate) fn stitch_faces_with_context<'a>(
     k: &mut Kernel,
@@ -1829,8 +1854,35 @@ pub(crate) fn stitch_faces_with_callback<'a, C: StitchCallback>(
     faces: Option<&[Option<FaceId>]>,
     allow_spine_edges: bool,
     identity: Option<crate::query::brep::BrepIdentity<'a>>,
+    edits: Option<&'a mut dyn crate::heal::stitch::p1::StitchEditContext>,
+    callback: &mut C,
+) -> Result<StitchOutcome> {
+    stitch_faces_configured(
+        k,
+        b,
+        xsect_tol_3d,
+        faces,
+        allow_spine_edges,
+        identity,
+        edits,
+        callback,
+        None,
+    )
+}
+
+/// [`stitch_faces_with_callback`] with the stitch's word on its faces
+/// ([`crate::heal::stitch::p1::Stitch::outside`]).
+#[allow(clippy::too_many_arguments)]
+fn stitch_faces_configured<'a, C: StitchCallback>(
+    k: &mut Kernel,
+    b: &mut Brep,
+    xsect_tol_3d: f64,
+    faces: Option<&[Option<FaceId>]>,
+    allow_spine_edges: bool,
+    identity: Option<crate::query::brep::BrepIdentity<'a>>,
     mut edits: Option<&'a mut dyn crate::heal::stitch::p1::StitchEditContext>,
     callback: &mut C,
+    outside: Option<FaceuseId>,
 ) -> Result<StitchOutcome> {
     // lock brep bounding box, until goes out of scope
     let mut lockit = LockBrepBox::new(k, b)?;
@@ -1838,6 +1890,7 @@ pub(crate) fn stitch_faces_with_callback<'a, C: StitchCallback>(
 
     // construct Stitch manager using the caller's keep/delete logic for glue pairs
     let mut stitch = Stitch::new(callback, xsect_tol_3d, true, true);
+    stitch.outside = outside;
     stitch.query_identity = identity;
     stitch.edits = edits
         .as_mut()
