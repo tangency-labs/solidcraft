@@ -194,7 +194,8 @@ fn panel_outer_cancellation_restores_published_data_and_visibility() {
         panels::show_panel(Some(&mut *session), "jobs", false)?;
         solidcraft_doc::progress::current().unwrap().cancel();
         Ok(json!({}))
-    });
+    })
+    .icon("play");
     let progress = std::sync::Arc::new(solidcraft_doc::progress::Progress::default());
     let result = solidcraft_doc::progress::watch(progress, || session.execute_spec(&command, &json!({})));
     assert!(matches!(result, Err(EngineError::Cancelled(_))), "{result:?}");
