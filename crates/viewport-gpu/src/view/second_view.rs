@@ -13,6 +13,8 @@ pub struct ViewTarget {
     /// failed is replaced by a one-sample one (`check_msaa`), whose pipelines cannot draw into
     /// them.
     samples: u32,
+    /// Its depth runs reversed (the renderer's depth format).
+    reversed: bool,
     /// The see-through surfaces' targets, made when a scene first has such surfaces.
     oit: Option<oit::Targets>,
 }
@@ -27,6 +29,12 @@ impl ViewTarget {
     /// was drawn, its colours multiplied by their alpha.
     pub fn picture(&self) -> &wgpu::TextureView {
         self.frame.resolve.as_ref().unwrap_or(&self.frame.color)
+    }
+
+    /// The picture's depth for a later pass to read: its sample count, whether it runs reversed
+    /// (1 near, 0 far: [`reversed_depth`]), and its depth aspect. Kept from the last draw.
+    pub fn depth(&self) -> Option<(u32, bool, &wgpu::TextureView)> {
+        self.frame.depth_read.as_ref().map(|view| (self.samples, self.reversed, view))
     }
 
     /// The picture bound for the renderer's own copy pipeline (tests read it back through that).
@@ -71,13 +79,13 @@ impl Renderer {
         let size = [size[0].clamp(1, max), size[1].clamp(1, max)];
         let samples = self.target.samples;
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_second_view") });
-        if target.as_ref().is_none_or(|t| t.frame.size != size || t.samples != samples) {
+        if target.as_ref().is_none_or(|t| t.frame.size != size || t.samples != samples || t.reversed != self.target.reversed_depth()) {
             // The old picture goes before the new one is asked for.
             *target = None;
-            match allocated(device, || self.supersampled(device, size)) {
+            match allocated(device, || self.supersampled(device, size, true)) {
                 Ok(made) => {
                     clear_resolve_targets(&mut encoder, made.resolve.as_ref());
-                    *target = Some(ViewTarget { frame: made, samples, oit: None });
+                    *target = Some(ViewTarget { frame: made, samples, reversed: self.target.reversed_depth(), oit: None });
                 }
                 Err(e) => {
                     log::warn!("the second view is not drawn: the GPU refused a {} × {} picture: {e}", size[0], size[1]);
@@ -124,7 +132,8 @@ impl Renderer {
         let [sw, sh] = [scissor[2].min(size[0] - sx), scissor[3].min(size[1] - sy)];
         let visible = sw > 0 && sh > 0;
         let stencil = self.target.depth.is_some_and(|f| f.has_stencil_aspect());
-        let keep = if see_through { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard };
+        // Kept: the headset hides its controllers and signs behind the model by it.
+        let keep = wgpu::StoreOp::Store;
         let far = far_depth(reversed);
         let ss = &view.frame;
         let pass = |encoder: &mut wgpu::CommandEncoder, first: bool| {

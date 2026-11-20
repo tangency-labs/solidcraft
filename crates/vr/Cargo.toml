@@ -12,3 +12,6 @@ workspace = true
 [dependencies]
 # The room's maths (poses, matrices, the placed model) and the controllers' input (no headset needed)
 solidcraft-xr = { workspace = true }
+# The controllers' models the VR software hands out: core glTF, pictures as PNG
+gltf = { workspace = true, features = ["utils"] }
+image = { workspace = true }

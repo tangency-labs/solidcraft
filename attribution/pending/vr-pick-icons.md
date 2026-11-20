@@ -1,0 +1,2 @@
+| crates/look/icons/design/svg/flat/eye_off.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/isolate.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |

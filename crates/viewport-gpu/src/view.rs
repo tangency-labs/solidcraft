@@ -2723,6 +2723,9 @@ struct Supersampled {
     /// The resolved colour (when `color` is multisampled).
     resolve: Option<wgpu::TextureView>,
     depth: Option<wgpu::TextureView>,
+    /// The depth (its depth aspect alone) for a later pass to read, where it was asked for (a
+    /// headset's second view, whose controllers and signs are hidden behind the model).
+    depth_read: Option<wgpu::TextureView>,
     /// The single-sampled colour, for the filter.
     bind: wgpu::BindGroup,
 }
@@ -4834,7 +4837,7 @@ impl Renderer {
             }
             // The old frame goes before the new one is asked for.
             self.ss = None;
-            match allocated(device, || self.supersampled(device, size)) {
+            match allocated(device, || self.supersampled(device, size, false)) {
                 Ok(ss) => {
                     let _cleared = clear_resolve_targets(encoder, ss.resolve.as_ref());
                     #[cfg(test)]
@@ -4942,21 +4945,22 @@ impl Renderer {
     }
 
     /// Textures for a supersampled frame of `size` pixels.
-    fn supersampled(&self, device: &wgpu::Device, size: [u32; 2]) -> Supersampled {
+    fn supersampled(&self, device: &wgpu::Device, size: [u32; 2], readable_depth: bool) -> Supersampled {
         let t = self.target;
+        let make = |label: &str, format: wgpu::TextureFormat, samples: u32, usage: wgpu::TextureUsages| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: samples,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage,
+                view_formats: &[],
+            })
+        };
         let texture = |label: &str, format: wgpu::TextureFormat, samples: u32, usage: wgpu::TextureUsages| {
-            device
-                .create_texture(&wgpu::TextureDescriptor {
-                    label: Some(label),
-                    size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
-                    mip_level_count: 1,
-                    sample_count: samples,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage,
-                    view_formats: &[],
-                })
-                .create_view(&Default::default())
+            make(label, format, samples, usage).create_view(&Default::default())
         };
         let samples = t.samples.max(1);
         let sampled = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
@@ -4965,7 +4969,17 @@ impl Renderer {
         } else {
             (texture("sc_ssaa", t.format, 1, sampled), None)
         };
-        let depth = t.depth.map(|f| texture("sc_ssaa_depth", f, samples, wgpu::TextureUsages::RENDER_ATTACHMENT));
+        let depth_usage = if readable_depth {
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
+        } else {
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+        };
+        let depth_texture = t.depth.map(|f| make("sc_ssaa_depth", f, samples, depth_usage));
+        let depth = depth_texture.as_ref().map(|d| d.create_view(&Default::default()));
+        let depth_read = depth_texture
+            .as_ref()
+            .filter(|_| readable_depth)
+            .map(|d| d.create_view(&wgpu::TextureViewDescriptor { aspect: wgpu::TextureAspect::DepthOnly, ..Default::default() }));
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sc_ssaa"),
             layout: &self.ss_bgl,
@@ -4974,7 +4988,7 @@ impl Renderer {
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
             ],
         });
-        Supersampled { size, color, resolve, depth, bind }
+        Supersampled { size, color, resolve, depth, depth_read, bind }
     }
 }
 
@@ -6727,6 +6741,7 @@ mod glass_tests {
     /// A second view's picture is made again, at the same size, when the renderer drawing into
     /// it has another sample count: `check_msaa` replaces a renderer whose multisampling fails by
     /// a one-sample one, and the headset keeps its picture across that. The model still shows.
+    /// Its depth stays readable for the headset's passes over it.
     #[test]
     fn a_second_view_remakes_its_picture_for_another_sample_count() {
         let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
@@ -6743,6 +6758,9 @@ mod glass_tests {
             assert!(r.draw_second_view(&device, &queue, &frame, [w, h], [0, 0, w, h], true, &mut target), "{samples} samples");
             let view = target.as_ref().unwrap();
             assert_eq!((view.size(), view.samples()), ([w, h], samples), "made for this renderer");
+            // Its depth is kept for the headset's later passes, as this renderer wrote it.
+            let kept = view.depth().map(|(n, reversed, _)| (n, reversed));
+            assert_eq!(kept, Some((samples, r.target.reversed_depth())), "{samples} samples: the depth is readable");
             let pixels = read_second_view(&r, &device, &queue, view);
             assert!(pixels.chunks(4).any(|p| p[0] > 200 && p[3] > 200), "{samples} samples: the model is drawn");
         }

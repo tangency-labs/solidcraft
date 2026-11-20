@@ -2,10 +2,10 @@
 //!
 //! - One hand's grip held: the model is held like a thing in the hand. It moves and turns with
 //!   the hand, about the hand.
-//! - Both grips held: the model grows or shrinks as the hands move apart or together, about the
-//!   point between them, and moves with that point. It does not turn: turning is one hand's.
-//!   Brought near its real size, it snaps to real size and stays there until the hands move it
-//!   clearly away again.
+//! - Both grips held, as [`TwoHands`] says: the model grows or shrinks as the hands move apart or
+//!   together and moves with them; it turns with them too, or only with the hand that took hold
+//!   first, or not at all. Brought near its real size, it snaps to real size (unless asked not
+//!   to) and stays there until the hands move it clearly away again.
 //!
 //! The room and its floor never move; only the model does. Whenever which hands hold changes,
 //! the grab starts again from where the model is, so the model never jumps when a second hand
@@ -14,7 +14,36 @@
 use solidcraft_xr::view::Pose;
 
 use crate::room::{MAX_SCALE, MIN_SCALE, REAL_SIZE, Transform};
-use crate::vector::{add, length, scale, sub, turn};
+use crate::vector::{add, cross, dot, finite, length, scale, sub, turn, unit};
+
+/// What both grabs do together.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TwoHands {
+    /// Scale about the point between the hands and move with it; no turn.
+    #[default]
+    ScaleMove,
+    /// Both hands equal: scale, move with the point between them, and turn with the line between
+    /// them and with their roll about it. Hands closer than [`MIN_SPAN`] do not turn it.
+    Equal,
+    /// The hand that took hold first holds and turns the model as one hand does; the other only
+    /// scales it, by its distance to the first.
+    Lead,
+}
+
+/// How the grab behaves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Mode {
+    pub two_hands: TwoHands,
+    /// A two-handed scale near real size snaps to it.
+    pub snap: bool,
+}
+
+impl Default for Mode {
+    /// As the grab was before it had settings: scale and move, snapping to real size.
+    fn default() -> Self {
+        Mode { two_hands: TwoHands::ScaleMove, snap: true }
+    }
+}
 
 /// Hands closer than this (metres) are taken as this far apart: their distance never sets a
 /// scale from nothing.
@@ -64,6 +93,9 @@ impl Snap {
 }
 
 /// Where the hands held from, and the model as it was then.
+// One lives in each grab, never in a list: the size of the two-handed state costs nothing, and
+// boxing it would cost the grab its `Copy`.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Held {
     Free,
@@ -74,13 +106,65 @@ enum Held {
         turn: [[f64; 3]; 3],
         start: Transform,
     },
-    /// Both hands: the point between them, how far apart they were, and the real-size snap.
+    /// Both hands: where each was and how it was turned, the real-size snap, which hand took
+    /// hold first, and the turn of both hands together ([`TwoHands::Equal`]).
     Two {
-        middle: [f64; 3],
-        distance: f64,
+        from: [[f64; 3]; 2],
+        turns: [[[f64; 3]; 3]; 2],
         start: Transform,
         snap: Snap,
+        lead: usize,
+        line: Line,
     },
+}
+
+/// The turn both hands make together ([`TwoHands::Equal`]), which follows the line between
+/// them. Hands closer than [`MIN_SPAN`] have no line to follow (a millimetre of tracking jitter
+/// would swing it by degrees): the turn holds still until they part again, and then starts from
+/// where the line is then, so the model neither spins nor jumps.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Line {
+    /// The turn made so far in this grab (as columns), as of the last frame.
+    turned: [[f64; 3]; 3],
+    /// Where the hands were and how they were turned when the line was last taken up, and the
+    /// turn made before that; `None` while the hands are closer than [`MIN_SPAN`].
+    base: Option<LineBase>,
+}
+
+/// Where the line between the hands was taken up from (see [`Line`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LineBase {
+    at: [[f64; 3]; 2],
+    turns: [[[f64; 3]; 3]; 2],
+    before: [[f64; 3]; 3],
+}
+
+/// No turn, as columns.
+const NO_TURN: [[f64; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
+/// Whether hands at `at` are far enough apart for the line between them to say where it points.
+fn apart(at: [[f64; 3]; 2]) -> bool {
+    let d = length(sub(at[1], at[0]));
+    d.is_finite() && d >= MIN_SPAN
+}
+
+impl Line {
+    /// The line as both hands take hold at `at`, turned `turns`: no turn made yet.
+    fn starting(at: [[f64; 3]; 2], turns: [[[f64; 3]; 3]; 2]) -> Line {
+        Line { turned: NO_TURN, base: apart(at).then_some(LineBase { at, turns, before: NO_TURN }) }
+    }
+
+    /// The turn made so far with the hands now at `at`, turned `now`: none added while they are
+    /// closer than [`MIN_SPAN`]; when they part again, the line is taken up from there.
+    fn next(&mut self, at: [[f64; 3]; 2], now: [[[f64; 3]; 3]; 2]) -> [[f64; 3]; 3] {
+        if !apart(at) {
+            self.base = None;
+            return self.turned;
+        }
+        let base = *self.base.get_or_insert(LineBase { at, turns: now, before: self.turned });
+        self.turned = multiply(&hands_turn(base.at, base.turns, at, now), &base.before);
+        self.turned
+    }
 }
 
 /// The grab between frames.
@@ -113,6 +197,11 @@ impl WorldGrab {
     /// ([`Transform::tidy`]); `current` itself is kept when moving it would not be (its middle
     /// out of reach).
     pub fn update(&mut self, current: &Transform, grips: [Option<Pose>; 2]) -> Transform {
+        self.update_with(current, grips, Mode::default())
+    }
+
+    /// [`WorldGrab::update`], the grab behaving as `mode` says.
+    pub fn update_with(&mut self, current: &Transform, grips: [Option<Pose>; 2], mode: Mode) -> Transform {
         let grips = grips.map(|g| g.and_then(|pose| Some((pose.position, pose.axes()?))));
         let moved = match (grips, self.held) {
             ([None, None], _) => {
@@ -129,14 +218,21 @@ impl WorldGrab {
                 self.held = Held::One { hand: 1, at, turn, start: *current };
                 None
             }
-            ([Some((left, _)), Some((right, _))], Held::Two { middle, distance, start, snap }) => {
-                let (snap, moved) = two_handed(&start, snap, middle, distance, scale(add(left, right), 0.5), length(sub(right, left)));
-                self.held = Held::Two { middle, distance, start, snap };
+            ([Some((left, left_turn)), Some((right, right_turn))], Held::Two { from, turns, start, snap, lead, mut line }) => {
+                let snap = if mode.snap { snap } else { Snap { on: false, armed: false } };
+                let (snap, moved) = two_handed(&start, snap, &mut line, from, turns, [left, right], [left_turn, right_turn], lead, mode.two_hands);
+                self.held = Held::Two { from, turns, start, snap, lead, line };
                 Some(moved)
             }
-            ([Some((left, _)), Some((right, _))], _) => {
-                let (middle, distance) = (scale(add(left, right), 0.5), length(sub(right, left)));
-                self.held = Held::Two { middle, distance, start: *current, snap: Snap::starting(current.scale) };
+            ([Some((left, left_turn)), Some((right, right_turn))], held) => {
+                // The hand already holding leads; both at once: the right.
+                let lead = match held {
+                    Held::One { hand, .. } => hand,
+                    _ => 1,
+                };
+                let snap = if mode.snap { Snap::starting(current.scale) } else { Snap { on: false, armed: false } };
+                let (from, turns) = ([left, right], [left_turn, right_turn]);
+                self.held = Held::Two { from, turns, start: *current, snap, lead, line: Line::starting(from, turns) };
                 None
             }
         };
@@ -155,16 +251,116 @@ fn held_in_hand(start: &Transform, from: [f64; 3], was: &[[f64; 3]; 3], at: [f64
     Transform { axes, translation, ..*start }
 }
 
-/// `start` scaled as the hands went from `distance` apart about `from` to `now_distance` apart
-/// about `now`, and moved with the point between them; `snap` is the grab's real-size snap.
-fn two_handed(start: &Transform, snap: Snap, from: [f64; 3], distance: f64, now: [f64; 3], now_distance: f64) -> (Snap, Transform) {
+/// `start` moved by both hands, which went from `from` (turned `turns`) to `at` (turned `now`), as
+/// `two_hands` says; `lead` the hand that took hold first; `snap` the grab's real-size snap;
+/// `line` the turn both hands make together.
+#[allow(clippy::too_many_arguments)]
+fn two_handed(
+    start: &Transform,
+    snap: Snap,
+    line: &mut Line,
+    from: [[f64; 3]; 2],
+    turns: [[[f64; 3]; 3]; 2],
+    at: [[f64; 3]; 2],
+    now: [[[f64; 3]; 3]; 2],
+    lead: usize,
+    two_hands: TwoHands,
+) -> (Snap, Transform) {
+    let distance = length(sub(from[1], from[0]));
+    let now_distance = length(sub(at[1], at[0]));
     let grow = if distance > MIN_SPAN && now_distance.is_finite() { now_distance.max(MIN_SPAN) / distance } else { 1.0 };
     // Within the scale's limits: past them the hands no longer scale, and the model does not
     // creep away from between them.
     let (snap, s) = snap.next((start.scale * grow).clamp(MIN_SCALE, MAX_SCALE));
     let grow = s / start.scale;
-    // A room point p goes to now + grow · (p − from).
-    (snap, Transform { scale: s, translation: add(now, scale(sub(start.translation, from), grow)), ..*start })
+    let middle = |p: [[f64; 3]; 2]| scale(add(p[0], p[1]), 0.5);
+    let moved = match two_hands {
+        // A room point p goes to now + grow · (p − from), about the points between the hands.
+        TwoHands::ScaleMove => {
+            let (m0, m1) = (middle(from), middle(at));
+            Transform { scale: s, translation: add(m1, scale(sub(start.translation, m0), grow)), ..*start }
+        }
+        TwoHands::Equal => {
+            let (m0, m1) = (middle(from), middle(at));
+            let delta = line.next(at, now);
+            let axes = start.axes.map(|a| turn(&delta, a));
+            Transform { axes, scale: s, translation: add(m1, scale(turn(&delta, sub(start.translation, m0)), grow)), ..*start }
+        }
+        TwoHands::Lead => {
+            let l = lead.min(1);
+            let held = held_in_hand(start, from[l], &turns[l], at[l], &now[l]);
+            Transform { scale: s, translation: add(at[l], scale(sub(held.translation, at[l]), grow)), ..held }
+        }
+    };
+    (snap, moved)
+}
+
+/// The turn both hands made together: the line between them from where it pointed to where it
+/// points, then about that line by the hands' own roll about it, averaged. Each hand's roll
+/// counts by how far its up stands across the line, before and after: a hand whose up lies
+/// nearly along the line says little about a roll, and its noise is not taken for one.
+fn hands_turn(from: [[f64; 3]; 2], turns: [[[f64; 3]; 3]; 2], at: [[f64; 3]; 2], now: [[[f64; 3]; 3]; 2]) -> [[f64; 3]; 3] {
+    let (Some(v0), Some(v1)) = (unit(sub(from[1], from[0])), unit(sub(at[1], at[0]))) else { return NO_TURN };
+    let swing = arc(v0, v1);
+    // Each hand's roll about the new line: where its up went, against where the swing alone
+    // would have put it.
+    let (mut sin, mut cos) = (0.0, 0.0);
+    for h in 0..2 {
+        let across = |v: [f64; 3], line: [f64; 3]| sub(v, scale(line, dot(v, line)));
+        let (was, is) = (across(turns[h][1], v0), across(now[h][1], v1));
+        let (Some(was_dir), Some(is_dir)) = (unit(was), unit(is)) else { continue };
+        let weight = length(was) * length(is);
+        let swung = turn(&swing, was_dir);
+        let angle = dot(cross(swung, is_dir), v1).atan2(dot(swung, is_dir));
+        sin += weight * angle.sin();
+        cos += weight * angle.cos();
+    }
+    let roll = if sin == 0.0 && cos == 0.0 { 0.0 } else { sin.atan2(cos) };
+    multiply(&about(v1, roll), &swing)
+}
+
+/// The turn by `angle` (radians, right-handed) about the unit `axis`, as columns.
+fn about(axis: [f64; 3], angle: f64) -> [[f64; 3]; 3] {
+    let (s, c) = angle.sin_cos();
+    let [x, y, z] = axis;
+    let t = 1.0 - c;
+    [
+        [t * x * x + c, t * x * y + s * z, t * x * z - s * y],
+        [t * x * y - s * z, t * y * y + c, t * y * z + s * x],
+        [t * x * z + s * y, t * y * z - s * x, t * z * z + c],
+    ]
+}
+
+/// The shortest turn taking unit `a` to unit `b`.
+fn arc(a: [f64; 3], b: [f64; 3]) -> [[f64; 3]; 3] {
+    let c = dot(a, b);
+    match unit(cross(a, b)) {
+        Some(axis) => about(axis, cross(a, b).iter().map(|v| v * v).sum::<f64>().sqrt().atan2(c)),
+        // Along each other: no turn; opposite: half a turn about any line across.
+        None if c > 0.0 => about([1.0, 0.0, 0.0], 0.0),
+        None => {
+            let across = unit(cross(a, [1.0, 0.0, 0.0])).or_else(|| unit(cross(a, [0.0, 1.0, 0.0]))).unwrap_or([0.0, 0.0, 1.0]);
+            about(across, std::f64::consts::PI)
+        }
+    }
+}
+
+/// `a` · `b`, matrices as columns.
+fn multiply(a: &[[f64; 3]; 3], b: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    b.map(|column| turn(a, column))
+}
+
+/// The model turned by `angle` (radians) about the room's vertical through `centre` (the room).
+pub fn turned_about_vertical(t: &Transform, centre: [f64; 3], angle: f64) -> Transform {
+    turned_about(t, centre, [0.0, 1.0, 0.0], angle)
+}
+
+/// The model turned by `angle` (radians) about `axis` (the room, made unit) through `centre`. An
+/// axis with no direction, or an angle or centre that is no number, leaves the model as it is.
+pub fn turned_about(t: &Transform, centre: [f64; 3], axis: [f64; 3], angle: f64) -> Transform {
+    let Some(axis) = unit(axis).filter(|_| angle.is_finite() && finite(centre)) else { return *t };
+    let r = about(axis, angle);
+    Transform { axes: t.axes.map(|a| turn(&r, a)), translation: add(centre, turn(&r, sub(t.translation, centre))), ..*t }
 }
 
 #[cfg(test)]
@@ -385,5 +581,222 @@ mod tests {
             assert!(crate::vector::dot(t.axes[i], t.axes[(i + 1) % 3]).abs() < 1e-12);
         }
         assert!(close(turn(&t.axes, [0.0, 1.0, 0.0]), [0.0, 1.0, 0.0]), "turns about the vertical keep Y up");
+    }
+
+    /// Both hands as [`TwoHands::Equal`] says.
+    const EQUAL: Mode = Mode { two_hands: TwoHands::Equal, snap: true };
+
+    /// Without settings the grab scales and moves with both hands and snaps to real size, as it
+    /// did before it had settings.
+    #[test]
+    fn the_default_mode_is_the_grab_as_it_was() {
+        assert_eq!(Mode::default(), Mode { two_hands: TwoHands::ScaleMove, snap: true });
+        assert_eq!(TwoHands::default(), TwoHands::ScaleMove);
+        let frames = [spread(0.1), spread(0.15), [hand([0.0, 1.0, 0.0], 0.3), None], spread(0.2)];
+        let (mut a, mut b) = (WorldGrab::default(), WorldGrab::default());
+        let (mut ta, mut tb) = (START, START);
+        for grips in frames {
+            ta = a.update(&ta, grips);
+            tb = b.update_with(&tb, grips, Mode::default());
+            assert_eq!(ta, tb);
+        }
+    }
+
+    /// Both hands equal, swung a quarter about the point between them: the model swings with
+    /// the line between them, and what each hand held stays in it.
+    #[test]
+    fn both_hands_equal_turn_the_model_with_the_line_between_them() {
+        let mut grab = WorldGrab::default();
+        grab.update_with(&START, [hand([-0.1, 1.0, -0.5], 0.0), hand([0.1, 1.0, -0.5], 0.0)], EQUAL);
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let t = grab.update_with(&START, [hand([0.0, 1.0, -0.4], quarter), hand([0.0, 1.0, -0.6], quarter)], EQUAL);
+        assert!(close(t.apply([100.0, 1000.0, -500.0]), [0.0, 1.0, -0.6]), "the right hand's point stays in it");
+        assert!(close(t.apply([-100.0, 1000.0, -500.0]), [0.0, 1.0, -0.4]), "the left hand's too");
+        assert!(close(turn(&t.axes, [1.0, 0.0, 0.0]), [0.0, 0.0, -1.0]), "X swung to −Z");
+        assert!(close(turn(&t.axes, [0.0, 1.0, 0.0]), [0.0, 1.0, 0.0]), "up stays up");
+        assert_eq!(t.scale, START.scale);
+    }
+
+    /// Both hands equal, both wrists rolled about the line between them: the model rolls with
+    /// them; wrists rolled opposite ways cancel out.
+    #[test]
+    fn both_hands_equal_roll_the_model_with_the_wrists() {
+        let (left, right) = ([-0.1, 1.0, -0.5], [0.1, 1.0, -0.5]);
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let mut grab = WorldGrab::default();
+        grab.update_with(&START, [hand(left, 0.0), hand(right, 0.0)], EQUAL);
+        let t = grab.update_with(&START, [tipped(left, quarter), tipped(right, quarter)], EQUAL);
+        assert!(close(turn(&t.axes, [0.0, 1.0, 0.0]), [0.0, 0.0, 1.0]), "the model's Y follows the wrists");
+        assert!(close(t.apply([0.0, 1000.0, -500.0]), [0.0, 1.0, -0.5]), "about the point between the hands");
+        let t = grab.update_with(&START, [tipped(left, 0.5), tipped(right, -0.5)], EQUAL);
+        assert!(close(t.axes[1], [0.0, 1.0, 0.0]) && close(t.translation, START.translation), "{t:?}");
+    }
+
+    /// Both hands equal, swapping sides without rolling: half a turn about the vertical, the
+    /// model still upright and each held point still in its hand.
+    #[test]
+    fn hands_swapping_sides_turn_the_model_half_about_the_vertical() {
+        let (left, right) = ([-0.1, 1.0, -0.5], [0.1, 1.0, -0.5]);
+        let mut grab = WorldGrab::default();
+        grab.update_with(&START, [hand(left, 0.0), hand(right, 0.0)], EQUAL);
+        let t = grab.update_with(&START, [hand(right, 0.0), hand(left, 0.0)], EQUAL);
+        assert!(close(turn(&t.axes, [1.0, 0.0, 0.0]), [-1.0, 0.0, 0.0]), "{t:?}");
+        assert!(close(turn(&t.axes, [0.0, 1.0, 0.0]), [0.0, 1.0, 0.0]));
+        assert!(close(t.apply([100.0, 1000.0, -500.0]), left), "the right hand's point went with it");
+    }
+
+    /// Both hands at one place, before or after, turn nothing and send nothing to no number.
+    #[test]
+    fn hands_at_one_place_turn_nothing() {
+        let at = [0.0, 1.0, -0.5];
+        let mut grab = WorldGrab::default();
+        grab.update_with(&START, [hand(at, 0.0), hand(at, 0.0)], EQUAL);
+        let t = grab.update_with(&START, [tipped(at, 1.0), hand(at, 2.0)], EQUAL);
+        assert_eq!(t, START, "no line between the hands: no turn, no scale");
+        let mut grab = WorldGrab::default();
+        grab.update_with(&START, spread(0.1), EQUAL);
+        let t = grab.update_with(&START, spread(0.0), EQUAL);
+        assert_eq!(t.axes, START.axes);
+        assert!((t.scale - START.scale * MIN_SPAN / 0.2).abs() < 1e-15, "{}", t.scale);
+        assert!(crate::vector::finite(t.translation));
+    }
+
+    /// A hand at `at`, turned `angle` about the room's Z (its up leaning sideways).
+    fn leaning(at: [f64; 3], angle: f64) -> Option<Pose> {
+        let (s, c) = (angle * 0.5).sin_cos();
+        Some(Pose { position: at, orientation: [0.0, 0.0, s, c] })
+    }
+
+    /// Whether two turns (as columns) are the same but for rounding.
+    fn same_turn(a: &[[f64; 3]; 3], b: &[[f64; 3]; 3]) -> bool {
+        (0..3).all(|k| close(a[k], b[k]))
+    }
+
+    /// Both hands equal, brought within 5 mm of each other: a millimetre of tracking jitter
+    /// either way, which swings the line between hands that close by degrees, turns nothing.
+    #[test]
+    fn hands_almost_together_do_not_spin_the_model() {
+        let mut grab = WorldGrab::default();
+        grab.update_with(&START, spread(0.1), EQUAL);
+        let together = grab.update_with(&START, around(0.0025, [0.0, 1.0, 0.0]), EQUAL);
+        assert!(same_turn(&together.axes, &START.axes), "{together:?}");
+        let jitter = [[0.001, 0.0, 0.0], [0.0, 0.001, 0.0], [0.0, 0.0, -0.001], [-0.001, 0.001, 0.0], [0.0, -0.001, 0.001], [0.0, 0.0, 0.0]];
+        for (k, d) in jitter.iter().enumerate() {
+            let e = jitter[(k + 2) % jitter.len()];
+            let (left, right) = (add([-0.0025, 1.0, 0.0], *d), sub([0.0025, 1.0, 0.0], e));
+            let t = grab.update_with(&START, [hand(left, 0.0), hand(right, 0.0)], EQUAL);
+            assert!(same_turn(&t.axes, &START.axes), "jitter {k}: {t:?}");
+        }
+    }
+
+    /// Both hands equal, parting again after being closer than [`MIN_SPAN`] along another line:
+    /// the model does not jump to that line's turn; the line is taken up from where the hands
+    /// part, and turning it from there turns the model.
+    #[test]
+    fn hands_parting_again_take_up_the_line_without_a_jump() {
+        let mut grab = WorldGrab::default();
+        grab.update_with(&START, spread(0.1), EQUAL);
+        grab.update_with(&START, around(0.0025, [0.0, 1.0, 0.0]), EQUAL);
+        // Tilted steeply by a jitter while together: the line now points mostly along −Z.
+        let before = grab.update_with(&START, [hand([-0.0005, 1.0, 0.002], 0.0), hand([0.0005, 1.0, -0.002], 0.0)], EQUAL);
+        assert!(same_turn(&before.axes, &START.axes));
+        let middle = [0.0, 1.0, 0.0];
+        let held = before.to_model(middle);
+        // Parted along Z about the same middle: no turn, the middle stays where it was.
+        let parted = grab.update_with(&START, [hand([0.0, 1.0, 0.1], 0.0), hand([0.0, 1.0, -0.1], 0.0)], EQUAL);
+        assert!(same_turn(&parted.axes, &START.axes), "no jump to the line's turn: {parted:?}");
+        assert!(close(parted.apply(held), middle), "the point between the hands stays between them");
+        // The line swung from −Z to X: a quarter about the vertical, from where the hands parted.
+        let swung = grab.update_with(&START, [hand([-0.1, 1.0, 0.0], 0.0), hand([0.1, 1.0, 0.0], 0.0)], EQUAL);
+        assert!(close(turn(&swung.axes, [1.0, 0.0, 0.0]), [0.0, 0.0, 1.0]), "{swung:?}");
+        assert!(close(turn(&swung.axes, [0.0, 1.0, 0.0]), [0.0, 1.0, 0.0]));
+    }
+
+    /// Both hands equal, one hand's up lying nearly along the line between them and flipping
+    /// across it (a roll that says nothing), the other rolled a quarter: the model rolls by the
+    /// other's quarter, not by the average of both.
+    #[test]
+    fn a_hand_whose_up_lies_along_the_line_does_not_roll_the_model() {
+        let (left, right) = ([-0.1, 1.0, -0.5], [0.1, 1.0, -0.5]);
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let mut grab = WorldGrab::default();
+        grab.update_with(&START, [leaning(left, quarter - 0.01), hand(right, 0.0)], EQUAL);
+        let t = grab.update_with(&START, [leaning(left, quarter + 0.01), tipped(right, quarter)], EQUAL);
+        let up = turn(&t.axes, [0.0, 1.0, 0.0]);
+        assert!((0..3).all(|k| (up[k] - [0.0, 0.0, 1.0][k]).abs() < 1e-3), "the model's Y follows the right wrist: {up:?}");
+    }
+
+    /// Set to [`TwoHands::Lead`], the hand that took hold first holds and turns the model; the
+    /// other only scales it, about the first, and its own turn does nothing. Both taking hold at
+    /// once, the right leads.
+    #[test]
+    fn the_first_hand_leads_when_set() {
+        let mode = Mode { two_hands: TwoHands::Lead, snap: false };
+        let (left, right) = ([-0.1, 1.0, -0.5], [0.1, 1.0, -0.5]);
+        let mut grab = WorldGrab::default();
+        grab.update_with(&START, [hand(left, 0.0), None], mode);
+        assert_eq!(grab.update_with(&START, [hand(left, 0.0), hand(right, 0.0)], mode), START, "the second hand joining moves nothing");
+        let t = grab.update_with(&START, [hand(left, 0.0), hand([0.3, 1.0, -0.5], 1.0)], mode);
+        assert!((t.scale - 2.0 * START.scale).abs() < 1e-15, "twice as far apart: twice the size");
+        assert!(close(t.apply([-100.0, 1000.0, -500.0]), left), "the leading hand's point stays in it");
+        assert_eq!(t.axes, START.axes, "the other hand's turn does nothing");
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let t = grab.update_with(&START, [hand(left, quarter), hand(right, 0.0)], mode);
+        assert!(close(turn(&t.axes, [1.0, 0.0, 0.0]), [0.0, 0.0, -1.0]), "the leading hand turns it");
+        assert!(close(t.apply([-100.0, 1000.0, -500.0]), left), "about itself");
+
+        let mut grab = WorldGrab::default();
+        grab.update_with(&START, [hand(left, 0.0), hand(right, 0.0)], mode);
+        let t = grab.update_with(&START, [hand([-0.3, 1.0, -0.5], 0.0), hand(right, 0.0)], mode);
+        assert!(close(t.apply([100.0, 1000.0, -500.0]), right), "the right led: its point stays");
+    }
+
+    /// With the snap off, a two-handed scale near real size is what the hands say.
+    #[test]
+    fn without_the_snap_the_scale_is_what_the_hands_say() {
+        let half = Transform { scale: REAL_SIZE * 0.5, ..START };
+        let mode = Mode { snap: false, ..Mode::default() };
+        let mut grab = WorldGrab::default();
+        grab.update_with(&half, spread(0.1), mode);
+        let s = grab.update_with(&half, spread(0.195), mode).scale / REAL_SIZE;
+        assert!((s - 0.975).abs() < 1e-12, "{s}");
+        // Starting at real size, a small move is not held there either.
+        let mut grab = WorldGrab::default();
+        grab.update_with(&START, spread(0.1), mode);
+        let s = grab.update_with(&START, spread(0.102), mode).scale / REAL_SIZE;
+        assert!((s - 1.02).abs() < 1e-12, "{s}");
+    }
+
+    /// Turning about a point keeps that point where it is and turns the rest round it, right
+    /// handed; an axis of any length counts as its direction.
+    #[test]
+    fn turning_about_a_point_keeps_that_point() {
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let t = Transform { translation: [1.0, 1.0, 0.0], ..START };
+        let centre = [0.0, 1.0, 0.0];
+        let turned = turned_about_vertical(&t, centre, quarter);
+        assert!(close(turned.translation, [0.0, 1.0, -1.0]), "the origin went from +X to −Z: {turned:?}");
+        assert!(close(turned.apply(t.to_model(centre)), centre), "the centre stays");
+        assert!(close(turn(&turned.axes, [1.0, 0.0, 0.0]), [0.0, 0.0, -1.0]));
+        assert_eq!((turned.scale, turned.pivot), (t.scale, t.pivot));
+        let tipped = turned_about(&t, centre, [1.0, 0.0, 0.0], quarter);
+        assert!(close(turn(&tipped.axes, [0.0, 1.0, 0.0]), [0.0, 0.0, 1.0]), "about X: Y to Z");
+        let long = turned_about(&t, centre, [0.0, 3.0, 0.0], quarter);
+        assert!(close(long.translation, turned.translation) && (0..3).all(|k| close(long.axes[k], turned.axes[k])));
+        let round = turned_about(&t, centre, [0.3, 0.4, 0.5], std::f64::consts::TAU);
+        assert!(close(round.translation, t.translation) && (0..3).all(|k| close(round.axes[k], t.axes[k])), "a whole turn");
+    }
+
+    /// An axis with no direction, or an angle or centre that is no number, leaves the model as
+    /// it is.
+    #[test]
+    fn turning_about_nothing_leaves_the_model_be() {
+        let t = Transform { axes: turn_about_vertical(0.3), translation: [1.0, 1.0, 0.0], ..START };
+        assert_eq!(turned_about(&t, [0.0; 3], [0.0; 3], 1.0), t);
+        assert_eq!(turned_about(&t, [0.0; 3], [f64::NAN, 1.0, 0.0], 1.0), t);
+        assert_eq!(turned_about(&t, [0.0; 3], [0.0, 1.0, 0.0], f64::NAN), t);
+        assert_eq!(turned_about(&t, [0.0; 3], [0.0, 1.0, 0.0], f64::INFINITY), t);
+        assert_eq!(turned_about_vertical(&t, [f64::NAN; 3], 1.0), t);
+        assert_eq!(turned_about(&t, [0.0; 3], [0.0, 1.0, 0.0], 0.0).tidy().map(|x| x.scale), Some(t.scale));
     }
 }

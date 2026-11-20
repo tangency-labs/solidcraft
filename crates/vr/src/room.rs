@@ -55,6 +55,16 @@ impl Transform {
         add(self.translation, scale(turn(&self.axes, p), self.scale))
     }
 
+    /// Where room point `p` is in the model (model units): [`Transform::apply`] undone.
+    pub fn to_model(&self, p: [f64; 3]) -> [f64; 3] {
+        scale(self.direction_to_model(sub(p, self.translation)), 1.0 / self.scale)
+    }
+
+    /// Room direction `d` in the model's own directions, its length kept (the axes only turn).
+    pub fn direction_to_model(&self, d: [f64; 3]) -> [f64; 3] {
+        self.axes.map(|axis| dot(axis, d))
+    }
+
     /// The transform as the renderer's placement (model units to metres).
     pub fn placement(&self) -> Placement {
         let [x, y, z] = self.axes.map(|a| scale(a, self.scale));
@@ -96,6 +106,13 @@ pub fn turn_about_vertical(angle: f64) -> [[f64; 3]; 3] {
 /// design) the model's origin takes the middle's place at a millimetre to the millimetre. `None`
 /// when `up` has no direction or `head` is not a pose.
 pub fn first_transform(bounds: Option<[[f64; 3]; 2]>, up: [f64; 3], toward_viewer: [f64; 3], head: &Pose) -> Option<Transform> {
+    first_transform_at(bounds, up, toward_viewer, head, [FIRST_DISTANCE, TABLE_SIZE, FIRST_DROP])
+}
+
+/// [`first_transform`] with where the model first appears given: `[distance, size, drop]` in
+/// place of [`FIRST_DISTANCE`], [`TABLE_SIZE`] and [`FIRST_DROP`] (metres).
+pub fn first_transform_at(bounds: Option<[[f64; 3]; 2]>, up: [f64; 3], toward_viewer: [f64; 3], head: &Pose, place: [f64; 3]) -> Option<Transform> {
+    let [first_distance, table_size, first_drop] = place;
     let model_up = unit(up)?;
     // The model's side toward the viewer, flattened onto the model's ground. Seen from straight
     // above or below, any side across the up direction does.
@@ -117,8 +134,8 @@ pub fn first_transform(bounds: Option<[[f64; 3]; 2]>, up: [f64; 3], toward_viewe
         Some([lo, hi]) => (scale(add(lo, hi), 0.5), (0..3).map(|k| hi[k] - lo[k]).fold(0.0, f64::max)),
         None => ([0.0; 3], 0.0),
     };
-    let s = if extent > 0.0 { (TABLE_SIZE / extent).clamp(MIN_SCALE, MAX_SCALE) } else { Transform::MILLIMETRES.scale };
-    let at = add(add(head.position, scale(room_front, -FIRST_DISTANCE)), [0.0, -FIRST_DROP, 0.0]);
+    let s = if extent > 0.0 && table_size > 0.0 { (table_size / extent).clamp(MIN_SCALE, MAX_SCALE) } else { Transform::MILLIMETRES.scale };
+    let at = add(add(head.position, scale(room_front, -first_distance)), [0.0, -first_drop, 0.0]);
     Transform { axes, scale: s, translation: sub(at, scale(turn(&axes, middle), s)), pivot: middle }.tidy()
 }
 
@@ -247,5 +264,55 @@ mod tests {
         assert!(Transform { axes: [[0.0; 3]; 3], ..Transform::MILLIMETRES }.tidy().is_none());
         assert!(Transform { scale: f64::NAN, ..Transform::MILLIMETRES }.tidy().is_none());
         assert!(Transform { translation: [f64::INFINITY, 0.0, 0.0], ..Transform::MILLIMETRES }.tidy().is_none());
+    }
+
+    /// A room point taken into the model's units lands where [`Transform::apply`] took it from,
+    /// and a room direction keeps its length.
+    #[test]
+    fn to_model_undoes_apply() {
+        // At real size a metre up: room (0.1, 1.2, 0.3) is model (100, 200, 300).
+        let up = Transform { translation: [0.0, 1.0, 0.0], ..Transform::MILLIMETRES };
+        assert!(close(up.to_model([0.1, 1.2, 0.3]), [100.0, 200.0, 300.0]));
+        // Turned a quarter about the vertical, the model's X points down the room's −Z.
+        let turned = Transform { axes: turn_about_vertical(std::f64::consts::FRAC_PI_2), ..up };
+        assert!(close(turned.to_model([0.0, 1.0, -0.001]), [1.0, 0.0, 0.0]));
+        assert!(close(turned.direction_to_model([0.0, 0.0, -3.0]), [3.0, 0.0, 0.0]));
+        let t = Transform { axes: turn_about_vertical(0.7), scale: 0.002, translation: [1.0, 2.0, 3.0], pivot: [0.0; 3] };
+        for p in [[0.0; 3], [10.0, -20.0, 30.0], [1e3, 5.0, -7.0]] {
+            assert!(close(t.to_model(t.apply(p)), p), "{p:?}");
+        }
+        let d = t.direction_to_model([3.0, 4.0, 0.0]);
+        assert!((length(d) - 5.0).abs() < 1e-12);
+    }
+
+    /// Where the model first appears can be set: the defaults give [`first_transform`], and
+    /// other numbers place and size it as they say.
+    #[test]
+    fn the_first_place_can_be_set() {
+        let bounds = Some([[-50.0, -10.0, 0.0], [50.0, 10.0, 20.0]]);
+        let (up, front) = ([0.0, 0.0, 1.0], [0.0, -1.0, 0.0]);
+        let defaults = first_transform_at(bounds, up, front, &head(0.0), [FIRST_DISTANCE, TABLE_SIZE, FIRST_DROP]);
+        assert_eq!(defaults, first_transform(bounds, up, front, &head(0.0)));
+        let far = first_transform_at(bounds, up, front, &head(0.0), [1.0, 0.2, 0.0]).unwrap();
+        assert!((far.scale - 0.2 / 100.0).abs() < 1e-15, "100 mm across shown 0.2 m across");
+        assert!(close(far.apply(far.pivot), [0.2, 1.6, -1.1]), "a metre ahead, at eye height");
+    }
+
+    /// A size that is no size shows the model at real size; a distance or drop that is no
+    /// number, or that puts it out of reach, places nothing.
+    #[test]
+    fn a_first_place_that_is_no_place_is_refused() {
+        let bounds = Some([[0.0; 3], [100.0; 3]]);
+        let (up, front) = ([0.0, 0.0, 1.0], [0.0, -1.0, 0.0]);
+        let at = |place| first_transform_at(bounds, up, front, &head(0.0), place);
+        for size in [0.0, -1.0, f64::NAN] {
+            assert_eq!(at([0.6, size, 0.3]).unwrap().scale, Transform::MILLIMETRES.scale, "{size}");
+        }
+        assert_eq!(at([0.6, f64::INFINITY, 0.3]).unwrap().scale, MAX_SCALE, "endless: as big as it gets");
+        assert_eq!(at([f64::NAN, 0.4, 0.3]), None);
+        assert_eq!(at([0.6, 0.4, f64::INFINITY]), None);
+        assert_eq!(at([MAX_DISTANCE * 2.0, 0.4, 0.3]), None, "out of reach");
+        // Behind the head (a negative distance) is still a place.
+        assert!(close(at([-1.0, 0.4, 0.0]).unwrap().apply([50.0; 3]), [0.2, 1.6, 0.9]));
     }
 }

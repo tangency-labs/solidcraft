@@ -969,6 +969,21 @@ pub fn restart_graphics(app: &mut SolveApp) {
     }
 }
 
+/// Connect to VR (Preferences › XR): VR is chosen when the window opens (the VR software makes
+/// the graphics device the window draws with), so the app restarts as a graphics change does
+/// (asking about unsaved designs, reopening the saved ones) with `--vr` for that one start. The
+/// saved "Start in VR" stays as it is. Nothing happens where the host cannot restart itself.
+pub fn restart_into_vr(app: &mut SolveApp) {
+    if let Some((program, mut args)) = app.services.graphics_restart.clone() {
+        if !args.iter().any(|a| a == "--vr") {
+            args.push("--vr".into());
+        }
+        app.updater.launch = Some((program, args));
+        app.updater.graphics_restart = true;
+        crate::documents::request_quit(app);
+    }
+}
+
 /// Whether the pending launch applies graphics settings, consumed by the native host.
 pub fn take_graphics_restart(app: &mut SolveApp) -> bool {
     std::mem::take(&mut app.updater.graphics_restart) && app.updater.launch.is_some()

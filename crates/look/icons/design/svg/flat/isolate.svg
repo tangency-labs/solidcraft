@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Isolate</title>
+  <path d="M5 23L17 23L17 41L5 41Z" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="4 4" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M47 23L59 23L59 41L47 41Z" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="4 4" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M23 14L41 14L41 50L23 50Z" fill="currentColor"/>
+</svg>

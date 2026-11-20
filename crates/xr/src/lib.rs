@@ -29,4 +29,4 @@ mod session;
 pub use installed::{Found, installed};
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
-pub use session::{Error, Frame, Gpu, Picture, Runtime, Session, Status};
+pub use session::{Error, Frame, Gpu, ModelAsset, ModelPose, Picture, Runtime, Session, Status};

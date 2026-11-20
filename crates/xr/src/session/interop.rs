@@ -1,8 +1,10 @@
 //! The calls that have no safe API: opening the OpenXR loader, having the runtime create the
 //! Vulkan instance and device, handing those to wgpu, opening the session on them, and wrapping
 //! the runtime's pictures as wgpu textures. Each is one function with its `SAFETY` note, and the
-//! device's destruction is one closure, run once through `DoOnce`; nothing else in the crate is
-//! `unsafe`.
+//! device's destruction is one closure, run once through `DoOnce`. Its child module
+//! `render_models` holds the controller models' calls (`XR_EXT_render_model`,
+//! `XR_EXT_interaction_render_model`), each with its `SAFETY` note too. Nothing else in the crate
+//! is `unsafe`.
 #![allow(unsafe_code)]
 
 use std::ffi::{CStr, c_char};
@@ -13,6 +15,9 @@ use openxr as xr;
 use wgpu::hal;
 
 use super::{Error, Gpu};
+
+mod render_models;
+pub(super) use render_models::{RawModel, controller_models};
 
 /// Something to do at most once, from whichever of several places gets there first: here
 /// destroying the headset's Vulkan device, which both wgpu-hal's drop callback and the error path

@@ -5,17 +5,30 @@
 //!   move) and where it first appears.
 //! - [`grab`]: the world grab. One hand's grip moves the model; both grips move, turn and scale
 //!   it. This is the only way to get around: there is no stick movement, so nobody gets sick.
+//! - [`flick`]: a thumbstick pushed out and let go, counted once.
+//! - [`press`]: a button clicked or held, told apart (a short press when let go, a long one once
+//!   held long enough).
+//! - [`menu`]: where the ring menu's items stand (a ring or a fan facing the head) and which one
+//!   the hand is nearest; the menu itself is the app's.
+//! - [`model`]: a controller's model as the VR software hands it out (glTF), ready to draw.
 //! - [`marks`]: what is drawn for each controller (its body and its ray), as triangles in the
 //!   room.
+//! - [`section`]: the section plane held at the controller's tip, in the room and in the
+//!   model's units, and the square drawn where it is.
 //!
 //! The crate is plain maths on the xr crate's poses: the app reads the headset and the
 //! controllers, draws the pictures, and feeds the results through here.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod flick;
 pub mod grab;
 pub mod marks;
+pub mod menu;
+pub mod model;
+pub mod press;
 pub mod room;
+pub mod section;
 
 /// Small vector helpers for the room's metres.
 pub(crate) mod vector {

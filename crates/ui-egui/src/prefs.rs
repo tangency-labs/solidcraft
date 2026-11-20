@@ -1214,6 +1214,9 @@ preference_settings! {
     /// Start in VR from the next start (#2172, docs/vr.md). Off by default: the app starts
     /// as it always has, with no VR software touched.
     vr_headset: bool = false, PAGE_XR => check_id("prefs.vr_headset");
+    /// VR's buttons and ways of working (Preferences › XR › VR, `vr_settings`): applied at once,
+    /// also with the headset on. The defaults are what VR did before they were settings.
+    vr: crate::vr_settings::VrSettings = Default::default(), PAGE_XR;
     /// Soft contact shading in the GPU viewport; optional and applied immediately.
     ambient_occlusion: bool = false, PAGE_GRAPHICS;
     /// Restore the shadow plane at the lowest visible body, including above the origin (#9838).

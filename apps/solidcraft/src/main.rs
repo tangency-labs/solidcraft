@@ -858,6 +858,9 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         graphics_path: graphics_path().map(|p| p.to_string_lossy().to_string()),
         // Windows and Linux have the VR view; a run that tries it fills in what happened.
         vr_status: cfg!(any(target_os = "windows", target_os = "linux")).then(String::new),
+        vr_connected: false,
+        vr_disconnect: false,
+        vr_passthrough: None,
         window_system: window_system_now(),
         // Linux: the desktop's dark or light setting, which the window is not told on every
         // desktop (#7944). Windows and macOS: the window's own theme.

@@ -86,6 +86,14 @@ impl OwnerState {
     }
 }
 
+impl Frame {
+    /// The context the Browser's drags and captures are ended through (the window's).
+    #[cfg(test)]
+    pub(crate) fn context(&self) -> Option<&egui::Context> {
+        self.context.as_ref()
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Frame {
     session: Option<u64>,
@@ -301,6 +309,31 @@ pub(crate) fn begin(app: &mut SolveApp, ctx: &egui::Context) {
 /// Render into an existing UI. Stable item IDs and command paths belong to the row renderers.
 pub(crate) fn show(app: &mut SolveApp, ui: &mut Ui, owner: ContentOwner, request: ContentRequest) {
     render_scope(app, ui, owner, request, |app, ui| crate::browser::render_content(app, ui, request));
+}
+
+/// The Browser drawn into `ui` of a context of its own (the VR headset's window on the belt),
+/// between the window's frames, as `owner`: its rows, folds, eyes and selecting work as in the
+/// window. What its pointer lights goes into `lit` (as `vr_pick::light` keeps it); its context
+/// menu and drops, which belong to the window, are not opened.
+pub(crate) fn show_detached(app: &mut SolveApp, ui: &mut Ui, owner: ContentOwner, lit: &mut Vec<String>) {
+    let request = ContentRequest::Browser { shrink_height: false };
+    let active = app.tree.content.active.take();
+    // The window's context stays the one its drags and captures are ended through.
+    let context = app.tree.content.context.clone();
+    if let Some(state) = app.tree.content.owners.get_mut(&owner) {
+        state.order_len = 0;
+        state.output = Output::default();
+        state.actions = None;
+        state.presented = false;
+    }
+    render_scope(app, ui, owner, request, |app, ui| crate::browser::render_content(app, ui, request));
+    let actions = app.tree.content.owners.get_mut(&owner).and_then(|state| state.actions.take());
+    let bodies = actions.filter(|a| a.session == Some(app.session.uid)).map(|a| a.hover_bodies).unwrap_or_default();
+    crate::vr_pick::light(app, lit, bodies);
+    app.tree.content.active = active;
+    if context.is_some() {
+        app.tree.content.context = context;
+    }
 }
 
 pub(crate) fn render_scope(

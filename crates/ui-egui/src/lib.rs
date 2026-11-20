@@ -372,6 +372,15 @@ mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
+pub mod vr_browser;
+#[cfg(test)]
+mod vr_browser_tests;
+pub mod vr_pick;
+#[cfg(test)]
+mod vr_pick_tests;
+pub mod vr_settings;
+#[cfg(test)]
+mod vr_settings_tests;
 pub use solidcraft_ui_kit::window_chrome;
 mod wireframe_silhouettes;
 pub mod workspace;
@@ -538,6 +547,14 @@ pub struct Services {
     /// words for Preferences › XR, where the setting for the next start is then offered.
     /// `None`: this host has no VR (the browser, macOS), and the page says what VR needs.
     pub vr_status: Option<String>,
+    /// A VR session is open in this run (it may still wait for the headset): Preferences › XR
+    /// offers to disconnect rather than to connect.
+    pub vr_connected: bool,
+    /// Preferences › XR asked to end the VR session: the host ends it and clears this.
+    pub vr_disconnect: bool,
+    /// Whether the running VR session can show the real room around the model (passthrough);
+    /// `None` without a session.
+    pub vr_passthrough: Option<bool>,
     /// HTTPS GET for the update check (`update`); None: never check (browser, tests).
     pub http_get: Option<update::HttpGet>,
     /// HTTPS download to a file, with progress, for one-click updates (`update::install`).

@@ -850,6 +850,80 @@ fn exploded_views_show_without_changing_the_design() {
     assert_eq!(run(&mut s, "explode.list", json!({}))["views"].as_array().map(Vec::len), Some(2));
 }
 
+/// `explode.show` with `spread` pulls the parts apart as a new exploded view of that scale starts
+/// (each top-level part away from the middle of them all), shows it only, saves no view, and is
+/// not taken for a move to capture; `view: null` puts them back.
+#[test]
+fn a_spread_shows_the_parts_apart_without_saving_a_view() {
+    let mut s = rail();
+    let before = s.doc.occurrences.clone();
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    let min_x =
+        |s: &mut Session, b: &str| run(s, "inspect.measure", json!({"bodies": [b]}))["bodies"][0]["bbox"]["min"][0].as_f64().unwrap_or(f64::NAN);
+    let r = run(&mut s, "explode.show", json!({"spread": 1}));
+    assert!(r["view"].is_null(), "no saved view is shown: {r}");
+    // Centres at x 5 and 25 → middle 15: each moves 10 mm further out, as `explode.create` with
+    // scale 1 would.
+    assert!((min_x(&mut s, &names[0]) + 10.0).abs() < 1e-6, "{}", min_x(&mut s, &names[0]));
+    assert!((min_x(&mut s, &names[1]) - 30.0).abs() < 1e-6, "{}", min_x(&mut s, &names[1]));
+    assert_eq!(s.doc.occurrences, before, "shown only");
+    assert!(s.doc.assembly.exploded.is_empty(), "no view is saved");
+    assert!(super::shows_exploded_view(&s), "the spread counts as an exploded view shown");
+    assert_eq!(run(&mut s, "component.capture_position", json!({}))["captured"], 0, "nothing of the spread is captured");
+    run(&mut s, "explode.show", json!({"view": null}));
+    assert!(min_x(&mut s, &names[0]).abs() < 1e-6, "assembled again");
+    assert!(s.pending_moves.is_empty() && s.exploded.is_empty());
+}
+
+/// A spread that is not a number above 0 and up to 100, one given with a view, or one asked of
+/// a design with fewer than two parts is refused and leaves what is shown as it was.
+#[test]
+fn a_bad_spread_is_refused_and_changes_nothing() {
+    let mut s = rail();
+    run(&mut s, "explode.create", json!({"name": "Apart", "scale": 1}));
+    run(&mut s, "explode.show", json!({"view": "Apart"}));
+    let shown = s.pending_moves.clone();
+    for p in [
+        json!({"spread": 0}),
+        json!({"spread": -1}),
+        json!({"spread": 100.5}),
+        json!({"spread": 1e308}),
+        json!({"spread": "far"}),
+        json!({"spread": [1]}),
+        json!({"spread": 1, "view": "Apart"}),
+    ] {
+        let e = s.execute("explode.show", &p).expect_err(&p.to_string());
+        assert!(e.to_string().contains("spread"), "{p}: {e}");
+        assert_eq!(s.pending_moves, shown, "{p} left the shown view as it was");
+    }
+    // `spread: null` is no spread: the saved view given beside it is shown.
+    run(&mut s, "explode.show", json!({"spread": null, "view": "Apart"}));
+    assert_eq!(s.pending_moves, shown);
+
+    let mut one = Session::default();
+    run(&mut one, "component.create", json!({"name": "Only"}));
+    run(&mut one, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let e = one.execute("explode.show", &json!({"spread": 1})).unwrap_err();
+    assert!(e.to_string().contains("two or more"), "{e}");
+    assert!(one.pending_moves.is_empty() && one.exploded.is_empty());
+}
+
+/// A part moved while a spread is shown is a move of its own: it is no longer the exploded view,
+/// so Capture Position keeps it.
+#[test]
+fn a_part_moved_in_a_spread_is_no_longer_the_exploded_view() {
+    let mut s = rail();
+    run(&mut s, "explode.show", json!({"spread": 2}));
+    assert!(super::shows_exploded_view(&s));
+    let b = occ(&s, "B");
+    let mut moved = s.pending_moves.clone();
+    if let Some(m) = moved.get_mut(&b) {
+        m[3][2] += 5.0;
+    }
+    s.pending_moves = moved;
+    assert!(!super::shows_exploded_view(&s), "a changed placement is the user's move, not the view");
+}
+
 /// An exploded view's move is a world translation: a part inside a component turned 90° about z
 /// moves the way the view gives, not along the turned component's own x (#13939).
 #[test]

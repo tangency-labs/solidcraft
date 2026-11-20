@@ -6457,6 +6457,8 @@ dependencies = [
 name = "solidcraft-vr"
 version = "0.44.0"
 dependencies = [
+ "gltf",
+ "image",
  "solidcraft-xr",
 ]
 

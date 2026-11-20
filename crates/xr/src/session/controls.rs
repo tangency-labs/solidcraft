@@ -18,7 +18,8 @@ pub(super) struct Controls {
     squeeze: xr::Action<f32>,
     stick: xr::Action<xr::Vector2f>,
     haptic: xr::Action<xr::Haptic>,
-    stick_click: xr::Action<bool>,
+    /// Stick click, the two face buttons and the menu button, in that order.
+    clicks: [xr::Action<bool>; 4],
     set: xr::ActionSet,
     /// Each hand's user path, left first.
     hands: [xr::Path; 2],
@@ -27,7 +28,8 @@ pub(super) struct Controls {
 impl Controls {
     /// Make the actions, suggest [`PROFILES`] to the runtime, and attach them to `session`. A
     /// profile the runtime refuses is left out (it says so in the log); none taken is an error.
-    pub(super) fn new(instance: &xr::Instance, session: &xr::Session<xr::Vulkan>) -> Result<Controls, Error> {
+    /// Tracked hands are suggested only with `hands` (the runtime has `XR_EXT_hand_interaction`).
+    pub(super) fn new(instance: &xr::Instance, session: &xr::Session<xr::Vulkan>, hands_tracked: bool) -> Result<Controls, Error> {
         let path = |p: &str| instance.string_to_path(p).map_err(|e| Error::xr("naming a controller input", e));
         let hands = [path(Hand::Left.path())?, path(Hand::Right.path())?];
         let set = instance.create_action_set("viewer", "SolidCraft VR viewer", 0).map_err(|e| Error::xr("making the controls", e))?;
@@ -38,25 +40,27 @@ impl Controls {
         let squeeze = set.create_action::<f32>(Control::Squeeze.name(), Control::Squeeze.label(), &hands).map_err(make_error)?;
         let stick = set.create_action::<xr::Vector2f>(Control::Stick.name(), Control::Stick.label(), &hands).map_err(make_error)?;
         let haptic = set.create_action::<xr::Haptic>(Control::Haptic.name(), Control::Haptic.label(), &hands).map_err(make_error)?;
-        let stick_click = set.create_action::<bool>(Control::StickClick.name(), Control::StickClick.label(), &hands).map_err(make_error)?;
+        let click = |c: Control| set.create_action::<bool>(c.name(), c.label(), &hands).map_err(make_error);
+        let clicks = [click(Control::StickClick)?, click(Control::Primary)?, click(Control::Secondary)?, click(Control::Menu)?];
 
         let mut taken = 0;
-        for profile in PROFILES {
+        for profile in PROFILES.iter().filter(|p| p.suggested(hands_tracked)) {
             let suggested = (|| -> Result<(), Error> {
-                let mut bindings = Vec::with_capacity(2 * profile.bindings.len());
-                for hand in Hand::BOTH {
-                    for (control, input) in profile.bindings {
-                        let at = path(&format!("{}{input}", hand.path()))?;
-                        bindings.push(match control {
-                            Control::Grip => xr::Binding::new(&grip, at),
-                            Control::Aim => xr::Binding::new(&aim, at),
-                            Control::Trigger => xr::Binding::new(&trigger, at),
-                            Control::Squeeze => xr::Binding::new(&squeeze, at),
-                            Control::Stick => xr::Binding::new(&stick, at),
-                            Control::Haptic => xr::Binding::new(&haptic, at),
-                            Control::StickClick => xr::Binding::new(&stick_click, at),
-                        });
-                    }
+                let mut bindings = Vec::with_capacity(2 * profile.bindings.len() + profile.extra.len());
+                for (control, at) in profile.paths() {
+                    let at = path(&at)?;
+                    bindings.push(match control {
+                        Control::Grip => xr::Binding::new(&grip, at),
+                        Control::Aim => xr::Binding::new(&aim, at),
+                        Control::Trigger => xr::Binding::new(&trigger, at),
+                        Control::Squeeze => xr::Binding::new(&squeeze, at),
+                        Control::Stick => xr::Binding::new(&stick, at),
+                        Control::Haptic => xr::Binding::new(&haptic, at),
+                        Control::StickClick => xr::Binding::new(&clicks[0], at),
+                        Control::Primary => xr::Binding::new(&clicks[1], at),
+                        Control::Secondary => xr::Binding::new(&clicks[2], at),
+                        Control::Menu => xr::Binding::new(&clicks[3], at),
+                    });
                 }
                 instance.suggest_interaction_profile_bindings(path(profile.path)?, &bindings).map_err(|e| Error::xr("suggesting bindings", e))
             })();
@@ -73,7 +77,7 @@ impl Controls {
             action.create_space(session, hand, xr::Posef::IDENTITY).map_err(|e| Error::xr("following a controller", e))
         };
         let spaces = [[space(&grip, hands[0])?, space(&aim, hands[0])?], [space(&grip, hands[1])?, space(&aim, hands[1])?]];
-        Ok(Controls { spaces, grip, aim, trigger, squeeze, stick, haptic, stick_click, set, hands })
+        Ok(Controls { spaces, grip, aim, trigger, squeeze, stick, haptic, clicks, set, hands })
     }
 
     /// Both hands at `time`, in `room`, left first. A hand whose controller is off, not tracked
@@ -87,7 +91,8 @@ impl Controls {
         Hand::BOTH.map(|hand| {
             let path = self.hands[hand.index()];
             let value = |action: &xr::Action<f32>| action.state(session, path).ok().filter(|s| s.is_active).map_or(0.0, |s| s.current_state);
-            let stick = self.stick.state(session, path).ok().filter(|s| s.is_active).map_or([0.0; 2], |s| [s.current_state.x, s.current_state.y]);
+            let stick_state = self.stick.state(session, path).ok().filter(|s| s.is_active);
+            let stick = stick_state.map_or([0.0; 2], |s| [s.current_state.x, s.current_state.y]);
             let [grip_space, aim_space] = &self.spaces[hand.index()];
             let locate = |action: &xr::Action<xr::Posef>, space: &xr::Space| {
                 if !action.is_active(session, path).unwrap_or(false) {
@@ -97,10 +102,11 @@ impl Controls {
                 let valid = xr::SpaceLocationFlags::ORIENTATION_VALID | xr::SpaceLocationFlags::POSITION_VALID;
                 location.location_flags.contains(valid).then(|| pose_of(location.pose))
             };
-            let stick_click = self.stick_click.state(session, path).ok().is_some_and(|s| s.is_active && s.current_state);
             let hand =
                 HandInput::new(locate(&self.grip, grip_space), locate(&self.aim, aim_space), value(&self.trigger), value(&self.squeeze), stick);
-            HandInput { stick_click, ..hand }
+            let [stick_click, primary, secondary, menu] =
+                self.clicks.each_ref().map(|a| a.state(session, path).ok().is_some_and(|s| s.is_active && s.current_state));
+            HandInput { has_stick: stick_state.is_some(), stick_click, primary, secondary, menu, ..hand }
         })
     }
 

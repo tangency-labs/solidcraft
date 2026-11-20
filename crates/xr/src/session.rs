@@ -81,10 +81,18 @@ impl Runtime {
         if !available.khr_vulkan_enable2 {
             return Err(Error::NoVulkan);
         }
-        let mut enabled = xr::ExtensionSet::default();
-        enabled.khr_vulkan_enable2 = true;
+        let mut required = xr::ExtensionSet::default();
+        required.khr_vulkan_enable2 = true;
+        let mut enabled = required.clone();
         // Where the floor is: asked for where the runtime has it; the play area stands in otherwise.
         enabled.ext_local_floor = available.ext_local_floor;
+        // Tracked hands as controllers (a pinch selects, a closed hand grabs), and the models of
+        // the controllers actually held (which need `XR_EXT_uuid` for their ids): asked for where
+        // the runtime has them all.
+        enabled.ext_hand_interaction = available.ext_hand_interaction;
+        enabled.ext_render_model = available.ext_render_model && available.ext_interaction_render_model && available.ext_uuid;
+        enabled.ext_interaction_render_model = enabled.ext_render_model;
+        enabled.ext_uuid = enabled.ext_render_model;
         let app = xr::ApplicationInfo {
             application_name: "SolidCraft",
             application_version: 1,
@@ -92,7 +100,16 @@ impl Runtime {
             engine_version: 1,
             api_version: xr::Version::new(1, 0, 0),
         };
-        let instance = entry.create_instance(&app, &enabled, &[], &()).map_err(|e| Error::NoRuntime(e.to_string()))?;
+        // The extras are never worth not starting for: a runtime that refuses them (one needs
+        // another the runtime does not say) gets asked for the required ones alone.
+        let instance = match entry.create_instance(&app, &enabled, &[], &()) {
+            Ok(instance) => instance,
+            Err(e) => {
+                log::warn!("VR: the VR software refused the optional extensions ({e}); starting without them");
+                enabled = required;
+                entry.create_instance(&app, &enabled, &[], &()).map_err(|e| Error::NoRuntime(e.to_string()))?
+            }
+        };
         let name = instance.properties().map(|p| format!("{} {}", p.runtime_name, p.runtime_version)).unwrap_or_default();
         let system = instance.system(xr::FormFactor::HEAD_MOUNTED_DISPLAY).map_err(|e| Error::NoHeadset(e.to_string()))?;
         let headset = instance.system_properties(system).map(|p| p.system_name).unwrap_or_default();
@@ -125,11 +142,11 @@ impl Runtime {
         let offered: Vec<i64> =
             session.enumerate_swapchain_formats().map_err(|e| Error::xr("reading the picture formats", e))?.into_iter().map(i64::from).collect();
         let format = plan::pick_format(&offered).ok_or(Error::NoFormat(offered))?;
-        let blend = instance
-            .enumerate_environment_blend_modes(system, kind)
-            .ok()
-            .and_then(|modes| modes.first().copied())
-            .unwrap_or(xr::EnvironmentBlendMode::OPAQUE);
+        let blends = instance.enumerate_environment_blend_modes(system, kind).unwrap_or_default();
+        let blend = blends.first().copied().unwrap_or(xr::EnvironmentBlendMode::OPAQUE);
+        // The real room around the model: the alpha-blended view, where the VR software has one.
+        let see_through = blends.contains(&xr::EnvironmentBlendMode::ALPHA_BLEND);
+        log::info!("VR: the VR software offers the blend modes {blends:?}; the real room (passthrough): {see_through}");
         let space = session
             .create_reference_space(xr::ReferenceSpaceType::LOCAL, xr::Posef::IDENTITY)
             .map_err(|e| Error::xr("creating the room's space", e))?;
@@ -139,6 +156,8 @@ impl Runtime {
         let floor = floor_kinds.into_iter().flatten().find_map(|kind| session.create_reference_space(kind, xr::Posef::IDENTITY).ok());
         let session = Session {
             eyes: None,
+            models: Vec::new(),
+            models_ask: ModelAsk::default(),
             controls: None,
             floor,
             space,
@@ -151,6 +170,8 @@ impl Runtime {
             recentred: false,
             in_frame: false,
             blend,
+            see_through,
+            passthrough: false,
             format,
             eye_sizes: [left, right],
             device: gpu.device.clone(),
@@ -247,6 +268,85 @@ pub struct Frame {
     pub eyes: Option<[Eye; 2]>,
 }
 
+/// A controller's model as the runtime hands it out ([`Session::new_controller_models`]).
+#[derive(Clone, Debug)]
+pub struct ModelAsset {
+    /// The asset's id: models with the same id look the same.
+    pub cache: [u8; 16],
+    /// The hand holding it, where it is a hand's controller.
+    pub hand: Option<Hand>,
+    /// The glTF asset (GLB, core glTF: no extensions asked for).
+    pub glb: Vec<u8>,
+    /// The names of its moving parts (glTF node names), in the order [`ModelPose::nodes`] has them.
+    pub nodes: Vec<String>,
+}
+
+/// Where a controller's model is in a frame ([`Session::controller_models`]).
+#[derive(Clone, Debug)]
+pub struct ModelPose {
+    pub cache: [u8; 16],
+    pub hand: Option<Hand>,
+    /// Where the asset's origin is in the room; `None` while it is not tracked.
+    pub pose: Option<Pose>,
+    /// Each moving part's pose relative to its parent node (it replaces the asset's own) and
+    /// whether it shows; empty when the runtime did not say this frame.
+    pub nodes: Vec<(Pose, bool)>,
+}
+
+/// How often asking for the controller models is tried in all after the runtime says they
+/// changed: the first ask and the tries after it failed.
+const MODEL_TRIES: u32 = 5;
+
+/// The frames let pass before the first try again after a failed ask; each later one waits
+/// twice as long (half a second, then 1, 2 and 4 at 90 frames a second).
+const MODEL_RETRY_FRAMES: u32 = 45;
+
+/// When the controller models are asked for ([`Session::new_controller_models`]): on the frame
+/// after the runtime says they changed, and again after an ask failed, later each time and at
+/// most [`MODEL_TRIES`] times in all, so a runtime whose list keeps failing is not asked every
+/// frame. What it depends on: the runtime's news ([`ModelAsk::changed`] starts afresh) and how
+/// each ask went ([`ModelAsk::failed`]); nothing is remembered past the next change.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ModelAsk {
+    /// The models are to be asked for.
+    stale: bool,
+    /// The asks that failed since the runtime last said the models changed.
+    failures: u32,
+    /// The frames still to let pass before asking.
+    wait: u32,
+}
+
+impl ModelAsk {
+    /// The runtime says the models changed (or the controls were just attached): ask on the
+    /// next frame, with every try again.
+    fn changed(&mut self) {
+        *self = ModelAsk { stale: true, failures: 0, wait: 0 };
+    }
+
+    /// Whether to ask this frame (asked once a frame); asking takes the request.
+    fn due(&mut self) -> bool {
+        if !self.stale {
+            return false;
+        }
+        if self.wait > 0 {
+            self.wait -= 1;
+            return false;
+        }
+        self.stale = false;
+        true
+    }
+
+    /// The ask just made failed: ask again after a wait twice as long as the last, unless it
+    /// has been tried [`MODEL_TRIES`] times; then only the runtime's next news asks again.
+    fn failed(&mut self) {
+        self.failures = self.failures.saturating_add(1);
+        if self.failures < MODEL_TRIES {
+            self.stale = true;
+            self.wait = MODEL_RETRY_FRAMES << (self.failures - 1).min(8);
+        }
+    }
+}
+
 /// What [`Session::poll`] found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -263,6 +363,12 @@ pub struct Session {
     // Dropped in this order: the pictures, the room, the frame handles and the session all go
     // before the device they were made on.
     eyes: Option<[Chain; 2]>,
+    /// The models of the controllers held (`XR_EXT_render_model`), where the runtime has them.
+    /// Dropped before the controls: the runtime made them from the bound controllers.
+    models: Vec<interop::RawModel>,
+    /// When the models are asked for again: the controllers changed (or were just attached), or
+    /// asking failed.
+    models_ask: ModelAsk,
     /// The controllers, once [`Session::attach_controls`] made them.
     controls: Option<controls::Controls>,
     /// A space on the floor under the user, where the runtime has one.
@@ -279,6 +385,10 @@ pub struct Session {
     /// Between a begun and an ended frame.
     in_frame: bool,
     blend: xr::EnvironmentBlendMode,
+    /// The VR software can show the real room around what is drawn (`ALPHA_BLEND`).
+    see_through: bool,
+    /// The real room is shown where nothing is drawn ([`Session::set_passthrough`]).
+    passthrough: bool,
     format: ColorFormat,
     eye_sizes: [[u32; 2]; 2],
     device: wgpu::Device,
@@ -344,6 +454,10 @@ impl Session {
                 Some(xr::Event::InstanceLossPending(_)) => State::LossPending,
                 Some(xr::Event::ReferenceSpaceChangePending(_)) => {
                     self.recentred = true;
+                    continue;
+                }
+                Some(xr::Event::InteractionRenderModelsChangedEXT) => {
+                    self.models_ask.changed();
                     continue;
                 }
                 Some(_) => continue,
@@ -424,9 +538,61 @@ impl Session {
     /// they stay with whatever else uses them.
     pub fn attach_controls(&mut self) -> Result<(), Error> {
         if self.controls.is_none() {
-            self.controls = Some(controls::Controls::new(&self.instance, &self.session)?);
+            let hands_tracked = self.instance.exts().ext_hand_interaction.is_some();
+            self.controls = Some(controls::Controls::new(&self.instance, &self.session, hands_tracked)?);
+            self.models_ask.changed();
         }
         Ok(())
+    }
+
+    /// The models of the controllers held, when they changed since the last call (the user
+    /// picked up other controllers, or the runtime found them): every model now, each with its
+    /// asset. `None` when nothing changed, and always where the runtime does not hand out models
+    /// (`XR_EXT_render_model`); the app then draws its own marks. Asking that failed is tried
+    /// again a little later, a few times ([`ModelAsk`]); meanwhile there are no models.
+    pub fn new_controller_models(&mut self) -> Option<Vec<ModelAsset>> {
+        if !self.models_ask.due() || self.controls.is_none() || self.instance.exts().ext_render_model.is_none() {
+            return None;
+        }
+        self.models.clear();
+        let path = |p: &str| self.instance.string_to_path(p).ok();
+        let (Some(left), Some(right)) = (path(Hand::Left.path()), path(Hand::Right.path())) else {
+            self.models_ask.failed();
+            return None;
+        };
+        match interop::controller_models(&self.instance, &self.session, [left, right]) {
+            Ok(models) => self.models = models,
+            Err(e) => {
+                log::info!("VR: no controller models: {e}");
+                self.models_ask.failed();
+            }
+        }
+        Some(
+            self.models
+                .iter_mut()
+                .map(|m| ModelAsset { cache: m.cache, hand: m.hand.map(|i| Hand::BOTH[i]), glb: std::mem::take(&mut m.glb), nodes: m.nodes.clone() })
+                .collect(),
+        )
+    }
+
+    /// Where each controller model (in the order [`Session::new_controller_models`] gave them)
+    /// is when `frame` is shown, and how its moving parts stand.
+    pub fn controller_models(&self, frame: &Frame) -> Vec<ModelPose> {
+        let valid = xr::SpaceLocationFlags::ORIENTATION_VALID | xr::SpaceLocationFlags::POSITION_VALID;
+        self.models
+            .iter()
+            .map(|m| {
+                let pose = m
+                    .space
+                    .as_ref()
+                    .and_then(|s| s.locate(&self.space, frame.time).ok())
+                    .filter(|l| l.location_flags.contains(valid))
+                    .map(|l| pose_of(l.pose))
+                    .filter(|p| p.axes().is_some());
+                let nodes = m.state(frame.time).map(|states| states.into_iter().map(|(p, v)| (pose_of(p), v)).collect()).unwrap_or_default();
+                ModelPose { cache: m.cache, hand: m.hand.map(|i| Hand::BOTH[i]), pose, nodes }
+            })
+            .collect()
     }
 
     /// Both hands' controllers as they will be when `frame` is shown, left first: all
@@ -451,6 +617,18 @@ impl Session {
     /// what was placed in front of the user is not any more.
     pub fn recentred(&mut self) -> bool {
         std::mem::take(&mut self.recentred)
+    }
+
+    /// Show the real room where nothing is drawn (a picture's alpha below one lets it through),
+    /// or not; where the VR software cannot (`false` back), the room stays as drawn.
+    pub fn set_passthrough(&mut self, on: bool) -> bool {
+        self.passthrough = on && self.see_through;
+        self.see_through
+    }
+
+    /// Whether the real room shows where nothing is drawn: the pictures' alpha counts.
+    pub fn passthrough(&self) -> bool {
+        self.passthrough
     }
 
     /// Vibrate `hand`'s controller (nothing before [`Session::attach_controls`]).
@@ -489,12 +667,16 @@ impl Session {
             }
             _ => None,
         };
-        let projection = projection_views.as_ref().map(|views| xr::CompositionLayerProjection::new().space(&self.space).views(views));
+        // With the real room shown, the pictures' alpha says where it shows through.
+        let flags = if self.passthrough { xr::CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA } else { xr::CompositionLayerFlags::EMPTY };
+        let projection =
+            projection_views.as_ref().map(|views| xr::CompositionLayerProjection::new().layer_flags(flags).space(&self.space).views(views));
         let mut layers: Vec<&xr::CompositionLayerBase<'_, xr::Vulkan>> = Vec::with_capacity(1);
         if let Some(projection) = &projection {
             layers.push(projection);
         }
-        let ended = self.stream.end(frame.time, self.blend, &layers).map_err(|e| Error::xr("handing the frame in", e));
+        let blend = if self.passthrough { xr::EnvironmentBlendMode::ALPHA_BLEND } else { self.blend };
+        let ended = self.stream.end(frame.time, blend, &layers).map_err(|e| Error::xr("handing the frame in", e));
         released.and(ended)
     }
 }
@@ -525,5 +707,54 @@ impl Drop for Session {
     fn drop(&mut self) {
         let chains: Vec<Chain> = self.eyes.take().into_iter().flatten().collect();
         retire(&self.device, chains);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The frames on which `ask` asks within `frames` frames, each ask failing when `fails`.
+    fn asks(ask: &mut ModelAsk, frames: u32, fails: bool) -> Vec<u32> {
+        let mut out = Vec::new();
+        for frame in 0..frames {
+            if ask.due() {
+                out.push(frame);
+                if fails {
+                    ask.failed();
+                }
+            }
+        }
+        out
+    }
+
+    /// Nothing is asked until the runtime says the models changed; then once, on the next
+    /// frame, and not again while the ask worked.
+    #[test]
+    fn the_models_are_asked_for_once_after_each_change() {
+        let mut ask = ModelAsk::default();
+        assert!(asks(&mut ask, 100, false).is_empty());
+        ask.changed();
+        assert_eq!(asks(&mut ask, 100, false), [0]);
+    }
+
+    /// An ask that failed is tried again later, each wait twice the last, at most
+    /// [`MODEL_TRIES`] times in all, never every frame; the runtime's next news starts afresh.
+    #[test]
+    fn a_failed_ask_is_tried_again_later_a_few_times() {
+        let mut ask = ModelAsk::default();
+        ask.changed();
+        let r = MODEL_RETRY_FRAMES;
+        let tried = asks(&mut ask, 100_000, true);
+        assert_eq!(tried, [0, r + 1, 3 * r + 2, 7 * r + 3, 15 * r + 4]);
+        assert_eq!(tried.len() as u32, MODEL_TRIES);
+        assert!(asks(&mut ask, 100_000, true).is_empty(), "given up until the runtime has news");
+        ask.changed();
+        assert_eq!(asks(&mut ask, 10, true), [0], "news: asked at once again");
+        // A failed ask, then news before the try again: asked on the next frame.
+        ask.changed();
+        assert_eq!(asks(&mut ask, 1, true), [0]);
+        ask.changed();
+        assert_eq!(asks(&mut ask, 1, false), [0]);
     }
 }
