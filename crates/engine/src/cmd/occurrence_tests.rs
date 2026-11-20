@@ -1148,6 +1148,35 @@ fn a_cut_or_join_from_the_top_level_into_a_linked_part_is_refused() {
     near(&volume, 6000.0);
 }
 
+/// #5679 for a revolve from a fixed face, which keeps no attachment: a cut or join from the top
+/// level into the linked part's face is refused the same way, and the plate stays.
+#[test]
+fn a_fixed_face_revolve_from_the_top_level_into_a_linked_part_is_refused() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-linked-revolve-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let part = dir.join("plate.solidcraft");
+    saved_box_design(&part, 30.0);
+    let mut s = Session::default();
+    run(&mut s, INSERT_DESIGN, json!({"path": part, "translate": [50, 0, 0]}));
+    let _ = std::fs::remove_dir_all(&dir);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let features = s.doc.features.len();
+    for operation in ["cut", "join"] {
+        let refused = s
+            .execute(
+                "solid.revolve",
+                &json!({"face": [55, 10, 30], "fixed": true, "axis": {"origin": [50, 0, 30], "dir": [0, 1, 0]},
+                        "angle": "180 deg", "direction": "symmetric", "operation": operation}),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains("`Plate`") && refused.contains("linked to a design file"), "{operation}: {refused}");
+    }
+    assert_eq!(s.doc.features.len(), features);
+    let volume = run(&mut s, "inspect.measure", json!({"bodies": ["Plate"]}))["total"]["volume_mm3"].clone();
+    near(&volume, 6000.0);
+}
+
 /// The compact list counts what a component holds and leaves out identity transforms; the full
 /// list stays as it was.
 #[test]
