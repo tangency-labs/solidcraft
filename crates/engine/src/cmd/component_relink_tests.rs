@@ -218,7 +218,13 @@ fn properties_part(path: &Path, material: &str, density: Option<f64>, color: [u8
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
     if let Some(density) = density {
-        s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial { name: material.into(), density, appearance: None, physical_card: None, rf_loss_db: None });
+        s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+            name: material.into(),
+            density,
+            appearance: None,
+            physical_card: None,
+            rf_loss_db: None,
+        });
     }
     run(&mut s, "material.assign", json!({"bodies": ["Cube"], "material": material}));
     s.doc_mut().appearances.bodies.insert("Cube".into(), solidcraft_doc::appearance::Look::custom(color, 0.4));

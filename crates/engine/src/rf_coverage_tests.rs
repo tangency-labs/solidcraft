@@ -73,18 +73,16 @@ fn abutting_boxes_of_one_wall_are_one_crossing_and_overlaps_take_the_larger_loss
     let mut scratch = Scratch::default();
     assert_eq!(walls.path_loss([0.0, 0.0], [2000.0, 0.0], Band::G5, &mut scratch), 4.0);
     // Drywall then concrete straight after it: two runs.
-    let two = WallMap::new(vec![wall(1000.0, -100.0, 1090.0, 100.0, 0), wall(1090.0, -100.0, 1290.0, 100.0, 2)], vec![
-        preset("drywall"),
-        preset("wood-door"),
-        preset("concrete"),
-    ]);
+    let two = WallMap::new(
+        vec![wall(1000.0, -100.0, 1090.0, 100.0, 0), wall(1090.0, -100.0, 1290.0, 100.0, 2)],
+        vec![preset("drywall"), preset("wood-door"), preset("concrete")],
+    );
     assert_eq!(two.path_loss([0.0, 0.0], [2000.0, 0.0], Band::G5, &mut scratch), 24.0);
     // A door inside a concrete opening's box: only the concrete counts where both are.
-    let overlap = WallMap::new(vec![wall(1000.0, -100.0, 1200.0, 100.0, 2), wall(1050.0, -50.0, 1150.0, 50.0, 1)], vec![
-        preset("drywall"),
-        preset("wood-door"),
-        preset("concrete"),
-    ]);
+    let overlap = WallMap::new(
+        vec![wall(1000.0, -100.0, 1200.0, 100.0, 2), wall(1050.0, -50.0, 1150.0, 50.0, 1)],
+        vec![preset("drywall"), preset("wood-door"), preset("concrete")],
+    );
     assert_eq!(overlap.path_loss([0.0, 0.0], [2000.0, 0.0], Band::G5, &mut scratch), 20.0);
     // An emitter inside a wall isn't charged for leaving it; the next wall counts.
     assert_eq!(two.path_loss([1050.0, 0.0], [2000.0, 0.0], Band::G5, &mut scratch), 20.0);
@@ -111,7 +109,19 @@ fn the_enclosed_floor_and_its_stats() {
     let grid = Grid::covering(walls.bounds().unwrap(), 75.0).unwrap();
     let solid = wall_cells(&walls, &grid);
     let inside = enclosed(&walls, &grid, &solid);
-    let cells: Vec<Cell> = solid.iter().zip(&inside).map(|(w, i)| if *w { Cell::Wall } else if *i { Cell::Floor } else { Cell::Outside }).collect();
+    let cells: Vec<Cell> = solid
+        .iter()
+        .zip(&inside)
+        .map(|(w, i)| {
+            if *w {
+                Cell::Wall
+            } else if *i {
+                Cell::Floor
+            } else {
+                Cell::Outside
+            }
+        })
+        .collect();
     let floor = cells.iter().filter(|c| **c == Cell::Floor).count() as f64 * 75.0 * 75.0 / 1e6;
     // 2 × 12 m², less the cells the walls' edges touch.
     assert!((20.0..24.0).contains(&floor), "{floor}");

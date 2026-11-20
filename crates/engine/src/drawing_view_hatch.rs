@@ -188,7 +188,7 @@ fn thin(region: &Region2, spacing: f64) -> bool {
 /// - The section has the cut's history: [`CutFaces::Traced`].
 /// - Else, by `uncut`'s own faces: none on the plane facing out of the kept side, [`CutFaces::All`];
 ///   one, [`CutFaces::InDoubt`].
-pub(super) fn cut_faces(uncut: &Body, section: &Body, plane: &Plane) -> Option<CutFaces> {
+pub(crate) fn cut_faces(uncut: &Body, section: &Body, plane: &Plane) -> Option<CutFaces> {
     let tol = uncut.planar_edges_tolerance();
     // The lowest point of the box round `uncut` along the normal: the box holds the body.
     let lowest = uncut.exact_bounds().map(|b| {
@@ -219,7 +219,7 @@ fn facing_out_on(body: &Body, index: usize, plane: &Plane, tol: f64) -> bool {
 /// The cut faces of `body`, a section, told as `telling` says ([`cut_faces`]): its faces that lie in
 /// `plane` and face against its normal (out of the side the section keeps), each as a region in
 /// `basis`'s coordinates ([`region`]). A face with an edge that doesn't read exactly is left out.
-fn faces_on(body: &Body, telling: CutFaces, plane: &Plane, basis: &Plane) -> Vec<Region2> {
+pub(crate) fn faces_on(body: &Body, telling: CutFaces, plane: &Plane, basis: &Plane) -> Vec<Region2> {
     let tol = body.planar_edges_tolerance();
     let record = body.record();
     let history = traced(body).filter(|_| telling == CutFaces::Traced);

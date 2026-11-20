@@ -132,6 +132,7 @@ mod plugin;
 mod plugin_storage;
 mod point_cloud;
 mod point_cloud_deviation;
+pub(crate) mod rf_coverage;
 mod script;
 mod section;
 mod selection;
@@ -539,6 +540,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(material_properties::COMMANDS.iter());
     v.extend(libraries::COMMANDS.iter());
     v.extend(section::COMMANDS.iter());
+    v.extend(rf_coverage::COMMANDS.iter());
     v.extend(view_navigation::COMMANDS.iter());
     v.extend(tab_views::COMMANDS.iter());
     v.extend(view_pick::COMMANDS.iter());

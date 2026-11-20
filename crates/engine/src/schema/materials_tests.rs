@@ -34,7 +34,10 @@ fn with_timber(level: ParamCheck) -> Session {
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<MaterialCreateParams>(), &["appearance", "color", "density_g_cm3", "name", "opacity", "pbr", "physical_card", "rf"]);
+    assert_keys(
+        input_schema_for::<MaterialCreateParams>(),
+        &["appearance", "color", "density_g_cm3", "name", "opacity", "pbr", "physical_card", "rf"],
+    );
     assert_keys(
         input_schema_for::<MaterialEditParams>(),
         &["appearance", "color", "density_g_cm3", "material", "name", "opacity", "pbr", "physical_card", "rf"],

@@ -119,7 +119,13 @@ fn design_export_deduplicates_exact_looks_and_keeps_physical_properties_distinct
     let look = LibraryLook { name: "Warm oak colour".into(), color: [180, 120, 70], opacity: 0.8, pbr: None }.to_look();
     doc.appearances.bodies.insert("Body1".into(), look.clone());
     doc.appearances.bodies.insert("Body2".into(), look.clone());
-    doc.user_materials.push(UserMaterial { name: "Timber density".into(), density: 0.7, appearance: Some(look), physical_card: None, rf_loss_db: None });
+    doc.user_materials.push(UserMaterial {
+        name: "Timber density".into(),
+        density: 0.7,
+        appearance: Some(look),
+        physical_card: None,
+        rf_loss_db: None,
+    });
     let library = Catalog::from_document(&doc, "user.test", "Test", Provenance::default()).unwrap();
     assert_eq!(library.entries.len(), 2);
     assert!(library.entries.iter().any(|e| matches!(&e.definition,Definition::Material(m) if m.density_g_cm3==0.7)));
@@ -235,7 +241,13 @@ fn rich() -> Catalog {
     look.name = "Original opaque study".into();
     look.pbr = Some(PbrParameters::new(1.0, 0.3, 1.5).unwrap());
     doc.appearances.bodies.insert("Body1".into(), look.clone());
-    doc.user_materials.push(UserMaterial { name: "Original candidate".into(), density: 0.8, appearance: Some(look), physical_card: Some(card()), rf_loss_db: None });
+    doc.user_materials.push(UserMaterial {
+        name: "Original candidate".into(),
+        density: 0.8,
+        appearance: Some(look),
+        physical_card: Some(card()),
+        rf_loss_db: None,
+    });
     Catalog::from_document(&doc, "user.test", "Original v2 fixture", Default::default()).unwrap()
 }
 
@@ -355,7 +367,13 @@ fn rich_export_bounds_retained_definitions_before_whole_catalog_encoding() {
     let record = ValidatedCard::from_value(&v).unwrap();
     let mut doc = Document::default();
     for i in 0..64 {
-        doc.user_materials.push(UserMaterial { name: format!("Candidate {i}"), density: 0.8, appearance: None, physical_card: Some(record.clone()), rf_loss_db: None });
+        doc.user_materials.push(UserMaterial {
+            name: format!("Candidate {i}"),
+            density: 0.8,
+            appearance: None,
+            physical_card: Some(record.clone()),
+            rf_loss_db: None,
+        });
     }
     assert!(Catalog::from_document(&doc, "user.test", "Original large fixture", Default::default()).unwrap_err().to_string().contains("4 MiB"));
 }

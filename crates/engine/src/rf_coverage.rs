@@ -62,8 +62,7 @@ pub struct WallRegion {
 
 impl WallRegion {
     pub fn new(rings: Vec<Vec<[f64; 2]>>, material: usize, body: String) -> Option<WallRegion> {
-        let rings: Vec<Vec<[f64; 2]>> =
-            rings.into_iter().filter(|r| r.len() >= 3 && r.iter().all(|p| p.iter().all(|c| c.is_finite()))).collect();
+        let rings: Vec<Vec<[f64; 2]>> = rings.into_iter().filter(|r| r.len() >= 3 && r.iter().all(|p| p.iter().all(|c| c.is_finite()))).collect();
         let mut bounds = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
         for p in rings.iter().flatten() {
             bounds = [bounds[0].min(p[0]), bounds[1].min(p[1]), bounds[2].max(p[0]), bounds[3].max(p[1])];
@@ -530,8 +529,7 @@ pub struct Stats {
 
 /// The figures for `values` over the cells `cells` marks [`Cell::Floor`].
 pub fn stats(values: &[f32], cells: &[Cell]) -> Option<Stats> {
-    let mut v: Vec<f64> =
-        values.iter().zip(cells).filter(|(v, c)| **c == Cell::Floor && v.is_finite()).map(|(v, _)| f64::from(*v)).collect();
+    let mut v: Vec<f64> = values.iter().zip(cells).filter(|(v, c)| **c == Cell::Floor && v.is_finite()).map(|(v, _)| f64::from(*v)).collect();
     if v.is_empty() {
         return None;
     }
