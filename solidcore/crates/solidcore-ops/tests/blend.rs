@@ -23,6 +23,7 @@ use solidcore::blend::definition_check::surface_kind_name;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::Kernel;
+use solidcore::mass::integrator::properties::{brep_volume, no_unsure_region, PropertyAttributes};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::{edge_closest_point, face_bounding_box};
 use solidcore::surface::procedural_blend::{BlendRef, ProceduralBlend};
@@ -36,6 +37,7 @@ use solidcore::{EdgeId, FaceId, Point2, Vec3};
 use solidcore_record::brep::Brep as Record;
 
 use solidcore_ops::sweep::{extrude, loft_to_point, Curve, DraftCorner, SweepFrame};
+use solidcore_ops::trim::remove_faces;
 use solidcore_ops::{
     blend, blend_ordered, blend_with, chamfer_sides, chamfer_sides_facing, edge_faces_along,
     edges_share_wedge, fillet_variable, fillet_variable_from, make_box, make_cone, make_cylinder,
@@ -5788,4 +5790,39 @@ fn a_full_round_whose_rails_meet_along_part_of_one_of_them() {
             }
         }
     }
+}
+
+/// A round on a 20 mm cube's edge, taken off by `delete_fillet_faces`, gives the cube back; a
+/// sheet (not a manifold solid) is left as it is and answers `Ok(false)`.
+#[test]
+fn delete_fillet_faces_gives_the_cube_back_and_refuses_a_sheet() {
+    all_fixes();
+    let cube = make_box([0.0; 3], [20.0; 3]).unwrap();
+    let made = blend(&cube, Blend::Round, &[0], &[2.0], &[], Corners::Filled).unwrap();
+    let (mut k, mut brep) = kernel_copy(&cube);
+    let round = brep.face_list()[made.made[0]];
+    assert!(blend::delete_fillet_faces(&mut k, &mut brep, &[round]).unwrap());
+    no_unsure_region(&brep).unwrap();
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    let v = brep_volume(&k, &mut brep, 1e-8, &attrs).unwrap();
+    assert!((v - 8000.0).abs() < 1e-6 * 8000.0, "{v}");
+    assert_eq!(
+        [
+            brep.face_list().len(),
+            brep.edge_list().len(),
+            brep.vertex_list().len()
+        ],
+        [6, 12, 8]
+    );
+
+    let solid = make_box([0.0; 3], [20.0; 3]).unwrap();
+    let order = solid.to_record().unwrap().1;
+    let sheet = remove_faces(&solid, &order, &[0]).unwrap();
+    let (mut k, mut sheet) = kernel_copy(&sheet);
+    let face = sheet.face_list()[0];
+    assert!(!blend::delete_fillet_faces(&mut k, &mut sheet, &[face]).unwrap());
 }

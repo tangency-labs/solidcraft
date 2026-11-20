@@ -208,6 +208,15 @@ fn faces_under(b: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
     Ok(out)
 }
 
+/// [`crate::delete_faces`] for fillet faces: SMLib's fillet removal of the faces `chosen` of `b`.
+pub(crate) fn delete_fillet_faces(b: &Body, chosen: &[usize]) -> Result<Body> {
+    let tol = pick_tolerance(b);
+    let exact = chosen.iter().map(|&f| crate::surface_untrim::face_point(b, f)).collect::<Result<Vec<Vec3>>>()?;
+    let pts = points(&exact);
+    let (r, h) = run("delete face", b, None, |s| s.delete_fillet_faces(&pts, tol))?;
+    Ok(r.with_checked_history(h, &record::counts(&[b])))
+}
+
 /// One point inside each face `faces` of `b`: the centroid of its largest triangle.
 fn face_points(b: &Body, faces: &[usize]) -> Result<Vec<Vec3>> {
     let mesh = b.mesh(&crate::MeshTolerance::chord((b.size() * 1e-3).max(1e-3)))?;

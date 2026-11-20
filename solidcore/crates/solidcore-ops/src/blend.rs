@@ -3201,6 +3201,25 @@ fn fillet_variable_impl(
     })?
 }
 
+/// Takes fillet faces `faces` off `b`; `Ok(false)`, `b` untouched, if it is not a manifold solid.
+pub fn delete_fillet_faces(
+    k: &mut Kernel,
+    b: &mut Brep,
+    faces: &[FaceId],
+) -> solidcore::Result<bool> {
+    if !is_manifold_solid(b)? {
+        return Ok(false);
+    }
+    let editing = b.editing_enabled();
+    b.set_editing_enabled(true);
+    let removed = faces
+        .iter()
+        .try_for_each(|&f| solidcore::blend::fillet_removal::delete_fillet_face(k, b, f, None));
+    b.set_editing_enabled(editing);
+    b.refresh_cached_topology();
+    removed.map(|()| true)
+}
+
 #[cfg(test)]
 mod tests;
 

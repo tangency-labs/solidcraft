@@ -18,12 +18,12 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use solidcore_ops::cap::{is_face_on_plane, is_point_on_plane};
 use solidcore_record::Vec3;
-use solidcore_record::brep::Curve;
+use solidcore_record::brep::{Brep, Curve, Loop};
 use solidcraft_geom::Aabb3;
 
 use crate::assemble::{AFace, AUse, Assembly};
 use crate::body::Body;
-use crate::history::{Change, FaceProv};
+use crate::history::{Change, FaceProv, faces_of};
 use crate::offset::{Surf, surf_of};
 use crate::{KernelError, Result, guard};
 
@@ -44,6 +44,35 @@ fn surface_kind(rec: &solidcore_record::brep::Brep, f: usize) -> &'static str {
         Some(Surf::Torus { .. }) => "a torus (as a fillet or round often is)",
         None => "a free-form (spline) face",
     }
+}
+
+/// The lowest curved neighbour `f` of a chosen face `by` across an edge, as `(f, by)`.
+fn curved_neighbour(rec: &Brep, del: &BTreeSet<usize>) -> Option<(usize, usize)> {
+    let mut found: BTreeSet<(usize, usize)> = BTreeSet::new();
+    for &d in del {
+        let Some(face) = rec.faces.get(d) else { continue };
+        for l in &face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for oe in edges {
+                let Some(e) = rec.edges.get(oe.edge as usize) else { continue };
+                for f in faces_of(e) {
+                    if !del.contains(&f) && !matches!(surf_of(rec, f), Some(Surf::Plane { .. })) {
+                        found.insert((f, d));
+                    }
+                }
+            }
+        }
+    }
+    found.into_iter().next()
+}
+
+/// The refusal for a gap that a curved neighbour `f` of face `by` cannot close.
+fn curved_refusal(rec: &Brep, by: usize, f: usize) -> KernelError {
+    fail(format!(
+        "face {by} ({}), borders face {f}, {}: include face {f} in the selection if it should go too, or take off the feature that made face {f} in the timeline instead; only planar neighbours can extend to close the gap",
+        surface_kind(rec, by),
+        surface_kind(rec, f),
+    ))
 }
 
 /// Key of a point for sharing vertices and edges between rebuilt faces.
@@ -305,6 +334,14 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
     if del.len() >= n {
         return Err(fail("that would delete every face"));
     }
+    if let Some((f, by)) = curved_neighbour(&rec, &del) {
+        // SMLib's fillet removal extends the fillet's two tangent neighbours whatever they are.
+        let chosen: Vec<usize> = del.iter().copied().collect();
+        return crate::offset_backend::delete_fillet_faces(body, &chosen).map_err(|e| {
+            log::debug!(target: "smlib", "delete face: fillet removal refused too: {e}");
+            curved_refusal(&rec, by, f)
+        });
+    }
     let size = body.size().max(1e-9);
     guard("delete face", || {
         let mut asm = Assembly::from_record(&rec)?;
@@ -339,23 +376,8 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
         }
         let mut planes: HashMap<usize, (Vec3, f64)> = HashMap::new();
         for &f in &neighbours {
-            match surf_of(&rec, f) {
-                Some(Surf::Plane { n, d }) => {
-                    planes.insert(f, (n, d));
-                }
-                _ => {
-                    let by = efaces
-                        .values()
-                        .find(|fs| fs.contains(&f) && fs.iter().any(|x| del.contains(x)))
-                        .and_then(|fs| fs.iter().find(|x| del.contains(x)).copied())
-                        .unwrap_or(0);
-                    return Err(fail(format!(
-                        "face {by} ({}), borders face {f}, {}: include face {f} in the selection if it should go too, or take off the feature that made face {f} in the timeline instead; only planar neighbours can extend to close the gap",
-                        surface_kind(&rec, by),
-                        surface_kind(&rec, f),
-                    )));
-                }
-            }
+            let Some(Surf::Plane { n, d }) = surf_of(&rec, f) else { return Err(fail("a neighbour is not planar")) };
+            planes.insert(f, (n, d));
         }
         // The deleted faces' vertices.
         let gap_vertices: BTreeSet<u32> = vfaces.iter().filter(|(_, fs)| fs.iter().any(|f| del.contains(f))).map(|(v, _)| *v).collect();
