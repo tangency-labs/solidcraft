@@ -53,14 +53,18 @@ use crate::geom::solution_array::SolutionObject;
 use crate::geom::tol::zone_tol3d;
 use crate::intersect::point_class::ClassObject;
 use crate::kernel::Kernel;
-use crate::math::{BIG_DOUBLE, Point3};
+use crate::math::{Point3, BIG_DOUBLE};
 use crate::topology::proto_topology::p1::CopyBrepMap;
 
 const OP: &str = "blend::fillet_executive::p3";
 
 /// `smos_Max` of two doubles.
 fn smos_max(a: f64, b: f64) -> f64 {
-    if a > b { a } else { b }
+    if a > b {
+        a
+    } else {
+        b
+    }
 }
 
 /// `FILEXEC_ERR` (`SM_ERR`): a step of the executive failed; the executive's error info
@@ -1049,7 +1053,7 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     fn edgeuse_vertex(&self, edgeuse: O) -> Result<Option<O>>;
     /// `GetName`, `GetCornerType`, `GetFilletedVertex` for error reporting only.
     fn corner_error_info(&self, corner: O, executive: &FilletExecutive<O>)
-    -> Result<CornerView<O>>;
+        -> Result<CornerView<O>>;
     /// `SmFilletCorner::IsBlendingCorner`.
     fn is_blending_corner(&self, corner: O) -> Result<bool>;
     /// `SmFilletCorner::IsTangentCorner`; called only for blending corners.
@@ -1400,7 +1404,7 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     /// `SmFilletExecutive::DoPiecewiseMerge` on the implementor's bodies (the live
     /// session's port is `FilletSession`'s piecewise merge).
     fn piecewise_merge(&mut self, k: &mut Kernel, executive: &mut FilletExecutive<O>)
-    -> Result<()>;
+        -> Result<()>;
 
     /// `SmFilletExecutive::SetFilletBrepEdgeMap` (`blend.fillet_executive_p2`).
     fn set_fillet_brep_edge_map(
@@ -2239,7 +2243,7 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
     /// # Errors
     /// Real smoothing or missing live tangent-collection context.
     fn creation_smooth(&mut self, k: &mut Kernel, executive: &mut FilletExecutive<O>)
-    -> Result<()>;
+        -> Result<()>;
 
     /// `sm_ExtendTraceToItsRails` (fork tangency-labs/smlib@a9277fd, WR-609; called
     /// before the corners since @6e77631, WR-610) on this solver: let its trace reach

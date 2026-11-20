@@ -28,11 +28,11 @@
 //! nearest-edge search of `sm_InsideMaterial` keeps the first of equally near edges, in
 //! the face's edge order, as the fork's strict `<` does. There is no recursion.
 
-use super::{OP, RailClassificationContext};
+use super::{RailClassificationContext, OP};
 use crate::blend::fillet_classification::FilletClassObject;
 use crate::blend::fillet_geom::p1::{FilletBrep, FilletGeomType};
 use crate::blend::fillet_solver::p1::{
-    FilletSolver, FilletSolverOps, test_manifold_tangent_rollover_at,
+    test_manifold_tangent_rollover_at, FilletSolver, FilletSolverOps,
 };
 use crate::curve::curve::Curve;
 use crate::error::blend::{BlendFailure, CrossingInput};
@@ -43,11 +43,11 @@ use crate::intersect::curve_class::p1::CurveClassification;
 use crate::intersect::curve_class::p2::ResetOptions;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
-use crate::math::BIG_DOUBLE;
 use crate::math::Point3;
+use crate::math::BIG_DOUBLE;
 use crate::topology::edgeuse::p2 as eu2;
 use crate::topology::face::p4 as face_p4;
-use crate::topology::{Brep, EdgeId, FaceId, edge, edgeuse::p1 as eu};
+use crate::topology::{edge, edgeuse::p1 as eu, Brep, EdgeId, FaceId};
 
 /// What [`FilletSolver::rails_fit_their_faces_judged_with_ops`] finds of a solver's rails
 /// (the fork's `RailsFitTheirFaces(rbFit, rbRollsOver, rbIntoMaterial)`).

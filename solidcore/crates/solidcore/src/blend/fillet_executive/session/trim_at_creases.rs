@@ -53,9 +53,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{FilletBody, FilletExecutive, FilletObject, FilletSession, SessionObjects, invalid};
+use super::{invalid, FilletBody, FilletExecutive, FilletObject, FilletSession, SessionObjects};
 use crate::blend::fillet_cliff_overflow::{
-    Refusal, SectionEnd, cut_fillet_at_open_end, section_edge, section_end, section_end_face,
+    cut_fillet_at_open_end, section_edge, section_end, section_end_face, Refusal, SectionEnd,
 };
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_executive::p3::NoRoomReason;
@@ -63,8 +63,8 @@ use crate::blend::fillet_geom::p1::{
     FilletEdgeType, FilletErrorType, FilletGeomId, FilletSurfaceStorage,
 };
 use crate::blend::fillet_overflow::{
-    ExtendOutcome, Extension, Rail, creases, edge_curve, edge_on_surface, extend, in_material,
-    make_extension_face, outward_plane,
+    creases, edge_curve, edge_on_surface, extend, in_material, make_extension_face, outward_plane,
+    ExtendOutcome, Extension, Rail,
 };
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::{Curve, CurveKind};
@@ -76,7 +76,7 @@ use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::ObjectRef;
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
-use crate::math::{BIG_DOUBLE, Point3, Vec3};
+use crate::math::{Point3, Vec3, BIG_DOUBLE};
 use crate::nurbs::b_spline_curve::{BSplineCurve, ControlPointForm};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
@@ -86,25 +86,33 @@ use crate::nurbs::nurbs_crv::is_clamped;
 use crate::query::brep::BrepIdentity;
 use crate::surface::plane::Plane;
 use crate::surface::procedural_blend::NetScope;
-use crate::surface::surface::Surface;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
-use crate::topology::brep::p3::{self, DeleteFaceOptions, delete_face, with_kernel_callbacks};
+use crate::surface::surface::Surface;
+use crate::topology::brep::p3::{self, delete_face, with_kernel_callbacks, DeleteFaceOptions};
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::edge::NotifyEnv;
 use crate::topology::topology_traverser::Marks;
-use crate::topology::{Brep, BrepId, EdgeId, FaceId, edge, edgeuse::p1 as eu1, face, vertex};
+use crate::topology::{edge, edgeuse::p1 as eu1, face, vertex, Brep, BrepId, EdgeId, FaceId};
 
 const OP: &str = "blend::fillet_executive::session::trim_at_creases";
 
 /// `smos_Max` of two doubles.
 fn smos_max(a: f64, b: f64) -> f64 {
-    if a > b { a } else { b }
+    if a > b {
+        a
+    } else {
+        b
+    }
 }
 
 /// `smos_Min` of two doubles.
 fn smos_min(a: f64, b: f64) -> f64 {
-    if a < b { a } else { b }
+    if a < b {
+        a
+    } else {
+        b
+    }
 }
 
 /// `SmFilletSolver::IsTangentEdge` (the fork's bacd0bb): whether the two faces at the
