@@ -2193,11 +2193,12 @@ impl<O: ClassObject> CurveClassification<O> {
     /// edge (the fork's `SmCurveClassification::ClassifyEdgeInterval`, WR-305): when the
     /// interval and the edge are both straight, when both ends lie within the intersection
     /// tolerance of the edge's line (the distance to a line is convex along the interval, so
-    /// its ends bound it); otherwise when the curve is tangent to the edge at both ends and
-    /// the whole curve over the interval and the edge piece between its ends are proved
-    /// within the intersection tolerance of each other on control points
+    /// its ends bound it); otherwise when the interval's ends are farther than that tolerance
+    /// apart and the whole curve over the interval and the edge piece between its ends are
+    /// proved within the intersection tolerance of each other on enclosures
     /// ([`curve_piece_runs_along_edge`]; the fork reads the midpoint only, a sample that also
-    /// takes a curve bowing far off the edge between its ends, or a short one crossing it). Both ends
+    /// takes a curve bowing far off the edge between its ends, or a piece no longer than the
+    /// tolerance, a point at it, crossing the edge). Both ends
     /// are on edge `E` when each classifies to `E` or to one of its two vertices and at least
     /// one to `E` itself. An interval whose midpoint is already classified, and a 2D
     /// classification curve's, is left as it is.
@@ -2206,7 +2207,7 @@ impl<O: ClassObject> CurveClassification<O> {
     /// intersections left unclassified counts as on `E` when its point is within the intersection tolerance of `E`, farther than that from both
     /// vertices of `E`, the curve is tangent to `E` at both ends of the interval
     /// ([`tangent_to_edge_at_ends`]), and the whole curve over the interval is proved within that
-    /// tolerance of `E` on control points ([`piece_within_band`]); it is then classified to
+    /// tolerance of `E` on enclosures ([`piece_within_band`]); it is then classified to
     /// `E` with its parameter on `E`. The tangency keeps out a curve that crosses `E` at the
     /// interval's classified end and stops a hair past it: a piece that short lies within the
     /// band whatever its angle to `E`. A curve that runs along an edge and ends on it without
@@ -2298,7 +2299,14 @@ impl<O: ClassObject> CurveClassification<O> {
                 let edge_ivl = edge_interval(geometry, edge)?;
                 straight_run_on_line(k, curve, &ivl.interval, target, &edge_ivl, xsect_tol_3d)?
             } else {
-                curve_piece_runs_along_edge(k, geometry, edge, curve, &ivl.interval, xsect_tol_3d)?
+                curve_piece_runs_along_edge(
+                    k,
+                    geometry,
+                    (edge, target),
+                    curve,
+                    &ivl.interval,
+                    xsect_tol_3d,
+                )?
             };
 
             if on_edge {
@@ -2406,7 +2414,7 @@ impl<O: ClassObject> CurveClassification<O> {
         if !tangent_to_edge_at_ends(k, (curve, [t0, t1]), (edge_crv, params))? {
             return Ok(None);
         }
-        let proved = piece_within_band(curve, &ivl.interval, edge_crv, params, xsect_tol_3d);
+        let proved = piece_within_band(k, curve, &ivl.interval, edge_crv, params, xsect_tol_3d)?;
         Ok(proved.then_some(unclassified))
     }
 }
@@ -2449,78 +2457,218 @@ fn tangent_to_edge_at_ends(
 
 /// Not upstream: whether `curve` over `interval` lies within `band` of `edge_curve` as a
 /// whole, where the two ends of `interval` drop onto `edge_curve` at `edge_params`; decided
-/// on control points, never on samples.
+/// on enclosures, never on samples ([`pieces_apart_bound`]).
 ///
-/// Each curve piece lies in the convex hull of its control points
-/// ([`Curve::piece_hull_points`]), whose first and last are its end points. Distance from a
-/// segment is convex, so every point of the curve over `interval` lies within `dev_c` of
-/// the chord `[a, b]` of its ends, `dev_c` the largest distance of a control point from it.
-/// The point of that chord at fraction `s` lies within `max(|a - a'|, |b - b'|)` of the
-/// point at `s` of the chord `[a', b']` of the edge piece between `edge_params` (the
-/// distance is convex in `s`). The edge piece runs from `a'` to `b'`, so its projection onto
-/// that chord's line covers the chord: every chord point is within `dev_e` of the edge
-/// piece, `dev_e` its control points' largest distance from `[a', b']`. The sum of the
-/// three bounds the distance of every point of the curve over `interval` from the edge.
-/// Each control point is within twice its coordinate error of the exact one, and every
-/// distance is widened for its rounding ([`segment_distance_bound`]); the sum must stay
-/// below `band`. A curve or edge curve of another kind, or with no certified piece, proves
-/// nothing.
+/// # Errors
+///
+/// Those of the end evaluations and of a curve on a surface's enclosure ([`piece_tube`]).
 fn piece_within_band(
+    k: &Kernel,
     curve: &Curve,
     interval: &Extent1d,
     edge_curve: &Curve,
     edge_params: [f64; 2],
     band: f64,
-) -> bool {
-    pieces_apart_bound(curve, interval, edge_curve, edge_params).is_some_and(|d| d < band)
+) -> Result<bool> {
+    // written so that a NaN bound refuses
+    Ok(pieces_apart_bound(k, curve, interval, edge_curve, edge_params, band)?.is_some_and(|d| d < band))
 }
 
-/// Not upstream: a bound `d` such that every point of `curve` over `interval` is within `d`
-/// of the piece of `other` between `other_params` and every point of that piece within `d`
-/// of the curve over `interval`, the first of `other_params` paired with `interval`'s start;
-/// the sum [`piece_within_band`] compares (its docs). Both directions hold: the curve piece
-/// lies within `dev_c` of its chord and its chord within `dev_c` of it (the projection onto
-/// the chord's line covers the chord), the two chords within the end gaps of each other at
-/// every fraction, and likewise for the other piece. `None` when either piece has no
-/// certified hull; NaN propagates.
-fn pieces_apart_bound(
-    curve: &Curve,
-    interval: &Extent1d,
-    other: &Curve,
-    other_params: [f64; 2],
-) -> Option<f64> {
-    let [s0, s1] = other_params;
-    let c = curve.piece_hull_points(interval)?;
-    let e = other.piece_hull_points(&Extent1d::from_min_max(s0.min(s1), s0.max(s1)))?;
-    let (&(a, ea), &(b, eb)) = (c.first()?, c.last()?);
-    let (&first, &last) = (e.first()?, e.last()?);
-    // the edge piece's end at the curve's start first
-    let ((a2, ea2), (b2, eb2)) = if s0 <= s1 {
-        (first, last)
-    } else {
-        (last, first)
-    };
-    // NaN propagates (a NaN distance proves nothing)
-    let chord_dev = |points: &[(Point3, f64)], a: Point3, b: Point3, e_ends: f64| {
-        points.iter().fold(0.0_f64, |m, &(q, eq)| {
+/// A piece of a curve enclosed about its chord `[a, b]`: every point of the piece within
+/// `rho` of that segment and every point of the segment within `rho` of the piece, `a` and
+/// `b` within `ea` and `eb` of the piece's exact ends ([`piece_tube`]).
+#[derive(Clone, Copy)]
+struct Tube {
+    a: Point3,
+    ea: f64,
+    b: Point3,
+    eb: f64,
+    rho: f64,
+}
+
+impl Tube {
+    /// The same tube with its ends swapped.
+    const fn reversed(self) -> Self {
+        Self {
+            a: self.b,
+            ea: self.eb,
+            b: self.a,
+            eb: self.ea,
+            rho: self.rho,
+        }
+    }
+}
+
+/// Pieces of a curve on a surface's chord gap ([`crv_on_surf_tube`]) bisects before it
+/// refuses.
+const CRV_ON_SURF_TUBE_PIECES: usize = 256;
+
+/// Not upstream: the [`Tube`] of `curve` over `interval`, `None` when the piece is not
+/// enclosed. `tol` is the distance the caller compares the tube with.
+///
+/// A curve with certified control points ([`Curve::piece_hull_points`]) lies in their convex
+/// hull, whose first and last points are its ends. Distance from a segment is convex, so every
+/// point of the piece lies within `rho` of the chord between them, `rho` the largest distance
+/// of a control point from it ([`segment_distance_bound`]), each point within twice its
+/// coordinate error of the exact one. The piece runs from one end of the chord to the other, so
+/// its projection onto the chord's line covers the chord: every point of the chord is within
+/// `rho` of the piece too.
+///
+/// A curve on a surface `S(W(t))` (its UV curve `W` and its surface `S`) has no control points
+/// of its own. Its chord is taken as the line `L` of degree 1 over `interval` through its two
+/// end points as evaluated, and `rho` is the proved bound on the distance between `L` and the
+/// image `S(W)` over `interval` both ways ([`trim_image_gap_bound_within`]: the surface's exact
+/// net and the UV curve's NURBS data in rounded interval arithmetic). The chord is `L` itself,
+/// so its ends are exact (`ea = eb = 0`).
+///
+/// A UV line's evaluation `P + s scale V` rounds, so its points are not those of its NURB, and
+/// the enclosure takes only an exactly evaluated trim. A UV line along a parameter direction
+/// (one coordinate of `V` nonzero) is taken all the same: its other coordinate is `P`'s
+/// exactly at every parameter (`P_c + x 0 = P_c` for a finite `x`), and its coordinate along
+/// `V` is monotone in the parameter (each rounded operation is), so its evaluated points run
+/// along the segment between its two evaluated ends and never leave it. Only how fast they
+/// run along it differs from the segment's own parameter, which the enclosure does not depend
+/// on (it bounds the distance of the images as sets, both ways). So the piece's UV curve is
+/// that segment, the line of degree 1 between the evaluated ends over `interval`: it is the
+/// trim enclosed.
+///
+/// A surface without an exact net, a UV curve of another kind than a B-spline, an ellipse or
+/// such a line, or a gap that the bisection does not enclose within its budget gives `None`;
+/// a gap above `tol` gives an infinite `rho`.
+///
+/// [`trim_image_gap_bound_within`]: crate::query::curve_surface_gap::trim_image_gap_bound_within
+///
+/// # Errors
+///
+/// Those of the end evaluations, of the surface's copy and of the enclosure.
+fn piece_tube(k: &Kernel, curve: &Curve, interval: &Extent1d, tol: f64) -> Result<Option<Tube>> {
+    if let Some(points) = curve.piece_hull_points(interval) {
+        let (Some(&(a, ea)), Some(&(b, eb))) = (points.first(), points.last()) else {
+            return Ok(None);
+        };
+        let e_ends = ea.max(eb);
+        // NaN propagates (a NaN distance proves nothing)
+        let rho = points.iter().fold(0.0_f64, |m, &(q, eq)| {
             let d = segment_distance_bound(q, a, b) + 2.0 * (eq + e_ends);
             if d.is_nan() || d > m {
                 d
             } else {
                 m
             }
-        })
+        });
+        return Ok(Some(Tube { a, ea, b, eb, rho }));
+    }
+    let CurveKind::CrvOnSurf(cos) = curve.kind() else {
+        return Ok(None);
     };
-    let dev_c = chord_dev(&c, a, b, ea.max(eb));
-    let dev_e = chord_dev(&e, a2, b2, ea2.max(eb2));
-    let gap_a = segment_distance_bound(a, a2, a2) + 2.0 * (ea + ea2);
-    let gap_b = segment_distance_bound(b, b2, b2) + 2.0 * (eb + eb2);
+    let (t0, t1) = (interval.min(), interval.max());
+    if !(t0 < t1 && t0.is_finite() && t1.is_finite()) {
+        return Ok(None);
+    }
+    let (a, b) = (curve.evaluate_point(k, t0)?, curve.evaluate_point(k, t1)?);
+    let Some(chord) = chord_line(a, b, t0, t1, 3) else {
+        return Ok(None);
+    };
+    // a UV line along a parameter direction: its points as evaluated lie on the segment
+    // between its two evaluated ends (see the docs above); any other UV line is refused below
+    let iso;
+    let uv = match cos.uv_curve().kind() {
+        CurveKind::Line(l) => {
+            let v = l.line_vector();
+            let along_u = v.x != 0.0 && v.y == 0.0 && v.z == 0.0;
+            let along_v = v.x == 0.0 && v.y != 0.0 && v.z == 0.0;
+            if !(along_u || along_v) {
+                return Ok(None);
+            }
+            let (w0, w1) = (
+                cos.uv_curve().evaluate_point(k, t0)?,
+                cos.uv_curve().evaluate_point(k, t1)?,
+            );
+            let Some(line) = chord_line(w0, w1, t0, t1, 2) else {
+                return Ok(None);
+            };
+            iso = line;
+            &iso
+        }
+        _ => cos.uv_curve(),
+    };
+    // (a copy without owner, as the drops use: its evaluations do not trim to a face)
+    let mut surface = cos.surface().clone_for_evaluation()?;
+    let _ = surface.set_owner(None);
+    // (below a thousandth of the tolerance a tighter bound changes nothing)
+    let floor = 1.0e-3 * tol;
+    let rho = crate::query::curve_surface_gap::trim_image_gap_bound_within(
+        k,
+        &surface,
+        &chord,
+        uv,
+        [t0, t1],
+        floor,
+        [floor, tol],
+        Some(CRV_ON_SURF_TUBE_PIECES),
+    )?;
+    Ok(rho.map(|rho| Tube {
+        a,
+        ea: 0.0,
+        b,
+        eb: 0.0,
+        rho,
+    }))
+}
+
+/// The line of degree 1 from `a` at `t0` to `b` at `t1` (`t0 < t1`), as a B-spline of
+/// dimension `dim` whose control points are `a` and `b` exactly; `None` when it cannot be
+/// built.
+fn chord_line(a: Point3, b: Point3, t0: f64, t1: f64, dim: u64) -> Option<Curve> {
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::nurbs::crv_basic::Curve as NurbCurve;
+    use crate::nurbs::math::{CPoint, NOW};
+    let pw = vec![CPoint::new(a.x, a.y, a.z, NOW), CPoint::new(b.x, b.y, b.z, NOW)];
+    let nurb = NurbCurve::new(pw, 1, vec![t0, t0, t1, t1]).ok()?;
+    Some(Curve::from(BSplineCurve::from_nurb(nurb, dim, false)))
+}
+
+/// Not upstream: a bound `d` such that every point of `curve` over `interval` is within `d`
+/// of the piece of `other` between `other_params` and every point of that piece within `d`
+/// of the curve over `interval`, the first of `other_params` paired with `interval`'s start.
+///
+/// Each piece lies within its `rho` of its chord and its chord within `rho` of it
+/// ([`piece_tube`]). The point of one chord at fraction `s` lies within `max(|a - a'|,
+/// |b - b'|)` of the point at `s` of the other (the distance is convex in `s`), each end gap
+/// widened by twice the ends' errors and for its rounding ([`segment_distance_bound`]). So
+/// every point of either piece is within `rho_c + max gap + rho_e` of the other, widened by
+/// `gamma(3)` for the sum. `None` when either piece has no [`Tube`]; NaN propagates. `tol` is
+/// the distance the caller compares the bound with ([`piece_tube`]).
+///
+/// # Errors
+///
+/// Those of [`piece_tube`].
+fn pieces_apart_bound(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    other: &Curve,
+    other_params: [f64; 2],
+    tol: f64,
+) -> Result<Option<f64>> {
+    let [s0, s1] = other_params;
+    let Some(c) = piece_tube(k, curve, interval, tol)? else {
+        return Ok(None);
+    };
+    let Some(e) = piece_tube(k, other, &Extent1d::from_min_max(s0.min(s1), s0.max(s1)), tol)?
+    else {
+        return Ok(None);
+    };
+    // the other piece's end at the curve's start first
+    let e = if s0 <= s1 { e } else { e.reversed() };
+    let gap_a = segment_distance_bound(c.a, e.a, e.a) + 2.0 * (c.ea + e.ea);
+    let gap_b = segment_distance_bound(c.b, e.b, e.b) + 2.0 * (c.eb + e.eb);
     let ends = if gap_a.is_nan() || gap_a > gap_b {
         gap_a
     } else {
         gap_b
     };
-    Some((dev_c + ends + dev_e) * (1.0 + gamma(3)))
+    Ok(Some((c.rho + ends + e.rho) * (1.0 + gamma(3))))
 }
 
 /// Pieces [`curve_runs_along`] bounds before it refuses.
@@ -2528,16 +2676,16 @@ const RUN_ALONG_PIECES: usize = 1024;
 
 /// Not upstream (WR-580): whether `curve` over `interval` and `other` over `other_interval`
 /// lie within `tol` of each other as wholes, each point of either within `tol` of a point of
-/// the other (their Hausdorff distance); decided on control points, never on samples.
+/// the other (their Hausdorff distance); decided on enclosures, never on samples.
 ///
 /// The two are cut into pieces paired end to end, the curve's start with the end of `other`
 /// whose point is nearer to it; a pair is proved by [`pieces_apart_bound`] (each piece within
-/// its control points' distance from its chord, the chords within their end gaps). A pair
+/// its enclosure's distance from its chord, the chords within their end gaps). A pair
 /// whose bound is not below `tol` is halved: the curve at its middle parameter, `other` at the
 /// drop of the curve's middle point onto its piece. The drop only chooses where `other` is
 /// cut; any cut gives pieces that cover both curves, so the bound holds whatever it returns.
 /// Every pair proved, the curves are within `tol`. A pair that cannot be cut any further, a
-/// failed drop, a curve of a kind with no certified hull, or more than [`RUN_ALONG_PIECES`]
+/// failed drop, a curve of a kind with no enclosure ([`piece_tube`]), or more than [`RUN_ALONG_PIECES`]
 /// pairs bounded proves nothing: `false`.
 ///
 /// # Errors
@@ -2562,7 +2710,7 @@ pub(crate) fn curve_runs_along(
     while let Some((t0, t1, s0, s1)) = pending.pop() {
         let piece = Extent1d::from_min_max(t0, t1);
         // written so that a NaN bound refuses
-        if pieces_apart_bound(curve, &piece, other, [s0, s1]).is_some_and(|d| d < tol) {
+        if pieces_apart_bound(k, curve, &piece, other, [s0, s1], tol)?.is_some_and(|d| d < tol) {
             continue;
         }
         bounded += 1;
@@ -2638,14 +2786,33 @@ fn drop_onto_edge<O: ClassObject>(
         .then_some((dropped.distance, dropped.parameter)))
 }
 
-/// Not upstream (WR-305): whether `curve` over `interval` runs along edge handle `edge`
-/// within `tol`: the curve is tangent to the edge's curve at both ends of `interval`
-/// ([`tangent_to_edge_at_ends`], at the drops of its end points), and the piece of the edge's curve
-/// between those drops and the curve over `interval` are proved within `tol` of each other
-/// as wholes on control points ([`curve_runs_along`]), never on samples. The drops only
-/// choose that edge piece: its ends' gaps to the interval's ends are part of the bound, so
-/// a poor drop can only refuse. A failed drop, two drops at one parameter, or a crossing
-/// at either end proves nothing: `false`.
+/// Not upstream (WR-305): whether `curve` over `interval` runs along edge handle `edge`, whose
+/// curve is `edge_crv`, within `tol`: the piece's two ends are farther than `tol` apart (or the
+/// edge is closed and the piece goes all the way round it), and the piece of the edge's curve
+/// between the drops of its two ends and the curve over
+/// `interval` are proved within `tol` of each other as wholes ([`curve_runs_along`]), never
+/// on samples. The drops only choose that edge piece: its ends' gaps to the interval's ends
+/// are part of the bound, so a poor drop can only refuse.
+///
+/// **Ends apart.** Two points within the tolerance of each other are one point. A piece whose
+/// two ends are that close starts and ends at one point as far as the tolerance tells: it runs
+/// along no stretch of an edge between two drops (a piece about as short as the band lies
+/// within it whatever its angle to the edge, as a sphere's arc clipping a box corner by about
+/// the tolerance, which cuts across the corner to the edge's vertex). It runs along the edge
+/// only all the way round a closed edge (its two ends one vertex): proved against the edge's
+/// whole curve. Otherwise it is left as the edge intersections left it, at its ends.
+///
+/// **A closed edge.** On an edge whose two ends are one vertex, the drops of a piece that
+/// runs along the edge through that vertex fall on either side of the edge's parameter seam,
+/// and the edge piece between them runs the other way round. Where the piece between the
+/// drops is not proved, that other way is tried ([`runs_through_seam`]): a drop at one end of
+/// the edge's interval is the seam's point, so it is taken at the interval's other end; else
+/// the curve is cut at the drop of the seam's point onto it, and each part is proved against
+/// the edge piece from its end's drop to the seam's end of the edge's interval. The drops only
+/// choose the edge pieces and where the curve is cut; each pair is proved as a whole, so they
+/// cannot make the proof wrong.
+///
+/// A failed drop, two drops at one parameter, or a bound not proved: `false`.
 ///
 /// # Errors
 ///
@@ -2653,17 +2820,39 @@ fn drop_onto_edge<O: ClassObject>(
 fn curve_piece_runs_along_edge<O: ClassObject>(
     k: &Kernel,
     geometry: &impl ClassGeometry<O>,
-    edge: O,
+    (edge, edge_crv): (O, &Curve),
     curve: &Curve,
     interval: &Extent1d,
     tol: f64,
 ) -> Result<bool> {
+    let ends = [
+        curve.evaluate_point(k, interval.min())?,
+        curve.evaluate_point(k, interval.max())?,
+    ];
+    let [a, b] = ends;
+    let apart = a.distance(b);
+    if apart.is_nan() {
+        return Ok(false);
+    }
+    let closed = closed_edge(geometry, edge)?;
+    if apart <= tol {
+        // one point: the piece runs along the edge only all the way round a closed one
+        let runs = closed
+            && curve_runs_along(
+                k,
+                curve,
+                interval,
+                edge_crv,
+                &edge_interval(geometry, edge)?,
+                tol,
+            )?;
+        if runs {
+            k.work_counters.add_curved_edge_run();
+        }
+        return Ok(runs);
+    }
     let mut params = [0.0; 2];
-    for (t, s) in [interval.min(), interval.max()]
-        .into_iter()
-        .zip(params.iter_mut())
-    {
-        let p = curve.evaluate_point(k, t)?;
+    for (p, s) in ends.into_iter().zip(params.iter_mut()) {
         let Some((_, param)) = drop_onto_edge(k, geometry, edge, p, tol)? else {
             return Ok(false);
         };
@@ -2674,23 +2863,7 @@ fn curve_piece_runs_along_edge<O: ClassObject>(
     if !(s0 < s1 || s1 < s0) {
         return Ok(false);
     }
-    let edge_crv = edge_curve(geometry, edge)?
-        .ok_or_else(|| SolidError::intersect_missing(OP_EDGE_INTERVAL, "the edge's curve"))?;
-    // A piece about as short as the band lies within it whatever its angle to the edge:
-    // a curve that crosses the edge at one end and cuts across a corner to the edge's
-    // vertex is not one that runs along it. Like an unclassified end
-    // (`CurveClassification::ends_on_edge`), the piece must leave neither end across the edge: tangent
-    // to it at both. This only refuses (the interval stays as the edge intersections left it).
-    // Each tangent is read from inside the piece, so a piece leaving or meeting a knot at
-    // an angle to the edge is not passed by a neighbouring span's direction.
-    if !tangent_to_edge_at_ends(
-        k,
-        (curve, [interval.min(), interval.max()]),
-        (edge_crv, params),
-    )? {
-        return Ok(false);
-    }
-    let runs = curve_runs_along(
+    let mut runs = curve_runs_along(
         k,
         curve,
         interval,
@@ -2698,10 +2871,118 @@ fn curve_piece_runs_along_edge<O: ClassObject>(
         &Extent1d::from_min_max(s0.min(s1), s0.max(s1)),
         tol,
     )?;
+    if !runs && closed {
+        runs = runs_through_seam(k, geometry, (edge, edge_crv), curve, interval, params, tol)?;
+    }
     if runs {
         k.work_counters.add_curved_edge_run();
     }
     Ok(runs)
+}
+
+/// Whether edge handle `edge` is closed: its two ends are one vertex.
+///
+/// # Errors
+///
+/// An unresolved handle.
+fn closed_edge<O: ClassObject>(geometry: &impl ClassGeometry<O>, edge: O) -> Result<bool> {
+    let (eb, e) = edge_of(geometry, edge, "SmEdge::GetStartVertex")?;
+    let (start_v, end_v) = (
+        topo_edge::start_vertex(eb, e)?,
+        topo_edge::end_vertex(eb, e)?,
+    );
+    Ok(start_v.is_some() && start_v == end_v)
+}
+
+/// Not upstream (WR-305): whether `curve` over `interval` runs along the closed edge handle
+/// `edge` (its two ends one vertex, [`closed_edge`]), whose curve is `edge_crv`, through the
+/// edge's parameter seam, its ends dropping onto the edge at `[s0, s1]` (see
+/// [`curve_piece_runs_along_edge`], "A closed edge"): with a drop at one end of the edge's
+/// interval taken at its other end, or cut at the seam. `false` for a failed drop of the
+/// seam's point, a cut at either end of `interval`, or a part not proved.
+///
+/// # Errors
+///
+/// An unresolved handle; those of the evaluations and of the drops.
+fn runs_through_seam<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    (edge, edge_crv): (O, &Curve),
+    curve: &Curve,
+    interval: &Extent1d,
+    [s0, s1]: [f64; 2],
+    tol: f64,
+) -> Result<bool> {
+    let edge_ivl = edge_interval(geometry, edge)?;
+    let (e0, e1) = (edge_ivl.min(), edge_ivl.max());
+    let (t0, t1) = (interval.min(), interval.max());
+    // an end that drops onto the seam is at either end of the edge's interval
+    let other_end = |s: f64| {
+        if s == e0 {
+            Some(e1)
+        } else if s == e1 {
+            Some(e0)
+        } else {
+            None
+        }
+    };
+    for flipped in [
+        other_end(s0).map(|f| [f, s1]),
+        other_end(s1).map(|f| [s0, f]),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let [u0, u1] = flipped;
+        if (u0 < u1 || u1 < u0)
+            && curve_runs_along(
+                k,
+                curve,
+                interval,
+                edge_crv,
+                &Extent1d::from_min_max(u0.min(u1), u0.max(u1)),
+                tol,
+            )?
+        {
+            return Ok(true);
+        }
+    }
+    let seam = edge_crv.evaluate_point(k, e0)?;
+    let dropped = curve.drop_point(
+        k,
+        interval,
+        seam,
+        None,
+        tol,
+        None,
+        SolverOperation::Minimize,
+    )?;
+    let tm = dropped.parameter;
+    if !(dropped.success && t0 < tm && tm < t1) {
+        return Ok(false);
+    }
+    // the curve's start runs to the seam's end of the edge's interval past its own drop, the
+    // end from the other end of the interval
+    let (first, second) = if s1 < s0 {
+        ((s0, e1), (e0, s1))
+    } else {
+        ((e0, s0), (s1, e1))
+    };
+    for ((c0, c1), (u0, u1)) in [((t0, tm), first), ((tm, t1), second)] {
+        if u0.partial_cmp(&u1) != Some(core::cmp::Ordering::Less)
+            || !curve_runs_along(
+                k,
+                curve,
+                &Extent1d::from_min_max(c0, c1),
+                edge_crv,
+                &Extent1d::from_min_max(u0, u1),
+                tol,
+            )?
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Not upstream (#15718): whether `curve` over `interval` runs along the line of
@@ -3332,14 +3613,16 @@ mod tests {
     }
 
     #[test]
-    fn a_piece_leaving_a_knot_across_the_edge_is_left_alone() {
-        // ending on the edge's corner vertex: the curved piece's certificate refuses
+    fn a_piece_leaving_a_knot_across_the_edge_onto_its_vertex_is_on_the_edge() {
+        // ending on the edge's corner vertex: both ends are classified, 1.5e-5 apart (more
+        // than the band, 1e-5), and the whole piece is proved within 4e-6 of the edge, so the
+        // curved piece's certificate accepts it, whatever its direction at the knot
         let (k, geo, mut cc, edge) = piece_leaving_a_knot_across_the_edge(1.0);
         cc.classify_edge_interval(&k, &geo, 0).expect("classify");
         let ivl = cc.at(0).expect("interval");
-        assert_eq!(ivl.mid.point_class(), PointClassType::Unknown);
-        assert_ne!(ivl.mid.object(), Some(edge));
-        assert_eq!(k.work_counters.curved_edge_runs(), 0);
+        assert_eq!(ivl.mid.point_class(), PointClassType::Edge);
+        assert_eq!(ivl.mid.object(), Some(edge));
+        assert_eq!(k.work_counters.curved_edge_runs(), 1);
     }
 
     #[test]
@@ -3358,30 +3641,50 @@ mod tests {
         assert_eq!(k.work_counters.curved_edge_runs(), 0);
     }
 
-    #[test]
-    fn a_short_curved_piece_crossing_the_edge_at_both_ends_is_left_alone() {
-        // 1.5e-5 long, from the edge to its corner, leaving and meeting the edge at 45
-        // degrees and at most 3.75e-6 off it: the whole piece lies in the band (1e-5), but it
-        // crosses the edge, it does not run along it (a sphere clipping a box corner by about
-        // the tolerance, whose arc on a side face cuts across the corner)
-        let (k, geo, mut cc, edge) = bezier_from_the_edge(
-            [1.0 - 1.5e-5, 1.0 - 1e-5, 1.0 - 5e-6, 1.0],
-            [0.0, 5e-6, 5e-6, 0.0],
-        );
+    /// The cubic Bézier from the edge to its corner over `x_len`, leaving and meeting the edge
+    /// at 45 degrees and at most `x_len / 4` off it (its control points at heights 0,
+    /// `x_len / 3`, `x_len / 3`, 0).
+    fn lens_to_the_corner(x_len: f64) -> (Kernel, BoxGeo, CurveClassification<H>, H) {
+        let (s1, s2) = (x_len / 3.0, 2.0 * x_len / 3.0);
+        let (k, geo, cc, edge) =
+            bezier_from_the_edge([1.0 - x_len, 1.0 - s2, 1.0 - s1, 1.0], [0.0, s1, s1, 0.0]);
         let curve = geo
             .curve(H(geo.entities.len(), ClassObjectKind::Curve))
             .expect("curve");
         let off_edge = |t: f64| curve.evaluate_point(&k, t).expect("point").y.abs();
-        assert!((off_edge(0.5) - 3.75e-6).abs() < 1e-15);
+        assert!((off_edge(0.5) - 0.25 * x_len).abs() < 1e-15);
         let slope = |t: f64| {
             let d = curve.evaluate(&k, t, 1, false, true).expect("derivative")[1];
             (d.y / d.x).abs()
         };
         assert!((slope(0.0) - 1.0).abs() < 1e-9 && (slope(1.0) - 1.0).abs() < 1e-9);
+        (k, geo, cc, edge)
+    }
+
+    #[test]
+    fn a_curved_piece_whose_ends_are_within_the_band_of_each_other_is_left_alone() {
+        // 8e-6 long, from the edge to its corner, at most 2e-6 off it: its ends lie within
+        // the band (1e-5) of each other, so they are one point at the tolerance and the piece
+        // has no length along the edge to run (a sphere clipping a box corner by about the
+        // tolerance, whose arc on a side face cuts across the corner: goldens `tess0033`)
+        let (k, geo, mut cc, edge) = lens_to_the_corner(8e-6);
         cc.classify_edge_interval(&k, &geo, 0).expect("classify");
         let ivl = cc.at(0).expect("interval");
         assert_eq!(ivl.mid.point_class(), PointClassType::Unknown);
         assert_ne!(ivl.mid.object(), Some(edge));
         assert_eq!(k.work_counters.curved_edge_runs(), 0);
+    }
+
+    #[test]
+    fn a_curved_piece_longer_than_the_band_and_within_it_is_on_the_edge() {
+        // 1.5e-5 long, at most 3.75e-6 off the edge: its ends are farther apart than the
+        // band (1e-5) and the whole piece is proved within it, so it runs along the edge
+        // however steeply it leaves it (tangency is not asked of a classified end)
+        let (k, geo, mut cc, edge) = lens_to_the_corner(1.5e-5);
+        cc.classify_edge_interval(&k, &geo, 0).expect("classify");
+        let ivl = cc.at(0).expect("interval");
+        assert_eq!(ivl.mid.point_class(), PointClassType::Edge);
+        assert_eq!(ivl.mid.object(), Some(edge));
+        assert_eq!(k.work_counters.curved_edge_runs(), 1);
     }
 }
