@@ -43,6 +43,44 @@ fn features_round_trip_through_iges() {
     round_trip(&fillet(&plate, &[Vec3::new(20.0, 0.0, 10.0)], 3.0).unwrap());
 }
 
+/// A body colour is written as a Color Definition (314) that IGES 5.3 readers accept: its
+/// directory status is subordinate switch 00 and entity use flag 02, "definition"
+/// (§2.2.4.4.9, §4.76), and its unnamed CNAME is omitted rather than written as `0H` (a
+/// Hollerith count is at least one). Two colours, read back unchanged.
+#[test]
+fn colour_definitions_are_unnamed_independent_definitions() {
+    let a = box_solid(Vec3::ZERO, Vec3::new(1.0, 2.0, 3.0)).unwrap();
+    let b = box_solid(Vec3::new(5.0, 0.0, 0.0), Vec3::new(6.0, 1.0, 1.0)).unwrap();
+    let text = iges_export_bodies(
+        &[
+            ExportBody { name: "A".into(), body: &a, color: Some([1.0, 0.5, 0.0]) },
+            ExportBody { name: "B".into(), body: &b, color: Some([0.0, 0.25, 1.0]) },
+        ],
+        &StepHeader::default(),
+    )
+    .unwrap();
+    let section = |c: char| text.lines().filter(move |l| l.as_bytes().get(72) == Some(&(c as u8))).collect::<Vec<_>>();
+    let (d, p) = (section('D'), section('P'));
+    let mut defs = 0;
+    for pair in d.chunks(2) {
+        if pair[0][..8].trim() != "314" {
+            continue;
+        }
+        defs += 1;
+        assert_eq!(&pair[0][64..72], "00000200", "{}", pair[0]);
+        // The parameter data: the lines whose back pointer (columns 65-72) is this entry's sequence.
+        let seq = pair[0][73..].trim().to_string();
+        let params: String = p.iter().filter(|l| l[64..72].trim() == seq).map(|l| l[..64].trim_end()).collect();
+        assert!(!params.contains("0H"), "{params}");
+        assert_eq!(params.trim_end_matches(';').split(',').count(), 4, "{params}");
+    }
+    assert_eq!(defs, 2);
+    let imp = iges_import(&text).unwrap();
+    let mut colors: Vec<_> = imp.bodies.iter().map(|b| b.color).collect();
+    colors.sort_by(|x, y| format!("{x:?}").cmp(&format!("{y:?}")));
+    assert_eq!(colors, [Some([0.0, 0.25, 1.0]), Some([1.0, 0.5, 0.0])]);
+}
+
 /// Hostile files fail cleanly: garbage, truncation, missing and circular references, huge
 /// counts.
 #[test]
@@ -600,6 +638,34 @@ fn a_curve_over_a_tiny_knot_span_still_bounds_its_faces() {
         let m = measure(&imp.bodies[0].body).unwrap();
         assert!(rel(m.volume, 6000.0) < 1e-6 && rel(m.area, 2200.0) < 1e-6, "span {span}: {} {}", m.volume, m.area);
     }
+}
+
+/// A patch trimmed by a curve on a surface with only its model-space curve (no B curve), a
+/// composite whose first line is written end to start: the first piece is turned to run on into
+/// the second, so the loop closes and the face is kept.
+#[test]
+fn a_trim_without_a_parameter_curve_whose_first_piece_is_reversed_keeps_its_face() {
+    let corners = [[0.0, 0.0, 0.0], [20.0, 0.0, 0.0], [20.0, 20.0, 0.0], [0.0, 20.0, 0.0]];
+    let mut ents: Vec<(i64, i64, String)> = vec![bilinear_patch(corners[0], corners[1], corners[2], corners[3])];
+    let fmt = |p: [f64; 3]| format!("{:?},{:?},{:?}", p[0], p[1], p[2]);
+    let mut pieces = Vec::new();
+    for k in 0..4 {
+        let (p0, p1) = (corners[k], corners[(k + 1) % 4]);
+        let (p0, p1) = if k == 0 { (p1, p0) } else { (p0, p1) };
+        ents.push((110, 0, format!("{},{}", fmt(p0), fmt(p1))));
+        pieces.push((2 * ents.len() - 1).to_string());
+    }
+    ents.push((102, 0, format!("4,{}", pieces.join(","))));
+    let c = 2 * ents.len() - 1;
+    // Created by projection, preferring the model-space curve (PREF 2), with no B curve.
+    ents.push((142, 0, format!("0,1,0,{c},2")));
+    let cos = 2 * ents.len() - 1;
+    ents.push((144, 0, format!("1,1,0,{cos}")));
+    let imp = iges_import(&iges_file(&ents)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("closed loop") || w.contains("face #")), "{:?}", imp.warnings);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.area, 400.0) < 1e-6, "area {}", m.area);
 }
 
 #[test]

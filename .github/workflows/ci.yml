@@ -38,6 +38,8 @@
 # solidcore/, on a pull request (once approved), merge group or push to main that changes
 # solidcore/** (main saves their caches), with SolidCore's cargo-deny (licences, bans, sources,
 # advisories): solidcore/ is outside the workspace, so the workspace's cargo-deny never sees it.
+# The kernel rig (kernel-rig.yml, called as a reusable workflow) runs on approved pull requests and
+# merge groups, for the rig areas the diff reaches, and `ci` requires it.
 # Cross-compilation is opt-in through Run workflow; release builds remain in release.yml.
 # The release gate (release-gate.yml) calls this workflow (workflow_call) as a Run workflow with
 # cross-compilation on.
@@ -96,7 +98,8 @@ concurrency:
   # A `labeled` event for any label but approved-for-ci does no work and must not cancel (or queue
   # behind) the PR's real run, so it gets a group of its own; approved-for-ci replaces the
   # unlabelled run with the full one.
-  group: ci-${{ github.event_name }}-${{ github.ref }}${{ github.event.action == 'labeled' && github.event.label.name != 'approved-for-ci' && format('-ignored-{0}', github.run_id) || '' }}
+  # A re-run (attempt 2 or later, often of an older commit) gets a group of its own, so it never cancels the live run for the PR's current head.
+  group: ci-${{ github.event_name }}-${{ github.ref }}${{ github.run_attempt > 1 && format('-rerun-{0}', github.run_id) || '' }}${{ github.event.action == 'labeled' && github.event.label.name != 'approved-for-ci' && format('-ignored-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -198,12 +201,13 @@ jobs:
           }
           # Whether the NUL-separated paths in $1 (the diff $2) reach what the Windows D3D12 jobs
           # exercise: the GPU crate and its shaders, the app and its startup, the viewport's wgpu
-          # glue, the vendored egui-wgpu and kernel, their scripts, or a lockfile change that moves
-          # the graphics stack (wgpu, naga, egui, winit, windows). Pull requests and merge groups share it.
+          # glue, the vendored egui and kernel, their scripts, the control server (its refusals,
+          # #10967), or a lockfile change that moves the graphics stack (wgpu, naga, egui, winit,
+          # windows). Pull requests and merge groups share it.
           windows_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
-                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui-wgpu/*|solidcore/*) windows=true ;;
+                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui/*|solidcore/*|crates/control/src/server.rs) windows=true ;;
                 tools/windows-*.ps1|.github/workflows/ci.yml|rust-toolchain*|.cargo/*) windows=true ;;
               esac
             done < "$1"
@@ -230,13 +234,14 @@ jobs:
           # crates below the apps, the web app, the vendored crates, the manifests and lockfile, the
           # toolchain and cargo config, and this workflow. #8227 put a native-only call in
           # crates/ui-egui and the merge queue passed it, because nothing built for wasm there.
+          # The plugin guide and its example crates count too: the wasm job builds the examples.
           deps_wasm_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
                 Cargo.lock|Cargo.toml|*/Cargo.toml) deps=true ;;
               esac
               case "$path" in
-                crates/*|apps/solidcraft-web/*|vendor/*|solidcore/*|Cargo.lock|Cargo.toml|rust-toolchain*|.cargo/*|.github/workflows/ci.yml) wasm=true ;;
+                crates/*|apps/solidcraft-web/*|vendor/*|solidcore/*|Cargo.lock|Cargo.toml|rust-toolchain*|.cargo/*|.github/workflows/ci.yml|docs/book/plugin-examples/*|docs/book/src/dev/plugins.md) wasm=true ;;
               esac
             done < "$1"
           }
@@ -494,6 +499,16 @@ jobs:
         run: python3 -I scripts/ci/test_affected.py
       - name: Merge-of-main detection self-test
         run: python3 -I scripts/ci/test_main_merge.py
+      # Static acceptance recipes are checked on every non-draft CI run; tests/fixtures
+      # are introduced by separate Drawing PRs, so run each validator when present.
+      - name: Drawing acceptance fixture contracts
+        run: |
+          if test -f tests/fixtures/w23a-drawing-updates/validate.py; then
+            python3 -I tests/fixtures/w23a-drawing-updates/validate.py
+          fi
+          if test -f tests/fixtures/w23-assembly-sheet/validate.py; then
+            python3 -I tests/fixtures/w23-assembly-sheet/validate.py
+          fi
       - name: Claim, triage and PR-check bot tests
         run: node --test scripts/claim/*.test.js scripts/triage/*.test.js scripts/pr-checks/*.test.js
 
@@ -1123,6 +1138,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Backend order and probing on Windows
         run: cargo test -p solidcraft --profile ci --locked -- startup::tests native_crash::tests native_frame::tests
+      # On Windows a reset loses the reply sent before it, so only here does this test see one (#10967).
+      - name: Control channel refusals on Windows
+        run: cargo test -p solidcraft-control --profile ci --locked -- server::tests::a_connection_past_the_limit_reads_why
       - name: Build the app
         run: cargo build -p solidcraft --profile ci --locked
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1153,12 +1171,29 @@ jobs:
         run: tools/windows-resize-smoke.ps1 -Exe target/ci/solidcraft.exe
 
   # Preserve the existing check name for branch protection, including docs-only PRs.
+  # The kernel rig (kernel-rig.yml) on pull requests and merge groups, so `ci` fails when it does
+  # (#19208 merged with its rig failing while the rig was a check of its own that nothing
+  # required). Its plan picks the areas the diff reaches; a change that reaches none runs only the
+  # plan and the summary. Like the other heavy checks it waits for approved-for-ci on a pull
+  # request and is not repeated for a push that only merges main into a change that passed.
+  # Pushes to main and develop, the release gate and a run by hand run kernel-rig.yml directly.
+  kernel-rig:
+    name: Kernel rig
+    needs: changes
+    if: >-
+      ${{ !cancelled() && needs.changes.result == 'success' && (github.event_name == 'merge_group' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'approved-for-ci') &&
+      needs.changes.outputs.carried == '')) }}
+    uses: ./.github/workflows/kernel-rig.yml
+    permissions:
+      contents: read
+
   ci:
     # On a run another label starts (every other job skipped), this job reports the result of the
     # commit's real run instead: the merge queue reads `ci` from the newest run of a commit, so a
     # run without a passing `ci` would block a pull request that passed (#1850, #3182, #3252).
     name: ci
-    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-build, windows-startup, dependency-advisories, wasm, solidcore, solidcore-standalone]
+    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-build, windows-startup, dependency-advisories, wasm, solidcore, solidcore-standalone, kernel-rig]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
     permissions:
@@ -1174,13 +1209,23 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          # The other runs of ci.yml for this commit. While one is still going, wait for it (at
-          # most 90 minutes); then pass only when the newest one that ran its checks passed.
+          # The other runs of ci.yml for this commit. While one that runs checks is still going,
+          # wait for it (at most 90 minutes); then pass only when the newest one that ran its
+          # checks passed. A run another label started is not waited for: its only job is ci,
+          # which waits as this one does, so two labels added close together had their runs wait
+          # for each other until the deadline. Such a run has every job but ci skipped; a run
+          # whose jobs are not listed yet, or cannot be read, is waited for.
           deadline=$((SECONDS + 5400))
           while :; do
             runs=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=pull_request&per_page=100" \
               --jq "[.workflow_runs[] | select(.id != $RUN_ID)]")
-            pending=$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")
+            pending=0
+            for id in $(jq -r '.[] | select(.status != "completed") | .id' <<<"$runs"); do
+              checks=$(gh api "repos/$REPO/actions/runs/$id/jobs?filter=latest&per_page=100" \
+                --jq 'if (.jobs | length) == 0 then 1
+                      else [.jobs[] | select(.name != "ci" and .conclusion != "skipped")] | length end') || checks=1
+              if [ "${checks:-1}" -gt 0 ]; then pending=$((pending + 1)); fi
+            done
             if [ "$pending" -eq 0 ] || [ "$SECONDS" -ge "$deadline" ]; then break; fi
             echo "Waiting for $pending run(s) of this commit to finish."
             sleep 30
@@ -1234,6 +1279,12 @@ jobs:
           SOLIDCORE_RUN: ${{ needs.changes.outputs.solidcore }}
           SOLIDCORE: ${{ needs.solidcore.result }}
           SOLIDCORE_STANDALONE: ${{ needs.solidcore-standalone.result }}
+          # The same condition as the kernel-rig job's `if` (after Select checks passed, which is
+          # tested first).
+          RIG_RUN: >-
+            ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' &&
+            contains(github.event.pull_request.labels.*.name, 'approved-for-ci') && needs.changes.outputs.carried == '') }}
+          RIG: ${{ needs.kernel-rig.result }}
         run: |
           test "$CHANGES" = success
           test "$CHECKS" = success
@@ -1277,6 +1328,10 @@ jobs:
             test "$SOLIDCORE" = success
             test "$SOLIDCORE_STANDALONE" = success
           fi
+          # The kernel rig: its own summary passes when the plan selected no area.
+          if [ "$RIG_RUN" = true ]; then
+            test "$RIG" = success
+          fi
       - name: Note a carried result
         if: needs.changes.outputs.carried != ''
         env:
@@ -1285,7 +1340,8 @@ jobs:
           echo "This push only merges main into a change that already passed; the heavy checks were not repeated. Passing run: $CARRIED" >> "$GITHUB_STEP_SUMMARY"
 
   # Every crate below the apps and the web app must build for the browser (`cargo xtask wasm`, a
-  # cargo check, no tests). In the merge queue for a group that reaches the wasm build (Select
+  # cargo check, no tests), and the plugin guide's example plugins must match the guide and build
+  # (`cargo xtask plugin-examples`). In the merge queue for a group that reaches the wasm build (Select
   # checks' `wasm`), where `ci` requires it; by hand with cross_compile.
   wasm:
     name: Compile WebAssembly
@@ -1303,6 +1359,7 @@ jobs:
           key: wasm
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - run: cargo xtask wasm
+      - run: cargo xtask plugin-examples
 
   # SolidCore's own checks (its required fmt, clippy, test, kernel-rig, goldens and wasm, and its
   # deny and publish-dry-run, in solidcore/.github/workflows/ci.yml, which GitHub does not run from

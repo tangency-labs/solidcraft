@@ -14,7 +14,7 @@ use solidcraft_kernel::Body;
 
 use super::CommandSpec;
 use super::joints::{cannot_move, effective_values, joint_id, occurrence_id, place_holding, value};
-use crate::params::{bad, bool_, str_, vec3};
+use crate::params::{bad, bool_, str_, unique_reference, vec3};
 use crate::schema::motion::{
     ContactCheck, ContactCollision, ContactCreateParams, ContactEditParams, ContactEnableParams, ContactNoParams, ContactSetChange,
     ContactSetCreated, ContactSetEdited, ContactSetInfo, ContactSets, ContactSwitch, ExplodeCreateParams, ExplodeCreated, ExplodeDeleteParams,
@@ -647,7 +647,7 @@ fn closest(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 /// longer close: the values are moved from where they are toward `want` as far as they go. The
 /// `given` values (joint, index) are driven; in a closed loop the others follow. Returns the
 /// answer and the last solve.
-pub(super) fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSet<(u64, usize)>) -> Result<(Value, joints::Solution)> {
+pub(crate) fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSet<(u64, usize)>) -> Result<(Value, joints::Solution)> {
     drive_with_contact_within(s, want, given, false)
 }
 
@@ -883,12 +883,20 @@ fn set_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
         Some(Value::String(x)) => x.clone(),
         _ => return Err(bad(cmd, "`set` must be an id or a name")),
     };
-    s.doc
-        .assembly
-        .contact_sets
-        .iter()
-        .position(|c| c.id.to_string() == key || c.name == key)
-        .ok_or_else(|| bad(cmd, format!("no contact set `{key}`")))
+    let numeric = p.get("set").is_some_and(Value::is_number);
+    unique_reference(
+        cmd,
+        "contact set",
+        &key,
+        s.doc
+            .assembly
+            .contact_sets
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.id.to_string() == key || (!numeric && c.name == key))
+            .map(|(i, c)| (c.id, i)),
+    )?
+    .ok_or_else(|| bad(cmd, format!("no contact set `{key}`")))
 }
 
 fn edit_set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -929,7 +937,8 @@ fn check(s: &mut Session, _p: &Value) -> Result<Value> {
 
 // ---- Motion studies ----
 
-fn study_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
+/// The index of the study `p`'s `study` names, by its id or name.
+pub(crate) fn study_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
     // A number is an id first, text a name first: a study may be named like another's id.
     let (key, id_first) = match p.get("study") {
         Some(Value::Number(n)) => (n.to_string(), true),
@@ -937,8 +946,12 @@ fn study_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
         _ => return Err(bad(cmd, "`study` must be an id or a name")),
     };
     let studies = &s.doc.assembly.studies;
-    let (by_id, by_name) = (studies.iter().position(|m| m.id.to_string() == key), studies.iter().position(|m| m.name == key));
-    if id_first { by_id.or(by_name) } else { by_name.or(by_id) }.ok_or_else(|| bad(cmd, format!("no motion study `{key}`")))
+    let by_id = studies.iter().position(|m| m.id.to_string() == key);
+    if id_first && let Some(i) = by_id {
+        return Ok(i);
+    }
+    let by_name = unique_reference(cmd, "motion study", &key, studies.iter().enumerate().filter(|(_, m)| m.name == key).map(|(i, m)| (m.id, i)))?;
+    by_name.or(by_id).ok_or_else(|| bad(cmd, format!("no motion study `{key}`")))
 }
 
 fn study(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1017,7 +1030,7 @@ fn study(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Joint values of a study at a step: (joint, full value vector).
-fn values_at(s: &Session, m: &MotionStudy, step: f64) -> Vec<(u64, Vec<f64>)> {
+pub(crate) fn values_at(s: &Session, m: &MotionStudy, step: f64) -> Vec<(u64, Vec<f64>)> {
     let mut out: Vec<(u64, Vec<f64>)> = Vec::new();
     for k in &m.keys {
         let Some(v) = k.value_at(step) else { continue };
@@ -1042,7 +1055,7 @@ fn values_at(s: &Session, m: &MotionStudy, step: f64) -> Vec<(u64, Vec<f64>)> {
 }
 
 /// The values a study keys: (joint, index).
-fn keyed(m: &MotionStudy) -> BTreeSet<(u64, usize)> {
+pub(crate) fn keyed(m: &MotionStudy) -> BTreeSet<(u64, usize)> {
     m.keys.iter().map(|k| (k.joint, k.index)).collect()
 }
 
@@ -1415,7 +1428,14 @@ fn view_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
         Some(Value::String(x)) => x.clone(),
         _ => return Err(bad(cmd, "`view` must be an id or a name")),
     };
-    s.doc.assembly.exploded.iter().position(|e| e.id.to_string() == key || e.name == key).ok_or_else(|| bad(cmd, format!("no exploded view `{key}`")))
+    let numeric = p.get("view").is_some_and(Value::is_number);
+    unique_reference(
+        cmd,
+        "exploded view",
+        &key,
+        s.doc.assembly.exploded.iter().enumerate().filter(|(_, e)| e.id.to_string() == key || (!numeric && e.name == key)).map(|(i, e)| (e.id, i)),
+    )?
+    .ok_or_else(|| bad(cmd, format!("no exploded view `{key}`")))
 }
 
 /// World centre of each top-level occurrence's bodies.
@@ -1517,7 +1537,7 @@ pub(crate) fn shows_exploded_view(s: &Session) -> bool {
 /// component moves the way the view gives, not along the component's axes (#13939). A component
 /// placed more than once shares its parts' placements, so there a part moves the way given in
 /// the component's first placement ([`solidcraft_doc::joints::occurrence_world`]).
-fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec3)> {
+pub(crate) fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec3)> {
     let placed: std::collections::BTreeMap<u64, (Mat, u64)> = s.doc.occurrences.iter().map(|o| (o.id, (o.transform, o.parent))).collect();
     v.moves
         .iter()
@@ -1534,7 +1554,7 @@ fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec3)> {
 }
 
 /// The pending moves that show `moves` `amount` of the way out: 0 assembled, 1 exploded.
-fn exploded_at(moves: &[(u64, Mat, Vec3)], amount: f64) -> std::collections::BTreeMap<u64, Mat> {
+pub(crate) fn exploded_at(moves: &[(u64, Mat, Vec3)], amount: f64) -> std::collections::BTreeMap<u64, Mat> {
     let mut out = std::collections::BTreeMap::new();
     for (o, m, t) in moves {
         let mut m = *m;

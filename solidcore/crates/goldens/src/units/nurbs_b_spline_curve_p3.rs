@@ -426,6 +426,9 @@ fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -1097,6 +1100,37 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::contact_certificate::{certify_gap_move, gap_intersection};
+
+    /// The contacts `(t0, t1)` (each point and both ends of each range) of the
+    /// intersection `trim_gap` runs in the `gap` cases whose answer moved when WR-455's
+    /// contacts at curve ends became the default, as they were before.
+    const OLD_GAP_CONTACTS: [(&str, &[[f64; 2]]); 1] =
+        [("gen0952", &[[6.145018443004455, -0.9998192898087154]])];
+
+    /// WR-455: every moved `gap` row comes from `trim_gap`'s intersection naming a
+    /// contact at a curve's end, certified ([`certify_gap_move`]: each solution now is a
+    /// contact, each one before is joined to one now within the tolerance; no sampling).
+    #[test]
+    fn gap_contacts_at_curve_ends_are_certified() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let k = Kernel::default();
+        for (name, old) in OLD_GAP_CONTACTS {
+            let case = cases.iter().find(|c| c.name == name).unwrap();
+            let i: Inputs = case.parse().unwrap();
+            let OpIn::Gap { other, dmin, .. } = &i.op else {
+                panic!("{name}: a gap case");
+            };
+            let this = build_this(&i.this).unwrap();
+            let other = build_this(other).unwrap();
+            let g = gap_intersection(&k, &this, &other, *dmin).expect("an intersection");
+            assert!(certify_gap_move(&k, name, &g, old), "{name}: moved");
+        }
+    }
 
     /// WR-668 (tangency-labs/smlib#76 6ca3405) takes a zero-speed end only at a vertex
     /// of the curve's edge, so the free curves of `zero_speed_end.json` report as

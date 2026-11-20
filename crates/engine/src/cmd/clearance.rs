@@ -34,7 +34,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.clearance", "C
     "bodies?: [names] (default: every solid body, in world placement, but those in `against`; mesh bodies are not measured); against?: [names] (only pairs with one body in `bodies` and the other here); \
      min_volume?: mm³ (default 0.01: smaller overlaps count as contact); clearance?: mm (default 0: report pairs closer than this); \
      nearest?: n (each body of `bodies` gets its n nearest others); skip_within?: \"occurrence\" (pairs of bodies of one occurrence) | \
-     \"component\" (pairs of bodies inside one placed component, its subcomponents included) | null; tolerance?: mm (default 1e-6: a gap \
+     \"component\" (pairs of bodies inside one placed component, its subcomponents included) | null; envelopes?: bool (default false: component envelopes, solid.bounding_solid with `component`, are left out unless named; true: each is checked instead of the bodies inside it, and a body named inside one means it; an envelope is never paired with a body inside it); tolerance?: mm (default 1e-6: a gap \
      below it is contact, 0) → overlaps: [{a, b, volume_mm3, area_mm2, bbox, center}]; near: [{a, b, distance_mm, from, to, overlap_mm3?: \
      a contact's shared volume below min_volume, exact?: false when measured on the meshes}], nearest by body (the same for pairs that overlap: 0); \
      nearest: {body: [{body, distance_mm}]}; unchecked: [{a, b, reason}] (pairs whose overlap could not be worked out; each mesh body, STL/3MF/OBJ import, is not measured and is listed as {a: name, b: null, reason: \"mesh body: not checked\"}, also when named in `bodies` or `against`; the result's `bodies` counts the solid bodies only); pairs_checked; \
@@ -96,16 +96,20 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
         },
     };
 
+    let use_envelopes = super::envelopes::use_envelopes(p, cmd)?;
     let st = s.world_state()?;
+    let envelopes = super::envelopes::Envelopes::of(s, &st);
     let (mesh_bodies, solid): (Vec<&solidcraft_doc::ModelBody>, Vec<&solidcraft_doc::ModelBody>) = st.bodies.iter().partition(|b| b.body.is_mesh());
     // Mesh bodies are not measured. A mesh body named in `bodies` or `against` is left out of the
-    // pairs and listed as unchecked, rather than refused as "no solid body".
+    // pairs and listed as unchecked, rather than refused as "no solid body". With `envelopes`, a
+    // body inside a component envelope is checked as that envelope.
     let named = |key: &str| -> Result<Vec<usize>> {
         let names = string_list(cmd, p, key)?;
         let mut out = Vec::new();
         for n in &names {
-            let Some(i) = solid.iter().position(|b| &b.name == n) else {
-                if mesh_bodies.iter().any(|b| &b.name == n) {
+            let n = if use_envelopes { envelopes.standing_in(n) } else { n.as_str() };
+            let Some(i) = solid.iter().position(|b| b.name == n) else {
+                if mesh_bodies.iter().any(|b| b.name == n) {
                     continue;
                 }
                 return Err(bad(cmd, format!("no solid body `{n}`")));
@@ -117,9 +121,13 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(out)
     };
     let against = if p.get("against").is_none_or(Value::is_null) { None } else { Some(named("against")?) };
-    // Without `bodies`: every body (every body not in `against`, when it is given).
+    // Without `bodies`: every body (every body not in `against`, when it is given), the
+    // envelopes left out, or with `envelopes` standing in for the bodies inside them.
     let subjects = if p.get("bodies").is_none_or(Value::is_null) {
-        (0..solid.len()).filter(|i| against.as_ref().is_none_or(|a| !a.contains(i))).collect()
+        (0..solid.len())
+            .filter(|i| against.as_ref().is_none_or(|a| !a.contains(i)))
+            .filter(|&i| solid.get(i).is_some_and(|b| envelopes.by_default(&b.name, use_envelopes)))
+            .collect()
     } else {
         named("bodies")?
     };
@@ -155,6 +163,12 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
             Some(_) => (flag(&in_subjects, i) && flag(&in_against, j)) || (flag(&in_subjects, j) && flag(&in_against, i)),
         };
         if !paired {
+            return false;
+        }
+        // An envelope around the other body is no finding.
+        if let (Some(x), Some(y)) = (solid.get(i), solid.get(j))
+            && envelopes.encloses(&x.name, &y.name)
+        {
             return false;
         }
         let (a, b) = (path_of(i), path_of(j));

@@ -98,6 +98,8 @@ pub(crate) struct Frame {
     /// them: the timeline sets `hover_feature` earlier in the frame.
     last_feature: Option<u64>,
     last_joint: Option<u64>,
+    /// The Origin item a row named last frame (#15658), cleared as `last_joint` is.
+    last_origin: Option<String>,
     plane_underlay: Option<String>,
     finalized: bool,
 }
@@ -110,6 +112,11 @@ impl Frame {
     pub(crate) fn current_mut(&mut self) -> &mut OwnerState {
         let owner = self.active.map_or(ContentOwner::BROWSER, |(owner, _)| owner);
         self.owners.entry(owner).or_default()
+    }
+
+    /// Whether the Browser panel holds the keyboard: its last click was on one of its rows (#17931).
+    pub(crate) fn browser_focused(&self) -> bool {
+        self.owners.get(&ContentOwner::BROWSER).is_some_and(|owner| owner.browser.focused())
     }
 
     /// The presentation being drawn (the Browser outside any).
@@ -266,6 +273,11 @@ fn expire_hover(app: &mut SolveApp) -> (Vec<String>, Option<String>) {
         && app.viewport.hover_joint == Some(joint)
     {
         app.viewport.hover_joint = None;
+    }
+    if let Some(origin) = app.tree.content.last_origin.take()
+        && app.viewport.hover_origin.as_ref() == Some(&origin)
+    {
+        app.viewport.hover_origin = None;
     }
     (old_bodies, old_plane)
 }
@@ -442,7 +454,7 @@ pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // Keep the previous contribution until finalization: floating viewports paint before
     // their overlaid panels. Expire only our contribution, leaving other producers intact.
-    let lit_before = (app.viewport.hover_feature, app.viewport.hover_joint);
+    let lit_before = (app.viewport.hover_feature, app.viewport.hover_joint, app.viewport.hover_origin.clone());
     let (old_bodies, old_plane) = expire_hover(app);
     // Egui's response hit testing supplies pointer ownership, including occlusion and capture.
     // Stable owner iteration only breaks ties; submission order never decides the winner.
@@ -451,7 +463,7 @@ pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
         (state.presented
             && actions.session == Some(app.session.uid)
             && capture.is_none_or(|capture| capture.owner == *owner && capture.session == app.session.uid)
-            && (state.output.pointer_owned || actions.hovered || actions.hover_plane.is_some()))
+            && (state.output.pointer_owned || actions.hovered || actions.hover_plane.is_some() || actions.hover_origin.is_some()))
         .then_some(*owner)
     });
     let mut effect = None;
@@ -485,11 +497,15 @@ pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
             app.viewport.hover_joint = Some(joint);
             app.tree.content.last_joint = Some(joint);
         }
+        if let Some(origin) = &actions.hover_origin {
+            app.viewport.hover_origin = Some(origin.clone());
+            app.tree.content.last_origin = Some(origin.clone());
+        }
         crate::browser::apply_content_actions(app, actions);
     }
     if old_bodies != app.tree.content.last_bodies
         || old_plane != app.tree.content.last_plane
-        || lit_before != (app.viewport.hover_feature, app.viewport.hover_joint)
+        || lit_before != (app.viewport.hover_feature, app.viewport.hover_joint, app.viewport.hover_origin.clone())
     {
         ctx.request_repaint();
     }

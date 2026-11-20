@@ -34,6 +34,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_smooth")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::curvature)
         .contract(&CURVATURE_CONTRACT)
         .output(output_schema_for::<ConstraintAdded>)
         .params("a, b: two curves sharing an end point (curvature continuous, G2)"),
@@ -41,6 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_polygon")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::polygon)
         .contract(&POLYGON_CONTRACT)
         .output(output_schema_for::<PolygonResult>)
         .params("lines: [line ids] of a closed chain: equal sides with every corner on one circle (a regular polygon)"),
@@ -444,6 +446,9 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.toggle_driven";
     let cid = str_(p, "constraint").ok_or_else(|| bad(cmd, "`constraint` must be a dimension id"))?.to_string();
     let want = crate::params::bool_(p, "driven");
+    if let Some(reply) = super::sketch_3d::toggle_driven_3d(s, p, cmd, &cid, want)? {
+        return Ok(reply);
+    }
     let mut before = None;
     let (driven, info) = edit(s, p, cmd, true, |sk, doc| {
         let c = sk.constraints.iter().find(|c| c.id == cid).cloned().ok_or_else(|| bad(cmd, format!("no constraint `{cid}`")))?;
@@ -610,8 +615,9 @@ fn glyphs(s: &mut Session, p: &Value) -> Result<Value> {
     let result = GlyphsResult {
         sketch: id,
         glyphs,
-        dof: ss.report.dof,
-        fully_constrained: ss.report.fully_constrained(),
+        dof: ss.report.shown_dof(),
+        planar_dof: ss.report.dof,
+        fully_constrained: ss.report.shown_dof() == 0,
         conflicts: failing.clone(),
         param_warnings: Vec::new(),
     };

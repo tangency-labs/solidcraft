@@ -11,7 +11,8 @@
 //! the features it evaluated ([`solidcraft_engine::Session::prime`]) rather than computing them
 //! again. Commands asked for meanwhile wait their turn; a marker moved again
 //! replaces the move still waiting, so a drag computes where it ends rather than every slot it
-//! crossed.
+//! crossed. A parameter changed in the Parameters dialog and a configuration activated in the
+//! configurations table compute the same way (#6777).
 //!
 //! A delete first checks what it takes with it and what it would make fail (#2678): the
 //! timeline's Delete asks `timeline.dependents`, Delete on the selection runs `selection.delete`

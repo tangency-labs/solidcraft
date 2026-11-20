@@ -98,6 +98,7 @@ use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::topology::brep::p1 as bp1;
+use crate::topology::brep::p6::InfiniteHalf;
 use crate::topology::brep_cache::{arena_identity, CacheObject};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{self as eu3, BinormalOptions};
@@ -397,8 +398,6 @@ pub fn select_topology_to_keep<C: StitchCallback + ?Sized>(
         if dist_between > (edge::tolerance(b, edge1)? + edge::tolerance(b, edge2)?) / 3.0 {
             let mut e1_to_e2_faces = 0.0;
             let mut e2_to_e1_faces = 0.0;
-            // upstream's `dMaxDistToSurface`, one local for both loops (None: not set yet)
-            let mut max_to_surface: Option<f64> = None;
 
             // Find the distance from pEdge1->Curve to each face in sEFaces2.
             for &face2 in &faces2 {
@@ -409,22 +408,18 @@ pub fn select_topology_to_keep<C: StitchCallback + ?Sized>(
                 };
                 let surface2 =
                     fp2::surface(b, face2)?.ok_or_else(|| deref("face without surface"))?;
-                // 0 samples: do a precise measurement; no max distance (status ignored)
-                if let Some(g) = ignored(crate::error::passed_on(
-                    curve1.surface_max_distance_between(
+                // 0 samples: do a precise measurement; no max distance (status ignored
+                // upstream, which keeps the previous distance; fork e7ebc8d passes it on)
+                let d = curve1
+                    .surface_max_distance_between(
                         k,
                         &edge::interval(b, edge1)?,
                         surface2,
                         &fp2::uv_domain(b, face2)?,
                         0,
                         None,
-                    ),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)? {
-                    max_to_surface = Some(g.max_distance);
-                }
-                let d =
-                    max_to_surface.ok_or_else(|| stitch_failed("no distance to the surface"))?;
+                    )?
+                    .max_distance;
 
                 // remember the largest edge->Curve otherEdge->Face->Surface drop distance
                 if d > e1_to_e2_faces {
@@ -441,21 +436,16 @@ pub fn select_topology_to_keep<C: StitchCallback + ?Sized>(
                 };
                 let surface1 =
                     fp2::surface(b, face1)?.ok_or_else(|| deref("face without surface"))?;
-                if let Some(g) = ignored(crate::error::passed_on(
-                    curve2.surface_max_distance_between(
+                let d = curve2
+                    .surface_max_distance_between(
                         k,
                         &edge::interval(b, edge2)?,
                         surface1,
                         &fp2::uv_domain(b, face1)?,
                         0,
                         Some(e1_to_e2_faces),
-                    ),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)? {
-                    max_to_surface = Some(g.max_distance);
-                }
-                let d =
-                    max_to_surface.ok_or_else(|| stitch_failed("no distance to the surface"))?;
+                    )?
+                    .max_distance;
 
                 // remember the largest edge->Curve otherEdge->Face->Surface drop distance
                 if d > e2_to_e1_faces {
@@ -488,17 +478,10 @@ pub fn select_topology_to_keep<C: StitchCallback + ?Sized>(
             return Ok(out);
         }
 
-        // knot counts (statuses ignored: a failing call leaves its list empty)
-        let knots1 = ignored(crate::error::passed_on(
-            curve_of(b, edge1)?.knots(k, None),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .map_or(0, |(k1, _)| k1.len());
-        let knots2 = ignored(crate::error::passed_on(
-            curve_of(b, edge2)?.knots(k, None),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .map_or(0, |(k2, _)| k2.len());
+        // knot counts (statuses ignored upstream, where a failing call leaves its list
+        // empty; passed on here, WR-658)
+        let knots1 = curve_of(b, edge1)?.knots(k, None)?.0.len();
+        let knots2 = curve_of(b, edge2)?.knots(k, None)?.0.len();
 
         // when knot counts vary - keep the smallest count
         if knots2 != knots1 {
@@ -654,12 +637,9 @@ fn test_and_split_edge_with(
         return Ok(out);
     }
 
-    // Check on the interior (status ignored: a failure reports not interior).
-    let interior = ignored(crate::error::passed_on(
-        check_interior_edge(k, b, e, dropped.parameter, this_tol),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?
-    .unwrap_or(false);
+    // Check on the interior (status ignored upstream, where a failure reports not
+    // interior; passed on here, WR-658).
+    let interior = check_interior_edge(k, b, e, dropped.parameter, this_tol)?;
     if !interior {
         out.reason = SplitReason::CloseToBoundary;
         return Ok(out);
@@ -921,6 +901,12 @@ pub struct Stitch<'c> {
     tol_3d: f64,
     /// Find and set the infinite region after gluing (`m_bDoRegionNesting`).
     pub do_region_nesting: bool,
+    /// A face use the caller knows to lie outside the one solid whose faces are stitched,
+    /// which are alone in the B-rep. The glue that closes the solid's shell splits the
+    /// infinite region and makes the half this face use is in the infinite one, with no
+    /// ray fired ([`InfiniteHalf::Of`]); the stitch's end searches as ever
+    /// (`do_region_nesting`). Not upstream, whose closing glue searches for the half.
+    pub(crate) outside: Option<FaceuseId>,
     /// Validate pointers after stitching in validating builds (`m_bValidateResult`).
     pub validate_result: bool,
     /// Don't signal an error and quit when two edges fail to glue
@@ -989,6 +975,7 @@ impl core::fmt::Debug for Stitch<'_> {
         f.debug_struct("Stitch")
             .field("stitch_tol_3d", &self.tol_3d)
             .field("do_region_nesting", &self.do_region_nesting)
+            .field("outside", &self.outside)
             .field("validate_result", &self.validate_result)
             .field("ignore_problems", &self.ignore_problems)
             .field("fast_edge_compare", &self.fast_edge_compare)
@@ -1089,13 +1076,15 @@ impl<'c> Stitch<'c> {
         orientation: OrientType,
         dist: f64,
         nest: bool,
+        half: InfiniteHalf,
         delete: EdgeId,
         inside: Option<&[FaceuseId]>,
     ) -> Result<()> {
+        // (an edit context's glue searches at each closed shell, as upstream)
         if let Some(edits) = self.edits.as_deref_mut() {
             edits.glue_edges(k, b, keep, orientation, dist, nest, delete, inside)
         } else {
-            glue_edges_general(k, b, keep, orientation, dist, nest, delete, inside)
+            glue_edges_searching(k, b, keep, orientation, dist, nest, half, delete, inside)
         }
     }
     #[allow(clippy::too_many_arguments)]
@@ -1194,6 +1183,7 @@ impl<'c> Stitch<'c> {
             edits: None,
             tol_3d: stitch_tol_3d,
             do_region_nesting,
+            outside: None,
             validate_result,
             ignore_problems: false,
             fast_edge_compare: false,
@@ -1435,11 +1425,9 @@ impl<'c> Stitch<'c> {
         }
 
         // the vertex and edge pairs have been found and they are in tolerance so delete
-        // FacesToDelete (increments unlocked mark value; status ignored)
-        ignore_status(crate::error::passed_on(
-            self.edit_remove_faces(k, b, faces_to_delete),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        // FacesToDelete (increments unlocked mark value; status ignored upstream, passed
+        // on here, WR-658)
+        self.edit_remove_faces(k, b, faces_to_delete)?;
 
         // now follow the procedure that is used in DoStitching for stitching vertex
         // and edge pairs
@@ -1621,6 +1609,7 @@ impl<'c> Stitch<'c> {
                         orientation,
                         dist_to_curve,
                         do_region_nesting,
+                        InfiniteHalf::Searched,
                         other,
                         None,
                     )?;
@@ -1661,12 +1650,10 @@ impl<'c> Stitch<'c> {
             let mut marks = Marks::default();
 
             // CalculateBoundingBox(sBrepBBox) with the header defaults; status ignored
-            // upstream (a failure leaves the default-initialised box)
-            let brep_bbox = ignored(crate::error::passed_on(
-                qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default()),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?
-            .unwrap_or_default();
+            // upstream (a failure leaves the default-initialised box), passed on here
+            // (WR-658)
+            let brep_bbox =
+                qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
 
             let edges = bp1::edges(b, None)?;
             // lNumPerNode = max(500, edges/10) only sizes the memory blocks
@@ -1721,15 +1708,10 @@ impl<'c> Stitch<'c> {
                         let orig_ivl = edge::interval(b, eu_edge)?;
                         // NormalizedEvaluate(dParam, FALSE, sPnt, &sDir): 3d, with the
                         // first derivative, default bOKToMakeUVTrimCurve. The status is
-                        // ignored upstream; a failure leaves sPnt / sDir at SmVector3d's
-                        // default SM_UNDEF_DOUBLE, here UNDEF.
-                        let (pnt, dir) = ignored(crate::error::passed_on(
-                            normalized_evaluate(k, b, eu, param, false, true, true),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?
-                        .map_or((Point3::UNDEF, Vec3::UNDEF), |(p, d)| {
-                            (p, d.unwrap_or(Vec3::UNDEF))
-                        });
+                        // ignored upstream (a failure leaves sPnt / sDir at SmVector3d's
+                        // default SM_UNDEF_DOUBLE); fork e7ebc8d passes it on.
+                        let (pnt, dir) = normalized_evaluate(k, b, eu, param, false, true, true)?;
+                        let dir = dir.unwrap_or(Vec3::UNDEF);
                         let mut vbox = Extent3d::from_point(pnt);
                         vbox.expand_absolute(stitch_tol_3d);
                         let objects = edge_tree.objects_in_box(&vbox)?;
@@ -1759,17 +1741,14 @@ impl<'c> Stitch<'c> {
                             if !dropped.success {
                                 continue;
                             }
-                            let norm_param = match ivl.inversion(dropped.parameter).parameter {
-                                Some(t) => t,
-                                // (fork e7ebc8d passes the failed inversion on: `SER`)
-                                None if k.fixes.brep_edit_statuses_pass_on => {
-                                    return Err(SolidError::heal_failed(
+                            // (fork e7ebc8d passes the failed inversion on: `SER`)
+                            let norm_param =
+                                ivl.inversion(dropped.parameter).parameter.ok_or_else(|| {
+                                    SolidError::heal_failed(
                                         OP,
                                         "the dropped point's parameter could not be inverted",
-                                    ));
-                                }
-                                None => UNDEF_PARAM,
-                            };
+                                    )
+                                })?;
                             if norm_param < 0.02 || norm_param > 0.98 {
                                 continue;
                             }
@@ -1780,12 +1759,8 @@ impl<'c> Stitch<'c> {
                                 true,
                                 true,
                             )?;
-                            // status ignored: a failure leaves the angle 0
-                            let angle_rad = ignored(crate::error::passed_on(
-                                tangent(&pv)?.angle_between(dir),
-                                k.fixes.brep_edit_statuses_pass_on,
-                            )?)?
-                            .unwrap_or(0.0);
+                            // status ignored upstream (a failure leaves the angle 0); passed on
+                            let angle_rad = tangent(&pv)?.angle_between(dir)?;
                             let angle_deg = angle_rad * 180.0 / PI;
                             // Make sure we are going in either same or opposite direction
                             if angle_deg > 5.0 && angle_deg < 175.0 {
@@ -2129,18 +2104,8 @@ impl<'c> Stitch<'c> {
                 }
             }
 
-            // status ignored
-            ignore_status(crate::error::passed_on(
-                update_object_tolerance(
-                    k,
-                    b,
-                    EntityRef::Vertex(vtx1),
-                    min_dist,
-                    old_tol,
-                    check_gaps,
-                ),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            // status ignored upstream; passed on here (WR-658)
+            update_object_tolerance(k, b, EntityRef::Vertex(vtx1), min_dist, old_tol, check_gaps)?;
             out.max_vertex_gap = smos_max(out.max_vertex_gap, min_dist);
 
             // Remove from our vertex list, and add to Processed list.
@@ -2341,23 +2306,21 @@ impl<'c> Stitch<'c> {
                         orientation,
                         dist_to_curve,
                         self.do_region_nesting,
+                        InfiniteHalf::Searched,
                         test_e,
                         None,
                     ) {
                         Ok(()) => {
                             out.glued.push(e);
                             out.deleted.push(test_e);
-                            ignore_status(crate::error::passed_on(
-                                update_object_tolerance(
-                                    k,
-                                    b,
-                                    EntityRef::Edge(e),
-                                    dist_to_curve,
-                                    old_tol,
-                                    false,
-                                ),
-                                k.fixes.brep_edit_statuses_pass_on,
-                            )?)?;
+                            update_object_tolerance(
+                                k,
+                                b,
+                                EntityRef::Edge(e),
+                                dist_to_curve,
+                                old_tol,
+                                false,
+                            )?;
                             set_none(&mut v_edges, kk)?; // per notes above
                             if !self.making_manifold_solid {
                                 // spine edges are allowed: just go on to the next [kk]
@@ -2381,9 +2344,6 @@ impl<'c> Stitch<'c> {
         Ok(out)
     }
 }
-
-/// `SmExtent1d::Inversion`'s `SM_UNDEF_DOUBLE` for a degenerate interval.
-const UNDEF_PARAM: f64 = crate::math::UNDEF_DOUBLE;
 
 /// The tangent of an `Evaluate(t, 1, ..)` result.
 fn tangent(pv: &[Vec3]) -> Result<Vec3> {
@@ -2541,6 +2501,7 @@ fn stitch_and_orient(
 /// ([`brep_p2::ArenaNotifyState`](crate::topology::brep::p2::ArenaNotifyState), so
 /// that `SmTopology::Notify`'s propagation finds both edges) and on the kernel's
 /// notification context, so its installed callbacks see the events.
+#[cfg(test)]
 pub(crate) fn glue_edges_general(
     k: &mut Kernel,
     b: &mut Brep,
@@ -2548,6 +2509,34 @@ pub(crate) fn glue_edges_general(
     orientation: OrientType,
     dist: f64,
     do_region_nesting: bool,
+    delete: EdgeId,
+    inside_faceuses: Option<&[FaceuseId]>,
+) -> Result<()> {
+    glue_edges_searching(
+        k,
+        b,
+        keep,
+        orientation,
+        dist,
+        do_region_nesting,
+        InfiniteHalf::Searched,
+        delete,
+        inside_faceuses,
+    )
+}
+
+/// [`glue_edges_general`] with the caller's word on how a split of the infinite region
+/// tells its infinite half
+/// ([`crate::topology::brep::p7::glue_edges_general_searching`]).
+#[allow(clippy::too_many_arguments)] // upstream's argument list and the half
+pub(crate) fn glue_edges_searching(
+    k: &mut Kernel,
+    b: &mut Brep,
+    keep: EdgeId,
+    orientation: OrientType,
+    dist: f64,
+    do_region_nesting: bool,
+    half: InfiniteHalf,
     delete: EdgeId,
     inside_faceuses: Option<&[FaceuseId]>,
 ) -> Result<()> {
@@ -2559,13 +2548,14 @@ pub(crate) fn glue_edges_general(
         crate::topology::brep::p2::ArenaNotifyState::with_attributes_of_reusing(records, b, serial);
     let r = Context::with_notification_context(k, |k, context| {
         let mut env = state.env(Some(context));
-        crate::topology::brep::p7::glue_edges_general(
+        crate::topology::brep::p7::glue_edges_general_searching(
             k,
             b,
             Some(keep),
             orientation,
             dist,
             do_region_nesting,
+            half,
             Some(delete),
             inside_faceuses,
             &mut env,
@@ -2744,18 +2734,16 @@ fn evaluate_binormal(
 
 // ---- SM_API entry points ---------------------------------------------------------------
 
-/// `SmApiStitch(SmBrep*)`: `StitchAndOrient` (status ignored), then success.
+/// `SmApiStitch(SmBrep*)`: `StitchAndOrient`, then success. Upstream ignores the
+/// stitch's status; it is passed on here (WR-658).
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] for a null B-rep.
+/// [`SolidError::InvalidInput`] for a null B-rep; any error of `StitchAndOrient`.
 pub fn api_stitch(k: &mut Kernel, b: Option<&mut Brep>) -> Result<()> {
     let b = b.ok_or_else(|| SolidError::invalid_input(API_OP, "no B-rep to stitch"))?;
     // StitchAndOrient() with its header defaults
-    ignore_status(crate::error::passed_on(
-        stitch_and_orient(k, b, -0.1, false, None, None),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    stitch_and_orient(k, b, -0.1, false, None, None)?;
     // Check manifold?
     Ok(())
 }
@@ -3458,7 +3446,16 @@ mod tests {
         let shell = b.add_shell_record(Shell::default()).unwrap();
         let edges = edges_between(&mut b, EdgeuseOwner::Shell(Some(shell)), 2);
         let (e0, e1) = (edges[0], edges[1]);
-        glue_edges_general(&mut k, &mut b, e0, OrientType::Same, 0.0, false, e1, None).unwrap();
+        // The wire edge's `DeleteEdge` refuses on this B-rep, whose editing is disabled:
+        // upstream ignores that status and the fork passes it on (WR-658,
+        // tangency-labs/smlib e7ebc8d), so the refusal is returned after the PreEdit.
+        let r = glue_edges_general(&mut k, &mut b, e0, OrientType::Same, 0.0, false, e1, None);
+        assert!(
+            matches!(&r, Err(e) if e.operation() == "topology::brep::p4::delete_edge"
+                && e.sm_status() == Some(1001)
+                && e.to_string().contains("editing is not enabled")),
+            "{r:?}"
+        );
         let seen = events.lock().unwrap().len();
         assert_eq!(
             events.lock().unwrap().first(),

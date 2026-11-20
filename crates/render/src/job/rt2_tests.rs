@@ -183,10 +183,17 @@ fn emission_runtime_json_is_bounded_explicit_and_roundtrips() {
     assert!(serde_json::from_value::<RaytraceOptions>(serde_json::json!({"emissions": vec![emitter; 33]})).is_err());
     assert!(
         serde_json::from_value::<RaytraceOptions>(
-            serde_json::json!({"emissions":[{"body_index":0,"body":"x".repeat(257),"color":[1,1,1],"strength":1}]})
+            serde_json::json!({"emissions":[{"body_index":0,"body":"x".repeat(513),"color":[1,1,1],"strength":1}]})
         )
         .is_err()
     );
+    // Any body name a rename takes (128 characters, up to 512 bytes) is admitted.
+    let long: RaytraceOptions =
+        serde_json::from_value(serde_json::json!({"emissions":[{"body_index":0,"body":"中".repeat(128),"color":[1,1,1],"strength":1}]})).unwrap();
+    assert!(long.emissions.as_ref().is_some_and(|e| e.iter().all(|emitter| emitter.validate().is_ok())), "{long:?}");
+    let reflections =
+        ReflectionOptions { bodies: vec![ReflectionBody { body: "中".repeat(128), mode: ReflectionMode::Mirror }], samples: 1, max_bounces: 1 };
+    assert!(reflections.validate().is_ok());
     assert_eq!(serde_json::from_str::<RaytraceOptions>("{}").unwrap().emissions, None);
     assert_eq!(serde_json::from_str::<RaytraceOptions>("{\"emissions\":[]}").unwrap().emissions, Some(Vec::new()));
 }
