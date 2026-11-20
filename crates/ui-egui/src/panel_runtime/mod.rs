@@ -4,8 +4,6 @@ mod app;
 mod drag_paint;
 mod fixtures;
 mod host;
-mod interaction;
-mod layout;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(not(target_arch = "wasm32"))]
@@ -20,6 +18,7 @@ mod workspace;
 pub use app::*;
 pub use fixtures::*;
 pub use host::*;
+// The placement core lives in solidcraft-panel-layout; these paths keep resolving here.
 pub use interaction::*;
 pub use layout::*;
 #[cfg(not(target_arch = "wasm32"))]
@@ -31,6 +30,7 @@ pub(crate) use production::{
     report_content_extent, shared_content_composer_height, shared_content_measurement,
 };
 pub use runtime::*;
+pub use solidcraft_engine::panels::{interaction, layout};
 pub use specimen::*;
 pub use surfaces::*;
 pub use workspace::*;

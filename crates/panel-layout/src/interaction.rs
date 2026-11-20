@@ -1,10 +1,9 @@
 //! Transient pointer capture. This module prepares candidates but never dispatches
 //! or commits them: the retained runtime owns lifecycle/native side effects.
 
-use solidcraft_engine::panels::*;
+use crate::*;
 
-use super::LocalScope;
-use super::layout::{
+use crate::layout::{
     HostContentMetrics, HostLayout, HostMetrics, bottom, next_host_column_id, next_host_section_id, rect, resolve_host_prepared_with_snapshot,
     resolve_host_projected, resolve_host_projected_with_snapshot, right,
 };
@@ -31,7 +30,7 @@ pub enum HostResizeEdge {
 impl HostResizeEdge {
     /// Dock targets retain their logical identity when the workspace mirrors.
     /// Floating corners remain physical because floating rects do not mirror.
-    pub(super) fn physical(self, zone: Zone, direction: Direction) -> Self {
+    pub fn physical(self, zone: Zone, direction: Direction) -> Self {
         if zone.docked() && direction == Direction::Rtl {
             match self {
                 Self::Left => Self::Right,
@@ -326,12 +325,7 @@ impl PreparedHostLayout {
 /// Resolve the display while a dragged tab is outside every admitted target.
 /// The private topology keeps the committed layout and capture untouched. A
 /// contextual panel can be detached for display even when it cannot be closed.
-pub(super) fn detached_drag_layout(
-    service: &LayoutService,
-    scope: &LocalScope,
-    reference: &HostLayout,
-    instance: &InstanceId,
-) -> PanelResult<HostLayout> {
+pub fn detached_drag_layout(service: &LayoutService, scope: &LocalScope, reference: &HostLayout, instance: &InstanceId) -> PanelResult<HostLayout> {
     validate_context(service, scope, reference)?;
     service.availability(instance).require()?;
     let section_id = &service.layout().containing(instance)?.id;
@@ -509,8 +503,8 @@ fn near_rect(a: LogicalRect, b: LogicalRect) -> bool {
 }
 
 struct AllocatedPair<'a> {
-    first: &'a super::layout::HostSection,
-    second: &'a super::layout::HostSection,
+    first: &'a crate::layout::HostSection,
+    second: &'a crate::layout::HostSection,
     zone: Zone,
     total: f32,
     lower: f32,
@@ -881,7 +875,7 @@ struct Gesture {
     metrics: HostMetrics,
     render_domain: LogicalRect,
     chrome_obstacles: Vec<LogicalRect>,
-    policy: super::layout::HostGeometryPolicy,
+    policy: crate::layout::HostGeometryPolicy,
     reference: HostLayout,
     pressed_target: HostPointerTarget,
     start: Point,
@@ -898,14 +892,14 @@ pub struct HostInteraction {
 }
 
 impl HostInteraction {
-    pub(super) fn set_live_drag(&mut self, enabled: bool) {
+    pub fn set_live_drag(&mut self, enabled: bool) {
         if self.live_drag != enabled {
             self.cancel();
             self.live_drag = enabled;
         }
     }
 
-    pub(super) fn detached_layout(&self) -> Option<&HostLayout> {
+    pub fn detached_layout(&self) -> Option<&HostLayout> {
         match &self.capture {
             Some(Gesture { kind: GestureKind::Move { detached, .. }, dragging: true, .. }) => detached.as_deref(),
             _ => None,
@@ -922,14 +916,14 @@ impl HostInteraction {
 
     /// Identity feedback follows the held Move, independently of drop admission.
     /// A suspended drag retains its source but has no current cursor position.
-    pub(crate) fn move_source(&self) -> Option<&InstanceId> {
+    pub fn move_source(&self) -> Option<&InstanceId> {
         match &self.capture {
             Some(Gesture { kind: GestureKind::Move { instance, .. }, dragging: true, .. }) => Some(instance),
             _ => None,
         }
     }
 
-    pub(crate) fn move_position(&self) -> Option<Point> {
+    pub fn move_position(&self) -> Option<Point> {
         self.move_source().and(self.last_position)
     }
 
@@ -1281,7 +1275,7 @@ fn begin_gesture(
 
 /// Keyboard resizing uses the same pure candidate geometry as a pointer preview.
 /// It neither captures a pointer nor publishes a second allocation.
-pub(crate) fn keyboard_resize_action(
+pub fn keyboard_resize_action(
     service: &LayoutService,
     layout: &HostLayout,
     target: &HostPointerTarget,
@@ -1296,7 +1290,7 @@ pub(crate) fn keyboard_resize_action(
             _ => Err(error(Rule::Availability, "focused control has no neighbour split")),
         };
     }
-    let step = solidcraft_theme::Tokens::get().space_8.max(HOST_DRAG_THRESHOLD);
+    let step = TOKEN_SPACE_8.max(HOST_DRAG_THRESHOLD);
     let (dx, dy) = match action {
         ResizeLeft => (-step, 0.0),
         ResizeRight => (step, 0.0),

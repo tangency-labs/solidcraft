@@ -194,7 +194,7 @@ fn raw_priority_records(envelope: &LayoutEnvelope) -> PanelResult<ExtentPriority
     Ok(context)
 }
 
-pub(super) fn typed_priority(layout: &Layout, target: &ExtentPriorityTarget) -> Option<u16> {
+pub fn typed_priority(layout: &Layout, target: &ExtentPriorityTarget) -> Option<u16> {
     match target {
         ExtentPriorityTarget::Section(id) => layout.section(id).ok().map(|s| s.extent_priority),
         ExtentPriorityTarget::Memory(id) => layout.instance(id).ok().map(|p| p.memory.extent_priority),
@@ -209,7 +209,7 @@ pub(super) fn typed_priority(layout: &Layout, target: &ExtentPriorityTarget) -> 
     }
 }
 
-pub(super) fn synchronize_priority_context(layout: &mut Layout) -> PanelResult<()> {
+pub fn synchronize_priority_context(layout: &mut Layout) -> PanelResult<()> {
     layout.extent_priority_context.validate()?;
     let priorities: Vec<_> = layout.extent_priority_context.records.iter().map(|record| typed_priority(layout, &record.target)).collect();
     for (record, priority) in layout.extent_priority_context.records.iter_mut().zip(priorities) {

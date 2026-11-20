@@ -14294,3 +14294,15 @@ fn header_content_takes_the_titles_place_after_the_grip() {
         raw.host.set_header_content(id("lone"), None);
     }
 }
+
+#[test]
+fn placement_token_constants_match_the_theme() {
+    use solidcraft_engine::panels::{
+        TOKEN_CONTROL_HEIGHT, TOKEN_FORM_FOOTER_HEIGHT, TOKEN_FORM_HEADER_HEIGHT, TOKEN_SPACE_2, TOKEN_SPACE_4, TOKEN_SPACE_8, TOKEN_SPACE_10,
+    };
+    let t = solidcraft_theme::Tokens::get();
+    assert_eq!(
+        [t.space_2, t.space_4, t.space_8, t.space_10, t.control_height, t.form_header_height, t.form_footer_height],
+        [TOKEN_SPACE_2, TOKEN_SPACE_4, TOKEN_SPACE_8, TOKEN_SPACE_10, TOKEN_CONTROL_HEIGHT, TOKEN_FORM_HEADER_HEIGHT, TOKEN_FORM_FOOTER_HEIGHT]
+    );
+}

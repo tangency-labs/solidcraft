@@ -3,9 +3,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use solidcraft_engine::panels::*;
+use crate::*;
 
-use super::interaction::{HostPointerTarget, HostProposalSnapshot, HostResizeEdge};
+use crate::interaction::{HostPointerTarget, HostProposalSnapshot, HostResizeEdge};
 
 /// Compatibility constant only; the host never allocates rails.
 pub const HOST_RAIL_THICKNESS: f32 = 32.0;
@@ -260,6 +260,16 @@ impl HostUsableRegion {
     }
 }
 
+/// The SolidCraft token values the placement core lays out with. The core is toolkit-free and
+/// cannot read the theme, so it holds these; `solidcraft-ui-egui`'s tests pin each one to its token.
+pub const TOKEN_SPACE_2: f32 = 2.0;
+pub const TOKEN_SPACE_4: f32 = 4.0;
+pub const TOKEN_SPACE_8: f32 = 8.0;
+pub const TOKEN_SPACE_10: f32 = 10.0;
+pub const TOKEN_CONTROL_HEIGHT: f32 = 28.0;
+pub const TOKEN_FORM_HEADER_HEIGHT: f32 = 40.0;
+pub const TOKEN_FORM_FOOTER_HEIGHT: f32 = 48.0;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HostMetrics {
     pub header_height: f32,
@@ -279,18 +289,17 @@ pub struct HostMetrics {
 
 impl Default for HostMetrics {
     fn default() -> Self {
-        let t = solidcraft_theme::Tokens::get();
         Self {
-            header_height: t.form_header_height - t.space_8,
+            header_height: TOKEN_FORM_HEADER_HEIGHT - TOKEN_SPACE_8,
             content_header_height: 0.0,
-            footer_height: t.form_footer_height,
-            gap: t.space_4,
-            sash_width: t.space_4,
-            control_extent: t.control_height,
-            tab_min_width: t.control_height * 2.0,
-            inline_max_height: (t.control_height * 2.0 + t.space_4).min(88.0),
-            inline_title_width: (t.control_height * 4.0).min(256.0),
-            min_viewport: Size { width: t.space_2, height: t.space_2 },
+            footer_height: TOKEN_FORM_FOOTER_HEIGHT,
+            gap: TOKEN_SPACE_4,
+            sash_width: TOKEN_SPACE_4,
+            control_extent: TOKEN_CONTROL_HEIGHT,
+            tab_min_width: TOKEN_CONTROL_HEIGHT * 2.0,
+            inline_max_height: (TOKEN_CONTROL_HEIGHT * 2.0 + TOKEN_SPACE_4).min(88.0),
+            inline_title_width: (TOKEN_CONTROL_HEIGHT * 4.0).min(256.0),
+            min_viewport: Size { width: TOKEN_SPACE_2, height: TOKEN_SPACE_2 },
         }
     }
 }
@@ -360,7 +369,7 @@ impl HostIdentityReservations {
         }
         Ok(())
     }
-    pub(super) fn preparation_context(&self) -> PanelResult<LayoutPreparationContext> {
+    pub fn preparation_context(&self) -> PanelResult<LayoutPreparationContext> {
         self.validate()?;
         Ok(LayoutPreparationContext {
             sections: self.sections.clone(),
@@ -369,7 +378,7 @@ impl HostIdentityReservations {
             replacement_ownership: self.replacement_ownership.clone(),
         })
     }
-    pub(super) fn include_layout(&mut self, layout: &Layout) -> PanelResult<()> {
+    pub fn include_layout(&mut self, layout: &Layout) -> PanelResult<()> {
         if layout.sections.len() > MAX_HOST_RESERVED_IDS
             || layout.instances.len() > MAX_HOST_RESERVED_IDS
             || layout.columns.len() > MAX_HOST_RESERVED_IDS
@@ -602,12 +611,12 @@ pub struct HostGeometryPolicy {
     pub requested_opacity: Option<f32>,
     pub default_opaque: bool,
     pub effective_surfaces: BTreeMap<SectionId, PanelSurface>,
-    pub(crate) hidden_header_actions: BTreeMap<InstanceId, BTreeSet<ControlId>>,
-    pub(crate) header_title_widths: BTreeMap<InstanceId, f32>,
+    pub hidden_header_actions: BTreeMap<InstanceId, BTreeSet<ControlId>>,
+    pub header_title_widths: BTreeMap<InstanceId, f32>,
     /// Panels whose content takes the title's place in the header, with the narrowest width
     /// that content takes (`ContentSlot::Title`).
-    pub(crate) header_content: BTreeMap<InstanceId, f32>,
-    pub(crate) tab_title_widths: BTreeMap<InstanceId, f32>,
+    pub header_content: BTreeMap<InstanceId, f32>,
+    pub tab_title_widths: BTreeMap<InstanceId, f32>,
     pub content: Vec<SideContentMeasure>,
     pub content_revision: u64,
     pub scroll: Point,
@@ -1060,7 +1069,7 @@ pub fn resolve_host_layout_in_domain(
 }
 
 /// Noncommittable current-owner geometry probe over structural projection data.
-pub(super) fn resolve_host_projected(service: &LayoutService, proposed: &Layout, reference: &HostLayout) -> PanelResult<HostLayout> {
+pub fn resolve_host_projected(service: &LayoutService, proposed: &Layout, reference: &HostLayout) -> PanelResult<HostLayout> {
     resolve_layout_source(
         service,
         proposed,
@@ -1076,7 +1085,7 @@ pub(super) fn resolve_host_projected(service: &LayoutService, proposed: &Layout,
 
 /// Final proposal geometry uses proposed-owner availability and one immutable
 /// metric snapshot. The outgoing reference still anchors placement and freshness.
-pub(super) fn resolve_host_prepared_with_snapshot(
+pub fn resolve_host_prepared_with_snapshot(
     service: &LayoutService,
     prepared: &PreparedLayout,
     reference: &HostLayout,
@@ -1086,7 +1095,7 @@ pub(super) fn resolve_host_prepared_with_snapshot(
 }
 
 /// All numeric prefix probes share the final owner's immutable environment.
-pub(super) fn resolve_host_projected_with_snapshot(
+pub fn resolve_host_projected_with_snapshot(
     service: &LayoutService,
     proposed: &Layout,
     reference: &HostLayout,
@@ -1246,14 +1255,12 @@ fn header_actions_below(
         None => policy.header_title_widths.get(instance).copied(),
     };
     count > 0
-        && (section.tabs.len() > 1
-            || title.is_some_and(|title| width < title + metrics.control_extent * (primary + count) as f32 + solidcraft_theme::Tokens::get().space_2))
+        && (section.tabs.len() > 1 || title.is_some_and(|title| width < title + metrics.control_extent * (primary + count) as f32 + TOKEN_SPACE_2))
 }
 
 /// The drag grip that stands in for the title before tabs or header content.
 fn grip_width(metrics: HostMetrics) -> f32 {
-    let t = solidcraft_theme::Tokens::get();
-    metrics.control_extent.min(t.space_10 + t.space_8)
+    metrics.control_extent.min(TOKEN_SPACE_10 + TOKEN_SPACE_8)
 }
 
 /// Splits a heading into the grip at its start and the rest, mirrored in RTL.
@@ -1267,7 +1274,7 @@ fn split_grip(heading: LogicalRect, metrics: HostMetrics, direction: Direction) 
     )
 }
 
-pub(super) fn sole_side_section(layout: &Layout, section: &Section, available: &[InstanceId]) -> bool {
+pub fn sole_side_section(layout: &Layout, section: &Section, available: &[InstanceId]) -> bool {
     section.location.zone().side()
         && layout.sections.iter().filter(|member| member.column == section.column && presented_instance(member, available).is_some()).count() == 1
 }
@@ -1656,16 +1663,16 @@ fn resize_rect(outer: LogicalRect, edge: HostResizeEdge, thickness: f32) -> Logi
     }
 }
 
-pub(super) fn rect(x: f32, y: f32, width: f32, height: f32) -> LogicalRect {
+pub fn rect(x: f32, y: f32, width: f32, height: f32) -> LogicalRect {
     LogicalRect { origin: Point { x, y }, size: Size { width, height } }
 }
-pub(super) fn positive_rect(x: f32, y: f32, width: f32, height: f32) -> Option<LogicalRect> {
+pub fn positive_rect(x: f32, y: f32, width: f32, height: f32) -> Option<LogicalRect> {
     let bounds = rect(x, y, width, height);
     if bounds.validate().is_ok() { Some(bounds) } else { None }
 }
-pub(super) fn right(bounds: LogicalRect) -> f32 {
+pub fn right(bounds: LogicalRect) -> f32 {
     bounds.origin.x + bounds.size.width
 }
-pub(super) fn bottom(bounds: LogicalRect) -> f32 {
+pub fn bottom(bounds: LogicalRect) -> f32 {
     bounds.origin.y + bounds.size.height
 }
