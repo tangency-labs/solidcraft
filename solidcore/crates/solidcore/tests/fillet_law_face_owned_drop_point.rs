@@ -1,6 +1,7 @@
 //! A B-spline radius law round on a cube edge (golden `law-cube20-e0-deg2-smooth-4-2-4`,
-//! `prog_test` `smFilletTest.cpp:399`; the law is smooth, as a law with a corner inside its
-//! edge is refused on this kernel, #2727, `variable_round_law_corner_refused.rs`).
+//! `prog_test` `smFilletTest.cpp:399`; the law is smooth. A law with a corner inside its
+//! edge is built as the union of its balls, split at the corner, #2727,
+//! `wr696_default_variable_rounds.rs`).
 //!
 //! `SmFilletEdge::CalcFilletIntSideFace` and `CalcCrossSection` work on upstream's
 //! pointers to the faces' surfaces, which keep their face as owner; the port's copies
@@ -54,6 +55,7 @@ fn bspline_law_round_drops_points_on_face_owned_surfaces_without_point_test() {
             .unwrap();
         session.do_fillet(&mut k).unwrap();
     }
-    // the round adds its face
+    // the round adds its face: the law (a quadratic Bezier through 4, 2, 4) is smooth, with
+    // no corner, so the round has no C0 knot to be split at (WR-685's law corners)
     assert_eq!(p1::faces(&body, None).unwrap().len(), faces_before + 1);
 }

@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use egui::Color32;
 use serde::{Deserialize, Serialize};
 use solidcraft_theme::{
-    Custom, Environment, Fade, PublishedTab, Surfaces, TAB_NAMES, TabAccent, Tokens, is_dark, set_custom, set_published, viewport_dark, vision,
+    AccentRamp, Custom, Environment, Fade, PublishedTab, Surfaces, TabAccent, Tokens, is_dark, set_custom, set_published, viewport_dark, vision,
 };
 
 #[derive(Clone)]
@@ -110,7 +110,7 @@ impl TabThemeState {
             self.fade = None;
         }
         // Bound the cache even if an internal caller supplies an unknown tab name.
-        let tab = if TAB_NAMES.contains(&tab) { tab } else { "MODEL" };
+        let tab = if crate::workspace::TAB_ACCENTS.contains(tab) { tab } else { "MODEL" };
         // Borrow the key on resting frames; own a name only when caching a new target.
         let target = if let Some(target) = self.targets.get(tab) {
             *target
@@ -124,7 +124,7 @@ impl TabThemeState {
             } else {
                 Tokens::themed(environment.dark, environment.vision)
             };
-            let accent = TabAccent::for_tab(&window, tab);
+            let accent = crate::workspace::tab_accent(&window, tab);
             let window = if viewport_dark() == is_dark() { window } else { window.with_viewport(Tokens::themed(viewport_dark(), vision())) };
             let target = TabTarget {
                 tokens: window.with_background(environment.background),
@@ -238,12 +238,7 @@ pub fn publish_tab(tab: &str, sketch_open: bool, tool_active: bool, ctx: &egui::
     if fading {
         ctx.request_repaint();
     }
-    accent.set_current(tab, sketch_open, tool_active, ctx);
-}
-
-/// The common conversion boundary for compiled icon palette data.
-pub(crate) const fn icon_color(rgb: [u8; 3]) -> Color32 {
-    Color32::from_rgb(rgb[0], rgb[1], rgb[2])
+    accent.set_current(crate::workspace::TAB_ACCENTS.icon_accent(tab), sketch_open.then_some(AccentRamp::Sketch), tool_active, ctx);
 }
 
 /// The 3D view's colours (#4146): the theme's own, or the built-in Light or Dark theme's whatever
@@ -313,7 +308,7 @@ mod tests {
     use solidcraft_theme::{ColorVision, apply, composite, contrast_ratio, set_dark, set_viewport_background, set_viewport_dark, set_vision};
 
     fn tabs_state(base: &str, overrides: BTreeMap<String, crate::theme_files::OptionValue>) -> TabThemeState {
-        let file = crate::theme_files::tab_fixture(base);
+        let file = crate::test_support::tab_fixture(base);
         let values = crate::theme_files::effective_values(&file, &overrides).0;
         let (enabled, fade_ms) = crate::theme_options::tab_settings(&file, &values);
         let base = FilePalette {
@@ -331,6 +326,7 @@ mod tests {
 
     #[test]
     fn tabs_fade_retargets_from_displayed_surfaces_and_stops_resolving_at_rest() {
+        crate::test_support::host_data();
         for opacity in [40.0, 100.0] {
             let mut state = tabs_state("dark", BTreeMap::from([("opacity".into(), crate::theme_files::OptionValue::Num(opacity))]));
             let (model, _, repaint) = state.publish("MODEL", 0.0);
@@ -360,6 +356,7 @@ mod tests {
 
     #[test]
     fn tabs_panel_text_contrast_holds_at_five_fade_steps_with_opacity() {
+        crate::test_support::host_data();
         use crate::theme_files::OptionValue;
         for base in ["dark", "light"] {
             for percent in [40.0, 75.0, 100.0] {
@@ -391,6 +388,7 @@ mod tests {
 
     #[test]
     fn blur_intent_cache_resolves_only_when_theme_or_raw_values_change() {
+        crate::test_support::host_data();
         let ctx = egui::Context::default();
         let source: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/theme-blur.json")).unwrap();
         let mut file = crate::theme_files::from_value(&source).unwrap();
@@ -436,8 +434,9 @@ mod tests {
 
     #[test]
     fn tabs_cache_invalidates_for_theme_values_vision_and_viewport_overrides() {
+        crate::test_support::host_data();
         let ctx = egui::Context::default();
-        let mut file = crate::theme_files::tab_fixture("dark");
+        let mut file = crate::test_support::tab_fixture("dark");
         let normalizations = Cell::new(0);
         let prepare = |file: &crate::theme_files::ThemeFile, raw: Option<&BTreeMap<String, serde_json::Value>>| {
             let custom = prepare_tabs(&ctx, Some(file), raw, || {
@@ -523,12 +522,13 @@ mod tests {
 
     #[test]
     fn built_in_selected_tab_labels_hold_wcag_small_text_contrast() {
+        crate::test_support::host_data();
         let mut themes = vec![("Dark", super::Tokens::dark()), ("Light", super::Tokens::light())];
         themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.as_str(), crate::theme_files::resolve(theme))));
         let mut failures = Vec::new();
         for (name, tokens) in themes {
-            for tab in super::TAB_NAMES.iter().copied() {
-                let accent = super::TabAccent::for_tab(&tokens, tab);
+            for tab in crate::workspace::TAB_ACCENTS.names() {
+                let accent = crate::workspace::tab_accent(&tokens, tab);
                 let ratio = contrast_ratio(accent.ink, accent.soft);
                 if ratio < 4.5 {
                     failures.push(format!("{name} {tab}: {ratio:.4}:1 ({:?} on {:?})", accent.ink, accent.soft));
@@ -559,7 +559,7 @@ mod tests {
         use crate::theme_files::{OptionValue, ThemeFile};
         for base in ["dark", "light"] {
             let ctx = crate::fonts::test_context();
-            let file = crate::theme_files::tab_fixture(base);
+            let file = crate::test_support::tab_fixture(base);
             set_dark(file.base.is_dark());
             set_vision(ColorVision::Off);
             set_viewport_dark(None);

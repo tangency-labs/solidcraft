@@ -5,7 +5,7 @@
 //! face. Every face of an evaluated body is named after how it was made: a face that came from a
 //! face of the feature's input keeps that face's name; a face new to the feature is named by its
 //! role (`F<feature>:side:<sketch curve>`, `F<feature>:start`/`top`/`bottom`/`end`,
-//! `F<feature>:blend:<edge>`, `F<feature>:inner:<face>`, …). Pieces of a split face are told
+//! `F<feature>:blend(<edge>)`, `F<feature>:inner(<face>)`, …). Pieces of a split face are told
 //! apart by the faces around them (`F2:top#[F2:side:l4,F4:side:l4]`). Edges are named by the
 //! faces they separate (`<face A>|<face B>`, `~k` for several edges between the same two).
 //!
@@ -33,8 +33,6 @@ pub struct NamingOrigin {
     pub depth: usize,
     /// Instance transforms of a pattern or mirror (its copies are named after their sources).
     pub mats: Vec<crate::Mat>,
-    /// The sheet metal bodies after a sheet feature (their folds place moved faces).
-    pub sheets: Vec<crate::sheet::SheetBody>,
 }
 
 /// The lazily computed names of a body, shared by its clones.
@@ -154,7 +152,8 @@ impl Drop for NameCell {
 }
 
 pub use crate::name_lookup::{
-    EdgeHit, FaceHit, LEGACY_MARK, face_has_name, faces_with_stem, legacy_name, locate_edge, locate_face, locate_face_on_body, locate_one,
+    EdgeHit, FaceHit, LEGACY_MARK, VertexHit, face_has_name, faces_with_stem, legacy_name, locate_edge, locate_face, locate_face_on_body, locate_one,
+    locate_vertex,
 };
 pub use crate::piece_names::parent_piece;
 
@@ -163,10 +162,6 @@ const MAX_DEPTH: usize = 400;
 
 /// Up to this many sample points per face.
 const SAMPLES: usize = 9;
-
-/// Up to this many sample points per face where a sheet's panel kept in place names the face it is
-/// part of (see [`geometric_names`]).
-const PANEL_SAMPLES: usize = 256;
 
 /// Unit normals of each face's triangles.
 fn normals(m: &Mesh, nf: usize) -> Vec<Vec<Vec3>> {
@@ -291,7 +286,7 @@ pub fn face_name_exact(b: &ModelBody, index: usize) -> bool {
 }
 
 /// What a face a fillet or chamfer made (a round, a chamfer face or a corner patch: named
-/// `F<feature>:blend:<edge>`) meets across one of its seams.
+/// `F<feature>:blend(<edge>)`) meets across one of its seams.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BlendSeamKind {
     /// A face either side of an edge the blend replaced: what it was made to meet along its
@@ -317,7 +312,6 @@ pub struct BlendSeam {
 /// face its round runs into) is not one. Read from the faces' names, so a body named from
 /// geometry ([`face_name_exact`] false) gives its blends' nearest edges.
 pub fn blend_seams(b: &ModelBody) -> Vec<BlendSeam> {
-    const MARK: &str = ":blend:";
     let n = names(b);
     // Per face: the names it answers to, and the edges a blend face replaced (each as
     // `<face>|<face>`, without qualifiers or numbers).
@@ -331,7 +325,7 @@ pub fn blend_seams(b: &ModelBody) -> Vec<BlendSeam> {
                 .into_iter()
                 .filter_map(|name| {
                     let (core, instance) = split_instance(name);
-                    let (_, edge) = core.split_once(MARK)?;
+                    let edge = blend_edge(core)?;
                     Some((crate::piece_names::strip_edge_piece(edge), instance.to_string()))
                 })
                 .collect()
@@ -364,10 +358,59 @@ pub fn blend_seams(b: &ModelBody) -> Vec<BlendSeam> {
     out
 }
 
+/// The two faces of the edge a blend face replaced (`F<feature>:blend(<face>|<face>)`, or the
+/// older form's `F<feature>:blend:<face>|<face>`), `None` for any other name (its copy's
+/// instance is not part of them). A fillet or chamfer face is named after the edge it rounds, so
+/// its name is what tells the two faces it now separates instead of that edge. The mark may sit
+/// inside another role (`F5:inner(F4:blend(A|B))`).
+pub(crate) fn blend_sides(name: &str) -> Option<(&str, &str)> {
+    let (name, _) = split_instance(name);
+    let (at, edge) = blend_mark(name)?;
+    // The role right before the mark is the feature that made the blend (`F4`).
+    let feature = name.get(..at)?.rsplit([':', '(']).next()?;
+    if !feature.strip_prefix('F').is_some_and(|k| !k.is_empty() && k.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
+    edge_sides(edge)
+}
+
+/// The blend face a name names, whole again since: the blend of the edge's sides without their
+/// qualifiers (`F3:blend(side|start)` for `F3:blend(side#[start]|start)`), in the name's own form.
+pub(crate) fn blend_stem(name: &str) -> Option<String> {
+    let (name, _) = split_instance(name);
+    let (a, b) = blend_sides(name)?;
+    let sides = format!("{}|{}", strip_piece(a), strip_piece(b));
+    let (at, _) = blend_mark(name)?;
+    let prefix = name.get(..at)?;
+    if name.get(at..)?.starts_with(":blend(") { Some(format!("{prefix}:blend({sides})")) } else { Some(format!("{prefix}:blend:{sides}")) }
+}
+
+/// The edge a blend face's name holds, and where its mark is: inside its parentheses in today's
+/// form (`F5:blend(A|B)`), or after the mark of the older form (`F5:blend:A|B`). The outermost
+/// mark is the one that names the face.
+fn blend_mark(name: &str) -> Option<(usize, &str)> {
+    const PARENS: &str = ":blend(";
+    const COLON: &str = ":blend:";
+    let (at, parens) = match (name.find(PARENS), name.find(COLON)) {
+        (Some(a), Some(b)) if a < b => (a, true),
+        (Some(a), None) => (a, true),
+        (Some(_), Some(b)) => (b, false),
+        (None, Some(b)) => (b, false),
+        (None, None) => return None,
+    };
+    if parens {
+        let rest = name.get(at + PARENS.len()..)?;
+        let close = matching_close(rest)?;
+        Some((at, rest.get(..close)?))
+    } else {
+        Some((at, name.get(at + COLON.len()..)?))
+    }
+}
+
 /// The two faces an edge name `<face A>|<face B>` joins. A blend face's own name holds the edge it
-/// replaced (`F<feature>:blend:<face>|<face>`), so a side's name can hold `|` too: the split is the
-/// one `|` outside every blend face's edge (`F1:+y` and `F3:blend:F1:+z|F2:side` for
-/// `F1:+y|F3:blend:F1:+z|F2:side`). `None` for a name that is not two faces.
+/// replaced (`F<feature>:blend(<face>|<face>)`), so a side's name can hold `|` too: the split is the
+/// one `|` outside every blend face's edge (`F1:+y` and `F3:blend(F1:+z|F2:side)` for
+/// `F1:+y|F3:blend(F1:+z|F2:side)`). `None` for a name that is not two faces.
 fn edge_sides(edge: &str) -> Option<(&str, &str)> {
     let first = face_name_end(edge, 0)?;
     if edge.as_bytes().get(first) != Some(&b'|') || face_name_end(edge, first + 1)? != edge.len() {
@@ -376,30 +419,71 @@ fn edge_sides(edge: &str) -> Option<(&str, &str)> {
     Some((edge.get(..first)?, edge.get(first + 1..)?))
 }
 
-/// Where the face name starting at byte `from` of `s` ends: at the next `|`, or for a blend face
-/// past the two faces of the edge its name holds (and theirs, for blends of blends).
+/// Where the face name starting at byte `from` of `s` ends: at the `|` that separates it from the
+/// next face, or at the end of the text. A `|` inside a blend's own edge (in its parentheses, or
+/// after the mark of the older form) belongs to that edge, not to this name.
 fn face_name_end(s: &str, from: usize) -> Option<usize> {
     const MARK: &str = ":blend:";
     // The faces still to read: a blend face's name is read as the two of its edge.
-    let (mut pending, mut at) = (1usize, from);
-    loop {
-        let rest = s.get(at..)?;
-        let bar = rest.find('|').unwrap_or(rest.len());
-        if let Some(m) = rest.get(..bar)?.find(MARK) {
+    let mut pending = 1usize;
+    let mut depth = 0usize;
+    // The text is walked by character: a curve id may hold a character outside ASCII, and a byte
+    // at a time would cut it in half.
+    let mut chars = s.get(from..)?.char_indices();
+    while let Some((i, c)) = chars.next() {
+        let at = from + i;
+        // The older form: the text after the mark holds an edge of its own.
+        if depth == 0 && c == ':' && s.get(at..)?.starts_with(MARK) {
             pending += 1;
-            at += m + MARK.len();
+            // The mark is ASCII: it is as many characters as it is bytes.
+            for _ in 1..MARK.len() {
+                let _ = chars.next();
+            }
             continue;
         }
-        pending -= 1;
-        at += bar;
-        if pending == 0 {
-            return Some(at);
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            '|' if depth == 0 => {
+                pending -= 1;
+                if pending == 0 {
+                    return Some(at);
+                }
+            }
+            _ => {}
         }
-        if s.as_bytes().get(at) != Some(&b'|') {
-            return None;
-        }
-        at += 1;
     }
+    (pending == 1).then_some(s.len())
+}
+
+/// The edge a blend face's name holds: inside its parentheses (`F5:blend(F2:side:l2|F2:top)`), or
+/// after the colon of the older form (`F5:blend:F2:side:l2|F2:top`).
+fn blend_edge(name: &str) -> Option<&str> {
+    let rest = name.split_once(':')?.1.strip_prefix("blend")?;
+    if let Some(rest) = rest.strip_prefix('(') {
+        let close = matching_close(rest)?;
+        Some(&rest[..close])
+    } else {
+        rest.strip_prefix(':')
+    }
+}
+
+/// The byte of the `)` closing the `(` that opens `s`.
+fn matching_close(s: &str) -> Option<usize> {
+    let mut depth = 1usize;
+    for (i, b) in s.bytes().enumerate() {
+        match b {
+            b'(' => depth += 1,
+            b')' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// A name and the copy it names (`@F<feature>.<instance>`, a pattern's or a paste's copy of a
@@ -505,9 +589,18 @@ pub(crate) fn names(b: &ModelBody) -> Arc<Names> {
         .clone()
 }
 
-/// Pairs of faces of a body that share an edge (from its mesh's edges).
+/// Pairs of faces of a body that share an edge (from its exact B-rep edges).
 pub(crate) fn mesh_adjacency(b: &ModelBody) -> Vec<(usize, usize)> {
-    crate::history_names::face_pairs(b.mesh().edge_faces.iter().map(|fs| fs.iter().map(|f| *f as usize)))
+    crate::history_names::face_pairs(b.body.record().edges.iter().map(|e| {
+        let mut faces: Vec<usize> = Vec::with_capacity(e.uses.len());
+        for u in &e.uses {
+            let f = u.face as usize;
+            if !faces.contains(&f) {
+                faces.push(f);
+            }
+        }
+        faces.into_iter()
+    }))
 }
 
 /// Work out a body's face names from the feature that made it and the model before it, by
@@ -586,38 +679,6 @@ pub(crate) fn geometric_names(b: &ModelBody, o: &NamingOrigin, nf: usize) -> Vec
             names = got.into_iter().map(|n| n.map(|n| format!("{n}@F{fid}.{}", k + 1))).collect();
         }
     }
-    // A sheet feature that moved panels (a fold, an unfold): faces it carried along lie on the
-    // faces they were, taken back through the panel they are on.
-    if let (Some(after), Some(before), Some(input)) = (
-        o.sheets.iter().find(|s| s.body == b.name),
-        o.before.sheets.iter().find(|s| s.body == b.name),
-        inputs.iter().find(|(x, _, _)| x.name == b.name),
-    ) {
-        let input = std::slice::from_ref(input);
-        let mut dense: Option<Vec<Vec<Vec3>>> = None;
-        for (fi, (name, ps)) in names.iter_mut().zip(&pts).enumerate() {
-            if name.is_some() {
-                continue;
-            }
-            // The panel the feature kept in place (the base an unfold lays the flanges out beside)
-            // lies on its own face before, and that face names the whole face it is part of now:
-            // a flat face spans that panel, the panels laid out beside it and the bend strips
-            // between them, whatever share of it they take. The few sample points above may all
-            // miss it (a bend strip is many small triangles), so the face is looked at closer.
-            let dense = dense.get_or_insert_with(|| samples_up_to(&m, nf, PANEL_SAMPLES));
-            if let Some(kept) = dense.get(fi).and_then(|ps| plurality(ps, input, tol)) {
-                *name = Some(kept);
-                continue;
-            }
-            // A point on a bend lies on no panel and has no place before; the face's other points
-            // do. At least half of them must, so a face that is mostly bend is not named from a
-            // few points.
-            let back: Vec<Vec3> = ps.iter().filter_map(|p| after.point_before(before, *p)).collect();
-            if !back.is_empty() && back.len() * 2 >= ps.len() {
-                *name = vote(&back, input, tol, None);
-            }
-        }
-    }
     // A feature that built a tool and reported no history. Two meshes of one curved face are only
     // as close as their chord tolerances, which follow the body's size: a tool that makes the body
     // bigger divides its round walls differently, and those walls miss their own faces at `tol`.
@@ -643,7 +704,7 @@ pub(crate) fn geometric_names(b: &ModelBody, o: &NamingOrigin, nf: usize) -> Vec
                 if matches!(o.feature.kind, FeatureKind::Shell { .. })
                     && let Some(n) = behind(ps, nn, &inputs)
                 {
-                    return format!("F{fid}:inner:{}", strip_piece(&n));
+                    return format!("F{fid}:inner({})", strip_piece(&n));
                 }
                 role_name(&o.feature, &o.before, ps, nn, fi, fid, &curves)
             })
@@ -732,28 +793,6 @@ fn vote(ps: &[Vec3], inputs: &[(&ModelBody, FaceIndex, Arc<Vec<String>>)], tol: 
     }
     votes.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     votes.first().filter(|(_, n)| *n * 2 >= ps.len().max(1) && votes.get(1).is_none_or(|(_, other)| n > other)).map(|(n, _)| n.clone())
-}
-
-/// The input face the most of `ps` lie on (pieces counted as their face), if at least two and a
-/// sixteenth of them lie on one: the face a sheet's unmoved panel was part of.
-fn plurality(ps: &[Vec3], inputs: &[(&ModelBody, FaceIndex, Arc<Vec<String>>)], tol: f64) -> Option<String> {
-    let mut votes: Vec<(String, usize)> = Vec::new();
-    for p in ps {
-        for (_, idx, nm) in inputs {
-            if let Some(f) = idx.face_at(*p, tol)
-                && let Some(n) = nm.get(f)
-            {
-                let n = strip_piece(n);
-                match votes.iter_mut().find(|(v, _)| v == n) {
-                    Some(v) => v.1 += 1,
-                    None => votes.push((n.to_string(), 1)),
-                }
-                break;
-            }
-        }
-    }
-    votes.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    votes.first().filter(|(_, n)| *n >= 2 && *n * 16 >= ps.len()).map(|(n, _)| n.clone())
 }
 
 /// A face name without its piece qualifiers: the face it is a piece of (`F2:top` for
@@ -859,9 +898,21 @@ fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usi
         FeatureKind::Revolve { sketch, axis, .. } => {
             let Some(ss) = before.sketch(sketch.0) else { return format!("F{fid}:face:{fi}") };
             // The origin was written as its values when the feature was evaluated (`naming_feature`).
-            let Ok((o2, d2)) =
-                crate::eval::revolve_axis(&Default::default(), ss, axis, before, &|name| crate::eval::construction_axis_in(None, before, name, 0))
-            else {
+            let Ok((o2, d2)) = crate::eval::revolve_axis(
+                None,
+                0,
+                &Default::default(),
+                ss,
+                axis,
+                before,
+                &|name| crate::eval::construction_axis_in(None, before, name, 0),
+                &|owner, curve| {
+                    before
+                        .sketch(owner)
+                        .ok_or_else(|| crate::DocError::Unknown(format!("sketch {owner}")))
+                        .and_then(|os| crate::eval::sketch_line_world(os, curve))
+                },
+            ) else {
                 return format!("F{fid}:face:{fi}");
             };
             let (o, d) = (ss.plane.to_world(o2), (ss.plane.to_world(o2 + d2) - ss.plane.to_world(o2)).normalized().unwrap_or(Vec3::Z));
@@ -941,8 +992,8 @@ fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usi
         FeatureKind::Fillet { edges, .. } | FeatureKind::Chamfer { edges, .. } => {
             let k = edges.iter().enumerate().min_by(|a, b| a.1.dist(c).total_cmp(&b.1.dist(c))).map(|(k, _)| k).unwrap_or(0);
             match f.edge_names.get(k) {
-                Some(e) => format!("F{fid}:blend:{e}"),
-                None => format!("F{fid}:blend:{k}"),
+                Some(e) => format!("F{fid}:blend({e})"),
+                None => format!("F{fid}:blend({k})"),
             }
         }
         _ => format!("F{fid}:face:{fi}"),
@@ -1047,6 +1098,83 @@ pub fn edge_names_at(b: &ModelBody, pts: &[Vec3]) -> Vec<String> {
                 .unwrap_or_default()
         })
         .collect()
+}
+
+/// Incident face indices (sorted, deduplicated) for each B-rep vertex in `record`.
+pub(crate) fn vertex_incident_faces(record: &solidcore_record::brep::Brep) -> Vec<Vec<u32>> {
+    let mut per_vertex = vec![Vec::new(); record.vertices.len()];
+    for edge in &record.edges {
+        for &v in &edge.vertices {
+            if let Some(fs) = per_vertex.get_mut(v as usize) {
+                fs.extend(edge.uses.iter().map(|u| u.face));
+            }
+        }
+    }
+    for fs in &mut per_vertex {
+        fs.sort_unstable();
+        fs.dedup();
+    }
+    per_vertex
+}
+
+/// Names of a body's vertices (by B-rep record vertex index): `<face A>|<face B>|…`, numbered
+/// with `~k` when repeated along the longest axis of their spread. Empty for a mesh body.
+pub fn vertex_names(b: &ModelBody) -> Vec<String> {
+    if b.body.is_mesh() {
+        return Vec::new();
+    }
+    let record = b.body.record();
+    let incident = vertex_incident_faces(record);
+    vertex_names_from_record(record, &incident, &face_names(b))
+}
+
+/// Names of `record`'s vertices from `incident` face indices and face names `faces`.
+pub(crate) fn vertex_names_from_record(record: &solidcore_record::brep::Brep, incident: &[Vec<u32>], faces: &[String]) -> Vec<String> {
+    let mut names: Vec<String> = incident
+        .iter()
+        .map(|fs| {
+            let mut n: Vec<&str> = fs.iter().filter_map(|f| faces.get(*f as usize).map(String::as_str)).filter(|s| !s.is_empty()).collect();
+            n.sort();
+            n.join("|")
+        })
+        .collect();
+    let mut non_empty = Vec::new();
+    let mut indices = Vec::new();
+    let mut non_empty_pts = Vec::new();
+    for (i, (n, v)) in names.iter().zip(&record.vertices).enumerate() {
+        if !n.is_empty() {
+            non_empty.push(n.clone());
+            indices.push(i);
+            non_empty_pts.push(vec![Vec3::new(v.point[0], v.point[1], v.point[2])]);
+        }
+    }
+    number_pieces(&mut non_empty, &non_empty_pts, '~');
+    for (i, n) in indices.into_iter().zip(non_empty) {
+        if let Some(slot) = names.get_mut(i) {
+            *slot = n;
+        }
+    }
+    names
+}
+
+/// Index in `b.body.record().vertices` of the vertex at `at`, within the body's pick reach.
+/// `None` for a mesh body, an orphan vertex with no incident faces, or a non-finite point.
+pub(crate) fn vertex_index_at(b: &ModelBody, at: Vec3) -> Option<usize> {
+    if b.body.is_mesh() || !at.is_finite() {
+        return None;
+    }
+    let record = b.body.record();
+    let incident = vertex_incident_faces(record);
+    let reach = (b.body.size() * 2e-3).max(1e-3);
+    record
+        .vertices
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| incident.get(*i).is_some_and(|fs| !fs.is_empty()))
+        .map(|(i, v)| (Vec3::new(v.point[0], v.point[1], v.point[2]).dist(at), i))
+        .filter(|(d, _)| d.is_finite() && *d <= reach)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, i)| i)
 }
 
 /// Names of the faces holding each point (any body; empty when none does).
@@ -1325,6 +1453,53 @@ mod tests {
 
     use super::*;
 
+    /// A curve id may hold a character outside ASCII (`F2:side:曲`), and the name of a blend face
+    /// holds the curve id of the edge it replaced. The name was read a byte at a time, which cut
+    /// that character in half and panicked.
+    #[test]
+    fn test_face_name_end_handles_non_ascii_curve_id() {
+        let read = |name: &str| std::panic::catch_unwind(|| face_name_end(name, 0)).expect("a name with a non-ASCII curve id must not panic");
+        // The name of a blend face holds the whole edge it replaced: the `|` inside it is its own.
+        let name = "F5:blend(F2:side:曲|F2:top)";
+        let end = read(name).expect("the name of one face ends at the end of the text");
+        assert_eq!(&name[..end], name, "the whole name is the one face name");
+        // A `|` outside the blend's own edge separates two faces.
+        let pair = "F5:blend(F2:side:曲|F2:top)|F6:+y";
+        let end = read(pair).expect("the first face of a pair ends at its bar");
+        assert_eq!(&pair[..end], "F5:blend(F2:side:曲|F2:top)", "the first face of a pair is the blend face");
+        assert_eq!(face_name_end(pair, end + 1), Some(pair.len()), "the second face of a pair ends at the end of the text");
+    }
+
+    /// A curve id may hold a character outside ASCII (`F2:side:曲`), and the name of a blend face
+    /// holds the curve id of the edge it replaced (`F5:blend(F2:side:曲|F2:top)`). The name was
+    /// read a byte at a time, which cut that character in half and panicked; `blend_seams` reads
+    /// the name of every blend face, so it panicked on any body that had one.
+    #[test]
+    fn blend_seams_reads_a_face_name_with_a_non_ascii_curve_id() {
+        for curve in ["曲", "é"] {
+            let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(4., 2., 1.)).unwrap();
+            let mut body = ModelBody::new("Blend".into(), body, 1);
+            let faces = face_count(&body);
+            // The blend face names the edge it replaced; the other faces are the sides of it.
+            let mut names = vec![format!("F2:side:{curve}"); faces];
+            names[0] = format!("F5:blend(F2:side:{curve}|F2:top)");
+            body.names = NameCell::known(Arc::new(names));
+            let seams = blend_seams(&body);
+            assert!(!seams.is_empty(), "the blend face meets the faces it rounded");
+            assert!(seams.iter().all(|s| s.kind == BlendSeamKind::Contact), "a blend face meets the face it rounded: {seams:?}");
+        }
+    }
+
+    /// The `:blend` mark is the outer face's role. A name that holds a blend inside it (an inner
+    /// face naming a blend) is not a blend face, and the edge it holds is not one it replaced.
+    #[test]
+    fn test_blend_edge_is_read_at_the_outer_face_role_only() {
+        assert_eq!(blend_edge("F5:blend(F4:+y|F4:+z)"), Some("F4:+y|F4:+z"));
+        assert_eq!(blend_edge("F5:blend:F4:+y|F4:+z"), Some("F4:+y|F4:+z"));
+        assert_eq!(blend_edge("F3:inner(F5:blend(F4:+y|F4:+z))"), None);
+        assert_eq!(blend_edge("F4:+x|F5:blend(F4:+y|F4:+z)"), None);
+    }
+
     /// A cone's tip repeats its apex vertex, so a triangle can have a zero-length edge. The nearest
     /// point on it must still be a real point (it used to be NaN, which broke picking the tip).
     #[test]
@@ -1371,8 +1546,7 @@ mod tests {
         let mut weak = vec![Arc::downgrade(&state)];
         for depth in 0..count {
             let mut next = body.clone();
-            next.names =
-                NameCell::new(Some(Arc::new(NamingOrigin { feature: feature.clone(), before: state, depth, mats: Vec::new(), sheets: Vec::new() })));
+            next.names = NameCell::new(Some(Arc::new(NamingOrigin { feature: feature.clone(), before: state, depth, mats: Vec::new() })));
             let mut next_state = ModelState::default();
             next_state.bodies.push(next);
             state = Arc::new(next_state);
@@ -1458,6 +1632,7 @@ mod tests {
             sketch,
             report,
             profiles,
+            profiles_3d: Vec::new(),
             ends: Default::default(),
         };
         let full_scan = |q: Vec2| {
@@ -1482,5 +1657,13 @@ mod tests {
         }
         assert_eq!(curves.nearest(Vec2::new(5., 0.)).map(|(_, id)| id).as_deref(), Some("c0_0"), "a tie keeps the first curve");
         assert!(curves.segs.iter().all(|(id, ..)| id != "guide"), "construction curves name nothing");
+    }
+
+    #[test]
+    fn mesh_adjacency_uses_exact_brep_edges() {
+        let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(4., 2., 1.)).unwrap();
+        let body = ModelBody::new("Cube".into(), body, 1);
+        let pairs = mesh_adjacency(&body);
+        assert_eq!(pairs.len(), 12);
     }
 }

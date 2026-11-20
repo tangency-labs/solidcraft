@@ -460,7 +460,7 @@ fn rust_srf_srf(i: &Inputs) -> Result<Rec, HarnessError> {
     else {
         return Err(harness("not a srf_srf query"));
     };
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let mut o = Vec::new();
     let build = |s: &SurfIn| -> Result<Result<Surface, f64>, HarnessError> {
         Ok(match surf(&k, s)? {
@@ -496,6 +496,7 @@ fn rust_srf_srf(i: &Inputs) -> Result<Rec, HarnessError> {
         SrfSrfOptions {
             skip_two_pnts_intersection: *skip,
             ref_point: ref_point.map(v3),
+            closed_by_start_direction: false,
         },
     );
     o.push(match st(&r) {
@@ -527,7 +528,7 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
             rm.fb.geom_mut(gid).map_err(h)?.solver = Some(FilletSolverId(si));
         }
     }
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let mut o = Vec::new();
     macro_rules! status_of {
         ($r:expr) => {
@@ -843,7 +844,7 @@ fn gen_pair(k: &Kernel, rng: &mut Rng, scale: f64) -> (SurfIn, SurfIn) {
 
 /// The Rust intersection curve of a pair without points (for sampling points on it).
 fn probe_curve(s1: &SurfIn, s2: &SurfIn, tol: f64, ang: f64) -> Option<Curve> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let a = surf(&k, s1).ok()?.ok()?;
     let b = surf(&k, s2).ok()?.ok()?;
     srf_srf_intersection(
@@ -1068,7 +1069,7 @@ fn gen_revolution(rng: &mut Rng, scale: f64) -> AnalyticSrf {
 #[allow(clippy::too_many_lines)]
 fn gen_rail_rail(rng: &mut Rng, mix: RailRailMix) -> Option<Inputs> {
     let scale = scale_of(rng);
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let kind = match mix {
         RailRailMix::Plain => rng.below(6),
         // plane 1/8, B-spline 4/8, revolution 2/8, gen_analytic 1/8
@@ -1400,7 +1401,7 @@ fn original_face_builds(i: &Inputs) -> bool {
     let Query::RailRail { face: Some(s), .. } = &i.query else {
         return true;
     };
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let Ok(Ok(surface)) = surf(&k, s) else {
         // a failed construction is the case's status
         return true;
@@ -1438,7 +1439,7 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-        let k = &Kernel::default();
+        let k = &crate::runner_kernel();
         // keep only inputs that keep the contract
         for _ in 0..64 {
             let inputs = match rng.below(20) {
@@ -1508,6 +1509,27 @@ mod tests {
         }
     }
 
+    /// `gen0014`: the surface-and-plane trace (WR-682, on every kernel since its flag was
+    /// retired) between two points of a surface whose curve runs off its domain. The march
+    /// went on along the B-spline's extrapolation to u = -6e5 on a domain of [0, 1], and each
+    /// refining pass split every span that missed, doubling the stations until the
+    /// allocation failed (an abort, 4.9 GB). The trace refuses a station off the domain
+    /// (status 1001, as the golden), and holds at most `MAX_STATIONS` in any case.
+    #[test]
+    fn gen0014_the_trace_stays_on_its_surface() {
+        // only `gen0014`, from its own seed, as `CaseContext::generated_cases` draws it
+        let seed = CaseContext::seed_for("blend.fillet_geom_p2", 14);
+        let inputs = Runner.generate(&mut Rng::new(seed)).unwrap();
+        let case = Case {
+            unit: "blend.fillet_geom_p2".into(),
+            name: "gen0014".into(),
+            source: crate::case::CaseSource::Generated { seed },
+            inputs,
+        };
+        let out = Runner.run_rust(&case).unwrap();
+        assert_eq!(out.values["status"], [1001.0], "{out:?}");
+    }
+
     /// Tallies the Rust outcome of every case per query (status `0`, an upstream error
     /// status, a deferral): with no failed case, the passes' success-path / error-path
     /// split. `CASE_SEEDS` sets the generated count.
@@ -1568,8 +1590,8 @@ mod tests {
                 };
                 // the face tolerance against the system zone tolerance an ownerless copy
                 // of the surface reads instead
-                let sys = Kernel::default().tolerances.zone_tol_3d;
-                let tol = zone_tol3d(&Kernel::default(), *face_tol);
+                let sys = crate::runner_kernel().tolerances.zone_tol_3d;
+                let tol = zone_tol3d(&crate::runner_kernel(), *face_tol);
                 let tol = if tol > 10.0 * sys {
                     "tol>>sys"
                 } else if tol < 0.1 * sys {

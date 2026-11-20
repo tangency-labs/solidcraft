@@ -476,7 +476,8 @@ pub fn fillet_tapered(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body,
 
 /// Chord-length fillet: each edge rounded so that the blend is `chord` wide across, from contact
 /// to contact at every station (SMLib's constant-chord round), its radius following the face
-/// angle along the edge.
+/// angle along the edge. The chord round of a single concave edge whose contact line runs off
+/// the flat face it rolls on is built by carrying that face on ([`crate::blend::or_carried_on`]).
 pub fn fillet_chord(body: &Body, edges: &[Vec3], chord: f64) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "fillet_chord");
     body.require_brep("fillet")?;
@@ -486,7 +487,8 @@ pub fn fillet_chord(body: &Body, edges: &[Vec3], chord: f64) -> Result<Body> {
     if edges.is_empty() || edges.len() > 1000 {
         return Err(KernelError::Invalid("select 1…1000 edges".into()));
     }
-    crate::blend_smlib::fillet_chord(body, edges, chord)
+    let plain = crate::blend_smlib::fillet_chord(body, edges, chord);
+    crate::blend::or_carried_on(plain, body, edges, chord, |carried| crate::blend_smlib::fillet_chord(carried, edges, chord))
 }
 
 #[cfg(test)]

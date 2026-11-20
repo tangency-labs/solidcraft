@@ -21,7 +21,7 @@ SKETCH appears during sketch editing; with Preferences › Interface › **Keep 
 | SURFACE | EDIT | **`surface.trim`**, **`surface.untrim`**, **`surface.extend`**, **`surface.stitch`**, `surface.unstitch`, `surface.reverse_normal`, `surface.fair`, `surface.fillet`, `surface.match` |
 | SURFACE | CONVERT | **`surface.thicken`**, **`mesh.convert`** |
 | ASSEMBLE | COMPONENTS | **`component.create`**, **`component.from_bodies`**, **`component.insert_design`**, **`parts.library`** |
-| ASSEMBLE | JOINTS | **`joint.create`**, **`joint.as_built`**, **`joint.origin`**, **`joint.rigid_group`**, `joint.limits`, `joint.gear`, `joint.rack_pinion`, `joint.screw`, `joint.cam`, `joint.reach` |
+| ASSEMBLE | JOINTS | **`joint.create`**, **`joint.as_built`**, **`joint.origin`**, **`joint.rigid_group`**, `assembly.constraint.create`, `joint.limits`, `joint.gear`, `joint.rack_pinion`, `joint.screw`, `joint.cam`, `joint.reach` |
 | ASSEMBLE | POSITION | **`occurrence.ground`**, **`component.capture_position`**, **`component.revert_position`** |
 | ASSEMBLE | MOTION | **`joint.drive`**, **`joint.motion_link`**, **`motion.study`**, **`motion.trace`**, `explode.create` |
 | ASSEMBLE | CONTACT | **`contact.enable_sets`**, **`contact.check`**, `contact.enable_all`, `contact.disable_all`, `contact.create`, `contact.edit`, `contact.list` |
@@ -49,7 +49,7 @@ SKETCH appears during sketch editing; with Preferences › Interface › **Keep 
 | SKETCH | REFERENCE | **`sketch.project`**, `sketch.intersect`, `sketch.include_3d`, `sketch.project_to_surface`, `sketch.intersection_curve`, `sketch.spun_profile`, `sketch.isoparametric_curve`, `sketch.fit_curves_to_section`, `sketch.insert_dxf`, `sketch.insert_svg`, `canvas.insert` |
 | SKETCH | FINISH SKETCH | **`sketch.finish`**, `sketch.finish_auto_constrain` |
 | SHEET METAL | SKETCH | **`sketch.create`** |
-| SHEET METAL | CREATE | **`sheet.flange`**, **`sheet.hem`**, **`sheet.fold`**, **`sheet.perforate`**, `sheet.convert` |
+| SHEET METAL | CREATE | **`sheet.flange`**, **`sheet.hem`**, **`sheet.fold`**, **`sheet.perforate`**, `sheet.convert`, `sheet.recognize` |
 | SHEET METAL | FLAT | **`sheet.unfold`**, **`sheet.refold`**, **`sheet.flat_pattern`** |
 | SHEET METAL | OUTPUT | **`sheet.export_dxf`**, **`sheet.export_bend_table`** |
 | SHEET METAL | RULES | **`sheet.manage_rules`** |
@@ -92,7 +92,7 @@ Explicit command-id lists override the default placement mapping. Shared command
 | SKETCH / PATTERN | SKETCH / PATTERN | `sketch.mirror`, `sketch.pattern.circular`, `sketch.pattern.rectangular` |
 | SOLID / ASSEMBLE | ASSEMBLE / COMPONENTS | `component.create`, `component.insert_design` |
 | SOLID / ASSEMBLE | ASSEMBLE / CONTACT | `contact.enable_sets`, `contact.enable_all`, `contact.disable_all`, `contact.create` |
-| SOLID / ASSEMBLE | ASSEMBLE / JOINTS | `joint.create`, `joint.as_built`, `joint.rigid_group`, `joint.gear`, `joint.rack_pinion`, `joint.screw`, `joint.cam` |
+| SOLID / ASSEMBLE | ASSEMBLE / JOINTS | `joint.create`, `joint.as_built`, `joint.rigid_group`, `assembly.constraint.create`, `joint.gear`, `joint.rack_pinion`, `joint.screw`, `joint.cam` |
 | SOLID / ASSEMBLE | ASSEMBLE / MOTION | `joint.drive`, `joint.motion_link`, `explode.create`, `motion.study`, `motion.trace` |
 | SOLID / CONFIGURE | MANAGE / CONFIGURATIONS | `config.configure`, `config.table` |
 | SOLID / CONSTRUCT | MODEL / CONSTRUCT | `construct.plane.offset`, `construct.plane.at_angle`, `construct.axis.through_cylinder`, `construct.axis.normal_to_face`, `construct.axis.two_planes`, `construct.axis.two_points`, `construct.axis.edge`, `construct.point.vertex`, `construct.point.two_edges`, `construct.point.three_planes`, `construct.point.center`, `construct.point.edge_plane`, `construct.point.along_path`, `construct.plane.midplane`, `construct.plane.two_edges`, `construct.plane.three_points`, `construct.plane.tangent`, `construct.plane.along_path`, `construct.plane.perpendicular` |

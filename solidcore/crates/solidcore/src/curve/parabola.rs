@@ -135,6 +135,17 @@ pub struct Parabola {
 }
 
 impl Parabola {
+    /// Not upstream: the same parabola by definition, exactly (IEEE `==`; a NaN
+    /// refuses): the same B-spline part ([`BSplineCurve::same_definition`]), and
+    /// placement, domain and focal distance equal.
+    #[must_use]
+    pub fn same_definition(&self, other: &Self) -> bool {
+        self.base.same_definition(&other.base)
+            && self.position == other.position
+            && self.anal_domain == other.anal_domain
+            && self.focal_dist == other.focal_dist
+    }
+
     /// Exact evaluation copy without the B-spline copy constructor's knot fix-up.
     pub(crate) fn clone_exact_bounded(&self) -> Self {
         Self {
@@ -365,7 +376,10 @@ impl Parabola {
     /// `SM_ERR` for more than 3 derivatives.
     pub fn evaluate_step(&self, t: f64, num_derivs: usize) -> Result<Vec<Vec3>> {
         if num_derivs > 3 {
-            return Err(SolidError::sm_err(OP_EVAL));
+            return Err(SolidError::curve_failed(
+                OP_EVAL,
+                "more than 3 derivatives were asked",
+            ));
         }
         let mut t = t;
         if !self.anal_domain.contains_value(t, 0.0) {
@@ -683,7 +697,10 @@ impl Parabola {
             let unit_scale = s.x == 1.0 && s.y == 1.0 && s.z == 1.0;
             if !unit_scale && (!are_same(s.x, s.y) || !are_same(s.x, s.z)) {
                 // Unable to scale analytical curves non-uniformly
-                return Err(SolidError::sm_err(OP_XFORM));
+                return Err(SolidError::curve_failed(
+                    OP_XFORM,
+                    "the scale is not uniform",
+                ));
             }
         }
 

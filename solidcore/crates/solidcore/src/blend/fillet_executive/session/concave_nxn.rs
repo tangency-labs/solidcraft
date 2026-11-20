@@ -45,7 +45,12 @@ impl SessionObjects<'_> {
             let object = FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(eu));
             match executive.fillet_solver_of_edgeuse(object) {
                 Some(FilletObject::Solver(solver)) => solver_ids.push(solver),
-                None => return Err(SolidError::null_pointer(NATIVE)),
+                None => {
+                    return Err(SolidError::blend_missing(
+                        NATIVE,
+                        "the edge use's fillet solver",
+                    ))
+                }
                 Some(_) => return Err(invalid("edge use does not name an actual solver")),
             }
         }

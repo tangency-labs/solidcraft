@@ -39,7 +39,7 @@ use crate::topology::{Brep, EdgeuseId, VertexId};
 /// The `SmStatus` upstream's `SER` returns, as the `double` result.
 fn status_angle(e: &SolidError) -> f64 {
     let code = match e {
-        SolidError::Upstream { code, .. } => *code,
+        e if e.upstream_status().is_some() => e.upstream_status().unwrap_or(SM_ERR),
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         _ => SM_ERR,
     };
@@ -234,10 +234,12 @@ impl FilletCorner {
             )?;
         } // end loop on all (both) non-filleted edges.
 
-        let fv_on_common_face =
-            fv_on_common_face.ok_or_else(|| SolidError::null_pointer(OP_NX2))?;
-        let fv_on_convex_edge =
-            fv_on_convex_edge.ok_or_else(|| SolidError::null_pointer(OP_NX2))?;
+        let fv_on_common_face = fv_on_common_face.ok_or_else(|| {
+            SolidError::blend_missing(OP_NX2, "the fillet vertex on the common face")
+        })?;
+        let fv_on_convex_edge = fv_on_convex_edge.ok_or_else(|| {
+            SolidError::blend_missing(OP_NX2, "the fillet vertex on the convex edge")
+        })?;
         pseudo
             .fillet_vertex_mut(fv_on_common_face)?
             .set_mate(0, Some(fv_on_convex_edge));

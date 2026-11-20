@@ -114,66 +114,96 @@ impl DepthPipelines {
 impl Renderer {
     /// Shared product upload and camera setup for ordinary colour and transparent feedback.
     pub(super) fn prepare_product_geometry(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &Frame) -> bool {
-        let scopes = [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation]
-            .map(|filter| device.push_error_scope(filter));
-        self.product.take(device, queue, &self.uniform, &self.uniform_bgl, frame.key, &frame.slot, None, false);
-        let mut failed = None;
-        for scope in scopes.into_iter().rev() {
-            if let Some(error) = crate::popped(scope.pop()) {
-                failed.get_or_insert(error.to_string());
-            }
-        }
-        if let Some(error) = failed {
-            log::error!("product preview upload failed: {error}");
+        // A large product scene can exceed what the device will allocate. Its upload runs under
+        // its own error scopes, so the failure reaches the preview instead of the device's
+        // uncaptured-error handler, and nothing half-uploaded is drawn.
+        let scopes = crate::error_scopes(device);
+        let refused = self.product.take(device, queue, &self.uniform, &self.uniform_bgl, frame.key, &frame.slot, None, false).err();
+        let caught = crate::caught(scopes);
+        let highlight_refused =
+            self.pic.highlight.take(device, queue, &self.uniform, &self.uniform_bgl, frame.hl_key, &frame.hl_slot, None, false).err();
+        // Only a failed product upload drops the product batches; a refused highlight keeps the
+        // product picture and is reported below. A refused scene stays in its slot, so the batches
+        // carry no key and the next frame retries it. A scope error means the scene was taken and
+        // what it uploaded can't be trusted, so its key stays and nothing half-uploaded is drawn.
+        if caught.is_some() {
             self.product = Batches { key: Some(frame.key), ..Batches::default() };
-            if let Some(Ok(mut sink)) = frame.upload_error.as_ref().map(|sink| sink.lock()) {
-                *sink = Some(error);
-            }
-            return false;
+        } else if refused.is_some() {
+            self.product = Batches::default();
         }
-        self.highlight.take(device, queue, &self.uniform, &self.uniform_bgl, frame.hl_key, &frame.hl_slot, None, false);
+        let product_failed = caught.or(refused);
+        let failed = product_failed.or(highlight_refused);
+        if let Some(error) = &failed {
+            log::error!("product preview upload failed: {error}");
+            self.refused_upload = Some(error.clone());
+            if let Some(Ok(mut sink)) = frame.upload_error.as_ref().map(|sink| sink.lock()) {
+                *sink = Some(error.clone());
+            }
+        }
         queue.write_buffer(
             &self.uniform,
             0,
             &uniform_bytes(frame, frame.size_px[0], frame.size_px[1], self.linear_out, self.target.reversed_depth()),
         );
-        true
+        failed.is_none()
     }
 
     /// Prepare a transparent product selection/hover image with its own depth and MSAA.
     /// Emit this instead of the ordinary product callback when live pixels are displayed.
     pub fn prepare_product_highlights(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame) {
+        self.activate(0);
+        self.pic.isolated = false;
+        self.prepare_product_highlights_frame(device, queue, encoder, frame);
+    }
+
+    /// Render feedback into the picture belonging to one tiled view. Its uniform writes and
+    /// draws must reach the GPU together, like the corresponding shaded tile.
+    pub fn prepare_product_highlights_view(&mut self, slot: u64, device: &wgpu::Device, queue: &wgpu::Queue, frame: &Frame) {
+        self.activate(slot);
+        self.pic.isolated = true;
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_product_highlight_view") });
+        self.prepare_product_highlights_frame(device, queue, &mut encoder, frame);
+        queue.submit(std::iter::once(encoder.finish()));
+    }
+
+    fn prepare_product_highlights_frame(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame) {
+        self.refused_upload = None;
         let key = frame_key(frame);
-        if self.product_highlights && can_reuse(self.ss_ready && self.ss.is_some(), self.ss_key, key) {
-            let filter = self.ss_scaled && self.cached.is_none();
+        if self.pic.product_highlights && can_reuse(self.pic.ss_ready && self.pic.ss.is_some(), self.pic.ss_key, key) {
+            let filter = self.pic.ss_scaled && self.pic.cached.is_none();
             if filter {
                 self.cache_picture(device, encoder, frame.size_px);
             }
-            self.ss_stats = DrawStats { draw_calls: u32::from(filter), ..DrawStats::default() };
+            self.pic.ss_stats = DrawStats { draw_calls: u32::from(filter), ..DrawStats::default() };
             return;
         }
-        self.product_highlights = true;
-        self.cached = None;
-        self.ss_ready = false;
-        self.ss_key = None;
+        self.pic.product_highlights = true;
+        self.pic.cached = None;
+        self.pic.ss_ready = false;
+        self.pic.ss_key = None;
         // Feedback without product depth would light occluded faces as if visible.
         if !frame.product || self.target.depth.is_none() {
             return;
         }
         if self.product_depth.is_none() {
-            self.product_depth = Some(DepthPipelines::new(device, &self.uniform_bgl, self.target));
+            self.product_depth = Some(DepthPipelines::new(device, &self.uniform_bgl.layout, self.target));
         }
         if !self.prepare_product_geometry(device, queue, frame) {
             return;
         }
-        self.ss_ready = self.supersample(device, encoder, frame, false);
-        self.ss_key = self.ss_ready.then_some(key);
+        self.pic.ss_ready = self.supersample(device, encoder, frame, false);
+        self.pic.ss_key = self.pic.ss_ready.then_some(key);
     }
 
     /// Alpha-blit only the prepared feedback. There is no shaded-model fallback.
     pub fn paint_product_highlights(&self, frame: &Frame, pass: &mut wgpu::RenderPass<'static>, viewport: [f32; 4]) {
-        if self.product_highlights && self.ss_ready {
-            self.paint(frame, pass, viewport);
+        self.paint_product_highlights_view(0, frame, pass, viewport);
+    }
+
+    /// Alpha-blit the feedback prepared for this tile.
+    pub fn paint_product_highlights_view(&self, slot: u64, frame: &Frame, pass: &mut wgpu::RenderPass<'static>, viewport: [f32; 4]) {
+        if self.picture(slot).is_some_and(|picture| picture.product_highlights && picture.ss_ready) {
+            self.paint_view(slot, frame, pass, viewport);
         }
     }
 
@@ -207,9 +237,14 @@ impl Renderer {
         triangles(pass, &depth.built, &model.open_tris);
         triangles(pass, &depth.pbr, &model.pbr);
         for key in &model.block_order {
-            if let Some(block) = model.blocks.get(key).filter(|block| block.class(TriClass::Opaque).is_some()) {
-                pass.set_pipeline(&depth.built);
-                block.draw(pass, TriClass::Opaque, tally);
+            let Some(block) = model.blocks.get(key) else { continue };
+            // PBR triangles are built into the same blocks (the product preview's): they occlude
+            // feedback too, in the block vertex layout the depth pipeline takes.
+            for class in [TriClass::Opaque, TriClass::Pbr] {
+                if block.class(class).is_some() {
+                    pass.set_pipeline(&depth.built);
+                    block.draw(pass, class, tally);
+                }
             }
         }
         for draw in model.planned.iter().filter(|draw| draw.class == TriClass::Opaque) {
@@ -220,12 +255,13 @@ impl Renderer {
             pass.draw_indexed(0..draw.mesh.index_count, 0, 0..1);
             tally.triangles(draw.mesh.index_count, 1);
         }
-        for draw in model.instanced.iter().filter(|draw| draw.look == InstanceLook::Opaque) {
+        // PBR placements are opaque too: they occlude feedback as the built ones do.
+        for draw in model.instanced.iter().filter(|draw| matches!(draw.look, InstanceLook::Opaque | InstanceLook::Pbr)) {
             draw.draw(pass, &depth.instanced, &depth.instanced, tally);
         }
         // Render's build_highlight emits self-contained mesh triangles/edges, including
         // whole bodies; it intentionally does not reference the Design model's GPU plans.
-        let highlight = &self.highlight;
+        let highlight = &self.pic.highlight;
         pass.set_bind_group(0, scene_bind(highlight, &self.bind), &[]);
         for draw in highlight.hover_instanced.iter().chain(&highlight.selected_instanced).filter(|draw| draw.look == InstanceLook::Opaque) {
             draw.draw(pass, &depth.feedback_smooth, &depth.feedback_flat, tally);

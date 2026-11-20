@@ -1,4 +1,4 @@
-//! Default parity and opt-in regularization of the bottle sweep (#1937).
+//! Regularization of the bottle sweep (#1937).
 #![allow(clippy::unwrap_used)] // integration-test helpers
 use solidcore::geom::attribute::ObjectKey;
 use solidcore::sweep::topology_sweep::store::SweepIdentities;
@@ -18,19 +18,12 @@ use solidcore::topology::topology::NotifyRecords;
 use solidcore::{Kernel, Vec3};
 #[test]
 #[ignore = "requires the pinned upstream bottle.smb fixture"]
-fn bottle_sweep_reproduces_native_failures() {
-    check_bottle(false);
-}
-
-#[test]
-#[ignore = "requires the pinned upstream bottle.smb fixture"]
 fn bottle_sweep_regularizes_degenerate_output() {
-    check_bottle(true);
+    check_bottle();
 }
 
-fn check_bottle(regularize: bool) {
+fn check_bottle() {
     let mut k = Kernel::default();
-    k.fixes.translation_sweep_regularize = regularize;
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../upstream/TestFiles/pt_TestFiles/Fillet/bottle.smb");
     let bytes = std::fs::read(path).unwrap();
@@ -81,103 +74,74 @@ fn check_bottle(regularize: bool) {
     assert_eq!(before.pointers_status, 1000);
     assert_eq!(before.assert_valid, Some(true));
     assert_eq!(before.reports.reports().len(), 8);
-    if regularize {
-        assert_eq!(after.pointers_status, 1000);
-        assert!(after.pointer_reports.reports().is_empty());
-        // These three reports are inherited input gaps, not sweep defects.
-        let inherited: Vec<_> = before
-            .reports
-            .reports()
-            .iter()
-            .filter(|r| r.test_index == 4 && r.value > 1.9e-5 && r.value < 2.1e-5)
-            .map(|r| (r.reporting_type, r.test_index, r.value, r.tol3d))
-            .collect();
-        assert_eq!(
-            after
-                .reports
-                .reports()
-                .iter()
-                .map(|r| (r.reporting_type, r.test_index, r.value, r.tol3d))
-                .collect::<Vec<_>>(),
-            inherited
-        );
-        assert_eq!(after.assert_valid, Some(true));
-        assert_eq!(solidcore::topology::brep::p1::num_faces(&b), 84);
-        assert_eq!(
-            solidcore::topology::brep::p1::edges(&b, None)
-                .unwrap()
-                .len(),
-            317
-        );
-        assert_eq!(
-            solidcore::topology::brep::p1::regions(&b, None)
-                .unwrap()
-                .len(),
-            2
-        );
-        assert!(check_brep(&mut k, &mut b, CheckLevel::Level0)
-            .unwrap()
-            .is_valid());
-        for entity in sweep
-            .to_same
-            .values()
-            .chain(sweep.to_higher.values())
-            .chain(sweep.from_same.keys())
-            .chain(sweep.from_lower.keys())
-            .flatten()
-        {
-            use solidcore::sweep::topology_sweep::SweepEntity;
-            match *entity {
-                SweepEntity::Face(owner, id) if owner == id_body() => {
-                    b.face(id).unwrap();
-                }
-                SweepEntity::Edge(owner, id) if owner == id_body() => {
-                    b.edge(id).unwrap();
-                }
-                SweepEntity::Vertex(owner, id) if owner == id_body() => {
-                    b.vertex(id).unwrap();
-                }
-                SweepEntity::Region(owner, id) if owner == id_body() => {
-                    b.region(id).unwrap();
-                }
-                _ => {}
-            }
-        }
-        let full = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-        assert_eq!(full.assert_valid, Some(false));
-        assert_eq!(full.reports.reports().len(), 1);
-        let gap = full.reports.reports().first().unwrap();
-        assert_eq!((gap.reporting_type, gap.test_index), (16021, 1));
-        assert!((gap.value - 4.7135458964378874e-5).abs() < 1e-12);
-        assert_eq!(gap.tol3d, 2e-5);
-        return;
-    }
     assert_eq!(after.pointers_status, 1000);
-    assert_eq!(after.assert_valid, Some(false));
-    assert_eq!(after.reports.reports().len(), 6);
-    let introduced: Vec<_> = after
+    assert!(after.pointer_reports.reports().is_empty());
+    // These three reports are inherited input gaps, not sweep defects.
+    let inherited: Vec<_> = before
         .reports
         .reports()
         .iter()
-        .filter(|r| r.reporting_type != 16011)
-        .map(|r| (r.reporting_type, r.test_index))
+        .filter(|r| r.test_index == 4 && r.value > 1.9e-5 && r.value < 2.1e-5)
+        .map(|r| (r.reporting_type, r.test_index, r.value, r.tol3d))
         .collect();
-    assert_eq!(introduced, [(15001, 1), (15001, 6), (12225, 2)]);
-    // Validation populates derived UV curves. A second check of the unchanged body
-    // exposes an additional loop-orientation failure in pointer validation.
-    let repeated = check_brep(&mut k, &mut b, CheckLevel::Level0).unwrap();
-    eprintln!("REPEATED {:?}", repeated.lines());
-    assert_eq!(repeated.pointers_status, 1000);
-    assert_eq!(repeated.assert_valid, None);
     assert_eq!(
-        repeated
-            .pointer_reports
+        after
+            .reports
             .reports()
             .iter()
-            .map(|r| (r.reporting_type, r.test_index))
+            .map(|r| (r.reporting_type, r.test_index, r.value, r.tol3d))
             .collect::<Vec<_>>(),
-        [(12225, 2), (12225, 3), (12225, 4)]
+        inherited
     );
+    assert_eq!(after.assert_valid, Some(true));
+    assert_eq!(solidcore::topology::brep::p1::num_faces(&b), 84);
+    assert_eq!(
+        solidcore::topology::brep::p1::edges(&b, None)
+            .unwrap()
+            .len(),
+        317
+    );
+    assert_eq!(
+        solidcore::topology::brep::p1::regions(&b, None)
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(check_brep(&mut k, &mut b, CheckLevel::Level0)
+        .unwrap()
+        .is_valid());
+    for entity in sweep
+        .to_same
+        .values()
+        .chain(sweep.to_higher.values())
+        .chain(sweep.from_same.keys())
+        .chain(sweep.from_lower.keys())
+        .flatten()
+    {
+        use solidcore::sweep::topology_sweep::SweepEntity;
+        match *entity {
+            SweepEntity::Face(owner, id) if owner == id_body() => {
+                b.face(id).unwrap();
+            }
+            SweepEntity::Edge(owner, id) if owner == id_body() => {
+                b.edge(id).unwrap();
+            }
+            SweepEntity::Vertex(owner, id) if owner == id_body() => {
+                b.vertex(id).unwrap();
+            }
+            SweepEntity::Region(owner, id) if owner == id_body() => {
+                b.region(id).unwrap();
+            }
+            _ => {}
+        }
+    }
+    let full = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+    assert_eq!(full.assert_valid, Some(false));
+    assert_eq!(full.reports.reports().len(), 1);
+    let gap = full.reports.reports().first().unwrap();
+    assert_eq!((gap.reporting_type, gap.test_index), (16021, 1));
+    assert!((gap.value - 4.7135458964378874e-5).abs() < 1e-12);
+    assert_eq!(gap.tol3d, 2e-5);
 }
 
 fn id_body() -> BrepId {
@@ -186,9 +150,8 @@ fn id_body() -> BrepId {
 
 type BoxSweep = (usize, usize, usize, Vec<[f64; 3]>, Vec<String>);
 
-fn sweep_box(regularize: bool, vector: Vec3, height: f64, tilt: f64) -> BoxSweep {
+fn sweep_box(vector: Vec3, height: f64, tilt: f64) -> BoxSweep {
     let mut k = Kernel::default();
-    k.fixes.translation_sweep_regularize = regularize;
     let mut b =
         solidcore::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 1.0, 1.0, height)
             .unwrap();
@@ -277,21 +240,17 @@ fn sweep_box(regularize: bool, vector: Vec3, height: f64, tilt: f64) -> BoxSweep
 #[test]
 fn regularization_preserves_ordinary_box_sweeps() {
     for vector in [Vec3::new(0.0, 0.0, 4.0), Vec3::new(1.0, 2.0, 3.0)] {
-        let native = sweep_box(false, vector, 1.0, 0.0);
-        let fixed = sweep_box(true, vector, 1.0, 0.0);
-        assert_eq!(fixed, native);
-        assert!(fixed.4.is_empty(), "{:?}", fixed.4);
-        assert!(fixed.0 >= 6);
+        let swept = sweep_box(vector, 1.0, 0.0);
+        assert!(swept.4.is_empty(), "{:?}", swept.4);
+        assert!(swept.0 >= 6);
     }
 }
 
 #[test]
 fn regularization_handles_near_parallel_box_sweep() {
-    let native = sweep_box(false, Vec3::new(0.0, 0.0, 4.0), 0.07, 0.0000268);
-    let fixed = sweep_box(true, Vec3::new(0.0, 0.0, 4.0), 0.07, 0.0000268);
-    assert!(native.0 >= 6);
-    assert!(fixed.4.is_empty(), "{:?}", fixed.4);
-    assert!(fixed.0 >= 6);
+    let swept = sweep_box(Vec3::new(0.0, 0.0, 4.0), 0.07, 0.0000268);
+    assert!(swept.4.is_empty(), "{:?}", swept.4);
+    assert!(swept.0 >= 6);
 }
 
 #[test]
@@ -343,6 +302,55 @@ fn near_parallel_generator_returns_invalid_surface() {
             [(15001, 1), (15001, 6)]
         );
     }
+}
+
+/// A stitched whole-B-rep sweep of a 3 x 7 x 2 box along -y (goldens
+/// `whole_stitch_linear_neg_y_flat_box`). One of the stitch's edge glues merges the edges
+/// and joins their shells, and then its region nesting (`TestClosureSplitRegion`) fails.
+/// Upstream ignores that status, and so does the port. The fork returns it, which reported
+/// the committed glue as failed: the stitch (which goes on past failed glues) then skipped
+/// that glue's bookkeeping, and the sweep refused with 1001. The sweep is stitched into
+/// its 14 faces and 28 edges, the body the default kernel built before. (That body fails
+/// the Level 2 edge-geometry check, before and after: not this glue's doing.)
+#[test]
+fn a_stitched_sweep_keeps_a_glue_whose_region_nesting_fails() {
+    let mut k = Kernel::default();
+    let mut b = solidcore::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 3.0, 7.0, 2.0)
+        .unwrap();
+    b.set_key(
+        WholeIdentities
+            .topology(id_body(), solidcore::EntityRef::Brep(id_body()))
+            .key,
+    );
+    let mut attributes = AttributeStore::new();
+    let mut records = NotifyRecords::new();
+    let mut next = 0;
+    let mut store = SweepStore::new(&WholeIdentities, &mut records, &mut attributes, &mut next);
+    let context = store.register_kernel(&mut k).unwrap();
+    let id = store.register_brep(context, &mut b).unwrap();
+    let region = store.infinite_region(id).unwrap();
+    let mut sweep = TopologySweep {
+        do_stitching: true,
+        do_merge: false,
+        ..TopologySweep::default()
+    };
+    sweep
+        .do_sweep(
+            &mut store,
+            &SweepGeometry::Translation(TranslationalSweepGeometry::new(Vec3::new(0.0, -4.0, 0.0))),
+            Some(id),
+            Some((id, region)),
+            &mut SweepTargets::default(),
+        )
+        .unwrap();
+    drop(store);
+    assert_eq!(solidcore::topology::brep::p1::num_faces(&b), 14);
+    assert_eq!(
+        solidcore::topology::brep::p1::edges(&b, None)
+            .unwrap()
+            .len(),
+        28
+    );
 }
 
 struct WholeIdentities;

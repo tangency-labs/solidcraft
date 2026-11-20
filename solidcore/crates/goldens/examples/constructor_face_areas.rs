@@ -17,7 +17,7 @@ fn main() {
         eprintln!("cannot read {file}");
         std::process::exit(2);
     };
-    let Some(body) = step_import::import(&bytes, &step_import::Limits::default())
+    let Some(body) = step_export::import(&bytes, &step_export::Limits::default())
         .ok()
         .and_then(|m| m.bodies.into_iter().nth(index))
     else {
@@ -44,7 +44,7 @@ fn main() {
             (Some(a), Some(c)) if (a - c).abs() <= 1e-6 * a.abs().max(c.abs()).max(1e-300) => "",
             _ => "  <<",
         };
-        let exact = step_import::script::step_face_area(&body, face, 512);
+        let exact = goldens::script::step_face_area(&body, face, 512);
         let close = |x: &Option<f64>| match (x, exact) {
             (Some(a), Some(e)) => (a - e).abs() <= 1e-4 * e.abs().max(1e-300),
             _ => false,

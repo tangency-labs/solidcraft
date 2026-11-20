@@ -28,6 +28,10 @@
 //!   and output arrays that cannot be allocated are `NL_MEM_ERR` (upstream's failed
 //!   `N_Malloc`), and index arithmetic that would overflow (`2 * max(p, q)`) is
 //!   `InvalidInput`.
+//! - [`extract_iso_crv`] combines with [`CPoint::affine2`] (the same `alpha*A +
+//!   (1-alpha)*B` as upstream's `N_Combine2CPts` with `1 - alpha`, except that a
+//!   coordinate both points share is kept exactly), so an iso curve keeps the net
+//!   coordinate its row or column shares, as `crv_trim`'s insertions already do.
 //! - Every array access is bounds checked. Where upstream would index outside its
 //!   arrays (invalid knot vectors, degrees above `NL_MAXDEG` for the fixed-size scratch
 //!   arrays of `N_SrfSplit` / `N_SrfExtractIsoCrv`), the Rust functions return
@@ -48,7 +52,7 @@ use crate::nurbs::math::CPoint;
 use crate::nurbs::srf_basic::{Direction, Surface};
 
 /// Snap tolerance of [`extract_patch`] (hard coded upstream).
-const PATCH_SNAP_TOL: f64 = 1.0e-08;
+pub(crate) const PATCH_SNAP_TOL: f64 = 1.0e-08;
 
 /// A control net, `Pw[i][j]`.
 pub(super) type Net = Vec<Vec<CPoint>>;
@@ -149,7 +153,7 @@ pub(super) fn degree(p: usize, op: &'static str) -> Result<isize> {
     if p > DEGREE_RANGE_MAX {
         return Err(SolidError::InvalidInput {
             operation: op,
-            reason: "degree above upstream's NL_DEGREE (short) range",
+            reason: "degree above the largest degree a knot index can hold",
         });
     }
     sx(p, op)
@@ -931,7 +935,6 @@ pub fn extract_iso_crv(sur: &Surface, t: f64, dir: Direction) -> Result<Curve> {
         return Err(oob(OP));
     }
     let mut alf: Vec<Vec<f64>> = zeros2(a, a, OP)?;
-    let mut oma: Vec<Vec<f64>> = zeros2(a, a, OP)?;
     let mut rw: Vec<CPoint> = zeros1(a, OP)?;
 
     // Check parameters and compute highest indexes.
@@ -992,7 +995,6 @@ pub fn extract_iso_crv(sur: &Surface, t: f64, dir: Direction) -> Result<Curve> {
             for j in 0..=q - i - mlv {
                 let x = (t - at(vp, a + j, OP)?) / (at(vp, spv + j + 1, OP)? - at(vp, a + j, OP)?);
                 put2(&mut alf, i, j, x, OP)?;
-                put2(&mut oma, i, j, 1.0 - x, OP)?;
             }
         }
 
@@ -1004,12 +1006,8 @@ pub fn extract_iso_crv(sur: &Surface, t: f64, dir: Direction) -> Result<Curve> {
             }
             for i in 1..=q - mlv {
                 for j in 0..=q - i - mlv {
-                    let c = CPoint::combine2(
-                        at2(&alf, i, j, OP)?,
-                        at(&rw, j + 1, OP)?,
-                        at2(&oma, i, j, OP)?,
-                        at(&rw, j, OP)?,
-                    );
+                    let c =
+                        CPoint::affine2(at2(&alf, i, j, OP)?, at(&rw, j + 1, OP)?, at(&rw, j, OP)?);
                     put(&mut rw, j, c, OP)?;
                 }
             }
@@ -1034,7 +1032,6 @@ pub fn extract_iso_crv(sur: &Surface, t: f64, dir: Direction) -> Result<Curve> {
             for j in 0..=p - i - mlu {
                 let x = (t - at(up, a + j, OP)?) / (at(up, spu + j + 1, OP)? - at(up, a + j, OP)?);
                 put2(&mut alf, i, j, x, OP)?;
-                put2(&mut oma, i, j, 1.0 - x, OP)?;
             }
         }
 
@@ -1046,12 +1043,8 @@ pub fn extract_iso_crv(sur: &Surface, t: f64, dir: Direction) -> Result<Curve> {
             }
             for i in 1..=p - mlu {
                 for j in 0..=p - i - mlu {
-                    let c = CPoint::combine2(
-                        at2(&alf, i, j, OP)?,
-                        at(&rw, j + 1, OP)?,
-                        at2(&oma, i, j, OP)?,
-                        at(&rw, j, OP)?,
-                    );
+                    let c =
+                        CPoint::affine2(at2(&alf, i, j, OP)?, at(&rw, j + 1, OP)?, at(&rw, j, OP)?);
                     put(&mut rw, j, c, OP)?;
                 }
             }
@@ -1262,7 +1255,7 @@ pub fn insert_knots(sur: &Surface, x: &[f64], dir: Direction) -> Result<Surface>
 
 /// Snaps `x` to the first of `knots[0..k]` within [`PATCH_SNAP_TOL`]; returns whether
 /// it snapped.
-fn snap(x: &mut f64, knots: &[f64], k: isize) -> bool {
+pub(crate) fn snap(x: &mut f64, knots: &[f64], k: isize) -> bool {
     for &kn in knots.iter().take(usize::try_from(k).unwrap_or(0)) {
         if *x > kn - PATCH_SNAP_TOL && *x < kn + PATCH_SNAP_TOL {
             *x = kn;

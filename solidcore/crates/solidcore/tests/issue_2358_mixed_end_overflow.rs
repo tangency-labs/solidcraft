@@ -26,13 +26,15 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::error::{EntityRef, SolidError};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
-use solidcore::math::{Point3, Vec3};
+use solidcore::math::{Point3, Vec3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::brep::cutting::PlaneCutter;
@@ -44,20 +46,18 @@ use solidcore::topology::proto_topology::p1::api_transform::{
 };
 use solidcore::topology::{edge, vertex, Brep, EdgeId, FaceId};
 
-/// Every opt-in fix on, with the blend corner as given, except the one the fork does not
-/// have that moves this body's measure: the exact trims of the cylinder's sections by the
-/// plate (`cylinder_plane_section_trims_exact`). With it on the union measures 3.6e-5
-/// less (38601.117929445747 against the fork's 38601.117965259655), and the removed
-/// volumes move by 1.7e-4. The integrator splits at the surface's knots on every kernel
-/// (WR-494): it moves the removed volumes below by 6.5e-9 to 3.2e-8 (at most 8e-13 of the
-/// part's 38601, inside the 1e-10 the volumes are integrated to).
+/// Every opt-in fix on, with the blend corner as given. The curves on the cylinder get
+/// their exact trims (WR-680), where the fork fits cubics to them: the union measures
+/// its closed form ([`the_union_is_its_closed_form`]), 3.6e-5 less than the fork's
+/// 38601.117965259655, and the removed volumes below are this kernel's own, 1.7e-4 to
+/// 4.3e-4 from the fork's. The integrator splits at the surface's knots on every kernel
+/// (WR-494).
 fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
         *f.flag_mut(name).unwrap() = true;
     }
-    f.cylinder_plane_section_trims_exact = false;
     k.fixes = f;
     k
 }
@@ -133,13 +133,21 @@ fn root(k: &Kernel, b: &Brep, deg: f64) -> Vec<EdgeId> {
 
 /// The root of the boss tilted `deg` rounded `r`: the volume it removes and the face count.
 fn rounded(deg: f64, r: f64) -> Result<(f64, usize), SolidError> {
-    rounded_seam(deg, 0.0, r).map(|(v, n, _)| (v, n))
+    rounded_seam(deg, 0.0, r, None).map(|(v, n, _)| (v, n))
 }
 
-/// As [`rounded`] with the seam turned `seam`; also the body's vertices.
-fn rounded_seam(deg: f64, seam: f64, r: f64) -> Result<(f64, usize, Vec<Point3>), SolidError> {
+/// As [`rounded`] with the seam turned `seam`; also the body's vertices. `was`: what it
+/// removed before `brep_volume` closed tolerant edges' gaps (#16735), the move checked
+/// within the two bodies' old leak bounds.
+fn rounded_seam(
+    deg: f64,
+    seam: f64,
+    r: f64,
+    was: Option<f64>,
+) -> Result<(f64, usize, Vec<Point3>), SolidError> {
     let mut k = kernel();
     let mut b = boss_seam(&mut k, deg, seam);
+    let mut part = b.clone_standing_for_self().unwrap();
     let before = volume(&k, &mut b);
     let es = root(&k, &b, deg);
     // as the fork's: two at tilt 20, one (the seam turned onto the chord side) at tilt 40
@@ -150,7 +158,13 @@ fn rounded_seam(deg: f64, seam: f64, r: f64) -> Result<(f64, usize, Vec<Point3>)
         .iter()
         .map(|&v| vertex::point(&b, v).unwrap())
         .collect();
-    Ok((before - volume(&k, &mut b), b.face_list().len(), points))
+    let removed = before - volume(&k, &mut b);
+    if let Some(was) = was {
+        volume_leak::assert_difference_moved_by_the_old_leak(
+            &k, &mut part, &mut b, was, removed, 1e-10,
+        );
+    }
+    Ok((removed, b.face_list().len(), points))
 }
 
 /// The bound r*, closed form.
@@ -162,6 +176,40 @@ fn bound() -> f64 {
 #[test]
 fn the_bound_is_the_closed_form() {
     assert!((bound() - 0.262_524_174).abs() <= 1e-9, "{}", bound());
+}
+
+/// The union of the plate and the boss tilted `deg` (its foot 2 into the plate, as
+/// [`boss_seam`]), closed form: the plate and the part of the cylinder above it. Across
+/// the cylinder, at `x` along the tilt from its axis, the point `s` up the axis from the
+/// foot is above the plate where `s > 2 + x tan(deg)`, so below the plate the cylinder
+/// holds the integral of `(2 + x tan(deg)) c(x)` from `x0 = -2 / tan(deg)` to 6, with the
+/// chord `c(x) = 2 sqrt(36 - x^2)`; `big_c` and `big_d` integrate `c(x)` and `x c(x)`.
+fn union_closed_form(deg: f64) -> f64 {
+    let t = deg.to_radians().tan();
+    let x0 = -2.0 / t;
+    let big_c = |x: f64| x * (36.0 - x * x).sqrt() + 36.0 * (x / 6.0).asin();
+    let big_d = |x: f64| -2.0 / 3.0 * (36.0 - x * x).powf(1.5);
+    let below = 2.0 * (big_c(6.0) - big_c(x0)) + t * (big_d(6.0) - big_d(x0));
+    36_000.0 + 25.0 * PI * 36.0 - below
+}
+
+/// The union tilted 20 degrees, on the default kernel, measures its closed form
+/// 38601.117929444641 to the integration's accuracy: the cylinder's trim of the root
+/// ellipse, the wall's section by the plate's top, is its exact rational curve. With the
+/// traced cubic trim the union measured 38601.117965259655 (every other fix on), 3.6e-5
+/// (9.3e-10 relative) more.
+#[test]
+fn the_union_is_its_closed_form() {
+    let want = union_closed_form(20.0);
+    assert!((want - 38_601.117_929_444_64).abs() <= 1e-8, "{want}");
+    let mut k = Kernel::default();
+    let mut b = boss_seam(&mut k, 20.0, 0.0);
+    let got = volume(&k, &mut b);
+    assert!(
+        (got - want).abs() <= 1e-12 * want,
+        "union {got} != {want} (off {:e})",
+        got - want
+    );
 }
 
 /// Tilted 20 degrees and rounded 1.5: refused, naming r* less the part's tolerance.
@@ -176,14 +224,24 @@ fn tilt_20_is_refused_naming_the_largest_radius() {
     assert!(fit.size < bound() && fit.size >= bound() - 0.02);
 }
 
-/// The radii below the bound build, as the fork's: the fork removes -0.576293096943 and
-/// -0.635789174601, solidcore -0.576293104474 and -0.635789178705 (was -0.576293097954 and
-/// -0.635789172127 stepping across the surface's knots): 7.5e-9 and 4.1e-9 off, 2e-13 of
-/// the part's 38601, inside the 1e-10 its volumes are integrated to.
+/// The radii below the bound build, as the fork's, 11 faces each. The fork removes
+/// -0.576293096943 and -0.635789174601 with the cylinder's trims fitted; with them exact
+/// (WR-680) solidcore removes -0.576120035475 and -0.635614755905, 1.73e-4 and 1.74e-4
+/// less (it was -0.576293104474 and -0.635789178705 with the fitted trims, the fork's to
+/// 7.5e-9 and 4.1e-9). Since `brep_volume` closes tolerant edges' gaps (#16735) they are
+/// -0.576118862613 and -0.635617731939, the faces unchanged. Since the trim pieces integrate
+/// by Gauss-Kronrod (#14460) they are -0.576118851131 and -0.635617720312 (from
+/// -0.576120023994 and -0.635614744278 before #16735): forced to accuracy 1e-11 and 1e-12
+/// Gauss-Kronrod gives the first to the last bit and the second within 7.3e-12, and the
+/// earlier Runge-Kutta trim pieces forced to 1e-12 within 1.2e-10 and 7.3e-11; the Runge-Kutta
+/// figures were 1.15e-8 and 1.16e-8 off.
 #[test]
 fn tilt_20_below_the_bound_builds() {
-    for (r, removed) in [(0.25, -0.576_293_104_474), (0.2625, -0.635_789_178_705)] {
-        let (got, faces) = rounded(20.0, r).unwrap();
+    for (r, removed, was) in [
+        (0.25, -0.576_118_851_131, -0.576_120_023_994),
+        (0.2625, -0.635_617_720_312, -0.635_614_744_278),
+    ] {
+        let (got, faces, _) = rounded_seam(20.0, 0.0, r, Some(was)).unwrap();
         assert!((got - removed).abs() <= 5e-9, "{r}: {got}");
         assert_eq!(faces, 11);
     }
@@ -199,12 +257,18 @@ fn tilt_20_below_the_bound_builds() {
 /// plane extended for the round is now an exactly widened plane (the fork's path handed the
 /// round the plane's fitted B-spline), and the faces, rails and rounds are exact; then
 /// -33.432934267425 with the integration split at the surface's knots (WR-494; -3.2e-8).
-/// The move from the fork's, 1.0e-8, is 2.6e-13 of the part's volume (38601): rounding at
-/// the part's scale, so the value is re-pinned with the same 5e-9.
+/// With the cylinder's trims exact (WR-680) it is -33.432512368854, 4.2e-4 less removed
+/// than with the fitted trims; the faces and the rails' ends are unchanged. Since
+/// `brep_volume` closes tolerant edges' gaps (#16735) it is -33.432507111065, the faces and
+/// the rails' ends unchanged. Since the trim pieces integrate by Gauss-Kronrod (#14460) it is
+/// -33.432507092853 (from -33.432512350570 before #16735), 1.8e-8 off the Runge-Kutta
+/// figure: Gauss-Kronrod gives
+/// it to the last bit forced to accuracy 1e-11 and 1e-12, the earlier Runge-Kutta pieces
+/// within 2.0e-10 at 1e-12.
 #[test]
 fn tilt_40_rail_continued_across_the_seam_vertex() {
-    let (got, faces, points) = rounded_seam(40.0, 125.13, 1.5).unwrap();
-    assert!((got - -33.432_934_267_425).abs() <= 5e-9, "{got}");
+    let (got, faces, points) = rounded_seam(40.0, 125.13, 1.5, Some(-33.432_512_350_570)).unwrap();
+    assert!((got - -33.432_507_092_853).abs() <= 5e-9, "{got}");
     assert_eq!(faces, 10);
     for y in [-4.664_695_271, 4.664_695_271] {
         let want = Point3::new(-4.176_377_478, y, 0.893_582_223);
@@ -219,19 +283,24 @@ fn tilt_40_rail_continued_across_the_seam_vertex() {
 /// the rim arc there: still refused naming r* less the part's tolerance, the most over both
 /// edges of the split arc (`SideEdgeChainTo`, 63c7962), and that size builds (its +y End's
 /// rail ends past the seam's vertex). The fork: 1001, fit 0.262514174; at 0.262514174, 10
-/// faces and -0.636117736700 removed. Here -0.636117743787: the union measures 7.7e-9 more
-/// than the fork's (38601.117955469737 against 38601.117955462076), the result 1.5e-8 more
-/// (4e-13 relative).
+/// faces and -0.636117736700 removed. With the fitted trims solidcore removed
+/// -0.636117743787, the fork's to 7.1e-9; with the cylinder's trims exact (WR-680)
+/// -0.635683901346, 4.3e-4 less; since `brep_volume` closes tolerant edges' gaps (#16735)
+/// -0.635686884714, the faces unchanged; since the trim pieces integrate by Gauss-Kronrod
+/// (#14460) -0.635686873036 (from -0.635683890083 before #16735; the same to the last bit
+/// by Gauss-Kronrod forced to accuracy 1e-11 and 1e-12, within 1.2e-10 by the earlier
+/// Runge-Kutta pieces at 1e-12; the Runge-Kutta figure was 1.17e-8 off).
 #[test]
 fn tilt_20_seam_over_the_rim_refused_on_the_whole_rim() {
-    let err = rounded_seam(20.0, 170.0, 1.5).unwrap_err();
+    let err = rounded_seam(20.0, 170.0, 1.5, None).unwrap_err();
     let SolidError::FilletRefused { code, fit, .. } = err else {
         panic!("{err:?}");
     };
     assert_eq!(code, 1001);
     assert!((fit.size - 0.262_514_174).abs() <= 1e-9, "{}", fit.size);
-    let (got, faces, _) = rounded_seam(20.0, 170.0, 0.262_514_174).unwrap();
-    assert!((got - -0.636_117_736_700).abs() <= 1e-8, "{got}");
+    let (got, faces, _) =
+        rounded_seam(20.0, 170.0, 0.262_514_174, Some(-0.635_683_890_083)).unwrap();
+    assert!((got - -0.635_686_873_036).abs() <= 1e-8, "{got}");
     assert_eq!(faces, 10);
 }
 

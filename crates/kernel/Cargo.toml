@@ -10,10 +10,12 @@ workspace = true
 
 [dependencies]
 solidcore-record = { workspace = true }
+solidcore-ops = { workspace = true }
+solidcore-tess = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-smlib = { workspace = true }
 solidcraft-profile = { workspace = true }
-solidcraft-step = { workspace = true }
+solidcore-step = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

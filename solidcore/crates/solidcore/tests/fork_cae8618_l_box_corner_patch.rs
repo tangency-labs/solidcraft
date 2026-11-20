@@ -4,8 +4,7 @@
 //! convex side edge rounded together at r 2 and at r 5. The corner at (60, 20, 10) gets
 //! one B-spline Coons patch. Upstream's patch averages the corners' twists and comes out
 //! 38.5 degrees off its neighbours (the fork's record: 14.7 degrees off the convex round
-//! and 38 off the side face). With `corner_blend_coons_patch_tangent_to_sides` every seam
-//! of the patch is within 1 degree, as the fork's test requires.
+//! and 38 off the side face). In solidcore every seam of the patch is within 1 degree, as the fork's test requires.
 //!
 //! The fork's test measures the angle between the binormals of the two faces at 31
 //! stations inside each of the patch's edges; this one compares the faces' normals there.
@@ -100,11 +99,10 @@ fn corner_patch_seams(k: &Kernel, b: &Brep, corner: Point3, reach: f64) -> (usiz
     (patches, worst)
 }
 
-/// The L-shaped box's notch floor edges rounded `radius`, with WR-547's `fixed`: the
-/// patches at the corner and their worst seam.
-fn rounded_notch(fixed: bool, radius: f64) -> (usize, f64) {
+/// The L-shaped box's notch floor edges rounded `radius`: the patches at the corner and
+/// their worst seam.
+fn rounded_notch(radius: f64) -> (usize, f64) {
     let mut k = Kernel::default();
-    k.fixes.corner_blend_coons_patch_tangent_to_sides = fixed;
     let part = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
     let block = create_box(&mut k, Point3::new(40.0, 20.0, 10.0), 30.0, 30.0, 20.0).unwrap();
     let mut b = boolean_difference(&mut k, part, block).unwrap();
@@ -123,20 +121,10 @@ fn rounded_notch(fixed: bool, radius: f64) -> (usize, f64) {
 }
 
 #[test]
-fn fork_cae8618_l_box_corner_patch_is_tangent_with_the_fix() {
+fn fork_cae8618_l_box_corner_patch_is_tangent() {
     for radius in [2.0, 5.0] {
-        let (patches, worst) = rounded_notch(true, radius);
+        let (patches, worst) = rounded_notch(radius);
         assert_eq!(patches, 1, "r {radius}");
         assert!(worst < 1.0, "r {radius}: a seam {worst} degrees off");
-    }
-}
-
-/// Upstream's mean-twist patch: 38.5 degrees off at both radii.
-#[test]
-fn fork_cae8618_l_box_corner_patch_is_not_tangent_by_default() {
-    for radius in [2.0, 5.0] {
-        let (patches, worst) = rounded_notch(false, radius);
-        assert_eq!(patches, 1, "r {radius}");
-        assert!(worst > 10.0, "r {radius}: {worst} degrees");
     }
 }

@@ -480,6 +480,22 @@ fn move_features_keeps_the_world_and_the_attachment_in_the_active_component() {
     assert_eq!(anchor.map(|a| (a.component, a.path)), Some((part, s.doc.first_path(part))));
 }
 
+/// A plane built square to a line carries two picks of the model. Moving its feature into a
+/// placed component re-expresses both picks in the component's frame, so the plane keeps its
+/// place in the world (#11134).
+#[test]
+fn move_features_re_expresses_a_square_to_line_planes_picks() {
+    let (mut s, part) = block_and_part();
+    // Square to the block's edge along Z at (10, 0), through a fixed point off that edge.
+    run(&mut s, "construct.plane.square_to_line", json!({"line": {"edge": [10, 0, 2]}, "point": {"point": [12, 5, 3]}, "name": "Ward"}));
+    let before = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n == "Ward").unwrap().2;
+    run(&mut s, "component.move_features", json!({"features": ["Ward"], "component": part}));
+    assert_eq!(s.doc.find_feature("Ward").map(|f| f.component), Some(part));
+    let after = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n == "Ward").unwrap().2;
+    assert!(after.origin.dist(before.origin) < 1e-9, "the plane moved: {before:?} -> {after:?}");
+    assert!(after.normal().dist(before.normal()) < 1e-9, "the plane turned: {before:?} -> {after:?}");
+}
+
 /// Moved without its body, or with the body moved from under it, a feature would break: the move
 /// is refused and nothing changes.
 #[test]
@@ -622,4 +638,60 @@ fn reparent_items_keeps_hidden_placements_hidden() {
     assert_eq!(s.visibility.hidden_occurrences, vec![vec![dest_occurrence, outer_occurrence, inner]]);
     assert_eq!(s.doc.occurrences.iter().find(|o| o.id == outer_occurrence).map(|o| o.parent), Some(dest));
     let _ = part;
+}
+
+/// Three loose sketches and an empty part, the sketch with id 2 and another one named "2".
+/// Returns the session, the part, the sketch named "2" and the sketch numbered 2.
+fn sketch_named_like_an_id() -> (Session, u64, u64, u64) {
+    let mut s = Session::default();
+    for name in ["A", "B", "C"] {
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": name}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    let sketches: Vec<u64> = s.doc.features.iter().map(|f| f.id).collect();
+    assert!(sketches.contains(&2), "a sketch has id 2: {sketches:?}");
+    let named = *sketches.iter().find(|id| **id != 2).unwrap();
+    run(&mut s, "timeline.rename", json!({"feature": named, "name": "2"}));
+    let part = run(&mut s, "component.create", json!({"name": "Part", "activate": false}))["component"].as_u64().unwrap();
+    (s, part, named, 2)
+}
+
+/// A feature named "2" is the one `"2"` names, not the feature whose id is 2, as in the
+/// timeline commands (#9748); the number 2 still names the feature with that id.
+#[test]
+fn component_commands_take_a_name_that_looks_like_an_id_as_the_name() {
+    let moved_by = |command: &str, key: Value| {
+        let (mut s, part, named, numbered) = sketch_named_like_an_id();
+        run(&mut s, command, json!({"features": [key], "component": part}));
+        let component = |id: u64| s.doc.feature(id).map(|f| f.component);
+        (component(named) == Some(part), component(numbered) == Some(part))
+    };
+    for command in ["component.move_features", "browser.reparent"] {
+        assert_eq!(moved_by(command, json!("2")), (true, false), "{command}: the name \"2\"");
+        assert_eq!(moved_by(command, json!(2)), (false, true), "{command}: the id 2");
+    }
+}
+
+/// `component.move_sketches.to_parts` with `"2"` looks at the sketch named "2": it is on no
+/// face, so it stays, and the reply names it.
+#[test]
+fn sketches_to_parts_takes_a_name_that_looks_like_an_id_as_the_name() {
+    let (mut s, _, named, _) = sketch_named_like_an_id();
+    let r = run(&mut s, "component.move_sketches.to_parts", json!({"sketches": ["2"]}));
+    assert_eq!(r["moved"], 0, "{r}");
+    let kept: Vec<u64> = r["kept"].as_array().unwrap().iter().filter_map(|k| k["sketch"].as_u64()).collect();
+    assert_eq!(kept, [named], "{r}");
+}
+
+/// `component.move_sketches` with `"2"` moves the sketch named "2", and with the number 2 the
+/// sketch with that id, as the other component commands (#9748).
+#[test]
+fn move_sketches_takes_a_name_that_looks_like_an_id_as_the_name() {
+    for (key, moves_named) in [(json!("2"), true), (json!(2), false)] {
+        let (mut s, part, named, numbered) = sketch_named_like_an_id();
+        run(&mut s, "component.move_sketches", json!({"sketches": [key], "component": part}));
+        let component = |id: u64| s.doc.feature(id).map(|f| f.component);
+        assert_eq!((component(named) == Some(part), component(numbered) == Some(part)), (moves_named, !moves_named), "{key}");
+    }
 }

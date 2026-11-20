@@ -427,7 +427,7 @@ impl DocumentTimeline {
                             anchor_name: name.clone(),
                         });
                     }
-                    PlaneRef::Construction { feature } => {
+                    PlaneRef::Construction { feature, .. } => {
                         let target_fid = feature.0;
                         deps.insert(target_fid);
                         refs.push(TopologicalReference::SketchPlane {
@@ -840,7 +840,7 @@ impl DocumentTimeline {
 /// Helper to recursively gather plane references.
 fn collect_plane_dependencies(plane: &PlaneRef, doc: &Document, deps: &mut HashSet<u64>) {
     match plane {
-        PlaneRef::Construction { feature } => {
+        PlaneRef::Construction { feature, .. } => {
             deps.insert(feature.0);
         }
         PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => {
@@ -1115,13 +1115,7 @@ impl DocumentDryRunExt for Document {
 /// Commit a mutation and its deterministic remapping as a single atomic undo/redo transaction.
 pub fn commit_edit_and_remap(session: &mut Session, mutation: TimelineMutation) -> Result<DiagnosticReport> {
     // 1. Record single undo snapshot for the atomic transaction
-    let before = Snapshot {
-        label: "Timeline Fixer: Edit & Auto-Remap".to_string(),
-        doc: session.doc.clone(),
-        active_sketch: session.active_sketch,
-        pending_moves: session.pending_moves.clone(),
-        visibility: session.visibility.clone(),
-    };
+    let before = Snapshot::of(session, "Timeline Fixer: Edit & Auto-Remap");
 
     // 2. Apply mutation to session doc
     let mut next_doc = (*session.doc).clone();

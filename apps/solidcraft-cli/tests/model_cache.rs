@@ -51,7 +51,7 @@ fn state(name: &str, st: &Arc<ModelState>) -> Value {
     json!({
         "bodies": st.bodies.iter().map(|b| body(name, b)).collect::<Vec<_>>(),
         "sketches": st.sketches.iter().map(|s| json!([s.feature, s.name, s.plane, s.sketch, s.report, s.profiles.len()])).collect::<Vec<_>>(),
-        "counter": st.body_counter, "sheets": st.sheets, "threads": st.threads, "construct": format!("{:?}", st.construct),
+        "counter": st.body_counter, "sheets": st.surface_sheets, "threads": st.threads, "construct": format!("{:?}", st.construct),
     })
 }
 
@@ -129,6 +129,74 @@ fn sample_designs_open_from_their_model_as_evaluated() {
             s.execute(c["command"].as_str().unwrap(), &c["params"]).unwrap_or_else(|e| panic!("{}: {e}", sample.name));
         }
         check(sample.name, s);
+    }
+}
+
+/// A cut up to its boss's top face splits that face. Copies need the face point found before
+/// the cut, including after opening from the saved model (#17426).
+#[test]
+fn reopened_patterns_and_mirrors_keep_the_faces_the_source_cut_split() {
+    let pattern = json!({"features":["Boss","Slot"],"dir1":[-1,0,0],"count1":2,"spacing1":40,"name":"Pat"});
+    let spacing = json!({"feature":"Pat","command":"solid.pattern.rectangular","params":{
+        "features":["Boss","Slot"],"dir1":[-1,0,0],"count1":2,"spacing1":45
+    }});
+    for thinned in [false, true] {
+        for (name, command, params) in [
+            ("spacing", "timeline.redefine", spacing.clone()),
+            ("pattern", "solid.pattern.rectangular", pattern.clone()),
+            ("mirror", "solid.mirror", json!({"features":["Boss","Slot"],"plane":"YZ"})),
+        ] {
+            let mut built = Session::default();
+            for (command, params) in [
+                ("solid.box", json!({"length":80,"width":10,"height":10,"corner":[-40,0,-10],"body_name":"Bar"})),
+                ("sketch.create", json!({"plane":"XY","name":"B"})),
+                ("sketch.rectangle.two_point", json!({"p0":[5,0],"p1":[35,10]})),
+                ("sketch.finish", json!({})),
+                ("solid.extrude", json!({"sketch":"B","profiles":[0],"name":"Boss","distance":5,"operation":"join"})),
+                ("sketch.create", json!({"plane":"XY","name":"C"})),
+                ("sketch.rectangle.two_point", json!({"p0":[15,0],"p1":[25,10]})),
+                ("sketch.finish", json!({})),
+                ("solid.extrude", json!({"sketch":"C","profiles":[0],"name":"Slot","to":[20,5,5],"operation":"cut"})),
+            ] {
+                built.execute(command, &params).unwrap();
+            }
+            if name == "spacing" {
+                built.execute("solid.pattern.rectangular", &pattern).unwrap();
+            }
+            let path = temp(&format!("split-face-{name}-{thinned}"));
+            if thinned {
+                let saved = built.model.saved(&built.doc).unwrap();
+                let pieces: Vec<Vec<(usize, usize)>> = (0..saved.bodies.len()).map(|i| vec![(i, 1 << 20)]).collect();
+                let (saved, _, _) = saved.thinned(&pieces, 0).unwrap();
+                assert_eq!(saved.records["states"].as_array().unwrap().len(), 1);
+                let bytes = solidcraft_engine::io::write_design_container_with_cache(
+                    &built.design(),
+                    solidcraft_engine::io::DesignCompression::Fast,
+                    None,
+                    Some(&saved),
+                )
+                .unwrap();
+                std::fs::write(&path, bytes).unwrap();
+            } else {
+                built.execute("file.save_as", &json!({"path":path})).unwrap();
+            }
+            let mut cached = open(&path);
+            if thinned {
+                assert!(cached.model.recomputed > 0, "{name}: states omitted from the cache were rebuilt");
+                assert!(cached.model.recomputed < built.doc.features.len(), "{name}: the saved final state was adopted");
+            } else {
+                assert_eq!(cached.model.last_recomputed, 0, "{name}: the saved model was adopted");
+            }
+            built.execute(command, &params).unwrap();
+            cached.execute(command, &params).unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(model(name, &cached), model(name, &built), "{name}: the same edit before and after reopening");
+            let state = cached.model.state();
+            assert_eq!(state.bodies.len(), 1);
+            let volume = solidcraft_engine::kernel::measure(&state.bodies[0].body).unwrap().volume;
+            // Bar + two bosses, each minus its slot: 80*10*10 + 2*(30*10*5 - 10*10*5).
+            assert!((volume - 10_000.0).abs() < 1e-6, "{name}: volume {volume}");
+            std::fs::remove_file(path).unwrap();
+        }
     }
 }
 

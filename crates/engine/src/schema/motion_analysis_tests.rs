@@ -33,7 +33,10 @@ fn rail() -> Session {
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<PlotParams>(), &["duration", "joints", "occurrence", "point", "samples", "study"]);
-    assert_keys(input_schema_for::<InterferenceParams>(), &["against", "budget_s", "contact_sets", "occurrences", "samples", "study"]);
+    assert_keys(
+        input_schema_for::<InterferenceParams>(),
+        &["against", "budget_s", "contact_sets", "exclude_pairs", "occurrences", "samples", "study"],
+    );
     for schema in [input_schema_for::<PlotParams>(), input_schema_for::<InterferenceParams>()] {
         assert_eq!(schema.as_value()["required"], json!(["study"]));
     }

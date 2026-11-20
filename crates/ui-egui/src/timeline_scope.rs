@@ -256,7 +256,7 @@ fn step_button(app: &mut SolveApp, ui: &mut egui::Ui, p: &Painter, x: f32, r: Re
         Step::More(_) => false,
     };
     let name = step_name(app, step);
-    let accent = solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab);
+    let accent = crate::workspace::tab_accent(&t, &app.ui.tab);
     let galley = p.layout_no_wrap(name.clone(), egui::FontId::proportional(t.font_small), t.text_dim);
     let size = vec2(galley.size().x.min(STEP_MAX) + 2.0 * t.space_4, t.space_24);
     let rect = Rect::from_min_size(pos2(x, r.center().y - t.space_24 / 2.0), size);

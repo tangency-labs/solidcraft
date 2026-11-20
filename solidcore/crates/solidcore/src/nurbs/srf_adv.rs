@@ -47,7 +47,7 @@ fn degree(p: usize, op: &'static str) -> Result<usize> {
     if p > DEGREE_RANGE_MAX {
         return Err(SolidError::InvalidInput {
             operation: op,
-            reason: "degree above upstream's NL_DEGREE (short) range",
+            reason: "degree above the largest degree a knot index can hold",
         });
     }
     Ok(p)

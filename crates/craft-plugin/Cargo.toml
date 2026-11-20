@@ -1,0 +1,15 @@
+[package]
+name = "craft-plugin"
+description = "App-independent command plugin contracts, manifests and permissions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

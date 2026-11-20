@@ -2,16 +2,17 @@
 //! original surface than the offset distance (`BuildOffsetOfFaceuse`, cpp:3730-3759).
 //!
 //! `Boolean/extrudeHoles1.smb` outset by 24.7 keeping face 0 as a shell face (the
-//! `offset.offset_executive_p2` case `pi_extrudeHoles1_f0_k0.38_out_rnd`), and
-//! `Defeature/extrusion.smb` inset by 2.5 keeping face 0: one offset face has a lamina
-//! edge point nearer the original surface than 24.7 (resp. 2.5) less twice the
+//! `offset.offset_executive_p2` case `pi_extrudeHoles1_f0_k0.38_out_rnd`): one offset face
+//! has a lamina edge point nearer the original surface than 24.7 less twice the
 //! approximation tolerance, so upstream deletes it with
 //! `SmTopologyIntersector::DeleteFaces`. The port ran that deletion through the kernel
 //! context while the face builder held its notification callbacks, so the deletion
 //! failed as a nested edit, its status was ignored and the face was kept: the
 //! unstitched offset had one face and four edges more than the C++ reference.
 //!
-//! The expected counts are the pinned C++ reference's.
+//! The expected counts are the pinned C++ reference's. `Defeature/extrusion.smb` inset by
+//! 2.5 deleted its face 2 the same way; that face's offset folds (radius 1.53), so the
+//! offset is now refused before it is built (`offset_shell_extrusion_extend.rs`).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -23,8 +24,7 @@
 mod offset_fixture;
 
 use offset_fixture::Notifications;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::offset::offset_executive::p1::{OffsetExecutive, OffsetOperation};
 use solidcore::offset::offset_executive::p2::SolidOffsetOptions;
 use solidcore::topology::brep::p1 as bp1;
@@ -32,7 +32,7 @@ use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, Kernel};
 
 /// The upstream test file, read as the difftest runner reads it; `None` (the test is
 /// skipped) without the pinned upstream checkout.
@@ -52,10 +52,7 @@ fn upstream_part(k: &mut Kernel, name: &str) -> Option<Brep> {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
@@ -108,12 +105,4 @@ fn extrude_holes_outset_deletes_the_face_off_its_original() {
         return;
     };
     assert_eq!(counts, (24, 84), "faces, edges");
-}
-
-#[test]
-fn extrusion_inset_deletes_the_face_off_its_original() {
-    let Some(counts) = unstitched_counts("Defeature/extrusion.smb", 2.5, 1e-4, true) else {
-        return;
-    };
-    assert_eq!(counts, (14, 65), "faces, edges");
 }

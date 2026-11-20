@@ -34,9 +34,9 @@ impl fmt::Display for FaceName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.base {
             Base::Made { feature, role } => write!(f, "F{}:{role}", feature.0)?,
-            Base::Blend { feature, rounds: Rounds::Edge(e) } => write!(f, "F{}:blend:{e}", feature.0)?,
-            Base::Blend { feature, rounds: Rounds::Index(k) } => write!(f, "F{}:blend:{k}", feature.0)?,
-            Base::Inner { feature, offsets } => write!(f, "F{}:inner:{offsets}", feature.0)?,
+            Base::Blend { feature, rounds: Rounds::Edge(e) } => write!(f, "F{}:blend({e})", feature.0)?,
+            Base::Blend { feature, rounds: Rounds::Index(k) } => write!(f, "F{}:blend({k})", feature.0)?,
+            Base::Inner { feature, offsets } => write!(f, "F{}:inner({offsets})", feature.0)?,
             Base::BodyFace { body, index } => write!(f, "{body}:face:{index}")?,
             Base::Other(t) => f.write_str(t)?,
         }

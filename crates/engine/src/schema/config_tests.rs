@@ -34,7 +34,7 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<ConfigColumnParams>(),
         &["appearance", "component_appearance", "delete", "face_appearance", "feature", "material", "param"],
     );
-    assert_keys(input_schema_for::<ConfigRowEditParams>(), &["delete", "from", "name", "rename", "values"]);
+    assert_keys(input_schema_for::<ConfigRowEditParams>(), &["delete", "from", "index", "name", "rename", "values"]);
     assert_keys(input_schema_for::<ConfigRuleParams>(), &["delete", "id", "index", "rule", "rules"]);
 }
 
@@ -43,6 +43,8 @@ fn strict_keeps_todays_errors() {
     assert_strict_keeps_todays_errors(&[
         ("config.activate", json!({})),
         ("config.activate", json!({"row": 5})),
+        ("config.activate", json!({"row": -1})),
+        ("config.activate", json!({"row": 1.5})),
         ("config.activate", json!({"row": "Nope"})),
         ("config.configure", json!({"params": 5})),
         ("config.configure", json!({"params": ["W", 1]})),
@@ -78,6 +80,9 @@ fn strict_keeps_todays_errors() {
         ("config.row", json!({"name": "R", "values": {"param:W": "1".repeat(4097)}})),
         ("config.row", json!({"name": "R", "values": {"param:W": "1"}})),
         ("config.row", json!({"name": "R", "from": "Nope"})),
+        ("config.row", json!({"name": "R", "from": 99_999})),
+        ("config.row", json!({"name": "R", "from": true})),
+        ("config.row", json!({"name": 99_999, "delete": true})),
         ("config.row", json!({"name": "R", "rename": null})),
         ("config.row", json!({"name": "R", "rename": "S"})),
         ("config.row", json!({"name": "R", "delete": true})),
@@ -137,6 +142,10 @@ fn the_table_editing_schemas_take_what_the_handlers_read() {
     check(input_schema_for::<ConfigRowEditParams>(), json!({"values": {}}), false);
     check(input_schema_for::<ConfigRuleParams>(), json!({"rule": always("r1", "W", "1")}), true);
     check(input_schema_for::<ConfigRuleParams>(), json!({"rules": [always("r1", "W", "1"), {"id": "r2", "name": "r2"}]}), false);
+    // A row's `index` is a number: `null` is refused by the handler, so the schema refuses it too.
+    check(input_schema_for::<ConfigRowEditParams>(), json!({"name": "R", "index": 0}), true);
+    check(input_schema_for::<ConfigRowEditParams>(), json!({"name": "R", "index": null}), false);
+    check(input_schema_for::<ConfigRowEditParams>(), json!({"name": "R", "index": -1}), false);
     check(input_schema_for::<ConfigRuleParams>(), json!({"id": "r1", "index": 0}), true);
     check(input_schema_for::<ConfigRuleParams>(), json!({"id": "r1", "index": -1}), false);
     // The schema of `config.column` says that exactly one target is given (`conforms` doesn't

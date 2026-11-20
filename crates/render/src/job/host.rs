@@ -80,8 +80,7 @@ impl ImageExecutor for CpuExecutor {
 #[cfg(all(test, feature = "raytrace-cpu", not(target_arch = "wasm32")))]
 impl ImageHost {
     pub(super) fn join_worker_for_test(&mut self) -> Result<()> {
-        self.0.shared.stop.store(true, Ordering::Release);
-        self.0.shared.wake.notify_all();
+        self.0.shared.stop_worker();
         let inner = Arc::get_mut(&mut self.0).ok_or_else(|| JobError::new(ErrorCode::Internal, "test must own its host"))?;
         if let Some(worker) = inner._worker.take() {
             worker.join().map_err(|_| JobError::new(ErrorCode::Internal, "test worker panicked"))?;
@@ -311,8 +310,7 @@ mod light_union_lease_tests {
         assert_eq!(job.wait_timeout(std::time::Duration::from_secs(60)).unwrap().progress.phase, Phase::Completed);
         // Synchronize this test's completed worker before asserting final Arc release;
         // publication wakes waiters just before Running drops its temporary handle.
-        host.0.shared.stop.store(true, Ordering::Release);
-        host.0.shared.wake.notify_all();
+        host.0.shared.stop_worker();
         Arc::get_mut(&mut host.0).unwrap()._worker.take().unwrap().join().unwrap();
         let retained = job.0.request.raytrace.as_ref().unwrap();
         assert_eq!(
@@ -1709,6 +1707,19 @@ struct Shared {
     wake: Condvar,
 }
 
+impl Shared {
+    /// Tell the native worker to stop and wake it. The worker checks `stop` and starts waiting
+    /// while it holds the queue lock, so both happen under that lock: a wake sent between the
+    /// check and the wait would be lost, and the worker would wait for good (#14500).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn stop_worker(&self) {
+        // A poisoned lock still hands back its guard; holding it is all that matters here.
+        let _queue = self.queue.lock();
+        self.stop.store(true, Ordering::Release);
+        self.wake.notify_all();
+    }
+}
+
 struct Owner {
     executor: Option<Arc<dyn ImageExecutor>>,
     shared: Arc<Shared>,
@@ -1739,7 +1750,7 @@ impl Drop for Owner {
             terminal(&work.handle, JobError::new(ErrorCode::Cancelled, "render host closed"));
         }
         #[cfg(not(target_arch = "wasm32"))]
-        self.shared.wake.notify_all();
+        self.shared.stop_worker();
         // Detaching cannot stall the UI; the bounded worker observes stop/cancel at its next unit.
     }
 }
@@ -2840,8 +2851,7 @@ mod retained_request_tests {
                 assert_eq!(slot.0.capacity() as u64 * std::mem::size_of::<JobOptions>() as u64, expected);
             }
             assert_eq!(job.wait_timeout(std::time::Duration::from_secs(60)).unwrap().progress.phase, Phase::Completed);
-            host.0.shared.stop.store(true, Ordering::Release);
-            host.0.shared.wake.notify_all();
+            host.0.shared.stop_worker();
             Arc::get_mut(&mut host.0).unwrap()._worker.take().unwrap().join().unwrap();
             assert!(job.work_released());
             let frame = job.frame().unwrap().unwrap();
@@ -2910,8 +2920,7 @@ mod retained_request_tests {
         received.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
         job.cancel().unwrap();
         assert_eq!(job.wait_timeout(std::time::Duration::from_secs(60)).unwrap().progress.phase, Phase::Cancelled);
-        host.0.shared.stop.store(true, Ordering::Release);
-        host.0.shared.wake.notify_all();
+        host.0.shared.stop_worker();
         Arc::get_mut(&mut host.0).unwrap()._worker.take().unwrap().join().unwrap();
         assert!(job.work_released());
         assert!(job.frame().unwrap().is_none());
@@ -2944,8 +2953,7 @@ mod retained_request_tests {
         let presentation = super::super::presentation::Presentation { exposure_ev: 1.0, ..Default::default() };
         let derivative = host.submit_regrade(JobId { session: 903, serial: 2, generation: 2 }, &original, presentation).unwrap();
         assert_eq!(derivative.wait_timeout(std::time::Duration::from_secs(60)).unwrap().progress.phase, Phase::Completed);
-        host.0.shared.stop.store(true, Ordering::Release);
-        host.0.shared.wake.notify_all();
+        host.0.shared.stop_worker();
         Arc::get_mut(&mut host.0).unwrap()._worker.take().unwrap().join().unwrap();
         let frame = derivative.frame().unwrap().unwrap();
         assert_eq!(frame.linear_exr().unwrap(), original_frame.linear_exr().unwrap());
@@ -3041,8 +3049,7 @@ mod retained_request_tests {
         assert_eq!(job.wait_timeout(std::time::Duration::from_secs(60)).unwrap().progress.phase, Phase::Completed);
         // Completion publication precedes the worker's last temporary handle release.
         // Join this test's worker before asserting exact lease ownership, as in the union test.
-        host.0.shared.stop.store(true, Ordering::Release);
-        host.0.shared.wake.notify_all();
+        host.0.shared.stop_worker();
         Arc::get_mut(&mut host.0).unwrap()._worker.take().unwrap().join().unwrap();
         let frame = job.frame().unwrap().unwrap();
         let held = job.clone();
@@ -3414,8 +3421,7 @@ mod surface_request_metadata_tests {
         let job = host.submit(id(40, 2), 1, scene, request).unwrap();
         assert_eq!(job.wait_timeout(Duration::from_secs(10)).unwrap().progress.phase, Phase::Completed);
         // Wait for this host's last temporary worker handle before exact lease checks.
-        host.0.shared.stop.store(true, Ordering::Release);
-        host.0.shared.wake.notify_all();
+        host.0.shared.stop_worker();
         Arc::get_mut(&mut host.0).unwrap()._worker.take().unwrap().join().unwrap();
         let frame = job.frame().unwrap().unwrap();
         let png_bytes = frame._reservation.bytes;

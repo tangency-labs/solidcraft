@@ -423,6 +423,38 @@ mod tests {
         assert!(g.execute("plastic.lip", &json!({"face": [40, 25, 0], "width": 1, "height": 2})).is_err(), "a face without an inner edge");
     }
 
+    #[test]
+    fn groove_on_bottom_rim_of_rounded_shell() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": solidcore_record::Plane::XY, "name": "Outline"}));
+        run(
+            &mut s,
+            "sketch.rectangle.rounded",
+            json!({"p0": [-25.263865881072945, -28.541660374585607], "p1": [25.263865881072945, 28.541660374585607], "radius": 3}),
+        );
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Outline", "distance": 10}));
+        run(&mut s, "solid.shell", json!({"faces": [[0, 0, 0]], "thickness": 2}));
+        let state = s.model.state();
+        let shell = &state.body("Body1").unwrap().body;
+        assert!(shell.validity().is_empty(), "shell: {:?}", shell.validity());
+        let (plane, band) = solidcraft_kernel::rim_band(shell, Vec3::new(0.0, -27.541660374585607, 0.0), 1.5, 0.0, false).unwrap();
+        let cutter = solidcraft_kernel::extrude(&plane, &[band], -2.0, 0.0).unwrap();
+        for body in &cutter {
+            assert!(body.validity().is_empty(), "cutter: {:?}", body.validity());
+        }
+        let before = volume(&mut s);
+        let result = s.execute("plastic.lip", &json!({"face": [0, -27.541660374585607, 0], "width": 1.5, "height": 2, "type": "groove"}));
+        assert!(result.is_ok(), "{result:?}");
+        let area = |w: f64, h: f64, r: f64| w * h - (4.0 - PI) * r * r;
+        let w = 50.52773176214589;
+        let h = 57.083320749171214;
+        let groove_area = area(w - 1.0, h - 1.0, 2.5) - area(w - 4.0, h - 4.0, 1.0);
+        let removed = before - volume(&mut s);
+        assert!((removed - groove_area * 2.0).abs() < 0.05, "removed {removed}, expected {}", groove_area * 2.0);
+        assert!(s.model.state().body("Body1").unwrap().body.validity().is_empty());
+    }
+
     /// A lip follows its rim face when a parameter moves it (#11209): it was kept by a point
     /// only, so a taller box left the point below the rim and the lip failed.
     #[test]

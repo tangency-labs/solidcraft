@@ -1,0 +1,263 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b9": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "revolve",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "angle": 6.283185307179586,
+        "cap": true,
+        "direction": [
+          -0.0,
+          -1.0,
+          -0.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 1.5707963257816089,
+              "radius": 10.000000010132878,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 1.0132877980591988e-9
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                10.000000010132878,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                10.000000010132878,
+                1.013287799085951e-8,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "transform",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "matrix": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            -1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            -0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b10"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b11"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b12"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b11"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b13"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b12",
+        "b13"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b14"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "3011-revolved-dome-1e-8-off-joined-to-its-mirror",
+  "expected": {
+    "body_count": 1,
+    "method": "two hemispheres r 10 meeting in the disc y = 0: V = 2*(2/3*pi*10^3) = 4/3*pi*10^3 = 4188.790; one body. Tolerance 1e-3 relative",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcore#3011"
+    ],
+    "tolerance": {
+      "rel": 0.001
+    },
+    "volume_mm3": 4188.79,
+    "what": "a dome made by `solid.revolve` (quarter disc r 10 about y, its arc passing through [7.0710678118654755, 7.0710678], about 1e-8 off the true circle (its y is rounded to 8 decimals; the exact point passes)) joined to its own mirror across y = 0 (`solid.mirror` with combine): a sphere. With the arc about 1e-8 off, the check refused the result ('Face Near missing Seam') until #13713 was fixed (#14348); the same case with the exact arc passes, and so does a primitive sphere joined to a cylinder (2851)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "records": "3011-revolved-dome-1e-8-off-joined-to-its-mirror.bodies.json.gz",
+  "result": [
+    {
+      "body": "Dome",
+      "made": "b14"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcore#3011"
+  ],
+  "ungraded": [],
+  "what": "a dome made by `solid.revolve` (quarter disc r 10 about y, its arc passing through [7.0710678118654755, 7.0710678], about 1e-8 off the true circle (its y is rounded to 8 decimals; the exact point passes)) joined to its own mirror across y = 0 (`solid.mirror` with combine): a sphere. With the arc about 1e-8 off, the check refused the result ('Face Near missing Seam') until #13713 was fixed (#14348); the same case with the exact arc passes, and so does a primitive sphere joined to a cylinder (2851)",
+  "why_not": []
+}

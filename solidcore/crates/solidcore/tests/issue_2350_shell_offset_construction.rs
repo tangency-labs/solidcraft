@@ -1,14 +1,14 @@
-//! tangency-labs/solidcore#2350, S1 (opt-in `UpstreamFixes::shell_one_construction`,
-//! WR-718): each face's offset sheet exact or certified.
+//! tangency-labs/solidcore#2350, S1 (WR-718): each face's offset sheet exact or certified,
+//! on the default kernel.
 //!
 //! The issue's §3.1 parabolic sheet, the quadratic Bezier (-10, 0), (0, 10), (10, 0)
 //! extruded 20 (one span, and two spans with a knot at s = 1/2), thickened by `t`:
 //! towards the centre of curvature the solid is the tube formula's
 //! `20 (t L - t^2 pi / 4)` (L = 22.955871, the arc length; the tangent turns by pi/2),
 //! away from it `20 (t L + t^2 pi / 4)`. At t11 towards the centre the offset folds
-//! (the apex's radius of curvature is 10): with the flag the thicken is refused naming
-//! 10 (D5); without it SMLib's port fails on its broken topology (the pinned C++ builds
-//! a folded body of one span and crashes on two).
+//! (the apex's radius of curvature is 10): the thicken is refused naming 10 (D5), where
+//! SMLib's port failed on its broken topology (the pinned C++ builds a folded body of one
+//! span and crashes on two).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -171,12 +171,6 @@ fn offset_face_error(k: &Kernel, b: &Brep, t: f64) -> f64 {
     worst
 }
 
-fn kernel(flag: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.shell_one_construction = flag;
-    k
-}
-
 /// S1's gate: the offset face is the certified offset, within the shell's tolerance
 /// (1e-5) of distance `t` from the sheet at every parameter (sampled: 2.7e-6 at t2), so
 /// the solid is the tube formula's to the tolerance times its boundary area. Measured at
@@ -187,7 +181,7 @@ fn kernel(flag: bool) -> Kernel {
 fn parabola_thickens_to_its_certified_offset() {
     for two in [false, true] {
         for (d, t, towards) in [(2.0, 2.0, true), (-2.0, 2.0, false), (5.0, 5.0, true)] {
-            let mut k = kernel(true);
+            let mut k = Kernel::default();
             let sheet = parabola_sheet(&mut k, two);
             let mut b = thicken(&mut k, sheet, d).unwrap();
             assert_eq!(b.face_list().len(), 6);
@@ -212,10 +206,12 @@ fn parabola_thickens_to_its_certified_offset() {
     }
 }
 
+/// t11 towards the centre folds at the apex (radius 10): the default kernel refuses it,
+/// naming 10 (D5), where SMLib's port failed on its broken topology.
 #[test]
 fn parabola_fold_is_refused_naming_its_apex_radius() {
     for two in [false, true] {
-        let mut k = kernel(true);
+        let mut k = Kernel::default();
         let sheet = parabola_sheet(&mut k, two);
         let err = thicken(&mut k, sheet, 11.0).unwrap_err();
         let Some(failure) = err.failure() else {
@@ -249,26 +245,8 @@ fn parabola_fold_is_refused_naming_its_apex_radius() {
     }
 }
 
-/// With the flag off the shell is SMLib's: t11 fails as the port does (not refused), and
-/// t2 builds on `N_SrfOffset`'s sampled fit.
-#[test]
-fn flag_off_keeps_smlibs_results() {
-    for two in [false, true] {
-        let mut k = kernel(false);
-        let sheet = parabola_sheet(&mut k, two);
-        let err = thicken(&mut k, sheet, 11.0).unwrap_err();
-        assert_ne!(err.kind(), ErrorKind::OffsetFolds, "{err:?}");
-        let mut k = kernel(false);
-        let sheet = parabola_sheet(&mut k, two);
-        let mut b = thicken(&mut k, sheet, 2.0).unwrap();
-        assert!(matches!(brep_is_manifold_solid(&b), Ok(true)));
-        let v = volume(&k, &mut b).unwrap();
-        assert!((v - tube(2.0, true)).abs() <= 1e-6 * v, "{v}");
-    }
-}
-
 /// §3.1's closed-form shells on analytic faces, which S1 leaves to their exact offsets:
-/// with every opt-in fix on (this flag included) they keep their closed forms.
+/// with every opt-in fix on they keep their closed forms.
 #[test]
 fn analytic_shells_keep_their_closed_forms() {
     use offset_fixture::{planar_faces_at, shell};
@@ -305,4 +283,49 @@ fn analytic_shells_keep_their_closed_forms() {
     let want = 2.0 * PI * PI * 20.0 * (25.0 - 16.0);
     let got = volume(&k, &mut b).unwrap();
     assert!((got - want).abs() <= 1e-8 * want, "torus {got} vs {want}");
+}
+
+/// #18239: a 2 x 2 x 2 square boss on a 20 x 20 x 10 block, shelled closed. At a wall of 1
+/// the boss's opposite sides' offsets meet (half its width), so its offset vanishes while
+/// the block keeps a cavity: refused as walls meeting across it, naming 1, the largest wall
+/// that fits (not as a radius of curvature, which a flat face has none of). At
+/// 0.9 it builds: the block's cavity (18.2 x 18.2 x 8.2) and the boss's (0.2 x 0.2 x 2).
+#[test]
+fn square_boss_inset_by_half_its_width_is_refused_naming_it() {
+    use offset_fixture::shell;
+    use solidcore::boolean::api_brep::boolean_union;
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_primitives::create_box;
+    let part = |k: &mut Kernel| {
+        let block = create_box(k, Point3::new(-10.0, -10.0, 0.0), 20.0, 20.0, 10.0).unwrap();
+        let boss = create_box(k, Point3::new(-1.0, -1.0, 10.0), 2.0, 2.0, 2.0).unwrap();
+        boolean_union(k, block, boss).unwrap()
+    };
+    let mut k = Kernel::default();
+    let boss = part(&mut k);
+    let err = shell(&mut k, boss, -1.0, &[]).unwrap_err();
+    let Some(&Reason::Offset(OffsetFailure::WallsMeetAcross { face, largest, .. })) =
+        err.failure().map(|f| &f.reason)
+    else {
+        panic!("wall 1: not walls meeting across the boss: {err}");
+    };
+    assert!((largest - 1.0).abs() <= 1e-9, "{largest}");
+    assert_eq!(err.kind(), ErrorKind::OffsetCollapses);
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "{}: the offset of face {} by 1 vanishes: the wall reaches half the width between \
+             two opposite faces (the largest wall that fits is {largest})",
+            err.operation(),
+            face.index()
+        )
+    );
+    assert!(!err.to_string().contains("curvature"), "{err}");
+    let mut k = Kernel::default();
+    let boss = part(&mut k);
+    let mut b = shell(&mut k, boss, -0.9, &[]).unwrap();
+    assert!(brep_is_manifold_solid(&b).unwrap());
+    let want = 4008.0 - (18.2 * 18.2 * 8.2 + 0.2 * 0.2 * 2.0);
+    let got = volume(&k, &mut b).unwrap();
+    assert!((got - want).abs() <= 1e-8 * want, "{got} vs {want}");
 }

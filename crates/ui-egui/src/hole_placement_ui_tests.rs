@@ -794,8 +794,8 @@ fn cylinder_with_cluster(sketch: Value, at: [f64; 2], view: &str) -> Cluster {
 fn select_other_over_a_dense_cluster_looks_the_face_up_once() {
     // The points on the cylinder's top face, a disc of a small part of the body's triangles. Select
     // Other looks the face under the cursor up once for all of them, not once per point (#718
-    // review): one planarity lookup, which tessellates the body, and one pass over the body's
-    // triangles. Each point is then tested against the face's triangles near the points only,
+    // review): one planarity lookup, which meshes nothing (the cap is a plane by its surface), and
+    // one pass over the body's triangles. Each point is then tested against the face's triangles near the points only,
     // not the face's or the body's; every point on the face is still counted.
     let mut c = cylinder_with_cluster(json!({"plane": {"face": [0, 0, 20]}}), [5.0, 4.0], "top");
     let (many, body, face, near) = (c.many, c.body_tris, c.face_tris, c.near_tris);
@@ -805,7 +805,7 @@ fn select_other_over_a_dense_cluster_looks_the_face_up_once() {
     let (list, (lookups, tested)) = c.select_other();
     assert_eq!((rows_named(&list, "Point"), rows_named(&list, "Face")), (crate::select_other::MAX_PER_KIND, 1), "{list}");
     assert_eq!(list["total"], json!(many + 1), "every point on the face is counted: {list}");
-    assert_eq!(lookups, 1, "the face is looked up once for {many} points");
+    assert_eq!(lookups, 0, "the face is planar by its surface: nothing is meshed for {many} points");
     assert!(tested <= body + many * near, "{tested} triangles looked at for {many} points ({body} in the body, {near} near the points)");
 }
 
@@ -819,7 +819,7 @@ fn select_other_over_a_dense_cluster_off_the_face_tests_no_triangles() {
     let (list, (lookups, tested)) = c.select_other();
     assert_eq!((rows_named(&list, "Point"), rows_named(&list, "Face")), (0, 1), "{list}");
     assert_eq!(list["total"], json!(1), "{list}");
-    assert_eq!(lookups, 1, "the face is looked up once for {many} points");
+    assert_eq!(lookups, 0, "the face is planar by its surface: nothing is meshed for {many} points");
     assert_eq!(tested, body, "one pass over the body's {body} triangles, and no test for the {many} points off the face");
 }
 
@@ -832,7 +832,7 @@ fn select_other_over_a_dense_cluster_by_a_curved_face_looks_it_up_once() {
     let many = c.many;
     let (list, (lookups, tested)) = c.select_other();
     assert_eq!((rows_named(&list, "Point"), rows_named(&list, "Face")), (0, 1), "the curved face alone: {list}");
-    assert_eq!(lookups, 1, "the curved face is looked up once for {many} points");
+    assert_eq!(lookups, 0, "a cylinder is curved by its surface: nothing is meshed for {many} points");
     assert_eq!(tested, 0, "no triangle of a curved face is looked at");
 }
 

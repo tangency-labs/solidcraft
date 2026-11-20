@@ -285,6 +285,33 @@ fn edge_only_box_contact_is_scale_invariant() {
     }
 }
 
+/// A cylinder lying along a box's top edge, tangent there to the box's top face (scale_invariant's
+/// shrunk case). From 10x the two faces, a step off the edge, made too small an angle and were
+/// taken for parallel (a zero sector), and from 100x for one surface (coincident faces): the
+/// union failed.
+#[test]
+fn cylinder_resting_on_a_box_edge_is_scale_invariant() {
+    let a = Prim::Cyl { at: [0.0, 2.5, 15.0], axis: 1, r: 7.5, h: 25.0 };
+    let b = Prim::Box { at: [0.0, 0.0, 0.0], size: [5.0, 5.0, 7.5] };
+    for k in [0.05, 1.0, 40.0, 100.0, 1000.0] {
+        check(scale(&a, &b, k));
+        check(scale(&b, &a, k));
+    }
+}
+
+/// Two cylinders side by side, touching along a line. From 100x their faces, a step off the
+/// line, were taken for one surface: the union failed, and at 1000x the intersection was a
+/// whole cylinder.
+#[test]
+fn cylinders_touching_along_a_line_are_scale_invariant() {
+    let a = Prim::Cyl { at: [0.0, 0.0, 0.0], axis: 1, r: 7.5, h: 25.0 };
+    let b = Prim::Cyl { at: [15.0, 2.5, 0.0], axis: 1, r: 7.5, h: 25.0 };
+    for k in [100.0, 1000.0] {
+        check(scale(&a, &b, k));
+        check(scale(&b, &a, k));
+    }
+}
+
 fn check(r: Result<(), TestCaseError>) {
     if let Err(e) = r {
         panic!("{e}");
@@ -316,6 +343,22 @@ fn grid_small_sphere_thin_box_union_is_sound() {
     let a = Prim::Sph { at: [20.0, 10.0, 27.5], r: 3.75 };
     let b = Prim::Box { at: [15.0, 0.0, 22.5], size: [7.5, 20.0, 5.0] };
     check(identity(&a, &b));
+}
+
+/// A sphere and a box apart from each other: moved 1e5 mm away, their union is refused ("a NURBS
+/// form that is not its analytic surface"), where at the origin it is the two solids.
+#[test]
+#[ignore = "kernel bug, solidcore#3131"]
+fn disjoint_sphere_box_union_moved_far() {
+    let a = Prim::Sph { at: [0.0, 0.0, 10.0], r: 2.5 }.body();
+    let b = Prim::Box { at: [0.0, 0.0, 0.0], size: [5.0, 5.0, 5.0] }.body();
+    let t = Vec3::new(1.0e5, -1.0e5 * 0.7, 1.0e5 * 0.3);
+    let mv = |x: &Body| transform(x, t, Vec3::ZERO, Vec3::Z, 0.0).expect("translate");
+    let (va, vb) = (vol(&a), vol(&b));
+    let here = run(&a, &b, BoolOp::Union).unwrap();
+    assert!(close(here, va + vb, va + vb), "{here}");
+    let there = run(&mv(&a), &mv(&b), BoolOp::Union).unwrap();
+    assert!(close(there, here, va + vb), "{there} moved, {here} at the origin");
 }
 
 /// Two crossing cylinders: the union moved 1000 mm away loses about a tenth of its volume.

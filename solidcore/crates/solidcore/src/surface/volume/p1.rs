@@ -52,19 +52,22 @@
 //! | [`Discontinuities3d`]                                  | `SmDiscontinuities3d` (constructor, `Init`, `SetUnaligned`, destructor) |
 //! | [`FindPvIntersect`]                                    | `SmFindPVIntersectENFO` (constructor, `Evaluate`) |
 //! | [`lift_first_derivative`], [`lift_second_derivative`], [`lift_third_derivative`] | `smvol_Lift*Derivative` (curve forms)  |
-//! | [`lift_first_derivative_srf`], [`lift_second_derivative_srf`], [`lift_third_derivative_srf`], [`lift_third_derivative_srf_opt_in`] | `smvol_Lift*Derivative` (surface forms) |
-//! | [`lift_first_derivative_vol`], [`lift_second_derivative_vol`], [`lift_third_derivative_vol`], [`lift_third_derivative_vol_opt_in`] | `smvol_Lift*Derivative` (volume forms) |
-//! | [`concat_evals`], [`concat_evals_opt_in`]              | `smvol_ConcatEvals`                              |
+//! | [`lift_first_derivative_srf`], [`lift_second_derivative_srf`], [`lift_third_derivative_srf`] | `smvol_Lift*Derivative` (surface forms) |
+//! | [`lift_first_derivative_vol`], [`lift_second_derivative_vol`], [`lift_third_derivative_vol`] | `smvol_Lift*Derivative` (volume forms) |
+//! | [`concat_evals`]                                       | `smvol_ConcatEvals`                              |
 //!
 //! Deviations:
 //! - **WR-3.** The bounded rectilinear line-domain check requires both endpoints
-//!   with `Kernel::fixes.extent3d_contains_both_segment_endpoints`; default is upstream OR.
+//!   inside the box, so the whole segment is inside (upstream's `ContainsLineSeg3d`
+//!   accepts either end).
 //! - **Nesting.** `with_maps` and `add_next_map` return `InvalidInput` when the next-map chain would nest
 //!   deeper than [`MAX_GEOMETRY_NESTING`]
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
 //!   cloning and dropping of nested geometry (no limit upstream).
 //! - **Kinds.** The class hierarchy is the [`VolumeKind`] enum: [`VolumeKind::Base`]
-//!   is a plain `SmVolume` (as made by the slicing copy in `IsLineInParamDomain`),
+//!   is a plain `SmVolume` (upstream's slicing copy in `IsLineInParamDomain` makes
+//!   one; the port copies the simple map with its kind instead, so the compounded
+//!   check evaluates through it),
 //!   [`VolumeKind::Transform`] holds the [`Transform`] matrix of an `SmTransform`,
 //!   [`VolumeKind::BSpline`] the [`BSplineVolume`] of an `SmBSplineVolume` (unit
 //!   `surface.b_spline_volume`; its `HasDiscontinuitiesSimple`,
@@ -104,10 +107,8 @@
 //! - **WR-45.** The surface and volume `smvol_LiftThirdDerivative` reuse `Dxxz` where
 //!   the `Dxzz` term belongs (`rDuuv`, `rDuvv`, `rDuuw`, `rDuww`, `rDvvw`, `rDvww`),
 //!   and `rDuww` / `rDvww` use `Fuv`/`Fv` and `Fvv`/`Fv` instead of `Fuw`/`Fw` and
-//!   `Fvw`/`Fw`; default (`false`) keeps upstream's formulas, while
-//!   `Kernel::fixes.volume_lift_third_derivative_terms` (via [`EvalOptions::fixes`],
-//!   [`lift_third_derivative_srf_opt_in`], [`lift_third_derivative_vol_opt_in`] and
-//!   [`concat_evals_opt_in`]) selects the exact multivariable chain-rule terms.
+//!   `Fvw`/`Fw`. [`lift_third_derivative_srf`], [`lift_third_derivative_vol`] and
+//!   [`concat_evals`] use the exact multivariable chain-rule terms.
 
 use crate::curve::crv_in_volume::CrvInVolume;
 use crate::curve::curve::p2::Curve;
@@ -125,7 +126,7 @@ use crate::geom::matrix::Matrix;
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::transform::{Transform, MAX_DERIV as GW_MAX_DERIV};
 use crate::geom::vector3d::{Point3, Vec3};
-use crate::kernel::{Kernel, UpstreamFixes};
+use crate::kernel::Kernel;
 use crate::math::{max2, EFF_ZERO, EFF_ZERO_SQ};
 use crate::surface::b_spline_volume::{BSplineVolume, VolumeParam};
 use crate::surface::bend_volume::BendVolume;
@@ -198,8 +199,6 @@ pub enum VolumeKind {
 /// Options of the compound evaluations (`Evaluate`, `Map`, `EvaluateSimple`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EvalOptions {
-    /// Opt-in corrections copied from the calling kernel and preserved through next maps.
-    pub fixes: UpstreamFixes,
     /// `bUFromLeft`, `bVFromLeft`, `bWFromLeft`: evaluate a point on an interval
     /// boundary in the upper (`true`) or lower interval, per direction.
     pub from_left: [bool; 3],
@@ -212,10 +211,9 @@ pub struct EvalOptions {
 }
 
 impl Default for EvalOptions {
-    /// Upstream arguments `true`, with all opt-in corrections disabled.
+    /// Upstream arguments `true`.
     fn default() -> Self {
         Self {
-            fixes: UpstreamFixes::default(),
             from_left: [true; 3],
             non_zero_tangents: true,
             do_zero_sampling: true,
@@ -427,7 +425,10 @@ impl Volume {
     /// [`SolidError::Unported`] for the unported kinds.
     pub fn copy(&self, simple_map_only: bool) -> Result<Self> {
         match &self.kind {
-            VolumeKind::Base => Err(SolidError::sm_err("surface::volume::p1::Volume::copy")),
+            VolumeKind::Base => Err(SolidError::surface_failed(
+                "surface::volume::p1::Volume::copy",
+                "a plain volume cannot be copied",
+            )),
             VolumeKind::Transform(_)
             | VolumeKind::BSpline(_)
             | VolumeKind::Bend(_)
@@ -806,7 +807,7 @@ impl Volume {
         with_compounding: bool,
     ) -> Result<bool> {
         // pass the call along
-        let mut is_in = self.is_line_in_param_domain_simple(k, start, end)?;
+        let mut is_in = self.is_line_in_param_domain_simple(start, end)?;
 
         // when asked - check compounded volumes as well
         if let (true, true, Some(next)) = (is_in, with_compounding, self.next_map.as_deref()) {
@@ -820,10 +821,12 @@ impl Volume {
                 (start, end)
             };
 
-            // build curve in OutSpace = NextInSpace: a plain SmVolume copy of the
-            // simple map (the slicing copy constructor)
-            let mut simple = Self::copy_from(self, true)?;
-            simple.kind = VolumeKind::Base;
+            // build curve in OutSpace = NextInSpace over a copy of the simple map.
+            // Upstream copies with `SmVolume sSimpleVolume(*this, TRUE)`, which slices
+            // the derived map off: the plain `SmVolume` cannot evaluate, so the check
+            // ran on nothing. The copy keeps its kind, as `IsCurveInParamDomain`'s
+            // virtual `Copy(TRUE)` does.
+            let simple = Self::copy_from(self, true)?;
             let line = Line::from_points(start_in, end_in, 3);
             let next_in_space_curve =
                 Curve::from(CrvInVolume::new(Curve::from(line), false, simple, 0, 0)?);
@@ -921,15 +924,16 @@ impl Volume {
         }
         // check input - number of supported derivatives is exceeded
         if n > MAX_DERIV {
-            return Err(SolidError::sm_err(OP_EVAL));
+            return Err(SolidError::surface_failed(
+                OP_EVAL,
+                "a derivative order above the volume's maximum was asked",
+            ));
         }
         let next_map = if opts.with_compounding {
             self.next_map.as_deref()
         } else {
             None
         };
-
-        let exact_third = opts.fixes.volume_lift_third_derivative_terms;
 
         // Map InSpace point to 1st OutSpace evaluations
         let first = if let Some(orient) = &self.orient_map {
@@ -938,7 +942,7 @@ impl Volume {
             // Map ProjPoint to 1st OutSpace
             let oriented = orient.evaluate_simple(at(&simple, 0, OP_EVAL)?, n)?;
             // concatenate with the chain rule the individual evaluates
-            concat_evals_opt_in(n, &simple, &oriented, exact_third)?
+            concat_evals(n, &simple, &oriented)?
         } else {
             // no Orient map, InSpace == ParamSpace and ProjSpace == 1stOutSpace
             self.evaluate_simple(param_point, n, opts)?
@@ -949,7 +953,7 @@ impl Volume {
             Some(next) => {
                 let next_derivs = next.map(at(&first, 0, OP_EVAL)?, n, opts)?;
                 // compound the evaluations with the chain rule
-                concat_evals_opt_in(n, &first, &next_derivs, exact_third)
+                concat_evals(n, &first, &next_derivs)
             }
             None => Ok(first),
         }
@@ -967,15 +971,16 @@ impl Volume {
     pub fn map(&self, in_point: Point3, n: usize, opts: &EvalOptions) -> Result<Vec<Vec3>> {
         // check input - number of supported derivatives is exceeded
         if n > MAX_DERIV {
-            return Err(SolidError::sm_err(OP_MAP));
+            return Err(SolidError::surface_failed(
+                OP_MAP,
+                "a derivative order above the volume's maximum was asked",
+            ));
         }
         let next_map = if opts.with_compounding {
             self.next_map.as_deref()
         } else {
             None
         };
-        let exact_third = opts.fixes.volume_lift_third_derivative_terms;
-
         // Map InSpace point to 1st OutSpace evaluations
         let first = if let Some(orient) = &self.orient_map {
             let inv = self
@@ -992,8 +997,8 @@ impl Volume {
             // Map ProjPoint to 1st OutSpace
             let oriented = orient.evaluate_simple(at(&simple, 0, OP_MAP)?, n)?;
             // concatenate with the chain rule the individual evaluates
-            let mid1 = concat_evals_opt_in(n, &inv_oriented, &simple, exact_third)?;
-            concat_evals_opt_in(n, &mid1, &oriented, exact_third)?
+            let mid1 = concat_evals(n, &inv_oriented, &simple)?;
+            concat_evals(n, &mid1, &oriented)?
         } else {
             // no Orient map, InSpace == ParamSpace and ProjSpace == 1stOutSpace
             self.evaluate_simple(in_point, n, opts)?
@@ -1004,7 +1009,7 @@ impl Volume {
             Some(next) => {
                 let next_derivs = next.map(at(&first, 0, OP_MAP)?, n, opts)?;
                 // compound the evaluations with the chain rule
-                concat_evals_opt_in(n, &first, &next_derivs, exact_third)
+                concat_evals(n, &first, &next_derivs)
             }
             None => Ok(first),
         }
@@ -1134,8 +1139,9 @@ impl Volume {
     ) -> Result<Vec<Vec3>> {
         // check state
         if n > MAX_DERIV {
-            return Err(SolidError::sm_err(
+            return Err(SolidError::surface_failed(
                 "surface::volume::p1::Volume::orient_directional_derivs",
+                "a derivative order above the volume's maximum was asked",
             ));
         }
         // make the evaluation: exact tangent values, zero sampling
@@ -1258,14 +1264,13 @@ impl Volume {
         opts: &EvalOptions,
     ) -> Result<Vec<Vec3>> {
         match &self.kind {
-            VolumeKind::Base => Err(SolidError::sm_err(
+            VolumeKind::Base => Err(SolidError::surface_failed(
                 "surface::volume::p1::Volume::evaluate_simple",
+                "a plain volume has no evaluation",
             )),
             VolumeKind::Transform(t) => t.evaluate_simple(param_point, n),
             VolumeKind::BSpline(b) => b.evaluate_simple(param_point, n, opts),
-            VolumeKind::Twist(t) => {
-                t.evaluate_simple_impl(param_point, n, opts.fixes.twist_simple_duw_sign)
-            }
+            VolumeKind::Twist(t) => t.evaluate_simple(param_point, n),
             VolumeKind::Unbend(u) => u.evaluate_simple(param_point, n),
             VolumeKind::Bend(b) => b.evaluate_simple(param_point, n),
         }
@@ -1318,8 +1323,9 @@ impl Volume {
     /// [`SolidError::Unported`] for the unported kinds.
     pub fn inv_evaluate_guess_point_simple(&self, proj_point: Point3) -> Result<Vec<Point3>> {
         match &self.kind {
-            VolumeKind::Base => Err(SolidError::sm_err(
+            VolumeKind::Base => Err(SolidError::surface_failed(
                 "surface::volume::p1::Volume::inv_evaluate_guess_point_simple",
+                "a plain volume has no inversion guess",
             )),
             VolumeKind::Transform(t) => t.inv_evaluate_guess_point_simple(proj_point),
             VolumeKind::BSpline(b) => b.inv_evaluate_guess_point_simple(proj_point),
@@ -1328,8 +1334,9 @@ impl Volume {
             VolumeKind::Bend(b) => match b.inv_evaluate_guess_point_simple(proj_point) {
                 (points, true) => Ok(points),
                 // the guesses written with SM_ERR are dropped (callers propagate it)
-                (_, false) => Err(SolidError::sm_err(
+                (_, false) => Err(SolidError::surface_failed(
                     "surface::bend_volume::BendVolume::inv_evaluate_guess_point_simple",
+                    "the bend volume's inversion guess failed",
                 )),
             },
         }
@@ -1374,20 +1381,16 @@ impl Volume {
         }
     }
 
-    /// Whether the parameter segment is in the natural domain (always, unbounded;
-    /// upstream's `ContainsLineSeg3d` tests either end) (`IsLineInParamDomainSimple`,
-    /// virtual). With `extent3d_contains_both_segment_endpoints` (WR-3), bounded
-    /// rectilinear domains require both endpoints inside instead.
+    /// Whether the parameter segment is in the natural domain
+    /// (`IsLineInParamDomainSimple`, virtual): always for an unbounded domain; a
+    /// bounded rectilinear domain needs both endpoints inside, which for a box (a
+    /// convex set) is exactly the whole segment inside (WR-3: upstream's
+    /// `ContainsLineSeg3d` accepts either end).
     ///
     /// # Errors
     ///
     /// [`SolidError::Unported`] for the unported kinds.
-    pub fn is_line_in_param_domain_simple(
-        &self,
-        k: &Kernel,
-        start: Point3,
-        end: Point3,
-    ) -> Result<bool> {
+    pub fn is_line_in_param_domain_simple(&self, start: Point3, end: Point3) -> Result<bool> {
         match &self.kind {
             VolumeKind::Twist(t) => Ok(t.is_line_in_param_domain_simple()),
             VolumeKind::Unbend(u) => Ok(u.is_line_in_param_domain_simple(start, end)),
@@ -1395,11 +1398,7 @@ impl Volume {
             _ => {
                 if self.is_bounded_simple()? {
                     let domain = self.natural_param_domain()?;
-                    return Ok(if k.fixes.extent3d_contains_both_segment_endpoints {
-                        domain.contains_point(start, 0.0) && domain.contains_point(end, 0.0)
-                    } else {
-                        domain.contains_line_seg(start, end, 0.0)
-                    });
+                    return Ok(domain.contains_point(start, 0.0) && domain.contains_point(end, 0.0));
                 }
                 Ok(true)
             }
@@ -1664,7 +1663,10 @@ impl EvalNFunctions for FindPvIntersect<'_> {
             || dv.length_squared() < EFF_ZERO_SQ
             || dw.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP_PV));
+            return Err(SolidError::surface_failed(
+                OP_PV,
+                "a volume tangent has zero length",
+            ));
         }
 
         // get gap vector
@@ -1820,7 +1822,8 @@ pub fn lift_second_derivative_srf(
 /// `smvol_LiftThirdDerivative` (surface form): `[Duuu, Duuv, Duvv, Dvvv]` from the
 /// surface's first, second and third partials `[Suuu, Suuv, Suvv, Svvv]` and the
 /// volume's first, second and third partials `[Dxxx, Dxxy, Dxxz, Dxyy, Dxyz, Dxzz,
-/// Dyyy, Dyyz, Dyzz, Dzzz]` (upstream's `Dxxz` for `Dxzz` kept).
+/// Dyyy, Dyyz, Dyzz, Dzzz]`. `Duuv` and `Duvv` multiply their `x z^2` outer-derivative
+/// coefficient by `Dxzz`, where upstream reuses `Dxxz` (WR-45).
 #[must_use]
 pub fn lift_third_derivative_srf(
     s1: [Vec3; 2],
@@ -1830,29 +1833,12 @@ pub fn lift_third_derivative_srf(
     d2: [Vec3; 6],
     d3: [Vec3; 10],
 ) -> [Vec3; 4] {
-    lift_third_derivative_srf_opt_in(s1, s2, s3, d1, d2, d3, false)
-}
-
-/// [`lift_third_derivative_srf`] with opt-in `WR-45` correction: when `exact_terms`
-/// is `true`, `Duuv` and `Duvv` multiply their `x z^2` outer-derivative coefficient
-/// by `Dxzz` instead of upstream's `Dxxz`.
-#[must_use]
-pub fn lift_third_derivative_srf_opt_in(
-    s1: [Vec3; 2],
-    s2: [Vec3; 3],
-    s3: [Vec3; 4],
-    d1: [Vec3; 3],
-    d2: [Vec3; 6],
-    d3: [Vec3; 10],
-    exact_terms: bool,
-) -> [Vec3; 4] {
     let [su, sv] = s1;
     let [suu, suv, svv] = s2;
     let [suuu, suuv, suvv, svvv] = s3;
     let [dx, dy, dz] = d1;
     let [dxx, dxy, dxz, dyy, dyz, dzz] = d2;
     let [dxxx, dxxy, dxxz, dxyy, dxyz, dxzz, dyyy, dyyz, dyzz, dzzz] = d3;
-    let dxzz_or_dxxz = if exact_terms { dxzz } else { dxxz };
     let duuu = suuu.x * dx
         + suuu.y * dy
         + suuu.z * dz
@@ -1886,7 +1872,7 @@ pub fn lift_third_derivative_srf_opt_in(
         + (sv.z * su.x * su.x + 2.0 * sv.x * su.x * su.z) * dxxz
         + (sv.x * su.y * su.y + 2.0 * sv.y * su.x * su.y) * dxyy
         + (2.0 * sv.y * su.x * su.z + 2.0 * sv.z * su.x * su.y + 2.0 * sv.x * su.y * su.z) * dxyz
-        + (sv.x * su.z * su.z + 2.0 * sv.z * su.x * su.z) * dxzz_or_dxxz
+        + (sv.x * su.z * su.z + 2.0 * sv.z * su.x * su.z) * dxzz
         + (sv.z * su.y * su.y + 2.0 * sv.y * su.y * su.z) * dyyz
         + (sv.y * su.z * su.z + 2.0 * sv.z * su.y * su.z) * dyzz
         + (sv.x * su.x * su.x) * dxxx
@@ -1906,7 +1892,7 @@ pub fn lift_third_derivative_srf_opt_in(
         + (su.z * sv.x * sv.x + 2.0 * su.x * sv.x * sv.z) * dxxz
         + (su.x * sv.y * sv.y + 2.0 * su.y * sv.x * sv.y) * dxyy
         + (2.0 * su.y * sv.x * sv.z + 2.0 * su.z * sv.x * sv.y + 2.0 * su.x * sv.y * sv.z) * dxyz
-        + (su.x * sv.z * sv.z + 2.0 * su.z * sv.x * sv.z) * dxzz_or_dxxz
+        + (su.x * sv.z * sv.z + 2.0 * su.z * sv.x * sv.z) * dxzz
         + (su.z * sv.y * sv.y + 2.0 * su.y * sv.y * sv.z) * dyyz
         + (su.y * sv.z * sv.z + 2.0 * su.z * sv.y * sv.z) * dyzz
         + (su.x * sv.x * sv.x) * dxxx
@@ -2030,8 +2016,10 @@ pub fn lift_second_derivative_vol(
 /// `smvol_LiftThirdDerivative` (volume form): `[Duuu, Duuv, Duuw, Duvv, Duvw, Duww,
 /// Dvvv, Dvvw, Dvww, Dwww]` from the base volume's first, second and third partials
 /// `[Fuuu, Fuuv, Fuuw, Fuvv, Fuvw, Fuww, Fvvv, Fvvw, Fvww, Fwww]` and the
-/// compounding volume's first, second and third partials (upstream's typos kept:
-/// `Dxxz` for `Dxzz`, and `Duww` / `Dvww` built from the wrong base partials).
+/// compounding volume's first, second and third partials. `Duuv`, `Duuw`, `Duvv`,
+/// `Duww`, `Dvvw` and `Dvww` use `Dxzz` for their `x z^2` outer-derivative term, `Duww`
+/// uses `Fuw` and `Fw`, and `Dvww` uses `Fvw` and `Fw`, where upstream reuses `Dxxz`
+/// and builds `Duww` / `Dvww` from `Fuv`/`Fv` and `Fvv`/`Fv` (WR-45).
 #[must_use]
 pub fn lift_third_derivative_vol(
     f1: [Vec3; 3],
@@ -2041,31 +2029,12 @@ pub fn lift_third_derivative_vol(
     d2: [Vec3; 6],
     d3: [Vec3; 10],
 ) -> [Vec3; 10] {
-    lift_third_derivative_vol_opt_in(f1, f2, f3, d1, d2, d3, false)
-}
-
-/// [`lift_third_derivative_vol`] with opt-in `WR-45` correction: when `exact_terms`
-/// is `true`, `Duuv`, `Duuw`, `Duvv`, `Duww`, `Dvvw` and `Dvww` use `Dxzz` for their
-/// `x z^2` outer-derivative term (instead of `Dxxz`), `Duww` uses `Fuw` and `Fw`
-/// (instead of `Fuv` and `Fv`), and `Dvww` uses `Fvw` and `Fw` (instead of `Fvv` and
-/// `Fv`).
-#[must_use]
-pub fn lift_third_derivative_vol_opt_in(
-    f1: [Vec3; 3],
-    f2: [Vec3; 6],
-    f3: [Vec3; 10],
-    d1: [Vec3; 3],
-    d2: [Vec3; 6],
-    d3: [Vec3; 10],
-    exact_terms: bool,
-) -> [Vec3; 10] {
     let [fu, fv, fw] = f1;
     let [fuu, fuv, fuw, fvv, fvw, fww] = f2;
     let [fuuu, fuuv, fuuw, fuvv, fuvw, fuww, fvvv, fvvw, fvww, fwww] = f3;
     let [dx, dy, dz] = d1;
     let [dxx, dxy, dxz, dyy, dyz, dzz] = d2;
     let [dxxx, dxxy, dxxz, dxyy, dxyz, dxzz, dyyy, dyyz, dyzz, dzzz] = d3;
-    let dxzz_or_dxxz = if exact_terms { dxzz } else { dxxz };
     let duuu = fuuu.x * dx
         + fuuu.y * dy
         + fuuu.z * dz
@@ -2099,7 +2068,7 @@ pub fn lift_third_derivative_vol_opt_in(
         + (fv.z * fu.x * fu.x + 2.0 * fv.x * fu.x * fu.z) * dxxz
         + (fv.x * fu.y * fu.y + 2.0 * fv.y * fu.x * fu.y) * dxyy
         + (2.0 * fv.y * fu.x * fu.z + 2.0 * fv.z * fu.x * fu.y + 2.0 * fv.x * fu.y * fu.z) * dxyz
-        + (fv.x * fu.z * fu.z + 2.0 * fv.z * fu.x * fu.z) * dxzz_or_dxxz
+        + (fv.x * fu.z * fu.z + 2.0 * fv.z * fu.x * fu.z) * dxzz
         + (fv.z * fu.y * fu.y + 2.0 * fv.y * fu.y * fu.z) * dyyz
         + (fv.y * fu.z * fu.z + 2.0 * fv.z * fu.y * fu.z) * dyzz
         + (fv.x * fu.x * fu.x) * dxxx
@@ -2119,7 +2088,7 @@ pub fn lift_third_derivative_vol_opt_in(
         + (fw.z * fu.x * fu.x + 2.0 * fw.x * fu.x * fu.z) * dxxz
         + (fw.x * fu.y * fu.y + 2.0 * fw.y * fu.x * fu.y) * dxyy
         + (2.0 * fw.y * fu.x * fu.z + 2.0 * fw.z * fu.x * fu.y + 2.0 * fw.x * fu.y * fu.z) * dxyz
-        + (fw.x * fu.z * fu.z + 2.0 * fw.z * fu.x * fu.z) * dxzz_or_dxxz
+        + (fw.x * fu.z * fu.z + 2.0 * fw.z * fu.x * fu.z) * dxzz
         + (fw.z * fu.y * fu.y + 2.0 * fw.y * fu.y * fu.z) * dyyz
         + (fw.y * fu.z * fu.z + 2.0 * fw.z * fu.y * fu.z) * dyzz
         + (fw.x * fu.x * fu.x) * dxxx
@@ -2139,7 +2108,7 @@ pub fn lift_third_derivative_vol_opt_in(
         + (fu.z * fv.x * fv.x + 2.0 * fu.x * fv.x * fv.z) * dxxz
         + (fu.x * fv.y * fv.y + 2.0 * fu.y * fv.x * fv.y) * dxyy
         + (2.0 * fu.y * fv.x * fv.z + 2.0 * fu.z * fv.x * fv.y + 2.0 * fu.x * fv.y * fv.z) * dxyz
-        + (fu.x * fv.z * fv.z + 2.0 * fu.z * fv.x * fv.z) * dxzz_or_dxxz
+        + (fu.x * fv.z * fv.z + 2.0 * fu.z * fv.x * fv.z) * dxzz
         + (fu.z * fv.y * fv.y + 2.0 * fu.y * fv.y * fv.z) * dyyz
         + (fu.y * fv.z * fv.z + 2.0 * fu.z * fv.y * fv.z) * dyzz
         + (fu.x * fv.x * fv.x) * dxxx
@@ -2172,49 +2141,25 @@ pub fn lift_third_derivative_vol_opt_in(
         + (fw.y * fv.z * fu.z + fw.z * (fv.y * fu.z + fv.z * fu.y)) * dyzz
         + (fw.z * fv.z * fu.z) * dzzz;
 
-    let duww = if exact_terms {
-        fuww.x * dx
-            + fuww.y * dy
-            + fuww.z * dz
-            + (2.0 * fuw.x * fw.x + fu.x * fww.x) * dxx
-            + (2.0 * fuw.y * fw.y + fu.y * fww.y) * dyy
-            + (2.0 * fuw.z * fw.z + fu.z * fww.z) * dzz
-            + (2.0 * fuw.x * fw.y + fu.y * fww.x + 2.0 * fw.x * fuw.y + fu.x * fww.y) * dxy
-            + (2.0 * fuw.x * fw.z + fu.z * fww.x + 2.0 * fw.x * fuw.z + fu.x * fww.z) * dxz
-            + (2.0 * fuw.y * fw.z + fu.z * fww.y + 2.0 * fw.y * fuw.z + fu.y * fww.z) * dyz
-            + (fu.y * fw.x * fw.x + 2.0 * fu.x * fw.x * fw.y) * dxxy
-            + (fu.z * fw.x * fw.x + 2.0 * fu.x * fw.x * fw.z) * dxxz
-            + (fu.x * fw.y * fw.y + 2.0 * fu.y * fw.x * fw.y) * dxyy
-            + (2.0 * fu.y * fw.x * fw.z + 2.0 * fu.z * fw.x * fw.y + 2.0 * fu.x * fw.y * fw.z)
-                * dxyz
-            + (fu.x * fw.z * fw.z + 2.0 * fu.z * fw.x * fw.z) * dxzz
-            + (fu.z * fw.y * fw.y + 2.0 * fu.y * fw.y * fw.z) * dyyz
-            + (fu.y * fw.z * fw.z + 2.0 * fu.z * fw.y * fw.z) * dyzz
-            + (fu.x * fw.x * fw.x) * dxxx
-            + (fu.y * fw.y * fw.y) * dyyy
-            + (fu.z * fw.z * fw.z) * dzzz
-    } else {
-        fuww.x * dx
-            + fuww.y * dy
-            + fuww.z * dz
-            + (2.0 * fuv.x * fv.x + fu.x * fww.x) * dxx
-            + (2.0 * fuv.y * fv.y + fu.y * fww.y) * dyy
-            + (2.0 * fuv.z * fv.z + fu.z * fww.z) * dzz
-            + (2.0 * fuv.x * fv.y + fu.y * fww.x + 2.0 * fv.x * fuv.y + fu.x * fww.y) * dxy
-            + (2.0 * fuv.x * fv.z + fu.z * fww.x + 2.0 * fv.x * fuv.z + fu.x * fww.z) * dxz
-            + (2.0 * fuv.y * fv.z + fu.z * fww.y + 2.0 * fv.y * fuv.z + fu.y * fww.z) * dyz
-            + (fu.y * fv.x * fv.x + 2.0 * fu.x * fv.x * fv.y) * dxxy
-            + (fu.z * fv.x * fv.x + 2.0 * fu.x * fv.x * fv.z) * dxxz
-            + (fu.x * fv.y * fv.y + 2.0 * fu.y * fv.x * fv.y) * dxyy
-            + (2.0 * fu.y * fv.x * fv.z + 2.0 * fu.z * fv.x * fv.y + 2.0 * fu.x * fv.y * fv.z)
-                * dxyz
-            + (fu.x * fv.z * fv.z + 2.0 * fu.z * fv.x * fv.z) * dxxz
-            + (fu.z * fv.y * fv.y + 2.0 * fu.y * fv.y * fv.z) * dyyz
-            + (fu.y * fv.z * fv.z + 2.0 * fu.z * fv.y * fv.z) * dyzz
-            + (fu.x * fv.x * fv.x) * dxxx
-            + (fu.y * fv.y * fv.y) * dyyy
-            + (fu.z * fv.z * fv.z) * dzzz
-    };
+    let duww = fuww.x * dx
+        + fuww.y * dy
+        + fuww.z * dz
+        + (2.0 * fuw.x * fw.x + fu.x * fww.x) * dxx
+        + (2.0 * fuw.y * fw.y + fu.y * fww.y) * dyy
+        + (2.0 * fuw.z * fw.z + fu.z * fww.z) * dzz
+        + (2.0 * fuw.x * fw.y + fu.y * fww.x + 2.0 * fw.x * fuw.y + fu.x * fww.y) * dxy
+        + (2.0 * fuw.x * fw.z + fu.z * fww.x + 2.0 * fw.x * fuw.z + fu.x * fww.z) * dxz
+        + (2.0 * fuw.y * fw.z + fu.z * fww.y + 2.0 * fw.y * fuw.z + fu.y * fww.z) * dyz
+        + (fu.y * fw.x * fw.x + 2.0 * fu.x * fw.x * fw.y) * dxxy
+        + (fu.z * fw.x * fw.x + 2.0 * fu.x * fw.x * fw.z) * dxxz
+        + (fu.x * fw.y * fw.y + 2.0 * fu.y * fw.x * fw.y) * dxyy
+        + (2.0 * fu.y * fw.x * fw.z + 2.0 * fu.z * fw.x * fw.y + 2.0 * fu.x * fw.y * fw.z) * dxyz
+        + (fu.x * fw.z * fw.z + 2.0 * fu.z * fw.x * fw.z) * dxzz
+        + (fu.z * fw.y * fw.y + 2.0 * fu.y * fw.y * fw.z) * dyyz
+        + (fu.y * fw.z * fw.z + 2.0 * fu.z * fw.y * fw.z) * dyzz
+        + (fu.x * fw.x * fw.x) * dxxx
+        + (fu.y * fw.y * fw.y) * dyyy
+        + (fu.z * fw.z * fw.z) * dzzz;
 
     let dvvv = fvvv.x * dx
         + fvvv.y * dy
@@ -2249,56 +2194,32 @@ pub fn lift_third_derivative_vol_opt_in(
         + (fw.z * fv.x * fv.x + 2.0 * fw.x * fv.x * fv.z) * dxxz
         + (fw.x * fv.y * fv.y + 2.0 * fw.y * fv.x * fv.y) * dxyy
         + (2.0 * fw.y * fv.x * fv.z + 2.0 * fw.z * fv.x * fv.y + 2.0 * fw.x * fv.y * fv.z) * dxyz
-        + (fw.x * fv.z * fv.z + 2.0 * fw.z * fv.x * fv.z) * dxzz_or_dxxz
+        + (fw.x * fv.z * fv.z + 2.0 * fw.z * fv.x * fv.z) * dxzz
         + (fw.z * fv.y * fv.y + 2.0 * fw.y * fv.y * fv.z) * dyyz
         + (fw.y * fv.z * fv.z + 2.0 * fw.z * fv.y * fv.z) * dyzz
         + (fw.x * fv.x * fv.x) * dxxx
         + (fw.y * fv.y * fv.y) * dyyy
         + (fw.z * fv.z * fv.z) * dzzz;
 
-    let dvww = if exact_terms {
-        fvww.x * dx
-            + fvww.y * dy
-            + fvww.z * dz
-            + (2.0 * fvw.x * fw.x + fv.x * fww.x) * dxx
-            + (2.0 * fvw.y * fw.y + fv.y * fww.y) * dyy
-            + (2.0 * fvw.z * fw.z + fv.z * fww.z) * dzz
-            + (2.0 * fvw.x * fw.y + fv.y * fww.x + 2.0 * fw.x * fvw.y + fv.x * fww.y) * dxy
-            + (2.0 * fvw.x * fw.z + fv.z * fww.x + 2.0 * fw.x * fvw.z + fv.x * fww.z) * dxz
-            + (2.0 * fvw.y * fw.z + fv.z * fww.y + 2.0 * fw.y * fvw.z + fv.y * fww.z) * dyz
-            + (fv.y * fw.x * fw.x + 2.0 * fv.x * fw.x * fw.y) * dxxy
-            + (fv.z * fw.x * fw.x + 2.0 * fv.x * fw.x * fw.z) * dxxz
-            + (fv.x * fw.y * fw.y + 2.0 * fv.y * fw.x * fw.y) * dxyy
-            + (2.0 * fv.y * fw.x * fw.z + 2.0 * fv.z * fw.x * fw.y + 2.0 * fv.x * fw.y * fw.z)
-                * dxyz
-            + (fv.x * fw.z * fw.z + 2.0 * fv.z * fw.x * fw.z) * dxzz
-            + (fv.z * fw.y * fw.y + 2.0 * fv.y * fw.y * fw.z) * dyyz
-            + (fv.y * fw.z * fw.z + 2.0 * fv.z * fw.y * fw.z) * dyzz
-            + (fv.x * fw.x * fw.x) * dxxx
-            + (fv.y * fw.y * fw.y) * dyyy
-            + (fv.z * fw.z * fw.z) * dzzz
-    } else {
-        fvww.x * dx
-            + fvww.y * dy
-            + fvww.z * dz
-            + (2.0 * fvv.x * fv.x + fv.x * fww.x) * dxx
-            + (2.0 * fvv.y * fv.y + fv.y * fww.y) * dyy
-            + (2.0 * fvv.z * fv.z + fv.z * fww.z) * dzz
-            + (2.0 * fvv.x * fv.y + fv.y * fww.x + 2.0 * fv.x * fvv.y + fv.x * fww.y) * dxy
-            + (2.0 * fvv.x * fv.z + fv.z * fww.x + 2.0 * fv.x * fvv.z + fv.x * fww.z) * dxz
-            + (2.0 * fvv.y * fv.z + fv.z * fww.y + 2.0 * fv.y * fvv.z + fv.y * fww.z) * dyz
-            + (fv.y * fv.x * fv.x + 2.0 * fv.x * fv.x * fv.y) * dxxy
-            + (fv.z * fv.x * fv.x + 2.0 * fv.x * fv.x * fv.z) * dxxz
-            + (fv.x * fv.y * fv.y + 2.0 * fv.y * fv.x * fv.y) * dxyy
-            + (2.0 * fv.y * fv.x * fv.z + 2.0 * fv.z * fv.x * fv.y + 2.0 * fv.x * fv.y * fv.z)
-                * dxyz
-            + (fv.x * fv.z * fv.z + 2.0 * fv.z * fv.x * fv.z) * dxxz
-            + (fv.z * fv.y * fv.y + 2.0 * fv.y * fv.y * fv.z) * dyyz
-            + (fv.y * fv.z * fv.z + 2.0 * fv.z * fv.y * fv.z) * dyzz
-            + (fv.x * fv.x * fv.x) * dxxx
-            + (fv.y * fv.y * fv.y) * dyyy
-            + (fv.z * fv.z * fv.z) * dzzz
-    };
+    let dvww = fvww.x * dx
+        + fvww.y * dy
+        + fvww.z * dz
+        + (2.0 * fvw.x * fw.x + fv.x * fww.x) * dxx
+        + (2.0 * fvw.y * fw.y + fv.y * fww.y) * dyy
+        + (2.0 * fvw.z * fw.z + fv.z * fww.z) * dzz
+        + (2.0 * fvw.x * fw.y + fv.y * fww.x + 2.0 * fw.x * fvw.y + fv.x * fww.y) * dxy
+        + (2.0 * fvw.x * fw.z + fv.z * fww.x + 2.0 * fw.x * fvw.z + fv.x * fww.z) * dxz
+        + (2.0 * fvw.y * fw.z + fv.z * fww.y + 2.0 * fw.y * fvw.z + fv.y * fww.z) * dyz
+        + (fv.y * fw.x * fw.x + 2.0 * fv.x * fw.x * fw.y) * dxxy
+        + (fv.z * fw.x * fw.x + 2.0 * fv.x * fw.x * fw.z) * dxxz
+        + (fv.x * fw.y * fw.y + 2.0 * fv.y * fw.x * fw.y) * dxyy
+        + (2.0 * fv.y * fw.x * fw.z + 2.0 * fv.z * fw.x * fw.y + 2.0 * fv.x * fw.y * fw.z) * dxyz
+        + (fv.x * fw.z * fw.z + 2.0 * fv.z * fw.x * fw.z) * dxzz
+        + (fv.z * fw.y * fw.y + 2.0 * fv.y * fw.y * fw.z) * dyyz
+        + (fv.y * fw.z * fw.z + 2.0 * fv.z * fw.y * fw.z) * dyzz
+        + (fv.x * fw.x * fw.x) * dxxx
+        + (fv.y * fw.y * fw.y) * dyyy
+        + (fv.z * fw.z * fw.z) * dzzz;
 
     let dwww = fwww.x * dx
         + fwww.y * dy
@@ -2332,22 +2253,6 @@ pub fn lift_third_derivative_vol_opt_in(
 /// [`SolidError::InvalidInput`] when an array is shorter than `(n+1)^3` or the size
 /// overflows.
 pub fn concat_evals(n: usize, first: &[Vec3], second: &[Vec3]) -> Result<Vec<Vec3>> {
-    concat_evals_opt_in(n, first, second, false)
-}
-
-/// [`concat_evals`] with opt-in `WR-45` third-derivative chain-rule terms
-/// ([`lift_third_derivative_vol_opt_in`]).
-///
-/// # Errors
-///
-/// [`SolidError::InvalidInput`] when an array is shorter than `(n+1)^3` or the size
-/// overflows.
-pub fn concat_evals_opt_in(
-    n: usize,
-    first: &[Vec3],
-    second: &[Vec3],
-    exact_terms: bool,
-) -> Result<Vec<Vec3>> {
     let size = eval_size(n, OP_CONCAT)?;
     if first.len() < size || second.len() < size {
         return Err(SolidError::invalid_input(
@@ -2431,7 +2336,7 @@ pub fn concat_evals_opt_in(
                     s(0, 1, 2)?,
                     s(0, 0, 3)?,
                 ];
-                let d3 = lift_third_derivative_vol_opt_in(f1, f2, f3, s1, s2, s3, exact_terms);
+                let d3 = lift_third_derivative_vol(f1, f2, f3, s1, s2, s3);
                 let slots = [
                     (3, 0, 0),
                     (2, 1, 0),
@@ -2626,10 +2531,10 @@ mod tests {
         // a B-spline volume cannot (no USE_VOLUMES upstream)
         let mut s = Volume::new(VolumeKind::BSpline(b_spline()));
         let before = s.kind().clone();
-        assert!(matches!(
-            s.transform(&ax, None),
-            Err(SolidError::Upstream { code: 1001, .. })
-        ));
+        assert_eq!(
+            s.transform(&ax, None).unwrap_err().upstream_status(),
+            Some(1001)
+        );
         assert_eq!(s.kind(), &before);
     }
 
@@ -3028,12 +2933,7 @@ mod tests {
         };
         let (u, t) = (0.25, 0.35);
         let (s1, s2, s3, d1, d2, d3) = eval_srf(u, t);
-        let legacy = lift_third_derivative_srf(s1, s2, s3, d1, d2, d3);
-        assert_eq!(
-            legacy,
-            lift_third_derivative_srf_opt_in(s1, s2, s3, d1, d2, d3, false)
-        );
-        let exact = lift_third_derivative_srf_opt_in(s1, s2, s3, d1, d2, d3, true);
+        let exact = lift_third_derivative_srf(s1, s2, s3, d1, d2, d3);
 
         let h = 1e-6;
         let second_at = |uu: f64, tt: f64| {
@@ -3058,19 +2958,6 @@ mod tests {
         }
         assert!(((s2_up[1] - s2_um[1]) / (2.0 * h) - exact[1]).length() < 1e-7);
         assert!(((s2_vp[1] - s2_vm[1]) / (2.0 * h) - exact[2]).length() < 1e-7);
-
-        // Pure partials Duuu and Dvvv already used Dxzz upstream; Duuv and Duvv
-        // exhibit the exact (Dxxz - Dxzz) substitution error when exact_terms = false.
-        assert_eq!(legacy[0], exact[0]);
-        assert_eq!(legacy[3], exact[3]);
-        let [su, sv] = s1;
-        let dxxz_minus_dxzz = d3[2] - d3[5];
-        let duuv_err = (sv.x * su.z * su.z + 2.0 * sv.z * su.x * su.z) * dxxz_minus_dxzz;
-        let duvv_err = (su.x * sv.z * sv.z + 2.0 * su.z * sv.x * sv.z) * dxxz_minus_dxzz;
-        assert!((legacy[1] - exact[1]).length() > 1.0);
-        assert!((legacy[2] - exact[2]).length() > 1.0);
-        assert!(((legacy[1] - exact[1]) - duuv_err).length() < 1e-12);
-        assert!(((legacy[2] - exact[2]) - duvv_err).length() < 1e-12);
     }
 
     #[test]
@@ -3099,12 +2986,7 @@ mod tests {
         let (f_pos, f1, f2, f3) = poly_eval_vol(&f_terms, p);
         let (d_pos, d1, d2, d3) = poly_eval_vol(&d_terms, f_pos);
 
-        let legacy = lift_third_derivative_vol(f1, f2, f3, d1, d2, d3);
-        assert_eq!(
-            legacy,
-            lift_third_derivative_vol_opt_in(f1, f2, f3, d1, d2, d3, false)
-        );
-        let exact = lift_third_derivative_vol_opt_in(f1, f2, f3, d1, d2, d3, true);
+        let exact = lift_third_derivative_vol(f1, f2, f3, d1, d2, d3);
 
         let h = 1e-6;
         let second_at = |q: Point3| {
@@ -3138,30 +3020,10 @@ mod tests {
                 "vol slot {i}: exact={got:?} fd={want:?}"
             );
         }
-        // Unaffected slots: Duuu(0), Duvw(4), Dvvv(6), Dwww(9).
-        for i in [0, 4, 6, 9] {
-            assert_eq!(legacy[i], exact[i], "slot {i} should match");
-        }
-        // All 6 WR-45 slots fail macroscopically when exact_terms = false:
-        // Duuv(1), Duuw(2), Duvv(3), Duww(5), Dvvw(7), Dvww(8).
-        for i in [1, 2, 3, 5, 7, 8] {
-            assert!(
-                (legacy[i] - fd[i]).length() > 1.0,
-                "slot {i} should diverge under upstream formula: legacy={:?} fd={:?}",
-                legacy[i],
-                fd[i]
-            );
-        }
-
-        // Verify concat_evals and concat_evals_opt_in on full (n+1)^3 arrays.
+        // Verify concat_evals on full (n+1)^3 arrays.
         let first = wr45_pack_eval3(f_pos, f1, f2, f3);
         let second = wr45_pack_eval3(d_pos, d1, d2, d3);
-        let c_def = concat_evals(3, &first, &second).unwrap();
-        assert_eq!(
-            c_def,
-            concat_evals_opt_in(3, &first, &second, false).unwrap()
-        );
-        let c_opt = concat_evals_opt_in(3, &first, &second, true).unwrap();
+        let c_opt = concat_evals(3, &first, &second).unwrap();
         let sv = |u: usize, vv: usize, w: usize| (u * 4 + vv) * 4 + w;
         let order3_slots = [
             (3, 0, 0),
@@ -3175,10 +3037,7 @@ mod tests {
             (0, 1, 2),
             (0, 0, 3),
         ];
-        for ((u, vv, w), (want_def, want_opt)) in
-            order3_slots.into_iter().zip(legacy.into_iter().zip(exact))
-        {
-            assert_eq!(c_def[sv(u, vv, w)], want_def);
+        for ((u, vv, w), want_opt) in order3_slots.into_iter().zip(exact) {
             assert_eq!(c_opt[sv(u, vv, w)], want_opt);
         }
         assert_eq!(c_opt[sv(3, 3, 3)], Vec3::UNDEF);
@@ -3187,25 +3046,7 @@ mod tests {
     #[test]
     fn wr45_compound_volume_and_srf_in_volume_end_to_end() {
         let k_def = Kernel::default();
-        assert!(!k_def.fixes.volume_lift_third_derivative_terms);
-        assert!(UpstreamFixes::NAMES.contains(&"volume_lift_third_derivative_terms"));
-
-        let mut k_opt = Kernel::default();
-        *k_opt
-            .fixes
-            .flag_mut("volume_lift_third_derivative_terms")
-            .unwrap() = true;
-        assert!(k_opt.fixes.volume_lift_third_derivative_terms);
-        assert!(k_opt
-            .fixes
-            .flags()
-            .any(|(name, on)| name == "volume_lift_third_derivative_terms" && on));
-
-        let opts_def = EvalOptions::default();
-        let opts_opt = EvalOptions {
-            fixes: k_opt.fixes,
-            ..EvalOptions::default()
-        };
+        let opts_opt = EvalOptions::default();
 
         let make_next_bend = || {
             BendVolume::create(
@@ -3273,8 +3114,6 @@ mod tests {
                     vol.evaluate(q, n, o).unwrap()
                 }
             };
-            assert_eq!(eval_at(p, 2, &opts_def), eval_at(p, 2, &opts_opt));
-            let d3_def = eval_at(p, 3, &opts_def);
             let d3_opt = eval_at(p, 3, &opts_opt);
             let d2_up = eval_at(v(p.x + h, p.y, p.z), 2, &opts_opt);
             let d2_um = eval_at(v(p.x - h, p.y, p.z), 2, &opts_opt);
@@ -3294,20 +3133,13 @@ mod tests {
                 (d2_vp[sv2(0, 0, 2)] - d2_vm[sv2(0, 0, 2)]) / (2.0 * h),
                 (d2_wp[sv2(0, 0, 2)] - d2_wm[sv2(0, 0, 2)]) / (2.0 * h),
             ];
-            let mut max_def_err = 0.0_f64;
             for (i, ((u, vv, w), fd_i)) in order3_slots.into_iter().zip(fd).enumerate() {
                 let got_opt = d3_opt[sv3(u, vv, w)];
-                let got_def = d3_def[sv3(u, vv, w)];
                 assert!(
                     (got_opt - fd_i).length() < 1e-7,
                     "{label} slot {i}: opt={got_opt:?} fd={fd_i:?}"
                 );
-                max_def_err = max_def_err.max((got_def - fd_i).length());
             }
-            assert!(
-                max_def_err > 1e-3,
-                "{label} expected default WR-45 mismatch, got max_def_err={max_def_err}"
-            );
         };
 
         check_vol(&twist_compound, v(1.3, -0.8, 0.5), false, "twist_eval");
@@ -3342,23 +3174,18 @@ mod tests {
             ..EvaluateFlags::default()
         };
         let check_siv = |siv: &SrfInVolume, uv: Point2, hu_step: f64, hv_step: f64, label: &str| {
-            assert_eq!(
-                siv.evaluate(&k_def, uv, 2, 2, flags).unwrap(),
-                siv.evaluate(&k_opt, uv, 2, 2, flags).unwrap()
-            );
-            let d3_def = siv.evaluate(&k_def, uv, 3, 3, flags).unwrap();
-            let d3_opt = siv.evaluate(&k_opt, uv, 3, 3, flags).unwrap();
+            let d3_opt = siv.evaluate(&k_def, uv, 3, 3, flags).unwrap();
             let s2_up = siv
-                .evaluate(&k_opt, Point2::new(uv.x + hu_step, uv.y), 2, 2, flags)
+                .evaluate(&k_def, Point2::new(uv.x + hu_step, uv.y), 2, 2, flags)
                 .unwrap();
             let s2_um = siv
-                .evaluate(&k_opt, Point2::new(uv.x - hu_step, uv.y), 2, 2, flags)
+                .evaluate(&k_def, Point2::new(uv.x - hu_step, uv.y), 2, 2, flags)
                 .unwrap();
             let s2_vp = siv
-                .evaluate(&k_opt, Point2::new(uv.x, uv.y + hv_step), 2, 2, flags)
+                .evaluate(&k_def, Point2::new(uv.x, uv.y + hv_step), 2, 2, flags)
                 .unwrap();
             let s2_vm = siv
-                .evaluate(&k_opt, Point2::new(uv.x, uv.y - hv_step), 2, 2, flags)
+                .evaluate(&k_def, Point2::new(uv.x, uv.y - hv_step), 2, 2, flags)
                 .unwrap();
             let fd = [
                 (s2_up[2][0] - s2_um[2][0]) / (2.0 * hu_step),
@@ -3367,21 +3194,13 @@ mod tests {
                 (s2_vp[0][2] - s2_vm[0][2]) / (2.0 * hv_step),
             ];
             let got_opt = [d3_opt[3][0], d3_opt[2][1], d3_opt[1][2], d3_opt[0][3]];
-            let got_def = [d3_def[3][0], d3_def[2][1], d3_def[1][2], d3_def[0][3]];
-            let mut max_def_err = 0.0_f64;
-            for (i, ((opt_i, def_i), fd_i)) in got_opt.into_iter().zip(got_def).zip(fd).enumerate()
-            {
+            for (i, (opt_i, fd_i)) in got_opt.into_iter().zip(fd).enumerate() {
                 let tol = 1e-6 * (1.0 + fd_i.length());
                 assert!(
                     (opt_i - fd_i).length() <= tol,
                     "{label} srf3[{i}]: opt={opt_i:?} fd={fd_i:?}"
                 );
-                max_def_err = max_def_err.max((def_i - fd_i).length());
             }
-            assert!(
-                max_def_err > 1e-2,
-                "{label} expected default WR-45 mismatch, got max_def_err={max_def_err}"
-            );
         };
 
         let siv_single =
@@ -3438,18 +3257,16 @@ mod tests {
             "sphere_twist_compound",
         );
 
-        // CrvInVolume over the compounded volume also receives exact 3rd derivatives via EvalOptions::fixes.
+        // CrvInVolume over the compounded volume also receives exact 3rd derivatives.
         let seg = Curve::from(
             Line::create_line_segment(3, v(0.4, -0.3, 0.2), v(1.5, 0.6, 1.1), None).unwrap(),
         );
         let civ = CrvInVolume::new(seg, true, twist_compound, 0, 0).unwrap();
         let t_param = 0.4;
-        let c3_def = civ.evaluate(&k_def, t_param, 3, true, false).unwrap();
-        let c3_opt = civ.evaluate(&k_opt, t_param, 3, true, false).unwrap();
-        let c2_p = civ.evaluate(&k_opt, t_param + h, 2, true, false).unwrap()[2];
-        let c2_m = civ.evaluate(&k_opt, t_param - h, 2, true, false).unwrap()[2];
+        let c3_opt = civ.evaluate(&k_def, t_param, 3, true, false).unwrap();
+        let c2_p = civ.evaluate(&k_def, t_param + h, 2, true, false).unwrap()[2];
+        let c2_m = civ.evaluate(&k_def, t_param - h, 2, true, false).unwrap()[2];
         let c_fd3 = (c2_p - c2_m) / (2.0 * h);
         assert!((c3_opt[3] - c_fd3).length() < 1e-6 * (1.0 + c_fd3.length()));
-        assert!((c3_def[3] - c_fd3).length() > 1e-3);
     }
 }

@@ -18,15 +18,7 @@ pub fn dir() -> Option<PathBuf> {
     if cfg!(test) {
         return Some(solidcraft_io::vfs::temp_dir().join(format!("solidcraft-test-slicer-{}", std::process::id())));
     }
-    let env = |k: &str| std::env::var_os(k).filter(|d| !d.is_empty()).map(PathBuf::from);
-    let (root, name) = if cfg!(windows) {
-        (env("LOCALAPPDATA")?, "SolidCraft")
-    } else if cfg!(target_os = "macos") {
-        (env("HOME")?.join("Library/Caches"), "SolidCraft")
-    } else {
-        (env("XDG_CACHE_HOME").or_else(|| env("HOME").map(|h| h.join(".cache")))?, "solidcraft")
-    };
-    Some(root.join(name).join("slicer"))
+    Some(crate::recovery::cache_dir()?.join("slicer"))
 }
 
 /// Make `dir`, readable by its owner only (on Unix).

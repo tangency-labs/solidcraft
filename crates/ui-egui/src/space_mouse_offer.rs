@@ -182,7 +182,7 @@ pub(crate) fn offerable(app: &SolveApp) -> Option<String> {
 fn input_blocked(app: &SolveApp, ctx: &egui::Context) -> bool {
     !ctx.input(|i| i.focused)
         || app.file_picker_busy()
-        || app.file_load.busy()
+        || app.file_load_holds()
         || crate::ui_kit::input_blocked()
         || app.prefs_window.shell.open
         || app.space_mouse.calibrating.is_some()

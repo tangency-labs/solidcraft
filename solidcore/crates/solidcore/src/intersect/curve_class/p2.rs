@@ -234,6 +234,8 @@ impl<O: ClassObject> CurveClassification<O> {
         self.doing_cross_hatch = other.doing_cross_hatch;
         self.doing_fillets = other.doing_fillets;
         self.ok_to_set_tolerance = other.ok_to_set_tolerance;
+        self.source_reach = other.source_reach;
+        self.seam_hint = other.seam_hint;
         self.tgt_loops_only = other.tgt_loops_only;
         self.tgt_loops.clear();
         self.tgt_loops.extend_from_slice(&other.tgt_loops);
@@ -503,7 +505,10 @@ impl<O: ClassObject> CurveClassification<O> {
         // check state - lIntervalIndex within bounds
         let size = self.size();
         if index >= size {
-            return Err(SolidError::sm_err(OP_CONNECT));
+            return Err(SolidError::intersect_failed(
+                OP_CONNECT,
+                "the interval index is past the end of the classification",
+            ));
         }
         let mut end_to_squeeze = end_to_squeeze;
 
@@ -601,7 +606,10 @@ impl<O: ClassObject> CurveClassification<O> {
     ) -> Result<()> {
         // check input
         if index >= self.size() {
-            return Err(SolidError::sm_err(OP_EDIT));
+            return Err(SolidError::intersect_failed(
+                OP_EDIT,
+                "the interval index is past the end of the classification",
+            ));
         }
 
         // Get allowed displacement range for the new Param value
@@ -614,7 +622,10 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // check input - new MinParam Value is in allowed range
         if !allowed.contains_value(new_param, 0.0) {
-            return Err(SolidError::sm_err(OP_EDIT));
+            return Err(SolidError::intersect_failed(
+                OP_EDIT,
+                "the new start parameter is outside the range the interval allows",
+            ));
         }
 
         // modify the target interval boundary position
@@ -670,7 +681,10 @@ impl<O: ClassObject> CurveClassification<O> {
         // check input
         let size = self.size();
         if index >= size {
-            return Err(SolidError::sm_err(OP_EDIT));
+            return Err(SolidError::intersect_failed(
+                OP_EDIT,
+                "the interval index is past the end of the classification",
+            ));
         }
 
         // Get allowed displacement range for the new Param value
@@ -683,7 +697,10 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // check input - new MaxParam Value is in allowed range
         if !allowed.contains_value(new_param, 0.0) {
-            return Err(SolidError::sm_err(OP_EDIT));
+            return Err(SolidError::intersect_failed(
+                OP_EDIT,
+                "the new end parameter is outside the range the interval allows",
+            ));
         }
 
         // modify the target interval boundary position
@@ -838,7 +855,10 @@ impl<O: ClassObject> CurveClassification<O> {
         // Curve is 3d branch - Use drop point
         let Some(face) = self.face else {
             // check state - the surface must be given
-            return Err(SolidError::sm_err(OP_UV));
+            return Err(SolidError::intersect_failed(
+                OP_UV,
+                "the classification has no face to drop the point onto",
+            ));
         };
         let surface = match geometry.topology_entity(face) {
             Some((b, EntityRef::Face(f))) => face_p2::surface(b, f)?,
@@ -855,7 +875,9 @@ impl<O: ClassObject> CurveClassification<O> {
                 ))
             }
         };
-        let surface = surface.ok_or(SolidError::sm_err(OP_UV))?;
+        let surface = surface.ok_or_else(|| {
+            SolidError::intersect_failed(OP_UV, "the classification's face has no surface")
+        })?;
 
         // (EvaluatePoint's status is ignored upstream: an undefined point on failure)
         let point = ignored(curve.evaluate_point(k, param))?.unwrap_or(Vec3::UNDEF);

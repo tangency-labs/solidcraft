@@ -29,13 +29,13 @@ tool built from a sketch, cut from each target, the cut body split into lumps) i
 |---|---|
 | a body of the model before the feature | as they were |
 | a moved copy of one (pattern, mirror) | `<name>@F<feature>.<instance>` |
-| the cavity side of a shell grown outward | `F<feature>:inner:<name>` |
+| the cavity side of a shell grown outward | `F<feature>:inner(<name>)` |
 | a body the feature built | by role: `F<feature>:side:<sketch curve>`, `start`/`top`/`bottom`/`end` caps, `+x`… box sides, `face:<k>` imported faces, `link:<digest>` faces of a linked design (see below) |
 | a copied tool of a patterned feature | `F<feature>:<role>@F<pattern>.<instance>` |
 
 `crates/doc/src/history_names.rs` names each face of the result from its origins: a kept or
-trimmed face keeps its origin's name, a fillet or chamfer face is `F<feature>:blend:<edge>` of the
-edge it replaces, a shell's inner wall `F<feature>:inner:<face>`. A side's sketch curve is the
+trimmed face keeps its origin's name, a fillet or chamfer face is `F<feature>:blend(<edge>)` of the
+edge it replaces, a shell's inner wall `F<feature>:inner(<face>)`. A side's sketch curve is the
 curve the profile segment lies on exactly; nothing is sampled.
 
 - **Pieces.** Faces that end up with one name are pieces of one face, and are told apart by the
@@ -98,9 +98,13 @@ A sketch's link to a projected edge (`sketch.project {edge: [x, y, z]}`, and Int
 Include 3D Geometry of an edge) keeps the edge's name beside its point. The link is that edge
 wherever a change takes it; of an edge that was split it is the piece nearest the link's point,
 and the sketch says so. When no edge has the name any more the link is lost and keeps its last
-geometry, as it does for a face: it does not take whichever edge is nearest now. A link saved
-without a name, by a build that kept only the point, is found by the edge nearest its point, as
-it always was, and takes that edge's name when its sketch is next edited.
+geometry, as it does for a face: it does not take whichever edge is nearest now. The sketch then
+fails, naming every such link by its source and curves (`DocError::LostProjections`), never by
+the persistent name. `Model::failed_sketch_shown` builds it with those links marked lost, for
+its editor, Redefine Sketch Plane's check that they are its only failure and the viewport; no
+feature builds from it. A link saved without a name, by a build that kept only the point, is
+found by the edge nearest its point, as it always was, and takes that edge's name when its
+sketch is next edited.
 
 A command that takes a face as a point can be given a name `model.faces` lists instead
 (`face.delete`, `solid.shell`, `solid.draft`, `solid.offset_face`, `solid.split_face`, the `faces`

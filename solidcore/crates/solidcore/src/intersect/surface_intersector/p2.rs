@@ -56,6 +56,15 @@
 //!   than a tenth of the one before only when the merged span passes the trace's span
 //!   test (`SurfaceIntersector::span_keeps_accuracy`); the fork (18e96f1) merges it
 //!   untested, as pinned SMLib does.
+//! - **A point at a pole is the pole (not upstream).** A trace point that
+//!   `ComputePointValues` finds singular on a surface and that lies on that surface's
+//!   degenerate boundary (within the UV tolerance `TestPoint` reads "on a boundary" with)
+//!   is given the boundary's parameter across it, the pole as its point on that surface,
+//!   and the pole's foot on the other surface
+//!   ([`SurfaceIntersector::place_at_pole`]): the curves that end at one pole end at one
+//!   point, and their trims end on the degenerate boundary, before
+//!   `StepBackFromSingularity` places the singular parameter along the curve's tangent
+//!   (part 1).
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks (graphics, dumps) and the
 //!   `SM_ASSERT`s (no-ops in release builds).
 
@@ -87,6 +96,7 @@ use crate::surface::surface_cache::PatchBoundaryBoundingPlanes;
 
 use super::p1::{flush_crv, IntersectionPointType, SrfIndex, SurfaceIntersector, TsectPnt};
 use super::p4::IntersectorVirtuals;
+use super::sphere_span;
 
 const OP_CPV: &str = "intersect::surface_intersector::p2::SurfaceIntersector::compute_point_values";
 const OP_SING: &str =
@@ -532,7 +542,10 @@ impl SurfaceIntersector<'_> {
 
                 // error case - surface point has no normal
                 if norm.length_squared() < EFF_ZERO_SQ {
-                    return Err(SolidError::sm_err(OP_CPV));
+                    return Err(SolidError::intersect_failed(
+                        OP_CPV,
+                        "the surface point has no normal",
+                    ));
                 }
             }
 
@@ -634,11 +647,15 @@ impl SurfaceIntersector<'_> {
                             uv_values,
                             point,
                             previous.map(TsectPnt::crv_deriv),
-                            k.fixes.dupin_bottom_hyperbola_axis,
                         ) {
                             Ok(()) => {}
                             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                            Err(_) => return Err(SolidError::sm_err(OP_SING)),
+                            Err(_) => {
+                                return Err(SolidError::intersect_failed(
+                                    OP_SING,
+                                    "the advanced intersector could not place the singular point",
+                                ))
+                            }
                         }
                     } else {
                         compute_singularity_point_base(uv_values, point, previous)?;
@@ -676,6 +693,10 @@ impl SurfaceIntersector<'_> {
                     };
                     let (sing, sing_dir) = is_singularity(k, self.surface(s), uv)?;
                     if sing {
+                        // Not upstream: a point on the degenerate boundary is the pole
+                        if self.place_at_pole(k, s, sing_dir, point)? {
+                            return Ok(());
+                        }
                         // step back along the 3D curve and recompute the tangents
                         let mut p = prev.clone();
                         self.step_back_from_singularity_points(
@@ -754,6 +775,127 @@ impl SurfaceIntersector<'_> {
         Ok(())
     }
 
+    /// Not upstream: places `point`, singular on surface `s` (collapsing along
+    /// `sing_dir`), at the pole when it lies on that surface's degenerate boundary.
+    ///
+    /// A trace that runs into a pole, or passes it within the tolerance it refines with,
+    /// ends a curve at a point `RefinePoint` put on the degenerate boundary only to within
+    /// its convergence: its parameter across the boundary, its point on the other surface
+    /// and so its curve point differ from those of another curve ending at the same pole
+    /// by the solves' noise (1e-11 in UV, 1e-9 in 3D). The edges meeting at the pole are
+    /// then trimmed short of their curves' ends by that much, and the trims end off the
+    /// degenerate boundary, where nothing closes the face's loop along the pole: the body's
+    /// volume enclosure, which bounds a closing segment on the pole only on the side
+    /// itself, could not decide the volume's sign. The pole is one point. When the point's
+    /// parameter across the boundary is within the UV tolerance `TestPoint` reads "on a
+    /// boundary" with (`100 SM_EFF_ZERO` scaled by the domain), the point is the pole: that
+    /// parameter is the boundary's, its point on `s` is the pole, its point on the other
+    /// surface is the pole's foot there (`LocalPointSolve` from the refined point), and its
+    /// curve point, deviation and tangent (`n0 x n1`, the sense kept) follow from those. A
+    /// point off the boundary, a surface collapsing in both directions or neither, a pole
+    /// whose foot is itself singular, and a point where an evaluation or the foot's solve
+    /// fails or the foot has no normal are left as upstream leaves them. Where the
+    /// surfaces are tangent at the pole the point is a tangent point, as
+    /// `ComputePointValues` makes any point with a vanishing tangent, and `true` is
+    /// returned (the caller returns at once).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] and [`SolidError::Cancelled`] from the evaluations and the
+    /// solve.
+    pub(super) fn place_at_pole(
+        &self,
+        k: &Kernel,
+        s: SrfIndex,
+        sing_dir: SurfParamType,
+        point: &mut TsectPnt,
+    ) -> Result<bool> {
+        // a failed evaluation or solve leaves the point as upstream has it
+        fn kept<T>(r: Result<T>) -> Result<Option<T>> {
+            match r {
+                Ok(x) => Ok(Some(x)),
+                Err(e) if e.is_unported_or_cancelled() => Err(e),
+                Err(_) => Ok(None),
+            }
+        }
+        let (si, oi) = if s == SrfIndex::First {
+            (0, SrfIndex::Second)
+        } else {
+            (1, SrfIndex::First)
+        };
+        let (Some(dom), Some(odom)) = (
+            self.uv_domains.get(si).copied(),
+            self.uv_domains.get(1 - si).copied(),
+        ) else {
+            return Ok(false);
+        };
+        let on_tol = EFF_ZERO * (1.0 + dom.max_dimension()) * 100.0;
+        let mut uv = point.uv_pos(s);
+        let (across, lo, hi) = match sing_dir {
+            SurfParamType::U => (&mut uv.y, dom.min().y, dom.max().y),
+            SurfParamType::V => (&mut uv.x, dom.min().x, dom.max().x),
+            _ => return Ok(false),
+        };
+        if (*across - lo).abs() <= on_tol {
+            *across = lo;
+        } else if (*across - hi).abs() <= on_tol {
+            *across = hi;
+        } else {
+            return Ok(false);
+        }
+        // a pole on the other surface's pole is left as upstream has it
+        match kept(is_singularity(k, self.surface(oi), point.uv_pos(oi)))? {
+            Some((false, _)) => {}
+            _ => return Ok(false),
+        }
+        let Some(pole) = kept(self.surface(s).evaluate_point(k, uv))? else {
+            return Ok(false);
+        };
+        let Some(Some([fu, fv])) = kept(surface_local_point_solve_normalize(
+            k,
+            self.surface(oi),
+            &odom,
+            pole,
+            point.uv_pos(oi),
+        ))?
+        else {
+            return Ok(false);
+        };
+        let foot = Point2::new(fu, fv);
+        let Some(m) = kept(self.surface(oi).evaluate(k, foot, 2, 2, LEFT_UPPER))? else {
+            return Ok(false);
+        };
+        let mut eval = *point.srf_eval_matrix(oi);
+        copy_upper_half(&mut eval, &m, 2);
+        let norm = eval[1][0].cross(eval[0][1]);
+        if norm.length_squared() < EFF_ZERO_SQ {
+            return Ok(false);
+        }
+        eval[2][2] = norm.unitize_or_z();
+        *point.uv_pos_mut(s) = uv;
+        point.srf_eval_matrix_mut(s)[0][0] = pole;
+        *point.uv_pos_mut(oi) = foot;
+        *point.srf_eval_matrix_mut(oi) = eval;
+        point.curve_pv[0] =
+            (point.srf_pos(SrfIndex::First) + point.srf_pos(SrfIndex::Second)) / 2.0;
+        point.deviation = point.crv_pos().distance(point.srf_pos(SrfIndex::First));
+        let mut tangent = point
+            .srf_norm(SrfIndex::First)
+            .cross(point.srf_norm(SrfIndex::Second));
+        if tangent.dot(point.crv_deriv()) < 0.0 {
+            tangent = -tangent;
+        }
+        // the surfaces tangent at the pole: a tangent point, as for any point
+        let length = tangent.length();
+        if length < self.start_parallel_tol_radians {
+            point.curve_pv[1] = tangent;
+            point.point_type = IntersectionPointType::TangentPoint;
+            return Ok(true);
+        }
+        point.curve_pv[1] = tangent / length;
+        Ok(false)
+    }
+
     /// Flushes the traced curve (the curve points, which are unlinked) into `out`
     /// (`FlushCurve`): a 3D curve and the two UV curves, degree 3 piecewise C0
     /// B-splines sharing the knots (the curve parameters), with the curve's type and
@@ -761,7 +903,10 @@ impl SurfaceIntersector<'_> {
     ///
     /// A single point becomes degenerate curves (type touching) when it is a tangent
     /// point or unique ([`is_point_unique`] against the start points and the 3D
-    /// curves' ends). A curve whose consecutive points are all within
+    /// curves' ends), and never when it is
+    /// [`SurfaceIntersector::lone_start_on_found_curve`] (fix WR-76: a point of a curve
+    /// already found, where upstream's uniqueness test, which reads only the found
+    /// curves' ends, can call it a touching point). A curve whose consecutive points are all within
     /// `this_approx_tol_3d` is dropped. A last span shorter than a tenth of the one
     /// before is merged into it (only when the merged
     /// span passes `SurfaceIntersector::span_keeps_accuracy`). A crossing curve with
@@ -770,7 +915,9 @@ impl SurfaceIntersector<'_> {
     /// # Errors
     ///
     /// Those of the degenerate curves and of [`flush_crv`]; [`SolidError::Unported`]
-    /// from the curve evaluations of [`is_point_unique`].
+    /// from the curve evaluations of [`is_point_unique`]; cancellation, and
+    /// `IntersectFailed` for a UV trim on a sphere the monotone-sweep fit refuses
+    /// ([`sphere_span::fit_monotone_sweep`]).
     pub fn flush_curve(&mut self, k: &Kernel, out: &mut TsectCurves) -> Result<()> {
         // take (and clear) the curve points
         let ids = core::mem::take(&mut self.curve_points);
@@ -779,10 +926,20 @@ impl SurfaceIntersector<'_> {
             .map(|&id| self.point(id).cloned())
             .collect::<Result<Vec<_>>>()?;
 
+        let lone_start_on_found_curve = self.lone_start_on_found_curve.take();
+
         // check no points to flush.
         let Some(first) = pnts.first() else {
             return Ok(());
         };
+
+        // fix (WR-76): a trace that stopped at its start point because its first span lies
+        // on a found curve leaves a point of that curve, not a touching point
+        if let [only] = ids.as_slice() {
+            if lone_start_on_found_curve == Some(*only) {
+                return Ok(());
+            }
+        }
 
         // When intersection is single point, output a degenerate curve
         if pnts.len() == 1 {
@@ -851,7 +1008,11 @@ impl SurfaceIntersector<'_> {
 
         // for every point to flush
         let n = pnts.len();
-        let at = |i: usize| pnts.get(i).ok_or_else(|| SolidError::sm_err(OP_FLUSH));
+        let at = |i: usize| {
+            pnts.get(i).ok_or_else(|| {
+                SolidError::intersect_failed(OP_FLUSH, "the curve has no point at that index")
+            })
+        };
         let mut i = 1;
         while i < n {
             let prev = at(i - 1)?;
@@ -912,6 +1073,31 @@ impl SurfaceIntersector<'_> {
                 ctrl.extend([Vec3::from(pt2), Vec3::from(pt3), Vec3::from(pt4)]);
             }
             i += 1;
+        }
+
+        // Not upstream (#17110): each span of a UV trim on a sphere is made monotone in
+        // its sweep coordinate wherever its 3D span is monotone in longitude, certified, or
+        // the whole intersection is refused (IntersectFailed); the trace's points stay.
+        // Cancellation is polled inside the fit
+        for (srf, ctrl) in [SrfIndex::First, SrfIndex::Second]
+            .into_iter()
+            .zip(&mut ctrl_uv)
+        {
+            let fitted = sphere_span::fit_monotone_sweep(
+                k,
+                self.surface(srf),
+                ctrl,
+                &ctrl_3d,
+                self.this_approx_tol_3d,
+            )?;
+            match fitted {
+                // the refitted trim's certified distance from the 3D curve joins the
+                // published deviation
+                Ok(fit) => max_deviation = max_deviation.max(fit.bound),
+                Err(why) => {
+                    return Err(SolidError::intersect_failed(OP_FLUSH, sweep_refusal(why)));
+                }
+            }
         }
 
         // build the B-spline curves
@@ -1171,7 +1357,10 @@ impl SurfaceIntersector<'_> {
         let mut ii = 1usize;
         loop {
             if ii > MAX_GAP_SAMPLES {
-                return Err(SolidError::sm_err(OP_CLASSIFY));
+                return Err(SolidError::intersect_failed(
+                    OP_CLASSIFY,
+                    "the boundary start point is not classified within the sample limit",
+                ));
             }
             // the sample array index: 1, then 2 (the last sample moves to 1)
             let tgt = if ii > 1 { 2 } else { 1 };
@@ -1418,7 +1607,10 @@ fn compute_singularity_point_base(
     _point: &mut TsectPnt,
     _previous: Option<&TsectPnt>,
 ) -> Result<()> {
-    Err(SolidError::sm_err(OP_SING))
+    Err(SolidError::intersect_failed(
+        OP_SING,
+        "the basic intersector does not handle singular or tangent points",
+    ))
 }
 
 /// True when `point` is farther than `tol_3d` from every start point's curve point
@@ -1649,7 +1841,10 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             // `SER( Inversion(dParameter, ..) )`: SM_ERR outside the interval or for a
             // zero-length one
             if pass && !inv.is_success() {
-                return Err(SolidError::sm_err(OP_LAW));
+                return Err(SolidError::intersect_failed(
+                    OP_LAW,
+                    "the law curve's normal could not be inverted",
+                ));
             }
             let t = inv.parameter.unwrap_or(UNDEF_DOUBLE);
             pv[1] = n0 * (1.0 - t) + n1 * t;
@@ -1657,7 +1852,10 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             // the step may end just past the interval, where the unclamped parameter
             // is set and extrapolates as wanted: only an undefined one is passed on
             if pass && inv.parameter.is_none() {
-                return Err(SolidError::sm_err(OP_LAW));
+                return Err(SolidError::intersect_failed(
+                    OP_LAW,
+                    "the law curve's normal inversion gave no parameter",
+                ));
             }
             let t = inv.parameter.unwrap_or(UNDEF_DOUBLE);
             pv_delta[1] = n0 * (1.0 - t) + n1 * t;
@@ -1722,7 +1920,37 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         // next iteration with a bigger delta step
         delta_step *= 10.0;
     }
-    Err(SolidError::sm_err(OP_LAW))
+    Err(SolidError::intersect_failed(
+        OP_LAW,
+        "no delta step gives the law point's values",
+    ))
+}
+
+/// Not upstream (#17110): the message of a refused monotone sweep fit
+/// ([`sphere_span::fit_monotone_sweep`]).
+const fn sweep_refusal(why: sphere_span::SweepRefusal) -> &'static str {
+    match why {
+        sphere_span::SweepRefusal::Off(sphere_span::Refusal::Off) => {
+            "the UV trim on the sphere made monotone in its sweep coordinate where the curve \
+             is monotone in longitude lies off the 3D curve by more than the tolerance"
+        }
+        sphere_span::SweepRefusal::Off(_) => {
+            "the UV trim on the sphere made monotone in its sweep coordinate where the curve \
+             is monotone in longitude could not be certified within the tolerance of the 3D \
+             curve"
+        }
+        sphere_span::SweepRefusal::TurnsBack => {
+            "a refitted span of the UV trim on the sphere could not be certified monotone \
+             in its sweep coordinate where the curve is monotone in longitude"
+        }
+        sphere_span::SweepRefusal::Degenerate => {
+            "the UV trim on the sphere made monotone in its sweep coordinate has a zero \
+             derivative at a joint"
+        }
+        sphere_span::SweepRefusal::Shape => {
+            "the UV and 3D control points of the traced curve are not matching cubic spans"
+        }
+    }
 }
 
 #[cfg(test)]

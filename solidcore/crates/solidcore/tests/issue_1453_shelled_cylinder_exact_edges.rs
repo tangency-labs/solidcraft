@@ -121,9 +121,11 @@ fn on_cylinder(p: Point3) -> f64 {
 
 /// The issue's case: a cylinder r5, h10 shelled 1 inward, its top open. By default
 /// (upstream) the new inner edges are marched: 7 edges and 5 vertices (the rim split
-/// at an extra vertex), the volume 3.5e-7 over. With the fix: the floor and rim are
-/// exact circles, 6 edges and 4 vertices, and the volume is pi 25 10 - pi 16 9 to
-/// 1e-9.
+/// at an extra vertex). Its volume read 3.5e-7 over until `brep_volume` closed the
+/// marched edges' gaps (#16735): that was the integrator's leak through them, and the
+/// marched solid's volume is pi 25 10 - pi 16 9 to 1e-9 too (1.1e-12 measured). With
+/// the fix: the floor and rim are exact circles, 6 edges and 4 vertices, and the volume
+/// is that closed form to 1e-9.
 #[test]
 fn issue_1453_shelled_cylinder_edges_are_exact() {
     let want = PI * 25.0 * 10.0 - PI * 16.0 * 9.0;
@@ -143,7 +145,10 @@ fn issue_1453_shelled_cylinder_edges_are_exact() {
     );
     assert!(stock.exact < stock.inner, "a marched inner edge");
     let over = stock.volume.unwrap() - want;
-    assert!(over > 1e-7 * want, "upstream's volume 3.5e-7 over: {over}");
+    assert!(
+        over.abs() <= 1e-9 * want,
+        "the marched solid's volume: {over}"
+    );
     let fixed = shelled(
         "issue_1453 cylinder",
         true,
@@ -251,4 +256,48 @@ fn issue_1453_shelled_dome_rim_stays_exact() {
     );
     assert!(fixed.worst <= 1e-12, "rim on r 18: {}", fixed.worst);
     assert_eq!((fixed.edges, fixed.vertices), (stock.edges, stock.vertices));
+}
+
+/// WR-671 on the issue's cylinder with its B-rep tolerance set to 1e-6 under its edges'
+/// and vertices' own 1e-5 (golden `api_shell_cylinder_r5_top_open_tol_1e6`). The offset
+/// edges and vertices keep the cylinder's own tolerances rather than the B-rep's 1e-6,
+/// so the shell is the one the cylinder at its default B-rep tolerance gives
+/// ([`issue_1453_shelled_cylinder_edges_are_exact`]'s upstream shell): 7 edges and 5
+/// vertices, the rim split at an extra vertex. It checks clean at level 2, no edge or
+/// vertex is tighter than the cylinder's, and its volume is pi 25 10 - pi 16 9 to 1e-9.
+#[test]
+fn wr_671_shell_at_a_tighter_brep_tolerance_keeps_the_cylinders_tolerances() {
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    let want = PI * 25.0 * 10.0 - PI * 16.0 * 9.0;
+    let mut k = Kernel::default();
+    let mut part = cylinder(&mut k);
+    part.set_tolerance(1e-6);
+    let source = p1::edges(&part, None)
+        .unwrap()
+        .into_iter()
+        .map(|e| part.edge(e).unwrap().tolerance)
+        .chain(
+            p1::vertices(&part, None)
+                .unwrap()
+                .into_iter()
+                .map(|v| part.vertex(v).unwrap().tolerance),
+        )
+        .fold(f64::INFINITY, f64::min);
+    assert_eq!(source, 1e-5, "the cylinder's own tolerances");
+    let open = planar_faces_at(&k, &part, 2, 10.0);
+    let mut b = shell(&mut k, part, -1.0, &open).unwrap();
+    assert_eq!((b.edge_list().len(), b.vertex_list().len()), (7, 5));
+    for e in p1::edges(&b, None).unwrap() {
+        let t = b.edge(e).unwrap().tolerance;
+        assert!(t >= source, "edge {e:?} tolerance {t}");
+    }
+    for v in p1::vertices(&b, None).unwrap() {
+        let t = b.vertex(v).unwrap().tolerance;
+        assert!(t >= source, "vertex {v:?} tolerance {t}");
+    }
+    let c = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+    assert_eq!(c.assert_valid, Some(true), "{:?}", c.lines());
+    assert_eq!(c.failures().count(), 0, "{:?}", c.lines());
+    let got = volume_at(&k, &mut b, 1e-12).unwrap();
+    assert!((got - want).abs() <= 1e-9 * want, "{got} vs {want}");
 }

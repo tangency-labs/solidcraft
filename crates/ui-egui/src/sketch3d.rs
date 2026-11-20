@@ -90,6 +90,7 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
     let (o, d) = proj.ray(pos);
     for h in pick_3d(app, proj, pos) {
         match h {
+            Hit::SketchPoint3d { at, .. } => return Some((at, "Pt")),
             Hit::SketchPoint { sketch, at, .. } => {
                 if let Some(source) = st.sketch(sketch) {
                     return Some((source.plane.to_world(at), "Pt"));

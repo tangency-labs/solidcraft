@@ -22,13 +22,12 @@
 //!   trimmed cache answers through the solver's `face_cache`
 //!   ([`crate::surface::surface::p8::FaceSolveCache::point_test`], a face
 //!   classification), otherwise through [`super::p1::is_point_valid_with`].
-//! - **Ignored statuses.** The leaf solve ignores the status of
-//!   `SmExtent3d::IntersectLine` and `SmPseudoBox::IntersectLine` (a zero line vector,
-//!   an undefined box or a negative volume box leave the hit count at zero: no work)
-//!   and of `sm_ClassifyCurveSurfaceXSectPoint`; the combination ignores the status of
-//!   `sm_ClassifyCurveSurfaceXSectPoint`, `SmSurface::ClassifyIntersectingRangeSolution`
-//!   and of the `EvaluatePoint`s of its point distance check (a failed evaluation
-//!   leaves `Vec3::UNDEF`). [`SolidError::Unported`] is always propagated.
+//! - **Statuses passed on (WR-663).** Upstream ignores the statuses of
+//!   `SmExtent3d::IntersectLine` and `SmPseudoBox::IntersectLine` in the leaf solve and
+//!   of `sm_ClassifyCurveSurfaceXSectPoint`, `SmSurface::ClassifyIntersectingRangeSolution`
+//!   and the `EvaluatePoint`s of the combination's point distance check; as the fork
+//!   (tangency-labs/smlib 21dcf69) they are passed on, and a leaf whose domain or line
+//!   interval cannot be trimmed to the one of interest has no answers.
 //! - **Solution nodes.** The combination resolves `m_apNodes[0]` in
 //!   [`CombineContext::curve_tree`] and `m_apNodes[1]` in the tree of
 //!   [`CombineContext::surface_cache`]; a node id without its tree is an error (upstream
@@ -55,7 +54,7 @@ use super::p9::implicit_iso;
 use crate::curve::curve::p3::local_curve_intersect;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
-use crate::error::{ignored, ignored_or_pass_on, passed_on, Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::LineHit as BoxHit;
@@ -68,7 +67,7 @@ use crate::geom::solution_array::{
 use crate::geom::tol::{are_same, scaled_zero2};
 use crate::geom::tree::{AuxDataType, NodeId, Tree};
 use crate::geom::vector2d::{Point2, Vec2};
-use crate::geom::vector3d::{Point3, Vec3};
+use crate::geom::vector3d::Point3;
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_surface::SurfParamType;
@@ -272,15 +271,6 @@ fn set_p(end: &mut SolutionEnd, i: usize, v: f64) -> Result<()> {
     Ok(())
 }
 
-/// `EvaluatePoint` whose status upstream ignores: `Vec3::UNDEF` on failure.
-fn point_or_undef(k: &Kernel, curve: &Curve, t: f64) -> Result<Point3> {
-    // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-    Ok(
-        ignored_or_pass_on(curve.evaluate_point(k, t), k.fixes.query_statuses_pass_on)?
-            .unwrap_or(Vec3::UNDEF),
-    )
-}
-
 /// The count and parameters of an `IntersectLine` whose status upstream ignores (an
 /// invalid input leaves the count at zero).
 fn box_hit(hit: &Result<BoxHit>) -> Option<(f64, f64)> {
@@ -412,8 +402,10 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             .first()
             .copied()
             .flatten()
-            .ok_or(SolidError::null_pointer(OP_LSI))?;
-        let cache = self.surface_cache.ok_or(SolidError::null_pointer(OP_LSI))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_LSI, "the branch's surface node"))?;
+        let cache = self
+            .surface_cache
+            .ok_or_else(|| SolidError::surface_missing(OP_LSI, "the surface cache"))?;
         let patch = cache.patch(surface_id)?.clone();
         let tree = self.base.tree(0)?;
         let parent = original_surface(tree, &surface_node)?;
@@ -464,17 +456,16 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             v_conts[1] = ContinuityType::Discontinuous;
         }
 
-        // with the opt-in fix a branch outside the domain or interval of interest has no
+        // as the fork, a branch outside the domain or interval of interest has no
         // answers and the box intersections pass on their statuses (WR-663,
         // tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
 
         // when SurfaceLeafDomain is partially intersected by the IntersectionDomain
         if !uv_domain.is_contained_by(&self.uv_domain, EFF_ZERO) {
             // trim leafNode domain down to intersection domain
             uv_domain = match uv_domain.intersect(&self.uv_domain) {
                 Ok(d) => d,
-                Err(e) if pass && !e.is_unported_or_cancelled() => return Ok(false),
+                Err(e) if !e.is_unported_or_cancelled() => return Ok(false),
                 Err(e) => return Err(e),
             };
 
@@ -494,19 +485,17 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         // BBox/line intersect
         let mut bbox = surface_node.bbox;
         bbox.expand_absolute(self.base.tolerance_3d);
-        let Some((bbox_enter, bbox_exit)) = box_hit(&passed_on(
-            bbox.intersect_line(self.line_point, self.line_vector),
-            pass,
-        )?) else {
+        let Some((bbox_enter, bbox_exit)) =
+            box_hit(&Ok(bbox.intersect_line(self.line_point, self.line_vector)?))
+        else {
             // no work - no BBox intersection
             return Ok(false);
         };
 
         // PseudoBox/line intersect
-        let Some((_, pseudo_enter, pseudo_exit)) = pseudo_hit(&passed_on(
-            pseudo_box.intersect_line(self.line_point, self.line_vector),
-            pass,
-        )?) else {
+        let Some((_, pseudo_enter, pseudo_exit)) = pseudo_hit(&Ok(
+            pseudo_box.intersect_line(self.line_point, self.line_vector)?
+        )) else {
             // no work - no Pseudo intersection
             return Ok(false);
         };
@@ -527,7 +516,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         if let Some(line_ivl) = &self.line_interval {
             bound_ivl = match bound_ivl.intersect(line_ivl) {
                 Ok(i) => i,
-                Err(e) if pass && !e.is_unported_or_cancelled() => return Ok(false),
+                Err(e) if !e.is_unported_or_cancelled() => return Ok(false),
                 Err(_) => Extent1d::new(),
             };
         }
@@ -536,6 +525,41 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         if self.ray_fire && bound_ivl.max() <= 0.0 {
             // no work - ray casting and no positive intersection segment
             return Ok(false);
+        }
+
+        // Not upstream. A ray has no roots behind its start: only the forward part of the
+        // interval is a candidate. Left whole, a leaf that a ray grazes (it crosses the
+        // convex patch twice) seeded its solve from the middle of the interval, which can
+        // settle on the root behind the start; that root is dropped below and the root
+        // ahead was never looked for, so the ray missed a wall it leaves by.
+        let mut clipped = false;
+        if self.ray_fire {
+            // (a band behind the start as wide as the one the interval is expanded by, so a
+            // root on the surface the ray starts on is found where it was, and dropped below
+            // where it was, rather than clamped to the end of the interval)
+            let behind =
+                EFF_ZERO * (1.0 + self.line_point.max_dimension()) + 2.0 * self.base.tolerance_3d;
+            // A ray that starts on the surface has its root at the start, which the
+            // classification of a point on a face leaves to the leaf solve as it was: the
+            // interval is kept whole there.
+            let on_surface = bound_ivl.min() < -behind && {
+                let natural = srf_eval.natural_uv_domain_with_nurb(k)?;
+                ignored(surface_local_point_solve::<O>(
+                    k,
+                    srf_eval,
+                    &natural,
+                    SolverOperation::Minimize,
+                    self.line_point,
+                    uv_domain.evaluate(0.5, 0.5),
+                ))?
+                .is_some_and(|(found, near)| {
+                    found && near.start.solution_value < self.base.tolerance_3d
+                })
+            };
+            if bound_ivl.min() < -behind && !on_surface {
+                bound_ivl = Extent1d::from_min_max(-behind, bound_ivl.max());
+                clipped = true;
+            }
         }
 
         // no work - if given, m_cpLineInterval doesn't overlap sBoxIvl
@@ -547,7 +571,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
 
         // init a line interval - for a ray or for a given line interval
         let ivl = match &self.line_interval {
-            Some(line_ivl) => passed_on(line_ivl.intersect(&bound_ivl), pass)?.unwrap_or_default(),
+            Some(line_ivl) => line_ivl.intersect(&bound_ivl)?,
             None => bound_ivl,
         };
 
@@ -570,7 +594,9 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             )?
             .first()
             .copied()
-            .ok_or(SolidError::sm_err(OP_LSI))
+            .ok_or_else(|| {
+                SolidError::surface_failed(OP_LSI, "the tangent plane drop gave no point")
+            })
         };
         let mut first_uv = drop(first_uv_guess, first_t)?;
 
@@ -713,7 +739,9 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         let natural = cache.surface().natural_uv_domain_with_nurb(k)?;
         for j in 0..2 {
             // Handle curve discontinuities
-            if t_conts.get(j).copied().is_some_and(at_most_c0) {
+            // (the clip's own end is no end of the line: a ray's root at its start is the
+            // leaf solve's, as before the clip)
+            if t_conts.get(j).copied().is_some_and(at_most_c0) && !(j == 0 && clipped) {
                 let t = if j == 1 {
                     leaf.interval.max()
                 } else {
@@ -960,10 +988,10 @@ impl<O: SolutionObject> CombineContext<'_, O> {
         };
         let tree = self
             .curve_tree
-            .ok_or(SolidError::null_pointer(OP_COMBINE))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_COMBINE, "the curve tree"))?;
         let cache = self
             .surface_cache
-            .ok_or(SolidError::null_pointer(OP_COMBINE))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_COMBINE, "the surface cache"))?;
         Ok(Some((
             tree.curve_aux(n1)?.interval,
             cache.aux(id2)?.uv_domain,
@@ -985,21 +1013,18 @@ fn is_coincident_point<O>(
 ) -> Result<bool> {
     let uv = Point2::new(p(&solution.start, 1)?, p(&solution.start, 2)?);
     let t = p(&solution.start, 0)?;
-    // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-    let class = ignored_or_pass_on(
-        classify_curve_surface_xsect_point(
-            k,
-            surface,
-            uv_domain,
-            curve,
-            interval,
-            uv,
-            t,
-            edge_tolerance,
-        ),
-        k.fixes.query_statuses_pass_on,
+    // (passed on as the fork does, WR-663, tangency-labs/smlib 21dcf69)
+    let class = classify_curve_surface_xsect_point(
+        k,
+        surface,
+        uv_domain,
+        curve,
+        interval,
+        uv,
+        t,
+        edge_tolerance,
     )?;
-    Ok(class.is_some_and(|c| c.point_type == TsectCurveType::Coincident))
+    Ok(class.point_type == TsectCurveType::Coincident)
 }
 
 /// Drops the curve points at `fractions` of the opening between two range solutions
@@ -1197,9 +1222,10 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
 
             // for point solutions only
             if curr.solution_type == SolutionType::SingleValue {
-                // evaluate solution points (statuses ignored)
-                let pt1 = point_or_undef(k, curve, p(&curr_start, 0)?)?;
-                let pt2 = point_or_undef(k, curve, p(&last_end, 0)?)?;
+                // evaluate solution points (statuses ignored upstream; passed on as the
+                // fork does, WR-663, tangency-labs/smlib 21dcf69)
+                let pt1 = curve.evaluate_point(k, p(&curr_start, 0)?)?;
+                let pt2 = curve.evaluate_point(k, p(&last_end, 0)?)?;
                 let dist2 = pt1.distance_squared(pt2);
 
                 // combine solutions when points are close enough together
@@ -1329,7 +1355,10 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
         };
         // the packed indices never pass the array (shrinking only)
         if last >= solutions.len() {
-            return Err(SolidError::sm_err(OP_COMBINE));
+            return Err(SolidError::surface_failed(
+                OP_COMBINE,
+                "the packed solution index is past the end of the solutions",
+            ));
         }
         solutions.set_size(last + 1);
     }
@@ -1493,23 +1522,20 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
         let large_interval = seg_leng > length / 10.0;
         let small_interval = ivl_length < scaled_ps_tol || reg_length < scaled_ps_tol2;
 
-        // for nonDegenerate intervals (status ignored)
+        // for nonDegenerate intervals (status ignored upstream; passed on as the fork
+        // does, WR-663, tangency-labs/smlib 21dcf69)
         if !small_interval {
             // (`ClassifyIntersectingRangeSolution` writes only the deviation and the
             // first three parameters of `rCurrSol.m_vStart`)
-            // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-            if let Some((degenerate, point)) = ignored_or_pass_on(
-                classify_intersecting_range_solution(k, surface, curve, &curr),
-                k.fixes.query_statuses_pass_on,
-            )? {
-                is_degenerate = degenerate;
-                if let Some(pt) = point {
-                    curr.start.solution_value = pt.solution_value;
-                    for (slot, v) in curr.start.parameters.iter_mut().zip(pt.parameters) {
-                        *slot = v;
-                    }
-                    solutions.set_at(ii, &curr)?;
+            let (degenerate, point) =
+                classify_intersecting_range_solution(k, surface, curve, &curr)?;
+            is_degenerate = degenerate;
+            if let Some(pt) = point {
+                curr.start.solution_value = pt.solution_value;
+                for (slot, v) in curr.start.parameters.iter_mut().zip(pt.parameters) {
+                    *slot = v;
                 }
+                solutions.set_at(ii, &curr)?;
             }
         }
         if large_interval && !is_degenerate {
@@ -1545,7 +1571,9 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                 let pv = curve.evaluate(k, p(&sol.start, 0)?, 1, true, true)?;
                 let uv = Point2::new(p(&sol.start, 1)?, p(&sol.start, 2)?);
                 let normal = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
-                let tangent = pv.get(1).copied().ok_or(SolidError::sm_err(OP_COMBINE))?;
+                let tangent = pv.get(1).copied().ok_or_else(|| {
+                    SolidError::surface_failed(OP_COMBINE, "the curve gave no tangent")
+                })?;
                 if !tangent.is_perpendicular_to(normal, 2.0) {
                     tmp.add(sol);
                 }
@@ -1721,5 +1749,40 @@ mod tests {
         )
         .unwrap();
         assert!(sols.is_empty());
+    }
+
+    /// The line and curve intersection failures keep the operation, status, kind and entity of the bare
+    /// `Upstream` statuses they replace (a sample).
+    #[test]
+    fn typed_surface_failures_keep_their_upstream_answers() {
+        use crate::error::surface::SurfaceFailure;
+        let samples: [(&'static str, SurfaceFailure, i32); 2] = [
+            (
+                OP_LSI,
+                SurfaceFailure::Missing("the surface cache"),
+                crate::error::SM_ERR_NULL_POINTER,
+            ),
+            (
+                OP_COMBINE,
+                SurfaceFailure::Failed("the curve gave no tangent"),
+                crate::error::SM_ERR,
+            ),
+        ];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(typed.surface_failure(), Some(&failure));
+        }
     }
 }

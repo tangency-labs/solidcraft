@@ -130,7 +130,7 @@ fn status(e: &SolidError) -> Result<Output, HarnessError> {
 fn ordinary<T>(r: solidcore::Result<T>) -> Result<i32, SolidError> {
     match r {
         Ok(_) => Ok(0),
-        Err(SolidError::Upstream { code, .. }) => Ok(code),
+        Err(e) if solidcore::error::upstream_status(&e).is_some() => Ok(solidcore::error::upstream_status(&e).unwrap_or(-1)),
         Err(e) => Err(e),
     }
 }
@@ -556,7 +556,8 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
             skeleton_caches(&mut b);
             Ok(graph_reachable(&b, record))
         }
-        Err(SolidError::Upstream { code, .. }) if i.op <= 4 => {
+        Err(e) if i.op <= 4 && solidcore::error::upstream_status(&e).is_some() => {
+            let code = solidcore::error::upstream_status(&e).unwrap_or(-1);
             // These APIs clear their pointer outputs before the first fallible
             // operation. Compare defined native failures as statuses, not harness
             // errors; any partial graph changes are still compared normally.
@@ -595,7 +596,10 @@ fn rust_orient(i: &Inputs, mut b: Brep, k: &mut Kernel) -> Result<Output, Harnes
             context: Some(ctx),
             key_of: &p3::tracked_key_of,
         };
-        result = ordinary(port::orient_sheet_surfaces(k, b, face, i.same, &mut env));
+        // (the note is recorded as the status 1 upstream returns for it)
+        result = ordinary(solidcore::topology::brep::p9::OrientSheetNote::stop_on_note(
+            port::orient_sheet_surfaces(k, b, face, i.same, &mut env),
+        ));
         Ok(Vec::new())
     });
     let run = match run {

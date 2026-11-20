@@ -5,21 +5,21 @@
 //!
 //! [`check`] fails with "not supported yet" while a test it reaches is unported in solidcore.
 
-use solidcore::error::EntityRef;
 use solidcore::geom::assert_array::{AssertArray, AssertReport, obj_type_string};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::tol::{SmallTopoType, brep_zone_tol_3d, context_xsect_tol_3d};
+use solidcore::geom::tol::{SmallTopoType, context_xsect_tol_3d};
 use solidcore::heal::gap::GapFunction;
-use solidcore::intersect::point_class::PointClassType;
-use solidcore::mass::integrator::properties::{MassPropertyBehavior, PropertyAttributes, brep_properties, face_properties};
+use solidcore::mass::integrator::properties::{MassPropertyBehavior, PropertyAttributes, brep_properties_in_box, face_properties};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::query::api_queries::{brep_bounding_box, brep_is_manifold_solid, brep_material_census, face_bounding_box};
-use solidcore::query::brep::BrepClassifier;
 use solidcore::topology::brep::p1 as bl;
-use solidcore::topology::brep::validation::{CheckLevel as SolidcoreCheckLevel, check_brep};
+use solidcore::topology::brep::validation::{CheckLevel as SolidcoreCheckLevel, check_brep_scoped};
 use solidcore::topology::face::p2::{PPF_AREA, PPF_AREA_FIRST_MOMENTS};
 use solidcore::topology::{FaceId, FaceuseId, NamingScheme};
 use solidcore::{Kernel, Point3, SolidError, Vec3};
+
+use solidcore_ops::check::ValidityScope;
+use solidcore_ops::measure::{LocateFailure, Located, locate_points};
 
 use super::blend::status;
 use super::{Body, with_body};
@@ -106,9 +106,12 @@ pub(crate) fn mass_properties(body: &Body, relative_accuracy: f64) -> Result<Mas
         // density). Bodies here carry none: the attribute store passed in is empty.
         let store = AttributeStore::default();
         let attrs = PropertyAttributes { store: &store, key_of: &|_| ObjectKey(0) };
-        // Moments about the middle of the box, moved to the centroid below: about the world
-        // origin, a body far from it would lose its inertia to cancellation.
-        let o = brep_bounding_box(k, b, false)?.mid();
+        // Moments about the middle of the exact box, moved to the centroid below: about the world
+        // origin, a body far from it would lose its inertia to cancellation. The loose box would do
+        // the same: an edge on a circle of large radius stretches it a quarter of the circle away
+        // (#17361). Its size sets the integration's error scale too.
+        let bx = brep_bounding_box(k, b, true)?;
+        let o = bx.mid();
         if !finite(&[o.x, o.y, o.z]) {
             return Err(invalid("non-finite box"));
         }
@@ -123,7 +126,7 @@ pub(crate) fn mass_properties(body: &Body, relative_accuracy: f64) -> Result<Mas
             }
             return Ok(MassProperties { area, volume: 0.0, centroid: c, moments: [0.0; 3], products: [0.0; 3] });
         }
-        let p = brep_properties(k, b, accuracy, o, MassPropertyBehavior { density: 1.0, ..MassPropertyBehavior::default() }, &attrs)?;
+        let p = brep_properties_in_box(k, b, accuracy, o, MassPropertyBehavior { density: 1.0, ..MassPropertyBehavior::default() }, &attrs, &bx)?;
         let (mass, volume) = (p.mass, p.volume);
         if !mass.is_finite() || !(mass > 0.0) || !(volume > 0.0) {
             return Err(invalid("no mass"));
@@ -198,33 +201,70 @@ pub(crate) fn edge_face_distance(body: &Body, edge: usize, face: usize) -> Resul
     found.ok_or(Error::Argument)
 }
 
+/// A proved upper bound on the distance from the record curve `curve` (a spline or rational
+/// spline) over its parameters `interval` to the surface of face `face` (the body's face
+/// order): [`solidcore_ops::curve_gap::curve_face_gap_bound`]. `None` when the
+/// kernel does not enclose the gap or there is no such face.
+pub(crate) fn curve_face_gap_bound(
+    body: &Body,
+    curve: &solidcore_record::brep::Curve,
+    interval: [f64; 2],
+    face: usize,
+    floor: f64,
+) -> Result<Option<f64>> {
+    // a circle or ellipse is the kernel's exact rational spline, over its interval there
+    let (curve, interval) = match solidcore_ops::curve_gap::GapCurve::of_conic(curve, interval).map_err(|e| Error::Solidcore(e.to_string()))? {
+        Some(found) => found,
+        None => (solidcore_ops::curve_gap::GapCurve::new(curve).ok_or(Error::Argument)?, interval),
+    };
+    with_body("curve_face_gap_bound", body, |k, b| {
+        let Some(&f) = bl::faces(b, None)?.get(face) else {
+            return Ok(None);
+        };
+        solidcore_ops::curve_gap::curve_face_gap_bound(k, b, f, &curve, interval, floor)
+    })
+}
+
 /// `smlib_brep_classify_point`: `SmBrep::Point3DClassify` at the body's own zone tolerance
 /// (`SmTol::GetZoneTol3d` of the body), with boundary intersections, so a point within that
 /// tolerance of a vertex, an edge or a face is on the boundary and never decided by a ray; else
 /// the region it lies in, outside when that region is void (`IsVoid() == TRUE`; `UNSURE` is
-/// material, as the capi compares with `TRUE`). Runs on a private copy when a solve needs one
-/// (`BrepClassifier`): upstream's `const` method may add UV trim curves to the body.
+/// material, as the capi compares with `TRUE`). The classification is the modelling layer's
+/// (`solidcore_ops::measure::locate_points`), which runs on a private copy when a solve needs one:
+/// upstream's `const` method may add UV trim curves to the body.
 pub(crate) fn classify_point(body: &Body, p: [f64; 3]) -> Result<PointClass> {
     if !finite(&p) {
         return Err(Error::Argument);
     }
-    with_body("classify_point", body, |k, b| {
-        let tol = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
-        let mut classifier = BrepClassifier::of_brep(b);
-        let pc = match classifier.point_3d_classify(k, Point3::new(p[0], p[1], p[2]), tol, true) {
-            Ok(pc) => pc,
-            // Its status, as the capi passes it on (no ray finding a region is SM_ERR).
-            Err(e) => return Ok(Err(status(e))),
-        };
-        Ok(match (pc.point_class(), pc.object()) {
-            (PointClassType::Vertex | PointClassType::Edge | PointClassType::Face, _) => Ok(PointClass::OnBoundary),
-            (PointClassType::Region, Some(EntityRef::Region(r))) => {
-                Ok(if classifier.brep().region(r)?.is_void() == 1 { PointClass::Outside } else { PointClass::Inside })
-            }
-            // Point3DClassify reports only the four classes above on success: SM_ERR.
-            _ => Err(Error::Status(SM_ERR)),
-        })
-    })?
+    with_body("classify_point", body, |k, b| Ok(point_class(locate_points(k, b, &[p]).pop().unwrap_or(Err(LocateFailure::Unclassified)))))?
+}
+
+/// [`classify_point`] for each of `points`, through one classification of the body
+/// (`locate_points`): the body's private copy and its search structures are made once for all of
+/// them, not once a point (on a large body they cost far more than a point's own solve). Each
+/// point's class, or its own error.
+pub(crate) fn classify_points(body: &Body, points: &[[f64; 3]]) -> Result<Vec<Result<PointClass>>> {
+    if points.iter().all(|p| !finite(p)) {
+        return Ok(points.iter().map(|_| Err(Error::Argument)).collect());
+    }
+    with_body("classify_points", body, |k, b| Ok(locate_points(k, b, points).into_iter().map(point_class).collect()))
+}
+
+/// [`classify_point`]'s class of a point the modelling layer placed. A region the kernel is unsure
+/// of is material (the capi's `IsVoid() == TRUE` test), where `solidcore_ops`' own
+/// `Body::classify_point` refuses it.
+fn point_class(l: std::result::Result<Located, LocateFailure>) -> Result<PointClass> {
+    match l {
+        Ok(Located::OnBoundary) => Ok(PointClass::OnBoundary),
+        Ok(Located::InRegion { material: Some(false), .. }) => Ok(PointClass::Outside),
+        Ok(Located::InRegion { material: Some(true) | None, .. }) => Ok(PointClass::Inside),
+        Err(LocateFailure::NotFinite) => Err(Error::Argument),
+        // Its status, as the capi passes it on (no ray finding a region is SM_ERR).
+        Err(LocateFailure::Classify(e)) => Err(status(e)),
+        Err(LocateFailure::Region(e)) => Err(Error::Solidcore(format!("classify_point: {e}"))),
+        // Point3DClassify reports only the four classes on success: SM_ERR.
+        Err(LocateFailure::Unclassified) => Err(Error::Status(SM_ERR)),
+    }
 }
 
 /// `SM_ERR`.
@@ -303,21 +343,35 @@ impl<T> super::dump::Answer for std::result::Result<T, Refusal> {
 /// owners' identities the check cannot know, fails the check with "not supported yet": the check
 /// never reports a body valid on fewer tests than the C++ kernel runs.
 pub(crate) fn check(body: &Body, level: CheckLevel) -> Result<CheckReport> {
+    check_with(body, level, false)
+}
+
+/// [`check`], stopped by the token over this thread's work when `stoppable` (a body the caller
+/// consumes: [`super::with_own_body`]).
+pub(crate) fn check_with(body: &Body, level: CheckLevel, stoppable: bool) -> Result<CheckReport> {
+    check_scoped(body, level, stoppable, ValidityScope::Body)
+}
+
+/// [`check_with`] holding the tolerance pass to `scope`: [`ValidityScope::Stitched`] for a body a
+/// stitch produced.
+pub(crate) fn check_scoped(body: &Body, level: CheckLevel, stoppable: bool, scope: ValidityScope) -> Result<CheckReport> {
     let lv = match level {
         CheckLevel::Basic => SolidcoreCheckLevel::Level0,
         CheckLevel::Geometry => SolidcoreCheckLevel::Level1,
         CheckLevel::All => SolidcoreCheckLevel::Level2,
     };
-    let c = match with_body("check", body, |k, b| {
+    let checked = |k: &mut Kernel, b: &mut solidcore::topology::Brep| {
         let naming = b.naming();
         if naming == NamingScheme::Unknown {
             return Ok(Err(Refusal::Naming(naming)));
         }
-        match check_brep(k, b, lv) {
+        match check_brep_scoped(k, b, lv, scope) {
             Err(SolidError::Unported { upstream, unit }) => Ok(Err(Refusal::Unported(upstream, unit))),
             r => r.map(Ok),
         }
-    })? {
+    };
+    let ran = if stoppable { super::with_own_body("check", body, checked) } else { with_body("check", body, checked) };
+    let c = match ran? {
         Ok(c) => c,
         Err(Refusal::Unported(upstream, unit)) => {
             return Err(Error::Solidcore(format!("smlib_brep_check: {upstream}: not supported yet: solidcore has not ported it (unit {unit})")));

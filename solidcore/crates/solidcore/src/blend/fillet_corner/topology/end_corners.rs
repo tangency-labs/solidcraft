@@ -67,7 +67,7 @@ pub struct EndCornerTopologyEnv<'a> {
 
 /// The live solver `id` (`NULL`: `SM_ERR_NULL_POINTER`).
 fn live(solvers: &[Option<SolverObject>], id: Option<FilletSolverId>) -> Result<&FilletSolver> {
-    let id = id.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let id = id.ok_or_else(|| SolidError::blend_missing(OP, "the edge use's solver"))?;
     solvers
         .get(id.0 as usize)
         .and_then(Option::as_ref)
@@ -169,7 +169,11 @@ impl FilletCorner {
             if let Some(curr_id) = curr_solver {
                 let common_face = face_by_two_edgeuses(target, Some(curr_eu), Some(next_eu), None)?;
                 if common_face.is_none() {
-                    return Err(SolidError::null_pointer(OP)); // Unrecoverable error
+                    // Unrecoverable error
+                    return Err(SolidError::blend_missing(
+                        OP,
+                        "the face between two of the corner's edge uses",
+                    ));
                 }
                 {
                     let v = pseudo.fillet_vertex_mut(curr_fv)?;
@@ -386,7 +390,7 @@ impl FilletCorner {
         for (ii, slot) in uv.iter_mut().enumerate() {
             let base = solver
                 .surface(ii)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's surface"))?
                 .surface
                 .base_surface();
             // Point testing off: GlobalPointSolve keeps every point solution.
@@ -401,7 +405,10 @@ impl FilletCorner {
                 SolutionRequested::Single,
             )?;
             let [solution] = solutions.as_slice() else {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the corner point does not drop onto the surface at exactly one point",
+                ));
             };
             *slot = Point2::new(solution.start.param(0)?, solution.start.param(1)?);
         }

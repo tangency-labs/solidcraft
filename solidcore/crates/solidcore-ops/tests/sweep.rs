@@ -3,7 +3,7 @@
 //! a refused draft corner's reason, a planar sheet's one face. Then the arcs of a profile on one
 //! circle: the queries and the join an application's one-wall rule is built on, and their
 //! refusals. They run under the rig's fix set
-//! (the corpus's `fixes.json`), as SolidCraft's rig ran them: with every fix off, a quarter
+//! (SolidCraft's preset, `solidcraft_fixes.rs`), as SolidCraft's rig ran them: with every fix off, a quarter
 //! torus's volume is 1.3e-9 off its closed form.
 // TODO(d0b44726f): the cases with arcs (extrude_circle*, sweep_circle_*, loft_two_circles,
 // planar_faces_with_a_hole, the joins) take the kernel's arcs as exact circles, at bound 0 by
@@ -19,14 +19,18 @@
     dead_code
 )]
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_ops::sweep::{
-    arcs_on_one_circle, curves_meet, extrude, face_section, join_arcs, loft, loft_to_point,
-    planar_faces, project_curves, revolve, screw_sweep, sweep_placed, sweep_stations, Affine,
-    CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck, SweepFrame, SweepRoute, Verdict,
+    arcs_on_one_circle, curves_meet, extrude, face_section, join_arcs, loft, loft_sheet,
+    loft_to_point, planar_faces, project_curves, revolve, screw_sweep, sweep_placed,
+    sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck, SweepFrame,
+    SweepRoute, Verdict,
 };
-use solidcore_ops::{make_box, Body, Error};
+use solidcore_ops::{make_box, Body, CheckLevel, Error};
 
 const Z: [f64; 3] = [0.0, 0.0, 1.0];
 
@@ -249,7 +253,8 @@ fn case(name: &str) -> Case {
             )
         }
         // A strip 2 wide leaning in 10° over 10: the long walls meet across the short ones
-        // (10 tan 10° > 1) before the far end.
+        // (10 tan 10° > 1) before the far end, and the section closes there along its ridge:
+        // the hip roof, ∫ (a - 2tz)(b - 2tz) dz to z* = b / 2t, V = b² (3a - b) / 12t.
         "extrude_draft_wall_closes" => c(
             Op::Extrude(
                 polygon(&[
@@ -261,6 +266,24 @@ fn case(name: &str) -> Case {
                 Z,
                 10.0,
                 10f64.to_radians(),
+                DraftCorner::Curvature,
+                true,
+            ),
+            Expect::Volume(4.0 * (3.0 * 20.0 - 2.0) / (12.0 * 10f64.to_radians().tan())),
+        ),
+        // The same strip leaning in so that its long walls meet just at the far end
+        // (10 tan θ = 1): the far end would pinch to the ridge, so it is refused.
+        "extrude_draft_ridge_on_far_end" => c(
+            Op::Extrude(
+                polygon(&[
+                    [0.0, 0.0, 0.0],
+                    [20.0, 0.0, 0.0],
+                    [20.0, 2.0, 0.0],
+                    [0.0, 2.0, 0.0],
+                ]),
+                Z,
+                10.0,
+                0.1f64.atan(),
                 DraftCorner::Curvature,
                 true,
             ),
@@ -475,19 +498,11 @@ fn run(op: &Op) -> solidcore_ops::Result<Body> {
     }
 }
 
-/// The rig's fix set, the corpus's `fixes.json`, on the calling thread's kernel. The setting
-/// is thread-local, so every test thread sets it: a `Once` would give the rig's set to the first
-/// thread only.
+/// The rig's fix set, SolidCraft's preset (`solidcraft_fixes.rs`), on the calling thread's
+/// kernel. The setting is thread-local, so every test thread sets it: a `Once` would give the
+/// rig's set to the first thread only.
 fn rig_fixes() {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../solidcore/tests/kernel_cases/fixes.json"
-    );
-    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
-    // A flat JSON array of flag names: every other piece between quotes.
-    let names: Vec<&str> = text.split('"').skip(1).step_by(2).collect();
-    assert!(!names.is_empty(), "{path}: no fixes");
-    solidcore_ops::session::set_thread_fixes(names).unwrap();
+    solidcore_ops::session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
 }
 
 fn check(name: &str) {
@@ -537,6 +552,7 @@ cases!(
     extrude_square_drafted_curvature,
     extrude_circle_drafted,
     extrude_draft_wall_closes,
+    extrude_draft_ridge_on_far_end,
     revolve_rectangle_full,
     revolve_rectangle_quarter,
     sweep_circle_straight,
@@ -624,6 +640,216 @@ fn an_open_run_of_arcs_joins_into_one_arc() {
     .unwrap();
     assert_eq!(faces(&b), 4, "the curved wall, the flat one and two caps");
     assert!(rel(b.volume(1e-8).unwrap(), 125.0 * PI) < 1e-9);
+}
+
+/// An arc in the plane z = 0 about the z axis (`turn` +1) or against it (-1), from the x axis.
+fn arc_about(center: [f64; 2], turn: f64, radius: f64, start: f64, end: f64) -> Curve {
+    Curve::Arc {
+        center: [center[0], center[1], 0.0],
+        axis: [0.0, 0.0, turn],
+        reference: [1.0, 0.0, 0.0],
+        radius,
+        start,
+        end,
+    }
+}
+
+/// The area a profile of lines and arcs in the plane z = 0 bounds, its holes running
+/// clockwise: Green's theorem, half the integral of x dy - y dx round every curve, exactly.
+fn area_bounded(profile: &[Curve]) -> f64 {
+    let cross = |a: [f64; 2], b: [f64; 2]| a[0] * b[1] - a[1] * b[0];
+    profile
+        .iter()
+        .map(|c| match c {
+            Curve::Line { start, end } => 0.5 * cross([start[0], start[1]], [end[0], end[1]]),
+            Curve::Arc {
+                center,
+                axis,
+                reference,
+                radius,
+                start,
+                end,
+            } => {
+                let (u, s) = (reference, axis[2]);
+                let v = [-u[1] * s, u[0] * s];
+                let at = |t: f64| {
+                    [
+                        radius * (t.cos() * u[0] + t.sin() * v[0]),
+                        radius * (t.cos() * u[1] + t.sin() * v[1]),
+                    ]
+                };
+                let (p, q) = (at(*start), at(*end));
+                let chord = [q[0] - p[0], q[1] - p[1]];
+                0.5 * (cross([center[0], center[1]], chord) + radius * radius * s * (end - start))
+            }
+            Curve::Nurbs { .. } => panic!("{c:?}"),
+        })
+        .sum()
+}
+
+/// #9216: three holes of a profile touch at one point, where a circle and a line are tangent
+/// to the outer circle: the r 3.5 hole below the line and the two slits between the line and
+/// the r 60 circle either side. The sketch solver left the r 3.5 circle 2.6e-8 off the point,
+/// so the curves end there up to 2.6e-8 apart. The r 3.5 hole is one loop with the slit it
+/// touches, so its wall is one full cylinder whose seam edge stands at the point, 2.6e-8 from
+/// the vertex there; the slits' tips stand beside the seam on walls of their own. 0.27.0 built
+/// this extrusion; face test 36 refused it.
+#[test]
+fn holes_touching_at_a_tangent_point_extrude_to_a_valid_solid() {
+    rig_fixes();
+    let p = [
+        arc_about(
+            [0.0, 0.0],
+            1.0,
+            60.0,
+            -4.440892098500626e-16,
+            0.8410686705679303,
+        ),
+        line([40.0, 44.721359549995796, 0.0], [40.0, 60.0, 0.0]),
+        line([40.0, 60.0, 0.0], [39.2, 60.0, 0.0]),
+        line([39.2, 60.0, 0.0], [39.2, 45.424222613050844, 0.0]),
+        arc_about([0.0, 0.0], 1.0, 60.0, 0.8588172718823294, FRAC_PI_2),
+        arc_about([0.0, 0.0], 1.0, 60.0, FRAC_PI_2, 2.282775381707464),
+        line([-39.2, 45.424222613050844, 0.0], [-39.2, 60.0, 0.0]),
+        line([-39.2, 60.0, 0.0], [-40.0, 60.0, 0.0]),
+        line([-40.0, 60.0, 0.0], [-40.0, 44.721359549995796, 0.0]),
+        arc_about([0.0, 0.0], 1.0, 60.0, 2.300523983021863, PI),
+        arc_about([0.0, 0.0], 1.0, 60.0, PI, 4.211519448788037),
+        line(
+            [-28.81130658186081, -52.629921271516494, 0.0],
+            [-2.0648102791373195, -67.27181102503482, 0.0],
+        ),
+        arc_about(
+            [2.589620916414858e-08, -63.50000000057623],
+            1.0,
+            4.3,
+            4.211519448787992,
+            5.213258512796999,
+        ),
+        line(
+            [2.0648103340060695, -67.27181102335074, 0.0],
+            [28.81130662478856, -52.629921248016466, 0.0],
+        ),
+        arc_about([0.0, 0.0], 1.0, 60.0, 5.213258512796996, TAU),
+        arc_about(
+            [0.0, 0.0],
+            -1.0,
+            59.2,
+            -10.494704755967625,
+            -5.213258512796996,
+        ),
+        arc_about(
+            [0.0, 0.0],
+            -1.0,
+            59.2,
+            -5.213258512796996,
+            -4.712388980792504,
+        ),
+        arc_about(
+            [0.0, 0.0],
+            -1.0,
+            59.2,
+            -4.712388980792504,
+            -4.211519448788038,
+        ),
+        arc_about([0.0, 0.0], 1.0, 60.0, 4.375000755112054, 4.671916535172597),
+        arc_about([0.0, 0.0], 1.0, 60.0, 4.671916535172597, 4.71238898038469),
+        line(
+            [-1.1021821192326178e-14, -60.0, 0.0],
+            [-2.4979991726557813, -60.0, 0.0],
+        ),
+        arc_about(
+            [2.589620916414858e-08, -63.50000000057623],
+            1.0,
+            4.3,
+            2.1906671803402036,
+            3.591648595026369,
+        ),
+        line(
+            [-3.8718178779954653, -65.37056839523703, 0.0],
+            [-19.861421682738087, -56.6173465356728, 0.0],
+        ),
+        arc_about([0.0, 0.0], 1.0, 60.0, 4.7528614264124105, 5.04977720647299),
+        line(
+            [19.861421728918845, -56.61734651947255, 0.0],
+            [3.871817931313502, -65.3705683920792, 0.0],
+        ),
+        arc_about(
+            [2.589620916414858e-08, -63.50000000057623],
+            1.0,
+            4.3,
+            5.833129366558602,
+            7.234110780429176,
+        ),
+        line(
+            [2.4979992244482014, -60.0, 0.0],
+            [2.589620712709006e-08, -60.00000000057623, 0.0],
+        ),
+        arc_about(
+            [2.589620916414858e-08, -63.50000000057623],
+            -1.0,
+            3.5,
+            -7.853981633974484,
+            -5.2132585127969975,
+        ),
+        arc_about(
+            [2.589620916414858e-08, -63.50000000057623],
+            -1.0,
+            3.5,
+            -5.2132585127969975,
+            -4.211519448787993,
+        ),
+        arc_about(
+            [2.589620916414858e-08, -63.50000000057623],
+            -1.0,
+            3.5,
+            -4.211519448787993,
+            -1.5707963267948974,
+        ),
+        arc_about([0.0, 0.0], 1.0, 60.0, 4.712388980816293, 4.7528614264124105),
+    ];
+    let open = |run: &[usize]| {
+        let pieces: Vec<Curve> = run.iter().map(|&i| p[i].clone()).collect();
+        join_arcs(&pieces, Join::Open, JOIN).unwrap()
+    };
+    let c = |i: usize| p[i].clone();
+    // The arcs on one circle joined as SolidCraft joins them (one wall per circle): the outer
+    // loop, the r 59.2 hole (a whole circle), the two slits and, in the second slit's loop
+    // (which runs round the r 3.5 hole from the point it touches), the r 3.5 circle.
+    let profile = [
+        c(1),
+        c(2),
+        c(3),
+        open(&[4, 5]),
+        c(6),
+        c(7),
+        c(8),
+        open(&[9, 10]),
+        c(11),
+        c(12),
+        c(13),
+        open(&[14, 0]),
+        join_arcs(&p[15..18], Join::ClosedAtFrameStart, JOIN).unwrap(),
+        open(&[18, 19]),
+        c(20),
+        c(21),
+        c(22),
+        c(24),
+        c(25),
+        c(26),
+        open(&[27, 28, 29]),
+        open(&[30, 23]),
+    ];
+    let b = extrude(&profile, Z, 3.0, 0.0, DraftCorner::default(), true).unwrap();
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    // A wall per curve and two caps; an edge up each wall's join and round each cap; on each
+    // cap twelve vertices round the outside, the r 59.2 circle's seam vertex, and seven round
+    // the slits and the r 3.5 circle, which share the point they touch at.
+    assert_eq!(b.counts().unwrap(), [24, 66, 40]);
+    assert_eq!(b.to_record().unwrap().0.shells.len(), 1);
+    let want = 3.0 * area_bounded(&p);
+    assert!(rel(b.volume(1e-10).unwrap(), want) < 1e-9, "{want}");
 }
 
 #[test]
@@ -864,5 +1090,149 @@ fn a_segment_projects_onto_a_box_s_record_face_at_its_index() {
         at(0, [0.0; 3]),
         Err(Error::Argument),
         "a direction of no length"
+    );
+}
+
+/// The x range of record face `face`'s corners.
+fn corners_x(record: &solidcore_record::brep::Brep, face: usize) -> [f64; 2] {
+    let xs: Vec<f64> = record
+        .edges
+        .iter()
+        .filter(|e| e.uses.iter().any(|u| u.face as usize == face))
+        .flat_map(|e| e.vertices)
+        .map(|v| record.vertices[v as usize].point[0])
+        .collect();
+    [
+        xs.iter().copied().fold(f64::INFINITY, f64::min),
+        xs.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+    ]
+}
+
+/// Two lines from x = 0 to 5 and on to 10 at height `z`, the corners at `y`.
+fn two_lines(y: [f64; 3], z: f64) -> Vec<Curve> {
+    vec![
+        line([0.0, y[0], z], [5.0, y[1], z]),
+        line([5.0, y[1], z], [10.0, y[2], z]),
+    ]
+}
+
+/// A sheet lofted through three sections of two lines each, whose corners move differently from
+/// one section to the next (the middle one unevenly, so each column's chords differ), is one
+/// skin: its two faces share the seam between them (tangency-labs/solidcraft#14048, where each
+/// column skinned on its own took parameters of its own and the seams parted). Each face is
+/// traced to its one column, the face between the first lines lying over x 0…5 and the other
+/// over x 5…10: curves `k`, `2 + k` and `4 + k`.
+#[test]
+fn a_loft_sheet_s_columns_share_their_seams() {
+    let sections = [
+        two_lines([0.0, 0.0, 0.0], 0.0),
+        two_lines([1.0, 6.0, 3.0], 5.0),
+        two_lines([0.0, 2.0, 0.0], 10.0),
+    ];
+    let (b, sources) = loft_sheet(&sections, 2).unwrap();
+    assert_eq!(b.counts().unwrap(), [2, 7, 6], "two faces sharing one seam");
+    let (record, _) = b.to_record().unwrap();
+    assert_eq!(record.edges.iter().filter(|e| e.uses.len() == 1).count(), 6);
+    let sources = sources.expect("traced");
+    assert_eq!(sources.len(), 2, "{sources:?}");
+    for (f, curves) in sources.into_iter().enumerate() {
+        let k = curves.first().copied().unwrap_or(9) % 2;
+        assert_eq!(curves, [k, 2 + k, 4 + k], "face {f}");
+        let want = [5.0 * k as f64, 5.0 * k as f64 + 5.0];
+        let got = corners_x(&record, f);
+        assert!(
+            (got[0] - want[0]).abs() < 1e-9 && (got[1] - want[1]).abs() < 1e-9,
+            "face {f}, column {k}: x {got:?}"
+        );
+    }
+}
+
+/// Two sections, each a line drawn as two halves of equal length, lofted as one sheet: each
+/// section's halves continue each other at the same speed, so the skin has no corner there and
+/// the flat strip is one face, traced to all four curves.
+#[test]
+fn a_loft_sheet_face_across_columns_is_traced_to_each() {
+    let sections = [two_lines([0.0; 3], 0.0), two_lines([0.0; 3], 5.0)];
+    let (b, sources) = loft_sheet(&sections, 1).unwrap();
+    assert_eq!(b.counts().unwrap(), [1, 4, 4]);
+    assert_eq!(sources, Some(vec![vec![0, 1, 2, 3]]));
+}
+
+/// Squares of side 10, 8 and 10 at z = 0, 5 and 10 lofted as one sheet: a closed band of four
+/// faces, one for each side and traced to that side in every section, joined at the four corner
+/// seams; only the two squares are free.
+#[test]
+fn a_loft_sheet_through_closed_sections_is_a_band() {
+    let sections = [
+        square(0.0, 0.0, 10.0, 0.0),
+        square(1.0, 1.0, 8.0, 5.0),
+        square(0.0, 0.0, 10.0, 10.0),
+    ];
+    let (b, sources) = loft_sheet(&sections, 2).unwrap();
+    assert_eq!(b.counts().unwrap(), [4, 12, 8]);
+    let (record, _) = b.to_record().unwrap();
+    assert_eq!(record.edges.iter().filter(|e| e.uses.len() == 1).count(), 8);
+    let sources = sources.expect("traced");
+    let mut sides: Vec<usize> = sources
+        .iter()
+        .map(|curves| {
+            let k = curves.first().copied().unwrap_or(99);
+            assert_eq!(curves, &[k, 4 + k, 8 + k], "one side in every section");
+            k
+        })
+        .collect();
+    sides.sort_unstable();
+    assert_eq!(sides, [0, 1, 2, 3], "one side a face: {sources:?}");
+}
+
+/// A square lofted to the square turned 45° (its corners at the first one's side midpoints) is a
+/// band of four twisted walls, each between one side of each section; every side is used once.
+#[test]
+fn a_loft_sheet_to_a_turned_square_is_a_band() {
+    let diamond = polygon(&[
+        [5.0, 0.0, 5.0],
+        [10.0, 5.0, 5.0],
+        [5.0, 10.0, 5.0],
+        [0.0, 5.0, 5.0],
+    ]);
+    let (b, sources) = loft_sheet(&[square(0.0, 0.0, 10.0, 0.0), diamond], 1).unwrap();
+    assert_eq!(b.counts().unwrap(), [4, 12, 8]);
+    let sources = sources.expect("traced");
+    for curves in &sources {
+        assert!(
+            curves.len() == 2 && curves[0] < 4 && curves[1] >= 4,
+            "one side of each section: {sources:?}"
+        );
+    }
+    let mut all = sources.concat();
+    all.sort_unstable();
+    assert_eq!(all, (0..8).collect::<Vec<_>>());
+}
+
+/// A loft sheet needs two sections or more, of one count of curves, and a degree of 1 to 3.
+#[test]
+fn a_loft_sheet_refuses_bad_sections() {
+    let one = two_lines([0.0; 3], 0.0);
+    let other = two_lines([1.0; 3], 5.0);
+    assert_eq!(
+        loft_sheet(std::slice::from_ref(&one), 1).err(),
+        Some(Error::Argument)
+    );
+    assert_eq!(
+        loft_sheet(&[one.clone(), other[..1].to_vec()], 1).err(),
+        Some(Error::Argument),
+        "counts differ"
+    );
+    assert_eq!(
+        loft_sheet(&[one.clone(), other.clone()], 0).err(),
+        Some(Error::Argument)
+    );
+    assert_eq!(
+        loft_sheet(&[one.clone(), other.clone()], 4).err(),
+        Some(Error::Argument)
+    );
+    assert_eq!(
+        loft_sheet(&[vec![], vec![]], 1).err(),
+        Some(Error::Argument)
     );
 }

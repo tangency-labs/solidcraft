@@ -54,7 +54,7 @@ impl FilletCorner {
     /// # Errors
     ///
     /// `SM_ERR` for a corner that is not a Ball of three or more ring edge uses (one solver each);
-    /// [`SolidError::null_pointer`] where the fork dereferences missing topology (`NER`);
+    /// `SM_ERR_NULL_POINTER` where the fork dereferences missing topology (`NER`);
     /// those of the solver and pseudo-topology operations.
     pub(crate) fn make_ball_topology(&mut self, env: BallTopologyEnv<'_>) -> Result<()> {
         fn lookup(corner: FilletCornerId, this: &FilletCorner) -> CornerLookup<'_> {
@@ -70,8 +70,11 @@ impl FilletCorner {
             corner,
             solvers,
         } = env;
-        let nul = || SolidError::null_pointer(OP_NX2);
-        let all = self.all_eus.clone().ok_or_else(nul)?;
+        let nul = |what: &'static str| SolidError::blend_missing(OP_NX2, what);
+        let all = self
+            .all_eus
+            .clone()
+            .ok_or_else(|| nul("the corner's outward edge uses"))?;
         let n = all.len();
         if !self
             .blend
@@ -79,7 +82,10 @@ impl FilletCorner {
             || n < 3
             || solvers.len() != n
         {
-            return Err(SolidError::sm_err(OP_NX2));
+            return Err(SolidError::blend_failed(
+                OP_NX2,
+                "the corner is not a ball corner of a round on each of its three or more edges",
+            ));
         }
         self.ball = Some(BallCorner::default());
         // sm_BallRingFaces: face i between edge uses i - 1 and i
@@ -92,12 +98,16 @@ impl FilletCorner {
         }
         for (fs, face) in solvers.iter().zip(&faces) {
             geoms.push(fs.first_fillet_geom()?);
-            face.ok_or_else(nul)?;
+            face.ok_or_else(|| nul("the face between two of the corner's edge uses"))?;
         }
 
         // the contacts: rounds i - 1 and i's rails on face i
         for ii in 0..n {
-            let face = faces.get(ii).copied().flatten().ok_or_else(nul)?;
+            let face = faces
+                .get(ii)
+                .copied()
+                .flatten()
+                .ok_or_else(|| nul("the face between two of the corner's edge uses"))?;
             let fv = new_corner_vertex(k, pseudo, corner)?;
             {
                 let v = pseudo.fillet_vertex_mut(fv)?;
@@ -107,7 +117,7 @@ impl FilletCorner {
             let prev = (ii + n - 1) % n;
             for round in [prev, ii] {
                 let (Some(&g), Some(&fs)) = (geoms.get(round), solvers.get(round)) else {
-                    return Err(nul());
+                    return Err(nul("a round's geometry or solver"));
                 };
                 let rail = fs.find_index_of_rail_on_face(target, Some(face))?;
                 pseudo.make_rail_edgeuse_on(
@@ -134,13 +144,14 @@ impl FilletCorner {
                 self.vertices.get((ii + 1) % n),
                 geoms.get(ii),
             ) else {
-                return Err(nul());
+                return Err(nul("a contact vertex or a round's geometry"));
             };
             let e = pseudo.make_fillet_edge(Some(from), Some(to), Some(corner))?;
             pseudo
                 .fillet_edge_mut(e)?
                 .set_fillet_edge_type(FilletEdgeType::CrossSection);
-            let primary = eu1::primary_edgeuse(pseudo.brep(), e)?.ok_or_else(nul)?;
+            let primary = eu1::primary_edgeuse(pseudo.brep(), e)?
+                .ok_or_else(|| nul("the corner edge's primary edge use"))?;
             pseudo.set_edgeuse_fillet_geom(primary, Some(g))?;
             self.edges.push(e);
         }

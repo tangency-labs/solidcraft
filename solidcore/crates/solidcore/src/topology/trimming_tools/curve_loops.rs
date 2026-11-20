@@ -35,9 +35,8 @@
 //!   list order. A solution's objects are [`LoopObject`]s (the loop curve is
 //!   `m_apObjects[1]`).
 //! - **Indices** are `usize` with upstream's `ULONG` wrap-around arithmetic.
-//!   `GetLoopStartEnd` sets the start of a later loop to the previous loop's last index,
-//!   as upstream does (WR-96), unless `Kernel::fixes.curve_loop_start_after_previous_end`
-//!   is enabled. An index past the curve list, which
+//!   `GetLoopStartEnd` starts a later loop after the previous loop's last index, where
+//!   upstream starts it at that index (WR-96). An index past the curve list, which
 //!   upstream reads out of bounds, is [`SolidError::InvalidInput`].
 //! - **Ignored statuses.** `SampleNearbyPoints` ignores `FindAdjacentLoopCurve`'s status
 //!   (index `0` when the curve is not in the loops) and `FindAdjacentLoopCurve` ignores
@@ -59,7 +58,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
 
-use super::{invalid_input_status, OP};
+use super::{invalid_value, OP};
 
 /// The unset index of an [`IsoXSectSegment`] (upstream `9999`).
 pub const NO_INDEX: usize = 9999;
@@ -271,7 +270,7 @@ impl CurveLoops {
     /// `SM_ERR_INVALID_INPUT` for a loop index out of range.
     pub fn loop_start_index(&self, loop_index: usize) -> Result<usize> {
         if loop_index >= self.loop_counts.len() {
-            return Err(invalid_input_status());
+            return Err(invalid_value("the loop index is past the last loop"));
         }
         Ok(self
             .loop_counts
@@ -282,7 +281,7 @@ impl CurveLoops {
 
     /// `GetLoopStartEnd` with its outputs as left on failure: the status, `rlStart` and
     /// `rlEnd`.
-    fn loop_start_end_raw(&self, k: &Kernel, curve_index: usize) -> (bool, usize, usize) {
+    fn loop_start_end_raw(&self, curve_index: usize) -> (bool, usize, usize) {
         let mut start = 0usize;
         let mut end = 0usize;
         for (ii, &c) in self.loop_counts.iter().enumerate() {
@@ -293,32 +292,33 @@ impl CurveLoops {
             if curve_index <= end {
                 return (true, start, end);
             }
-            start = if k.fixes.curve_loop_start_after_previous_end {
-                end.wrapping_add(1)
-            } else {
-                end
-            };
+            // a later loop starts after the previous loop's end; upstream starts it at
+            // that end, the previous loop's last curve (WR-96)
+            start = end.wrapping_add(1);
         }
         (false, start, end)
     }
 
     /// `GetLoopStartEnd`: the first and last curve index of the loop holding
-    /// `curve_index`. With `k.fixes.curve_loop_start_after_previous_end`, a later
-    /// loop starts after the previous loop's end; the default reproduces WR-96.
+    /// `curve_index`. A later loop starts after the previous loop's end, where upstream
+    /// starts it at the previous loop's last curve (WR-96).
     ///
     /// # Errors
     ///
     /// `SM_ERR` when the index is past every loop.
-    pub fn loop_start_end(&self, k: &Kernel, curve_index: usize) -> Result<(usize, usize)> {
-        match self.loop_start_end_raw(k, curve_index) {
+    pub fn loop_start_end(&self, curve_index: usize) -> Result<(usize, usize)> {
+        match self.loop_start_end_raw(curve_index) {
             (true, s, e) => Ok((s, e)),
-            _ => Err(SolidError::sm_err(OP)),
+            _ => Err(SolidError::topology_failed(
+                OP,
+                "the curve index is past every loop",
+            )),
         }
     }
 
     /// `FindAdjacentLoopCurve`: the index of the loop curve before `key` (when `param`
     /// lies in the first half of its natural interval) or after it, cyclically in its
-    /// loop. Honors `k.fixes.curve_loop_start_after_previous_end` (WR-96).
+    /// loop. Loops are bounded as [`CurveLoops::loop_start_end`] gives them (WR-96).
     ///
     /// # Errors
     ///
@@ -326,16 +326,18 @@ impl CurveLoops {
     /// in `store`.
     pub fn find_adjacent_loop_curve(
         &self,
-        k: &Kernel,
         store: &[Curve],
         key: CurveKey,
         param: f64,
     ) -> Result<usize> {
         let Some(idx) = self.curves.iter().position(|&c| c == key) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the curve is not in the loops",
+            ));
         };
         // status ignored upstream
-        let (_, start, end) = self.loop_start_end_raw(k, idx);
+        let (_, start, end) = self.loop_start_end_raw(idx);
         let mid = curve_of(store, key)?.natural_interval().mid();
         Ok(if param < mid {
             if idx == start {
@@ -362,7 +364,7 @@ impl CurveLoops {
         index2: usize,
     ) -> Result<(usize, usize)> {
         if self.loop_counts.is_empty() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(OP, "there are no loops"));
         }
 
         let mut loop_number = 0usize;
@@ -380,7 +382,10 @@ impl CurveLoops {
         let end = next_loop_start.wrapping_sub(1);
 
         if index2 < start || index2 > end {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the two curves are not in the same loop",
+            ));
         }
 
         if count > 2 {
@@ -398,7 +403,10 @@ impl CurveLoops {
         } else if index1 == index2.wrapping_add(1) {
             Ok((index2, index1))
         } else {
-            Err(SolidError::sm_err(OP))
+            Err(SolidError::topology_failed(
+                OP,
+                "the two curves are not adjacent in their loop",
+            ))
         }
     }
 
@@ -431,7 +439,7 @@ impl CurveLoops {
         }
 
         // find adjacent loop curve (status ignored, index 0 on failure)
-        let adj = match self.find_adjacent_loop_curve(k, store, key, param) {
+        let adj = match self.find_adjacent_loop_curve(store, key, param) {
             Ok(a) => a,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => 0,
@@ -528,7 +536,9 @@ impl CurveLoops {
     /// for counts past `other`'s curves.
     pub fn append_loop(&mut self, other: &Self, other_loop: usize) -> Result<()> {
         if other_loop >= other.num_loops() {
-            return Err(invalid_input_status());
+            return Err(invalid_value(
+                "the loop index is past the other loops' last loop",
+            ));
         }
         let start = other.loop_start_index(other_loop)?;
         let count = get(&other.loop_counts, other_loop)?;
@@ -552,7 +562,7 @@ impl CurveLoops {
     /// [`SolidError::InvalidInput`] for orientations shorter than the curves.
     pub fn insert_into_loops(&mut self, new_curve: CurveKey, loop_curve: CurveKey) -> Result<()> {
         let Some(idx) = self.curves.iter().position(|&c| c == loop_curve) else {
-            return Err(invalid_input_status());
+            return Err(invalid_value("the loop curve is not in the loops"));
         };
         let o = get(&self.orients, idx)?;
         self.curves.insert(idx + 1, new_curve);
@@ -595,7 +605,10 @@ impl CurveLoops {
         // Find which loop the iso edge will go into.
         let min_idx = seg.min_index();
         if min_idx >= self.curves.len() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the segment's first curve index is past the curves",
+            ));
         }
 
         let mut loop_number = self.loop_counts.len();
@@ -608,14 +621,20 @@ impl CurveLoops {
             total = total.wrapping_add(c);
         }
         if loop_number >= self.loop_counts.len() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the segment's first curve is in no loop",
+            ));
         }
 
         // check state - highest index is in the same loop.
         let max_idx = seg.max_index();
         let this_count = get(&self.loop_counts, loop_number)?;
         if max_idx >= total.wrapping_add(this_count) {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the segment's curves are not in one loop",
+            ));
         }
 
         // Copy any previous loops into the new loop structures.
@@ -776,10 +795,10 @@ mod tests {
         let l = loops(&[3, 4]);
         assert_eq!(l.loop_start_index(1).unwrap(), 3);
         assert!(l.loop_start_index(2).is_err());
-        assert_eq!(l.loop_start_end(&Kernel::default(), 1).unwrap(), (0, 2));
-        // upstream's start of a later loop is the previous loop's last index
-        assert_eq!(l.loop_start_end(&Kernel::default(), 4).unwrap(), (2, 6));
-        assert!(l.loop_start_end(&Kernel::default(), 7).is_err());
+        assert_eq!(l.loop_start_end(1).unwrap(), (0, 2));
+        // the second loop holds curves 3..=6 (upstream started it at 2, WR-96)
+        assert_eq!(l.loop_start_end(4).unwrap(), (3, 6));
+        assert!(l.loop_start_end(7).is_err());
     }
 
     #[test]

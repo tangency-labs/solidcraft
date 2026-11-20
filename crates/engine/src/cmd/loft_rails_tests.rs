@@ -7,6 +7,7 @@
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
+use solidcraft_geom::Vec3Geom;
 
 use crate::Session;
 
@@ -119,6 +120,42 @@ fn a_surface_loft_follows_its_rail() {
     let area = 2.0 * (40.0 * C + root_integral());
     assert!((m.area - area).abs() < 2e-3 * area, "area {} vs {area}", m.area);
     assert!((m.bbox.min.x + 15.0).abs() < 1e-2, "{:?}", m.bbox);
+}
+
+/// A hull sheet from a keel (vertical) to a sheer (level) along a transom and a stem (#12031): the
+/// keel's sketch facing −Y or +Y draws the same curve, and the loft is the same either way. The
+/// stations between the two sections, at 90° to each other, used to turn with the keel's sketch.
+#[test]
+fn a_sections_sketch_facing_does_not_change_a_railed_loft() {
+    let hull = |keel_plane: Value, dip: f64| {
+        let mut s = Session::default();
+        let sketch = |s: &mut Session, name: &str, plane: Value, cmd: &str, p: Value| {
+            run(s, "sketch.create", json!({"name": name, "plane": plane}));
+            run(s, cmd, p);
+            run(s, "sketch.finish", json!({}));
+        };
+        let at = |o: [i32; 3], x: [i32; 3], y: [i32; 3]| json!({"origin": o, "x_dir": x, "y_dir": y});
+        sketch(&mut s, "Keel", keel_plane, "sketch.spline.fit_point", json!({"points": [[20, 0], [131, dip], [250, 0]]}));
+        sketch(&mut s, "Sheer", at([0, 0, 20], [1, 0, 0], [0, 1, 0]), "sketch.spline.fit_point", json!({"points": [[250, 42], [177, 50], [20, 0]]}));
+        sketch(
+            &mut s,
+            "Transom",
+            at([250, 0, 0], [0, 1, 0], [0, 0, 1]),
+            "sketch.spline.fit_point",
+            json!({"points": [[0, 0], [40.5, 12.3], [42, 20]]}),
+        );
+        // The XZ sketch's y runs down world Z.
+        sketch(&mut s, "Stem", json!("XZ"), "sketch.line", json!({"points": [[20, 0], [20, -20]]}));
+        let p = json!({"sections": [{"sketch": "Keel", "curves": ["s1"]}, {"sketch": "Sheer", "curves": ["s1"]}],
+            "rails": [{"sketch": "Transom", "curves": ["s1"]}, {"sketch": "Stem", "curves": ["l1"]}], "body_name": "Hull"});
+        s.execute("surface.loft", &p).map_err(|e| e.to_string())?;
+        Ok::<_, String>(measure(&s, "Hull"))
+    };
+    let up = hull(json!("XZ"), 19.0).unwrap();
+    let down = hull(json!({"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}), -19.0).unwrap();
+    assert!((up.area - down.area).abs() < 1e-6 * up.area, "area {} vs {}", down.area, up.area);
+    assert!((up.bbox.min.z + 19.0).abs() < 0.1 && (up.bbox.max.z - 20.0).abs() < 1e-6, "{:?}", up.bbox);
+    assert!(up.bbox.min.dist(down.bbox.min) < 1e-6 && up.bbox.max.dist(down.bbox.max) < 1e-6, "{:?} vs {:?}", down.bbox, up.bbox);
 }
 
 /// Hostile rails are refused with an error and leave the design as it was.

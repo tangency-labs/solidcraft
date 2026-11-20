@@ -1,5 +1,5 @@
-//! Explicitly choose a linked component's source; all its instances share that source. Extract
-//! makes a component that is not linked the source of its own design file.
+//! Explicitly choose a linked component's source, for all its placements or for one of them.
+//! Extract makes a component that is not linked the source of its own design file.
 
 use std::sync::Arc;
 
@@ -7,6 +7,8 @@ use serde_json::{Value, json};
 
 use crate::SolveApp;
 
+/// Relink Source for the selection, which must name exactly one linked component, through
+/// its browser rows or placements.
 pub(crate) fn start_selected(app: &mut SolveApp) {
     let mut components = app.tree.picked_components.clone();
     for selection in &app.session.selection {
@@ -21,14 +23,16 @@ pub(crate) fn start_selected(app: &mut SolveApp) {
     if let [component] = components.as_slice()
         && app.session.doc.links.contains_key(component)
     {
-        start(app, *component);
+        start(app, *component, None);
     } else {
         app.set_status(app.tr("ui.relink_select_one").to_string(), true);
     }
 }
 
-pub(crate) fn start(app: &mut SolveApp, component: u64) {
-    if app.file_picker_busy() || app.file_load.busy() {
+/// Ask for the design a linked component shows instead: in all its placements, or with
+/// `occurrence` in that one only.
+pub(crate) fn start(app: &mut SolveApp, component: u64, occurrence: Option<u64>) {
+    if app.file_picker_busy() || app.file_load_holds() {
         return;
     }
     if !app.session.doc.links.contains_key(&component) {
@@ -49,14 +53,18 @@ pub(crate) fn start(app: &mut SolveApp, component: u64) {
         }
         // Picked in the file dialog: its server is the user's choice.
         let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(&path).into_iter().collect();
-        let relinked =
-            solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.relink", json!({"component": component, "path": path})));
+        let mut params = json!({"component": component, "path": path});
+        if let Some(occurrence) = occurrence {
+            params["occurrence"] = json!(occurrence);
+        }
+        let relinked = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.relink", params));
         if let Ok(result) = relinked {
+            let done = if occurrence.is_some() { app.tr_label("ui.relink_one_done") } else { app.tr_label("ui.relink_done") }.to_string();
             let warnings: Vec<&str> = result["warnings"].as_array().into_iter().flatten().filter_map(|w| w.as_str()).collect();
             if warnings.is_empty() {
-                app.set_status(app.tr_label("ui.relink_done").to_string(), false);
+                app.set_status(done, false);
             } else {
-                let text = format!("{} {}", app.tr_label("ui.relink_done"), warnings.join("; "));
+                let text = format!("{done} {}", warnings.join("; "));
                 app.session.echo(text.clone());
                 app.set_status(text, true);
             }
@@ -66,7 +74,7 @@ pub(crate) fn start(app: &mut SolveApp, component: u64) {
 
 /// Ask where the component's design goes, then move its history there and link it.
 pub(crate) fn extract(app: &mut SolveApp, component: u64) {
-    if app.file_picker_busy() || app.file_load.busy() {
+    if app.file_picker_busy() || app.file_load_holds() {
         return;
     }
     let Some(name) = app.session.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()) else { return };
@@ -191,7 +199,13 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
     // Links met here for the first time: those whose files changed since the design last read
     // them (#9739) are read again too.
     let first: Vec<u64> = now.iter().map(|(c, _)| *c).filter(|c| !app.docs.link_stamps.iter().any(|(k, _)| k == c)).collect();
-    let stale = if first.is_empty() { Vec::new() } else { changed_since_read(&mut app.session) };
+    let mut stale = if first.is_empty() { Vec::new() } else { changed_since_read(&mut app.session) };
+    // Only links inside the design's own folder are read unasked when it is met: a design received
+    // from someone else names what it likes as "changed since last read", and one reaching out of
+    // its folder would copy another design of the user's into it. Those stay marked out of date
+    // until the user runs Update Links.
+    let design = app.session.path.clone();
+    stale.retain(|c| app.session.doc.links.get(c).is_some_and(|l| inside_design_folder(design.as_deref(), &l.path)));
     let changed: Vec<u64> = now
         .iter()
         .filter(|(c, s)| s.is_some() && (app.docs.link_stamps.iter().any(|(k, was)| k == c && was != s) || (first.contains(c) && stale.contains(c))))
@@ -210,6 +224,34 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
     request.options.insert("components".into(), json!(changed));
     request.design.clone_from(&app.session.path);
     let _ = crate::file_load::begin_request(app, request);
+}
+
+/// Whether `link`, as the design saved at `design` keeps it, names a file in the design's own
+/// folder or below it, judged from the link's text (`..` is followed, the link itself is not
+/// asked of the disk). The folder counts both as the design's path names it and as the disk
+/// resolves it: a link is kept with its symlinks resolved, so a design opened through a symlink
+/// (`/var` → `/private/var` on macOS, a linked home folder) still finds its own links inside.
+/// An unsaved design has no folder.
+fn inside_design_folder(design: Option<&str>, link: &str) -> bool {
+    use std::path::{Component, Path, PathBuf};
+    let Some(dir) = design.and_then(|d| Path::new(d).parent()).filter(|d| !d.as_os_str().is_empty()) else { return false };
+    let lexical = |p: &Path| {
+        let mut out = PathBuf::new();
+        for c in p.components() {
+            match c {
+                Component::ParentDir => {
+                    out.pop();
+                }
+                Component::CurDir => {}
+                c => out.push(c),
+            }
+        }
+        out
+    };
+    let Ok(dir) = std::path::absolute(dir) else { return false };
+    let dir = lexical(&dir);
+    let target = lexical(&dir.join(link));
+    target.starts_with(&dir) || std::fs::canonicalize(&dir).is_ok_and(|real| target.starts_with(real))
 }
 
 /// Update Links (`options` as it was asked) read the shown design's links again: those it read
@@ -299,7 +341,7 @@ mod tests {
 
     fn answer(app: &mut SolveApp, path: Option<String>) {
         app.services.pick_open = Some(Box::new(move |extensions| {
-            assert_eq!(extensions, &["sc", "solidcraft", "solvecraft", "json"], "a design of any release, or a plain JSON design");
+            assert_eq!(extensions, &["sc", "solidcraft", "json"], "a design of any release, or a plain JSON design");
             let result = path.clone();
             Box::pin(async move { result })
         }));
@@ -329,24 +371,52 @@ mod tests {
         let _ = std::fs::remove_dir_all(folder);
     }
 
+    /// #12227: a placement's menu relinks that placement alone when the component has others.
+    #[test]
+    fn relink_menu_relinks_one_placement_of_several() {
+        let (mut app, component, occurrence, folder, moved) = fixture("one");
+        let rows = |app: &SolveApp, target: &Target| -> Vec<String> { context_menu::entries(app, target).into_iter().map(|i| i.id).collect() };
+        assert!(
+            !rows(&app, &Target::Occurrence { path: vec![occurrence] }).contains(&"ui.relinkPlacement".to_string()),
+            "one placement: only the row for all"
+        );
+        let second = app.run("occurrence.copy", json!({"occurrence": occurrence, "translate": [90,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+        assert!(!rows(&app, &Target::Component { id: component }).contains(&"ui.relinkPlacement".to_string()), "no placement to relink");
+        let target = Target::Occurrence { path: vec![second] };
+        let ids = rows(&app, &target);
+        let at = ids.iter().position(|id| id == "ui.relinkPlacement").expect("a row for this placement");
+        assert_eq!(ids[at + 1], "ui.relinkSource", "right above the row for all instances");
+        let item = context_menu::entries(&app, &target).into_iter().find(|i| i.id == "ui.relinkPlacement").unwrap();
+        assert_eq!(item.params, Some(json!({"component": component, "occurrence": second})));
+        answer(&mut app, Some(moved.to_string_lossy().into_owned()));
+        context_menu::run_item(&mut app, &item, egui::Pos2::ZERO);
+        crate::file_picker::tick(&mut app, &egui::Context::default());
+        let shows = |app: &SolveApp, o: u64| app.session.doc.occurrences.iter().find(|x| x.id == o).unwrap().component;
+        assert_eq!(shows(&app, occurrence), component);
+        assert_ne!(shows(&app, second), component);
+        assert!(app.session.doc.links[&shows(&app, second)].path.ends_with("moved.solidcraft"));
+        assert!(app.status.as_ref().is_some_and(|(s, _, error)| s.contains("this instance") && !error), "{:?}", app.status);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
     #[test]
     fn relink_picker_cancel_bad_file_and_changed_document_keep_the_link() {
         let (mut app, component, _, folder, moved) = fixture("cancel");
         let before = serde_json::to_value(&*app.session.doc).unwrap();
         let undo = app.session.undo.len();
         answer(&mut app, None);
-        start(&mut app, component);
+        start(&mut app, component, None);
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert_eq!(serde_json::to_value(&*app.session.doc).unwrap(), before);
         assert_eq!(app.session.undo.len(), undo);
         answer(&mut app, Some(folder.join("missing.solidcraft").to_string_lossy().into_owned()));
-        start(&mut app, component);
+        start(&mut app, component, None);
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert_eq!(serde_json::to_value(&*app.session.doc).unwrap(), before);
         assert_eq!(app.session.undo.len(), undo);
         assert!(app.status.as_ref().is_some_and(|(_, _, error)| *error));
         answer(&mut app, Some(moved.to_string_lossy().into_owned()));
-        start(&mut app, component);
+        start(&mut app, component, None);
         // The ordinary UI blocks edits while picking. Simulate a host replacing/editing the
         // session directly to exercise the continuation's independent stale-target guard.
         app.session.execute("component.rename", &json!({"component": component, "name": "Changed"})).unwrap();
@@ -380,7 +450,7 @@ mod tests {
         part.execute("solid.box", &json!({"length": 10, "width": 20, "height": 45})).unwrap();
         part.execute("file.save", &json!({"path": plain})).unwrap();
         answer(&mut app, Some(plain.to_string_lossy().into_owned()));
-        start(&mut app, component);
+        start(&mut app, component, None);
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert!(app.session.doc.links[&component].path.ends_with("plain.json"));
         let _ = std::fs::remove_dir_all(folder);
@@ -697,6 +767,95 @@ mod tests {
         let _ = std::fs::remove_dir_all(folder);
     }
 
+    /// A design met for the first time reads unasked only the changed links inside its own folder:
+    /// one that reaches out of it (`..`, an absolute path elsewhere) stays out of date for Update
+    /// Links, so a received design can't copy another of the user's designs into itself.
+    #[test]
+    fn opening_a_design_reads_unasked_only_links_inside_its_folder() {
+        let folder = std::env::temp_dir().join(format!("solidcraft-links-outside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("received")).unwrap();
+        let outside = folder.join("housing.solidcraft");
+        save_part(&outside, [10.0, 20.0, 30.0], false);
+        let case = folder.join("received").join("case.solidcraft");
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.run("component.insert_design", json!({"path": outside})).unwrap();
+        app.run("file.save", json!({"path": case})).unwrap();
+        drop(app);
+        save_part(&outside, [10.0, 20.0, 30.0], true);
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let mut opened = Session::default();
+        opened.execute("doc.open", &json!({"path": case})).unwrap();
+        crate::documents::adopt(&mut app, opened);
+        assert!(app.file_load.idle(), "a link out of the design's folder is not read unasked");
+        assert!((volume(&app) - 6000.0).abs() < 1e-6, "{}", volume(&app));
+        let links = app.session.execute("component.links", &json!({})).unwrap();
+        assert_eq!(links["links"][0]["changed"], true, "it stays marked out of date");
+        let base = folder.join("received").join("case.solidcraft").to_string_lossy().into_owned();
+        assert!(inside_design_folder(Some(&base), "part.sc") && inside_design_folder(Some(&base), "sub/../parts/a.sc"));
+        assert!(!inside_design_folder(Some(&base), "../housing.solidcraft") && !inside_design_folder(Some(&base), "parts/../../x.sc"));
+        assert!(!inside_design_folder(Some(&base), &outside.to_string_lossy()) && !inside_design_folder(None, "part.sc"));
+        // A design opened through a symlinked folder: its links, kept with symlinks resolved, are
+        // still inside; one out of the real folder is still out.
+        #[cfg(unix)]
+        {
+            let alias = folder.join("alias");
+            std::os::unix::fs::symlink(folder.join("received"), &alias).unwrap();
+            let through = alias.join("case.solidcraft").to_string_lossy().into_owned();
+            let real = folder.join("received").canonicalize().unwrap();
+            assert!(inside_design_folder(Some(&through), &real.join("part.sc").to_string_lossy()));
+            assert!(!inside_design_folder(Some(&through), &real.join("../housing.solidcraft").to_string_lossy()));
+        }
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// Relative links are judged by the file the reader opens for them, as `component.links`
+    /// reports it: these two are outside the design's folder, so neither is read as it opens.
+    #[cfg(unix)]
+    #[test]
+    fn resolves_like_the_reader_for_relative_links() {
+        let top = std::env::temp_dir().join(format!("solidcraft-links-reader-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        let real = top.join("a").join("r");
+        std::fs::create_dir_all(real.join("sub")).unwrap();
+        std::fs::create_dir_all(top.join("a").join("view")).unwrap();
+        let up = top.join("x.solidcraft");
+        let beside = top.join("a").join("view").join("x.solidcraft");
+        save_part(&up, [10.0, 20.0, 30.0], false);
+        save_part(&beside, [10.0, 20.0, 30.0], false);
+        let case = real.join("case.solidcraft");
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.run("component.insert_design", json!({"path": up})).unwrap();
+        app.run("component.insert_design", json!({"path": beside})).unwrap();
+        app.run("file.save", json!({"path": case})).unwrap();
+        drop(app);
+        // How the design keeps the links.
+        let (saved, _) = solidcraft_engine::io::read_design_file(&case.to_string_lossy(), None::<fn(solidcraft_engine::io::DesignPreview)>).unwrap();
+        let mut kept: Vec<&str> = saved.links.values().map(|l| l.path.as_str()).collect();
+        kept.sort_unstable();
+        assert_eq!(kept, ["../../x.solidcraft", "../view/x.solidcraft"], "how the design keeps the links");
+        save_part(&up, [10.0, 20.0, 30.0], true);
+        save_part(&beside, [10.0, 20.0, 30.0], true);
+        let view = real.join("sub").join("view");
+        std::os::unix::fs::symlink(&real, &view).unwrap();
+        let through = view.join("case.solidcraft");
+        let mut opened = Session::default();
+        opened.execute("doc.open", &json!({"path": through})).unwrap();
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        crate::documents::adopt(&mut app, opened);
+        assert!(app.file_load.idle(), "neither link is read as the design opens");
+        assert!((volume(&app) - 12000.0).abs() < 1e-6, "{}", volume(&app));
+        let links = app.session.execute("component.links", &json!({})).unwrap();
+        let files: Vec<std::path::PathBuf> =
+            links["links"].as_array().unwrap().iter().map(|l| std::path::PathBuf::from(l["file"].as_str().unwrap())).collect();
+        let (up, beside) = (up.canonicalize().unwrap(), beside.canonicalize().unwrap());
+        assert!(files.contains(&up) && files.contains(&beside), "the reader opens the files outside the folder: {files:?}");
+        assert!(links["links"].as_array().unwrap().iter().all(|l| l["changed"] == true), "both stay out of date: {links}");
+        let design = through.to_string_lossy().into_owned();
+        assert!(app.session.doc.links.values().all(|l| !inside_design_folder(Some(&design), &l.path)), "{:?}", app.session.doc.links);
+        let _ = std::fs::remove_dir_all(top);
+    }
+
     #[test]
     fn cancelling_a_close_all_reads_what_the_tab_left_in_front_missed() {
         let (assembly, folder, plate, _) = two_links("cancelled");
@@ -772,7 +931,7 @@ mod tests {
         changed.execute("solid.box", &json!({"length": 10, "width": 20, "height": 45})).unwrap();
         changed.execute("file.save", &json!({"path": moved})).unwrap();
         answer(&mut app, Some(moved.to_string_lossy().into_owned()));
-        start(&mut app, component);
+        start(&mut app, component, None);
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert!(app.status.as_ref().is_some_and(|(s, _, error)| s.contains("check this component's joints") && *error));
         assert!(app.session.log.iter().any(|s| s.contains("check this component's joints")));

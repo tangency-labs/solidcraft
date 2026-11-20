@@ -6,14 +6,18 @@ are ones you add yourself, with a unit, an expression and an optional comment. C
 uses them.
 
 When creating or editing a sketch dimension, its value editor shows its model parameter
-name (`d1`, `d2`, …). Click another driving dimension to use its name: when the value is
-just a number (such as `10` or `10 mm`) the name replaces it; otherwise it goes in at the
-cursor, replacing selected text and keeping what you typed, so typing `10 + ` and clicking
-`d1` gives `10 + d1`. Add arithmetic such as `/ 2` to build a dependent dimension. Press **Enter** to apply
-the expression or **Escape** to cancel the edit.
+name (`d1`, `d2`, …). Double-click another dimension to edit it: the current value is applied,
+as **Enter** does (if it is not valid, the box stays open with its error), and the clicked
+dimension opens with its value selected. Single-click another driving dimension to insert its
+name: when the value is just a number (such as `10` or `10 mm`) the name replaces it; otherwise
+it goes in at the cursor, replacing selected text and keeping what you typed, so typing `10 + `
+and clicking `d1` gives `10 + d1`. The name goes in a moment after the click, once it is clear
+the click was not the first of a double-click. Add arithmetic such as `/ 2` to build a dependent
+dimension. Press **Enter** to apply the expression or **Escape** to cancel the edit.
 Add and edit user parameters through the existing **Change Parameters** command.
 
-![The Parameters dialog, numbered 1 to 5](../media/parameters/dialog.png)
+<img class="dark-ui" src="../media/parameters/dialog.png" alt="The Parameters dialog, numbered 1 to 5">
+<img class="light-ui" src="../media/parameters/dialog.light.png" alt="The Parameters dialog, numbered 1 to 5">
 
 **1** Apply each change as you leave its field · **2** User parameters, and **Add parameter** ·
 **3** Model parameters, grouped by the sketch or feature they belong to · **4** An expression ·
@@ -90,8 +94,10 @@ or unitless arithmetic expression typed into a length field is read. In an inch 
 and `1 / 4` mean 0.25 in. A new user parameter given no unit (`parameters.add` or
 `parameters.import` without `unit`) is a length in the design's units, as the Parameters dialog
 makes it: `40/2` is 20 in. Operation dialogs start with lengths in the design's units, including
-secondary distances, wall thicknesses, gaps, offsets and radii. Canvas handles and live sketch
-values use the same units as the operation. Angles, counts and scale factors keep their own
+secondary distances, wall thicknesses, gaps, offsets and radii. One is the exception: a new Solid
+Fillet's radius opens at the 2 mm the tool ships with, shown in the design's units ("0.07874 in" in
+an inch design), because a radius is bound by the faces beside its edges. Canvas handles and live
+sketch values use the same units as the operation. Angles, counts and scale factors keep their own
 units. Preferences selects the default units for new designs; existing designs use their own
 Document Settings.
 
@@ -133,3 +139,21 @@ time and what changed from the design as it is now: features that fail (`failed`
 (`joints_flipped`, more than 90°), sketch planes that turned over (`sketches_flipped`) and sketch
 solves that fail or only hold by flipping a triangle's turn or an offset's side (`sketches_failed`).
 `summary` counts the values that show each.
+
+Use **Compare Parameter Variants** when several parameters must change together. Each
+named variant starts from the same open design, so values from one variant never carry
+over to the next. For example, compare a pair of bracket sizes:
+
+```json
+{"command": "inspect.parameter_variants", "params": {"variants": [
+  {"name": "Compact", "set": {"Width": "40 mm", "Thickness": "4 mm"}},
+  {"name": "Wide", "set": {"Width": "60 mm", "Thickness": "6 mm"}}
+]}}
+```
+
+The command accepts up to 12 variants with up to 16 existing parameters each. It returns
+the baseline's volume, mass and body counts, then one result per variant in input order.
+The result reports new feature, joint or sketch regressions using the same checks as
+Parameter Sweep. A refused expression is an error for that variant; later variants still
+run. A variant with a rebuild regression has no metrics. Open bodies do not count toward
+volume or mass. The design and its undo history are unchanged.

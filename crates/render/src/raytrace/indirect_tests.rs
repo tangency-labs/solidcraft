@@ -87,7 +87,9 @@ fn opaque_path_mixture_has_analytic_lambert_and_matched_full_coat_density() {
                     let denom = 1.0 - h.z * h.z + h.z * h.z * a2;
                     a2 / (PI * denom * denom) * h.z / (4.0 * h.z)
                 };
-                let expected = 0.6 * (0.5 * s.direction.z / PI + 0.5 * ndf(0.4)) + 0.4 * ndf(0.3);
+                // The coat takes 0.4; the diffuse lobe takes 0.5 × (1 − metallic) of the rest.
+                let diffuse = 0.5 * (1.0 - metallic);
+                let expected = 0.6 * (diffuse * s.direction.z / PI + (1.0 - diffuse) * ndf(0.4)) + 0.4 * ndf(0.3);
                 assert!((s.pdf - expected).abs() < 1e-12 * expected.max(1.0));
                 let expected = surface.brdf(Vec3::Z, Vec3::Z, s.direction).unwrap() * s.direction.z;
                 assert!((s.weight * s.pdf - expected).len() < 1e-11 * expected.len().max(1.0));
@@ -162,6 +164,10 @@ fn opaque_path_oblique_and_grazing_coated_response_and_null_mass_match_independe
         for metallic in [0.0, 0.5, 1.0] {
             let surface =
                 OpaqueSurface::new(Vec3::new(0.7, 0.3, 0.1), metallic, 0.6, 1.5).unwrap().with_clear_coat(ClearCoat::new(0.8, 0.5, 1.4).unwrap());
+            // The coat takes 0.4; the diffuse lobe takes 0.5 × (1 − metallic) of the other 0.6.
+            // One variate inside each nonempty interval, with that interval's probability.
+            let diffuse = 0.5 * (1.0 - metallic);
+            let components = [(0.2, 0.4), (0.4 + 0.3 * diffuse, 0.6 * diffuse), (0.4 + 0.6 * diffuse + 0.3 * (1.0 - diffuse), 0.6 * (1.0 - diffuse))];
             let mut quadrature = Vec3::ZERO;
             let mut density = 0.0;
             let mut sampled = Vec3::ZERO;
@@ -183,7 +189,7 @@ fn opaque_path_oblique_and_grazing_coated_response_and_null_mass_match_independe
                         let lambda = 0.5 * ((1.0 + a2 * (1.0 - cosine * cosine) / (cosine * cosine)).sqrt() - 1.0);
                         a2 / (PI * denominator * denominator * (1.0 + lambda) * 4.0 * cosine)
                     };
-                    let independent_pdf = 0.6 * (0.5 * u / PI + 0.5 * vndf(0.6)) + 0.4 * vndf(0.5);
+                    let independent_pdf = 0.6 * (diffuse * u / PI + (1.0 - diffuse) * vndf(0.6)) + 0.4 * vndf(0.5);
                     density += independent_pdf * TAU / cells;
                     let integrand = surface.brdf(Vec3::Z, view, l).unwrap() * u;
                     quadrature += integrand * (TAU / cells);
@@ -192,12 +198,12 @@ fn opaque_path_oblique_and_grazing_coated_response_and_null_mass_match_independe
                         let denominator = 1.0 - half.z * half.z + half.z * half.z * a2;
                         a2 * half.z / (PI * denominator * denominator * 4.0 * view.dot(half))
                     };
-                    let ndf_pdf = 0.6 * (0.5 * u / PI + 0.5 * ndf(0.6)) + 0.4 * ndf(0.5);
+                    let ndf_pdf = 0.6 * (diffuse * u / PI + (1.0 - diffuse) * ndf(0.6)) + 0.4 * ndf(0.5);
                     ndf_second_moment += integrand.x.powi(2) * TAU / (cells * ndf_pdf);
                     // Enumerate mixture components with their original probability.
                     // Rejected directions contribute zero mass and zero radiance;
                     // no retry and no division by the number of accepted samples.
-                    for (component, probability) in [(0.2, 0.4), (0.55, 0.3), (0.85, 0.3)] {
+                    for (component, probability) in components.into_iter().filter(|&(_, probability)| probability > 0.0) {
                         if let Some(s) = sample(surface, Vec3::Z, Vec3::Z, view, [component, u, v]).unwrap() {
                             mass += probability / cells;
                             sampled += s.weight * (probability / cells);
@@ -291,7 +297,8 @@ fn authored_point_zero_two_base_and_coated_path_pdf_use_the_exact_unclamped_fini
             alpha2 / (std::f64::consts::PI * d * d) / 4.0
         };
         let p = coat_weight / 2.0;
-        let expected = (1.0 - p) * (0.5 * c / std::f64::consts::PI + 0.5 * density(a2)) + p * density(ca2);
+        // The authored finish is a pure metal, so the base spends nothing on its diffuse lobe.
+        let expected = (1.0 - p) * density(a2) + p * density(ca2);
         let l = Vec3::new(0.6, 0.0, c);
         let actual = surface_pdf(surface, Vec3::Z, Vec3::Z, l).unwrap();
         assert!((actual - expected).abs() < 1e-14);
