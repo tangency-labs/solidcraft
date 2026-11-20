@@ -267,7 +267,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
         && let Some(o) = row.as_object()
     {
         // `default_length` picks the Length list's opening value; it is not a dimension.
-        for (key, v) in o.iter().filter(|(key, _)| !matches!(key.as_str(), "size" | "default_length")) {
+        // `in_standard` is said in words below the table.
+        for (key, v) in o.iter().filter(|(key, _)| !matches!(key.as_str(), "size" | "default_length" | "in_standard")) {
             let label = dimension_label(key).map_or_else(|| key.replace('_', " "), str::to_string);
             form_row(ui, &label, |ui| {
                 crate::ui_kit::text(
@@ -277,6 +278,11 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
                 );
             });
         }
+    }
+    if f.sizes.get(k.size).is_some_and(|(_, row)| row.get("in_standard") == Some(&Value::Bool(false))) {
+        ui.vertical(|ui| {
+            crate::ui_kit::text(ui, solidcraft_ui_text::tr("parts.size_not_in_standard"), crate::ui_kit::Text::Note("parts_not_in_standard"));
+        });
     }
     if inputs.first().is_some_and(|i| i.items.is_empty()) {
         ui.vertical(|ui| {
@@ -464,7 +470,9 @@ mod tests {
         assert!(l.len() >= 7, "{}", l.len());
         for f in &l {
             for (size, row) in &f.sizes {
-                for key in row.as_object().into_iter().flat_map(|o| o.keys()).filter(|k| !matches!(k.as_str(), "size" | "default_length")) {
+                for key in
+                    row.as_object().into_iter().flat_map(|o| o.keys()).filter(|k| !matches!(k.as_str(), "size" | "default_length" | "in_standard"))
+                {
                     let label = dimension_label(key).map(solidcraft_ui_text::tr);
                     assert!(
                         label.is_some_and(|l| l.starts_with(char::is_uppercase) && !l.contains('_') && !l.starts_with("parts.")),

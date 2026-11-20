@@ -687,10 +687,10 @@ mod tests {
         assert_eq!(head_counterbore_texts(&opts), Some(("8 mm".to_string(), "4.5 mm".to_string())));
         assert_eq!(head_problem(&opts), None);
         opts.head = 2;
-        opts.clearance_size = "M2".into();
+        opts.clearance_size = "M14".into();
         assert_eq!(head_counterbore_texts(&opts), None);
         let problem = head_problem(&opts).unwrap_or_default();
-        assert!(problem.contains("ISO 7380-1") && problem.contains("M2"), "{problem}");
+        assert!(problem.contains("ISO 7380-1") && problem.contains("M14"), "{problem}");
     }
 
     /// #17728: a countersunk head fills a countersink (Ø and 90°), and each Hole Type sees only
