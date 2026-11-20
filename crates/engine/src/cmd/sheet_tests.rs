@@ -2064,6 +2064,24 @@ fn fold_through_cut_outs() {
     assert!((volume(&mut c) - want).abs() < 0.05, "{} vs {want}", volume(&mut c));
 }
 
+/// A construction line drawn first in line with an edge of the base (a guide past both its
+/// ends, as a projected layout line is) names no rim: the edge is the drawn line's, so a
+/// flange on it is saved and found again by the drawn line. Before, the rim took the guide's
+/// name, and a design that named the edge after its drawn line lost the flange.
+#[test]
+fn a_construction_line_in_line_with_a_base_edge_does_not_name_it() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.line", json!({"points": [[-20, 0], [120, 0]], "ids": ["guide"], "construction": true, "connect": false}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    let base = s.doc.features.last().map_or(0, |f| f.id);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20, "name": "Front"}));
+    let front = s.doc.find_feature("Front").cloned().unwrap();
+    assert_eq!(front.edge_names, vec![format!("F{base}:side:l1|F{base}:top")]);
+}
+
 #[test]
 fn flange_edges_are_named_and_follow_the_base_sketch() {
     let mut s = Session::default();
