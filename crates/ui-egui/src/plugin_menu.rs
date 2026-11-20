@@ -1395,11 +1395,13 @@ fn body(
                     }
                     let before = input.clone();
                     ui.add_enabled_ui(field.enabled, |ui| {
-                        if let Input::Selection(items) = input {
-                            selection_row(app, ui, id, pick_index, field, items, picker, claim);
-                        } else {
-                            field_row(app, ui, &plugin.images, field, input);
-                        }
+                        ui_kit::with_row_label_tooltip(ui, field.tip.as_deref(), |ui| {
+                            if let Input::Selection(items) = input {
+                                selection_row(app, ui, id, pick_index, field, items, picker, claim);
+                            } else {
+                                field_row(app, ui, &plugin.images, field, input);
+                            }
+                        });
                     });
                     field.edited |= *input != before;
                 }
