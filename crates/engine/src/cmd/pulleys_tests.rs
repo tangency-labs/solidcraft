@@ -146,7 +146,10 @@ fn hostile_params_never_panic() {
     ];
     for p in bad {
         let before = s.doc.components.len();
-        assert!(s.execute("pulley.insert", &p).is_err(), "{p} should be refused");
+        match s.execute("pulley.insert", &p) {
+            Err(crate::EngineError::BadParams { .. }) => {}
+            other => panic!("{p} should be refused as bad parameters: {other:?}"),
+        }
         assert_eq!(s.doc.components.len(), before, "{p} left a component behind");
     }
 }
