@@ -61,7 +61,8 @@
 //!   silently short file.
 
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignore_status, EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{ignore_status, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::{ids, AttributeHandle, AttributeStore, Behavior, ObjectKey};
 use crate::geom::object::ObjectRef;
 use crate::geom::vector3d::Vec3;
@@ -603,7 +604,7 @@ pub fn write_curve_to_db(
             l.base_with_nurb()?.write_to_db(db, version)?;
         } else {
             let b = bspline_curve_part(curve).ok_or_else(|| {
-                SolidError::topology_missing(OP_CURVE, "the curve's B-spline part")
+                SolidError::topology(OP_CURVE, TopologyFailure::CurveNotBSpline { entity: None })
             })?;
             b.write_to_db(db, version)?;
         }
@@ -652,13 +653,19 @@ pub fn write_surface_to_db(
             .extended_base_surface()
             .unwrap_or_else(|| off.base_surface());
         let b = bspline_surface_part(base)?.ok_or_else(|| {
-            SolidError::topology_missing(OP_SURFACE, "the offset surface's B-spline base")
+            SolidError::topology(
+                OP_SURFACE,
+                TopologyFailure::SurfaceWithoutNurbs { entity: None },
+            )
         })?;
         b.write_to_db(db, version)?;
     } else {
         db.write_type(B_SPLINE_SURFACE_TYPE, None);
         let b = bspline_surface_part(surface)?.ok_or_else(|| {
-            SolidError::topology_missing(OP_SURFACE, "the surface's B-spline part")
+            SolidError::topology(
+                OP_SURFACE,
+                TopologyFailure::SurfaceWithoutNurbs { entity: None },
+            )
         })?;
         b.write_to_db(db, version)?;
     }
@@ -1152,10 +1159,9 @@ impl BrepData {
 fn make_uv_curve_2d(c: &mut Curve) -> Result<()> {
     let b = bspline_curve_part_mut(c)
         .ok_or_else(|| SolidError::invalid_input(OP_UV, "UV curve is not a B-spline curve"))?;
-    let cur = b
-        .nurb
-        .as_mut()
-        .ok_or_else(|| SolidError::topology_missing(OP_UV, "the UV curve's NURBS data"))?;
+    let cur = b.nurb.as_mut().ok_or_else(|| {
+        SolidError::topology(OP_UV, TopologyFailure::CurveNotBSpline { entity: None })
+    })?;
     let cpts = cur.cpts_mut();
     let first_z = cpts.first().map_or(NOZ, |p| p.z);
     if first_z != NOZ && cpts.iter().all(|p| p.z == 0.0) {
@@ -1207,9 +1213,18 @@ pub fn write_brep_to_file(
     data.write_to_file_with_nurbs(k, file_type)
 }
 
-/// `SM_ERR_NULL_POINTER` of [`BrepData::from_brep`].
-fn null() -> SolidError {
-    SolidError::topology_missing(OP_FROM, "a link of the B-rep's topology")
+/// `SM_ERR_NULL_POINTER` of [`BrepData::from_brep`] at a link the B-rep always has.
+fn broken_link() -> SolidError {
+    Failure::new(
+        OP_FROM,
+        TopologyFailure::Defect {
+            why: "a B-rep link the record walk follows is null, though the B-rep's edits always \
+                  set it (an edge's edge uses, their mates, successors and loop uses, a loop \
+                  use's face use)",
+        },
+    )
+    .with_status(SM_ERR_NULL_POINTER)
+    .into_error()
 }
 
 /// `sm_GetMap`: the record index of `e`, `SM_NO_OBJECT` when it is not mapped (or
@@ -1349,7 +1364,7 @@ impl BrepData {
         for (i, &e) in edges.iter().enumerate() {
             map.insert(EntityRef::Edge(e), i as u64);
             if edge::is_wire(b, e)? {
-                let prim = eu1::primary_edgeuse(b, e)?.ok_or_else(null)?;
+                let prim = eu1::primary_edgeuse(b, e)?.ok_or_else(broken_link)?;
                 let n = all_edgeuses.len() as u64;
                 map.insert(EntityRef::Edgeuse(prim), n);
                 if let Some(m) = eu1::mate(b, prim)? {
@@ -1413,7 +1428,9 @@ impl BrepData {
         };
         let mut surface_index: BTreeMap<FaceId, u64> = BTreeMap::new();
         for f in surface_owners(b, None, &face_ref)? {
-            let surface = b.face(f)?.surface.as_ref().ok_or_else(null)?;
+            let surface = b.face(f)?.surface.as_ref().ok_or_else(|| {
+                SolidError::topology(OP_FROM, TopologyFailure::FaceWithoutSurface)
+            })?;
             surface_index.insert(f, bd.surfaces.len() as u64);
             bd.surfaces.push(Keyed {
                 key: (env.surface_key)(f),
@@ -1444,8 +1461,8 @@ impl BrepData {
 
             // set pLUT1 = topFU->loopuse (pLUT2 stays the other loop use)
             let (lu1, lu2) = loopuse::loop_loopuses(b, l)?;
-            let lu2 = lu2.ok_or_else(null)?;
-            let fu = loopuse::faceuse(b, lu1)?.ok_or_else(null)?;
+            let lu2 = lu2.ok_or_else(broken_link)?;
+            let fu = loopuse::faceuse(b, lu1)?.ok_or_else(broken_link)?;
             let lut1 = if eu1::faceuse_orientation(b, fu)? == OrientType::Opposite {
                 lu2
             } else {
@@ -1485,10 +1502,10 @@ impl BrepData {
         // Edgeuses (top face use edge uses and wire primary edge uses, not mates)
         for &eu in &all_edgeuses {
             let mut ed = EuData::zeroed();
-            let next = eu1::edgeuse_next(b, eu)?.ok_or_else(null)?;
+            let next = eu1::edgeuse_next(b, eu)?.ok_or_else(broken_link)?;
             ed.next_eu = edgeuse_index(&map, &mate_map, next);
-            let mate = eu1::mate(b, eu)?.ok_or_else(null)?;
-            let mate_next = eu1::edgeuse_next(b, mate)?.ok_or_else(null)?;
+            let mate = eu1::mate(b, eu)?.ok_or_else(broken_link)?;
+            let mate_next = eu1::edgeuse_next(b, mate)?.ok_or_else(broken_link)?;
             ed.mate_next_eu = edgeuse_index(&map, &mate_map, mate_next);
             ed.edge = get_map(&map, eu1::edge(b, eu)?.map(EntityRef::Edge));
 
@@ -1499,7 +1516,7 @@ impl BrepData {
                 ed.shell = get_map(&map, eu1::shell(b, eu)?.map(EntityRef::Shell));
             } else {
                 // an edge in a loop connecting edges to a face
-                let lu = eu1::loopuse(b, eu)?.ok_or_else(null)?;
+                let lu = eu1::loopuse(b, eu)?.ok_or_else(broken_link)?;
                 let l = loopuse::loop_(b, lu)?;
                 ed.eu_type = 0;
                 ed.loop_ = get_map(&map, l.map(EntityRef::Loop));
@@ -1534,7 +1551,7 @@ impl BrepData {
 
         // Edges - set EdgeData objects and store Curves
         for &e in &edges {
-            let prim = eu1::primary_edgeuse(b, e)?.ok_or_else(null)?;
+            let prim = eu1::primary_edgeuse(b, e)?.ok_or_else(broken_link)?;
             let mut ed = EdgeData::zeroed();
             ed.prim_eu = edgeuse_index(&map, &mate_map, prim);
 
@@ -1550,7 +1567,10 @@ impl BrepData {
 
             // every edge owns its curve: a new 3D curve each
             let edge_rec = b.edge(e)?;
-            let curve = edge_rec.curve.as_ref().ok_or_else(null)?;
+            let curve = edge_rec
+                .curve
+                .as_ref()
+                .ok_or_else(|| SolidError::topology(OP_FROM, TopologyFailure::EdgeWithoutCurve))?;
             ed.curve = bd.curves_3d.len() as u64;
             bd.curves_3d.push(Keyed {
                 key: (env.curve_key)(e),
