@@ -939,7 +939,7 @@ fn a_hole_picked_on_a_turned_part_drills_it_past_other_parts_frames() {
         ("Base side face", [30.0, 0.0, -5.0], "Cap:1", "root", [-50.0, -15.0, 5.0], down),
     ] {
         let mut s = Session::default();
-        run(&mut s, "component.create", json!({"name": "Base"}));
+        run(&mut s, "component.create", json!({"name": "Base", "grounded": false}));
         run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Base block"}));
         run(&mut s, "component.create", json!({"name": "Cap", "parent": "root"}));
         run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": cap, "body_name": "Cap block"}));
