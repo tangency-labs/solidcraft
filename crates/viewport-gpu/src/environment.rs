@@ -4,7 +4,7 @@
 //! lighting (split-sum): a specular map whose mip `k` is the room seen through a GGX lobe of
 //! perceptual roughness `k / (SPECULAR_LEVELS - 1)`, and a small diffuse irradiance map
 //! (cosine-weighted), plus the GGX environment-BRDF table (`dfg`) the shader weights them with.
-//! The room is used as is (no scale, no turn); the shader applies model-viewer's exposure for it.
+//! The room is used as is (no scale, no turn) at exposure 1: it lights an upright face as about unit light.
 //!
 //! Both maps are equirectangular in the shader's frame, the view's (x right, y up, z toward the
 //! eye): a direction `(x, y, z)` sits at `u = 0.5 + atan2(x, -z) / 2π`, `v = acos(y) / π`. The
@@ -535,6 +535,18 @@ mod tests {
     #[test]
     fn the_shader_knows_the_specular_mip_count() {
         assert!(crate::view::SHADER.contains(&format!("const STUDIO_MIPS: f32 = {SPECULAR_LEVELS}.0;")));
+    }
+
+    #[test]
+    fn an_upright_face_shows_its_assigned_colour() {
+        // PBR Neutral shows a base colour as assigned under unit white light. The room gives an
+        // upright face about that, so the shader scales it by nothing; 1.3 washed faces out (#19994).
+        let (_, diffuse) = prefilter(room());
+        for d in [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]] {
+            let e = diffuse.sample(d)[0];
+            assert!((0.9..1.05).contains(&e), "{d:?}: {e}");
+        }
+        assert!(crate::view::SHADER.contains("pbr_neutral(mix(dielectric, metal, metallic))"));
     }
 
     #[test]
