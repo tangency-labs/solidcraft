@@ -1648,36 +1648,29 @@ impl<O: ClassObject> PointClassification<O> {
             curve_identity,
         } = context;
         let object = self.object.ok_or_else(|| no_object(OP_MERGE))?;
-        let kind = match target {
-            EntityRef::Region(_) => ClassObjectKind::Region,
-            EntityRef::Face(_) => ClassObjectKind::Face,
-            EntityRef::Edge(_) => ClassObjectKind::Edge,
-            EntityRef::Vertex(_) => ClassObjectKind::Vertex,
-            // a target a vertex cannot be merged into (rule 8)
-            _ => {
-                return Err(SolidError::intersect(
+        // checked in each arm before its edit: the target is the classification's object
+        let resolves = |kind: ClassObjectKind| {
+            if object.class_kind() != kind || handle(target) != object {
+                return Err(SolidError::invalid_input(
                     OP_MERGE,
-                    IntersectFailure::UnsupportedObjectKind,
-                ))
+                    "target does not resolve classification object",
+                ));
             }
+            Ok(())
         };
-        if object.class_kind() != kind || handle(target) != object {
-            return Err(SolidError::invalid_input(
-                OP_MERGE,
-                "target does not resolve classification object",
-            ));
-        }
         let mut outputs = MergeOutputs {
             new_edges: Vec::new(),
             new_vertices: Vec::new(),
         };
         let vertex_id = match target {
             EntityRef::Region(r) => {
+                resolves(ClassObjectKind::Region)?;
                 let (_, v) = p9::make_shell_vertex(b, Some(r), src_point, env)?;
                 outputs.new_vertices.push(handle(EntityRef::Vertex(v)));
                 v
             }
             EntityRef::Face(f) => {
+                resolves(ClassObjectKind::Face)?;
                 let (_, v) = p9::make_vertex_loop(
                     b,
                     f,
@@ -1689,6 +1682,7 @@ impl<O: ClassObject> PointClassification<O> {
                 v
             }
             EntityRef::Edge(e) => {
+                resolves(ClassObjectKind::Edge)?;
                 // Not upstream (#2621, WR-751): where the edge passes the point
                 let t = split_parameter(k, b, e, self.t_param(), src_point)?;
                 let split = p9::make_vertex_split_edge_with_curve_identity(
@@ -1720,16 +1714,15 @@ impl<O: ClassObject> PointClassification<O> {
                 outputs.new_vertices.push(handle(EntityRef::Vertex(v)));
                 v
             }
-            EntityRef::Vertex(v) => v,
-            // (cannot be reached: the target's kind was checked above, but the match needs
-            // the arm)
+            EntityRef::Vertex(v) => {
+                resolves(ClassObjectKind::Vertex)?;
+                v
+            }
+            // a target a vertex cannot be merged into (rule 8)
             _ => {
                 return Err(SolidError::intersect(
                     OP_MERGE,
-                    IntersectFailure::Defect {
-                        why: "the target is not a region, face, edge or vertex, though its \
-                              kind was checked to be one before the edit",
-                    },
+                    IntersectFailure::UnsupportedObjectKind,
                 ))
             }
         };
