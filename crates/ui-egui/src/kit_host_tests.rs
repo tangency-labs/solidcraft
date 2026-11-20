@@ -562,9 +562,7 @@ mod layout {
                             PictureChoice {
                                 key: "axes",
                                 label: "Axes (signed)",
-                                figure: |p, rect| {
-                                    paint_navigation_axes(p, rect, &crate::viewport::navigator_axes(&solidcraft_viewport::Camera::default()))
-                                },
+                                figure: |p, rect| paint_navigation_axes(p, rect, &solidcraft_ui_kit::prefs_navigation_page::default_navigator_axes()),
                             },
                             PictureChoice { key: "custom", label: "Custom", figure: paint_navigation_custom },
                         ],

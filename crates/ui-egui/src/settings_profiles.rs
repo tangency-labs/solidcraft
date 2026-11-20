@@ -156,7 +156,7 @@ const PROFILE_KEYS: &[&str] = &[
 
 /// The preferences a profile holds, by their stored key.
 pub fn keys() -> impl Iterator<Item = &'static str> {
-    prefs::FIELD_PAGES.iter().map(|(key, _)| *key).filter(|key| PROFILE_KEYS.contains(key))
+    prefs::field_pages().into_iter().map(|(key, _)| key).filter(|key| PROFILE_KEYS.contains(key))
 }
 
 /// The kept profiles, which one was applied or saved last, and the Preferences section's state.

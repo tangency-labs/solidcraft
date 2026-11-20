@@ -354,7 +354,7 @@ pub(crate) fn twist_turn(app: &mut SolveApp, rect: Rect, radians: f64, hover: Op
     if !radians.is_finite() {
         return;
     }
-    let pivot = match app.preferences.orbit_around {
+    let pivot = match app.preferences.navigation.orbit_around {
         OrbitAround::ViewCentre => None,
         OrbitAround::Origin => Some(Vec3::ZERO),
         OrbitAround::Cursor => Some(match app.viewport.twist_pivot {
@@ -469,13 +469,13 @@ fn zoom_in_view(app: &mut SolveApp, factor: f64, anchor: Option<Vec3>) {
 /// Zoom anchor: the model point under the cursor, else the target's depth.
 /// Preferences › Navigation › Zoom to the cursor (off: toward the view's centre).
 pub(crate) fn zoom_anchor(app: &mut SolveApp, rect: egui::Rect, hover: Option<egui::Pos2>, surface: bool) -> Option<Vec3> {
-    let hover = hover.filter(|_| app.preferences.zoom_to_cursor);
+    let hover = hover.filter(|_| app.preferences.navigation.zoom_to_cursor);
     zoom_point(app, rect, hover, surface)
 }
 
 /// The cap, bridge and drag-zoom keep their old behaviour unless explicitly opted in.
 fn model_zoom_anchor(app: &mut SolveApp, rect: Rect, point: Option<Pos2>, surface: bool) -> Option<Vec3> {
-    let point = point.filter(|_| app.preferences.zoom_stop_at_model);
+    let point = point.filter(|_| app.preferences.navigation.zoom_stop_at_model);
     zoom_point(app, rect, point, surface)
 }
 
@@ -520,7 +520,7 @@ pub(crate) fn modifier_motion(
             && !crate::render_workspace::active(app)
             && hover.is_some_and(|p| app.viewport.rect.is_some_and(|rect| crate::canvas::owns_pointer(app, &projection(app, rect), p))))
         && !hover.is_some_and(|p| app.viewport.layout.as_ref().is_some_and(|l| l.navigation.contains(p)));
-    let next = crate::prefs::nav_preset(&app.preferences.nav).motion_mode(mods).zip(hover.filter(|p| owns && p.is_finite()));
+    let next = crate::prefs::nav_preset(&app.preferences.navigation.nav).motion_mode(mods).zip(hover.filter(|p| owns && p.is_finite()));
     let previous = app.viewport.modifier_nav;
     if previous.map(|(m, _)| m) != next.map(|(m, _)| m) {
         app.viewport.orbit_pivot = None;
@@ -591,7 +591,7 @@ pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, 
     }
     // The Browser has the keyboard (its last click was on a row): plain arrows move through its
     // tree instead of turning the view (#17931).
-    if app.preferences.browser_arrow_keys
+    if app.preferences.navigation.browser_arrow_keys
         && matches!(key, Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown)
         && !ctrl
         && !mods.shift
@@ -694,7 +694,7 @@ pub(crate) fn camera_motion(app: &mut SolveApp, rect: Rect, mut params: serde_js
     let stored_fov = app.cam.fov;
     params["camera"] = json!(projection(app, rect).cam);
     params["viewport"] = json!([rect.width().max(1.0), rect.height().max(1.0)]);
-    params["free_orbit"] = json!(app.preferences.free_orbit);
+    params["free_orbit"] = json!(app.preferences.navigation.free_orbit);
     let _ = app.run("view.navigate", params);
     app.cam.fov = stored_fov;
 }
@@ -827,7 +827,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     device(app, rect, caps);
 
     // Pencil mode assigns finger gestures to navigation even when the separate preference is off.
-    let touch_enabled = (app.preferences.touchscreen_navigation || app.preferences.pencil_mode)
+    let touch_enabled = (app.preferences.navigation.touchscreen_navigation || app.preferences.pencil_mode)
         && app.tool.is_none()
         && app.dialog.is_none()
         && app.viewport.context_menu.is_none();
@@ -836,7 +836,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
 
     // ---- navigation ----
     let trackpad_pan = app.preferences.trackpad_pans();
-    if !app.preferences.smooth_wheel_zoom {
+    if !app.preferences.navigation.smooth_wheel_zoom {
         app.viewport.wheel_zoom_raw_until_idle = true;
     } else if !ui.input(|i| i.is_scrolling()) {
         app.viewport.wheel_zoom_raw_until_idle = false;
@@ -848,7 +848,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     // panning off the scroll zooms, so there is one gesture and no coast to end.
     let scroll_mode = if trackpad_pan { app.preferences.trackpad_scroll() } else { crate::prefs::TrackpadScroll::Pans };
     let trackpad_orbit = scroll_mode.modes_differ();
-    let zoom_modifier = app.preferences.trackpad_zoom_modifier.modifiers();
+    let zoom_modifier = app.preferences.navigation.trackpad_zoom_modifier.modifiers();
     let viewport = &mut app.viewport;
     let raw = ui.input(|i| {
         immediate_wheel(
@@ -903,7 +903,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         // Spread zooms in: the camera distance shrinks by the pinch factor.
         let f = f64::from(pinch).powf(-crate::prefs::zoom_sign(app));
         let anchor = zoom_anchor(app, rect, hover, caps.orbit);
-        if app.preferences.nav == crate::prefs::TOUCHPAD_NAV {
+        if app.preferences.navigation.nav == crate::prefs::TOUCHPAD_NAV {
             let mut params = json!({"motion":"zoom", "factor":f.clamp(0.05,20.0)});
             if let Some(anchor) = anchor {
                 params["anchor"] = json!(anchor);
@@ -916,9 +916,9 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     }
     if wheel_inside && scroll.is_finite() && scroll != 0.0 {
         app.viewport.orbit_free = None;
-        let f = (-scroll as f64 * 0.0015 * f64::from(app.preferences.wheel_zoom_speed) * crate::prefs::zoom_sign(app)).exp();
+        let f = (-scroll as f64 * 0.0015 * f64::from(app.preferences.navigation.wheel_zoom_speed) * crate::prefs::zoom_sign(app)).exp();
         let anchor = zoom_anchor(app, rect, hover, caps.orbit);
-        if app.preferences.nav == crate::prefs::TOUCHPAD_NAV {
+        if app.preferences.navigation.nav == crate::prefs::TOUCHPAD_NAV {
             let mut params = json!({"motion":"zoom", "factor":f.clamp(0.05,20.0)});
             if let Some(anchor) = anchor {
                 params["anchor"] = json!(anchor);
@@ -932,7 +932,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     // Two-finger scroll pans the model with the fingers.
     if wheel_inside && pan.is_finite() && pan != egui::Vec2::ZERO {
         app.viewport.orbit_free = None;
-        if app.preferences.nav == crate::prefs::TOUCHPAD_NAV {
+        if app.preferences.navigation.nav == crate::prefs::TOUCHPAD_NAV {
             camera_motion(app, rect, json!({"motion":"pan","delta":[pan.x,pan.y]}));
         } else {
             app.cancel_view_animation();
@@ -955,7 +955,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         app.viewport.twist_pivot = None;
         app.viewport.twist_last = None;
     }
-    if wheel_inside && caps.orbit && app.preferences.trackpad_twist_turns && twist != 0.0 {
+    if wheel_inside && caps.orbit && app.preferences.navigation.trackpad_twist_turns && twist != 0.0 {
         app.cancel_view_animation();
         app.viewport.orbit_free = None;
         app.viewport.spin = false;
@@ -991,9 +991,12 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
                         && (crate::render_workspace::active(app) || (crate::dim_view::hit(p).is_none() && crate::sketch_tools::glyph_at(p).is_none()))
                 })
         };
-        let openscad_orbit =
-            app.preferences.nav == crate::prefs::OPENSCAD_NAV && app.tool.is_none() && app.dialog.is_none() && !mods.shift && empty_space(app);
-        let preset = if app.preferences.nav != crate::prefs::OPENSCAD_NAV || openscad_orbit {
+        let openscad_orbit = app.preferences.navigation.nav == crate::prefs::OPENSCAD_NAV
+            && app.tool.is_none()
+            && app.dialog.is_none()
+            && !mods.shift
+            && empty_space(app);
+        let preset = if app.preferences.navigation.nav != crate::prefs::OPENSCAD_NAV || openscad_orbit {
             crate::prefs::nav_mode(app, crate::prefs::NavButton::Left, mods)
         } else {
             None
@@ -1058,7 +1061,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     // frame, as before.
     let button_mode = match button {
         Some(b) if dragging && app.viewport.axis_drag.is_none() => {
-            let kept = app.viewport.button_nav.filter(|(held, _)| *held == b && app.preferences.nav_drag_keeps_mode);
+            let kept = app.viewport.button_nav.filter(|(held, _)| *held == b && app.preferences.navigation.nav_drag_keeps_mode);
             let mode = kept.map_or_else(|| crate::prefs::nav_mode(app, b, mods), |(_, mode)| mode);
             app.viewport.button_nav = Some((b, mode));
             mode
@@ -1122,7 +1125,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         // Shift can be required to enter orbit (middle drag, Alias Shift+Alt),
         // rather than an additional request for snapping. Only an extra modifier snaps.
         let without_shift = egui::Modifiers { shift: false, ..mods };
-        let snap = app.preferences.nav != crate::prefs::OPENSCAD_NAV
+        let snap = app.preferences.navigation.nav != crate::prefs::OPENSCAD_NAV
             && mods.shift
             && match button {
                 Some(b) => crate::prefs::nav_mode(app, b, without_shift) == Some(NavMode::Orbit),
@@ -1145,9 +1148,9 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
                 Some(NavMode::Zoom) => {
                     let press = ui.input(|i| i.pointer.press_origin());
                     let anchor = model_zoom_anchor(app, rect, press.or(hover), caps.orbit);
-                    let sign = if crate::prefs::nav_preset(&app.preferences.nav).reverse_drag_zoom { -1.0 } else { 1.0 };
-                    let horizontal = app.preferences.nav == "maya"
-                        && app.preferences.maya_horizontal_zoom
+                    let sign = if crate::prefs::nav_preset(&app.preferences.navigation.nav).reverse_drag_zoom { -1.0 } else { 1.0 };
+                    let horizontal = app.preferences.navigation.nav == "maya"
+                        && app.preferences.navigation.maya_horizontal_zoom
                         && button == Some(crate::prefs::NavButton::Right)
                         && mods.alt;
                     let movement = if horizontal { -delta.x } else { delta.y };
@@ -1234,7 +1237,7 @@ pub(crate) fn view_moving(app: &SolveApp, scroll: f32, pinch: f32, pan: egui::Ve
 /// target, so its hover goes off as before. With `keep_hover_while_navigating` off the
 /// highlight always goes off while the view moves, as it did before the freeze.
 pub(crate) fn hover_is_frozen(input: &CameraInput, app: &SolveApp) -> bool {
-    if !app.preferences.keep_hover_while_navigating {
+    if !app.preferences.navigation.keep_hover_while_navigating {
         return false;
     }
     let pointer_owns = input.middle || input.secondary_down || (input.primary_nav.is_some() && input.primary_down);
@@ -1252,7 +1255,7 @@ const WRAP_MARGIN: f32 = 4.0;
 /// synthetic drag (control channel, scripts) has no real cursor to move. With
 /// `orbit_cursor_wrap` off in the preferences the drag stops at the edge of the screen.
 pub(crate) fn wrap_cursor(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
-    if !app.preferences.orbit_cursor_wrap || app.viewport.cursor_wrap.is_some() || app.synthetic_press {
+    if !app.preferences.navigation.orbit_cursor_wrap || app.viewport.cursor_wrap.is_some() || app.synthetic_press {
         return;
     }
     let Some(at) = ui.input(|i| i.pointer.latest_pos()) else { return };
@@ -1341,14 +1344,14 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     });
     if let Some(queued) = app.viewport.device_motion.take() {
         let before = app.cam;
-        let (free, fov) = (app.preferences.free_orbit, app.view_fov());
+        let (free, fov) = (app.preferences.navigation.free_orbit, app.view_fov());
         with_fov(&mut app.cam, fov, |cam| device_camera(cam, queued.motion, queued.seconds, height, turn, free, anchor, pivot));
         app.cam = crate::view_angles::keep_locked(app, before, app.cam);
     }
     // A device app's motion (the navigation bridge), on the same terms.
     if let Some(queued) = app.viewport.bridge_motion.take() {
         let before = app.cam;
-        let (reverse, free, fov) = (app.preferences.zoom_reverse, app.preferences.free_orbit, app.view_fov());
+        let (reverse, free, fov) = (app.preferences.navigation.zoom_reverse, app.preferences.navigation.free_orbit, app.view_fov());
         with_fov(&mut app.cam, fov, |cam| bridge_camera(cam, queued, height, turn, reverse, free, anchor, pivot));
         app.cam = crate::view_angles::keep_locked(app, before, app.cam);
     }
@@ -1506,7 +1509,7 @@ pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press
     let free = app.cam;
     app.viewport.orbit_free = Some(free);
     if !snap {
-        if app.preferences.free_orbit {
+        if app.preferences.navigation.free_orbit {
             app.viewport.orbit_free = None;
         }
         return;
@@ -1520,13 +1523,13 @@ pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press
             target.pitch = displayed.pitch;
         }
     }
-    if app.preferences.free_orbit {
+    if app.preferences.navigation.free_orbit {
         target = snapped_quarter_roll(target, free);
     }
     // The cursor, origin and view-centre pivots stay still. The axis gizmo uses the origin when selected;
     // otherwise it orbits about the camera target, see `axis_view`.
     let pivot = if around_cursor {
-        match app.preferences.orbit_around {
+        match app.preferences.navigation.orbit_around {
             crate::prefs::OrbitAround::Origin => Some(Vec3::ZERO),
             _ => app.viewport.orbit_pivot,
         }
@@ -1560,7 +1563,7 @@ pub(crate) fn middle_double_click(app: &mut SolveApp, ui: &egui::Ui, inside: boo
     if !go {
         return;
     }
-    match crate::prefs::MiddleDoubleClick::of(app) {
+    match crate::prefs::MiddleDoubleClick::of_id(&app.preferences.navigation.middle_double_click) {
         crate::prefs::MiddleDoubleClick::Home => app.animate_view("home"),
         crate::prefs::MiddleDoubleClick::Fit => app.animate_fit_all(),
         crate::prefs::MiddleDoubleClick::Off => {}
@@ -1577,7 +1580,7 @@ pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Opti
     let (pivot, kept) = orbit_pivot(app, rect, (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at), press.unwrap_or(rect.center()));
     (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at) = kept;
     app.viewport.orbit_mark = orbit_mark(app, pivot);
-    if app.preferences.free_orbit {
+    if app.preferences.navigation.free_orbit {
         app.viewport.orbit_from = None;
         match pivot {
             Some(p) => orbit_about(app, rect, dx, dy, p),
@@ -1594,7 +1597,7 @@ pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Opti
         Some(f) if f.last == app.cam && f.pivot == pivot => f,
         _ => OrbitFrom { start: app.cam, dx: 0.0, dy: 0.0, pivot, last: app.cam },
     };
-    if !app.preferences.upright_orbit_unrolls {
+    if !app.preferences.navigation.upright_orbit_unrolls {
         // Off: a rolled view keeps its roll and turns about the world's up axis, as before.
         let (dx, dy) = (from.dx + dx, from.dy + dy);
         app.cam = from.start;
@@ -1632,7 +1635,7 @@ const UNROLL_TRAVEL: f64 = 240.0;
 /// cannot see (the origin, the model point under the cursor; the view's centre is what the eye
 /// already holds still) and Mark the orbit point is on (#17474).
 fn orbit_mark(app: &SolveApp, pivot: Option<Vec3>) -> Option<Vec3> {
-    pivot.filter(|_| app.preferences.mark_orbit_point && app.preferences.orbit_around != OrbitAround::ViewCentre)
+    pivot.filter(|_| app.preferences.navigation.mark_orbit_point && app.preferences.navigation.orbit_around != OrbitAround::ViewCentre)
 }
 
 /// The point an orbit turns about, by Orbit around: the view's centre ([`view_middle`]), the world origin, or the
@@ -1641,7 +1644,7 @@ fn orbit_mark(app: &SolveApp, pivot: Option<Vec3>) -> Option<Vec3> {
 /// function for the drag orbit and continuous orbit (which starts at the middle of the view), so both turn about
 /// the same point.
 fn orbit_pivot(app: &SolveApp, rect: Rect, kept: KeptPivot, at: Pos2) -> (Option<Vec3>, KeptPivot) {
-    match app.preferences.orbit_around {
+    match app.preferences.navigation.orbit_around {
         OrbitAround::ViewCentre => {
             let (p, chosen_at) = kept_view_middle(app, rect, kept.1.map(|s| (kept.0, s)));
             (p, (p, chosen_at))
@@ -1693,7 +1696,7 @@ fn home_centre(app: &SolveApp) -> Option<Pos2> {
 /// aims at the model's middle, at the view's centre unless the shared panel frame moves it. Fit still
 /// frames the plain way, so after Fit, a pan or a zoom the model's middle is elsewhere and this is `None`.
 fn navigator_home_centre(app: &SolveApp, bounds: &solidcraft_engine::geom::Aabb3, layout: &crate::viewport_layout::Layout) -> Option<Pos2> {
-    if !app.preferences.navigator_fit {
+    if !app.preferences.navigation.navigator_fit {
         return None;
     }
     let at = screen_middle(app, app.navigator_fitted_bounds(app.cam, bounds)?, bounds, layout)?;
@@ -1974,13 +1977,13 @@ impl TouchNavigation {
 }
 
 fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
-    if !app.preferences.free_orbit {
+    if !app.preferences.navigation.free_orbit {
         app.cam.orbit(dx, dy);
-    } else if app.preferences.free_orbit_upright && app.preferences.upright_orbit_unrolls {
+    } else if app.preferences.navigation.free_orbit_upright && app.preferences.navigation.upright_orbit_unrolls {
         // The same preference as the upright orbit's: the pointer is read through the view's
         // roll, so a view rolled on its side still follows it. Free orbit keeps the roll.
         app.cam.orbit_unlimited_through_roll(dx, dy);
-    } else if app.preferences.free_orbit_upright {
+    } else if app.preferences.navigation.free_orbit_upright {
         app.cam.orbit_unlimited(dx, dy);
     } else {
         app.cam.rotate_in_view(Vec3::new(-dy * 0.008, -dx * 0.008, 0.0));
@@ -2332,9 +2335,9 @@ mod tests {
         for roll in [0.0, std::f64::consts::PI, std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_2, 0.7, -2.3] {
             for (dx, dy) in [(6.0, 0.0), (-6.0, 0.0), (0.0, 6.0), (0.0, -6.0), (4.0, 3.0)] {
                 let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
-                app.preferences.orbit_around = OrbitAround::ViewCentre;
-                app.preferences.free_orbit = true;
-                app.preferences.free_orbit_upright = true;
+                app.preferences.navigation.orbit_around = OrbitAround::ViewCentre;
+                app.preferences.navigation.free_orbit = true;
+                app.preferences.navigation.free_orbit_upright = true;
                 app.cam = Camera { yaw: 0.4, pitch: 0.5, roll, ..Default::default() };
                 let near = app.cam.target + app.cam.back() * 10.0;
                 orbit(&mut app, rect, dx, dy, None);
@@ -2352,10 +2355,10 @@ mod tests {
         // Off, free orbit's upright turn is the one before, rolled or not.
         for roll in [0.0, std::f64::consts::FRAC_PI_2, 0.7] {
             let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
-            app.preferences.orbit_around = OrbitAround::ViewCentre;
-            app.preferences.free_orbit = true;
-            app.preferences.free_orbit_upright = true;
-            app.preferences.upright_orbit_unrolls = false;
+            app.preferences.navigation.orbit_around = OrbitAround::ViewCentre;
+            app.preferences.navigation.free_orbit = true;
+            app.preferences.navigation.free_orbit_upright = true;
+            app.preferences.navigation.upright_orbit_unrolls = false;
             app.cam = Camera { yaw: 0.4, pitch: 0.5, roll, ..Default::default() };
             let mut expected = app.cam;
             expected.orbit_unlimited(5.0, -3.0);
@@ -2376,7 +2379,7 @@ mod tests {
         // view's axis, so the roll easing off does not move it).
         let first_step = |roll: f64| {
             let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
-            app.preferences.orbit_around = OrbitAround::ViewCentre;
+            app.preferences.navigation.orbit_around = OrbitAround::ViewCentre;
             app.cam = Camera { yaw: 0.4, pitch: 0.5, roll, ..Default::default() };
             let p = app.cam.target + app.cam.back() * 10.0;
             let before = app.cam.to_screen(p, 800.0, 600.0, 100.0);
@@ -2394,7 +2397,7 @@ mod tests {
         for strokes in [false, true] {
             for roll in [std::f64::consts::PI, -2.0, 0.9] {
                 let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
-                app.preferences.orbit_around = OrbitAround::ViewCentre;
+                app.preferences.navigation.orbit_around = OrbitAround::ViewCentre;
                 app.cam = Camera { yaw: 0.4, pitch: 0.5, roll, ..Default::default() };
                 for _ in 0..16 {
                     if strokes {
@@ -2408,7 +2411,7 @@ mod tests {
         }
         // An unrolled view orbits exactly as before.
         let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
-        app.preferences.orbit_around = OrbitAround::ViewCentre;
+        app.preferences.navigation.orbit_around = OrbitAround::ViewCentre;
         app.cam = Camera { yaw: 0.4, pitch: 0.5, ..Default::default() };
         let mut expected = app.cam;
         expected.orbit(30.0, -20.0);
@@ -2419,7 +2422,7 @@ mod tests {
         // Look At a sketch on XY turned -130° about X comes out upside down (#12458): a drag up
         // and a little sideways stands it upright, and dragging down then looks from above.
         let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
-        app.preferences.orbit_around = OrbitAround::ViewCentre;
+        app.preferences.navigation.orbit_around = OrbitAround::ViewCentre;
         let (sin, cos) = (-130f64).to_radians().sin_cos();
         let (x, y) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, cos, sin));
         app.cam = crate::dialogs::square_sketch_axes(app.cam.looking_from(x.cross(y)), x, y);
@@ -2438,9 +2441,9 @@ mod tests {
         for fov in [0.0, 0.6] {
             for around in [OrbitAround::ViewCentre, OrbitAround::Origin, OrbitAround::Cursor] {
                 let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
-                assert!(app.preferences.upright_orbit_unrolls, "standing a rolled view up is the default");
-                app.preferences.upright_orbit_unrolls = false;
-                app.preferences.orbit_around = around;
+                assert!(app.preferences.navigation.upright_orbit_unrolls, "standing a rolled view up is the default");
+                app.preferences.navigation.upright_orbit_unrolls = false;
+                app.preferences.navigation.orbit_around = around;
                 app.viewport.orbit_pivot = Some(cursor);
                 app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), yaw: 0.4, pitch: 0.5, roll: std::f64::consts::PI, fov, ..Default::default() };
                 let mut expected = app.cam;
@@ -2463,7 +2466,7 @@ mod tests {
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
         for fov in [0.0, 0.6] {
             let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
-            app.preferences.orbit_around = OrbitAround::Origin;
+            app.preferences.navigation.orbit_around = OrbitAround::Origin;
             // Unrolled: a rolled view stands upright as the drag goes, so it does not come back rolled.
             app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), pitch: 1.4, fov, ..Default::default() };
             let start = app.cam;
@@ -2472,7 +2475,7 @@ mod tests {
             }
             assert!(app.cam.back().dist(start.back()) < 1e-9);
             assert!(app.cam.target.dist(start.target) < 1e-9);
-            app.preferences.free_orbit = true;
+            app.preferences.navigation.free_orbit = true;
             orbit(&mut app, rect, 0.0, 80.0, None);
             assert!((app.cam.back().dot(start.back()) - 0.64_f64.cos()).abs() < 1e-9);
             // Free orbit left the view rolled: the upright drag that follows turns the way the
@@ -2480,7 +2483,7 @@ mod tests {
             let mut next = app.cam;
             let (sin, cos) = app.cam.roll.sin_cos();
             next.orbit_about(10.0 * cos + 20.0 * sin, 20.0 * cos - 10.0 * sin, Vec3::ZERO);
-            app.preferences.free_orbit = false;
+            app.preferences.navigation.free_orbit = false;
             orbit(&mut app, rect, 10.0, 20.0, None);
             assert!(app.cam.back().dist(next.back()) < 1e-9);
         }
@@ -2512,8 +2515,8 @@ mod tests {
                 for free in [false, true] {
                     let ctx = egui::Context::default();
                     let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
-                    app.preferences.nav = crate::prefs::TOUCHPAD_NAV.into();
-                    app.preferences.free_orbit = free;
+                    app.preferences.navigation.nav = crate::prefs::TOUCHPAD_NAV.into();
+                    app.preferences.navigation.free_orbit = free;
                     app.ui.up_axis = up;
                     app.cam = Camera { pitch: 1.4, roll: 0.7, up, ..Default::default() };
                     let before = app.cam;
@@ -2548,9 +2551,9 @@ mod tests {
                 for around in [OrbitAround::Origin, OrbitAround::Cursor] {
                     let ctx = egui::Context::default();
                     let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
-                    app.preferences.nav = crate::prefs::TOUCHPAD_NAV.into();
-                    app.preferences.free_orbit = true;
-                    app.preferences.orbit_around = around;
+                    app.preferences.navigation.nav = crate::prefs::TOUCHPAD_NAV.into();
+                    app.preferences.navigation.free_orbit = true;
+                    app.preferences.navigation.orbit_around = around;
                     app.ui.perspective = fov > 0.0;
                     app.ui.up_axis = up;
                     app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), pitch: 1.4, roll: 0.7, fov, up, ..Default::default() };
@@ -2577,8 +2580,8 @@ mod tests {
         use super::*;
         let ctx = egui::Context::default();
         let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
-        app.preferences.nav = crate::prefs::TOUCHPAD_NAV.into();
-        app.preferences.free_orbit = true;
+        app.preferences.navigation.nav = crate::prefs::TOUCHPAD_NAV.into();
+        app.preferences.navigation.free_orbit = true;
         app.cam = Camera { pitch: 1.4, roll: 0.7, ..Default::default() };
         let initial = app.cam;
         let design = app.session.doc.to_json();
@@ -2643,7 +2646,7 @@ mod tests {
                 for quarter in 0..4 {
                     let roll = f64::from(quarter) * std::f64::consts::FRAC_PI_2;
                     let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
-                    app.preferences.free_orbit = true;
+                    app.preferences.navigation.free_orbit = true;
                     app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), yaw: 0.08, pitch: 0.1, roll: roll + 0.08, distance: 47.0, fov, up };
                     let expected = Camera { yaw: 0.0, pitch: 0.0, roll, ..app.cam };
                     orbit_drag(&mut app, rect, 0.0, 0.0, None, true, false);
@@ -2680,8 +2683,8 @@ mod tests {
                         OrbitAround::Cursor => Some(Vec3::new(7.0, -2.0, 3.0)),
                     };
                     for a in [&mut app, &mut reference] {
-                        a.preferences.free_orbit = true;
-                        a.preferences.orbit_around = around;
+                        a.preferences.navigation.free_orbit = true;
+                        a.preferences.navigation.orbit_around = around;
                         a.cam = initial;
                         a.viewport.orbit_pivot = pivot;
                     }
@@ -2718,8 +2721,8 @@ mod tests {
         for preset in crate::prefs::NAV_PRESETS {
             for enabled in [false, true] {
                 let mut h = crate::scenario::Harness::new();
-                h.app.preferences.nav = preset.id.into();
-                h.app.preferences.free_orbit = enabled;
+                h.app.preferences.navigation.nav = preset.id.into();
+                h.app.preferences.navigation.free_orbit = enabled;
                 h.app.cam = initial;
                 orbit_drag(&mut h.app, rect, 0.0, 80.0, None, !enabled, false);
                 if enabled {
@@ -2750,8 +2753,8 @@ mod tests {
         use super::*;
         for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
             let mut h = crate::scenario::Harness::new();
-            h.app.preferences.free_orbit = true;
-            h.app.preferences.free_orbit_upright = true;
+            h.app.preferences.navigation.free_orbit = true;
+            h.app.preferences.navigation.free_orbit_upright = true;
             h.app.cam = Camera { yaw: 0.2, pitch: 0.6, up, ..Default::default() };
             let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
             let height = |c: &Camera| c.back().dot(c.up_dir());
@@ -2781,7 +2784,7 @@ mod tests {
         }
         // Without the option, free orbit still turns about the screen's axes.
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.free_orbit = true;
+        h.app.preferences.navigation.free_orbit = true;
         h.app.cam = Camera { yaw: 0.0, pitch: 0.6, ..Default::default() };
         orbit_drag(&mut h.app, Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)), 50.0, 0.0, None, false, false);
         assert!((h.app.cam.back().z - 0.6_f64.sin()).abs() > 1e-3);
@@ -2794,8 +2797,8 @@ mod tests {
             for button in ["middle", "right"] {
                 let mut h = crate::scenario::Harness::new();
                 h.app.home.open = false;
-                h.app.preferences.nav = "solidworks".into();
-                h.app.preferences.free_orbit = true;
+                h.app.preferences.navigation.nav = "solidworks".into();
+                h.app.preferences.navigation.free_orbit = true;
                 h.app.ui.up_axis = up;
                 h.app.cam = solidcraft_viewport::Camera { yaw: 0.0, pitch: 1.4, up, ..Default::default() };
                 let before = h.app.cam;
@@ -2816,7 +2819,7 @@ mod tests {
         use serde_json::json;
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        crate::prefs::choose_nav_preset(&mut h.app.preferences, crate::prefs::nav_preset("solidworks"));
+        h.app.preferences.navigation.choose_preset(crate::prefs::nav_preset("solidworks"));
         let before = h.app.cam;
         for shift in [false, true] {
             h.call("ui.drag", json!({"x0":800,"y0":400,"x1":850,"y1":440,"button":"right","shift":shift,"steps":20}));
@@ -2833,8 +2836,8 @@ mod tests {
         for caps in [NavCaps::MODEL, NavCaps::RENDER] {
             for rotation in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]] {
                 let mut h = crate::scenario::Harness::new();
-                h.app.preferences.nav = "solidworks".into();
-                h.app.preferences.free_orbit = true;
+                h.app.preferences.navigation.nav = "solidworks".into();
+                h.app.preferences.navigation.free_orbit = true;
                 let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
                 let initial = Camera { yaw: 0.0, pitch: 0.0, roll: 0.7, ..Default::default() };
                 h.app.cam = initial;
@@ -2907,8 +2910,8 @@ mod tests {
     fn solidworks_free_orbit_keeps_the_configured_pivot_on_screen() {
         use super::*;
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.nav = "solidworks".into();
-        h.app.preferences.free_orbit = true;
+        h.app.preferences.navigation.nav = "solidworks".into();
+        h.app.preferences.navigation.free_orbit = true;
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
         for fov in [0.0, 0.6] {
             h.app.ui.perspective = fov > 0.0;
@@ -3108,7 +3111,7 @@ mod tests {
             assert!(crate::prefs::set(&mut app, &json!({"wheel_zoom_speed":invalid})).is_err());
             let loaded = crate::prefs::lenient(&json!({"wheel_zoom_speed":invalid, "zoom_reverse":true}));
             assert_eq!(serde_json::to_value(&loaded).unwrap()["wheel_zoom_speed"], 1.0);
-            assert!(loaded.zoom_reverse);
+            assert!(loaded.navigation.zoom_reverse);
         }
         crate::prefs::control(&mut app, &json!({"button":"defaults"})).unwrap();
         assert_eq!(serde_json::to_value(&app.preferences).unwrap()["wheel_zoom_speed"], 1.0);
@@ -3143,7 +3146,7 @@ mod tests {
                 let mut s = solidcraft_engine::Session::default();
                 s.execute("solid.box", &serde_json::json!({"length":40,"width":30,"height":20})).unwrap();
                 let mut app = crate::SolveApp::new(s, crate::Services::default());
-                app.preferences.orbit_around = around;
+                app.preferences.navigation.orbit_around = around;
                 app.cam.fov = fov;
                 let ctx = crate::fonts::test_context();
                 let mut time = 0.0;
@@ -3211,7 +3214,7 @@ mod tests {
             let mut s = solidcraft_engine::Session::default();
             s.execute("solid.box", &serde_json::json!({"length":40,"width":30,"height":20})).unwrap();
             let mut app = crate::SolveApp::new(s, crate::Services::default());
-            app.preferences.nav = preset.into();
+            app.preferences.navigation.nav = preset.into();
             app.viewport.spin = true;
             let ctx = crate::fonts::test_context();
             let mut time = 0.0;
@@ -3365,9 +3368,9 @@ mod tests {
         for preset in ["fusion", "touchpad"] {
             for smooth in [false, true] {
                 let mut h = crate::scenario::Harness::new();
-                h.app.preferences.nav = preset.into();
-                h.app.preferences.smooth_wheel_zoom = smooth;
-                h.app.preferences.zoom_to_cursor = false;
+                h.app.preferences.navigation.nav = preset.into();
+                h.app.preferences.navigation.smooth_wheel_zoom = smooth;
+                h.app.preferences.navigation.zoom_to_cursor = false;
                 h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
                 h.step(&json!({"call":"ui.camera", "params":{"target":[20,15,10],"distance":100}})).unwrap();
                 let at = h.app.viewport.rect.unwrap().center();
@@ -3565,7 +3568,7 @@ mod tests {
         frame(&mut app, vec![]);
         assert_eq!(app.viewport.cursor_wrap, None);
         // With the preference off, the same drag reaches the edge and the cursor stays there.
-        app.preferences.orbit_cursor_wrap = false;
+        app.preferences.navigation.orbit_cursor_wrap = false;
         frame(&mut app, vec![Event::PointerButton { pos: at, button, pressed: true, modifiers: mods }]);
         for x in [620.0, 700.0, 780.0, 800.0, 806.0] {
             assert!(frame(&mut app, vec![Event::PointerMoved(pos2(x, 300.0))]).is_empty(), "no cursor move with wrapping off ({x})");
@@ -3700,8 +3703,8 @@ mod tests {
             for cap in [true, false] {
                 let mut h = crate::scenario::Harness::new();
                 h.app.session.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20]})).unwrap();
-                h.app.preferences.zoom_to_cursor = to_cursor;
-                h.app.preferences.zoom_stop_at_model = stop_at_model;
+                h.app.preferences.navigation.zoom_to_cursor = to_cursor;
+                h.app.preferences.navigation.zoom_stop_at_model = stop_at_model;
                 h.settle();
                 // The iso view looks straight at the box, as the report's sample does.
                 h.app.cam = Camera::default();
@@ -3733,8 +3736,8 @@ mod tests {
         for (stop_at_model, to_cursor) in [(false, false), (false, true), (true, false), (true, true)] {
             let mut h = crate::scenario::Harness::new();
             h.app.session.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20]})).unwrap();
-            h.app.preferences.zoom_to_cursor = to_cursor;
-            h.app.preferences.zoom_stop_at_model = stop_at_model;
+            h.app.preferences.navigation.zoom_to_cursor = to_cursor;
+            h.app.preferences.navigation.zoom_stop_at_model = stop_at_model;
             h.app.run("view.tool", json!({"tool": "zoom"})).unwrap();
             h.settle();
             h.app.cam = Camera::default();
@@ -3775,7 +3778,7 @@ mod tests {
                 let mut h = crate::scenario::Harness::new();
                 h.app.session.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20]})).unwrap();
                 h.app.preferences.space_mouse_model_pivot = model_pivot;
-                h.app.preferences.free_orbit = free;
+                h.app.preferences.navigation.free_orbit = free;
                 h.settle();
                 // Looking at the box from far away, so the view's centre is well behind the face.
                 h.app.cam = Camera { distance: 400.0, ..Camera::default() };
@@ -4001,8 +4004,8 @@ mod tests {
     fn touchscreen_pinch_uses_displayed_projection_for_anchor() {
         use egui::TouchPhase::{Move, Start};
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
-        app.preferences.touchscreen_navigation = true;
-        app.preferences.zoom_to_cursor = true;
+        app.preferences.navigation.touchscreen_navigation = true;
+        app.preferences.navigation.zoom_to_cursor = true;
         app.ui.perspective = true;
         app.cam.fov = 0.0;
         assert!(app.view_fov() > 0.0);
@@ -4028,7 +4031,7 @@ mod tests {
         let input_rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
         for (release_x, expected_inside) in [(150.0, true), (750.0, false)] {
             let mut app = crate::SolveApp::new(Default::default(), Default::default());
-            app.preferences.touchscreen_navigation = true;
+            app.preferences.navigation.touchscreen_navigation = true;
             let ctx = crate::fonts::test_context();
             let mut time = 0.0;
             let bounds = input_rect;
@@ -4053,7 +4056,7 @@ mod tests {
         let input_rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
         for (second_x, expected_owned) in [(150.0, true), (50.0, false)] {
             let mut app = crate::SolveApp::new(Default::default(), Default::default());
-            app.preferences.touchscreen_navigation = true;
+            app.preferences.navigation.touchscreen_navigation = true;
             let ctx = crate::fonts::test_context();
             let mut time = 0.0;
             let bounds = input_rect;
@@ -4077,7 +4080,7 @@ mod tests {
         use egui::TouchPhase::{End, Move, Start};
         for enabled in [true, false] {
             let mut app = crate::SolveApp::new(Default::default(), Default::default());
-            app.preferences.touchscreen_navigation = enabled;
+            app.preferences.navigation.touchscreen_navigation = enabled;
             let ctx = crate::fonts::test_context();
             let mut time = 0.0;
             touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, true);
@@ -4102,7 +4105,7 @@ mod tests {
     fn touchscreen_six_point_threshold_uses_the_kernel_distance() {
         use egui::TouchPhase::{Move, Start};
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
-        app.preferences.touchscreen_navigation = true;
+        app.preferences.navigation.touchscreen_navigation = true;
         let ctx = crate::fonts::test_context();
         let mut time = 0.0;
         touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, false);
@@ -4124,8 +4127,8 @@ mod tests {
     fn touchscreen_three_contact_pinch_uses_mean_radius_for_nonuniform_motion() {
         use egui::TouchPhase::{Move, Start};
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
-        app.preferences.touchscreen_navigation = true;
-        app.preferences.zoom_to_cursor = false;
+        app.preferences.navigation.touchscreen_navigation = true;
+        app.preferences.navigation.zoom_to_cursor = false;
         let ctx = crate::fonts::test_context();
         let mut time = 0.0;
         touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, false);
@@ -4266,8 +4269,8 @@ mod tests {
     fn touchscreen_two_fingers_pan_and_pinch_without_orbit_or_double_zoom() {
         use egui::TouchPhase::{End, Move, Start};
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
-        app.preferences.touchscreen_navigation = true;
-        app.preferences.zoom_to_cursor = false;
+        app.preferences.navigation.touchscreen_navigation = true;
+        app.preferences.navigation.zoom_to_cursor = false;
         let ctx = crate::fonts::test_context();
         let mut time = 0.0;
         touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, true);
@@ -4298,9 +4301,9 @@ mod tests {
         use egui::TouchPhase::{Move, Start};
         for reverse in [false, true] {
             let mut app = crate::SolveApp::new(Default::default(), Default::default());
-            app.preferences.touchscreen_navigation = true;
-            app.preferences.zoom_to_cursor = false;
-            app.preferences.zoom_reverse = reverse;
+            app.preferences.navigation.touchscreen_navigation = true;
+            app.preferences.navigation.zoom_to_cursor = false;
+            app.preferences.navigation.zoom_reverse = reverse;
             let ctx = crate::fonts::test_context();
             let mut time = 0.0;
             touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, true);
@@ -4320,7 +4323,7 @@ mod tests {
     fn touchscreen_outside_gesture_does_not_capture_on_entering_the_view() {
         use egui::TouchPhase::{Move, Start};
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
-        app.preferences.touchscreen_navigation = true;
+        app.preferences.navigation.touchscreen_navigation = true;
         let ctx = crate::fonts::test_context();
         let mut time = 0.0;
         touchscreen_frame(&mut app, &ctx, pointer(50.0, 300.0, None), &mut time, true);
@@ -4338,7 +4341,7 @@ mod tests {
     fn touchscreen_cancel_clears_contacts_and_flat_views_pan() {
         use egui::TouchPhase::{Cancel, Move, Start};
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
-        app.preferences.touchscreen_navigation = true;
+        app.preferences.navigation.touchscreen_navigation = true;
         let ctx = crate::fonts::test_context();
         let mut time = 0.0;
         touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, false);
@@ -4362,25 +4365,25 @@ mod tests {
     fn touchscreen_preference_defaults_off_and_survives_roundtrip() {
         use serde_json::json;
         let prefs: crate::prefs::Prefs = serde_json::from_value(json!({})).unwrap();
-        assert!(!prefs.touchscreen_navigation);
+        assert!(!prefs.navigation.touchscreen_navigation);
         assert!(!prefs.pencil_mode);
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
         crate::prefs::control(&mut app, &json!({"open":"Navigation", "touchscreen_navigation":true})).unwrap();
         crate::prefs::control(&mut app, &json!({"button":"apply"})).unwrap();
         let mut other = crate::SolveApp::new(Default::default(), Default::default());
         other.load_prefs(&app.prefs());
-        assert!(other.preferences.touchscreen_navigation);
+        assert!(other.preferences.navigation.touchscreen_navigation);
         crate::prefs::control(&mut app, &json!({"open":"Navigation", "button":"defaults"})).unwrap();
-        assert!(!app.preferences.touchscreen_navigation);
+        assert!(!app.preferences.navigation.touchscreen_navigation);
         crate::prefs::control(&mut app, &json!({"button":"cancel"})).unwrap();
-        assert!(app.preferences.touchscreen_navigation);
+        assert!(app.preferences.navigation.touchscreen_navigation);
     }
 
     #[test]
     fn touchscreen_tool_cancels_an_existing_gesture() {
         use egui::TouchPhase::{Move, Start};
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
-        app.preferences.touchscreen_navigation = true;
+        app.preferences.navigation.touchscreen_navigation = true;
         let ctx = crate::fonts::test_context();
         let mut time = 0.0;
         touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, true);
@@ -4411,7 +4414,7 @@ mod tests {
     fn touchscreen_second_finger_on_axes_cannot_join_the_camera_gesture() {
         use egui::TouchPhase::{Move, Start};
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
-        app.preferences.touchscreen_navigation = true;
+        app.preferences.navigation.touchscreen_navigation = true;
         let ctx = crate::fonts::test_context();
         let mut time = 0.0;
         touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, true);
@@ -4433,7 +4436,7 @@ mod tests {
         use egui::TouchPhase::{End, Move, Start};
         use serde_json::json;
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.touchscreen_navigation = true;
+        h.app.preferences.navigation.touchscreen_navigation = true;
         h.app.run("solid.box", json!({"length":80,"width":50,"height":20})).unwrap();
         h.app.fit_view();
         h.frames(2);
@@ -4503,7 +4506,7 @@ mod view_key_tests {
     #[test]
     fn arrow_keys_turn_and_pan_the_view() {
         let mut h = Harness::new();
-        h.app.preferences.look_at_anim = false;
+        h.app.preferences.navigation.look_at_anim = false;
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
         h.step(&json!({"call": "ui.view", "params": {"view": "front"}})).unwrap();
         h.frames(3);
@@ -4534,12 +4537,12 @@ mod view_key_tests {
     #[test]
     fn arrows_leave_the_view_alone_while_the_browser_has_focus() {
         let mut h = Harness::new();
-        h.app.preferences.look_at_anim = false;
+        h.app.preferences.navigation.look_at_anim = false;
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "base": [30, 0, 0]})).unwrap();
         h.step(&json!({"call": "ui.view", "params": {"view": "front"}})).unwrap();
         h.frames(3);
-        assert!(h.app.preferences.browser_arrow_keys, "on by default");
+        assert!(h.app.preferences.navigation.browser_arrow_keys, "on by default");
         assert!(!h.app.tree.content.browser_focused(), "nothing is focused yet");
         let (yaw, _) = turned(&mut h, json!({"key": "ArrowLeft"}));
         assert!(yaw.abs() > 0.1, "the view turns before the Browser has focus: {yaw}");
@@ -4556,10 +4559,10 @@ mod view_key_tests {
         assert!(selected.contains("Body2"), "Down moves the selection through the rows: {selected}");
         let (_, pitch) = turned(&mut h, json!({"key": "ArrowUp"}));
         assert!(pitch.abs() < 1e-9, "nor does Up: {pitch}");
-        h.app.preferences.browser_arrow_keys = false;
+        h.app.preferences.navigation.browser_arrow_keys = false;
         let (yaw, _) = turned(&mut h, json!({"key": "ArrowLeft"}));
         assert!(yaw.abs() > 0.1, "with the preference off the arrows turn the view again: {yaw}");
-        h.app.preferences.browser_arrow_keys = true;
+        h.app.preferences.navigation.browser_arrow_keys = true;
         h.step(&json!({"click": {"world": [5, 5, 10]}})).unwrap();
         h.frames(2);
         assert!(!h.app.tree.content.browser_focused(), "a click in the view takes the keyboard back");
@@ -4612,8 +4615,8 @@ mod view_key_tests {
         let mut h = crate::scenario::Harness::new();
         h.app.session.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20]})).unwrap();
         h.app.ui.perspective = true;
-        h.app.preferences.zoom_to_cursor = true;
-        h.app.preferences.zoom_stop_at_model = false;
+        h.app.preferences.navigation.zoom_to_cursor = true;
+        h.app.preferences.navigation.zoom_stop_at_model = false;
         h.settle();
         let rect = h.app.viewport.rect.expect("the viewport");
         let min = crate::viewport::min_zoom_distance(&h.app);
@@ -4667,7 +4670,7 @@ mod view_key_tests {
     #[test]
     fn zoom_keys_zoom_the_view() {
         let mut h = Harness::new();
-        h.app.preferences.look_at_anim = false;
+        h.app.preferences.navigation.look_at_anim = false;
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
         h.frames(2);
         let near = |a: f64, b: f64| ((a / b) - 1.0).abs() < 1e-9;
@@ -4707,7 +4710,7 @@ mod view_key_tests {
     #[test]
     fn unfocused_layout_preferences_owns_view_keys_while_general_preserves_camera_preview() {
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
-        app.preferences.look_at_anim = false;
+        app.preferences.navigation.look_at_anim = false;
         let ctx = crate::fonts::test_context();
         let mut output = ctx.run_ui(egui::RawInput { events: vec![arrow(true, false)], focused: true, ..Default::default() }, |ui| {
             assert!(ui.memory(|memory| memory.focused().is_none()));
@@ -4749,7 +4752,7 @@ mod view_key_tests {
 
     fn front_view() -> Harness {
         let mut h = Harness::new();
-        h.app.preferences.look_at_anim = true;
+        h.app.preferences.navigation.look_at_anim = true;
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
         h.step(&json!({"call": "ui.view", "params": {"view": "front"}})).unwrap();
         h.settle();
@@ -4827,7 +4830,7 @@ mod view_key_tests {
     fn ctrl_digits_turn_to_the_standard_views_and_can_be_rebound() {
         use solidcraft_viewport::StandardView;
         let mut h = Harness::new();
-        h.app.preferences.look_at_anim = false;
+        h.app.preferences.navigation.look_at_anim = false;
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
         h.frames(2);
         let looks_from = |h: &mut Harness, digit: &str, view: StandardView| {
@@ -4862,7 +4865,7 @@ mod view_key_tests {
     #[test]
     fn ctrl_8_again_looks_from_the_other_side() {
         let mut h = Harness::new();
-        h.app.preferences.look_at_anim = false;
+        h.app.preferences.navigation.look_at_anim = false;
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
         h.frames(2);
         let back_z = |h: &Harness| h.app.cam.back().z;

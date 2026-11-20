@@ -434,7 +434,7 @@ mod tests {
 
     fn boxed() -> crate::scenario::Harness {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.look_at_anim = false;
+        h.app.preferences.navigation.look_at_anim = false;
         h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10})).unwrap();
         h.frames(2);
         h

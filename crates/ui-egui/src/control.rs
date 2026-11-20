@@ -2635,7 +2635,7 @@ pub(crate) mod tests {
     #[test]
     fn touchpad_automation_moves_with_modifiers_and_releases_without_buttons() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.nav = "touchpad".into();
+        h.app.preferences.navigation.nav = "touchpad".into();
         h.call("ui.move", json!({"x":800,"y":500}));
         let before = h.app.cam;
         h.call("ui.move", json!({"x":800,"y":500,"shift":true}));
@@ -2731,7 +2731,7 @@ pub(crate) mod tests {
     #[test]
     fn touchpad_drag_positioning_releases_previous_motion_modifiers() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.nav = "touchpad".into();
+        h.app.preferences.navigation.nav = "touchpad".into();
         h.call("ui.move", json!({"x":800,"y":500}));
         for modifier in ["shift", "alt"] {
             let mut params = json!({"x":800,"y":500});

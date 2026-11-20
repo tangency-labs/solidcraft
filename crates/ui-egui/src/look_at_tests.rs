@@ -12,7 +12,7 @@ use crate::scenario::Harness;
 fn far_sketch() -> (Harness, u64) {
     let mut h = Harness::new();
     h.app.home.open = false;
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     h.app.run("sketch.create", json!({"plane": "XY", "offset": 8, "name": "Far"})).unwrap();
     h.app.run("sketch.rectangle.two_point", json!({"p0": [330, 475], "p1": [350, 505]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
@@ -73,7 +73,7 @@ fn look_ats_own_key_faces_the_open_sketch_with_nothing_selected() {
 fn an_empty_sketch_keeps_its_planes_origin() {
     let mut h = Harness::new();
     h.app.home.open = false;
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     h.app.run("sketch.create", json!({"plane": "XY", "offset": 8})).unwrap();
     h.app.cam.distance = 123.0;
     crate::dialogs::look_at_sketch(&mut h.app);
@@ -87,7 +87,7 @@ fn an_empty_sketch_keeps_its_planes_origin() {
 fn the_viewport_menu_looks_at_a_planar_face() {
     let mut h = Harness::new();
     h.app.home.open = false;
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
     let body = h.app.session.model.state().bodies[0].clone();
     let face = body.body.faces(0.01).unwrap().into_iter().find(|f| f.plane_normal.is_some_and(|n| n.z > 0.99)).unwrap();
@@ -103,7 +103,7 @@ fn the_viewport_menu_looks_at_a_planar_face() {
 fn the_viewport_menu_looks_at_a_plane_under_the_cursor() {
     let mut h = Harness::new();
     h.app.home.open = false;
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     h.app.menu.plane = Some("XZ".to_string());
     let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
     let look = items.iter().find(|i| i.id == "ui.lookAt").cloned().expect("a plane's menu has Look At");
@@ -117,7 +117,7 @@ fn the_viewport_menu_looks_at_a_plane_under_the_cursor() {
 fn look_at_squares_a_vertical_sketch_to_the_screen() {
     let mut h = Harness::new();
     h.app.home.open = false;
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     h.app.run("sketch.create", json!({"plane": "XZ", "name": "Wall"})).unwrap();
     h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]})).unwrap();
     crate::dialogs::look_at_sketch(&mut h.app);
@@ -133,7 +133,7 @@ fn look_at_squares_a_vertical_sketch_to_the_screen() {
 fn editing_a_sketch_in_a_turned_component_faces_its_world_plane() {
     let mut h = Harness::new();
     h.app.home.open = false;
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     h.app.run("component.create", json!({"name": "Part"})).unwrap();
     h.app.run("sketch.create", json!({"plane": "XY", "name": "Face"})).unwrap();
     h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]})).unwrap();
@@ -159,7 +159,7 @@ fn editing_a_sketch_in_a_turned_component_faces_its_world_plane() {
 fn the_viewport_menu_looks_at_a_construction_plane() {
     let mut h = Harness::new();
     h.app.home.open = false;
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     h.app
         .run(
             "construct.plane.three_points",

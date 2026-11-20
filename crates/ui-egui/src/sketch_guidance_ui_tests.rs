@@ -12,7 +12,7 @@ fn step(h: &mut Harness, value: Value) {
 }
 fn fixture() -> Harness {
     let mut h = Harness::new();
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     h.app.preferences.sketch_mirror_auto_line = false; // Exercise manual reference picking.
     for (command, params) in [
         ("sketch.create", json!({"plane":"XY"})),
@@ -270,7 +270,7 @@ fn sketch_modify_keeps_custom_point_ids_that_contain_colons() {
 fn tracking_fixture() -> Harness {
     let mut h = Harness::new();
     h.app.home.open = false;
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     for (command, params) in [
         ("sketch.create", json!({"plane":"XY"})),
         ("sketch.rectangle.two_point", json!({"p0":[-30,-20],"p1":[30,20]})),
@@ -344,7 +344,7 @@ fn a_corner_starts_a_guide_while_drawing_unless_turned_off() {
 fn a_rectangle_snaps_to_an_infinite_line_crossing() {
     use solidcore_record::Vec2;
     let mut h = Harness::new();
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     for (command, params) in [
         ("sketch.create", json!({"plane":"XY"})),
         ("sketch.construction_line.vertical", json!({"at":[20,40]})),
@@ -469,7 +469,7 @@ fn tracking_does_not_leak_outside_the_viewport_or_into_another_sketch() {
 fn lining_up_fixture(points: &[(&str, Value)]) -> Harness {
     let mut h = Harness::new();
     h.app.home.open = false;
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     assert!(!h.app.preferences.sketch_align_points, "off unless turned on");
     h.app.preferences.sketch_align_points = true;
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -639,7 +639,7 @@ fn holed_box_sketch() -> Harness {
     h.app.home.open = false;
     h.app.set_origin_shown(false);
     h.app.ui.show_browser = false;
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 10})).unwrap();
     h.app.run("solid.cylinder", json!({"radius": 3, "height": 12, "base": [15, 20, -1], "operation": "cut"})).unwrap();
     h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();

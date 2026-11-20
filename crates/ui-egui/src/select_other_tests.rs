@@ -632,7 +632,7 @@ fn a_drag_under_a_lit_navigation_mode_moves_the_view_and_opens_nothing() {
 #[test]
 fn a_preset_chord_held_still_does_not_open_the_list() {
     let (mut h, at) = two_lines();
-    h.app.preferences.nav = "maya".into();
+    h.app.preferences.navigation.nav = "maya".into();
     let (x, y) = (at[0].as_f64().unwrap_or_default(), at[1].as_f64().unwrap_or_default());
     h.call("ui.drag", json!({"x0": x, "y0": y, "x1": x, "y1": y, "steps": 1, "hold": 40, "alt": true}));
     h.settle();

@@ -15,7 +15,7 @@ fn moved_block(h: &mut Harness) {
     h.app.run("solid.extrude", json!({"distance": 5})).unwrap();
     let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
     h.app.run("solid.move", json!({"bodies": [body], "translate": [500, 0, 0]})).unwrap();
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     h.settle();
 }
 
@@ -114,7 +114,7 @@ fn middle_double_click_preference_fit_or_off() {
     moved_block(&mut h);
     let bad = h.call("ui.prefs", json!({"middle_double_click": "zoom"}));
     assert!(bad.to_string().contains("middle_double_click"), "{bad}");
-    assert_eq!(h.app.preferences.middle_double_click, "home");
+    assert_eq!(h.app.preferences.navigation.middle_double_click, "home");
 
     h.call("ui.prefs", json!({"middle_double_click": "fit"}));
     h.app.cam.set_view(StandardView::Front);
@@ -352,9 +352,9 @@ fn fit_and_home_json_commands_preserve_design_framing() {
 #[test]
 fn home_fit_size_scales_the_framed_model() {
     let mut h = Harness::new();
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     moved_block(&mut h);
-    assert_eq!(h.app.preferences.home_fit_size, 1.0, "fills the room by default");
+    assert_eq!(h.app.preferences.navigation.home_fit_size, 1.0, "fills the room by default");
     h.call("engine.execute", json!({"command":"view.home","params":{}}));
     h.frames(2);
     let tight = h.app.cam;
@@ -369,17 +369,17 @@ fn home_fit_size_scales_the_framed_model() {
         let r = h.call("ui.prefs", json!({"home_fit_size":bad}));
         assert_eq!(r["ok"], false, "{bad} is outside 10 %…100 %: {r}");
     }
-    assert!((h.app.preferences.home_fit_size - 0.8).abs() < 1e-6);
+    assert!((h.app.preferences.navigation.home_fit_size - 0.8).abs() < 1e-6);
     h.call("ui.prefs", json!({"open":"Navigation"}));
     h.call("ui.prefs", json!({"button":"defaults"}));
-    assert_eq!(h.app.preferences.home_fit_size, 1.0, "Navigation defaults restore 100 %");
+    assert_eq!(h.app.preferences.navigation.home_fit_size, 1.0, "Navigation defaults restore 100 %");
     h.call("ui.prefs", json!({"button":"cancel"}));
 }
 
 #[test]
 fn fit_json_frames_selection_while_home_frames_everything() {
     let mut h = Harness::new();
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Near"})).unwrap();
     h.app.run("solid.box", json!({"corner":[500,0,0],"length":10,"width":10,"height":10,"body_name":"Far"})).unwrap();
     h.settle();
@@ -536,7 +536,7 @@ fn navigation_bar_tool_radio_group_and_overflow_execute_in_list_order() {
 #[test]
 fn navigation_bar_look_at_keeps_the_active_sketch_fallback() {
     let mut h = Harness::new();
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.app.cam.set_view(StandardView::Iso);
     h.settle();
@@ -562,7 +562,7 @@ fn orbit_after_home_turns_the_model_in_place_beside_the_browser() {
         moved_block(&mut h);
         h.app.ui.show_browser = browser;
         h.settle();
-        assert_eq!(h.app.preferences.orbit_around, crate::prefs::OrbitAround::ViewCentre);
+        assert_eq!(h.app.preferences.navigation.orbit_around, crate::prefs::OrbitAround::ViewCentre);
         assert_eq!(h.app.shell.browser.is_some(), browser, "exercise both Browser visibility states");
         h.app.animate_view("home");
         h.settle();
@@ -634,9 +634,9 @@ fn orbit_after_the_navigators_home_turns_the_model_in_place() {
         moved_block(&mut h);
         h.app.ui.show_browser = browser;
         h.app.ui.perspective = perspective;
-        h.app.preferences.navigator_fit = true;
+        h.app.preferences.navigation.navigator_fit = true;
         h.settle();
-        assert_eq!(h.app.preferences.orbit_around, crate::prefs::OrbitAround::ViewCentre);
+        assert_eq!(h.app.preferences.navigation.orbit_around, crate::prefs::OrbitAround::ViewCentre);
         let rect = h.app.viewport.rect.unwrap();
         let proj = |h: &Harness| crate::viewport::projection(&h.app, rect);
         let centre = crate::viewport::view_bounds(&h.app).center();
@@ -714,10 +714,10 @@ fn orbit_up_to_the_top_view_and_around_keeps_one_pivot() {
         h.app.run("sketch.rectangle.two_point", json!({"p0": [-60, -20], "p1": [60, 20]})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
         h.app.run("solid.extrude", json!({"distance": 3})).unwrap();
-        h.app.preferences.look_at_anim = false;
+        h.app.preferences.navigation.look_at_anim = false;
         h.app.ui.show_browser = browser;
         h.settle();
-        assert_eq!(h.app.preferences.orbit_around, crate::prefs::OrbitAround::ViewCentre);
+        assert_eq!(h.app.preferences.navigation.orbit_around, crate::prefs::OrbitAround::ViewCentre);
         h.app.animate_view("home");
         h.settle();
         h.app.cam.zoom_at(zoom, None);

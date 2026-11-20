@@ -9667,8 +9667,8 @@ mod right_click_tests {
         for gestures in [false, true] {
             let mut h = mirror();
             if gestures {
-                h.app.preferences.nav = crate::mouse_gesture::MOUSE_MODE.into();
-                h.app.preferences.mouse_gestures.enabled = true;
+                h.app.preferences.navigation.nav = crate::mouse_gesture::MOUSE_MODE.into();
+                h.app.preferences.navigation.mouse_gestures.enabled = true;
             }
             h.step(&json!({"click": {"world": [25, 15, 20]}})).unwrap();
             right_drag(&mut h);

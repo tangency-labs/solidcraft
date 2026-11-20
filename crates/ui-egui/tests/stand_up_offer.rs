@@ -185,7 +185,7 @@ type V3 = solidcore_record::Vec3;
 /// `start`, a rectangle far from the part at x 200..220, y 0..10 on it, extruded 15 mm: the
 /// sketch's world normal, the direction the view turned to look from, and the new body's bounds.
 fn sketched_and_extruded(start: impl FnOnce(&mut Harness)) -> (V3, V3, solidcraft_engine::geom::Aabb3) {
-    let mut h = opened_from("'SolidWorks 2021','SolidWorks 2021'", |h| h.app.preferences.look_at_anim = false);
+    let mut h = opened_from("'SolidWorks 2021','SolidWorks 2021'", |h| h.app.preferences.navigation.look_at_anim = false);
     // Stand it up through the offer when one is waiting (a SolidWorks file is offered, not turned silently).
     if h.app.stand_up.is_some() {
         solidcraft_ui_egui::stand_up::stand_up(&mut h.app).unwrap();

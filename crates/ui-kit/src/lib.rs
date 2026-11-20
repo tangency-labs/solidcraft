@@ -72,6 +72,8 @@ pub mod preferences_figures;
 mod preferences_layout;
 mod preferences_navigation;
 mod preferences_small;
+pub mod prefs_navigation;
+pub mod prefs_navigation_page;
 mod radial;
 pub mod recent_colors;
 mod reports;
@@ -177,6 +179,8 @@ mod blur_plan_tests;
 #[cfg(any(test, feature = "test-support"))]
 #[path = "gallery_tests.rs"]
 pub mod gallery;
+#[cfg(test)]
+mod prefs_navigation_tests;
 #[cfg(test)]
 mod slider_tests;
 #[cfg(any(test, feature = "test-support"))]

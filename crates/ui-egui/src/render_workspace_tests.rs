@@ -307,7 +307,7 @@ fn environment_ring_fixture() -> Harness {
     let mut h = environment_editor_fixture();
     enter(&mut h.app, true).unwrap();
     inspector::select_editor(&mut h.app, inspector::Editor::Environment);
-    h.app.preferences.nav = crate::prefs::OPENSCAD_NAV.into();
+    h.app.preferences.navigation.nav = crate::prefs::OPENSCAD_NAV.into();
     h.app.cam.fit(&solidcraft_engine::render::view_bounds(&solidcraft_engine::product_scene::extract(&h.app.session).unwrap().bounds));
     environment_ring_frame(&mut h, egui::Modifiers::NONE, vec![]);
     h
@@ -2612,8 +2612,8 @@ fn result_navigation_uses_shared_pan_zoom_and_leaves_product_camera_unchanged() 
     enter(&mut h.app, true).unwrap();
     inspector::select_editor(&mut h.app, inspector::Editor::Output);
     h.app.ui.perspective = true;
-    h.app.preferences.smooth_wheel_zoom = false;
-    h.app.preferences.zoom_reverse = false;
+    h.app.preferences.navigation.smooth_wheel_zoom = false;
+    h.app.preferences.navigation.zoom_reverse = false;
     let preview = h.app.cam;
     let draft = serde_json::to_value(&h.app.render_workspace.view.draft).unwrap();
     let dirty = h.app.render_workspace.view.dirty;
@@ -3334,9 +3334,9 @@ fn nav_app(render: bool, preset: &str, around: crate::prefs::OrbitAround) -> cra
         enter(&mut app, true).unwrap();
         assert!(active(&app));
     }
-    app.preferences.nav = preset.into();
-    app.preferences.orbit_around = around;
-    app.preferences.zoom_to_cursor = true;
+    app.preferences.navigation.nav = preset.into();
+    app.preferences.navigation.orbit_around = around;
+    app.preferences.navigation.zoom_to_cursor = true;
     app.ui.perspective = true;
     let mut cam = Camera { fov: 0.6, ..Default::default() };
     cam.set_view(solidcraft_viewport::StandardView::Iso);
@@ -3448,8 +3448,8 @@ fn render_preview_navigates_like_the_modelling_viewport_in_every_preset() {
 fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
     for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Custom] {
         let mut h = Harness::new();
-        h.app.preferences.navigator_style = style;
-        h.app.preferences.look_at_anim = false;
+        h.app.preferences.navigation.navigator_style = style;
+        h.app.preferences.navigation.look_at_anim = false;
         h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Product"})).unwrap();
         enter(&mut h.app, true).unwrap();
         inspector::select_editor(&mut h.app, inspector::Editor::Output);
@@ -6145,7 +6145,7 @@ fn navigation_bar_render_canvases_filter_slots_and_keep_product_fit() {
     let mut h = Harness::new();
     h.app.run("solid.box", json!({"length":10,"width":20,"height":5})).unwrap();
     enter(&mut h.app, true).unwrap();
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     h.settle();
     assert_eq!(crate::navigation_bar_view::canvas_caps(&h.app), crate::navigation::NavCaps::RENDER);
     // The product preview picks (#6426), so the slots that need a pick are on the bar there too.
@@ -8085,7 +8085,7 @@ fn render_results_compare_divider_drag_clamps_and_blocks_all_camera_input() {
     let pending = h.app.run("render.start", json!({"settings":{"width":16,"height":16}})).unwrap()["job"].clone();
     assert!(!h.app.render_workspace.view.follow_job, "new job previews must not replace comparison framing");
     h.frames(3);
-    h.app.preferences.nav = "maya".into();
+    h.app.preferences.navigation.nav = "maya".into();
     h.app.render_workspace.view.result_scale = ResultScale::Free;
     let product = h.app.cam;
     let result = h.app.render_workspace.view.result_camera;
@@ -11860,8 +11860,8 @@ fn gray_canvas_empty_space_orbit_ignores_cropped_geometry_and_its_hidden_surface
         h.app.render_workspace.view.live_paused = true;
         h.app.render_workspace.view.draft.width = 160;
         h.app.render_workspace.view.draft.height = 120;
-        h.app.preferences.nav = preset.into();
-        h.app.preferences.orbit_around = crate::prefs::OrbitAround::Cursor;
+        h.app.preferences.navigation.nav = preset.into();
+        h.app.preferences.navigation.orbit_around = crate::prefs::OrbitAround::Cursor;
         h.app.viewport.nav = None;
         h.app.cancel_view_animation();
         h.app.cam = Camera { target: Vec3::ZERO, distance: 100.0, fov: 0.0, yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..h.app.cam };
@@ -15504,7 +15504,7 @@ fn host_result_controls_shield_wheel_and_comparison_divider_keeps_capture() {
     crate::panel_runtime::enable_host_specimen(&mut h.app, "docks").unwrap();
     h.app.run("render.compare", json!({"left":0,"right":1})).unwrap();
     h.frames(4);
-    h.app.preferences.nav = "maya".into();
+    h.app.preferences.navigation.nav = "maya".into();
     h.app.render_workspace.view.result_scale = ResultScale::Free;
     let product = h.app.cam;
     let image = h.app.render_workspace.view.result_camera;
@@ -15566,8 +15566,8 @@ fn host_panel_capture_blocks_result_navigation_through_release() {
             h.frames(4);
             h.app.pending_fit = None;
             h.app.cancel_view_animation();
-            h.app.preferences.nav = "maya".into();
-            h.app.preferences.smooth_wheel_zoom = false;
+            h.app.preferences.navigation.nav = "maya".into();
+            h.app.preferences.navigation.smooth_wheel_zoom = false;
             h.app.render_workspace.view.result_scale = ResultScale::Free;
             let product = h.app.cam;
             let image = h.app.render_workspace.view.result_camera;

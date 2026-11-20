@@ -14,7 +14,7 @@ fn on_screen(h: &mut Harness, w: [f64; 3]) -> [f64; 2] {
 fn an_orbit_begun_over_empty_space_keeps_a_far_off_part_in_view() {
     for at_origin in ["nothing", "box", "sketch"] {
         let mut h = Harness::new();
-        h.app.preferences.orbit_around = solidcraft_ui_egui::prefs::OrbitAround::Cursor;
+        h.app.preferences.navigation.orbit_around = solidcraft_ui_egui::prefs::OrbitAround::Cursor;
         h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"corner":[50000,50000,0]})).unwrap();
         h.call("ui.view", json!({"view":"iso"}));
         h.call("ui.view", json!({"view":"fit"}));

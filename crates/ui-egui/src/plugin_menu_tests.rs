@@ -927,7 +927,7 @@ mod native {
     fn a_view_command_from_a_plugin_moves_the_camera_and_an_edit_without_one_leaves_it() {
         let root = view_package("camera");
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.look_at_anim = false;
+        h.app.preferences.navigation.look_at_anim = false;
         h.app.plugin_menu.listed = list(&h.app, Some(&root));
         assert_eq!(h.app.plugin_menu.listed.len(), 1);
         let index = |name: &str| h.app.plugin_menu.listed[0].entries.iter().position(|entry| entry.name == name).expect(name);

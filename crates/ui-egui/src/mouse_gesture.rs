@@ -21,10 +21,8 @@
 //! any of them: how many tools and in which place, clockwise from the top.
 
 use crate::ui_kit::{Container, Surface};
-use std::collections::BTreeMap;
 
 use egui::{Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Sense, Shape, Stroke, Vec2, pos2, vec2};
-use serde::{Deserialize, Serialize};
 
 use crate::SolveApp;
 use crate::context_menu::{act, cmd};
@@ -42,7 +40,7 @@ const GAP: f32 = 1.5;
 /// Points sampled along one frame's pointer move when looking for the zone it touched.
 const SAMPLES: usize = 48;
 /// The only mouse mode gestures work with.
-pub(crate) const MOUSE_MODE: &str = "solidworks";
+pub(crate) use solidcraft_ui_kit::prefs_navigation::MOUSE_MODE;
 
 // ---------------------------------------------------------------------------------------------
 // Studios and their tools
@@ -217,21 +215,22 @@ pub(crate) fn catalog() -> Vec<(String, String)> {
 // The person's settings
 // ---------------------------------------------------------------------------------------------
 
-/// The gesture settings, kept with the preferences.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Config {
-    /// Gestures are on (they also need the SolidWorks mouse mode, see [`active`]).
-    pub enabled: bool,
-    /// A studio's own list of tool ids, clockwise from the top, by [`Studio::key`]. A studio
-    /// without an entry uses its default tools.
-    pub wheels: BTreeMap<String, Vec<String>>,
+/// The gesture settings, kept with the preferences in the kit (`MouseGestureSettings`); the ring's
+/// tool lists are read and edited through [`GestureWheels`].
+pub use solidcraft_ui_kit::prefs_navigation::MouseGestureSettings as Config;
+
+/// The ring's tool lists of a studio, read and edited on the stored settings.
+pub(crate) trait GestureWheels {
+    fn tools(&self, studio: Studio) -> Vec<String>;
+    fn is_custom(&self, studio: Studio) -> bool;
+    fn set_tools(&mut self, studio: Studio, tools: Vec<String>);
+    fn reset(&mut self, studio: Studio);
 }
 
-impl Config {
+impl GestureWheels for Config {
     /// The tool ids of `studio`: the person's list cleaned of unknown and repeated ids and cut
     /// to [`MAX_TOOLS`], or the studio's defaults when nothing usable is left.
-    pub(crate) fn tools(&self, studio: Studio) -> Vec<String> {
+    fn tools(&self, studio: Studio) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         for id in self.wheels.get(studio.key()).into_iter().flatten() {
             if out.len() < MAX_TOOLS && label_of(id).is_some() && !out.contains(id) {
@@ -242,28 +241,28 @@ impl Config {
     }
 
     /// Whether `studio` has a list of its own.
-    pub(crate) fn is_custom(&self, studio: Studio) -> bool {
+    fn is_custom(&self, studio: Studio) -> bool {
         self.wheels.contains_key(studio.key())
     }
 
-    pub(crate) fn set_tools(&mut self, studio: Studio, tools: Vec<String>) {
+    fn set_tools(&mut self, studio: Studio, tools: Vec<String>) {
         self.wheels.insert(studio.key().to_string(), tools);
     }
 
     /// Puts `studio` back to its default tools.
-    pub(crate) fn reset(&mut self, studio: Studio) {
+    fn reset(&mut self, studio: Studio) {
         self.wheels.remove(studio.key());
     }
 }
 
 /// Gestures are on and the mouse mode allows them.
 pub(crate) fn active(app: &SolveApp) -> bool {
-    app.preferences.mouse_gestures.enabled && app.preferences.nav == MOUSE_MODE
+    app.preferences.navigation.mouse_gestures.enabled && app.preferences.navigation.nav == MOUSE_MODE
 }
 
 /// The ring's tools in `studio` as menu items, unknown ids dropped.
 pub(crate) fn items(app: &SolveApp, studio: Studio) -> Vec<Item> {
-    app.preferences.mouse_gestures.tools(studio).iter().filter_map(|id| item(app, id)).collect()
+    app.preferences.navigation.mouse_gestures.tools(studio).iter().filter_map(|id| item(app, id)).collect()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -607,7 +606,7 @@ pub(crate) fn nav_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             crate::ui_kit::checkbox(
                 ui,
                 solidcraft_ui_text::tr_label("Ring of tools on the right button"),
-                &mut app.preferences.mouse_gestures.enabled,
+                &mut app.preferences.navigation.mouse_gestures.enabled,
             );
             let customize = crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Customize…"), crate::ui_kit::Button::Normal);
             crate::scenario::publish_handle("gestures:customize", customize.rect.center());
@@ -616,16 +615,16 @@ pub(crate) fn nav_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 app.gesture.editor.studio = Studio::of(app);
             }
         });
-        if app.preferences.nav != MOUSE_MODE {
+        if app.preferences.navigation.nav != MOUSE_MODE {
             crate::ui_kit::text(
                 ui,
                 solidcraft_ui_text::tr_label("Mouse gestures only work with the SolidWorks mouse mode (the wheel orbits, Ctrl + wheel pans)."),
                 crate::ui_kit::Text::Hint("mouse_gesture_mode"),
             );
             if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Use the SolidWorks mouse mode"), crate::ui_kit::Button::Normal).clicked() {
-                crate::prefs::choose_nav_preset(&mut app.preferences, crate::prefs::nav_preset(MOUSE_MODE));
+                app.preferences.navigation.choose_preset(crate::prefs::nav_preset(MOUSE_MODE));
             }
-        } else if app.preferences.mouse_gestures.enabled {
+        } else if app.preferences.navigation.mouse_gestures.enabled {
             crate::ui_kit::text(
                 ui,
                 solidcraft_ui_text::tr_label(
@@ -645,12 +644,12 @@ fn editor(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let t = Tokens::get();
     let mut studio = app.gesture.editor.studio;
-    let mut config = app.preferences.mouse_gestures.clone();
+    let mut config = app.preferences.navigation.mouse_gestures.clone();
     let closed = crate::ui_kit::Window::new(egui::Id::unique("sc_gesture_editor"), "settings", solidcraft_ui_text::tr_label("Mouse gestures"))
         .cards(3.0)
         .show_body(ctx, |ui| {
             crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Ring of tools on the right button"), &mut config.enabled);
-            if app.preferences.nav != MOUSE_MODE {
+            if app.preferences.navigation.nav != MOUSE_MODE {
                 ui.colored_label(
                     t.warning,
                     solidcraft_ui_text::tr_label("Mouse gestures only work with the SolidWorks mouse mode (the wheel orbits, Ctrl + wheel pans)."),
@@ -773,7 +772,7 @@ fn editor(app: &mut SolveApp, ctx: &egui::Context) {
             }
         });
     app.gesture.editor.studio = studio;
-    app.preferences.mouse_gestures = config;
+    app.preferences.navigation.mouse_gestures = config;
     app.gesture.editor.open = !closed;
 }
 
@@ -1001,16 +1000,16 @@ mod tests {
             h.app.home.open = false;
             h.call("ui.resize", json!({"width":1400,"height":900}));
             h.call("ui.set", json!({"dark":dark}));
-            h.app.preferences.mouse_gestures.set_tools(Studio::Part, vec!["undo".into(), "solid.extrude".into()]);
+            h.app.preferences.navigation.mouse_gestures.set_tools(Studio::Part, vec!["undo".into(), "solid.extrude".into()]);
             h.app.gesture.editor.open = true;
             h.app.gesture.editor.studio = Studio::Part;
             h.frames(6);
             let header = rect_of("dialog:header").unwrap();
             assert_eq!(header.height(), Tokens::get().form_header_height);
-            assert_eq!(h.app.preferences.mouse_gestures.tools(Studio::Part).len(), 2);
+            assert_eq!(h.app.preferences.navigation.mouse_gestures.tools(Studio::Part).len(), 2);
             h.step(&json!({"widget":"Add a tool"})).unwrap();
             h.frames(4);
-            assert_eq!(h.app.preferences.mouse_gestures.tools(Studio::Part).len(), 3);
+            assert_eq!(h.app.preferences.navigation.mouse_gestures.tools(Studio::Part).len(), 3);
             let window = rect_of("dialog:window").unwrap();
             for at in [window.left_center(), window.right_center(), window.right_bottom()] {
                 h.call("ui.move", json!({"x":at.x,"y":at.y}));
@@ -1027,7 +1026,7 @@ mod tests {
             h.call("ui.click", json!({"x":close.x,"y":close.y}));
             h.frames(2);
             assert!(!h.app.gesture.editor.open);
-            assert_eq!(h.app.preferences.mouse_gestures.tools(Studio::Part).len(), 3, "closing retains edits");
+            assert_eq!(h.app.preferences.navigation.mouse_gestures.tools(Studio::Part).len(), 3, "closing retains edits");
         }
     }
 
@@ -1039,7 +1038,7 @@ mod tests {
 
         let mut h = Harness::new();
         h.app.home.open = false;
-        h.app.preferences.mouse_gestures.set_tools(Studio::Part, vec!["undo".into(), "solid.extrude".into()]);
+        h.app.preferences.navigation.mouse_gestures.set_tools(Studio::Part, vec!["undo".into(), "solid.extrude".into()]);
         h.app.gesture.editor.open = true;
         h.app.gesture.editor.studio = Studio::Part;
         h.frames(6);
@@ -1063,7 +1062,7 @@ mod tests {
         assert!(handle_at("dialog:list:solid.box").is_none(), "unmatched tools are filtered out");
         click(&mut h, "dialog:list:solid.extrude");
         assert!(egui::Popup::is_any_open(&h.ctx), "a tool already in another slot is disabled");
-        assert_eq!(h.app.preferences.mouse_gestures.tools(Studio::Part), ["undo", "solid.extrude"]);
+        assert_eq!(h.app.preferences.navigation.mouse_gestures.tools(Studio::Part), ["undo", "solid.extrude"]);
 
         h.frame_with(pointer(search, true));
         h.frame_with(pointer(search, false));
@@ -1072,7 +1071,7 @@ mod tests {
         h.frames(2);
         click(&mut h, "dialog:list:solid.box");
         assert!(!egui::Popup::is_any_open(&h.ctx), "choosing a tool closes the picker");
-        assert_eq!(h.app.preferences.mouse_gestures.tools(Studio::Part), ["solid.box", "solid.extrude"]);
+        assert_eq!(h.app.preferences.navigation.mouse_gestures.tools(Studio::Part), ["solid.box", "solid.extrude"]);
 
         click(&mut h, "gestures:tool:0");
         h.step(&json!({"key":"Escape"})).unwrap();
@@ -1160,8 +1159,8 @@ mod tests {
 
     fn gesture_app() -> SolveApp {
         let mut app = app();
-        app.preferences.nav = MOUSE_MODE.into();
-        app.preferences.mouse_gestures.enabled = true;
+        app.preferences.navigation.nav = MOUSE_MODE.into();
+        app.preferences.navigation.mouse_gestures.enabled = true;
         app
     }
 
@@ -1171,14 +1170,14 @@ mod tests {
     fn gestures_need_both_the_switch_and_the_solidworks_mouse_mode() {
         let mut app = app();
         assert!(!active(&app), "off by default");
-        app.preferences.mouse_gestures.enabled = true;
+        app.preferences.navigation.mouse_gestures.enabled = true;
         for nav in ["fusion", "creo", "inventor", "alias", "blender", "tinkercad", "openscad", "touchpad"] {
-            app.preferences.nav = nav.into();
+            app.preferences.navigation.nav = nav.into();
             assert!(!active(&app), "{nav}: gestures only work with the SolidWorks mouse mode");
         }
-        app.preferences.nav = MOUSE_MODE.into();
+        app.preferences.navigation.nav = MOUSE_MODE.into();
         assert!(active(&app));
-        app.preferences.mouse_gestures.enabled = false;
+        app.preferences.navigation.mouse_gestures.enabled = false;
         assert!(!active(&app));
     }
 
@@ -1245,6 +1244,7 @@ mod tests {
     fn a_ring_of_five_takes_the_tool_in_the_direction_of_its_zone() {
         let mut app = gesture_app();
         app.preferences
+            .navigation
             .mouse_gestures
             .set_tools(Studio::Part, ["undo", "delete", "sketch.create", "solid.extrude", "solid.move"].map(String::from).to_vec());
         assert_eq!(items(&app, Studio::Part).len(), 5);
@@ -1257,6 +1257,7 @@ mod tests {
         let dir = vec2((144.0_f32).to_radians().sin(), -(144.0_f32).to_radians().cos());
         let mut app = gesture_app();
         app.preferences
+            .navigation
             .mouse_gestures
             .set_tools(Studio::Part, ["undo", "delete", "sketch.create", "solid.extrude", "solid.move"].map(String::from).to_vec());
         drag(&mut app, &[PRESS, PRESS + dir * 20.0, PRESS + dir * 200.0], false);
@@ -1274,9 +1275,9 @@ mod tests {
         let flat = faces.iter().find(|f| f.plane_normal.is_some()).unwrap();
         let normal = flat.plane_normal.unwrap();
         h.app.session.selection = vec![solidcraft_engine::Sel::Face { body: body.name.clone(), index: flat.index, point: flat.centroid }];
-        h.app.preferences.nav = MOUSE_MODE.into();
-        h.app.preferences.mouse_gestures.enabled = true;
-        h.app.preferences.mouse_gestures.set_tools(Studio::Part, tools.map(String::from).to_vec());
+        h.app.preferences.navigation.nav = MOUSE_MODE.into();
+        h.app.preferences.navigation.mouse_gestures.enabled = true;
+        h.app.preferences.navigation.mouse_gestures.set_tools(Studio::Part, tools.map(String::from).to_vec());
         (h, normal)
     }
 
@@ -1321,11 +1322,11 @@ mod tests {
     fn nothing_opens_while_gestures_are_off_or_the_mouse_mode_is_wrong() {
         let drag_down = [PRESS, PRESS + vec2(0.0, 20.0), PRESS + vec2(0.0, 300.0)];
         let mut app = gesture_app();
-        app.preferences.mouse_gestures.enabled = false;
+        app.preferences.navigation.mouse_gestures.enabled = false;
         drag(&mut app, &drag_down, false);
         assert!(!is_open(&app) && app.tool.is_none() && app.dialog.is_none());
         let mut app = gesture_app();
-        app.preferences.nav = "fusion".into();
+        app.preferences.navigation.nav = "fusion".into();
         drag(&mut app, &drag_down, false);
         assert!(!is_open(&app) && app.tool.is_none() && app.dialog.is_none());
     }
@@ -1369,13 +1370,13 @@ mod tests {
         };
         // Held 0.8 s with the radial menu on, the usual way opens its menu...
         let mut app = app();
-        app.preferences.nav = MOUSE_MODE.into();
-        app.preferences.radial_context_menu = true;
+        app.preferences.navigation.nav = MOUSE_MODE.into();
+        app.preferences.navigation.radial_context_menu = true;
         held(&mut app);
         assert!(app.viewport.context_menu.is_some(), "gestures off: the radial menu opens as before");
         // ...with gestures on, only the ring.
         let mut app = gesture_app();
-        app.preferences.radial_context_menu = true;
+        app.preferences.navigation.radial_context_menu = true;
         held(&mut app);
         assert!(app.viewport.context_menu.is_none(), "gestures on: no radial menu");
         assert!(!is_open(&app), "held without moving: no ring either");
@@ -1398,12 +1399,12 @@ mod tests {
         use crate::prefs::{NavButton, nav_mode};
         let none = egui::Modifiers::NONE;
         let mut app = app();
-        app.preferences.nav = MOUSE_MODE.into();
+        app.preferences.navigation.nav = MOUSE_MODE.into();
         assert!(nav_mode(&app, NavButton::Right, none).is_some(), "gestures off: the right button orbits as before");
-        app.preferences.mouse_gestures.enabled = true;
+        app.preferences.navigation.mouse_gestures.enabled = true;
         assert_eq!(nav_mode(&app, NavButton::Right, none), None, "gestures on: it opens the ring");
         assert_eq!(nav_mode(&app, NavButton::Middle, none), nav_mode(&gesture_app_off(), NavButton::Middle, none), "the other buttons are untouched");
-        app.preferences.nav = "fusion".into();
+        app.preferences.navigation.nav = "fusion".into();
         assert_eq!(
             nav_mode(&app, NavButton::Right, none),
             crate::prefs::nav_preset("fusion").mode(NavButton::Right, none),
@@ -1413,7 +1414,7 @@ mod tests {
 
     fn gesture_app_off() -> SolveApp {
         let mut app = app();
-        app.preferences.nav = MOUSE_MODE.into();
+        app.preferences.navigation.nav = MOUSE_MODE.into();
         app
     }
 }

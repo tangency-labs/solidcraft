@@ -3561,7 +3561,7 @@ impl SolveApp {
         let bounds = viewport::view_bounds(self);
         // Framed as the Home button frames: with the navigators' Fit on, that is their shared
         // zoom and centre, so a design opens the way Home shows it (#10091).
-        let shared = self.preferences.navigator_fit;
+        let shared = self.preferences.navigation.navigator_fit;
         self.pending_fit = Some((self.cam, bounds, false, shared));
         self.fit_waits = 0;
         self.cam = if shared { self.navigator_fitted(self.cam) } else { self.fitted(self.cam) };
@@ -3598,12 +3598,19 @@ impl SolveApp {
             if render_workspace::active(self) {
                 return render_workspace::fit_host_product_bounds(self, cam, bounds, layout, &usable);
             }
-            return viewport_layout::fit_host_bounds(cam, bounds, layout, &usable, self.view_fov(), f64::from(self.preferences.home_fit_size));
+            return viewport_layout::fit_host_bounds(
+                cam,
+                bounds,
+                layout,
+                &usable,
+                self.view_fov(),
+                f64::from(self.preferences.navigation.home_fit_size),
+            );
         }
         if render_workspace::active(self) {
             return viewport_layout::fit_product_bounds(cam, bounds, &render_workspace::picture_layout(self, layout));
         }
-        viewport_layout::fit_bounds_sized(cam, bounds, layout, self.view_fov(), f64::from(self.preferences.home_fit_size))
+        viewport_layout::fit_bounds_sized(cam, bounds, layout, self.view_fov(), f64::from(self.preferences.navigation.home_fit_size))
     }
 
     /// `cam` framing the whole model the navigators' way (#10091): looking at the middle of the
@@ -3719,13 +3726,13 @@ impl SolveApp {
             return;
         }
         // Preferences › Navigation: animated (at a chosen speed) or immediate.
-        if !self.preferences.look_at_anim {
+        if !self.preferences.navigation.look_at_anim {
             self.cam = to;
             self.cam_anim = None;
             return;
         }
         let mut anim = CameraAnim::new(self.cam, to, self.now);
-        let speed = f64::from(self.preferences.look_at_speed);
+        let speed = f64::from(self.preferences.navigation.look_at_speed);
         if speed.is_finite() && speed > 0.0 {
             anim.duration /= speed;
         }
@@ -3758,7 +3765,7 @@ impl SolveApp {
     /// navigators' Home, faces, corners, arrows and axes (`navigator_fitted`).
     pub fn animate_to_fitted(&mut self, to: Camera) {
         let Ok(bounds) = solidcraft_engine::view::bounds(&self.session) else { return };
-        let shared = self.preferences.navigator_fit;
+        let shared = self.preferences.navigation.navigator_fit;
         let framed = if shared { self.navigator_fitted(to) } else { self.fitted(to) };
         self.animate_to(framed);
         self.pending_fit = Some((to, bounds, true, shared));
@@ -3768,7 +3775,7 @@ impl SolveApp {
     /// in place, or frames the whole model from the new direction when Preferences › Navigation
     /// asks for it (`navigator_fit`, #10091).
     pub fn animate_turn(&mut self, to: Camera) {
-        if self.preferences.navigator_fit {
+        if self.preferences.navigation.navigator_fit {
             self.animate_to_fitted(to);
         } else {
             self.animate_to(to);
@@ -3823,7 +3830,7 @@ impl SolveApp {
             to.set_view(StandardView::Iso);
             // With the navigators' Fit on, Home shares their zoom, so a face clicked after it
             // keeps the zoom (#10091).
-            let shared = self.preferences.navigator_fit;
+            let shared = self.preferences.navigation.navigator_fit;
             self.pending_fit = Some((to, viewport::view_bounds(self), true, shared));
             to = if shared { self.navigator_fitted(to) } else { self.fitted(to) };
         } else {

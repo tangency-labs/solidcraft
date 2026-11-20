@@ -439,7 +439,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             .iter()
             .map(|preset| {
                 let item = act("ui.navPreset", preset.translated_label(), "").with(json!({ "preset": preset.id }));
-                if app.preferences.nav == preset.id { item.key("current") } else { item }
+                if app.preferences.navigation.nav == preset.id { item.key("current") } else { item }
             })
             .collect(),
         Target::NamedView { name } => crate::browser::view_items(app, name),
@@ -753,7 +753,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         let face = sel.iter().find_map(|s| if let Sel::Face { body, .. } = s { Some(body.clone()) } else { None }).unwrap_or_default();
         let (feature, sketch) = feature_and_sketch(app, picked_face_feature(app));
         let hidden = app.session.visibility.hidden_bodies.contains(&face);
-        if app.preferences.nav == "solidworks" {
+        if app.preferences.navigation.nav == "solidworks" {
             v.push(cmd(app, "view.normal_to", "Normal to Selection").with(json!({"camera": app.cam})));
             v.push(Item::sep());
         }
@@ -2069,7 +2069,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.navPreset" => {
             // Picked here, a preset sets what Preferences › Navigation sets for it.
             if let Some(preset) = crate::prefs::NAV_PRESETS.iter().find(|preset| p.get("preset").and_then(Value::as_str) == Some(preset.id)) {
-                crate::prefs::choose_nav_preset(&mut app.preferences, preset);
+                app.preferences.navigation.choose_preset(preset);
             }
         }
         "ui.historyPlayButton" => {
@@ -2641,7 +2641,7 @@ pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
     app.menu.submenu.clear();
     app.menu.submenu_key = None;
     app.menu.submenu_leave = None;
-    app.menu.radial = target == Target::Viewport && app.preferences.radial_context_menu;
+    app.menu.radial = target == Target::Viewport && app.preferences.navigation.radial_context_menu;
     app.menu.target = target;
     app.menu.flick = false;
     app.menu.opener = None;
@@ -2902,7 +2902,7 @@ fn sector(d: Vec2) -> Option<usize> {
 /// Press-and-hold of the right button in the viewport opens the menu; releasing over a
 /// direction picks it.
 fn track_hold(app: &mut SolveApp, ctx: &egui::Context) {
-    if !app.preferences.radial_context_menu || crate::mouse_gesture::active(app) {
+    if !app.preferences.navigation.radial_context_menu || crate::mouse_gesture::active(app) {
         app.menu.press = None;
         app.menu.flick = false;
         app.menu.radial = false;
@@ -2917,7 +2917,7 @@ fn track_hold(app: &mut SolveApp, ctx: &egui::Context) {
             i.time,
         )
     });
-    let free = app.tool.is_none() && app.dialog.is_none() && app.preferences.nav != crate::prefs::OPENSCAD_NAV;
+    let free = app.tool.is_none() && app.dialog.is_none() && app.preferences.navigation.nav != crate::prefs::OPENSCAD_NAV;
     if pressed && free && app.viewport.context_menu.is_none() && app.viewport.mouse.is_some() {
         app.menu.press = pos.map(|p| (p, time));
     }
@@ -3819,7 +3819,7 @@ mod tests {
         let curved = faces.iter().find(|f| f.plane_normal.is_none()).unwrap();
         h.app.session.selection = vec![Sel::Face { body: body.name.clone(), index: flat.index, point: flat.centroid }];
         assert!(items(&h.app, &Target::Viewport).iter().all(|i| i.id != "view.normal_to"));
-        h.app.preferences.nav = "solidworks".into();
+        h.app.preferences.navigation.nav = "solidworks".into();
         h.app.preferences.language = "ja".into();
         h.settle();
         let before = h.app.cam;

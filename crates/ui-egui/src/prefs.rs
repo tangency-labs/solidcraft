@@ -3,6 +3,7 @@
 
 use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_ui_kit::prefs_navigation::{HOME_FIT_SIZE, LOOK_AT_SPEED, WHEEL_ZOOM_SPEED};
 use std::collections::BTreeMap;
 
 use egui::{Modifiers, Pos2};
@@ -29,7 +30,6 @@ mod graphics;
 mod interface;
 mod mouse3d;
 mod navbar;
-mod navigation;
 mod panel_layout;
 mod security;
 mod sketch;
@@ -44,263 +44,10 @@ use crate::viewport::NavMode;
 use solidcraft_theme::Tokens;
 
 pub const UNITS: &[&str] = &["mm", "cm", "m", "in", "ft"];
-pub const OPENSCAD_NAV: &str = "openscad";
-pub const TOUCHPAD_NAV: &str = "touchpad";
-/// A mouse button that can drag the camera.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NavButton {
-    Left,
-    Middle,
-    Right,
-}
-
-/// Modifier keys a binding needs held (others may be held too).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct NavKeys {
-    pub shift: bool,
-    pub ctrl: bool,
-    pub alt: bool,
-}
-
-impl NavKeys {
-    const NONE: NavKeys = NavKeys { shift: false, ctrl: false, alt: false };
-    const SHIFT: NavKeys = NavKeys { shift: true, ctrl: false, alt: false };
-    const CTRL: NavKeys = NavKeys { shift: false, ctrl: true, alt: false };
-    const ALT: NavKeys = NavKeys { shift: false, ctrl: false, alt: true };
-    const SHIFT_ALT: NavKeys = NavKeys { shift: true, ctrl: false, alt: true };
-
-    /// All of these keys are held (Ctrl is Cmd on macOS).
-    fn held(self, m: Modifiers) -> bool {
-        (!self.shift || m.shift) && (!self.ctrl || m.ctrl || m.command) && (!self.alt || m.alt)
-    }
-}
-
-/// One camera binding: dragging `button` with `keys` held does `mode`.
-#[derive(Clone, Copy, Debug)]
-pub struct NavBinding {
-    pub button: NavButton,
-    pub keys: NavKeys,
-    pub mode: NavMode,
-}
-
-const fn bind(button: NavButton, keys: NavKeys, mode: NavMode) -> NavBinding {
-    NavBinding { button, keys, mode }
-}
-
-/// A mouse mapping: its bindings, most specific first (the first one whose button is dragged
-/// with all its keys held wins).
-pub struct NavPreset {
-    pub id: &'static str,
-    pub label: &'static str,
-    /// What the mouse does, for the Preferences page.
-    pub help: &'static str,
-    /// Choosing the preset turns the wheel the other way.
-    pub reverse_zoom: bool,
-    /// Dragging down zooms in instead of out (independent of the wheel preference).
-    pub reverse_drag_zoom: bool,
-    /// Choosing the preset sets what a middle double-click does (`None` leaves it as it is).
-    pub middle_double_click: Option<&'static str>,
-    /// Choosing the preset sets "Right drag orbits" (`None` leaves it as it is).
-    pub right_drag_orbits: Option<bool>,
-    pub bindings: &'static [NavBinding],
-}
-
-impl NavPreset {
-    /// What dragging `button` with `mods` held does, if anything.
-    pub fn mode(&self, button: NavButton, mods: Modifiers) -> Option<NavMode> {
-        self.bindings.iter().find(|b| b.button == button && b.keys.held(mods)).map(|b| b.mode)
-    }
-}
-
-use NavButton::{Left, Middle, Right};
-use NavMode::{Orbit, Pan, Zoom};
-
-/// The mouse mappings. The first is the default.
-pub const NAV_PRESETS: &[NavPreset] = &[
-    NavPreset {
-        id: "fusion",
-        label: "Fusion",
-        help: "Middle drag pans, Shift+middle orbits, right drag orbits",
-        reverse_zoom: false,
-        reverse_drag_zoom: false,
-        middle_double_click: None,
-        right_drag_orbits: None,
-        bindings: &[bind(Middle, NavKeys::SHIFT, Orbit), bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
-    },
-    NavPreset {
-        id: "solidworks",
-        label: "SolidWorks",
-        help: "Middle drag orbits, Ctrl+middle pans, Shift+middle zooms, right drag orbits",
-        reverse_zoom: true,
-        reverse_drag_zoom: false,
-        // Picked here, the right button is left to the context menu and mouse gestures (#6492).
-        middle_double_click: Some("fit"),
-        right_drag_orbits: Some(false),
-        bindings: &[
-            bind(Middle, NavKeys::CTRL, Pan),
-            bind(Middle, NavKeys::SHIFT, Zoom),
-            bind(Middle, NavKeys::NONE, Orbit),
-            bind(Right, NavKeys::NONE, Orbit),
-        ],
-    },
-    // Public Creo Parametric dynamic-viewing bindings; no product code or assets are used.
-    // https://support.ptc.com/help/creo/creo_pma/r12/usascii/fundamentals/fundamentals/About_Dynamic_Viewing.html
-    NavPreset {
-        id: "creo",
-        label: "Creo",
-        help: "Middle drag orbits, Shift+middle pans, Ctrl+middle drag vertically zooms (down to zoom in); scroll the wheel to zoom",
-        reverse_zoom: false,
-        reverse_drag_zoom: true,
-        middle_double_click: None,
-        right_drag_orbits: None,
-        bindings: &[bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::NONE, Orbit)],
-    },
-    NavPreset {
-        id: "nx",
-        label: "NX",
-        // NX's CAD1 scheme drags middle to rotate, middle + left to zoom and middle + right to
-        // pan; the bindings here hold one button at a time, so the two-button drags are the
-        // middle drag with Ctrl (zoom) and Shift (pan).
-        help: "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera",
-        reverse_zoom: false,
-        reverse_drag_zoom: false,
-        middle_double_click: Some("fit"),
-        right_drag_orbits: Some(false),
-        bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
-    },
-    NavPreset {
-        id: "inventor",
-        label: "Inventor",
-        help: "Middle drag pans, Shift+middle orbits, Ctrl+middle zooms, right drag orbits",
-        reverse_zoom: false,
-        reverse_drag_zoom: false,
-        middle_double_click: None,
-        right_drag_orbits: None,
-        bindings: &[
-            bind(Middle, NavKeys::SHIFT, Orbit),
-            bind(Middle, NavKeys::CTRL, Zoom),
-            bind(Middle, NavKeys::NONE, Pan),
-            bind(Right, NavKeys::NONE, Orbit),
-        ],
-    },
-    NavPreset {
-        id: "alias",
-        label: "Alias",
-        help: "Shift+Alt+left drag orbits, Shift+Alt+middle pans, Shift+Alt+right zooms; middle drag also pans and right drag orbits",
-        reverse_zoom: false,
-        reverse_drag_zoom: false,
-        middle_double_click: None,
-        right_drag_orbits: None,
-        bindings: &[
-            bind(Left, NavKeys::SHIFT_ALT, Orbit),
-            bind(Middle, NavKeys::SHIFT_ALT, Pan),
-            bind(Right, NavKeys::SHIFT_ALT, Zoom),
-            bind(Middle, NavKeys::CTRL, Zoom),
-            bind(Middle, NavKeys::NONE, Pan),
-            bind(Right, NavKeys::NONE, Orbit),
-        ],
-    },
-    NavPreset {
-        id: "maya",
-        label: "Maya",
-        help: "Alt+left drag orbits, Alt+middle pans, Alt+right zooms; middle drag also pans",
-        reverse_zoom: false,
-        reverse_drag_zoom: false,
-        middle_double_click: None,
-        right_drag_orbits: None,
-        bindings: &[
-            bind(Left, NavKeys::ALT, Orbit),
-            bind(Middle, NavKeys::ALT, Pan),
-            bind(Right, NavKeys::ALT, Zoom),
-            bind(Middle, NavKeys::NONE, Pan),
-        ],
-    },
-    NavPreset {
-        id: "blender",
-        label: "Blender",
-        help: "Middle drag orbits, Shift+middle pans, Ctrl+middle zooms; right drag leaves the camera alone",
-        reverse_zoom: false,
-        reverse_drag_zoom: false,
-        middle_double_click: None,
-        right_drag_orbits: None,
-        bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
-    },
-    NavPreset {
-        id: "tinkercad",
-        label: "Tinkercad",
-        help: "Right drag orbits, middle or Shift+right drag pans",
-        reverse_zoom: false,
-        reverse_drag_zoom: false,
-        middle_double_click: None,
-        right_drag_orbits: None,
-        bindings: &[bind(Right, NavKeys::SHIFT, Pan), bind(Right, NavKeys::NONE, Orbit), bind(Middle, NavKeys::NONE, Pan)],
-    },
-    NavPreset {
-        id: OPENSCAD_NAV,
-        label: "OpenSCAD",
-        help: "Left drag on empty space orbits, Shift+left drag box-selects, sketch geometry drags edit; right or middle drag pans, Shift+right or Shift+middle drag zooms",
-        reverse_zoom: false,
-        reverse_drag_zoom: false,
-        middle_double_click: None,
-        right_drag_orbits: None,
-        bindings: &[
-            bind(Left, NavKeys::NONE, Orbit),
-            bind(Right, NavKeys::SHIFT, Zoom),
-            bind(Middle, NavKeys::SHIFT, Zoom),
-            bind(Right, NavKeys::NONE, Pan),
-            bind(Middle, NavKeys::NONE, Pan),
-        ],
-    },
-    NavPreset {
-        id: "hfss",
-        label: "HFSS",
-        help: "Alt+left drag pans, Shift+Alt+left zooms, Ctrl+left drag on empty space orbits",
-        reverse_zoom: false,
-        reverse_drag_zoom: false,
-        middle_double_click: None,
-        right_drag_orbits: None,
-        // Ctrl+left orbit is the drag from empty space every preset has: as a binding it would
-        // also take a Ctrl+click on geometry, which adds to the selection.
-        bindings: &[bind(Left, NavKeys::SHIFT_ALT, Zoom), bind(Left, NavKeys::ALT, Pan)],
-    },
-    NavPreset {
-        id: TOUCHPAD_NAV,
-        label: "Touchpad",
-        help: "Hold Shift and move the pointer to pan; hold Alt/Option and move it to orbit. No mouse button is needed. Vertical scroll zooms.",
-        reverse_zoom: false,
-        reverse_drag_zoom: false,
-        middle_double_click: None,
-        right_drag_orbits: None,
-        bindings: &[bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
-    },
-];
-
-impl NavPreset {
-    /// Button-free motion has exact modifiers, unlike the additive drag bindings.
-    pub fn motion_mode(&self, mods: Modifiers) -> Option<NavMode> {
-        if self.id != TOUCHPAD_NAV || mods.ctrl || mods.command || mods.mac_cmd {
-            return None;
-        }
-        match (mods.shift, mods.alt) {
-            (true, false) => Some(Pan),
-            (false, true) => Some(Orbit),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn translated_label(&self) -> &str {
-        match self.id {
-            "creo" => solidcraft_ui_text::tr("nav.creo.label"),
-            TOUCHPAD_NAV => solidcraft_ui_text::tr("nav.touchpad.label"),
-            _ => solidcraft_ui_text::tr_label(self.label),
-        }
-    }
-
-    pub(crate) fn translated_help(&self) -> &str {
-        if self.id == "creo" { solidcraft_ui_text::tr("nav.creo.help") } else { solidcraft_ui_text::tr_label(self.help) }
-    }
-}
-
+pub use solidcraft_ui_kit::prefs_navigation::{
+    MiddleDoubleClick, NAV_PRESETS, NavBinding, NavButton, NavKeys, NavPreset, NavigatorStyle, NavigatorTexture, OPENSCAD_NAV, OrbitAround,
+    TOUCHPAD_NAV, TrackpadZoomModifier, nav_preset,
+};
 /// What a two-finger trackpad scroll does in a navigation preset (#15079).
 ///
 /// Fusion orbits with Shift held and pans without it; Blender is the other way
@@ -334,12 +81,12 @@ impl TrackpadScroll {
 impl Prefs {
     /// Touchpad scroll zooms without overwriting the user's preference for other presets.
     pub fn trackpad_pans(&self) -> bool {
-        self.nav != TOUCHPAD_NAV && self.trackpad_pan
+        self.navigation.nav != TOUCHPAD_NAV && self.navigation.trackpad_pan
     }
 
     /// What a two-finger trackpad scroll does in the chosen preset (#15079).
     pub fn trackpad_scroll(&self) -> TrackpadScroll {
-        match self.nav.as_str() {
+        match self.navigation.nav.as_str() {
             "fusion" => TrackpadScroll::ShiftOrbits,
             "blender" => TrackpadScroll::BareOrbits,
             _ => TrackpadScroll::Pans,
@@ -347,23 +94,6 @@ impl Prefs {
     }
 }
 
-/// The preset with this id (the default for an unknown one).
-pub fn nav_preset(id: &str) -> &'static NavPreset {
-    NAV_PRESETS.iter().find(|p| p.id == id).unwrap_or(&NAV_PRESETS[0])
-}
-
-/// Picks `preset` the way the Preferences page does: its bindings, wheel direction and, when the
-/// preset names them, middle double-click and "Right drag orbits".
-pub fn choose_nav_preset(prefs: &mut Prefs, preset: &NavPreset) {
-    prefs.nav = preset.id.into();
-    prefs.zoom_reverse = preset.reverse_zoom;
-    if let Some(double_click) = preset.middle_double_click {
-        prefs.middle_double_click = double_click.into();
-    }
-    if let Some(orbits) = preset.right_drag_orbits {
-        prefs.right_drag_orbits = orbits;
-    }
-}
 /// Stable control-channel names; presentation labels may be shorter.
 pub const PAGES: &[&str] = &[
     "General",
@@ -541,40 +271,6 @@ pub const MSAA: [u32; 4] = [1, 2, 4, 8];
 /// Supersampling factors (#1288): off, 1.5× and 2× the viewport's pixels each way.
 pub const SUPERSAMPLING: [f32; 3] = [1.0, 1.5, 2.0];
 
-/// View navigators, independent of the mouse navigation preset.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NavigatorStyle {
-    /// Also what a navigator this version doesn't know reads as (`lenient`).
-    #[default]
-    Axes,
-    /// A body of the user's choice ([`crate::view_gizmo`]); the signed axes until one is chosen.
-    Custom,
-}
-
-impl NavigatorStyle {
-    pub const ALL: [Self; 2] = [Self::Axes, Self::Custom];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Axes => "Signed axes",
-            Self::Custom => "Custom",
-        }
-    }
-}
-
-/// How the custom view gizmo colours its body.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NavigatorTexture {
-    /// The navigator's colours. Also what a value this version doesn't know reads as
-    /// (`lenient`).
-    #[default]
-    Themed,
-    /// The body's own appearance, as the viewport shows it.
-    Modeled,
-}
-
 /// How the History at the left lists sketches (Preferences: "Sketches", #6489). The timeline
 /// along the bottom always keeps the creation order.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -647,53 +343,6 @@ pub const DIMENSION_STEP_DEG: std::ops::RangeInclusive<f64> = 0.001..=180.0;
 
 /// How far a sketch dimension's text may be scaled (Preferences › Sketch › Dimension text size).
 pub const DIMENSION_TEXT_SCALE: std::ops::RangeInclusive<f32> = 0.5..=2.5;
-
-/// What an orbit turns around (Preferences: "Orbit around").
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OrbitAround {
-    /// The world origin: the view turns about it and keeps it still on screen.
-    Origin,
-    /// The view's centre: what Pan moves and Fit frames (the default, as it always was).
-    #[default]
-    ViewCentre,
-    /// The model point under the cursor when the drag began.
-    Cursor,
-}
-
-/// The sole modifier that turns vertical scroll into wheel-style zoom.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TrackpadZoomModifier {
-    Cmd,
-    Alt,
-    Ctrl,
-    /// The default: scroll keeps its usual meaning until a key is chosen.
-    #[default]
-    Off,
-}
-
-impl TrackpadZoomModifier {
-    pub const ALL: [Self; 4] = [Self::Cmd, Self::Alt, Self::Ctrl, Self::Off];
-
-    pub fn modifiers(self) -> Option<egui::Modifiers> {
-        match self {
-            Self::Cmd => Some(egui::Modifiers::COMMAND),
-            Self::Alt => Some(egui::Modifiers::ALT),
-            Self::Ctrl => Some(egui::Modifiers::CTRL),
-            Self::Off => None,
-        }
-    }
-
-    pub fn label_id(self, platform: crate::tool_modifiers::Platform) -> &'static str {
-        match self {
-            Self::Cmd if platform == crate::tool_modifiers::Platform::Mac => "prefs.trackpad_zoom_modifier.cmd",
-            Self::Alt => "prefs.trackpad_zoom_modifier.alt",
-            Self::Cmd | Self::Ctrl => "prefs.trackpad_zoom_modifier.ctrl",
-            Self::Off => "prefs.trackpad_zoom_modifier.off",
-        }
-    }
-}
 
 /// Where the view goes when a sketch ends (Preferences: "When a sketch ends", #7038).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1004,12 +653,16 @@ macro_rules! preference_settings {
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         #[serde(default)]
         pub struct Prefs {
+            /// The Navigation page's settings, kept in the kit; flattened, so the saved file keeps
+            /// their keys at the top level.
+            #[serde(flatten)]
+            pub navigation: solidcraft_ui_kit::prefs_navigation::NavigationSettings,
             $($(#[$doc])* pub $field: $ty,)*
             $(#[serde(skip_serializing)] pub $legacy: $legacy_ty,)*
         }
 
         impl Default for Prefs {
-            fn default() -> Self { Self { $($field: $default,)* $($legacy: $legacy_default,)* } }
+            fn default() -> Self { Self { navigation: Default::default(), $($field: $default,)* $($legacy: $legacy_default,)* } }
         }
 
         const LEGACY_PANEL_FIELDS: &[&str] = &[$(stringify!($legacy),)*];
@@ -1020,17 +673,30 @@ macro_rules! preference_settings {
             }
         }
 
-        /// Every stored field and the page whose Defaults resets it (`None`: no page).
-        pub(crate) const FIELD_PAGES: &[(&str, Option<usize>)] = &[$((stringify!($field), preference_settings!(@page $($page)?)),)*];
+        /// Every stored field of the table and the page whose Defaults resets it (`None`: no page).
+        const TABLE_FIELD_PAGES: &[(&str, Option<usize>)] = &[$((stringify!($field), preference_settings!(@page $($page)?)),)*];
 
         fn reset_preferences(p: &mut Prefs, page: usize) {
             let d = Prefs::default();
             $($(if page == $page { p.$field = d.$field; })?)*
+            if page == PAGE_NAVIGATION {
+                p.navigation = d.navigation;
+            }
         }
 
         mod accepted {
             use super::*;
             $($(pub(super) fn $field(p: &Prefs) -> bool { ($accepted).contains(&p.$field) })?)*
+        }
+
+        /// Every stored field and the page whose Defaults resets it (`None`: no page): the table's
+        /// fields, then the Navigation page's, whose names are the keys its settings are stored under.
+        pub(crate) fn field_pages() -> Vec<(&'static str, Option<usize>)> {
+            TABLE_FIELD_PAGES
+                .iter()
+                .copied()
+                .chain(solidcraft_ui_kit::prefs_navigation::FIELDS.iter().map(|key| (*key, Some(PAGE_NAVIGATION))))
+                .collect()
         }
 
         mod setting {
@@ -1124,29 +790,6 @@ preference_settings! {
     /// Scales true size on the drawing sheet so 100 % measures 1 mm as 1 mm on this screen, against
     /// a ruler held to the 100 mm bar in Preferences.
     drawing_calibration: f32 = 1.0, PAGE_DESIGN, accept(0.5..=2.0) => slider("ui.sheet_page.calibration", 0.5..=2.0, 0.005, |v| format!("{v:.3}×"), "prefs:drawing_calibration");
-    /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
-    nav: String = "fusion".into(), PAGE_NAVIGATION;
-    /// Touchscreen drags orbit/pan; off preserves the mouse mapping's selection behavior.
-    touchscreen_navigation: bool = false, PAGE_NAVIGATION => check_tr("nav.touchscreen.label");
-    /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
-    /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
-    free_orbit: bool = false, PAGE_NAVIGATION;
-    /// With free orbit, mouse drags turn sideways about the world's up axis (a turntable without
-    /// the pole limit) instead of the screen's.
-    free_orbit_upright: bool = false, PAGE_NAVIGATION => check_tr("nav.free_orbit_upright.label");
-    /// Off: a right drag that the mouse mapping would orbit leaves the camera alone (#6492).
-    right_drag_orbits: bool = true, PAGE_NAVIGATION => check_tr("nav.right_drag_orbits.label");
-    /// A middle or right drag keeps the mode it started with until its button is released, as a
-    /// left drag with the mapping's keys does: letting go of Shift partway through a Shift+middle
-    /// orbit doesn't turn it into a pan (#9557). Off: the keys held decide on every frame, as before.
-    nav_drag_keeps_mode: bool = true, PAGE_NAVIGATION => check_tr("nav.drag_keeps_mode.label");
-    /// An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and
-    /// keeps turning; false stops the drag at the edge of the screen, as before.
-    orbit_cursor_wrap: bool = true, PAGE_NAVIGATION => check_tr("nav.orbit_cursor_wrap.label");
-    /// While an orbit turns about the origin or the model point under the cursor (Orbit around),
-    /// a faint ball marks that point, as it does for the 3D mouse (#17474); false draws nothing,
-    /// as before.
-    mark_orbit_point: bool = true, PAGE_NAVIGATION => check_tr("nav.mark_orbit_point.label");
     /// A right-click in the view with a dialog open confirms its input: on to the next one, then OK.
     /// Off: it does nothing there, as before (#6159).
     right_click_confirms: bool = false, PAGE_GENERAL => check("Right-click confirms dialog inputs", "With a dialog open, a right-click in the view goes on to its next empty input, and on the last one runs OK");
@@ -1166,42 +809,13 @@ preference_settings! {
     /// C for Cancel (#9841). Off by default: typing does nothing to the buttons, as before.
     /// A letter that fits two buttons does nothing, and a focused text field keeps the keystroke.
     dialog_first_letter_buttons: bool = false, PAGE_GENERAL => check_id("prefs.dialog_first_letter_buttons");
-    /// The upright orbit stands a rolled view up as the pointer moves, turning the way the
-    /// pointer goes on screen (#12458). Off: a rolled view keeps its roll and turns about the
-    /// world's up axis, as before, so an upside-down view stays upside down.
-    upright_orbit_unrolls: bool = true, PAGE_NAVIGATION => check_tr("nav.upright_orbit_unrolls.label");
     /// The Donate button (Ko-fi) at the status bar's right end. The button's × turns it off; the Help
     /// menu, About and the start page keep their link.
     show_donate_button: bool = true, PAGE_GENERAL => check_id("prefs.show_donate_button");
     /// The Discord button at the status bar's right end; the × on it turns it off.
     show_discord_button: bool = true, PAGE_GENERAL => check_id("prefs.show_discord_button");
-    /// View orientation widget: original signed axes (default) or a custom body.
-    navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
-    /// The custom view gizmo's colours: the theme's (themed) or the body's own (modeled).
-    navigator_texture: NavigatorTexture = NavigatorTexture::default(), PAGE_NAVIGATION;
-    /// The custom view gizmo has the orbit and roll arrows around it.
-    navigator_arrows: bool = true, PAGE_NAVIGATION;
-    /// The custom view gizmo has the Home button beside it.
-    navigator_home: bool = true, PAGE_NAVIGATION;
-    /// Show the radial ring and enable hold/flick gestures for viewport context menus.
-    radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
-    /// The quick menu (`quick_menu`) also opens by itself shortly after a click in the viewport
-    /// selects something a command takes (#5501). Off by default: a click only selects.
-    quick_menu_after_selection: bool = false, PAGE_NAVIGATION => check_tr("prefs.quick_menu_after_selection");
     /// Work on the model directly in the viewport (pull a face to extrude or cut); off by default.
     direct_interaction: bool = false, PAGE_TOOLS;
-    /// Mouse gestures: a ring of tools on the right button.
-    mouse_gestures: crate::mouse_gesture::Config = Default::default(), PAGE_NAVIGATION;
-    /// The wheel zooms out when turned forward.
-    zoom_reverse: bool = false, PAGE_NAVIGATION => check("Reverse zoom direction");
-    /// Maya Alt+right drag uses horizontal motion; off restores the former vertical zoom.
-    maya_horizontal_zoom: bool = true, PAGE_NAVIGATION => check_id("nav.maya_horizontal_zoom.label");
-    /// What an orbit turns around.
-    orbit_around: OrbitAround = OrbitAround::default(), PAGE_NAVIGATION;
-    /// The cursor preference as releases before the origin option saved it (`true` = the point
-    /// under the cursor). [`migrate`] folds it into `orbit_around` when saved preferences are
-    /// read, so an existing choice survives the upgrade; this version only writes `false`.
-    orbit_cursor: bool = false, PAGE_NAVIGATION;
     /// Whether a connected 3D mouse moves the view.
     space_mouse_enabled: bool = true, PAGE_MOUSE3D => check("Navigate with the 3D mouse");
     /// Whether a picture of the connected 3D mouse, moving as it does, sits in the 3D view's lower
@@ -1328,10 +942,6 @@ preference_settings! {
     profile_operations: bool = false, PAGE_GRAPHICS => check_tr("prefs.profile_operations");
     /// With the frame rate: a frame-time graph, a histogram and what the GPU drew (#2548).
     frame_rate_details: bool = false, PAGE_GRAPHICS;
-    /// While the Browser has the keyboard (the last click was on one of its rows), Up/Down move
-    /// the selection, Left/Right fold or unfold, and the arrows do not turn the view (#17931).
-    /// Off: the arrows always turn the view, as before.
-    browser_arrow_keys: bool = true, PAGE_NAVIGATION => check_tr("prefs.browser_arrow_keys");
     /// Draw a wider rim under finished sketch curves to improve contrast on shaded faces.
     sketch_halo: bool = false, PAGE_GRAPHICS => check("Halo under sketch curves");
     /// How joints look in the viewport: 0 the ring and axis drawn before badges, or a badge with
@@ -1613,34 +1223,6 @@ preference_settings! {
     /// again after each edit. Off by default: folders start open, placements as "Components start
     /// open" says, and a pick in the 3D view opens the Browser down to its body (#3005), as before.
     browser_rows_start_closed: bool = false, PAGE_LAYOUT;
-    /// The wheel zooms toward the point under the cursor (else toward the view's centre).
-    zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's center)");
-    /// Speed multiplier for wheel zoom, independent of the 3D mouse.
-    wheel_zoom_speed: f32 = 1.0, PAGE_NAVIGATION, accept(0.25..=4.0) => slider("ui.wheel_zoom_speed", 0.25..=4.0, 0.05, |v| format!("{v:.2}×"), "prefs:wheel_zoom_speed");
-    /// Opt-in surface anchoring for the 3D mouse, navigation bridge and drag-zoom. The wheel
-    /// and pinch retain their independent `zoom_to_cursor` preference.
-    zoom_stop_at_model: bool = false, PAGE_NAVIGATION => check_id("prefs.zoom_stop_at_model");
-    /// Spread discrete wheel input across frames (off: apply each event immediately).
-    smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
-    /// The face under the pointer keeps its highlight while the view moves under it (#2130).
-    keep_hover_while_navigating: bool = true, PAGE_NAVIGATION;
-    /// Two-finger trackpad scroll pans (off: it zooms like the wheel); pinch always zooms.
-    trackpad_pan: bool = true, PAGE_NAVIGATION;
-    /// Hold this modifier alone to zoom with vertical wheel or two-finger scroll.
-    trackpad_zoom_modifier: TrackpadZoomModifier = TrackpadZoomModifier::default(), PAGE_NAVIGATION;
-    /// Horizontal trackpad and thumb-wheel scrolling pans the view the other way (#2007).
-    pan_reverse_x: bool = false, PAGE_NAVIGATION => check("ui.reverse_horizontal_pan_direction", "Horizontal two-finger scrolling and the thumb wheel pan the other way");
-    /// Vertical trackpad scrolling pans the view the other way (#5240).
-    pan_reverse_y: bool = false, PAGE_NAVIGATION => check("ui.reverse_vertical_pan_direction", "Vertical two-finger scrolling pans the other way");
-    /// Shift with two-finger trackpad scrolling orbits the view the other way, both ways at once,
-    /// as natural scrolling turns it (#8410).
-    orbit_reverse: bool = false, PAGE_NAVIGATION => check("ui.reverse_trackpad_orbit_direction", "Shift with two-finger scrolling orbits the other way");
-    /// A two-finger twist on the trackpad turns the view about the world's up axis (#6286). Off
-    /// by default: the twist does nothing, as before.
-    trackpad_twist_turns: bool = false, PAGE_NAVIGATION => check_id_help("prefs.trackpad_twist_turns", "prefs.trackpad_twist_turns_tip");
-    /// View changes (axis view, Look At, Home) animate; `look_at_speed` scales how fast.
-    look_at_anim: bool = true, PAGE_NAVIGATION => check("Animate view changes", "ui.look_at_anim_desc");
-    look_at_speed: f32 = 1.0, PAGE_NAVIGATION, accept(0.25..=4.0) => enabled_slider(look_at_anim, "Animation speed", 0.5..=3.0, 0.25, |v| format!("{v:.2}×"));
     /// Default modelling orientation: `z` (Z up) or `y` (Y up) (#3).
     up_axis: String = "z".into(), PAGE_DESIGN;
     /// After a STEP or IGES file opens, offer to stand a Y-up part up (`stand_up`).
@@ -1727,24 +1309,6 @@ preference_settings! {
     network_locations: bool = false, PAGE_GENERAL => check_tr("prefs.network_locations");
     /// The servers the files a design names may be on ("Always allow this server").
     network_hosts: Vec<String> = Vec::new(), PAGE_GENERAL;
-    /// What a middle-button double-click in the view does: `home`, `fit` or `off`.
-    middle_double_click: String = "home".into(), PAGE_NAVIGATION;
-    /// A view chosen on the navigator (a face, corner or arrow, an axis tip) also frames the
-    /// whole model, as Home does (#10091). Off by default: the view turns in place, keeping its
-    /// target and zoom.
-    navigator_fit: bool = false, PAGE_NAVIGATION;
-    /// The navigator's directional arrows orbit the camera the way the arrow points, as in
-    /// Fusion and Inventor (`invert_navigator_arrows`, #10254). Off by default: an arrow rotates
-    /// the view toward the side it sits on, so the arrow on the left swings the camera left.
-    invert_navigator_arrows: bool = false, PAGE_NAVIGATION;
-    /// The navigator's two curved arrows roll the view the other way: the clockwise arrow rolls
-    /// counterclockwise and the counterclockwise arrow rolls clockwise (`invert_curved_roll_arrows`,
-    /// #10483). Off by default: each arrow rolls the view the way it curls.
-    invert_curved_roll_arrows: bool = false, PAGE_NAVIGATION;
-    /// How much of the view the model fills when Home, Fit, an opened design or a navigator
-    /// view change frames it (0.1 to 1; #10091): 1, the default, fills the room between the
-    /// panels, the compass and the navigation bar, as before.
-    home_fit_size: f32 = 1.0, PAGE_NAVIGATION, accept(0.1..=1.0);
     /// Colour vision mode (#778): `off`, `protan`, `deutan` or `tritan`.
     color_vision: solidcraft_theme::ColorVision = solidcraft_theme::ColorVision::Off, PAGE_APPEARANCE;
     /// Check for updates at start and once a day (docs/updates.md).
@@ -2020,34 +1584,6 @@ preference_settings! {
     /// User ceilings, not automatic increases to a package's approved execution budget.
     plugin_max_fuel: u64 = solidcraft_engine::plugin::HostLimits::default().max_fuel, PAGE_PLUGINS;
     plugin_max_memory_mib: usize = solidcraft_engine::plugin::HostLimits::default().max_memory_mib, PAGE_PLUGINS;
-}
-
-/// What a middle-button double-click in the view does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MiddleDoubleClick {
-    /// Go Home (the iso view, framing what is shown).
-    Home,
-    /// Frame what is shown, keeping the orientation.
-    Fit,
-    Off,
-}
-
-impl MiddleDoubleClick {
-    pub const ALL: [(MiddleDoubleClick, &'static str, &'static str); 3] =
-        [(MiddleDoubleClick::Home, "home", "Home"), (MiddleDoubleClick::Fit, "fit", "Fit"), (MiddleDoubleClick::Off, "off", "Off")];
-
-    /// The preference's setting (Home for an unknown one).
-    pub fn of(app: &SolveApp) -> MiddleDoubleClick {
-        Self::parse(&app.preferences.middle_double_click).unwrap_or(MiddleDoubleClick::Home)
-    }
-
-    pub fn parse(id: &str) -> Option<MiddleDoubleClick> {
-        Self::ALL.iter().find(|(_, i, _)| *i == id).map(|(m, _, _)| *m)
-    }
-
-    pub fn label(self) -> &'static str {
-        Self::ALL.iter().find(|(m, _, _)| *m == self).map_or("Home", |(_, _, l)| l)
-    }
 }
 
 impl Prefs {
@@ -2842,9 +2378,9 @@ pub fn nav_mode(app: &SolveApp, button: NavButton, mods: Modifiers) -> Option<Na
     if button == NavButton::Right && crate::mouse_gesture::active(app) {
         return None;
     }
-    let mode = nav_preset(&app.preferences.nav).mode(button, mods);
+    let mode = nav_preset(&app.preferences.navigation.nav).mode(button, mods);
     // "Right drag orbits" off leaves the right button to the context menu (#6492).
-    if button == NavButton::Right && mode == Some(NavMode::Orbit) && !app.preferences.right_drag_orbits {
+    if button == NavButton::Right && mode == Some(NavMode::Orbit) && !app.preferences.navigation.right_drag_orbits {
         return None;
     }
     mode
@@ -2852,17 +2388,17 @@ pub fn nav_mode(app: &SolveApp, button: NavButton, mods: Modifiers) -> Option<Na
 
 /// +1, or −1 when horizontal scrolling pans the other way (#2007).
 pub fn pan_sign_x(app: &SolveApp) -> f32 {
-    if app.preferences.pan_reverse_x { -1.0 } else { 1.0 }
+    if app.preferences.navigation.pan_reverse_x { -1.0 } else { 1.0 }
 }
 
 /// +1, or −1 when vertical scrolling pans the other way.
 pub fn pan_sign_y(app: &SolveApp) -> f32 {
-    if app.preferences.pan_reverse_y { -1.0 } else { 1.0 }
+    if app.preferences.navigation.pan_reverse_y { -1.0 } else { 1.0 }
 }
 
 /// +1, or −1 when Shift with two-finger scrolling orbits the other way (#8410).
 pub fn orbit_sign(app: &SolveApp) -> f64 {
-    if app.preferences.orbit_reverse { -1.0 } else { 1.0 }
+    if app.preferences.navigation.orbit_reverse { -1.0 } else { 1.0 }
 }
 
 /// Whether the configured suppress-snap chord is held.
@@ -2886,7 +2422,7 @@ pub fn manipulator_free_held(app: &SolveApp, m: Modifiers) -> bool {
 
 /// +1, or −1 when the wheel zooms the other way.
 pub fn zoom_sign(app: &SolveApp) -> f64 {
-    if app.preferences.zoom_reverse { -1.0 } else { 1.0 }
+    if app.preferences.navigation.zoom_reverse { -1.0 } else { 1.0 }
 }
 
 /// The model point under a screen position: on a face, vertex, edge or sketch curve, the point
@@ -3281,6 +2817,23 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     });
 }
 
+/// The Navigation page's settings are the kit's; the app adds its profile tag and the mouse
+/// gesture rings.
+impl solidcraft_ui_kit::prefs_navigation_page::PrefsHost for SolveApp {
+    fn navigation(&self) -> solidcraft_ui_kit::prefs_navigation::NavigationSettings {
+        self.preferences.navigation.clone()
+    }
+    fn set_navigation(&mut self, settings: solidcraft_ui_kit::prefs_navigation::NavigationSettings) {
+        self.preferences.navigation = settings;
+    }
+    fn heading_tag(&self) -> Option<fn(&mut egui::Ui)> {
+        Some(crate::settings_profiles::tag)
+    }
+    fn mouse_gesture_rows(&mut self, ui: &mut egui::Ui) {
+        crate::mouse_gesture::nav_rows(self, ui, &Tokens::get());
+    }
+}
+
 impl prefs_window::Host for SolveApp {
     type Snapshot = Snapshot;
     fn window(&mut self) -> &mut prefs_window::State<Snapshot> {
@@ -3422,7 +2975,7 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
         }
         PAGE_DESIGN => design::show(app, ui),
         PAGE_SECURITY => security::show(app, ui),
-        PAGE_NAVIGATION => navigation::show(app, ui, t),
+        PAGE_NAVIGATION => solidcraft_ui_kit::prefs_navigation_page::navigation_page(ui, app),
         PAGE_GRAPHICS => graphics::show(app, ui),
         PAGE_SKETCH => sketch::show(app, ui),
         _ => {}
@@ -4476,11 +4029,11 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     if !p.joint_rotation_fine.is_finite() || !(0.001..=180.0).contains(&p.joint_rotation_fine) {
         p.joint_rotation_fine = 0.1;
     }
-    if !accepted::wheel_zoom_speed(&p) {
-        p.wheel_zoom_speed = Prefs::default().wheel_zoom_speed;
+    if !WHEEL_ZOOM_SPEED.contains(&p.navigation.wheel_zoom_speed) {
+        p.navigation.wheel_zoom_speed = Prefs::default().navigation.wheel_zoom_speed;
     }
-    if !accepted::home_fit_size(&p) {
-        p.home_fit_size = Prefs::default().home_fit_size;
+    if !HOME_FIT_SIZE.contains(&p.navigation.home_fit_size) {
+        p.navigation.home_fit_size = Prefs::default().navigation.home_fit_size;
     }
     if !accepted::constraint_glyph_scale(&p) {
         p.constraint_glyph_scale = Prefs::default().constraint_glyph_scale;
@@ -4488,9 +4041,9 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     if !accepted::dimension_text_scale(&p) {
         p.dimension_text_scale = Prefs::default().dimension_text_scale;
     }
-    if p.orbit_cursor {
-        p.orbit_around = OrbitAround::Cursor;
-        p.orbit_cursor = false;
+    if p.navigation.orbit_cursor {
+        p.navigation.orbit_around = OrbitAround::Cursor;
+        p.navigation.orbit_cursor = false;
     }
     if !crate::space_mouse::drives_each_once(p.space_mouse_axis_source) {
         log::warn!("preferences: the 3D mouse axis assignment {:?} doesn't drive each axis once; using the default", p.space_mouse_axis_source);
@@ -4707,7 +4260,7 @@ fn prepare_preferences(
     if let Some(update) = p.get("theme_options") {
         merge_theme_options(&mut new, followed, update)?;
     }
-    if !accepted::wheel_zoom_speed(&new) {
+    if !WHEEL_ZOOM_SPEED.contains(&new.navigation.wheel_zoom_speed) {
         return Err("`wheel_zoom_speed` must be 0.25…4".into());
     }
     // Before `migrate`, which puts a template this version doesn't have back to the default.
@@ -4719,7 +4272,7 @@ fn prepare_preferences(
             return Err(format!("`{key}` must be one of {}", kind.join(", ")));
         }
     }
-    if !accepted::home_fit_size(&new) {
+    if !HOME_FIT_SIZE.contains(&new.navigation.home_fit_size) {
         return Err("`home_fit_size` must be 0.1…1".into());
     }
     if !accepted::constraint_glyph_scale(&new) {
@@ -4736,7 +4289,7 @@ fn prepare_preferences(
     if !WINDOW_SYSTEMS.contains(&new.window_system.as_str()) {
         return Err(format!("`window_system` must be one of {}", WINDOW_SYSTEMS.join(", ")));
     }
-    if !NAV_PRESETS.iter().any(|p| p.id == new.nav) || !MSAA.contains(&new.msaa) {
+    if !NAV_PRESETS.iter().any(|p| p.id == new.navigation.nav) || !MSAA.contains(&new.msaa) {
         return Err(format!("`nav` must be one of {} and `msaa` 1, 2, 4 or 8", NAV_PRESETS.iter().map(|p| p.id).collect::<Vec<_>>().join(", ")));
     }
     if new.msaa != app.preferences.msaa && !app.msaa_supported.is_empty() && !app.msaa_supported.contains(&new.msaa) {
@@ -4812,7 +4365,7 @@ fn prepare_preferences(
     if !once(&new.hidden_toolbar_tabs, &allowed) {
         return Err(format!("`hidden_toolbar_tabs` lists toolbar tabs, each once: {}", allowed.join(", ")));
     }
-    if !accepted::ui_scale(&new) || !accepted::look_at_speed(&new) {
+    if !accepted::ui_scale(&new) || !LOOK_AT_SPEED.contains(&new.navigation.look_at_speed) {
         return Err("`ui_scale` must be 0.5…2.5 and `look_at_speed` 0.25…4".into());
     }
     if !accepted::print_face_highlight(&new) {
@@ -4821,7 +4374,7 @@ fn prepare_preferences(
     if !accepted::joint_symbols(&new) {
         return Err("`joint_symbols` must be 0 (ring and axis), 1 (white on dark), 2 (solid accent), 3 (solid amber), 4 (outline), 5 (colour by type) or 6 (dots)".into());
     }
-    if !accepted::home_fit_size(&new) {
+    if !HOME_FIT_SIZE.contains(&new.navigation.home_fit_size) {
         return Err("`home_fit_size` must be 0.1…1".into());
     }
     if !accepted::perspective_fov(&new) {
@@ -4855,7 +4408,7 @@ fn prepare_preferences(
     if !SUPERSAMPLING.contains(&new.supersampling) {
         return Err("`supersampling` must be 1 (off), 1.5 or 2".into());
     }
-    if MiddleDoubleClick::parse(&new.middle_double_click).is_none() {
+    if MiddleDoubleClick::parse(&new.navigation.middle_double_click).is_none() {
         return Err("`middle_double_click` must be home, fit or off".into());
     }
     let mut new = new;
@@ -5238,32 +4791,32 @@ mod tests {
     /// Defaults resets it.
     #[test]
     fn invert_navigator_arrows_defaults_off_persists_and_resets() {
-        assert!(!Prefs::default().invert_navigator_arrows);
+        assert!(!Prefs::default().navigation.invert_navigator_arrows);
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        assert!(!app.preferences.invert_navigator_arrows);
-        app.preferences.invert_navigator_arrows = true;
+        assert!(!app.preferences.navigation.invert_navigator_arrows);
+        app.preferences.navigation.invert_navigator_arrows = true;
         assert_eq!(serde_json::to_value(&app.preferences).unwrap()["invert_navigator_arrows"], true);
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         restored.load_prefs(&app.prefs());
-        assert!(restored.preferences.invert_navigator_arrows);
+        assert!(restored.preferences.navigation.invert_navigator_arrows);
         super::reset_preferences(&mut app.preferences, super::PAGE_NAVIGATION);
-        assert!(!app.preferences.invert_navigator_arrows);
+        assert!(!app.preferences.navigation.invert_navigator_arrows);
     }
 
     /// #10483: the curved-roll invert toggle is off by default, persists, and the Navigation
     /// page's Defaults resets it.
     #[test]
     fn invert_curved_roll_arrows_defaults_off_persists_and_resets() {
-        assert!(!Prefs::default().invert_curved_roll_arrows);
+        assert!(!Prefs::default().navigation.invert_curved_roll_arrows);
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        assert!(!app.preferences.invert_curved_roll_arrows);
-        app.preferences.invert_curved_roll_arrows = true;
+        assert!(!app.preferences.navigation.invert_curved_roll_arrows);
+        app.preferences.navigation.invert_curved_roll_arrows = true;
         assert_eq!(serde_json::to_value(&app.preferences).unwrap()["invert_curved_roll_arrows"], true);
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         restored.load_prefs(&app.prefs());
-        assert!(restored.preferences.invert_curved_roll_arrows);
+        assert!(restored.preferences.navigation.invert_curved_roll_arrows);
         super::reset_preferences(&mut app.preferences, super::PAGE_NAVIGATION);
-        assert!(!app.preferences.invert_curved_roll_arrows);
+        assert!(!app.preferences.navigation.invert_curved_roll_arrows);
     }
 
     /// #10220: off by default, offered on Preferences › General only where designs are kept in
@@ -5422,7 +4975,7 @@ mod tests {
 
     #[test]
     fn trackpad_zoom_modifier_roundtrips_and_validates_control_values() {
-        assert_eq!(Prefs::default().trackpad_zoom_modifier, TrackpadZoomModifier::Off);
+        assert_eq!(Prefs::default().navigation.trackpad_zoom_modifier, TrackpadZoomModifier::Off);
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         for (id, value) in [
             ("cmd", TrackpadZoomModifier::Cmd),
@@ -5431,25 +4984,25 @@ mod tests {
             ("off", TrackpadZoomModifier::Off),
         ] {
             set(&mut app, &json!({"trackpad_zoom_modifier": id})).unwrap();
-            assert_eq!(app.preferences.trackpad_zoom_modifier, value);
+            assert_eq!(app.preferences.navigation.trackpad_zoom_modifier, value);
             let saved = serde_json::to_value(&app.preferences).unwrap();
             assert_eq!(saved["trackpad_zoom_modifier"], id);
-            assert_eq!(lenient(&saved).trackpad_zoom_modifier, value);
+            assert_eq!(lenient(&saved).navigation.trackpad_zoom_modifier, value);
             let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
             restored.load_prefs(&app.prefs());
-            assert_eq!(restored.preferences.trackpad_zoom_modifier, value);
+            assert_eq!(restored.preferences.navigation.trackpad_zoom_modifier, value);
         }
 
         for invalid in [json!("super"), json!(""), json!(42), json!(null)] {
             assert!(set(&mut app, &json!({"trackpad_zoom_modifier": invalid})).is_err());
-            assert_eq!(app.preferences.trackpad_zoom_modifier, TrackpadZoomModifier::Off);
-            assert_eq!(lenient(&json!({"trackpad_zoom_modifier": invalid})).trackpad_zoom_modifier, TrackpadZoomModifier::Off);
+            assert_eq!(app.preferences.navigation.trackpad_zoom_modifier, TrackpadZoomModifier::Off);
+            assert_eq!(lenient(&json!({"trackpad_zoom_modifier": invalid})).navigation.trackpad_zoom_modifier, TrackpadZoomModifier::Off);
         }
         app.load_prefs(&json!({"preferences": {"trackpad_zoom_modifier": "future"}}).to_string());
-        assert_eq!(app.preferences.trackpad_zoom_modifier, TrackpadZoomModifier::Off);
-        app.preferences.trackpad_zoom_modifier = TrackpadZoomModifier::Cmd;
+        assert_eq!(app.preferences.navigation.trackpad_zoom_modifier, TrackpadZoomModifier::Off);
+        app.preferences.navigation.trackpad_zoom_modifier = TrackpadZoomModifier::Cmd;
         reset_preferences(&mut app.preferences, PAGE_NAVIGATION);
-        assert_eq!(app.preferences.trackpad_zoom_modifier, TrackpadZoomModifier::Off);
+        assert_eq!(app.preferences.navigation.trackpad_zoom_modifier, TrackpadZoomModifier::Off);
     }
 
     #[test]
@@ -6245,7 +5798,7 @@ mod tests {
         assert_eq!(p.space_mouse_buttons, before.space_mouse_buttons);
         assert_eq!(p.space_mouse_offered, before.space_mouse_offered);
         assert!(p.space_mouse_offer_never && !p.space_mouse_enabled);
-        assert_eq!(p.nav, before.nav);
+        assert_eq!(p.navigation.nav, before.navigation.nav);
         assert_eq!(h.app.cam, camera);
         // And it asks first: the real button only arms it (see cancelling_the_restore_question_changes_nothing).
         assert!(!h.app.space_mouse.restore_pending);
@@ -6263,41 +5816,41 @@ mod tests {
         assert!(!h.app.preferences.space_mouse_model_pivot, "classic again");
         open_at(&mut h.app, PAGE_NAVIGATION);
         h.frames(4);
-        assert!(!h.app.preferences.zoom_stop_at_model, "stop-at-model zoom is off by default");
+        assert!(!h.app.preferences.navigation.zoom_stop_at_model, "stop-at-model zoom is off by default");
         scroll_to_and_click(&mut h, "prefs:zoom_stop_at_model");
-        assert!(h.app.preferences.zoom_stop_at_model, "stop-at-model zoom is opt-in");
-        assert!(h.app.preferences.zoom_to_cursor, "the wheel preference is unchanged");
+        assert!(h.app.preferences.navigation.zoom_stop_at_model, "stop-at-model zoom is opt-in");
+        assert!(h.app.preferences.navigation.zoom_to_cursor, "the wheel preference is unchanged");
     }
 
     #[test]
     fn model_navigation_is_opt_in_and_persists() {
         for to_cursor in [false, true] {
             let old = serde_json::from_value::<Prefs>(json!({"zoom_to_cursor": to_cursor})).unwrap();
-            assert!(!old.zoom_stop_at_model && !old.space_mouse_model_pivot, "older saved preferences keep legacy navigation");
-            assert_eq!(old.zoom_to_cursor, to_cursor);
+            assert!(!old.navigation.zoom_stop_at_model && !old.space_mouse_model_pivot, "older saved preferences keep legacy navigation");
+            assert_eq!(old.navigation.zoom_to_cursor, to_cursor);
         }
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        assert!(!app.preferences.zoom_stop_at_model && !app.preferences.space_mouse_model_pivot);
+        assert!(!app.preferences.navigation.zoom_stop_at_model && !app.preferences.space_mouse_model_pivot);
         let enabled = json!({"open": "Navigation", "zoom_stop_at_model": true, "space_mouse_model_pivot": true});
         control(&mut app, &enabled).unwrap();
         control(&mut app, &json!({"button": "cancel"})).unwrap();
-        assert!(!app.preferences.zoom_stop_at_model && !app.preferences.space_mouse_model_pivot);
+        assert!(!app.preferences.navigation.zoom_stop_at_model && !app.preferences.space_mouse_model_pivot);
         let reply = control(&mut app, &enabled).unwrap();
         assert_eq!(reply["zoom_stop_at_model"], true);
         assert_eq!(reply["space_mouse_model_pivot"], true);
         control(&mut app, &json!({"button": "apply"})).unwrap();
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
-        assert!(other.preferences.zoom_stop_at_model && other.preferences.space_mouse_model_pivot);
-        assert!(other.preferences.zoom_to_cursor, "enabling model navigation leaves wheel zoom alone");
+        assert!(other.preferences.navigation.zoom_stop_at_model && other.preferences.space_mouse_model_pivot);
+        assert!(other.preferences.navigation.zoom_to_cursor, "enabling model navigation leaves wheel zoom alone");
         control(&mut app, &json!({"button": "defaults"})).unwrap();
-        assert!(!app.preferences.zoom_stop_at_model);
+        assert!(!app.preferences.navigation.zoom_stop_at_model);
         assert!(app.preferences.space_mouse_model_pivot, "Navigation defaults leave 3D mouse settings alone");
         control(&mut app, &json!({"open":"3D mouse", "button":"defaults"})).unwrap();
         assert!(!app.preferences.space_mouse_model_pivot);
-        assert!(app.preferences.zoom_to_cursor, "Navigation defaults still anchor the wheel");
+        assert!(app.preferences.navigation.zoom_to_cursor, "Navigation defaults still anchor the wheel");
         control(&mut app, &json!({"button": "cancel"})).unwrap();
-        assert!(app.preferences.zoom_stop_at_model && app.preferences.space_mouse_model_pivot, "Cancel restores the last Apply");
+        assert!(app.preferences.navigation.zoom_stop_at_model && app.preferences.space_mouse_model_pivot, "Cancel restores the last Apply");
     }
 
     /// Opens Preferences on the 3D mouse page with its section open and these settings
@@ -7418,7 +6971,7 @@ mod tests {
             [(PAGE_APPEARANCE, "Look"), (PAGE_DESIGN, "Work"), (PAGE_SECURITY, "Work"), (PAGE_NAVIGATION, "Input"), (PAGE_ASSISTANT, "Extend")]
         );
         let mut fields = std::collections::BTreeSet::new();
-        for (field, page) in FIELD_PAGES {
+        for (field, page) in field_pages() {
             assert!(fields.insert(field), "duplicate home for {field}");
             assert!(page.is_none_or(|p| p < PAGES.len()), "invalid page for {field}");
         }
@@ -9037,10 +8590,10 @@ mod tests {
             h.call("ui.prefs", json!({"button":"defaults"}));
             let reset = serde_json::to_value(&h.app.preferences).unwrap();
             let defaults = serde_json::to_value(Prefs::default()).unwrap();
-            for (field, owner) in FIELD_PAGES {
+            for (field, owner) in field_pages() {
                 assert_eq!(
-                    &reset[*field],
-                    if *owner == Some(PAGE_SKETCH) { &defaults[*field] } else { &expected[*field] },
+                    &reset[field],
+                    if owner == Some(PAGE_SKETCH) { &defaults[field] } else { &expected[field] },
                     "{field}: only Sketch resets"
                 );
             }
@@ -9151,7 +8704,7 @@ mod tests {
                 assert_eq!(h.app.preferences.custom_themes.len(), 2);
                 assert!(h.app.preferences.custom_themes[0].tabs.is_empty());
                 assert_eq!(h.app.preferences.custom_themes[1].tabs, file.tabs);
-                assert!(h.app.preferences.zoom_reverse);
+                assert!(h.app.preferences.navigation.zoom_reverse);
             }
             let out = control(&mut h.app, &json!({"custom_themes":[source],"theme":file.id,"theme_options":{&file.id:{"tab_colours":false,"tab_fade_ms":123}},"theme_export":true})).unwrap();
             assert_eq!(out["theme_file"]["tabs"], serde_json::to_value(&file.tabs).unwrap());
@@ -9238,7 +8791,7 @@ mod tests {
             assert!(restored.preferences.custom_themes[0].overlays.is_empty());
             assert_eq!(restored.preferences.custom_themes[0].colors, restored.preferences.custom_themes[1].colors);
             assert!(!restored.preferences.custom_themes[1].options.is_empty());
-            assert!(restored.preferences.zoom_reverse);
+            assert!(restored.preferences.navigation.zoom_reverse);
             apply(&mut restored, &egui::Context::default());
             assert_eq!(
                 resolved_theme(&restored.preferences, &restored.preferences.custom_themes[0]).panel,
@@ -9248,7 +8801,7 @@ mod tests {
             assert_eq!(out["theme_option_defs"], json!([]));
             assert_eq!(out["theme_option_values"], json!({}));
             assert_eq!(out["theme_options"]["options-a"]["amount"], 99);
-            assert!(restored.preferences.zoom_reverse);
+            assert!(restored.preferences.navigation.zoom_reverse);
         }
 
         // Reserved fields ignored by import must also be ignored before serde sees an update.
@@ -9320,7 +8873,7 @@ mod tests {
         saved["zoom_reverse"] = json!(true);
         saved["ui_scale"] = json!("bad saved field");
         h.app.preferences = lenient(&saved);
-        assert!(h.app.preferences.zoom_reverse);
+        assert!(h.app.preferences.navigation.zoom_reverse);
         let out = control(&mut h.app, &json!({"look_at_anim":false})).unwrap();
         assert_eq!(out["theme_options"], saved["theme_options"]);
         assert_eq!(out["theme_option_values"], json!({"enabled":false,"amount":5.0,"style":"warm","blur":0.0}));
@@ -9334,7 +8887,7 @@ mod tests {
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         other.load_prefs(&h.app.prefs());
         assert_eq!(other.preferences.theme_options, h.app.preferences.theme_options);
-        assert!(other.preferences.zoom_reverse);
+        assert!(other.preferences.navigation.zoom_reverse);
     }
 
     #[test]
@@ -9954,9 +9507,9 @@ mod tests {
         // A navigator, a field of the wrong type and a key from another release.
         let saved = json!({"nav": "solidworks", "navigator_style": "hologram", "ui_scale": "big", "zoom_reverse": true, "from_the_future": 3});
         let p = super::lenient(&saved);
-        assert_eq!(p.nav, "solidworks");
-        assert!(p.zoom_reverse);
-        assert_eq!(p.navigator_style, super::NavigatorStyle::Axes);
+        assert_eq!(p.navigation.nav, "solidworks");
+        assert!(p.navigation.zoom_reverse);
+        assert_eq!(p.navigation.navigator_style, super::NavigatorStyle::Axes);
         assert_eq!(p.ui_scale, super::Prefs::default().ui_scale);
         assert_eq!(super::lenient(&json!("garbage")), super::Prefs::default());
         // Hand-edited toolbar tab lists keep only the tabs each can hold, each once (#5717).
@@ -9967,7 +9520,7 @@ mod tests {
         // Whole-app load: the other saved state is kept too, and nothing panics.
         let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         app.load_prefs(&json!({"grid": false, "preferences": saved}).to_string());
-        assert!(!app.ui.show_grid && app.preferences.nav == "solidworks" && app.preferences.zoom_reverse);
+        assert!(!app.ui.show_grid && app.preferences.navigation.nav == "solidworks" && app.preferences.navigation.zoom_reverse);
         for junk in ["", "{", "[]", "null", "{\"preferences\": 7, \"recent\": {}, \"shortcuts\": 1, \"toolbar\": \"x\"}"] {
             crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default()).load_prefs(junk);
         }
@@ -10237,7 +9790,7 @@ mod tests {
         h.app.autosave_minutes = 7.0;
         super::set_autosave(&mut h.app);
         h.app.preferences.language = "en".into();
-        h.app.preferences.nav = "tinkercad".into();
+        h.app.preferences.navigation.nav = "tinkercad".into();
         h.app.preferences.reopen_designs = false;
         h.app.run("settings.profile.save", json!({"name":"Working"})).unwrap();
         let profiles = h.app.settings_profiles.list.clone();
@@ -10277,7 +9830,7 @@ mod tests {
         assert_eq!(h.app.autosave.as_ref().unwrap().interval, Duration::from_secs(300));
         assert_eq!(h.app.preferences.language, solidcraft_ui_text::SYSTEM);
         assert!(h.app.preferences.reopen_designs);
-        assert_eq!(h.app.preferences.nav, "tinkercad", "General's reset leaves other pages alone");
+        assert_eq!(h.app.preferences.navigation.nav, "tinkercad", "General's reset leaves other pages alone");
         assert_eq!(h.app.settings_profiles.list, profiles);
         assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Working"));
         h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
@@ -10978,7 +10531,7 @@ mod tests {
         for old in ["zigzag", "cube"] {
             let saved = json!({"navigator_style": old, "length_decimals": 4});
             let p = super::lenient(&saved);
-            assert_eq!(p.navigator_style, NavigatorStyle::Axes, "{old} reads as the axes navigator");
+            assert_eq!(p.navigation.navigator_style, NavigatorStyle::Axes, "{old} reads as the axes navigator");
             assert_eq!(p.length_decimals, 4, "the rest of the saved preferences are kept");
             assert!(serde_json::from_value::<NavigatorStyle>(json!(old)).is_err());
         }
@@ -10987,41 +10540,41 @@ mod tests {
         assert!(control(&mut h.app, &json!({"navigator_style":"zigzag"})).is_err());
         assert_eq!(h.app.preferences, before);
         assert!(h.app.run("view.navigator", json!({"style":"zigzag"})).is_err());
-        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
+        assert_eq!(h.app.preferences.navigation.navigator_style, NavigatorStyle::Axes);
     }
 
     #[test]
     fn navigator_picker_preserves_axes_and_follows_preferences_transactions() {
         let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
-        assert_eq!(old.navigator_style, NavigatorStyle::Axes);
+        assert_eq!(old.navigation.navigator_style, NavigatorStyle::Axes);
         let mut h = crate::scenario::Harness::new();
         assert!(crate::scenario::handle_at("axis_view:z").is_some());
         let camera = h.app.cam;
         let design = h.app.session.doc.to_json();
-        let nav = h.app.preferences.nav.clone();
+        let nav = h.app.preferences.navigation.nav.clone();
         h.call("ui.prefs", json!({"open":"Navigation"}));
         super::reveal_preference(&mut h, "prefs:navigator");
         let custom = crate::scenario::rect_of("prefs:navigator:Custom").unwrap().center();
         assert!(crate::scenario::rect_of("prefs:navigator:Signed axes").is_some());
         h.call("ui.click", json!({"x":custom.x,"y":custom.y}));
-        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
-        assert_eq!(h.app.preferences.nav, nav);
+        assert_eq!(h.app.preferences.navigation.navigator_style, NavigatorStyle::Custom);
+        assert_eq!(h.app.preferences.navigation.nav, nav);
         assert_eq!(h.app.cam, camera);
         assert_eq!(h.app.session.doc.to_json(), design);
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
-        assert_eq!(restored.preferences.navigator_style, NavigatorStyle::Axes, "a change that was not applied is not saved (#9730)");
+        assert_eq!(restored.preferences.navigation.navigator_style, NavigatorStyle::Axes, "a change that was not applied is not saved (#9730)");
         let before = h.app.preferences.clone();
         assert!(control(&mut h.app, &json!({"navigator_style":"unknown", "nav":"solidworks"})).is_err());
         assert_eq!(h.app.preferences, before, "invalid settings must fail atomically");
         h.call("ui.prefs", json!({"button":"cancel"}));
-        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
+        assert_eq!(h.app.preferences.navigation.navigator_style, NavigatorStyle::Axes);
         h.call("ui.prefs", json!({"open":"Navigation","navigator_style":"custom"}));
         h.call("ui.prefs", json!({"button":"apply"}));
         h.call("ui.prefs", json!({"button":"defaults"}));
-        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
+        assert_eq!(h.app.preferences.navigation.navigator_style, NavigatorStyle::Axes);
         h.call("ui.prefs", json!({"button":"cancel"}));
-        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
+        assert_eq!(h.app.preferences.navigation.navigator_style, NavigatorStyle::Custom);
         h.call("ui.prefs", json!({"navigator_style":"axes", "look_at_anim":false}));
         h.call("ui.view", json!({"view":"front"}));
         let axis = crate::scenario::handle_at("axis_view:-y").unwrap();
@@ -11198,7 +10751,10 @@ mod tests {
             h.call("ui.prefs", json!({"button":"defaults"}));
             assert!(h.app.preferences.live_panel_drag_preview);
             assert!(!h.app.preferences.history_in_browser);
-            assert!(h.app.preferences.quick_measure && h.app.preferences.invert_curved_roll_arrows, "Layout reset retains Graphics and Navigation");
+            assert!(
+                h.app.preferences.quick_measure && h.app.preferences.navigation.invert_curved_roll_arrows,
+                "Layout reset retains Graphics and Navigation"
+            );
             h.call("ui.prefs", json!({"button":"cancel"}));
             assert!(h.app.preferences.history_in_browser, "Cancel after Apply returns to the applied state");
             assert!(!h.app.preferences.live_panel_drag_preview);
@@ -11312,9 +10868,9 @@ mod tests {
     fn navigation_legend_follows_all_presets_and_runtime_options_without_mutating_them() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         for preset in NAV_PRESETS {
-            choose_nav_preset(&mut app.preferences, preset);
+            app.preferences.navigation.choose_preset(preset);
             let before = app.preferences.clone();
-            let rows = navigation::mapping_rows(&app);
+            let rows = solidcraft_ui_kit::prefs_navigation_page::mapping_rows(&app.preferences.navigation);
             assert!(!rows.is_empty());
             assert!(rows.iter().all(|(keys, action)| !keys.is_empty() && !action.is_empty()));
             assert_eq!(app.preferences, before);
@@ -11335,9 +10891,9 @@ mod tests {
                 assert!(!app.preferences.trackpad_pans());
             }
         }
-        choose_nav_preset(&mut app.preferences, nav_preset(crate::mouse_gesture::MOUSE_MODE));
-        app.preferences.mouse_gestures.enabled = true;
-        let rows = navigation::mapping_rows(&app);
+        app.preferences.navigation.choose_preset(nav_preset(crate::mouse_gesture::MOUSE_MODE));
+        app.preferences.navigation.mouse_gestures.enabled = true;
+        let rows = solidcraft_ui_kit::prefs_navigation_page::mapping_rows(&app.preferences.navigation);
         assert!(rows.iter().any(|(_, action)| action == solidcraft_ui_text::tr("prefs.context_menu_ring")));
         assert!(!rows.iter().any(|(keys, action)| keys.contains(&solidcraft_ui_text::tr("prefs.button_right").to_owned())
             && action == solidcraft_ui_text::tr("prefs.gesture_orbit")));
@@ -11376,8 +10932,8 @@ mod tests {
     #[test]
     fn orbit_picture_cards_keep_legacy_migration_and_preferences_transactions() {
         let legacy = migrate(serde_json::from_value::<Prefs>(json!({"orbit_cursor":true})).unwrap());
-        assert_eq!(legacy.orbit_around, OrbitAround::Cursor);
-        assert!(!legacy.orbit_cursor);
+        assert_eq!(legacy.navigation.orbit_around, OrbitAround::Cursor);
+        assert!(!legacy.navigation.orbit_cursor);
         for theme in ["light", "dark"] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
@@ -11387,52 +10943,52 @@ mod tests {
             for (key, value) in [("Origin", OrbitAround::Origin), ("View center", OrbitAround::ViewCentre), ("Under the cursor", OrbitAround::Cursor)]
             {
                 scroll_to_and_click(&mut h, &format!("prefs:orbit_around:{key}"));
-                assert_eq!(h.app.preferences.orbit_around, value);
+                assert_eq!(h.app.preferences.navigation.orbit_around, value);
                 assert_eq!(h.app.cam, camera, "choosing the pivot does not turn the camera");
-                assert!(!h.app.preferences.orbit_cursor);
+                assert!(!h.app.preferences.navigation.orbit_cursor);
             }
             h.call("ui.prefs", json!({"button":"apply"}));
             h.call("ui.prefs", json!({"button":"defaults"}));
-            assert_eq!(h.app.preferences.orbit_around, OrbitAround::ViewCentre);
+            assert_eq!(h.app.preferences.navigation.orbit_around, OrbitAround::ViewCentre);
             h.call("ui.prefs", json!({"button":"cancel"}));
-            assert_eq!(h.app.preferences.orbit_around, OrbitAround::Cursor);
+            assert_eq!(h.app.preferences.navigation.orbit_around, OrbitAround::Cursor);
         }
     }
 
     #[test]
     fn orbit_cursor_wrap_defaults_on_and_can_be_turned_off() {
         let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
-        assert!(old.orbit_cursor_wrap, "saved preferences from before the option wrap");
+        assert!(old.navigation.orbit_cursor_wrap, "saved preferences from before the option wrap");
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"open":"Navigation"}));
         h.step(&json!({"click":{"handle":"prefs:orbit_cursor_wrap"}})).unwrap();
-        assert!(!h.app.preferences.orbit_cursor_wrap);
+        assert!(!h.app.preferences.navigation.orbit_cursor_wrap);
         h.call("ui.prefs", json!({"button":"apply"}));
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
-        assert!(!restored.preferences.orbit_cursor_wrap);
+        assert!(!restored.preferences.navigation.orbit_cursor_wrap);
         h.call("ui.prefs", json!({"button":"defaults"}));
-        assert!(h.app.preferences.orbit_cursor_wrap);
+        assert!(h.app.preferences.navigation.orbit_cursor_wrap);
         h.call("ui.prefs", json!({"orbit_cursor_wrap":false,"button":"apply"}));
-        assert!(!h.app.preferences.orbit_cursor_wrap);
+        assert!(!h.app.preferences.navigation.orbit_cursor_wrap);
     }
 
     #[test]
     fn mark_orbit_point_defaults_on_and_can_be_turned_off() {
         let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
-        assert!(old.mark_orbit_point, "saved preferences from before the option mark the point");
+        assert!(old.navigation.mark_orbit_point, "saved preferences from before the option mark the point");
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"open":"Navigation"}));
         h.step(&json!({"click":{"handle":"prefs:mark_orbit_point"}})).unwrap();
-        assert!(!h.app.preferences.mark_orbit_point);
+        assert!(!h.app.preferences.navigation.mark_orbit_point);
         h.call("ui.prefs", json!({"button":"apply"}));
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
-        assert!(!restored.preferences.mark_orbit_point);
+        assert!(!restored.preferences.navigation.mark_orbit_point);
         h.call("ui.prefs", json!({"button":"defaults"}));
-        assert!(h.app.preferences.mark_orbit_point);
+        assert!(h.app.preferences.navigation.mark_orbit_point);
         h.call("ui.prefs", json!({"mark_orbit_point":false,"button":"apply"}));
-        assert!(!h.app.preferences.mark_orbit_point);
+        assert!(!h.app.preferences.navigation.mark_orbit_point);
     }
 
     /// An agent's slow commands compute off the window thread unless a person turned that off:
@@ -11452,33 +11008,33 @@ mod tests {
     #[test]
     fn free_orbit_defaults_off_and_follows_preferences_transactions() {
         let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
-        assert!(!old.free_orbit);
+        assert!(!old.navigation.free_orbit);
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"open":"Navigation"}));
-        h.app.preferences.free_orbit_upright = true;
+        h.app.preferences.navigation.free_orbit_upright = true;
         h.frames(2);
         scroll_to_and_click(&mut h, "prefs:free_orbit_upright");
-        assert!(h.app.preferences.free_orbit_upright, "the disabled upright control preserves its saved value");
-        assert!(!h.app.preferences.free_orbit);
+        assert!(h.app.preferences.navigation.free_orbit_upright, "the disabled upright control preserves its saved value");
+        assert!(!h.app.preferences.navigation.free_orbit);
         scroll_to_and_click(&mut h, "prefs:free_orbit");
-        assert!(h.app.preferences.free_orbit);
+        assert!(h.app.preferences.navigation.free_orbit);
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
-        assert!(!restored.preferences.free_orbit, "a change that was not applied is not saved (#9730)");
+        assert!(!restored.preferences.navigation.free_orbit, "a change that was not applied is not saved (#9730)");
         h.call("ui.prefs", json!({"button":"cancel"}));
-        assert!(!h.app.preferences.free_orbit);
+        assert!(!h.app.preferences.navigation.free_orbit);
         h.call("ui.prefs", json!({"open":"Navigation","free_orbit":true,"button":"apply"}));
         h.call("ui.prefs", json!({"button":"defaults"}));
-        assert!(!h.app.preferences.free_orbit);
+        assert!(!h.app.preferences.navigation.free_orbit);
         h.call("ui.prefs", json!({"button":"cancel"}));
-        assert!(h.app.preferences.free_orbit);
+        assert!(h.app.preferences.navigation.free_orbit);
     }
 
     #[test]
     fn radial_context_menu_defaults_off_and_follows_preferences_transactions() {
-        assert!(!Prefs::default().radial_context_menu);
+        assert!(!Prefs::default().navigation.radial_context_menu);
         let old: Prefs = serde_json::from_value(json!({"nav":"solidworks","zoom_reverse":true})).unwrap();
-        assert!(!old.radial_context_menu && old.zoom_reverse && old.nav == "solidworks");
+        assert!(!old.navigation.radial_context_menu && old.navigation.zoom_reverse && old.navigation.nav == "solidworks");
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"open":"Navigation"}));
         for _ in 0..16 {
@@ -11490,18 +11046,18 @@ mod tests {
             h.frames(20);
         }
         h.step(&json!({"widget":"Radial context menu"})).unwrap();
-        assert!(h.app.preferences.radial_context_menu, "the actual checkbox enables radial menus");
+        assert!(h.app.preferences.navigation.radial_context_menu, "the actual checkbox enables radial menus");
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
-        assert!(!restored.preferences.radial_context_menu, "a change that was not applied is not saved (#9730)");
+        assert!(!restored.preferences.navigation.radial_context_menu, "a change that was not applied is not saved (#9730)");
         h.call("ui.prefs", json!({"button":"cancel"}));
-        assert!(!h.app.preferences.radial_context_menu, "Cancel restores the default-off setting");
+        assert!(!h.app.preferences.navigation.radial_context_menu, "Cancel restores the default-off setting");
         h.call("ui.prefs", json!({"open":"Navigation","radial_context_menu":true}));
         h.call("ui.prefs", json!({"button":"apply"}));
         h.call("ui.prefs", json!({"button":"defaults"}));
-        assert!(!h.app.preferences.radial_context_menu, "Navigation defaults disable the ring");
+        assert!(!h.app.preferences.navigation.radial_context_menu, "Navigation defaults disable the ring");
         h.call("ui.prefs", json!({"button":"cancel"}));
-        assert!(h.app.preferences.radial_context_menu, "Cancel restores the last Apply");
+        assert!(h.app.preferences.navigation.radial_context_menu, "Cancel restores the last Apply");
     }
 
     #[test]
@@ -12105,56 +11661,62 @@ mod tests {
 
     #[test]
     fn wheel_smoothing_persists_and_follows_dialog_buttons() {
-        assert!(serde_json::from_value::<Prefs>(json!({})).unwrap().smooth_wheel_zoom);
+        assert!(serde_json::from_value::<Prefs>(json!({})).unwrap().navigation.smooth_wheel_zoom);
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         control(&mut app, &json!({"open":"Navigation", "smooth_wheel_zoom":false})).unwrap();
         control(&mut app, &json!({"button":"cancel"})).unwrap();
-        assert!(app.preferences.smooth_wheel_zoom);
+        assert!(app.preferences.navigation.smooth_wheel_zoom);
         control(&mut app, &json!({"open":"Navigation", "smooth_wheel_zoom":false})).unwrap();
         control(&mut app, &json!({"button":"apply"})).unwrap();
         control(&mut app, &json!({"smooth_wheel_zoom":true, "button":"cancel"})).unwrap();
-        assert!(!app.preferences.smooth_wheel_zoom);
+        assert!(!app.preferences.navigation.smooth_wheel_zoom);
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
-        assert!(!other.preferences.smooth_wheel_zoom);
+        assert!(!other.preferences.navigation.smooth_wheel_zoom);
         control(&mut app, &json!({"open":"Navigation", "button":"defaults"})).unwrap();
-        assert!(app.preferences.smooth_wheel_zoom);
+        assert!(app.preferences.navigation.smooth_wheel_zoom);
         control(&mut app, &json!({"button":"cancel"})).unwrap();
-        assert!(!app.preferences.smooth_wheel_zoom);
+        assert!(!app.preferences.navigation.smooth_wheel_zoom);
     }
 
     #[test]
     fn touchpad_preset_persists_and_obeys_preference_transactions() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         control(&mut app, &json!({"open":"Navigation", "nav":"touchpad"})).unwrap();
-        assert_eq!(app.preferences.nav, "touchpad");
-        assert!(app.preferences.trackpad_pan, "choosing Touchpad must not overwrite the saved scroll preference");
+        assert_eq!(app.preferences.navigation.nav, "touchpad");
+        assert!(app.preferences.navigation.trackpad_pan, "choosing Touchpad must not overwrite the saved scroll preference");
         control(&mut app, &json!({"button":"cancel"})).unwrap();
-        assert_eq!(app.preferences.nav, "fusion");
+        assert_eq!(app.preferences.navigation.nav, "fusion");
         control(&mut app, &json!({"open":"Navigation", "nav":"touchpad", "button":"apply"})).unwrap();
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
-        assert_eq!(other.preferences.nav, "touchpad");
+        assert_eq!(other.preferences.navigation.nav, "touchpad");
         control(&mut app, &json!({"button":"defaults"})).unwrap();
-        assert_eq!(app.preferences.nav, "fusion");
+        assert_eq!(app.preferences.navigation.nav, "fusion");
         control(&mut app, &json!({"button":"cancel"})).unwrap();
-        assert_eq!(app.preferences.nav, "touchpad");
+        assert_eq!(app.preferences.navigation.nav, "touchpad");
     }
 
     #[test]
     fn choosing_the_solidworks_preset_frees_the_right_button_and_fits_on_middle_double_click() {
         let none = Modifiers::default();
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        app.preferences.middle_double_click = "off".into();
+        app.preferences.navigation.middle_double_click = "off".into();
         set(&mut app, &json!({"nav": "solidworks"})).unwrap();
-        assert!(app.preferences.right_drag_orbits, "a saved SolidWorks preset keeps its right-drag orbit");
+        assert!(app.preferences.navigation.right_drag_orbits, "a saved SolidWorks preset keeps its right-drag orbit");
         assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Orbit));
-        choose_nav_preset(&mut app.preferences, nav_preset("fusion"));
+        app.preferences.navigation.choose_preset(nav_preset("fusion"));
         let p = &app.preferences;
-        assert_eq!((p.nav.as_str(), p.zoom_reverse, p.middle_double_click.as_str(), p.right_drag_orbits), ("fusion", false, "off", true));
-        choose_nav_preset(&mut app.preferences, nav_preset("solidworks"));
+        assert_eq!(
+            (p.navigation.nav.as_str(), p.navigation.zoom_reverse, p.navigation.middle_double_click.as_str(), p.navigation.right_drag_orbits),
+            ("fusion", false, "off", true)
+        );
+        app.preferences.navigation.choose_preset(nav_preset("solidworks"));
         let p = &app.preferences;
-        assert_eq!((p.nav.as_str(), p.zoom_reverse, p.middle_double_click.as_str(), p.right_drag_orbits), ("solidworks", true, "fit", false));
+        assert_eq!(
+            (p.navigation.nav.as_str(), p.navigation.zoom_reverse, p.navigation.middle_double_click.as_str(), p.navigation.right_drag_orbits),
+            ("solidworks", true, "fit", false)
+        );
         assert_eq!(nav_mode(&app, NavButton::Right, none), None, "right drag is left to the context menu (#6492)");
         assert_eq!(nav_mode(&app, NavButton::Middle, none), Some(NavMode::Orbit));
         set(&mut app, &json!({"nav": "openscad"})).unwrap();
@@ -12166,10 +11728,10 @@ mod tests {
     #[test]
     fn creo_preset_maps_navigation_and_persists() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        assert_eq!(app.preferences.nav, "fusion");
-        choose_nav_preset(&mut app.preferences, nav_preset("creo"));
-        assert_eq!(app.preferences.nav, "creo");
-        assert!(!app.preferences.zoom_reverse);
+        assert_eq!(app.preferences.navigation.nav, "fusion");
+        app.preferences.navigation.choose_preset(nav_preset("creo"));
+        assert_eq!(app.preferences.navigation.nav, "creo");
+        assert!(!app.preferences.navigation.zoom_reverse);
         for (mods, mode) in [
             (Modifiers::NONE, NavMode::Orbit),
             (Modifiers::SHIFT, NavMode::Pan),
@@ -12187,7 +11749,7 @@ mod tests {
         }
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
-        assert_eq!(other.preferences.nav, "creo");
+        assert_eq!(other.preferences.navigation.nav, "creo");
         assert_eq!(nav_mode(&other, NavButton::Middle, Modifiers::NONE), Some(NavMode::Orbit));
     }
 
@@ -12232,14 +11794,14 @@ mod tests {
     fn creo_preset_obeys_preference_transactions() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         control(&mut app, &json!({"open":"Navigation", "nav":"creo"})).unwrap();
-        assert_eq!(app.preferences.nav, "creo");
+        assert_eq!(app.preferences.navigation.nav, "creo");
         control(&mut app, &json!({"button":"cancel"})).unwrap();
-        assert_eq!(app.preferences.nav, "fusion");
+        assert_eq!(app.preferences.navigation.nav, "fusion");
         control(&mut app, &json!({"open":"Navigation", "nav":"creo", "button":"apply"})).unwrap();
         control(&mut app, &json!({"button":"defaults"})).unwrap();
-        assert_eq!(app.preferences.nav, "fusion");
+        assert_eq!(app.preferences.navigation.nav, "fusion");
         control(&mut app, &json!({"button":"cancel"})).unwrap();
-        assert_eq!(app.preferences.nav, "creo");
+        assert_eq!(app.preferences.navigation.nav, "creo");
     }
 
     #[test]
@@ -12253,24 +11815,24 @@ mod tests {
         assert_eq!(nav_mode(&app, NavButton::Left, Modifiers::default()), Some(NavMode::Orbit));
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
-        assert_eq!(other.preferences.nav, OPENSCAD_NAV);
+        assert_eq!(other.preferences.navigation.nav, OPENSCAD_NAV);
     }
 
     #[test]
     fn pan_reverse_x_defaults_off_persists_and_flips_the_sign() {
-        assert!(!serde_json::from_value::<Prefs>(json!({})).unwrap().pan_reverse_x);
+        assert!(!serde_json::from_value::<Prefs>(json!({})).unwrap().navigation.pan_reverse_x);
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         assert_eq!(pan_sign_x(&app), 1.0);
         set(&mut app, &json!({"pan_reverse_x": true})).unwrap();
         assert_eq!(pan_sign_x(&app), -1.0);
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
-        assert!(other.preferences.pan_reverse_x);
+        assert!(other.preferences.navigation.pan_reverse_x);
     }
 
     #[test]
     fn orbit_reverse_defaults_off_persists_and_flips_the_sign() {
-        assert!(!serde_json::from_value::<Prefs>(json!({})).unwrap().orbit_reverse);
+        assert!(!serde_json::from_value::<Prefs>(json!({})).unwrap().navigation.orbit_reverse);
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         assert_eq!(orbit_sign(&app), 1.0);
         set(&mut app, &json!({"orbit_reverse": true})).unwrap();
@@ -12278,12 +11840,12 @@ mod tests {
         assert_eq!((pan_sign_x(&app), pan_sign_y(&app)), (1.0, 1.0));
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
-        assert!(other.preferences.orbit_reverse);
+        assert!(other.preferences.navigation.orbit_reverse);
     }
 
     #[test]
     fn pan_reverse_y_defaults_off_persists_and_flips_the_sign() {
-        assert!(!serde_json::from_value::<Prefs>(json!({})).unwrap().pan_reverse_y);
+        assert!(!serde_json::from_value::<Prefs>(json!({})).unwrap().navigation.pan_reverse_y);
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         assert_eq!(pan_sign_y(&app), 1.0);
         set(&mut app, &json!({"pan_reverse_y": true})).unwrap();
@@ -12295,27 +11857,27 @@ mod tests {
         set(&mut app, &json!({"pan_reverse_y": true})).unwrap();
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
-        assert!(other.preferences.pan_reverse_y);
+        assert!(other.preferences.navigation.pan_reverse_y);
     }
 
     #[test]
     fn trackpad_pan_defaults_on_persists_and_follows_dialog_buttons() {
-        assert!(serde_json::from_value::<Prefs>(json!({})).unwrap().trackpad_pan);
-        assert!(Prefs::default().trackpad_pan);
+        assert!(serde_json::from_value::<Prefs>(json!({})).unwrap().navigation.trackpad_pan);
+        assert!(Prefs::default().navigation.trackpad_pan);
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         control(&mut app, &json!({"open":"Navigation", "trackpad_pan":false})).unwrap();
         control(&mut app, &json!({"button":"cancel"})).unwrap();
-        assert!(app.preferences.trackpad_pan);
+        assert!(app.preferences.navigation.trackpad_pan);
         control(&mut app, &json!({"open":"Navigation", "trackpad_pan":false})).unwrap();
         control(&mut app, &json!({"button":"apply"})).unwrap();
-        assert!(!app.preferences.trackpad_pan);
+        assert!(!app.preferences.navigation.trackpad_pan);
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
-        assert!(!other.preferences.trackpad_pan);
+        assert!(!other.preferences.navigation.trackpad_pan);
         control(&mut app, &json!({"open":"Navigation", "button":"defaults"})).unwrap();
-        assert!(app.preferences.trackpad_pan);
+        assert!(app.preferences.navigation.trackpad_pan);
         control(&mut app, &json!({"button":"cancel"})).unwrap();
-        assert!(!app.preferences.trackpad_pan);
+        assert!(!app.preferences.navigation.trackpad_pan);
     }
 
     #[test]
@@ -12338,7 +11900,7 @@ mod tests {
         assert_eq!(zoom_sign(&app), 1.0, "the wheel turns the usual way");
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
-        assert_eq!(other.preferences.nav, "blender");
+        assert_eq!(other.preferences.navigation.nav, "blender");
     }
 
     #[test]
@@ -12444,7 +12006,7 @@ mod tests {
         assert_eq!(zoom_sign(&app), 1.0);
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
-        assert_eq!(other.preferences.nav, "hfss");
+        assert_eq!(other.preferences.navigation.nav, "hfss");
     }
 
     /// The templates of new drawings: ISO A3 for a part and ISO A2 for an assembly unless chosen, each
@@ -12491,17 +12053,17 @@ mod tests {
     #[test]
     fn maya_zoom_axis_preference_is_saved_and_reset_with_navigation() {
         let mut h = crate::scenario::Harness::new();
-        assert!(h.app.preferences.maya_horizontal_zoom);
+        assert!(h.app.preferences.navigation.maya_horizontal_zoom);
         control(&mut h.app, &json!({"open":"Navigation","nav":"maya","maya_horizontal_zoom":false})).unwrap();
         control(&mut h.app, &json!({"button":"apply"})).unwrap();
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&h.app.prefs());
-        assert_eq!(other.preferences.nav, "maya");
-        assert!(!other.preferences.maya_horizontal_zoom, "the legacy direction survives reopening");
+        assert_eq!(other.preferences.navigation.nav, "maya");
+        assert!(!other.preferences.navigation.maya_horizontal_zoom, "the legacy direction survives reopening");
         control(&mut h.app, &json!({"button":"defaults"})).unwrap();
-        assert!(h.app.preferences.maya_horizontal_zoom);
+        assert!(h.app.preferences.navigation.maya_horizontal_zoom);
         control(&mut h.app, &json!({"button":"cancel"})).unwrap();
-        assert!(!h.app.preferences.maya_horizontal_zoom, "Cancel restores the applied legacy choice");
+        assert!(!h.app.preferences.navigation.maya_horizontal_zoom, "Cancel restores the applied legacy choice");
         assert!(set(&mut h.app, &json!({"maya_horizontal_zoom":"sideways"})).is_err());
     }
 
@@ -12517,14 +12079,14 @@ mod tests {
         app.keymap.custom.insert("solid.extrude".into(), vec!["Shift+E".into()]);
         let v = control(&mut app, &json!({"button": "cancel"})).unwrap();
         assert_eq!(v["dialog"], serde_json::Value::Null);
-        assert!(app.ui.dark && app.preferences.theme == "dark" && app.preferences.ui_scale == 1.0 && app.preferences.zoom_to_cursor);
+        assert!(app.ui.dark && app.preferences.theme == "dark" && app.preferences.ui_scale == 1.0 && app.preferences.navigation.zoom_to_cursor);
         assert!(app.keymap.custom.is_empty(), "a rebinding made while the dialog was open is undone too");
 
         control(&mut app, &json!({"open": "Navigation", "nav": "alias", "look_at_anim": false})).unwrap();
         control(&mut app, &json!({"button": "apply"})).unwrap();
         control(&mut app, &json!({"nav": "tinkercad"})).unwrap();
         control(&mut app, &json!({"button": "cancel"})).unwrap();
-        assert_eq!(app.preferences.nav, "alias", "Cancel goes back to the last Apply");
+        assert_eq!(app.preferences.navigation.nav, "alias", "Cancel goes back to the last Apply");
         let to = {
             let mut c = app.cam;
             c.set_view(solidcraft_viewport::StandardView::Top);
@@ -12535,8 +12097,8 @@ mod tests {
 
         control(&mut app, &json!({"open": "Navigation"})).unwrap();
         control(&mut app, &json!({"button": "defaults"})).unwrap();
-        assert_eq!(app.preferences.nav, "fusion");
-        assert!(app.preferences.look_at_anim);
+        assert_eq!(app.preferences.navigation.nav, "fusion");
+        assert!(app.preferences.navigation.look_at_anim);
         control(&mut app, &json!({"button": "ok"})).unwrap();
         assert!(!app.prefs_window.shell.open);
 
@@ -12583,7 +12145,7 @@ mod tests {
         let apply = crate::scenario::handle_at("dialog:apply").unwrap();
         draw(&mut app, crate::test_support::pointer(apply, true));
         draw(&mut app, crate::test_support::pointer(apply, false));
-        assert!(app.prefs_window.shell.open && !app.preferences.zoom_to_cursor, "Apply keeps the dialog and the change");
+        assert!(app.prefs_window.shell.open && !app.preferences.navigation.zoom_to_cursor, "Apply keeps the dialog and the change");
         assert_eq!(draw(&mut app, vec![]), Some(0.0), "after Apply: Apply is disabled");
         // A disabled Apply does nothing when clicked.
         draw(&mut app, crate::test_support::pointer(apply, true));
@@ -12804,8 +12366,8 @@ mod tests {
         app.run("solid.box", json!({"length": 40, "width": 40, "height": 40})).unwrap();
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
         app.fit_view();
-        assert_eq!(app.preferences.orbit_around, OrbitAround::ViewCentre, "the view centre stays the default");
-        app.preferences.orbit_around = OrbitAround::Origin;
+        assert_eq!(app.preferences.navigation.orbit_around, OrbitAround::ViewCentre, "the view centre stays the default");
+        app.preferences.navigation.orbit_around = OrbitAround::Origin;
         app.cam.pan(60.0, -25.0, 600.0);
         let was = (app.cam.yaw, app.cam.pitch);
         let before = crate::viewport::projection(&app, rect).to_screen(Vec3::ZERO).unwrap();
@@ -12819,17 +12381,17 @@ mod tests {
     /// the control channel still accepts the old key.
     #[test]
     fn saved_cursor_preference_migrates_to_the_origin_option() {
-        assert_eq!(lenient(&json!({"orbit_cursor": true})).orbit_around, OrbitAround::Cursor);
-        assert_eq!(lenient(&json!({"orbit_cursor": false})).orbit_around, OrbitAround::ViewCentre);
-        assert_eq!(lenient(&json!({})).orbit_around, OrbitAround::ViewCentre);
-        assert_eq!(lenient(&json!({"orbit_around": "origin"})).orbit_around, OrbitAround::Origin);
+        assert_eq!(lenient(&json!({"orbit_cursor": true})).navigation.orbit_around, OrbitAround::Cursor);
+        assert_eq!(lenient(&json!({"orbit_cursor": false})).navigation.orbit_around, OrbitAround::ViewCentre);
+        assert_eq!(lenient(&json!({})).navigation.orbit_around, OrbitAround::ViewCentre);
+        assert_eq!(lenient(&json!({"orbit_around": "origin"})).navigation.orbit_around, OrbitAround::Origin);
 
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         set(&mut app, &json!({"orbit_around": "origin"})).unwrap();
-        assert_eq!(app.preferences.orbit_around, OrbitAround::Origin);
+        assert_eq!(app.preferences.navigation.orbit_around, OrbitAround::Origin);
         set(&mut app, &json!({"orbit_cursor": true})).unwrap();
-        assert_eq!(app.preferences.orbit_around, OrbitAround::Cursor, "the old key still moves the choice");
-        assert!(!app.preferences.orbit_cursor, "and is folded away");
+        assert_eq!(app.preferences.navigation.orbit_around, OrbitAround::Cursor, "the old key still moves the choice");
+        assert!(!app.preferences.navigation.orbit_cursor, "and is folded away");
     }
 
     /// Constraint glyphs keep their size unless a larger one is chosen (#10794); `ui.prefs` takes
@@ -12858,7 +12420,7 @@ mod tests {
     fn orbiting_around_the_cursor_keeps_that_point_still() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         app.run("solid.box", json!({"length": 40, "width": 40, "height": 40})).unwrap();
-        app.preferences.orbit_around = OrbitAround::Cursor;
+        app.preferences.navigation.orbit_around = OrbitAround::Cursor;
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
         app.fit_view();
         let at = egui::pos2(500.0, 250.0);
@@ -12875,7 +12437,7 @@ mod tests {
         use crate::viewport::Hit;
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         app.run("solid.box", json!({"length": 200, "width": 40, "height": 40})).unwrap();
-        app.preferences.orbit_around = OrbitAround::Cursor;
+        app.preferences.navigation.orbit_around = OrbitAround::Cursor;
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
         app.fit_view();
         let proj = crate::viewport::projection(&app, rect);
@@ -12908,7 +12470,7 @@ mod tests {
         app.run("sketch.create", json!({"plane": "XY"})).unwrap();
         app.run("sketch.line", json!({"points": [[-100, 0], [100, 0]]})).unwrap();
         app.run("sketch.finish", json!({})).unwrap();
-        app.preferences.orbit_around = OrbitAround::Cursor;
+        app.preferences.navigation.orbit_around = OrbitAround::Cursor;
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
         app.fit_view();
         let proj = crate::viewport::projection(&app, rect);
@@ -12924,7 +12486,7 @@ mod tests {
     fn orbiting_from_empty_space_turns_around_the_visible_geometry() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         app.run("solid.box", json!({"length": 40, "width": 40, "height": 40})).unwrap();
-        app.preferences.orbit_around = OrbitAround::Cursor;
+        app.preferences.navigation.orbit_around = OrbitAround::Cursor;
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
         app.fit_view();
         let corner = egui::pos2(10.0, 10.0);
@@ -12937,7 +12499,7 @@ mod tests {
         assert_eq!(app.viewport.orbit_pivot, Some(centre));
 
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        app.preferences.orbit_around = OrbitAround::Cursor;
+        app.preferences.navigation.orbit_around = OrbitAround::Cursor;
         app.cam.target = solidcore_record::Vec3::new(5.0, -3.0, 2.0);
         orbit(&mut app, rect, 40.0, 25.0, Some(corner));
         assert_eq!(app.viewport.orbit_pivot, Some(solidcore_record::Vec3::new(5.0, -3.0, 2.0)));
@@ -14742,5 +14304,64 @@ mod kit_use_tests {
         assert_eq!(restored.ui.recent_colors.first(), Some(&[9, 8, 7]));
         assert_eq!(restored.ui.recent_colors.get(1), Some(&[1, 2, 3]));
         assert_eq!(restored.ui.recent_colors.len(), MAX_RECENT_COLORS);
+    }
+}
+
+#[cfg(test)]
+mod navigation_file_tests {
+    use super::*;
+    use solidcraft_ui_kit::prefs_navigation::{MouseGestureSettings, NavigatorStyle, NavigatorTexture, OrbitAround, TrackpadZoomModifier};
+
+    /// A preferences file as a release before the Navigation settings moved into the kit wrote it:
+    /// every Navigation key at the top level, set away from its default.
+    const SAVED_BEFORE_THE_KIT: &str = r#"{
+        "nav": "blender", "touchscreen_navigation": true, "free_orbit": true, "free_orbit_upright": true,
+        "right_drag_orbits": false, "nav_drag_keeps_mode": false, "orbit_cursor_wrap": false,
+        "mark_orbit_point": false, "upright_orbit_unrolls": false, "navigator_style": "custom",
+        "navigator_texture": "modeled", "navigator_arrows": false, "navigator_home": false,
+        "radial_context_menu": true, "quick_menu_after_selection": true,
+        "mouse_gestures": {"enabled": true, "wheels": {"part": ["undo"]}},
+        "zoom_reverse": true, "maya_horizontal_zoom": false, "orbit_around": "origin", "orbit_cursor": false,
+        "browser_arrow_keys": false, "zoom_to_cursor": false, "wheel_zoom_speed": 2.5, "zoom_stop_at_model": true,
+        "smooth_wheel_zoom": false, "keep_hover_while_navigating": false, "trackpad_pan": false,
+        "trackpad_zoom_modifier": "cmd", "pan_reverse_x": true, "pan_reverse_y": true, "orbit_reverse": true,
+        "trackpad_twist_turns": true, "look_at_anim": false, "look_at_speed": 3.0, "middle_double_click": "off",
+        "navigator_fit": true, "invert_navigator_arrows": true, "invert_curved_roll_arrows": true, "home_fit_size": 0.5
+    }"#;
+
+    #[test]
+    fn a_file_saved_before_the_settings_moved_loads_every_navigation_value() {
+        let saved: serde_json::Value = serde_json::from_str(SAVED_BEFORE_THE_KIT).expect("the fixture is JSON");
+        let p = lenient(&saved);
+        let n = &p.navigation;
+        assert_eq!(n.nav, "blender");
+        assert!(n.touchscreen_navigation && n.free_orbit && n.free_orbit_upright);
+        assert!(!n.right_drag_orbits && !n.nav_drag_keeps_mode && !n.orbit_cursor_wrap);
+        assert!(!n.mark_orbit_point && !n.upright_orbit_unrolls);
+        assert_eq!((n.navigator_style, n.navigator_texture), (NavigatorStyle::Custom, NavigatorTexture::Modeled));
+        assert!(!n.navigator_arrows && !n.navigator_home && n.radial_context_menu && n.quick_menu_after_selection);
+        assert_eq!(n.mouse_gestures, MouseGestureSettings { enabled: true, wheels: [("part".to_string(), vec!["undo".to_string()])].into() });
+        assert!(n.zoom_reverse && !n.maya_horizontal_zoom);
+        assert_eq!(n.orbit_around, OrbitAround::Origin);
+        assert!(!n.orbit_cursor && !n.browser_arrow_keys && !n.zoom_to_cursor);
+        assert_eq!(n.wheel_zoom_speed, 2.5);
+        assert!(n.zoom_stop_at_model && !n.smooth_wheel_zoom && !n.keep_hover_while_navigating && !n.trackpad_pan);
+        assert_eq!(n.trackpad_zoom_modifier, TrackpadZoomModifier::Cmd);
+        assert!(n.pan_reverse_x && n.pan_reverse_y && n.orbit_reverse && n.trackpad_twist_turns);
+        assert!(!n.look_at_anim);
+        assert_eq!(n.look_at_speed, 3.0);
+        assert_eq!(n.middle_double_click, "off");
+        assert!(n.navigator_fit && n.invert_navigator_arrows && n.invert_curved_roll_arrows);
+        assert_eq!(n.home_fit_size, 0.5);
+    }
+
+    #[test]
+    fn the_saved_shape_keeps_the_navigation_keys_at_the_top_level() {
+        let value = serde_json::to_value(Prefs::default()).expect("prefs serialise");
+        let object = value.as_object().expect("prefs are an object");
+        for key in solidcraft_ui_kit::prefs_navigation::FIELDS {
+            assert!(object.contains_key(*key), "{key} stays a top-level key, as the saved files have it");
+        }
+        assert!(!object.contains_key("navigation"), "the nested struct is flattened, not stored under its own key");
     }
 }

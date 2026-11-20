@@ -1100,8 +1100,8 @@ fn flat_app(preset: &str, mode: crate::ui_kit::LayoutMode) -> SolveApp {
     app.start("sheet.flat_pattern");
     let Some(Kind::Sheet(Sm::FlatPattern { data, .. })) = app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("flat dialog") };
     *data = Some(Ok(flat));
-    app.preferences.nav = preset.into();
-    app.preferences.zoom_to_cursor = true;
+    app.preferences.navigation.nav = preset.into();
+    app.preferences.navigation.zoom_to_cursor = true;
     app
 }
 
@@ -1144,8 +1144,8 @@ fn flat_pattern_pans_and_zooms_like_the_design_viewport() {
                 let mut design = flat_app(preset, mode);
                 design.dialog = None;
                 for app in [&mut flat, &mut design] {
-                    app.preferences.zoom_reverse = reverse;
-                    app.preferences.zoom_to_cursor = to_cursor;
+                    app.preferences.navigation.zoom_reverse = reverse;
+                    app.preferences.navigation.zoom_to_cursor = to_cursor;
                 }
                 let (mut ft, mut dt) = (0.0, 0.0);
                 frame(&mut flat, &flat_ctx, &mut ft, none, vec![]);
