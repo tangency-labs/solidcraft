@@ -132,6 +132,9 @@ mod plugin;
 mod plugin_storage;
 mod point_cloud;
 mod point_cloud_deviation;
+mod pulleys;
+#[cfg(test)]
+mod pulleys_tests;
 mod script;
 mod section;
 mod selection;
@@ -514,6 +517,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(panels::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
+    v.extend(pulleys::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
     v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
