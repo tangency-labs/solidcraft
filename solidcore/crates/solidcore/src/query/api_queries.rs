@@ -1901,6 +1901,75 @@ mod face_square_level_tests {
     }
 }
 
+/// How far from unit length an application's direction may be ([`is_unit_direction`]).
+pub const UNIT_AXIS_TOL: f64 = 1e-9;
+
+/// Whether `v` is a unit direction: finite, its squared length within [`UNIT_AXIS_TOL`] of 1
+/// (not upstream: the check of an application's direction).
+pub fn is_unit_direction(v: Vec3) -> bool {
+    [v.x, v.y, v.z].iter().all(|c| c.is_finite())
+        && (v.length_squared() - 1.0).abs() <= UNIT_AXIS_TOL
+}
+
+/// The distance within which a point given by an application matches a vertex of a body:
+/// ten times the larger of the body's largest tolerance (`largest_tolerance`, its own or an
+/// edge's) and 1e-9 of its `size` (not upstream: the matching of a surface extrude's start
+/// corners to the vertices of its walls).
+pub fn vertex_match_tolerance(largest_tolerance: f64, size: f64) -> f64 {
+    largest_tolerance.max(size * 1e-9) * 10.0
+}
+
+/// The part along the unit direction `along` of edge use `eu`'s binormal (pointing into its
+/// face) at the fraction `fraction` of its edge's interval ([`evaluate_binormal`], 3D only).
+/// Not upstream (whether a face runs on along a direction across one of its edges).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an `along` that is not a unit direction
+/// ([`is_unit_direction`]), or a `fraction` or binormal that is not finite; those of
+/// [`evaluate_binormal`].
+pub fn edgeuse_binormal_along(
+    k: &Kernel,
+    brep: &mut Brep,
+    eu: EdgeuseId,
+    fraction: f64,
+    along: Vec3,
+) -> Result<f64> {
+    if !(fraction.is_finite() && is_unit_direction(along)) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a fraction that is not finite or a direction that is not unit",
+        ));
+    }
+    let e = brep
+        .edgeuse(eu)?
+        .edge
+        .ok_or_else(|| SolidError::invalid_input(OP, "edge use without an edge"))?;
+    let t = brep.edge(e)?.interval.evaluate(fraction);
+    let at = evaluate_binormal(k, brep, eu, t, true, &BinormalOptions::default())?;
+    let part = at.binormal.dot(along);
+    if !part.is_finite() {
+        return Err(SolidError::invalid_input(OP, "binormal not finite"));
+    }
+    Ok(part)
+}
+
+#[cfg(test)]
+mod unit_direction_tests {
+    use super::*;
+
+    /// Unit directions pass; a long one or a NaN one does not. The match tolerance is ten times
+    /// the larger of the body's tolerance and 1e-9 of its size.
+    #[test]
+    fn unit_directions_and_the_match_tolerance() {
+        assert!(is_unit_direction(Vec3::new(0.0, 0.0, 1.0)));
+        assert!(!is_unit_direction(Vec3::new(0.0, 0.0, 2.0)));
+        assert!(!is_unit_direction(Vec3::new(f64::NAN, 0.0, 1.0)));
+        assert!((vertex_match_tolerance(1e-6, 10.0) - 1e-5).abs() < 1e-18);
+        assert!((vertex_match_tolerance(0.0, 1e3) - 1e-5).abs() < 1e-18);
+    }
+}
+
 /// One sample of [`edge_face_gap_samples`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EdgeFaceGapSample {

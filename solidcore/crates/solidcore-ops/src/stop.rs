@@ -16,9 +16,11 @@
 
 use std::collections::BTreeSet;
 
-use solidcore::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
+use solidcore::query::api_queries::{
+    edgeuse_binormal_along, is_unit_direction, vertex_match_tolerance,
+};
 use solidcore::topology::{edge, face, EdgeId};
-use solidcore::EntityRef;
+use solidcore::{EntityRef, Vec3};
 use solidcore_record::brep::Brep as Record;
 
 use crate::body::Body;
@@ -61,8 +63,8 @@ impl Piece {
         }
     }
 
-    fn join(&self, with: Option<&Piece>) -> Option<Piece> {
-        Some(with.map_or_else(|| self.clone(), |w| self.joined(w)))
+    fn join(&self, with: Option<&Piece>) -> Piece {
+        with.map_or_else(|| self.clone(), |w| self.joined(w))
     }
 }
 
@@ -71,13 +73,13 @@ impl Piece {
 impl Provenance for Piece {
     const ID: u64 = FIRST_ID + 20;
     fn split(&self, child: Option<&Self>) -> Option<Self> {
-        self.join(child)
+        Some(self.join(child))
     }
     fn merge(&self, result: Option<&Self>) -> Option<Self> {
-        self.join(result)
+        Some(self.join(result))
     }
     fn coincident(&self, onto: Option<&Self>) -> Option<Self> {
-        self.join(onto)
+        Some(self.join(onto))
     }
 }
 
@@ -128,8 +130,7 @@ pub fn stop_at_bodies(
     {
         return Err(Error::Argument);
     }
-    let length = along.iter().map(|x| x * x).sum::<f64>();
-    if (length - 1.0).abs() > 1e-9 {
+    if !is_unit_direction(Vec3::new(along[0], along[1], along[2])) {
         return Err(Error::Argument);
     }
     provenance::take::<Piece>()?;
@@ -255,13 +256,12 @@ fn kept_regions(
     }
     let (lo, hi) = cur.bounds()?;
     let size = box_max_distance_to_point(lo, hi, lo)?;
-    let accept = record
+    let largest = record
         .edges
         .iter()
         .map(|e| e.tolerance)
-        .fold(record.tolerance, f64::max)
-        .max(size * 1e-9)
-        * 10.0;
+        .fold(record.tolerance, f64::max);
+    let accept = vertex_match_tolerance(largest, size);
     let mut at_start = Vec::new();
     for v in &record.vertices {
         let mut at = false;
@@ -306,7 +306,7 @@ fn runs_on_past(
         .iter()
         .map(|&f| order::face(order, f))
         .collect::<Result<Vec<_>>>()?;
-    let along = solidcore::Vec3::new(along[0], along[1], along[2]);
+    let along = Vec3::new(along[0], along[1], along[2]);
     with_body("stop_at_bodies", cur, |k, b| {
         for &f in &faces {
             for e in face::edges(b, f, None, false, None)? {
@@ -316,14 +316,11 @@ fn runs_on_past(
                 let Some(eu) = edge::edgeuse_of_face(b, e, Some(f))? else {
                     continue;
                 };
-                let interval = b.edge(e)?.interval;
                 for s in SIDE_SAMPLES {
-                    let t = interval.evaluate(s);
-                    let Ok(ev) = evaluate_binormal(k, b, eu, t, true, &BinormalOptions::default())
-                    else {
+                    let Ok(part) = edgeuse_binormal_along(k, b, eu, s, along) else {
                         continue;
                     };
-                    if ev.binormal.dot(along) > ON_PAST {
+                    if part > ON_PAST {
                         return Ok(Err(Error::Unsupported(
                             "part of a wall runs on past the side of a body in its way (the body covers only part of the wall)",
                         )));
