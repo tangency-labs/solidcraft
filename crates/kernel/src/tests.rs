@@ -3478,3 +3478,61 @@ fn whole_edge_keeps_corners_tangent_arcs_and_authored_splits_apart() {
         assert_eq!(whole_edge(&capped, e), ring, "ring {ring:?}");
     }
 }
+
+/// The arc from `a` through `m` to `b`.
+fn arc_through(a: [f64; 2], m: [f64; 2], b: [f64; 2]) -> Seg2 {
+    let d = 2.0 * (a[0] * (m[1] - b[1]) + m[0] * (b[1] - a[1]) + b[0] * (a[1] - m[1]));
+    let sq = |p: [f64; 2]| p[0] * p[0] + p[1] * p[1];
+    let cx = (sq(a) * (m[1] - b[1]) + sq(m) * (b[1] - a[1]) + sq(b) * (a[1] - m[1])) / d;
+    let cy = (sq(a) * (b[0] - m[0]) + sq(m) * (a[0] - b[0]) + sq(b) * (m[0] - a[0])) / d;
+    let angle = |p: [f64; 2]| (p[1] - cy).atan2(p[0] - cx);
+    let ccw = (m[0] - a[0]) * (b[1] - m[1]) - (m[1] - a[1]) * (b[0] - m[0]) > 0.0;
+    let mut sweep = angle(b) - angle(a);
+    if ccw && sweep < 0.0 {
+        sweep += 2.0 * PI;
+    }
+    if !ccw && sweep > 0.0 {
+        sweep -= 2.0 * PI;
+    }
+    Seg2::Arc { center: Vec2::new(cx, cy), radius: ((a[0] - cx).powi(2) + (a[1] - cy).powi(2)).sqrt(), start: angle(a), sweep }
+}
+
+/// A round larger than a narrow concave round on its tangent chain is refused at once, naming
+/// that round's radius. A stem whose outline has three slight inward kinks (3, 5 and 9 degrees
+/// where its arcs meet) is joined into a bulged bar and its six corners are rounded at 2: at the
+/// kinks those rounds are concave faces 0.1 to 0.3 mm wide. A ball of 8 or of 5 does not roll
+/// inside a round of 2, so the round of the stem's foot does not fit them. The kernel found no
+/// ball on those three edges and let them pass; it went on for 18 s to refuse two of the chain's
+/// bands as overlapping, with 0.158 mm as the radius that fits.
+#[test]
+fn a_foot_round_wider_than_a_narrow_concave_round_on_its_chain_is_refused_naming_it() {
+    let bar_plane = Plane { origin: Vec3::new(0.0, 0.0, 3.0), x: Vec3::new(1.0, 0.0, 0.0), y: Vec3::new(0.0, 0.0, 1.0) };
+    let bar_loop = Loop2 {
+        segs: vec![
+            Seg2::Line { a: Vec2::new(-30.0, 0.0), b: Vec2::new(30.0, 0.0) },
+            Seg2::Line { a: Vec2::new(30.0, 0.0), b: Vec2::new(30.0, 17.5) },
+            arc_through([30.0, 17.5], [0.0, 22.5], [-30.0, 17.5]),
+            Seg2::Line { a: Vec2::new(-30.0, 17.5), b: Vec2::new(-30.0, 0.0) },
+        ],
+    };
+    let bar = revolve(&bar_plane, &[Region2 { outer: bar_loop, holes: vec![] }], Vec2::ZERO, Vec2::new(1.0, 0.0), 2.0 * PI).unwrap().remove(0);
+    let corners = [[21.54, -6.4], [13.71, 13.47], [-12.17, 14.52], [-21.5, -5.01], [-15.57, -15.06], [13.88, -15.91]];
+    let through = [[18.8, 4.0], [0.94, 17.9], [-17.68, 5.16], [-20.99, -11.41], [0.0, 0.0], [20.24, -13.18]];
+    let mut segs = Vec::new();
+    for i in 0..6 {
+        let (a, b) = (corners[i], corners[(i + 1) % 6]);
+        segs.push(if i == 4 { Seg2::Line { a: Vec2::new(a[0], a[1]), b: Vec2::new(b[0], b[1]) } } else { arc_through(a, through[i], b) });
+    }
+    let stem_plane = Plane { origin: Vec3::new(0.0, 0.0, 65.0), ..Plane::XY };
+    let stem = extrude(&stem_plane, &[Region2 { outer: Loop2 { segs }, holes: vec![] }], -55.0, 0.0).unwrap().remove(0);
+    let body = boolean(&bar, &stem, BoolOp::Union).unwrap().unwrap();
+    let picks: Vec<Vec3> = corners.iter().map(|c| Vec3::new(c[0], c[1], 45.0)).collect();
+    let body = fillet(&body, &picks, 2.0).unwrap();
+    let chain = tangent_chain(&body, &[Vec3::new(-0.85, -15.48, 19.32)]).unwrap();
+    assert_eq!(chain.len(), 14, "the foot: six sides, six corner rounds and the bar's seam twice");
+    for r in [8.0, 5.0] {
+        let Err(KernelError::TooLarge(why)) = fillet(&body, &chain, r) else { panic!("{r}: refused as too large") };
+        assert!(why.contains("the rolling ball does not fit a face it rolls on"), "{r}: {why}");
+        assert_eq!(named_fit(&why), Some(2.0), "{r}: {why}");
+    }
+}
