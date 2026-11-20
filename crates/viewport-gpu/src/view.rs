@@ -435,6 +435,47 @@ impl SharedTris {
         out
     }
 
+    /// An indexed mesh whose facets are lit by their own normals. Reuse its existing vertex
+    /// sharing. Vertices referenced only by discarded facets cannot enlarge its draw bounds.
+    pub fn from_flat_indexed(positions: &[Vec3], triangles: &[[u32; 3]]) -> Option<SharedTris> {
+        let mut remap = Vec::new();
+        remap.try_reserve_exact(positions.len()).ok()?;
+        remap.resize(positions.len(), u32::MAX);
+        let source = triangles.as_flattened();
+        let mut used = 0;
+        for &index in source {
+            let slot = remap.get_mut(index as usize)?;
+            if *slot == u32::MAX {
+                *slot = 0;
+                used += 1;
+            }
+        }
+
+        let mut out = SharedTris { flat: true, ..Default::default() };
+        out.vertices.try_reserve_exact(SHARED_SIZE.checked_mul(used)?).ok()?;
+        out.indices.try_reserve_exact(source.len()).ok()?;
+        let mut lo = [f32::INFINITY; 3];
+        let mut hi = [f32::NEG_INFINITY; 3];
+        for (p, index) in positions.iter().zip(&mut remap).filter(|(_, i)| **i != u32::MAX) {
+            *index = u32::try_from(out.vertices.len() / SHARED_SIZE).ok()?;
+            let p = p.to_f32();
+            for k in 0..3 {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+            for v in p.iter().chain(&[0.0f32; 3]) {
+                out.vertices.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        if used == positions.len() {
+            out.indices.extend_from_slice(source);
+        } else {
+            out.indices.extend(source.iter().map(|&i| remap[i as usize]));
+        }
+        out.bounds = [lo, hi];
+        Some(out)
+    }
+
     /// A simplified copy of a mesh ([`solidcore_tess::simplify::Level`]): its vertices already
     /// shared, its triangles lit flat (each fragment with its triangle's own normal).
     pub fn from_level(level: &solidcore_tess::simplify::Level) -> SharedTris {
@@ -5859,6 +5900,16 @@ mod tests {
             assert_eq!(*q, flat.positions[k].to_f32());
             assert!((n[2] - 1.0).abs() < 1e-6, "{n:?}");
         }
+        // Canonical indexed imports already share vertices. Keep triangle order and lighting
+        // and exclude a vertex left unused by a discarded facet, even if it is far away.
+        let source = [p[2], Vec3::new(100.0, 100.0, 100.0), p[0], p[3], p[1]];
+        let indexed = SharedTris::from_flat_indexed(&source, &[[2, 4, 0], [2, 0, 3]]).unwrap();
+        assert!(indexed.flat);
+        assert_eq!(indexed.vertices.len() / SHARED_SIZE, 4);
+        assert_eq!(indexed.indices, [1, 3, 0, 1, 0, 2]);
+        assert_eq!(indexed.bounds, shared.bounds);
+        assert_eq!(indexed.corners().flatten().collect::<Vec<_>>(), corners);
+        assert!(SharedTris::from_flat_indexed(&source, &[[2, 4, 5]]).is_none());
         // Smooth: the same corners with different normals stay apart.
         let mut smooth = flat.clone();
         smooth.normals = vec![Vec3::Z, Vec3::Z, Vec3::new(0.0, 0.6, 0.8), Vec3::Z, Vec3::X, Vec3::new(0.0, 0.6, 0.8)];

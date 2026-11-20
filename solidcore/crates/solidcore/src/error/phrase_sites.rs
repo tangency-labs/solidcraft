@@ -131,7 +131,6 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/fillet_executive/session/trim_at_creases.rs", 34),
     ("solidcore/src/blend/fillet_executive/session/two_offsets.rs", 18),
     ("solidcore/src/blend/fillet_geom/surface_plane_curve.rs", 13),
-    ("solidcore/src/blend/fillet_geom/tangent_end_rib.rs", 19),
     ("solidcore/src/blend/fillet_intersector.rs", 13),
     ("solidcore/src/blend/fillet_overflow.rs", 31),
     ("solidcore/src/blend/fillet_removal.rs", 3),

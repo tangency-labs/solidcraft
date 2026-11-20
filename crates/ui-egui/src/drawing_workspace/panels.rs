@@ -27,13 +27,14 @@ pub(super) enum Tool {
     Dimension(Option<u64>),
     Note(Option<u64>),
     PartsList(Option<u64>),
+    Export,
 }
 
 impl Tool {
     /// The placed object whose options these are, if they are one's.
     pub(super) fn object(self) -> Option<u64> {
         match self {
-            Self::Base | Self::Projected => None,
+            Self::Base | Self::Projected | Self::Export => None,
             Self::Edit(object) | Self::Dimension(object) | Self::Note(object) | Self::PartsList(object) => object,
         }
     }
@@ -46,6 +47,7 @@ impl Tool {
             "drawing.dimension" => Some(Self::Dimension(None)),
             "drawing.note" => Some(Self::Note(None)),
             "drawing.parts_list" => Some(Self::PartsList(None)),
+            "drawing.export" => Some(Self::Export),
             _ => None,
         }
     }
@@ -58,6 +60,7 @@ impl Tool {
             Self::Dimension(_) => tr("ui.drawing_panel.dimension"),
             Self::Note(_) => tr("ui.drawing_panel.note"),
             Self::PartsList(_) => tr("ui.drawing_panel.parts_list"),
+            Self::Export => tr("ui.drawing_export.title"),
         }
     }
 }
@@ -125,7 +128,7 @@ pub(super) fn tool_body(app: &SolveApp, ui: &mut egui::Ui, tool: Tool) {
         Tool::Base | Tool::Projected => base_view(ui, &app.session.doc.name, tool == Tool::Projected),
         Tool::Edit(_) => {}
         Tool::Dimension(selected) => dimension(ui, drawing, sheet, selected),
-        Tool::Note(_) => {}
+        Tool::Note(_) | Tool::Export => {}
         Tool::PartsList(table) => parts_list(ui, drawing, sheet, table, &app.session.doc.name),
     }
 }

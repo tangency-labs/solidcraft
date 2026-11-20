@@ -1,6 +1,7 @@
 ;; Original test component. `home` inserts a box and calls view.home. `edit` inserts a box
 ;; farther away and calls no view command. `place` makes a component with a box in it and moves
-;; the component 100 mm along X. Any other entry calls view.home and then traps.
+;; the component 100 mm along X. `move` only moves an existing component.
+;; `both` moves the existing component and makes a box. Any other entry calls view.home and then traps.
 (component
   (type $ty-PLUGIN_PACKAGE/types@PLUGIN_VERSION (;0;)
     (instance
@@ -92,6 +93,14 @@
       i32.const 0
       call $run
     )
+    (func $move (type 2)
+      i32.const 760
+      i32.const 15
+      i32.const 1600
+      i32.const 45
+      i32.const 0
+      call $run
+    )
     (func $execute (;6;) (type 1) (param i32 i32 i32 i32) (result i32)
       (local i32)
       local.get 0
@@ -115,8 +124,23 @@
           if
             call $place
           else
-            call $home
-            unreachable
+            local.get 4
+            i32.const 109
+            i32.eq
+            if
+              call $move
+            else
+              local.get 4
+              i32.const 98
+              i32.eq
+              if
+                call $move
+                call $box_far
+              else
+                call $home
+                unreachable
+              end
+            end
           end
         end
       end

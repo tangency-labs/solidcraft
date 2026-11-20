@@ -1379,7 +1379,7 @@ mod tests {
     /// sites lowers the pin to the new count, and a new site builds a typed cause.
     #[test]
     fn the_phrase_cause_sites_only_go_down() {
-        const PHRASE_CAUSE_SITES: usize = 903;
+        const PHRASE_CAUSE_SITES: usize = 897;
         use crate::blend::fillet_executive::NoRoomReason as R;
         let causes = [
             BlendFailure::NoRoom(R::BallDoesNotFit),
