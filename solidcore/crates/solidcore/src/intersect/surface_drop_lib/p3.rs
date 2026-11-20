@@ -104,6 +104,7 @@
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p5::make_curve_cache;
 use crate::curve::curve::Curve;
+use crate::error::intersect::IntersectFailure;
 use crate::error::{ignore_status, ignored, Result, SolidError, SM_ERR};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
@@ -566,9 +567,11 @@ fn span_proved_off(
     let at = |t: f64, uv: Point2| -> Result<Option<(Vec3, Vec3)>> {
         let pd = curve.evaluate(k, t, 1, true, true)?;
         let (Some(&c), Some(&d)) = (pd.first(), pd.get(1)) else {
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP,
-                "the curve's point and first derivative were not evaluated",
+                IntersectFailure::Defect {
+                    why: "the curve's evaluation at a parameter of its own span, asked for the                           point and the first derivative, returned fewer than two vectors;                           the evaluator builds both for every parameter of the curve",
+                },
             ));
         };
         let dist = (c - centre).length();
