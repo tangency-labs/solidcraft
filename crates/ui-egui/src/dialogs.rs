@@ -4363,14 +4363,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let vp = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
     let placement = crate::shell::editor_space(app, vp);
     let side = crate::frame::Side::Right;
+    let card_id = egui::Id::unique(("sc_dialog", title_of(&d)));
     // In a small window, a card that would take more than half of the view's width goes along
-    // the view's bottom instead, as wide as the view and at most half as tall: its top follows
-    // the height the card took last frame, and its body scrolls past that.
+    // the view's bottom instead, as wide as the view and at most half as tall: it stands on the
+    // bottom with the height it took last frame with its whole body shown, its top never above
+    // the view's middle, and its body scrolls past that. Before its first frame it has the whole
+    // lower half, so its first measure is of its contents and not of the room it was given.
     let along_bottom = crate::small_window::card_at_bottom(ctx.content_rect().width(), placement.width(), card_width(&d));
+    let full_height = crate::ui_kit::Panel::last_full_height(ctx, card_id);
     let top = if along_bottom {
         let gap = crate::ui_kit::Container::for_layout(app.ui.layout, crate::ui_kit::Surface::Feature).gap();
-        let height = app.viewport.dialog_rect.map_or(0.0, |r| r.height());
-        (placement.bottom() - gap - height).max(placement.center().y)
+        (placement.bottom() - gap - full_height.unwrap_or(f32::INFINITY)).max(placement.center().y)
     } else {
         crate::shell::panel_top(app, placement, placement.bottom(), side)
     };
@@ -4429,8 +4432,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     );
     let grow_key = egui::Id::unique(("sc_dialog_label_grow", raw_title));
     let label_grow = ctx.data(|data| data.get_temp::<f32>(grow_key)).unwrap_or(0.0).min((vp.width() - t.space_24 - card_width(&d)).max(0.0));
-    let panel = crate::ui_kit::Panel::new(&heading, egui::Id::unique(("sc_dialog", title_of(&d))), anchor, drag_bounds, side, frame)
-        .actions(ok_label, close_label);
+    let panel = crate::ui_kit::Panel::new(&heading, card_id, anchor, drag_bounds, side, frame).actions(ok_label, close_label);
     let max_width = (docked.x - drag_bounds.left()).max(crate::frame::DIALOG_MIN_W);
     // The configuration table's card is resized by its edges, like the Parameters card (T-693).
     let sized = matches!(d.kind, Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })).then_some(CONFIGURATIONS_SIZE);
@@ -4452,7 +4454,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut resize = crate::card_resize::Resize::None;
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
-        let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::unique(("sc_dialog", title_of(&d))), "delete", &heading)
+        let (closed, action) = crate::ui_kit::Confirm::new(card_id, "delete", &heading)
             .tone(crate::ui_kit::Tone::Danger)
             .actions("Delete", "Cancel", None)
             .detail(&detail)
@@ -4555,6 +4557,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         }
         app.viewport.corner_ok = ok_enabled;
+    }
+    // A card on the bottom edge stood on last frame's height: when this frame's differs by more
+    // than a point, the next frame stands it on the edge again.
+    if along_bottom
+        && let Some(now) = crate::ui_kit::Panel::last_full_height(ctx, card_id)
+        && full_height.is_none_or(|before| (before - now).abs() > 1.0)
+    {
+        ctx.request_repaint();
     }
     if let Some(r) = app.viewport.dialog_rect {
         crate::scenario::publish_rect("dialog:outer", r);
