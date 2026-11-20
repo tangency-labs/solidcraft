@@ -2021,6 +2021,13 @@ pub(crate) fn cover_joined_faces(
         else {
             continue;
         };
+        // UNPROVED fallback (#18166): a bound the B-rep check refuses as an edge tolerance
+        // is the enclosure's limit, not a distance to raise to (`create_cylindrical_box` at
+        // radius 1e4, thickness 1e-3: 3.49 for a joined arc, B-rep tolerance 1e-5). The edge
+        // is left as upstream leaves it, not proved to cover the face.
+        if !within_edge_tolerance_limit(b, gap) {
+            continue;
+        }
         settle.push((f, f64::INFINITY));
         if gap > tol {
             crate::topology::edge::set_tolerance(b, e, gap, true, true)?;
@@ -2045,7 +2052,8 @@ pub(crate) fn cover_joined_faces(
 /// (`keep_trim_covered`), but a trim the operation was given is bounded only here
 /// (`primitive.api_primitives` gen1108: a line 5.5e8 long, raised to 1.17e-5 for its
 /// trimless face, with a trim bounded at 2.8e-5 under the tolerance of 1e-5 it came with).
-/// A trim whose bound is not enclosed is left as upstream leaves it.
+/// A trim whose bound is not enclosed, or is past the B-rep check's limit
+/// ([`within_edge_tolerance_limit`]), is left as upstream leaves it.
 ///
 /// # Errors
 ///
@@ -2058,7 +2066,9 @@ fn cover_raised_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
             continue;
         };
         if let Some(bound) = raised_trim_bound(k, b, x, trim, tol)? {
-            if bound.is_finite() && bound > reach {
+            // (UNPROVED fallback, as [`cover_joined_faces`]: a bound past the B-rep check's
+            // limit is the enclosure's, and that trim is left as upstream leaves it)
+            if bound.is_finite() && bound > reach && within_edge_tolerance_limit(b, bound) {
                 reach = bound;
             }
         }
@@ -2296,7 +2306,12 @@ fn settle_face_bounds(k: &Kernel, b: &mut Brep, e: EdgeId, faces: &[(FaceId, f64
         for &(f, reach) in faces {
             let tol = b.edge(e)?.tolerance;
             match edge_face_gap_bound(k, b, e, f, tol, [tol, f64::INFINITY])? {
-                Some(again) if again.is_finite() && again > tol && again < reach => {
+                Some(again)
+                    if again.is_finite()
+                        && again > tol
+                        && again < reach
+                        && within_edge_tolerance_limit(b, again) =>
+                {
                     crate::topology::edge::set_tolerance(b, e, again, true, true)?;
                     raised = true;
                 }
