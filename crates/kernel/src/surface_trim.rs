@@ -4,9 +4,7 @@
 //! when one stops short of the other.
 
 use solidcore_record::Vec3;
-use std::collections::BTreeSet;
-
-use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
+use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
@@ -98,18 +96,12 @@ pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> 
     Ok(crate::record::after(trimmed, &split, &crate::record::counts(&[body])))
 }
 
-/// Most bodies one [`stop_at_bodies`] cuts with.
-const MAX_STOP_BODIES: usize = 10_000;
-
-/// Where along each cut edge [`stop_at_bodies`] checks which side of it a kept piece lies on,
-/// as fractions of the edge's interval.
-const SIDE_SAMPLES: [f64; 7] = [0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875];
-
 /// The walls of a surface extrude (`walls`, swept along `along`) cut where they first run into
-/// `bodies`: each body's faces exactly as they are, bounded where they end and never extended
-/// (SMLib's imprint of each body in turn). The pieces kept are those joined to the walls'
-/// start, without crossing an edge a body cut: `starts` are corners of the walls at their
-/// start, one on each chain. Mesh bodies and bodies apart from the walls cut nothing.
+/// `bodies`, as solidcore-ops does it ([`solidcore_ops::stop::stop_at_bodies`]): each body's
+/// faces exactly as they are, bounded where they end and never extended, imprinted on the walls
+/// in turn. The pieces kept are those joined to the walls' start, without crossing an edge a
+/// body cut: `starts` are corners of the walls at their start, one on each chain. Mesh bodies
+/// and bodies apart from the walls cut nothing.
 ///
 /// Each kept piece must lie on the start side of every cut edge that bounds it, so it stops
 /// where it first meets a body all along. A piece that runs on past a body beside it (a body
@@ -120,141 +112,39 @@ const SIDE_SAMPLES: [f64; 7] = [0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875];
 /// Each kept face is the face of `walls` it is a piece of: the history is over `[walls]`, as
 /// [`trim_keep`]'s.
 pub fn stop_at_bodies(walls: &Body, bodies: &[&Body], starts: &[Vec3], along: Vec3) -> Result<(Body, bool)> {
-    const NAME: &str = "SMLib imprint of the bodies in the walls' way";
+    const NAME: &str = "the imprint of the bodies in the walls' way";
     let _span = solidcraft_profile::span("kernel", "stop_at_bodies");
     walls.require_brep("trim")?;
     TrimKeep::Regions(starts).check()?;
-    if bodies.len() > MAX_STOP_BODIES {
-        return Err(KernelError::Invalid(format!("too many bodies in the walls' way (at most {MAX_STOP_BODIES})")));
-    }
     let along = along.normalized().filter(|a| a.is_finite()).ok_or_else(|| KernelError::Invalid("the walls' direction has no length".into()))?;
-    let failed = |e: solidcraft_smlib::Error| KernelError::smlib(NAME, e);
-    let lost = |what: &str| KernelError::Failed(format!("{NAME}: {what}"));
-    let (mut cur, order) = crate::native::smlib_body_ordered(walls)?;
-    let order = order.ok_or_else(|| lost("SMLib numbers the walls' faces unlike their record"))?;
-    let [faces, edges, _] = cur.counts().map_err(failed)?;
-    // Each SMLib face of `cur`: the face of `walls` it is a piece of. Each SMLib edge: whether
-    // a body's cut made it (or a piece of it).
-    let canonical = |list: &[usize], i: usize| if list.is_empty() { Some(i) } else { list.get(i).copied() };
-    let mut face_of: Vec<usize> =
-        (0..faces).map(|i| canonical(&order.faces, i)).collect::<Option<_>>().ok_or_else(|| lost("a face is not numbered"))?;
-    let mut cut = vec![false; edges];
-    let mut met = false;
+    let no_form = || KernelError::Failed(format!("{NAME}: a body has no solidcore form"));
+    let (ops, order) = walls.ops_body().ok_or_else(no_form)?;
+    let mut tools = Vec::new();
     for b in bodies {
         if b.is_mesh() || crate::apart(walls, b)? {
             continue;
         }
-        let tool = b.smlib()?.tagged(1).map_err(failed)?;
-        let Some(r) = cur.tagged(0).map_err(failed)?.imprint(&tool).map_err(failed)? else { continue };
-        let raw = r.history().map_err(failed)?;
-        face_of = raw
-            .faces
-            .iter()
-            .map(|f| f.origins.iter().find(|(k, _)| *k == 0).and_then(|(_, i)| face_of.get(*i).copied()))
-            .collect::<Option<_>>()
-            .ok_or_else(|| lost("a piece comes from no face of the walls"))?;
-        // New where the faces met; a piece of a cut edge, or of the body's own edge, is a cut too.
-        cut = raw
-            .edges
-            .iter()
-            .map(|e| e.origins.is_empty() || e.origins.iter().any(|&(k, i)| k != 0 || cut.get(i).copied().unwrap_or(false)))
-            .collect();
-        cur = r;
-        met = true;
+        tools.push(&b.ops_body().ok_or_else(no_form)?.0);
     }
-    if !met {
+    if tools.is_empty() {
         return Ok((walls.clone(), false));
     }
-    let (split, order) = crate::native::body_from_smlib_ordered(&cur)?;
-    let order = order.ok_or_else(|| lost("the imprinted walls cannot be numbered"))?;
-    let split = split.with_color(walls.color());
-    let rec = split.record();
-    let n = rec.faces.len();
-    // In the record's order: the walls' face each face is a piece of, and the edges cut.
-    let mut from = vec![None; n];
-    for (i, f) in face_of.iter().enumerate() {
-        let slot = canonical(&order.faces, i).and_then(|c| from.get_mut(c)).ok_or_else(|| lost("a face lies outside the walls"))?;
-        *slot = Some(*f);
+    let starts: Vec<[f64; 3]> = starts.iter().map(|s| [s.x, s.y, s.z]).collect();
+    let stop = || solidcore_ops::stop::stop_at_bodies(ops, order, &tools, &starts, [along.x, along.y, along.z]);
+    let stopped = match solidcraft_smlib::stop::token() {
+        Some(token) => solidcore_ops::cancel::within(&token, stop),
+        None => stop(),
     }
-    let from: Vec<usize> = from.into_iter().collect::<Option<_>>().ok_or_else(|| lost("a face of the imprint is not numbered"))?;
-    let mut made = vec![false; rec.edges.len()];
-    for i in cut.iter().enumerate().filter(|(_, c)| **c).map(|(i, _)| i) {
-        if let Some(slot) = canonical(&order.edges, i).and_then(|k| made.get_mut(k)) {
-            *slot = true;
-        }
-    }
-    for p in &order.pieces {
-        if cut.get(p.edge).copied().unwrap_or(false)
-            && let Some(slot) = made.get_mut(p.canonical)
-        {
-            *slot = true;
-        }
-    }
-    // Regions: the faces that hang together across edges no cut made.
-    let mut parent: Vec<usize> = (0..n).collect();
-    fn root(parent: &[usize], mut i: usize) -> usize {
-        while let Some(&p) = parent.get(i).filter(|p| **p != i) {
-            i = p;
-        }
-        i
-    }
-    for (e, edge) in rec.edges.iter().enumerate() {
-        if made.get(e).copied().unwrap_or(true) {
-            continue;
-        }
-        let faces: Vec<usize> = edge.uses.iter().map(|u| u.face as usize).collect();
-        for pair in faces.windows(2) {
-            let (a, b) = (root(&parent, pair[0]), root(&parent, pair[1]));
-            if let Some(slot) = parent.get_mut(a.max(b)) {
-                *slot = a.min(b);
-            }
-        }
-    }
-    // The regions holding a start: those of the faces whose edges end at a start corner.
-    let accept = rec.edges.iter().map(|e| e.tolerance).fold(rec.tolerance, f64::max).max(split.size() * 1e-9) * 10.0;
-    let at_start = |v: u32| rec.vertices.get(v as usize).is_some_and(|v| starts.iter().any(|s| crate::body::v3(v.point).dist(*s) <= accept));
-    let mut wanted = BTreeSet::new();
-    for edge in rec.edges.iter().filter(|e| e.vertices.iter().any(|v| at_start(*v))) {
-        wanted.extend(edge.uses.iter().map(|u| root(&parent, u.face as usize)));
-    }
-    if wanted.is_empty() {
-        return Err(lost("no piece of the walls holds their start"));
-    }
-    let kept: Vec<bool> = (0..n).map(|f| wanted.contains(&root(&parent, f))).collect();
-    // A kept piece lies on the start side of each cut edge bounding it: into the face, across
-    // the edge, it runs back against `along`, never on with it.
-    for face in rec.faces.iter().zip(&kept).filter(|(_, k)| **k).map(|(face, _)| face) {
-        let surface = SurfaceEval::new(face.parameters()).map_err(|e| lost(&format!("a face's surface: {e}")))?;
-        let uses = face.loops.iter().flat_map(|l| match l {
-            solidcore_record::brep::Loop::Edges { edges } => edges.as_slice(),
-            solidcore_record::brep::Loop::Vertex { .. } => &[],
-        });
-        for u in uses.filter(|u| made.get(u.edge as usize).copied().unwrap_or(false)) {
-            let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
-            let curve = CurveEval::new(edge.parameters()).map_err(|e| lost(&format!("a cut edge's curve: {e}")))?;
-            let [t0, t1] = edge.interval;
-            for s in SIDE_SAMPLES {
-                let t = t0 + (t1 - t0) * s;
-                let (Some(p), Some(d)) = (curve.point(t), crate::blend::curve_derivative(edge.parameters(), t)) else { continue };
-                let Some([su, sv]) = surface.project(p, None, accept).and_then(|uv| surface.derivs(uv[0], uv[1])).map(|(_, su, sv)| [su, sv]) else {
-                    continue;
-                };
-                // The face lies to the left of its loop seen from its surface's natural normal.
-                let ahead = if u.forward { d } else { d * -1.0 };
-                let Some(into) = su.cross(sv).cross(ahead).normalized() else { continue };
-                if into.dot(along) > 1e-6 {
-                    return Err(KernelError::Invalid(
-                        "not supported yet: part of a wall runs on past the side of a body in its way (the body covers only part of the wall)".into(),
-                    ));
-                }
-            }
-        }
-    }
-    let dropped: Vec<usize> = kept.iter().enumerate().filter(|(_, k)| !**k).map(|(i, _)| i).collect();
-    let faces: Vec<_> = from.iter().map(|f| crate::record::from_face(0, *f, crate::history::Change::Kept)).collect();
-    let split = crate::record::attach(split, &crate::record::counts(&[walls]), Some(faces), &[]);
-    let trimmed = if dropped.is_empty() { split.clone() } else { crate::remove_faces(&split, &dropped)? };
-    Ok((crate::record::after(trimmed, &split, &crate::record::counts(&[walls])), true))
+    .map_err(|e| match e {
+        solidcore_ops::Error::Unsupported(_) | solidcore_ops::Error::Argument => KernelError::Invalid(e.to_string()),
+        // a panic the session caught stays the kernel's internal error, as SMLib's do
+        solidcore_ops::Error::Internal(m) => KernelError::Internal(format!("{NAME}: {m}")),
+        e => KernelError::Failed(format!("{NAME}: {e}")),
+    })?;
+    let Some(stopped) = stopped else { return Ok((walls.clone(), false)) };
+    let kept = Body::from_record(stopped.record)?.with_color(walls.color());
+    let faces = stopped.from.iter().map(|f| crate::record::from_face(0, *f, crate::history::Change::Kept)).collect();
+    Ok((crate::record::attach(kept, &crate::record::counts(&[walls]), Some(faces), &[]), true))
 }
 
 /// The side of the tool each face of `body` (in its face order) lies on: the tool's field at a
