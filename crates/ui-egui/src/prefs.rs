@@ -1166,10 +1166,6 @@ preference_settings! {
     /// C for Cancel (#9841). Off by default: typing does nothing to the buttons, as before.
     /// A letter that fits two buttons does nothing, and a focused text field keeps the keystroke.
     dialog_first_letter_buttons: bool = false, PAGE_GENERAL => check_id("prefs.dialog_first_letter_buttons");
-    /// In Parameters, Name, Expression and Value stop growing at about their default width, and
-    /// Comment takes the rest of a wider window, with no divider (#18846). Off: the four columns
-    /// share extra width by weight and Comment keeps its divider and dragged width, as before.
-    params_comment_fills: bool = true, PAGE_GENERAL => check_id_help("prefs.params_comment_fills", "prefs.params_comment_fills_help");
     /// The upright orbit stands a rolled view up as the pointer moves, turning the way the
     /// pointer goes on screen (#12458). Off: a rolled view keeps its roll and turns about the
     /// world's up axis, as before, so an upside-down view stays upside down.

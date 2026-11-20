@@ -18,19 +18,16 @@ pub struct Column<'a> {
     frozen: bool,
     /// The widest a shared column grows before the rest of the width goes to the other columns.
     max: Option<f32>,
-    /// The window, not a divider, sizes this column: it has no divider and ignores a stored width.
-    fills: bool,
 }
 
 impl<'a> Column<'a> {
     pub fn new(label: &'a str, width: f32) -> Self {
-        Self { label, width, min_content_width: 0.0, icon_only: false, flexible: false, manual: None, frozen: false, max: None, fills: false }
+        Self { label, width, min_content_width: 0.0, icon_only: false, flexible: false, manual: None, frozen: false, max: None }
     }
 
-    /// Hold the column at a width the user chose by dragging its header divider. A `fills`
-    /// column ignores it.
+    /// Hold the column at a width the user chose by dragging its header divider.
     pub fn manual_width(mut self, width: Option<f32>) -> Self {
-        self.manual = width.filter(|w| !self.fills && w.is_finite() && *w > 0.0);
+        self.manual = width.filter(|w| w.is_finite() && *w > 0.0);
         self
     }
 
@@ -39,15 +36,6 @@ impl<'a> Column<'a> {
     /// minimum keeps that minimum.
     pub fn max_width(mut self, width: Option<f32>) -> Self {
         self.max = width.filter(|w| w.is_finite() && *w > 0.0);
-        self
-    }
-
-    /// Let the window alone size this column: it keeps taking its share whatever the user drags,
-    /// has no header divider, and ignores a width stored for it earlier. For the flexible column
-    /// meant to take a wider window's spare width (with the others capped by `max_width`).
-    pub fn fills(mut self) -> Self {
-        self.fills = true;
-        self.manual = None;
         self
     }
 
@@ -292,7 +280,7 @@ impl Table<'_> {
                 },
             );
             solidcraft_ui_registry::publish_rect(&format!("dialog:column:{}:{}", self.id, column.label), cell);
-            if index + 1 < self.columns.len() && !column.fills && clip_left.is_none_or(|x| cell.right() > x) {
+            if index + 1 < self.columns.len() && clip_left.is_none_or(|x| cell.right() > x) {
                 dividers.push((index, cell.right() + t.space_8 * 0.5));
             }
             left = at.right() + t.space_8;

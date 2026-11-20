@@ -487,33 +487,40 @@ fn a_cap_never_takes_a_column_under_its_content_minimum() {
     assert!((widths[0] - 200.0).abs() <= 0.5, "{widths:?}");
 }
 
+/// A column dragged to a width holds it whatever the table's width, while capped columns beside
+/// it still stop at their caps and an undragged column takes the rest.
 #[test]
-fn a_filling_column_ignores_a_stored_width_and_keeps_taking_the_spare_width() {
-    let columns =
-        |stored| [Column::new("Name", 1.0).flex().manual_width(Some(120.0)), Column::new("Comment", 1.0).flex().manual_width(stored).fills()];
+fn a_dragged_column_holds_its_width_beside_capped_columns() {
+    let columns = |stored| {
+        [
+            Column::new("Name", 1.0).flex().max_width(Some(120.0)),
+            Column::new("Comment", 1.0).flex().manual_width(stored),
+            Column::new("Notes", 1.0).flex(),
+        ]
+    };
     let wide = widths_at(&columns(Some(300.0)), 800.0);
     let wider = widths_at(&columns(Some(300.0)), 1000.0);
-    // A width stored before the column filled (an older release's drag) changes nothing.
-    assert_eq!(wide, widths_at(&columns(None), 800.0));
-    assert!((wider[1] - wide[1] - 200.0).abs() <= 1.0, "{wide:?} then {wider:?}");
-    // A plain dragged column still holds its width whatever the table's width.
-    assert_eq!(wide[0], wider[0]);
-    // Without fills a dragged column is fixed, as before.
-    let fixed = [Column::new("Comment", 1.0).flex().manual_width(Some(300.0))];
-    assert!((widths_at(&fixed, 1000.0)[0] - 300.0).abs() <= 0.5);
+    assert!((wide[1] - 300.0).abs() <= 0.5 && (wider[1] - 300.0).abs() <= 0.5, "{wide:?} then {wider:?}");
+    assert!((wide[0] - 120.0).abs() <= 0.5 && (wider[0] - 120.0).abs() <= 0.5, "{wide:?} then {wider:?}");
+    assert!((wider[2] - wide[2] - 200.0).abs() <= 1.0, "the undragged column takes the extra width: {wide:?} then {wider:?}");
+    // Without a stored width, Comment shares again.
+    let auto = widths_at(&columns(None), 1000.0);
+    assert!((auto[1] - auto[2]).abs() <= 1.0, "{auto:?}");
 }
 
+/// Every column but the last keeps its header divider, capped or not.
 #[test]
-fn a_filling_column_has_no_divider_and_the_others_keep_theirs() {
+fn capped_columns_keep_their_dividers() {
     let ctx = crate::test_support::context();
-    let columns = [Column::new("Name", 1.0).flex(), Column::new("Comment", 1.0).flex().fills(), Column::new("Actions", 0.0).icon_only()];
-    let key = egui::Id::unique("fill_dividers");
+    let columns =
+        [Column::new("Name", 1.0).flex().max_width(Some(120.0)), Column::new("Comment", 1.0).flex(), Column::new("Actions", 0.0).icon_only()];
+    let key = egui::Id::unique("capped_dividers");
     for _ in 0..2 {
         harness::frame(&ctx, vec![], |ui| {
             ui.set_width(600.0);
-            table_custom(ui, "filldiv", &columns, "Empty", |ui, table| table.headers_resizable(ui, key, |_, _| false));
+            table_custom(ui, "capdiv", &columns, "Empty", |ui, table| table.headers_resizable(ui, key, |_, _| false));
         });
     }
-    assert!(registry::rect_of("dialog:column_divider:filldiv:0").is_some(), "Name keeps its divider");
-    assert!(registry::rect_of("dialog:column_divider:filldiv:1").is_none(), "Comment has none");
+    assert!(registry::rect_of("dialog:column_divider:capdiv:0").is_some(), "Name keeps its divider");
+    assert!(registry::rect_of("dialog:column_divider:capdiv:1").is_some(), "Comment keeps its divider");
 }

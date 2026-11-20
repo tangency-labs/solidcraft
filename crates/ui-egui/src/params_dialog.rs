@@ -594,19 +594,16 @@ impl ui_kit::GridSource for ParamGrid<'_> {
         let units = UNITS.iter().map(|u| unit_label(u).to_owned()).collect();
         // Name keeps a larger share and a shared content floor so long identifiers stay readable
         // and every section's columns line up (#8533, #8551 review).
-        // With the preference on, Name, Expression and Value stop at about their width in the
-        // default card, so a wider window goes to Comment, which has no divider: the window sizes
-        // it (#18846). Off: the four columns share extra width by weight, as before.
-        let fills = self.app.preferences.params_comment_fills;
-        let cap = |column: GridColumn, max: f32| if fills { column.max_width(max) } else { column };
-        let comment = GridColumn::new("comment", "Comment", 1.0, CellKind::Text).flex().edit_on_click();
+        // Name, Expression and Value stop at about their width in the default card, so a wider
+        // window goes to Comment (#18846). Comment's header divider still sets a width, which the
+        // grid keeps with the other dragged widths; a double-click returns it to automatic.
         vec![
             GridColumn::new("favorite", "", 0.0, CellKind::Custom).min_content_width(t.space_24 * 3.0),
-            cap(GridColumn::new("name", "Name", 2.0, CellKind::Text).flex().min_content_width(self.name_floor), t.form_card_width * 0.75),
+            GridColumn::new("name", "Name", 2.0, CellKind::Text).flex().min_content_width(self.name_floor).max_width(t.form_card_width * 0.75),
             GridColumn::new("unit", "Unit", 0.65, CellKind::Choice(units)).min_content_width(self.unit_width),
-            cap(GridColumn::new("expression", "Expression", 1.5, CellKind::Expression).flex().edit_on_click(), t.form_card_width * 0.75),
-            cap(GridColumn::new("value", "Value", 1.1, CellKind::ReadOnly).flex(), t.form_card_width * 0.5),
-            if fills { comment.fills() } else { comment },
+            GridColumn::new("expression", "Expression", 1.5, CellKind::Expression).flex().edit_on_click().max_width(t.form_card_width * 0.75),
+            GridColumn::new("value", "Value", 1.1, CellKind::ReadOnly).flex().max_width(t.form_card_width * 0.5),
+            GridColumn::new("comment", "Comment", 1.0, CellKind::Text).flex().edit_on_click(),
             GridColumn::new("actions", "Actions", 0.0, CellKind::Custom).icon_only().min_content_width(ui_kit::table_row_height()),
         ]
     }
@@ -2779,27 +2776,48 @@ mod tests {
         assert!((fav.x - user.x).abs() < 1.0, "Expression columns lined up: favorites {fav:?} user {user:?}");
     }
 
+    /// #18846 (a wider Parameters window widened every column a little and Comment least): past the
+    /// default card, extra width goes to Comment. Its header divider still sets its width, as in
+    /// the shared grid, and the dialog opens again at that width.
     #[test]
-    fn the_comment_column_takes_a_wide_window_unless_the_preference_is_off() {
-        let comment = |fills: bool| {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.app.preferences.params_comment_fills = fills;
-            h.call("ui.resize", json!({"width": 1600, "height": 1200}));
-            h.app.run("parameters.add", json!({"name": "wall", "expression": "1.2 mm", "comment": "Wall thickness"})).unwrap();
-            // A card dragged far wider than its default, so the column caps are reached.
-            h.ctx.data_mut(|m| m.insert_persisted(width_id(), 1400.0_f32));
+    fn a_wider_card_widens_comment_and_a_dragged_comment_width_is_remembered() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+        h.app.run("parameters.add", json!({"name": "wall", "expression": "1.2 mm", "comment": "Wall thickness"})).unwrap();
+        let heading = |label: &str| {
+            solidcraft_ui_registry::rects("dialog:column:").into_iter().find(|(name, _)| name.ends_with(&format!(":{label}"))).expect("heading")
+        };
+        let open = |h: &mut crate::scenario::Harness| {
             h.app.start("parameters.change");
             h.frames(6);
-            let (_, width) =
-                solidcraft_ui_registry::rects("dialog:column:").into_iter().find(|(name, _)| name.ends_with(":Comment")).expect("Comment heading");
-            let divider = solidcraft_ui_registry::handles("dialog:column_divider:").iter().any(|(name, _)| name.ends_with(":5"));
-            (width.width(), divider)
         };
-        let (on, on_divider) = comment(true);
-        let (off, off_divider) = comment(false);
-        assert!(!on_divider && off_divider, "Comment keeps its divider only with the preference off");
-        assert!(on > off + 10.0, "the preference gives Comment the extra width: on {on}, off {off}");
+        open(&mut h);
+        let (_, comment) = heading("Comment");
+        let (_, name) = heading("Name");
+        let default_card = crate::scenario::rect_of("dialog:header").expect("card header").width();
+        h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
+        h.frames(2);
+
+        // A card dragged much wider than its default: Comment takes nearly all of the extra width.
+        h.ctx.data_mut(|m| m.insert_persisted(egui::Id::unique(SIZE.width), default_card + 500.0));
+        open(&mut h);
+        let (table, wide) = heading("Comment");
+        assert!(wide.width() > comment.width() + 300.0, "Comment widens with the card: {comment:?} -> {wide:?}");
+        assert!(heading("Name").1.width() < name.width() + 100.0, "Name stops near its default width");
+
+        // Comment's divider (column 5, before Actions) sets its width, and the width is kept.
+        let id = table.trim_start_matches("dialog:column:").trim_end_matches(":Comment").to_owned();
+        let divider = crate::scenario::rect_of(&format!("dialog:column_divider:{id}:5")).expect("Comment has a divider");
+        h.step(&json!({"drag": [[divider.center().x, divider.center().y], [divider.center().x - 150.0, divider.center().y]]})).unwrap();
+        h.frames(3);
+        let dragged = heading("Comment").1;
+        assert!(dragged.width() < wide.width() - 100.0, "the drag narrowed Comment: {wide:?} -> {dragged:?}");
+        h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
+        h.frames(2);
+        open(&mut h);
+        let reopened = heading("Comment").1;
+        assert!((reopened.width() - dragged.width()).abs() < 1.0, "the dialog opens at the dragged width: {dragged:?} -> {reopened:?}");
     }
 
     #[test]
