@@ -525,10 +525,17 @@ impl NetSurface {
         }
         // A part past a knot line (`past_one_low_line`) is enclosed on the kept side's
         // polynomial `S~` continued, while point values (`lk` 0, the pieces' ends) are the
-        // surface's own `S`: `|C - S~(W)|` at an end is at most `|C - S(W)|` plus
-        // `sup |S - S~|` over that part, which is added (for an offset across a join where
-        // its base is not C^1, the offset's jump there). So `dist(C, S)` along a piece is at
-        // most the ends' gap, the term, this and the overshoot's slack (#18219 review).
+        // surface's own `S`. Along a piece, with `J = sup |S - S~|` over that part (for an
+        // offset across a join where its base is not C^1, the offset's jump there),
+        // `g = C - S(W)` is `g~ - e`, `g~ = C - S~(W)` and `e = S(W) - S~(W)`, `|e| <= J`
+        // (0 off the part). The term bounds `g~` against its ends' chord `ℓ~`, and
+        // `ℓ~ = ℓ - ℓe` (the chords of `g` and of `e`), so
+        // `|g(t)| <= |ℓ(t)| + |g~(t) - ℓ~(t)| + |e(t) - ℓe(t)| <= ends + term + 2 J`,
+        // `|ℓ(t)|` at most the ends' gap and `|e - ℓe|` at most `J + J` (the Lipschitz and
+        // corner paths alike: `|g(t)| <= |g(a)| + |g~(t) - g~(a)| + |e(t)| + |e(a)|`). That
+        // is the gap to the image point `S(W(t))` itself, on the face's own sheet, as
+        // `trim_image_gap_bound` promises, so `2 J` is added (#18219 review; one `J` bounds
+        // only the distance to the surface's closure, which may be the kept side's sheet).
         if lk >= 1 {
             let mut jump = 0.0_f64;
             // (a mean-value form about the part's middle `m`: `S - S~` over the part lies in
@@ -571,7 +578,7 @@ impl NetSurface {
                     }
                 }
             }
-            slack = (Ivl::from(slack) + Ivl::from(jump)).hi;
+            slack = (Ivl::from(slack) + Ivl::from(2.0) * Ivl::from(jump)).hi;
         }
         Ok((out, slack))
     }
@@ -3962,6 +3969,112 @@ mod tests {
         assert!(net.partials(&[box_at(1.0 + 1.5 * e)], 1, 1).is_err());
     }
 
+    /// The bound is to the image `S(W)` itself, not only to the surface's closure (#18219
+    /// review, CodeRabbit), end to end: the base is flat for `u <= 1` and past it (degree 1
+    /// in `u`, a C^0 join) tilts by `+10` degrees at `v = 0` and `v = 1` but by `-10`
+    /// degrees at `v = 1/2` (its far row quadratic in `v`), offset by `d = 5`. The trim is at
+    /// `u = 1.0005`, just past the join, at both ends and at `v* = 1/2` (an interior point of
+    /// the one piece), and dips to about `0.97` between. Its curve is the flat sheet's plane
+    /// continued, moved so it meets the image at both ends: `C = S~(W) + D`. Over the part
+    /// past the join `g = C - S(W)` is `D - e` with `e = S(W) - S~(W)` the offset's jump,
+    /// `+e` at the ends and nearly `-e` at `v*`, so the gap there is near `2 |e|`, while the
+    /// ends' gap is 0: the bound must cover it. (Here the jump's enclosure over the
+    /// piece's wide `v` range is loose enough that one `sup |e|` would too; the slack itself
+    /// is checked against twice the jump where its enclosure is tight, in
+    /// `an_offset_across_its_bases_kink_has_twice_its_jump_in_the_slack`.)
+    #[test]
+    fn a_trim_past_its_bases_kink_is_bounded_to_its_image_point() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        use crate::surface::offset_surface::OffsetSurface;
+        let k = Kernel::default();
+        let (tilt, d) = (10.0_f64.to_radians().tan(), 5.0);
+        let rows = [
+            [[0.0, 0.0, 0.0], [0.0, 0.5, 0.0], [0.0, 1.0, 0.0]],
+            [[1.0, 0.0, 0.0], [1.0, 0.5, 0.0], [1.0, 1.0, 0.0]],
+            [[2.0, 0.0, tilt], [2.0, 0.5, -3.0 * tilt], [2.0, 1.0, tilt]],
+        ];
+        let net: Vec<Vec<CPoint>> = rows
+            .iter()
+            .map(|r| {
+                r.iter()
+                    .map(|&[x, y, z]| CPoint::new(x, y, z, NOW))
+                    .collect()
+            })
+            .collect();
+        let base = NurbSurface::new(
+            net,
+            1,
+            2,
+            vec![0.0, 0.0, 1.0, 2.0, 2.0],
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let base = Surface::from(BSplineSurface::from_nurb(base, false));
+        let surface = Surface::from(OffsetSurface::new(&k, d, base, true, 0).unwrap());
+        let s_at = |u: f64, v: f64| surface.evaluate_point(&k, Point2::new(u, v)).unwrap();
+        let flat = |u: f64, v: f64| Point3::new(u, v, d);
+        // the tilt at v* is the other way: the jump there is nearly opposite the ends'
+        let (e_end, e_mid) = (
+            s_at(1.0005, 0.0) - flat(1.0005, 0.0),
+            s_at(1.0005, 0.5) - flat(1.0005, 0.5),
+        );
+        assert!(e_end.dot(e_mid) < 0.0, "{e_end:?} {e_mid:?}");
+        let us = [1.0005, 1.0005, 0.97, 1.0005, 1.0005, 0.97, 1.0005, 1.0005];
+        let vs = [0.0, 0.1, 0.25, 0.45, 0.55, 0.75, 0.9, 1.0];
+        let knots = vec![
+            0.0,
+            0.0,
+            0.0,
+            1.0 / 6.0,
+            2.0 / 6.0,
+            0.5,
+            4.0 / 6.0,
+            5.0 / 6.0,
+            1.0,
+            1.0,
+            1.0,
+        ];
+        let trim_pts: Vec<Point3> = us
+            .iter()
+            .zip(vs)
+            .map(|(&u, v)| Point3::new(u, v, 0.0))
+            .collect();
+        let curve_pts: Vec<Point3> = us
+            .iter()
+            .zip(vs)
+            .map(|(&u, v)| flat(u, v) + e_end)
+            .collect();
+        let trim = Top::curve(&trim_pts, 2, knots.clone(), true);
+        let curve = Top::curve(&curve_pts, 2, knots, false);
+        let (cn, wn) = (
+            NurbsCurve::of(curve.b_spline_base().unwrap()).unwrap(),
+            NurbsCurve::of(trim.b_spline_base().unwrap()).unwrap(),
+        );
+        // the gap to the image point, sampled; at v* it is near twice the jump
+        let mut gap = 0.0_f64;
+        for i in 0..=1000 {
+            let t = f64::from(i) / 1000.0;
+            let w = trim.evaluate_point(&k, t).unwrap();
+            gap = gap.max((curve.evaluate_point(&k, t).unwrap() - s_at(w.x, w.y)).length());
+        }
+        let w_mid = trim.evaluate_point(&k, 0.5).unwrap();
+        assert!(w_mid.x > 1.0 && (w_mid.y - 0.5).abs() < 1e-12, "{w_mid:?}");
+        assert!(
+            gap > 1.5 * e_end.length(),
+            "{gap:e} against {:e}",
+            e_end.length()
+        );
+        let probes = [Point2::new(0.5, 0.5), Point2::new(1.5, 0.5)];
+        let net = NetSurface::of_exact(&k, &surface, &probes)
+            .unwrap()
+            .unwrap();
+        let (ends, rest) = piece_bound(&cn, &wn, &net, 0.0, 1.0)
+            .unwrap()
+            .expect("the piece is enclosed");
+        assert!(ends + rest >= gap, "{ends:e} + {rest:e} against {gap:e}");
+    }
+
     /// A short part past a low knot line holding another knot (#18219 review): a cubic
     /// net with a C^0 line at `1` and a simple knot at `1.01`. The short part `[1, 1.02]`
     /// would be two spans of the surface while its jump is enclosed on one, so it is not
@@ -4071,6 +4184,67 @@ mod tests {
             trim_image_gap_bound(&k, &surface, &curve, &trim, [0.0, 1.0], 1e-9).unwrap()
         {
             assert!(g >= lower, "{g:e} against at least {lower:e}");
+        }
+    }
+
+    /// The jump's deviation from its chord along a piece reaches twice its size (#18219
+    /// review, CodeRabbit): one way at a piece's ends, the other way at a point between, as
+    /// where the base's kink tilts one way at the ends' `v` and the other at that point's.
+    /// The bound to the image point `S(W)` (`g = g~ - e`, `e = S(W) - S~(W)`) needs
+    /// `|e - ℓe| <= 2 sup |e|` on top of the ends' gap and the term, so the slack holds twice
+    /// the jump: the flat-and-45-degree kink at `u = 1` offset by `0.5`, a box whose upper
+    /// part `[1, 1.02]` is past it, where the jump's enclosure is tight (it is the same all
+    /// along `v`). Without the second `J` the slack is about `0.39` against `0.77`.
+    #[test]
+    fn an_offset_across_its_bases_kink_has_twice_its_jump_in_the_slack() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        use crate::surface::offset_surface::OffsetSurface;
+        let k = Kernel::default();
+        let (c, sn, d) = (
+            std::f64::consts::FRAC_1_SQRT_2,
+            std::f64::consts::FRAC_1_SQRT_2,
+            0.5,
+        );
+        let net: Vec<Vec<CPoint>> = [[0.0, 0.0], [1.0, 0.0], [1.0 + c, sn]]
+            .iter()
+            .map(|&[x, z]| {
+                [0.0, 1.0]
+                    .iter()
+                    .map(|&y| CPoint::new(x, y, z, NOW))
+                    .collect()
+            })
+            .collect();
+        let base = NurbSurface::new(
+            net,
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 2.0, 2.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let base = Surface::from(BSplineSurface::from_nurb(base, false));
+        let surface = Surface::from(OffsetSurface::new(&k, d, base, true, 0).unwrap());
+        let probes = [Point2::new(0.5, 0.5), Point2::new(1.5, 0.5)];
+        let net = NetSurface::of_exact(&k, &surface, &probes)
+            .unwrap()
+            .unwrap();
+        let w = V3 {
+            x: Ivl::new(0.92, 1.02),
+            y: Ivl::new(0.4, 0.6),
+            z: Ivl::from(0.0),
+        };
+        let jump = (0..=20)
+            .map(|i| 1.0 + 0.001 * f64::from(i))
+            .map(|u| {
+                (surface.evaluate_point(&k, Point2::new(u, 0.5)).unwrap() - Point3::new(u, 0.5, d))
+                    .length()
+            })
+            .fold(0.0_f64, f64::max);
+        assert!(jump > 0.38, "{jump:e}");
+        for (lk, continuity) in [(1, 0), (2, 1)] {
+            let (_, slack) = net.partials(&[w], lk, continuity).unwrap();
+            assert!(slack >= 2.0 * jump, "{slack:e} against twice {jump:e}");
         }
     }
 }
