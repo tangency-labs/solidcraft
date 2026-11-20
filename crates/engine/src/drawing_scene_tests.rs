@@ -195,7 +195,10 @@ fn without_text(group: &Group) -> Group {
 fn border(s: &Session, sheet: u64) -> Vec<Group> {
     let d = s.drawing("test").unwrap();
     let record = d.sheets.iter().find(|x| x.id == sheet).unwrap();
-    record.border.as_ref().unwrap().layout(&record.sheet).unwrap().paper(sheet)
+    let mut groups = record.border.as_ref().unwrap().layout(&record.sheet).unwrap().paper(sheet);
+    // The frame's labels follow the lines of the drawing border's group (#20121).
+    groups[0].items.extend(labels(record).frame.into_iter().map(Item::Text));
+    groups
 }
 
 /// The box round the ends of `group`'s stroke pieces, and how long they are in all.
@@ -601,9 +604,7 @@ fn a_sheet_with_no_views_is_its_border() {
     let (mut s, _, _) = front_and_top();
     let second = run(&mut s, "drawing.sheet.add", json!({}))["sheet"].as_str().and_then(ids::decode).unwrap();
     let SheetScene { scene, views, .. } = built(&s, second);
-    // Its frame's labels aside (`a_sheets_frame_prints_its_zone_labels_and_size`).
-    let lines: Vec<Group> = scene.groups.iter().map(without_text).filter(|group| !group.items.is_empty()).collect();
-    assert_eq!((serde_json::to_string(&lines).unwrap(), views.len()), (serde_json::to_string(&border(&s, second)).unwrap(), 0));
+    assert_eq!((serde_json::to_string(&scene.groups).unwrap(), views.len()), (serde_json::to_string(&border(&s, second)).unwrap(), 0));
 }
 
 /// The text a scene's border groups print, run by run.
@@ -2987,7 +2988,12 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
 fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     let (s, sheet, [front, _]) = front_and_top();
     let d = s.drawing("test").unwrap().clone();
-    let record = sheet_of(&d, sheet).unwrap();
+    // On a sheet whose frame prints no labels: the font table is the dimensions' alone (the frame's
+    // zone letters and numbers would add their glyphs to it, #20121).
+    let record = &Sheet {
+        border: sheet_of(&d, sheet).unwrap().border.map(|b| DrawingBorderProfile { zone_labels: false, ..b }),
+        ..sheet_of(&d, sheet).unwrap().clone()
+    };
     let frame = ViewFrame::new(solidcore_record::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap();
     let view = Drawn {
         hatches: Vec::new(),

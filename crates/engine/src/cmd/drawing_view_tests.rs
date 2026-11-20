@@ -644,8 +644,8 @@ fn a_fit_with_no_block_is_the_borders() {
     }
 }
 
-/// The base view on a real sheet, its built-in block 180 x 49 mm on the border's lower-right corner
-/// (230 to 410 across, 10 to 59 up): at 2:1 the 100 x 20 view at (210, 70) would reach down to 50, so
+/// The base view on a real sheet, its built-in block 180 x 61 mm on the border's lower-right corner
+/// (230 to 410 across, 10 to 71 up): at 2:1 the 100 x 20 view at (210, 82) would reach down to 62, so
 /// it is 1:1, and listed as nothing. Over the block no scale will do, and that says so; with a scale
 /// given it goes there and is listed, as ever. A sheet with no block fits as the border says, however
 /// small, and a block the paper can't hold is refused where it's set.
@@ -653,9 +653,9 @@ fn a_fit_with_no_block_is_the_borders() {
 fn a_base_view_fits_around_the_sheets_block() {
     let mut s = block_drawing();
     run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": "built-in"}));
-    let (off, _) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [210, 70]}));
+    let (off, _) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [210, 82]}));
     assert_eq!(off["scale"]["text"], "1:1", "{off}");
-    assert_box(&off, [160.0, 60.0], [260.0, 80.0]);
+    assert_box(&off, [160.0, 72.0], [260.0, 92.0]);
     assert!(off.get("outside").is_none(), "{off}");
     let (roomy, _) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [210, 148.5]}));
     assert_eq!(roomy["scale"]["text"], "2:1", "{roomy}");

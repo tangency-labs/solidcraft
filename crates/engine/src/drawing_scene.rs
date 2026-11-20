@@ -1717,9 +1717,10 @@ fn assemble<D: Borrow<Drawn>>(
         }
         _ => None,
     };
-    // The frame's labels are the border's, after its lines.
-    if !text.frame.is_empty() {
-        border.push(Group { object: record.id, kind: ObjectKind::DrawingBorder, items: text.frame.iter().cloned().map(Item::Text).collect() });
+    // The frame's labels are the border's: its text follows the lines of the drawing border's own group,
+    // which a sheet with a border always has.
+    if let Some(first) = border.first_mut() {
+        first.items.extend(text.frame.iter().cloned().map(Item::Text));
     }
     let fonts = text.fonts.clone();
     // The border's groups are one object, measured before the images painted with them join them:
