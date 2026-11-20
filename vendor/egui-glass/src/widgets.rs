@@ -26,10 +26,7 @@ pub fn glass_shape_in(ctx: &egui::Context, rect: Rect, style: &GlassStyle) -> Sh
 }
 
 fn expand_margin(rect: Rect, m: Margin, sign: f32) -> Rect {
-    Rect::from_min_max(
-        rect.min - sign * egui::vec2(m.left as f32, m.top as f32),
-        rect.max + sign * egui::vec2(m.right as f32, m.bottom as f32),
-    )
+    Rect::from_min_max(rect.min - sign * egui::vec2(m.left as f32, m.top as f32), rect.max + sign * egui::vec2(m.right as f32, m.bottom as f32))
 }
 
 /// Flat widget visuals for controls sitting on glass: transparent idle
@@ -57,7 +54,11 @@ fn flat_visuals(ui: &mut Ui, style: &GlassStyle) {
 
 /// Text colour that reads on this glass: light on dark tints, else the theme's strong text.
 fn text_color(ui: &Ui, style: &GlassStyle) -> Color32 {
-    if style.is_dark() { Color32::WHITE } else { ui.visuals().strong_text_color() }
+    if style.is_dark() {
+        Color32::WHITE
+    } else {
+        ui.visuals().strong_text_color()
+    }
 }
 
 /// A glass container: card, section, sidebar, sheet.

@@ -57,8 +57,8 @@ mod widgets;
 pub use backdrop::{
     backdrop_rect, backdrop_size, free_native_texture_id, map_backdrop, register_native_texture, set_backdrop, show_backdrop, show_backdrop_mapped,
 };
-pub use live::LiveBackdrop;
 pub use context::{GlassContext, GlassError, GlassTexture};
+pub use live::LiveBackdrop;
 pub use live_quality::LiveBackdropQuality;
 pub use renderer::init;
 pub use scene::{init_scene_backdrop, scene_backdrop_shape, SceneBrightness, SceneLuma, SceneSource};

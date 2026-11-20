@@ -164,10 +164,7 @@ impl CallbackTrait for LiveCallback {
         }
         // Keep the original projection: rounding odd target sizes must not shift the page.
         let commands = res.renderer.update_buffers(device, queue, encoder, &frame.primitives, screen);
-        let clip_scale = egui::vec2(
-            w as f32 / screen.size_in_pixels[0] as f32,
-            h as f32 / screen.size_in_pixels[1] as f32,
-        ) / frame.quality.scale();
+        let clip_scale = egui::vec2(w as f32 / screen.size_in_pixels[0] as f32, h as f32 / screen.size_in_pixels[1] as f32) / frame.quality.scale();
         for primitive in &mut frame.primitives {
             primitive.clip_rect = Rect::from_min_max(
                 (primitive.clip_rect.min.to_vec2() * clip_scale).to_pos2(),

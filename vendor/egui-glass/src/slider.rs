@@ -79,35 +79,55 @@ impl<'a> GlassSlider<'a> {
     pub fn show(self, ui: &mut Ui) -> Response {
         let old_value = *self.value;
         let width = self.width.unwrap_or_else(|| ui.available_width()).max(64.0);
-        let mut response = ui.vertical(|ui| {
-            ui.set_width(width);
-            let header = ui.horizontal(|ui| {
-                let label = ui.label(&self.text);
-                let value = ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let span = (f64::from(*self.range.end()) - f64::from(*self.range.start())).abs();
-                    ui.add(egui::DragValue::new(self.value).range(self.range.clone())
-                        .speed(self.step.unwrap_or(span / 200.0)).max_decimals(3).suffix(&self.suffix))
-                }).inner;
-                value.labelled_by(label.id)
-            }).inner;
-            let mut response = ui.scope(|ui| {
-                // Keep egui's input and accessibility semantics while replacing only its paint.
-                ui.set_opacity(0.0);
-                ui.spacing_mut().slider_width = width;
-                ui.spacing_mut().interact_size.y = CONTROL_HEIGHT;
-                let mut slider = egui::Slider::new(self.value, self.range.clone()).show_value(false)
-                    .handle_shape(egui::style::HandleShape::Rect { aspect_ratio: THUMB_ASPECT_RATIO });
-                if let Some(step) = self.step { slider = slider.step_by(step); }
-                ui.add(slider)
-            }).inner;
-            response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), f64::from(*self.value), &self.text));
-            if ui.is_rect_visible(response.rect) {
-                self.paint(ui, &response);
-            }
-            if header.changed() { response.mark_changed(); }
-            response
-        }).inner;
-        if *self.value != old_value { response.mark_changed(); }
+        let mut response = ui
+            .vertical(|ui| {
+                ui.set_width(width);
+                let header = ui
+                    .horizontal(|ui| {
+                        let label = ui.label(&self.text);
+                        let value = ui
+                            .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let span = (f64::from(*self.range.end()) - f64::from(*self.range.start())).abs();
+                                ui.add(
+                                    egui::DragValue::new(self.value)
+                                        .range(self.range.clone())
+                                        .speed(self.step.unwrap_or(span / 200.0))
+                                        .max_decimals(3)
+                                        .suffix(&self.suffix),
+                                )
+                            })
+                            .inner;
+                        value.labelled_by(label.id)
+                    })
+                    .inner;
+                let mut response = ui
+                    .scope(|ui| {
+                        // Keep egui's input and accessibility semantics while replacing only its paint.
+                        ui.set_opacity(0.0);
+                        ui.spacing_mut().slider_width = width;
+                        ui.spacing_mut().interact_size.y = CONTROL_HEIGHT;
+                        let mut slider = egui::Slider::new(self.value, self.range.clone())
+                            .show_value(false)
+                            .handle_shape(egui::style::HandleShape::Rect { aspect_ratio: THUMB_ASPECT_RATIO });
+                        if let Some(step) = self.step {
+                            slider = slider.step_by(step);
+                        }
+                        ui.add(slider)
+                    })
+                    .inner;
+                response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), f64::from(*self.value), &self.text));
+                if ui.is_rect_visible(response.rect) {
+                    self.paint(ui, &response);
+                }
+                if header.changed() {
+                    response.mark_changed();
+                }
+                response
+            })
+            .inner;
+        if *self.value != old_value {
+            response.mark_changed();
+        }
         response
     }
 
@@ -128,12 +148,19 @@ impl<'a> GlassSlider<'a> {
         ui.painter().rect_filled(fill, 3.0, if ui.is_enabled() { accent } else { track_color });
         let style = crate::animation::interaction_style(ui, response, self.style, self.animate);
         if ui.is_enabled() {
-            paint_glass(ui, thumb, &GlassStyle {
-                tint: Color32::from_rgba_unmultiplied(255, 255, 255, 245),
-                specular: style.specular.min(0.12), border: style.border.min(0.08),
-                shadow: style.shadow.max(0.10), shadow_radius: 6.0, shadow_offset: 2.0,
-                ..style.capsule()
-            });
+            paint_glass(
+                ui,
+                thumb,
+                &GlassStyle {
+                    tint: Color32::from_rgba_unmultiplied(255, 255, 255, 245),
+                    specular: style.specular.min(0.12),
+                    border: style.border.min(0.08),
+                    shadow: style.shadow.max(0.10),
+                    shadow_radius: 6.0,
+                    shadow_offset: 2.0,
+                    ..style.capsule()
+                },
+            );
             ui.painter().rect_stroke(thumb, 255.0, Stroke::new(0.5, Color32::from_white_alpha(180)), StrokeKind::Inside);
         } else {
             ui.painter().rect_filled(thumb, 255.0, ui.visuals().widgets.noninteractive.bg_fill);

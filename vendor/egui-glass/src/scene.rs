@@ -129,7 +129,9 @@ impl SceneResources {
                     let mut luma = Vec::with_capacity(w * h);
                     for y in 0..h {
                         let row = &data[y * read.padded as usize..][..w * 4];
-                        luma.extend(row.chunks_exact(4).map(|p| (0.2126 * f32::from(p[0]) + 0.7152 * f32::from(p[1]) + 0.0722 * f32::from(p[2])) / 255.0));
+                        luma.extend(
+                            row.chunks_exact(4).map(|p| (0.2126 * f32::from(p[0]) + 0.7152 * f32::from(p[1]) + 0.0722 * f32::from(p[2])) / 255.0),
+                        );
                     }
                     *self.shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(SceneLuma { rect: read.rect, size: [w, h], luma });
                 }
@@ -147,7 +149,12 @@ impl SceneResources {
             }
             _ if self.frame % READ_EVERY == 0 => {
                 encoder.copy_texture_to_buffer(
-                    wgpu::TexelCopyTextureInfo { texture: &pyramid.texture, mip_level: read.level, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &pyramid.texture,
+                        mip_level: read.level,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
                     wgpu::TexelCopyBufferInfo {
                         buffer: &read.buffer,
                         layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(read.padded), rows_per_image: Some(read.size[1]) },
@@ -202,7 +209,8 @@ pub fn init_scene_backdrop(render_state: &RenderState) -> SceneBrightness {
     let device = &render_state.device;
     let mut renderer = render_state.renderer.write();
     let mipgen = renderer.callback_resources.get::<GlassResources>().map(|g| g.mipgen.clone()).expect("egui_glass::init must be called first");
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("egui_glass_scene"), source: wgpu::ShaderSource::Wgsl(BLIT.into()) });
+    let shader =
+        device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("egui_glass_scene"), source: wgpu::ShaderSource::Wgsl(BLIT.into()) });
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("egui_glass_scene"),
         entries: &[
@@ -224,8 +232,11 @@ pub fn init_scene_backdrop(render_state: &RenderState) -> SceneBrightness {
             },
         ],
     });
-    let pipeline_layout =
-        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("egui_glass_scene"), bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("egui_glass_scene"),
+        bind_group_layouts: &[Some(&layout)],
+        immediate_size: 0,
+    });
     let pipeline = |format| {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("egui_glass_scene"),

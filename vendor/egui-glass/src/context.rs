@@ -35,8 +35,14 @@ impl std::fmt::Display for GlassError {
         match self {
             Self::AlreadyInitialized => write!(f, "glass is already initialized on this renderer; reuse the existing GlassContext or legacy setup"),
             Self::UnsupportedSampleCount(samples) => write!(f, "MSAA sample count {samples} is unsupported for this renderer's target format"),
-            Self::InvalidImage { size, pixels } => write!(f, "invalid backdrop: {}x{} dimensions with {pixels} pixels; use nonzero dimensions and matching pixel storage", size[0], size[1]),
-            Self::ImageTooLarge { size, limit } => write!(f, "backdrop {}x{} exceeds the device's {limit}-pixel texture limit; resize it before uploading", size[0], size[1]),
+            Self::InvalidImage { size, pixels } => write!(
+                f,
+                "invalid backdrop: {}x{} dimensions with {pixels} pixels; use nonzero dimensions and matching pixel storage",
+                size[0], size[1]
+            ),
+            Self::ImageTooLarge { size, limit } => {
+                write!(f, "backdrop {}x{} exceeds the device's {limit}-pixel texture limit; resize it before uploading", size[0], size[1])
+            }
         }
     }
 }

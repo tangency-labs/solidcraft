@@ -33,9 +33,9 @@ struct Uniforms {
     light_dir: [f32; 2],
     max_lod: f32,
     backdrop_scale: f32,
-    corner_a: [f32; 4], // p, a, b, c
-    corner_b: [f32; 4], // d, r, theta3, 0
-    fill: [f32; 4],     // colour outside the backdrop rect
+    corner_a: [f32; 4],   // p, a, b, c
+    corner_b: [f32; 4],   // d, r, theta3, 0
+    fill: [f32; 4],       // colour outside the backdrop rect
     shadow_geo: [f32; 4], // offset, spread, reach, 0
 }
 
@@ -322,7 +322,11 @@ impl GlassCallback {
         // Color32 is premultiplied; the shader mixes towards straight colours.
         let unpremultiply = |c: egui::Color32| {
             let [r, g, b, a] = c.to_normalized_gamma_f32();
-            if a > 0.0 { [r / a, g / a, b / a, a] } else { [0.0; 4] }
+            if a > 0.0 {
+                [r / a, g / a, b / a, a]
+            } else {
+                [0.0; 4]
+            }
         };
         let tint = unpremultiply(s.tint);
         let light = egui::vec2(-0.45, -1.0).normalized();

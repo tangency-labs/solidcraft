@@ -59,13 +59,19 @@ mod tests {
         assert!(hover.brightness > base.brightness && hover.brightness < base.hovered().brightness);
         assert_eq!(hover.corner_radius, f32::INFINITY);
         assert_eq!(hover.blur, base.blur);
-        for n in 2..=12 { frame(&ctx, n as f64 * 0.02, Interaction::Hovered, 0.12); }
+        for n in 2..=12 {
+            frame(&ctx, n as f64 * 0.02, Interaction::Hovered, 0.12);
+        }
         assert_eq!(frame(&ctx, 0.26, Interaction::Hovered, 0.12), base.hovered());
         let press = frame(&ctx, 0.28, Interaction::Pressed, 0.12);
         assert!(press.brightness < base.hovered().brightness && press.brightness > base.pressed().brightness);
-        for n in 15..=26 { frame(&ctx, n as f64 * 0.02, Interaction::Pressed, 0.12); }
+        for n in 15..=26 {
+            frame(&ctx, n as f64 * 0.02, Interaction::Pressed, 0.12);
+        }
         assert_eq!(frame(&ctx, 0.54, Interaction::Pressed, 0.12), base.pressed());
-        for n in 28..=40 { frame(&ctx, n as f64 * 0.02, Interaction::Idle, 0.12); }
+        for n in 28..=40 {
+            frame(&ctx, n as f64 * 0.02, Interaction::Idle, 0.12);
+        }
         assert_eq!(frame(&ctx, 0.82, Interaction::Idle, 0.12), base);
     }
 

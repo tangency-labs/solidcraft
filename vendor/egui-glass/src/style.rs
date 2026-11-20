@@ -124,13 +124,7 @@ impl GlassStyle {
 
     /// Dark tinted glass for light content.
     pub const fn dark() -> Self {
-        Self {
-            tint: Color32::from_rgba_unmultiplied_const(0, 0, 0, 90),
-            brightness: 0.9,
-            specular: 0.5,
-            border: 0.5,
-            ..Self::regular()
-        }
+        Self { tint: Color32::from_rgba_unmultiplied_const(0, 0, 0, 90), brightness: 0.9, specular: 0.5, border: 0.5, ..Self::regular() }
     }
 
     /// Sets the corner radius in logical points; infinity requests a capsule.

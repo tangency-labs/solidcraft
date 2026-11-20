@@ -43,11 +43,8 @@ pub fn backdrop_rect(ctx: &Context) -> Option<Rect> {
 pub fn set_backdrop(ctx: &Context, render_state: &RenderState, image: &ColorImage) -> TextureId {
     let [w, h] = [image.size[0].max(1) as u32, image.size[1].max(1) as u32];
     let mut renderer = render_state.renderer.write();
-    let mipgen = renderer
-        .callback_resources
-        .get::<GlassResources>()
-        .map(|g| g.mipgen.clone())
-        .expect("egui_glass::init must be called before set_backdrop");
+    let mipgen =
+        renderer.callback_resources.get::<GlassResources>().map(|g| g.mipgen.clone()).expect("egui_glass::init must be called before set_backdrop");
     let pyramid = mipgen.create(&render_state.device, w, h, wgpu::TextureUsages::COPY_DST);
     let pixels: Vec<u8> = if image.pixels.is_empty() { vec![0; 4] } else { image.pixels.iter().flat_map(|c| c.to_array()).collect() };
     render_state.queue.write_texture(
@@ -66,19 +63,11 @@ pub fn set_backdrop(ctx: &Context, render_state: &RenderState, image: &ColorImag
         free_native_texture(&mut renderer, &previous.texture);
     }
     let texture_id = register_native_texture_in(&mut renderer, &render_state.device, &view);
-    let resources: &mut GlassResources = renderer
-        .callback_resources
-        .get_mut()
-        .expect("egui_glass::init must be called before set_backdrop");
+    let resources: &mut GlassResources = renderer.callback_resources.get_mut().expect("egui_glass::init must be called before set_backdrop");
     resources.set_backdrop(&render_state.device, view, mip_levels);
     drop(renderer);
 
-    let state = BackdropState {
-        texture: texture_id,
-        size: Vec2::new(w as f32, h as f32),
-        rect: Rect::ZERO,
-        fill: Color32::TRANSPARENT,
-    };
+    let state = BackdropState { texture: texture_id, size: Vec2::new(w as f32, h as f32), rect: Rect::ZERO, fill: Color32::TRANSPARENT };
     ctx.data_mut(|d| d.insert_temp(state_id(), state));
     texture_id
 }
