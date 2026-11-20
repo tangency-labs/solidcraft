@@ -3305,42 +3305,172 @@ fn a_fin_top_edge_on_a_tube_is_the_roll_overs_concave_chain() {
     }
 }
 
-/// #19476's own part, the fin's side y = 0 in the plane of the tube's seam: at 1 the piece of
-/// the edge past the seam's vertex has its rail nowhere on the fin's top, and the round is
-/// refused as before, naming a size that builds, the body left as it was.
+/// #19505, #19476's own part: the fin's side y = 0 lies in the plane of the tube's seam, so the
+/// seam's vertex on the asked edge is where the round's rail on the fin's top crosses the side's
+/// top edge, and the round has no whole section there for the two pieces to join at. The pass
+/// turns the tube's seam off the edge in its own copy, rolls over the Root rounds as on a tube
+/// whose seam is elsewhere, and puts the seam back.
 #[test]
-fn a_fin_top_round_whose_seam_lies_in_the_fin_s_side_keeps_its_refusal() {
+fn a_fin_top_round_whose_seam_lies_in_the_fin_s_side_rolls_over_the_root_rounds() {
+    fixes();
+    assert_fin_top_round_rolls_over(-0.62, 1.0);
+}
+
+/// The seam edges of `b` (both sides on one face), each as its two ends, the lower first.
+fn seams(b: &Body) -> Vec<[[f64; 3]; 2]> {
+    use solidcore::topology::edge;
+    let (k, mut brep) = common::kernel_copy(b);
+    let mut out = Vec::new();
+    for &e in &brep.edge_list().to_vec() {
+        if edge::faces(&brep, e, None).unwrap().len() != 1
+            || !edge::is_seam(&k, &mut brep, e).unwrap()
+        {
+            continue;
+        }
+        let (s, z) = edge::start_end_vertices(&brep, e).unwrap();
+        let p = brep.vertex(s.unwrap()).unwrap().point;
+        let q = brep.vertex(z.unwrap()).unwrap().point;
+        let (lo, hi) = if p.z <= q.z { (p, q) } else { (q, p) };
+        out.push([[lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]]);
+    }
+    out
+}
+
+fn assert_seam(b: &Body, from_z: f64, what: &str) {
+    let got = seams(b);
+    assert_eq!(got.len(), 1, "{what}: {got:?}");
+    let want = [[TUBE, 0.0, from_z], [TUBE, 0.0, 75.0]];
+    for (p, w) in got[0].iter().zip(&want) {
+        for (a, c) in p.iter().zip(w) {
+            assert!((a - c).abs() <= 1e-9, "{what}: {got:?}");
+        }
+    }
+}
+
+/// #19505: the round built with the tube's seam turned off its edge leaves the seam on the
+/// ruling it was on (x = 10, y = 0), from the tube's top down to the round's rail on the tube.
+#[test]
+fn a_fin_top_round_built_off_the_tube_s_seam_leaves_the_seam_on_its_ruling() {
     fixes();
     let b = tube_with_fin(-0.62);
-    let before = b.volume(1e-9).unwrap();
-    let size = match blend(
+    assert_seam(&b, FIN_TOP, "the input");
+    blend(
         &b,
         Blend::Round,
         &[fin_top_edge(&b, -0.62)],
         &[1.0],
         &[],
         Corners::Filled,
-    ) {
-        Err(Error::TooLarge {
-            size,
-            why: Some(RoomReason::RailLeavesFace),
-            ..
-        }) => size,
-        other => panic!("{other:?}"),
-    };
-    assert_eq!(b.volume(1e-9).unwrap().to_bits(), before.to_bits());
-    assert!(
-        size > 0.0 && size < fin_side(-0.62, -1.62).2 - TUBE,
-        "{size}"
+    )
+    .unwrap();
+    assert_seam(&b, FIN_TOP + 1.0, "the result");
+}
+
+/// The kernel's decision (#19505): the chain is taken off a seam only where the round has no
+/// whole section at the seam's vertex. With the fin's side in the seam's plane the contact on
+/// the fin's top at the vertex is on the side's top edge at 1 (the seam is turned: the chain
+/// is one edge from V to V, the body has as many edges as before, the seam's edge and the
+/// vertex it split the fin top's edge at gone, the turned seam's edge and the vertex it splits
+/// the tube's bottom arc at made) and inside the fin's top at 0.9; with the fin across the
+/// seam it is inside at 1; with the fin elsewhere the chain has no seam's vertex.
+#[test]
+fn the_chain_is_taken_off_a_seam_only_where_the_round_has_no_whole_section_there() {
+    use solidcore::blend::blend_corner::rollover::chain_off_seams;
+    use solidcore::topology::edge;
+    fixes();
+    for (y0, r, turned) in [
+        (-0.62, 1.0, true),
+        (-0.62, 0.9, false),
+        (-0.31, 1.0, false),
+        (2.0, 1.0, false),
+    ] {
+        let b = tube_with_fin(y0);
+        let pick = fin_top_edge(&b, y0);
+        let (mut k, mut brep) = common::kernel_copy(&b);
+        let edges = [brep.edge_list()[pick]];
+        let before = brep.edge_list().len();
+        let off = chain_off_seams(&mut k, &mut brep, &edges, &[r]).unwrap();
+        assert_eq!(off.is_some(), turned, "y0 {y0} r {r}");
+        assert_eq!(brep.edge_list().len(), before, "y0 {y0} r {r}");
+        let Some(off) = off else {
+            continue;
+        };
+        assert_eq!(off.turned.len(), 1, "y0 {y0} r {r}");
+        assert_eq!(off.sizes, vec![r], "y0 {y0} r {r}");
+        let [chain] = off.edges.as_slice() else {
+            panic!("y0 {y0} r {r}: {:?}", off.edges);
+        };
+        let (s, z) = edge::start_end_vertices(&brep, *chain).unwrap();
+        let mut at: Vec<[f64; 2]> = [s, z]
+            .into_iter()
+            .map(|v| {
+                let p = brep.vertex(v.unwrap()).unwrap().point;
+                [p.x, p.y]
+            })
+            .collect();
+        at.sort_by(|a, b| a[1].total_cmp(&b[1]));
+        let y1 = y0 + FIN;
+        let want = [fin_side(y0, y0 - ROOT).1, fin_side(y1, y1 + ROOT).1];
+        for (a, w) in at.iter().zip(&want) {
+            assert!(
+                (a[0] - w[0]).abs() < 1e-9 && (a[1] - w[1]).abs() < 1e-9,
+                "y0 {y0} r {r}: {a:?} {w:?}"
+            );
+        }
+    }
+}
+
+/// #19505: a seam turned off the chain and put back leaves the body as it was: valid, its
+/// faces and edges as many, its volume the same, its seam on the same ruling between the
+/// same ends.
+#[test]
+fn a_seam_turned_off_the_chain_and_back_leaves_the_body_as_it_was() {
+    use solidcore::blend::blend_corner::rollover::{chain_off_seams, seams_back};
+    fixes();
+    let b = tube_with_fin(-0.62);
+    let volume = b.volume(1e-9).unwrap();
+    let pick = fin_top_edge(&b, -0.62);
+    let (mut k, mut brep) = common::kernel_copy(&b);
+    let edges = [brep.edge_list()[pick]];
+    let (faces, edge_count) = (brep.face_list().len(), brep.edge_list().len());
+    let off = chain_off_seams(&mut k, &mut brep, &edges, &[1.0])
+        .unwrap()
+        .unwrap();
+    seams_back(&mut k, &mut brep, &off.turned).unwrap();
+    assert_eq!(
+        (brep.face_list().len(), brep.edge_list().len()),
+        (faces, edge_count)
     );
-    blend(
+    let back = common::built(|_| Ok(std::mem::take(&mut brep)));
+    let report = back.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    // each volume is asked to 1e-9
+    assert!((back.volume(1e-9).unwrap() - volume).abs() <= 2e-9);
+    assert_seam(&back, FIN_TOP, "turned and back");
+}
+
+/// #19505: the same part at 0.93 stays refused as on main. The seam's vertex on the chain has
+/// no whole section at this size either, but the round's rail leaves the fin's top at the
+/// seam's section (the decision's trigger, see `docs/generic-blend.md`), so the body is
+/// untouched and the refusal stands.
+#[test]
+fn a_fin_top_round_whose_seam_lies_in_the_fin_s_side_stays_refused_at_0_93() {
+    fixes();
+    let b = tube_with_fin(-0.62);
+    let before = b.volume(1e-9).unwrap();
+    match blend(
         &b,
         Blend::Round,
         &[fin_top_edge(&b, -0.62)],
-        &[size],
+        &[0.93],
         &[],
         Corners::Filled,
-    )
-    .unwrap();
-    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    ) {
+        Err(Error::TooLarge {
+            why: Some(RoomReason::RailLeavesFace),
+            ..
+        }) => {}
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(b.volume(1e-9).unwrap().to_bits(), before.to_bits());
 }

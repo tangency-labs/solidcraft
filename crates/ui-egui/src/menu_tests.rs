@@ -3020,3 +3020,29 @@ fn a_menu_taller_than_the_window_scrolls_its_last_rows_into_view() {
     let last_row = crate::scenario::rect_of(&format!("menu:{last}")).unwrap();
     assert!(menu.contains_rect(last_row), "and shows its last row: {last_row:?} in {menu:?}");
 }
+
+/// A base flange and a contour flange are drawn from a sketch: their History bar menu offers
+/// Edit Profile Sketch on it, as an extrude's does.
+#[test]
+fn sheet_flanges_from_a_sketch_offer_edit_profile_sketch() {
+    let mut app = crate::SolveApp::new(Session::default(), Services::default());
+    app.run("sheet.manage_rules", json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "active": true})).unwrap();
+    app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    app.run("sketch.create", json!({"plane": "XZ", "name": "Chain"})).unwrap();
+    app.run("sketch.line", json!({"points": [[200, 0], [240, 0], [240, 30]], "ids": ["c1", "c2"]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("sheet.flange", json!({"sketch": "Chain", "curves": ["c1", "c2"], "distance": 20})).unwrap();
+    let doc = &app.session.doc;
+    let id_of = |name: &str| doc.find_feature(name).map(|f| f.id).unwrap_or_else(|| panic!("no {name}"));
+    let of = |ty: &str| doc.features.iter().find(|f| f.kind.type_name() == ty).map(|f| f.id).unwrap_or_else(|| panic!("no {ty}"));
+    let flanges = [of("BaseFlangeFeature"), of("ContourFlangeFeature")];
+    for (flange, sketch) in flanges.into_iter().zip([id_of("Base"), id_of("Chain")]) {
+        let items = crate::timeline::feature_items(&app, flange);
+        let edit = find(&items, "Edit Profile Sketch");
+        assert!(edit.enabled);
+        assert_eq!(edit.params, Some(json!({"sketch": sketch})));
+    }
+}

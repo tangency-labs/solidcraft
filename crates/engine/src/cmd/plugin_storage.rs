@@ -93,7 +93,10 @@ fn put_blob(s: &mut Session, p: &Value) -> Result<Value> {
     let data = base64_decode(&p.data).ok_or_else(|| bad(CMD, "`data` must be base64"))?;
     let path = format!("{}{}", if p.cache { CACHE } else { BLOBS }, p.name);
     let mut bytes = if p.append {
-        storage::blob_path(&s.doc, &caller.id, &p.name).and_then(|(path, _)| storage::blob(&s.doc, &caller.id, &path)).unwrap_or_default()
+        storage::blob_path(&s.doc, &caller.id, &p.name)
+            .and_then(|(path, _)| storage::blob(&s.doc, &caller.id, &path))
+            .map(<[u8]>::to_vec)
+            .unwrap_or_default()
     } else {
         Vec::new()
     };

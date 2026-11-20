@@ -38,6 +38,7 @@ pub(crate) fn tools(
         through_all,
         direction,
         targets,
+        mode,
         ..
     } = &f.kind
     else {
@@ -48,7 +49,14 @@ pub(crate) fn tools(
     // component.
     let (_, scope) = boolean_scope(st, f, &crate::plain(targets));
     if st.surface_sheets.iter().any(|sheet| scope.contains(&sheet.body)) {
-        return Err(DocError::Invalid("not supported yet: a cell grid cannot cut sheet metal; use sheet.perforate".into()));
+        return Err(DocError::Invalid(match mode {
+            crate::CellGridMode::Cut => "not supported yet: a cell grid cannot cut sheet metal; use sheet.perforate".into(),
+            crate::CellGridMode::Raised => "not supported yet: a cell grid cannot add cells to sheet metal".into(),
+        }));
+    }
+    // Raised cells stand `depth` from the plane: "through all" has no far side to reach.
+    if *mode == crate::CellGridMode::Raised && *through_all {
+        return Err(DocError::Invalid("a raised cell grid stands `depth` high: give `depth`, not `through_all`".into()));
     }
     let ss = constructor_profile_in_frame(
         doc,

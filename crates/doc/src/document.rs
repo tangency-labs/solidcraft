@@ -103,7 +103,15 @@ pub enum PlaneRef {
         about_y: bool,
     },
     /// Halfway between two planes (or planar faces); bisecting them when they meet at an angle.
-    Midplane { a: Box<GeoRef>, b: Box<GeoRef> },
+    Midplane {
+        a: Box<GeoRef>,
+        b: Box<GeoRef>,
+        /// The design was saved before the midplane took a world plane's frame (#18260): the
+        /// frame it was saved with (the first plane's own origin and axes) is kept, so the
+        /// sketch stays where it was saved.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        old_frame: bool,
+    },
     /// Through two straight edges (lines) that lie in one plane.
     TwoEdges { a: Box<GeoRef>, b: Box<GeoRef> },
     /// Through a line (axis) and a point not on that line.
@@ -243,13 +251,16 @@ impl Touching {
     }
 }
 
-/// What a cell grid does with its cells. Only `cut` is built so far.
+/// What a cell grid does with its cells.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CellGridMode {
     /// Cut the cells out of the targets.
     #[default]
     Cut,
+    /// Add the cells as material standing on the sketch plane, joined to the targets. A design
+    /// with this mode is written with the next format number.
+    Raised,
 }
 
 /// The smallest cell size and web of a cell grid, in mm.
@@ -1558,7 +1569,8 @@ pub enum FeatureKind {
     },
     /// A cell grid (#14044): the cells of one shape that fill the closed profiles of a sketch (an
     /// outer loop is the field, a loop inside it a keep-out), cut from the targets `depth` deep
-    /// (or through all) along the sketch normal. The cells are planned by solidcore
+    /// (or through all) along the sketch normal, or with `mode: raised` standing `depth` high
+    /// from the sketch plane and joined to the targets. The cells are planned by solidcore
     /// (`solidcore_ops::cell_grid`) and cut in one boolean.
     CellGrid {
         /// Feature id of the sketch.
@@ -1708,9 +1720,9 @@ pub enum FeatureKind {
         flip: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
-        /// The relief cut where two of this feature's bends meet at a corner of the base, in place
-        /// of the rule's: `corner_relief_shape` (notch | round | rectangular | tear) and
-        /// `corner_relief`, the size across. Either one left out follows the rule.
+        /// The relief cut where two of this feature's bends meet at a corner of the panel they
+        /// stand on, in place of the rule's: `corner_relief_shape` (notch | round | rectangular |
+        /// tear) and `corner_relief`, the size across. Either one left out follows the rule.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         corner_relief_shape: Option<String>,
         /// Walked last, after the edges' values, so the inputs before it keep their names.
@@ -1761,8 +1773,8 @@ pub enum FeatureKind {
         #[walk(profiles_of = sketch)]
         profiles: Option<ProfileSel>,
     },
-    /// Fold a sheet along a line on its base face: a sketch line (followed when the sketch
-    /// changes), else the points `a`, `b`.
+    /// Fold a sheet along a line on one of its flat faces: a sketch line (followed when the
+    /// sketch changes), else the points `a`, `b`.
     SheetFold {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sketch: Option<SketchId>,
@@ -1779,9 +1791,11 @@ pub enum FeatureKind {
         position: String,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
-        /// The point the side that stays was picked by, kept as it was given: the fold made
-        /// with it stores that side in `stays` (and a design saved before `stays` gets it when
-        /// opened), so the point no longer decides; a point off the sheet is still said.
+        /// The point the side that stays is picked by, as it was given. The `sheet.fold` command
+        /// refuses a point off the sheet, decides the side by it once, stores that side in
+        /// `stays` and keeps no point. A fold it could not decide then keeps its point, and a fold
+        /// saved before `stays` keeps the point it was made with: its side is decided by it as
+        /// the design opens (see `Document::with_fold_sides`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fixed: Option<Position>,
         /// The side of the line that stays put (see [`FoldSide`]), decided once when the fold is
@@ -3894,11 +3908,12 @@ pub struct Document {
     /// each in its own entry.
     #[serde(skip_deserializing, skip_serializing_if = "Vec::is_empty")]
     pub drawings: Vec<std::sync::Arc<crate::drawing::Drawing>>,
-    /// Plugin data, by `<plugin-id>/<path>`, base64: kept and saved back untouched, plugin or no
-    /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design.
-    /// Shared, so an edit that copies the design does not copy a plugin's large files.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty", deserialize_with = "crate::plugin_data::deserialize")]
-    pub plugin_data: std::collections::BTreeMap<String, std::sync::Arc<str>>,
+    /// Plugin data, by `<plugin-id>/<path>`, as bytes: kept and saved back untouched, plugin or no
+    /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design;
+    /// a plain JSON design can't hold it ([`Document::binary_data`]). Shared, so an edit that
+    /// copies the design does not copy a plugin's large files.
+    #[serde(default, skip_serializing, deserialize_with = "crate::plugin_data::deserialize")]
+    pub plugin_data: std::collections::BTreeMap<String, crate::blob::Blob>,
 }
 
 /// The browser's view of a design: items and folders hidden or shown, sketch profiles and
@@ -4682,6 +4697,16 @@ impl Document {
         }
         Ok(d)
     }
+    /// What this design holds that a plain JSON design can't carry: binary data, which only a
+    /// container keeps, as parts of their own. Empty when the design saves as JSON whole.
+    pub fn binary_data(&self) -> Vec<&'static str> {
+        let mut kinds = Vec::new();
+        if !self.plugin_data.is_empty() {
+            kinds.push("plugin files");
+        }
+        kinds
+    }
+
     pub fn to_json(&self) -> String {
         if self.newer_file.is_some() {
             let mut value = serde_json::to_value(self).unwrap_or_default();

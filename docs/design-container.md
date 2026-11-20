@@ -108,8 +108,10 @@ either retain that document or fail required-part CRC/hash validation. Optional
 preview success never validates source blobs or makes a document editable. An invalid required blob still
 fails the later document read. ZIP directory scans can touch a bounded suffix of a
 stored blob; deferral means not loading or decoding the complete payload, not zero
-physical reads of its byte range. Optional cache metadata is capped at 16 MiB;
-larger metadata misses the cache and uses the normal authoritative part-size budget.
+physical reads of its byte range. Standalone previews cap `document.json` at 16 MiB.
+When opening a design with a model cache, Open can check the cache against the full
+`document.json` within the authoritative part-size budget. Open reuses those bytes
+for document validation and loading.
 
 ## Model cache
 
