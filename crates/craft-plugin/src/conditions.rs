@@ -20,6 +20,19 @@ enum Condition {
     Not(Box<Self>),
 }
 impl Condition {
+    fn fields<'a>(&'a self, fields: &mut BTreeSet<&'a str>) {
+        match self {
+            Self::Eq(field, _) | Self::In(field, _) => {
+                fields.insert(field);
+            }
+            Self::All(conditions) | Self::Any(conditions) => {
+                for condition in conditions {
+                    condition.fields(fields);
+                }
+            }
+            Self::Not(condition) => condition.fields(fields),
+        }
+    }
     fn matches(&self, values: &Map<String, Value>) -> bool {
         match self {
             Self::Eq(field, value) => values.get(field).is_some_and(|v| scalar_equal(v, value)),
@@ -140,18 +153,65 @@ impl InputConditions {
         Ok(Self { fields, order })
     }
 
-    /// Scalar controller values in dependency order. Hidden controllers cannot affect another
-    /// row. Only scalars are copied: an arbitrary, unchecked nested input is never cloned here.
-    pub fn visible_values(&self, values: &Map<String, Value>) -> Map<String, Value> {
-        let mut values: Map<String, Value> =
-            values.iter().filter(|(_, v)| !v.is_object() && !v.is_array()).map(|(k, v)| (k.clone(), v.clone())).collect();
-        for name in &self.order {
-            if self.fields.get(name).is_some_and(|f| !f.visible(&values)) {
-                values.remove(name);
+    /// Scalar controller values after all of this scope's visibility rules have been applied.
+    pub fn visible_values(&self, values: &Map<String, Value>) -> Result<Map<String, Value>> {
+        visible_values(values, self.fields.iter().map(|(name, rules)| (name.as_str(), rules)))
+    }
+}
+
+/// Evaluate controllers across all applicable scopes, with each controller resolved before its
+/// dependents. A field hidden by any scope cannot control a field in another scope. Only scalars
+/// are copied, so unchecked nested input is never cloned here.
+pub fn visible_values<'a>(
+    values: &Map<String, Value>,
+    fields: impl IntoIterator<Item = (&'a str, &'a FieldConditions)>,
+) -> Result<Map<String, Value>> {
+    let mut values: Map<String, Value> =
+        values.iter().filter(|(_, v)| !v.is_object() && !v.is_array()).map(|(k, v)| (k.clone(), v.clone())).collect();
+    let mut remaining: BTreeMap<&str, Vec<&FieldConditions>> = BTreeMap::new();
+    for (name, rules) in fields {
+        remaining.entry(name).or_default().push(rules);
+    }
+    let mut dependents: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    let mut counts = BTreeMap::new();
+    let mut ready = BTreeSet::new();
+    for (name, rules) in &remaining {
+        let mut dependencies = BTreeSet::new();
+        for rule in rules {
+            if let Some(condition) = &rule.visible {
+                condition.fields(&mut dependencies);
             }
         }
-        values
+        dependencies.retain(|dependency| remaining.contains_key(dependency));
+        counts.insert(*name, dependencies.len());
+        if dependencies.is_empty() {
+            ready.insert(*name);
+        }
+        for dependency in dependencies {
+            dependents.entry(dependency).or_default().insert(*name);
+        }
     }
+    while let Some(name) = ready.pop_first() {
+        if let Some(rules) = remaining.remove(name)
+            && rules.iter().any(|rule| !rule.visible(&values))
+        {
+            values.remove(name);
+        }
+        if let Some(dependents) = dependents.get(name) {
+            for dependent in dependents {
+                if let Some(count) = counts.get_mut(dependent) {
+                    *count = count.saturating_sub(1);
+                    if *count == 0 {
+                        ready.insert(*dependent);
+                    }
+                }
+            }
+        }
+    }
+    if !remaining.is_empty() {
+        return Err(invalid("input_schema", format!("conditional field cycle: {}", remaining.keys().copied().collect::<Vec<_>>().join(", "))));
+    }
+    Ok(values)
 }
 
 fn parse_condition(
@@ -221,7 +281,7 @@ pub fn has_conditions(schema: &Value) -> bool {
 
 // At composition boundaries, scalar choice-option annotations belong to the enclosing field,
 // not to an object branch. Conditions below properties/items still need branch projection.
-fn contains_conditions(schema: &Value, choice_filters: bool) -> bool {
+pub(crate) fn contains_conditions(schema: &Value, choice_filters: bool) -> bool {
     fn visit(schema: &Value, depth: usize, budget: &mut usize, choice_filters: bool) -> bool {
         if depth > 32 || *budget == 0 {
             return true;
@@ -252,7 +312,7 @@ fn contains_conditions(schema: &Value, choice_filters: bool) -> bool {
 
 // A required, unconditional finite scalar discriminator proves that two branches cannot both
 // match. The same numeric comparison as input checking avoids rounding integer discriminators.
-fn disjoint_branches(a: &Value, b: &Value, objects_only: bool, path: &str, budget: &mut usize) -> Result<bool> {
+fn disjoint_branches(a: &Value, b: &Value, objects_only: bool, path: &str, budget: &mut usize, input: Option<&Value>) -> Result<bool> {
     fn domain(property: &Value) -> Option<&[Value]> {
         let values = property.get("const").map(std::slice::from_ref).or_else(|| property.get("enum").and_then(Value::as_array).map(Vec::as_slice))?;
         (!values.is_empty() && values.len() <= 256 && values.iter().all(|v| !v.is_object() && !v.is_array())).then_some(values)
@@ -291,11 +351,32 @@ fn disjoint_branches(a: &Value, b: &Value, objects_only: bool, path: &str, budge
                 break;
             }
         }
-        if !overlap {
+        if !overlap && input.is_none_or(|input| input.get(name).is_some_and(|value| a.iter().any(|option| scalar_equal(value, option)))) {
             return Ok(true);
         }
     }
     Ok(false)
+}
+
+// Use only the discriminators that prove branches disjoint, rather than validating fields
+// that another scope may hide. Single branches need no discriminator.
+pub(crate) fn selected_branch<'a>(options: &'a [Value], value: &Value, budget: &mut usize) -> Result<Option<&'a Value>> {
+    if options.len() == 1 {
+        return Ok(options.first());
+    }
+    for (index, option) in options.iter().take(256).enumerate() {
+        let mut matches = true;
+        for (other_index, other) in options.iter().take(256).enumerate() {
+            if index != other_index && !disjoint_branches(option, other, true, "input_schema", budget, Some(value))? {
+                matches = false;
+                break;
+            }
+        }
+        if matches {
+            return Ok(Some(option));
+        }
+    }
+    Ok(None)
 }
 
 /// Validate every object scope at load, including schemas the GUI does not draw.
@@ -329,7 +410,7 @@ pub fn validate_conditions(schema: &Value) -> Result<()> {
                     for (i, a) in options.iter().enumerate() {
                         for b in options.iter().skip(i + 1) {
                             *budget = budget.checked_sub(1).ok_or_else(|| invalid(&location, "conditional composition is too large"))?;
-                            if !disjoint_branches(a, b, schema.get("type").and_then(Value::as_str) == Some("object"), &location, budget)? {
+                            if !disjoint_branches(a, b, schema.get("type").and_then(Value::as_str) == Some("object"), &location, budget, None)? {
                                 return Err(invalid(&location, "conditional branches need disjoint required scalar const/enum discriminators"));
                             }
                         }

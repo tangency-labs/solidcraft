@@ -456,6 +456,57 @@ fn conditional_preparation_projects_applicable_composition_branches() {
 }
 
 #[test]
+fn conditional_composition_shares_hidden_controllers_across_scopes() {
+    for keyword in ["oneOf", "anyOf"] {
+        for reverse in [false, true] {
+            let controller = json!({"gate":{"type":"boolean"},"mode":{"type":"boolean","x-solidcraft-visible-when":{"field":"gate","eq":true}}});
+            let dependent = json!({"mode":{"type":"boolean"},"secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}});
+            let (outer, inner) = if reverse { (dependent, controller) } else { (controller, dependent) };
+            let mut schema = json!({"type":"object","additionalProperties":true,"properties":outer});
+            schema[keyword] = json!([{"additionalProperties":true,"properties":inner}]);
+            assert_eq!(
+                prepare_input(&schema, &json!({"gate":false,"mode":true,"secret":7})),
+                Ok(json!({"gate":false})),
+                "{keyword}, reverse={reverse}"
+            );
+            assert_eq!(prepare_input(&schema, &json!({"gate":true,"mode":true,"secret":7})), Ok(json!({"gate":true,"mode":true,"secret":7})));
+            assert_eq!(prepare_input(&schema, &json!({"gate":false,"mode":true,"secret":"hidden"})), Ok(json!({"gate":false})));
+            schema["required"] = json!(["secret"]);
+            schema[keyword][0]["required"] = json!(["secret"]);
+            assert_eq!(check_input(&schema, &json!({"gate":false,"mode":true})), Ok(()));
+            assert!(check_input(&schema, &json!({"gate":true,"mode":true})).is_err());
+            let properties = if reverse { &mut schema["properties"] } else { &mut schema[keyword][0]["properties"] };
+            properties["choice"] = json!({"type":"string","oneOf":[
+                {"const":"shown","x-solidcraft-when":{"field":"mode","eq":true}},
+                {"const":"hidden","x-solidcraft-when":{"not":{"field":"mode","eq":true}}}
+            ]});
+            properties["inverted"] = json!({"type":"integer","x-solidcraft-visible-when":{"not":{"field":"mode","eq":true}}});
+            assert!(
+                matches!(check_input(&schema, &json!({"gate":false,"mode":true,"choice":"shown"})), Err(HostError::InvalidInput { field, .. }) if field == "params.choice")
+            );
+            assert_eq!(
+                prepare_input(&schema, &json!({"gate":false,"mode":true,"secret":"hidden","choice":"hidden","inverted":9})),
+                Ok(json!({"gate":false,"choice":"hidden","inverted":9}))
+            );
+            let outer = json!({"type":"object","additionalProperties":true,"properties":schema["properties"]});
+            let inner = schema[keyword][0].clone();
+            let mut array = json!({"type":"array","items":outer});
+            array[keyword] = json!([{"type":"array","items":inner}]);
+            assert_eq!(prepare_input(&array, &json!([{"gate":false,"mode":true,"secret":"hidden"}])), Ok(json!([{"gate":false}])));
+            let mut nested = json!({"type":"object","properties":{"nested":outer,"rows":{"type":"array","items":outer}}});
+            nested[keyword] = json!([{"properties":{"nested":inner,"rows":{"type":"array","items":inner}}}]);
+            assert_eq!(
+                prepare_input(
+                    &nested,
+                    &json!({"nested":{"gate":false,"mode":true,"secret":"hidden"},"rows":[{"gate":false,"mode":true,"secret":"hidden"}]})
+                ),
+                Ok(json!({"nested":{"gate":false},"rows":[{"gate":false}]}))
+            );
+        }
+    }
+}
+
+#[test]
 fn conditional_composition_rejects_ambiguous_branches_at_their_manifest_location() {
     let branch = json!({"properties":{"mode":{"type":"boolean"},"secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}}});
     for keyword in ["oneOf", "anyOf", "allOf"] {

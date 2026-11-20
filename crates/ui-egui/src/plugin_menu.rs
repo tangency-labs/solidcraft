@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 use solidcraft_engine::Sel;
-use solidcraft_engine::plugin::conditions::{FieldConditions, InputConditions, validate_conditions};
+use solidcraft_engine::plugin::conditions::{FieldConditions, InputConditions, validate_conditions, visible_values};
 
 use crate::selection::{Accept, SelInput};
 
@@ -202,8 +202,7 @@ pub(crate) fn form(schema: &Value) -> Option<Vec<(Field, Input)>> {
         field.conditions = conditions.fields.get(&field.key).cloned().unwrap_or_default();
         field.order = conditions.order.iter().position(|name| name == &field.key).unwrap_or(usize::MAX);
     }
-    refresh_conditions(&mut fields);
-    Some(fields)
+    refresh_conditions(&mut fields).then_some(fields)
 }
 
 fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> {
@@ -500,10 +499,11 @@ fn default_input(field: &Field, value: &Value) -> Option<Input> {
 }
 
 /// Controllers are evaluated first, including chains of defaults and hidden controllers.
-fn refresh_conditions(fields: &mut [(Field, Input)]) {
+fn refresh_conditions(fields: &mut [(Field, Input)]) -> bool {
     let mut order: Vec<(usize, usize)> = fields.iter().enumerate().map(|(i, (f, _))| (f.order, i)).collect();
     order.sort_unstable();
-    let mut values: Map<String, Value> = fields.iter().filter_map(|(f, i)| scalar_value(f, i).map(|v| (f.key.clone(), v))).collect();
+    let raw: Map<String, Value> = fields.iter().filter_map(|(f, i)| scalar_value(f, i).map(|v| (f.key.clone(), v))).collect();
+    let Ok(mut values) = visible_values(&raw, fields.iter().map(|(f, _)| (f.key.as_str(), &f.conditions))) else { return false };
     for (_, index) in order {
         let Some((field, input)) = fields.get_mut(index) else { continue };
         let controls: Map<String, Value> =
@@ -538,6 +538,7 @@ fn refresh_conditions(fields: &mut [(Field, Input)]) {
             values.remove(&field.key);
         }
     }
+    true
 }
 
 /// The parameters the fields make, or why Run stays off. An optional field left empty is left out,

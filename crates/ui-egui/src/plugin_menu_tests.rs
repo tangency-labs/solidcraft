@@ -165,6 +165,28 @@ fn conditional_defaults_cascade_and_hidden_empty_fields_do_not_gate_run() {
 }
 
 #[test]
+fn conditional_dialog_and_composed_input_share_hidden_controllers() {
+    let controller = json!({"gate":{"type":"boolean","default":false},"mode":{"type":"boolean","default":true,"x-solidcraft-visible-when":{"field":"gate","eq":true}}});
+    let dependent = json!({"mode":{"type":"boolean"},"secret":{"type":"integer","default":7,"x-solidcraft-visible-when":{"field":"mode","eq":true}}});
+    let composed =
+        json!({"type":"object","additionalProperties":true,"properties":controller,"oneOf":[{"required":["secret"],"properties":dependent}]});
+    // Composition remains a CLI/agent form. Its equivalent dialog must send the same values.
+    let mut flat = json!({"type":"object","required":["secret"],"properties":controller});
+    flat["properties"]["secret"] = dependent["secret"].clone();
+    let mut fields = form(&flat).unwrap();
+    for gate in [false, true, false] {
+        set_input(&mut fields, "gate", Input::Boolean(gate));
+        let expected = if gate { json!({"gate":true,"mode":true,"secret":7}) } else { json!({"gate":false}) };
+        assert_eq!(params(&fields), Ok(expected));
+        let secret = if gate { json!(7) } else { json!("hidden") };
+        assert_eq!(solidcraft_engine::plugin::check_input(&composed, &json!({"gate":gate,"mode":true,"secret":secret})), Ok(()));
+        for key in ["mode", "secret"] {
+            assert_eq!(fields.iter().find(|(f, _)| f.key == key).unwrap().0.visible, gate);
+        }
+    }
+}
+
+#[test]
 fn invalid_conditional_dialog_schemas_leave_run_off() {
     for condition in [json!({"field":"missing","eq":true}), json!({"field":"a","eq":1})] {
         assert!(form(&json!({"type":"object","properties":{"a":{"type":"number","x-solidcraft-visible-when":condition}}})).is_none());
