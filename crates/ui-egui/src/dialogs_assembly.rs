@@ -2158,7 +2158,9 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
     // A moved component looks like itself (no new surface), with its old place as the ghost.
     // A plugin's run in a design with nothing placed keeps the colours of a new body.
     let colors = if was_placed { Colors { added: colors.body, new_body: colors.body, ..colors } } else { colors };
+    let plugin_summary = crate::preview::plugin_summary(cmds, &preview.replies);
     Some(build_world_preview(preview, colors).map(|mut built| {
+        built.plugin_summary = plugin_summary;
         built.stopped = stopped;
         built.placed = placed;
         built

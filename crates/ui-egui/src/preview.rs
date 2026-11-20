@@ -885,7 +885,6 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             let combine = combine_of(cmds);
             let mut b = guard(&|| build_as(&p.before, &p.after, colors, combine.as_ref()))?;
             b.bounds = state_bounds(&p.after);
-            b.plugin_summary = plugin_summary(cmds, &p.replies);
             // The radius a previewed fillet used when it reduced the one asked for (a new
             // fillet or an edited one: the feature the replies name).
             let features = || p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64));
@@ -897,7 +896,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
 }
 
 /// A plugin can return arbitrary JSON. Only its optional summary string goes in the form.
-fn plugin_summary(commands: &[(String, Value)], replies: &[Value]) -> Option<String> {
+pub(crate) fn plugin_summary(commands: &[(String, Value)], replies: &[Value]) -> Option<String> {
     let [(command, _)] = commands else { return None };
     if command != "plugin.run" {
         return None;
