@@ -115,6 +115,7 @@ drawing.properties                a drawing: its tests in crates/engine/src/cmd/
 drawing.properties.remove         a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.properties.set            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.revise                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.print                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.revision.add              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.revision.delete           a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.revision.edit             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs

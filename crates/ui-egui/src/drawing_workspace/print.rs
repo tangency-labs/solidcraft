@@ -115,7 +115,7 @@ mod tests {
         }));
         h.app.ui.tab = "DRAWING REVIEW".into();
         h.frames(4);
-        h.step(&json!({"click":{"handle":"button:drawing.print"}})).unwrap();
+        h.step(&json!({"click":{"handle":"button:drawing.print.planned"}})).unwrap();
         wait(&mut h);
         let paths = opened.lock().unwrap().clone();
         assert_eq!(paths.len(), 1, "{paths:?}");

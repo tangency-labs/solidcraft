@@ -342,7 +342,7 @@ pub const SECTIONS: &[Section] = &[
         promoted: 3,
         ids: &["drawing.revision", "drawing.revise.planned", "drawing.revision.tag.add.planned"],
     },
-    Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export", "drawing.print"] },
+    Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export", "drawing.print.planned"] },
     Section {
         tab: "MODEL",
         panel: "SKETCH",
@@ -673,7 +673,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.leader", "Leader Note"),
     ("drawing.note", "Note"),
     ("drawing.replace_model", "Replace"),
-    ("drawing.print", "Print"),
+    ("drawing.print.planned", "Print"),
     ("drawing.revise.planned", "Issue Rev."),
     ("drawing.revision", "Add Revision"),
     ("drawing.revision_table", "Revision Tbl."),
