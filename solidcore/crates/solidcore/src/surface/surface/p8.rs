@@ -4653,6 +4653,153 @@ mod tests {
     use super::*;
     use crate::geom::vector3d::Vec3;
 
+    /// The fillet's rational patch of #17356 (its base surface, in world coordinates): a line from
+    /// M along +x crosses it twice, at t 43.03 and 54.118; both roots must come back.
+    #[test]
+    fn line_crossing_a_rational_patch_twice_gets_both_roots() {
+        use crate::nurbs::math::CPoint;
+        let k = Kernel::default();
+        let pw: Vec<Vec<CPoint>> = vec![
+            vec![
+                CPoint {
+                    x: -11.24302824013088,
+                    y: -48.32938874083239,
+                    z: 99.99999999999999,
+                    w: 1.0,
+                },
+                CPoint {
+                    x: -7.038022322008203,
+                    y: -33.09317890610005,
+                    z: 70.71067811865476,
+                    w: std::f64::consts::FRAC_1_SQRT_2,
+                },
+                CPoint {
+                    x: -9.953266620068586,
+                    y: -46.800822431045916,
+                    z: 98.0,
+                    w: 1.0,
+                },
+            ],
+            vec![
+                CPoint {
+                    x: -0.4328218299403017,
+                    y: -51.18014615854607,
+                    z: 89.1542142332857,
+                    w: 0.8915421423328571,
+                },
+                CPoint {
+                    x: 0.017472338200014002,
+                    y: -34.81311766152826,
+                    z: 63.04154945571454,
+                    w: 0.6304154945571454,
+                },
+                CPoint {
+                    x: 0.024709617648828525,
+                    y: -49.233183145423595,
+                    z: 87.37112994862,
+                    w: 0.8915421423328571,
+                },
+            ],
+            vec![
+                CPoint {
+                    x: 13.188958041108734,
+                    y: -54.07084452370621,
+                    z: 99.99999999999996,
+                    w: 1.0,
+                },
+                CPoint {
+                    x: 8.990872307607335,
+                    y: -36.85992912873532,
+                    z: 70.71067811865474,
+                    w: std::f64::consts::FRAC_1_SQRT_2,
+                },
+                CPoint {
+                    x: 12.715013554982978,
+                    y: -52.12781168196859,
+                    z: 97.99999999999997,
+                    w: 1.0,
+                },
+            ],
+            vec![
+                CPoint {
+                    x: 23.94984564415679,
+                    y: -45.23272697027765,
+                    z: 89.15421423328566,
+                    w: 0.8915421423328571,
+                },
+                CPoint {
+                    x: 16.014010778930786,
+                    y: -30.911242701811666,
+                    z: 63.0415494557145,
+                    w: 0.6304154945571454,
+                },
+                CPoint {
+                    x: 22.64723123155285,
+                    y: -43.71509865870842,
+                    z: 87.37112994861995,
+                    w: 0.8915421423328571,
+                },
+            ],
+            vec![
+                CPoint {
+                    x: 32.23332295116151,
+                    y: -37.72463905191165,
+                    z: 99.99999999999991,
+                    w: 1.0,
+                },
+                CPoint {
+                    x: 21.485153980709832,
+                    y: -26.135806984698732,
+                    z: 70.71067811865471,
+                    w: std::f64::consts::FRAC_1_SQRT_2,
+                },
+                CPoint {
+                    x: 30.38459614919413,
+                    y: -36.96161270132641,
+                    z: 97.99999999999993,
+                    w: 1.0,
+                },
+            ],
+        ];
+        let u = [
+            0.26715715734254886,
+            0.26715715734254886,
+            0.26715715734254886,
+            0.5,
+            0.5,
+            0.7328428426574513,
+            0.7328428426574513,
+            0.7328428426574513,
+        ];
+        let v = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let s = Surface::from(BSplineSurface::from_data(4, 2, 2, 2, 7, 5, &pw, &u, &v).unwrap());
+        let uv = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let m = Point3::new(-41.95180172423388, -52.769215120747496, 99.32524009643143);
+        let roots = s
+            .base_global_line_intersect::<NoObject>(
+                &k,
+                NoObject,
+                &uv,
+                m,
+                Vec3::new(1.0, 0.0, 0.0),
+                None,
+                false,
+                1e-7,
+            )
+            .unwrap();
+        let mut ts: Vec<f64> = roots
+            .as_slice()
+            .iter()
+            .map(|sol| sol.start.param(0).unwrap())
+            .collect();
+        ts.sort_by(f64::total_cmp);
+        assert_eq!(ts.len(), 2, "both roots: {ts:?}");
+        assert!(
+            (ts[0] - 43.0325171).abs() < 1e-6 && (ts[1] - 54.118237439).abs() < 1e-6,
+            "{ts:?}"
+        );
+    }
+
     fn bilinear() -> Surface {
         Surface::from(
             BSplineSurface::create_bilinear_surface(
