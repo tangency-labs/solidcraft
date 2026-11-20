@@ -239,7 +239,13 @@ accepts only that form, with an absolute path and a pattern that can't leave it;
 allow-once when the path, links followed, lies inside a file or folder sent by path in this
 conversation (`AgentChat::by_path`, cleared by New chat with the tools turned off again), and asks
 the user otherwise. Checked with `claude-agent-acp` 0.107.0: without the rule these tools read any
-path without asking, and a resumed session keeps what was said before. Other agents' own
+path without asking, and a resumed session keeps what was said before. The chat sees only the
+path a Glob or Grep starts from, not where its walk goes, so a link inside an attached folder
+that points out of it is safe only because Claude Code's walk doesn't follow links. Checked with
+0.107.0, with a linked folder and a linked file that both point outside: Glob `**/*`, a Grep over
+the folder, and patterns that name a link (`linkdir/**/*`, `linkfile*`) returned only the
+folder's own file, even with a ripgrep config saying `--follow` (`RIPGREP_CONFIG_PATH`). Check
+this again when the adapter's version moves. Other agents' own
 permission requests appear in the panel with their options.
 
 A coding agent gets every attached file and folder by its path (`attach::reference`,
