@@ -755,6 +755,16 @@ fn several_features_from_one_used_sketch_with_apply() {
                 _ => json!({"key": "Escape"}),
             };
             h.step(&action).unwrap();
+            // The extrusion computes off the window thread, and OK is refused while one is still
+            // computing: wait for it to land, as a person does before pressing OK.
+            for _ in 0..3000 {
+                if h.app.applying.is_none() {
+                    break;
+                }
+                h.frames(1);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(h.app.applying.is_none(), "{last}: the {step} finished computing");
             h.settle();
         }
         let made = if last == "OK" { 2 } else { 1 };
