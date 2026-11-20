@@ -2271,6 +2271,11 @@ impl<O: ClassObject> CurveClassification<O> {
         }
 
         for edge in candidates {
+            // an edge with no 3D curve proves nothing: no interval runs along it (checked
+            // before any lookup below that needs the curve and would fail without it)
+            if edge_curve(geometry, edge)?.is_none() {
+                continue;
+            }
             let Some(unclassified) = self.ends_on_edge(k, geometry, edge, &ivl)? else {
                 continue;
             };

@@ -51,6 +51,11 @@ fn solid_regions(b: &Brep) -> usize {
 fn issue_1057_grazing_cut_leaves_one_solid() {
     let mut k = Kernel::default();
     let mut b = cut(&mut k);
+    // the arc is put on the edge by the curved-piece certificate, not by another path
+    assert!(
+        k.work_counters.curved_edge_runs() >= 1,
+        "no curved piece certified on an edge"
+    );
     assert_eq!(
         solid_regions(&b),
         1,
