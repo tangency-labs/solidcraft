@@ -608,6 +608,10 @@ pub enum KernelError {
 
 pub type Result<T> = std::result::Result<T, KernelError>;
 
+/// Most guide rails a loft takes. solidcore states the same limit (`solidcore::sweep::loft_rails`);
+/// the kernel does not depend on solidcore, so the number is repeated here.
+pub const MAX_LOFT_RAILS: usize = 16;
+
 /// The mesher's error as the kernel's: the same words.
 impl From<solidcore_tess::TessError> for KernelError {
     fn from(e: solidcore_tess::TessError) -> KernelError {
