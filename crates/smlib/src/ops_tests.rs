@@ -279,6 +279,31 @@ fn hostile_inputs_are_errors() {
     assert_untouched(&c, 8000.0, [6, 12, 8]);
 }
 
+/// A cone (Ø6 to Ø1, 10 tall) with a 0.12 mm square pad on its top, turned 45°, whose corner
+/// is `inset` inside the top's rim on the cone's seam, shelled 0.05 inward open at the top
+/// (#18568). 0.00002 in, the join merges the corner with the rim's seam vertex, and the shell
+/// fails; refused as a face whose outline touches itself, at the corner. 0.0001 in, the
+/// corner is its own vertex, and the pad shells.
+#[test]
+fn a_shell_of_a_face_whose_outline_touches_itself_is_refused_as_such() {
+    let padded = |inset: f64| {
+        let cone = Brep::make_cone([0.0; 3], 3.0, 0.5, 10.0).unwrap();
+        let (x, h) = (0.5 - inset, 0.12 / 2f64.sqrt());
+        let diamond = [[x, 0.0, 10.0], [x - h, h, 10.0], [x - 2.0 * h, 0.0, 10.0], [x - h, -h, 10.0]];
+        let sides: Vec<crate::sweeps::Curve> = (0..4).map(|i| crate::sweeps::Curve::Line { start: diamond[i], end: diamond[(i + 1) % 4] }).collect();
+        let pad = Brep::extrude(&sides, [0.0, 0.0, 1.0], 0.12, 0.0, crate::sweeps::DraftCorner::default(), true).unwrap();
+        cone.boolean(&pad, BooleanOp::Union).unwrap().unwrap()
+    };
+    let top = [[0.15, -0.25, 10.0]];
+    match padded(2e-5).shell(&top, 0.01, -0.05).unwrap_err() {
+        Error::OutlineTouches { at, .. } => {
+            assert!((at[0] - 0.5).abs() < 1e-4 && at[1].abs() < 1e-4 && (at[2] - 10.0).abs() < 1e-9, "at {at:?}");
+        }
+        e => panic!("refused as {e}"),
+    }
+    shot(&padded(1e-4).shell(&top, 0.01, -0.05).unwrap(), "shell-pad-clear-of-the-rim");
+}
+
 /// Rig case shell/4711: a 60 x 40 x 10 block with an r3 through hole at (22.5, 7), 4 from the
 /// front face, and a 10 x 10 notch on that edge, shelled 2 inward open at the bottom: the hole's
 /// offset (r5) is tangent to the front's (y = 2), so the walls meet along a line and the offset
