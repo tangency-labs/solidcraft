@@ -20,8 +20,9 @@ pub trait PrefsHost {
         None
     }
     /// Rows the host draws in the Mouse section, below the mapping's bindings (SolidCraft's mouse
-    /// gestures).
-    fn mouse_gesture_rows(&mut self, _ui: &mut Ui) {}
+    /// gestures). They edit `settings`, the page's draft, so the host's edits and the kit
+    /// controls' reach the host in the one write at the end of the frame.
+    fn mouse_gesture_rows(&mut self, _settings: &mut NavigationSettings, _ui: &mut Ui) {}
 }
 
 /// Restore Defaults for the Navigation page.
@@ -198,7 +199,7 @@ fn mouse(s: &mut NavigationSettings, host: &mut impl PrefsHost, ui: &mut Ui, t: 
         );
         crate::checkbox(ui, text("Radial context menu"), &mut s.radial_context_menu).backing_on_hover_text(text("prefs.navigation.radial_help"));
         crate::checkbox(ui, text("prefs.quick_menu_after_selection"), &mut s.quick_menu_after_selection);
-        let label = text("Middle double-click");
+        let label = text("prefs.middle_double_click");
         let width = crate::ContentWidth::label(ui, label);
         crate::settings_form(ui, width, |ui| {
             crate::row(ui, label, |ui| {
@@ -218,7 +219,7 @@ fn mouse(s: &mut NavigationSettings, host: &mut impl PrefsHost, ui: &mut Ui, t: 
                 });
             });
         });
-        host.mouse_gesture_rows(ui);
+        host.mouse_gesture_rows(s, ui);
     });
 }
 
@@ -321,11 +322,12 @@ fn wheel(s: &mut NavigationSettings, ui: &mut Ui, t: &Tokens) {
                 check(ui, &tr_label("Smooth wheel zoom"), &mut s.smooth_wheel_zoom, Some(&tr_label(SMOOTH_HELP)), None);
                 let touchpad = s.nav == TOUCHPAD_NAV;
                 ui.add_enabled_ui(!touchpad, |ui| {
-                    let response = crate::checkbox(ui, text("ui.two_finger_scroll_pans"), &mut s.trackpad_pan).backing_on_hover_text(if touchpad {
-                        text("nav.touchpad.scroll")
+                    let response = crate::checkbox(ui, text("ui.two_finger_scroll_pans"), &mut s.trackpad_pan);
+                    let response = if touchpad {
+                        response.backing_on_disabled_hover_text(text("nav.touchpad.scroll"))
                     } else {
-                        text("ui.trackpad_pan_tip")
-                    });
+                        response.backing_on_hover_text(text("ui.trackpad_pan_tip"))
+                    };
                     registry::publish_target("prefs:trackpad_pan", response.rect);
                 });
                 check(ui, &tr_label("ui.reverse_trackpad_orbit_direction"), &mut s.orbit_reverse, Some(&tr_label(ORBIT_HELP)), None);
@@ -429,12 +431,19 @@ fn view(s: &mut NavigationSettings, ui: &mut Ui, t: &Tokens) {
         crate::settings_form(ui, width, |ui| {
             crate::row(ui, &tr_label("Animation speed"), |ui| {
                 ui.add_enabled_ui(s.look_at_anim, |ui| {
-                    crate::slider(
+                    // The slider clamps what it draws; a stored speed outside its range (the
+                    // validator accepts more) stays as stored until the user moves the slider.
+                    let mut shown = s.look_at_speed;
+                    let response = crate::slider(
                         ui,
-                        &mut s.look_at_speed,
+                        &mut shown,
                         0.5..=3.0,
                         crate::Slider { step: Some(0.25), format: |v| format!("{v:.2}×"), ..Default::default() },
-                    )
+                    );
+                    if response.changed() {
+                        s.look_at_speed = shown;
+                    }
+                    response
                 })
                 .inner
             });

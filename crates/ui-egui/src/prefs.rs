@@ -2829,8 +2829,8 @@ impl solidcraft_ui_kit::prefs_navigation_page::PrefsHost for SolveApp {
     fn heading_tag(&self) -> Option<fn(&mut egui::Ui)> {
         Some(crate::settings_profiles::tag)
     }
-    fn mouse_gesture_rows(&mut self, ui: &mut egui::Ui) {
-        crate::mouse_gesture::nav_rows(self, ui, &Tokens::get());
+    fn mouse_gesture_rows(&mut self, settings: &mut solidcraft_ui_kit::prefs_navigation::NavigationSettings, ui: &mut egui::Ui) {
+        crate::mouse_gesture::nav_rows(self, settings, ui, &Tokens::get());
     }
 }
 

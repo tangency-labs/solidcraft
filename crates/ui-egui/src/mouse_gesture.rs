@@ -28,6 +28,7 @@ use crate::SolveApp;
 use crate::context_menu::{act, cmd};
 use crate::ui_kit::Item;
 use solidcraft_theme::Tokens;
+use solidcraft_ui_kit::prefs_navigation::NavigationSettings;
 
 /// Most tools one ring may hold.
 pub(crate) const MAX_TOOLS: usize = 12;
@@ -600,14 +601,10 @@ fn apply(list: &mut Vec<String>, op: Op) -> bool {
 
 /// The rows of Preferences › Navigation that belong to gestures: the switch, the button that
 /// opens the editor, and what the mouse mode has to be.
-pub(crate) fn nav_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
+pub(crate) fn nav_rows(app: &mut SolveApp, nav: &mut NavigationSettings, ui: &mut egui::Ui, t: &Tokens) {
     crate::ui_kit::settings_block(ui, solidcraft_ui_text::tr_label("Mouse gestures"), t.space_24 * 6.0 + t.space_6, |ui| {
         ui.horizontal_wrapped(|ui| {
-            crate::ui_kit::checkbox(
-                ui,
-                solidcraft_ui_text::tr_label("Ring of tools on the right button"),
-                &mut app.preferences.navigation.mouse_gestures.enabled,
-            );
+            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Ring of tools on the right button"), &mut nav.mouse_gestures.enabled);
             let customize = crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Customize…"), crate::ui_kit::Button::Normal);
             crate::scenario::publish_handle("gestures:customize", customize.rect.center());
             if customize.clicked() {
@@ -615,16 +612,16 @@ pub(crate) fn nav_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 app.gesture.editor.studio = Studio::of(app);
             }
         });
-        if app.preferences.navigation.nav != MOUSE_MODE {
+        if nav.nav != MOUSE_MODE {
             crate::ui_kit::text(
                 ui,
                 solidcraft_ui_text::tr_label("Mouse gestures only work with the SolidWorks mouse mode (the wheel orbits, Ctrl + wheel pans)."),
                 crate::ui_kit::Text::Hint("mouse_gesture_mode"),
             );
             if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Use the SolidWorks mouse mode"), crate::ui_kit::Button::Normal).clicked() {
-                app.preferences.navigation.choose_preset(crate::prefs::nav_preset(MOUSE_MODE));
+                nav.choose_preset(crate::prefs::nav_preset(MOUSE_MODE));
             }
-        } else if app.preferences.navigation.mouse_gestures.enabled {
+        } else if nav.mouse_gestures.enabled {
             crate::ui_kit::text(
                 ui,
                 solidcraft_ui_text::tr_label(

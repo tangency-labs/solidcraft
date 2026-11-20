@@ -125,6 +125,7 @@
   "prefs.left_click": "왼쪽 클릭",
   "prefs.live_panel_drag_preview": "드래그 중 패널 배치 미리 보기",
   "prefs.live_panel_drag_preview_help": "놓기 전에 드래그 중인 패널과 다른 패널을 배치 예정 위치에 표시합니다. 끄면 놓을 위치가 윤곽선으로 표시됩니다.",
+  "prefs.middle_double_click": "가운데 버튼 더블 클릭",
   "prefs.mouse_heading": "마우스",
   "prefs.mouse_mapping": "마우스 매핑",
   "prefs.navigation": "탐색",
