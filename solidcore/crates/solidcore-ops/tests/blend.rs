@@ -5155,26 +5155,29 @@ fn corner_round(c: [f64; 2], d1: [f64; 2], d2: [f64; 2], r: f64) -> (f64, f64) {
 
 /// #19724: a frustum about x (radius 24 at x = 0, 36 at x = 48) with a 12 degree rib on it,
 /// whose side leaves the cone at (18, 28.5) 15 degrees off the cone's straight side, the edge
-/// there rounded 1 mm. The record is the body SolidCraft wrote after that round
-/// (`tests/data/issue_19724_cone_rib_round.bodies.json.gz`): the round is an exact round of
-/// the `Circle` class between the two cones, its definition holding each support as a cone
-/// label and its NURBS form. The rib's cone is one 12 degree arc span, and the cone the
-/// record's reading derives from that form's control rows is off it by more than the rounding
-/// `AnalyticSupport::build` allows, so on main reading the record failed ("a support's
-/// analytic surface is not its NURBS form's parametrisation"): the body could not be measured,
-/// and nothing more could be done to it. A label its form does not prove is now dropped, as
-/// a face's is, and the support is its form; the round is certified again from the supports.
+/// there rounded 1 mm: the body SolidCraft wrote after that round
+/// (`tests/data/issue_19724_cone_rib_round.bodies.json.gz`), read here with that round as its
+/// net. The rib's two sides are cones of one 12 degree arc span each, whose NURBS forms carry
+/// the rounding of the conversions that made them: their own numbers prove them, the cones
+/// read off their control rows do not (`AnalyticSupport::build`'s parametrisation test).
 ///
-/// The body read back has the record's faces, edges and vertices, and its volume is the
-/// frustum's, the rib's (its triangle turned 12 degrees about x, its base on the cone's
-/// side) and the round's (the corner of turn 15 degrees between the two sides, filled to the
-/// ball, turned 12 degrees), each by Pappus. The rim at the small end (x = 0, radius 24),
-/// rounded 1 mm then, takes off its corner of 90 degrees plus the cone's half angle, turned
-/// once round: one face more (the torus), two edges (the rim split in two, the torus's seam)
-/// and one vertex (the seam's vertex split in two).
+/// Rounding the rib's top edge makes an exact round of the `Circle` class between the two
+/// sides, its supports the sides' surfaces. On main its record labelled them cones, and
+/// reading it back refused the body ("a support's analytic surface is not its NURBS form's
+/// parametrisation"), as SolidCraft's measuring did after the issue's round. A support is
+/// now labelled only where reading derives it back from its form, and the body reads back
+/// with its round.
+///
+/// The volume before is the frustum's, the rib's (its triangle turned 12 degrees about x, its
+/// base on the cone's side) and the 15 degree round's (the corner between the cone's side and
+/// the rib's, filled to the ball, turned 12 degrees), each by Pappus; the top round takes off
+/// the rib's 75 degree corner at its top, turned 12 degrees. It ends on the rib's two end
+/// planes as the 15 degree round does: one face more, three edges (the top edge split in two,
+/// an arc on each end plane) and two vertices.
 #[test]
-fn a_round_between_two_cones_on_a_short_arc_reads_back_and_the_rim_rounds_after_it() {
+fn a_round_on_a_short_rib_s_cones_reads_back_from_its_record() {
     use solidcore::topology::face::p2 as face;
+    use solidcore_record::brep::Surface as RecordSurface;
     rig_fixes();
     let case = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -5185,23 +5188,27 @@ fn a_round_between_two_cones_on_a_short_arc_reads_back_and_the_rim_rounds_after_
         .read_to_string(&mut text)
         .unwrap();
     let records: serde_json::Value = serde_json::from_str(&text).unwrap();
-    let record: Record = serde_json::from_value(records["b1"].clone()).unwrap();
-    let b = Body::from_record(&record, true)
-        .unwrap_or_else(|e| panic!("the record does not read back: {e:?}"))
-        .0;
+    let mut record: Record = serde_json::from_value(records["b1"].clone()).unwrap();
+    // the 15 degree round as its net (its definition's supports were written the way this
+    // test shows refused)
+    let mut nets = 0;
+    for f in &mut record.faces {
+        if matches!(f.surface, RecordSurface::Blend { .. }) {
+            f.surface = f.nurbs.take().unwrap();
+            nets += 1;
+        }
+    }
+    assert_eq!(nets, 1);
     let counts = [
         record.faces.len(),
         record.edges.len(),
         record.vertices.len(),
     ];
     assert_eq!(counts, [8, 15, 10]);
+    let b = Body::from_record(&record, true).unwrap().0;
     assert_eq!(b.counts().unwrap(), counts);
-    assert!(b.is_manifold_solid().unwrap());
-    let report = b.check(CheckLevel::All).unwrap();
-    assert!(report.is_valid(), "{report}");
-    // the round keeps its definition: an exact round between the two cones (on the body
-    // itself: a copy through its `.smb` bytes keeps no definitions)
-    let rounds = {
+    // exact rounds on the body itself: a copy through its `.smb` bytes keeps no definitions
+    let exact_rounds = |b: &Body| {
         let brep = b.kernel();
         brep.face_list()
             .iter()
@@ -5211,9 +5218,9 @@ fn a_round_between_two_cones_on_a_short_arc_reads_back_and_the_rim_rounds_after_
             })
             .count()
     };
-    assert_eq!(rounds, 1);
+    assert_eq!(exact_rounds(&b), 0);
 
-    let slope = 0.25_f64;
+    let theta = 12.0_f64.to_radians();
     let frustum = PI * 48.0 / 3.0 * (24.0 * 24.0 + 24.0 * 36.0 + 36.0 * 36.0);
     let p: [[f64; 2]; 3] = [
         [18.0, 28.5],
@@ -5222,40 +5229,50 @@ fn a_round_between_two_cones_on_a_short_arc_reads_back_and_the_rim_rounds_after_
     ];
     let cross =
         (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
-    let rib = cross.abs() / 2.0 * (p[0][1] + p[1][1] + p[2][1]) / 3.0 * 12.0_f64.to_radians();
+    let rib = cross.abs() / 2.0 * (p[0][1] + p[1][1] + p[2][1]) / 3.0 * theta;
     let unit = |d: [f64; 2]| {
         let l = d[0].hypot(d[1]);
         [d[0] / l, d[1] / l]
     };
-    let along_cone = unit([1.0, slope]);
-    let up_rib = unit([p[1][0] - p[0][0], p[1][1] - p[0][1]]);
+    let towards = |from: [f64; 2], to: [f64; 2]| unit([to[0] - from[0], to[1] - from[1]]);
+    let along_cone = unit([1.0, 0.25]);
+    let up_rib = towards(p[0], p[1]);
     let turn = (along_cone[0] * up_rib[0] + along_cone[1] * up_rib[1]).acos();
     assert!(
         (turn.to_degrees() - 15.0).abs() < 1e-5,
         "{}",
         turn.to_degrees()
     );
-    // the round fills the corner outside both sides: between the cone's side back towards
-    // x = 0 and the rib's side
+    // the 15 degree round fills the corner outside both sides: between the cone's side back
+    // towards x = 0 and the rib's side
     let (area, rho) = corner_round(p[0], [-along_cone[0], -along_cone[1]], up_rib, 1.0);
-    let round = area * rho * 12.0_f64.to_radians();
-    let want = frustum + rib + round;
+    let want = frustum + rib + area * rho * theta;
     // the volume's accuracy, and the rib's base 2.5e-7 inside the cone at its far end
-    let tol = 2e-8 * want + 1e-5;
-    let before = volume(&b);
+    let accuracy = 1e-10;
+    let tol = 2.0 * accuracy * want + 1e-5;
+    let before = b.volume(accuracy).unwrap();
     assert!((before - want).abs() <= tol, "{before} {want}");
 
-    // the rim at the small end: the plane x = 0 down towards the axis, and the cone's side
-    let rim = nearest_edge(&b, [0.0, 0.0, -24.0]);
-    blend(&b, Blend::Round, &[rim], &[1.0], &[], Corners::Filled)
-        .unwrap_or_else(|e| panic!("the rim does not round: {e:?}"));
-    assert_eq!(b.counts().unwrap(), [9, 17, 11]);
-    assert!(b.is_manifold_solid().unwrap());
-    let report = b.check(CheckLevel::All).unwrap();
+    // the rib's top edge, the arc through its top corner
+    let top = nearest_edge(&b, [p[1][0], p[1][1], 0.0]);
+    let r = 0.5;
+    blend(&b, Blend::Round, &[top], &[r], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("the rib's top does not round: {e:?}"));
+    assert_eq!(b.counts().unwrap(), [9, 18, 12]);
+    assert_eq!(exact_rounds(&b), 1);
+    let (area, rho) = corner_round(p[1], towards(p[1], p[0]), towards(p[1], p[2]), r);
+    let want = want - area * rho * theta;
+
+    let (written, _) = b.to_record().unwrap();
+    let back = Body::from_record(&written, true)
+        .unwrap_or_else(|e| panic!("the body does not read back: {e:?}"))
+        .0;
+    assert_eq!(back.counts().unwrap(), [9, 18, 12]);
+    assert!(back.is_manifold_solid().unwrap());
+    let report = back.check(CheckLevel::All).unwrap();
     assert!(report.is_valid(), "{report}");
-    let (area, rho) = corner_round([0.0, 24.0], [0.0, -1.0], along_cone, 1.0);
-    let want = want - area * rho * 2.0 * PI;
-    let after = volume(&b);
+    assert_eq!(exact_rounds(&back), 1);
+    let after = back.volume(accuracy).unwrap();
     assert!((after - want).abs() <= tol, "{after} {want}");
 }
 

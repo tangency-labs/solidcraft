@@ -42,7 +42,7 @@ use crate::nurbs::knots::MAX_DEGREE;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
 use crate::nurbs::srf_basic::Surface as NurbSurface;
 use crate::surface::ball_patch::BallPatch;
-use crate::surface::implicit::{lies_on, AnalyticSupport, LeaderMap, SupportKind};
+use crate::surface::implicit::{AnalyticSupport, LeaderMap, SupportKind};
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::FaceId;
 
@@ -138,46 +138,6 @@ const fn kind_of(k: SupportKindRecord) -> Option<SupportKind> {
         SupportKindRecord::Cone => Some(SupportKind::Cone),
         SupportKindRecord::Sphere => Some(SupportKind::Sphere),
         SupportKindRecord::Torus => Some(SupportKind::Torus),
-    }
-}
-
-/// A support of a procedural blend or an exact round a record holds as its NURBS form
-/// `form` and the analytic kind `kind` labels it with: the analytic surface of that kind
-/// derived from the form and proved its parametrisation ([`AnalyticSupport::derive`], then
-/// [`AnalyticSupport::build`]), or the form itself where it has no label. The record holds
-/// no numbers for the label, so they are read off the form's control rows, and on a form of
-/// one short span (a cone's 12 degree arc) that reading can be off the form's
-/// parametrisation by more than `build`'s rounding, while the surface the record was written
-/// from, with its own numbers, is the form's. A form that lies on the derived surface
-/// (`lies_on`) but is not proved its parametrisation keeps no label: the support is its form,
-/// as a face whose form does not prove its label is (`face_surface::labelled`, owner 22254).
-/// The definition is certified again on the supports: [`rebuild`] proves the net on the
-/// definition they make, and [`exact_rebuild`] reads the class again, a support that is its
-/// form as the quadric the form is within the class's tolerance (`BlendQuadric::from_surface`).
-///
-/// # Errors
-///
-/// `InvalidInput` where no surface of the kind is derived from the form, or the form does not
-/// lie on the derived surface; those of the derivation and the proof.
-fn labelled_support(
-    k: &Kernel,
-    kind: Option<SupportKind>,
-    form: BSplineSurface,
-) -> Result<Surface> {
-    let Some(kind) = kind else {
-        return Ok(Surface::from(form));
-    };
-    let support = AnalyticSupport::derive(k, kind, &form)?;
-    match support.build(k, form.copy()) {
-        Ok(s) => Ok(s),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
-        Err(e) => {
-            if lies_on(&form, &support.implicit())? {
-                Ok(Surface::from(form))
-            } else {
-                Err(e)
-            }
-        }
     }
 }
 
@@ -301,17 +261,24 @@ fn from_record_at(k: &Kernel, rec: &ProceduralBlendRecord, depth: u32) -> Result
     for (i, s) in d.supports.iter().enumerate() {
         supports.push(match s {
             SupportRecord::Nurbs { kind, form } => {
-                labelled_support(k, kind_of(*kind), surface_of(form)?).map_err(|e| match e {
-                    SolidError::InvalidInput { .. } => SolidError::invalid_input(
-                        OP_FROM,
-                        if i == 0 {
-                            "support 1's NURBS form is not of its kind"
-                        } else {
-                            "support 2's NURBS form is not of its kind"
-                        },
-                    ),
-                    other => other,
-                })?
+                let form = surface_of(form)?;
+                match kind_of(*kind) {
+                    None => Surface::from(form),
+                    // the analytic surface derived from the form, the form checked on it
+                    Some(kind) => AnalyticSupport::derive(k, kind, &form)
+                        .and_then(|a| a.build(k, form))
+                        .map_err(|e| match e {
+                            SolidError::InvalidInput { .. } => SolidError::invalid_input(
+                                OP_FROM,
+                                if i == 0 {
+                                    "support 1's NURBS form is not of its kind"
+                                } else {
+                                    "support 2's NURBS form is not of its kind"
+                                },
+                            ),
+                            other => other,
+                        })?,
+                }
             }
             SupportRecord::Blend(b) => Surface::from(from_record_at(k, b, depth + 1)?),
         });
@@ -537,17 +504,16 @@ pub fn exact_to_record(k: &Kernel, surface: &Surface) -> Result<ExactRoundRecord
     })
 }
 
-/// The exact round a record holds: its supports by their labels ([`labelled_support`]) and
-/// its net derived from its form by its label (the analytic surfaces exact to rounding,
-/// their NURBS forms as stored), its definition as stored. The net is not checked against
-/// the definition: [`exact_rebuild`] does that.
+/// The exact round a record holds: its supports and net derived from their forms by their
+/// labels (the analytic surfaces exact to rounding, their NURBS forms as stored), its
+/// definition as stored. The net is not checked against the definition:
+/// [`exact_rebuild`] does that.
 ///
 /// # Errors
 ///
 /// `InvalidInput` for a record its structural check refuses
-/// ([`ExactRoundRecord::validate`]), a support's form not of its label's kind or off its
-/// surface ([`labelled_support`]), or a net's form not of its label's kind; those of making
-/// the supports, the leader and the net.
+/// ([`ExactRoundRecord::validate`]) or a form not of its label's kind; those of making the
+/// supports, the leader and the net.
 pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> {
     rec.validate()
         .map_err(|e| SolidError::invalid_input(OP_EXACT_FROM, e.reason))?;
@@ -555,7 +521,13 @@ pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> 
     for s in &rec.supports {
         supports.push(match s {
             SupportRecord::Nurbs { kind, form } => {
-                labelled_support(k, kind_of(*kind), surface_of(form)?)?
+                let form = surface_of(form)?;
+                match kind_of(*kind) {
+                    None => Surface::from(form),
+                    Some(kind) => {
+                        AnalyticSupport::derive(k, kind, &form).and_then(|a| a.build(k, form))?
+                    }
+                }
             }
             SupportRecord::Blend(_) => {
                 return Err(SolidError::invalid_input(
