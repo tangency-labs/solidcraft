@@ -11,6 +11,19 @@ use solidcraft_theme::Tokens;
 
 pub use crate::workspace::TABS;
 
+/// Planned Drawing tools stay unavailable to the engine, but reviewed option layouts can open.
+/// Execution availability remains entirely owned by the engine command.
+fn can_start(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> bool {
+    crate::render_workspace::interactive_command_info(app, command).enabled
+        || (crate::drawing_workspace::active(app) && crate::drawing_workspace::can_open_options(command.id))
+}
+
+/// A planned Drawing tool with a working options panel is a working tool, drawn and described as
+/// one. Only a planned tool that opens nothing yet is faded and says it is coming soon.
+pub(crate) fn coming_soon(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> bool {
+    command.planned.is_some() && !(crate::drawing_workspace::active(app) && crate::drawing_workspace::can_open_options(command.id))
+}
+
 /// Accent for a tab or a panel with a more specific semantic role.
 fn panel_accent(t: &Tokens, tab: &str, panel: &str) -> Color32 {
     if panel == "CONSTRAIN" {
@@ -358,6 +371,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
 pub enum FileAction {
     /// Create a design using the document lifecycle.
     New,
+    /// Make a drawing of the open design and show its first sheet in Drawing.
+    NewDrawing,
     /// Pick a design or an exchange file to open.
     Open,
     /// Save the active design, asking for a path when needed.
@@ -395,14 +410,16 @@ pub enum FileAction {
 impl FileAction {
     /// Whether this action is available in the current document, picker and report state.
     pub fn enabled(&self, app: &SolveApp) -> bool {
-        let needs_design =
-            matches!(self, Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_) | Self::VerifySignature)
-                || matches!(self, Self::Export(extension) if *extension != "json");
+        let needs_design = matches!(
+            self,
+            Self::NewDrawing | Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_) | Self::VerifySignature
+        ) || matches!(self, Self::Export(extension) if *extension != "json");
         // An open bug report describes the designs as they are, and a window opened behind it
         // covers it (#7188). Quit too, as behind any modal window: it would switch to a design
         // with unsaved changes under the report, and ask about it where it can't be answered.
         let behind_report = app.issue_report.draft.is_some();
         let available = match self {
+            Self::NewDrawing => app.session.doc.has_something_to_draw(),
             Self::Undo => !app.session.undo.is_empty(),
             Self::Redo => !app.session.redo.is_empty(),
             Self::ClearRecent => !app.home.recent.is_empty(),
@@ -426,6 +443,7 @@ impl FileAction {
         }
         match self {
             Self::New => crate::documents::new_design(app),
+            Self::NewDrawing => new_drawing(app),
             Self::Open => app.pick_open(|app, path| {
                 if let Some(path) = path {
                     app.open_chosen_file(&path);
@@ -458,6 +476,23 @@ impl FileAction {
     }
 }
 
+/// New Drawing: enter Drawing first, then make the drawing, so it opens on its first sheet. A
+/// drawing open in Design would refuse every model command, so a refused create goes back, but
+/// only if this call entered Drawing: started in Drawing, the user stays where they were.
+fn new_drawing(app: &mut SolveApp) {
+    let entered = !crate::drawing_workspace::active(app);
+    let made = crate::workspace::enter(app, "drawing").and_then(|()| {
+        app.run("drawing.create", json!({})).map(drop).inspect_err(|_| {
+            if entered {
+                let _ = crate::workspace::enter(app, "design");
+            }
+        })
+    });
+    if let Err(error) = made {
+        app.set_status(error, true);
+    }
+}
+
 fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
     let id = egui::Id::unique("sc_file_menu");
     if !ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
@@ -487,8 +522,10 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     };
     // Insert, Save and Export act on the design, which Home hides.
     let shown = design_shown(app);
-    let mut rows =
-        vec![row("new", app.tr("ui.new_design"), "Ctrl+N", "new", true), row("open", &format!("{}…", app.tr("ui.open")), "Ctrl+O", "open", true)];
+    let mut rows = vec![row("new", app.tr("ui.new_design"), "Ctrl+N", "new", true)];
+    // The icon `drawing.create` itself uses.
+    rows.push(row("new_drawing", app.tr("ui.new_drawing"), "", "new", FileAction::NewDrawing.enabled(app)));
+    rows.push(row("open", &format!("{}…", app.tr("ui.open")), "Ctrl+O", "open", true));
     let mut recent: Vec<FileRow> = app
         .home
         .recent
@@ -529,8 +566,14 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("file.export_view_dxf", app.tr_label("Export Current View as DXF…"), "", "export", shown));
     rows.push(row("file.export_obj", app.tr_label("Export OBJ…"), &key("file.export_obj"), "export", shown));
     rows.push(row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown));
+    rows.push(row("export_usd", &format!("{}…", app.tr("ui.export_usd")), "", "export", shown));
     rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
+    rows.push(row("file.export_sdf", app.tr_label("Export SDF Model…"), &key("file.export_sdf"), "export", shown));
     rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
+    // Print the drawing shown: only in Drawing, where Ctrl+P does the same.
+    if crate::drawing_workspace::active(app) && app.session.open_drawing.is_some() {
+        rows.push(row("drawing.print", &format!("{}…", app.tr("ui.drawing_print.menu")), &key("drawing.print"), "export", true));
+    }
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
     rows.push(FileRow::Separator);
@@ -575,6 +618,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
     }
     match id {
         "new" => FileAction::New.run(app),
+        "new_drawing" => FileAction::NewDrawing.run(app),
         "open" => FileAction::Open.run(app),
         "clear_recent" => FileAction::ClearRecent.run(app),
         "file.insert_step" => FileAction::Command("file.insert_step").run(app),
@@ -586,7 +630,9 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "file.export_view_dxf" => FileAction::Command("file.export_view_dxf").run(app),
         "file.export_obj" => FileAction::Command("file.export_obj").run(app),
         "file.export_urdf" => FileAction::Command("file.export_urdf").run(app),
+        "file.export_sdf" => FileAction::Command("file.export_sdf").run(app),
         "document.metadata" => FileAction::Command("document.metadata").run(app),
+        "drawing.print" => app.start(id),
         "pointcloud.insert" | "file.send_to_slicer" => app.start(id),
         "save" => FileAction::Save.run(app),
         "save_as" => FileAction::SaveAs.run(app),
@@ -599,6 +645,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
             }
         }
         "export_glb" => FileAction::Export("glb").run(app),
+        "export_usd" => FileAction::Export("usd").run(app),
         "export_json" => FileAction::Export("json").run(app),
         "install" => {
             if let Some(offer) = crate::install::offered(app) {
@@ -610,6 +657,16 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "quit" => FileAction::Quit.run(app),
         _ => {}
     }
+}
+
+/// The Drawing tool `key` starts on a drawing's sheet (`on_sheet`): the one that does there what
+/// the sketch tool bound to the key does in a sketch. None while a sheet sketch is being edited,
+/// where the key is the sketch's own.
+fn sheet_tool(app: &SolveApp, on_sheet: bool, key: &str) -> Option<&'static str> {
+    if !on_sheet || app.session.active_sketch.is_some() {
+        return None;
+    }
+    crate::keymap::commands_for(app, key).into_iter().find_map(crate::drawing_workspace::counterpart)
 }
 
 /// Whether the design is on screen: viewport/menu editing stays disabled behind File.
@@ -723,6 +780,7 @@ pub(crate) fn start_export(app: &mut SolveApp, id: &str) -> bool {
         "file.export_step" => ("step", false),
         "file.export_obj" => ("obj", false),
         "file.export_urdf" => ("urdf", false),
+        "file.export_sdf" => ("sdf", false),
         "file.export_stl" => ("stl", true),
         "file.export_3mf" => ("3mf", true),
         _ => return false,
@@ -744,14 +802,20 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
     let body = crate::export_name::first_body(app);
     let name = format!("{}.{ext}", crate::export_name::offered(app, body.as_deref(), &app.session.doc.name));
     let format = format.map(str::to_string);
-    app.pick_save(&name, &[ext], move |app, path| {
+    // OpenUSD: the extension chosen picks binary (`.usd`, `.usdc`), text (`.usda`) or a package
+    // (`.usdz`).
+    let exts: &[&str] = if solidcraft_engine::io::is_usd_path(&name) { &solidcraft_engine::io::USD_EXTS } else { std::slice::from_ref(&ext) };
+    app.pick_save(&name, exts, move |app, path| {
         let Some(path) = path else { return };
         let mut params = json!({"path": path});
         if let Some(format) = format {
             params["format"] = json!(format);
         }
-        if app.run("file.export", params).is_ok() {
-            app.set_status(format!("Exported {path}"), false);
+        if let Ok(result) = app.run("file.export", params) {
+            let skipped =
+                result.get("skipped").and_then(Value::as_array).map_or(Vec::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>());
+            let line = if skipped.is_empty() { format!("Exported {path}") } else { format!("Exported {path} (skipped {})", skipped.join(", ")) };
+            app.set_status(line, false);
         }
     });
 }
@@ -1096,6 +1160,8 @@ struct PanelButton {
     exit: bool,
     persistent: bool,
     disabled: Option<String>,
+    /// Drawn faded: a planned tool that opens nothing yet.
+    coming_soon: bool,
     split_title: String,
     split_name: String,
 }
@@ -1109,6 +1175,7 @@ impl PanelButton {
             name: &self.name,
             icon: self.icon,
             size: self.size,
+            planned: self.coming_soon,
             enabled: self.enabled,
             pressed: self.pressed,
             exit: self.exit,
@@ -1200,7 +1267,7 @@ impl RibbonPanels {
                         name: app.tr_label(info.label).to_string(),
                         icon: if selected.id == "sketch.finish" { "finish" } else { info.icon },
                         size,
-                        enabled: info.enabled,
+                        enabled: can_start(app, selected),
                         pressed: (ribbon_shows_pressed(app, selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
                             || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip),
                         // The buttons that leave the sketch or the edit never show pressed; a
@@ -1209,6 +1276,7 @@ impl RibbonPanels {
                             && matches!(selected.id, "sketch.finish" | "sketch.finish_auto_constrain" | "sketch.cancel" | "component.finish_edit"),
                         persistent,
                         disabled: info.disabled_reason,
+                        coming_soon: coming_soon(app, selected),
                         split_title: family.map(|f| app.tr_label(crate::workspace::ribbon_family_label(f)).to_string()).unwrap_or_default(),
                         split_name: family.map(|f| app.tr_label(f.label).to_string()).unwrap_or_default(),
                     }
@@ -1224,11 +1292,12 @@ impl RibbonPanels {
                         name: app.tr_label(info.label).to_string(),
                         icon: info.icon,
                         size: ButtonSize { width: 0.0, min_width: 0.0 },
-                        enabled: info.enabled,
+                        enabled: can_start(app, c),
                         pressed: ribbon_shows_pressed(app, c.id),
                         exit: false,
                         persistent: false,
                         disabled: info.disabled_reason,
+                        coming_soon: coming_soon(app, c),
                         split_title: String::new(),
                         split_name: String::new(),
                     }
@@ -1244,7 +1313,7 @@ impl RibbonPanels {
                             label: info.label,
                             icon: info.icon,
                             shortcut: crate::keymap::display_for(app, c.id).unwrap_or_default(),
-                            enabled: info.enabled,
+                            enabled: can_start(app, c),
                             checked,
                             hint: persistent_hint(app, c, info.enabled),
                         }
@@ -1337,6 +1406,7 @@ impl RibbonPanels {
                         name: &b.name,
                         icon: &b.icon,
                         size: *size,
+                        planned: false,
                         enabled: true,
                         pressed: false,
                         exit: false,
@@ -1460,10 +1530,23 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             crate::context_menu::open_for(app, bg.interact_pointer_pos().unwrap_or(r.left_bottom()), crate::context_menu::Target::Toolbar);
         }
         let render = crate::render_workspace::active(app);
+        let drawing = crate::drawing_workspace::active(app);
         let switcher = app_bar::Switcher {
-            name: app.tr(if render { "ui.render" } else { "ui.design" }),
+            name: if render {
+                app.tr("ui.render")
+            } else if drawing {
+                app.tr_label("Drawing")
+            } else {
+                app.tr("ui.design")
+            },
             caption: app.tr("ui.ribbon_workspace"),
-            icon: if render { "ws_render" } else { "ws_design" },
+            icon: if render {
+                "ws_render"
+            } else if drawing {
+                "ws_drawing"
+            } else {
+                "ws_design"
+            },
             tip: app.tr("ui.change_workspace"),
             open: app.viewport.context_menu.is_some() && app.menu.target == crate::context_menu::Target::Workspace,
             floating,
@@ -1792,7 +1875,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                             // focused: the first or the last), instead of egui's own spatial move.
                             let (down, up) = ui.input(|i| (i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::ArrowUp)));
                             if down || up {
-                                let enabled: Vec<&str> = cmds.iter().filter(|c| c.info(&app.session).enabled).map(|c| c.id).collect();
+                                let enabled: Vec<&str> = cmds.iter().filter(|c| can_start(app, c)).map(|c| c.id).collect();
                                 let focused = ui.ctx().memory(|m| m.focused());
                                 let at = enabled.iter().position(|id| focused == Some(menu_style(app).focus_id(id)));
                                 let n = enabled.len();
@@ -2039,7 +2122,11 @@ impl RowData {
         };
         let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
         // A disabled row says why; a documented command also shows its help (#2758).
-        let reason = info.disabled_reason.as_deref().filter(|_| !info.enabled).map(|reason| app.tr_label(reason));
+        let reason = if crate::drawing_workspace::active(app) && c.planned.is_some() {
+            coming_soon(app, c).then(|| app.tr("ui.drawing_ribbon.planned"))
+        } else {
+            info.disabled_reason.as_deref().filter(|_| !info.enabled).map(|reason| app.tr_label(reason))
+        };
         let (tip, help, hint) = match persistent_hint(app, c, info.enabled) {
             Some(hint) => (Some(hint), None, true),
             None => (
@@ -2048,7 +2135,7 @@ impl RowData {
                 false,
             ),
         };
-        RowData { label, shortcut, checked, enabled: info.enabled, icon: info.icon, tip, help, hint }
+        RowData { label, shortcut, checked, enabled: can_start(app, c), icon: info.icon, tip, help, hint }
     }
 
     fn entry<'a>(&'a self, c: &'static solidcraft_engine::CommandSpec, pinned: bool) -> ribbon::MenuEntry<'a> {
@@ -2090,7 +2177,7 @@ fn dropdown_row(
 
 /// Up and Down through these commands' enabled rows ([`ribbon::list_keys`]).
 fn dropdown_keys(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_engine::CommandSpec]) {
-    let enabled: Vec<&str> = cmds.iter().filter(|c| crate::render_workspace::interactive_command_info(app, c).enabled).map(|c| c.id).collect();
+    let enabled: Vec<&str> = cmds.iter().filter(|c| can_start(app, c)).map(|c| c.id).collect();
     ribbon::list_keys(ui, &enabled, &menu_style(app));
 }
 
@@ -2146,7 +2233,7 @@ fn grid_entry<'a>(app: &SolveApp, c: &'static solidcraft_engine::CommandSpec, la
         label,
         icon: c.icon,
         shortcut: "",
-        enabled: c.info(&app.session).enabled,
+        enabled: can_start(app, c),
         checked: None,
         pinned,
         tip: None,
@@ -2239,8 +2326,13 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
         if let Some(help) = crate::command_help::help(command.id) {
             ui.add(egui::Label::new(egui::RichText::new(help).color(t.text_dim)).wrap());
         }
-        if let Some(reason) = disabled {
-            ui.add(egui::Label::new(egui::RichText::new(app.tr_label(reason)).color(t.text_dim)).wrap());
+        let reason = if crate::drawing_workspace::active(app) && command.planned.is_some() {
+            coming_soon(app, command).then(|| app.tr("ui.drawing_ribbon.planned"))
+        } else {
+            disabled.map(|reason| app.tr_label(reason))
+        };
+        if let Some(reason) = reason {
+            ui.add(egui::Label::new(egui::RichText::new(reason).color(t.text_dim)).wrap());
         }
     })
 }
@@ -2480,7 +2572,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     crate::viewport_status::reconcile(app, ctx);
     crate::browser::update_folder_pick(app, ctx);
     let chat_owner = crate::agent_chat::owns_keyboard_input(app, ctx);
-    if design_shown(app) && !chat_owner {
+    if design_shown(app) && !chat_owner && !crate::drawing_workspace::active(app) {
         crate::navigation::step_key_hold(app, ctx);
     } else {
         app.viewport.key_hold = None;
@@ -2531,6 +2623,11 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     if crate::params_dialog::cancel_on_escape(app, ctx) {
+        return;
+    }
+    if crate::view_tiles::cancel_placement_on_escape(app, ctx) {
+        app.esc_handled = true;
+        app.last_escape = None;
         return;
     }
     // A dimension value that is taking the keyboard: letters belong to it (a parameter name
@@ -2584,7 +2681,14 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     // A theme pasted on the Interface page is a theme, not copied components (#8226).
     crate::prefs::take_theme_paste(app, ctx);
     // Home hides the design: only New, Open and Preferences work there.
-    let shown = design_shown(app);
+    // Model shortcuts must not silently edit the source design behind a drawing. An open
+    // drawing takes the shared selection keys (Escape, Delete, Select All) on its own objects,
+    // and undo and redo step through that drawing's own history only, so Ctrl+Z and Ctrl+Y pass.
+    // Explicit source editors retain their existing shortcuts while open.
+    let drawing =
+        crate::drawing_workspace::active(app) && app.bom.is_none() && app.design_properties.is_none() && !crate::dialogs_sheet::flat_active(app);
+    let shown = design_shown(app) && !drawing;
+    let drawing_history = drawing && design_shown(app) && app.session.open_drawing.is_some();
     if shown {
         crate::edit_clipboard::handle(app, ctx);
     } else {
@@ -2592,6 +2696,30 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     }
     for (k, repeat, mods) in keys {
         use egui::Key;
+        if drawing && k == Key::S && !mods.command && !mods.shift && !mods.alt {
+            app.start("ui.palette");
+            continue;
+        }
+        // Escape as in the model: the tool or drag under way first, then the selection.
+        if drawing && k == Key::Escape {
+            // As in a sketch: the first Esc drops the Dimension tool's picks, the next leaves it.
+            if cancel_unfinished(app)
+                || crate::drawing_workspace::dimension::clear_picks(app)
+                || crate::drawing_workspace::escape_panel(app)
+                || crate::drawing_sheet_page::clear_view_selection(app)
+            {
+                app.esc_handled = true;
+            } else if !app.session.selection.is_empty() {
+                app.esc_handled = true;
+                let _ = app.run("select.clear", json!({}));
+            }
+            continue;
+        }
+        // Delete and Backspace delete the selection through the model's own path.
+        if drawing_history && matches!(k, Key::Delete | Key::Backspace) && !mods.command && !mods.alt {
+            crate::viewport::delete_selection(app);
+            continue;
+        }
         // Only Esc pressed twice in a row finishes a sketch: any other key in between resets it.
         if k != Key::Escape {
             app.last_escape = None;
@@ -2607,7 +2735,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             && !mods.shift
             && let Some(place) = view_place(k)
         {
-            drop(app.run("tab.view.activate", json!({"index": place})));
+            let key = crate::keymap::key_name(k, mods);
+            if crate::keymap::commands_for(app, &key).is_empty() {
+                drop(app.run("tab.view.activate", json!({"index": place})));
+            } else {
+                crate::keymap::press(app, &key, repeat);
+            }
             continue;
         }
         if mods.command {
@@ -2623,12 +2756,23 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                         }
                     });
                 }
-                _ if !shown => {}
+                // Select All's key (Ctrl+A by default) works on the drawing's sheet.
+                _ if !shown && !(drawing_history && matches!(k, Key::Z | Key::Y)) => {
+                    let key = crate::keymap::key_name(k, mods);
+                    if drawing_history && crate::keymap::command_for(app, &key) == Some("select.all") {
+                        crate::keymap::press(app, &key, repeat);
+                    } else if let Some(tool) = sheet_tool(app, drawing_history, &key) {
+                        app.start(tool);
+                    }
+                }
                 // Ctrl+W closes the view shown, and the design with it when that is its only view;
                 // Ctrl+Shift+W closes the design shown. A design is closed asking first when it is
                 // unsaved; closing the last one shows the start page (#5366).
                 Key::W if !mods.alt => {
-                    if mods.shift || app.docs.views.len() < 2 {
+                    let key = crate::keymap::key_name(k, mods);
+                    if mods.shift && !crate::keymap::commands_for(app, &key).is_empty() {
+                        crate::keymap::press(app, &key, repeat);
+                    } else if mods.shift || app.docs.views.len() < 2 {
                         crate::documents::close(app, app.docs.active, false);
                     } else {
                         drop(app.run("tab.view.close", json!({})));
@@ -2648,6 +2792,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 Key::S => save(app),
                 _ => crate::keymap::press(app, &crate::keymap::key_name(k, mods), repeat),
             }
+            continue;
+        }
+        // On a drawing's sheet, a sketch tool's key starts the tool that does its job there: the
+        // Dimension key (D by default, or the key it was rebound to) starts Dimension.
+        if let Some(tool) = sheet_tool(app, drawing_history, &crate::keymap::key_name(k, mods)) {
+            app.start(tool);
             continue;
         }
         if !shown {
@@ -2709,6 +2859,11 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 // A single Esc with nothing left to cancel keeps the sketch open (#1804); a quick
                 // second press finishes it (above).
+            }
+            // The quick menu at the cursor (#5501), unless the person bound the key to a command.
+            Key::S if mods.shift && !mods.alt && crate::keymap::commands_for(app, crate::quick_menu::KEY).is_empty() => {
+                let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(ctx.content_rect().center());
+                crate::quick_menu::open(app, at);
             }
             Key::F2 => {
                 if !crate::context_menu::press_shortcut(app, "F2") {
@@ -2772,6 +2927,23 @@ fn dropdown_cell(
 #[cfg(test)]
 mod header_report_tests {
     use super::*;
+
+    #[test]
+    fn custom_view_chords_run_before_builtin_view_shortcuts() {
+        for (chord, input) in [("Alt+1", json!({"key":"1", "alt":true})), ("Ctrl+Shift+W", json!({"key":"W", "cmd":true, "shift":true}))] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            let second = h.app.docs.views.open(solidcraft_views::ViewKind::Model, None, false);
+            crate::keymap::bind_at(&mut h.app, "view.grid", None, chord, true).unwrap();
+            h.frames(2);
+            let grid = h.app.ui.show_grid;
+            h.call("ui.key", input);
+            h.frames(2);
+            assert_eq!(h.app.ui.show_grid, !grid, "{chord} runs its assigned command");
+            assert_eq!(h.app.docs.views.active().id, second, "{chord} does not activate or close a view");
+            assert!(!h.app.home.open && h.app.docs.closing.is_none(), "{chord} does not close the design");
+        }
+    }
 
     #[test]
     fn escape_closes_file_menu_on_home_and_over_a_sketch_without_cancelling_it() {
@@ -2891,6 +3063,7 @@ mod header_report_tests {
     #[test]
     fn native_menu_actions_disable_save_on_home() {
         let mut h = crate::scenario::Harness::new();
+        // New Drawing is there with drawings on (Preferences > Design > Drawings).
         h.app.home.open = true;
         assert!(!FileAction::Save.enabled(&h.app));
         assert!(!FileAction::SaveAs.enabled(&h.app));
@@ -2900,9 +3073,12 @@ mod header_report_tests {
         assert!(!FileAction::Export("step").enabled(&h.app));
         assert!(!FileAction::ExportMesh("stl").enabled(&h.app));
         assert!(!FileAction::Command("document.metadata").enabled(&h.app));
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
+        assert!(!FileAction::NewDrawing.enabled(&h.app), "Home hides the design a drawing would draw");
         h.app.home.open = false;
         assert!(FileAction::Save.enabled(&h.app));
         assert!(FileAction::Export("step").enabled(&h.app));
+        assert!(FileAction::NewDrawing.enabled(&h.app));
     }
 
     /// File › Export STEP…, STL…, 3MF…, OBJ… and URDF… each run a command of their own, so each
@@ -3026,6 +3202,7 @@ mod header_report_tests {
         for action in [
             FileAction::Undo,
             FileAction::New,
+            FileAction::NewDrawing,
             FileAction::Open,
             FileAction::OpenRecent("elsewhere.solidcraft".into()),
             FileAction::ClearRecent,
@@ -3133,6 +3310,68 @@ mod header_report_tests {
             let found = crate::shortcut_box::search(&h.app, q);
             assert!(found.iter().any(|r| r.0 == "file.save_mesh"), "{q}: {:?}", found.iter().map(|r| r.0).collect::<Vec<_>>());
         }
+    }
+
+    /// File › New Drawing draws the open design: it enters Drawing and shows the new drawing's first
+    /// sheet, in one undo step. With nothing to draw the row is greyed and nothing changes.
+    #[test]
+    fn file_menu_new_drawing_opens_the_first_sheet_of_the_open_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        assert!(!FileAction::NewDrawing.enabled(&h.app), "an empty design has nothing to draw");
+        FileAction::NewDrawing.run(&mut h.app);
+        assert!(h.app.session.doc.drawings.is_empty() && !crate::drawing_workspace::active(&h.app));
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        let undo = h.app.session.undo.len();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+        h.step(&json!({"widget":"New Drawing"})).unwrap();
+        h.frames(3);
+        assert!(crate::drawing_workspace::active(&h.app), "New Drawing enters Drawing");
+        assert_eq!(h.app.session.doc.drawings.len(), 1);
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+        let first = h.app.run("drawing.inspect", json!({})).unwrap()["sheets"][0]["id"].clone();
+        assert!(first.is_string());
+        assert_eq!(crate::drawing_sheet_page::inspect(&h.app)["sheet"], first, "the first sheet is shown");
+    }
+
+    /// A New Drawing the command refuses (the preferred template is gone) leaves the user in Design
+    /// with no drawing open, so modelling goes on.
+    #[test]
+    fn file_menu_new_drawing_that_fails_goes_back_to_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        h.app.preferences.part_drawing_template = "no-such-template".into();
+        assert!(FileAction::NewDrawing.enabled(&h.app));
+        FileAction::NewDrawing.run(&mut h.app);
+        assert!(!crate::drawing_workspace::active(&h.app), "back in Design");
+        assert!(h.app.session.doc.drawings.is_empty() && h.app.session.open_drawing.is_none());
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5})).unwrap();
+    }
+
+    /// A New Drawing refused in Drawing leaves the user where they were: in Drawing's empty state, or
+    /// on the drawing they had open.
+    #[test]
+    fn file_menu_new_drawing_that_fails_in_drawing_stays_in_drawing() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        let template = h.app.preferences.part_drawing_template.clone();
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        h.app.preferences.part_drawing_template = "no-such-template".into();
+        FileAction::NewDrawing.run(&mut h.app);
+        assert!(crate::drawing_workspace::active(&h.app), "still in Drawing's empty state");
+        assert!(h.app.session.doc.drawings.is_empty());
+        h.app.preferences.part_drawing_template = template;
+        FileAction::NewDrawing.run(&mut h.app);
+        let open = h.app.session.open_drawing;
+        assert!(open.is_some());
+        h.app.preferences.part_drawing_template = "no-such-template".into();
+        FileAction::NewDrawing.run(&mut h.app);
+        assert!(crate::drawing_workspace::active(&h.app), "still in Drawing");
+        assert_eq!(h.app.session.open_drawing, open, "on the drawing that was open");
+        assert_eq!(h.app.session.doc.drawings.len(), 1);
     }
 
     /// The browser build's File > Download design hands the open design to the host as a
@@ -4619,6 +4858,9 @@ mod app_bar_tests {
             }
         }
         h.app.ui.tab = "MODEL".into();
+        // Tall enough for the whole File menu (Export SDF Model made it a row longer), so the
+        // plugin's row at its foot is on screen without scrolling the menu.
+        h.call("ui.resize", json!({"width":1600,"height":1600}));
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
         h.step(&json!({"widget":"Workshop helper · measure"})).unwrap();

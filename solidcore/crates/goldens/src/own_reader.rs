@@ -21,7 +21,7 @@
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::kernel::Kernel;
-use solidcore::topology::brep::{p10::TopologyEnv, p7};
+use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::Brep;
 use solidcore::{EntityRef, Result as SolidResult};
@@ -82,10 +82,11 @@ fn read_bytes(k: &mut Kernel, bytes: Vec<u8>, rebuild: bool) -> SolidResult<Brep
         records: &mut records,
         next_key: 1u64 << 50,
     };
-    p7::read_from_file(k, &mut body, bytes, FileType::Ascii, rebuild, &mut env)?;
+    crate::refit::read_from_file(k, &mut body, bytes, FileType::Ascii, rebuild, &mut env)?;
     // Record the geometry owners under arena identities, as a kernel-built B-rep
     // does, so `GetFace` / `GetEdge` on that geometry resolve to the owning topology.
     body.use_arena_naming()?;
+    crate::tolsub::after_read(&mut body);
     Ok(body)
 }
 
@@ -186,7 +187,7 @@ pub(crate) fn edgeuse_case(
     use crate::own_builder::{counts, failed_output, Built, Conventions};
     use crate::units::topology_edgeuse_p1::ImportTypes;
     let conv = &Conventions::EDGEUSE_GRAPH;
-    let k = &mut Kernel::default();
+    let k = &mut crate::runner_kernel();
     Ok(
         match brep_in_order(k, src, validate_only, init_gaps, conv)? {
             Built::Brep(b) => Ok((counts(&b), *b, ImportTypes::default())),

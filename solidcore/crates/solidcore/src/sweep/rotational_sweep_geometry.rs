@@ -510,7 +510,6 @@ impl RotationalSweepGeometry {
         let mut new = Self::new(self.base_pt, self.axis, self.angle, self.eps);
         new.base.set_make_analytics(self.base.make_analytics);
         new.analytic_revolutions = self.analytic_revolutions;
-        new.base.statuses_pass_on = self.base.statuses_pass_on;
         new
     }
 
@@ -646,10 +645,7 @@ impl RotationalSweepGeometry {
 
         let mut cs = Axis2Placement::default();
         // (status not checked upstream; the fork passes it on, c8f6a31)
-        let status = cs.set_canonical(pt, self.axis, diff_vec);
-        if self.base.statuses_pass_on {
-            status?;
-        }
+        cs.set_canonical(pt, self.axis, diff_vec)?;
         Ok(cs)
     }
 
@@ -725,10 +721,7 @@ impl RotationalSweepGeometry {
 
         let mut a2p = Axis2Placement::default();
         // (status not checked upstream; the fork passes it on, c8f6a31)
-        let status = a2p.set_canonical(rot_center, x_vect, y_vect);
-        if self.base.statuses_pass_on {
-            status?;
-        }
+        a2p.set_canonical(rot_center, x_vect, y_vect)?;
 
         // degree 2
         let circle = BSplineCurve::create_circle_segment(

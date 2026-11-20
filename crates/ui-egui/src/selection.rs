@@ -34,30 +34,12 @@ pub(crate) fn holds_body(session: &solidcraft_engine::Session, body: &str) -> bo
 
 /// Two distinct point intents for the alignment command, without creating sketch points.
 pub(crate) fn alignment_points(selection: &[Sel]) -> Option<[serde_json::Value; 2]> {
-    let [a, b] = selection else { return None };
-    let point = |s: &Sel| match s {
-        Sel::SketchPoint { id } => Some(serde_json::json!(id)),
-        Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
-        // Horizontal/Vertical takes no origin axis yet: a selection with one isn't consumed.
-        _ => None,
-    };
-    let (a, b) = (point(a)?, point(b)?);
-    (a != b).then_some([a, b])
+    solidcraft_engine::sketch_selection::alignment_points(selection)
 }
 
-/// Coincident's two operands for a two-item selection: points and curves by id, a line's
-/// midpoint as `{midpoint: line}`, which the command ties a point to (#10311).
+/// Coincident's two operands for a two-item selection.
 pub(crate) fn coincident_operands(selection: &[Sel]) -> Option<serde_json::Value> {
-    let [a, b] = selection else { return None };
-    let operand = |s: &Sel| match s {
-        Sel::SketchPoint { id } | Sel::SketchCurve { id, .. } => Some(serde_json::json!(id)),
-        Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
-        // An origin axis, either operand: the command projects it into the sketch.
-        Sel::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => Some(serde_json::json!({"axis": name})),
-        _ => None,
-    };
-    let (a, b) = (operand(a)?, operand(b)?);
-    (a != b).then(|| serde_json::json!({"a": a, "b": b}))
+    solidcraft_engine::sketch_selection::coincident_operands(selection)
 }
 
 /// The current middle of a finite straight sketch edge.
@@ -102,6 +84,9 @@ pub const EXTERNAL_POINTS: Accept = 16384;
 pub const CONSTRUCTION_POINTS: Accept = 32768;
 /// Snap points: an edge or face hovered wakes its centre, middle and ends (`snap_wake`).
 pub const SNAP_POINTS: Accept = 65536;
+/// Placements of components (a pattern of components): a pick in the view or the Browser takes
+/// the placement under the active component, as Align's Components do.
+pub const OCCURRENCES: Accept = 131072;
 /// What a 3D axis input takes (Revolve, Circular Pattern, Plane at Angle, Move's Rotate): an
 /// origin or construction axis, a straight sketch line, and an edge or face of the model that
 /// has an axis (a straight or circular edge, a cylinder, cone or torus face; the dialog takes
@@ -168,6 +153,11 @@ impl SelInput {
             Hit::Plane { name, .. } if a & PLANES != 0 => Some(Sel::Plane { name: name.clone() }),
             Hit::Axis { name } if a & AXES != 0 => Some(Sel::Axis { name: name.clone() }),
             Hit::ConstructionPoint { name } if a & CONSTRUCTION_POINTS != 0 => Some(Sel::ConstructionPoint { name: name.clone() }),
+            Hit::ConstructionPoint { name }
+                if solidcraft_engine::origins::item(name).is_some_and(|(_, item)| item == "O") && a & (ORIGIN | SNAP_POINTS) != 0 =>
+            {
+                Some(Sel::ConstructionPoint { name: name.clone() })
+            }
             Hit::SketchPoint3d { sketch, id, .. } if a & POINTS != 0 => Some(Sel::SketchPoint { id: format!("{sketch}:{id}") }),
             // A straight sketch line stands for an axis only in an input that takes axes for
             // what they are: an input that takes curves too (Measure) takes the line as its curve.

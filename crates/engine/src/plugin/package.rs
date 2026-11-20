@@ -111,8 +111,14 @@ pub fn remove(s: &mut Session, id: &str) -> Result<RemoveResult> {
         return Err(invalid("installed package must be a directory, not a symlink"));
     }
     check_remove_tree(&path)?;
-    std::fs::remove_dir_all(path).map_err(io)?;
+    s.plugin_state.refresh_stored();
+    // The approvals go first: a store that cannot be written leaves the package installed, with
+    // nothing granted in this session, and the error is reported. A record left behind could
+    // otherwise approve the same package again if it were copied back.
     s.plugin_state.grants.remove(id);
+    s.plugin_state.persist_stored()?;
+    s.plugin_state.forget_stored(id)?;
+    std::fs::remove_dir_all(path).map_err(io)?;
     s.plugin_state.packages.remove(id);
     s.disabled_plugins.remove(id);
     Ok(RemoveResult { id: id.into(), removed: true, param_warnings: vec![] })

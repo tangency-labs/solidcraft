@@ -69,6 +69,11 @@
 //!   polygon, as the fork (tangency-labs/smlib 666242b); upstream reads the unset
 //!   values. A control point whose angles cannot be measured (a zero polygon segment)
 //!   is skipped and the scan goes on, where the fork ends it with no dog-leg.
+//! - **Narrow domains (WR-18540).** `IsEdgeuseSideInSurface` takes a sample within the
+//!   side band of two opposite sides of the face's domain to lie on the nearer of them (on
+//!   neither when midway). Upstream keeps both, and its direction test then holds every
+//!   edge of a domain narrower than twice the band (a sliver triangle's plane, fitted to
+//!   the face) to U-min or V-min, failing a correctly turned edge along the other side.
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::Curve;
@@ -333,15 +338,7 @@ pub fn evaluate_binormal_step_off(
     step_off_distance: f64,
     options: &StepOffOptions,
 ) -> Result<BinormalEval> {
-    let mut out = BinormalEval {
-        point: Point3::UNDEF,
-        binormal: Vec3::UNDEF,
-        tangent: Vec3::UNDEF,
-        face_normal: Vec3::UNDEF,
-        uv: Point2::UNDEF,
-    };
-    evaluate_binormal_step_off_into(k, b, eu, parameter, step_off_distance, options, &mut out)?;
-    Ok(out)
+    evaluate_binormal_step_off_or_left_face(k, b, eu, parameter, step_off_distance, options)?
 }
 
 /// [`evaluate_binormal_step_off`] writing its outputs into the caller's record in
@@ -367,6 +364,53 @@ pub fn evaluate_binormal_step_off_into(
     options: &StepOffOptions,
     out: &mut BinormalEval,
 ) -> Result<()> {
+    match step_off_into(k, b, eu, parameter, step_off_distance, options, out)? {
+        Some(left_face) => Err(left_face),
+        None => Ok(()),
+    }
+}
+
+/// [`evaluate_binormal_step_off`] with a step that leaves the face's UV domain as a
+/// value: the inner `Err` holds the error [`evaluate_binormal_step_off`] returns for
+/// it. For a caller that may take its point at another edge use.
+///
+/// # Errors
+///
+/// As [`evaluate_binormal_step_off`], but for the step that leaves the face's UV domain.
+pub(crate) fn evaluate_binormal_step_off_or_left_face(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    parameter: f64,
+    step_off_distance: f64,
+    options: &StepOffOptions,
+) -> Result<std::result::Result<BinormalEval, SolidError>> {
+    let mut out = BinormalEval {
+        point: Point3::UNDEF,
+        binormal: Vec3::UNDEF,
+        tangent: Vec3::UNDEF,
+        face_normal: Vec3::UNDEF,
+        uv: Point2::UNDEF,
+    };
+    Ok(
+        match step_off_into(k, b, eu, parameter, step_off_distance, options, &mut out)? {
+            Some(left_face) => Err(left_face),
+            None => Ok(out),
+        },
+    )
+}
+
+// The body of `evaluate_binormal_step_off_into`. `Some`: the step leaves the face's UV
+// domain (the error the entry returns for it); `out` then holds the values at the edge.
+fn step_off_into(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    parameter: f64,
+    step_off_distance: f64,
+    options: &StepOffOptions,
+    out: &mut BinormalEval,
+) -> Result<Option<SolidError>> {
     // evaluate binormal at the edge - set outputs for stepOffDistance = 0.0
     let at_edge = evaluate_binormal(
         k,
@@ -382,7 +426,7 @@ pub fn evaluate_binormal_step_off_into(
 
     // low work - StepOffDistance = 0.0
     if step_off_distance < EFF_ZERO {
-        return Ok(());
+        return Ok(None);
     }
 
     // edgeuse locals
@@ -432,19 +476,19 @@ pub fn evaluate_binormal_step_off_into(
         )?;
         let Some(first) = solutions.first() else {
             // stepoffdistance stepped off face UVDomain
-            return Err(SolidError::topology_failed(
+            return Ok(Some(SolidError::topology_failed(
                 OP,
                 "the stepped-off point does not lie on the face",
-            ));
+            )));
         };
         uv_guess = Point2::new(first.param(0)?, first.param(1)?);
 
         // still stepping off face UVDomain
         if !uv_domain.contains_point(uv_guess, 0.0) {
-            return Err(SolidError::topology_failed(
+            return Ok(Some(SolidError::topology_failed(
                 OP,
                 "the stepped-off point is outside the face's UV domain",
-            ));
+            )));
         }
     }
 
@@ -499,7 +543,7 @@ pub fn evaluate_binormal_step_off_into(
     out.point = surface.evaluate_point(k, uv_found)?;
     out.face_normal = normal;
     out.uv = uv_found;
-    Ok(())
+    Ok(None)
 }
 
 /// `IsConvexRadialSector`: true when, at `num_samples` evenly spaced interior samples
@@ -923,7 +967,8 @@ pub struct EdgeuseSide {
 /// pOptOnNaturalBoundary)`: drops `smp_count` points of the edge curve (in edge use
 /// order) onto the face's surface and classifies them against the natural UV domain's
 /// sides (to twice the surface zone tolerance mapped to UV in U and in V; not upstream: a
-/// periodic side, a seam, to the edge's own tolerance, docs/booleans.md "Seams and poles").
+/// periodic side, a seam, to the edge's own tolerance, docs/booleans.md "Seams and poles";
+/// nor upstream: a sample that close to two opposite sides lies on the nearer, WR-18540).
 /// A sample off every side answers `true` at once. Otherwise the edge use runs along a
 /// side: a degenerate edge (its sample box below twice the zone tolerance) is `true`, and else
 /// the UV steps must run the way that side's inside requires (all but one of them;
@@ -1079,6 +1124,36 @@ pub fn is_edgeuse_side_in_surface(
         // and V directions)
         let uv_loc_u = uv_domain.point_boundaries(uv_drop_point, tol_2d_u) & (SS_UMIN | SS_UMAX);
         let uv_loc_v = uv_domain.point_boundaries(uv_drop_point, tol_2d_v) & (SS_VMIN | SS_VMAX);
+        // (not upstream, WR-18540: a sample within the band of both opposite sides, where the
+        // domain is narrower than twice the band, lies on the nearer of the two, and on neither
+        // when it is midway; upstream keeps both, and its direction test then holds the edge to
+        // the side it tests first, U-min before U-max, V-min before V-max)
+        let nearer = |loc: u32, lo: u32, hi: u32, to_lo: f64, to_hi: f64| {
+            if loc != lo | hi {
+                loc
+            } else if to_lo < to_hi {
+                lo
+            } else if to_hi < to_lo {
+                hi
+            } else {
+                0
+            }
+        };
+        let (p, d) = (uv_drop_point, &uv_domain);
+        let uv_loc_u = nearer(
+            uv_loc_u,
+            SS_UMIN,
+            SS_UMAX,
+            (p.x - d.u_min()).abs(),
+            (d.u_max() - p.x).abs(),
+        );
+        let uv_loc_v = nearer(
+            uv_loc_v,
+            SS_VMIN,
+            SS_VMAX,
+            (p.y - d.v_min()).abs(),
+            (d.v_max() - p.y).abs(),
+        );
         let uv_loc = uv_loc_u | uv_loc_v;
 
         // save the drop and classify data per sample point

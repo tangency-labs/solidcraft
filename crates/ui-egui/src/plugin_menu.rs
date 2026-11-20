@@ -25,6 +25,7 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 use solidcraft_engine::Sel;
+use solidcraft_engine::plugin::conditions::{FieldConditions, InputConditions, validate_conditions};
 
 use crate::selection::{Accept, SelInput};
 
@@ -34,6 +35,8 @@ use crate::ui_kit::BackingTooltipExt as _;
 
 /// The menu row that installs a plugin.
 const INSTALL: &str = "install";
+/// Last import report…: the report of the last file an importer plugin opened, again.
+const LAST_REPORT: &str = "last_import_report";
 
 /// The start of a plugin command's ribbon button id: `plugin_entry:<plugin id>:<entry name>`.
 pub(crate) const RIBBON_PREFIX: &str = "plugin_entry:";
@@ -83,6 +86,13 @@ pub(crate) struct Field {
     /// A choice's pictures, one package image path (`x-solidcraft-icon`) per option in order;
     /// empty unless every option names one.
     pub(crate) images: Vec<String>,
+    conditions: FieldConditions,
+    order: usize,
+    pub(crate) visible: bool,
+    pub(crate) enabled: bool,
+    available: Vec<usize>,
+    pub(crate) edited: bool,
+    controls: Option<Map<String, Value>>,
 }
 
 /// What a field holds, with its schema limits.
@@ -164,6 +174,8 @@ pub(crate) enum Problem {
 /// The fields of an input schema, each with its default, or `None` when the schema has parts this
 /// dialog does not draw (the entry is then run from the agent or the CLI).
 pub(crate) fn form(schema: &Value) -> Option<Vec<(Field, Input)>> {
+    validate_conditions(schema).ok()?;
+    let conditions = InputConditions::parse(schema).ok()?;
     let schema = schema.as_object()?;
     if schema.get("type").is_some_and(|t| t != "object") || ["$ref", "oneOf", "anyOf", "allOf", "if", "not"].iter().any(|k| schema.contains_key(*k)) {
         return None;
@@ -186,6 +198,11 @@ pub(crate) fn form(schema: &Value) -> Option<Vec<(Field, Input)>> {
     // them, then the rest by name.
     let rank = |key: &str| required.iter().position(|r| *r == key).unwrap_or(usize::MAX);
     fields.sort_by(|(a, _), (b, _)| rank(&a.key).cmp(&rank(&b.key)).then_with(|| a.key.cmp(&b.key)));
+    for (field, _) in &mut fields {
+        field.conditions = conditions.fields.get(&field.key).cloned().unwrap_or_default();
+        field.order = conditions.order.iter().position(|name| name == &field.key).unwrap_or(usize::MAX);
+    }
+    refresh_conditions(&mut fields);
     Some(fields)
 }
 
@@ -207,7 +224,21 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         ("string", false) => &["minLength", "maxLength", "format"],
         _ => return None,
     };
-    const ANNOTATIONS: &[&str] = &["type", "title", "description", "default", "unit", "x-unit", "units", "examples", "$comment", "deprecated"];
+    const ANNOTATIONS: &[&str] = &[
+        "type",
+        "title",
+        "description",
+        "default",
+        "unit",
+        "x-unit",
+        "units",
+        "examples",
+        "$comment",
+        "deprecated",
+        "x-solidcraft-visible-when",
+        "x-solidcraft-enabled-when",
+        "x-solidcraft-defaults",
+    ];
     if p.keys().any(|k| !ANNOTATIONS.contains(&k.as_str()) && !allowed.contains(&k.as_str())) {
         return None;
     }
@@ -283,7 +314,24 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         _ => return None,
     };
     let label = text("title").unwrap_or_else(|| key.to_owned());
-    Some((Field { key: key.to_owned(), label, tip: text("description"), required, kind, images }, input))
+    Some((
+        Field {
+            key: key.to_owned(),
+            label,
+            tip: text("description"),
+            required,
+            kind,
+            images,
+            conditions: Default::default(),
+            order: 0,
+            visible: true,
+            enabled: true,
+            available: Vec::new(),
+            edited: false,
+            controls: None,
+        },
+        input,
+    ))
 }
 
 /// An array property as a selection field: one annotated with [`SELECTION_KEY`]
@@ -293,7 +341,19 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
 /// the counts Run checks; `maxItems: 1` makes a pick replace the last one. `None` for any other
 /// array, an annotation this host does not read, or an `items` that is not the type sent.
 fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<(Field, Input)> {
-    const KEYWORDS: &[&str] = &["type", "title", "description", "minItems", "maxItems", "items", "$comment", "deprecated", SELECTION_KEY];
+    const KEYWORDS: &[&str] = &[
+        "type",
+        "title",
+        "description",
+        "minItems",
+        "maxItems",
+        "items",
+        "$comment",
+        "deprecated",
+        SELECTION_KEY,
+        "x-solidcraft-visible-when",
+        "x-solidcraft-enabled-when",
+    ];
     if p.keys().any(|k| !KEYWORDS.contains(&k.as_str())) {
         return None;
     }
@@ -327,7 +387,21 @@ fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<
     let (title, tip) = (text("title")?, text("description")?);
     let kind = Kind::Selection { accept, min: min.unwrap_or(0), max, names };
     Some((
-        Field { key: key.to_owned(), label: title.unwrap_or_else(|| key.to_owned()), tip, required, kind, images: Vec::new() },
+        Field {
+            key: key.to_owned(),
+            label: title.unwrap_or_else(|| key.to_owned()),
+            tip,
+            required,
+            kind,
+            images: Vec::new(),
+            conditions: Default::default(),
+            order: 0,
+            visible: true,
+            enabled: true,
+            available: Vec::new(),
+            edited: false,
+            controls: None,
+        },
         Input::Selection(Vec::new()),
     ))
 }
@@ -373,7 +447,7 @@ fn choices(p: &Map<String, Value>) -> Option<(Vec<String>, Vec<String>, Vec<Stri
             .iter()
             .map(|option| {
                 let option = option.as_object()?;
-                if option.keys().any(|k| !matches!(k.as_str(), "const" | "title" | "description" | crate::plugin_images::KEY)) {
+                if option.keys().any(|k| !matches!(k.as_str(), "const" | "title" | "description" | "x-solidcraft-when" | crate::plugin_images::KEY)) {
                     return None;
                 }
                 let value = option.get("const")?.as_str()?.to_owned();
@@ -392,11 +466,88 @@ fn choices(p: &Map<String, Value>) -> Option<(Vec<String>, Vec<String>, Vec<Stri
     (!values.is_empty() && distinct.len() == values.len()).then_some((values, titles, images))
 }
 
+/// A scalar's current value, including partially filled forms, for sibling conditions.
+fn scalar_value(field: &Field, input: &Input) -> Option<Value> {
+    match input {
+        Input::Number(n) => Some(json!(n)),
+        Input::Integer(n) => Some(json!(n)),
+        Input::Boolean(b) => Some(json!(b)),
+        Input::Text(s) if !s.is_empty() => Some(json!(s)),
+        Input::Typed(s) => match field.kind {
+            Kind::Integer { .. } => s.trim().parse::<i64>().ok().map(|n| json!(n)),
+            _ => ui_kit::parse_number(s).filter(|n| n.is_finite()).map(|n| json!(n)),
+        },
+        Input::Choice(Some(i)) => {
+            if let Kind::Choice { values, .. } = &field.kind {
+                values.get(*i).map(|v| json!(v))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn default_input(field: &Field, value: &Value) -> Option<Input> {
+    match &field.kind {
+        Kind::Number { .. } => value.as_f64().map(Input::Number),
+        Kind::Integer { .. } => value.as_i64().map(Input::Integer),
+        Kind::Boolean => value.as_bool().map(Input::Boolean),
+        Kind::Text { .. } => value.as_str().map(|s| Input::Text(s.to_owned())),
+        Kind::Choice { values, .. } => value.as_str().and_then(|v| values.iter().position(|s| s == v)).map(|i| Input::Choice(Some(i))),
+        _ => None,
+    }
+}
+
+/// Controllers are evaluated first, including chains of defaults and hidden controllers.
+fn refresh_conditions(fields: &mut [(Field, Input)]) {
+    let mut order: Vec<(usize, usize)> = fields.iter().enumerate().map(|(i, (f, _))| (f.order, i)).collect();
+    order.sort_unstable();
+    let mut values: Map<String, Value> = fields.iter().filter_map(|(f, i)| scalar_value(f, i).map(|v| (f.key.clone(), v))).collect();
+    for (_, index) in order {
+        let Some((field, input)) = fields.get_mut(index) else { continue };
+        let controls: Map<String, Value> =
+            field.conditions.dependencies().iter().filter_map(|k| values.get(k).map(|v| (k.clone(), v.clone()))).collect();
+        let changed = field.controls.as_ref() != Some(&controls);
+        field.visible = field.conditions.visible(&values);
+        field.enabled = field.conditions.enabled(&values);
+        if !field.edited
+            && changed
+            && let Some(default) = field.conditions.default_value(&values).and_then(|v| default_input(field, v))
+        {
+            *input = default;
+        }
+        if let Kind::Choice { values: choices, .. } = &field.kind {
+            let was_unavailable = field.controls.is_some() && field.available.is_empty();
+            field.available = (0..choices.len()).filter(|i| field.conditions.option_available(*i, &values)).collect();
+            if let Input::Choice(chosen) = input
+                && (chosen.is_some_and(|i| !field.available.contains(&i)) || (chosen.is_none() && was_unavailable && !field.available.is_empty()))
+            {
+                let default = field.conditions.default_value(&values).and_then(Value::as_str).and_then(|v| choices.iter().position(|s| s == v));
+                *chosen = default.filter(|i| field.available.contains(i)).or_else(|| field.available.first().copied());
+            }
+        }
+        field.controls = Some(controls);
+        if field.visible {
+            if let Some(value) = scalar_value(field, input) {
+                values.insert(field.key.clone(), value);
+            } else {
+                values.remove(&field.key);
+            }
+        } else {
+            values.remove(&field.key);
+        }
+    }
+}
+
 /// The parameters the fields make, or why Run stays off. An optional field left empty is left out,
 /// so the plugin's own default stands.
 pub(crate) fn params(fields: &[(Field, Input)]) -> Result<Value, Problem> {
     let mut out = Map::new();
     for (field, input) in fields {
+        if !field.visible {
+            continue;
+        }
         let missing = || Problem::Missing(field.label.clone());
         let invalid = || Problem::Invalid(field.label.clone());
         let value = match (&field.kind, input) {
@@ -412,7 +563,12 @@ pub(crate) fn params(fields: &[(Field, Input)]) -> Result<Value, Problem> {
             },
             (Kind::Boolean, Input::Boolean(b)) => Some(json!(b)),
             (Kind::Choice { .. }, Input::Choice(None)) => None,
-            (Kind::Choice { values, .. }, Input::Choice(Some(index))) => Some(json!(values.get(*index).ok_or_else(invalid)?)),
+            (Kind::Choice { values, .. }, Input::Choice(Some(index))) => {
+                if !field.available.contains(index) {
+                    return Err(invalid());
+                }
+                Some(json!(values.get(*index).ok_or_else(invalid)?))
+            }
             (Kind::Text { .. }, Input::Text(text)) if text.is_empty() => None,
             (Kind::Text { .. }, Input::Text(text)) => Some(json!(text)),
             // An optional field with nothing picked is left out; a required one is sent, empty
@@ -603,11 +759,15 @@ pub(crate) fn list(app: &SolveApp, dir: Option<&Path>) -> Vec<Listed> {
     listed
 }
 
-/// The menu's rows: Install plugin…, a separator, then each plugin's entries.
+/// The menu's rows: Install plugin…, Last import report…, a separator, then each plugin's entries.
 pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
     use crate::app_bar::{FileItem, FileRow};
     let item = |id: String, label: String, enabled: bool| FileRow::Item(FileItem { id, label, key: String::new(), icon: String::new(), enabled });
-    let mut rows = vec![item(INSTALL.into(), app.tr("ui.plugin_menu_install").into(), true), FileRow::Separator];
+    let mut rows = vec![
+        item(INSTALL.into(), app.tr("ui.plugin_menu_install").into(), true),
+        item(LAST_REPORT.into(), app.tr("ui.plugin_menu_last_report").into(), app.import_report.is_some()),
+        FileRow::Separator,
+    ];
     if app.plugin_menu.listed.iter().all(|plugin| plugin.entries.is_empty()) {
         rows.push(item("empty".into(), app.tr("ui.plugin_menu_empty").into(), false));
     } else if !app.plugin_menu.listed.iter().any(|p| shown(app, p)) {
@@ -660,6 +820,10 @@ pub(crate) fn refresh(app: &mut SolveApp) {
 pub(crate) fn choose(app: &mut SolveApp, id: &str) {
     if id == INSTALL {
         install_plugin_action(app);
+        return;
+    }
+    if id == LAST_REPORT {
+        crate::import_report::reopen(app);
         return;
     }
     let mut parts = id.strip_prefix("entry:").into_iter().flat_map(|rest| rest.split(':')).map(str::parse::<usize>);
@@ -746,7 +910,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
     // other fields start empty, so one selection never fills two fields.
     let mut prefilled = false;
     if let Some((Field { kind: Kind::Selection { accept, max, .. }, .. }, Input::Selection(picks))) =
-        fields.as_mut().and_then(|f| f.iter_mut().find(|(field, _)| matches!(field.kind, Kind::Selection { .. })))
+        fields.as_mut().and_then(|f| f.iter_mut().find(|(field, _)| field.visible && field.enabled && matches!(field.kind, Kind::Selection { .. })))
     {
         picks.extend(app.session.selection.iter().filter(|s| crate::dialogs::fits(*accept, s)).take(max.unwrap_or(usize::MAX)).cloned());
         prefilled = !picks.is_empty();
@@ -771,11 +935,16 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
     // The new dialog's first selection field takes the viewport's picks, unless another tool is
     // picking: that tool keeps them until a field here is clicked.
     if let Some(dialog) = app.plugin_menu.dialogs.last()
-        && !dialog.selection_inputs().is_empty()
+        && let Some(field) = dialog
+            .fields
+            .iter()
+            .flatten()
+            .filter(|(_, input)| matches!(input, Input::Selection(_)))
+            .position(|(field, _)| field.visible && field.enabled)
         && app.tool.is_none()
         && app.dialog.as_ref().is_none_or(|d| matches!(d.kind, crate::dialogs::Kind::PluginPick { .. }))
     {
-        start_picking(app, id, 0);
+        start_picking(app, id, field);
     }
 }
 
@@ -849,6 +1018,9 @@ fn start_picking_listed(app: &mut SolveApp, id: u64, field: usize, listed: bool)
     }
     let mut picker = crate::dialogs::Dialog::new(crate::dialogs::Kind::PluginPick { dialog: id }, dialog.selection_inputs());
     picker.active = field.min(picker.inputs.len().saturating_sub(1));
+    if !dialog.pickable(picker.active) {
+        return false;
+    }
     picker.awaiting_pick = true;
     picker.listed = listed.then_some(picker.active);
     app.dialog = Some(picker);
@@ -876,7 +1048,9 @@ fn keep_picks(app: &mut SolveApp, picker: &crate::dialogs::Dialog) {
 fn sync_picks(app: &mut SolveApp) {
     if let Some(id) = picking(app) {
         let owner = app.plugin_menu.dialogs.iter().find(|d| d.id == id);
-        if owner.is_none_or(|d| d.session != app.session.uid || d.running.is_some()) {
+        if owner.is_none_or(|d| {
+            d.session != app.session.uid || d.running.is_some() || app.dialog.as_ref().is_some_and(|picker| !d.pickable(picker.active))
+        }) {
             if let Some(d) = app.dialog.take() {
                 keep_picks(app, &d);
             }
@@ -910,6 +1084,15 @@ fn sync_picks(app: &mut SolveApp) {
 }
 
 impl EntryDialog {
+    fn pickable(&self, index: usize) -> bool {
+        self.fields
+            .iter()
+            .flatten()
+            .filter(|(_, input)| matches!(input, Input::Selection(_)))
+            .nth(index)
+            .is_some_and(|(field, _)| field.visible && field.enabled)
+    }
+
     /// The selection fields as the inputs of a pick dialog, in field order, with their picks.
     pub(crate) fn selection_inputs(&self) -> Vec<SelInput> {
         let Some(fields) = &self.fields else { return Vec::new() };
@@ -948,6 +1131,11 @@ impl EntryDialog {
             Problem::Invalid(label) => solidcraft_ui_text::format("ui.plugin_dialog_invalid", &[("field", &label)]),
         })
     }
+}
+
+/// Whether a plugin command that edits this design has an open dialog.
+pub(crate) fn editing_dialog_open(app: &SolveApp) -> bool {
+    app.plugin_menu.dialogs.iter().any(|dialog| dialog.session == app.session.uid && !dialog.read && dialog.opens.is_none())
 }
 
 /// The dialog the viewport previews, and the `plugin.run` it previews: the dialog picking in the
@@ -1110,9 +1298,20 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
 /// selection fields, and whether its list of picks was opened.
 type Claim = Option<(usize, bool)>;
 
+/// An entry keeps its window across reopenings on the same design. A transient dialog serial
+/// changes every time, which used to discard the moved position (#18684). The design identity
+/// also prevents two documents' dialogs for the same plugin entry from sharing one window.
+fn dialog_window_id(dialog: &EntryDialog, remember_position: bool) -> egui::Id {
+    let id = egui::Id::unique("sc_plugin_entry");
+    if remember_position { id.with((dialog.plugin.id.as_str(), dialog.entry.as_str(), dialog.session)) } else { id.with(dialog.id) }
+}
+
 /// Draw one dialog. Returns whether it stays open, whether Run was pressed, and a selection field
 /// that asks for the viewport's picks.
 fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog) -> (bool, bool, Claim) {
+    if let Some(fields) = &mut dialog.fields {
+        refresh_conditions(fields);
+    }
     let ready = dialog.ready(app);
     let running = dialog.running.is_some();
     if running {
@@ -1126,7 +1325,7 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     let mut picker = if picking(app) == Some(dialog.id) { app.dialog.take() } else { None };
     let mut claim = None;
     let icon = dialog.icon.clone();
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_plugin_entry").with(dialog.id), &icon, &title)
+    let (closed, action) = ui_kit::Window::new(dialog_window_id(dialog, app.preferences.plugin_remember_dialog_position), &icon, &title)
         .fields()
         .actions(&run_label, &close_label, None)
         .show(ctx, ready.is_ok() && !running, |ui| body(app, ui, dialog, ready.as_ref().err(), &mut picker, &mut claim));
@@ -1187,14 +1386,25 @@ fn body(
             ui.add_enabled_ui(editable, |ui| {
                 let mut picks = 0;
                 for (field, input) in fields.iter_mut() {
-                    if let Input::Selection(items) = input {
-                        selection_row(app, ui, id, picks, field, items, picker, claim);
+                    let pick_index = picks;
+                    if matches!(input, Input::Selection(_)) {
                         picks += 1;
-                    } else {
-                        field_row(app, ui, &plugin.images, field, input);
                     }
+                    if !field.visible {
+                        continue;
+                    }
+                    let before = input.clone();
+                    ui.add_enabled_ui(field.enabled, |ui| {
+                        if let Input::Selection(items) = input {
+                            selection_row(app, ui, id, pick_index, field, items, picker, claim);
+                        } else {
+                            field_row(app, ui, &plugin.images, field, input);
+                        }
+                    });
+                    field.edited |= *input != before;
                 }
             });
+            refresh_conditions(fields);
         }
     }
     // Preview: a command that edits the design, as the native tools have it.
@@ -1295,12 +1505,22 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, images: &std::collections::BTree
             // Until something is chosen the dropdown leads with "Choose…", which is not a value.
             let choose = app.tr("ui.plugin_dialog_choose").to_owned();
             let lead = chosen.is_none();
-            let shown: Vec<&str> = lead.then_some(choose.as_str()).into_iter().chain(titles.iter().map(String::as_str)).collect();
-            let mut index = chosen.unwrap_or(0);
+            let shown: Vec<&str> = lead
+                .then_some(choose.as_str())
+                .into_iter()
+                .chain(field.available.iter().filter_map(|i| titles.get(*i).map(String::as_str)))
+                .collect();
+            let mut index = chosen.and_then(|i| field.available.iter().position(|v| *v == i)).unwrap_or(0);
             let id = format!("plugin_field_{}", field.key);
             // Every option's picture from the package, when each has one that passed the check.
             let pictures: Option<Vec<&str>> = (!field.images.is_empty())
-                .then(|| field.images.iter().map(|rel| images.get(rel).map(String::as_str)).collect::<Option<Vec<&str>>>())
+                .then(|| {
+                    field
+                        .available
+                        .iter()
+                        .map(|i| field.images.get(*i).and_then(|rel| images.get(rel)).map(String::as_str))
+                        .collect::<Option<Vec<&str>>>()
+                })
                 .flatten();
             let response = match pictures {
                 Some(pictures) => {
@@ -1311,7 +1531,7 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, images: &std::collections::BTree
                 }
                 None => ui_kit::row(ui, &label, |ui| ui_kit::dropdown(ui, &id, &mut index, &shown)),
             };
-            *chosen = if lead { index.checked_sub(1) } else { Some(index) };
+            *chosen = (if lead { index.checked_sub(1) } else { Some(index) }).and_then(|i| field.available.get(i).copied());
             response
         }
         (Kind::Text { .. }, Input::Text(text)) => {

@@ -9,17 +9,32 @@ use solidcraft_doc::naming::legacy_name;
 use solidcraft_doc::persistent_name::{Base, EdgeName, FaceName, Role};
 use solidcraft_doc::{Document, MAX_PLACEMENT_DEPTH, ModelState};
 
+use super::filter::{Row, RowFilter, contents_groups, omit};
 use super::{component_of, joint_id, link_info, named_value_list, occurrence_name, reply};
 use crate::schema::joints::{
-    EdgeReference, FaceReference, InspectJointResult, InspectedJoint, JointLink, JointSide, LinkRole, MadeBy, Reference, ReferenceRole, Referent,
-    SweptFrom, WorldFrame,
+    EdgeReference, FaceReference, InspectJointResult, InspectedJoint, JointLink, JointSide, LinkRole, MadeBy, Omitted, Reference, ReferenceRole,
+    Referent, SweptFrom, WorldFrame,
 };
 use crate::{Result, Session};
 
 pub(super) fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.inspect";
+    let mut omitted = Omitted::default();
     let ids: Vec<u64> = match p.get("joint") {
-        None | Some(Value::Null) => s.doc.assembly.joints.iter().map(|j| j.id).collect(),
+        None | Some(Value::Null) => {
+            let rows = RowFilter::read(s, p, cmd)?;
+            let groups = if rows.needs_groups() { contents_groups(&s.doc) } else { Default::default() };
+            let mut ids = Vec::new();
+            for j in &s.doc.assembly.joints {
+                let ends = super::filter::ends(j);
+                if rows.keeps(&Row { kind: j.kind, suppressed: j.suppressed, ends: &ends, holds_contents: groups.contains_key(&j.id) }) {
+                    ids.push(j.id);
+                } else {
+                    omit(&mut omitted, j.kind);
+                }
+            }
+            ids
+        }
         v => vec![joint_id(s, v, cmd)?],
     };
     let st = s.model.state();
@@ -33,7 +48,7 @@ pub(super) fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             joint_json(s, &st, &sol, j, q)
         })
         .collect();
-    reply(cmd, InspectJointResult { joints: out, param_warnings: Vec::new() })
+    reply(cmd, InspectJointResult { joints: out, omitted: omitted.some(), param_warnings: Vec::new() })
 }
 
 fn joint_json(s: &Session, st: &ModelState, sol: &joints::Solution, j: &Joint, q: &[f64]) -> InspectedJoint {
