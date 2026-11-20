@@ -1192,10 +1192,9 @@ impl JsonSchema for PatternDir {
     }
 }
 
+// `count1` and `spacing1` are not required: one of them is worked out with an extent.
 fn rectangular_required(schema: &mut Schema) {
-    for key in ["dir1", "count1", "spacing1"] {
-        require(schema, key);
-    }
+    require(schema, "dir1");
 }
 
 /// Copy features, bodies or components in a row, or a grid with a second direction. Give one of
@@ -1212,19 +1211,20 @@ pub struct PatternRectangularParams {
     /// The components to place more of, by id or name. The reply then lists the new occurrences.
     #[serde(default)]
     pub components: Option<NameList>,
-    // `dir1`, `count1` and `spacing1` are optional in the type and required in the schema: left
-    // out, the handler refuses the call with its own message ("`dir1` must be [x, y, z]"), which
-    // the check would otherwise replace with "`dir1` is required".
+    // `dir1` is optional in the type and required in the schema: left out, the handler refuses
+    // the call with its own message ("`dir1` must be [x, y, z]"), which the check would otherwise
+    // replace with "`dir1` is required". `count1` and `spacing1` are read as `dir1`; the
+    // handler requires the ones `distance1` uses.
     /// The first direction.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PatternDir")]
     pub dir1: Option<PatternDir>,
     /// How many along the first direction, the original included: a whole number or an
-    /// expression that gives one.
+    /// expression that gives one. Not needed with `spacing_extent`.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "NumberExpr")]
     pub count1: Option<NumberExpr>,
-    /// The step between neighbours along the first direction.
+    /// The step between neighbours along the first direction. Not needed with `count_extent`.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "LengthExpr")]
     pub spacing1: Option<LengthExpr>,
@@ -1256,8 +1256,102 @@ pub struct PatternRectangularParams {
     #[serde(default, deserialize_with = "pattern_reversed2", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub reversed2: Option<bool>,
+    /// What sets the first direction's copies: `count_spacing` (the default: `count1` and
+    /// `spacing1`), `count_extent` (`count1` and `extent1`; the spacing is the extent divided by
+    /// one less than the count) or `spacing_extent` (`spacing1` and `extent1`; as many copies as
+    /// fit, none past the extent's end) or `count_list` (`count1` and `spacing_list1`).
+    #[serde(default, deserialize_with = "pattern_distance1")]
+    pub distance1: Option<PatternDistanceParam>,
+    /// What sets the second direction's copies, as `distance1`.
+    #[serde(default, deserialize_with = "pattern_distance2")]
+    pub distance2: Option<PatternDistanceParam>,
+    /// The distance from the first copy to the last along the first direction, greater than
+    /// zero, for `count_extent` and `spacing_extent`.
+    #[serde(default)]
+    pub extent1: Option<LengthExpr>,
+    /// The extent along the second direction.
+    #[serde(default)]
+    pub extent2: Option<LengthExpr>,
+    /// `spacing_extent`: one more copy exactly at the extent's end when the spacing doesn't divide
+    /// it, so only the last gap is shorter. Default false.
+    #[serde(default, deserialize_with = "copy_at_end1")]
+    pub copy_at_end1: Option<bool>,
+    /// As `copy_at_end1`, along the second direction.
+    #[serde(default, deserialize_with = "copy_at_end2")]
+    pub copy_at_end2: Option<bool>,
+    /// `count_list`: the gaps between neighbours along the first direction, each greater than
+    /// zero, used in turn and from the start again: `[10, 20, 30]` with a count of 5 puts the
+    /// copies at 10, 30, 60 and 70. Centred, the list runs out from the original on both sides.
+    #[serde(default, deserialize_with = "spacing_list1")]
+    pub spacing_list1: Option<Vec<LengthExpr>>,
+    /// As `spacing_list1`, along the second direction.
+    #[serde(default, deserialize_with = "spacing_list2")]
+    pub spacing_list2: Option<Vec<LengthExpr>>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+/// A rectangular pattern direction's distance type, as `features::pattern_direction` reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PatternDistanceParam {
+    CountSpacing,
+    CountExtent,
+    SpacingExtent,
+    CountList,
+}
+
+/// A distance type under `key`, with the handler's message; `null` is read as left out.
+fn distance_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<PatternDistanceParam>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => serde_json::from_value(v)
+            .map(Some)
+            .map_err(|_| D::Error::custom(whole(format!("`{key}` must be count_spacing, count_extent, spacing_extent or count_list")))),
+    }
+}
+
+/// A Copy at the end flag under `key`, with the handler's message; `null` is read as left out.
+fn copy_at_end_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<bool>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::Bool(b) => Ok(Some(b)),
+        _ => Err(D::Error::custom(whole(format!("`{key}` must be true or false")))),
+    }
+}
+
+fn pattern_distance1<'de, D: Deserializer<'de>>(d: D) -> Result<Option<PatternDistanceParam>, D::Error> {
+    distance_at(d, "distance1")
+}
+
+fn pattern_distance2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<PatternDistanceParam>, D::Error> {
+    distance_at(d, "distance2")
+}
+
+fn copy_at_end1<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    copy_at_end_at(d, "copy_at_end1")
+}
+
+fn copy_at_end2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    copy_at_end_at(d, "copy_at_end2")
+}
+
+/// A spacing list under `key`, with the handler's message; `null` is read as left out.
+fn spacing_list_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<Vec<LengthExpr>>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => serde_json::from_value(v)
+            .map(Some)
+            .map_err(|_| D::Error::custom(whole(format!("`{key}` must be a list of spacings, each a number or an expression")))),
+    }
+}
+
+fn spacing_list1<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<LengthExpr>>, D::Error> {
+    spacing_list_at(d, "spacing_list1")
+}
+
+fn spacing_list2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<LengthExpr>>, D::Error> {
+    spacing_list_at(d, "spacing_list2")
 }
 
 /// The most curves a pattern path lists, as `features::pattern_path` reads it.

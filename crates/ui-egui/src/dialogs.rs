@@ -13,7 +13,9 @@ use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::{AxisRef, Direction, FeatureKind, FilletStyle, HoleKind, Operation, PatternKind, PlaneRef, ProfileSel, ThinSide};
+use solidcraft_engine::doc::{
+    AxisRef, Direction, FeatureKind, FilletStyle, HoleKind, Operation, PatternDistance, PatternKind, PlaneRef, ProfileSel, ThinSide,
+};
 use solidcraft_engine::geom::Aabb3;
 
 use crate::SolveApp;
@@ -237,6 +239,15 @@ crate::dialog_descriptor::dialog_descriptors! {
                 spacing: String,
                 count2: String,
                 spacing2: String,
+                /// Each direction's extent (first copy to last), for the distance types that
+                /// take one (#8523); which type each direction has is `distance1` / `distance2`
+                /// in the dialog's extra parameters.
+                extent: String,
+                extent2: String,
+                /// Each direction's spacing list as typed, the gaps separated by semicolons
+                /// (`10 mm; 20 mm; 30 mm`), for Quantity and List.
+                list: String,
+                list2: String,
             },
             /// Circular pattern of bodies around an axis.
             PatternCirc {
@@ -1111,7 +1122,16 @@ impl Dialog {
                 )],
             ),
             "solid.pattern.rectangular" => Dialog::new(
-                Kind::PatternRect { count: "3".into(), spacing: length_default(s, "20"), count2: "1".into(), spacing2: length_default(s, "20") },
+                Kind::PatternRect {
+                    count: "3".into(),
+                    spacing: length_default(s, "20"),
+                    count2: "1".into(),
+                    spacing2: length_default(s, "20"),
+                    extent: length_default(s, "100"),
+                    extent2: length_default(s, "100"),
+                    list: default_spacing_list(s),
+                    list2: default_spacing_list(s),
+                },
                 vec![
                     SelInput::new("Objects", BODIES, true),
                     SelInput::new("Direction", AXES | EDGES, false),
@@ -1544,6 +1564,10 @@ impl Dialog {
     pub fn primary(&mut self) -> Option<(&'static str, ValueKind, &mut String)> {
         let move_field = crate::dialogs_move::value_field(self);
         let through_point = offset_through_point(self).is_some();
+        // Quantity and Extent works out the spacing, so the canvas value is the extent (#8523).
+        let pattern_extent = pattern_distance(&self.extra, 0) == PatternDistance::CountExtent;
+        // A spacing list is no single length to drag or type on the canvas.
+        let pattern_list = pattern_distance(&self.extra, 0) == PatternDistance::CountList;
         Some(match &mut self.kind {
             Kind::Extrude { to_offset, .. } if to_object_on(&self.inputs) => ("To Offset", ValueKind::Length, to_offset),
             Kind::Extrude { distance, .. } => ("Distance", ValueKind::Length, distance),
@@ -1582,6 +1606,8 @@ impl Dialog {
                     _ => ("X", ValueKind::Length, x),
                 },
             },
+            Kind::PatternRect { .. } if pattern_list => return None,
+            Kind::PatternRect { extent, .. } if pattern_extent => ("ui.pattern_extent", ValueKind::Length, extent),
             Kind::PatternRect { spacing, .. } => ("Spacing", ValueKind::Length, spacing),
             Kind::PatternCirc { angle, .. } => ("Angle", ValueKind::Angle, angle),
             Kind::Section { offset, .. } => ("Distance", ValueKind::Length, offset),
@@ -3233,6 +3259,10 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
                         spacing: length_default(session, "20"),
                         count2: "1".into(),
                         spacing2: length_default(session, "20"),
+                        extent: length_default(session, "100"),
+                        extent2: length_default(session, "100"),
+                        list: default_spacing_list(session),
+                        list2: default_spacing_list(session),
                     },
                     vec![
                         SelInput::new("Objects", BODIES, true),
@@ -3677,6 +3707,54 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
 }
 
 /// Feature patterns use the same source-fixed slot ordering and controls as sketch patterns.
+/// A rectangular pattern direction's distance type (`index` 0 or 1), from the dialog's extra
+/// parameters (#8523); count and spacing until one is chosen.
+pub(crate) fn pattern_distance(extra: &serde_json::Map<String, Value>, index: usize) -> PatternDistance {
+    let key = if index == 0 { "distance1" } else { "distance2" };
+    extra.get(key).and_then(Value::as_str).and_then(PatternDistance::from_word).unwrap_or_default()
+}
+
+/// One rectangular pattern direction's values (`k` "1" or "2") as its distance type uses them:
+/// the count, the spacing, the extent and the spacing list as typed.
+fn pattern_values(
+    doc: &solidcraft_engine::doc::Document,
+    p: &mut Value,
+    k: &str,
+    distance: PatternDistance,
+    (count, spacing, extent, list): (&str, &str, &str, &str),
+) {
+    if distance.uses_count() {
+        p[format!("count{k}")] = json!(count);
+    }
+    if distance.uses_spacing() {
+        p[format!("spacing{k}")] = json!(spacing);
+    }
+    if distance.uses_extent() {
+        p[format!("extent{k}")] = json!(extent);
+    }
+    if distance.uses_list() {
+        p[format!("spacing_list{k}")] = json!(spacing_list_values(doc, list));
+    }
+}
+
+/// A new pattern's spacing list: two gaps in the design unit.
+fn default_spacing_list(s: &Session) -> String {
+    format!("{}; {}", length_default(s, "10"), length_default(s, "20"))
+}
+
+/// The gaps of a spacing list typed in the dialog (separated by semicolons, so a decimal comma
+/// stays in its number), each with the design unit made explicit as other length fields are.
+pub(crate) fn spacing_list_values(doc: &solidcraft_engine::doc::Document, text: &str) -> Vec<String> {
+    text.split(';').map(str::trim).filter(|gap| !gap.is_empty()).map(|gap| crate::length_input::expression(doc, gap, ValueKind::Length)).collect()
+}
+
+/// A saved spacing list as the dialog shows it; a bare number reads as millimetres in a design
+/// with another unit, as other length fields do.
+fn spacing_list_text(doc: &solidcraft_engine::doc::Document, list: &[solidcraft_engine::doc::Expr]) -> String {
+    let shown = |gap: &str| if crate::length_input::unit(doc) != "mm" { crate::length_input::stored(doc, gap) } else { gap.to_string() };
+    list.iter().map(|gap| shown(gap)).collect::<Vec<_>>().join("; ")
+}
+
 fn feature_pattern_alignment_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, index: usize) {
     use solidcraft_engine::sketch::PatternAlignment;
     let (label, alignment_key, reversed_key) =
@@ -4868,7 +4946,9 @@ fn remembered_extra_keys(kind: &Kind) -> &'static [&'static str] {
         Some("solid.shell") => &["direction", "tangent_chain"],
         Some("solid.fillet") => &["type", "fit", "corner", "radius2", "mid", "radii", "swap_ends", "smooth"],
         Some("solid.mirror") => &["combine"],
-        Some("solid.pattern.rectangular") => &["alignment", "reversed", "alignment2", "reversed2"],
+        Some("solid.pattern.rectangular") => {
+            &["alignment", "reversed", "alignment2", "reversed2", "distance1", "distance2", "copy_at_end1", "copy_at_end2"]
+        }
         Some("solid.pattern.circular") => &["alignment", "reversed"],
         Some("solid.hole") => &["all_points", "flip"],
         Some("solid.align") => &["from_snap", "to_snap"],
@@ -6343,7 +6423,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             pattern_objects(s, sels(d, 0), &mut p);
             ("solid.mirror", p)
         }
-        Kind::PatternRect { count, spacing, count2, spacing2 } => {
+        Kind::PatternRect { count, spacing, count2, spacing2, extent, extent2, list, list2 } => {
             need(0, "objects")?;
             let kept = d.extra.get("dir1").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2]));
             let d1 = match (sels(d, 1).first(), kept) {
@@ -6351,7 +6431,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 (None, Some(k)) => k,
                 (None, None) => return Err("select a direction (an axis, a sketch line or a straight edge) first".into()),
             };
-            let mut p = json!({"dir1": pt(d1), "count1": count, "spacing1": spacing});
+            let mut p = json!({"dir1": pt(d1)});
+            // Each direction sends the values its distance type uses (#8523); the command keeps
+            // a count or spacing it works out, so switching back shows what the copies had.
+            let (distance1, distance2) = (pattern_distance(&d.extra, 0), pattern_distance(&d.extra, 1));
+            pattern_values(&s.doc, &mut p, "1", distance1, (count, spacing, extent, list));
             pattern_objects(s, sels(d, 0), &mut p);
             let kept2 = d.extra.get("dir2").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2]));
             let d2 = match sels(d, 2).first() {
@@ -6360,8 +6444,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             if let Some(d2) = d2 {
                 p["dir2"] = pt(d2);
-                p["count2"] = json!(count2);
-                p["spacing2"] = json!(spacing2);
+                pattern_values(&s.doc, &mut p, "2", distance2, (count2, spacing2, extent2, list2));
             }
             ("solid.pattern.rectangular", p)
         }
@@ -8546,17 +8629,46 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 copied.iter().enumerate().map(|(k, name)| Sel::Body { name: world(k, name) }).collect()
             };
             let mut d = match pattern {
-                PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
+                PatternKind::Rectangular {
+                    dir1,
+                    count1,
+                    spacing1,
+                    dir2,
+                    count2,
+                    spacing2,
+                    alignment,
+                    alignment2,
+                    reversed,
+                    reversed2,
+                    distance1,
+                    distance2,
+                    extent1,
+                    extent2,
+                    copy_at_end1,
+                    copy_at_end2,
+                    spacing_list1,
+                    spacing_list2,
+                } => {
                     let mut d = start("solid.pattern.rectangular")?;
                     d.extra.insert("alignment".into(), json!(alignment));
                     d.extra.insert("alignment2".into(), json!(alignment2));
                     d.extra.insert("reversed".into(), json!(reversed));
                     d.extra.insert("reversed2".into(), json!(reversed2));
+                    // A recalled distance type must not outlive the pattern being edited.
+                    for (key, distance) in [("distance1", distance1), ("distance2", distance2)] {
+                        d.extra.insert(key.into(), json!(distance.as_str()));
+                    }
+                    d.extra.insert("copy_at_end1".into(), json!(copy_at_end1));
+                    d.extra.insert("copy_at_end2".into(), json!(copy_at_end2));
                     d.kind = Kind::PatternRect {
                         count: count1.to_string(),
                         spacing: spacing1.to_string(),
                         count2: count2.as_deref().map(str::to_string).unwrap_or_else(|| "1".into()),
                         spacing2: spacing2.as_deref().map(str::to_string).unwrap_or_else(|| length_default(s, "20")),
+                        extent: extent1.as_deref().map(str::to_string).unwrap_or_else(|| length_default(s, "100")),
+                        extent2: extent2.as_deref().map(str::to_string).unwrap_or_else(|| length_default(s, "100")),
+                        list: if spacing_list1.is_empty() { default_spacing_list(s) } else { spacing_list_text(&s.doc, spacing_list1) },
+                        list2: if spacing_list2.is_empty() { default_spacing_list(s) } else { spacing_list_text(&s.doc, spacing_list2) },
                     };
                     // Directions along the origin axes show as those axes; others are kept as is.
                     for (i, (key, dir)) in [("dir1", Some(*dir1)), ("dir2", *dir2)].into_iter().enumerate() {

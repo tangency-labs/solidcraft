@@ -3006,6 +3006,39 @@ pub enum PatternKind {
         reversed: bool,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         reversed2: bool,
+        /// What sets the first direction's copies (#8523): count and spacing (as before), count
+        /// and `extent1`, or spacing and `extent1`. The value it doesn't use is kept, so
+        /// switching back finds it.
+        #[serde(default, skip_serializing_if = "PatternDistance::is_default")]
+        distance1: PatternDistance,
+        /// What sets the second direction's copies.
+        #[serde(default, skip_serializing_if = "PatternDistance::is_default")]
+        distance2: PatternDistance,
+        /// The distance from the first copy to the last along the first direction, for the
+        /// distance types with an extent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Extent")]
+        extent1: Option<Expr>,
+        /// The extent along the second direction.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Extent 2")]
+        extent2: Option<Expr>,
+        /// Spacing and extent: one more copy exactly at the extent's end when the spacing doesn't
+        /// divide it, so only the last gap is shorter.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        copy_at_end1: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        copy_at_end2: bool,
+        /// Count and spacing list: the gaps between neighbours along the first direction, used
+        /// in turn and from the start again, so `10; 20; 30` with a count of 5 puts the copies
+        /// at 10, 30, 60 and 70.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[walk(length = "Spacing list")]
+        spacing_list1: Vec<Expr>,
+        /// The spacing list along the second direction.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[walk(length = "Spacing list 2")]
+        spacing_list2: Vec<Expr>,
     },
     Circular {
         /// A point on the axis the copies turn about: numbers, or length expressions it follows
@@ -3053,6 +3086,64 @@ pub enum PatternKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         orient: bool,
     },
+}
+
+/// What a rectangular pattern direction is given, the rest worked out (#8523).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PatternDistance {
+    /// The count and the spacing between neighbours.
+    #[default]
+    CountSpacing,
+    /// The count and the extent from the first copy to the last: the spacing is the extent
+    /// divided by one less than the count.
+    CountExtent,
+    /// The spacing and the extent: as many evenly spaced copies as fit in the extent.
+    SpacingExtent,
+    /// The count and a list of spacings, used in turn and from the start again.
+    CountList,
+}
+
+impl PatternDistance {
+    pub fn is_default(&self) -> bool {
+        *self == Self::CountSpacing
+    }
+
+    /// The word the command and the design file use.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CountSpacing => "count_spacing",
+            Self::CountExtent => "count_extent",
+            Self::SpacingExtent => "spacing_extent",
+            Self::CountList => "count_list",
+        }
+    }
+
+    /// Read [`PatternDistance::as_str`]'s word.
+    pub fn from_word(word: &str) -> Option<Self> {
+        [Self::CountSpacing, Self::CountExtent, Self::SpacingExtent, Self::CountList].into_iter().find(|d| d.as_str() == word)
+    }
+
+    /// Whether the count is given (else worked out from the spacing and the extent).
+    pub fn uses_count(self) -> bool {
+        self != Self::SpacingExtent
+    }
+
+    /// Whether one spacing is given (else worked out from the count and the extent, or the
+    /// list's first).
+    pub fn uses_spacing(self) -> bool {
+        matches!(self, Self::CountSpacing | Self::SpacingExtent)
+    }
+
+    /// Whether an extent is given.
+    pub fn uses_extent(self) -> bool {
+        matches!(self, Self::CountExtent | Self::SpacingExtent)
+    }
+
+    /// Whether a list of spacings is given.
+    pub fn uses_list(self) -> bool {
+        self == Self::CountList
+    }
 }
 
 fn default_pattern_alignment(alignment: &solidcraft_sketch::PatternAlignment) -> bool {
