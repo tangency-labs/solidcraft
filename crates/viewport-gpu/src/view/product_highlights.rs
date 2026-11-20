@@ -158,7 +158,7 @@ impl Renderer {
 
     /// Render feedback into the picture belonging to one tiled view. Its uniform writes and
     /// draws must reach the GPU together, like the corresponding shaded tile.
-    pub fn prepare_product_highlights_view(&mut self, slot: u32, device: &wgpu::Device, queue: &wgpu::Queue, frame: &Frame) {
+    pub fn prepare_product_highlights_view(&mut self, slot: u64, device: &wgpu::Device, queue: &wgpu::Queue, frame: &Frame) {
         self.activate(slot);
         self.pic.isolated = true;
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_product_highlight_view") });
@@ -201,7 +201,7 @@ impl Renderer {
     }
 
     /// Alpha-blit the feedback prepared for this tile.
-    pub fn paint_product_highlights_view(&self, slot: u32, frame: &Frame, pass: &mut wgpu::RenderPass<'static>, viewport: [f32; 4]) {
+    pub fn paint_product_highlights_view(&self, slot: u64, frame: &Frame, pass: &mut wgpu::RenderPass<'static>, viewport: [f32; 4]) {
         if self.picture(slot).is_some_and(|picture| picture.product_highlights && picture.ss_ready) {
             self.paint_view(slot, frame, pass, viewport);
         }
