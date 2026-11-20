@@ -3479,9 +3479,9 @@ mod tests {
     /// #18166: a lowering must cover the evaluation's rounding where the edge lies. gen1157's
     /// proved bound `B = 7.392e-6`, lowered to `2 B`, covers it at the origin; 8e8 away the
     /// edge curves' evaluation rounding (`sqrt 3` times their point error bound there, about
-    /// 4e-5) is more than `2 B` leaves over `B`, so [`trim_raise_distance`] keeps upstream's
-    /// raise. A bound enclosed there is loose by that rounding (each edge's below), and twice
-    /// it covers it.
+    /// 4e-5) is more than `2 B` leaves over `B`. There [`trim_raise_distance`] keeps
+    /// upstream's raise for an edge whose bound leaves the rounding uncovered, and lowers
+    /// only where it is covered.
     #[test]
     fn a_lowering_covers_the_evaluation_rounding_where_the_edge_lies() {
         let (b_proved, lowered) = (7.392e-6, 1.4784e-5);
@@ -3492,15 +3492,19 @@ mod tests {
         }
         let (k, mut far, far_edges) = sphere_edges(FAR);
         assert_eq!(far_edges.len(), edges.len());
+        let mut kept = 0;
         for (e, eu, trim) in &far_edges {
             assert!(!lowered_covers_rounding(&far, *e, b_proved, lowered).unwrap());
-            let fit = fit_tolerance(&k, &mut far, *e).unwrap();
-            let bound = trim_deviation_bound(&k, &far, *eu, trim, fit, [5e-6, f64::INFINITY], None)
-                .unwrap()
-                .unwrap();
-            assert!(bound > b_proved, "far: bound {bound:e}");
-            assert!(lowered_covers_rounding(&far, *e, bound, 2.0 * bound).unwrap());
+            let raise = trim_raise_distance(&k, &mut far, *eu, trim, 1.0).unwrap();
+            if raise == 1.0 {
+                kept += 1;
+            } else {
+                // (a lowering far away: its tolerance covers the bound and the rounding)
+                let tol = far.edge(*e).unwrap().tolerance;
+                assert!(lowered_covers_rounding(&far, *e, raise, tol.max(2.0 * raise)).unwrap());
+            }
         }
+        assert!(kept > 0, "the rounding check keeps no far raise");
     }
 
     #[test]
