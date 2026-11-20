@@ -1001,6 +1001,48 @@ fn closes_around_the_box(
     }
 }
 
+/// A full-period loop with a small overrun at its cut belongs around the base
+/// period. Shifting its lowest control point inside moved most of it one turn out.
+#[test]
+fn a_full_period_loop_is_centered_on_the_base_period() {
+    let surface = Surface::Spline {
+        u_knots: vec![0., 0., 1., 2., 3., 4., 4.],
+        v_knots: vec![0., 0., 3., 3.],
+        points: [[-2., -2.], [2., -2.], [2., 2.], [-2., 2.], [-2., -2.]]
+            .map(|[x, y]| vec![[x, y, 0.], [x, y, 3.]])
+            .to_vec(),
+    };
+    let on = On::new(&surface).unwrap();
+    let epsilon = 1e-5;
+    let line = |a, b| Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![a, b],
+    };
+    for offset in [-8., 0., 12.] {
+        let mut uses = vec![
+            (
+                line([offset - epsilon, 0.], [offset + 4. + epsilon, 0.]),
+                true,
+            ),
+            (
+                line([offset + 4. + epsilon, 0.], [offset + 4. - epsilon, 3.]),
+                true,
+            ),
+            (
+                line([offset + 4. - epsilon, 3.], [offset + epsilon, 3.]),
+                true,
+            ),
+            (line([offset + epsilon, 3.], [offset - epsilon, 0.]), true),
+        ];
+        on.close(&mut uses, 1e-3).unwrap();
+        for (pc, _) in uses {
+            for p in points(&pc) {
+                assert!(p[0] >= -2. * epsilon && p[0] <= 4. + 2. * epsilon, "{p:?}");
+            }
+        }
+    }
+}
+
 /// Splines closed on themselves in u (their first and last control rows the same) are periodic
 /// there, one knot interval per period: a ring of a torus bounded by two circles and a seam used
 /// twice (SMLib's fillet round a hole's rim), a NURBS cylinder, and a NURBS dome whose seam runs
