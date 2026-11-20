@@ -494,3 +494,113 @@ fn derives_about_the_z_axis(form: &Form, sweep: f64) {
         }
     }
 }
+
+/// A 12° rib centred on a cone's seam is filleted as 6° edges. The rib face is one
+/// 12° cone. Reloading that cone from its control polygon used to place the axis
+/// through the short arc's centre, 2.7e-13 mm off the axis, and
+/// `AnalyticSupport::build` refused the fillet. The axis now passes through the
+/// generators' apex.
+#[test]
+fn a_short_rib_cone_reloads_after_its_fillet() {
+    use solidcore::blend::fillet_executive::api::fillet_edges;
+    use solidcore::boolean::api_brep::boolean_union;
+    use solidcore::curve::curve::Curve;
+    use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+    use solidcore::kernel::UpstreamFixes;
+    use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_curves::create_line_segment;
+    use solidcore::surface::procedural_blend::convert::{exact_from_record, exact_to_record};
+    use solidcore::surface::procedural_blend::exact::ExactClass;
+    use solidcore::sweep::api_brep::create_rotational_sweep;
+    use solidcore::topology::face::p2 as face;
+    use solidcore::topology::{edge, EdgeId};
+
+    fn revolved(k: &mut Kernel, pts: &[Vec3], sweep: f64) -> solidcore::Brep {
+        let cs: Vec<Curve> = pts
+            .iter()
+            .zip(pts.iter().cycle().skip(1))
+            .map(|(a, b)| Curve::from(create_line_segment(*a, *b).unwrap()))
+            .collect();
+        let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+        create_rotational_sweep(
+            k,
+            &refs,
+            Point3::ZERO,
+            Vec3::new(1.0, 0.0, 0.0),
+            sweep,
+            true,
+        )
+        .unwrap()
+    }
+
+    let cone =
+        [[0.0, 0.0], [0.0, 24.0], [48.0, 36.0], [48.0, 0.0]].map(|p| Vec3::new(p[0], p[1], 0.0));
+    let rib = [
+        [18.0, 28.5],
+        [26.743_129, 33.353_628],
+        [27.370_857, 30.842_714],
+    ];
+    let sweep = 12.0_f64;
+    let turn = -sweep.to_radians() / 2.0;
+    let (c, s) = (turn.cos(), turn.sin());
+    let rib: Vec<Vec3> = rib
+        .iter()
+        .map(|p| Vec3::new(p[0], p[1] * c, p[1] * s))
+        .collect();
+
+    let mut k = Kernel::default();
+    k.fixes = UpstreamFixes::all();
+    let body = revolved(&mut k, &cone, 360.0);
+    let wedge = revolved(&mut k, &rib, sweep);
+    let mut body = boolean_union(&mut k, body, wedge).unwrap();
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    let before = brep_volume(&k, &mut body, 1e-6, &attrs).unwrap();
+    assert!(
+        (before - 137_607.253).abs() < 1e-3,
+        "pre-fillet volume {before}"
+    );
+
+    let at = Point3::new(18.0, 28.5, 0.0);
+    let edge_id = body
+        .edges()
+        .ids()
+        .min_by(|e, f| {
+            let gap = |e: EdgeId| {
+                let ivl = edge::interval(&body, e).unwrap();
+                let curve = edge::curve(&body, e).unwrap().unwrap();
+                curve
+                    .evaluate_point(&k, ivl.evaluate(0.5))
+                    .unwrap()
+                    .distance(at)
+            };
+            gap(*e).total_cmp(&gap(*f))
+        })
+        .unwrap();
+    fillet_edges(&mut k, &mut body, &[edge_id], 1.0, 1, 1, 1.0).unwrap();
+
+    let mut rounds = 0;
+    for f in body.faces().ids() {
+        let Some(surface) = face::surface(&body, f).unwrap() else {
+            continue;
+        };
+        let Some(class) = surface
+            .procedural_blend()
+            .and_then(|b| b.exact().map(|r| r.class()))
+        else {
+            continue;
+        };
+        if class != ExactClass::Circle {
+            continue;
+        }
+        rounds += 1;
+        let rec = exact_to_record(&k, surface).unwrap();
+        exact_from_record(&k, &rec)
+            .unwrap_or_else(|e| panic!("the 12° rib's fillet did not reload: {e}"));
+    }
+    assert!(rounds >= 1, "the fillet did not build a circle-class round");
+}

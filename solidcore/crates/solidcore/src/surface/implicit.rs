@@ -2608,7 +2608,61 @@ impl AnalyticSupport {
         if axis.dot(axis_r) < 0.0 {
             axis *= -1.0;
         }
-        let origin = c0 + axis * (placement_r.origin() - c0).dot(axis);
+        // A circular row's centre, from its control triangle, lies off the axis along the
+        // chord's bisector by about the row's rounding over the square of a short arc
+        // (2.7e-13 mm on a 12° patch of radius 28.5). Drawing the axis through that centre
+        // keeps the tilt at 0 and still misses `build`'s parametrisation test. The arc's two
+        // end generators are stored columns and meet at the apex, which a 12° patch places
+        // 5.5e-14 mm from the axis. The axis passes through the apex when the generators
+        // meet; parallel generators have no apex and keep the centre.
+        let point = |r: usize, c: usize| if along_v { at(r, c) } else { at(c, r) };
+        let through_apex = if cylinder {
+            None
+        } else {
+            let last = rows.checked_sub(1)?;
+            let end = len.checked_sub(1)?;
+            let a = point(0, 0)?;
+            let b = point(last, 0)?;
+            let c = point(0, end)?;
+            let d = point(last, end)?;
+            let da = b - a;
+            let db = d - c;
+            let w = c - a;
+            let m00 = da.dot(da);
+            let m01 = da.dot(db);
+            let m11 = db.dot(db);
+            // `|da|²|db|² sin²`, zero when the generators are parallel.
+            let det = m00 * m11 - m01 * m01;
+            let scale = m00.max(m11).max(1.0);
+            if !(det > gamma(8) * scale * scale && det.is_finite()) {
+                None
+            } else {
+                let b1 = da.dot(w);
+                let b2 = db.dot(w);
+                // Normal equations for `a + t da = c + s db`.
+                let t = (m11 * b1 - m01 * b2) / det;
+                let s = (m01 * b1 - m00 * b2) / det;
+                let p = a + da * t;
+                let q = c + db * s;
+                let size = [a, b, c, d]
+                    .into_iter()
+                    .fold(0.0_f64, |m, v| m.max(v.length()));
+                if (p - q).length() > gamma(24) * (1.0 + size) {
+                    None
+                } else {
+                    let apex = (p + q) * 0.5;
+                    let origin = apex + axis * (placement_r.origin() - apex).dot(axis);
+                    let dist = |v: Vec3| {
+                        let off = v - apex;
+                        (off - axis * off.dot(axis)).length()
+                    };
+                    Some((origin, dist(a), dist(b), (b - a).dot(axis), a))
+                }
+            }
+        };
+        let origin = through_apex
+            .map(|(origin, _, _, _, _)| origin)
+            .unwrap_or_else(|| c0 + axis * (placement_r.origin() - c0).dot(axis));
         let xr = placement_r.x_axis();
         let x = xr - axis * xr.dot(axis);
         let x = x * (1.0 / x.length());
@@ -2629,13 +2683,20 @@ impl AnalyticSupport {
                 radius: r0,
             });
         }
-        // the radius changes by tan(angle) per unit along the axis
-        let tan = (r1 - r0) / along.dot(axis);
+        // the radius changes by tan(angle) per unit along the axis. With the apex, the
+        // radii are the end generators' distances to the axis, not the short arc's sagitta.
+        let (radius0, radius1, span, foot) = through_apex
+            .map(|(_, ra, rb, span, foot)| (ra, rb, span, foot))
+            .unwrap_or((r0, r1, along.dot(axis), c0));
+        if !(span.abs() > 0.0) {
+            return None;
+        }
+        let tan = (radius1 - radius0) / span;
         let semi_angle_deg = tan.atan().to_degrees();
         if semi_r != 0.0 && (semi_angle_deg > 0.0) != (semi_r > 0.0) {
             return None;
         }
-        let base_radius = r0 + tan * (origin - c0).dot(axis);
+        let base_radius = radius0 + tan * (origin - foot).dot(axis);
         Some(Self::Cone {
             placement,
             base_radius,
