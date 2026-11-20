@@ -348,19 +348,7 @@ pub(super) fn configurations_rows(
         }
     });
     remember_column_widths(ui.ctx(), &keys);
-    configuration_rules_ui::show(ui, app, error, rule_editor);
-    if let Some(styles) = v["style_status"].as_array() {
-        for style in styles.iter().filter(|style| style["dormant"].as_bool() == Some(true)) {
-            ui_kit::text(
-                ui,
-                &format!("{}: appearance dormant while its feature is suppressed", style["target"].as_str().unwrap_or("Face")),
-                ui_kit::Text::Report("dormant", false),
-            );
-        }
-    }
-    if let Some(message) = v["style_error"].as_str() {
-        ui_kit::text(ui, message, ui_kit::Text::Error("style_error"));
-    }
+    // What Update couldn't take into the row, right under the table it concerns.
     if let Some((_, missed)) = rule_editor.not_captured.as_ref().filter(|(at, _)| *at == app.session.revision) {
         let names: Vec<String> = missed
             .iter()
@@ -374,6 +362,19 @@ pub(super) fn configurations_rows(
             &solidcraft_ui_text::format("config.not_captured", &[("names", &names.join(", "))]),
             ui_kit::Text::Report("not_captured", false),
         );
+    }
+    configuration_rules_ui::show(ui, app, error, rule_editor);
+    if let Some(styles) = v["style_status"].as_array() {
+        for style in styles.iter().filter(|style| style["dormant"].as_bool() == Some(true)) {
+            ui_kit::text(
+                ui,
+                &format!("{}: appearance dormant while its feature is suppressed", style["target"].as_str().unwrap_or("Face")),
+                ui_kit::Text::Report("dormant", false),
+            );
+        }
+    }
+    if let Some(message) = v["style_error"].as_str() {
+        ui_kit::text(ui, message, ui_kit::Text::Error("style_error"));
     }
     if let Some(message) = error {
         ui_kit::text(ui, message, ui_kit::Text::Error("config_error"));
