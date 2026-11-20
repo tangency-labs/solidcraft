@@ -657,6 +657,9 @@ fn intersect_cuts_a_body_with_the_sketch_plane() {
     assert_eq!(si["profiles"].as_array().unwrap().len(), 1);
 }
 
+/// √91 = √(10² − 3²): where a plane 3 from the axis of a radius-10 cylinder meets its side.
+const ROOT_91: f64 = 9.539_392_014_169_456;
+
 /// The linked points of an Intersect with edge `at` of `body` on the plane through `origin`
 /// spanned by `x` and `y`, in that plane's coordinates.
 fn intersected_edge(s: &mut Session, body: &str, at: [f64; 3], (origin, x, y): ([f64; 3], [f64; 3], [f64; 3])) -> Vec<[f64; 2]> {
@@ -680,7 +683,7 @@ fn intersecting_a_circular_edge_puts_its_points_on_the_circle() {
     let mut got = intersected_edge(&mut s, "C", [0.0, 10.0, 10.0], ([3.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]));
     got.sort_by(|a, b| a[0].total_cmp(&b[0]));
     assert_eq!(got.len(), 2, "{got:?}");
-    for (p, y) in got.iter().zip([-(91f64.sqrt()), 91f64.sqrt()]) {
+    for (p, y) in got.iter().zip([-ROOT_91, ROOT_91]) {
         assert!((p[0] - y).abs() < 1e-9 && (p[1] - 10.0).abs() < 1e-9, "{got:?}");
     }
     // The plane Y = 0 meets it at X = ±10, one of them where the closed edge starts and ends.
@@ -715,12 +718,12 @@ fn intersecting_where_two_cylinders_meet_puts_the_points_on_both() {
     let tol = meeting.iter().fold(0.0, |m: f64, t| m.max(*t));
     drop(state);
     // The plane Y = 3 meets the meeting curve on the +X side at X = √(10² − 3²), Z = 20 ± √(5² − 3²).
-    let mut got = intersected_edge(&mut s, "C", [91f64.sqrt(), 3.0, 24.0], ([0.0, 3.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]));
+    let mut got = intersected_edge(&mut s, "C", [ROOT_91, 3.0, 24.0], ([0.0, 3.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]));
     got.sort_by(|a, b| a[1].total_cmp(&b[1]));
     assert_eq!(got.len(), 2, "{got:?}");
+    // The curve crosses the plane steeply there, so its spline crosses within the edge's tolerance.
     for (p, z) in got.iter().zip([16.0, 24.0]) {
-        let (on_upright, on_cross) = ((p[0].powi(2) + 9.0).sqrt() - 10.0, (9.0 + (p[1] - 20.0).powi(2)).sqrt() - 5.0);
-        assert!(on_upright.abs() <= tol && on_cross.abs() <= tol && (p[1] - z).abs() < 0.5, "{got:?}, edge tolerance {tol}");
+        assert!((p[0] - ROOT_91).abs() <= tol && (p[1] - z).abs() <= tol, "{got:?}, edge tolerance {tol}");
     }
 }
 

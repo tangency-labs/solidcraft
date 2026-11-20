@@ -598,7 +598,7 @@ fn edge_geom(
         LinkKind::Intersect => match section()? {
             EdgeSection::Crossings(points) => points,
             EdgeSection::InPlane => planar()?.unwrap_or_else(|| fit_world(plane, &pts)),
-            EdgeSection::Mesh => section_of_polyline(plane, &pts),
+            EdgeSection::Polyline => section_of_polyline(plane, &pts),
         },
         LinkKind::Include if off_plane(plane, &pts) => {
             wires.push(pts);
@@ -628,8 +628,10 @@ enum EdgeSection {
     Crossings(Vec<LinkGeom>),
     /// It lies in the plane: it meets the plane along its whole length.
     InPlane,
-    /// A mesh body's edge: its display polyline is the edge.
-    Mesh,
+    /// No curve the kernel evaluates: crossed through its display polyline. A mesh body's edge,
+    /// whose polyline is the edge, or a traced intersection curve with no NURBS form, which the
+    /// kernel can't build yet.
+    Polyline,
 }
 
 /// Where edge `e` of `body` meets `plane`: the kernel's crossings of the curve it evaluates the
@@ -638,10 +640,13 @@ enum EdgeSection {
 /// two vertices are in the plane (each within its own tolerance) lies in it.
 fn edge_section(body: &crate::ModelBody, e: usize, plane: &Plane) -> Result<EdgeSection> {
     if body.body.is_mesh() {
-        return Ok(EdgeSection::Mesh);
+        return Ok(EdgeSection::Polyline);
     }
     let record = body.body.record();
     let edge = record.edges.get(e).ok_or_else(|| lost("the edge"))?;
+    if matches!(edge.curve, solidcore_record::brep::Curve::SurfaceIntersection { .. }) && edge.nurbs.is_none() {
+        return Ok(EdgeSection::Polyline);
+    }
     let hits = solidcore_ops::curve::plane_crossings(edge.parameters(), edge.interval, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
     if !hits.is_empty() {
         return Ok(EdgeSection::Crossings(hits.into_iter().map(LinkGeom::Point).collect()));

@@ -1178,3 +1178,41 @@ fn a_projected_plane_of_another_component_lands_where_the_two_planes_meet() {
 
 /// Where the part of the test above stands: turned half about X and lifted 100 mm.
 const PART_FRAME: crate::Mat = [[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 100.0, 0.0, 1.0]];
+
+/// A traced intersection edge with no NURBS form has no curve the kernel can build, so Intersect
+/// crosses its display polyline, as before it used exact edge curves, rather than refusing it.
+#[test]
+fn intersecting_a_traced_edge_with_no_nurbs_form_uses_its_polyline() {
+    use solidcore_record::brep::Curve;
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(20., 20., 10.)).unwrap();
+    let mut saved = solidcore_record::native::decode(&solidcraft_kernel::encode_native_body(&body).unwrap()).unwrap();
+    // The upright edge at X 20, Y 0 becomes the intersection of its two side faces, led by itself.
+    let upright = |c: &Curve| matches!(c, Curve::Line { start, end } if [start, end].iter().all(|p| (p[0] - 20.).abs() < 1e-9 && p[1].abs() < 1e-9));
+    let (e, start, end) = saved
+        .solid
+        .edges
+        .iter()
+        .enumerate()
+        .find_map(|(i, edge)| match edge.curve {
+            Curve::Line { start, end } if upright(&edge.curve) => Some((i, start, end)),
+            _ => None,
+        })
+        .unwrap();
+    let faces: Vec<usize> = saved.solid.edges[e].uses.iter().map(|u| u.face as usize).collect();
+    let surface = |k: usize| Box::new(saved.solid.faces[faces[k]].surface.clone());
+    let traced = Curve::SurfaceIntersection {
+        surfaces: [surface(0), surface(1)],
+        leader: Box::new(Curve::Polyline { points: vec![start, end] }),
+        tolerance: 1e-6,
+    };
+    let edge = &mut saved.solid.edges[e];
+    (edge.curve, edge.nurbs) = (traced, None);
+    let body = solidcraft_kernel::decode_native_body(&solidcore_record::native::encode(&saved).unwrap()).unwrap();
+    let mut st = ModelState::default();
+    st.bodies.push(ModelBody::new("Traced".into(), body, 1));
+    let source = LinkSource::Edge { body: "Traced".into(), at: Vec3::new(20., 0., 5.) };
+    let plane = Plane::XY.offset(5.);
+    let resolved = crate::project::resolve(&Document::default(), &BTreeMap::new(), &st, &plane, LinkKind::Intersect, &source).unwrap();
+    let points: Vec<Vec2> = resolved.geom.iter().filter_map(|g| if let LinkGeom::Point(p) = g { Some(*p) } else { None }).collect();
+    assert!(points.len() == 1 && points[0].dist(Vec2::new(20., 0.)) < 1e-9, "{:?}", resolved.geom);
+}
