@@ -2374,7 +2374,10 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         .copied()
         .filter(|tab| {
             strip.shown_selected == Some(strip.selected)
-                && (tab.views.len() >= min_views || strip.pop_out || strip.view_rename.is_some() || (strip.clear_view_tabs && strip.views_as_tabs && !tab.views.is_empty()))
+                && (tab.views.len() >= min_views
+                    || strip.pop_out
+                    || strip.view_rename.is_some()
+                    || (strip.clear_view_tabs && strip.views_as_tabs && !tab.views.is_empty()))
         })
         .map(|tab| {
             let room = (x1 - x0 - new_tab_width - MIN_TAB * n.saturating_sub(1) as f32).max(0.0);
