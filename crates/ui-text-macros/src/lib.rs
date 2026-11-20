@@ -1,10 +1,10 @@
-//! SolidCraft's message ids checked when a crate compiles, and turned into numbers.
+//! SolidCraft's message ids checked when a crate compiles, and turned into their places.
 //!
 //! A message is looked up by its id (`app.tr("ui.file")`, `Locale::text`, `Locale::format`), and
 //! an id the catalogs do not have compiles: the window then shows the id itself. [`msg!`] moves
 //! that discovery to the compiler. It takes the id as a string literal, looks it up in the English
-//! catalog and expands to the message's number (`solidcraft_ui_text::Msg`), so the id itself is
-//! not in the program:
+//! catalog and expands to the message's place among that catalog's sorted ids
+//! (`solidcraft_ui_text::Msg`), so the id itself is not in the program:
 //!
 //! ```ignore
 //! msg!("ui.file").tr()                                  // "File", in the current language
@@ -28,8 +28,9 @@
 //! in its build script (`cargo:rerun-if-changed`), as `solidcraft-ui-egui` does, to be compiled
 //! again when a message is added.
 //!
-//! The number is `solidcraft_ui_text::numbered::number` of the id (FNV-1a, 64 bits), computed
-//! here by a copy of it: this crate depends on no other of the workspace.
+//! With the place goes the fingerprint of the ids it was counted in
+//! (`solidcraft_ui_text::numbered::fingerprint`, computed here by a copy of it: this crate
+//! depends on no other of the workspace), so a table made for another list of ids refuses it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -78,8 +79,9 @@ pub fn msg(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as Input);
     match check(&input) {
         Ok(order) => {
-            let number = number(&input.id.value());
-            let msg = quote!(::solidcraft_ui_text::Msg::checked(#number));
+            let (place, ids) = order.0;
+            let msg = quote!(::solidcraft_ui_text::Msg::checked(#place, #ids));
+            let order = order.1;
             match order {
                 None => msg.into(),
                 Some(values) => quote!(::solidcraft_ui_text::Filled::checked(#msg, [#(#values),*])).into(),
@@ -89,15 +91,23 @@ pub fn msg(input: TokenStream) -> TokenStream {
     }
 }
 
-/// `solidcraft_ui_text::numbered::number`: FNV-1a over the id's bytes, 64 bits.
-fn number(id: &str) -> u64 {
-    id.bytes().fold(0xcbf2_9ce4_8422_2325, |hash: u64, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3))
+/// `solidcraft_ui_text::numbered::fingerprint`: FNV-1a over the ids, each followed by a newline,
+/// folded to 32 bits.
+fn fingerprint<'a>(ids: impl IntoIterator<Item = &'a str>) -> u32 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in ids.into_iter().flat_map(|id| id.bytes().chain(std::iter::once(b'\n'))) {
+        hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    (hash ^ (hash >> 32)) as u32
 }
 
-/// The values in the order the English text names their placeholders (`None` for a message
-/// given without values), or why the message is refused.
-fn check(input: &Input) -> syn::Result<Option<Vec<&syn::Expr>>> {
-    let catalog = catalog().as_ref().map_err(|why| syn::Error::new(input.id.span(), why))?;
+/// The message's place and its catalog's fingerprint, with the values in the order the English
+/// text names their placeholders (`None` for a message given without values), or why the
+/// message is refused.
+#[allow(clippy::type_complexity)]
+fn check(input: &Input) -> syn::Result<((u32, u32), Option<Vec<&syn::Expr>>)> {
+    let (catalog, ids) = catalog().as_ref().map_err(|why| syn::Error::new(input.id.span(), why))?;
+    let ids = *ids;
     let id = input.id.value();
     let Some(text) = catalog.get(&id) else {
         let hint = nearest(catalog, &id).map(|near| format!("; did you mean `{near}`?")).unwrap_or_default();
@@ -106,10 +116,13 @@ fn check(input: &Input) -> syn::Result<Option<Vec<&syn::Expr>>> {
         );
         return Err(syn::Error::new(input.id.span(), message));
     };
+    // A `BTreeMap`'s keys are in the order of their bytes, as the tables' ids are.
+    let place = u32::try_from(catalog.range::<str, _>((std::ops::Bound::Unbounded, std::ops::Bound::Excluded(id.as_str()))).count())
+        .map_err(|_| syn::Error::new(input.id.span(), "the English catalog has too many messages"))?;
     let wanted = placeholders(text);
     let Some(values) = &input.values else {
         return match wanted.first() {
-            None => Ok(None),
+            None => Ok(((place, ids), None)),
             Some(first) => Err(syn::Error::new(
                 input.id.span(),
                 format!("`{id}` has the placeholder `{{{first}}}`: give it a value, `{first} = ...`; its text is {text:?}"),
@@ -126,7 +139,7 @@ fn check(input: &Input) -> syn::Result<Option<Vec<&syn::Expr>>> {
             None => return Err(syn::Error::new(input.id.span(), format!("`{id}` also has the placeholder `{{{name}}}`: its text is {text:?}"))),
         }
     }
-    Ok(Some(ordered))
+    Ok(((place, ids), Some(ordered)))
 }
 
 /// The names in `{braces}` in `text`, each once, in order. A name is letters, digits and `_`;
@@ -181,9 +194,10 @@ fn edits(a: &str, b: &str) -> usize {
     row.last().copied().unwrap_or(0)
 }
 
-/// The English catalog, read once per compiled crate, or why it could not be read.
-fn catalog() -> &'static Result<Catalog, String> {
-    static CATALOG: OnceLock<Result<Catalog, String>> = OnceLock::new();
+/// The English catalog and the fingerprint of its ids, read once per compiled crate, or why it
+/// could not be read.
+fn catalog() -> &'static Result<(Catalog, u32), String> {
+    static CATALOG: OnceLock<Result<(Catalog, u32), String>> = OnceLock::new();
     CATALOG.get_or_init(|| {
         let from = std::env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from).ok_or("msg!: CARGO_MANIFEST_DIR is not set")?;
         let root = from
@@ -191,7 +205,9 @@ fn catalog() -> &'static Result<Catalog, String> {
             .take(MAX_ANCESTORS)
             .find(|dir| dir.join("assets/locales/en.json").is_file())
             .ok_or_else(|| format!("msg!: no assets/locales/en.json in {} or the {MAX_ANCESTORS} folders above it", from.display()))?;
-        read_catalog(root)
+        let catalog = read_catalog(root)?;
+        let ids = fingerprint(catalog.keys().map(String::as_str));
+        Ok((catalog, ids))
     })
 }
 
@@ -259,11 +275,12 @@ mod tests {
         assert_eq!((edits("", "abc"), edits("abc", "abc"), edits("kitten", "sitting")), (3, 0, 3));
     }
 
-    /// The same number as `solidcraft_ui_text::numbered::number` gives (its own test has this value).
+    /// The same fingerprint as `solidcraft_ui_text::numbered::fingerprint` gives (its own test
+    /// has this value).
     #[test]
-    fn a_number_is_the_text_crates() {
-        assert_eq!(number("ui.file"), 0xa1ef_8b5f_db45_ae41);
-        assert_eq!(number(""), 0xcbf2_9ce4_8422_2325);
+    fn a_fingerprint_is_the_text_crates() {
+        assert_eq!(fingerprint(["ui.cancel", "ui.file"]), 0x13f5_3633);
+        assert_ne!(fingerprint(["ab", "c"]), fingerprint(["a", "bc"]));
     }
 
     /// The repository's own English catalog reads, with the messages of the app, of the shared

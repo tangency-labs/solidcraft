@@ -280,7 +280,7 @@ impl Locale {
     /// The message `msg` in this language, then in English, then empty (a table has no ids to
     /// show in its place). Its placeholders are marks: fill them with [`Filled::tr`].
     pub fn message(self, msg: Msg) -> &'static str {
-        numbered::lookup(self.0.table, msg.number()).or_else(|| numbered::lookup(english().table, msg.number())).unwrap_or_default()
+        numbered::lookup(self.0.table, msg).or_else(|| numbered::lookup(english().table, msg)).unwrap_or_default()
     }
 }
 

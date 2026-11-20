@@ -1,53 +1,60 @@
-//! Messages named by a number instead of their id, so the ids need not be in the program.
+//! Messages named by their place in the English catalog instead of their id, so the ids need
+//! not be in the program.
 //!
-//! A message's number is a hash of its id ([`number`]), the same wherever it is computed: by
-//! `msg!` when a crate compiles, by a build script that packs a catalog into a table
-//! ([`encode`]), and here for an id built at run time ([`Msg::of`]). A [`Msg`] is that number.
-//! A catalog's table holds its texts under their numbers, sorted, with no ids:
+//! The ids of the English catalog, sorted, are numbered from 0: a message's number is its place
+//! among them. `msg!` writes that number when a crate compiles, and a build script packs each
+//! catalog into a table ([`encode`]) that holds its texts in the same order, so a text is found
+//! by its place, with no id and no search:
 //!
 //! ```text
-//! u32 count | count × u64 numbers, ascending | (count + 1) × u32 offsets | the texts, UTF-8
+//! u32 count | u32 fingerprint | ⌈count / 8⌉ bytes, bit i set when the catalog has message i
+//!           | (count + 1) × u32 offsets | the texts, UTF-8
 //! ```
 //!
-//! all little-endian. A text's `{placeholders}` are stored as marks that say which argument
-//! goes there ([`template`]), counted in the order the English text names them, so a filled
-//! message takes its values by position ([`Filled`]) and no placeholder name is kept either.
+//! all little-endian. The places only mean something for one list of ids, so a [`Msg`] carries
+//! the list's [`fingerprint`] and a table refuses a message numbered against another list
+//! (a crate compiled before a message was added) instead of showing a neighbour's text.
+//!
+//! A text's `{placeholders}` are stored as marks that say which argument goes there
+//! ([`template`]), counted in the order the English text names them, so a filled message takes
+//! its values by position ([`Filled`]) and no placeholder name is kept either.
 
-use std::collections::BTreeMap;
-
-/// The number of the message `id`: FNV-1a over its bytes, 64 bits.
-pub const fn number(id: &str) -> u64 {
-    let bytes = id.as_bytes();
+/// What tells one sorted list of ids from another: FNV-1a over the ids, each followed by a
+/// newline, folded to 32 bits. `msg!` computes the same (crates/ui-text-macros).
+pub fn fingerprint<'a>(ids: impl IntoIterator<Item = &'a str>) -> u32 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    let mut i = 0;
-    while i < bytes.len() {
-        hash ^= bytes[i] as u64;
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-        i += 1;
+    for byte in ids.into_iter().flat_map(|id| id.bytes().chain(std::iter::once(b'\n'))) {
+        hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
     }
-    hash
+    (hash ^ (hash >> 32)) as u32
 }
 
-/// A message, by its number.
+/// A message, by its place among the English catalog's sorted ids.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Msg(u64);
+pub struct Msg {
+    place: u32,
+    /// The [`fingerprint`] of the ids the place was counted in.
+    ids: u32,
+}
 
 impl Msg {
-    /// The message with this number. `msg!` writes this after finding the id in the English
-    /// catalog; nothing else should.
+    /// The message at `place` among the ids with the fingerprint `ids`. `msg!` writes this after
+    /// finding the id in the English catalog; nothing else should.
     #[doc(hidden)]
-    pub const fn checked(number: u64) -> Self {
-        Self(number)
+    pub const fn checked(place: u32, ids: u32) -> Self {
+        Self { place, ids }
     }
 
-    /// The message with the id `id`, for an id built at run time (a command's label). No check
-    /// is made that a catalog has it: a missing one reads as empty.
-    pub fn of(id: &str) -> Self {
-        Self(number(id))
-    }
-
-    pub const fn number(self) -> u64 {
-        self.0
+    /// The message with the id `id`, for an id built at run time (a command's label): its place
+    /// in the installed English catalog. `None` when that catalog has no such id. This reads
+    /// the ids, so a host that uses it keeps them.
+    pub fn of(id: &str) -> Option<Self> {
+        let english = crate::english();
+        let messages = english.messages();
+        messages.contains_key(id).then(|| Self {
+            place: messages.range::<str, _>((std::ops::Bound::Unbounded, std::ops::Bound::Excluded(id))).count() as u32,
+            ids: table_fingerprint(english.table),
+        })
     }
 
     /// The message in this thread's language (English where the language lacks it).
@@ -139,46 +146,57 @@ fn fill(template: &str, values: &[&str]) -> String {
     out
 }
 
-/// A catalog as a table: `messages` is number → text, the texts already as they are to be shown
-/// and with marks for their placeholders. `None` when two ids have the same number or a size
-/// does not fit; the caller says which ids.
-pub fn encode(messages: &BTreeMap<u64, String>) -> Option<Vec<u8>> {
-    let count = u32::try_from(messages.len()).ok()?;
-    let mut out = Vec::new();
+/// A catalog as a table. `ids` are the English catalog's ids, sorted; `texts` gives this
+/// catalog's text for an id it has, already as it is to be shown and with marks for its
+/// placeholders. `None` when a size does not fit.
+pub fn encode<'a>(ids: &[&str], texts: impl Fn(&str) -> Option<&'a str>) -> Option<Vec<u8>> {
+    let count = u32::try_from(ids.len()).ok()?;
+    let mut has = vec![0u8; ids.len().div_ceil(8)];
+    let mut offsets = Vec::with_capacity((ids.len() + 1) * 4);
+    let mut body = Vec::new();
+    for (i, id) in ids.iter().enumerate() {
+        offsets.extend_from_slice(&u32::try_from(body.len()).ok()?.to_le_bytes());
+        if let Some(text) = texts(id) {
+            *has.get_mut(i / 8)? |= 1 << (i % 8);
+            body.extend_from_slice(text.as_bytes());
+        }
+    }
+    offsets.extend_from_slice(&u32::try_from(body.len()).ok()?.to_le_bytes());
+    let mut out = Vec::with_capacity(8 + has.len() + offsets.len() + body.len());
     out.extend_from_slice(&count.to_le_bytes());
-    for number in messages.keys() {
-        out.extend_from_slice(&number.to_le_bytes());
-    }
-    let mut offset: u32 = 0;
-    for text in messages.values() {
-        out.extend_from_slice(&offset.to_le_bytes());
-        offset = offset.checked_add(u32::try_from(text.len()).ok()?)?;
-    }
-    out.extend_from_slice(&offset.to_le_bytes());
-    for text in messages.values() {
-        out.extend_from_slice(text.as_bytes());
-    }
+    out.extend_from_slice(&fingerprint(ids.iter().copied()).to_le_bytes());
+    out.extend_from_slice(&has);
+    out.extend_from_slice(&offsets);
+    out.extend_from_slice(&body);
     Some(out)
 }
 
-/// The text under `number` in `table`, or `None` when it has none or the table is not one.
-pub(crate) fn lookup(table: &'static [u8], number: u64) -> Option<&'static str> {
-    let count = u32::from_le_bytes(table.get(..4)?.try_into().ok()?) as usize;
-    let numbers = table.get(4..4 + count.checked_mul(8)?)?;
-    let offsets = table.get(4 + count * 8..4 + count * 8 + (count + 1).checked_mul(4)?)?;
-    let texts = table.get(4 + count * 8 + (count + 1) * 4..)?;
-    let at = |i: usize| numbers.get(i * 8..i * 8 + 8).and_then(|b| b.try_into().ok()).map(u64::from_le_bytes);
-    let offset = |i: usize| offsets.get(i * 4..i * 4 + 4).and_then(|b| b.try_into().ok()).map(|b| u32::from_le_bytes(b) as usize);
-    let (mut low, mut high) = (0, count);
-    while low < high {
-        let middle = low + (high - low) / 2;
-        match at(middle)?.cmp(&number) {
-            std::cmp::Ordering::Equal => return std::str::from_utf8(texts.get(offset(middle)?..offset(middle + 1)?)?).ok(),
-            std::cmp::Ordering::Less => low = middle + 1,
-            std::cmp::Ordering::Greater => high = middle,
-        }
+fn u32_at(bytes: &[u8], at: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(bytes.get(at..at.checked_add(4)?)?.try_into().ok()?))
+}
+
+/// The fingerprint of the ids `table` was made for (0 for what is not a table).
+fn table_fingerprint(table: &[u8]) -> u32 {
+    u32_at(table, 4).unwrap_or(0)
+}
+
+/// The text of `msg` in `table`, or `None` when the catalog lacks it, the table was made for
+/// another list of ids, or it is not a table.
+pub(crate) fn lookup(table: &'static [u8], msg: Msg) -> Option<&'static str> {
+    let count = u32_at(table, 0)? as usize;
+    let place = msg.place as usize;
+    if place >= count || table_fingerprint(table) != msg.ids {
+        return None;
     }
-    None
+    let has = table.get(8..8 + count.div_ceil(8))?;
+    if has.get(place / 8)? & (1 << (place % 8)) == 0 {
+        return None;
+    }
+    let offsets = 8 + has.len();
+    let texts = table.get(offsets + (count + 1).checked_mul(4)?..)?;
+    let from = u32_at(table, offsets + place * 4)? as usize;
+    let to = u32_at(table, offsets + place * 4 + 4)? as usize;
+    std::str::from_utf8(texts.get(from..to)?).ok()
 }
 
 #[cfg(test)]
@@ -189,40 +207,57 @@ mod tests {
         Box::leak(bytes.into_boxed_slice())
     }
 
-    #[test]
-    fn a_number_is_the_same_at_compile_time_and_at_run_time() {
-        const FILE: u64 = number("ui.file");
-        // `msg!` computes the same one (crates/ui-text-macros, the same test).
-        assert_eq!(FILE, 0xa1ef_8b5f_db45_ae41);
-        assert_eq!(Msg::of("ui.file").number(), FILE);
-        assert_ne!(number("ui.file"), number("ui.files"));
-        assert_eq!(number(""), 0xcbf2_9ce4_8422_2325);
+    /// The fingerprint of `ui.cancel` and `ui.file`.
+    const FINGERPRINT: u32 = 0x13f5_3633;
+
+    const IDS: [&str; 4] = ["ui.cancel", "ui.empty", "ui.file", "ui.only_english"];
+
+    fn msg(id: &str) -> Msg {
+        Msg::checked(IDS.iter().position(|i| *i == id).unwrap() as u32, fingerprint(IDS))
     }
 
     #[test]
-    fn a_table_gives_each_text_back_and_nothing_else() {
-        let messages: BTreeMap<u64, String> = [("ui.file", "File"), ("ui.cancel", "Cancel"), ("ui.empty", ""), ("ja", "ファイル")]
-            .into_iter()
-            .map(|(id, t)| (number(id), t.to_string()))
-            .collect();
-        let table = leak(encode(&messages).unwrap());
-        for (id, text) in [("ui.file", "File"), ("ui.cancel", "Cancel"), ("ui.empty", ""), ("ja", "ファイル")] {
-            assert_eq!(lookup(table, number(id)), Some(text), "{id}");
-        }
-        assert_eq!(lookup(table, number("ui.missing")), None);
-        assert_eq!(lookup(leak(encode(&BTreeMap::new()).unwrap()), 1), None);
+    fn a_fingerprint_tells_lists_of_ids_apart() {
+        // `msg!` computes the same one (crates/ui-text-macros, the same test).
+        assert_eq!(fingerprint(["ui.cancel", "ui.file"]), FINGERPRINT);
+        assert_ne!(fingerprint(["ui.cancel", "ui.file"]), fingerprint(["ui.cancel", "ui.files"]));
+        // Where one id ends and the next begins counts.
+        assert_ne!(fingerprint(["ab", "c"]), fingerprint(["a", "bc"]));
+        assert_ne!(fingerprint([]), fingerprint([""]));
+    }
+
+    #[test]
+    fn a_table_gives_each_text_back_by_its_place() {
+        let japanese = |id: &str| match id {
+            "ui.cancel" => Some("キャンセル"),
+            "ui.empty" => Some(""),
+            "ui.file" => Some("ファイル"),
+            _ => None,
+        };
+        let table = leak(encode(&IDS, japanese).unwrap());
+        assert_eq!(lookup(table, msg("ui.cancel")), Some("キャンセル"));
+        assert_eq!(lookup(table, msg("ui.file")), Some("ファイル"));
+        // A text that is empty is not a text that is missing.
+        assert_eq!(lookup(table, msg("ui.empty")), Some(""));
+        assert_eq!(lookup(table, msg("ui.only_english")), None);
+        // A place beyond the table, and a message counted in another list of ids.
+        assert_eq!(lookup(table, Msg::checked(4, fingerprint(IDS))), None);
+        assert_eq!(lookup(table, Msg::checked(0, fingerprint(["ui.cancel"]))), None);
+        assert_eq!(lookup(leak(encode(&[], |_| None).unwrap()), Msg::checked(0, fingerprint([]))), None);
     }
 
     /// A table that is cut short, or is not a table, gives nothing and never panics.
     #[test]
     fn a_broken_table_reads_as_empty() {
-        let messages: BTreeMap<u64, String> = [(number("a.b"), "text".to_string()), (number("c.d"), "more".to_string())].into_iter().collect();
-        let whole = encode(&messages).unwrap();
+        let whole = encode(&IDS, |_| Some("text")).unwrap();
         for cut in 0..whole.len() {
-            let _ = lookup(leak(whole[..cut].to_vec()), number("a.b"));
+            let table = leak(whole[..cut].to_vec());
+            for id in IDS {
+                let _ = lookup(table, msg(id));
+            }
         }
         for hostile in [&[][..], &[0xff; 3], &[0xff; 64]] {
-            assert_eq!(lookup(leak(hostile.to_vec()), 7), None);
+            assert_eq!(lookup(leak(hostile.to_vec()), Msg::checked(7, 0xffff_ffff)), None);
         }
     }
 

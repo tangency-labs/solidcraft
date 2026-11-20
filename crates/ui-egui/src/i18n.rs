@@ -1146,7 +1146,7 @@ mod tests {
         assert_eq!(Locale::for_language("en").label("motion.plot_quantity"), "Quantity");
     }
 
-    /// A message named by its number reads as it does by its id, in every language: the text as
+    /// A message named by its place reads as it does by its id, in every language: the text as
     /// it is shown (a right-to-left catalog's in display order, English where the language lacks
     /// it), with a mark where each placeholder stood.
     #[test]
@@ -1158,12 +1158,13 @@ mod tests {
         for catalog in solidcraft_ui_text::locales() {
             let locale = Locale::for_language(catalog.id);
             for (id, source) in &english {
-                let by_number = locale.message(solidcraft_ui_text::Msg::of(id));
+                let by_number = locale.message(solidcraft_ui_text::Msg::of(id).unwrap());
                 assert_eq!(by_number, template(locale.text(id), &placeholders(source)), "{}: {id}", catalog.id);
                 read += 1;
             }
         }
         assert!(read > 200_000, "{read} messages read");
+        assert!(solidcraft_ui_text::Msg::of("ui.no_such_message").is_none());
         // `msg!` names the same message, and fills it by the names.
         let japanese = Locale::for_language("ja");
         assert_eq!(japanese.message(msg!("ui.cancel")), japanese.text("ui.cancel"));
