@@ -119,7 +119,7 @@ fn font_dialog_filters_picks_with_keyboard_and_click_and_renders() {
             image.save(dir.join(name)).unwrap();
         }
     };
-    for _ in 0..4 {
+    for _ in 0..16 {
         draw(&mut app, vec![], None);
     }
     assert!(app.plugin_menu.dialog().unwrap().ready(&app).is_ok());
@@ -138,6 +138,10 @@ fn font_dialog_filters_picks_with_keyboard_and_click_and_renders() {
         draw(&mut app, vec![], None);
     }
     draw(&mut app, vec![egui::Event::Text("lIbErAtIoN".into())], None);
+    // Capture the settled popup, after its native fade and any content sizing pass.
+    for _ in 0..16 {
+        draw(&mut app, vec![], None);
+    }
     draw(&mut app, vec![], Some("filtered.png"));
     assert!(crate::scenario::handle_at("plugin_dialog:font:font:Liberation Sans").is_some(), "partial, case-insensitive match");
     let key = |key| vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }];

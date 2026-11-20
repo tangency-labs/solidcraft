@@ -1570,13 +1570,12 @@ fn font_field_row(ui: &mut egui::Ui, field: &Field, text: &mut String) -> egui::
     let state = ui.make_persistent_id(egui::IdSalt::new(&id)).with("filter");
     let mut filter = ui.data(|data| data.get_temp::<String>(state)).unwrap_or_default();
     let current = if text.is_empty() { solidcraft_ui_text::tr("ui.plugin_dialog_choose") } else { text.as_str() };
-    if let Some(chosen) = ui_kit::searchable_dropdown(
+    if let Some(chosen) = ui_kit::searchable_dropdown_fitting(
         ui,
         &id,
         current,
         &mut filter,
         &options,
-        None,
         families.is_none().then(|| solidcraft_ui_text::tr("sketch_text.loading_fonts")),
     ) {
         *text = chosen;

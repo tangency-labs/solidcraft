@@ -472,13 +472,28 @@ pub fn searchable_dropdown(
     custom: Option<&str>,
     pending: Option<&str>,
 ) -> Option<String> {
-    searchable_dropdown_with(ui, id, current, filter, options, SearchMenu { custom, pending, icon: None })
+    searchable_dropdown_with(ui, id, current, filter, options, SearchMenu { custom, pending, icon: None, fit_contents: false })
+}
+
+/// Searchable dropdown whose list fits its matches up to the usual scrolling limit.
+/// Keeps a loading status below the list, inside the popup. Keyboard selection and theme
+/// tokens are the same as [`searchable_dropdown`].
+pub fn searchable_dropdown_fitting(
+    ui: &mut Ui,
+    id: &str,
+    current: &str,
+    filter: &mut String,
+    options: &[SearchOption<'_>],
+    pending: Option<&str>,
+) -> Option<String> {
+    searchable_dropdown_with(ui, id, current, filter, options, SearchMenu { custom: None, pending, icon: None, fit_contents: true })
 }
 
 struct SearchMenu<'a> {
     custom: Option<&'a str>,
     pending: Option<&'a str>,
     icon: Option<&'static str>,
+    fit_contents: bool,
 }
 
 fn searchable_dropdown_with(
@@ -489,7 +504,7 @@ fn searchable_dropdown_with(
     options: &[SearchOption<'_>],
     menu: SearchMenu<'_>,
 ) -> Option<String> {
-    let SearchMenu { custom, pending, icon } = menu;
+    let SearchMenu { custom, pending, icon, fit_contents } = menu;
     super::settings_search::note_current(ui, current);
     let mut chosen = None;
     let row = label(ui).to_owned();
@@ -504,6 +519,27 @@ fn searchable_dropdown_with(
         combo.icon(dropdown_arrow)
     };
     let state = ui.make_persistent_id(egui::IdSalt::new(id)).with("search_keyboard");
+    if fit_contents {
+        let query = filter.to_lowercase();
+        let layout = (options.iter().filter(|option| option.label.to_lowercase().contains(&query)).count(), pending.is_some());
+        let changed = ui.data_mut(|data| {
+            let previous = data.get_temp::<(usize, bool)>(state.with("layout"));
+            data.insert_temp(state.with("layout"), layout);
+            previous.is_some_and(|previous| previous != layout)
+        });
+        let widget = ui.make_persistent_id(egui::IdSalt::new(id));
+        let popup = widget.with("popup");
+        // The native combo's outer scroll area otherwise keeps the last frame's height,
+        // preventing a short list from growing when the filter or loading state changes.
+        if changed
+            && egui::ComboBox::is_open(ui.ctx(), widget)
+            && let Some(mut area) = egui::containers::AreaState::load(ui.ctx(), popup)
+        {
+            area.size = None;
+            ui.memory_mut(|memory| memory.areas_mut().set_state(egui::LayerId::new(egui::Order::Foreground, popup), area));
+            ui.ctx().request_discard("searchable dropdown contents changed");
+        }
+    }
     let popup = super::container::show_combo(ui, ui.make_persistent_id(egui::IdSalt::new(id)), combo, |ui| {
         // The popup keeps focus in its editor while arrows move the highlighted result.
         // Consume Enter before TextEdit can give it to an enclosing dialog's primary action.
@@ -575,8 +611,8 @@ fn searchable_dropdown_with(
         egui::ScrollArea::vertical()
             .id_salt(format!("{id}_list"))
             .max_height(Tokens::get().space_24 * 10.0)
-            .min_scrolled_height(Tokens::get().space_24 * 10.0)
-            .auto_shrink([false, false])
+            .min_scrolled_height(if fit_contents { 0.0 } else { Tokens::get().space_24 * 10.0 })
+            .auto_shrink([false, fit_contents])
             .show(ui, |ui| {
                 for (index, option) in visible.iter().enumerate() {
                     let response = ui.selectable_label(cursor.map_or(current == option.label, |cursor| cursor == index), option.label);
@@ -591,10 +627,13 @@ fn searchable_dropdown_with(
                         ui.close();
                     }
                 }
-                if let Some(pending) = pending {
+                if !fit_contents && let Some(pending) = pending {
                     ui.label(pending);
                 }
             });
+        if fit_contents && let Some(pending) = pending {
+            ui.label(pending);
+        }
     });
     let response = popup.response;
     if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -1607,7 +1646,14 @@ pub fn shell_search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &
 
 /// Compact icon action opening the shared searchable menu.
 pub fn searchable_icon_dropdown(ui: &mut Ui, icon: &'static str, label: &str, filter: &mut String, options: &[SearchOption<'_>]) -> Option<String> {
-    searchable_dropdown_with(ui, "icon_search_menu", label, filter, options, SearchMenu { custom: None, pending: None, icon: Some(icon) })
+    searchable_dropdown_with(
+        ui,
+        "icon_search_menu",
+        label,
+        filter,
+        options,
+        SearchMenu { custom: None, pending: None, icon: Some(icon), fit_contents: false },
+    )
 }
 
 /// The filter at the top of a long menu: a search glyph, a frameless editor and a rule under

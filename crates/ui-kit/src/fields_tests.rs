@@ -325,6 +325,82 @@ fn searchable_dropdown_filters_selects_and_accepts_custom_values() {
 }
 
 #[test]
+fn searchable_dropdown_fits_rows_and_keeps_loading_status_inside_popup() {
+    let ctx = crate::test_support::context();
+    let count = std::cell::Cell::new(3);
+    let pending = std::cell::Cell::new(true);
+    let widget = std::cell::Cell::new(egui::Id::NULL);
+    let names: Vec<_> = (0..40).map(|i| format!("Family {i}")).collect();
+    let mut filter = String::new();
+    let mut draw = |ui: &mut Ui| {
+        ui.set_width(300.0);
+        row(ui, "Font", |ui| {
+            widget.set(ui.make_persistent_id(egui::IdSalt::new("fitting_fonts")));
+            let options: Vec<_> = names.iter().take(count.get()).map(|name| SearchOption { value: name, label: name, handle: None }).collect();
+            searchable_dropdown_fitting(
+                ui,
+                "fitting_fonts",
+                "Family 0",
+                &mut filter,
+                &options,
+                pending.get().then_some("Looking for installed fonts…"),
+            );
+        });
+    };
+    let mut render = |events| {
+        raw_frame(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0))),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| scope(ui, &mut draw),
+        )
+    };
+    render(vec![]);
+    let at = registry::handle_at("dialog:Font").unwrap();
+    render(pointer(at, true));
+    render(pointer(at, false));
+    let mut measure = |rows, loading| {
+        count.set(rows);
+        pending.set(loading);
+        let mut output = egui::FullOutput::default();
+        for _ in 0..4 {
+            output = render(vec![]);
+        }
+        let popup = ctx.read_response(widget.get().with("popup")).unwrap().rect;
+        let mut status = None;
+        let mut painted_text = Vec::new();
+        for clipped in &output.shapes {
+            each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Text(text) = shape {
+                    painted_text.push(text.galley.job.text.clone());
+                    if text.galley.job.text == "Looking for installed fonts…" {
+                        let rect = text.galley.rect.translate(text.pos.to_vec2());
+                        assert!(popup.expand(1.0).contains_rect(rect), "status {rect:?} outside popup {popup:?}");
+                        assert!(clipped.clip_rect.contains_rect(rect), "status must not be clipped");
+                        status = Some(rect);
+                    }
+                }
+            });
+        }
+        assert_eq!(status.is_some(), loading, "{rows} rows in {popup:?}: {painted_text:?}");
+        popup.height()
+    };
+    let three = measure(3, true);
+    let one = measure(1, true);
+    assert!(one < three - 20.0, "one row ({one}) must shrink from three ({three})");
+    assert!(one < 140.0, "one match and status must not reserve an empty list: {one}");
+    let loaded = measure(1, false);
+    assert!(loaded < one - 5.0, "loaded list drops the status row");
+    let many = measure(40, true);
+    assert!(many > three + 20.0, "more rows grow the popup again");
+    assert!(many < solidcraft_theme::Tokens::get().space_24 * 15.0, "long lists stay bounded and scroll: {many}");
+}
+
+#[test]
 fn searchable_dropdown_keyboard_picks_the_filtered_full_value() {
     let ctx = crate::test_support::context();
     let mut filter = String::new();
