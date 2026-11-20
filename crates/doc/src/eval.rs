@@ -5710,7 +5710,7 @@ thread_local! {
 fn joined_into<'d>(doc: &'d Document, state: &ModelState, f: &Feature, name: &str) -> Option<&'d str> {
     let mut now: Option<&'d str> = None;
     for g in doc.features.iter().take_while(|g| g.id != f.id).filter(|g| !g.suppressed) {
-        if let FeatureKind::Combine { target, tools, operation: Operation::Join | Operation::NewBody, keep_tools: false } = &g.kind
+        if let FeatureKind::Combine { target, tools, operation: Operation::Join | Operation::NewBody, keep_tools: false, .. } = &g.kind
             && tools.iter().any(|t| t.0.as_str() == now.unwrap_or(name))
         {
             now = Some(target.0.as_str());
@@ -13611,10 +13611,18 @@ fn eval_feature_kind(
             let tool = more::cone(point(vals, base)?, axis.0, radius, top_radius, height)?;
             apply_traced(doc, st, f, vec![tool], *operation, &[])
         }
-        FeatureKind::Combine { target, tools, operation, keep_tools } => {
+        FeatureKind::Combine { target, tools, operation, keep_tools, offset, offset_edges } => {
             if tools.iter().any(|t| t == target) {
                 return Err(DocError::Invalid("a body cannot be combined with itself".into()));
             }
+            // A cut's clearance (#3774): each tool is grown by it before it cuts.
+            let offset = match offset {
+                Some(_) if *operation != Operation::Cut => {
+                    return Err(DocError::Invalid("an offset is only for a cut".into()));
+                }
+                Some(e) => val(vals, e, Kind::Length)?,
+                None => 0.0,
+            };
             // Each body is kept in its own component's frame: a tool placed differently from the
             // target is moved into the target's frame, so it is combined where it is shown (#3383).
             // A tool placed exactly as the target is left as it is.
@@ -13715,6 +13723,19 @@ fn eval_feature_kind(
                 }
                 _ => {}
             }
+            // The grown copies cut; the tool bodies stay as they are.
+            let tb = if offset == 0.0 {
+                tb
+            } else {
+                let round = *offset_edges == crate::OffsetEdges::Round;
+                tb.into_iter()
+                    .map(|t| {
+                        kernel::offset_solid(&t.body, offset, round)
+                            .map(|grown| Traced::step(grown, &[&t]))
+                            .map_err(|e| DocError::Invalid(format!("a tool could not be offset by {offset} mm: {e}")))
+                    })
+                    .collect::<Result<Vec<_>>>()?
+            };
             apply_traced(doc, st, f, tb, op, std::slice::from_ref(&target.0))?;
             if !keep_tools {
                 st.bodies.retain(|b| !tools.iter().any(|t| *t == b.name));

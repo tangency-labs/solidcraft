@@ -399,6 +399,7 @@ pub use polyhedron::HalfSpace;
 pub use polyhedron::convex_polyhedron;
 pub use polyhedron::draft;
 pub use polyhedron::offset_faces;
+pub use polyhedron::offset_solid;
 pub use polyhedron::shell;
 pub use prism::PLANAR_FIT_TOL;
 pub use prism::extrude_planar_regions;

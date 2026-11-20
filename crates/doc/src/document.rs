@@ -241,6 +241,32 @@ pub enum Touching {
     OneBody,
 }
 
+/// What a grown or shrunk body's convex edges become (Combine's cut offset).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OffsetEdges {
+    /// The moved faces are extended until they meet: the edges stay sharp.
+    #[default]
+    Sharp,
+    /// Each convex edge is rounded with the offset as its radius, so every point of the grown
+    /// body's surface is the offset from the body's.
+    Round,
+}
+
+impl OffsetEdges {
+    pub fn parse(s: &str) -> Option<OffsetEdges> {
+        Some(match s.to_ascii_lowercase().trim() {
+            "sharp" => OffsetEdges::Sharp,
+            "round" | "rounded" => OffsetEdges::Round,
+            _ => return None,
+        })
+    }
+
+    pub fn is_sharp(&self) -> bool {
+        *self == OffsetEdges::Sharp
+    }
+}
+
 impl Touching {
     pub fn parse(s: &str) -> Option<Touching> {
         Some(match s.to_ascii_lowercase().replace([' ', '-'], "_").as_str() {
@@ -1077,6 +1103,16 @@ pub enum FeatureKind {
         operation: Operation,
         #[serde(default)]
         keep_tools: bool,
+        /// A cut only: how far each tool is grown along its faces' outward normals before it
+        /// cuts (negative: shrunk), so the cut leaves a clearance round the tool (#3774). The
+        /// tool bodies themselves are not changed. None, as older designs: the tools cut as
+        /// they are.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Offset")]
+        offset: Option<Expr>,
+        /// With `offset`: what the grown tool's convex edges become.
+        #[serde(default, skip_serializing_if = "OffsetEdges::is_sharp")]
+        offset_edges: OffsetEdges,
     },
     /// Copies of other features' results, of bodies, or of components (rectangular, circular or
     /// along a path). The copied features are named by id (#1134). Component copies are named by

@@ -177,6 +177,7 @@ const ANSWERING: [&str; 69] = [
     "shell",
     "offset_faces",
     "thicken",
+    "offset_solid",
     "merge_faces",
     "draft",
     "split_faces",
@@ -312,6 +313,7 @@ fn every_entry_point_answers() {
     says("shell", a.shell(&top, 0.1, 1.0));
     says("offset_faces", a.offset_faces(&top, 0.1, 1.0));
     says("thicken", a.thicken(1.0, false));
+    says("offset_solid", a.offset_solid(1.0, true));
     says("merge_faces", a.merge_faces(&top, 0.1));
     says("draft", a.draft(&[p(5.0, 10.0, 5.0)], 0.1, [0.0; 3], p(0.0, 0.0, 1.0), p(0.0, 0.0, 1.0), 0.1));
     let tool =

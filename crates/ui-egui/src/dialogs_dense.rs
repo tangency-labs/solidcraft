@@ -1256,12 +1256,17 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
             crate::op_auto::op_row(ui, "pr_op", operation);
         }
-        Kind::Combine { operation, keep_tools } => {
+        Kind::Combine { operation, keep_tools, offset, round_edges } => {
             form_row(ui, "Operation", |ui| {
                 let mut op = operation.saturating_sub(1);
                 combo(ui, "cb_op", &OP_LABELS[1..], &mut op);
                 *operation = op + 1;
             });
+            // A cut's clearance: the tools grow by the offset before they cut (#3774).
+            if *operation == 2 {
+                enter |= expr_row(ui, "ui.combine_offset", offset);
+                ui_kit::checkbox_grid(ui, &mut [("ui.combine_offset_round_edges", round_edges)], 1);
+            }
             ui_kit::section(ui, "combine_options", "Options", true, |ui| {
                 let mut new_component = d.extra.get("new_component").and_then(Value::as_bool).unwrap_or(false);
                 let before = new_component;

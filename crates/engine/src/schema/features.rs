@@ -18,8 +18,8 @@ use super::motion::require;
 use super::types::{
     AngleExpr, AxisDir, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FaceRefs, FacesParam,
     FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr, NumberExpr,
-    OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef,
-    StringList, ThinSideParam, ToPoint, TouchingParam, feature_common, present,
+    OffsetEdgesParam, OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam, ScaleFactors,
+    SketchRef, StringList, ThinSideParam, ToPoint, TouchingParam, feature_common, present,
 };
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
@@ -650,6 +650,14 @@ pub struct CombineParams {
     /// Keep the tool bodies as they are. Default: false (the combine uses them up).
     #[serde(default)]
     pub keep_tools: Option<bool>,
+    /// A cut only: how far each tool is grown along its faces' outward normals before it cuts
+    /// (negative: shrunk, for a press fit), so the cut leaves that clearance round it. The tool
+    /// bodies themselves are not changed. Default: 0.
+    #[serde(default)]
+    pub offset: Option<LengthExpr>,
+    /// With `offset`: what the grown tool's convex edges become. Default: sharp.
+    #[serde(default)]
+    pub offset_edges: Option<OffsetEdgesParam>,
     /// Move the result into a new component, made for it. Default: false.
     #[serde(default)]
     pub new_component: Option<bool>,

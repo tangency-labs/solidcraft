@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::construct::DatumItem;
 use solidcraft_doc::{
-    AxisRef, Direction, Expr, Extent, FeatureKind, Operation, PointExpr, ProfileSel, RailFit, SweepOrientation, SweepRail, ThinSide, ThinWall,
-    Touching, expr::Kind, point_expr,
+    AxisRef, Direction, Expr, Extent, FeatureKind, OffsetEdges, Operation, PointExpr, ProfileSel, RailFit, SweepOrientation, SweepRail, ThinSide,
+    ThinWall, Touching, expr::Kind, point_expr,
 };
 use solidcraft_doc::{BodyName, FeatureName, SketchId, SplitSheet};
 use solidcraft_doc::{Dir, FacePick, Position};
@@ -127,7 +127,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("combine")
         .contract(&COMBINE_CONTRACT)
         .output(output_schema_for::<CombineResult>)
-        .params("target: body; tools: [body]; operation?: join|cut|intersect; touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
+        .params("target: body; tools: [body]; operation?: join|cut|intersect; touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); keep_tools?: bool; offset?: expr (cut only: each tool is grown this far along its faces' outward normals before it cuts, so the cut leaves that clearance round it; negative: shrunk, for a press fit; the tool bodies themselves are not changed; default 0); offset_edges?: sharp|round (with offset: sharp, the default, extends the grown faces until they meet; round rounds each convex edge with the offset as its radius, so the clearance is the same everywhere); new_component?: bool (the result goes into a new component; component_name?)"),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", crate::checked!("solid.pattern.rectangular", pattern_rect)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
@@ -2570,6 +2570,19 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
         None => Operation::Join,
         Some(o) => Operation::parse(o).filter(|o| *o != Operation::NewBody).ok_or_else(|| bad(cmd, "operation must be join, cut or intersect"))?,
     };
+    // A cut's clearance (#3774): each tool grown by it before it cuts.
+    let offset = expr(p, "offset");
+    if let Some(d) = &offset {
+        if op != Operation::Cut {
+            return Err(bad(cmd, "`offset` is only for a cut"));
+        }
+        check_expr(s, d, Kind::Length, cmd, "offset")?;
+    }
+    let offset_edges = match str_(p, "offset_edges") {
+        None => OffsetEdges::Sharp,
+        Some(_) if offset.is_none() => return Err(bad(cmd, "`offset_edges` needs an `offset`")),
+        Some(e) => OffsetEdges::parse(e).ok_or_else(|| bad(cmd, "`offset_edges` must be sharp or round"))?,
+    };
     let mut out = add_feature(
         s,
         p,
@@ -2578,6 +2591,8 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
             tools: tools.into_iter().map(BodyName).collect(),
             operation: op,
             keep_tools: bool_(p, "keep_tools").unwrap_or(false),
+            offset,
+            offset_edges,
         },
     )?;
     // New Component: the result goes into a component of its own.

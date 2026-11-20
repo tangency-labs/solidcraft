@@ -295,9 +295,10 @@ fn shell_brep_full(k: &mut Kernel, b: &Brep, distance: f64, open: &[FaceId]) -> 
     solidcore::offset::thin_features::shell_brep(k, b, options, open)
 }
 
-/// `SmApiOffsetBrepFull(b, distance, TRUE, TRUE, r)`.
-fn offset_brep_full(k: &mut Kernel, b: &mut Brep, distance: f64) -> solidcore::Result<Brep> {
-    offset_brep_simple(k, b, OffsetOptions { distance, extend_convex_edges: true, merge_results: true })
+/// `SmApiOffsetBrepFull(b, distance, extend, TRUE, r)`: the convex edges extended until the
+/// moved faces meet (`extend`, as the capi always does), or rounded by the distance.
+fn offset_brep_full(k: &mut Kernel, b: &mut Brep, distance: f64, extend: bool) -> solidcore::Result<Brep> {
+    offset_brep_simple(k, b, OffsetOptions { distance, extend_convex_edges: extend, merge_results: true })
 }
 
 /// `finish`: the result must have faces, and a solid input must give a closed manifold solid.
@@ -426,7 +427,7 @@ pub(crate) fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Bo
             return Ok(Err(Error::Argument));
         }
         if symmetric {
-            w = match called(offset_brep_full(k, &mut w, -0.5 * thickness))? {
+            w = match called(offset_brep_full(k, &mut w, -0.5 * thickness, true))? {
                 Ok(moved) => moved,
                 Err(e) => return Ok(Err(e)),
             };
@@ -447,8 +448,28 @@ pub(crate) fn offset_sheet(body: &Body, distance: f64) -> Result<Body> {
     }
     on_copy("smlib_offset_sheet", body, |k, mut w| {
         // `take`: a result without faces (a sphere moved in to its centre) is SMLIB_ERR_EMPTY.
-        match called(offset_brep_full(k, &mut w, distance))? {
+        match called(offset_brep_full(k, &mut w, distance, true))? {
             Ok(r) => finish(r, false),
+            Err(e) => Ok(Err(e)),
+        }
+    })
+}
+
+/// The closed solid `body` grown by `distance` along its faces' outward normals (negative: shrunk):
+/// the convex edges extended until the moved faces meet, or (`round`) rounded with `distance` as
+/// the radius, so every point of the result's surface is `distance` from the body's. A body that is
+/// not a closed manifold solid is [`Error::Argument`]; a result that is not one is
+/// [`Error::NotSolid`].
+pub(crate) fn offset_solid(body: &Body, distance: f64, round: bool) -> Result<Body> {
+    if !distance_ok(distance) {
+        return Err(Error::Argument);
+    }
+    on_copy("smlib_offset_solid", body, |k, mut w| {
+        if !brep_p2::is_manifold_solid(&w)? {
+            return Ok(Err(Error::Argument));
+        }
+        match called(offset_brep_full(k, &mut w, distance, !round))? {
+            Ok(r) => finish(r, true),
             Err(e) => Ok(Err(e)),
         }
     })

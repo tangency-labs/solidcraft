@@ -6032,6 +6032,64 @@ fn combine_keep_tools_and_new_component() {
     assert!(rel(solidcraft_kernel::measure(&a.body).unwrap().volume, 4000.0) < 1e-9);
 }
 
+/// A Combine cut with an offset grows the tool before it cuts (#3774): a 10 mm cube inside a
+/// 40 × 40 × 20 block, offset `gap`, cuts the cube (10 + 2 gap)³ out of the block's 32000 mm³ and
+/// leaves the tool as it is. The offset follows its parameter.
+#[test]
+fn combine_cut_offset_leaves_a_clearance() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "0.5 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"corner": [15, 15, 5], "length": 10, "width": 10, "height": 10, "body_name": "Pin"}));
+    run(&mut s, "solid.combine", json!({"target": "Block", "tools": ["Pin"], "operation": "cut", "keep_tools": true, "offset": "gap"}));
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.model.state().body(name).unwrap().body).unwrap().volume;
+    assert!(rel(vol(&s, "Block"), 32000.0 - 11.0f64.powi(3)) < 1e-9, "{}", vol(&s, "Block"));
+    assert!(rel(vol(&s, "Pin"), 1000.0) < 1e-9, "the tool is not grown: {}", vol(&s, "Pin"));
+    run(&mut s, "parameters.change", json!({"name": "gap", "expression": "1 mm"}));
+    assert!(rel(vol(&s, "Block"), 32000.0 - 12.0f64.powi(3)) < 1e-9, "{}", vol(&s, "Block"));
+    // Shrunk 1 mm, for a press fit: the cube 8³.
+    run(&mut s, "parameters.change", json!({"name": "gap", "expression": "-1 mm"}));
+    assert!(rel(vol(&s, "Block"), 32000.0 - 8.0f64.powi(3)) < 1e-9, "{}", vol(&s, "Block"));
+}
+
+/// With `offset_edges: round` the grown cube's edges and corners are rounded with the offset
+/// as their radius: every point within d of the cube (Steiner's formula for a box of side a),
+/// a³ + 6 a² d + 3 π a d² + (4/3) π d³, comes out of the block.
+#[test]
+fn combine_cut_offset_round_edges() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"corner": [15, 15, 5], "length": 10, "width": 10, "height": 10, "body_name": "Pin"}));
+    run(&mut s, "solid.combine", json!({"target": "Block", "tools": ["Pin"], "operation": "cut", "offset": 1, "offset_edges": "round"}));
+    let st = s.model.state();
+    assert!(st.body("Pin").is_none(), "the cut uses the tool up");
+    let (a, d) = (10.0f64, 1.0f64);
+    let grown = a.powi(3) + 6.0 * a * a * d + 3.0 * PI * a * d * d + 4.0 / 3.0 * PI * d.powi(3);
+    let v = solidcraft_kernel::measure(&st.body("Block").unwrap().body).unwrap().volume;
+    assert!(rel(v, 32000.0 - grown) < 1e-9, "{v} vs {}", 32000.0 - grown);
+    let saved = serde_json::to_value(&s.doc.features.last().unwrap().kind).unwrap();
+    assert_eq!(saved["offset_edges"], "round", "{saved}");
+}
+
+/// An offset is a cut's only, and `offset_edges` needs one.
+#[test]
+fn combine_offset_refusals() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"corner": [10, 0, 0], "length": 20, "width": 20, "height": 20, "body_name": "B"}));
+    for (p, says) in [
+        (json!({"target": "A", "tools": ["B"], "operation": "join", "offset": 1}), "only for a cut"),
+        (json!({"target": "A", "tools": ["B"], "operation": "intersect", "offset": 1}), "only for a cut"),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset_edges": "round"}), "needs an `offset`"),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": "wavy"}), "sharp or round"),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": "2 deg"}), "offset"),
+    ] {
+        let e = s.execute("solid.combine", &p).expect_err(&p.to_string()).to_string();
+        assert!(e.contains(says), "{p}: {e}");
+    }
+    assert_eq!(s.doc.features.len(), 2, "nothing was added");
+}
+
 /// Align with snap points: a box's vertex onto another's face centre, an edge midpoint onto a
 /// hole's circle centre.
 #[test]

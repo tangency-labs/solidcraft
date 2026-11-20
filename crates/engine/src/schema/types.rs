@@ -9,7 +9,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
-use solidcraft_doc::{Expr, Operation, ThinSide, Touching};
+use solidcraft_doc::{Expr, OffsetEdges, Operation, ThinSide, Touching};
 
 use super::check::{keyed, whole};
 use crate::params;
@@ -706,6 +706,34 @@ impl JsonSchema for TouchingParam {
         enum_schema(
             &["separate", "one_body"],
             "What a join makes of pieces that share no face: separate (the default) makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body.",
+        )
+    }
+}
+
+/// What a grown tool's convex edges become, as `OffsetEdges::parse` reads it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OffsetEdgesParam(pub OffsetEdges);
+
+/// Combine's message for an `offset_edges` it doesn't know.
+const OFFSET_EDGES_MESSAGE: &str = "`offset_edges` must be sharp or round";
+
+impl<'de> Deserialize<'de> for OffsetEdgesParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(s) => OffsetEdges::parse(&s).map(OffsetEdgesParam).ok_or_else(|| D::Error::custom(whole(OFFSET_EDGES_MESSAGE))),
+            _ => Err(D::Error::custom(whole(OFFSET_EDGES_MESSAGE))),
+        }
+    }
+}
+
+impl JsonSchema for OffsetEdgesParam {
+    fn schema_name() -> Cow<'static, str> {
+        "OffsetEdges".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        enum_schema(
+            &["sharp", "round"],
+            "What a grown tool's convex edges become: sharp (the default) extends the grown faces until they meet; round rounds each convex edge with the offset as its radius.",
         )
     }
 }

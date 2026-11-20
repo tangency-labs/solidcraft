@@ -411,6 +411,10 @@ crate::dialog_descriptor::dialog_descriptors! {
             Combine {
                 operation: usize,
                 keep_tools: bool,
+                /// A cut's offset: how far the tools grow before they cut (an expression).
+                offset: String,
+                /// With an offset: round the grown tools' convex edges.
+                round_edges: bool,
             },
             EditParam {
                 name: String,
@@ -1228,7 +1232,7 @@ impl Dialog {
                 vec![SelInput::new("Profile", PROFILES, false)],
             ),
             "solid.combine" => Dialog::new(
-                Kind::Combine { operation: 1, keep_tools: false },
+                Kind::Combine { operation: 1, keep_tools: false, offset: "0 mm".into(), round_edges: false },
                 vec![SelInput::new("Target Body", BODIES, false), SelInput::new("Tool Bodies", BODIES, true)],
             ),
             _ => {
@@ -7221,15 +7225,23 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 json!({"tools": sels(d, 0).body_names(), "cells": picked, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
             )
         }
-        Kind::Combine { operation, keep_tools } => {
+        Kind::Combine { operation, keep_tools, offset, round_edges } => {
             need(0, "the target body")?;
             need(1, "tool bodies")?;
             let target = sels(d, 0).body_names().into_iter().next().unwrap_or_default();
             let tools: Vec<String> = sels(d, 1).body_names().into_iter().filter(|n| *n != target).collect();
-            (
-                "solid.combine",
-                json!({"target": target, "tools": tools, "operation": OPS.get(*operation).copied().unwrap_or("join"), "keep_tools": keep_tools}),
-            )
+            let op = OPS.get(*operation).copied().unwrap_or("join");
+            let mut p = json!({"target": target, "tools": tools, "operation": op, "keep_tools": keep_tools});
+            // Only a cut takes an offset, and one of zero is the same as none.
+            let offset = offset.trim();
+            let zero = app.session.doc.eval(offset, solidcraft_engine::doc::expr::Kind::Length).is_ok_and(|v| v == 0.0);
+            if op == "cut" && !offset.is_empty() && !zero {
+                p["offset"] = json!(offset);
+                if *round_edges {
+                    p["offset_edges"] = json!("round");
+                }
+            }
+            ("solid.combine", p)
         }
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
@@ -8717,9 +8729,14 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Combine { target, tools, operation, keep_tools } => {
+        FeatureKind::Combine { target, tools, operation, keep_tools, offset, offset_edges } => {
             let mut d = start("solid.combine")?;
-            d.kind = Kind::Combine { operation: op_index(operation).max(1), keep_tools: *keep_tools };
+            d.kind = Kind::Combine {
+                operation: op_index(operation).max(1),
+                keep_tools: *keep_tools,
+                offset: offset.as_ref().map_or_else(|| "0 mm".to_string(), |e| e.as_str().to_string()),
+                round_edges: *offset_edges == solidcraft_engine::doc::OffsetEdges::Round,
+            };
             if let Some(inp) = d.inputs.get_mut(0) {
                 inp.items = vec![Sel::Body { name: target.to_string() }];
             }
