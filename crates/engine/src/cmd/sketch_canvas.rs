@@ -45,7 +45,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("canvas")
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<CanvasEdited>)
-        .params("canvas: id or name; center?, width?, angle?: deg, opacity?, flip?, visible?, name?, locked? (a locked canvas refuses center, width, angle, flip, Calibrate and Delete); anchor?: {sketch: id, bottom_left, bottom_right: point ids, top_left?: point id} | null (the sketch points the image's corners follow; without top_left the height follows the image; an anchored canvas refuses center, width, angle, Calibrate and Straighten)"),
+        .params("canvas: id or name; center?, width?, height?, angle?: deg, opacity?, flip?, visible?, name?, locked? (a locked canvas refuses center, width, height, angle, flip, Calibrate and Delete); anchor?: {sketch: id, bottom_left, bottom_right: point ids, top_left?: point id} | null (the sketch points the image's corners follow; without top_left the height follows the image; an anchored canvas refuses center, width, height, angle, Calibrate and Straighten)"),
     CommandSpec::new("canvas.frame_sketch", "Frame Sketch", crate::checked!("canvas.frame_sketch", frame_sketch))
         .icon("canvas")
         .contract(&FRAME_SKETCH_CONTRACT)

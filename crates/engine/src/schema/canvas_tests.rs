@@ -31,7 +31,7 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(
         input_schema_for::<CanvasEditParams>(),
-        &["anchor", "angle", "canvas", "center", "flip", "locked", "name", "opacity", "visible", "width"],
+        &["anchor", "angle", "canvas", "center", "flip", "height", "locked", "name", "opacity", "visible", "width"],
     );
     assert_keys(input_schema_for::<CanvasFrameSketchParams>(), &["canvas", "name"]);
     assert_keys(input_schema_for::<CanvasCalibrateParams>(), &["a", "b", "canvas", "distance"]);

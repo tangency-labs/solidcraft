@@ -170,9 +170,12 @@ pub struct CanvasEditParams {
     /// The image's new centre on its plane, in mm.
     #[serde(default)]
     pub center: Option<Point2>,
-    /// Its new width, in mm (above 0, below 1e7); its height follows the image.
+    /// Its new width, in mm (above 0, below 1e7); its height follows the image unless `height` is set.
     #[serde(default)]
     pub width: Option<CanvasWidth>,
+    /// Its new explicit height, in mm (above 0, below 1e7), for non-uniform stretching.
+    #[serde(default)]
+    pub height: Option<CanvasWidth>,
     /// Its new rotation on the plane, in degrees (a number of 1e9 or more is ignored).
     #[serde(default)]
     pub angle: Option<f64>,

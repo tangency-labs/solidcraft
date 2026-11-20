@@ -6924,7 +6924,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let dragging_layer = drag_layer::holds_pointer(app, layered, manipulator_dragging);
     let hits = hover
         .filter(|_| {
-            inside && app.viewport.boxsel.is_none() && !crate::joint_drag::active(app) && !joint_handle_pointer && !canvas_handle_pointer && !navigating && !dragging_layer
+            inside
+                && app.viewport.boxsel.is_none()
+                && !crate::joint_drag::active(app)
+                && !joint_handle_pointer
+                && !canvas_handle_pointer
+                && !navigating
+                && !dragging_layer
         })
         .map(|p| pick_cached(app, &proj, p))
         .unwrap_or_default();
@@ -6959,7 +6965,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let navigating_from_press = mode.is_some() || app.viewport.primary_nav.is_some() || joint_handle_pointer || canvas_handle_pointer;
     let held = crate::select_other::track_hold(app, ui.ctx(), &proj, inside, primary_pressed, primary_down, hover, navigating_from_press);
     crate::select_other::hover_override(app);
-    let (canv_pressed, canv_down) = if app.viewport.primary_nav.is_none() && mode.is_none() { (primary_pressed, primary_down) } else { (false, false) };
+    let (canv_pressed, canv_down) =
+        if app.viewport.primary_nav.is_none() && mode.is_none() { (primary_pressed, primary_down) } else { (false, false) };
     let canvas_dragging = crate::browser_canvas::drag(app, &proj, hover.filter(|_| inside), canv_pressed, canv_down);
     list_hover(app);
     let still = inside
@@ -7277,7 +7284,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             dialog.restore_value_focus = true;
         }
-        if resp.clicked() && !held && !reference_pick && !joint_handle_pointer && !canvas_grip_pointer && !canvas_dragging && !app.viewport.draw_drag_handled {
+        if resp.clicked()
+            && !held
+            && !reference_pick
+            && !joint_handle_pointer
+            && !canvas_grip_pointer
+            && !canvas_dragging
+            && !app.viewport.draw_drag_handled
+        {
             if crate::browser_canvas::click(app, &proj, p) {
                 // Calibrate Canvas: the click sets Point A or B on the image (#9108).
             } else if app.tool.is_some() {
@@ -7456,7 +7470,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     // Dragging a sketch point of the active sketch moves it; the solver keeps the constraints.
-    if app.tool.is_none() && app.dialog.is_none() && primary_nav.is_none() && mode.is_none() && app.session.active_sketch.is_some() && !held && !canvas_dragging {
+    if app.tool.is_none()
+        && app.dialog.is_none()
+        && primary_nav.is_none()
+        && mode.is_none()
+        && app.session.active_sketch.is_some()
+        && !held
+        && !canvas_dragging
+    {
         let on_plane = |app: &SolveApp, p: Pos2| {
             let ss = app.session.active_sketch.and_then(|sid| crate::open_meshing::shown_world(app).sketch(sid).cloned())?;
             let (o, d) = proj.ray(p);
@@ -7645,7 +7666,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Dragging a part moves its free chain (outside sketches), or reaches within its joints
     // when the chain is anchored. Shift, Ctrl/Cmd or Alt held as the drag starts
     // draws a selection box instead, as a drag from empty space does.
-    if app.tool.is_none() && app.dialog.is_none() && primary_nav.is_none() && mode.is_none() && app.session.active_sketch.is_none() && !held && !canvas_dragging {
+    if app.tool.is_none()
+        && app.dialog.is_none()
+        && primary_nav.is_none()
+        && mode.is_none()
+        && app.session.active_sketch.is_none()
+        && !held
+        && !canvas_dragging
+    {
         if resp.drag_started_by(egui::PointerButton::Primary)
             // Physical Ctrl on macOS is not the primary click-selection modifier, but must
             // still keep a modified drag from moving a part.
