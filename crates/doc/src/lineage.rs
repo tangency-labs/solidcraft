@@ -141,10 +141,11 @@ impl Lineage {
             .collect()
     }
 
-    /// A tool of `faces` faces and no edges (a mesh's triangles) whose faces have no role.
-    pub(crate) fn unnamed_faces(faces: usize) -> Lineage {
-        let faces = (0..faces).map(|face| FaceProv { origins: vec![FaceOrigin::Face { operand: 0, face }], change: Change::Kept }).collect();
-        Lineage { history: History { operands: 1, faces, edges: Vec::new() }, operands: vec![Arc::new(Operand::Made(Vec::new()))] }
+    /// `tool`, a body the feature built whose faces have no role, with its faces and its edges: a
+    /// cut by it reports where its edges went, and a lineage without them could not take that in,
+    /// leaving the whole result to be named from geometry (a modelled Thread, #18460).
+    pub(crate) fn unnamed(tool: &Body) -> Lineage {
+        Lineage::of(tool, Operand::Made(vec![Vec::new(); tool.face_count()]))
     }
 
     /// The lineages of `pieces`, the lumps of `whole` (whose lineage is `lineage`): their faces
@@ -246,6 +247,9 @@ pub(crate) struct ProfileRoles<'a> {
     pub region: Option<&'a Region2>,
     /// The start and end caps' roles (`None`: not known).
     pub caps: [Option<String>; 2],
+    /// A second name each cap answers to (`None`: none), so a reference picked under the name the
+    /// cap had before the extrude's direction changed still finds it.
+    pub cap_synonyms: [Option<String>; 2],
     /// A thin wall: its sides lie off the sketch curves, and are named by the curve they run
     /// beside.
     pub thin: Option<&'a ThinWallRoles>,
@@ -291,7 +295,12 @@ impl<'a> ProfileRoles<'a> {
                 for origin in &face.origins {
                     let found = match *origin {
                         FaceOrigin::Profile { segment } => curve(segment),
-                        FaceOrigin::Cap { end } => self.caps.get(usize::from(end)).cloned().flatten().into_iter().collect(),
+                        FaceOrigin::Cap { end } => {
+                            let k = usize::from(end);
+                            let name = self.caps.get(k).cloned().flatten();
+                            // A cap with no name stays unknown; one with a name also answers to its synonym.
+                            name.into_iter().chain(self.cap_synonyms.get(k).cloned().flatten()).collect()
+                        }
                         _ => Vec::new(),
                     };
                     // One unknown origin leaves the face unknown: never a partial guess.
@@ -313,7 +322,7 @@ impl<'a> ProfileRoles<'a> {
     /// A body swept from a profile (revolve, sweep, loft): its sides named by the sketch curves,
     /// its caps `start` and `end`.
     pub fn swept(sketch: Option<&'a SolvedSketch>, region: Option<&'a Region2>) -> ProfileRoles<'a> {
-        ProfileRoles { sketch, region, caps: [Some("start".into()), Some("end".into())], thin: None }
+        ProfileRoles { sketch, region, caps: [Some("start".into()), Some("end".into())], cap_synonyms: [None, None], thin: None }
     }
 
     /// A tool built from the profile (and then moved, from `built`, when given), its faces named
@@ -544,12 +553,23 @@ pub(crate) fn numbered_tool(body: Body) -> Traced {
 /// there ([`link_role`]), so a reference to it follows that name, not the face's place in the
 /// file, when the design changes; it still answers to `face:<k>`.
 pub(crate) fn linked_tool(body: Body, fid: u64, carried: &[String]) -> Traced {
+    linked_tool_from(body, fid, carried, None)
+}
+
+/// [`linked_tool`] for a body whose face `k` was face `source[k]` of the body the roles and
+/// carried names are of (an import's part healed: `solidcraft_kernel::HealedBody::face_source`):
+/// each face keeps the roles of the face it was, so a reference to a face of the body as read
+/// finds the same face, and one to a face the heal removed finds nothing.
+pub(crate) fn linked_tool_from(body: Body, fid: u64, carried: &[String], source: Option<&[usize]>) -> Traced {
     let roles = (0..body.face_count())
-        .map(|k| {
-            let numbered = format!("face:{k}");
-            match carried.get(k).filter(|n| !n.is_empty()) {
-                Some(name) => vec![link_role(fid, name, 0), numbered],
-                None => vec![numbered],
+        .map(|k| match source.map_or(Some(k), |s| s.get(k).copied()) {
+            None => Vec::new(),
+            Some(k) => {
+                let numbered = format!("face:{k}");
+                match carried.get(k).filter(|n| !n.is_empty()) {
+                    Some(name) => vec![link_role(fid, name, 0), numbered],
+                    None => vec![numbered],
+                }
             }
         })
         .collect();

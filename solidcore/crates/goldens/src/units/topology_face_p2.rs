@@ -2391,6 +2391,88 @@ mod tests {
         }
     }
 
+    /// extra00702 (WR-455's contact move, tangency-labs/solidcraft#17404): the internal
+    /// point of a rectangular-trimmed B-spline face over `[0, 1]^2` moves from the face's
+    /// constant-V line `v = 8/21` to its first one, `v = 1/21`: main's lines 1 to 7 met
+    /// the face's interior in no interval, the new row's first line does. PROVEN for both
+    /// points: the surface's `x` depends on `u` alone, strictly increasing (the net's `x`
+    /// is `0.001 i`, so every derivative control point is positive), and its `y` is
+    /// `(1 - N_0(u)) Y(v)` with `Y` strictly increasing (row 0 of the net is the origin,
+    /// the others have `y = 0.001 j`), so at a fixed `u > 0` strictly increasing in `v`;
+    /// bisection finds the `u` with the point's `x`, then the `v` with its `y` there,
+    /// and the surface point there is within 1e-15 of the point (far below the face's
+    /// 1e-5 tolerance), at a `(u, v)` strictly inside the face, at least 0.01 from its
+    /// boundary. Class: equal (both are internal points; the new one is on the first line
+    /// `CalculateAnInternalPoint` tries).
+    #[test]
+    fn wr455_extra00702_internal_point_is_inside_the_face() {
+        let case = crate::case::regression_case(&Runner, "extra00702");
+        let i: Inputs = case.parse().unwrap();
+        let state = run_rust(&i).unwrap().values["state"].clone();
+        let now = Vec3::new(state[1], state[2], state[3]);
+        assert_eq!(state[0], 0.0);
+        assert_eq!(
+            [now.x, now.y, now.z],
+            [5.997_856_171_225_904e-5, 5.011_072_986_310_686e-5, 6.674_095_540_413_089e-5]
+        );
+        let main = Vec3::new(8.501_171_443_409_645e-5, 1.955_087_294_908_429e-4, -2.533_443_274_855_833e-4);
+
+        let mut k = Kernel::default();
+        let path = path_of(&i).unwrap();
+        let (b, _) = own_brep(&mut k, i.brep.as_ref().unwrap(), &path, i.validate_only, i.init_gaps)
+            .unwrap()
+            .unwrap_or_else(|_| panic!("extra00702: no brep"));
+        let faces = solidcore::topology::brep::p1::faces(&b, None).unwrap();
+        assert_eq!(faces.len(), 1);
+        let f = b.face(faces[0]).unwrap();
+        assert_eq!(f.rectangular_trim, 1);
+        assert_eq!(
+            [f.uv_domain.min().x, f.uv_domain.min().y, f.uv_domain.max().x, f.uv_domain.max().y],
+            [0.0, 0.0, 1.0, 1.0]
+        );
+        assert_eq!(f.tolerance, 1e-5);
+        let s = f.surface.as_ref().unwrap();
+
+        // the net: x = 0.001 i; y = 0.001 j, but 0 on row 0 (the degenerate edge)
+        let net = case.inputs["brep"]["surface"]["bspline"]["net"].as_array().unwrap();
+        assert_eq!(net.len(), 4);
+        for (r, row) in net.iter().enumerate() {
+            let row = row.as_array().unwrap();
+            assert_eq!(row.len(), 5);
+            for (c, p) in row.iter().enumerate() {
+                let xyw = [p[0].as_f64().unwrap(), p[1].as_f64().unwrap(), p[3].as_f64().unwrap()];
+                // non-rational (the weight is the `NOW` marker); row 0 is one point, the
+                // origin (the face's `u = 0` edge is degenerate)
+                let y = if r == 0 { 0.0 } else { 0.001 * c as f64 };
+                assert_eq!(xyw, [0.001 * r as f64, y, -f64::MAX], "net ({r}, {c})");
+            }
+        }
+        // the parameter at which the strictly increasing `f` reaches `target`
+        let solve = |f: &dyn Fn(f64) -> f64, target: f64| {
+            let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
+            assert!(f(lo) < target && target < f(hi));
+            for _ in 0..200 {
+                let mid = 0.5 * (lo + hi);
+                if f(mid) < target {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            0.5 * (lo + hi)
+        };
+        let at = |u: f64, v: f64| s.evaluate_point(&k, Point2::new(u, v)).unwrap();
+        for (name, p, line) in [("new", now, 1.0 / 21.0), ("main", main, 8.0 / 21.0)] {
+            let u = solve(&|u| at(u, 0.5).x, p.x);
+            let v = solve(&|v| at(u, v).y, p.y);
+            let d = at(u, v).distance(p);
+            assert!(d <= 1e-15, "{name}: {d:e} from the surface point at ({u}, {v})");
+            let margin = u.min(v).min(1.0 - u).min(1.0 - v);
+            assert!(margin >= 0.01, "{name}: ({u}, {v}) is {margin} from the boundary");
+            assert!((v - line).abs() <= 1e-12, "{name}: v {v} is not the line {line}");
+        }
+    }
+
     /// The inputs of nightly fuzz case `topology.face_p2/fuzz00020`.
     const FUZZ00020: &str = r#"{"brep":{"dom":[0.0,0.0,1.0,1.0],"kind":"face","surface":{"bspline":{"form":0,"net":[[[0.0,0.0,0.48290885450886867,1.0],[0.0,1.0,0.026558355163892045,-1.7976931348623157e+308],[0.0,2.0,0.3236024010000994,-1.7976931348623157e+308]],[[1.0,0.0,0.16008492196929902,-1.7976931348623157e+308],[1.0,1.0,-0.3818595663202652,-1.7976931348623157e+308],[1.0,2.0,0.42438880397299017,-1.7976931348623157e+308]],[[2.0,0.0,-0.39686080956013436,-1.7976931348623157e+308],[2.0,1.0,0.05611566788706901,-1.7976931348623157e+308],[2.0,2.0,0.3283143419234992,-1.7976931348623157e+308]],[[3.0,0.0,0.363745333750945,-1.7976931348623157e+308],[3.0,1.0,0.36228231985820736,-1.7976931348623157e+308],[3.0,2.0,0.027268171389889018,-1.7976931348623157e+308]],[[4.0,0.0,-0.345322603754885,-1.7976931348623157e+308],[4.0,1.0,-0.32212985152181606,-1.7976931348623157e+308],[4.0,2.0,-0.4060463095725655,-1.7976931348623157e+308]]],"oob":false,"p":3,"q":1,"u":[0.0,0.0,0.0,0.0,0.5811054631449626,1.0,1.0,1.0,1.0],"v":[0.0,0.0,0.8672390488922626,1.0,1.0]}}},"cands":[{"curve":{"cpts":[[0.7895661339805444,-0.17171284016679556,1.7976931348623157e+308,-1.7976931348623157e+308],[0.8055199936793002,0.08681972422832687,1.7976931348623157e+308,-1.7976931348623157e+308],[0.7898024725911749,0.32205588150363834,1.7976931348623157e+308,-1.7976931348623157e+308]],"dim":2,"p":1,"u":[-1.5099557060603712,-1.5099557060603712,3.4113170103733608,5.537417838142818,5.537417838142818]},"kind":1,"orient":1},{"curve":{"cpts":[[0.41791217040037293,0.6071607649021995,-1e+300,1.846060688685256],[0.44522646681436484,0.38625390666912246,1.7976931348623157e+308,1.2398708818883835],[0.7494185757767893,0.6328648305934458,1.7976931348623157e+308,1.8680767293062457],[0.7900457641165108,0.4428112016048782,1.7976931348623157e+308,1.7317769440249347],[0.8780064788048215,0.3577346108988606,1.7976931348623157e+308,1.8293958767881109]],"dim":2,"p":3,"u":[0.0,0.0,0.0,0.0,0.6994601289283375,1.0,1.0,1.0,1.0]},"kind":1,"orient":1},{"curve":null,"kind":2,"orient":1}],"eu":870782,"init_gaps":true,"op":"best_uv","validate_only":false}"#;
 }

@@ -79,6 +79,29 @@ its flat size and a table of bends to export as DXF or CSV.
 
 ## Rules and tools
 
+**Standard library**, at the top of Sheet Metal Rules, has the stock thicknesses of common
+materials: mild steel and stainless 304 (their sheet gauge charts), aluminium 5052-H32 and
+6061-T6, copper and brass (Brown & Sharpe), each also in the metric thicknesses 0.5 to 6 mm
+(ISO 497's R″10 preferred numbers). Pick a **Material**, choose **Sizes** (gauges or metric; a
+millimetre design shows metric first), then a **Thickness**, and the manager shows a rule of that
+name with that thickness; **OK** adds it to the design. The gauge is
+only a label that names its chart: the rule keeps the thickness. Picking another material clears
+the thickness pick and never changes the thickness by itself.
+
+The bend radius stays the rule's own, since it comes from your tooling. Where the material has a
+published minimum inside radius (5052-H32 and 6061-T6), the manager says when the radius is
+under it. The K-factor is estimated from the **Bend method** (air bending, bottoming or coining)
+at the rule's R/T, from the generic K-factor chart, and the manager says it is an estimate: a
+value your shop measured from test bends is better. A rule's **Material** is a label saved with
+it, and can be typed for any rule.
+
+**Import pack…** reads a JSON or CSV file of rules, from you or your shop, into your personal
+rules, and **Export pack…** writes them as one. The format is in
+`docs/formats/sheet-rule-packs.md`. Over MCP, `sheet.rule_library` lists the library and
+`sheet.manage_rules {"name": "AL", "material": "Aluminium 5052-H32", "gauge": "14"}` makes a rule of
+one gauge (`"gauge": "1.5 mm"` a metric thickness; with `bend_method` for the K-factor estimate; its reply's `notes` say what was
+estimated).
+
 A rule is saved in its design, and a new design starts with only the default steel rule. To use
 the same rules in every design, keep them as **personal rules**, saved in your profile: open
 **Personal rules** at the top of Sheet Metal Rules.

@@ -343,8 +343,7 @@ fn perforation_properties_of_a_hole_two_bends_reach_are_refused() {
 /// mm³.
 #[test]
 fn a_saved_rule_with_a_bend_radius_of_0_is_refused_as_the_design_rebuilds() {
-    let knife =
-        "a bend radius of 0 can't be made: no material bends to a knife edge, so give the smallest inside radius your material and tooling form";
+    let knife = "the bend radius must be more than 0: use your tooling's real inside radius, or a tiny one like 0.001 mm for a sharp look";
     let mut s = Session::default();
     run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": "2 mm", "k_factor": "0.5", "bend_radius": "1 mm", "active": true}));
     base(&mut s, 100.0, 60.0);

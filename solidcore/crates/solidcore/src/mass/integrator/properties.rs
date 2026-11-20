@@ -36,8 +36,14 @@
 //! quadrature (`kronrod_integrate`, bisection bounded at 48 levels and 100,000 pieces),
 //! not by nested Runge-Kutta steps: a dense spline grid has a band cell per pair of knot
 //! spans, and two Runge-Kutta steps a level cost 144 samples a cell at the least.
-//! Each span-wise iso-u piece is evaluated at its end from its own knot span, the
-//! one-sided limit from inside the piece (WR-670, #2091): upstream takes the span above.
+//! Every face's trim pieces, banded or not, are integrated the same way (#14460): the
+//! outer rule runs along the trim piece and the inner one along each sample's iso-u line,
+//! each level with its own bounds of 48 levels and 100,000 pieces (so the work is bounded
+//! by their product), cancel polled in both, and no recursion. Neither level has a node
+//! at a piece's end, so the WR-670 one-sided end evaluation (#2091) is not needed on this
+//! path; every trim piece also ends at each crossing of its trim with a surface v knot
+//! line, banded or not, as the outer integrand has a kink there (crossings found by sign
+//! change between samples of each trim span, as `trim_curve_breaks` finds them).
 //! An edge's tube area, volume and moments each have an error scale of their own size
 //! (#2887): upstream's are `BIG_DOUBLE`, so only the edge's length was under error control.
 //! Not upstream (#16735): `brep_properties` closes every volume-bounding face onto its
@@ -67,16 +73,13 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::surface::surface::Surface;
 use crate::topology::face::p2::{
-    surface_knots_inside, trim_curve_breaks, OdeArea, OdeIsoCurveLength, PrecisePropertyLayout,
-    PPF_ALL, PPF_AREA, PPF_AREA_FIRST_MOMENTS,
+    surface_knots_inside, trim_curve_breaks, OdeIsoCurveLength, PrecisePropertyLayout, PPF_ALL,
+    PPF_AREA, PPF_AREA_FIRST_MOMENTS,
 };
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, FaceuseId, RegionId, VertexId};
 use crate::{EntityRef, Result, SolidError};
 
 const OP: &str = "mass::integrator::properties";
-/// The operation the `SM_ERR` of a span the integrator took no step over names (not
-/// upstream: the code is upstream's, the name says which failure it is).
-const OP_SKIPPED_SPAN: &str = "mass::integrator::properties::skipped_span";
 /// The fewest surface v knots inside a face's trims for which the face is integrated in
 /// bands between them (#14460).
 const MIN_BANDS: usize = 12;
@@ -583,7 +586,9 @@ fn continuation_certified(
     Ok(true)
 }
 /// `SmFace::ComputePreciseProperties`; the default property mask is `PPF_ALL`. Missing UV
-/// trim curves of the face are made on `b`.
+/// trim curves of the face are made on `b`, after the arguments are checked: a non-finite
+/// `accuracy` or an invalid mask is [`SolidError::InvalidInput`], as in
+/// [`boundary_properties`].
 pub fn face_properties(
     k: &Kernel,
     b: &mut Brep,
@@ -627,6 +632,7 @@ fn face_properties_in(
     closed: bool,
 ) -> Result<PreciseProperties> {
     valid_flags(flags)?;
+    valid_accuracy(accuracy)?;
     let trims = if closed {
         closed_boundary(k, b, f)?.curves
     } else {
@@ -700,77 +706,103 @@ fn trims_v_range(k: &Kernel, trims: &[Curve], domain: &Extent2d) -> Result<(f64,
 fn unsteppable(a: f64, b: f64) -> bool {
     are_same(a, b) || are_same(0.5 * (b - a), EFF_ZERO) || 0.5 * (b - a) < EFF_ZERO
 }
-/// The integral of `integrand` (writing `dy` at `x`) from `a` to `b` into `y`, the
-/// precise properties' outer integration: Runge-Kutta at `accuracy` with the components'
-/// error `scale`, a first step of half the span, then finer first steps where the
-/// coarser fails.
-fn integrate_piece<F>(
-    k: &Kernel,
-    a: f64,
-    b: f64,
+/// The surface lines of one face's iso-u integrals and how tightly each is integrated:
+/// the inner level of the trim pieces' integral.
+struct IsoLine<'a> {
+    surface: &'a Surface,
+    origin: Point3,
+    thickness: f64,
+    layout: &'a PrecisePropertyLayout,
+    /// the inner integrals' accuracy (`SmODEAreaIFEO::m_dIsoCurveAccuracy`)
     accuracy: f64,
-    scale: &[f64],
-    y: &mut [f64],
-    mut integrand: F,
-) -> Result<()>
-where
-    F: FnMut(f64, &mut [f64]) -> Result<()>,
-{
-    // A coarse first Runge-Kutta step can trip the integrator's abort guard for one
-    // traversal direction, so a reversed cap loop fails where its twin succeeds. Try
-    // a span/2 first step, then fall back to finer steps.
-    let mut status = Err(SolidError::mass_failed(OP, "the span was not integrated"));
-    for divisor in [2.0, 8.0, 64.0, 512.0, 4096.0] {
-        k.check_cancelled(OP)?;
-        let mut eval_calls = 0u64;
-        status = OdeIntegrator::default()
-            .integrate(
-                y,
-                a,
-                b,
-                OdeOptions {
-                    accuracy,
-                    initial_step: (b - a) / divisor,
-                    minimum_step: 0.0,
-                    scale: Some(scale),
-                    quadrature: true,
-                    rounding: None,
-                    rate: None,
-                },
-                |t, _, dy| {
-                    eval_calls += 1;
-                    if (eval_calls & 63) == 1 {
-                        k.check_cancelled(OP)?;
-                    }
-                    integrand(t, dy)
-                },
-            )
-            // Success with no steps means the integrator skipped the span.
-            .and_then(|counts| {
-                if counts.good + counts.reduced == 0 {
-                    Err(SolidError::mass(OP_SKIPPED_SPAN, MassFailure::SkippedSpan))
-                } else {
-                    Ok(())
-                }
-            });
-        if status.is_ok() {
-            break;
-        }
-        if status
-            .as_ref()
-            .is_err_and(SolidError::is_unported_or_cancelled)
-        {
-            break;
-        }
+    /// the components' error scales
+    scale: &'a [f64],
+}
+
+/// The trim pieces' integrand at `t` on `trim` into `dy` (`SmODEAreaIFEO::Evaluate`):
+/// the iso-u integral at the trim point `(u, v)` from `v = base` to `v`, times the trim's
+/// `-du/dt`. Zero, without the iso-u integral, where `du/dt` is exactly zero or the trim
+/// point is on its base (`v = base`: a zero-width iso-u integral). The iso-u
+/// integral is taken by [`kronrod_integrate`] piece by piece between the surface's v knots
+/// between `base` and `v` (WR-494), at `iso.accuracy`; one running down (a trim point
+/// below its base) is the negated integral up. `scratch` holds the iso integrand's
+/// values.
+///
+/// Not upstream: upstream integrates both levels by Runge-Kutta (`SmODEAreaIFEO`'s inner
+/// `SmRungeKuttaODEIntegrate`), and leaves `dy` as it was where `|du/dt| <= SM_EFF_ZERO`
+/// (see [`OdeArea::evaluate`](crate::topology::face::p2::OdeArea::evaluate)).
+///
+/// # Errors
+///
+/// Those of the trim's evaluation (and a non-finite trim point or tangent), of
+/// [`surface_knots_inside`] and of the inner integration.
+fn trim_integrand(
+    k: &Kernel,
+    iso: &IsoLine<'_>,
+    trim: &Curve,
+    base: f64,
+    t: f64,
+    scratch: &mut [f64],
+    dy: &mut [f64],
+) -> Result<()> {
+    let pv = trim.evaluate(k, t, 1, true, true)?;
+    let (Some(p0), Some(p1)) = (pv.first().copied(), pv.get(1).copied()) else {
+        return Err(SolidError::mass_failed(
+            OP,
+            "the trim has no point or tangent",
+        ));
+    };
+    // a non-finite trim point would bisect to the depth bound and fail as step control
+    if !(p0.x.is_finite() && p0.y.is_finite() && p1.x.is_finite()) {
+        return Err(SolidError::mass_failed(
+            OP,
+            "the trim's point or tangent is not finite",
+        ));
     }
-    // Propagate failure instead of dropping the boundary: a silent skip would
-    // return success with zero/partial properties.
-    status
+    dy.fill(0.0);
+    if p1.x == 0.0 {
+        return Ok(());
+    }
+    let (lo, hi, sign) = if p0.y >= base {
+        (base, p0.y, 1.0)
+    } else {
+        (p0.y, base, -1.0)
+    };
+    // (a trim point on its base: a zero-width iso-u integral, nothing to evaluate)
+    if lo == hi {
+        return Ok(());
+    }
+    let eval = OdeIsoCurveLength::new(k, iso.surface, p0.x, iso.origin, iso.thickness, iso.layout);
+    let mut v0 = lo;
+    // the 15-point rule: an iso-u line up a smooth surface that is no polynomial (a sphere's
+    // rational form, a cylinder's quarter turn) takes the 7-point rule's pieces about as
+    // often as upstream's Runge-Kutta steps; the 15-point rule, exact to degree 22, a fifth
+    // of the evaluations on a sphere at the app's accuracy
+    for v1 in surface_knots_inside(k, iso.surface, SurfParamType::V, lo, hi)?
+        .into_iter()
+        .chain(core::iter::once(hi))
+    {
+        kronrod15_integrate(k, v0, v1, iso.accuracy, iso.scale, dy, |v, g| {
+            eval.evaluate(v, scratch)?;
+            for (d, x) in g.iter_mut().zip(scratch.iter().skip(1)) {
+                *d = *x;
+            }
+            Ok(())
+        })?;
+        v0 = v1;
+    }
+    for d in dy.iter_mut() {
+        // (* -1.0: an exact negation)
+        *d = -(*d * p1.x) * sign;
+    }
+    Ok(())
 }
 /// The 7-point Gauss-Kronrod rule on `[-1, 1]` and its embedded 3-point Gauss rule: the
 /// nodes `0, ±x1, ±x2, ±x3` (`x2 = sqrt(3/5)`, the Gauss nodes with `0`), the Kronrod
 /// weights of each, and the Gauss weights (zero where the node is not a Gauss node).
 /// The Kronrod rule integrates polynomials of degree 10 exactly, the Gauss rule degree 5.
+/// [`kronrod_integrate`] reads only the off-centre weights: the centre's are what makes
+/// each rule's weights sum to 2.
 const KRONROD_NODES: [f64; 4] = [
     0.0,
     0.434_243_749_346_802_558_002_071_502_844_628,
@@ -784,6 +816,43 @@ const KRONROD_WEIGHTS: [f64; 4] = [
     0.104_656_226_026_467_265_193_823_857_192_073,
 ];
 const GAUSS_WEIGHTS: [f64; 4] = [8.0 / 9.0, 0.0, 5.0 / 9.0, 0.0];
+/// The 15-point Gauss-Kronrod rule on `[-1, 1]` and its embedded 7-point Gauss rule, laid
+/// out as [`KRONROD_NODES`] is: the nodes `0, ±x1, ..., ±x7` (the Gauss nodes `0, ±x2, ±x4,
+/// ±x6`), their Kronrod weights, and the Gauss weights (zero off the Gauss nodes). The
+/// Kronrod rule integrates polynomials of degree 22 exactly, the Gauss rule degree 13.
+const KRONROD15_NODES: [f64; 8] = [
+    0.0,
+    0.207_784_955_007_898_467_600_689_403_773_245,
+    0.405_845_151_377_397_166_906_606_412_076_961,
+    0.586_087_235_467_691_130_294_144_845_693_013,
+    0.741_531_185_599_394_439_863_864_773_280_788,
+    0.864_864_423_359_769_072_789_712_788_640_926,
+    0.949_107_912_342_758_524_526_189_684_047_851,
+    0.991_455_371_120_812_639_206_854_697_526_329,
+];
+const KRONROD15_WEIGHTS: [f64; 8] = [
+    0.209_482_141_084_727_828_012_999_174_891_714,
+    0.204_432_940_075_298_892_414_161_999_234_649,
+    0.190_350_578_064_785_409_913_256_402_421_014,
+    0.169_004_726_639_267_902_826_583_426_598_550,
+    0.140_653_259_715_525_918_745_189_590_510_238,
+    0.104_790_010_322_250_183_839_876_322_541_518,
+    0.063_092_092_629_978_553_290_700_663_189_204,
+    0.022_935_322_010_529_224_963_732_008_058_970,
+];
+const GAUSS7_WEIGHTS: [f64; 8] = [
+    0.417_959_183_673_469_387_755_102_040_816_327,
+    0.0,
+    0.381_830_050_505_118_944_950_369_775_488_975,
+    0.0,
+    0.279_705_391_489_276_667_901_467_771_423_780,
+    0.0,
+    0.129_484_966_168_869_693_270_611_432_679_082,
+    0.0,
+];
+/// A Gauss-Kronrod rule as [`kronrod_integrate_with`] takes it: its nodes on `[0, 1]` (the
+/// first `0`, each other one used at `±x`), their Kronrod weights and their Gauss weights.
+type KronrodRule = (&'static [f64], &'static [f64], &'static [f64]);
 /// The deepest bisection of [`kronrod_integrate`]: a piece `2^-48` of the range.
 const KRONROD_MAX_DEPTH: u32 = 48;
 /// The most pieces [`kronrod_integrate`] evaluates over one range.
@@ -795,10 +864,16 @@ const KRONROD_MAX_PIECES: u32 = 100_000;
 /// the Kronrod value returned is exact on polynomials of degree 10 where the Gauss value
 /// is on degree 5, so on a smooth integrand its own error is far below that estimate. A
 /// piece is accepted when, per component, the estimate is within `accuracy` of the larger
-/// of the piece's value and the component's error `scale` (as a Runge-Kutta step of
-/// [`integrate_piece`] is held to its values or that scale); otherwise it is halved.
+/// of the piece's value and the component's error `scale` (as upstream's Runge-Kutta steps
+/// are held to their values or that scale); otherwise it is halved.
 /// The pieces are summed left to right. No node is an end of the range, so an integrand
 /// smooth inside `(a, b)` is never read on the far side of a knot at either end.
+/// Each rule is summed about the centre node's value `c`, as `2 c + sum w_i (f_i - c)`
+/// over the other nodes (each rule's weights sum to 2, so this is the same rule): the
+/// weights' rounding (the double Kronrod weights sum to `2 + 2^-54`) then scales only the
+/// integrand's variation about `c`, never its level, and a constant integrand gives
+/// exactly the piece's width times it (#15021: summed weight by weight, a 100 x 100 x 2
+/// box's volume came out 1 ulp over 20000).
 ///
 /// # Errors
 ///
@@ -812,6 +887,60 @@ fn kronrod_integrate<F>(
     accuracy: f64,
     scale: &[f64],
     y: &mut [f64],
+    integrand: F,
+) -> Result<()>
+where
+    F: FnMut(f64, &mut [f64]) -> Result<()>,
+{
+    kronrod_integrate_with(
+        (&KRONROD_NODES, &KRONROD_WEIGHTS, &GAUSS_WEIGHTS),
+        k,
+        (a, b),
+        accuracy,
+        scale,
+        y,
+        integrand,
+    )
+}
+
+/// [`kronrod_integrate`] by the 15-point rule ([`KRONROD15_NODES`]): on a smooth integrand
+/// that needs many 7-point pieces (an iso line up a sphere's rational form, held to a
+/// billionth), its degree-22 pieces are fewer.
+///
+/// # Errors
+///
+/// Those of [`kronrod_integrate`].
+fn kronrod15_integrate<F>(
+    k: &Kernel,
+    a: f64,
+    b: f64,
+    accuracy: f64,
+    scale: &[f64],
+    y: &mut [f64],
+    integrand: F,
+) -> Result<()>
+where
+    F: FnMut(f64, &mut [f64]) -> Result<()>,
+{
+    kronrod_integrate_with(
+        (&KRONROD15_NODES, &KRONROD15_WEIGHTS, &GAUSS7_WEIGHTS),
+        k,
+        (a, b),
+        accuracy,
+        scale,
+        y,
+        integrand,
+    )
+}
+
+/// [`kronrod_integrate`] by `rule`.
+fn kronrod_integrate_with<F>(
+    (nodes, kronrod_weights, gauss_weights): KronrodRule,
+    k: &Kernel,
+    (a, b): (f64, f64),
+    accuracy: f64,
+    scale: &[f64],
+    y: &mut [f64],
     mut integrand: F,
 ) -> Result<()>
 where
@@ -822,6 +951,7 @@ where
     let mut kronrod = vec![0.0; n];
     let mut gauss = vec![0.0; n];
     let mut dy = vec![0.0; n];
+    let mut centre = vec![0.0; n];
     // the pieces still to integrate, the leftmost last (depth with each)
     let mut stack = vec![(a, b, 0_u32)];
     let mut pieces = 0_u32;
@@ -835,26 +965,44 @@ where
         let half = 0.5 * (hi - lo);
         kronrod.fill(0.0);
         gauss.fill(0.0);
-        for (i, &x) in KRONROD_NODES.iter().enumerate() {
-            let wk = KRONROD_WEIGHTS.get(i).copied().unwrap_or(0.0);
-            let wg = GAUSS_WEIGHTS.get(i).copied().unwrap_or(0.0);
-            let sides: &[f64] = if i == 0 { &[0.0] } else { &[-1.0, 1.0] };
-            for &side in sides {
+        // (the centre node first, as the weights' order has it)
+        centre.fill(0.0);
+        integrand(mid, &mut centre)?;
+        if !centre.iter().all(|v| v.is_finite()) {
+            return Err(SolidError::mass(OP_INTEGRAND, MassFailure::Integrand));
+        }
+        for (i, &x) in nodes.iter().enumerate().skip(1) {
+            let wk = kronrod_weights.get(i).copied().unwrap_or(0.0);
+            let wg = gauss_weights.get(i).copied().unwrap_or(0.0);
+            for side in [-1.0, 1.0] {
                 dy.fill(0.0);
                 integrand(mid + side * x * half, &mut dy)?;
                 if !dy.iter().all(|v| v.is_finite()) {
                     return Err(SolidError::mass(OP_INTEGRAND, MassFailure::Integrand));
                 }
-                for ((kv, gv), d) in kronrod.iter_mut().zip(gauss.iter_mut()).zip(&dy) {
-                    *kv += wk * d;
-                    *gv += wg * d;
+                for (((kv, gv), d), c) in kronrod
+                    .iter_mut()
+                    .zip(gauss.iter_mut())
+                    .zip(&dy)
+                    .zip(&centre)
+                {
+                    let off = *d - *c;
+                    *kv += wk * off;
+                    *gv += wg * off;
                 }
             }
         }
         let mut accepted = true;
-        for (i, (kv, gv)) in kronrod.iter_mut().zip(gauss.iter_mut()).enumerate() {
-            *kv *= half;
-            *gv *= half;
+        for (i, ((kv, gv), c)) in kronrod
+            .iter_mut()
+            .zip(gauss.iter_mut())
+            .zip(&centre)
+            .enumerate()
+        {
+            // Each rule's weights sum to 2, so the centre value's share is exactly `2 c`:
+            // a constant integrand is integrated exactly, with no rounding of the weights.
+            *kv = half * (2.0 * *c + *kv);
+            *gv = half * (2.0 * *c + *gv);
             let floor = scale.get(i).copied().unwrap_or(0.0);
             let s = kv.abs().max(floor).max(EFF_ZERO);
             let estimate = (*kv - *gv).abs();
@@ -876,6 +1024,15 @@ where
     }
     Ok(())
 }
+/// A NaN accuracy would pass every piece's error test (`estimate > NaN` is false) and an
+/// infinite one would hold no piece to any: neither asks for an accuracy.
+fn valid_accuracy(accuracy: f64) -> Result<()> {
+    if accuracy.is_finite() {
+        Ok(())
+    } else {
+        Err(SolidError::invalid_input(OP, "accuracy not finite"))
+    }
+}
 fn valid_flags(flags: u64) -> Result<()> {
     if flags == 0 || flags & !PPF_ALL != 0 {
         Err(SolidError::invalid_input(OP, "invalid property mask"))
@@ -887,6 +1044,12 @@ fn valid_flags(flags: u64) -> Result<()> {
 /// `trims` must have the orientation and order returned by `CreateOrientedTrimBoundary`;
 /// `face_box` is the face's bounding box (`CalculateBoundingBox`), which sets the error
 /// scale of the volume and moment components.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an invalid property mask or a non-finite `accuracy`
+/// (a NaN one would accept every quadrature piece unchecked); otherwise those of the
+/// trims' and the surface's evaluation and of the integration.
 pub fn boundary_properties(
     k: &Kernel,
     surface: &Surface,
@@ -903,6 +1066,7 @@ pub fn boundary_properties(
     // the moment groups' extra length dimensions
     const POWERS: [u32; 8] = [1, 2, 2, 2, 2, 3, 3, 3];
     valid_flags(flags)?;
+    valid_accuracy(accuracy)?;
     if accuracy < EFF_ZERO {
         accuracy = EFF_ZERO_SQ;
     }
@@ -937,10 +1101,15 @@ pub fn boundary_properties(
     let mut floors = vec![base_v];
     let lines = surface_knots_inside(k, surface, SurfParamType::V, base_v, top_v)?;
     if lines.len() >= MIN_BANDS {
-        floors.extend(lines);
+        floors.extend(lines.iter().copied());
     }
     let banded = floors.len() > 1;
-    let v_lines = floors.get(1..).unwrap_or_default();
+    // Every trim piece ends at each crossing, found by sign change between samples, of its
+    // trim with a surface v knot line, banded or not:
+    // across one the iso-u integrand's v derivatives jump, so the outer integrand along
+    // the trim is not smooth there and a piece's error estimate, the leading term of an
+    // expansion that holds only where it is smooth, may not bound the piece's error.
+    let v_lines = lines.as_slice();
     let band_of = |v: f64| floors.partition_point(|&f| f <= v).saturating_sub(1);
     let floor = |band: usize| floors.get(band).copied().unwrap_or(base_v);
 
@@ -980,19 +1149,16 @@ pub fn boundary_properties(
         }
     }
     // (no trims: nothing to integrate)
-    let Some(first) = trims.first() else {
+    if trims.is_empty() {
         return Ok(PreciseProperties::default());
-    };
-    let area = OdeArea {
-        kernel: k,
+    }
+    let iso = IsoLine {
         surface,
-        uv_curve: first,
-        min_v: base_v,
-        iso_curve_accuracy: accuracy / 10.0,
-        y_scale: &scale,
         origin,
-        face_thickness: thickness,
+        thickness,
         layout: &layout,
+        accuracy: accuracy / 10.0,
+        scale: &scale,
     };
 
     let mut y = vec![0.0; layout.num_components];
@@ -1031,19 +1197,16 @@ pub fn boundary_properties(
             if b.partial_cmp(&a) != Some(std::cmp::Ordering::Greater) {
                 continue; // a crossing at a knot
             }
-            let eval = OdeArea {
-                uv_curve: trim,
-                min_v: floor(band),
-                ..area
-            };
+            // Gauss-Kronrod at both levels, as the bands are (#14460): a Runge-Kutta step
+            // pair a level cost at least 144 samples a piece, and an iso-u line long in v
+            // (a cylinder's quarter turns) hundreds a sample; the 7-point rule takes 49 a
+            // piece when no piece is halved. Neither level's nodes reach a piece's ends,
+            // so no sample is read at a knot of the trim, or at a piece's end on a surface
+            // knot line.
+            let base = floor(band);
             span_y.fill(0.0);
-            integrate_piece(k, a, b, accuracy / 10.0, &scale, &mut span_y, |t, dy| {
-                // (the evaluator writes every component, zero where the trim's du/dt is)
-                eval.evaluate(k, t, &mut scratch)?;
-                for (d, v) in dy.iter_mut().zip(scratch.iter().skip(1)) {
-                    *d = *v;
-                }
-                Ok(())
+            kronrod_integrate(k, a, b, accuracy / 10.0, &scale, &mut span_y, |t, dy| {
+                trim_integrand(k, &iso, trim, base, t, &mut scratch, dy)
             })?;
             for (total, part) in trim_y.iter_mut().zip(span_y.iter()) {
                 *total += *part;
@@ -1111,26 +1274,17 @@ pub fn boundary_properties(
                 }
                 span_y.fill(0.0);
                 kronrod_integrate(k, a, b, accuracy / 10.0, &scale, &mut span_y, |u, dy| {
-                    let eval =
-                        OdeIsoCurveLength::new(area.kernel, surface, u, origin, thickness, &layout);
+                    let eval = OdeIsoCurveLength::new(k, surface, u, origin, thickness, &layout);
                     // (the band's height, piece by piece between any v knots inside it)
                     let mut v0 = lo;
                     for v1 in v_knots.iter().copied().chain(core::iter::once(hi)) {
-                        kronrod_integrate(
-                            k,
-                            v0,
-                            v1,
-                            area.iso_curve_accuracy,
-                            &scale,
-                            dy,
-                            |v, g| {
-                                eval.evaluate(v, &mut scratch_iso)?;
-                                for (d, x) in g.iter_mut().zip(scratch_iso.iter().skip(1)) {
-                                    *d = *x;
-                                }
-                                Ok(())
-                            },
-                        )?;
+                        kronrod_integrate(k, v0, v1, iso.accuracy, &scale, dy, |v, g| {
+                            eval.evaluate(v, &mut scratch_iso)?;
+                            for (d, x) in g.iter_mut().zip(scratch_iso.iter().skip(1)) {
+                                *d = *x;
+                            }
+                            Ok(())
+                        })?;
                         v0 = v1;
                     }
                     Ok(())
@@ -1617,6 +1771,19 @@ fn gap_closure(
     // continued past its domain where the face's integration continues it, so the strips
     // start on the curves the face's Green integral runs along
     let _unclamped = Unclamped::where_trims_may_leave(k, &surface, &integrated.curves)?;
+    // The surface's v knot lines: a strip, like the face's own trim pieces
+    // ([`boundary_properties`]), ends where its trim crosses a surface knot line in either
+    // direction, as the trim image's derivative `su u' + sv v'` need not be smooth there.
+    // Taken over the whole real line, end knots included: `trim_curve_breaks` keeps only
+    // the lines strictly inside each trim's box, and a trim that leaves a clamped domain
+    // still breaks at a line it crosses there.
+    let v_lines = surface_knots_inside(
+        k,
+        &surface,
+        SurfParamType::V,
+        f64::NEG_INFINITY,
+        f64::INFINITY,
+    )?;
     // the surface as the face's integrand evaluates it (`OdeIsoCurveLength`): the point,
     // then the u and v derivatives
     let at = |uv: Vec3| -> Result<(Vec3, Vec3, Vec3)> {
@@ -1663,27 +1830,34 @@ fn gap_closure(
                 let v = side.vertex;
                 side.trim_ends = if side.same { [p0, p1] } else { [p1, p0] };
                 let mut strip = [0.0; 13];
-                kronrod_integrate(k, c0, c1, accuracy, &scale, &mut strip, |t, dy| {
-                    let d = side.trim.evaluate(k, t, 1, true, false)?;
-                    let (Some(&uv), Some(&duv)) = (d.first(), d.get(1)) else {
-                        return Err(missing());
-                    };
-                    let (p, su, sv) = at(uv)?;
-                    let mut col = [0.0; 13];
-                    let zero = Vec3::new(0.0, 0.0, 0.0);
-                    ruled_column(
-                        p - origin,
-                        su * duv.x + sv * duv.y,
-                        v - origin,
-                        zero,
-                        1.0,
-                        &mut col,
-                    );
-                    for (o, c) in dy.iter_mut().zip(col) {
-                        *o = c;
+                let breaks = trim_curve_breaks(k, &side.trim, &surface, &v_lines)?;
+                for piece in breaks.windows(2) {
+                    let [lo, hi] = piece else { continue };
+                    if hi.partial_cmp(lo) != Some(std::cmp::Ordering::Greater) {
+                        continue;
                     }
-                    Ok(())
-                })?;
+                    kronrod_integrate(k, *lo, *hi, accuracy, &scale, &mut strip, |t, dy| {
+                        let d = side.trim.evaluate(k, t, 1, true, false)?;
+                        let (Some(&uv), Some(&duv)) = (d.first(), d.get(1)) else {
+                            return Err(missing());
+                        };
+                        let (p, su, sv) = at(uv)?;
+                        let mut col = [0.0; 13];
+                        let zero = Vec3::new(0.0, 0.0, 0.0);
+                        ruled_column(
+                            p - origin,
+                            su * duv.x + sv * duv.y,
+                            v - origin,
+                            zero,
+                            1.0,
+                            &mut col,
+                        );
+                        for (o, c) in dy.iter_mut().zip(col) {
+                            *o = c;
+                        }
+                        Ok(())
+                    })?;
+                }
                 let sigma = if side.same { 1.0 } else { -1.0 };
                 for (o, v) in sum.iter_mut().zip(strip) {
                     *o -= sigma * v;
@@ -1723,13 +1897,10 @@ fn gap_closure(
             let eb = curve.evaluate_point(k, e1)?;
             side.trim_ends = if side.same { [p0, p1] } else { [p1, p0] };
             side.edge_ends = if side.same { [ea, eb] } else { [eb, ea] };
-            // pieces between the grid's points and the trim's knots
-            // a trim without knots (a B-spline missing its NURB) is malformed: its error
-            // is the volume's
-            let mut breaks: Vec<f64> = side
-                .trim
-                .knots(k, None)?
-                .0
+            // pieces between the grid's points, the trim's knots and its crossings of the
+            // surface's knot lines; a trim without knots (a B-spline missing its NURB) is
+            // malformed: its error is the volume's
+            let mut breaks: Vec<f64> = trim_curve_breaks(k, &side.trim, &surface, &v_lines)?
                 .into_iter()
                 .filter(|&t| t > c0 && t < c1)
                 .collect();
@@ -1826,6 +1997,65 @@ pub fn brep_properties_in_box(
     attributes: &PropertyAttributes<'_>,
     bbox: &Extent3d,
 ) -> Result<PreciseProperties> {
+    properties_in_box(k, b, accuracy, origin, behavior, attributes, bbox, None)
+}
+
+/// [`brep_properties_in_box`] and its summands: each face use's, closure's and wire
+/// edge's contribution as it is added to the total, in order (the rounding of the total is at most `gamma_(n-1)` times the sum of the
+/// summands' magnitudes, per component). The total is the same, bit for bit.
+///
+/// # Errors
+///
+/// Those of [`brep_properties_in_box`]; [`SolidError::Unsupported`] for a body with a
+/// shell vertex, whose ball is not recorded as a summand.
+#[doc(hidden)] // (for the goldens' rounding bounds; the kernel itself does not call it)
+pub fn brep_properties_in_box_terms(
+    k: &Kernel,
+    b: &mut Brep,
+    accuracy: f64,
+    origin: Point3,
+    behavior: MassPropertyBehavior,
+    attributes: &PropertyAttributes<'_>,
+    bbox: &Extent3d,
+) -> Result<(PreciseProperties, Vec<PreciseProperties>)> {
+    let mut terms = Vec::new();
+    let total = properties_in_box(
+        k,
+        b,
+        accuracy,
+        origin,
+        behavior,
+        attributes,
+        bbox,
+        Some(&mut terms),
+    )?;
+    Ok((total, terms))
+}
+
+/// Pushes on `terms`, when recording, the summand `add` adds to a zero total.
+fn record(
+    terms: &mut Option<&mut Vec<PreciseProperties>>,
+    add: impl FnOnce(&mut PreciseProperties),
+) {
+    if let Some(terms) = terms.as_deref_mut() {
+        let mut term = PreciseProperties::default();
+        add(&mut term);
+        terms.push(term);
+    }
+}
+
+/// [`brep_properties_in_box`], recording its summands on `terms` when given.
+#[allow(clippy::too_many_arguments)] // brep_properties_in_box's inputs and the record
+fn properties_in_box(
+    k: &Kernel,
+    b: &mut Brep,
+    accuracy: f64,
+    origin: Point3,
+    behavior: MassPropertyBehavior,
+    attributes: &PropertyAttributes<'_>,
+    bbox: &Extent3d,
+    mut terms: Option<&mut Vec<PreciseProperties>>,
+) -> Result<PreciseProperties> {
     let size = bbox.size();
     let estimated = size.z.max(size.x.max(size.y));
     let estimated = estimated * estimated / 100.0;
@@ -1908,6 +2138,9 @@ pub fn brep_properties_in_box(
                     // face between two solid regions bounds both volumes but is no part of
                     // the area
                     add_selected(&mut total, &delta, mass.x, do_volume, do_area);
+                    record(&mut terms, |t| {
+                        add_selected(t, &delta, mass.x, do_volume, do_area);
+                    });
                     // Not upstream (#16735): the strips and corners closing the face onto
                     // its edges, the use's way round as its volume
                     if do_volume {
@@ -1926,10 +2159,12 @@ pub fn brep_properties_in_box(
                                 *m *= sign;
                             }
                             add_selected(&mut total, &c, mass.x, true, false);
+                            record(&mut terms, |t| add_selected(t, &c, mass.x, true, false));
                         }
                     }
                 } else {
                     add(&mut total, &delta, mass.x);
+                    record(&mut terms, |t| add(t, &delta, mass.x));
                 }
                 if !separating {
                     break;
@@ -1950,10 +2185,17 @@ pub fn brep_properties_in_box(
             mass.x = 1.0;
         }
         add(&mut total, &delta.properties, mass.x);
+        record(&mut terms, |t| add(t, &delta.properties, mass.x));
     }
     for v in vertices(b)? {
         if !vertex::is_shell_vertex(b, v)? {
             continue;
+        }
+        if terms.is_some() {
+            return Err(SolidError::Unsupported {
+                operation: OP,
+                reason: "a shell vertex's ball is not recorded as a summand",
+            });
         }
         let mut mass = attributes.mass_vector(
             EntityRef::Vertex(v),
@@ -2301,7 +2543,8 @@ impl MassPropertyRequest {
 /// [`brep_mass_properties_estimated`]'s result.
 ///
 /// **Requested accuracy, estimated, not proved.** Every number comes from an adaptive
-/// Runge-Kutta integration whose per-step error estimate is held under
+/// integration (Gauss-Kronrod over faces, Runge-Kutta along edges) whose error estimate
+/// per piece or step is held under
 /// `requested_accuracy` times a per-property scale. That estimate is not a bound: the
 /// error is not proved to be below the requested accuracy, and no caller may treat it
 /// as one (decide a tolerance on these numbers only with that in mind). A certified
@@ -2676,6 +2919,59 @@ fn faces_area_about(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The 15-point Gauss-Kronrod rule integrates `x^n` on `[-1, 1]` exactly up to degree 22
+    /// and its embedded 7-point Gauss rule up to degree 13; and the 7-point rule's to 10 and 5.
+    #[test]
+    fn kronrod_rules_are_exact_to_their_degrees() {
+        let rule = |nodes: &[f64], weights: &[f64], n: i32| -> f64 {
+            nodes
+                .iter()
+                .zip(weights)
+                .map(|(&x, &w)| {
+                    if x == 0.0 {
+                        w * if n == 0 { 1.0 } else { 0.0 }
+                    } else {
+                        w * (x.powi(n) + (-x).powi(n))
+                    }
+                })
+                .sum()
+        };
+        let exact = |n: i32| {
+            if n % 2 == 1 {
+                0.0
+            } else {
+                2.0 / f64::from(n + 1)
+            }
+        };
+        for (nodes, kronrod, gauss, dk, dg) in [
+            (
+                &KRONROD_NODES[..],
+                &KRONROD_WEIGHTS[..],
+                &GAUSS_WEIGHTS[..],
+                10,
+                5,
+            ),
+            (
+                &KRONROD15_NODES[..],
+                &KRONROD15_WEIGHTS[..],
+                &GAUSS7_WEIGHTS[..],
+                22,
+                13,
+            ),
+        ] {
+            for n in 0..=dk {
+                let got = rule(nodes, kronrod, n);
+                assert!((got - exact(n)).abs() <= 1e-15, "Kronrod degree {n}: {got}");
+            }
+            for n in 0..=dg {
+                let got = rule(nodes, gauss, n);
+                assert!((got - exact(n)).abs() <= 1e-15, "Gauss degree {n}: {got}");
+            }
+            // and no further: the Gauss rule misses the next even power
+            assert!((rule(nodes, gauss, dg + 1) - exact(dg + 1)).abs() > 1e-15);
+        }
+    }
     use crate::geom::attribute::{Attribute, Behavior};
 
     #[test]
@@ -2720,6 +3016,140 @@ mod tests {
             b.edgeuses().iter().any(|(_, u)| u.uv_trim_curve.is_some()),
             "the trims are made on the box itself"
         );
+    }
+    /// A trim whose point is not finite is refused as such at once, not bisected to the
+    /// depth bound and reported as step control.
+    #[test]
+    fn a_non_finite_trim_point_is_refused_by_name() {
+        let k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(
+            &mut Kernel::default(),
+            Point3::ZERO,
+            1.0,
+            1.0,
+            1.0,
+        )
+        .unwrap();
+        let f = *faces(&b).unwrap().first().unwrap();
+        let surface = crate::topology::face::p2::surface(&b, f).unwrap().unwrap();
+        let layout = PrecisePropertyLayout::new(PPF_AREA);
+        let scale = vec![1.0; layout.num_components];
+        let iso = IsoLine {
+            surface,
+            origin: Point3::ZERO,
+            thickness: 0.0,
+            layout: &layout,
+            accuracy: 1e-10,
+            scale: &scale,
+        };
+        let trim = Curve::from(crate::curve::line::Line::from_points(
+            Point3::new(0.5, f64::NAN, 0.0),
+            Point3::new(0.5, 1.0, 0.0),
+            2,
+        ));
+        let mut scratch = vec![0.0; layout.num_components + 1];
+        let mut dy = vec![0.0; layout.num_components];
+        let err = trim_integrand(&k, &iso, &trim, 0.0, 0.5, &mut scratch, &mut dy).unwrap_err();
+        assert!(err.to_string().contains("not finite"), "{err}");
+    }
+    /// A constant integrand is integrated exactly: the piece's width times it, whatever its
+    /// size (summed weight by weight, the rounded Kronrod weights' sum `2 + 2^-54` put
+    /// 10^4 over `[0, 100]` 1 ulp over 10^6).
+    #[test]
+    fn a_constant_is_integrated_exactly() {
+        let k = Kernel::default();
+        for c in [1.0, 100.0, 10_000.0, 20_000.0, -50.0, 1.0 / 3.0] {
+            for (a, b) in [(0.0, 100.0), (-1.0, 1.0), (0.0, 2.0), (-35.0, 65.0)] {
+                let mut y = [0.0];
+                kronrod_integrate(&k, a, b, 1e-10, &[1.0], &mut y, |_, dy| {
+                    dy[0] = c;
+                    Ok(())
+                })
+                .unwrap();
+                assert_eq!(y[0], (b - a) * c, "{c} over [{a}, {b}]");
+            }
+        }
+    }
+    /// #15021: a 100 x 100 x 2 box away from the origin, about the middle of its box (as the
+    /// app measures a body), has volume exactly 20000 and area exactly 20800: every face's
+    /// integrand is constant.
+    #[test]
+    fn a_plate_box_is_measured_exactly() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            Point3::new(-30.0, -35.0, 10.0),
+            100.0,
+            100.0,
+            2.0,
+        )
+        .unwrap();
+        let bbox = crate::query::api_queries::brep_bounding_box(&k, &b, true).unwrap();
+        let store = no_attributes();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        let p = brep_properties_in_box(
+            &k,
+            &mut b,
+            1e-8,
+            bbox.mid(),
+            MassPropertyBehavior::default(),
+            &attrs,
+            &bbox,
+        )
+        .unwrap();
+        assert_eq!(p.volume, 20_000.0, "{p:?}");
+        assert_eq!(p.area, 20_800.0, "{p:?}");
+    }
+
+    /// [`brep_properties_in_box_terms`] returns [`brep_properties_in_box`]'s total bit for
+    /// bit with two summands per face use of a box, and refuses a body with a shell vertex,
+    /// whose ball it does not record.
+    #[test]
+    fn properties_terms_match_the_total_and_refuse_a_shell_vertex() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            Point3::new(-3.0, 5.0, 1.0),
+            7.0,
+            2.0,
+            3.0,
+        )
+        .unwrap();
+        let bbox = crate::query::api_queries::brep_bounding_box(&k, &b, true).unwrap();
+        let store = no_attributes();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        let behavior = MassPropertyBehavior::default();
+        let p =
+            brep_properties_in_box(&k, &mut b, 1e-8, bbox.mid(), behavior, &attrs, &bbox).unwrap();
+        let (total, terms) =
+            brep_properties_in_box_terms(&k, &mut b, 1e-8, bbox.mid(), behavior, &attrs, &bbox)
+                .unwrap();
+        assert_eq!(total.volume.to_bits(), p.volume.to_bits());
+        assert_eq!(total.area.to_bits(), p.area.to_bits());
+        // (each of the 6 face uses, then its closure strips and corners)
+        assert_eq!(terms.len(), 12, "{terms:?}");
+        let mut sum = PreciseProperties::default();
+        for t in &terms {
+            add(&mut sum, t, 1.0);
+        }
+        assert_eq!(sum.volume.to_bits(), p.volume.to_bits());
+        assert_eq!(sum.area.to_bits(), p.area.to_bits());
+
+        crate::topology::brep::p2::make_shell_vertex_topology(&mut b, None).unwrap();
+        let refused =
+            brep_properties_in_box_terms(&k, &mut b, 1e-8, bbox.mid(), behavior, &attrs, &bbox);
+        assert!(
+            matches!(refused, Err(SolidError::Unsupported { .. })),
+            "{refused:?}"
+        );
+        // (the total alone still measures it)
+        brep_properties_in_box(&k, &mut b, 1e-8, bbox.mid(), behavior, &attrs, &bbox).unwrap();
     }
     fn no_attributes() -> AttributeStore {
         AttributeStore::default()
@@ -2793,6 +3223,7 @@ mod tests {
     #[test]
     fn integration_failures_are_typed_by_cause() {
         use super::super::{OP_INTEGRAND, OP_STEP_CONTROL};
+        const OP_SKIPPED_SPAN: &str = "mass::integrator::properties::skipped_span";
         assert!(matches!(
             typed_failure(SolidError::mass(OP_STEP_CONTROL, MassFailure::StepControl)),
             SolidError::NotConverged { .. }

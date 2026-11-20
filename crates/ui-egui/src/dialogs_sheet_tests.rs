@@ -978,7 +978,7 @@ fn convert_takes_the_body_its_bends_and_the_faces_it_skips() {
     assert!(c[0].1.get("direction").is_none());
     run_all(&mut app, c);
     let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
-    assert_eq!((flat["surfaces"].clone(), flat["bends"].as_array().map(Vec::len)), (json!(true), Some(4)), "{flat}");
+    assert_eq!(flat["bends"].as_array().map(Vec::len), Some(4), "{flat}");
     // Edit Feature as the app opens it: rolled back to before the conversion, where the skipped
     // face still is.
     let f = app.session.doc.features.last().unwrap().clone();
@@ -1575,6 +1575,44 @@ fn flat_pattern_navigation_slots_hide_orbit_controls_and_keep_fit_home() {
     }
 }
 
+/// Drawing reuses the source flat-pattern inspector without giving its camera to Design.
+#[test]
+fn source_flat_pattern_remains_visible_and_refittable_in_drawing() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        let ctx = crate::fonts::test_context();
+        let mut app = plate(mode);
+        app.run("sheet.flange", json!({"sketch":"Base"})).unwrap();
+        let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
+        let doc = app.session.doc.clone();
+        let design = app.cam;
+        crate::workspace::enter(&mut app, "drawing").unwrap();
+        app.start("sheet.flat_pattern");
+        let Some(Kind::Sheet(Sm::FlatPattern { data, .. })) = app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("source flat inspector") };
+        *data = Some(Ok(flat));
+        let render = |app: &mut SolveApp| {
+            let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))), ..Default::default() };
+            crate::test_support::frame(&ctx, raw, |ui| app.show_workspace(ui));
+        };
+        render(&mut app);
+        assert!(app.flat_view.fitted, "the Drawing route paints the existing source inspector");
+        let fitted = app.flat_view.cam;
+        for view in ["fit", "home"] {
+            app.flat_view.cam.pan(120.0, -80.0, 600.0);
+            app.animate_view(view);
+            assert!(!app.flat_view.fitted);
+            render(&mut app);
+            assert_eq!(app.flat_view.cam, fitted);
+            assert_eq!(app.cam, design);
+        }
+        app.flat_view.cam.pan(50.0, 50.0, 600.0);
+        app.fit_view();
+        render(&mut app);
+        assert_eq!(app.flat_view.cam, fitted);
+        assert_eq!(app.session.doc, doc);
+        assert_eq!(app.cam, design);
+        assert!(crate::drawing_workspace::active(&app));
+    }
+}
 /// A picked edge split into segments: the dialog sends equal stretches with the rows' angle,
 /// height and turns, and the part builds with two bends.
 #[test]

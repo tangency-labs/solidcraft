@@ -209,7 +209,9 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
     let index: HashMap<u64, usize> = ids.iter().enumerate().map(|(i, id)| (*id, i)).collect();
 
     let mut groups = Groups((0..ids.len()).collect());
-    let live: Vec<_> = doc.assembly.joints.iter().filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
+    // A rigid group holds its parts as rigid joints would.
+    let all = doc.joints_with_rigid_groups();
+    let live: Vec<_> = all.iter().filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
     let jointed: HashSet<u64> = live.iter().flat_map(|j| [j.a.occurrence, j.b.occurrence]).collect();
     for j in live.iter().filter(|j| j.kind == JointKind::Rigid) {
         if let (Some(&a), Some(&b)) = (index.get(&j.a.occurrence), index.get(&j.b.occurrence)) {

@@ -11,7 +11,7 @@ use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
-use crate::schema::inspect::{BodiesDetail, DocumentBodies, TimelineDetail, TimelineRow};
+use crate::schema::inspect::{BodiesDetail, DocumentBodies, GeometryDefect, TimelineDetail, TimelineRow};
 use crate::schema::inspect::{
     BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox,
     ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail,
@@ -101,9 +101,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<ModelFaces>)
         .params(
         "body: name → per face: index, name (what face.delete, sheet.convert `face`, solid.shell … take in place of a point), exact, area, centroid (not always on the face), \
-         plane_normal, point (a point on the face that picks it), cylinder? ({origin, axis, radius} of a cylindrical face), \
-         sheet_face? (a flat-model sheet's face: `sheet:<body>:<panel>:<side>`, side top | bottom | rim.<edge> | bend.inner | bend.outer; \
-         taken wherever a face name is; a sheet made from surfaces has none: its faces' names are the model's, after what made each)",
+         plane_normal, point (a point on the face that picks it), cylinder? ({origin, axis, radius} of a cylindrical face)",
     ),
     CommandSpec::new("model.threads", "List Threads", crate::checked!("model.threads", model_threads))
         .icon("inspect")
@@ -169,11 +167,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<MaterialListResult>)
         .params("→ built-in and design-owned materials (user: true, look, optional physical_card/physical_validation/density_comparison). Read-only; candidate engineering records do not certify sources or supply a solver"),
     CommandSpec::new("engine.commands", "List Commands", crate::checked!("engine.commands", commands))
+        .any_part()
         .icon("list")
         .noundo()
         .contract(&COMMANDS_CONTRACT)
         .output(output_schema_for::<Vec<CommandEntry>>),
-    CommandSpec::new("engine.describe", "Describe Command", crate::checked!("engine.describe", describe))
+    CommandSpec::new("engine.describe", "Describe Command", crate::checked!("engine.describe", describe)).any_part()
         .icon("list")
         .noundo()
         .doc_only()
@@ -495,7 +494,8 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
     Some(SketchInspected {
         id,
         name: ss.name.clone(),
-        plane: serde_json::to_value(ss.plane).unwrap_or_default(),
+        plane: ss.plane.into(),
+        world_plane: plane.into(),
         status: ss.report.status.into(),
         dof: ss.report.shown_dof(),
         fully_constrained: ss.report.shown_dof() == 0,
@@ -592,6 +592,36 @@ impl Session {
 fn revision(s: &mut Session, _p: &Value) -> Result<Value> {
     let revision = s.design_revision();
     reply("document.revision", RevisionResult { document_id: s.document_id.clone(), revision, param_warnings: Vec::new() })
+}
+
+/// What imports found wrong with the bodies and components they made
+/// (`solidcraft_doc::import_defects`): each body's notes, then each component's parts that were
+/// not imported.
+fn geometry_defects(s: &Session) -> Vec<GeometryDefect> {
+    use solidcraft_doc::import_defects;
+    let kind = |k: solidcraft_doc::kernel::IssueKind| serde_json::to_value(k).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
+    let st = s.model.state();
+    let mut out: Vec<GeometryDefect> = st
+        .bodies
+        .iter()
+        .flat_map(|b| {
+            import_defects::body_import_issues(&s.model, b).into_iter().map(|i| GeometryDefect {
+                body: Some(b.name.clone()),
+                component: None,
+                kind: kind(i.kind),
+                detail: i.detail.clone(),
+            })
+        })
+        .collect();
+    for (component, issues) in import_defects::component_import_issues(&s.doc, &s.model) {
+        out.extend(issues.into_iter().map(|i| GeometryDefect {
+            body: None,
+            component: Some(component),
+            kind: kind(i.kind),
+            detail: i.detail.clone(),
+        }));
+    }
+    out
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
@@ -714,6 +744,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             timeline,
             bodies,
             sketches,
+            defects: geometry_defects(s),
             selection: serde_json::to_value(&s.selection).unwrap_or_default(),
             undo: s.undo.len(),
             redo: s.redo.len(),
@@ -759,10 +790,6 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
     let names = solidcraft_doc::naming::face_names(b);
     let tol = (b.body.size() * 2e-3).max(1e-3);
     let spots = solidcraft_doc::naming::face_spots(b);
-    // A folded sheet's faces also have the readable names its sheet gives them, worked out in
-    // the body's own coordinates.
-    let model = s.model.state();
-    let sheet_names = model.body(&b.name).map(|own| solidcraft_doc::sheet::body_sheet_face_names(&model, own)).unwrap_or_default();
     let faces = b
         .body
         .faces(tol)?
@@ -784,7 +811,6 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
                 plane_normal: f.plane_normal.map(Into::into),
                 point: spot.map(|x| x.point.into()),
                 cylinder,
-                sheet_face: sheet_names.get(f.index).and_then(|n| n.as_ref().map(|n| n.to_string())),
             }
         })
         .collect();

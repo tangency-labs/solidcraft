@@ -398,15 +398,29 @@ fn a_half_disc_keeps_its_cone_or_gets_tangent_planes() {
 
 /// A profile curve that is neither a line nor an arc has no exact wall: the
 /// curvature-keeping rule refuses it at its start, and the tangent rule leaves it to
-/// SMLib's offset method.
+/// SMLib's offset method. (A B-spline that is a straight line is a line, #16639.)
 #[test]
 fn a_free_form_corner_is_not_exact() {
-    use solidcore::nurbs::b_spline_curve::p1::BSplineCurve;
+    use solidcore::nurbs::b_spline_curve::p1::{
+        BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+    };
     let mut k = kernel();
-    // the rectangle with its bottom side as a plain B-spline
+    // the rectangle with its bottom side a quadratic B-spline bowed out by 0.25
     let mut curves = rectangle();
-    curves[0] =
-        Curve::from(BSplineCurve::create_line_segment(3, p(0.0, 0.0), p(20.0, 0.0)).unwrap());
+    curves[0] = Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &[p(0.0, 0.0), p(10.0, -0.5), p(20.0, 0.0)],
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[3, 3],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap(),
+    );
     let TaperExtrude::Refused(refusal) =
         taper(&mut k, &curves, -10.0, OffsetCornerType::CurveExtension)
     else {
@@ -415,4 +429,104 @@ fn a_free_form_corner_is_not_exact() {
     assert_eq!(refusal.reason, TaperCornerRefusal::NotExact);
     let (faces, _) = built(&mut k, &curves, -10.0, OffsetCornerType::LinearExtension);
     assert_eq!(faces, 14);
+}
+
+/// #16639: the rectangle with its bottom side a straight B-spline segment drafts as the
+/// rectangle of lines under both corner rules (the curvature rule refused it as not exact):
+/// 6 faces, 12 edges, 8 vertices, the prismatoid's volume.
+#[test]
+fn a_straight_spline_side_drafts_as_its_line() {
+    use solidcore::nurbs::b_spline_curve::p1::BSplineCurve;
+    let expected = drafted_rectangle_volume(true);
+    let mut curves = rectangle();
+    curves[0] =
+        Curve::from(BSplineCurve::create_line_segment(3, p(0.0, 0.0), p(20.0, 0.0)).unwrap());
+    for corner in [
+        OffsetCornerType::LinearExtension,
+        OffsetCornerType::CurveExtension,
+    ] {
+        let mut k = kernel();
+        let TaperExtrude::Solid(b) = taper(&mut k, &curves, -10.0, corner) else {
+            panic!("{corner:?}: refused");
+        };
+        assert_eq!(
+            (b.faces().len(), b.edges().len(), b.vertices().len()),
+            (6, 12, 8),
+            "{corner:?}"
+        );
+        let (_, v) = built(&mut k, &curves, -10.0, corner);
+        assert_rel(v, expected, 1e-9);
+    }
+}
+
+/// A leg on a foot (#18452, the foot of a lettering "Omega"): the foot's top runs left into a
+/// sharp notch, where a curve (a parabola, so the tangent rule takes SMLib's offset method)
+/// leaves it at 27.5 degrees, 0.83 from the leg's far side, x = 0.
+fn leg_on_a_foot() -> Vec<Curve> {
+    use solidcore::nurbs::b_spline_curve::p1::{
+        BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+    };
+    let notch = p(0.83, 0.875);
+    let parabola = BSplineCurve::create_canonical(&CanonicalData {
+        dim: 3,
+        degree: 2,
+        control_points: &[notch, p(1.9, 1.465), p(2.8, 3.0)],
+        form: BSplineCurveForm::Unspecified,
+        knot_multiplicities: &[3, 3],
+        knots: &[0.0, 1.0],
+        knot_type: KnotType::Unspecified,
+        weights: None,
+        trim: None,
+    })
+    .unwrap();
+    let line = |a, b| Curve::from(Line::create_line_segment(3, a, b, None).unwrap());
+    vec![
+        line(p(0.0, 0.0), p(3.5, 0.0)),
+        line(p(3.5, 0.0), p(3.5, 0.94)),
+        line(p(3.5, 0.94), notch),
+        Curve::from(parabola),
+        line(p(2.8, 3.0), p(0.0, 3.0)),
+        line(p(0.0, 3.0), p(0.0, 0.0)),
+    ]
+}
+
+/// The tangent rule continues the notch's walls as a long wedge, which reaches the leg's
+/// far wall partway down a 45 degree draft 0.3 deep: SMLib's offset method built an open
+/// shell there. It is refused where the walls meet, on the far wall (x = z at 45 degrees);
+/// a 20 degree draft, whose wedge stops short of it, builds.
+#[test]
+fn walls_meeting_across_the_offset_method_are_refused_where_they_meet() {
+    let mut k = kernel();
+    let curves = leg_on_a_foot();
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    let result = create_taper_extrude_with_corner(
+        &mut k,
+        &refs,
+        0.3,
+        45.0,
+        3,
+        OffsetCornerType::LinearExtension,
+    )
+    .unwrap();
+    let TaperExtrude::Refused(refusal) = result else {
+        panic!("built: {result:?}");
+    };
+    assert_eq!(refusal.reason, TaperCornerRefusal::WallCloses);
+    let at = refusal.corner;
+    assert!((at.x - at.z).abs() <= 1e-5, "{at:?}");
+    assert!(
+        at.z > 0.0 && at.z < 0.3 && at.y > 0.0 && at.y < 0.875,
+        "{at:?}"
+    );
+
+    let result = create_taper_extrude_with_corner(
+        &mut k,
+        &refs,
+        0.3,
+        20.0,
+        3,
+        OffsetCornerType::LinearExtension,
+    )
+    .unwrap();
+    solid(&k, result);
 }
