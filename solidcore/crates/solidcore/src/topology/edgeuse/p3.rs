@@ -2075,7 +2075,9 @@ fn sampled_face_gap(k: &Kernel, b: &Brep, e: EdgeId, f: FaceId) -> Result<Option
     let surface = surface.clone_for_evaluation()?;
     let mut most = 0.0_f64;
     for i in 0..=COVER_SAMPLES {
-        let t = rec.interval.evaluate(f64::from(i) / f64::from(COVER_SAMPLES));
+        let t = rec
+            .interval
+            .evaluate(f64::from(i) / f64::from(COVER_SAMPLES));
         let Ok(p) = curve.evaluate_point(k, t) else {
             return Ok(None);
         };
