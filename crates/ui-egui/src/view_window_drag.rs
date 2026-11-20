@@ -218,10 +218,9 @@ pub(crate) fn record(app: &mut SolveApp, ctx: &Context, zones: Vec<(u64, usize, 
     }
     if let Some(flight) = &state.flight
         && flight.viewport == viewport
+        && !paint_flight(ctx, flight)
     {
-        if !paint_flight(ctx, flight) {
-            state.flight = None;
-        }
+        state.flight = None;
     }
 }
 
