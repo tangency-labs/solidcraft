@@ -1,17 +1,19 @@
 //! The ops profile hook (feature `profile`): each ops call gets the kernel's profile of its own
 //! work, checked on counts that follow in closed form.
 //!
-//! A cut decides the sign of its two operands' volumes and of its result's
-//! (`mass::enclosure::volume_sign`, one call per decision, as `proof_reuse.rs` counts them):
-//! a box less a cylinder through it makes 3 decisions. No operand and no result holds a blend,
-//! so no blend definition is evaluated or solved.
+//! A proved cut ([`Contract::Proved`]) of two primitives takes each operand's facing out from
+//! the template the primitive was built from (its closed form, `is_outward_primitive`, no
+//! volume) and proves its result, which decides the sign of the result's volume once
+//! (`mass::enclosure::volume_sign`, one call per decision): a box less a cylinder through it
+//! makes 1 decision. No operand and no result holds a blend, so no blend definition is
+//! evaluated or solved.
 #![cfg(feature = "profile")]
 #![allow(clippy::unwrap_used)]
 
 use solidcore::profile::Counter;
-use solidcore_ops::boolean::boolean;
+use solidcore_ops::boolean::boolean_with;
 use solidcore_ops::session::{self, CallProfile};
-use solidcore_ops::{make_box, make_cylinder, Body, BooleanOp, CheckLevel};
+use solidcore_ops::{make_box, make_cylinder, Body, BooleanOp, CheckLevel, Contract};
 
 /// Where `counter` sits in a profile's counter arrays.
 fn at(counter: Counter) -> usize {
@@ -45,8 +47,11 @@ fn operands() -> (Body, Body) {
     )
 }
 
+/// `a` less `b`, proved: the contract that proves the result.
 fn cut((a, b): (Body, Body)) -> Body {
-    boolean(a, b, BooleanOp::Subtract).unwrap().unwrap()
+    boolean_with(a, b, BooleanOp::Subtract, Contract::Proved)
+        .unwrap()
+        .unwrap()
 }
 
 #[test]
@@ -56,7 +61,11 @@ fn a_cut_counts_its_decisions_in_closed_form() {
     assert_eq!(calls.len(), 1, "{calls:?}");
     let call = &calls[0];
     assert_eq!(call.call, "SmApiBoolean");
-    assert_eq!(decisions(call), 3, "both operands and the result");
+    assert_eq!(
+        decisions(call),
+        1,
+        "the result's; the operands' come from their templates"
+    );
     for c in [
         Counter::Evaluations,
         Counter::Solves,
@@ -79,7 +88,7 @@ fn each_call_inside_profiled_has_its_own_profile() {
     assert_eq!(names, ["SmApiBoolean", "SmApiBoolean"]);
     // each cut counted alone: the second does not carry the first's decisions
     for call in &calls {
-        assert_eq!(decisions(call), 3);
+        assert_eq!(decisions(call), 1);
     }
     // outside profiled nothing is collected
     let ((), none) = session::profiled(|| ());
