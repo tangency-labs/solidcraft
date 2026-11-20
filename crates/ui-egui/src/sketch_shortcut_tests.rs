@@ -138,6 +138,19 @@ fn a_sketch_key_with_nothing_selected_asks_for_the_plane_then_starts_the_tool() 
     assert!(h.app.dialog.is_none());
 }
 
+#[test]
+fn a_sketch_modify_key_outside_a_sketch_opens_no_sketch() {
+    for key in ["T", "O", "G"] {
+        let mut h = Harness::new();
+        let id = crate::keymap::commands_for(&h.app, key).into_iter().find(|id| id.starts_with("sketch.")).unwrap_or_default();
+        assert_eq!(solidcraft_engine::find_command(id).map(|c| c.panel), Some("MODIFY"), "{key} is a sketch Modify tool's key");
+        press(&mut h, key);
+        assert!(h.app.dialog.is_none(), "{key} opened {:?}", h.app.dialog.as_ref().map(|d| &d.kind));
+        assert!(h.app.session.active_sketch.is_none(), "{key}");
+        assert!(tool(&h).is_none(), "{key}");
+    }
+}
+
 /// #1804: Escape puts down the sketch tool. Another Escape, on its own, does not leave the
 /// sketch; only a quick second press does (and finishes it, keeping it).
 #[test]
