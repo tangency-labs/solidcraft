@@ -65,10 +65,10 @@ impl Renderer {
         self.sketch = Batches::default();
         self.highlight = Batches::default();
         self.preview = Batches::default();
-        self.ss = None;
-        self.ss_key = None;
-        self.ss_ready = false;
-        self.cached = None;
+        self.pic.ss = None;
+        self.pic.ss_key = None;
+        self.pic.ss_ready = false;
+        self.pic.cached = None;
         let mut error = None;
         for scope in scopes.into_iter().rev() {
             if let Some(e) = crate::popped(scope.pop()) {
@@ -148,7 +148,7 @@ impl Renderer {
         // Tests reproduce a driver returning a blank resolve, without changing production draws.
         #[cfg(test)]
         if (blank_samples == 1 || blank_samples == self.target.samples)
-            && let Some(resolve) = self.ss.as_ref().map(|ss| ss.resolve.as_ref().unwrap_or(&ss.color))
+            && let Some(resolve) = self.pic.ss.as_ref().map(|ss| ss.resolve.as_ref().unwrap_or(&ss.color))
         {
             let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {

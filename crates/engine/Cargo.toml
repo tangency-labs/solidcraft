@@ -43,6 +43,7 @@ solidcraft-viewport = { workspace = true }
 tiny-skia = { workspace = true }
 png = { workspace = true }
 solidcore-ops = { workspace = true }
+solidcraft-views = { workspace = true }
 solidcore-record = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-control = { workspace = true }
@@ -79,6 +80,8 @@ solidcraft-io = { workspace = true, features = ["dxf-legacy-baseline-tests", "tr
 solidcraft-sketch = { workspace = true, features = ["solver-profiling"] }
 # Sheet metal tests read the joints of a sheet made from surfaces.
 solidcraft-develop = { workspace = true }
+# Sheet PDF tests inflate the pages' content to read them back.
+flate2 = { workspace = true }
 
 [[example]]
 name = "render_resource_workflow"

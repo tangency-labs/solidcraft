@@ -574,6 +574,10 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     for (format, label) in crate::plugin_slots::export_slots(app) {
         rows.push(row(&format!("{PLUGIN_EXPORT}{format}"), &label, "", "export", shown));
     }
+    // Print the drawing shown: only in Drawing, where Ctrl+P does the same.
+    if crate::drawing_workspace::active(app) && app.session.open_drawing.is_some() {
+        rows.push(row("drawing.print", &format!("{}…", app.tr("ui.drawing_print.menu")), &key("drawing.print"), "export", true));
+    }
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
     rows.push(FileRow::Separator);
@@ -640,6 +644,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "file.export_urdf" => FileAction::Command("file.export_urdf").run(app),
         "file.export_sdf" => FileAction::Command("file.export_sdf").run(app),
         "document.metadata" => FileAction::Command("document.metadata").run(app),
+        "drawing.print" => app.start(id),
         "pointcloud.insert" | "file.send_to_slicer" => app.start(id),
         "save" => FileAction::Save.run(app),
         "save_as" => FileAction::SaveAs.run(app),
@@ -4746,6 +4751,42 @@ mod dropdown_toggle_tests {
 #[cfg(test)]
 mod app_bar_tests {
     use super::*;
+
+    #[test]
+    fn file_menu_keeps_plugin_exports_alongside_drawing_print() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let root = h.dir.join("export-slots");
+        let package = root.join("cabinet");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("entry.wasm"), []).unwrap();
+        std::fs::write(
+            package.join("plugin.json"),
+            json!({
+                "id":"cabinet","name":"Cabinet","version":"1","capabilities":["formats@0.1"],
+                "runtime":{"module":"entry.wasm","commands":[],"entries":[
+                    {"name":"sheets","kind":"exporter","extensions":["dxf"],"output":"files"}
+                ]}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        h.app.session.plugin_state.plugins_dir = Some(root);
+        crate::plugin_slots::invalidate(&mut h.app);
+        crate::plugin_slots::refresh(&mut h.app);
+        crate::plugin_slots::wait_for_discovery(&mut h.app);
+        let has_row = |app: &SolveApp, id: &str| file_rows(app).iter().any(|row| matches!(row, app_bar::FileRow::Item(item) if item.id == id));
+        assert!(has_row(&h.app, "plugin_export:cabinet.sheets"));
+        assert!(!has_row(&h.app, "drawing.print"));
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        FileAction::NewDrawing.run(&mut h.app);
+        assert!(crate::drawing_workspace::active(&h.app));
+        assert!(has_row(&h.app, "drawing.print"));
+        assert!(has_row(&h.app, "plugin_export:cabinet.sheets"));
+        crate::prefs::set(&mut h.app, &json!({"disabled_plugins":["cabinet"]})).unwrap();
+        assert!(!has_row(&h.app, "plugin_export:cabinet.sheets"));
+        assert!(has_row(&h.app, "drawing.print"));
+    }
 
     #[test]
     fn plugins_host_menu_and_ribbon_slots_show_identity_and_obey_disabled_policy() {
