@@ -911,6 +911,9 @@ fn a_dimensions_text_waits_for_its_font_off_the_windows_thread() {
     settled(&mut s, sheet);
     let p = json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}});
     let added = run(&mut s, "drawing.dimension.add", p)["dimension"].as_str().and_then(ids::decode).unwrap();
+    // The search's answer for this character is held back until the reads below have been made, so
+    // they see the text waiting however fast the search thread is.
+    let hold = solidcraft_sketch::fallback::gate::hold('\u{30f7}');
     // Its text through edit, which lays nothing out: add asks for a font itself (it never waits), and
     // the read this test watches must be the first to ask.
     run(&mut s, "drawing.dimension.edit", json!({"dimension": ids::encode(added), "set": {"override_text": "\u{30f7} 100"}}));
@@ -922,9 +925,9 @@ fn a_dimensions_text_waits_for_its_font_off_the_windows_thread() {
     assert!(!step(&mut s), "it is read again by extract, not by a step");
     // Still waiting, nothing changed: the sheet isn't put together again.
     let again = extract(&mut s, sheet).unwrap();
-    if again.waiting_for_fonts {
-        assert_eq!(again.generation, first.generation);
-    }
+    assert!(again.waiting_for_fonts, "the answer is held back, so the text still waits");
+    assert_eq!(again.generation, first.generation);
+    drop(hold);
     assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built(&s, sheet).scene));
     assert!(!s.drawing_scenes.dimensions[&added].drawn.pending);
 }
