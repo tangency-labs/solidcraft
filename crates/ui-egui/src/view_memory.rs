@@ -6,7 +6,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use crate::design_views::{ViewKind, ViewSet};
+use solidcraft_views::{ViewKind, ViewSet};
 
 /// The file in the data folder.
 const FILE: &str = "view-memory.json";

@@ -88,6 +88,15 @@
 //!   add `Buvv` and `Bvvv`, not `Buuv` (WR-160, WR-161; PR #1914). These corrections
 //!   are unconditional. The arithmetic for orders 0..2 and `Duuu` is unchanged;
 //!   regression tests retain pre-fix bits at four samples.
+//! - **Sides.** `EvaluatePlainOrSimple` evaluates the base from its default side for
+//!   every offset distance but zero, whatever side it is asked for, as upstream: at a
+//!   knot across which the base is only `C0` (and at the joint of an extended base) the
+//!   offset answers with the derivatives of the span past the knot. Not upstream:
+//!   [`OffsetSurface::evaluate_on_sides`] evaluates the base on the sides asked for; the
+//!   curve drop uses it at a `C0` knot line of its surface
+//!   (`intersect::surface_drop_lib::knot_lines`). `Evaluate` itself is left as upstream's:
+//!   answering on the sides asked for everywhere moves the offsets that are evaluated on
+//!   the joint of an extended base.
 //! - **Other upstream bugs kept.** `WR-162` (the upper-half, unequal-order second-
 //!   derivative slot write) is still unfixed. `SplitAt` with an extended
 //!   surface splits the base surface a second time for the extended halves;
@@ -167,6 +176,10 @@ pub const MAX_DERIVS: usize = 3;
 /// level evaluates the offset at two step-off points); past it the evaluation fails
 /// with [`SolidError::InvalidInput`]. Upstream fixtures reach depth 1.
 pub const MAX_STEPOFF_DEPTH: usize = 32;
+
+/// The sides `EvaluatePlainOrSimple` evaluates the base on for an offset distance other
+/// than zero, whatever sides it is asked for (upstream's; see the module notes).
+const DEFAULT_BASE_SIDES: [Side; 2] = [Side::Left, Side::Left];
 
 /// The size of upstream's local derivative matrices (`(2*MAX_DERIVS+1)^2`).
 const MAT_LEN: usize = (2 * MAX_DERIVS + 1) * (2 * MAX_DERIVS + 1);
@@ -1150,6 +1163,39 @@ impl OffsetSurface {
                 highest_u_deriv,
                 highest_v_deriv,
                 flags,
+                DEFAULT_BASE_SIDES,
+            )
+        })
+    }
+
+    /// Not upstream: [`OffsetSurface::evaluate`] with the base evaluated on the sides
+    /// asked for (`flags.u_side`, `flags.v_side`). [`OffsetSurface::evaluate`] evaluates
+    /// the base from its default side for every offset distance but zero, as upstream
+    /// (the module notes), so at a knot across which the base is only `C0` it answers
+    /// with the derivatives of the span past the knot whatever side is asked; this
+    /// answers with those of the side asked. The two agree wherever the base is smooth.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`OffsetSurface::evaluate`].
+    pub fn evaluate_on_sides(
+        &self,
+        k: &Kernel,
+        uv: Point2,
+        highest_u_deriv: usize,
+        highest_v_deriv: usize,
+        flags: EvaluateFlags,
+    ) -> Result<Vec<Vec<Vec3>>> {
+        self.with_extension(|ext| {
+            self.evaluate_with(
+                k,
+                ext,
+                !flags.non_zero_tangents,
+                uv,
+                highest_u_deriv,
+                highest_v_deriv,
+                flags,
+                [flags.u_side, flags.v_side],
             )
         })
     }
@@ -1187,7 +1233,16 @@ impl OffsetSurface {
         flags: EvaluateFlags,
     ) -> Result<Vec<Vec<Vec3>>> {
         self.with_extension(|ext| {
-            self.evaluate_with(k, ext, true, uv, highest_u_deriv, highest_v_deriv, flags)
+            self.evaluate_with(
+                k,
+                ext,
+                true,
+                uv,
+                highest_u_deriv,
+                highest_v_deriv,
+                flags,
+                DEFAULT_BASE_SIDES,
+            )
         })
     }
 
@@ -1393,6 +1448,7 @@ impl OffsetSurface {
         hu: usize,
         hv: usize,
         flags: EvaluateFlags,
+        base_sides: [Side; 2],
     ) -> Result<Vec<Vec<Vec3>>> {
         // (checked before the array is sized)
         match highest_offset_deriv(hu, hv, flags.only_upper_half) {
@@ -1413,6 +1469,7 @@ impl OffsetSurface {
             uv,
             [hu, hv],
             [flags.u_side, flags.v_side],
+            base_sides,
             flags.only_upper_half,
             &mut out,
         )?;
@@ -1430,6 +1487,7 @@ impl OffsetSurface {
         cr_uv: Point2,
         [hu, hv]: [usize; 2],
         [u_side, v_side]: [Side; 2],
+        [base_u_side, base_v_side]: [Side; 2],
         only_upper_half: bool,
         out: &mut [Vec3],
     ) -> Result<()> {
@@ -1478,14 +1536,16 @@ impl OffsetSurface {
         }
 
         // evaluate the base surface one derivative higher than the offset
+        // (on `base_sides`: upstream's default side, or the sides asked for through
+        // `evaluate_on_sides`)
         let m = surface.evaluate_simple(
             k,
             uv,
             hb,
             hb,
             EvaluateFlags {
-                u_side: Side::Left,
-                v_side: Side::Left,
+                u_side: base_u_side,
+                v_side: base_v_side,
                 only_upper_half: true,
                 non_zero_tangents: false,
             },
@@ -1537,6 +1597,7 @@ impl OffsetSurface {
                 step_uv,
                 [hu, hv],
                 [u_side, v_side],
+                [base_u_side, base_v_side],
                 only_upper_half,
                 &mut mat1,
             )?;
@@ -1549,6 +1610,7 @@ impl OffsetSurface {
                 step_uv,
                 [hu, hv],
                 [u_side, v_side],
+                [base_u_side, base_v_side],
                 only_upper_half,
                 &mut mat2,
             )?;
@@ -3467,6 +3529,7 @@ impl SurfaceEvaluate for OffsetEval<'_> {
                 highest_u_deriv,
                 highest_v_deriv,
                 flags,
+                DEFAULT_BASE_SIDES,
             )
         })
     }
@@ -4783,6 +4846,58 @@ mod tests {
             assert_eq!(typed.is_port_failure(), before.is_port_failure());
             assert_eq!(typed.is_status_answer(), before.is_status_answer());
             assert_eq!(typed.surface_failure(), Some(&failure));
+        }
+    }
+
+    /// [`OffsetSurface::evaluate_on_sides`] evaluates the base on the sides asked for.
+    /// The base is a plane patch that is only `C0` in u across `u = 1` (`x = u` before
+    /// it, `x = 1 + 3 (u - 1)` past it; `y = v`), so on that line `Su` is `(1, 0, 0)`
+    /// from below and `(3, 0, 0)` from above, and the offset of a plane has its base's
+    /// derivatives. (`evaluate` answers from the base's default side for every distance
+    /// but zero, as upstream: `(3, 0, 0)` from both sides.)
+    #[test]
+    fn an_offset_evaluated_on_sides_answers_from_the_side_asked_at_a_c0_knot_of_its_base() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::{CPoint, NOW};
+        let k = Kernel::default();
+        let net: Vec<Vec<CPoint>> = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0, 2.0, 3.0, 4.0]
+            .iter()
+            .map(|&x| vec![CPoint::new(x, 0.0, 0.0, NOW), CPoint::new(x, 2.0, 0.0, NOW)])
+            .collect();
+        let u = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0];
+        let v = [0.0, 0.0, 2.0, 2.0];
+        let base =
+            Surface::from(BSplineSurface::from_data(6, 1, 3, 1, 10, 3, &net, &u, &v).unwrap());
+        for distance in [0.0, 0.25, -1e-9] {
+            let offset = OffsetSurface::new(
+                &k,
+                distance,
+                base.clone(),
+                true,
+                crate::geom::extent2d::SS_NONE,
+            )
+            .unwrap();
+            for (u_side, speed) in [(Side::Right, 1.0), (Side::Left, 3.0)] {
+                let flags = EvaluateFlags {
+                    u_side,
+                    v_side: Side::Left,
+                    only_upper_half: true,
+                    non_zero_tangents: true,
+                };
+                let d = offset
+                    .evaluate_on_sides(&k, Point2::new(1.0, 0.5), 1, 1, flags)
+                    .unwrap();
+                let (point, du, dv) = (d[0][0], d[1][0], d[0][1]);
+                assert!(
+                    (du - Vec3::new(speed, 0.0, 0.0)).length() < 1e-12,
+                    "offset {distance}, {u_side:?}: {du:?}"
+                );
+                assert!((dv - Vec3::new(0.0, 1.0, 0.0)).length() < 1e-12, "{dv:?}");
+                assert!(
+                    (point - Vec3::new(1.0, 0.5, distance)).length() < 1e-12,
+                    "offset {distance}: {point:?}"
+                );
+            }
         }
     }
 }

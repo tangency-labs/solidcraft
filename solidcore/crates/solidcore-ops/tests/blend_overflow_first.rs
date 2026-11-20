@@ -11,6 +11,9 @@
 
 /// #16735's leak checks on a body read into the kernel: test code measuring geometry, which
 /// this crate itself does not (docs/layers.md §4).
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 #[path = "../../solidcore/tests/support/volume_leak.rs"]
 #[allow(clippy::disallowed_methods)]
 mod volume_leak;
@@ -32,11 +35,7 @@ const NOTCHED: &[u8] =
 
 /// SolidCraft's rig set at the time of the kernel's check: every fix but those listed.
 fn fixes() {
-    let off = [
-        "cone_unbounded_parameterized_as_nurb",
-        "fillet_round_on_round_as_definition",
-        "fillet_refuse_rounds_breaking_through",
-    ];
+    let off = ["fillet_round_on_round_as_definition"];
     let on = solidcore::kernel::UpstreamFixes::NAMES
         .iter()
         .copied()
@@ -134,11 +133,7 @@ fn the_notched_block_s_second_rounds_meet_the_first() {
 fn the_fuzz_round_near_a_focal_distance_builds_within_its_budget() {
     use solidcore_ops::blend::{blend_ordered, BlendOptions};
     use std::io::Read;
-    let fixes: Vec<String> = serde_json::from_str(include_str!(
-        "../../solidcore/tests/kernel_cases/fixes.json"
-    ))
-    .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let gz: &[u8] = include_bytes!("data/atomic_seed2_b27.bodies.json.gz");
     let mut text = String::new();
     flate2::read::GzDecoder::new(gz)

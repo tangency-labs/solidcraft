@@ -37,12 +37,14 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use std::f64::consts::PI;
 
 use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection};
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::AttributeStore;
-use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::brep_volume_default;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::create_line_segment;
@@ -55,17 +57,10 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::{Brep, Kernel};
 
-/// SolidCraft's fix list (`tests/kernel_cases/fixes.json`).
+/// SolidCraft's fix list (`support/solidcraft_fixes.rs`).
 fn kernel() -> Kernel {
-    let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
-    let mut f = UpstreamFixes::default();
-    for name in &names {
-        if let Some(flag) = f.flag_mut(name) {
-            *flag = true;
-        }
-    }
     Kernel {
-        fixes: f,
+        fixes: solidcraft_fixes::solidcraft_fixes(),
         ..Kernel::default()
     }
 }

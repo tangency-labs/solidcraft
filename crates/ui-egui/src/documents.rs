@@ -13,8 +13,8 @@ use solidcraft_viewport::Camera;
 
 use crate::SolveApp;
 use crate::design_tab_prefs::DesignTabPrefs;
-use crate::design_views::{DesignView, ViewKind, ViewSet};
 use crate::ui_kit;
+use solidcraft_views::{DesignView, ViewKind, ViewSet};
 
 /// Continue transient shot queues without adopting their document or view into the active tab.
 pub(crate) fn advance_render_batches(app: &mut SolveApp, ctx: &egui::Context) {
@@ -60,6 +60,8 @@ pub struct DocSlot {
     pub(crate) tab: u64,
     /// The views of the design (its sub-tabs), kept while another design is shown.
     views: ViewSet,
+    /// What each of its views shows besides the camera ([`ViewInspect`]), kept while another design is shown.
+    inspect: ViewInspect,
     /// Opened behind the shown design: framed when it is first shown.
     fit: bool,
 }
@@ -89,6 +91,7 @@ fn take_work(app: &mut SolveApp) -> DocWork {
     if !app.preferences.keep_work_on_tab_switch || app.applying.is_some() {
         crate::dialogs::cancel(app);
         app.tool = None;
+        crate::drawing_workspace::close_panel(app);
         let tab = app.preferences.remember_toolbar_tab.then(|| (app.ui.tab.clone(), app.ui.ribbon_context.clone(), app.ui.sketch_return_tab.clone()));
         return DocWork { bom, tab, ..DocWork::default() };
     }
@@ -128,11 +131,13 @@ fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
         }
     }
     crate::workspace::sync_context(app);
+    crate::drawing_workspace::swap_selection(app);
+    crate::drawing_workspace::sync_history(app);
 }
 
 /// The per-design part of the UI state the session doesn't keep (what is hidden, shown or locked
 /// is in the session's `visibility`, saved with the design).
-#[derive(Clone, Debug, Default)]
+#[derive(Default)]
 struct DocView {
     render: crate::render_workspace::ViewState,
     /// The runs and folders opened and folded in its History, and which part of the design it
@@ -148,6 +153,8 @@ struct DocView {
     cut: crate::edit_clipboard::CutSet,
     /// `SolveApp::own_clipboard_stamp`.
     own_clipboard_stamp: u64,
+    /// Its Drawing workspace: the sheet page (sheet, zoom, camera) and the panels open on it.
+    drawing: crate::drawing_workspace::State,
 }
 
 impl DocSlot {
@@ -170,6 +177,7 @@ impl DocSlot {
             jobs: Default::default(),
             tab: next_tab(),
             views: ViewSet::new(),
+            inspect: ViewInspect::new(),
             fit: false,
         }
     }
@@ -209,6 +217,8 @@ pub struct Documents {
     active_tab: u64,
     /// The shown design's views ([`DocSlot::views`] for the others); see [`apply_view`].
     pub(crate) views: ViewSet,
+    /// What each of the shown design's views shows besides the camera ([`DocSlot::inspect`] for the others).
+    pub(crate) inspect: ViewInspect,
     /// A view's name being typed in its sub-tab ([`view_rename_start`]).
     pub(crate) view_rename: Option<ViewRename>,
 }
@@ -418,6 +428,7 @@ fn take_view(app: &mut SolveApp) -> DocView {
         copied_placements: std::mem::take(&mut app.copied_placements),
         cut: std::mem::take(&mut app.cut),
         own_clipboard_stamp: app.own_clipboard_stamp,
+        drawing: std::mem::take(&mut app.drawing_workspace),
     }
 }
 
@@ -433,6 +444,7 @@ fn put_view(app: &mut SolveApp, v: DocView) {
     app.copied_placements = v.copied_placements;
     app.cut = v.cut;
     app.own_clipboard_stamp = v.own_clipboard_stamp;
+    app.drawing_workspace = v.drawing;
     crate::edit_clipboard::drop_stale(app);
 }
 
@@ -447,6 +459,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     // (`take_work`).
     crate::timeline::stop_playback(app);
     crate::sketch_text_move::cancel_drag(app);
+    crate::control_joint_drive::discard(app);
     let work = take_work(app);
     crate::dim_view::cancel();
     app.params = None;
@@ -480,6 +493,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         jobs: app.swap_jobs(slot.jobs),
         tab: std::mem::replace(&mut app.docs.active_tab, slot.tab),
         views: std::mem::replace(&mut app.docs.views, slot.views),
+        inspect: std::mem::replace(&mut app.docs.inspect, slot.inspect),
         fit: false,
     };
     crate::browser::restore_reveals(app, slot.reveals);
@@ -626,7 +640,12 @@ fn enter_workspace(app: &mut SolveApp, render: bool) {
 /// is the active view (opened when the design has none for it), and with neither the Model view
 /// is, as the app left them by itself. Called each frame and after a design switch, so a view
 /// entered from anywhere in the app (a ribbon button, a command, Finish Sketch) shows in the strip.
+/// A view of a sketch the design no longer has (cancelled, undone or deleted) closes (#18264).
+/// While the strip shows no views (views as tabs and the switcher both off), no view is opened
+/// here: the design enters the sketch or workspace in the view shown, as before design views.
 pub(crate) fn sync_views(app: &mut SolveApp) {
+    let session = &app.session;
+    app.docs.views.drop_views(|view| view.kind != ViewKind::Sketch || can_restore(session, view.kind, view.subject.as_deref()));
     let shown = if crate::render_workspace::active(app) {
         Some((ViewKind::Render, None))
     } else {
@@ -636,7 +655,7 @@ pub(crate) fn sync_views(app: &mut SolveApp) {
     let views = &mut app.docs.views;
     match shown {
         Some((kind, subject)) => {
-            if prefs.opens_sub_tab(kind) && (views.active().kind != kind || views.active().subject != subject) {
+            if prefs.opens_views_by_itself() && prefs.opens_sub_tab(kind) && (views.active().kind != kind || views.active().subject != subject) {
                 views.open(kind, subject, prefs.reuse_views);
             }
         }
@@ -654,13 +673,46 @@ pub(crate) fn sync_views(app: &mut SolveApp) {
 /// shows the new one ([`apply_view`]).
 fn change_views<T>(app: &mut SolveApp, change: impl FnOnce(&mut ViewSet) -> T) -> T {
     let before = app.docs.views.active().id;
+    keep_look(app);
     let result = change(&mut app.docs.views);
     let active = app.docs.views.active();
     if active.id != before {
         let active = active.clone();
         apply_view(app, &active);
+        show_look(app, &active);
     }
     result
+}
+
+/// The section and analyses each view of a design shows, by view id: a view that was never left
+/// has none and shows what the design shows now.
+pub(crate) type ViewInspect = std::collections::HashMap<u64, solidcraft_engine::InspectState>;
+
+/// Keep how the shown Model view looks at the design (its camera) with that view, so it comes back
+/// as it was left: two Model views of one design are two angles, not one.
+fn keep_look(app: &mut SolveApp) {
+    let active = app.docs.views.active();
+    if active.kind == ViewKind::Model {
+        let id = active.id;
+        app.docs.views.set_spec(id, solidcraft_viewport::ViewSpec::new(app.cam));
+        app.docs.inspect.insert(id, app.session.inspect());
+    }
+}
+
+/// Show `view` from the angle it was left at. A view that was never left (a new one) keeps the
+/// angle the design looks from now.
+fn show_look(app: &mut SolveApp, view: &DesignView) {
+    if view.kind == ViewKind::Model
+        && let Some(spec) = view.spec
+    {
+        app.cam = spec.camera;
+        app.cam_anim = None;
+    }
+    if view.kind == ViewKind::Model
+        && let Some(state) = app.docs.inspect.get(&view.id)
+    {
+        app.session.set_inspect(state.clone());
+    }
 }
 
 /// Open a view of `kind` showing `subject` in the shown design and show it (`reuse`: one that
@@ -670,7 +722,7 @@ fn change_views<T>(app: &mut SolveApp, change: impl FnOnce(&mut ViewSet) -> T) -
 pub fn view_open(app: &mut SolveApp, kind: ViewKind, subject: Option<String>, reuse: bool) -> u64 {
     let prefs = DesignTabPrefs::from(&app.preferences);
     if !prefs.opens_sub_tab(kind) {
-        apply_view(app, &DesignView { id: 0, kind, name: String::new(), subject });
+        apply_view(app, &DesignView { id: 0, kind, name: String::new(), subject, spec: None });
         return app.docs.views.active().id;
     }
     change_views(app, |views| views.open(kind, subject, reuse && prefs.reuse_views))
@@ -695,6 +747,12 @@ fn remember_views_in(app: &SolveApp, i: usize, dir: &std::path::Path) {
     }
     let session = if i == app.docs.active { Some(&app.session) } else { app.docs.slots.get(i).and_then(Option::as_ref).map(|slot| &slot.session) };
     let (Some(path), Some(views)) = (session.and_then(|session| session.path.as_deref()), views_of(app, i)) else { return };
+    // The shown Model view is saved from the angle the design looks from now.
+    let mut views = views.clone();
+    if i == app.docs.active && views.active().kind == ViewKind::Model {
+        let id = views.active().id;
+        views.set_spec(id, solidcraft_viewport::ViewSpec::new(app.cam));
+    }
     if let Err(e) = crate::view_memory::remember(dir, path, views.to_json()) {
         log::warn!("could not remember the views of {path}: {e}");
     }
@@ -723,6 +781,7 @@ fn restore_views_in(app: &mut SolveApp, path: &str, dir: &std::path::Path) {
         app.docs.views = set;
         let active = app.docs.views.active().clone();
         apply_view(app, &active);
+        show_look(app, &active);
     } else if let Some(slot) = app.docs.slots.iter_mut().flatten().find(|slot| slot.session.path.as_deref().is_some_and(|p| same_path(p, path))) {
         slot.views = set;
     }
@@ -944,8 +1003,15 @@ pub(crate) fn same_path(a: &str, b: &str) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
         // canonicalize resolves symlinks and Windows long names/case using the filesystem.
-        // Never lowercase: Windows can also host case-sensitive directories.
-        if let (Ok(a), Ok(b)) = (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        // Never lowercase: Windows can also host case-sensitive directories. A path on a network
+        // location not allowed (other than the host the other path is on) or a device is never
+        // resolved: on Windows that connects to the host before any "network location" question.
+        use solidcraft_engine::io::vfs;
+        let reachable = |p: &str, other: &str| vfs::design_path_refusal(p, Some(other)).is_none();
+        if reachable(a, b)
+            && reachable(b, a)
+            && let (Ok(a), Ok(b)) = (vfs::canonicalize(a), vfs::canonicalize(b))
+        {
             return a == b;
         }
         // A deleted file can still select its live editing session. Path equality also
@@ -1023,6 +1089,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
         crate::history_folds::load(app);
         crate::timeline_scope::reset(app);
         crate::render_workspace::reset_document(app);
+        crate::drawing_workspace::reset_document(app);
         app.session.invalidate_view(rev);
         app.cam = Camera::default();
         app.fit_view();
@@ -1044,7 +1111,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
 pub fn export(app: &mut SolveApp) -> Result<Value, String> {
     let revision = app.session.design_revision();
     let design = app.session.design();
-    let text = String::from_utf8(solidcraft_engine::io::write_design(&design)).map_err(|e| e.to_string())?;
+    let text = String::from_utf8(solidcraft_engine::io::write_design(&design).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     Ok(json!({"name": design.name, "revision": revision, "dirty": app.session.is_dirty(), "format": "json", "text": text}))
 }
 
@@ -1136,6 +1203,52 @@ pub fn prepare_open(app: &mut SolveApp) {
     } else {
         crate::prefs::apply_new_design(app);
     }
+}
+
+/// Close only the active clean design for the control API. The optional document_id
+/// guards against a tab switch between inspection and closing (#18781).
+pub(crate) fn close_clean(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
+    let expected = match p {
+        Value::Null => None,
+        Value::Object(fields) => {
+            if let Some(key) = fields.keys().find(|key| key.as_str() != "document_id") {
+                return Err(format!("unknown document.close field {key}"));
+            }
+            match fields.get("document_id") {
+                None => None,
+                Some(Value::String(id)) => Some(id.as_str()),
+                _ => return Err("document_id must be a string".into()),
+            }
+        }
+        _ => return Err("document.close params must be an object".into()),
+    };
+    if let Some(id) = expected
+        && id != app.session.document_id
+    {
+        return Err("the active document changed; nothing was closed".into());
+    }
+    if app.file_picker_busy()
+        || app.file_load.busy()
+        || app.saving.is_some()
+        || app.docs.closing.is_some()
+        || app.docs.quitting.is_some()
+        || app.docs.batch.is_some()
+        || app.docs.group.is_some()
+    {
+        return Err("finish the file operation or save prompt before closing a document".into());
+    }
+    if app.docs.count() == 1 && active_is_blank(app) {
+        return Err("no open design to close".into());
+    }
+    if dirty(app, app.docs.active) {
+        return Err("the design has unsaved changes; save it before document.close".into());
+    }
+    let closed = app.session.document_id.clone();
+    close(app, app.docs.active, false);
+    if app.session.document_id == closed {
+        return Err("the active design could not be closed".into());
+    }
+    Ok(json!({"closed_document_id": closed, "document_id": app.session.document_id, "documents": app.docs.count()}))
 }
 
 /// Close tab `i`: asks first when it has unsaved changes (`force`: close anyway).
@@ -1464,6 +1577,17 @@ fn tab_place(path: Option<&str>, dirty: bool, security: Option<&str>) -> String 
     place
 }
 
+/// The drawing each tab has open, by id and name, or null.
+fn tab_drawings(app: &SolveApp) -> Vec<Value> {
+    open_sessions(app)
+        .into_iter()
+        .map(|session| match session.drawing("ui.documents") {
+            Ok(d) => json!({"id": solidcraft_engine::doc::ids::encode(d.id), "name": d.name}),
+            Err(_) => Value::Null,
+        })
+        .collect()
+}
+
 /// What a design's signature says, for its tab's tooltip: the last verification when one ran, or
 /// that the file carries records that have not been checked in this session.
 fn tab_security(app: &SolveApp) -> Vec<Option<String>> {
@@ -1668,7 +1792,11 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Value {
         Some("cancel") => answer_disk(app, DiskAnswer::Cancel),
         _ => {}
     }
-    let tabs: Vec<Value> = tabs_info(app).into_iter().map(|(name, dirty)| json!({"name": name, "dirty": dirty})).collect();
+    let tabs: Vec<Value> = tabs_info(app)
+        .into_iter()
+        .zip(tab_drawings(app))
+        .map(|((name, dirty), drawing)| json!({"name": name, "dirty": dirty, "drawing": drawing}))
+        .collect();
     let save_prompt = app.docs.group.as_ref().map(|group| {
         group
             .rows
@@ -1836,6 +1964,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             id: tab_strip_id(),
             handles: TAB_HANDLES,
             views_as_tabs,
+            switcher_always: DesignTabPrefs::from(&app.preferences).switcher_always(),
             view_text: crate::app_bar::ViewText {
                 close_view: solidcraft_ui_text::tr_label("Close view"),
                 close_design: solidcraft_ui_text::tr_label("Close design"),
@@ -1845,9 +1974,10 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             },
             view_menu: &crate::design_view_ui::VIEW_MENU,
             view_right_row: crate::design_view_ui::VIEW_CLOSE_RIGHT,
-            view_rename: view_edit.as_mut().zip(view_place).map(|(r, place)| {
-                (place, crate::app_bar::TabRename { text: &mut r.text, focused: &mut r.focused, max: crate::design_views::MAX_NAME })
-            }),
+            view_rename: view_edit
+                .as_mut()
+                .zip(view_place)
+                .map(|(r, place)| (place, crate::app_bar::TabRename { text: &mut r.text, focused: &mut r.focused, max: solidcraft_views::MAX_NAME })),
             plus_menu: &plus_menu,
             switcher_menu: &SWITCHER_MENU,
             tear_off_below: TEAR_OFF_BELOW,
@@ -2560,6 +2690,24 @@ mod tests {
         assert!(reuse_path(&mut a, "picker.solidcraft").is_err());
         assert_eq!(a.docs.active, 1);
         assert_eq!(a.docs.count(), 2);
+    }
+
+    /// A design's link to a network location not allowed is never resolved to see whether it is
+    /// an open design (Edit in Place asks that before the "network location" question).
+    #[test]
+    fn saved_path_identity_never_resolves_a_refused_network_path() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-tab-paths-net-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let open = dir.join("assembly.solidcraft").to_string_lossy().into_owned();
+        let calls = solidcraft_engine::io::vfs::file_calls();
+        for link in [r"\\server\share\part.solidcraft", "//server/share/part.solidcraft", r"\\.\pipe\part.solidcraft"] {
+            assert!(!same_path(&open, link), "{link}");
+            assert!(!same_path(link, &open), "{link}");
+        }
+        assert_eq!(solidcraft_engine::io::vfs::file_calls(), calls, "a refused path was resolved");
+        // Two paths on the same server (a design opened from it) are still compared.
+        assert!(same_path(r"\\files\share\a.solidcraft", r"\\files\share\a.solidcraft"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -3620,15 +3768,59 @@ mod tests {
         h.frames(2);
         let sketch = h.app.session.active_sketch.unwrap();
         let active = h.app.docs.views.active().clone();
-        assert_eq!((active.kind, active.subject), (crate::design_views::ViewKind::Sketch, Some(sketch.to_string())));
+        assert_eq!((active.kind, active.subject), (solidcraft_views::ViewKind::Sketch, Some(sketch.to_string())));
         assert_eq!(h.app.docs.views.len(), before + 1);
         h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
         h.frames(2);
-        assert_eq!(h.app.docs.views.active().kind, crate::design_views::ViewKind::Model);
+        assert_eq!(h.app.docs.views.active().kind, solidcraft_views::ViewKind::Model);
         assert_eq!(h.app.docs.views.len(), before + 1, "the sketch's view stays");
         assert!(view_activate(&mut h.app, active.id));
         assert_eq!(h.app.session.active_sketch, Some(sketch), "showing it edits the sketch again");
+    }
+
+    /// Two Model views of one design are two angles: each keeps the camera it was left with, and a
+    /// new one starts from where the design looks now.
+    #[test]
+    fn model_views_keep_their_own_angle() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let first = h.app.docs.views.active().id;
+        h.app.cam.yaw = 0.25;
+        let second = view_open(&mut h.app, ViewKind::Model, None, false);
+        assert_ne!(first, second, "a second Model view is opened, not the first reused");
+        assert_eq!(h.app.cam.yaw, 0.25, "a new view starts from the angle the design looks from");
+        h.app.cam.yaw = 1.5;
+        assert!(view_activate(&mut h.app, first));
+        assert_eq!(h.app.cam.yaw, 0.25, "the first view comes back at its own angle");
+        assert!(view_activate(&mut h.app, second));
+        assert_eq!(h.app.cam.yaw, 1.5, "and the second at its own");
+        let copy = view_duplicate(&mut h.app, second).unwrap();
+        assert_eq!(h.app.cam.yaw, 1.5, "a copy starts at the angle of the view it copies");
+        h.app.cam.yaw = -0.5;
+        assert!(view_activate(&mut h.app, second));
+        assert_eq!(h.app.cam.yaw, 1.5);
+        assert!(view_activate(&mut h.app, copy));
+        assert_eq!(h.app.cam.yaw, -0.5);
+    }
+
+    /// Each Model view keeps its own section and analysis too, so one design can be inspected two
+    /// ways at once; the design itself is the same.
+    #[test]
+    fn model_views_keep_their_own_analysis() {
+        use solidcraft_engine::SurfaceAnalysis;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let first = h.app.docs.views.active().id;
+        let second = view_open(&mut h.app, ViewKind::Model, None, false);
+        h.app.session.analysis = Some(SurfaceAnalysis::Zebra { stripes: 8.0 });
+        assert!(view_activate(&mut h.app, first));
+        assert_eq!(h.app.session.analysis, None, "the first view never had the analysis");
+        h.app.session.analysis = Some(SurfaceAnalysis::Environment);
+        assert!(view_activate(&mut h.app, second));
+        assert_eq!(h.app.session.analysis, Some(SurfaceAnalysis::Zebra { stripes: 8.0 }));
+        assert!(view_activate(&mut h.app, first));
+        assert_eq!(h.app.session.analysis, Some(SurfaceAnalysis::Environment));
     }
 
     /// The Layout page's "Design tabs" choices govern the views: a kind kept out of sub-tabs is
@@ -3655,6 +3847,106 @@ mod tests {
         assert_eq!(h.app.docs.views.len(), 3);
     }
 
+    /// The owner's ask: by default a design tab shows no view switcher while the design has its one
+    /// view, and entering a sketch or Render stays in that view, so the tab looks as it did before
+    /// design views. The switcher shows once the user opens a second view, with "Show the design
+    /// view switcher" on (even for one view, and a sketch then opens its own view again), and views
+    /// as tabs keeps its sub-tabs and the tab's + for a new view.
+    #[test]
+    fn a_design_tab_shows_no_view_switcher_until_it_has_a_second_view() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width": 1280, "height": 720}));
+        let switcher = |h: &mut crate::scenario::Harness| {
+            h.frames(3);
+            crate::scenario::rect_of("tab:switcher").is_some()
+        };
+        assert!(!h.app.preferences.show_design_view_switcher && !h.app.preferences.design_views_as_tabs, "both off by default");
+        assert!(!switcher(&mut h), "one view: no switcher");
+        assert!(crate::scenario::handle_at("tab:design:0").is_some(), "the strip is drawn");
+        assert!(crate::scenario::handle_at("tab:view_new").is_none(), "nor the tab's + for a new view");
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();
+        h.frames(2);
+        assert!(h.app.session.active_sketch.is_some(), "the sketch is entered");
+        assert_eq!(h.app.docs.views.len(), 1, "in the view shown");
+        assert!(!switcher(&mut h), "still no switcher while sketching");
+        h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        assert!(!switcher(&mut h), "nor after Finish Sketch");
+        // The preference brings the switcher back for one view, and sketches open views again.
+        h.app.preferences.show_design_view_switcher = true;
+        assert!(switcher(&mut h), "the preference shows it for one view");
+        h.app.run("sketch.create", json!({"plane": "XZ", "name": "Sketch2"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.views.len(), 2, "a sketch opens its own view with the switcher on");
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.frames(2);
+        h.app.preferences.show_design_view_switcher = false;
+        assert!(switcher(&mut h), "a second view shows it with the preference off");
+        // Views as tabs: sub-tabs, no switcher, whatever the preference (on a bar with room for them;
+        // a narrow one falls back to the switcher).
+        h.call("ui.resize", json!({"width": 1920, "height": 1080}));
+        h.app.preferences.design_views_as_tabs = true;
+        assert!(!switcher(&mut h), "views as tabs draws sub-tabs instead");
+        assert!(crate::scenario::rect_of("tab:view:0").is_some(), "the sub-tabs are drawn");
+        h.app.preferences.show_design_view_switcher = true;
+        assert!(!switcher(&mut h));
+        // Back to one view with both off: no switcher again; a view opened with Ctrl+T shows it.
+        h.app.preferences.design_views_as_tabs = false;
+        h.app.preferences.show_design_view_switcher = false;
+        let first = h.app.docs.views.views()[0].id;
+        view_close_others(&mut h.app, first);
+        assert!(!switcher(&mut h), "one view again");
+        h.app.preferences.design_views_as_tabs = true;
+        assert!(!switcher(&mut h));
+        assert!(crate::scenario::handle_at("tab:view_new").is_some(), "views as tabs keeps the tab's + for a new view");
+        h.app.preferences.design_views_as_tabs = false;
+        h.call("ui.key", json!({"key": "T", "cmd": true}));
+        assert_eq!(h.app.docs.views.len(), 2, "Ctrl+T still opens another view");
+        assert!(switcher(&mut h), "and the switcher shows");
+    }
+
+    /// #18264: cancelling a new sketch closes its view instead of leaving a tab that says the
+    /// sketch no longer exists; so does undoing a finished sketch away, and Reopen does not bring
+    /// either back. A finished sketch that stays keeps its view.
+    #[test]
+    fn a_view_closes_when_its_sketch_is_cancelled_or_undone_away() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        // Test change (#18264): editing a sketch opens a view of its own only while the strip shows
+        // views (the owner asked that it not by default), and this test is about closing such a
+        // view, so it runs with views as tabs on. With both off no sketch view opens at all, which
+        // `a_design_tab_shows_no_view_switcher_until_it_has_a_second_view` checks.
+        h.app.preferences.design_views_as_tabs = true;
+        let sketch_views = |h: &crate::scenario::Harness| h.app.docs.views.views().iter().filter(|view| view.kind == ViewKind::Sketch).count();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();
+        h.frames(2);
+        h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(sketch_views(&h), 1, "the finished sketch keeps its view");
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch2"})).unwrap();
+        h.frames(2);
+        assert_eq!(sketch_views(&h), 2);
+        h.app.run("sketch.cancel", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(sketch_views(&h), 1, "the cancelled sketch's view closes");
+        assert_eq!(h.app.docs.views.active().kind, ViewKind::Model);
+        assert!(!h.app.docs.views.can_reopen(), "Reopen has no dead view to bring back");
+        // Undo steps back into Sketch1 before it removes it; undo until the design has no sketch.
+        for _ in 0..8 {
+            if h.app.session.doc.features.iter().all(|feature| feature.name != "Sketch1") {
+                break;
+            }
+            h.app.run("edit.undo", json!({})).unwrap();
+            h.frames(2);
+        }
+        assert!(h.app.session.doc.features.iter().all(|feature| feature.name != "Sketch1"));
+        assert_eq!(sketch_views(&h), 0, "undoing Sketch1 away closes its view too");
+        assert_eq!(h.app.docs.views.len(), 1);
+    }
+
     /// With "Reopen a design's views" on, a saved design's views come back when it opens again:
     /// those that can still be shown, nothing from a stale memory, and nothing at all when the
     /// preference is off.
@@ -3664,6 +3956,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
+        // Test change: the owner asked that a sketch open no view of its own while the strip shows
+        // no views (the new default); with the switcher on it does, which is what this test needs.
+        h.app.preferences.show_design_view_switcher = true;
         let path = std::env::temp_dir().join("solidcraft-remembered.scd").to_string_lossy().into_owned();
         h.app.session.path = Some(path.clone());
         h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();
@@ -4207,6 +4502,156 @@ mod tests {
         a.preferences.hidden_toolbar_tabs = vec!["SURFACE".into()];
         switch(&mut a, 0);
         assert_eq!(a.ui.tab, "MODEL");
+    }
+
+    /// A design with a box and a drawing of two sheets, open: the sheets' ids.
+    fn two_sheet_drawing(a: &mut SolveApp) -> [u64; 2] {
+        a.run("solid.box", json!({"length": 40, "width": 20, "height": 3})).unwrap();
+        a.run("drawing.create", json!({})).unwrap();
+        a.run("drawing.sheet.add", json!({"name": "Inspection sheet"})).unwrap();
+        let drawing = a.session.drawing("test").unwrap();
+        [0, 1].map(|i| drawing.sheets[i].id)
+    }
+
+    /// K10 (#3890): each tab keeps its own Drawing workspace. The sheet and the zoom chosen in one
+    /// tab come back with it, and the other tab's never show in it.
+    #[test]
+    fn a_drawing_tab_keeps_its_sheet_and_zoom() {
+        use crate::drawing_sheet_page::{active_sheet, select_sheet, set_zoom, zoom_percent};
+        let ctx = egui::Context::default();
+        let mut a = app();
+        let [_, second] = two_sheet_drawing(&mut a);
+        select_sheet(&mut a, second);
+        set_zoom(&mut a, &ctx, 1.5);
+        new_design(&mut a);
+        let [other, _] = two_sheet_drawing(&mut a);
+        select_sheet(&mut a, other);
+        set_zoom(&mut a, &ctx, 0.5);
+        switch(&mut a, 0);
+        assert_eq!(active_sheet(&a), Some(second), "the first tab is back on its second sheet");
+        assert!((zoom_percent(&a, &ctx) - 150.0).abs() < 1.0, "at 150 %: {}", zoom_percent(&a, &ctx));
+        switch(&mut a, 1);
+        assert_eq!(active_sheet(&a), Some(other));
+        assert!((zoom_percent(&a, &ctx) - 50.0).abs() < 1.0, "at 50 %: {}", zoom_percent(&a, &ctx));
+    }
+
+    /// K10 (#3890): `ui.documents` says which drawing each tab has open, and the entries follow
+    /// their tabs when a tab moves.
+    #[test]
+    fn each_tab_keeps_its_open_drawing_and_says_which() {
+        let mut a = app();
+        two_sheet_drawing(&mut a);
+        let drawing = a.session.drawing("test").unwrap();
+        let expected = json!({"id": solidcraft_engine::doc::ids::encode(drawing.id), "name": drawing.name});
+        new_design(&mut a);
+        let drawings = |a: &mut SolveApp| {
+            let reply = control(a, &json!({}));
+            reply["documents"].as_array().unwrap().iter().map(|tab| tab["drawing"].clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(drawings(&mut a), [expected.clone(), Value::Null]);
+        control(&mut a, &json!({"action": "move", "from": 0, "to": 1}));
+        assert_eq!(drawings(&mut a), [Value::Null, expected.clone()]);
+        switch(&mut a, 0);
+        assert_eq!(drawings(&mut a), [Value::Null, expected]);
+    }
+
+    /// K10 (#3890): a tab with its drawing open takes model commands, as every tab does, with a
+    /// sheet sketch being edited there too; the sheet sketch stays in its own tab and is still
+    /// active after a round trip.
+    #[test]
+    fn a_tabs_sheet_sketch_waits_in_that_tab_and_holds_nothing() {
+        let mut a = app();
+        let [sheet, _] = two_sheet_drawing(&mut a);
+        // A sheet sketch is made, and finished, in Drawing.
+        crate::workspace::enter(&mut a, "drawing").unwrap();
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        assert!(a.session.open_drawing.is_some(), "with the drawing still open");
+        a.run("drawing.sketch.create", json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        assert!(a.session.active_sheet_sketch.is_some(), "a model command leaves the sheet sketch open");
+        new_design(&mut a);
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        assert!(a.session.active_sheet_sketch.is_none());
+        switch(&mut a, 0);
+        assert!(a.session.active_sheet_sketch.is_some(), "the sheet sketch waits in its tab");
+        crate::workspace::enter(&mut a, "drawing").unwrap();
+        a.run("sketch.finish", json!({})).unwrap();
+        assert!(a.session.active_sheet_sketch.is_none());
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+    }
+
+    /// K10 (#3890): without "Keep dialogs and tools open when switching designs", a tab switch
+    /// closes the Drawing workspace's panels, as it cancels a dialog. With it, a panel waits in its
+    /// own tab and never shows in another.
+    #[test]
+    fn a_tab_switch_closes_the_drawing_panels_by_default() {
+        for keep in [false, true] {
+            let mut a = app();
+            a.preferences.keep_work_on_tab_switch = keep;
+            two_sheet_drawing(&mut a);
+            crate::drawing_workspace::enter(&mut a, true).unwrap();
+            a.drawing_workspace.settings_open = true;
+            new_design(&mut a);
+            assert!(!a.drawing_workspace.settings_open, "Sheet Settings stays out of the other tab");
+            switch(&mut a, 0);
+            assert_eq!(a.drawing_workspace.settings_open, keep, "keep: {keep}");
+        }
+    }
+
+    /// K10 (#3890): a new design in one tab (`file.new`, as `doc.open` and `doc.recover`) starts
+    /// that tab's Drawing workspace over and leaves the other tab's.
+    #[test]
+    fn opening_a_file_resets_only_that_tabs_drawing_page() {
+        use crate::drawing_sheet_page::{active_sheet, select_sheet, set_zoom, zoom_percent};
+        let ctx = egui::Context::default();
+        let mut a = app();
+        let [_, second] = two_sheet_drawing(&mut a);
+        select_sheet(&mut a, second);
+        set_zoom(&mut a, &ctx, 1.5);
+        new_design(&mut a);
+        let blank = zoom_percent(&a, &ctx);
+        two_sheet_drawing(&mut a);
+        set_zoom(&mut a, &ctx, 0.5);
+        a.run("file.new", json!({})).unwrap();
+        assert!((zoom_percent(&a, &ctx) - blank).abs() < 1e-3, "this tab starts over");
+        switch(&mut a, 0);
+        assert_eq!(active_sheet(&a), Some(second));
+        assert!((zoom_percent(&a, &ctx) - 150.0).abs() < 1.0, "the other tab keeps its page");
+    }
+
+    /// K10 (#3890): a design opened into the blank tab starts its Drawing workspace over, as
+    /// `doc.open` does: no panel or zoom is left from the blank design.
+    #[test]
+    fn adopting_a_design_resets_the_drawing_workspace() {
+        let ctx = egui::Context::default();
+        let mut a = app();
+        let blank = crate::drawing_sheet_page::zoom_percent(&a, &ctx);
+        a.drawing_workspace.settings_open = true;
+        crate::drawing_sheet_page::set_zoom(&mut a, &ctx, 2.0);
+        assert!(active_is_blank(&a));
+        let mut design = Session::default();
+        design.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        assert!(adopt(&mut a, design));
+        assert_eq!(a.docs.count(), 1, "the blank tab took it");
+        assert!(!a.drawing_workspace.settings_open);
+        assert!((crate::drawing_sheet_page::zoom_percent(&a, &ctx) - blank).abs() < 1e-3);
+    }
+
+    /// K10 (#3890): a drawing edit is an unsaved change of its design: closing its tab asks once.
+    #[test]
+    fn closing_a_tab_with_an_unsaved_drawing_edit_asks_once() {
+        let mut a = app();
+        two_sheet_drawing(&mut a);
+        new_design(&mut a);
+        switch(&mut a, 0);
+        a.session.mark_saved();
+        assert!(!dirty(&a, 0));
+        a.run("drawing.sheet.add", json!({"name": "Third sheet"})).unwrap();
+        assert!(dirty(&a, 0));
+        close(&mut a, 0, false);
+        assert_eq!((a.docs.closing, a.docs.count()), (Some(0), 2));
+        close(&mut a, 0, true);
+        assert_eq!(a.docs.count(), 1);
     }
 
     /// #9360: a feature being edited keeps its history rolled back to it in its own design only,
