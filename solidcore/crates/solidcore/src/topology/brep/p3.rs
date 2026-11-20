@@ -3939,9 +3939,9 @@ pub fn split_disconnected_shells(k: &mut Kernel, b: &mut Brep) -> Result<()> {
 ///
 /// Those of the ray tests: [`crate::topology::Shell::is_inner_shell`]'s (its `SM_ERR` for
 /// a shell its rays cannot classify, [`SolidError::Unported`], a cancelled call), and a
-/// topology failure for a void that no outer shell holds where a nesting test was unsure
-/// (`SM_UNSURE`): which solid it bounds is not decided, so the region is not regrouped
-/// on a guess. Those of the list edits and dangling ids.
+/// [`TopologyFailure::VoidOwnerUndecided`] for a void that no outer shell holds where a
+/// nesting test was unsure (`SM_UNSURE`): which solid it bounds is not decided, so the
+/// region is not regrouped on a guess. Those of the list edits and dangling ids.
 fn regroup_split_region(k: &mut Kernel, b: &mut Brep, r: RegionId) -> Result<()> {
     let shells = region_shells(b, r)?;
     // a void of the region: a closed face-use shell the region does not lie inside (an
@@ -3979,8 +3979,9 @@ fn regroup_split_region(k: &mut Kernel, b: &mut Brep, r: RegionId) -> Result<()>
                 }
             }
             None if unsure => {
-                return Err(ser(
-                    "a split shell's void part whose outer shell the nesting rays do not decide",
+                return Err(SolidError::topology(
+                    OP,
+                    TopologyFailure::VoidOwnerUndecided,
                 ))
             }
             None => {}
