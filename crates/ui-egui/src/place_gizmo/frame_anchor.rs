@@ -15,7 +15,7 @@
 //! are published as `frame_anchor:<anchor>` and `frame_anchor:position` for `ui.handles`.
 
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use egui::{Pos2, vec2};
 use serde_json::{Value, json};
@@ -86,11 +86,12 @@ struct Shown {
     points: Vec<Option<Vec2>>,
 }
 
-/// The section of the last values asked for, with what it was worked out from.
+/// The section of the last values asked for, with what it was worked out from. The design and
+/// model are held weakly: for identity only, they stay freed once the dialog or the design closes.
 struct Cached {
     key: String,
-    doc: Arc<Document>,
-    state: Arc<ModelState>,
+    doc: Weak<Document>,
+    state: Weak<ModelState>,
     component: u64,
     shown: Option<Shown>,
 }
@@ -106,9 +107,17 @@ thread_local! {
     static DRAWN: RefCell<Vec<Pos2>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Is `p` on a hot point or the marker of the open Frame Member dialog (as drawn last frame)?
+/// Is `p` on a hot point or the marker of the open Frame Member dialog (as drawn last frame)? The
+/// same square as the press area they register (`press_area`), corners included.
 pub(crate) fn contains_pointer(app: &SolveApp, p: Pos2) -> bool {
-    app.applying.is_none() && app.dialog.as_ref().is_some_and(|d| serves(app, d)) && DRAWN.with(|h| h.borrow().iter().any(|c| c.distance(p) <= REACH))
+    app.applying.is_none()
+        && app.dialog.as_ref().is_some_and(|d| serves(app, d))
+        && DRAWN.with(|h| h.borrow().iter().any(|c| press_area(*c).contains(p)))
+}
+
+/// The press area of a hot point or the marker centred at `c` (screen).
+fn press_area(c: Pos2) -> egui::Rect {
+    egui::Rect::from_center_size(c, vec2(2.0 * REACH, 2.0 * REACH))
 }
 
 /// The `frame.member` parameters the dialog's OK would run; none while it is unfinished.
@@ -128,14 +137,22 @@ fn section(app: &SolveApp, d: &Dialog) -> Option<Shown> {
     let hit = CACHE.with(|c| {
         c.borrow()
             .as_ref()
-            .filter(|c| c.key == key && c.component == s.active_component && Arc::ptr_eq(&c.doc, &s.doc) && Arc::ptr_eq(&c.state, &state))
+            .filter(|c| {
+                c.key == key
+                    && c.component == s.active_component
+                    && std::ptr::eq(c.doc.as_ptr(), Arc::as_ptr(&s.doc))
+                    && std::ptr::eq(c.state.as_ptr(), Arc::as_ptr(&state))
+            })
             .map(|c| c.shown.clone())
     });
     if let Some(shown) = hit {
         return shown;
     }
     let shown = solidcraft_engine::cmd::frame::member_section_view(s, &p).ok().and_then(laid_out);
-    CACHE.with(|c| *c.borrow_mut() = Some(Cached { key, doc: s.doc.clone(), state, component: s.active_component, shown: shown.clone() }));
+    CACHE.with(|c| {
+        *c.borrow_mut() =
+            Some(Cached { key, doc: Arc::downgrade(&s.doc), state: Arc::downgrade(&state), component: s.active_component, shown: shown.clone() })
+    });
     shown
 }
 
@@ -258,14 +275,13 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     if let Some(p) = ui.ctx().pointer_latest_pos() {
         order.sort_by(|a, b| b.1.distance(p).total_cmp(&a.1.distance(p)));
     }
-    let area = |c: Pos2| egui::Rect::from_center_size(c, vec2(2.0 * REACH, 2.0 * REACH));
     let mut dot_hits: Vec<Option<egui::Response>> = vec![None; dots.len()];
     let mut marker: Option<egui::Response> = None;
     for (target, at) in order {
         match target {
             Target::Dot(i) => {
                 let Some((dot, _)) = dots.get(i) else { continue };
-                let r = ui.interact(area(at), egui::Id::unique(("sc_frame_anchor_dot", dot.name)), egui::Sense::click());
+                let r = ui.interact(press_area(at), egui::Id::unique(("sc_frame_anchor_dot", dot.name)), egui::Sense::click());
                 if r.clicked() {
                     let index = dot.index;
                     with_dialog(app, |_, d| set_anchor(d, index));
@@ -274,7 +290,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
                     *slot = Some(r);
                 }
             }
-            Target::Marker => marker = Some(ui.interact(area(at), marker_id, egui::Sense::drag())),
+            Target::Marker => marker = Some(ui.interact(press_area(at), marker_id, egui::Sense::drag())),
         }
     }
 

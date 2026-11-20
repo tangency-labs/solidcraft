@@ -97,11 +97,16 @@ pub struct Member {
     /// Offset A and B: how far the section is moved from its anchor, along its own axes as drawn
     /// (A its width, B its height; not the world's X and Y; both empty: none). Kept as the dialog's `locate` (`sync_offset`), which the engine reads.
     pub offset: [String; 2],
-    /// The offset text last seen, so an edit is told from a `locate` changed in the view.
+    /// The offset text last applied, so an edit is told from a `locate` changed in the view.
     seen: [String; 2],
-    /// The parameters the offset text was last worked out for.
+    /// What the section was worked out from when the offset was last applied (`base_key`).
     shown: Option<String>,
-    /// The section the anchors are read from: the parameters without `locate`, and their section.
+    /// The `locate` the dialog held after the offset was last applied: one that differs was set
+    /// elsewhere (the hot points in the view).
+    written: Option<[f64; 2]>,
+    /// Why the typed offset cannot be applied to the section now; OK refuses with it.
+    refused: Option<String>,
+    /// The section the anchors are read from: what it was worked out from (`base_key`) and the section.
     base: Option<(String, SectionView)>,
     pub angle: String,
     pub mirror: bool,
@@ -437,6 +442,8 @@ impl Member {
             offset: Default::default(),
             seen: Default::default(),
             shown: None,
+            written: None,
+            refused: None,
             base: None,
             angle: String::new(),
             mirror: false,
@@ -1154,51 +1161,75 @@ fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &[SelI
 }
 
 /// Keep Offset A and B and the dialog's `locate` in step: an edited offset sets `locate` (the
-/// anchor's point minus the offset, both empty: none); a `locate` set elsewhere (the hot points in
-/// the view) or other values changed rewrite the offset from it.
+/// anchor's point minus the offset, both empty: none), and so does a change of the other values
+/// (a dimension, the anchor), from the offset as typed; a `locate` set elsewhere (the hot points in
+/// the view) rewrites the offset from it.
 fn sync_offset(app: &SolveApp, m: &mut Member, inputs: &[SelInput], extra: &mut Map<String, Value>) {
-    if m.offset != m.seen {
-        let applied = match offset_mm(app, m) {
-            Ok(None) => {
-                extra.remove("locate");
-                true
-            }
-            Ok(Some(off)) => match base_view(app, m, inputs, extra).and_then(|v| locate_for(&v, m.anchor, off)) {
-                Some(at) => {
-                    extra.insert("locate".into(), json!(at));
-                    true
-                }
-                // No section yet (no line, an unfinished value): the offset waits for one, tried
-                // again each frame, rather than being taken as applied and later wiped.
-                None => false,
-            },
-            // Refused when the dialog runs; `locate` stays as it was meanwhile.
-            Err(_) => true,
+    let held = located(extra);
+    let edited = m.offset != m.seen;
+    let elsewhere = match (held, m.written) {
+        (Some(h), Some(w)) => !same_locate(h, w),
+        (h, w) => h.is_some() != w.is_some(),
+    };
+    if !edited && elsewhere {
+        let offset = match held {
+            None => Some(Default::default()),
+            Some(at) => base_view(app, m, inputs, extra).and_then(|v| offset_of(&v, m.anchor, at)).map(|o| {
+                let doc = &app.session.doc;
+                o.map(|v| crate::length_input::model(doc, (v * 1e6).round() / 1e6 + 0.0))
+            }),
         };
-        if applied {
-            m.seen = m.offset.clone();
-            m.shown = params(app, m, inputs, extra).ok().map(|p| p.to_string());
+        // No section to read it on yet: tried again as values change.
+        if let Some(offset) = offset {
+            m.seen = offset.clone();
+            m.offset = offset;
+            m.written = held;
+            m.refused = None;
+            m.shown = base_key(app, m, inputs, extra);
         }
         return;
     }
-    let Ok(p) = params(app, m, inputs, extra) else { return };
-    let key = p.to_string();
-    if m.shown.as_deref() == Some(key.as_str()) {
+    let key = base_key(app, m, inputs, extra);
+    if !edited && (key.is_none() || m.shown == key) {
         return;
     }
-    let located = extra.get("locate").and_then(Value::as_array).and_then(|a| Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?]));
-    let offset = match located {
-        None => Some(Default::default()),
-        Some(at) => base_view(app, m, inputs, extra).and_then(|v| offset_of(&v, m.anchor, at)).map(|o| {
-            let doc = &app.session.doc;
-            o.map(|v| crate::length_input::model(doc, (v * 1e6).round() / 1e6 + 0.0))
-        }),
-    };
-    if let Some(offset) = offset {
-        m.seen = offset.clone();
-        m.offset = offset;
+    m.refused = None;
+    match offset_mm(app, m) {
+        Ok(None) => {
+            extra.remove("locate");
+        }
+        Ok(Some(off)) => match base_view(app, m, inputs, extra) {
+            Some(v) => match locate_for(&v, m.anchor, off) {
+                Some(at) => {
+                    extra.insert("locate".into(), json!(at));
+                }
+                // The section is there but the offset puts its point on the line too far: OK
+                // refuses rather than running a `locate` left from other values.
+                None => {
+                    m.refused = Some(format!("Offset A and Offset B move the section's point on the line past {} mm", frame::MAX_PROFILE_SIZE));
+                    extra.remove("locate");
+                }
+            },
+            // No section yet (no line, an unfinished value): the offset waits for one, tried
+            // again each frame, rather than being taken as applied and later wiped.
+            None => return,
+        },
+        // Refused when the dialog runs; `locate` stays as it was meanwhile.
+        Err(_) => {}
     }
-    m.shown = Some(key);
+    m.seen = m.offset.clone();
+    m.written = located(extra);
+    m.shown = key;
+}
+
+/// The dialog's `locate`, when it holds one.
+fn located(extra: &Map<String, Value>) -> Option<[f64; 2]> {
+    extra.get("locate").and_then(Value::as_array).and_then(|a| Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?]))
+}
+
+/// Two `locate`s within float noise of each other.
+fn same_locate(a: [f64; 2], b: [f64; 2]) -> bool {
+    (a[0] - b[0]).abs() <= 1e-9 && (a[1] - b[1]).abs() <= 1e-9
 }
 
 /// Offset A and B in mm; none when both are empty (an empty one is 0).
@@ -1219,14 +1250,28 @@ fn offset_mm(app: &SolveApp, m: &Member) -> Result<Option<[f64; 2]>, String> {
     Ok(Some([mm(x)?, mm(y)?]))
 }
 
-/// The section the dialog's values make, without a located point (its anchors do not move with
-/// one), worked out again only when those values change.
-fn base_view(app: &SolveApp, m: &mut Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Option<SectionView> {
+/// The dialog's parameters without a located point: what the anchors are read from (they do not
+/// move with one).
+fn base_params(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Option<Value> {
     let mut p = params(app, m, inputs, extra).ok()?;
     if let Value::Object(o) = &mut p {
         o.remove("locate");
     }
-    let key = p.to_string();
+    Some(p)
+}
+
+/// What the anchors are worked out from: the dialog's values and the design's parameters and units
+/// (a profile dimension may name a parameter that changes while the dialog is open).
+fn base_key(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Option<String> {
+    let doc = &app.session.doc;
+    base_params(app, m, inputs, extra).map(|p| format!("{p} {} {:?}", doc.units, doc.param_values().0))
+}
+
+/// The section the dialog's values make, without a located point (its anchors do not move with
+/// one), worked out again only when those values or the design's parameters change.
+fn base_view(app: &SolveApp, m: &mut Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Option<SectionView> {
+    let p = base_params(app, m, inputs, extra)?;
+    let key = base_key(app, m, inputs, extra)?;
     if let Some((k, v)) = &m.base
         && *k == key
     {
@@ -1258,7 +1303,11 @@ fn offset_of(v: &SectionView, anchor: usize, at: [f64; 2]) -> Option<[f64; 2]> {
 
 /// The command the dialog's OK runs (`extra`: parameters kept from the feature being edited).
 pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
-    offset_mm(app, m)?;
+    if offset_mm(app, m)?.is_some()
+        && let Some(e) = &m.refused
+    {
+        return Err(e.clone());
+    }
     Ok(vec![("frame.member".to_string(), params(app, m, inputs, extra)?)])
 }
 

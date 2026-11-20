@@ -214,6 +214,65 @@ fn an_offset_typed_before_a_line_is_picked_applies_once_one_is() {
     assert_eq!(c[0].1["locate"], json!([0.0, -70.0]), "{}", c[0].1);
 }
 
+/// A dimension changed after Offset B is typed keeps the offset as typed and moves `locate` with
+/// the section: the tube's bottom stays 50 mm from the line at 60 mm high as at 40 mm.
+#[test]
+fn a_dimension_change_keeps_the_typed_offset() {
+    let mut h = post();
+    member(&mut h).anchor = index("bottom");
+    member(&mut h).offset = [String::new(), "50 mm".into()];
+    h.settle();
+    let m = member(&mut h);
+    m.dims[m.kind][1] = "60 mm".into();
+    h.settle();
+    assert_eq!(member(&mut h).offset, [String::new(), "50 mm".to_string()], "the typed offset stays");
+    let c = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(c[0].1["locate"], json!([0.0, -80.0]), "{}", c[0].1);
+    let v = view(&h);
+    assert!((point(&v, Anchor::Bottom).y - v.at.y - 50.0).abs() < 1e-9, "the tube's bottom is 50 mm from the line");
+}
+
+/// A design parameter a dimension names, changed while the dialog is open, lays the section out
+/// again: `locate` follows the new height, the typed offset as it was.
+#[test]
+fn a_parameter_change_lays_the_section_out_again() {
+    let mut h = post();
+    h.app.run("parameters.add", json!({"name": "H", "expression": "40 mm"})).unwrap();
+    let m = member(&mut h);
+    m.dims[m.kind][1] = "H".into();
+    m.anchor = index("bottom");
+    m.offset = [String::new(), "50 mm".into()];
+    h.settle();
+    assert_eq!(locate(&h), Some(json!([0.0, -70.0])));
+    h.app.run("parameters.change", json!({"name": "H", "expression": "60 mm"})).unwrap();
+    h.settle();
+    assert_eq!(locate(&h), Some(json!([0.0, -80.0])), "laid out with H = 60 mm");
+    assert_eq!(member(&mut h).offset, [String::new(), "50 mm".to_string()]);
+}
+
+/// An offset whose point on the line would be past the largest profile is refused by OK, naming
+/// the fields, rather than run without it.
+#[test]
+fn an_offset_past_the_largest_profile_is_refused() {
+    let mut h = post();
+    member(&mut h).anchor = index("bottom");
+    member(&mut h).offset = [String::new(), format!("{} mm", solidcraft_engine::doc::frame::MAX_PROFILE_SIZE)];
+    h.settle();
+    let err = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap_err();
+    assert!(err.contains("Offset A") && err.contains("Offset B"), "{err}");
+    assert_eq!(locate(&h), None, "no located point is left from other values");
+}
+
+/// A press in the corner of a hot point's square press area is the overlay's, not Select Other's.
+#[test]
+fn a_press_in_a_hot_points_corner_is_owned() {
+    let h = post();
+    let c = DRAWN.with(|d| d.borrow().first().copied()).expect("the hot points were drawn");
+    let corner = c + vec2(REACH - 0.5, REACH - 0.5);
+    assert!(c.distance(corner) > REACH, "outside the circle of reach");
+    assert!(contains_pointer(&h.app, corner));
+}
+
 /// Off, the dialog behaves as before: no section, no hot points, no marker.
 #[test]
 fn with_the_preference_off_nothing_is_drawn() {
