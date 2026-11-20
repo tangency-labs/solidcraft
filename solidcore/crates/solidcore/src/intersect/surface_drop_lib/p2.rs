@@ -1112,10 +1112,7 @@ fn prove_uv_domain(polygon: &[Point3], domain: &Extent2d) -> Result<()> {
                 || !domain.contains_point(Point2::new(p.x, p.y), 0.0)
         })
     {
-        return Err(SolidError::intersect_failed(
-            OP_ADD,
-            "the traced UV control polygon is not proved inside the surface domain",
-        ));
+        return Err(SolidError::intersect_uv_polygon_not_in_domain(OP_ADD));
     }
     Ok(())
 }

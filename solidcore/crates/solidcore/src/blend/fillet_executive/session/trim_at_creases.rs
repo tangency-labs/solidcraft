@@ -1254,6 +1254,56 @@ fn crease_piece(k: &Kernel, crease: &Curve, t0: f64, t1: f64) -> Result<Curve> {
     Ok(piece)
 }
 
+/// The refusal of a crease on the target face `f` whose rail leaves a face it rolls on (one
+/// of `rolled_supports`) across a tangent edge, with that face; `None` when no such edge is
+/// crossed. A face past a cliff meets the face the rail leaves at a sharp edge; one that
+/// runs on from it tangentially (a round already on the face) is no cliff: the rail would
+/// roll over onto it, and the ball does not fit between.
+///
+/// The edges the crease crosses (`seam_events`, each with the parameter it crosses at,
+/// every edge at a vertex it crosses through included) are judged where it crosses them,
+/// against the round's section budget `tangent_budget` (a spline seam's tangency varies
+/// along it). The face's other edges are judged as ever: at a fixed point of the edge,
+/// against the solvers' tangency tolerance `face_tangency`.
+fn crease_across_tangent_edge(
+    k: &Kernel,
+    target: &mut Brep,
+    f: FaceId,
+    seam_events: &[(EdgeId, f64)],
+    rolled_supports: &BTreeSet<FaceId>,
+    tangent_budget: f64,
+    face_tangency: f64,
+) -> Result<Option<(FaceId, Refusal)>> {
+    let mut judged: Vec<(EdgeId, f64, f64)> = seam_events
+        .iter()
+        .map(|&(e, parameter)| (e, parameter, tangent_budget))
+        .collect();
+    for e in face::p4::edges(target, f, None, false, None)? {
+        if !seam_events.iter().any(|&(crossed, _)| crossed == e) {
+            let parameter = edge::interval(target, e)?.evaluate(0.34);
+            judged.push((e, parameter, face_tangency));
+        }
+    }
+    for (e, parameter, budget) in judged {
+        for g in edge::faces(target, e, None)? {
+            if g != f
+                && rolled_supports.contains(&g)
+                && is_tangent_edge(k, target, e, parameter, budget)?
+            {
+                return Ok(Some((
+                    g,
+                    refusal(
+                        FilletErrorType::NoRoom,
+                        Some(NoRoomReason::CreaseAcrossTangentEdge),
+                        "Fillet Error: a rail leaves the face it rolls on across a tangent edge, onto a face it would cut (the blend is larger than the face allows)",
+                    ),
+                )));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// A refusal with its fillet error and typed reason.
 const fn refusal(
     code: FilletErrorType,
@@ -2146,42 +2196,22 @@ impl FilletSession<'_> {
                     // rolls on) at a sharp edge. One that runs on from it tangentially (a
                     // round already on the face) is no cliff: the rail would roll over
                     // onto it, and the ball does not fit between.
-                    // The edges a crease crosses are judged where it crosses them, against the
-                    // round's section budget (a spline seam's tangency varies along it). The
-                    // face's other edges are judged as ever: at a fixed point of the edge,
-                    // against the solvers' tangency tolerance.
-                    let mut judged: Vec<(EdgeId, f64, f64)> = seam_events
-                        .iter()
-                        .map(|&(e, parameter)| (e, parameter, tangent_budget))
-                        .collect();
-                    for e in face::p4::edges(self.objects.target, f, None, false, None)? {
-                        if !seam_events.iter().any(|&(crossed, _)| crossed == e) {
-                            let parameter = edge::interval(self.objects.target, e)?.evaluate(0.34);
-                            judged.push((e, parameter, face_tangency));
-                        }
-                    }
-                    for (e, parameter, budget) in judged {
-                        for g in edge::faces(self.objects.target, e, None)? {
-                            if g != f
-                                && supports.contains(&g)
-                                && rolled_on.contains(&g)
-                                && is_tangent_edge(k, self.objects.target, e, parameter, budget)?
-                            {
-                                // the fork's NoteFitOnFace(g) (49f393d, WR-696)
-                                let face =
-                                    FilletObject::Topology(FilletBody::Target, EntityRef::Face(g));
-                                self.executive
-                                    .note_fit_on_face(k, &mut self.objects, face)?;
-                                return refuse(
-                                    note,
-                                    refusal(
-                                        FilletErrorType::NoRoom,
-                                        Some(NoRoomReason::CreaseAcrossTangentEdge),
-                                        "Fillet Error: a rail leaves the face it rolls on across a tangent edge, onto a face it would cut (the blend is larger than the face allows)",
-                                    ),
-                                );
-                            }
-                        }
+                    let rolled_supports: BTreeSet<FaceId> =
+                        supports.intersection(&rolled_on).copied().collect();
+                    if let Some((g, r)) = crease_across_tangent_edge(
+                        k,
+                        self.objects.target,
+                        f,
+                        &seam_events,
+                        &rolled_supports,
+                        tangent_budget,
+                        face_tangency,
+                    )? {
+                        // the fork's NoteFitOnFace(g) (49f393d, WR-696)
+                        let face = FilletObject::Topology(FilletBody::Target, EntityRef::Face(g));
+                        self.executive
+                            .note_fit_on_face(k, &mut self.objects, face)?;
+                        return refuse(note, r);
                     }
                     crossed += 1;
                     only = Some(
@@ -3041,6 +3071,72 @@ mod tests {
             }
         }
         out
+    }
+
+    /// #17016: a crease that leaves the top of a cylinder through the vertex where its seam
+    /// starts ends its run at that vertex, which names no edge. The seam, an edge of the side
+    /// face only (tangent to itself all along), touches the top at that vertex alone; the
+    /// rail crossing there onto the side the blend rolls on is refused with
+    /// `CreaseAcrossTangentEdge`. Without the seam events at a vertex the seam is never
+    /// judged (it is not an edge of the top), and the top's own circle is sharp.
+    #[test]
+    fn a_crease_through_a_vertex_on_a_tangent_edge_is_refused() {
+        use crate::primitive::api_primitives::create_cylinder;
+        let mut k = Kernel::default();
+        let mut b = create_cylinder(&mut k, Point3::ZERO, 10.0, 20.0).unwrap();
+        // the vertex of the top circle: the end of the seam at z = 20
+        let v = b
+            .vertices()
+            .ids()
+            .find(|&v| (b.vertex(v).unwrap().point.z - 20.0).abs() < 1e-9)
+            .unwrap();
+        let at = b.vertex(v).unwrap().point;
+        let (mut seam, mut circle) = (None, None);
+        for e in vertex::edges(&b, v, None).unwrap() {
+            if edge::other_vertex(&b, e, Some(v)).unwrap() == Some(v) {
+                circle = Some(e);
+            } else {
+                seam = Some(e);
+            }
+        }
+        let (seam, circle) = (seam.unwrap(), circle.unwrap());
+        let side = edge::faces(&b, seam, None).unwrap();
+        assert!(side.iter().all(|&g| g == side[0]), "the seam has one face");
+        let side = side[0];
+        let top = edge::faces(&b, circle, None)
+            .unwrap()
+            .into_iter()
+            .find(|&g| g != side)
+            .unwrap();
+        // in the plane of the top, from its centre out through the vertex and on past it
+        let centre = Point3::new(0.0, 0.0, 20.0);
+        let crease: Curve = Line::from_points(centre, centre + (at - centre) * 2.0, 3).into();
+        let (mut in_face, mut along) = (Vec::new(), Vec::new());
+        let events =
+            pieces_in_face_to_ends(&k, &crease, &mut b, top, TOL, &mut in_face, &mut along)
+                .unwrap();
+        // the fillet's default tangency, 10 degrees (`edge_refusals::DEFAULT_TANGENCY`): the
+        // seam is tangent at 0 degrees, the circle sharp at 90, so any budget between decides
+        // the same
+        let tangency = 10.0 * (crate::math::PI / 180.0);
+        let rolled_supports = BTreeSet::from([side]);
+        let refused = crease_across_tangent_edge(
+            &k,
+            &mut b,
+            top,
+            &events,
+            &rolled_supports,
+            tangency,
+            tangency,
+        )
+        .unwrap();
+        let (face, r) = refused.expect("the rail crosses the tangent seam at the vertex");
+        assert_eq!(face, side);
+        assert!(matches!(r.code, FilletErrorType::NoRoom));
+        assert!(matches!(
+            r.reason,
+            Some(NoRoomReason::CreaseAcrossTangentEdge)
+        ));
     }
 
     /// The leftover check refuses what a move left off and passes a body that holds

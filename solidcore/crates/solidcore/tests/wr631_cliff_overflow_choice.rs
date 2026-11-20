@@ -210,6 +210,21 @@ fn a_concave_round_crossing_a_finite_wall_is_trimmed_at_its_creases() {
     assert!(session.executive().cliff_overflow);
     drop(session);
     assert!(is_manifold_solid(&body).unwrap());
+    // The topology the creases leave, every face one loop. The L prism (B y=0, R x=10,
+    // T y=10, W x=7, floor y=5, left x=0, caps z=0 and z=20) plus the wall box's faces
+    // above the floor (x=5, y=10, z=5, z=15); its x=0 face merges with the left face.
+    // The round takes the floor's x in [4,7] where it sits on it, and in z in [5,15] the
+    // floor kept only x in [5,7] beside the wall: the floor falls into two rectangles. The
+    // round is one face, cut at the creases on z=5 (an arc), x=5 (a line at y=8-2*sqrt 2)
+    // and z=15 (an arc). Edges per face: B, R, T, W, the two floor pieces, x=5 and y=10
+    // have 4; left 8; each cap 7 (the L with its corner rounded); z=5 and z=15 have 5
+    // (the floor, the arc, x=5, y=10, left); the round 8 (wall rail, two cap arcs, two
+    // floor rails, two crease arcs, the crease line). 14 faces, 72 / 2 = 36 edges, and
+    // by Euler V = 2 - F + E = 24 (7 per cap, the box's 4 at y=10, 3 more on each of z=5
+    // and z=15).
+    assert_eq!(body.faces().ids().count(), 14);
+    assert_eq!(body.edges().ids().count(), 36);
+    assert_eq!(body.vertices().ids().count(), 24);
     body.use_arena_naming().unwrap();
     let report = check_brep(&mut k, &mut body, CheckLevel::Level2).unwrap();
     assert!(report.lines().is_empty(), "{:?}", report.lines());
