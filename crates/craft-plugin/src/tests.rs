@@ -39,6 +39,82 @@ fn declared_inputs_effects_and_slots_are_readable() {
 }
 
 #[test]
+fn dialog_hook_requires_its_capability_and_newer_versions_are_reported_first() {
+    let mut m = manifest();
+    m["runtime"]["entries"] = json!([{"name":"make","dialog_hook":true}]);
+    assert!(matches!(parse(&m), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    m["capabilities"] = json!(["commands@0.1", "dialog@0.1"]);
+    assert!(parse(&m).unwrap().runtime.unwrap().entries[0].dialog_hook);
+    m["capabilities"] = json!(["commands@0.1", "dialog@0.2"]);
+    m["runtime"]["entries"][0]["future_hook_options"] = json!({"new":true});
+    assert!(matches!(parse(&m), Err(HostError::UnsupportedCapability { capability, .. }) if capability == "dialog@0.2"));
+}
+
+fn hook_schema() -> Value {
+    json!({"type":"object","required":["width"],"properties":{
+        "mode":{"type":"boolean","default":false},
+        "width":{"type":"number","minimum":1},
+        "locked":{"type":"number","x-solidcraft-visible-when":{"field":"mode","eq":false},"x-solidcraft-enabled-when":{"field":"mode","eq":false}},
+        "size":{"type":"string","oneOf":[{"const":"small","x-solidcraft-when":{"field":"mode","eq":false}},{"const":"large"}]}
+    }})
+}
+
+#[test]
+fn dialog_hook_defaults_and_narrowed_choices_share_input_validation() {
+    let patch = r#"{"width":{"default":24},"size":{"choices":["large"],"hint":"Available locally"}}"#;
+    let update = dialog::apply(&hook_schema(), &json!({}), &BTreeSet::new(), Some(patch), true).unwrap();
+    assert_eq!(update.values["width"], 24);
+    assert!(update.warning.is_none());
+    let input = json!({"width":12,"size":"small"});
+    let partial = dialog::apply(&hook_schema(), &input, &BTreeSet::from(["width".into(), "size".into()]), Some(patch), false).unwrap();
+    assert_eq!(partial.values["size"], "small", "forms preserve an edited choice and gate Run until it is valid");
+    assert_eq!(partial.fields["size"]["choices"], json!(["large"]));
+    let error = dialog::apply(&hook_schema(), &input, &BTreeSet::from(["width".into(), "size".into()]), Some(patch), true).unwrap_err();
+    assert!(matches!(error, HostError::InvalidInput { field, reason } if field == "params.size" && reason.contains("size")));
+    let update = dialog::apply(&hook_schema(), &json!({"width":12}), &BTreeSet::from(["width".into()]), Some(patch), true).unwrap();
+    assert_eq!(update.values["width"], 12);
+}
+
+#[test]
+fn dialog_hook_computed_controllers_recheck_declarative_defaults() {
+    let schema = json!({"type":"object","properties":{
+        "mode":{"type":"boolean","default":false},
+        "width":{"type":"number","default":3,"x-solidcraft-defaults":[{"when":{"field":"mode","eq":true},"value":6}]}
+    }});
+    let reply = r#"{"mode":{"value":true}}"#;
+    let update = dialog::apply(&schema, &json!({}), &BTreeSet::new(), Some(reply), true).unwrap();
+    assert_eq!(update.values, json!({"mode":true,"width":6}));
+    let update = dialog::apply(&schema, &json!({"width":12}), &BTreeSet::from(["width".into()]), Some(reply), true).unwrap();
+    assert_eq!(update.values["width"], 12);
+}
+
+#[test]
+fn dialog_hook_bad_reply_is_ignored_whole_and_cannot_widen_choices_or_conditions() {
+    for reply in ["not JSON", "[]", "null"] {
+        let update = dialog::apply(&hook_schema(), &json!({}), &BTreeSet::new(), Some(reply), false).unwrap();
+        assert!(update.warning.is_some());
+        assert!(update.fields.is_empty());
+        assert!(update.values.get("width").is_none());
+    }
+    for patch in [
+        json!({"width":{"default":24},"missing":{"hint":"unknown"}}),
+        json!({"width":{"default":24},"size":{"choices":["other"]}}),
+        json!({"width":{"default":24},"size":{"choices":["large","small"]}}),
+        json!({"width":{"default":24},"size":{"choices":["small"]}}),
+        json!({"width":{"type":"string"}}),
+        json!({"width":{"default":"wrong"}}),
+        json!({"width":{"default":null}}),
+        json!({"width":{"default":24},"locked":{"visible":true}}),
+        json!({"width":{"default":24},"locked":{"enabled":true}}),
+    ] {
+        let update = dialog::apply(&hook_schema(), &json!({"mode":true}), &BTreeSet::new(), Some(&patch.to_string()), false).unwrap();
+        assert!(update.warning.is_some(), "{patch}");
+        assert!(update.fields.is_empty(), "no partial patch");
+        assert!(update.values.get("width").is_none(), "no partial default");
+    }
+}
+
+#[test]
 fn schema_properties_must_be_objects_even_in_nested_inputs() {
     for schema in [
         json!({"type":"object","properties":[]}),

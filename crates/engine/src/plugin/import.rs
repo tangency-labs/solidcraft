@@ -138,6 +138,17 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
     if !options.is_object() {
         return Err(HostError::InvalidInput { field: "options".into(), reason: "the importer's options are an object".into() }.into());
     }
+    let hooked = if let Some(entry) = runtime.entries.iter().find(|entry| entry.name == importer.entry && entry.dialog_hook) {
+        let protected = options.as_object().map(|v| v.keys().cloned().collect()).unwrap_or_default();
+        let update = update_dialog(session, &package, &importer.entry, options, &protected, true)?;
+        if let Some(warning) = update.warning {
+            session.echo(warning);
+        }
+        Some(craft_plugin::prepare_input(&entry.input_schema, &update.values)?)
+    } else {
+        None
+    };
+    let options = hooked.as_ref().unwrap_or(options);
     // The caller's file scope covers the file, and with input_folder, the folder it is in. The
     // folder is read only when the manifest asks for it and the user approved it at install, for
     // this exact package (the grant above).

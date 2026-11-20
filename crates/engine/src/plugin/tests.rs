@@ -694,6 +694,59 @@ mod native {
         }
     }
 
+    fn dialog_fixture(code: &str) -> Fixture {
+        let f = Fixture::new("");
+        let mut m = manifest();
+        m["capabilities"] = json!(["commands@0.1", "dialog@0.1"]);
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","dialog_hook":true,"input_schema":{
+        "type":"object","required":["width"],"properties":{
+            "width":{"type":"number","minimum":1},
+            "size":{"type":"string","oneOf":[{"const":"small"},{"const":"large"}]}
+        }}}]);
+        m["runtime"]["limits"] = json!({"fuel":10000000,"memory_mib":1,"deadline_ms":250});
+        let reply = r#"{"width":{"default":24},"size":{"choices":["large"]}}"#;
+        let bytes = include_str!("../../../craft-plugin-wasm/src/dialog_fixture.wat")
+            .replace("__PACKAGE__", "craft:plugin")
+            .replace("__VERSION__", "0.2.0")
+            .replace("__HOOK_CODE__", code)
+            .replace("__REPLY_LEN__", &reply.len().to_string())
+            .replace("__REPLY__", &reply.replace('"', "\\22"));
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(bytes).unwrap()).unwrap();
+        f
+    }
+
+    #[test]
+    fn plugin_run_dialog_hook_fills_omissions_preserves_callers_and_rejects_narrowed_choices() {
+        let f = dialog_fixture("");
+        let mut s = Session::default();
+        let approval = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
+        let args = |params: Value| json!({"path":f.path(),"approval":approval,"entry":"make","params":params});
+        let tools = s.execute("plugin.tools", &json!({"name":"sample.make"})).unwrap();
+        let schema = &tools["tools"][0]["input_schema"];
+        check_input(schema, &json!({})).unwrap();
+        assert!(schema.get("required").is_none(), "MCP accepts omitted keys for hook defaults");
+        assert_eq!(s.execute("sample.make", &json!({"approval":approval,"params":{}})).unwrap()["result"]["width"], 24);
+        assert_eq!(s.execute("plugin.run", &args(json!({}))).unwrap()["result"]["width"], 24);
+        assert_eq!(s.execute("plugin.run", &args(json!({"width":12}))).unwrap()["result"]["width"], 12);
+        let error = s.execute("plugin.run", &args(json!({"size":"small"}))).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "params.size"), "{error}");
+        assert!(s.undo.is_empty());
+    }
+
+    #[test]
+    fn plugin_run_dialog_hook_timeout_is_typed_and_never_runs_the_entry() {
+        let f = dialog_fixture("(loop $forever br $forever)");
+        let path = f.0.join("sample/plugin.json");
+        let mut manifest: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        manifest["runtime"]["limits"]["deadline_ms"] = json!(1);
+        std::fs::write(path, manifest.to_string()).unwrap();
+        let mut s = Session::default();
+        let error = f.run(&mut s).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::Exhausted { limit, .. }) if limit == "deadline_ms"), "{error}");
+        assert!(s.undo.is_empty());
+    }
+
     #[test]
     fn plugin_run_omits_hidden_keys_and_refuses_unavailable_choices() {
         // Return the JSON argument received by the actual Wasm entry, using its canonical result area.

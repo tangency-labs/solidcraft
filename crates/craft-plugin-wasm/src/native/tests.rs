@@ -91,6 +91,92 @@ fn component_for(version: &str, code: &str) -> Vec<u8> {
     assert!(template.contains(original));
     wat::parse_str(template.replacen(original, &format!("      {code}\n"), 1)).unwrap()
 }
+fn dialog_component(version: &str, code: &str, reply: &str) -> Vec<u8> {
+    let source = include_str!("../dialog_fixture.wat")
+        .replace("__PACKAGE__", "craft:plugin")
+        .replace("__VERSION__", version)
+        .replace("__HOOK_CODE__", code)
+        .replace("__REPLY_LEN__", &reply.len().to_string())
+        .replace("__REPLY__", &reply.replace('"', "\\22"));
+    let source = if version == "0.1.0" { source.replace(r#" (case "unsupported" string)"#, "") } else { source };
+    wat::parse_str(source).unwrap()
+}
+
+fn hook_manifest() -> Manifest {
+    let mut m = manifest();
+    m.capabilities.push("dialog@0.1".into());
+    m.runtime.as_mut().unwrap().entries[0].dialog_hook = true;
+    m
+}
+
+#[test]
+fn dialog_hook_computes_defaults_looks_up_choices_and_old_worlds_still_link() {
+    let reply = r#"{"width":{"default":0},"size":{"choices":["large"]}}"#;
+    let digit = reply.find('0').unwrap() + 8192;
+    let choice = reply.find("large").unwrap() + 8192;
+    let code = format!(
+        "i32.const {digit} local.get 2 i32.const 9 i32.add i32.load8_u i32.const 48 i32.sub i32.const 2 i32.mul i32.const 48 i32.add i32.store8
+        local.get 2 i32.const 9 i32.add i32.load8_u i32.const 51 i32.lt_u
+        if i32.const {choice} i32.const 1818324339 i32.store i32.const {} i32.const 108 i32.store8 end",
+        choice + 4
+    );
+    for version in ["0.1.0", "0.2.0"] {
+        let bytes = dialog_component(version, &code, reply);
+        crate::check_component(&hook_manifest(), &bytes).unwrap();
+        let (host, result) =
+            crate::dialog_fields(App::default(), &hook_manifest(), &bytes, "make", &json!({"count":3}), craft_plugin::HostLimits::default());
+        let patch: Value = serde_json::from_str(&result.unwrap()).unwrap();
+        assert_eq!(patch["width"]["default"], 6);
+        assert_eq!(patch["size"]["choices"], json!(["large"]));
+        assert_eq!(host.value, 0);
+        let (_, result) =
+            crate::dialog_fields(App::default(), &hook_manifest(), &bytes, "make", &json!({"count":2}), craft_plugin::HostLimits::default());
+        let patch: Value = serde_json::from_str(&result.unwrap()).unwrap();
+        assert_eq!(patch["width"]["default"], 4);
+        assert_eq!(patch["size"]["choices"], json!(["small"]));
+        let mut app = App::default();
+        let old = component_for(version, "call $box");
+        crate::check_component(&manifest(), &old).unwrap();
+        run(&mut app, &manifest(), &old, "make", &json!({})).unwrap();
+        assert_eq!(app.value, 1);
+    }
+}
+
+#[test]
+fn dialog_hook_loops_traps_and_edit_attempts_stop_without_changing_the_host() {
+    for (code, expected) in [("(loop $forever br $forever)", "exhausted"), ("unreachable", "trap"), ("call $box", "permission_denied")] {
+        let bytes = dialog_component("0.2.0", code, "{}");
+        let (host, result) = crate::dialog_fields(App::default(), &hook_manifest(), &bytes, "make", &json!({}), craft_plugin::HostLimits::default());
+        let error = result.unwrap_err();
+        assert_eq!(serde_json::to_value(&error).unwrap()["kind"], expected, "{error}");
+        assert_eq!(host.value, 0);
+    }
+}
+
+#[test]
+fn dialog_hook_uses_its_own_fuel_ceiling_and_stops_memory_growth() {
+    let bytes = dialog_component("0.2.0", "(loop $forever br $forever)", "{}");
+    let (_, result) = crate::dialog_fields(
+        App::default(),
+        &hook_manifest(),
+        &bytes,
+        "make",
+        &json!({}),
+        craft_plugin::HostLimits { max_fuel: 77, max_memory_mib: 1 },
+    );
+    assert_eq!(result.unwrap_err(), HostError::Exhausted { limit: "fuel".into(), allowed: 77 });
+    let bytes = dialog_component("0.2.0", "i32.const 10000 memory.grow drop", "{}");
+    let (_, result) = crate::dialog_fields(App::default(), &hook_manifest(), &bytes, "make", &json!({}), craft_plugin::HostLimits::default());
+    assert!(matches!(result, Err(HostError::Exhausted { limit, allowed:1 }) if limit == "memory_mib"));
+}
+
+#[test]
+fn dialog_hook_export_requires_opt_in_and_a_declared_hook_requires_the_export() {
+    assert!(crate::check_component(&manifest(), &dialog_component("0.2.0", "", "{}")).is_err());
+    assert!(run(&mut App::default(), &manifest(), &dialog_component("0.2.0", "", "{}"), "make", &json!({})).is_err());
+    assert!(crate::check_component(&hook_manifest(), &component("")).is_err());
+}
+
 #[test]
 fn edit_commands_commit_as_one_transaction_and_instances_are_fresh() {
     let mut app = App::default();
@@ -382,6 +468,9 @@ fn files_component_after(write: bool, swallow_error: bool, after: &str) -> Vec<u
 /// An entry that makes these file calls in order (`true`: write "changed" to `secret.txt` of the
 /// grant `project`; `false`: read it), ignoring what each returns unless it is the last.
 fn files_component_calls(writes: &[bool], swallow_error: bool, after: &str) -> Vec<u8> {
+    wat::parse_str(files_component_source(writes, swallow_error, after)).unwrap()
+}
+fn files_component_source(writes: &[bool], swallow_error: bool, after: &str) -> String {
     let (package, version) = API.split_once('@').unwrap();
     let template = include_str!("../fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version);
     // Keep exactly the shared WIT types, then exercise the real files interface.
@@ -448,7 +537,7 @@ fn files_component_calls(writes: &[bool], swallow_error: bool, after: &str) -> V
   (export "{package}/entry@{version}" (instance $command))
 )"#
     );
-    wat::parse_str(source).unwrap()
+    source
 }
 #[test]
 fn file_import_denial_rolls_back_even_when_guest_swallows_it_and_grants_enable_reads() {
@@ -475,6 +564,27 @@ fn run(app: &mut App, manifest: &Manifest, component: &[u8], entry: &str, params
     let (returned, result) = crate::run(std::mem::take(app), manifest, component, entry, params);
     *app = returned;
     result
+}
+
+#[test]
+fn dialog_hook_cannot_write_files_even_with_the_command_entries_approved_grants() {
+    let source = files_component_source(&[true], true, "");
+    let (prefix, _) = source.rsplit_once(')').unwrap();
+    let source = format!(
+        r#"{prefix}
+      (func $update (param "entry" string) (param "values" $json) (result (result $json (error $plugin-error)))
+        (canon lift (core func $execute) (memory $memory) (realloc $realloc)))
+      (instance $dialog (export "json" (type $json)) (export "plugin-error" (type $plugin-error)) (export "update-fields" (func $update)))
+      (export "craft:plugin/dialog-provider@0.2.0" (instance $dialog)))"#
+    );
+    let root = import_folder(&[("secret.txt", b"original")]);
+    let mut manifest = hook_manifest();
+    manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission { name: "project".into(), read: true, write: true });
+    let app = App { grants: vec![FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true }], ..Default::default() };
+    let (_, result) = crate::dialog_fields(app, &manifest, &wat::parse_str(source).unwrap(), "make", &json!({}), craft_plugin::HostLimits::default());
+    assert_eq!(result.unwrap_err(), craft_plugin::read_entry_refusal("write-file"));
+    assert_eq!(std::fs::read(root.join("secret.txt")).unwrap(), b"original");
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -755,6 +865,39 @@ fn import_folder(files: &[(&str, &[u8])]) -> PathBuf {
     }
     root
 }
+#[test]
+fn dialog_hook_on_an_importer_links_but_cannot_write_a_design() {
+    let mut manifest = importer_manifest(false);
+    manifest.capabilities.push("dialog@0.1".into());
+    manifest.runtime.as_mut().unwrap().entries[0].dialog_hook = true;
+    let source = include_str!("../importer_fixture.wat").replace("__PACKAGE__", "craft:plugin").replace("__VERSION__", "0.2.0");
+    let source = source.replace(
+        "    (func $import (;3;)",
+        r#"
+    (export "update-fields" (func $update))
+    (func $update (param i32 i32 i32 i32) (result i32)
+        i32.const 0 i32.const 0 i32.const 0 call $write
+        i32.const 0 i32.const 0 i32.store
+        i32.const 4 i32.const 1536 i32.store
+        i32.const 8 i32.const 2 i32.store i32.const 0)
+    (data (i32.const 1536) "{}")
+    (func $import (;3;)"#,
+    );
+    let (prefix, _) = source.rsplit_once(')').unwrap();
+    let source = format!(
+        r##"{prefix}
+      (alias core export $main "update-fields" (core func $update))
+      (func $update (param "entry" string) (param "values" $json) (result (result $json (error $"#type6 plugin-error")))
+        (canon lift (core func $update) (memory $memory) (realloc $cabi_realloc)))
+      (instance $dialog (export "json" (type $json)) (export "plugin-error" (type $"#type6 plugin-error")) (export "update-fields" (func $update)))
+      (export "craft:plugin/dialog-provider@0.2.0" (instance $dialog)))"##
+    );
+    let component = wat::parse_str(source).unwrap();
+    crate::check_component(&manifest, &component).unwrap();
+    let (_, result) = crate::dialog_fields(App::default(), &manifest, &component, "convert", &json!({}), craft_plugin::HostLimits::default());
+    assert!(matches!(result, Err(HostError::PermissionDenied { permission }) if permission.contains("design")));
+}
+
 #[test]
 fn an_importer_streams_its_file_into_a_design_and_returns_its_loss_report() {
     let root = import_folder(&[("bracket.smp", b"design bytes")]);
