@@ -31,7 +31,7 @@ fn each_schema_type_becomes_its_field_with_limits_labels_and_defaults() {
     assert_eq!(fields[2].1, Input::Typed(String::new()), "a number without a default starts empty");
     assert_eq!((&fields[3].0.kind, &fields[3].1), (&Kind::Boolean, &Input::Boolean(false)));
     assert_eq!(fields[4].0.label, "name", "no title: the key");
-    assert_eq!(fields[4].0.kind, Kind::Text { min_length: None, max_length: Some(8) });
+    assert_eq!(fields[4].0.kind, Kind::Text { min_length: None, max_length: Some(8), directory: false });
     let angles: Vec<String> = vec!["14.5".into(), "20".into(), "25".into()];
     assert_eq!(fields[5].0.kind, Kind::Choice { values: angles.clone(), titles: angles }, "enum: each value shown as it is");
     assert_eq!(fields[5].1, Input::Choice(Some(1)), "the default");
@@ -905,6 +905,93 @@ fn ungranted_command_groups_keep_run_off_and_are_named() {
     assert!(app.plugin_menu.dialog().unwrap().ready(&app).is_err(), "another plugin's grants do not approve this plugin");
     app.session.plugin_state.grants.entry("files".into()).or_default().command_groups.insert("file".into());
     assert!(app.plugin_menu.dialog().unwrap().ready(&app).is_ok());
+}
+
+/// A directory field gets Browse when the host has a folder picker, and no button otherwise.
+/// The picked folder is the value sent to the plugin. A plain string field stays a text box.
+/// Run refuses a folder outside the install grant, and the grant is unchanged. Paste still
+/// fills either field.
+#[test]
+fn a_directory_field_browses_a_folder_and_an_outside_folder_stays_ungranted() {
+    let schema = json!({"type":"object","properties":{
+        "folder":{"type":"string","title":"Folder","format":"directory"},
+        "note":{"type":"string","title":"Note"}
+    }});
+    let parsed = form(&schema).expect("drawn");
+    assert!(matches!(parsed[0].0.kind, Kind::Text { directory: true, .. }), "format directory is remembered");
+    assert!(matches!(parsed[1].0.kind, Kind::Text { directory: false, .. }));
+
+    let mut h = crate::scenario::Harness::new();
+    let granted = h.dir.join("granted");
+    let outside = h.dir.join("outside");
+    std::fs::create_dir_all(&granted).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let mut command = entry("export", "edit", json!([]));
+    command.input_schema = schema;
+    h.app.plugin_menu.listed = vec![listed("files", vec![command])];
+    let grants = solidcraft_engine::plugin::Grants {
+        folders: vec![solidcraft_engine::plugin::FileGrant { name: "work".into(), folder: granted.clone(), read: true, write: true }],
+        ..Default::default()
+    };
+    h.app.session.plugin_state.grants.insert("files".into(), grants.clone());
+    h.app.preferences.plugin_grants.insert("files".into(), grants);
+    open_entry(&mut h.app, 0, 0);
+    h.frames(2);
+    let browse = h.app.tr("ui.plugin_dialog_browse").to_owned();
+    assert!(h.widgets(&browse).is_empty(), "without a folder picker, Browse is not shown");
+    assert!(!h.widgets("Folder").is_empty(), "the folder field stays a text box");
+    let folder_text = |h: &crate::scenario::Harness| match &h
+        .app
+        .plugin_menu
+        .dialog()
+        .unwrap()
+        .fields
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|(f, _)| f.key == "folder")
+        .unwrap()
+        .1
+    {
+        Input::Text(text) => text.clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(folder_text(&h), "", "the text box starts empty");
+
+    let picked = outside.to_string_lossy().into_owned();
+    let answer = picked.clone();
+    h.app.services.pick_folder = Some(Box::new(move || Box::pin(std::future::ready(Some(answer.clone())))));
+    h.frames(2);
+    assert_eq!(h.widgets(&browse).len(), 1, "only the directory field has Browse");
+    let y = |label: &str| h.widgets(label)[0][1];
+    assert!((y(&browse) - y("Folder")).abs() < (y(&browse) - y("Note")).abs(), "Browse sits on the folder row, not the plain string");
+    let grants = h.app.session.plugin_state.grants["files"].folders.clone();
+    h.step(&json!({"widget": browse})).unwrap();
+    h.frames(2);
+    assert_eq!(folder_text(&h), picked, "the picked folder is the field value");
+    assert!(!h.widgets(&picked).is_empty(), "the text box shows the picked folder, so paste can replace it");
+    let fields = h.app.plugin_menu.dialog().unwrap().fields.clone().unwrap();
+    assert_eq!(params(&fields), Ok(json!({"folder": picked})), "that path is the value sent to the plugin");
+    let err = run(&mut h.app).unwrap_err();
+    assert!(err.contains("file path has no applicable folder grant"), "{err}");
+    assert!(h.app.control_held.is_empty(), "Run does not go ahead with a folder outside the grant");
+    assert_eq!(h.app.session.plugin_state.grants["files"].folders, grants, "picking a folder does not widen the install grant");
+
+    let allowed = granted.to_string_lossy().into_owned();
+    {
+        let fields = h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap();
+        fields.iter_mut().find(|(field, _)| field.key == "folder").unwrap().1 = Input::Text(allowed.clone());
+        fields.iter_mut().find(|(field, _)| field.key == "note").unwrap().1 = Input::Text("pasted".into());
+    }
+    let sent = json!({"folder": allowed, "note": "pasted"});
+    assert_eq!(
+        h.app.plugin_menu.dialog().unwrap().ready(&h.app).as_ref().unwrap(),
+        &sent,
+        "a pasted path inside the grant, and a pasted string, are sent"
+    );
+    run(&mut h.app).unwrap();
+    let request = h.app.control_held.back().expect("the allowed folder is sent to the plugin");
+    assert_eq!(request.params["params"]["params"], sent);
 }
 
 #[test]

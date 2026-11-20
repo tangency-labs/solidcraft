@@ -533,7 +533,9 @@ pub struct Services {
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
     /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
     pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
-    /// Select the local document library root; unavailable in browser hosts.
+    /// Open a dialog asking for a folder. `None` on the web build and when the host has no
+    /// folder picker: a plugin field shows no Browse button and the text field still accepts
+    /// a pasted path, and the document library cannot choose a folder.
     pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
     pub show_in_folder: Option<Box<dyn Fn(&str)>>,
     /// Open a file in the program the system opens its kind with (a PDF in its viewer, to print).
