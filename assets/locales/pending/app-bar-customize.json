@@ -23,6 +23,7 @@
     "app_bar.release": "Release to put it back in the tray",
     "app_bar.reset": "Reset to default",
     "app_bar.separator": "Separator",
+    "app_bar.space": "Space",
     "app_bar.subtitle": "Drag an item up to the bar. Drag it off the bar to take it away.",
     "app_bar.title": "Customize the app bar",
     "app_bar.version": "Version",

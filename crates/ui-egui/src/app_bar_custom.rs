@@ -90,9 +90,9 @@ pub(crate) fn preset(app: &mut SolveApp, value: Preset) {
     app.toolbar_custom.app_bar.set_preset(value, &defaults);
 }
 pub(crate) fn add(app: &mut SolveApp, id: &str) {
-    if id == "separator" {
+    if matches!(id, "separator" | "space") {
         let defaults = defaults(app);
-        app.toolbar_custom.app_bar.add_separator(Zone::End, None, &defaults);
+        app.toolbar_custom.app_bar.add_object(id, Zone::End, None, &defaults);
         return;
     }
     if app.toolbar_custom.app_bar.items.iter().any(|p| p.id == id && p.shown) {
@@ -122,8 +122,8 @@ pub(crate) fn preview(app: &SolveApp, ctx: &egui::Context) -> Layout {
     if let Some(drag) = drag.filter(|d| d.active && app.toolbar_custom.app_bar_customizing) {
         let defaults = defaults(app);
         if let Some(slot) = drag.slot {
-            if drag.id == "separator" {
-                layout.add_separator(slot.zone, slot.before.as_deref(), &defaults);
+            if matches!(drag.id.as_str(), "separator" | "space") {
+                layout.add_object(&drag.id, slot.zone, slot.before.as_deref(), &defaults);
             } else {
                 layout.move_before(&drag.id, slot.zone, slot.before.as_deref(), &defaults);
                 layout.set_shown(&drag.id, true, &defaults);
@@ -200,7 +200,7 @@ pub(crate) fn backing(ui: &egui::Ui, content: Rect, out: &app_bar::BarOut, shape
         ui.painter().set(
             shape,
             egui::Shape::Vec(vec![
-                egui::Shape::rect_filled(rect, 10, t.app_bar.lerp_to_gamma(t.text, 0.065)),
+                egui::Shape::rect_filled(rect, 10, app_bar::edit_palette(t).card),
                 egui::Shape::rect_stroke(rect, 10, Stroke::new(1.0, t.border), egui::StrokeKind::Inside),
             ]),
         );
@@ -223,7 +223,7 @@ pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, out: &ap
         }
         let response = ui.interact(rect, Id::unique(("appbar_edit", &item.id)), Sense::click_and_drag());
         if response.contains_pointer() && !drag.as_ref().is_some_and(|d| d.active) {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            ui.ctx().set_cursor_icon(app_bar::grab_cursor());
         }
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label_icon(app, &item.id).0));
         crate::scenario::publish_target(&format!("appbar:edit:{}", item.id), rect);
@@ -268,10 +268,10 @@ pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, out: &ap
         held.below = app_bar_items::drag_out(held.pointer.y, content.bottom());
         // The repeatable tray tile has no saved identity until placement. Exclude its
         // provisional preview object from the slot calculation just like a lifted item.
-        let preview_id = if held.id == "separator" {
+        let preview_id = if matches!(held.id.as_str(), "separator" | "space") {
             out.edit_items
                 .iter()
-                .find(|p| p.id.starts_with("separator:") && !app.toolbar_custom.app_bar.items.iter().any(|s| s.id == p.id))
+                .find(|p| p.id.starts_with(&format!("{}:", held.id)) && !app.toolbar_custom.app_bar.items.iter().any(|s| s.id == p.id))
                 .map(|p| p.id.as_str())
                 .unwrap_or(&held.id)
         } else {
@@ -317,8 +317,8 @@ pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, out: &ap
                     DragRelease::Insert => {
                         if let Some(slot) = &held.slot {
                             let defaults = defaults(app);
-                            if held.id == "separator" {
-                                app.toolbar_custom.app_bar.add_separator(slot.zone, slot.before.as_deref(), &defaults);
+                            if matches!(held.id.as_str(), "separator" | "space") {
+                                app.toolbar_custom.app_bar.add_object(&held.id, slot.zone, slot.before.as_deref(), &defaults);
                             } else {
                                 app.toolbar_custom.app_bar.move_before(&held.id, slot.zone, slot.before.as_deref(), &defaults);
                                 app.toolbar_custom.app_bar.set_shown(&held.id, true, &defaults);
@@ -368,6 +368,7 @@ fn label_icon(app: &SolveApp, id: &str) -> (String, String) {
     let (key, icon) = match id {
         "documents" => ("app_bar.documents", "document_browser"),
         "separator" => ("app_bar.separator", "help"),
+        "space" => ("app_bar.space", "help"),
         "file" => ("ui.file", "new"),
         "home" => ("ui.start_page", "home"),
         "save" => ("ui.save", "save"),
@@ -381,6 +382,7 @@ fn label_icon(app: &SolveApp, id: &str) -> (String, String) {
         "help" => ("ui.help", "help"),
         "version" => ("app_bar.version", "help"),
         _ if id.starts_with("separator:") => ("app_bar.separator", "help"),
+        _ if id.starts_with("space:") => ("app_bar.space", "help"),
         _ => return (id.into(), "help".into()),
     };
     (app.tr(key).into(), icon.into())
@@ -389,7 +391,9 @@ fn control<'a>(app: &'a SolveApp, id: &'a str, version: &'a str) -> Control<'a> 
     match id {
         "documents" => Control::Documents,
         "separator" => Control::Separator,
+        "space" => Control::Space,
         _ if id.starts_with("separator:") => Control::Separator,
+        _ if id.starts_with("space:") => Control::Space,
         "file" => Control::File { label: app.tr("ui.file"), enabled: true, open: false },
         "report" => Control::Report { label: app.tr("ui.report_a_bug"), labelled: true },
         "version" => Control::Version(version),
@@ -450,10 +454,15 @@ fn tile(app: &mut SolveApp, ui: &mut egui::Ui, id: &str, version: &str) {
     let on_bar = app.toolbar_custom.app_bar.items.iter().any(|p| p.id == id && p.shown) && !returning;
     let placeable = !on_bar && !empty;
     if placeable && response.contains_pointer() && !app_bar::is_dragging(ui.ctx()) {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        ui.ctx().set_cursor_icon(app_bar::grab_cursor());
     }
     app_bar::paint_hover(ui, &format!("tray:{id}"), cell, 9, placeable && response.contains_pointer(), |ui| {
-        ui.painter().rect_filled(cell, 9, t.app_bar);
+        let palette = app_bar::edit_palette(t);
+        ui.painter().rect_filled(
+            cell,
+            9,
+            if placeable && response.contains_pointer() && !app_bar::is_dragging(ui.ctx()) { palette.hover } else { palette.item },
+        );
         if !empty {
             if returning {
                 ui.painter().rect_stroke(cell.expand(2.0), 11, Stroke::new(4.0, t.accent.gamma_multiply(0.15)), egui::StrokeKind::Outside);
@@ -461,7 +470,16 @@ fn tile(app: &mut SolveApp, ui: &mut egui::Ui, id: &str, version: &str) {
             ui.painter().rect_stroke(
                 cell,
                 9,
-                Stroke::new(1.0, if returning || response.has_focus() { t.accent } else { t.border }),
+                Stroke::new(
+                    1.0,
+                    if returning || response.has_focus() {
+                        t.accent
+                    } else if id == "space" {
+                        t.app_bar_text.gamma_multiply(0.24)
+                    } else {
+                        t.border
+                    },
+                ),
                 egui::StrokeKind::Inside,
             );
             app_bar::preview_control(ui, cell.shrink(4.0), control(app, id, version), if on_bar { 0.5 } else { 1.0 }, false, false);
@@ -505,14 +523,14 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, width: f32) -> bool {
     let done_label = app.tr("app_bar.done");
     let done_width =
         ui.painter().layout_no_wrap(done_label.into(), FontId::proportional(t.font_label), t.on_accent).size().x + (t.space_12 + t.space_6) * 2.0;
-    let segment_gap = t.space_8 * 2.0 + 1.0;
+    let segment_gap = t.space_8;
     let natural_presets: f32 = options
         .iter()
         .map(|label| ui.painter().layout_no_wrap((*label).into(), ui_kit::type_face::semibold(t.font_label), t.text).size().x.ceil() + t.space_16)
         .sum::<f32>()
         + segment_gap;
-    let presets_width = natural_presets.min((width - done_width - t.space_8 - 166.0).max(80.0));
-    let controls_width = presets_width + t.space_8 + done_width;
+    let presets_width = natural_presets.min((width - done_width - t.space_24 - 166.0).max(80.0));
+    let controls_width = presets_width + t.space_24 + done_width;
     let title_width = (width - controls_width - t.space_24 - t.space_2).max(0.0);
     let title_height = t.font_heading + t.space_4;
     let subtitle = app.tr("app_bar.subtitle");
@@ -532,7 +550,7 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, width: f32) -> bool {
     let done = app_bar::tray_done(&mut done_ui, done_rect, done_label);
     crate::scenario::publish_target("appbar:done", done.rect);
     let presets_rect =
-        Rect::from_center_size(pos2(done_rect.left() - t.space_8 - presets_width / 2.0, rect.center().y), vec2(presets_width, ui_kit::row_height()));
+        Rect::from_center_size(pos2(done_rect.left() - t.space_24 - presets_width / 2.0, rect.center().y), vec2(presets_width, ui_kit::row_height()));
     crate::scenario::publish_rect("appbar:header:presets", presets_rect);
     let values = [Preset::Default, Preset::Minimal, Preset::Full, Preset::Compact, Preset::Custom];
     let matched = app.toolbar_custom.app_bar.preset(&defaults(app));
@@ -561,12 +579,6 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, width: f32) -> bool {
             ..Default::default()
         },
     );
-    let line = Rect::from_center_size(
-        pos2(left.right() + segment_gap / 2.0, presets_rect.center().y),
-        vec2(1.0, (presets_rect.height() - t.space_8).max(0.0)),
-    );
-    ui.painter().vline(line.center().x, line.y_range(), Stroke::new(1.0, t.border));
-    crate::scenario::publish_rect("appbar:presets:divider", line);
     let mut custom_ui =
         ui.new_child(egui::UiBuilder::new().id_salt("appbar_custom_indicator").max_rect(right).layout(egui::Layout::top_down(egui::Align::Min)));
     let mut indicator = if matched == Preset::Custom { 0 } else { usize::MAX };
@@ -625,7 +637,7 @@ fn body(app: &mut SolveApp, ui: &mut egui::Ui, width: f32, version: &str) {
     let sections = [
         ("app_bar.commands", &["documents", "home", "save", "undo", "redo", "assistant", "settings", "help"][..]),
         ("app_bar.links", &["report", "donate", "discord", "version"][..]),
-        ("app_bar.layout", &["separator"][..]),
+        ("app_bar.layout", &["separator", "space"][..]),
     ];
     let quick: Vec<_> =
         app.toolbar_custom.quick_access.iter().filter(|id| solidcraft_engine::find_command(id).is_some()).map(|id| format!("quick:{id}")).collect();
@@ -742,12 +754,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             ui.set_width(width);
             ui.set_opacity(1.0);
-            // This editor is an opaque card, even when workspace panels use glass backing.
-            let frame = host
-                .frame(ctx, t.panel, ui_kit::frame::Side::Left)
-                .fill(t.panel.to_opaque())
-                .stroke(Stroke::new(1.0, t.border))
-                .inner_margin(t.space_12);
+            let frame = host.frame(ctx, t.panel, ui_kit::frame::Side::Left).inner_margin(t.space_12);
             let content_width = (width - (t.space_12 + frame.stroke.width) * 2.0).max(TILE_WIDTH);
             let card = Container::show_backing(ui, frame, |ui| {
                 ui.set_width(content_width);

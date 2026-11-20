@@ -1,6 +1,7 @@
 //! Application bar, the workspace toolbar (tabs and panels) and keyboard shortcuts.
 
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::app_bar_layout::application::{CONTENT_PADDING, GAP};
 use crate::ui_kit::{self, Container, Edge, Surface};
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
@@ -84,9 +85,6 @@ fn ribbon_shows_pressed(app: &SolveApp, id: &str) -> bool {
     if persistent_available(app, id) { running_command(app).as_deref() == Some(id) } else { shows_pressed(app, id) }
 }
 
-/// The height of an application-bar pill ([`offer_pill`]), a little under the bar's 26 px buttons.
-pub(crate) const PILL_HEIGHT: f32 = 22.0;
-
 /// An application-bar pill for something on offer (Update) at the right of `span` (the bar's free
 /// space): accent-filled (outlined on the bar when `quiet`, for a notice such as Managed by), with `icon` and the first of `labels` that fits (the icon alone when
 /// none does or `labeled` is false). Every label but the last also leaves `keep` points of the
@@ -104,7 +102,9 @@ pub(crate) fn offer_pill(
 ) -> Option<(Rect, egui::Response)> {
     let t = Tokens::get();
     let font = FontId::proportional(t.font_label);
-    let (icon_x, text_x, right_pad) = (16.0, 29.0, 11.0);
+    let icon_x = CONTENT_PADDING + app_bar::PILL_ICON_SIZE / 2.0;
+    let text_x = CONTENT_PADDING + app_bar::PILL_ICON_SIZE + GAP;
+    let right_pad = CONTENT_PADDING;
     let last = labels.len().saturating_sub(1);
     let label = labels.iter().enumerate().filter(|_| labeled).find_map(|(i, text)| {
         let galley = ui.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font.clone(), t.app_bar_text));
@@ -112,17 +112,18 @@ pub(crate) fn offer_pill(
         let room = if i < last { span.width() - keep } else { span.width() };
         (width <= room).then_some((*text, width))
     });
-    let width = label.map_or(PILL_HEIGHT + 4.0, |(_, w)| w);
+    let width = label.map_or(app_bar::ITEM_HEIGHT, |(_, w)| w);
     if width > span.width() {
         return None;
     }
-    let rect = Rect::from_min_size(pos2(span.right() - width, span.center().y - PILL_HEIGHT / 2.0), vec2(width, PILL_HEIGHT));
+    let height = if label.is_some() { app_bar::PILL_HEIGHT } else { app_bar::ITEM_HEIGHT };
+    let rect = Rect::from_min_size(pos2(span.right() - width, span.center().y - height / 2.0), vec2(width, height));
     let response = ui.interact(rect, ui.scope_id().with(("sc_offer_pill", handle)), Sense::click());
     let name = label.map(|(text, _)| text).or(labels.first().copied()).unwrap_or_default().to_string();
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), &name));
     crate::scenario::publish_target(handle, rect);
     let hot = response.hovered() || response.has_focus();
-    let radius = PILL_HEIGHT / 2.0 * f32::from(t.radius_xl) / 10.0;
+    let radius = if label.is_some() { f32::from(app_bar::ITEM_PILL_RADIUS) } else { f32::from(app_bar::ITEM_RADIUS) };
     if hot {
         ui.painter().rect_filled(rect, radius, t.app_bar_hover_button);
     } else if quiet {
@@ -134,7 +135,8 @@ pub(crate) fn offer_pill(
         ui.painter().rect_stroke(rect.expand(2.0), Tokens::outset_radius(radius, 2.0), Stroke::new(1.0, t.app_bar_text), egui::StrokeKind::Outside);
     }
     let glyph_x = if label.is_some() { rect.left() + icon_x } else { rect.center().x };
-    let glyph = Rect::from_center_size(pos2(glyph_x, rect.center().y), vec2(16.0, 16.0));
+    let icon_size = if label.is_some() { app_bar::PILL_ICON_SIZE } else { app_bar::ITEM_ICON_SIZE };
+    let glyph = Rect::from_center_size(pos2(glyph_x, rect.center().y), vec2(icon_size, icon_size));
     icons::paint_on(ui.painter(), glyph, icon, Some(true), 1.0);
     if let Some((text, _)) = label {
         ui.painter().text(pos2(rect.left() + text_x, rect.center().y), Align2::LEFT_CENTER, text, font, t.app_bar_text);
@@ -262,7 +264,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 quick_ids: &quick_ids,
                 mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
                 name: "SolidCraft",
-                leading: (crate::library::available(app) && !app.home.open).then_some(vec2(26.0, 26.0)),
+                leading: (crate::library::available(app) && !app.home.open).then_some(vec2(app_bar::ITEM_HEIGHT, app_bar::ITEM_HEIGHT)),
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
@@ -283,9 +285,9 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     },
                     icon_only: app.header.report == ReportButton::Icon,
                 },
-                pills: crate::links::pills(app, r.width() >= app_bar::PILL_LABEL_MIN)
+                pills: crate::links::pills(app, true)
                     .into_iter()
-                    .map(|p| app_bar::Pill { hide_tip: app.tr("app_bar.hide_tip"), ink: t.on_accent, ..p })
+                    .map(|p| app_bar::Pill { hide_tip: app.tr("app_bar.hide_tip"), ink: t.app_bar_text, ..p })
                     .collect(),
                 search: search_in_header(app) && design_shown(app),
                 search_shortcut: palette_shortcut.as_deref(),
@@ -293,8 +295,12 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 version: (app.header.version == VersionPlace::Header).then_some(app_bar::Version { text: &version, url: &url }),
                 handles: APP_BAR_HANDLES,
             };
-            let measure =
-                |text: &str| ui.painter().layout_no_wrap(text.to_string(), FontId::proportional(t.font_label), t.app_bar_text).size().x + 40.0;
+            let measure = |text: &str| {
+                ui.painter().layout_no_wrap(text.to_string(), FontId::proportional(t.font_label), t.app_bar_text).size().x
+                    + CONTENT_PADDING * 2.0
+                    + app_bar::PILL_ICON_SIZE
+                    + GAP
+            };
             let offers = app_bar::Offers {
                 update: crate::update::offered(app)
                     .map(|release| measure(&solidcraft_ui_text::format("update.button_version", &[("version", release.version())]))),
@@ -388,9 +394,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             // A newer release: its Update button stays before the right cluster, and the
             // organization's Managed by badge left of it and of the link pills.
-            let (update, badge) = draw_bar_offers(app, ui, &out);
-            let tabs_end =
-                if out.reserved_offers { out.tabs_end } else { badge.or(update).map_or(out.tabs_end, |u| out.tabs_end.min(u.left() - 8.0)) };
+            let _ = draw_bar_offers(app, ui, &out);
+            let tabs_end = out.tabs_end;
             // Narrow title bars can fit only part of the tab strip. Its hit regions must not
             // extend into the persistent report and window controls.
             let tabs_rect = Rect::from_min_max(pos2(out.tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));
@@ -436,15 +441,6 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 /// Reserved slots keep the tab minimum in the layout, so their labels need no second tab allowance.
 fn draw_bar_offers(app: &mut SolveApp, ui: &mut egui::Ui, out: &app_bar::BarOut) -> (Option<Rect>, Option<Rect>) {
-    if !out.reserved_offers {
-        let update = app_bar::paint_motion(ui, "offered", out.offer, |ui| crate::update::button(app, ui, out.offer, out.offer_labeled));
-        let badge = out.managed.and_then(|mut span| {
-            let right = update.map_or(out.controls_left, |u| u.left().min(out.controls_left)) - 6.0;
-            span.max.x = right.max(span.min.x);
-            app_bar::paint_motion(ui, "managed", span, |ui| crate::policy::badge(app, ui, span, out.managed_labeled))
-        });
-        return (update, badge);
-    }
     let update = crate::update::offered(app).map(|r| r.version().to_string()).and_then(|version| {
         let full = solidcraft_ui_text::format("update.button_version", &[("version", &version)]);
         let labels = [full.as_str(), solidcraft_ui_text::tr("update.button")];
@@ -2166,7 +2162,7 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, slots: &[(
     let mut buttons = Vec::with_capacity(ids.len());
     let mut start = None;
     for (c, x) in &ids {
-        let br = Rect::from_center_size(pos2(*x, bar.center().y), vec2(32.0, 32.0));
+        let br = Rect::from_center_size(pos2(*x, bar.center().y), vec2(app_bar::ITEM_HEIGHT, app_bar::ITEM_HEIGHT));
         let info = c.info(&app.session);
         let customizing = app.toolbar_custom.app_bar_customizing;
         let enabled = customizing || (shown && info.enabled);
@@ -3028,16 +3024,32 @@ fn view_place(key: egui::Key) -> Option<u8> {
         .and_then(|i| u8::try_from(i).ok())
 }
 
-/// The Report a bug button for this header layout ([`app_bar::report_rect`]).
 #[cfg(test)]
-fn report_rect(bar: Rect, captions: f32, tabs_start: f32, label_width: f32, version_width: f32, layout: HeaderLayout) -> (Rect, bool) {
-    let version = (layout.version == VersionPlace::Header).then_some(version_width);
-    app_bar::report_rect(bar, captions, tabs_start, label_width, version, layout.report == ReportButton::Icon)
+use ui_kit::app_bar_layout::application::GAP as HEADER_SEARCH_GAP;
+
+/// Test measurements feed the actual application spec, never a second set of anchor maths.
+#[cfg(test)]
+fn header_geometry(width: f32, captions: f32, label: f32, version: f32, layout: HeaderLayout) -> ui_kit::app_bar_layout::Placed {
+    use ui_kit::app_bar_layout::{application, layout as place};
+    let m = application::Measurements {
+        origin: 0.0,
+        name: 50.0,
+        file: 40.0,
+        leading: None,
+        actions: vec![false, true, true],
+        quick: 0,
+        report: label,
+        report_icon_only: layout.report == ReportButton::Icon,
+        pills: Vec::new(),
+        search: (layout.search == SearchPlace::Header).then_some((160.0, app_bar::ITEM_HEIGHT)),
+        assistant: true,
+        version: (layout.version == VersionPlace::Header).then_some(version),
+        offered: None,
+        managed: None,
+        pixels_per_point: 1.0,
+    };
+    place(&application::spec(width, 0.0, captions, m))
 }
-
-#[cfg(test)]
-use app_bar::{CLUSTER_BUTTONS, REPORT_TEXT_X, RIGHT_GROUP, SEARCH_GAP as HEADER_SEARCH_GAP, help_x, version_room};
-
 /// A grid drop-down's commands as the grid lays them out: their ids under their headings.
 #[cfg(test)]
 fn grid_ids(grouped: &[(Option<&'static str>, &'static solidcraft_engine::CommandSpec)]) -> Vec<(Option<&'static str>, &'static str)> {
@@ -3582,30 +3594,23 @@ mod header_report_tests {
 
     #[test]
     fn header_report_reserves_controls_at_normal_and_double_scale_widths() {
-        for physical_width in [900.0, 1400.0] {
+        use ui_kit::app_bar_layout::application::{CONTENT_PADDING, GAP, PILL_ICON};
+        for physical in [900.0, 1400.0] {
             for scale in [1.0, 2.0] {
-                let width = physical_width / scale;
-                let bar = Rect::from_min_size(egui::Pos2::ZERO, vec2(width, APP_BAR_HEIGHT));
                 for captions in [0.0, crate::window_chrome::WIDTH] {
-                    // The English label, and a longer one (Russian is about 125 px).
-                    for (label_width, layout) in [80.0, 125.0].into_iter().flat_map(|w| [(w, HeaderLayout::DESKTOP), (w, HeaderLayout::COMPACT)]) {
-                        let (report, labeled) = report_rect(bar, captions, 354.0, label_width, 40.0, layout);
-                        assert!(bar.contains_rect(report));
-                        let prefs = Rect::from_center_size(pos2(report.left() - 52.0, APP_BAR_HEIGHT / 2.0), vec2(32.0, 32.0));
-                        let help = Rect::from_center_size(pos2(help_x(report), APP_BAR_HEIGHT / 2.0), vec2(32.0, 32.0));
-                        assert!(!report.intersects(prefs) && !report.intersects(help) && !help.intersects(prefs));
-                        assert!(prefs.right() < help.left() && help.right() < report.left());
-                        if layout.report == ReportButton::Icon {
-                            assert!(!labeled && report.size() == vec2(32.0, 32.0));
-                            continue;
-                        }
-                        let full = REPORT_TEXT_X + label_width + 11.0;
-                        assert_eq!(
-                            labeled,
-                            width - captions - version_room(bar, captions, 354.0, 40.0).unwrap_or(8.0) - CLUSTER_BUTTONS - 354.0 >= 216.0 + full
-                        );
-                        if labeled {
-                            assert!(REPORT_TEXT_X + label_width < report.width(), "{label_width}: the text overruns its button");
+                    for label in [80.0, 125.0] {
+                        for layout in [HeaderLayout::DESKTOP, HeaderLayout::COMPACT] {
+                            let width = physical / scale;
+                            let placed = header_geometry(width, captions, label, 40.0, layout);
+                            let g = placed.application.unwrap();
+                            if g.report.right > g.report.left {
+                                assert!(g.report.left >= 0.0 && g.report.right <= width - captions);
+                                if g.visible.iter().any(|id| id == "help") {
+                                    assert!((g.report.left - (g.help + app_bar::ITEM_HEIGHT / 2.0) - GAP).abs() < 0.01);
+                                }
+                                let expected = if g.report_labeled { CONTENT_PADDING * 2.0 + PILL_ICON + GAP + label } else { app_bar::PILL_HEIGHT };
+                                assert!((g.report.right - g.report.left - expected).abs() < 0.01);
+                            }
                         }
                     }
                 }
@@ -3652,7 +3657,7 @@ mod header_report_tests {
         assert!(crate::scenario::rect_of("titlebar:update").is_none(), "Update is behind More");
         assert!(!h.app.updater.open);
         assert!(h.widget("More").is_some(), "More has its catalogue accessible name");
-        assert_eq!(crate::scenario::rect_of("appbar:overflow").unwrap().size(), vec2(32.0, 32.0));
+        assert_eq!(crate::scenario::rect_of("appbar:overflow").unwrap().size(), vec2(app_bar::ITEM_HEIGHT, app_bar::ITEM_HEIGHT));
         assert_eq!(crate::scenario::rect_of("appbar:overflow"), crate::scenario::rect_of("titlebar:overflow"));
         h.step(&json!({"click":{"handle":"appbar:overflow"}})).unwrap();
         h.frames(2);
@@ -3681,8 +3686,8 @@ mod header_report_tests {
         let rect = |name: &str| crate::scenario::rect_of(name).unwrap();
         let first = rect("titlebar:separator:brand");
         let second = rect("titlebar:separator:documents");
-        assert_eq!(first.size(), vec2(1.0, 20.0));
-        assert_eq!(second.size(), vec2(1.0, 20.0));
+        assert_eq!(first.size(), vec2(1.0, 16.0));
+        assert_eq!(second.size(), vec2(1.0, 16.0));
         assert_eq!(first.center().y, 17.0);
         assert_eq!(second.center().y, 17.0);
         assert!(rect("titlebar:home").right() < first.left());
@@ -3692,9 +3697,12 @@ mod header_report_tests {
         assert!(second.right() < rect("tab:design:0").left());
         assert!(at("tab:design:0") < at("titlebar:assistant"));
         assert!(at("titlebar:assistant") < at("titlebar:preferences"));
-        for name in ["titlebar:assistant", "titlebar:preferences", "appbar:help"] {
-            assert_eq!(rect(name).size(), vec2(32.0, 32.0));
+        for name in ["titlebar:home", "titlebar:save", "appbar:undo", "appbar:redo", "titlebar:assistant", "titlebar:preferences", "appbar:help"] {
+            assert_eq!(rect(name).size(), vec2(app_bar::ITEM_HEIGHT, app_bar::ITEM_HEIGHT));
             assert!(rect(name).top() >= 0.0 && rect(name).bottom() <= APP_BAR_HEIGHT);
+        }
+        if let Some(documents) = crate::scenario::rect_of("library:toggle") {
+            assert_eq!(documents.size(), vec2(app_bar::ITEM_HEIGHT, app_bar::ITEM_HEIGHT));
         }
         assert!(at("titlebar:preferences") < at("appbar:help") && (at("appbar:help") as f64) < report);
         assert!(at("appbar:home") < at("appbar:file"));
@@ -3719,19 +3727,10 @@ mod header_report_tests {
             h.app.preferences.language = language.into();
             h.call("ui.resize", json!({"width":1400.0,"height":720}));
             h.frames(3);
-            let center = crate::scenario::handle_at("titlebar:report").expect("the report button is drawn");
-            let t = Tokens::get();
-            let version = format!("v{}", crate::update::current_version());
-            let version = h.ctx.fonts_mut(|f| f.layout_no_wrap(version, FontId::proportional(t.font_small), t.app_bar_text).size().x);
-            // The button's right edge is fixed; its width is twice the distance to its centre.
-            let bar = Rect::from_min_size(egui::Pos2::ZERO, vec2(1400.0, APP_BAR_HEIGHT));
-            let room = version_room(bar, crate::window_chrome::WIDTH, 354.0, version).unwrap_or(8.0);
-            2.0 * (1400.0 - crate::window_chrome::WIDTH - room - center.x)
+            crate::scenario::rect_of("titlebar:report").unwrap().width()
         };
         let (en, ru) = (width_in("en"), width_in("ru"));
-        assert!((en - 114.34375).abs() < 0.05, "Plex Sans report button width: {en}");
-        // "Сообщить об ошибке" needs more than the English button's 114 px.
-        assert!(ru > en + 10.0, "{ru}");
+        assert!(en > 90.0 && ru > en + 10.0, "labels determine their own width: {en}/{ru}");
     }
 
     #[test]
@@ -3778,14 +3777,17 @@ mod header_report_tests {
         assert_eq!(search.width(), crate::ui_kit::CommandSearch::closed_width(&h.ctx, Some("S")));
         assert!(crate::scenario::rect_of("titlebar:search").is_none());
         let report = rect("titlebar:report");
-        // A pre-release's longer version takes more room than RIGHT_GROUP and moves the button left.
+        // The version owns its text width and twelve points of padding on each side.
         let t = Tokens::get();
         let version = format!("v{}", crate::update::current_version());
         let version = h.ctx.fonts_mut(|f| f.layout_no_wrap(version, FontId::proportional(t.font_small), t.app_bar_text).size().x);
-        assert_eq!(report.right(), 1400.0 - crate::window_chrome::WIDTH - RIGHT_GROUP.max(12.0 + version + 8.0));
-        assert_eq!(report.height(), 26.0);
+        assert_eq!(
+            report.right(),
+            1400.0 - crate::window_chrome::WIDTH - (version + ui_kit::app_bar_layout::application::VERSION_PADDING * 2.0) - HEADER_SEARCH_GAP
+        );
+        assert_eq!(report.height(), app_bar::PILL_HEIGHT);
         assert!(report.width() > 100.0, "Report a bug carries its label: {report:?}");
-        assert_eq!(rect("titlebar:preferences").center().x, report.left() - 52.0);
+        assert_eq!(rect("titlebar:preferences").center().x, report.left() - HEADER_SEARCH_GAP * 2.0 - app_bar::ITEM_HEIGHT * 1.5);
         assert!(crate::scenario::handle_at("titlebar:version").is_some(), "the version is in the bar");
         h.step(&json!({"click":{"handle":"appbar:help"}})).unwrap();
         assert!(h.app.help.menu);
@@ -3812,9 +3814,9 @@ mod header_report_tests {
         assert_eq!(rect("ribbon:search"), search, "the one search field is drawn in the bar");
         // Report a bug: an icon the size of Settings and Help, still named for assistive tools.
         let report = rect("titlebar:report");
-        assert_eq!(report.size(), vec2(32.0, 32.0));
-        assert_eq!(report.right(), 1400.0 - crate::window_chrome::WIDTH - 8.0, "no room is kept for the version");
-        assert_eq!(rect("appbar:help").size(), report.size());
+        assert_eq!(report.size(), vec2(app_bar::PILL_HEIGHT, app_bar::PILL_HEIGHT));
+        assert_eq!(report.right(), 1400.0 - crate::window_chrome::WIDTH, "no room is kept for the version");
+        assert_eq!(rect("appbar:help").size(), vec2(app_bar::ITEM_HEIGHT, app_bar::ITEM_HEIGHT));
         assert!(h.widget("Report a bug").is_some(), "the icon keeps its accessible name");
         assert!(crate::scenario::handle_at("titlebar:version").is_none(), "the version left the bar");
         // The ribbon's tabs run to its end.
@@ -3839,7 +3841,7 @@ mod header_report_tests {
         h.call("ui.resize", json!({"width":700.0,"height":720}));
         h.frames(3);
         let search = rect("titlebar:search");
-        assert_eq!(search.width(), crate::ui_kit::CommandSearch::compact_width(26.0));
+        assert_eq!(search.width(), app_bar::ITEM_HEIGHT);
         assert_eq!(search.right(), rect("titlebar:preferences").left() - HEADER_SEARCH_GAP);
         h.step(&json!({"click":{"handle":"titlebar:search"}})).unwrap();
         assert!(h.app.ui.palette_open, "the magnifier opens search");
@@ -3891,27 +3893,15 @@ mod header_report_tests {
     /// hidden, as on a narrow bar (#5621).
     #[test]
     fn a_longer_version_moves_the_report_button_instead_of_covering_it() {
-        let h = crate::scenario::Harness::new();
-        let t = Tokens::get();
-        let measure = |text: &str| h.ctx.fonts_mut(|f| f.layout_no_wrap(text.into(), FontId::proportional(t.font_small), t.app_bar_text).size().x);
-        let (release, candidate) = (measure("v0.25.1"), measure("v0.21.0-rc.1"));
-        assert!(candidate > release + 15.0, "{release} {candidate}");
+        use ui_kit::app_bar_layout::application::{GAP, VERSION_PADDING};
         for width in [700.0, 900.0, 1400.0] {
-            let bar = Rect::from_min_size(egui::Pos2::ZERO, vec2(width, APP_BAR_HEIGHT));
             for captions in [0.0, crate::window_chrome::WIDTH] {
-                // A release keeps the button where it always was.
-                assert_eq!(version_room(bar, captions, 354.0, release), Some(RIGHT_GROUP), "{width} {captions}");
-                for (k, version_width) in [release, candidate, 2.0 * candidate].into_iter().enumerate() {
-                    let (report, _) = report_rect(bar, captions, 354.0, 80.0, version_width, HeaderLayout::DESKTOP);
-                    let shown = version_room(bar, captions, 354.0, version_width).is_some();
-                    if shown {
-                        let version_left = bar.right() - 12.0 - captions - version_width;
-                        assert!(report.right() + 8.0 <= version_left + 0.01, "{width} {captions} {version_width}: {report:?}");
-                    } else {
-                        assert_eq!(report.right(), bar.right() - captions - 8.0, "{width} {captions} {version_width}: the narrow bar's margin");
-                    }
-                    if k == 1 {
-                        assert_eq!(shown, width >= 900.0, "{width} {captions}: the release candidate's version");
+                for version_width in [40.0, 80.0, 160.0] {
+                    let g = header_geometry(width, captions, 80.0, version_width, HeaderLayout::DESKTOP).application.unwrap();
+                    if let Some(version) = g.version {
+                        assert!((version.right - version.left - version_width - VERSION_PADDING * 2.0).abs() < 0.01);
+                        assert!((version.left - g.report.right - GAP).abs() < 0.01);
+                        assert_eq!(version.right, width - captions);
                     }
                 }
             }
@@ -4973,6 +4963,38 @@ mod app_bar_tests {
     use super::*;
 
     #[test]
+    fn app_bar_space_tile_places_repeatable_items_and_delete_persists() {
+        use crate::scenario::{Harness, handle_at};
+        use ui_kit::app_bar_items::{Layout, Preset};
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1000}));
+        h.app.start("ui.appBarCustomize");
+        h.frames(4);
+        for _ in 0..2 {
+            h.step(&json!({"click":{"handle":"appbar:tile:space"}})).unwrap();
+            h.frames(3);
+        }
+        let spaces: Vec<_> = h.app.toolbar_custom.app_bar.items.iter().filter(|p| p.id.starts_with("space:")).map(|p| p.id.clone()).collect();
+        assert_eq!(spaces.len(), 2);
+        assert_ne!(spaces[0], spaces[1]);
+        assert!(crate::scenario::rect_of("appbar:badge:space").is_none());
+        assert_eq!(h.app.toolbar_custom.app_bar.preset(&Layout::default()), Preset::Custom);
+        let at = handle_at(&format!("appbar:edit:{}", spaces[0])).unwrap();
+        h.step(&json!({"click":[at.x,at.y]})).unwrap();
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(3);
+        assert!(!h.app.toolbar_custom.app_bar.items.iter().any(|p| p.id == spaces[0]));
+        let mut loaded = crate::toolbar_custom::ToolbarCustom::default();
+        loaded.load(&h.app.toolbar_custom.prefs());
+        assert_eq!(loaded.app_bar, h.app.toolbar_custom.app_bar);
+        let done = crate::scenario::rect_of("appbar:done").unwrap();
+        let presets = crate::scenario::rect_of("appbar:header:presets").unwrap();
+        assert!((done.left() - presets.right() - 24.0).abs() <= 1.0);
+        assert!(crate::scenario::rect_of("appbar:presets:divider").is_none());
+    }
+
+    #[test]
     fn app_bar_default_separator_drag_removal_reset_and_grab_cursors() {
         use crate::scenario::{Harness, handle_at, rect_of};
         use ui_kit::app_bar_items::{Layout, Preset};
@@ -4990,7 +5012,7 @@ mod app_bar_tests {
         let at = resting.center();
         h.step(&json!({"move":[at.x,at.y]})).unwrap();
         h.frames(8);
-        assert_eq!(h.output.cursor_icon, egui::CursorIcon::Grab);
+        assert_eq!(h.output.cursor_icon, app_bar::grab_cursor());
         assert_eq!(rect_of("appbar:edit:separator:1"), Some(resting), "hover lift cannot move the hit target");
         let press =
             |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
@@ -5007,10 +5029,9 @@ mod app_bar_tests {
         h.step(&json!({"click":{"handle":"appbar:reset"}})).unwrap();
         h.frames(4);
         assert_eq!(h.app.toolbar_custom.app_bar, Layout::default());
-        let divider = rect_of("appbar:presets:divider").unwrap();
         let compact = rect_of("appbar:preset:Compact").unwrap();
         let custom = rect_of("appbar:preset:Custom").unwrap();
-        assert!(compact.right() < divider.left() && divider.right() < custom.left());
+        assert!((custom.left() - compact.right() - 8.0).abs() <= 1.0);
         h.step(&json!({"click":{"handle":"appbar:preset:Custom"}})).unwrap();
         h.frames(3);
         assert_eq!(h.app.toolbar_custom.app_bar.preset(&Layout::default()), Preset::Default);
@@ -5130,7 +5151,7 @@ mod app_bar_tests {
             for (column, ids) in [
                 (0, &["documents", "home", "save", "undo", "redo", "assistant", "settings", "help"][..]),
                 (1, &["report", "donate", "discord", "version"][..]),
-                (2, &["separator"][..]),
+                (2, &["separator", "space"][..]),
             ] {
                 let bounds = rect_of(&format!("appbar:column:{column}")).unwrap();
                 assert!(card.contains_rect(bounds));
@@ -5165,7 +5186,8 @@ mod app_bar_tests {
                 tray_paint_leaves(&clipped.shape, &mut shapes);
             }
             let t = solidcraft_theme::Tokens::get();
-            let panel = shapes.iter().position(|shape| matches!(shape, egui::Shape::Rect(r) if (r.rect.width() - card.width()).abs() <= 2.0 && r.rect.contains(card.center()) && r.fill == t.panel.to_opaque() && r.stroke.width == 1.0)).expect("an opaque, bordered panel backs the entire tray");
+            let shared = Container::floating_card(Surface::Panel).frame(&h.ctx, t.panel, ui_kit::frame::Side::Left);
+            let panel = shapes.iter().position(|shape| matches!(shape, egui::Shape::Rect(r) if (r.rect.width() - card.width()).abs() <= 2.0 && r.rect.contains(card.center()) && r.fill == shared.fill && r.stroke == shared.stroke && r.corner_radius == shared.corner_radius)).expect("the shared panel fill, alpha, border and radius back the tray");
             let scrim = shapes.iter().position(|shape| matches!(shape, egui::Shape::Rect(r) if r.rect.top() == 34.0 && r.rect.bottom() == 720.0 && r.rect.width() == width && r.fill.a() > 0)).expect("the scrim is painted");
             assert!(scrim < panel, "the card paints above the scrim");
             for (id, label) in [("assistant", "Assistant"), ("settings", "Settings"), ("home", "Start page")] {

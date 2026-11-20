@@ -207,11 +207,15 @@ pub fn paint_item(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, response:
         paint_control(ui, rect, control, response, opacity);
     } else {
         paint_motion(ui, id, rect, |ui| {
-            let movable = editing_active(ui.ctx()) && id != "overflow";
-            let hovered = movable && ui.rect_contains_pointer(rect);
+            let movable = editing_active(ui.ctx()) && !matches!(id, "overflow" | "more");
+            let hovered = movable && !is_dragging(ui.ctx()) && ui.rect_contains_pointer(rect);
             paint_hover(ui, id, item_rect(rect, control), control_radius(control), hovered, |ui| {
                 if movable {
-                    ui.painter().rect_filled(item_rect(rect, control), control_radius(control), Tokens::get().control_fill);
+                    ui.painter().rect_filled(
+                        item_rect(rect, control),
+                        control_radius(control),
+                        if hovered { edit_palette(Tokens::get()).hover } else { edit_palette(Tokens::get()).item },
+                    );
                 }
                 paint_control(ui, rect, control, response, opacity);
             });
@@ -219,9 +223,11 @@ pub fn paint_item(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, response:
     }
 }
 
-pub const ITEM_HEIGHT: f32 = 32.0;
-pub const PILL_HEIGHT: f32 = 28.0;
-pub const ITEM_RADIUS: u8 = 7;
+pub const ITEM_HEIGHT: f32 = crate::app_bar_layout::application::ICON_WIDTH;
+pub const PILL_HEIGHT: f32 = crate::app_bar_layout::application::PILL_HEIGHT;
+pub const ITEM_ICON_SIZE: f32 = 16.0;
+pub const PILL_ICON_SIZE: f32 = crate::app_bar_layout::application::PILL_ICON;
+pub const ITEM_RADIUS: u8 = 6;
 pub const ITEM_PILL_RADIUS: u8 = (PILL_HEIGHT / 2.0) as u8;
 const HOVER_TIME: f32 = 0.12;
 
@@ -230,7 +236,40 @@ pub fn control_height(control: Control<'_>) -> f32 {
 }
 
 pub fn item_rect(rect: Rect, control: Control<'_>) -> Rect {
-    Rect::from_center_size(rect.center(), vec2(rect.width(), control_height(control)))
+    let width = if icon_control(control) { ITEM_HEIGHT } else { rect.width() };
+    Rect::from_center_size(rect.center(), vec2(width, control_height(control)))
+}
+
+pub fn icon_control(control: Control<'_>) -> bool {
+    matches!(control, Control::Icon { .. } | Control::Command { .. } | Control::Documents | Control::Assistant { .. })
+}
+
+/// Winit 0.30's Windows backend maps Grab/Grabbing to IDC_SIZEALL. IDC_HAND is
+/// exposed through PointingHand, so use that for an actual hand when hovering on Windows.
+pub fn grab_cursor() -> egui::CursorIcon {
+    if cfg!(target_os = "windows") { egui::CursorIcon::PointingHand } else { egui::CursorIcon::Grab }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct EditPalette {
+    pub card: egui::Color32,
+    pub item: egui::Color32,
+    pub hover: egui::Color32,
+}
+
+/// Three opaque levels derived from the bar's own foreground/background tokens. Bound
+/// the brightest level by text contrast; the panel around the cells retains its shared alpha.
+pub fn edit_palette(t: Tokens) -> EditPalette {
+    let card = t.app_bar.to_opaque();
+    let foreground = t.app_bar_text.to_opaque();
+    let mut amount = 0.32;
+    for _ in 0..8 {
+        if solidcraft_theme::contrast_ratio(card.lerp_to_gamma(foreground, amount), foreground) >= 4.5 {
+            break;
+        }
+        amount *= 0.9;
+    }
+    EditPalette { card, item: card.lerp_to_gamma(foreground, amount / 2.0), hover: card.lerp_to_gamma(foreground, amount) }
 }
 
 pub fn control_radius(control: Control<'_>) -> u8 {
@@ -319,13 +358,6 @@ pub fn tray_accent() -> (egui::Color32, egui::Color32) {
 
 /// The bar's height: the window's title bar on desktop builds.
 pub const HEIGHT: f32 = 34.0;
-/// Room for the version between Report a bug and the caption buttons, at the least.
-pub const RIGHT_GROUP: f32 = 60.0;
-/// The right-hand cluster's buttons (Assistant, Settings, Help) before Report a bug.
-pub const CLUSTER_BUTTONS: f32 = 108.0;
-/// The least room the document tabs keep when a long version takes its extra width: one tab and
-/// its + button.
-const TABS_KEPT: f32 = 124.0;
 /// The least width of a document tab before the tabs scroll behind the » list.
 const MIN_TAB: f32 = 90.0;
 /// The expanded design tab (option A): its height and corner radius.
@@ -345,7 +377,7 @@ const VIEW_LABEL_MAX: f32 = 180.0;
 /// The least width a view's label takes while its name is typed.
 const RENAME_MIN: f32 = 90.0;
 /// Where the Report a bug text starts, from the button's left edge.
-pub const REPORT_TEXT_X: f32 = 29.0;
+pub const REPORT_TEXT_X: f32 = crate::app_bar_layout::application::CONTENT_PADDING + PILL_ICON_SIZE + crate::app_bar_layout::application::GAP;
 /// The fills of the bar's pills. They are the services' own colours (Ko-fi coral, Discord
 /// blurple), the same in every theme; both take white ink.
 pub mod brand {
@@ -354,14 +386,9 @@ pub mod brand {
     pub const DISCORD: Color32 = Color32::from_rgb(0x58, 0x65, 0xF2);
 }
 /// The pills' height, and the least width at which the bar gives the first pill its label.
-pub const PILL_LABEL_MIN: f32 = 1100.0;
 /// The × inside a pill.
-const PILL_X: f32 = 16.0;
+const PILL_X: f32 = PILL_ICON_SIZE;
 
-/// Space between the search field and Settings.
-pub const SEARCH_GAP: f32 = 4.0;
-/// A bar narrower than this shows no product name, no Undo and Redo, and narrower file actions.
-const COMPACT: f32 = 640.0;
 /// Space the File menu keeps below its rows for its frame and a gap above the window's bottom.
 const FILE_MENU_BOTTOM_GAP: f32 = 24.0;
 /// The least height the File menu's rows get, about three rows, however short the window.
@@ -442,6 +469,7 @@ pub struct Version<'a> {
 #[derive(Clone, Copy)]
 pub enum Control<'a> {
     Separator,
+    Space,
     Documents,
     Icon { icon: &'a str, size: f32, enabled: bool },
     Command { icon: &'a str, enabled: bool },
@@ -512,11 +540,12 @@ pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, respon
         let p = ui.painter();
         let hot = response.hovered() || response.has_focus();
         match control {
+            Control::Space => {}
             Control::Separator => {
                 p.vline(
                     rect.center().x,
-                    rect.center().y - 10.0..=rect.center().y + 10.0,
-                    Stroke::new(1.0, t.app_bar.lerp_to_gamma(t.app_bar_separator, 0.4)),
+                    rect.center().y - 8.0..=rect.center().y + 8.0,
+                    Stroke::new(1.0, if editing { t.app_bar_text } else { t.app_bar.lerp_to_gamma(t.app_bar_separator, 0.4) }),
                 );
             }
             Control::Documents => {
@@ -526,14 +555,19 @@ pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, respon
                 if response.has_focus() {
                     p.rect_stroke(rect.shrink(1.0), ITEM_RADIUS, Stroke::new(1.0, t.app_bar_text), egui::StrokeKind::Inside);
                 }
-                crate::icons::paint_app_bar(p, Rect::from_center_size(rect.center(), vec2(18.0, 18.0)), "document_browser", 1.0);
+                crate::icons::paint_app_bar(p, Rect::from_center_size(rect.center(), vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE)), "document_browser", 1.0);
             }
-            Control::Icon { icon, size, enabled } => {
+            Control::Icon { icon, size: _, enabled } => {
                 let enabled = enabled || editing;
                 if enabled && hot {
                     p.rect_filled(rect, ITEM_RADIUS, t.app_bar_hover_button);
                 }
-                crate::icons::paint_app_bar(p, Rect::from_center_size(rect.center(), vec2(size, size)), icon, if enabled { 1.0 } else { 0.35 });
+                crate::icons::paint_app_bar(
+                    p,
+                    Rect::from_center_size(rect.center(), vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE)),
+                    icon,
+                    if enabled { 1.0 } else { 0.35 },
+                );
             }
             Control::Command { icon, enabled } => {
                 if enabled && hot {
@@ -541,7 +575,7 @@ pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, respon
                 }
                 crate::icons::paint_on(
                     p,
-                    Rect::from_center_size(rect.center(), vec2(20.0, 20.0)),
+                    Rect::from_center_size(rect.center(), vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE)),
                     icon,
                     Some(true),
                     if enabled { 1.0 } else { 0.35 },
@@ -574,28 +608,36 @@ pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, respon
                 if labelled {
                     crate::icons::paint_ink(
                         p,
-                        Rect::from_center_size(pos2(capsule_rect.left() + 14.0, capsule_rect.center().y), vec2(16.0, 16.0)),
+                        Rect::from_center_size(
+                            pos2(
+                                capsule_rect.left() + crate::app_bar_layout::application::CONTENT_PADDING + PILL_ICON_SIZE / 2.0,
+                                capsule_rect.center().y,
+                            ),
+                            vec2(PILL_ICON_SIZE, PILL_ICON_SIZE),
+                        ),
                         "bug_report",
                         ink,
                     );
-                    p.text(
-                        pos2(capsule_rect.left() + REPORT_TEXT_X, capsule_rect.center().y),
-                        Align2::LEFT_CENTER,
-                        label,
-                        FontId::proportional(t.font_button),
+                    let text = Rect::from_min_max(
+                        pos2(capsule_rect.left() + REPORT_TEXT_X, capsule_rect.top()),
+                        pos2(capsule_rect.right() - crate::app_bar_layout::application::CONTENT_PADDING, capsule_rect.bottom()),
+                    );
+                    crate::paint_text(ui, text, label, FontId::proportional(t.font_button), ink, false);
+                } else {
+                    crate::icons::paint_ink(
+                        p,
+                        Rect::from_center_size(capsule_rect.center(), vec2(PILL_ICON_SIZE, PILL_ICON_SIZE)),
+                        "bug_report",
                         ink,
                     );
-                } else {
-                    crate::icons::paint_ink(p, Rect::from_center_size(capsule_rect.center(), vec2(16.0, 16.0)), "bug_report", ink);
                 }
             }
             Control::Version(text) => {
-                let galley = p.layout_no_wrap(text.to_string(), FontId::proportional(t.font_small), t.app_bar_text);
-                let text_rect = Rect::from_center_size(rect.center(), galley.size());
                 if hot {
                     p.rect_filled(rect, ITEM_RADIUS, t.app_bar_hover);
                 }
-                p.galley(text_rect.min, galley, t.app_bar_text);
+                let text_rect = rect.shrink2(vec2(crate::app_bar_layout::application::VERSION_PADDING, 0.0));
+                crate::paint_text(ui, text_rect, text, FontId::proportional(t.font_small), t.app_bar_text, false);
             }
             Control::Assistant { state, open } => {
                 if hot || open {
@@ -604,7 +646,10 @@ pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, respon
                 // Retain the shared icon and live status mark while the bar owns its uniform
                 // background. A passive response suppresses the entry's smaller hover frame.
                 let passive = ui.new_child(egui::UiBuilder::new().max_rect(rect).disabled());
-                let quiet = passive.interact(rect, passive.scope_id().with("assistant_mark"), Sense::hover());
+                // assistant_entry's icon has a seven-point inset; this passive paint target
+                // produces the shared 16-point icon without changing the 28-point item slot.
+                let entry = Rect::from_center_size(rect.center(), egui::Vec2::splat(ITEM_ICON_SIZE + 2.0 * (t.space_6 + 1.0)));
+                let quiet = passive.interact(entry, passive.scope_id().with("assistant_mark"), Sense::hover());
                 crate::assistant_entry(&passive, &quiet, state, false, ui.ctx().global_style().animation_time > 0.0);
             }
         }
@@ -615,12 +660,13 @@ pub fn control_size(ctx: &egui::Context, control: Control<'_>) -> egui::Vec2 {
     let t = Tokens::get();
     let text = |s: &str, size| ctx.fonts_mut(|f| f.layout_no_wrap(s.into(), FontId::proportional(size), t.app_bar_text)).size().x;
     let width = match control {
-        Control::Separator => 9.0,
+        Control::Separator => crate::app_bar_layout::application::SEPARATOR_WIDTH,
+        Control::Space => crate::app_bar_layout::application::SPACE_WIDTH,
         Control::Documents => ITEM_HEIGHT,
         Control::File { label, .. } => text(label, t.font_button) + 16.0,
         Control::Pill { data, .. } => pill_width(ctx, &data),
-        Control::Report { label, labelled: true } => REPORT_TEXT_X + text(label, t.font_button) + 11.0,
-        Control::Version(label) => text(label, t.font_small) + 4.0,
+        Control::Report { label, labelled: true } => REPORT_TEXT_X + text(label, t.font_button) + crate::app_bar_layout::application::CONTENT_PADDING,
+        Control::Version(label) => text(label, t.font_small) + crate::app_bar_layout::application::VERSION_PADDING * 2.0,
         _ => ITEM_HEIGHT,
     };
     vec2(width.max(1.0), control_height(control))
@@ -631,7 +677,11 @@ pub fn control_size(ctx: &egui::Context, control: Control<'_>) -> egui::Vec2 {
 pub fn preview_control(ui: &mut egui::Ui, cell: Rect, control: Control<'_>, opacity: f32, lifted: bool, warning: bool) {
     // This scratch layer is tessellated into the owning cell below. Even disabled hover
     // widgets on a tooltip layer occlude clicks, so keep its widgets outside the viewport.
-    let native = Rect::from_min_size(ui.ctx().content_rect().right_bottom() + vec2(100.0, 100.0), control_size(ui.ctx(), control));
+    let size = control_size(ui.ctx(), control);
+    // Adapt the same widget to the tile width; elide its label rather than shrinking the
+    // 28/22-point body or its 16/13-point icon. A lifted chip keeps its natural width.
+    let size = if lifted { size } else { vec2(size.x.min(cell.width()).max(1.0), size.y) };
+    let native = Rect::from_min_size(ui.ctx().content_rect().right_bottom() + vec2(100.0, 100.0), size);
     let layer = egui::LayerId::new(egui::Order::Tooltip, ui.scope_id().with("control_preview_paint"));
     let mut child = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(native).layout(egui::Layout::top_down(egui::Align::Min)).disabled());
     child.set_opacity(1.0);
@@ -660,32 +710,30 @@ pub fn preview_control(ui: &mut egui::Ui, cell: Rect, control: Control<'_>, opac
 
 fn paint_link_pill(ui: &egui::Ui, rect: Rect, p: &Pill<'_>, lift: f32, veil: f32, focused: bool) {
     let t = Tokens::get();
-    let ppp = ui.ctx().pixels_per_point();
-    let snap = |v: f32| (v * ppp).round() / ppp;
-    let x_rect = Rect::from_center_size(pos2(snap(rect.right() - 4.0 - PILL_X / 2.0), rect.center().y), vec2(PILL_X, PILL_X));
-    let fill = p.fill.lerp_to_gamma(t.on_accent, 0.08 * lift);
-    ui.painter().rect_filled(rect, egui::CornerRadius::same(ITEM_PILL_RADIUS), fill);
+    let ink = t.app_bar_text;
+    let x_rect = pill_close(rect);
+    let fill = p.fill.lerp_to_gamma(ink, 0.08 * lift);
+    ui.painter().rect_filled(rect, ITEM_PILL_RADIUS, fill);
     if focused {
-        ui.painter().rect_stroke(
-            rect.expand(1.5),
-            egui::CornerRadius::same((f32::from(ITEM_PILL_RADIUS) + 1.5) as u8),
-            Stroke::new(1.5, t.app_bar_text),
-            egui::StrokeKind::Outside,
-        );
+        ui.painter().rect_stroke(rect, ITEM_PILL_RADIUS, Stroke::new(1.0, ink), egui::StrokeKind::Inside);
     }
-    let icon = Rect::from_center_size(pos2(rect.left() + 15.0, rect.center().y), vec2(14.0, 14.0));
-    crate::icons::paint_ink(ui.painter(), icon, p.icon, p.ink);
+    let icon = Rect::from_center_size(
+        pos2(rect.left() + crate::app_bar_layout::application::CONTENT_PADDING + PILL_ICON_SIZE / 2.0, rect.center().y),
+        vec2(PILL_ICON_SIZE, PILL_ICON_SIZE),
+    );
+    crate::icons::paint_ink(ui.painter(), icon, p.icon, ink);
     if p.labelled && !p.label.is_empty() {
-        let galley = ui.painter().layout_no_wrap(p.label.to_string(), crate::type_face::semibold(t.font_label), p.ink);
-        let top = rect.center().y - galley.size().y / 2.0 + 0.5;
-        ui.painter().galley(pos2(snap(icon.right() + 5.0), snap(top)), galley, p.ink);
+        let label = Rect::from_min_max(
+            pos2(icon.right() + crate::app_bar_layout::application::GAP, rect.top()),
+            pos2(x_rect.left() - crate::app_bar_layout::application::GAP, rect.bottom()),
+        );
+        crate::paint_text(ui, label, p.label, crate::type_face::semibold(t.font_label), ink, false);
     }
     if veil > 0.0 {
         ui.painter().circle_filled(x_rect.center(), PILL_X / 2.0, t.figure_shadow.to_opaque().gamma_multiply(0.38 * veil));
     }
-    crate::icons::paint_ink(ui.painter(), Rect::from_center_size(x_rect.center(), vec2(8.0, 8.0)), "close", p.ink);
+    crate::icons::paint_ink(ui.painter(), x_rect, "close", ink);
 }
-
 /// The bar as the app describes it this frame.
 pub struct AppBar<'a> {
     /// Saved movable items; None uses today's default arrangement.
@@ -802,64 +850,26 @@ fn handle(prefix: &str, key: &str) -> String {
     format!("{prefix}{key}")
 }
 
-/// The room right of Report a bug for the version (`version_width`, measured), or None where the
-/// bar shows none. The version sits 12 points from the caption buttons with a gap before the
-/// button, so a longer one moves the button left instead of covering it. Its width over
-/// [`RIGHT_GROUP`] comes only from the document tabs' spare room: where it would leave them less
-/// than [`TABS_KEPT`], the version is hidden, as it is on a narrow bar.
-pub fn version_room(bar: Rect, captions: f32, tabs_start: f32, version_width: f32) -> Option<f32> {
-    if bar.width() < COMPACT {
-        return None;
-    }
-    let need = 12.0 + version_width + 8.0;
-    let room = RIGHT_GROUP.max(need);
-    // The tabs end 8 points before the cluster, with Report a bug as an icon at the least.
-    let tabs = bar.right() - captions - room - 28.0 - CLUSTER_BUTTONS - 8.0 - tabs_start;
-    (need <= RIGHT_GROUP || tabs >= TABS_KEPT).then_some(room)
-}
-
-/// The centre of Help, between Settings and Report a bug.
-pub fn help_x(report: Rect) -> f32 {
-    report.left() - 18.0
-}
-
-/// The Report a bug button: labelled unless `icon_only`, when there is room for its text
-/// (`label_width`, measured), otherwise just the icon. An icon-only button is a square the size of
-/// Settings and Help. `version_width`: the measured version, when the bar shows it.
-pub fn report_rect(bar: Rect, captions: f32, tabs_start: f32, label_width: f32, version_width: Option<f32>, icon_only: bool) -> (Rect, bool) {
-    let room = version_width.and_then(|width| version_room(bar, captions, tabs_start, width));
-    let right = bar.right() - captions - room.unwrap_or(8.0);
-    if icon_only {
-        return (Rect::from_min_size(pos2(right - 32.0, bar.center().y - 16.0), vec2(32.0, 32.0)), false);
-    }
-    // Icon, text and a margin that mirrors the icon side.
-    let full = REPORT_TEXT_X + label_width + 11.0;
-    let labeled = right - CLUSTER_BUTTONS - tabs_start >= 216.0 + full;
-    let width = if labeled { full } else { 28.0 };
-    (Rect::from_min_size(pos2(right - width, bar.center().y - 13.0), vec2(width, 26.0)), labeled)
-}
-
-/// The closed search field in the bar, ending `right`: whole when the document tabs keep the room
-/// Report a bug's label leaves them (`tabs_room`: theirs without the field), else just its
-/// magnifier.
-pub fn search_rect(ctx: &egui::Context, shortcut: Option<&str>, bar: Rect, right: f32, tabs_room: f32) -> Rect {
-    let height = 26.0;
-    let full = crate::CommandSearch::closed_width(ctx, shortcut);
-    let whole = bar.width() >= COMPACT && tabs_room - full - SEARCH_GAP >= 216.0;
-    let width = if whole { full } else { crate::CommandSearch::compact_width(height) };
-    Rect::from_min_size(pos2(right - width, bar.center().y - height / 2.0), vec2(width, height))
-}
-
-/// A pill's width: pad, mark, label, ×.
+/// Width of the same content painted by paint_link_pill; padding is inside the pill.
 fn pill_width(ctx: &egui::Context, p: &Pill) -> f32 {
     let label = if p.labelled && !p.label.is_empty() {
-        5.0 + ctx.fonts_mut(|f| f.layout_no_wrap(p.label.to_string(), crate::type_face::semibold(Tokens::get().font_label), p.ink)).size().x
+        crate::app_bar_layout::application::GAP
+            + ctx
+                .fonts_mut(|f| f.layout_no_wrap(p.label.to_owned(), crate::type_face::semibold(Tokens::get().font_label), Tokens::get().app_bar_text))
+                .size()
+                .x
     } else {
         0.0
     };
-    8.0 + 14.0 + label + 4.0 + PILL_X + 3.0
+    crate::app_bar_layout::application::PILL_MIN + label
 }
 
+fn pill_close(rect: Rect) -> Rect {
+    Rect::from_center_size(
+        pos2(rect.right() - crate::app_bar_layout::application::CONTENT_PADDING - PILL_X / 2.0, rect.center().y),
+        vec2(PILL_X, PILL_X),
+    )
+}
 /// A flat capsule `PILL_HEIGHT` tall in `fill`, a touch lighter while `hot`.
 fn capsule(ui: &egui::Ui, rect: Rect, fill: egui::Color32, hot: bool) {
     let fill = if hot { fill.lerp_to_gamma(egui::Color32::WHITE, 0.12) } else { fill };
@@ -874,7 +884,7 @@ fn pill(ui: &mut egui::Ui, bar: Rect, rect: Rect, p: &Pill, h: &Handles, actions
     let ppp = ui.ctx().pixels_per_point();
     let snap = |v: f32| (v * ppp).round() / ppp;
     let rect = Rect::from_min_size(pos2(rect.left(), snap(bar.center().y - PILL_HEIGHT / 2.0)), vec2(rect.width(), PILL_HEIGHT));
-    let x_rect = Rect::from_center_size(pos2(snap(rect.right() - 4.0 - PILL_X / 2.0), rect.center().y), vec2(PILL_X, PILL_X));
+    let x_rect = pill_close(rect);
     let main = Rect::from_min_max(rect.min, pos2(x_rect.left(), rect.bottom()));
     let main_resp = ui.interact(main, ui.scope_id().with(("sc_pill", p.id)), Sense::click_and_drag());
     let x_resp = ui.interact(x_rect, ui.scope_id().with(("sc_pill_hide", p.id)), Sense::click());
@@ -897,8 +907,8 @@ fn pill(ui: &mut egui::Ui, bar: Rect, rect: Rect, p: &Pill, h: &Handles, actions
 
 /// An icon button of the bar, dimmed and deaf to clicks when disabled (its tip still shows).
 /// Returns whether it was clicked.
-fn icon_button(ui: &mut egui::Ui, bar: Rect, at: f32, b: &BarButton, compact: bool, handles: &Handles) -> bool {
-    let width = if compact && b.narrow { 22.0 } else { 32.0 };
+fn icon_button(ui: &mut egui::Ui, bar: Rect, at: f32, b: &BarButton, _compact: bool, handles: &Handles) -> bool {
+    let width = ITEM_HEIGHT;
     let br = Rect::from_center_size(pos2(at, bar.center().y), vec2(width, ITEM_HEIGHT));
     let resp = ui.interact(br, ui.scope_id().with(("ab", b.id)), if b.id == "overflow" { Sense::click() } else { Sense::click_and_drag() });
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, b.enabled, b.tip));
@@ -950,7 +960,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         report: label_width,
         report_icon_only: data.report.icon_only,
         pills: data.pills.iter().map(|p| pill_width(ui.ctx(), p)).collect(),
-        search: data.search.then(|| (crate::CommandSearch::closed_width(ui.ctx(), data.search_shortcut), crate::CommandSearch::compact_width(26.0))),
+        search: data.search.then(|| (crate::CommandSearch::closed_width(ui.ctx(), data.search_shortcut), ITEM_HEIGHT)),
         assistant: data.assistant,
         version: version.as_ref().map(|(_, galley)| galley.size().x),
         offered: offers.update,
@@ -996,7 +1006,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
             if editing_active(ui.ctx()) { t.app_bar_text.gamma_multiply(0.55) } else { t.app_bar_text },
         );
     }
-    let leading = geometry.leading.zip(data.leading).map(|(span, size)| rect(span, size.y));
+    let leading = geometry.leading.map(|span| rect(span, ITEM_HEIGHT));
     // Home.
     let home = rect(geometry.home, ITEM_HEIGHT);
     let idle = data.home.enabled;
@@ -1022,7 +1032,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         }
     }
     // The File menu's text button.
-    let file = rect(geometry.file, 26.0);
+    let file = rect(geometry.file, ITEM_HEIGHT);
     let clicked = visible("file") && text_button(ui, file, (data.file, data.file), data.file_open, idle, "file").1;
     for name in h.file {
         solidcraft_ui_registry::publish_handle(name, file.center());
@@ -1044,9 +1054,9 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     let quick = geometry.quick.map(|(at, step)| (r.left() + at, step));
     // The document tabs follow the file actions.
     let tabs_start = r.left() + geometry.tabs_start;
-    let report = rect(geometry.report, if data.report.icon_only { ITEM_HEIGHT } else { 26.0 });
+    let report = rect(geometry.report, PILL_HEIGHT);
     let report_label = geometry.report_labeled;
-    let search = geometry.search.map(|span| rect(span, 26.0));
+    let search = geometry.search.map(|span| rect(span, ITEM_HEIGHT));
     if let Some(search) = search {
         solidcraft_ui_registry::publish_target(h.search, search);
     }
@@ -1086,7 +1096,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     // The link pills, left of the assistant.
     for (p, span) in data.pills.iter().zip(&geometry.pills).rev() {
         if span.right > span.left {
-            let p = Pill { labelled: p.labelled && span.right - span.left > 45.0, ..*p };
+            let p = Pill { labelled: p.labelled && span.right - span.left >= pill_width(ui.ctx(), p) - 0.01, ..*p };
             pill(ui, r, rect(*span, PILL_HEIGHT), &p, h, &mut actions);
         }
     }
@@ -1109,14 +1119,15 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         }
     }
     let assistant = geometry.assistant.map(|span| rect(span, ITEM_HEIGHT));
-    if let Some((v, galley)) = version
+    if let Some((v, _)) = version
         && let Some(span) = geometry.version
     {
-        let vrect = rect(span, galley.size().y);
-        let vresp = ui.interact(vrect.expand2(vec2(2.0, 4.0)), ui.scope_id().with("sc_version_link"), Sense::click_and_drag());
+        let vrect = rect(span, ITEM_HEIGHT);
+        let vresp = ui.interact(vrect, ui.scope_id().with("sc_version_link"), Sense::click_and_drag());
         let vresp = vresp.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(v.url);
         paint_item(ui, vrect, Control::Version(v.text), &vresp, item_opacity(ui.ctx(), "version"), "version");
         solidcraft_ui_registry::publish_handle(h.version, vrect.center());
+        solidcraft_ui_registry::publish_rect(h.version, vrect);
         if vresp.clicked() {
             actions.push(BarAction::Version);
         }
@@ -1141,20 +1152,9 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         }
     }
     let overflow_items = overflow_items(data, &placed.overflow, overflow_button.map_or(r.left(), |b| b.left()));
-    // Project the established slots into ordinary separator controls. The legacy spans and
-    // registry aliases preserve default geometry; edited lists use independent nine-pixel slots.
     let mut separators = Vec::new();
-    for (id, x) in [
-        ("separator:1", (visible("brand") && geometry.brand_separator < geometry.file.left).then_some(r.left() + geometry.brand_separator)),
-        ("separator:2", visible("documents").then_some(r.left() + geometry.documents_separator)),
-        ("separator:3", geometry.quick_separator.map(|x| r.left() + x)),
-    ] {
-        if let Some(x) = x {
-            separators.push((id.to_owned(), Rect::from_center_size(pos2(x, r.center().y), vec2(9.0, ITEM_HEIGHT))));
-        }
-    }
     for (item, p) in spec.items.iter().zip(&placed.placements) {
-        if item.id.starts_with("separator:")
+        if (item.id.starts_with("separator:") || item.id.starts_with("space:"))
             && let Some(p) = p
         {
             separators
@@ -1163,15 +1163,15 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     }
     for (id, br) in &separators {
         let response = ui.interact(*br, ui.scope_id().with(id), Sense::hover());
-        paint_item(ui, *br, Control::Separator, &response, item_opacity(ui.ctx(), id), id);
+        paint_item(ui, *br, if id.starts_with("space:") { Control::Space } else { Control::Separator }, &response, item_opacity(ui.ctx(), id), id);
         let group = match id.as_str() {
             "separator:1" => Some("brand"),
             "separator:2" => Some("documents"),
-            "separator:3" => Some("quick_access"),
+
             _ => None,
         };
         if let Some(group) = group {
-            solidcraft_ui_registry::publish_rect(&handle(h.separator, group), Rect::from_center_size(br.center(), vec2(1.0, 20.0)));
+            solidcraft_ui_registry::publish_rect(&handle(h.separator, group), Rect::from_center_size(br.center(), vec2(1.0, 16.0)));
         }
     }
     let mut edit_items = Vec::new();
@@ -1193,7 +1193,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     }
     for (b, at) in data.actions.iter().zip(&geometry.actions) {
         if let Some(at) = at {
-            let width = if compact && b.narrow { 22.0 } else { 32.0 };
+            let width = ITEM_HEIGHT;
             edit_item(b.id.into(), Rect::from_center_size(pos2(r.left() + at, r.center().y), vec2(width, ITEM_HEIGHT)), false);
         }
     }
@@ -1205,7 +1205,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     for (p, span) in data.pills.iter().zip(&geometry.pills) {
         edit_item(if p.id == "kofi" { "donate" } else { p.id }.into(), rect(*span, PILL_HEIGHT), false);
     }
-    for (id, br) in [("search", search), ("assistant", assistant), ("version", geometry.version.map(|s| rect(s, 26.0)))] {
+    for (id, br) in [("search", search), ("assistant", assistant), ("version", geometry.version.map(|s| rect(s, ITEM_HEIGHT)))] {
         if let Some(br) = br {
             edit_item(id.into(), br, false);
         }
@@ -1246,7 +1246,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         overflow_button,
         quick_count: geometry.quick_count,
         tabs_end: r.left() + geometry.tabs_end,
-        managed: geometry.managed.map(|s| rect(s, 26.0)),
+        managed: geometry.managed.map(|s| rect(s, ITEM_HEIGHT)),
         managed_labeled: geometry.managed_labeled,
         reserved_offers: geometry.reserved_offers,
     }
@@ -2702,6 +2702,8 @@ pub fn overflow_menu(ctx: &egui::Context, rows: &[OverflowItem], button: Option<
     }
     let menu_rows: Vec<FileRow> = rows
         .iter()
+        // A Space has no visual or action when it yields to real controls.
+        .filter(|row| !row.id.starts_with("space:"))
         .map(|row| {
             if row.id.starts_with("separator:") {
                 return FileRow::Separator;

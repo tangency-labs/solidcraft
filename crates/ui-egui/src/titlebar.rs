@@ -127,18 +127,17 @@ mod tests {
         v
     }
 
-    /// SolidCraft's name leaves Home where it has always been: 88 pt right of the name's start
-    /// (Home centred at 124 from the bar's content edge, the name starting at 36), the kit's least
-    /// place for Home.
+    /// Home follows the preceding name or document button with the stack's one shared gap.
     #[test]
-    fn home_keeps_its_place_after_solidcrafts_name() {
+    fn home_follows_solidcrafts_name_with_the_uniform_gap() {
         let mut w = Win::new(1600.0);
         w.app.home.open = false;
         w.frame(vec![]);
         let out = w.frame(vec![]);
         let name = texts(&out).into_iter().find(|(text, _)| text == "SolidCraft").map(|(_, rect)| rect).expect("the name is drawn");
         let home = crate::scenario::rect_of("titlebar:home").expect("Home is drawn");
-        assert_eq!(home.center().x - name.left(), 88.0);
+        let previous = crate::scenario::rect_of("library:toggle").unwrap_or(name);
+        assert!((home.left() - previous.right() - solidcraft_ui_kit::app_bar_layout::application::GAP).abs() <= 0.5);
         assert!(name.right() < home.left());
     }
 
@@ -239,9 +238,10 @@ mod tests {
             if let Some(tabs) = tabs {
                 assert!(tabs.right() <= donate.left(), "{width}: tabs {tabs:?} run under the pills {donate:?}");
             }
-            // Donate carries its name on a wide bar and drops it on a narrow one.
+            // Donate's label follows the width allocated by the uniform layout, not a
+            // window-width breakpoint: the same item can be placed in either stack.
             let named = texts(&out).iter().any(|(t, r)| t == "Donate" && donate.contains_rect(*r));
-            assert_eq!(named, width >= solidcraft_ui_kit::app_bar::PILL_LABEL_MIN, "{width}");
+            assert_eq!(named, donate.width() > solidcraft_ui_kit::app_bar_layout::application::PILL_MIN, "{width}");
         }
     }
 

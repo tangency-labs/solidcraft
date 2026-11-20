@@ -10,6 +10,7 @@ pub const MAX_ID_CHARS: usize = 100;
 pub enum ItemId {
     Documents,
     Separator(u64),
+    Space(u64),
     File,
     Home,
     Save,
@@ -50,6 +51,7 @@ impl ItemId {
             "help" => Self::Help,
             "version" => Self::Version,
             _ if id.starts_with("separator:") => Self::Separator(id.strip_prefix("separator:")?.parse().ok()?),
+            _ if id.starts_with("space:") => Self::Space(id.strip_prefix("space:")?.parse().ok()?),
             _ => Self::Quick(id.strip_prefix("quick:").filter(|s| !s.is_empty())?.to_string()),
         })
     }
@@ -58,6 +60,7 @@ impl ItemId {
         match self {
             Self::Documents => "documents".into(),
             Self::Separator(n) => format!("separator:{n}"),
+            Self::Space(n) => format!("space:{n}"),
             Self::File => "file".into(),
             Self::Quick(id) => format!("quick:{id}"),
             Self::Home => "home".into(),
@@ -242,7 +245,7 @@ impl Layout {
         if !self.editable(id) || (!shown && !can_remove(id)) {
             return false;
         }
-        if !shown && matches!(ItemId::parse(id), Some(ItemId::Separator(_))) {
+        if !shown && matches!(ItemId::parse(id), Some(ItemId::Separator(_) | ItemId::Space(_))) {
             self.items.retain(|p| p.id != id);
             return true;
         }
@@ -294,11 +297,23 @@ impl Layout {
 
     /// Allocate a repeatable layout object without reusing any live identity.
     pub fn add_separator(&mut self, zone: Zone, before: Option<&str>, defaults: &Self) -> Option<String> {
+        self.add_object("separator", zone, before, defaults)
+    }
+
+    pub fn add_space(&mut self, zone: Zone, before: Option<&str>, defaults: &Self) -> Option<String> {
+        self.add_object("space", zone, before, defaults)
+    }
+
+    /// Repeatable layout objects share validation, capacity and identity rules.
+    pub fn add_object(&mut self, kind: &str, zone: Zone, before: Option<&str>, defaults: &Self) -> Option<String> {
+        if !matches!(kind, "separator" | "space") {
+            return None;
+        }
         self.sanitize(defaults);
         if self.items.len() >= MAX_ITEMS || before.is_some_and(|id| !self.items.iter().any(|p| p.id == id && p.zone == zone && self.editable(id))) {
             return None;
         }
-        let id = (0..=MAX_ITEMS).map(|n| format!("separator:{n}")).find(|id| !self.items.iter().any(|p| &p.id == id))?;
+        let id = (0..=MAX_ITEMS).map(|n| format!("{kind}:{n}")).find(|id| !self.items.iter().any(|p| &p.id == id))?;
         self.items.push(Placement { id: id.clone(), zone, shown: true });
         self.move_before(&id, zone, before, defaults);
         Some(id)
@@ -317,9 +332,6 @@ impl Layout {
             }
             let id = ItemId::Quick(id.to_string()).id();
             if valid_id(&id) && !items.iter().any(|p| p.id == id) {
-                if !items.iter().any(|p| p.id.starts_with("quick:")) {
-                    items.push(Placement { id: "separator:3".into(), zone: Zone::Start, shown: true });
-                }
                 items.push(Placement { id, zone: Zone::Start, shown: true });
             }
         }
@@ -336,7 +348,12 @@ impl Layout {
     pub fn sanitize(&mut self, defaults: &Self) {
         // Separator absence is intentional in current lists. Only the old-format loader
         // inserts default separators; otherwise removing one would resurrect it on save.
-        let known: Vec<_> = defaults.items.iter().filter(|p| placement_id(&p.id) && !p.id.starts_with("separator:")).take(MAX_ITEMS).collect();
+        let known: Vec<_> = defaults
+            .items
+            .iter()
+            .filter(|p| placement_id(&p.id) && !p.id.starts_with("separator:") && !p.id.starts_with("space:"))
+            .take(MAX_ITEMS)
+            .collect();
         let mut kept: Vec<Placement> = Vec::new();
         let mut unknown = 0;
         for p in self.items.iter().take(4096) {
@@ -344,12 +361,13 @@ impl Layout {
                 continue;
             }
             let mut p = p.clone();
-            if p.id.starts_with("separator:") {
-                if let Some(ItemId::Separator(n)) = ItemId::parse(&p.id) {
-                    p.id = format!("separator:{n}");
+            if p.id.starts_with("separator:") || p.id.starts_with("space:") {
+                let kind = if p.id.starts_with("space:") { "space" } else { "separator" };
+                if let Some(item @ (ItemId::Separator(_) | ItemId::Space(_))) = ItemId::parse(&p.id) {
+                    p.id = item.id();
                 }
-                if !matches!(ItemId::parse(&p.id), Some(ItemId::Separator(_))) || kept.iter().any(|k| k.id == p.id) {
-                    let Some(id) = (0..=MAX_ITEMS).map(|n| format!("separator:{n}")).find(|id| !kept.iter().any(|p| &p.id == id)) else { continue };
+                if !matches!(ItemId::parse(&p.id), Some(ItemId::Separator(_) | ItemId::Space(_))) || kept.iter().any(|k| k.id == p.id) {
+                    let Some(id) = (0..=MAX_ITEMS).map(|n| format!("{kind}:{n}")).find(|id| !kept.iter().any(|p| &p.id == id)) else { continue };
                     p.id = id;
                 }
                 if !p.shown {
@@ -417,6 +435,17 @@ impl Layout {
             .collect();
         let mut layout = Self { items };
         layout.sanitize(defaults);
+        // Version 1's canonical quick-access layout contained a third divider. Only
+        // remove it when the entire known list still matches that old default.
+        if value.get("version").and_then(serde_json::Value::as_u64) == Some(1) && defaults.items.iter().any(|p| p.id.starts_with("quick:")) {
+            let mut old = defaults.clone();
+            if let Some(at) = old.items.iter().position(|p| p.id.starts_with("quick:")) {
+                old.items.insert(at, Placement { id: "separator:3".into(), zone: Zone::Start, shown: true });
+            }
+            if layout.items.iter().filter(|p| ItemId::parse(&p.id).is_some()).eq(old.items.iter()) {
+                layout.items.retain(|p| p.id != "separator:3");
+            }
+        }
         if value.get("version").and_then(serde_json::Value::as_u64).unwrap_or(0) < 1 {
             layout.migrate_separators(defaults);
         }
@@ -454,7 +483,7 @@ impl Layout {
     }
 
     pub fn to_value(&self) -> serde_json::Value {
-        serde_json::json!({"version": 1, "items": self.items})
+        serde_json::json!({"version": 2, "items": self.items})
     }
 }
 
