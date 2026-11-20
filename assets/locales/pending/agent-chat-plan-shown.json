@@ -1,0 +1,42 @@
+{
+  "en": {
+    "ui.ai_auto_plan_file": "it writes its plan in SolidCraft's own folder",
+    "ui.ai_auto_plan_read": "it reads its own plan in SolidCraft's folder",
+    "ui.ai_declined_write": "Declined: {title}. Claude Code writes only its plan here; it changes the design through SolidCraft's tools."
+  },
+  "ar": {
+    "ui.ai_auto_plan_file": "يكتب خطته في مجلد SolidCraft الخاص",
+    "ui.ai_auto_plan_read": "يقرأ خطته في مجلد SolidCraft الخاص",
+    "ui.ai_declined_write": "مرفوض: {title}. لا يكتب Claude Code هنا إلا خطته؛ ويغيّر التصميم عبر أدوات SolidCraft."
+  },
+  "de": {
+    "ui.ai_auto_plan_file": "es schreibt seinen Plan in SolidCrafts eigenen Ordner",
+    "ui.ai_auto_plan_read": "es liest seinen Plan in SolidCrafts eigenem Ordner",
+    "ui.ai_declined_write": "Abgelehnt: {title}. Claude Code schreibt hier nur seinen Plan; das Design ändert es über die Werkzeuge von SolidCraft."
+  },
+  "he": {
+    "ui.ai_auto_plan_file": "הוא כותב את התוכנית שלו בתיקייה של SolidCraft עצמה",
+    "ui.ai_auto_plan_read": "הוא קורא את התוכנית שלו בתיקייה של SolidCraft עצמה",
+    "ui.ai_declined_write": "נדחה: {title}. כאן Claude Code כותב רק את התוכנית שלו; הוא משנה את התכן דרך הכלים של SolidCraft."
+  },
+  "ja": {
+    "ui.ai_auto_plan_file": "SolidCraft 専用のフォルダーに計画を書き込むため",
+    "ui.ai_auto_plan_read": "SolidCraft 専用のフォルダーにある自分の計画を読むため",
+    "ui.ai_declined_write": "拒否しました: {title}。ここでは Claude Code が書き込むのは計画だけです。デザインは SolidCraft のツールで変更します。"
+  },
+  "ko": {
+    "ui.ai_auto_plan_file": "SolidCraft 전용 폴더에 계획을 씀",
+    "ui.ai_auto_plan_read": "SolidCraft 전용 폴더의 계획을 읽음",
+    "ui.ai_declined_write": "거부됨: {title}. 여기서 Claude Code는 계획만 씁니다. 디자인은 SolidCraft의 도구로 변경합니다."
+  },
+  "vi": {
+    "ui.ai_auto_plan_file": "nó ghi kế hoạch của mình vào thư mục riêng của SolidCraft",
+    "ui.ai_auto_plan_read": "nó đọc kế hoạch của mình trong thư mục riêng của SolidCraft",
+    "ui.ai_declined_write": "Đã từ chối: {title}. Ở đây Claude Code chỉ ghi kế hoạch của mình; nó thay đổi thiết kế qua các công cụ của SolidCraft."
+  },
+  "zh": {
+    "ui.ai_auto_plan_file": "它把计划写在 SolidCraft 自己的文件夹里",
+    "ui.ai_auto_plan_read": "它读取 SolidCraft 自己文件夹里的计划",
+    "ui.ai_declined_write": "已拒绝：{title}。在这里 Claude Code 只写它的计划；它通过 SolidCraft 的工具修改设计。"
+  }
+}

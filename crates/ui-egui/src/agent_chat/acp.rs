@@ -218,6 +218,43 @@ pub fn read_path(call: &Value) -> Option<std::path::PathBuf> {
     path.is_absolute().then_some(path)
 }
 
+/// The file a permission question would write, when it asks for one of Claude Code's own write
+/// tools ([`CLAUDE_PLAN_TOOLS`]) as the Claude adapter forms such a question: `Write <path>` or
+/// `Edit <path>` of kind `edit` with an absolute `rawInput.file_path`. An MCP tool's question
+/// (`_meta.claudeCode.mcpServer`) never counts. Anything else is `None`.
+pub fn write_path(call: &Value) -> Option<std::path::PathBuf> {
+    if call.pointer("/_meta/claudeCode/mcpServer").is_some() || call.get("kind")?.as_str()? != "edit" {
+        return None;
+    }
+    let title = call.get("title")?.as_str()?;
+    if !CLAUDE_PLAN_TOOLS.iter().any(|tool| title.strip_prefix(tool).is_some_and(|rest| rest.starts_with(' '))) {
+        return None;
+    }
+    let path = std::path::PathBuf::from(call.pointer("/rawInput/file_path")?.as_str()?);
+    path.is_absolute().then_some(path)
+}
+
+/// The most of a plan a question shows, in characters.
+pub const MAX_PLAN: usize = 20_000;
+
+/// The plan a question asks the user to approve: Claude Code puts the text of its plan file in
+/// `rawInput.plan` of its "Approve Plan" question (kind `switch_mode`). Blank is `None`; a plan
+/// longer than [`MAX_PLAN`] is cut there.
+pub fn plan_text(call: &Value) -> Option<String> {
+    if call.get("kind").and_then(Value::as_str) != Some("switch_mode") {
+        return None;
+    }
+    let plan = call.pointer("/rawInput/plan")?.as_str()?.trim();
+    if plan.is_empty() {
+        return None;
+    }
+    let mut text: String = plan.chars().take(MAX_PLAN).collect();
+    if text.len() < plan.len() {
+        text.push('…');
+    }
+    Some(text)
+}
+
 /// The MCP server the agent starts to reach the design: `solidcraft-cli mcp --connect` bridged to
 /// this app's control port. The server finds the port's token in the token file the app wrote
 /// (docs/control-protocol.md), so the token never travels through the agent, and it keeps its
@@ -297,9 +334,28 @@ pub fn system_note(instructions: &str) -> String {
 
 /// The Claude Code adapter's own tools that reach the computer rather than the design: turned off
 /// for the session (`_meta.claudeCode.options.disallowedTools`), so it works through SolidCraft's.
-/// Its read tools are not among them: they ask instead ([`CLAUDE_ASK_TOOLS`]).
+/// Its read tools ([`CLAUDE_ASK_TOOLS`]) and write tools ([`CLAUDE_PLAN_TOOLS`]) are not among
+/// them: they ask instead, and it writes its plan with the write tools.
 pub const CLAUDE_DISALLOWED_TOOLS: &[&str] =
-    &["Bash", "BashOutput", "KillShell", "Write", "Edit", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch", "Task"];
+    &["Bash", "BashOutput", "KillShell", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch", "Task"];
+
+/// The Claude Code adapter's tools that write a file. In plan mode it writes its plan to a file in
+/// its plan folder ([`PLANS_FOLDER`]) and reads it back into the question that asks the user to
+/// approve the plan (`rawInput.plan`, [`plan_text`]); without them the question comes with no plan
+/// (#19571). They are on, but every call asks (a `permissions.ask` rule in the session's settings):
+/// the chat allows a write of a plan file by itself ([`write_path`]) and declines any other.
+pub const CLAUDE_PLAN_TOOLS: &[&str] = &["Write", "Edit"];
+
+/// Claude Code's plan folder (its `plansDirectory` setting), inside the agent's working folder,
+/// which is SolidCraft's own: not the user's `~/.claude/plans`.
+pub const PLANS_FOLDER: &str = "plans";
+
+/// The Claude Code adapter's settings for a session (`_meta.claudeCode.options.settings`): every
+/// call of its write and read tools asks the chat, and plans go in [`PLANS_FOLDER`].
+fn claude_settings() -> Value {
+    let ask: Vec<&str> = CLAUDE_PLAN_TOOLS.iter().chain(CLAUDE_ASK_TOOLS).copied().collect();
+    json!({"permissions": {"ask": ask}, "plansDirectory": PLANS_FOLDER})
+}
 
 /// The Claude Code adapter's read tools. They are on in every session, but every call asks (a
 /// `permissions.ask` rule in the session's settings), so the question reaches the panel: the chat
@@ -317,12 +373,12 @@ pub fn session_new_params(cwd: &std::path::Path, bridge: Option<&McpBridge>, ini
         "systemPrompt": {"append": note},
         // Hosts may opt a session out of "bypass permissions" (the Claude adapter reads it):
         // every tool call the agent asks about reaches the panel.
-        // Its own shell and write tools are off: the agent works through SolidCraft's tools. Its
-        // read tools ask, so the chat sees every read.
+        // Its own shell and web tools are off: the agent works through SolidCraft's tools. Its
+        // read and write tools ask, so the chat sees every read and write (it may write only its plan).
         "claudeCode": {"options": {
             "allowDangerouslySkipPermissions": false,
             "disallowedTools": CLAUDE_DISALLOWED_TOOLS,
-            "settings": {"permissions": {"ask": CLAUDE_ASK_TOOLS}},
+            "settings": claude_settings(),
         }},
     });
     if takes_antigravity_note(init)
@@ -581,6 +637,10 @@ pub enum Incoming {
         options: Vec<PermissionOption>,
         /// The path it would read, when it is one of Claude Code's own read tools ([`read_path`]).
         reads: Option<std::path::PathBuf>,
+        /// The file it would write, when it is one of Claude Code's own write tools ([`write_path`]).
+        writes: Option<std::path::PathBuf>,
+        /// The plan it asks the user to approve ([`plan_text`]).
+        plan: Option<String>,
     },
     /// The agent says whether it is logged in (an extension both adapters send).
     AuthStatus(String),
@@ -671,7 +731,9 @@ pub fn parse(line: &str) -> Option<Incoming> {
                 })
                 .unwrap_or_default();
             let reads = call.and_then(read_path);
-            Some(Incoming::Permission { rpc: id.clone(), title, kind, options, reads })
+            let writes = call.and_then(write_path);
+            let plan = call.and_then(plan_text);
+            Some(Incoming::Permission { rpc: id.clone(), title, kind, options, reads, writes, plan })
         }
         (Some(m), Some(id)) => Some(Incoming::Unsupported { rpc: id.clone(), method: m.to_string() }),
         (Some("session/update"), None) => Some(update(params.get("update")?, params.get("sessionId").and_then(Value::as_str).unwrap_or(""))),
@@ -999,9 +1061,9 @@ mod tests {
             })
         );
         let perm = r#"{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{"sessionId":"s","toolCall":{"toolCallId":"t1","title":"batch"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},{"optionId":"reject","name":"Reject","kind":"reject_once"}]}}"#;
-        let Some(Incoming::Permission { rpc, title, kind, options, reads }) = parse(perm) else { panic!() };
+        let Some(Incoming::Permission { rpc, title, kind, options, reads, writes, plan }) = parse(perm) else { panic!() };
         assert_eq!((title.as_str(), options.len(), options[1].kind.as_str()), ("batch", 2, "reject_once"));
-        assert_eq!((kind, reads), (None, None));
+        assert_eq!((kind, reads, writes, plan), (None, None, None, None));
         assert_eq!(permission_reply(rpc.clone(), Some("allow"))["result"]["outcome"], json!({"outcome": "selected", "optionId": "allow"}));
         assert_eq!(permission_reply(rpc, None)["result"]["outcome"]["outcome"], "cancelled");
         let fs = r#"{"jsonrpc":"2.0","id":8,"method":"fs/read_text_file","params":{}}"#;
@@ -1079,20 +1141,21 @@ mod tests {
         assert_eq!(config_options(&json!({"configOptions":[{"type":"select","id":"broken"}]})), ConfigParse::Invalid);
     }
 
-    /// Claude Code's read tools are on in every session and ask before every call; its shell,
-    /// write and web tools stay off.
+    /// Claude Code's read tools are on in every session and ask before every call, as do its write
+    /// tools, for its plan; its shell and web tools stay off.
     #[test]
     fn claudes_read_tools_ask_and_its_other_tools_are_off() {
         let p = session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE);
         let options = &p["_meta"]["claudeCode"]["options"];
         let off: Vec<&str> = options["disallowedTools"].as_array().map(|t| t.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
-        for tool in ["Bash", "Write", "Edit", "WebFetch", "WebSearch", "Task"] {
+        for tool in ["Bash", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch", "Task"] {
             assert!(off.contains(&tool), "{tool} off: {off:?}");
         }
-        for tool in CLAUDE_ASK_TOOLS {
+        for tool in CLAUDE_ASK_TOOLS.iter().chain(CLAUDE_PLAN_TOOLS) {
             assert!(!off.contains(tool), "{tool} on: {off:?}");
         }
-        assert_eq!(options["settings"]["permissions"]["ask"], json!(["Read", "Glob", "Grep"]));
+        assert_eq!(options["settings"]["permissions"]["ask"], json!(["Write", "Edit", "Read", "Glob", "Grep"]));
+        assert_eq!(options["settings"]["plansDirectory"], "plans");
         assert!(options.get("resume").is_none());
         assert!(SYSTEM_NOTE.contains("attached it by path"), "{SYSTEM_NOTE}");
         let argv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
@@ -1100,6 +1163,39 @@ mod tests {
         assert!(is_claude_adapter(&argv(&["npx", "-y", "@zed-industries/claude-code-acp"])));
         assert!(is_claude_adapter(&argv(&["C:\\npm\\claude-agent-acp.cmd"])));
         assert!(!is_claude_adapter(&argv(&["codex-acp"])) && !is_claude_adapter(&argv(&["opencode", "acp"])));
+    }
+
+    /// Only the Claude adapter's own Write and Edit questions, with an absolute path, give a file
+    /// to check; the plan comes only from its "Approve Plan" question, cut at [`MAX_PLAN`].
+    #[test]
+    fn claudes_writes_and_plan_are_read_from_its_questions() {
+        let f = "/w/plans/plan-a.md";
+        let write = |v: Value| write_path(&v);
+        assert_eq!(write(json!({"title": format!("Write {f}"), "kind": "edit", "rawInput": {"file_path": f, "content": "# Plan"}})), Some(f.into()));
+        assert_eq!(write(json!({"title": "Edit plans/plan-a.md", "kind": "edit", "rawInput": {"file_path": f}})), Some(f.into()));
+        for call in [
+            json!({"title": "Write plans/plan-a.md", "kind": "edit", "rawInput": {"file_path": "plans/plan-a.md"}}),
+            json!({"title": format!("Write {f}"), "kind": "read", "rawInput": {"file_path": f}}),
+            json!({"title": format!("Writer {f}"), "kind": "edit", "rawInput": {"file_path": f}}),
+            json!({"title": format!("MultiEdit {f}"), "kind": "edit", "rawInput": {"file_path": f}}),
+            json!({"title": format!("Write {f}"), "kind": "edit", "rawInput": {"path": f}}),
+            json!({"title": format!("Write {f}"), "kind": "edit", "rawInput": {"file_path": f}, "_meta": {"claudeCode": {"mcpServer": {"name": "x"}}}}),
+        ] {
+            assert_eq!(write(call.clone()), None, "{call}");
+        }
+        let plan = |v: Value| plan_text(&v);
+        let approve = |p: Value| json!({"title": "Ready to code?", "kind": "switch_mode", "rawInput": {"plan": p, "planFilePath": f}});
+        assert_eq!(plan(approve(json!("\n# Plan\n\n1. A block.\n"))).as_deref(), Some("# Plan\n\n1. A block."));
+        assert_eq!(plan(approve(json!("  "))), None);
+        assert_eq!(plan(approve(json!(7))), None);
+        assert_eq!(plan(json!({"title": "batch", "kind": "other", "rawInput": {"plan": "x"}})), None);
+        let long = plan(approve(json!("é".repeat(MAX_PLAN + 5)))).unwrap_or_default();
+        assert_eq!((long.chars().count(), long.ends_with('…')), (MAX_PLAN + 1, true));
+        let perm = json!({
+            "jsonrpc": "2.0", "id": 9, "method": "session/request_permission",
+            "params": {"sessionId": "s", "toolCall": {"toolCallId": "t", "title": "Ready to code?", "kind": "switch_mode", "rawInput": {"plan": "# Plan"}}, "options": []},
+        });
+        assert!(matches!(parse(&perm.to_string()), Some(Incoming::Permission { plan: Some(p), writes: None, .. }) if p == "# Plan"));
     }
 
     /// Only the Claude adapter's own Read, Glob and Grep questions, with an absolute path and a
