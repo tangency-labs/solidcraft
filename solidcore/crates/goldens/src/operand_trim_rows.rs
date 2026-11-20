@@ -184,6 +184,10 @@ pub(crate) type Moved = (&'static str, usize, f64, f64);
 pub(crate) enum Class {
     Closer,
     Equal,
+    /// A tolerance raised from under its need to past twice it, to a proved bound that covers
+    /// the need but is loose ([`RAISED_TO_A_LOOSE_BOUND`]): neither shown closer nor equal,
+    /// counted apart and allowed only where listed.
+    Looser,
     Farther,
 }
 
@@ -312,6 +316,7 @@ fn point_class(k: &Kernel, b: &Brep, faces: &[FaceId], main: Point3, now: Point3
             Class::Farther => return Class::Farther,
             Class::Closer => class = Class::Closer,
             Class::Equal => {}
+            Class::Looser => unreachable!("`class_of` is never looser"),
         }
     }
     class
@@ -455,10 +460,17 @@ fn geometry_site(ints: &[i64], i: usize) -> Site {
     Site::EdgeTolerance { e: r / 3 }
 }
 
-/// Tolerances raised past twice their need although main's was under it: (case, body
-/// prefix, `geometry` index). The refit's proved deviation bound is loose at these corners
-/// (#19784 tracks tightening it); the raise reaches that bound, which covers the measured
-/// need, so the tolerance goes from main's uncertified one to a certified, looser one.
+/// Tolerances raised past twice their need although main's was under it, classed
+/// [`Class::Looser`]: (case, body prefix, `geometry` index). The kernel raises these to its
+/// refit's proved deviation bound, loose at these corners (#19784 tracks tightening it):
+/// main's 1.97e-5 becomes 1.7e-3, about 86 times main's and past twice the need. The need is
+/// an upper bound on what the tolerance must cover, not a measured distance, so main's being
+/// under it does not show main's tolerance fails to cover, and this certificate shows the
+/// raise neither closer nor equal. Each case's two entries are an edge's tolerance (index
+/// 740, the record's edge 46) and its end vertex's (index 499, vertex 30), both 1.7e-3.
+/// `trim_tolerance`'s certificate keeps the same edge (its edge 93) open as a `loose-raise`
+/// (one of its trims is a line on a B-spline surface, which it does not enclose): counted,
+/// never proved closer.
 const RAISED_TO_A_LOOSE_BOUND: &[(&str, &str, usize)] = &[
     ("fc0000", "", 499),
     ("fc0000", "", 740),
@@ -473,9 +485,9 @@ const RAISED_TO_A_LOOSE_BOUND: &[(&str, &str, usize)] = &[
 /// The class of a tolerance moved from main's `m` to `n`, both against `need`, the bound
 /// the tolerance must cover (`n >= need` already asserted): lowered is closer; raised by at
 /// most `need` is equal (within what the trims need); raised from under its need to at most
-/// twice it is closer (main's uncovered, this branch's covering it with no more slack than
-/// the need itself); any other raise is farther, except the listed
-/// [`RAISED_TO_A_LOOSE_BOUND`] rows, closer as documented there (each must still be raised
+/// twice it is closer (main's under the bound, this branch's covering it with no more slack
+/// than the need itself); any other raise is farther, except the listed
+/// [`RAISED_TO_A_LOOSE_BOUND`] rows, looser as documented there (each must still be raised
 /// from under its need past twice it, or its entry is stale).
 fn tolerance_class(name: &str, prefix: &str, i: usize, m: f64, n: f64, need: f64) -> Class {
     let listed = RAISED_TO_A_LOOSE_BOUND.contains(&(name, prefix, i));
@@ -486,7 +498,7 @@ fn tolerance_class(name: &str, prefix: &str, i: usize, m: f64, n: f64, need: f64
             Class::Closer
         } else if listed {
             eprintln!("    raised to a loose proved bound (#19784): {name} {prefix} geometry[{i}]");
-            return Class::Closer;
+            return Class::Looser;
         } else {
             Class::Farther
         }
@@ -924,6 +936,8 @@ pub(crate) fn certify_body(
         }
         let class = if of_face.contains(&Class::Farther) {
             Class::Farther
+        } else if of_face.contains(&Class::Looser) {
+            Class::Looser
         } else if of_face.contains(&Class::Equal) {
             Class::Equal
         } else {
@@ -1057,7 +1071,8 @@ mod local_operation {
     include!("operand_trim_rows/local_operation.rs");
 
     /// Every `topology.brep_local_operation` row the copy moves (65): certified as the
-    /// module docs say; none farther. The rows were recorded before the kept-trim cover
+    /// module docs say; none farther, and looser only the listed
+    /// [`super::RAISED_TO_A_LOOSE_BOUND`] tolerances (counted). The rows were recorded before the kept-trim cover
     /// (#19295), which can raise these reads' edge tolerances. Each case runs with any
     /// such raise put back, so the certificate is of the copy's moves alone (the cover's
     /// are proved by `tolsub`'s replay). They were recorded before the WR-493 retirement
@@ -1069,7 +1084,7 @@ mod local_operation {
     fn local_operation_rows_are_certified() {
         use crate::refit::with_fitted_spheres;
         use crate::tolsub::with_trim_cover_put_back;
-        let (mut closer, mut equal) = (0, 0);
+        let (mut closer, mut equal, mut looser) = (0, 0, 0);
         for row in ROWS {
             let case = crate::case::regression_case(&Runner, row.case);
             let (out, _) = with_fitted_spheres(|| {
@@ -1082,15 +1097,18 @@ mod local_operation {
                 match c {
                     Class::Closer => closer += 1,
                     Class::Equal => equal += 1,
+                    Class::Looser => looser += 1,
                     Class::Farther => unreachable!(),
                 }
             }
         }
         eprintln!(
-            "{} rows: moved values closer {closer}, equal {equal}",
+            "{} rows: moved values closer {closer}, equal {equal}, looser (raised to a loose \
+             proved bound, #19784) {looser}",
             ROWS.len()
         );
         assert_eq!(ROWS.len(), 65);
+        assert_eq!(looser, super::RAISED_TO_A_LOOSE_BOUND.len());
     }
 
     /// A trim off its edge's tolerance on an edge no moved value touches passes only as
@@ -1192,7 +1210,9 @@ mod feature_executive {
                     match c {
                         Class::Closer => closer += 1,
                         Class::Equal => equal += 1,
-                        Class::Farther => panic!("{}: a moved value is farther", row.case),
+                        Class::Looser | Class::Farther => {
+                            panic!("{}: a moved value is {c:?}", row.case)
+                        }
                     }
                 }
             }
@@ -1699,6 +1719,8 @@ mod fillet_p3 {
         assert!(!of.is_empty(), "a moved bound with no moved sample");
         if of.contains(&Class::Farther) {
             Class::Farther
+        } else if of.contains(&Class::Looser) {
+            Class::Looser
         } else if of.contains(&Class::Equal) {
             Class::Equal
         } else {
@@ -2074,7 +2096,7 @@ mod fillet_p3 {
                         }
                         Some(Class::Closer) => closer += 1,
                         Some(Class::Equal) => equal += 1,
-                        Some(Class::Farther) => farther.push(name),
+                        Some(Class::Looser | Class::Farther) => farther.push(name),
                     }
                 } else {
                     eprintln!(
@@ -2090,7 +2112,7 @@ mod fillet_p3 {
                 match c {
                     Class::Closer => closer += 1,
                     Class::Equal => equal += 1,
-                    Class::Farther => farther.push(name),
+                    Class::Looser | Class::Farther => farther.push(name),
                 }
             }
         }

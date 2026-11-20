@@ -73,11 +73,6 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 ///   `u = 71.94`, `v` from 0 to 139.4, far outside the face's B-spline domain
 ///   `[-0.05, 1.05]^2`, so its image is the surface's extrapolation; the trim is in another
 ///   parameterisation than its face's, in both kernels, and no tolerance covers it);
-/// - `loose`: the sampled gap is within the new tolerance but the enclosure `B` is not, on
-///   the body as built nor on an exactly translated copy ([`exact_translated_bound`]):
-///   `primitive.api_primitives`' `gen0244` edges 1 and 3 and `gen1157` edge 5, about 8e8
-///   from the origin (the other moved edges of those cases and of `gen0893` are certified
-///   on that copy);
 /// - `rounding-bound`: a vertex of `primitive.api_primitives`' `gen0244`, `gen0893` and
 ///   `gen1157`, about 8e8 from the origin, where the evaluation's own error bound at that
 ///   scale exceeds what the tolerance can show: its edge ends evaluate onto its point, but
@@ -114,12 +109,13 @@ const OPEN: &str = include_str!("trim_tolerance_open.tsv");
 /// origin is a new failure, not this one.
 const ROUNDING_BOUND_SCALE: f64 = 1.0e8;
 
-/// Whether every one of `points` has a coordinate past [`ROUNDING_BOUND_SCALE`] in magnitude.
+/// Whether every one of `points` has a coordinate of at least [`ROUNDING_BOUND_SCALE`] in
+/// magnitude.
 fn all_far(points: &[Point3]) -> bool {
     !points.is_empty()
         && points
             .iter()
-            .all(|p| p.x.abs().max(p.y.abs()).max(p.z.abs()) > ROUNDING_BOUND_SCALE)
+            .all(|p| p.x.abs().max(p.y.abs()).max(p.z.abs()) >= ROUNDING_BOUND_SCALE)
 }
 
 /// [`OPEN`] entries of `unit`: `(case, body, entity)`, the entity an edge's index or `v` and
@@ -446,17 +442,23 @@ fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> UseBound {
 /// curve and the surface moved by `-T`, where the move is exact: every distance of the copy
 /// is the original's, so its bound is a bound of the original pair (#18166: a body built at
 /// the origin, its tolerances proved there, then moved about 8e8 away, where the enclosures
-/// widen with the coordinates: `primitive.api_primitives` gen1157).
+/// widen with the coordinates: `primitive.api_primitives`' `gen0244`, `gen0893` and `gen1157`,
+/// whose moved edges the body as built leaves uncertified are certified on this copy).
 ///
-/// `T` is, per axis, the power of two at most the middle of the curve's control points'
-/// coordinate (`0` for a middle that is zero or not normal). The copy is built here, not by
-/// a transform (which divides by the weight and multiplies back, rounding): each stored
-/// homogeneous coordinate `X` of weight `w` (`1` for a non-rational point) becomes `X - w T`,
-/// so the Euclidean point `X / w` moves by exactly `-T`. Exactness is checked, never assumed:
-/// `w T` exact (a power of two times a weight, normal or zero), `X - w T` with no rounding
-/// error (Knuth's two-sum error `0`), and the copy's stored coordinate that value, its weight
-/// unchanged. `None` where any point fails, for a curve or surface that is not a B-spline, or
-/// where the bound is not enclosed.
+/// `T` is a sum of steps, each exact on its own, so the whole move is exact. A step is, per
+/// axis, the power of two at most the middle of the moved curve's control points' coordinate
+/// (`0` where that middle is under `1` in magnitude or not normal): it about halves the
+/// middle, so the steps bring the middle of the copy's curve under `1` on each axis, within
+/// [`TRANSLATION_STEPS`] steps, stopping early at the first step that would not be
+/// exact (the copy then stays where the last exact step left it). The copy is built here,
+/// not by a transform (which divides by the weight and multiplies back, rounding): each
+/// stored homogeneous coordinate `X` of weight `w` (`1` for a non-rational point) becomes
+/// `X - w t` for a step `t`, so the Euclidean point `X / w` moves by exactly `-t`. Exactness
+/// is checked, never assumed: `w t` exact (a power of two times a weight, normal or zero),
+/// `X - w t` with no rounding error (Knuth's two-sum error `0`), and the copy's stored
+/// coordinates the last step's values, bit for bit, its weights unchanged. `None` where no
+/// step is exact, for a curve or surface that is not a B-spline, or where the bound is not
+/// enclosed.
 fn exact_translated_bound(
     k: &Kernel,
     surface: &Surface,
@@ -473,29 +475,12 @@ fn exact_translated_bound(
     };
     let weight = |p: &CPoint| if p.w > 0.0 { p.w } else { 1.0 };
     let cp = c.control_points().ok()?;
-    let mut lo = [f64::INFINITY; 3];
-    let mut hi = [f64::NEG_INFINITY; 3];
-    for p in cp {
-        for (i, x) in [p.x, p.y, p.z].into_iter().enumerate() {
-            let e = x / weight(p);
-            lo[i] = lo[i].min(e);
-            hi[i] = hi[i].max(e);
-        }
-    }
-    let t: [f64; 3] = std::array::from_fn(|i| {
-        let m = 0.5 * lo[i] + 0.5 * hi[i];
-        if m.is_normal() {
-            // (the exponent bits alone: the largest power of two at most |m|)
-            f64::from_bits(m.abs().to_bits() & 0x7ff0_0000_0000_0000).copysign(m)
-        } else {
-            0.0
-        }
-    });
-    if t == [0.0; 3] {
+    let (n, m, sp) = sb.control_points().ok()?;
+    if m == 0 {
         return None;
     }
-    // `p` moved by `-T`, or `None` where a coordinate's move is not exact
-    let moved = |p: &CPoint| -> Option<Point3> {
+    // `p` moved by `-t`, or `None` where a coordinate's move is not exact
+    let step = |p: &CPoint, t: [f64; 3]| -> Option<CPoint> {
         let mut out = [0.0; 3];
         for (o, (x, tc)) in out.iter_mut().zip([(p.x, t[0]), (p.y, t[1]), (p.z, t[2])]) {
             let s = weight(p) * tc;
@@ -508,47 +493,88 @@ fn exact_translated_bound(
             }
             *o = d;
         }
-        Some(Point3::new(out[0], out[1], out[2]))
+        Some(CPoint {
+            x: out[0],
+            y: out[1],
+            z: out[2],
+            w: p.w,
+        })
     };
-    let same = |p: &CPoint, q: &CPoint, d: Point3| {
-        p.w.to_bits() == q.w.to_bits()
-            && [(q.x, d.x), (q.y, d.y), (q.z, d.z)]
-                .into_iter()
-                .all(|(y, d)| y.to_bits() == d.to_bits())
+    let (mut cur_c, mut cur_s) = (cp.to_vec(), sp.to_vec());
+    let mut moved_any = false;
+    for _ in 0..TRANSLATION_STEPS {
+        let mut lo = [f64::INFINITY; 3];
+        let mut hi = [f64::NEG_INFINITY; 3];
+        for p in &cur_c {
+            for (i, x) in [p.x, p.y, p.z].into_iter().enumerate() {
+                let e = x / weight(p);
+                lo[i] = lo[i].min(e);
+                hi[i] = hi[i].max(e);
+            }
+        }
+        let t: [f64; 3] = std::array::from_fn(|i| {
+            let mid = 0.5 * lo[i] + 0.5 * hi[i];
+            if mid.is_normal() && mid.abs() >= 1.0 {
+                // (the exponent bits alone: the largest power of two at most |mid|)
+                f64::from_bits(mid.abs().to_bits() & 0x7ff0_0000_0000_0000).copysign(mid)
+            } else {
+                0.0
+            }
+        });
+        if t == [0.0; 3] {
+            break;
+        }
+        let next_c: Option<Vec<CPoint>> = cur_c.iter().map(|p| step(p, t)).collect();
+        let next_s: Option<Vec<CPoint>> = cur_s.iter().map(|p| step(p, t)).collect();
+        let (Some(next_c), Some(next_s)) = (next_c, next_s) else {
+            break;
+        };
+        (cur_c, cur_s, moved_any) = (next_c, next_s, true);
+    }
+    if !moved_any {
+        return None;
+    }
+    let same = |p: &CPoint, q: &CPoint| {
+        [(p.x, q.x), (p.y, q.y), (p.z, q.z), (p.w, q.w)]
+            .into_iter()
+            .all(|(a, b)| a.to_bits() == b.to_bits())
     };
     let mut mc = c.clone();
-    for (i, p) in cp.iter().enumerate() {
-        mc.set_control_point(ControlPointForm::HomogeneousRational, i, moved(p)?, p.w)
-            .ok()?;
+    for (i, p) in cur_c.iter().enumerate() {
+        mc.set_control_point(
+            ControlPointForm::HomogeneousRational,
+            i,
+            Point3::new(p.x, p.y, p.z),
+            p.w,
+        )
+        .ok()?;
     }
     let mcp = mc.control_points().ok()?;
     if mcp.len() != cp.len()
-        || !cp
-            .iter()
-            .zip(mcp)
-            .all(|(p, q)| moved(p).is_some_and(|d| same(p, q, d)))
+        || !cp.iter().zip(&cur_c).all(|(p, q)| p.w.to_bits() == q.w.to_bits())
+        || !cur_c.iter().zip(mcp).all(|(p, q)| same(p, q))
     {
         return None;
     }
-    let (n, m, sp) = sb.control_points().ok()?;
     let mut ms = sb.clone();
-    if m == 0 {
-        return None;
-    }
     // (`n` rows of `m` points: point `[i][j]` at `i m + j`)
-    for (i, row) in sp.chunks(m).enumerate() {
+    for (i, row) in cur_s.chunks(m).enumerate() {
         for (j, p) in row.iter().enumerate() {
-            ms.set_control_point(ControlPointForm::HomogeneousRational, i, j, moved(p)?, p.w)
-                .ok()?;
+            ms.set_control_point(
+                ControlPointForm::HomogeneousRational,
+                i,
+                j,
+                Point3::new(p.x, p.y, p.z),
+                p.w,
+            )
+            .ok()?;
         }
     }
     let (mn, mm, mp) = ms.control_points().ok()?;
     if (n, m) != (mn, mm)
         || sp.len() != mp.len()
-        || !sp
-            .iter()
-            .zip(&mp)
-            .all(|(p, q)| moved(p).is_some_and(|d| same(p, q, d)))
+        || !sp.iter().zip(&cur_s).all(|(p, q)| p.w.to_bits() == q.w.to_bits())
+        || !cur_s.iter().zip(&mp).all(|(p, q)| same(p, q))
     {
         return None;
     }
@@ -556,6 +582,10 @@ fn exact_translated_bound(
     let moved_surface = Surface::from(ms);
     trim_image_gap_bound(k, &moved_surface, &moved_curve, trim, range, floor).ok()?
 }
+
+/// The most steps of [`exact_translated_bound`]'s move (a cap): each about halves a middle
+/// of at least `1`, so 1100 steps cover any finite middle (under `2^1024`).
+const TRANSLATION_STEPS: usize = 1100;
 
 /// The owner of a value of a geometry record (`topology_brep_mirror::geometry`).
 #[derive(Clone, Copy, PartialEq)]
@@ -1126,15 +1156,16 @@ fn certify(unit: &str) -> Tally {
                 let key = (row.case.clone(), body, index.to_string());
                 if raised {
                     // a raise: the new tolerance covers every trim, and one trim's bound is
-                    // above the old tolerance (in OPEN only as a `loose-raise`: no enclosed
-                    // trim past the old tolerance, every one within the new, and the new
-                    // tolerance exactly the entry's, so a raise that moves is seen; counted
-                    // open, never proved)
+                    // above the old tolerance (in OPEN only as a `loose-raise`: at least one
+                    // trim enclosed, none past the old tolerance, every one within the new,
+                    // and the new tolerance exactly the entry's, so a raise that moves is
+                    // seen; counted open, never proved)
                     let past = bounds.iter().flatten().any(|x| *x > old);
                     if bad.is_empty() && past {
                         tally.raised += 1;
                     } else if open.get(&key).is_some_and(|c| c == "loose-raise")
                         && !past
+                        && bounds.iter().any(Option::is_some)
                         && bounds.iter().flatten().all(|x| *x <= new)
                         && open_tolerance(unit, &key).map(f64::to_bits) == Some(new.to_bits())
                     {

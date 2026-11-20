@@ -58,8 +58,7 @@
 //! raises (the cover measures the kept trims on the file's NURB here, on the fitted NURB on
 //! main) by less than the goldens' comparator: the committed line stays main's, the run
 //! agrees with it under the comparator, and with the fitted NURB put back the run is that
-//! line to the bit (three `nurb_fillet` mirrors, whose committed line is not main's own run
-//! to the bit, under the comparator: [`TRIM_COVER_MAIN_RUN_NOT_COMMITTED`]).
+//! line to the bit.
 //!
 //! `corpus.parity`'s five part-file reads (`Solids/boolean_trees.smp`,
 //! `ss_plane_sph1..4.smp`) are not replayed: the part read (`part_file::read_part_from_db`)
@@ -69,13 +68,22 @@
 //! `boolean_trees.smp` agrees with its committed line (main's) under the comparator
 //! ([`part_reads_the_retirement_moves`]).
 //!
-//! `topology.brep_mirror`'s `gen0050`, `gen0061`, `gen0079` and `gen0111` (mirrors of
-//! `Solids/nurb_fillet.smb`): with the raises put back, with or without the fitted NURB,
-//! their geometry blocks' sums are one to three units in the last place off main's
-//! put-back run (measured once on main), so they are not held to main's hash: put back,
-//! each is asserted off main's hash and moved by the cover beyond the comparator; as is,
-//! each agrees with its committed line (main's) under the comparator
-//! ([`TRIM_COVER_PUT_BACK_OFF_MAIN_RUN`]).
+//! #18166 (the stitch's end-of-operation cover, raised to proved bounds, and the lazy UV
+//! trim raise) re-blesses 27 of these rows, each certified in `certify::trim_tolerance`:
+//! `topology.brep_mirror`'s 18 `nurb_fillet` mirrors (with the four whose put-back row was
+//! off main's run, and the rows only the cover's put-back step reached), `topology.face_p3`'s
+//! five `own_reader_sphere_diff_3cylinders_uv_trim` faces, `topology.brep_p2`'s
+//! `refine_cci_f6_plane_c_uv` and `refine_cci_f7_plane_b_uv`, `topology.brep_local_operation`'s
+//! `fc0006` and `blend.fillet_executive_p3`'s `stubs4-shell_fillet2-e5-r0.5`; their entries
+//! are deleted. Four more, `blend.fillet_executive_p3`'s
+//! `stubs4-delete-edge-sphere_diff_3cylinders-e1/e4-r0.1/r0.5`, keep main's committed line
+//! to the bit, but with the cover's raises put back their edges hold #18166's lazily raised
+//! tolerances (lower, each a proved bound) instead of main's, so the put-back row is no
+//! longer main's: they are not replayed with the cover's raises put back. They are checked
+//! instead as rows that did not move ([`KEPT_MAIN_ROW`]): run as is, each is main's committed
+//! line to the bit (its hash, taken from main's expected file, which holds these four lines
+//! unchanged) and this branch's committed line. (The hashes their [`TRIM_COVER`] entries held
+//! were of an older main's run, not of the line main now commits.)
 
 use std::collections::BTreeMap;
 
@@ -266,8 +274,7 @@ const WITHIN_COMPARATOR: &[(&str, &str)] = &[
 /// [`TRIM_COVER_REFIT`] has the found spheres' fitted NURB put back as well for the first
 /// run. A row in [`TRIM_COVER_WITHIN_COMPARATOR`] agrees with its committed line under the
 /// goldens' comparator but not to the bit, and with the fitted NURB put back (the cover's
-/// raises kept) it is that line to the bit (under the comparator for a row in
-/// [`TRIM_COVER_MAIN_RUN_NOT_COMMITTED`]).
+/// raises kept) it is that line to the bit.
 fn replay_trim_cover(unit_id: &str) -> usize {
     let u = unit(unit_id);
     let all = cases(u.as_ref());
@@ -317,40 +324,6 @@ fn replay_trim_cover(unit_id: &str) -> usize {
             failures.push(format!("{name}: {reads} reads, {undone} put back, {f:?}"));
         }
         let committed = golden.get(name);
-        if TRIM_COVER_PUT_BACK_OFF_MAIN_RUN.contains(&(unit_id, name)) {
-            // (put back, the row is not main's put-back row to the bit, and the cover's
-            // raises move it beyond the comparator; as is it agrees with the committed
-            // line, main's, under the comparator)
-            if hash(&line) == main_hash {
-                failures.push(format!("{name}: the row put back is main's row to the bit"));
-            }
-            // the positive oracle: main's put-back row (captured on main 46dafacb6f, the
-            // row `main_hash` pins), which the row put back agrees with under the comparator
-            let main_row = main_put_back_row(name);
-            if hash(&main_row) != main_hash {
-                failures.push(format!(
-                    "{name}: the captured row is not main's put-back row"
-                ));
-            }
-            if diff(&main_row, &line, u.abs_floors()).is_some() {
-                failures.push(format!(
-                    "{name}: the row put back does not agree with main's put-back row"
-                ));
-            }
-            if committed.is_some_and(|g| diff(g, &line, u.abs_floors()).is_none()) {
-                failures.push(format!(
-                    "{name}: the row put back agrees with the committed line: the cover \
-                     moved nothing"
-                ));
-            }
-            let as_is = run(u.as_ref(), case);
-            if committed.is_none_or(|g| diff(g, &as_is, u.abs_floors()).is_some()) {
-                failures.push(format!(
-                    "{name}: the row as is does not agree with the committed line"
-                ));
-            }
-            continue;
-        }
         if hash(&line) != main_hash {
             failures.push(format!("{name}: the row put back is not main's row"));
         }
@@ -364,15 +337,7 @@ fn replay_trim_cover(unit_id: &str) -> usize {
                 }
                 Some(g) if diff(g, &line, u.abs_floors()).is_none() => {
                     let refit = refit_run(case, &mut failures);
-                    if TRIM_COVER_MAIN_RUN_NOT_COMMITTED.contains(&(unit_id, name)) {
-                        // (main's own run is not its committed line to the bit either)
-                        if diff(g, &refit, u.abs_floors()).is_some() {
-                            failures.push(format!(
-                                "{name}: with the fitted NURB the row does not agree with \
-                                 the committed line"
-                            ));
-                        }
-                    } else if &refit != g {
+                    if &refit != g {
                         failures.push(format!(
                             "{name}: with the fitted NURB the row is not the committed line"
                         ));
@@ -395,23 +360,7 @@ fn replay_trim_cover(unit_id: &str) -> usize {
 const TRIM_COVER_REFIT: &[(&str, &str)] = &[
     (
         "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-    ),
-    (
-        "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
     ),
     (
         "blend.fillet_executive_p3",
@@ -440,52 +389,14 @@ const TRIM_COVER_REFIT: &[(&str, &str)] = &[
     ("topology.api_files", "write_bytes0179"),
     ("topology.api_files", "write_bytes_file_nurb_fillet_ascii"),
     ("topology.api_files", "write_bytes_file_nurb_fillet_binary"),
-    ("topology.brep_mirror", "Solids_nurb_fillet_smb_xy_at_z12"),
-    ("topology.brep_mirror", "gen0003"),
     ("topology.brep_p2", "refine_cci_f6_plane_b_nouv"),
     ("topology.brep_p2", "refine_cci_f6_plane_b_uv"),
-    ("topology.brep_p2", "refine_cci_f7_plane_b_uv"),
     ("topology.face_p3", "own_reader_sphere_plane_uv_trim_f0"),
     ("topology.face_p3", "own_reader_sphere_plane_uv_trim_f10"),
     ("topology.face_p3", "own_reader_sphere_plane_uv_trim_f2"),
     ("topology.face_p3", "own_reader_sphere_plane_uv_trim_f4"),
     ("topology.face_p3", "own_reader_sphere_plane_uv_trim_f6"),
     ("topology.face_p3", "own_reader_sphere_plane_uv_trim_f8"),
-];
-
-/// Main's put-back row of a [`TRIM_COVER_PUT_BACK_OFF_MAIN_RUN`] row (captured on main at
-/// 46dafacb6f; its hash is the row's [`TRIM_COVER`] hash).
-fn main_put_back_row(name: &str) -> Value {
-    include_str!("replay/main_put_back_rows.jsonl")
-        .lines()
-        .map(|l| serde_json::from_str::<Value>(l).expect("row"))
-        .find(|v| v["case"] == name)
-        .unwrap_or_else(|| panic!("{name}: no captured put-back row"))
-}
-
-/// The [`TRIM_COVER`] rows (mirrors of `Solids/nurb_fillet.smb`) that, with the cover's
-/// raises put back, with or without the fitted NURB, are one to three units in the last
-/// place off main's put-back run in their geometry blocks' sums (measured once on main at
-/// 0b321cbaa4, not replayed here). Held here: put back, the row is not main's put-back row
-/// to the bit, and it does not agree with the committed line under the goldens' comparator
-/// (the cover's raises move it beyond that), but it agrees with main's put-back row (held in
-/// `replay/main_put_back_rows.jsonl`) under the comparator; as is, it agrees with its
-/// committed line (main's) under the comparator (`gen0061` to the bit).
-const TRIM_COVER_PUT_BACK_OFF_MAIN_RUN: &[(&str, &str)] = &[
-    ("topology.brep_mirror", "gen0050"),
-    ("topology.brep_mirror", "gen0061"),
-    ("topology.brep_mirror", "gen0079"),
-    ("topology.brep_mirror", "gen0111"),
-];
-
-/// The [`TRIM_COVER_WITHIN_COMPARATOR`] rows whose committed line (main's) is not main's own
-/// run of the case to the bit (measured once on main's run at 0b321cbaa4, not replayed
-/// here: that run agrees with the line under the goldens' comparator only). For these the run with the fitted NURB put back is held to
-/// the committed line under the comparator, not to the bit.
-const TRIM_COVER_MAIN_RUN_NOT_COMMITTED: &[(&str, &str)] = &[
-    ("topology.brep_mirror", "Solids_nurb_fillet_smb_xz_at_y3"),
-    ("topology.brep_mirror", "gen0003"),
-    ("topology.brep_mirror", "gen0109"),
 ];
 
 /// The [`TRIM_COVER`] rows whose cover raises the WR-493 retirement moves by less than the
@@ -507,16 +418,7 @@ const TRIM_COVER_WITHIN_COMPARATOR: &[(&str, &str)] = &[
     ("heal.stitch_p2", "file_nurb_fillet.smb_stitchfaces_0.001"),
     ("heal.stitch_p2", "file_nurb_fillet.smb_stitchfaces_0.005"),
     ("topology.brep_cutting", "gen0050"),
-    ("topology.brep_mirror", "Solids_nurb_fillet_smb_xy_at_z12"),
-    ("topology.brep_mirror", "Solids_nurb_fillet_smb_xz_at_y3"),
-    ("topology.brep_mirror", "Solids_nurb_fillet_smb_yz_at_0"),
-    ("topology.brep_mirror", "gen0003"),
-    ("topology.brep_mirror", "gen0013"),
-    ("topology.brep_mirror", "gen0109"),
-    ("topology.brep_mirror", "gen0121"),
-    ("topology.brep_mirror", "mat0049"),
     ("topology.brep_mirror", "mat0058"),
-    ("topology.brep_mirror", "mat0059"),
     ("topology.brep_p2", "refine_cci_f0_plane_a_nouv"),
     ("topology.brep_p2", "refine_cci_f0_plane_a_uv"),
     ("topology.brep_p2", "refine_cci_f0_plane_b_uv"),
@@ -525,8 +427,6 @@ const TRIM_COVER_WITHIN_COMPARATOR: &[(&str, &str)] = &[
     ("topology.brep_p2", "refine_cci_f4_plane_b_uv"),
     ("topology.brep_p2", "refine_cci_f6_plane_b_nouv"),
     ("topology.brep_p2", "refine_cci_f6_plane_b_uv"),
-    ("topology.brep_p2", "refine_cci_f6_plane_c_uv"),
-    ("topology.brep_p2", "refine_cci_f7_plane_b_uv"),
     ("topology.brep_p2", "refine_cci_f8_plane_a_uv"),
     (
         "topology.edgeuse_p3",
@@ -546,22 +446,6 @@ const TRIM_COVER_WITHIN_COMPARATOR: &[(&str, &str)] = &[
     ),
     (
         "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f10",
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f11",
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f2",
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f3",
-    ),
-    (
-        "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f4",
     ),
     (
@@ -571,10 +455,6 @@ const TRIM_COVER_WITHIN_COMPARATOR: &[(&str, &str)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f6",
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f7",
     ),
     (
         "topology.face_p3",
@@ -672,19 +552,70 @@ macro_rules! replay_trim_cover_tests {
 
 replay_trim_cover_tests! {
     blend_feature_executive_rows_move_only_through_the_trim_cover: "blend.feature_executive", 3;
-    blend_fillet_executive_p3_rows_move_only_through_the_trim_cover: "blend.fillet_executive_p3", 32;
+    blend_fillet_executive_p3_rows_move_only_through_the_trim_cover: "blend.fillet_executive_p3", 27;
     blend_fillet_removal_rows_move_only_through_the_trim_cover: "blend.fillet_removal", 20;
     corpus_parity_rows_move_only_through_the_trim_cover: "corpus.parity", 3;
     heal_stitch_p1_rows_move_only_through_the_trim_cover: "heal.stitch_p1", 4;
     heal_stitch_p2_rows_move_only_through_the_trim_cover: "heal.stitch_p2", 8;
     topology_api_files_rows_move_only_through_the_trim_cover: "topology.api_files", 12;
     topology_brep_cutting_rows_move_only_through_the_trim_cover: "topology.brep_cutting", 2;
-    topology_brep_local_operation_rows_move_only_through_the_trim_cover: "topology.brep_local_operation", 28;
-    topology_brep_mirror_rows_move_only_through_the_trim_cover: "topology.brep_mirror", 20;
-    topology_brep_p2_rows_move_only_through_the_trim_cover: "topology.brep_p2", 11;
+    topology_brep_local_operation_rows_move_only_through_the_trim_cover: "topology.brep_local_operation", 27;
+    topology_brep_mirror_rows_move_only_through_the_trim_cover: "topology.brep_mirror", 2;
+    topology_brep_p2_rows_move_only_through_the_trim_cover: "topology.brep_p2", 9;
     topology_brep_p9_rows_move_only_through_the_trim_cover: "topology.brep_p9", 4;
     topology_edgeuse_p3_rows_move_only_through_the_trim_cover: "topology.edgeuse_p3", 16;
-    topology_face_p3_rows_move_only_through_the_trim_cover: "topology.face_p3", 18;
+    topology_face_p3_rows_move_only_through_the_trim_cover: "topology.face_p3", 13;
+}
+
+/// Rows #18166 took out of [`TRIM_COVER`] that it does not move (see the module docs): unit,
+/// case, and the hash of main's committed line (`origin/main` ee673a19bf's expected file).
+const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
+    (
+        "blend.fillet_executive_p3",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
+        0xa90a_9179_4750_1297,
+    ),
+    (
+        "blend.fillet_executive_p3",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
+        0x1679_1328_0d68_333a,
+    ),
+    (
+        "blend.fillet_executive_p3",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
+        0xfb1f_0985_b9ee_e48c,
+    ),
+    (
+        "blend.fillet_executive_p3",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
+        0xcc4d_2e3f_0192_8b71,
+    ),
+];
+
+/// Each [`KEPT_MAIN_ROW`] row, run as is, is main's committed line to the bit and this
+/// branch's committed line.
+#[test]
+fn rows_the_lazy_raise_keeps_are_main_s() {
+    for &(unit_id, name, main_hash) in KEPT_MAIN_ROW {
+        assert!(
+            !TRIM_COVER.iter().any(|r| r.0 == unit_id && r.1 == name)
+                && !DATA.iter().any(|r| r.0 == unit_id && r.1 == name),
+            "{unit_id} {name}: replayed as well"
+        );
+        let u = unit(unit_id);
+        let all = cases(u.as_ref());
+        let golden = read(&default_dir(), unit_id).unwrap();
+        let case = all
+            .get(name)
+            .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
+        let line = run(u.as_ref(), case);
+        assert_eq!(hash(&line), main_hash, "{unit_id} {name}: not main's line");
+        assert_eq!(
+            golden.get(name),
+            Some(&line),
+            "{unit_id} {name}: not the committed line"
+        );
+    }
 }
 
 /// Writes, per `unit<TAB>case` line of `$TOLSUB_CASES`, one JSON line to `$TOLSUB_OUT`:

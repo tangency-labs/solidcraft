@@ -3481,7 +3481,9 @@ mod tests {
     /// edge curves' evaluation rounding (`sqrt 3` times their point error bound there, about
     /// 4e-5) is more than `2 B` leaves over `B`. There [`trim_raise_distance`] keeps
     /// upstream's raise for an edge whose bound leaves the rounding uncovered, and lowers
-    /// only where it is covered.
+    /// only where it is covered. The check is of the edge where the raise is made: gen1157
+    /// itself is lowered at the origin, where it passes, and then moved 8e8 away, which this
+    /// guard does not see (a lowering carried across a later move: #19910).
     #[test]
     fn a_lowering_covers_the_evaluation_rounding_where_the_edge_lies() {
         let (b_proved, lowered) = (7.392e-6, 1.4784e-5);
