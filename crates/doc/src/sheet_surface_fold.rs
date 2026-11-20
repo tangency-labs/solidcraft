@@ -292,8 +292,25 @@ impl Folded<'_> {
     /// split alike, so that a ruled wall joins them piece by piece.
     fn edges(&self, piece: Piece, run: &[Seg2]) -> Result<[EdgeSpec; 2]> {
         let sampled = |depth: f64| (0..=SAMPLES).map(|k| self.at(piece, run_at(run, k as f64 / SAMPLES as f64), depth)).collect::<Result<Vec<_>>>();
+        // A run's samples on one circle make it an arc, but in a bend's zone a short piece of a
+        // helix (a cut across a zone's curved end near a joint of its spans) passes for one too,
+        // whose wall would be a cone the rulings at its ends don't lie on: there only a line
+        // straight across the bend folds to an arc (round the bend's axis).
+        let across = |bent: &Bent| {
+            run.iter().all(|s| match *s {
+                Seg2::Line { a, b } => (bent.wrapped(a).0 - bent.wrapped(b).0).abs() <= 1e-9,
+                _ => false,
+            })
+        };
         if let (Some(surface), Some(deep)) = (simple(&sampled(0.0)?), simple(&sampled(self.t)?)) {
-            return Ok([surface, deep]);
+            let arc = matches!(surface, EdgeSpec::Arc { .. }) || matches!(deep, EdgeSpec::Arc { .. });
+            let held = match piece {
+                Piece::Zone(z) if arc => self.bent(z).is_some_and(across),
+                _ => true,
+            };
+            if held {
+                return Ok([surface, deep]);
+            }
         }
         // Equal pieces of each of the run's segments, as few as keep within the tolerance at
         // both depths; each joint of the run starts a piece.
