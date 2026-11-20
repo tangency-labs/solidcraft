@@ -917,10 +917,10 @@ fn names(p: &Value) -> Vec<String> {
     p.get("bodies").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect()
 }
 
-/// Whether Keep Axes With Body is ticked. It starts unticked, so an ordinary Move moves what it
-/// always did.
-pub(crate) fn keeps_axes(_app: &SolveApp, d: &Dialog) -> bool {
-    d.extra.get("keep_axes").and_then(Value::as_bool).unwrap_or(false)
+/// Whether Keep Axes With Body is ticked. It starts ticked in Creative Mode and unticked
+/// otherwise, so an ordinary Move moves what it always did.
+pub(crate) fn keeps_axes(app: &SolveApp, d: &Dialog) -> bool {
+    d.extra.get("keep_axes").and_then(Value::as_bool).unwrap_or_else(|| crate::creative_mode::on(app))
 }
 
 /// The construction axes held only by fixed points (a Center Pole) whose line runs through one
