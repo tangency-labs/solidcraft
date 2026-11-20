@@ -87,6 +87,80 @@ impl Cylinder {
         };
         (on(a) && on(b)).then_some(c)
     }
+    /// Whether `other` is this cylinder: the same radius and axis within `tol`, a tilt counted at
+    /// the rim (`|a × b| · radius <= tol`).
+    #[must_use]
+    pub fn same_cylinder(&self, other: &Cylinder, tol: f64) -> bool {
+        let across = other.origin - self.origin;
+        (self.radius - other.radius).abs() <= tol
+            && self.axis.cross(other.axis).length() * self.radius <= tol
+            && (across - self.axis * across.dot(self.axis)).length() <= tol
+    }
+
+    /// Whether `p` lies within `tol` of the cylinder's wall: its distance from the axis is the radius.
+    #[must_use]
+    pub fn on_wall(&self, p: Vec3, tol: f64) -> bool {
+        ((p - self.centre_at(p)).length() - self.radius).abs() <= tol
+    }
+
+    /// Whether the line from `a` to `b` is a ruling: `|(b − a) × axis| <= tol`.
+    #[must_use]
+    pub fn runs_along_axis(&self, a: Vec3, b: Vec3, tol: f64) -> bool {
+        (b - a).cross(self.axis).length() <= tol
+    }
+
+    /// Where the line `p0 + u·t` (`u` unit) meets the cylinder; empty when it misses or runs along
+    /// it (`tol` is a length: `|u × axis| · radius <= tol`).
+    #[must_use]
+    pub fn line_hits(&self, p0: Vec3, u: Vec3, tol: f64) -> Vec<Vec3> {
+        let w = p0 - self.centre_at(p0);
+        let du = u - self.axis * u.dot(self.axis);
+        let (qa, qb, qc) = (
+            du.dot(du),
+            2.0 * du.dot(w),
+            w.dot(w) - self.radius * self.radius,
+        );
+        let disc = qb * qb - 4.0 * qa * qc;
+        if du.length() * self.radius <= tol || disc < 0.0 {
+            return Vec::new();
+        }
+        [
+            (-qb - disc.sqrt()) / (2.0 * qa),
+            (-qb + disc.sqrt()) / (2.0 * qa),
+        ]
+        .map(|t| p0 + u * t)
+        .to_vec()
+    }
+
+    /// The centre and outward side of an edge from `a` to `b` round the cylinder, its samples `pts`
+    /// and `b` on the circle at `a`'s height within `tol`; the side is the middle sample's.
+    #[must_use]
+    pub fn round_side(&self, pts: &[Vec3], a: Vec3, b: Vec3, tol: f64) -> Option<(Vec3, Vec3)> {
+        let h = self.height(a);
+        let on = |p: Vec3| (self.height(p) - h).abs() <= tol && self.on_wall(p, tol);
+        let mid = *pts.get(pts.len() / 2)?;
+        (pts.iter().all(|p| on(*p)) && (self.height(b) - h).abs() <= tol)
+            .then(|| (self.centre_at(a), mid - (a + b) * 0.5))
+    }
+}
+
+/// The line where planes `n1·x = d1` and `n2·x = d2` (unit normals) meet: a point and its unit
+/// direction; `None` when `|n1 × n2| <= parallel_sine`, a sine, not a length.
+#[must_use]
+pub fn plane_pair_line(
+    n1: Vec3,
+    d1: f64,
+    n2: Vec3,
+    d2: f64,
+    parallel_sine: f64,
+) -> Option<(Vec3, Vec3)> {
+    let c = n1.cross(n2);
+    if c.length() <= parallel_sine {
+        return None;
+    }
+    let u = c * (1.0 / c.length());
+    let p0 = (n2.cross(u) * d1 + u.cross(n1) * d2) / c.dot(u);
+    Some((p0, u))
 }
 
 /// An arc about a centre: from its start along `x_axis`, through `sweep` radians towards
@@ -352,6 +426,137 @@ mod tests {
         assert!(
             !c.is_circle_at(at, x, tilted(0.011), 2.0, 5.0, tol),
             "outside tol"
+        );
+    }
+
+    #[test]
+    fn two_planes_meet_in_a_line_on_both_planes() {
+        let (p0, u) = plane_pair_line(
+            Vec3::new(1.0, 0.0, 0.0),
+            2.0,
+            Vec3::new(0.0, 1.0, 0.0),
+            3.0,
+            1e-9,
+        )
+        .expect("the planes meet");
+        assert!(
+            (p0 - Vec3::new(2.0, 3.0, 0.0)).length() < 1e-12,
+            "p0 on both planes"
+        );
+        assert!(
+            (u - Vec3::new(0.0, 0.0, 1.0)).length() < 1e-12,
+            "u along the line"
+        );
+        assert!(
+            plane_pair_line(
+                Vec3::new(1.0, 0.0, 0.0),
+                2.0,
+                Vec3::new(2.0, 0.0, 0.0),
+                3.0,
+                1e-9
+            )
+            .is_none(),
+            "parallel planes"
+        );
+    }
+
+    #[test]
+    fn a_line_meets_the_cylinder_at_its_two_roots_or_misses() {
+        let c = cylinder();
+        let hits = c.line_hits(Vec3::new(0.0, 0.0, 7.0), Vec3::new(1.0, 0.0, 0.0), 1e-9);
+        assert_eq!(hits.len(), 2);
+        assert!((hits[0] - Vec3::new(-2.0, 0.0, 7.0)).length() < 1e-12);
+        assert!((hits[1] - Vec3::new(2.0, 0.0, 7.0)).length() < 1e-12);
+        assert!(c
+            .line_hits(Vec3::new(0.0, 5.0, 7.0), Vec3::new(1.0, 0.0, 0.0), 1e-9)
+            .is_empty());
+    }
+
+    #[test]
+    fn planes_are_parallel_by_the_sine_between_them_at_any_size() {
+        let tilted = |s: f64| Vec3::new(s, 0.0, (1.0 - s * s).sqrt());
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        for d in [1.0e-3, 2.0e5] {
+            assert!(plane_pair_line(z, d, tilted(0.1), d, 1e-6).is_some(), "{d}");
+            assert!(
+                plane_pair_line(z, d, tilted(1e-7), d, 1e-6).is_none(),
+                "{d}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_line_runs_along_the_cylinder_by_its_drift_over_one_radius() {
+        let leaning = |s: f64| Vec3::new(s, 0.0, (1.0 - s * s).sqrt());
+        for r in [5.0e-4, 1.0e5] {
+            let c = Cylinder {
+                radius: r,
+                ..cylinder()
+            };
+            // A length tolerance of 1e-6 of the diameter.
+            let tol = 2.0 * r * 1e-6;
+            let p0 = Vec3::new(0.0, 0.0, 0.0);
+            assert_eq!(c.line_hits(p0, leaning(0.1), tol).len(), 2, "{r}");
+            assert!(c.line_hits(p0, leaning(1e-6), tol).is_empty(), "{r}");
+        }
+    }
+
+    #[test]
+    fn a_cylinder_with_the_same_axis_and_radius_is_the_same_one() {
+        let c = cylinder();
+        let shifted = Cylinder {
+            origin: Vec3::new(0.0, 0.0, 9.0),
+            ..c
+        };
+        assert!(c.same_cylinder(&shifted, 1e-9), "a point of the same axis");
+        let off = Cylinder {
+            origin: Vec3::new(0.5, 0.0, 0.0),
+            ..c
+        };
+        assert!(!c.same_cylinder(&off, 1e-9), "another axis");
+        let wider = Cylinder { radius: 3.0, ..c };
+        assert!(!c.same_cylinder(&wider, 1e-9), "another radius");
+    }
+
+    #[test]
+    fn a_point_on_the_wall_is_within_tol_of_it() {
+        let c = cylinder();
+        assert!(c.on_wall(Vec3::new(2.0, 0.0, 5.0), 1e-9));
+        assert!(!c.on_wall(Vec3::new(1.0, 0.0, 5.0), 1e-9));
+    }
+
+    #[test]
+    fn a_line_runs_along_the_axis_only_within_tol() {
+        let c = cylinder();
+        let (o, up) = (Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.1, 0.0, 3.0));
+        assert!(c.runs_along_axis(o, Vec3::new(0.0, 0.0, 3.0), 1e-6));
+        assert!(!c.runs_along_axis(o, up, 1e-6), "leans off the axis");
+        assert!(c.runs_along_axis(o, up, 0.2), "within a looser tol");
+    }
+
+    #[test]
+    fn a_round_edge_arcs_about_the_axis_on_the_middle_samples_side() {
+        let c = cylinder();
+        let at = |deg: f64, z: f64| {
+            let t = deg.to_radians();
+            Vec3::new(2.0 * t.cos(), 2.0 * t.sin(), z)
+        };
+        let pts: Vec<Vec3> = (0..=4).map(|i| at(f64::from(i) * 22.5, 5.0)).collect();
+        let (centre, out) = c
+            .round_side(&pts, at(0.0, 5.0), at(90.0, 5.0), 1e-9)
+            .expect("round");
+        assert!(
+            (centre - Vec3::new(0.0, 0.0, 5.0)).length() < 1e-12,
+            "centre on the axis"
+        );
+        assert!(
+            out.dot(Vec3::new(1.0, 1.0, 0.0)) > 0.0,
+            "the middle's side of the chord"
+        );
+        assert!(
+            c.round_side(&pts, at(0.0, 5.0), at(90.0, 6.0), 1e-9)
+                .is_none(),
+            "b off the height"
         );
     }
 }

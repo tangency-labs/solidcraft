@@ -98,6 +98,60 @@ impl Cylinder {
             .plane_circle(vec(normal), d, vec(a), vec(b), tol)
             .map(arr)
     }
+    /// Whether `other` is this cylinder ([`cc::Cylinder::same_cylinder`]).
+    #[must_use]
+    pub fn same_cylinder(&self, other: &Cylinder, tol: f64) -> bool {
+        self.kernel().same_cylinder(&other.kernel(), tol)
+    }
+
+    /// Whether `p` lies within `tol` of the cylinder's wall ([`cc::Cylinder::on_wall`]).
+    #[must_use]
+    pub fn on_wall(&self, p: [f64; 3], tol: f64) -> bool {
+        self.kernel().on_wall(vec(p), tol)
+    }
+
+    /// Whether the line from `a` to `b` is a ruling ([`cc::Cylinder::runs_along_axis`]).
+    #[must_use]
+    pub fn runs_along_axis(&self, a: [f64; 3], b: [f64; 3], tol: f64) -> bool {
+        self.kernel().runs_along_axis(vec(a), vec(b), tol)
+    }
+
+    /// Where the line `p0 + u·t` meets the cylinder ([`cc::Cylinder::line_hits`]).
+    #[must_use]
+    pub fn line_hits(&self, p0: [f64; 3], u: [f64; 3], tol: f64) -> Vec<[f64; 3]> {
+        self.kernel()
+            .line_hits(vec(p0), vec(u), tol)
+            .into_iter()
+            .map(arr)
+            .collect()
+    }
+
+    /// The centre and outward side of an edge round the cylinder ([`cc::Cylinder::round_side`]).
+    #[must_use]
+    pub fn round_side(
+        &self,
+        pts: &[[f64; 3]],
+        a: [f64; 3],
+        b: [f64; 3],
+        tol: f64,
+    ) -> Option<([f64; 3], [f64; 3])> {
+        let pts: Vec<Vec3> = pts.iter().map(|p| vec(*p)).collect();
+        self.kernel()
+            .round_side(&pts, vec(a), vec(b), tol)
+            .map(|(c, out)| (arr(c), arr(out)))
+    }
+}
+
+/// The line where planes `n1·x = d1` and `n2·x = d2` meet ([`cc::plane_pair_line`]).
+#[must_use]
+pub fn plane_pair_line(
+    n1: [f64; 3],
+    d1: f64,
+    n2: [f64; 3],
+    d2: f64,
+    parallel_sine: f64,
+) -> Option<([f64; 3], [f64; 3])> {
+    cc::plane_pair_line(vec(n1), d1, vec(n2), d2, parallel_sine).map(|(p0, u)| (arr(p0), arr(u)))
 }
 
 /// An arc about a centre: from its start along `x_axis`, through `sweep` radians towards
