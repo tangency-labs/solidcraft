@@ -500,3 +500,35 @@ fn a_second_stack_adds_its_own_sketches_and_folder() {
     assert!(names.contains(&"Side 1 of 3 (5 mm)".to_string()), "{names:?}");
     assert!(s.model.results.iter().all(|x| x.error.is_none()), "{:?}", s.model.results);
 }
+
+/// Insert Mesh puts a scan in a component of its own. With the design's top level active, the
+/// stack is sketched there and measured where the mesh is placed: the 10 x 20 x 30 mm box, then
+/// moved by (100, 0, 50), so its planes run from z = 0.001 and then from z = 50.001.
+#[test]
+fn an_inserted_mesh_is_cut_where_it_is_placed() {
+    let dir = crate::tests::Folder::new("section-stack-insert");
+    let stl = dir.path("box.stl");
+    let mut src = Session::default();
+    run(&mut src, "solid.box", json!({"length": 10, "width": 20, "height": 30}));
+    run(&mut src, "file.export_stl", json!({ "path": stl }));
+    let mut s = Session::default();
+    let inserted = run(&mut s, "file.insert_mesh", json!({ "path": stl }));
+    let body = s.model.state().bodies[0].name.clone();
+    let check = |s: &mut Session, bottom: f64| {
+        let r = run(s, "mesh.section_stack", json!({"body": body, "plane": "XY", "spacing": 10}));
+        let sketches = ids(&r["sketches"]);
+        let zs: Vec<f64> = sketches.iter().map(|id| sketch_of(s, *id).0.z).collect();
+        let want: Vec<f64> = [0.001, 10.001, 20.001, 29.999].iter().map(|z| z + bottom).collect();
+        assert!(close(&zs, &want), "{zs:?}");
+        for id in sketches {
+            let (_, curves, areas) = sketch_of(s, id);
+            assert_eq!(lines(&curves), 4, "{curves:?}");
+            assert!((areas[0] - 200.0).abs() < 1e-6, "{areas:?}");
+        }
+    };
+    check(&mut s, 0.0);
+    let occurrence = inserted["occurrence"].clone();
+    run(&mut s, "occurrence.ground", json!({"occurrence": occurrence, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [100, 0, 50]}));
+    check(&mut s, 50.0);
+}

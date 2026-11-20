@@ -226,13 +226,33 @@ fn section_stack(s: &mut Session, p: &Value) -> Result<Value> {
     if !source.body.is_mesh() {
         return Err(bad(cmd, "select a mesh body"));
     }
-    // The sketches go into the active component, and its frame is the one the body's box and the
-    // plane are read in.
+    // The sketches go into the active component. A body of that component is measured where it
+    // is defined; with the design's top level active, a body of a component inside it (where
+    // Insert Mesh puts a scan) is measured where it is placed, the frame the top level's sketches
+    // are in, as Fit Curves reads it.
     let owner = s.doc.model_body_component(source);
-    if owner != s.active_component {
+    let at_top = s.active_component == 0 && s.active_occurrence_path.is_none();
+    let bounds = if owner == s.active_component {
+        source.body.exact_bounds()
+    } else if at_top && s.doc.component_within(owner, s.active_component) {
+        let world = s.world_state()?;
+        let placed: Vec<&solidcraft_doc::ModelBody> =
+            world.bodies.iter().filter(|b| s.own_body_name(&b.name).as_deref() == Some(body.as_str())).collect();
+        match placed.as_slice() {
+            [one] => one.body.exact_bounds(),
+            _ => {
+                let name = s.doc.components.iter().find(|c| c.id == owner).map(|c| c.name.as_str()).unwrap_or("its component");
+                return Err(bad(cmd, format!("the mesh body is placed {} times: activate component '{name}' to cut it there", placed.len())));
+            }
+        }
+    } else {
         let name = s.doc.components.iter().find(|c| c.id == owner).map(|c| c.name.as_str()).unwrap_or(s.doc.name.as_str());
-        return Err(bad(cmd, format!("activate component '{name}' first: the sections are sketched in the mesh body's own component")));
+        return Err(bad(
+            cmd,
+            format!("activate component '{name}' (or the design's top level) first: the sections are sketched in the active component"),
+        ));
     }
+    .map_err(|e| bad(cmd, format!("the mesh body's size: {e}")))?;
     let plane_value = match p.get("plane") {
         None | Some(Value::Null) => return Err(bad(cmd, "`plane` is required: the first plane of the stack, as sketch.create takes it")),
         Some(v) => v.clone(),
@@ -261,7 +281,6 @@ fn section_stack(s: &mut Session, p: &Value) -> Result<Value> {
     let base = super::sketch::plane_ref(s, &json!({ "plane": plane_value }), cmd)?;
     let (vals, _) = s.doc.param_values();
     let plane = s.doc.resolve_plane_in(&vals, &base, 0, s.active_component, Some(state.as_ref())).map_err(|e| bad(cmd, e.to_string()))?;
-    let bounds = source.body.exact_bounds().map_err(|e| bad(cmd, format!("the mesh body's size: {e}")))?;
     let v3 = |v: solidcore_record::Vec3| [v.x, v.y, v.z];
     let reach = solidcore_ops::affine::span_along(v3(bounds.min), v3(bounds.max), v3(plane.origin), v3(plane.normal()))
         .map_err(|_| bad(cmd, "the mesh body's reach along the plane's normal is not a finite length"))?;

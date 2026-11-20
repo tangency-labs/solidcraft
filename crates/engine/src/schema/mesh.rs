@@ -51,7 +51,9 @@ pub struct MeshConvertParams {
 #[schemars(deny_unknown_fields)]
 pub struct MeshSectionStackParams {
     /// The mesh body, by name. Default: the one selected body. A blank name also means the
-    /// selected body.
+    /// selected body. It is a body of the active component, or, with the design's top level
+    /// active, of any component in it placed once (where Insert Mesh puts a scan): that body is
+    /// cut where it is placed.
     #[serde(default)]
     pub body: Option<String>,
     /// The first plane, as `sketch.create` takes it: XY, XZ or YZ (also Top, Front, Right), a
