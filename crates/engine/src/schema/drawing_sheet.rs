@@ -179,7 +179,10 @@ pub struct SheetSettings {
     #[schemars(with = "Map<String, Value>")]
     pub excluded: Option<Map<String, Value>>,
     /// Text shown in place of its title block cells' values, by cell name (each a text cell of
-    /// its block): `{cell: text}`, merged into the ones it has; `null` for a cell drops its
+    /// its block; the built-in block's are `title`, `identification_number`, `created_by`,
+    /// `approved_by`, `date_of_issue`, `sheet`, `material`, `finish`, `mass`, `legal_owner`,
+    /// `general_tolerances`, and ISO 7200's `scale`, `document_type`, `document_status`,
+    /// `language`, `revision` and `department`): `{cell: text}`, merged into the ones it has; `null` for a cell drops its
     /// override, `null` for all of them drops them all. The values are still worked out, and
     /// `drawing.inspect` shows them beside.
     #[serde(default, deserialize_with = "overrides", skip_serializing_if = "Option::is_none")]
