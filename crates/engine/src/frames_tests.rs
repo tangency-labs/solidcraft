@@ -917,6 +917,31 @@ fn edge_picks_on_a_moved_part_find_it_past_other_parts_frames() {
     assert_eq!(blend_edges(&s), vec![Vec3::new(20.0, 0.0, 0.0)]);
 }
 
+/// #18057: a hole picked on a turned part drills that part, though another part has a face at
+/// the same point in its own frame (two leaves of a hinge, one turned by its joint). Cap is
+/// turned 180° about Z and moved 10 mm along -X, so its face centre (20, 15, 10) is shown at
+/// (-30, -15, 10): its top face when Cap's block starts at z 0, its bottom face when it starts
+/// at z 10 (where Base's top face points the other way).
+#[test]
+fn a_hole_picked_on_a_turned_part_drills_it_past_other_parts_frames() {
+    // A flat-bottomed hole of diameter 4, 5 deep.
+    let bore = std::f64::consts::PI * 2.0 * 2.0 * 5.0;
+    for (case, cap_z, active) in [("top, root active", 0.0, "root"), ("top, Base active", 0.0, "Base"), ("bottom, root active", 10.0, "root")] {
+        let mut s = two_parts(cap_z, [0.0; 3]);
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "occurrence.move", json!({"occurrence": "Cap:1", "axis": [0, 0, 1], "angle": "180 deg", "translate": [-10, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": active}));
+        run(&mut s, "solid.hole", json!({"position": [-30, -15, 10], "diameter": 4, "depth": 5, "name": "H"}));
+        assert_eq!(s.doc.find_feature("H").unwrap().participants, vec!["Cap block".to_string()], "{case}");
+        let (b, c) = (body_volume(&s, "Base block"), body_volume(&s, "Cap block"));
+        assert!(b == BLOCK && (c - (BLOCK - bore)).abs() < 1e-6 * BLOCK, "{case}: Base {b}, Cap {c}");
+        // The box's 6 faces, 12 edges and 8 corners, and the hole's wall and floor, its two rims
+        // and the wall's seam, and the seam's two ends.
+        let m = run(&mut s, "inspect.measure", json!({"bodies": ["Cap block"]}))["bodies"][0]["kernel"].clone();
+        assert_eq!(m, json!({"faces": 8, "edges": 15, "vertices": 10, "shells": 1}), "{case}");
+    }
+}
+
 /// Where the edges of two parts lie in one place in the world, a pick without `body` is refused,
 /// naming both; with `body`, or a pick's own `body`, the named part is cut.
 #[test]
