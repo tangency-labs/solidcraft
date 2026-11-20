@@ -324,6 +324,12 @@ pub(crate) struct OnScreen {
 }
 
 impl OnScreen {
+    /// A sheet shown one point a millimetre round its origin, for a tool's test.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> OnScreen {
+        OnScreen { centre: Pos2::ZERO, target: Vec2::ZERO, scale: 1.0 }
+    }
+
     fn of(cam: &Camera, canvas: Rect) -> OnScreen {
         let scale = f64::from(canvas.height().max(1.0)) / (2.0 * cam.half_height());
         OnScreen { centre: canvas.center(), target: Vec2::new(cam.target.x, cam.target.y), scale }
@@ -527,19 +533,50 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let on_paper = hover.filter(|p| (0.0..=size.x).contains(&p.x) && (0.0..=size.y).contains(&p.y));
     let placement_painter = painter.with_clip_rect(sheet_rect.intersect(painter.clip_rect()));
     let placing = crate::drawing_workspace::placement::on_sheet(app, &placement_painter, at, &drawing, sheet, on_paper, response.clicked());
+    if crate::drawing_workspace::placing_detail(app) {
+        crate::drawing_workspace::detail::follow_sheet(app, sheet);
+        if let Some(point) = on_paper {
+            crate::drawing_workspace::detail::on_sheet(app, &placement_painter, at, &view.objects, sheet, point, response.clicked());
+        }
+    }
     let placing_note = crate::drawing_workspace::placing_note(app);
     if placing_note && let Some(point) = on_paper {
         crate::drawing_workspace::note::on_sheet(app, &placement_painter, at, point, sheet, response.clicked());
     }
     let placing_dimension = crate::drawing_workspace::placing_dimension(app);
-    if placing_dimension && let Some(point) = on_paper {
-        crate::drawing_workspace::dimension::on_sheet(app, &placement_painter, at, sheet, point, HOVER_BAND / at.scale, response.clicked());
+    // A placed dimension's text, or a note, under the pointer comes before the tool's pick, as a
+    // sketch dimension's text does: it lights up and drags, and nothing under it is picked. Not
+    // once the picks are made, when a click anywhere places the new dimension.
+    let band = HOVER_BAND / at.scale;
+    let annotation = hover
+        .filter(|_| placing_dimension && !crate::drawing_workspace::dimension::has_picks(app))
+        .and_then(|p| drawing_scene::hit(&view.objects, p, band).map(|hit| (p, hit)))
+        .filter(|(_, hit)| matches!(hit.kind, ObjectKind::Dimension | ObjectKind::Note) && drawing.has_object(hit.object))
+        .filter(|(p, hit)| hit.kind == ObjectKind::Note || view_tools::over_text(app, hit.object, *p, band))
+        .map(|(_, hit)| hit);
+    if placing_dimension
+        && annotation.is_none()
+        && !view_tools::dragging_dimension()
+        && let Some(point) = on_paper
+    {
+        // The second click of a double-click is not a click of the tool's: it would place the
+        // dimension where the first click picked its edge, on top of the edge.
+        let clicked = response.clicked() && !response.double_clicked();
+        crate::drawing_workspace::dimension::on_sheet(app, &placement_painter, at, sheet, point, HOVER_BAND / at.scale, clicked);
     }
-    let placing = placing || placing_note || placing_dimension;
+    // With the tool in hand a double-click on a placed dimension's text edits it where it is, as
+    // the sketch's Dimension tool does, and the tool stays in hand; anywhere else it changes nothing.
+    if response.double_clicked()
+        && let Some(hit) = annotation.filter(|hit| hit.kind == ObjectKind::Dimension)
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        crate::drawing_workspace::edit_in_place(app, hit.object, pointer);
+    }
+    let placing = placing || placing_note || placing_dimension || crate::drawing_workspace::placing_detail(app);
     view_tools::Canvas { at, painter: &painter, response: &response, drawing: &drawing, sheet, objects: &view.objects, free: free_area(app, canvas) }
         .show(app, ui, placing);
     view_tools::box_select(app, ui, &painter, &response, at, &drawing, &view.objects, canvas, box_free && !placing);
-    let hit = hover.filter(|_| !placing).and_then(|p| drawing_scene::hit(&view.objects, p, HOVER_BAND / at.scale));
+    let hit = hover.filter(|_| !placing).and_then(|p| drawing_scene::hit(&view.objects, p, HOVER_BAND / at.scale)).or(annotation);
     app.drawing_workspace.page.hover =
         hit.filter(|hit| drawing.has_object(hit.object)).map(|hit| solidcraft_engine::Sel::Drawing { drawing: drawing.id, object: hit.object });
     // A right-click, as in the model and a sketch: it finishes the tool in hand, or else opens the
@@ -556,6 +593,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         }
     }
     if response.double_clicked()
+        && !placing
         && let Some(hit) = hit
     {
         let kind = match hit.kind {
@@ -592,6 +630,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         marks.paint_lit(&painter, &at, visible, ppp as f32, &app.drawing_workspace.page.pictures, &lit, t.accent);
     }
     let states = view_states(&painter, &at, &view.views, &view.stale, &view.objects);
+    let first_lines = waiting_views(&painter, &at, &drawing, &view);
     // Views a deferred drawing holds stay out of date without being worked on: their words say so.
     let waiting = view.stale.len() + view.stale_dimensions.len();
     if working {
@@ -624,11 +663,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         "ink": hex(ink),
         "generation": view.generation,
         "views": states,
+        "waiting_views": first_lines.iter().copied().map(encode).collect::<Vec<_>>(),
         "pictures": app.drawing_workspace.page.pictures.inspect(),
         "working": working,
         "hover": hit.map(|h| json!({"object": encode(h.object), "kind": kind_name(h.kind), "on_edge": h.on_edge, "lit": lit.contains(&h.object)})),
         "error": app.drawing_workspace.page.marks.as_ref().and_then(|m| m.error.clone()),
     }));
+    // The shared toasts, as the model and render pages show them: what a command or an export or
+    // print just said, which the sheet would otherwise leave unseen.
+    crate::viewport::transient_messages(app, ui, canvas, None);
     true
 }
 
@@ -737,15 +780,43 @@ fn view_states(painter: &egui::Painter, at: &OnScreen, views: &[drawing_scene::V
         }
         // D26's shape for Needs update, ahead of the words.
         let mark = if out_of_date { "⟳ " } else { "" };
-        let text = format!("{mark}{}", words.join(" · "));
-        let galley = painter.layout_no_wrap(text, egui::FontId::proportional(t.font_label), colour);
-        let at = r.left_top() + vec2(t.space_4, -(galley.size().y + t.space_8));
-        let chip = Rect::from_min_size(at, galley.size()).expand2(vec2(t.space_4, t.space_2));
-        painter.rect_filled(chip, chip.height() / 2.0, t.panel);
-        painter.galley(at, galley, colour);
-        crate::scenario::publish_rect(&format!("sheet:view:{}:state", solidcraft_engine::doc::ids::encode(state.view)), chip);
+        say(painter, r, format!("{mark}{}", words.join(" · ")), colour, state.view);
     }
     out
+}
+
+/// A view's state in words on a chip above its box `r`, for every state alike.
+fn say(painter: &egui::Painter, r: Rect, text: String, colour: Color32, view: u64) {
+    let t = Tokens::get();
+    let galley = painter.layout_no_wrap(text, egui::FontId::proportional(t.font_label), colour);
+    let at = r.left_top() + vec2(t.space_4, -(galley.size().y + t.space_8));
+    let chip = Rect::from_min_size(at, galley.size()).expand2(vec2(t.space_4, t.space_2));
+    painter.rect_filled(chip, chip.height() / 2.0, t.panel);
+    painter.galley(at, galley, colour);
+    crate::scenario::publish_rect(&format!("sheet:view:{}:state", solidcraft_engine::doc::ids::encode(view)), chip);
+}
+
+/// The views placed on the sheet whose first lines are still being worked out: each says
+/// "Projecting…" at its place on the sheet, from the frame it is placed, so a view that takes long
+/// is never silence. Their ids, for `ui.inspect`. Where it says so is the view's centre, which the
+/// drawing has without measuring anything: the window never works a view's extents out for it. A
+/// view drawn before keeps its last lines and says Needs update instead ([`view_states`]).
+fn waiting_views(
+    painter: &egui::Painter,
+    at: &OnScreen,
+    drawing: &solidcraft_engine::doc::drawing::Drawing,
+    view: &drawing_scene::SheetView,
+) -> Vec<u64> {
+    let t = Tokens::get();
+    let waiting: Vec<u64> =
+        view.stale.iter().copied().filter(|id| !view.objects.iter().any(|o| o.kind == ObjectKind::View && o.object == *id)).collect();
+    for id in &waiting {
+        let Ok(centre) = drawing.view_centre(*id) else { continue };
+        // The words alone, on the chip the other states use: no outline round an empty place.
+        let place = Rect::from_center_size(at.screen(centre), egui::Vec2::ZERO);
+        say(painter, place, solidcraft_ui_text::tr("ui.sheet_page.projecting").to_owned(), t.text_dim, *id);
+    }
+    waiting
 }
 
 /// What is said beside a view: why it draws nothing, and whether it needs an update (D26's

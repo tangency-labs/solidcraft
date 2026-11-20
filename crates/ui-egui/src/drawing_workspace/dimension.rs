@@ -217,6 +217,11 @@ pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+/// Whether the tool has picked something for the dimension it is making.
+pub(crate) fn has_picks(app: &SolveApp) -> bool {
+    app.drawing_workspace.dimension.as_ref().is_some_and(|draft| !draft.picks.is_empty())
+}
+
 /// Drops the tool's picks, keeping the tool: the first Esc, as in the sketch. Whether there were any.
 pub(crate) fn clear_picks(app: &mut SolveApp) -> bool {
     app.drawing_workspace.dimension.take().is_some_and(|draft| !draft.picks.is_empty())

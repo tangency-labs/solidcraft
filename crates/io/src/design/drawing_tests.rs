@@ -75,10 +75,10 @@ fn a_designs_drawings_round_trip_through_both_forms_byte_for_byte() {
     for part in ["document.json", "container.json"] {
         assert_eq!(inside[part], without[part], "{part} is the same with drawings or without");
     }
-    let json = write_design(&doc);
+    let json = write_design(&doc).unwrap();
     let read = read_design(&json).unwrap();
     assert_eq!(read.drawings, doc.drawings);
-    assert_eq!(write_design(&read), json, "the plain form too");
+    assert_eq!(write_design(&read).unwrap(), json, "the plain form too");
 }
 
 /// An image on a sheet travels in its drawing's record through both forms, and an entry whose file
@@ -100,13 +100,37 @@ fn an_image_on_a_sheet_round_trips_and_a_lying_one_is_refused() {
     let read = read_design(&bytes).unwrap();
     assert_eq!(read.drawings, doc.drawings);
     assert_eq!(write_design_container(&read).unwrap(), bytes, "save, open, save: the same bytes");
-    let json = write_design(&doc);
-    assert_eq!(read_design(&json).unwrap().drawings, doc.drawings, "the plain form too");
+    // The record names each image's part and keeps no bytes as text.
+    let entries = parts(&bytes);
+    let record: Value = serde_json::from_slice(&entries[&entry(doc.drawings[0].id)]).unwrap();
+    let part = record["image_files"][0]["part"].as_str().unwrap().to_string();
+    assert_eq!((record["image_files"][0]["data"].as_str(), entries[&part].as_slice()), (Some(""), header.as_slice()));
+    // The design names the part too, for a release that can't read the drawing's record.
+    let metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+    assert_eq!(metadata["drawing_parts"], json!([part]));
+    // A nightly build kept the records in `images`, naming their parts: it opens the same.
+    let mut nightly = entries.clone();
+    let mut layout = record.clone();
+    let files = layout.as_object_mut().unwrap().remove("image_files").unwrap();
+    let placed = layout.as_object_mut().unwrap().remove("placed_images").unwrap();
+    (layout["images"], layout["sheet_images"]) = (files, placed);
+    nightly.insert(entry(doc.drawings[0].id), layout.to_string().into_bytes());
+    assert_eq!(read_design(&container(&nightly)).unwrap().drawings, doc.drawings);
+    // An older design kept the bytes as base64 in the record: it opens the same.
+    let mut older = entries.clone();
+    let mut record = layout;
+    record["images"][0].as_object_mut().unwrap().remove("part");
+    record["images"][0]["data"] = json!(solidcraft_doc::canvas::base64_encode(&header));
+    older.insert(entry(doc.drawings[0].id), record.to_string().into_bytes());
+    older.remove(&part);
+    assert_eq!(read_design(&container(&older)).unwrap().drawings, doc.drawings);
+    // A plain JSON design can't hold the image: saving one is refused, naming it.
+    assert!(write_design(&doc).unwrap_err().to_string().contains("drawing images"));
 
     let mut inside = parts(&bytes);
     let name = entry(doc.drawings[0].id);
     let mut record: Value = serde_json::from_slice(&inside[&name]).unwrap();
-    record["images"][0]["pixels"] = json!([1, 1]);
+    record["image_files"][0]["pixels"] = json!([1, 1]);
     inside.insert(name, record.to_string().into_bytes());
     assert!(read_design(&container(&inside)).is_err());
 }
@@ -240,7 +264,7 @@ fn file_kind_tells_designs_and_drawings_apart() {
     let d = drawing();
     let cases = [
         (design, FileKind::Design),
-        (write_design(&doc), FileKind::Design),
+        (write_design(&doc).unwrap(), FileKind::Design),
         (write_drawing_container(&d).unwrap(), FileKind::Drawing),
         (d.to_json().unwrap().into_bytes(), FileKind::Drawing),
         (b"{\"format\": \"solidcraft-drawing/1\"}".to_vec(), FileKind::Drawing),
@@ -260,7 +284,7 @@ fn a_design_is_never_read_as_a_drawing_nor_a_drawing_as_a_design() {
         assert!(error(read_design(&bytes)).contains("is a SolidCraft drawing, not a design"));
     }
     let doc = Document::new("Plate");
-    for bytes in [write_design_container(&doc).unwrap(), write_design(&doc)] {
+    for bytes in [write_design_container(&doc).unwrap(), write_design(&doc).unwrap()] {
         assert!(error(read_drawing(&bytes)).contains("is a SolidCraft design, not a drawing"));
     }
 }
@@ -350,7 +374,7 @@ fn design_with_sheet_sketches() -> Document {
 fn sheet_sketches_round_trip_through_real_container_and_plain_design() {
     let source = design_with_sheet_sketches();
     let container_bytes = write_design_container(&source).unwrap();
-    let plain_bytes = write_design(&source);
+    let plain_bytes = write_design(&source).unwrap();
     for bytes in [&container_bytes, &plain_bytes] {
         let reopened = read_design(bytes).unwrap();
         assert_eq!(reopened.drawings, source.drawings);
@@ -366,7 +390,7 @@ fn sheet_sketches_round_trip_through_real_container_and_plain_design() {
             assert_eq!(d.sheet_sketch(record.id).unwrap().name, format!("Outline {i}"));
         }
         assert_eq!(write_design_container(&reopened).unwrap(), container_bytes);
-        assert_eq!(write_design(&reopened), plain_bytes);
+        assert_eq!(write_design(&reopened).unwrap(), plain_bytes);
     }
     let entries = parts(&container_bytes);
     for d in &source.drawings {
@@ -428,10 +452,51 @@ fn a_bad_sheet_sketch_refuses_the_whole_container_without_owner_fallback() {
         corrupt.insert(own_entry.clone(), serde_json::to_vec(&record).unwrap());
         let error = read_design(&container(&corrupt)).unwrap_err().to_string();
         assert!(error.contains(&own_entry), "missing drawing context for {pointer}: {error}");
-        let mut inline: Value = serde_json::from_slice(&write_design(&source)).unwrap();
+        let mut inline: Value = serde_json::from_slice(&write_design(&source).unwrap()).unwrap();
         inline["drawings"][0] = record;
         assert!(read_design(&serde_json::to_vec(&inline).unwrap()).is_err(), "plain JSON accepted {pointer}");
     }
     assert_eq!(read_design(&original).unwrap().drawings, source.drawings);
     assert_eq!(parts(&original), good_parts, "hostile-input checks changed their source");
+}
+
+/// A design saved by main with every kind of binary part, opened and saved again by the last
+/// release, 0.45.0 (`tests/fixtures/mixed-version`, which says what that release does): main reads
+/// back what it saved, every part byte for byte, the drawing's images and logo too.
+#[test]
+fn what_the_last_release_saves_back_main_reads_whole() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mixed-version");
+    let ours = std::fs::read(fixtures.join("saved-by-main.sc")).unwrap();
+    let theirs = std::fs::read(fixtures.join("saved-again-by-0.45.0.sc")).unwrap();
+    let (before, after) = (parts(&ours), parts(&theirs));
+    for (name, bytes) in before.iter().filter(|(name, _)| name.starts_with("blobs/") || name.starts_with("plugins/")) {
+        assert_eq!(after.get(name), Some(bytes), "{name} kept byte for byte");
+    }
+    let (ours, theirs) = (read_design(&ours).unwrap(), read_design(&theirs).unwrap());
+    assert!(theirs.newer_file.is_none(), "what it saved holds nothing this build can't read");
+    assert_eq!(theirs.plugin_data, ours.plugin_data);
+    assert_eq!((&theirs.canvases, &theirs.point_clouds, &theirs.render), (&ours.canvases, &ours.point_clouds, &ours.render));
+    assert_eq!(theirs.drawings, ours.drawings);
+    let d = &theirs.drawings[0];
+    assert!(d.sheet_images.iter().next().is_some() && d.logos().next().is_some(), "the placed image and the logo");
+}
+
+/// What a release that can't read image parts (0.45.0) needs of a file to open it and keep it all:
+/// each drawing's image records, placements and logos in fields it sets aside (no `images`, no
+/// `sheet_images`, no logo in a title-block cell), and every part the design holds named in
+/// `document.json`, the only place that release looks before it keeps a part.
+#[test]
+fn a_design_keeps_the_layout_the_last_release_reads() {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mixed-version/saved-by-main.sc");
+    let doc = read_design(&std::fs::read(fixture).unwrap()).unwrap();
+    let saved = parts(&write_design_container(&doc).unwrap());
+    let metadata = String::from_utf8(saved["document.json"].clone()).unwrap();
+    for name in saved.keys().filter(|name| name.starts_with("blobs/")) {
+        assert!(metadata.contains(name.as_str()), "document.json names {name}");
+    }
+    let record: Value = serde_json::from_slice(&saved[&entry(doc.drawings[0].id)]).unwrap();
+    assert!(record.get("images").is_none() && record.get("sheet_images").is_none(), "{record}");
+    assert!(record["image_files"].is_array() && record["placed_images"].is_array() && record["logo_cells"].is_array(), "{record}");
+    let cells = record.pointer("/sheets/0/title_block/cells").and_then(Value::as_array).unwrap();
+    assert!(cells.iter().all(|cell| cell.pointer("/kind/text/image").is_none()), "a logo cell keeps its text only");
 }

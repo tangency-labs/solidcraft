@@ -1,0 +1,10 @@
+{
+  "prefs.appearance.colour_vision_help": "Changes the colours that carry a meaning: sketch states, axes, bends, analyses and icons.",
+  "prefs.appearance.viewport_colours": "3D view colours",
+  "prefs.bottom_centre": "Bottom centre",
+  "prefs.logo_theme": "Theme's colours",
+  "prefs.status_bar_note": "A thin bar along the window's bottom edge shows what is being edited, the open sketch's state in its colour and the design's units; a click on the units changes them. The sketch's state then no longer shows in the view's corner.",
+  "prefs.structure.appearance_note": "Colours, text and accessibility.",
+  "prefs.trackpad_zoom_modifier.help": "Hold only this key to zoom at the pointer with vertical scroll. Off keeps the existing scroll behaviour.",
+  "prefs.viewport_background_colour": "Colour"
+}

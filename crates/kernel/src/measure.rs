@@ -199,6 +199,24 @@ mod tests {
         assert!(plate.bounds.lock().unwrap().is_some());
     }
 
+    /// Bodies whose vertices' boxes meet are not joined apart, and no exact box is measured to
+    /// show it (a Combine join onto a rounded spline body measured it for tens of seconds);
+    /// bodies whose vertices' boxes do not meet are judged by the exact boxes, as before.
+    #[test]
+    fn bodies_among_each_others_vertices_are_not_joined_apart_without_measuring() {
+        let plate = crate::box_solid(Vec3::ZERO, Vec3::new(200.0, 100.0, 1.0)).unwrap();
+        let on_top = crate::box_solid(Vec3::new(10.0, 10.0, 1.0), Vec3::new(20.0, 20.0, 5.0)).unwrap();
+        let far = crate::box_solid(Vec3::new(300.0, 0.0, 0.0), Vec3::new(310.0, 10.0, 1.0)).unwrap();
+        assert!(crate::union_apart(&[plate.clone(), far.clone(), on_top.clone()]).unwrap().is_none());
+        assert_eq!(*plate.bounds.lock().unwrap(), None);
+        assert_eq!(*on_top.bounds.lock().unwrap(), None);
+        assert_eq!(*far.bounds.lock().unwrap(), None);
+        // Clear of each other: the exact boxes show it, measured as before, and they are joined.
+        let joined = crate::union_apart(&[plate.clone(), far.clone()]).unwrap().expect("apart");
+        assert_eq!(joined.lumps().map_or(0, |l| l.len()), 2);
+        assert!(plate.bounds.lock().unwrap().is_some() && far.bounds.lock().unwrap().is_some());
+    }
+
     /// A cube 1000 mm from the origin with one 0.5 mm² facet left out: about the box's centre
     /// the sums miss a cone of that facet to the centre (0.08 %), where about the origin they are
     /// 17 % over. Closed, it measures the same about either.

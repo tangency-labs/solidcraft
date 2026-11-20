@@ -516,9 +516,9 @@ fn placement_preview(app: &SolveApp) -> Option<(String, DimensionDraft)> {
 
 thread_local! {
     static DRAWN: RefCell<Vec<Drawn>> = const { RefCell::new(Vec::new()) };
-    /// A text being dragged: which dimension, undo depth at the start, grab offset (sketch, or
-    /// paper for a drawing's).
-    static DRAG: RefCell<Option<(Dragged, usize, Vec2)>> = const { RefCell::new(None) };
+    /// What a drag moves: each item and where it was, the undo depth at the start and where the
+    /// pointer pressed (sketch, or paper for a drawing's).
+    static DRAG: RefCell<Option<Drag>> = const { RefCell::new(None) };
     static EDIT: RefCell<Option<Edit>> = const { RefCell::new(None) };
     /// Solves made for drafts so far: each preview's number, which the sketch scene is keyed on.
     static SOLVES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -752,35 +752,18 @@ fn change_sheet_text(app: &mut SolveApp, target: SheetText, typed: &str) -> Resu
     let typed = typed.trim();
     match target {
         SheetText::Dimension(id) => {
-            let inspect = |app: &mut SolveApp| app.run("drawing.dimension.inspect", json!({"dimension": encode(id)}));
-            let edit = |app: &mut SolveApp, text: serde_json::Value| {
-                app.run("drawing.dimension.edit", json!({"dimension": encode(id), "set": {"override_text": text}}))
-                    .map_err(|err| shown_error("drawing.dimension.edit", &err))
-            };
-            let read = inspect(app)?;
-            if read["text"].as_str() == Some(typed) {
-                // As it reads now: nothing to change, and a measured number stays measured.
+            // The box holds the dimension's text as a template, `{value}` its measured number.
+            let read = app.run("drawing.dimension.inspect", json!({"dimension": encode(id)}))?;
+            let now = read["record"]["override_text"].as_str();
+            let plain = solidcraft_engine::doc::drawing::dimension::VALUE_TOKEN;
+            // Nothing typed, `{value}` alone, or the measured number typed back: the number, measured.
+            let measured = typed.is_empty() || typed == plain || read["measured_text"].as_str() == Some(typed);
+            let wanted = (!measured).then_some(typed);
+            if wanted == now {
                 return Ok(read);
             }
-            if read["record"]["override_text"].is_null() {
-                return if typed.is_empty() { Ok(read) } else { edit(app, json!(typed)) };
-            }
-            // It shows a text instead of its number. The number shows again first: typed back, or
-            // with nothing typed, that is the whole change, and the dimension follows the model
-            // again. Any other text then takes its place, the two as one undo step.
-            let depth = app.session.undo.len();
-            let measured = edit(app, serde_json::Value::Null)?;
-            if typed.is_empty() || inspect(app)?["text"].as_str() == Some(typed) {
-                return Ok(measured);
-            }
-            let changed = edit(app, json!(typed));
-            if changed.is_ok() {
-                app.session.undo.truncate(depth + 1);
-            } else {
-                // A text that can't be set leaves the one it had.
-                let _ = app.run("edit.undo", json!({}));
-            }
-            changed
+            app.run("drawing.dimension.edit", json!({"dimension": encode(id), "set": {"override_text": wanted}}))
+                .map_err(|err| shown_error("drawing.dimension.edit", &err))
         }
         SheetText::TitleCell { sheet, cell } => {
             // As the sheet shows the cell now, and the value a typed text hides.
@@ -868,6 +851,21 @@ pub(crate) enum Dragged {
     /// A drawing's note, by its id: `drawing.note.edit` with `at`, on paper from its sheet's corner
     /// or its view's centre, as the note keeps it.
     Note(u64),
+    /// A drawing view, by its id: `drawing.view.move` with `to_mm`, its centre on the sheet.
+    View(u64),
+    /// A drawing's balloon, by its id: `drawing.balloon.edit` with `at`, as the balloon keeps it.
+    Balloon(u64),
+    /// A drawing's table, by its id: `drawing.table.edit` with `place: {at}`, its top left.
+    Table(u64),
+}
+
+/// A drag in progress: everything it moves, each from where it was, by how far the pointer has
+/// gone since `press`. One item, or a whole selection, as a sketch drags its selected geometry.
+#[derive(Clone, Debug)]
+struct Drag {
+    items: Vec<(Dragged, Vec2)>,
+    depth: usize,
+    press: Vec2,
 }
 
 /// Start dragging the text of the dimension under `press` (true: a dimension took the drag).
@@ -886,7 +884,16 @@ pub fn drag_start(app: &SolveApp, press: Pos2, press_sketch: Vec2, on_geometry: 
 /// Start dragging `dragged`'s text, which is at `text` now, from the pointer at `press` (both in
 /// the sketch's coordinates, or on paper for a drawing's).
 pub(crate) fn begin_drag(app: &SolveApp, dragged: Dragged, text: Vec2, press: Vec2) {
-    DRAG.with(|g| *g.borrow_mut() = Some((dragged, app.session.undo.len(), text - press)));
+    begin_group_drag(app, vec![(dragged, text)], press);
+}
+
+/// Start dragging several things at once, each from where it is now (`items`), by the pointer's
+/// way from `press`: a drawing's selection moves together, one undo step for the whole drag.
+pub(crate) fn begin_group_drag(app: &SolveApp, items: Vec<(Dragged, Vec2)>, press: Vec2) {
+    if items.is_empty() {
+        return;
+    }
+    DRAG.with(|g| *g.borrow_mut() = Some(Drag { items, depth: app.session.undo.len(), press }));
 }
 
 /// Is a dimension text being dragged?
@@ -896,26 +903,30 @@ pub fn dragging() -> bool {
 
 /// The dimension being dragged, if any.
 pub(crate) fn dragged() -> Option<Dragged> {
-    DRAG.with(|g| g.borrow().as_ref().map(|(d, ..)| d.clone()))
+    DRAG.with(|g| g.borrow().as_ref().and_then(|d| d.items.first().map(|(item, _)| item.clone())))
 }
 
 /// Move the dragged text so it follows the pointer (at `to`, sketch coordinates); one undo
 /// step for the whole drag.
 pub fn drag_to(app: &mut SolveApp, to: Vec2) {
-    let Some((dragged, depth, off)) = DRAG.with(|g| g.borrow().clone()) else { return };
-    let at = to + off;
-    let moved = match &dragged {
-        Dragged::Sketch(id) => app.session.execute("sketch.dimension_text", &json!({"dimension": id, "at": [at.x, at.y]})),
-        Dragged::Drawing(id) => app
-            .session
-            .execute("drawing.dimension.edit", &json!({"dimension": solidcraft_engine::doc::ids::encode(*id), "set": {"text_to_mm": [at.x, at.y]}})),
-        Dragged::Note(id) => {
-            app.session.execute("drawing.note.edit", &json!({"note": solidcraft_engine::doc::ids::encode(*id), "set": {"at": [at.x, at.y]}}))
-        }
-    };
-    if moved.is_ok() {
-        app.session.undo.truncate(depth + 1);
+    let Some(drag) = DRAG.with(|g| g.borrow().clone()) else { return };
+    let by = to - drag.press;
+    let encode = solidcraft_engine::doc::ids::encode;
+    for (item, from) in &drag.items {
+        let at = *from + by;
+        let (command, params) = match item {
+            Dragged::Sketch(id) => ("sketch.dimension_text", json!({"dimension": id, "at": [at.x, at.y]})),
+            Dragged::Drawing(id) => ("drawing.dimension.edit", json!({"dimension": encode(*id), "set": {"text_to_mm": [at.x, at.y]}})),
+            Dragged::Note(id) => ("drawing.note.edit", json!({"note": encode(*id), "set": {"at": [at.x, at.y]}})),
+            Dragged::View(id) => ("drawing.view.move", json!({"view": encode(*id), "to_mm": [at.x, at.y]})),
+            Dragged::Balloon(id) => ("drawing.balloon.edit", json!({"balloon": encode(*id), "set": {"at": [at.x, at.y]}})),
+            Dragged::Table(id) => ("drawing.table.edit", json!({"table": encode(*id), "set": {"place": {"at": [at.x, at.y]}}})),
+        };
+        // One that can't go there stays where it is; the rest still move.
+        let _ = app.session.execute(command, &params);
     }
+    // Each step keeps the design as it was before it: the first, from before the drag, undoes it all.
+    app.session.undo.truncate(drag.depth + 1);
 }
 
 pub fn drag_end() {

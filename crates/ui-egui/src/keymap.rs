@@ -484,6 +484,9 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
     if keeps_old_show_hide(app, key) {
         app.start("ui.toggle_visibility");
     } else if let Some(id) = command_for(app, key) {
+        if repeat && matches!(id, "tab.view.pop_out" | "tab.view.move_to_window") {
+            return;
+        }
         if id == DRAG_ZOOM {
             // The viewport reads the held chord. A key press must not latch Zoom.
             return;

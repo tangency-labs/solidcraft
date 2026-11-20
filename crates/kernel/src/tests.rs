@@ -1273,6 +1273,66 @@ fn mesh_corner_normals_survive_welding_reflection_and_nonuniform_scale() {
 }
 
 #[test]
+fn packed_mesh_winding_repairs_pairs_and_leaves_non_manifold_edges_alone() {
+    let positions = [
+        [0., 0., 0.],
+        [1., 0., 0.],
+        [0., 1., 0.],
+        [1., 1., 0.],
+        [10., 0., 0.],
+        [11., 0., 0.],
+        [10., 1., 0.],
+        [10., 0., 1.],
+        [10., -1., 0.],
+        [0., 0., 0.],
+    ];
+    let triangles = [[0, 9, 1], [0, 1, 2], [1, 2, 3], [4, 5, 6], [4, 5, 7], [4, 5, 8]];
+    let mut normals = [[0., 0., 1., 0., 0., 1., 0., 0., 1.]; 6];
+    normals[2] = [1., 0., 0., 0., 1., 0., 0., 0., 1.];
+
+    let body = crate::Body::from_packed_mesh(&positions, &triangles, &normals).unwrap();
+    let (welded_positions, welded_triangles) = body.triangle_mesh().unwrap();
+    assert_eq!(welded_positions.len(), 9);
+    assert_eq!(welded_triangles, &[[0, 1, 2], [1, 3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]]);
+    assert_eq!(body.triangle_corner_normals().unwrap()[1], [Vec3::X, Vec3::Z, Vec3::Y]);
+    assert!(!body.is_closed_mesh());
+}
+
+#[test]
+fn a_flat_scan_keeps_its_welded_source_and_rebuilds_the_same_winding() {
+    // Two triangles of an open square, sharing a side that runs in the same direction.
+    let positions = std::sync::Arc::from([0., 0., 0., 1., 0., 0., 0., 1., 0., 1., 1., 0., 1., 0., 0., 0., 1., 0.]);
+    let facets = std::sync::Arc::from([0, 1, 2, 4, 5, 3]);
+    let (ready, packed, indexed) = crate::Body::from_packed_flat_mesh_indexed(positions, facets).unwrap();
+    assert_eq!(packed.as_chunks::<3>().0, &[[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [1., 1., 0.]]);
+    assert_eq!(indexed, [0, 1, 2, 1, 2, 3], "source order is kept for shading");
+    let reopened = crate::Body::from_packed_mesh(packed.as_chunks::<3>().0, indexed.as_chunks::<3>().0, &[]).unwrap();
+    assert_eq!(ready.triangle_mesh(), reopened.triangle_mesh());
+    assert_eq!(reopened.triangle_mesh().unwrap().1, &[[0, 1, 2], [1, 3, 2]]);
+}
+
+#[test]
+fn mesh_winding_cannot_close_a_nonorientable_surface() {
+    // Six-vertex projective plane. Each side belongs to two triangles, but their
+    // directions cannot all be made opposite in one consistent winding.
+    let triangles = [[0, 1, 2], [0, 1, 3], [0, 2, 4], [0, 3, 5], [0, 4, 5], [1, 2, 5], [1, 3, 4], [1, 4, 5], [2, 3, 4], [2, 3, 5]];
+    let positions = [Vec3::X, Vec3::Y, Vec3::Z, -Vec3::X, -Vec3::Y, -Vec3::Z];
+    let body = crate::mesh_body(&positions, &triangles).unwrap();
+    let (_, triangles) = body.triangle_mesh().unwrap();
+    let mut edges = std::collections::BTreeMap::new();
+    for &[a, b, c] in triangles {
+        for (from, to) in [(a, b), (b, c), (c, a)] {
+            let (uses, balance) = edges.entry((from.min(to), from.max(to))).or_insert((0, 0));
+            *uses += 1;
+            *balance += if from < to { 1 } else { -1 };
+        }
+    }
+    assert!(edges.values().all(|(uses, _)| *uses == 2));
+    assert!(edges.values().any(|(_, balance)| *balance != 0));
+    assert!(!body.is_closed_mesh());
+}
+
+#[test]
 fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     // Unit cube as 12 triangles with repeated corners (welded on construction).
     let c = |i: u32| Vec3::new((i & 1) as f64 * 10.0, ((i >> 1) & 1) as f64 * 10.0, ((i >> 2) & 1) as f64 * 10.0);
@@ -1292,8 +1352,10 @@ fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     assert!((m.volume - 1000.0).abs() < 1e-9 && (m.area - 600.0).abs() < 1e-9, "{m:?}");
     assert_eq!((m.faces, m.edges, m.vertices), (12, 18, 8));
     let moved = crate::transform(&b, Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.7).unwrap();
+    assert!(moved.is_closed_mesh());
     assert!((measure(&moved).unwrap().volume - 1000.0).abs() < 1e-9);
     let mirrored = crate::transform_matrix(&b, [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]).unwrap();
+    assert!(mirrored.is_closed_mesh());
     assert!((measure(&mirrored).unwrap().volume - 1000.0).abs() < 1e-9);
     let solid = box_solid(Vec3::ZERO, Vec3::new(5.0, 5.0, 5.0)).unwrap();
     assert!(fillet(&b, &[Vec3::new(5.0, 0.0, 0.0)], 1.0).unwrap_err().to_string().contains("mesh"));
@@ -2900,6 +2962,43 @@ fn loft_joins_a_corner_to_the_middle_of_a_rounded_corner() {
             assert!(ends.len() == 1 && ends.iter().all(near_middle), "corner ({x}, {y}) joins {ends:?}");
         }
     }
+}
+
+/// A 112.24 x 148.34 rectangle lofted 100 up to a circle of radius 55.76, the circle's arcs split
+/// at the directions of the rectangle's corners (#19478). The rule `solid.loft` uses between
+/// paired vertices, pinned here: each wall is ruled (degree 1 across the two sections), and each
+/// span runs on its own parameter (a line's linear one, an arc's rational Bezier one), so a point
+/// at share t of a rectangle side is paired with the arc point at share t of the arc's Bezier
+/// parameter, not its share of the arc length. The two 105.8 degree arcs are two conic spans each
+/// (`conic_data`, solidcore/crates/solidcore/src/nurbs/crv_basic.rs, the quarter-turn bound), so
+/// the x-sides are each two walls, meeting at their middle with the circle's 0 and 180 degree
+/// points; the 74.2 degree arcs are one span, so the y-sides are one wall each. The volume is that
+/// surface's integral (Gauss-Legendre, 40 points a span): 1 312 579.22 mm3.
+/// The expected volume for the same sections is 1 310 514.00 mm3, with four corner-to-corner walls. The
+/// same rule with each 105.8 degree arc as one span gives 1 310 501.28 mm3, so the two-span arcs
+/// account for the 2065 mm3. The remaining 12.72 mm3 is not the pairing points, which are exact
+/// (radius 55.76, and the corner directions to the last digit); the arc-length spans give
+/// 1 313 109.39 mm3 and the chord-length spans 1 313 370.97 mm3 on the kernel's walls.
+#[test]
+fn loft_rectangle_to_circle_pairs_each_span_on_its_own_parameter() {
+    let rect = Loop2::polygon(&[Vec2::new(56.12, -74.17), Vec2::new(56.12, 74.17), Vec2::new(-56.12, 74.17), Vec2::new(-56.12, -74.17)]);
+    let r = 55.76;
+    let secs = [(Plane::XY, rect), (Plane::XY.offset(100.0), Loop2::circle(Vec2::ZERO, r))];
+    let body = loft(&secs).unwrap();
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // Six side walls and two caps.
+    assert_eq!(body.face_count(), 8);
+    let m = measure(&body).unwrap();
+    // The rule's integral, computed independently: 1 312 579.2213408777 mm3.
+    assert!(rel(m.volume, 1_312_579.221_340_877) < 1e-9, "{}", m.volume);
+    // The four corners' side edges run straight to their paired circle points, and the x-sides'
+    // middles to the circle's 0 and 180 degree points.
+    let (cx, cy) = (33.644_666_293_548_83, 44.465_874_892_952_9);
+    for (x, y, px, py) in [(56.12, -74.17, cx, -cy), (56.12, 74.17, cx, cy), (-56.12, 74.17, -cx, cy), (-56.12, -74.17, -cx, -cy)] {
+        assert!(joins(&body, Vec3::new(x, y, 0.0), Vec3::new(px, py, 100.0)), "({x}, {y}) joins its paired point");
+    }
+    assert!(joins(&body, Vec3::new(56.12, 0.0, 0.0), Vec3::new(r, 0.0, 100.0)), "the x-side's middle joins the circle's 0 degree point");
+    assert!(joins(&body, Vec3::new(-56.12, 0.0, 0.0), Vec3::new(-r, 0.0, 100.0)), "the x-side's middle joins the circle's 180 degree point");
 }
 
 /// Three sections, the first hood profile, the second, then the first again ([`HOOD_A`]): the

@@ -1081,7 +1081,7 @@ mod tests {
             assert!(convert_prismatic_mesh(&mesh_of(&solid), tolerance).is_err());
         }
         for coordinate in [f64::NAN, f64::INFINITY, f64::MAX, 1e30] {
-            let mesh = crate::meshbody::TriMesh { positions: vec![Vec3::new(coordinate, 0., 0.)], triangles: vec![], corner_normals: Vec::new() };
+            let mesh = crate::meshbody::TriMesh { positions: vec![Vec3::new(coordinate, 0., 0.)], ..Default::default() };
             assert!(weld(&mesh, 0.05).is_err());
         }
     }
@@ -1215,7 +1215,7 @@ mod tests {
         let body = crate::mesh_body(&positions, &triangles).unwrap();
         let err = convert_prismatic_mesh(&body, 0.05).unwrap_err().to_string();
         assert!(err.contains("50001 triangles") && err.contains("50000"), "{err}");
-        let mesh = crate::meshbody::TriMesh { positions: vec![Vec3::ZERO; MAX_TRIANGLES * 3 + 1], triangles: vec![], corner_normals: Vec::new() };
+        let mesh = crate::meshbody::TriMesh { positions: vec![Vec3::ZERO; MAX_TRIANGLES * 3 + 1], ..Default::default() };
         let err = weld(&mesh, 0.05).unwrap_err().to_string();
         assert!(err.contains("150001 vertices") && err.contains("150000"), "{err}");
     }

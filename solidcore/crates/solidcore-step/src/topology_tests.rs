@@ -3231,6 +3231,67 @@ fn a_projected_pcurve_past_the_quarter_line_a_face_form_ends_on_stays_in_the_fac
     solidcore_ops::record_check::agreement(b).unwrap();
 }
 
+/// A wedge of a cylinder (radius 10 mm, 5 mm high) from -120 to 180 degrees about +z, in a file
+/// of uncertainty 0.02 mm, whose corner at the top of its 180 degree side lies 0.008 mm outside
+/// the cylinder, 1e-4 mm below the top and 1e-4 rad round past the side. The cylinder face is
+/// its NURBS form, a turn from -180 degrees, and ends on the form's seam at that side; the drop
+/// of the corner onto it stops on the face's bound and crosses the seam, a turn from the
+/// corner's trims. The corner's point on the face is the one on the trims' side: the trims
+/// closed onto it at the corner (the 1e-4 mm gap there) stay in the face's domain
+/// (`SmBrep::ValidatePointers` tests 70 to 72, "Edge endpoints within face domain"), the corner
+/// classifies on the face (`SmFace` test 12), and the kernel's check of the healed body finds
+/// only the corner's gap off the cylinder.
+#[test]
+fn a_corner_off_a_face_where_it_ends_on_its_seam_is_on_the_face_and_its_trims_in_its_domain() {
+    let (r, h): (f64, f64) = (10.0, 5.0);
+    let (from, to) = ((-120f64).to_radians(), 180f64.to_radians());
+    let (off, below, past) = (0.008, 1e-4, 1e-4);
+    let mut w = W::default();
+    let v = |w: &mut W, p: V| (w.vertex(p), p);
+    let on = |a: f64, rr: f64, z: f64| [rr * a.cos(), rr * a.sin(), z];
+    let (a0, a1) = (v(&mut w, [0.0; 3]), v(&mut w, [0.0, 0.0, h]));
+    let (p0, p1) = (v(&mut w, on(from, r, 0.0)), v(&mut w, on(from, r, h)));
+    let (q0, q1) = (v(&mut w, on(to, r, 0.0)), v(&mut w, on(to + past, r + off, h - below)));
+    let edge = |w: &mut W, a: (u64, V), b: (u64, V)| w.line_edge(a, b, true, len3(sub3(b.1, a.1)));
+    let (axis, e_p, e_q) = (edge(&mut w, a0, a1), edge(&mut w, p0, p1), edge(&mut w, q0, q1));
+    let (r_pb, r_qb, r_pt, r_qt) = (edge(&mut w, a0, p0), edge(&mut w, a0, q0), edge(&mut w, a1, p1), edge(&mut w, a1, q1));
+    let arc = |w: &mut W, a: (u64, V), b: (u64, V), z: f64| {
+        let c = w.circle([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        w.add(format!("EDGE_CURVE('',#{},#{},#{c},.T.)", a.0, b.0))
+    };
+    let (arc_b, arc_t) = (arc(&mut w, p0, q0, 0.0), arc(&mut w, p1, q1, h));
+    let ax = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let cyl = w.add(format!("CYLINDRICAL_SURFACE('',#{ax},{})", real(r)));
+    let face = |w: &mut W, uses: &[(u64, bool)], surface: u64, same_sense: bool| {
+        let oes: Vec<u64> = uses.iter().map(|&(e, f)| w.oe(e, f)).collect();
+        let b = w.bound(&oes, true, true);
+        w.face(&[b], surface, same_sense)
+    };
+    let (bottom, top) = (w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]), w.plane([0.0, 0.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]));
+    let side_q = w.plane([0.0; 3], [-to.sin(), to.cos(), 0.0], [to.cos(), to.sin(), 0.0]);
+    let side_p = w.plane([0.0; 3], [from.sin(), -from.cos(), 0.0], [from.cos(), from.sin(), 0.0]);
+    let faces = [
+        face(&mut w, &[(e_q, true), (arc_t, false), (e_p, false), (arc_b, true)], cyl, true),
+        face(&mut w, &[(r_qb, true), (arc_b, false), (r_pb, false)], bottom, false),
+        face(&mut w, &[(r_pt, true), (arc_t, true), (r_qt, false)], top, true),
+        face(&mut w, &[(axis, true), (r_qt, true), (e_q, false), (r_qb, false)], side_q, true),
+        face(&mut w, &[(r_pb, true), (e_p, true), (r_pt, false), (axis, false)], side_p, true),
+    ];
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('wedge',#{shell})"));
+    let kernel = Projected(std::sync::atomic::AtomicUsize::new(0));
+    let read = read_solids_with(&w.file_with_uncertainty(&[solid], 2e-2), &kernel);
+    assert!(read.failures.is_empty(), "{:?}", read.failures);
+    let b = &read.solids[0].brep;
+    assert_eq!(counts(b), [2, 1, 5, 9, 6]);
+    let (body, _) = solidcore_ops::body::Body::from_record(b, false).unwrap();
+    let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
+    for line in report.text.lines() {
+        assert!(line.contains("Bad Gap: Vertex/Face gap"), "{report}");
+    }
+    body.check_solid().unwrap();
+}
+
 /// A disc (radius 30 mm, 18 mm high) with a flat cut off its side, its cylinder face going 330
 /// degrees about +z from 30.02 degrees to 360.02, in a file of uncertainty 0.02 mm (as Onshape
 /// writes): the face ends 0.0105 mm past its frame's x axis, within the uncertainty, so its form
@@ -3584,6 +3645,237 @@ fn a_spline_surface_on_unclamped_knots_is_not_closed() {
         [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [1e-5, 0.0]].iter().map(|&[x, y]| vec![[x, y, 0.0], [x, y, 5.0]]).collect();
     let unclamped = BSurface::Spline { u_knots: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0], v_knots: vec![0.0, 0.0, 1.0, 1.0], points };
     assert!(closed_within(&unclamped, 1e-3).is_none());
+}
+
+/// A cubic along x whose third control point steps back `back` mm against the polygon's way
+/// (and a little off it, `off` along y), its ends at x = 0 and 10.
+fn wiggle(back: f64, off: f64) -> BCurve {
+    BCurve::Spline {
+        knots: vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0],
+        points: vec![[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [4.0 - back, off, 0.0], [7.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+    }
+}
+
+/// A control polygon whose step turns back on the one before it by no more than the tolerance
+/// has that step's inner point moved onto its neighbour: the curve moves by at most the step, its
+/// ends stay, and the polygon no longer turns back. A step back longer than the tolerance, a
+/// polygon that does not turn back, and a step that turns less than the check's 170 degrees are
+/// left as they are. A rational point keeps its weight.
+#[test]
+fn a_control_polygon_that_turns_back_within_the_tolerance_is_unfolded() {
+    let tol = 1e-3;
+    let near = wiggle(5e-4, 0.0);
+    let (unfolded, moved) = unfolded_curve(&near, tol).expect("a step back within the tolerance");
+    assert_eq!(moved, 1);
+    let BCurve::Spline { points, .. } = &unfolded else { panic!("a spline") };
+    assert_eq!(points[2], [4.0, 0.0, 0.0], "onto its neighbour");
+    assert_eq!((points[0], points[4]), ([0.0, 0.0, 0.0], [10.0, 0.0, 0.0]), "the ends stay");
+    let (before, after) = (CurveEval::new(&near).unwrap(), CurveEval::new(&unfolded).unwrap());
+    let moved_by = (0..=200).map(|k| f64::from(k) / 200.0).map(|t| before.point(t).unwrap().dist(after.point(t).unwrap())).fold(0.0, f64::max);
+    assert!(moved_by <= 5e-4 * (1.0 + 1e-12), "moved {moved_by}");
+    assert!(unfolded_curve(&unfolded, tol).is_none(), "nothing left to unfold");
+
+    assert!(unfolded_curve(&wiggle(2e-3, 0.0), tol).is_none(), "farther back than the tolerance");
+    assert!(unfolded_curve(&wiggle(-5e-4, 0.0), tol).is_none(), "no step back");
+    // 5e-4 back and 2e-4 aside turns about 158 degrees: under the check's 170.
+    assert!(unfolded_curve(&wiggle(5e-4, 2e-4), tol).is_none(), "turns less than 170 degrees");
+
+    let BCurve::Spline { knots, points } = wiggle(5e-4, 0.0) else { panic!("a spline") };
+    let w = [1.0, 0.5, 2.0, 1.0, 1.0];
+    let homogeneous = points.iter().zip(w).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, w]).collect();
+    let (rational, _) = unfolded_curve(&BCurve::RationalSpline { knots, homogeneous }, tol).expect("a rational step back");
+    let BCurve::RationalSpline { homogeneous, .. } = rational else { panic!("rational") };
+    assert_eq!(homogeneous[2], [8.0, 0.0, 0.0, 2.0], "onto its neighbour, keeping its weight");
+}
+
+/// A spline surface's control rows and columns are unfolded as a curve's polygon is: a row that
+/// steps back within the tolerance has that point moved onto its neighbour, the surface moving
+/// by at most the step.
+#[test]
+fn a_control_net_that_turns_back_within_the_tolerance_is_unfolded() {
+    let tol = 1e-3;
+    let row = |y: f64, back: f64| vec![[0.0, y, 0.0], [4.0, y, 0.0], [4.0 - back, y, 0.0], [7.0, y, 0.0], [10.0, y, 0.0]];
+    let net = BSurface::Spline {
+        u_knots: vec![0.0, 0.0, 1.0, 1.0],
+        v_knots: vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0],
+        points: vec![row(0.0, 0.0), row(5.0, 5e-4)],
+    };
+    let (unfolded, moved) = unfolded_surface(&net, tol).expect("a row that steps back");
+    assert_eq!(moved, 1);
+    let BSurface::Spline { points, .. } = &unfolded else { panic!("a spline") };
+    assert_eq!(points[1][2], [4.0, 5.0, 0.0]);
+    assert_eq!(points[0], row(0.0, 0.0), "the other row stays");
+    let (before, after) = (SurfaceEval::new(&net).unwrap(), SurfaceEval::new(&unfolded).unwrap());
+    let mut moved_by = 0.0_f64;
+    for i in 0..=10 {
+        for j in 0..=100 {
+            let uv = [f64::from(i) / 10.0, f64::from(j) / 100.0];
+            moved_by = moved_by.max(before.point(uv).unwrap().dist(after.point(uv).unwrap()));
+        }
+    }
+    assert!(moved_by <= 5e-4 * (1.0 + 1e-12), "moved {moved_by}");
+    assert!(unfolded_surface(&unfolded, tol).is_none());
+}
+
+/// A polygon whose run back reaches its last point keeps that end: the run's points from the
+/// end of the last step forward are moved onto it, each within the tolerance of where it was,
+/// and nothing that turns back is left. Moved one point at a time, the run left a step back of
+/// 0.8 µm behind (review of the first version).
+#[test]
+fn a_run_back_to_a_polygons_last_point_is_moved_onto_it() {
+    let tol = 1e-3;
+    let points = vec![[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [3.9996, 0.0, 0.0], [3.9992, 0.0, 0.0]];
+    let curve = BCurve::Spline { knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0], points: points.clone() };
+    let (unfolded, moved) = unfolded_curve(&curve, tol).expect("a run back to the end");
+    let BCurve::Spline { points: now, .. } = &unfolded else { panic!("a spline") };
+    assert_eq!(now, &vec![[0.0, 0.0, 0.0], [3.9992, 0.0, 0.0], [3.9992, 0.0, 0.0], [3.9992, 0.0, 0.0]]);
+    assert_eq!(moved, 2);
+    assert!(now.iter().zip(&points).all(|(a, b)| (a[0] - b[0]).abs() <= tol), "{now:?}");
+    assert!(unfolded_curve(&unfolded, tol).is_none(), "nothing left that turns back");
+    // A run back farther than the tolerance from where its points were is left as it is.
+    let far = BCurve::Spline {
+        knots: vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        points: vec![[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [3.9994, 0.0, 0.0], [3.9988, 0.0, 0.0], [3.9985, 0.0, 0.0]],
+    };
+    let BCurve::Spline { points: far_points, .. } = &far else { panic!("a spline") };
+    if let Some((c, _)) = unfolded_curve(&far, tol) {
+        let BCurve::Spline { points: now, .. } = &c else { panic!("a spline") };
+        assert!(now.iter().zip(far_points).all(|(a, b)| (a[0] - b[0]).abs() <= tol), "{now:?}");
+    }
+}
+
+/// A control point a row and its column both move stays within the tolerance of where the file
+/// put it: every move is bounded against the original net. The rows' pass moves the centre point
+/// to 3.9994 and the columns' pass would carry it on to 3.9988, 1.2 µm from 4.0 (review of the
+/// first version).
+#[test]
+fn a_control_point_moved_by_its_row_and_its_column_stays_within_the_tolerance() {
+    let tol = 1e-3;
+    let points = vec![
+        vec![[0.0, -1.0, 0.0], [3.9988, 0.0, 0.0], [5.0, -1.0, 0.0]],
+        vec![[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [3.9994, 0.0, 0.0]],
+        vec![[0.0, 1.0, 0.0], [3.9989, 0.0, 0.0], [5.0, 1.0, 0.0]],
+    ];
+    let bezier = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    let net = BSurface::Spline { u_knots: bezier.clone(), v_knots: bezier, points: points.clone() };
+    let (unfolded, _) = unfolded_surface(&net, tol).expect("a row that steps back to its end");
+    let BSurface::Spline { points: now, .. } = &unfolded else { panic!("a spline") };
+    for (row, was) in now.iter().zip(&points) {
+        for (p, q) in row.iter().zip(was) {
+            let d = ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt();
+            assert!(d <= tol, "a point moved {d}: {now:?}");
+        }
+    }
+}
+
+/// A cubic from x = 0 to 10 whose first control step runs `run` back along -x (and `aside` along
+/// +y) before the polygon goes forward to x = 4, 7 and 10.
+fn run_out(run: f64, aside: f64, second: f64) -> BCurve {
+    BCurve::Spline {
+        knots: vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0],
+        points: vec![[0.0, 0.0, 0.0], [-run, aside, 0.0], [second, 0.0, 0.0], [7.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+    }
+}
+
+/// A polygon that runs out of its first point the wrong way, by no more than the tolerance, and
+/// that the next step turns back on past the first point keeps its first point and has the run
+/// turned the way it goes: the point mirrored through the first point. The curve keeps its speed
+/// at its start, now pointing the way the curve goes, moves by at most twice the run, and nothing
+/// that turns back is left. A run whose mirror image lies farther than the tolerance from it, a
+/// step back that does not carry the polygon past its first point by more than the run, and a
+/// polygon that does not turn back are left as they are. A rational point keeps its weight.
+#[test]
+fn a_run_out_of_a_polygons_first_point_that_the_next_step_turns_back_past_is_turned_the_way_it_goes() {
+    let tol = 1e-3;
+    let near = run_out(2e-4, 1e-9, 4.0);
+    let (unfolded, moved) = unfolded_curve(&near, tol).expect("a run out within the tolerance");
+    assert_eq!(moved, 1);
+    let BCurve::Spline { points, .. } = &unfolded else { panic!("a spline") };
+    assert_eq!(points[1], [2e-4, -1e-9, 0.0], "its mirror image through the first point");
+    assert_eq!((points[0], points[4]), ([0.0, 0.0, 0.0], [10.0, 0.0, 0.0]), "the ends stay");
+    let (before, after) = (CurveEval::new(&near).unwrap(), CurveEval::new(&unfolded).unwrap());
+    let moved_by = (0..=200).map(|k| f64::from(k) / 200.0).map(|t| before.point(t).unwrap().dist(after.point(t).unwrap())).fold(0.0, f64::max);
+    assert!(moved_by <= 4e-4 * (1.0 + 1e-9), "moved {moved_by}");
+    let ((_, d0), (_, d1)) = (before.derivs(0.0).unwrap(), after.derivs(0.0).unwrap());
+    let origin = Vec3::new(0.0, 0.0, 0.0);
+    assert!((d0.dist(origin) - d1.dist(origin)).abs() <= 1e-12 * d0.dist(origin), "the same speed at the start");
+    assert!(d0.x < 0.0 && d1.x > 0.0, "now leaving the way the curve goes: {d0:?} {d1:?}");
+    assert!(unfolded_curve(&unfolded, tol).is_none(), "nothing left that turns back");
+
+    assert!(unfolded_curve(&run_out(6e-4, 0.0, 4.0), tol).is_none(), "its mirror image farther than the tolerance");
+    // 2e-4 out, then back to 1e-4 past the first point: no farther than the run.
+    assert!(unfolded_curve(&run_out(2e-4, 0.0, 1e-4), tol).is_none(), "not carried past the first point by more than the run");
+    assert!(unfolded_curve(&run_out(-2e-4, 0.0, 4.0), tol).is_none(), "no step back");
+
+    let BCurve::Spline { knots, points } = run_out(2e-4, 0.0, 4.0) else { panic!("a spline") };
+    let w = [1.0, 0.5, 2.0, 1.0, 1.0];
+    let homogeneous = points.iter().zip(w).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, w]).collect();
+    let (rational, _) = unfolded_curve(&BCurve::RationalSpline { knots, homogeneous }, tol).expect("a rational run out");
+    let BCurve::RationalSpline { homogeneous, .. } = rational else { panic!("rational") };
+    assert_eq!(homogeneous[1], [1e-4, 0.0, 0.0, 0.5], "mirrored, keeping its weight");
+}
+
+/// A 10 × 20 × 30 mm block, in a file of uncertainty 0.01 mm, whose edge from (0, 0, 30) to
+/// (0, 20, 30) is a cubic spline that first runs 1 um the wrong way (and 1e-9 mm down) before
+/// going on to its end, all inside its first Bezier piece: it leaves its start vertex, turns back
+/// within a micron and passes the vertex again. Its pcurves on its two plane faces are its
+/// control polygon's images, so they turn back too, and the kernel's curve check failed the edge
+/// curve and both pcurves on a radius of curvature of 1e-16 (BSplineCurve tests 13 and 14,
+/// "Extremely small radius of curvature") and a speed of 1e-5 at the turn (tests 11 and 12).
+/// Read, the run out is turned the way the edge goes, and every curve passes.
+#[test]
+fn a_spline_edge_that_runs_out_of_its_start_vertex_the_wrong_way_reads_without_a_turn_back() {
+    use solidcore::curve::curve::CurveKind;
+    use solidcore::geom::assert_array::{AssertArray, ObjectKey};
+    use solidcore::topology::edgeuse::p1 as eu1;
+    let mut w = W::default();
+    let faces = box_faces(&mut w, [0.0; 3], [10.0, 20.0, 30.0], BoxStyle::default(), &mut |_, _| Vec::new());
+    // The first edge box_faces writes is that from corner 4 to corner 6, on its first LINE.
+    let (a, z) = ([0.0, 0.0, 30.0], [0.0, 20.0, 30.0]);
+    let line = w.s.lines().find(|l| l.contains("=LINE(")).map(str::to_string).unwrap();
+    let id = line.split_once('=').unwrap().0.to_string();
+    // Two Bezier pieces along the edge: the first, 1e-4 of the parameter, holds the run out and
+    // the turn back.
+    let polygon = [a, [0.0, -1e-3, 30.0 - 1e-9], [0.0, 2e-3, 30.0], [0.0, 4e-3, 30.0], [0.0, 8.0, 30.0], [0.0, 14.0, 30.0], z];
+    let ids: Vec<u64> = polygon.iter().map(|&p| w.pt(p)).collect();
+    let spline = format!("{id}=B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,(4,3,4),(0.,1.E-4,1.),.UNSPECIFIED.);", list(&ids));
+    w.s = w.s.replace(&line, &spline);
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('block',#{shell})"));
+    let read = read_solids(&w.file_with_uncertainty(&[solid], 1e-2));
+    assert!(read.failures.is_empty(), "{:?}", read.failures);
+    let s = &read.solids[0];
+    assert_eq!(counts(&s.brep), [2, 1, 6, 12, 8]);
+    let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+    // The kernel's check of each spline: the edge curves, and the pcurves on their faces' surfaces.
+    let k = solidcore::kernel::Kernel::default();
+    let mut failed = Vec::new();
+    {
+        let b = body.kernel();
+        let mut check = |c: &solidcore::curve::curve::Curve, on: Option<&solidcore::surface::surface::Surface>| {
+            let CurveKind::BSpline(x) = c.kind() else { return };
+            let mut list = AssertArray::new();
+            x.assert_valid_on(&k, Some(&mut list), false, ObjectKey(1), on).unwrap();
+            failed.extend(list.reports().iter().filter(|r| !r.ok).map(|r| r.format_log_message()));
+        };
+        for (_, e) in b.edges().iter() {
+            check(e.curve.as_ref().unwrap(), None);
+        }
+        for (eu, _) in b.edgeuses().iter() {
+            let (Some(trim), _) = eu1::uv_trim_curve(&b, eu).unwrap() else { continue };
+            let f = eu1::face(&b, eu).unwrap().unwrap();
+            check(trim, b.face(f).unwrap().surface.as_ref());
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(body.check_solid(), Ok(()));
+    let mass = body.mass_properties(1e-6).unwrap();
+    assert!((mass.volume - 6000.0).abs() < 1e-6 * 6000.0, "{}", mass.volume);
+    assert!(s.notes.iter().any(|n| n.starts_with("1 control points of spline curves")), "{:?}", s.notes);
+    let edge = s.brep.edges.iter().find(|e| matches!(e.curve, BCurve::Spline { .. })).unwrap();
+    let BCurve::Spline { points, .. } = &edge.curve else { panic!("a spline") };
+    let mirrored = [0.0, 1e-3, 30.0 + 1e-9];
+    assert!(points[1].iter().zip(mirrored).all(|(p, q)| (p - q).abs() <= 1e-12), "its run out mirrored through its start: {:?}", points[1]);
 }
 
 /// A rational surface's end lines are made one only while the surface moves by at most the

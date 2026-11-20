@@ -167,7 +167,7 @@ fn a_template_applied_restyles_the_sheets_and_moves_nothing() {
 fn a_template_file_saves_and_starts_drawings() {
     let (mut s, _) = crate::cmd::drawing_view::tests::three_views();
     let folder = Folder::new("drawing-template");
-    let path = folder.path("company-a3.json");
+    let path = folder.path("company-a3.scdwg");
     // The company's name written into the built-in block, and its general tolerances typed over it.
     let mut block = solidcraft_geom::title_block::default_block();
     let owner = block.cells.iter_mut().find(|cell| cell.name == "legal_owner").unwrap();
@@ -195,8 +195,8 @@ fn a_template_file_saves_and_starts_drawings() {
     let applied = run(&mut s, "drawing.template.apply", json!({"template": path, "dry_run": true}));
     assert_eq!(applied["changed"], json!([]), "the file now holds this drawing's own format: {applied}");
     for (command, p, why) in [
-        ("drawing.template.save", json!({"path": folder.path("company.txt")}), "`path` must be a .json file"),
-        ("drawing.template.save", json!({}), "`path` must be a .json file"),
+        ("drawing.template.save", json!({"path": folder.path("company.txt")}), "`path` must be a .json or .scdwg file"),
+        ("drawing.template.save", json!({}), "`path` must be a .json or .scdwg file"),
         ("drawing.create", json!({"template": folder.path("missing.json")}), "template `"),
         ("drawing.create", json!({"template": "company"}), "no template `company`"),
     ] {
@@ -214,7 +214,8 @@ fn a_template_file_saves_and_starts_drawings() {
         let refusal = refused(&mut s, "drawing.create", json!({"template": path}));
         assert!(refusal.contains("outside the folders this agent may use"), "{refusal}");
     });
-    assert!(std::path::Path::new(&inside.path("ok.json")).is_file() && !std::path::Path::new(&outside.path("no.json")).exists());
+    // A .json name gets the .scdwg file beside it, inside the scope as the name asked.
+    assert!(std::path::Path::new(&inside.path("ok.scdwg")).is_file() && !std::path::Path::new(&outside.path("no.scdwg")).exists());
 }
 
 /// The drawing open, as the design holds it.

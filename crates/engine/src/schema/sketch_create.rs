@@ -1152,6 +1152,38 @@ fn points_required(schema: &mut Schema) {
     require(schema, "points");
 }
 
+/// Draw a control point spline with its own knots and weights (`sketch.spline.control_knots`): the
+/// clamped B-spline of `degree` over its points, with exactly the knots it is given (#19524).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = knots_required)]
+pub struct ControlKnotsSplineParams {
+    /// The control points.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SplinePoints")]
+    pub points: Option<SplinePoints>,
+    /// The degree: 1 to 9.
+    pub degree: u8,
+    /// The clamped knot vector: points + degree + 1 non-decreasing numbers, the first and last
+    /// degree + 1 equal to the domain's ends, no interior knot repeated more than degree times.
+    pub knots: Vec<f64>,
+    /// One positive weight per point; none: all 1. A weighted spline must have degree 2 (a
+    /// rational quadratic, exact as conics).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub weights: Option<Vec<f64>>,
+    /// Make it construction geometry. Default: false.
+    #[serde(default)]
+    pub construction: Option<bool>,
+    /// The sketch (default: the one being edited).
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+fn knots_required(schema: &mut Schema) {
+    require(schema, "points");
+    require(schema, "degree");
+    require(schema, "knots");
+}
+
 /// Join the end points of two curves with a blend curve: a tangent spline (g1), or one Bézier that
 /// also matches the curves' curvature and more (g2 to g4).
 #[derive(Debug, Deserialize, JsonSchema)]
