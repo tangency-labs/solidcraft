@@ -45,8 +45,8 @@ pub const EXTRUDE_TOLERANCE: f64 = 1e-7;
 struct Out<T>(std::result::Result<T, Error>);
 
 impl<T> Answer for Out<T> {
-    fn refusal(&self) -> Option<String> {
-        self.0.as_ref().err().map(ToString::to_string)
+    fn refusal(&self) -> Option<Error> {
+        self.0.as_ref().err().cloned()
     }
 }
 

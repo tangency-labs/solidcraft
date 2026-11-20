@@ -44,8 +44,13 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::surface::surface::Surface;
 use crate::{Result, SolidError};
 
+pub(crate) mod polynomial_pieces;
+
 /// A direction's knot samples (parameter, spacing, span index) and its slack.
 type KnotSamples = (Vec<(f64, f64, usize)>, f64);
+/// A side of a control net: whether it runs across u, whether at the max, and its points'
+/// indices.
+type Edge = (bool, bool, Vec<(usize, usize)>);
 
 const OP: &str = "query::curve_surface_gap";
 
@@ -66,7 +71,7 @@ const CORRESPONDENCE_POINTS: usize = 257;
 const FIRST_PIECES: usize = 32;
 
 /// A surface prepared for enclosure: its net and the directions it continues past the net.
-struct NetSurface {
+pub(crate) struct NetSurface {
     net: Nurbs,
     ends: EndContinuation,
 }
@@ -75,7 +80,15 @@ impl NetSurface {
     /// The net of `surface`, or `None` when it has none (an offset, a step surface, a surface
     /// in a volume, a curve-bounded one) or its net's parameters are not the surface's: the
     /// net and the surface must give one point at the parameters `probe`.
-    fn of(k: &Kernel, surface: &Surface, probe: &[Point2]) -> Result<Option<Self>> {
+    ///
+    /// The bounds built on it take the net as the surface. That holds by construction for
+    /// the kinds [`as_b_spline`] returns whose evaluation is their own net (a B-spline
+    /// surface, and the analytic kinds through their exact base B-spline); the probe checks
+    /// the agreement only at `probe` (to `1e-9` relative), so it catches a parameterisation
+    /// mismatch but is no proof of agreement between the probes. A procedural blend's net
+    /// only approximates its definition, by which it evaluates: not exact by construction
+    /// (`query::seam_bound` refuses it).
+    pub(crate) fn of(k: &Kernel, surface: &Surface, probe: &[Point2]) -> Result<Option<Self>> {
         let Some(bs) = as_b_spline(k, surface)? else {
             return Ok(None);
         };
@@ -112,6 +125,109 @@ impl NetSurface {
         Ok(Some(me))
     }
 
+    /// The knot lines strictly inside `u x v` across which the net is not C^1 (a knot of
+    /// multiplicity at least the degree): the `u` values, then the `v` values, each sorted
+    /// and once. A box cut at them has each part's second partials enclosed by
+    /// [`Self::partials`].
+    pub(crate) fn low_lines(&self, u: Ivl, v: Ivl) -> (Vec<f64>, Vec<f64>) {
+        let n = &self.net;
+        let lines = |knots: &[f64], p: usize, lo: f64, hi: f64| {
+            let mut out: Vec<f64> = Vec::new();
+            for &x in knots {
+                if x > lo && x < hi && out.last() != Some(&x) {
+                    let m = knots.iter().filter(|&&y| y == x).count();
+                    if m >= p {
+                        out.push(x);
+                    }
+                }
+            }
+            out.sort_by(f64::total_cmp);
+            out.dedup();
+            out
+        };
+        (lines(&n.u, n.p, u.lo, u.hi), lines(&n.v, n.q, v.lo, v.hi))
+    }
+
+    /// The net's domain: `([u_lo, u_hi], [v_lo, v_hi])`.
+    pub(crate) fn domain(&self) -> (Ivl, Ivl) {
+        let n = &self.net;
+        (
+            Ivl::new(knot(&n.u, n.p as isize), knot(&n.u, n.nu as isize)),
+            Ivl::new(knot(&n.v, n.q as isize), knot(&n.v, n.nv as isize)),
+        )
+    }
+
+    /// The net's sides collapsed to a point: those whose row of control points (homogeneous
+    /// coordinates, weight included) is one point exactly, so the surface is that point all
+    /// along the side. Each is `(across_u, at_max, point)`: `across_u` for a side at
+    /// constant u (the first or last column), `at_max` for the last row or column, and the
+    /// point (`None` from a net with a zero weight there). Only an end whose knots are
+    /// clamped (the first or last `degree + 1` equal) is a side: the surface's edge there
+    /// is that row; an unclamped end's row is not on the surface, and gives no side.
+    pub(crate) fn collapsed_sides(&self) -> Vec<(bool, bool, V3<f64>)> {
+        let n = &self.net;
+        // the end of a knot vector (degree `p`, `count` control points) is clamped
+        let clamped = |kn: &[f64], p: usize, count: usize, at_max: bool| -> bool {
+            if at_max {
+                let end = knot(kn, count as isize);
+                (1..=p).all(|i| knot(kn, (count + i) as isize) == end)
+            } else {
+                let end = knot(kn, p as isize);
+                (0..p).all(|i| knot(kn, i as isize) == end)
+            }
+        };
+        let at = |i: usize, j: usize| -> Option<[f64; 4]> {
+            let k = (i.checked_mul(n.nv)?.checked_add(j)?).checked_mul(4)?;
+            let s = n.pw.get(k..k.checked_add(4)?)?;
+            Some([*s.first()?, *s.get(1)?, *s.get(2)?, *s.get(3)?])
+        };
+        let mut out = Vec::new();
+        let (Some(lu), Some(lv)) = (n.nu.checked_sub(1), n.nv.checked_sub(1)) else {
+            return out;
+        };
+        // (across u, at the max, the side's control points)
+        let sides: [Edge; 4] = [
+            (true, false, (0..n.nv).map(|j| (0, j)).collect()),
+            (true, true, (0..n.nv).map(|j| (lu, j)).collect()),
+            (false, false, (0..n.nu).map(|i| (i, 0)).collect()),
+            (false, true, (0..n.nu).map(|i| (i, lv)).collect()),
+        ];
+        for (across_u, at_max, row) in sides {
+            let ends_clamped = if across_u {
+                clamped(&n.u, n.p, n.nu, at_max)
+            } else {
+                clamped(&n.v, n.q, n.nv, at_max)
+            };
+            if !ends_clamped {
+                continue;
+            }
+            let pts: Option<Vec<[f64; 4]>> = row.iter().map(|&(i, j)| at(i, j)).collect();
+            let Some(pts) = pts else {
+                continue;
+            };
+            let Some(first) = pts.first().copied() else {
+                continue;
+            };
+            if pts.len() < 2 || pts.iter().any(|q| *q != first) {
+                continue;
+            }
+            let [x, y, z, w] = first;
+            if !(w.is_finite() && w > 0.0 && x.is_finite() && y.is_finite() && z.is_finite()) {
+                continue;
+            }
+            out.push((
+                across_u,
+                at_max,
+                V3 {
+                    x: x / w,
+                    y: y / w,
+                    z: z / w,
+                },
+            ));
+        }
+        out
+    }
+
     /// The net's point at `uv` (double arithmetic, a sanity probe only).
     fn point(&self, uv: Point2) -> Option<crate::math::Vec3> {
         let n = &self.net;
@@ -133,7 +249,7 @@ impl NetSurface {
     /// out): the continued polynomial `S~` differs from the surface at the clamped point by at
     /// most the first partials' size times the overshoot, which is the slack, added to the
     /// bound: `dist(C, S) <= |C - S~(W)| + |S~(W) - S(clamp W)|`.
-    fn partials(
+    pub(crate) fn partials(
         &self,
         w: &[V3<Ivl>],
         lk: usize,
@@ -225,6 +341,25 @@ fn norm_upper(v: V3<Ivl>) -> Option<f64> {
     (v.x.is_finite() && v.y.is_finite() && v.z.is_finite() && hi.is_finite()).then_some(hi)
 }
 
+/// `sqrt(x^2 + y^2 + z^2)` of an enclosure, a lower bound (each component's least
+/// magnitude); `None` unless finite.
+fn norm_lower(v: V3<Ivl>) -> Option<f64> {
+    let sq = |a: Ivl| {
+        let m = if a.lo > 0.0 {
+            a.lo
+        } else if a.hi < 0.0 {
+            -a.hi
+        } else {
+            0.0
+        };
+        let m = Ivl::from(m);
+        m * m
+    };
+    let s = sq(v.x) + sq(v.y) + sq(v.z);
+    let lo = s.sqrt().lo.max(0.0);
+    (v.x.is_finite() && v.y.is_finite() && v.z.is_finite() && lo.is_finite()).then_some(lo)
+}
+
 fn scaled(v: V3<Ivl>, a: Ivl) -> V3<Ivl> {
     V3 {
         x: v.x * a,
@@ -249,8 +384,9 @@ fn minus(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
     }
 }
 
-/// The bound of one piece: `(end values, second-order term)`.
-fn piece(
+/// The bound of one piece: `(end values, second-order term)`; the gap over `[a, b]` is at
+/// most their sum.
+pub(crate) fn piece(
     cn: &NurbsCurve,
     wn: &NurbsCurve,
     s: &NetSurface,
@@ -434,7 +570,7 @@ fn kinks(cn: &NurbsCurve, lo: f64, hi: f64) -> Vec<f64> {
 /// # Errors
 ///
 /// The kernel's unported and cancelled statuses.
-pub(crate) fn curve_uv_gap_bound(
+pub fn curve_uv_gap_bound(
     k: &Kernel,
     curve: &BSplineCurve,
     uv: &BSplineCurve,
@@ -460,6 +596,63 @@ pub(crate) fn curve_uv_gap_bound(
     certified_gap(k, curve, uv, &net, range, FIRST_PIECES, floor)
 }
 
+/// A proved lower bound on `|C(t) − S(W(t))|` at the one parameter `t`, for the curves and
+/// surface of [`curve_uv_gap_bound`]: the same enclosures of `C(t)`, `W(t)` and the net's
+/// point over the box `W(t)` encloses, every rounding included, and the norm's lower end.
+/// It bounds the supremum [`curve_uv_gap_bound`] encloses from below (not upstream,
+/// tangency-labs/solidcraft#18195, a witness for ranking two gaps).
+///
+/// `None` when the gap at `t` is not enclosed: `t` outside either curve's domain or not
+/// finite, a surface that is not a NURBS net or whose net's parameters are not the
+/// surface's (probed at `W(t)`), or a box `W(t)` too far past the net's end. A box past the
+/// end by rounding has the continued polynomial's slack taken off.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub fn curve_uv_gap_lower_bound(
+    k: &Kernel,
+    curve: &BSplineCurve,
+    uv: &BSplineCurve,
+    surface: &Surface,
+    t: f64,
+) -> Result<Option<f64>> {
+    // (the homogeneous points as stored, so the curves enclosed are the ones evaluated: a
+    // rebuild from the Euclidean points rounds a rational point's `x w`)
+    let (Some(cn), Some(wn)) = (
+        polynomial_pieces::stored_nurbs(curve),
+        polynomial_pieces::stored_nurbs(uv),
+    ) else {
+        return Ok(None);
+    };
+    let inside = |n: &NurbsCurve| matches!((n.u.get(n.p), n.u.get(n.n)), (Some(&d0), Some(&d1)) if d0 <= t && t <= d1);
+    if !(t.is_finite() && inside(&cn) && inside(&wn)) {
+        return Ok(None);
+    }
+    let Ok(w) = uv.evaluate_point(t) else {
+        return Ok(None);
+    };
+    let surface = surface.clone_for_evaluation()?;
+    let Some(net) = NetSurface::of(k, &surface, &[Point2::new(w.x, w.y)])? else {
+        return Ok(None);
+    };
+    let at = Ivl::from(t);
+    let c = curve_derivs_over(&cn, at, 0, None)?;
+    let w = curve_derivs_over(&wn, at, 0, None)?;
+    let Some(c0) = c.first().copied() else {
+        return Ok(None);
+    };
+    // a box past the net's end (rounding of a parameter on the boundary) is the continued
+    // polynomial `S~` there: `|C - S(clamp W)| >= |C - S~(W)| - slack`, the slack of
+    // [`NetSurface::partials`] bounding `|S~(W) - S(clamp W)|`
+    let (surf, slack) = match net.partials(&w, 1, 0) {
+        Ok((p, slack)) => (p.at(0, 0), slack),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    Ok(norm_lower(minus(c0, surf)).map(|d| (Ivl::from(d) - Ivl::from(slack)).lo.max(0.0)))
+}
+
 /// A proved upper bound on the distance from every point of `curve` over its parameters
 /// `range` to the surface of face `face` over that surface's parameter box: no point of the
 /// curve there is farther from the surface. `floor` is the caller's scale (a hundredth of the
@@ -481,12 +674,6 @@ pub fn curve_face_gap_bound(
     range: [f64; 2],
     floor: f64,
 ) -> Result<Option<f64>> {
-    use crate::curve::curve::Curve;
-    use crate::error::ignored;
-    use crate::nurbs::crv_fit::p1::ParamMethod;
-    use crate::surface::surface::p4::NoObject;
-    use crate::surface::surface::p5::DropPointOptions;
-
     let [lo, hi] = range;
     if !(lo.is_finite() && hi.is_finite() && lo < hi && floor.is_finite() && floor >= 0.0) {
         return Ok(None);
@@ -496,7 +683,35 @@ pub fn curve_face_gap_bound(
         return Ok(None);
     };
     let surface = surface.clone_for_evaluation()?;
-    let domain = rec.uv_domain;
+    let Some((net, correspondence)) = correspondence(k, &surface, &rec.uv_domain, curve, [lo, hi])?
+    else {
+        return Ok(None);
+    };
+    certified_gap(k, curve, &correspondence, &net, range, FIRST_PIECES, floor)
+}
+
+/// The correspondence `W` of `curve` over `[lo, hi]` on `surface` (module docs): a cubic
+/// B-spline of parameters `(u, v, 0)` on the curve's own parameter, through the nearest points
+/// in `domain` of [`CORRESPONDENCE_POINTS`] equally spaced points of the curve, with the
+/// surface's net. `None` where a nearest point is not found or the surface has no net whose
+/// parameters are the surface's ([`NetSurface::of`]).
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses; those of the curve's evaluation.
+pub(crate) fn correspondence(
+    k: &Kernel,
+    surface: &Surface,
+    domain: &crate::geom::extent2d::Extent2d,
+    curve: &BSplineCurve,
+    [lo, hi]: [f64; 2],
+) -> Result<Option<(NetSurface, BSplineCurve)>> {
+    use crate::curve::curve::Curve;
+    use crate::error::ignored;
+    use crate::nurbs::crv_fit::p1::ParamMethod;
+    use crate::surface::surface::p4::NoObject;
+    use crate::surface::surface::p5::DropPointOptions;
+
     let evaluated = Curve::from(curve.clone_exact());
     let params: Vec<f64> = (0..CORRESPONDENCE_POINTS)
         .map(|i| {
@@ -534,7 +749,7 @@ pub fn curve_face_gap_bound(
             guess_uv: guess,
             ..DropPointOptions::default()
         };
-        let Some(drop) = ignored(surface.drop_point::<NoObject>(k, point, &domain, &opts))? else {
+        let Some(drop) = ignored(surface.drop_point::<NoObject>(k, point, domain, &opts))? else {
             return Ok(None);
         };
         if !drop.success {
@@ -545,7 +760,7 @@ pub fn curve_face_gap_bound(
         }
     }
     let uvs: Vec<Point2> = found.into_iter().flatten().collect();
-    let Some(net) = NetSurface::of(k, &surface, &uvs)? else {
+    let Some(net) = NetSurface::of(k, surface, &uvs)? else {
         return Ok(None);
     };
     let flat: Vec<crate::math::Vec3> = uvs
@@ -563,7 +778,7 @@ pub fn curve_face_gap_bound(
     ) else {
         return Ok(None);
     };
-    certified_gap(k, curve, &correspondence, &net, range, FIRST_PIECES, floor)
+    Ok(Some((net, correspondence)))
 }
 
 // ---- a curve piece against a point, a surface or a curve ------------------------------------
@@ -1010,6 +1225,85 @@ mod tests {
             matches!(&stopped, Err(e) if e.is_cancelled()),
             "{stopped:?}"
         );
+    }
+
+    /// [`curve_uv_gap_lower_bound`] of a line `lift` above the bilinear plane patch z = 0 (x,
+    /// y in 0..1) at its UV line: at every parameter the gap is exactly `lift`, and the lower
+    /// bound is at most that (and at most [`curve_uv_gap_bound`]'s upper bound) and below it
+    /// by no more than rounding, a UV point on the net's end (`u = 1`) included. Read at the
+    /// reversed UV line, at `t = 0` the gap is the shadow's whole length. Nothing is enclosed
+    /// at a parameter outside the domain or not finite, nor where the UV line runs far past
+    /// the net's end.
+    #[test]
+    fn a_line_over_its_uv_line_has_its_height_as_lower_bound() {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::{
+            BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
+        };
+        let k = Kernel::default();
+        let plane = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(1.0, 1.0, 0.0),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let surface = Surface::from(plane);
+        let line = |a: [f64; 3], b: [f64; 3]| {
+            let c = NurbCurve::new(
+                vec![
+                    CPoint::new(a[0], a[1], a[2], NOW),
+                    CPoint::new(b[0], b[1], b[2], NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap();
+            BSplineCurve::from_nurb(c, 3, false)
+        };
+        let lift = 4.2e-7;
+        let lower = |c: &BSplineCurve, w: &BSplineCurve, t: f64| {
+            curve_uv_gap_lower_bound(&k, c, w, &surface, t).unwrap()
+        };
+        // (to the net's end u = 1 at t = 1)
+        let curve = line([0.2, 0.3, lift], [1.0, 0.6, lift]);
+        let uv = line([0.2, 0.3, 0.0], [1.0, 0.6, 0.0]);
+        let upper = curve_uv_gap_bound(&k, &curve, &uv, &surface, [0.0, 1.0], 1e-9)
+            .unwrap()
+            .unwrap();
+        // the bound gives up rounding only: coordinates near 1 cost a few ulps of 1 (at
+        // t = 1 the UV box rounds past the net's end, and the continuation's slack, about
+        // 6e-15, is taken off)
+        for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let lo = lower(&curve, &uv, t).unwrap_or_else(|| panic!("t {t}: not enclosed"));
+            assert!(
+                lo <= lift && lo <= upper && lo >= lift - 1e-13,
+                "t {t}: {lo:e} against {lift:e} (upper {upper:e})"
+            );
+        }
+        let reversed = line([1.0, 0.6, 0.0], [0.2, 0.3, 0.0]);
+        let full = (0.8_f64 * 0.8 + 0.3 * 0.3 + lift * lift).sqrt();
+        let lo = lower(&curve, &reversed, 0.0).unwrap();
+        assert!(lo <= full && lo >= full * (1.0 - 1e-12), "{lo:e} {full:e}");
+        for t in [-0.5, 1.5, f64::NAN, f64::INFINITY] {
+            assert_eq!(lower(&curve, &uv, t), None, "t {t}");
+        }
+        let far = line([0.2, 0.3, 0.0], [1.5, 0.3, 0.0]);
+        let over = line([0.2, 0.3, lift], [1.5, 0.3, lift]);
+        assert!(lower(&over, &far, 0.0).is_some());
+        assert_eq!(lower(&over, &far, 1.0), None);
     }
 
     /// The top face (`z = 3`) of a 1 x 2 x 3 box: its surface, a plane with a net.

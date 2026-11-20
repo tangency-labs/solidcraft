@@ -1,0 +1,684 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b19": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b20": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b28": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b5": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 20.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                10.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                -10.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                10.0,
+                30.0,
+                0.0
+              ],
+              "start": [
+                10.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                10.0,
+                30.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                -10.0,
+                10.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.7071067811865476,
+          0.7071067811865476
+        ],
+        "distance": 50.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.7071067811865476,
+                0.7071067811865476
+              ],
+              "center": [
+                0.0,
+                -23.90990257669732,
+                -0.37436867076458213
+              ],
+              "end": 6.896285307179586,
+              "radius": 3.0,
+              "reference": [
+                -1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b10",
+        "b11"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b12"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b17"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  1.6583123951776955,
+                  -10.0,
+                  10.0
+                ],
+                [
+                  1.6583123951776741,
+                  10.0,
+                  30.0
+                ]
+              ],
+              "index": 15
+            },
+            {
+              "at": [
+                [
+                  -1.6583123951777168,
+                  -10.0,
+                  10.0
+                ],
+                [
+                  -1.6583123951777363,
+                  10.0,
+                  30.0
+                ]
+              ],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              1.6583123951776848,
+              1.1102230246251565e-15,
+              20.0
+            ],
+            [
+              -1.6583123951777266,
+              1.1102230246251565e-15,
+              20.0
+            ]
+          ],
+          "tolerance": 2.06255281280883
+        },
+        "kind": "round",
+        "sizes": [
+          1.0,
+          1.0
+        ],
+        "turn": "mitre"
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b18"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 30.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                3.1,
+                -11.28,
+                0.0
+              ],
+              "start": [
+                1.3,
+                -11.28,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                3.1,
+                -7.28,
+                0.0
+              ],
+              "start": [
+                3.1,
+                -11.28,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                1.3,
+                -7.28,
+                0.0
+              ],
+              "start": [
+                3.1,
+                -7.28,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                1.3,
+                -11.28,
+                0.0
+              ],
+              "start": [
+                1.3,
+                -7.28,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b21"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b21"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b22"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b25"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b26"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b25",
+        "b26"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b27"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    },
+    {
+      "inputs": [
+        "b28"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b29"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b29"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b30"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b30"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b31"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b31"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b32"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  3.1,
+                  -7.28,
+                  12.719999999999995
+                ],
+                [
+                  1.9364916731036905,
+                  -7.280000000000003,
+                  12.719999999999995
+                ]
+              ],
+              "index": 27
+            },
+            {
+              "at": [
+                [
+                  1.4523687548277653,
+                  -7.280000000000001,
+                  12.543223304703368
+                ],
+                [
+                  1.9364916731036905,
+                  -7.280000000000003,
+                  12.719999999999995
+                ]
+              ],
+              "index": 23
+            },
+            {
+              "at": [
+                [
+                  1.4523687548277653,
+                  -7.280000000000001,
+                  12.543223304703368
+                ],
+                [
+                  1.3,
+                  -7.28,
+                  12.431923047071724
+                ]
+              ],
+              "index": 14
+            }
+          ],
+          "points": [
+            [
+              2.5182458365518454,
+              -7.280000000000001,
+              12.719999999999995
+            ],
+            [
+              1.694430213965728,
+              -7.280000000000002,
+              12.631611652351681
+            ],
+            [
+              1.3761843774138827,
+              -7.280000000000001,
+              12.487573175887546
+            ]
+          ],
+          "tolerance": 2.062552812808832
+        },
+        "kind": "round",
+        "sizes": [
+          0.9,
+          0.9,
+          0.9
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "round-slot-back-wall-across-a-rounded-groove-r0-9",
+  "expected": {
+    "body_count": 1,
+    "method": "V0 = 7931.946204485 as in chamfer-slot-back-wall-across-a-rounded-groove-0-4 (Cavalieri for the groove and rounds, the slot by quadrature of the closed-form top). The round: at each station the ball of radius 0.9 touches the wall y = -7.28 and the top n = f(x), and the section is the ball's arc between its contacts; the slot's side walls x = 1.3 and 3.1 cut it off. On the slope the section is r^2 tan(22.5 deg) - r^2 (pi/4)/2 over x in [xr, 3.1]; below xr each slice x = const meets each station's arc at one point, t = asin((x - m.x) sin w / (r v2.x)) / w on the arc m + r (sin((1-t) w) v1 + sin(t w) v2) / sin w, and the removed area is the polygon of those points, between the slice's exact ends, and the edge's corner. The result depends on both the slice and the station counts: 801 slices give 0.0367140074 with 400 stations per slice, 0.0367140763 with 800 and 0.0367140984 with 1600; 1601 slices with 800 stations give 0.0367141123. Removed 0.0367141 (converged to about 1e-8). V = 7931.90949038",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#18824"
+    ],
+    "tolerance": {
+      "abs_mm": 1e-06
+    },
+    "volume_mm3": 7931.90949038,
+    "what": "the block, groove and slot of chamfer-slot-back-wall-across-a-rounded-groove-0-4, the back wall's top edge chain rounded 0.9 instead: the ball nearly fills the groove's 1 mm round, its centre there on an ellipse 0.2 mm across"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 43,
+      "faces": 17,
+      "vertices": 28
+    }
+  },
+  "result": [
+    {
+      "body": "Block",
+      "made": "b32"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2609.205767659086,
+      "body_count": 1,
+      "edges": 43,
+      "faces": 17,
+      "vertices": 28,
+      "volume_mm3": 7931.909490377034
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#18824"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "the block, groove and slot of chamfer-slot-back-wall-across-a-rounded-groove-0-4, the back wall's top edge chain rounded 0.9 instead: the ball nearly fills the groove's 1 mm round, its centre there on an ellipse 0.2 mm across",
+  "why_not": [],
+  "records": "round-slot-back-wall-across-a-rounded-groove-r0-9.bodies.json.gz"
+}

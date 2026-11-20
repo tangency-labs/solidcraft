@@ -43,6 +43,7 @@ pub mod cancel;
 pub mod cap;
 pub mod cell_grid;
 pub mod check;
+pub mod conic_projection;
 pub mod contact;
 pub mod continuity;
 pub mod curve;
@@ -57,23 +58,29 @@ pub mod export_geometry;
 pub mod extend;
 pub mod face_surface;
 pub mod file;
+pub mod fit_projection;
 pub mod hatch;
 pub mod heal;
+pub mod hlr;
 pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;
 pub mod measure;
+pub mod member_turn;
 pub mod network;
 pub mod offset;
 pub mod order;
+pub mod outline;
 pub mod path_export;
 pub mod pcurve;
 pub mod pick;
+pub mod point_identity;
 pub mod prism;
 pub mod provenance;
 pub mod query;
 pub mod record_check;
 pub mod session;
+pub mod spline_projection;
 pub mod split;
 pub mod step_assembly;
 pub mod stitch;
@@ -101,8 +108,8 @@ pub use boolean::BooleanOp;
 pub use check::{CheckLevel, CheckReport};
 pub use contact::Gap;
 pub use error::{
-    Error, FitKind, OffsetRefusal, RecordEntity, Result, RoomReason, SolidTest, Unblendable,
-    Unsoundness,
+    Error, FailureCode, FitKind, OffsetRefusal, RecordEntity, Result, RoomReason, SolidTest,
+    Unblendable, Unsoundness,
 };
 pub use measure::{
     point_displacement, point_distance, point_set_summary, points_meet, Distance, EdgeCurve,

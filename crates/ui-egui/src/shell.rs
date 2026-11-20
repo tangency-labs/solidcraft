@@ -50,6 +50,14 @@ pub(crate) fn covered_rects(app: &SolveApp) -> Vec<Rect> {
 /// Actual persistent workspace footprints for the shared host. Transient menus
 /// remain input shields, without becoming targets for framing or control placement.
 pub(crate) fn host_usable(app: &SolveApp) -> solidcraft_engine::panels::PanelResult<crate::panel_runtime::HostUsableRegion> {
+    host_usable_in(app, None)
+}
+
+/// Use the shared window obstacles, with controls constrained to one tiled view.
+pub(crate) fn host_usable_in(
+    app: &SolveApp,
+    viewport: Option<Rect>,
+) -> solidcraft_engine::panels::PanelResult<crate::panel_runtime::HostUsableRegion> {
     use crate::panel_runtime::{MAX_USABLE_OBSTACLES, egui_rect, logical_rect, resolve_usable_region};
     use solidcraft_engine::panels::{Rule, error};
     let frame = app.universal_panel_frame().ok_or_else(|| error(Rule::Lifecycle, "universal host geometry is unavailable"))?;
@@ -68,7 +76,8 @@ pub(crate) fn host_usable(app: &SolveApp) -> solidcraft_engine::panels::PanelRes
             obstacles.push(bounds);
         }
     }
-    resolve_usable_region(frame.layout.render_domain, &obstacles)
+    let domain = viewport.map_or(frame.layout.render_domain, |rect| logical_rect(rect.intersect(egui_rect(frame.layout.render_domain))));
+    resolve_usable_region(domain, &obstacles)
 }
 
 fn occluding_rects(app: &SolveApp, fitting: bool, input: bool, include_confirm: bool) -> Vec<Rect> {

@@ -693,6 +693,7 @@ fn open_names_an_unsupported_file_instead_of_the_design_readers_complaint() {
         let error = s.execute("doc.open", &json!({"path": write(name, bytes)})).unwrap_err().to_string();
         let ext = name.rsplit('.').next().unwrap();
         assert!(error.contains(&format!("can't open .{ext} files")), "{error}");
+        assert!(error.contains("export STEP") && error.contains("importer plugin") && error.contains("Preferences › Plugins"), "{error}");
     }
     let broken = s.execute("doc.open", &json!({"path": write("broken.sc", b"PK\x03\x04not a design")})).unwrap_err().to_string();
     assert!(!broken.contains("can't open"), "{broken}");

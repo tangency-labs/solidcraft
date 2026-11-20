@@ -2186,7 +2186,7 @@ fn list_commands_narrows_by_prefix_panel_fields_and_page() {
 #[test]
 fn legacy_design_files_open_by_contents() {
     let mut s = server();
-    let saved = String::from_utf8(solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::default())).unwrap();
+    let saved = String::from_utf8(solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::default()).unwrap()).unwrap();
     assert!(saved.contains("\"solidcraft/"), "{saved}");
     let legacy = saved.replace("\"solidcraft/", "\"solvecraft/");
     let path = std::env::temp_dir().join(format!("solidcraft-mcp-legacy-{}.solvecraft", std::process::id()));
@@ -2932,8 +2932,8 @@ fn compact_reply_counts_repeated_mesh_warnings() {
     assert_eq!(
         compact["warnings"],
         json!([
-            "130 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 13.68° (Node: face 129); bodies: \"Node\" (130)",
-            "2 faces whose shaping stopped at a bound (Points) with the 25° asked reached; the sharpest: smallest angle 25.01° (Node: face 201); bodies: \"Node\" (2)",
+            "130 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 13.68° (\"Node\": face 129); bodies: \"Node\" (130)",
+            "2 faces whose shaping stopped at a bound (Points) with the 25° asked reached; the sharpest: smallest angle 25.01° (\"Node\": face 201); bodies: \"Node\" (2)",
             "Node: face 7: its shared boundary was kept. Its triangles lie up to 1.200e-3 mm off the surface, past it (chord tolerance 1.000e-3 mm)",
             "Lid has a print face but was written as it lies",
         ]),
@@ -2966,7 +2966,7 @@ fn compact_batch_reply_of_parameters_export_and_script() {
         {"command": "solid.hole", "params": {"position": [12, 0, 8], "diameter": 6.3, "depth": 3.1}},
         {"command": "solid.hole", "params": {"position": [-12, 0, 8], "diameter": 6.3, "depth": 3.1}},
         {"command": "solid.hole", "params": {"position": [0, 12, 8], "diameter": 6.3, "depth": 3.1}},
-        {"command": "solid.fillet", "params": {"edges": [[20, 0, 8]], "radius": 1.5}},
+        {"command": "solid.fillet", "params": {"edges": [[15.15, 0, 8], [-8.85, 0, 8], [3.15, 12, 8]], "radius": 1.0}},
         {"command": "file.export_stl", "params": {"path": stl}},
         {"command": "timeline.export_script", "params": {"path": script}},
     ]);
@@ -2979,7 +2979,8 @@ fn compact_batch_reply_of_parameters_export_and_script() {
     assert_eq!(full["results"][0]["display_value"], json!(20.0), "{full}");
     assert_eq!(r["results"][0], json!({"name": "R", "unit": "mm", "value": 20.0}), "{r}");
     assert!(r["results"][2].get("warning").is_none() && full["results"][2]["warning"].is_null(), "a null warning is left out: {r}");
-    // The fillet leaves three faces whose shaping stopped at a bound: one line in the compact reply.
+    // The rounded hole rims leave three faces whose shaping stopped at a bound: one line in the
+    // compact reply.
     let export = &r["results"][7];
     let n = full["results"][7]["warnings"].as_array().map_or(0, Vec::len);
     assert!(n >= 2, "the part should give the export several warnings: {full}");
@@ -2990,6 +2991,7 @@ fn compact_batch_reply_of_parameters_export_and_script() {
     assert!(full["results"][8]["script"].is_object(), "{full}");
     assert!(exported.get("script").is_none(), "{r}");
     assert_eq!(exported["path"], json!(script), "{r}");
+    assert_eq!(exported["absolute_path"], json!(script), "the compact reply keeps the file's full path: {r}");
     assert_eq!(exported["bytes"], json!(written.len()), "{r}");
     assert!(written.contains("\"timeline.add\""), "the script is still written in full: {written}");
     // The compact reply is a fraction of the full one.
