@@ -2613,12 +2613,20 @@ impl AnalyticSupport {
         // (2.7e-13 mm on a 12° patch of radius 28.5). Drawing the axis through that centre
         // keeps the tilt at 0 and still misses `build`'s parametrisation test. The arc's two
         // end generators are stored columns and meet at the apex, which a 12° patch places
-        // 5.5e-14 mm from the axis. The axis passes through the apex when the generators
-        // meet; parallel generators have no apex and keep the centre.
+        // 5.5e-14 mm from the axis.
+        //
+        // Parallel columns have no apex. That is the squared sine of the angle between them,
+        // so a generator shorter than a millimetre is not parallel merely for being short.
+        // Columns that are not parallel but do not meet, or whose closest-point solve is not
+        // finite, keep the arc's centre: the form is still a cone. A failed solve does not
+        // become `derive`'s not-of-its-kind refusal.
         let point = |r: usize, c: usize| if along_v { at(r, c) } else { at(c, r) };
-        let through_apex = if cylinder {
-            None
-        } else {
+        // `?` stays inside the closure, so a missing corner or a failed solve is "no apex"
+        // and the cone keeps the arc centre. It is not `revolved_from_rows` returning `None`.
+        let through_apex = (|| {
+            if cylinder {
+                return None;
+            }
             let last = rows.checked_sub(1)?;
             let end = len.checked_sub(1)?;
             let a = point(0, 0)?;
@@ -2631,35 +2639,42 @@ impl AnalyticSupport {
             let m00 = da.dot(da);
             let m01 = da.dot(db);
             let m11 = db.dot(db);
-            // `|da|²|db|² sin²`, zero when the generators are parallel.
+            // `sin²` of the angle between the generators.
             let det = m00 * m11 - m01 * m01;
-            let scale = m00.max(m11).max(1.0);
-            if !(det > gamma(8) * scale * scale && det.is_finite()) {
-                None
+            let sin2 = if m00 > 0.0 && m11 > 0.0 {
+                det / (m00 * m11)
             } else {
-                let b1 = da.dot(w);
-                let b2 = db.dot(w);
-                // Normal equations for `a + t da = c + s db`.
-                let t = (m11 * b1 - m01 * b2) / det;
-                let s = (m01 * b1 - m00 * b2) / det;
-                let p = a + da * t;
-                let q = c + db * s;
-                let size = [a, b, c, d]
-                    .into_iter()
-                    .fold(0.0_f64, |m, v| m.max(v.length()));
-                if (p - q).length() > gamma(24) * (1.0 + size) {
-                    None
-                } else {
-                    let apex = (p + q) * 0.5;
-                    let origin = apex + axis * (placement_r.origin() - apex).dot(axis);
-                    let dist = |v: Vec3| {
-                        let off = v - apex;
-                        (off - axis * off.dot(axis)).length()
-                    };
-                    Some((origin, dist(a), dist(b), (b - a).dot(axis), a))
-                }
+                0.0
+            };
+            if !(sin2 > gamma(8) && sin2.is_finite()) {
+                return None;
             }
-        };
+            let b1 = da.dot(w);
+            let b2 = db.dot(w);
+            // Normal equations for `a + t da = c + s db`.
+            let t = (m11 * b1 - m01 * b2) / det;
+            let s = (m01 * b1 - m00 * b2) / det;
+            let p = a + da * t;
+            let q = c + db * s;
+            let gap = (p - q).length();
+            let size = [a, b, c, d]
+                .into_iter()
+                .fold(0.0_f64, |m, v| m.max(v.length()));
+            if !(t.is_finite()
+                && s.is_finite()
+                && gap.is_finite()
+                && gap <= gamma(24) * (1.0 + size))
+            {
+                return None;
+            }
+            let apex = (p + q) * 0.5;
+            let origin = apex + axis * (placement_r.origin() - apex).dot(axis);
+            let dist = |v: Vec3| {
+                let off = v - apex;
+                (off - axis * off.dot(axis)).length()
+            };
+            Some((origin, dist(a), dist(b), (b - a).dot(axis), a))
+        })();
         let origin = through_apex
             .map(|(origin, _, _, _, _)| origin)
             .unwrap_or_else(|| c0 + axis * (placement_r.origin() - c0).dot(axis));

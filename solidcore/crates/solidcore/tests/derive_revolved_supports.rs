@@ -583,24 +583,108 @@ fn a_short_rib_cone_reloads_after_its_fillet() {
         .unwrap();
     fillet_edges(&mut k, &mut body, &[edge_id], 1.0, 1, 1, 1.0).unwrap();
 
+    // The fillet removes the 15° corner between the cone side and the rib's outer side,
+    // radius 1, turned 12° about x. The interior angle is 165°, so the section is that
+    // kite less the ball's 15° sector. Its volume is the section's area times the
+    // centroid's radius times the turn (Pappus). The pre-fillet closed form sits 1.7e-4
+    // mm³ under the issue's 137607.253, so the added round is held to 1e-4.
+    let outer = [26.743_129_f64, 33.353_628];
+    let slope = 0.25_f64;
+    let along = {
+        let l = (1.0 + slope * slope).sqrt();
+        [1.0 / l, slope / l]
+    };
+    let rib_side = {
+        let d = [outer[0] - 18.0, outer[1] - 28.5];
+        let l = (d[0] * d[0] + d[1] * d[1]).sqrt();
+        [d[0] / l, d[1] / l]
+    };
+    let round = {
+        let back = [-along[0], -along[1]];
+        let phi = (back[0] * rib_side[0] + back[1] * rib_side[1]).acos();
+        let t = 1.0 / (phi / 2.0).tan();
+        let bis = [back[0] + rib_side[0], back[1] + rib_side[1]];
+        let bl = (bis[0] * bis[0] + bis[1] * bis[1]).sqrt();
+        let b = [bis[0] / bl, bis[1] / bl];
+        let centre = 28.5 + b[1] / (phi / 2.0).sin();
+        let foot = |d: [f64; 2]| 28.5 + d[1] * t;
+        let kite = t;
+        let kite_rho = (2.0 * 28.5 + foot(back) + foot(rib_side) + 2.0 * centre) / 6.0;
+        let half = (std::f64::consts::PI - phi) / 2.0;
+        let sector = half;
+        let sector_rho = centre - b[1] * 2.0 * half.sin() / (3.0 * half);
+        let area = kite - sector;
+        let rho = (kite * kite_rho - sector * sector_rho) / area;
+        area * rho * sweep.to_radians()
+    };
+    let after = brep_volume(&k, &mut body, 1e-6, &attrs).unwrap();
+    assert!(
+        (after - (before + round)).abs() <= 1e-4,
+        "post-fillet volume {after}, before {before}, round {round}"
+    );
+
+    // Distance from a point to the cone of slope `slope` whose radius is `rho0` at `x0`.
+    // The radial gap is not perpendicular to the cone; the normal leans by the semi-angle.
+    let cone_distance = |p: Point3, x0: f64, rho0: f64, drho: f64| {
+        let rho = rho0 + drho * (p.x - x0);
+        (p.y.hypot(p.z) - rho).abs() * drho.atan().cos()
+    };
+    let rib_slope = (outer[1] - 28.5) / (outer[0] - 18.0);
+
     let mut rounds = 0;
+    let mut saw_body = false;
+    let mut saw_rib = false;
     for f in body.faces().ids() {
         let Some(surface) = face::surface(&body, f).unwrap() else {
             continue;
         };
-        let Some(class) = surface
-            .procedural_blend()
-            .and_then(|b| b.exact().map(|r| r.class()))
-        else {
+        let Some(round) = surface.procedural_blend().and_then(|b| b.exact()) else {
             continue;
         };
-        if class != ExactClass::Circle {
+        if round.class() != ExactClass::Circle {
             continue;
         }
         rounds += 1;
+        assert!(
+            (round.radius() - 1.0).abs() <= 1e-12,
+            "round radius {}",
+            round.radius()
+        );
+        for i in 0..2 {
+            let support = round.support(i).unwrap();
+            let domain = support.natural_uv_domain_if_built();
+            let span = |a: f64, b: f64, t: f64| a + (b - a) * t;
+            for (su, sv) in [(0.5, 0.5), (0.25, 0.75), (0.75, 0.25)] {
+                let uv = Point2::new(
+                    span(domain.min().x, domain.max().x, su),
+                    span(domain.min().y, domain.max().y, sv),
+                );
+                let p = support.evaluate_point(&k, uv).unwrap();
+                let on_body = cone_distance(p, 0.0, 24.0, slope);
+                let on_rib = cone_distance(p, 18.0, 28.5, rib_slope);
+                if on_body <= 1e-5 {
+                    saw_body = true;
+                }
+                if on_rib <= 1e-5 {
+                    saw_rib = true;
+                }
+                assert!(
+                    on_body.min(on_rib) <= 1e-5,
+                    "support {i} at {p:?} is {on_body} from the body cone and {on_rib} from the rib"
+                );
+            }
+        }
         let rec = exact_to_record(&k, surface).unwrap();
         exact_from_record(&k, &rec)
             .unwrap_or_else(|e| panic!("the 12° rib's fillet did not reload: {e}"));
     }
-    assert!(rounds >= 1, "the fillet did not build a circle-class round");
+    assert!(
+        saw_body && saw_rib,
+        "a round support missed a reference cone"
+    );
+    // The cone's seam splits the 12° root into two 6° edges, so the fillet is two rounds.
+    assert_eq!(
+        rounds, 2,
+        "the fillet did not build both circle-class rounds"
+    );
 }
