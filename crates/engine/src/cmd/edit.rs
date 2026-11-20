@@ -1487,6 +1487,7 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
         omitted,
         inputs,
         error: r.and_then(|r| r.error.clone()),
+        error_code: r.and_then(|r| r.error_code.as_ref()).map(Into::into),
         warning: r.and_then(|r| r.warning.clone()),
     };
     reply(cmd, TimelineInspectResult { inspected: Inspected::Feature(Box::new(info)), param_warnings: Vec::new() })

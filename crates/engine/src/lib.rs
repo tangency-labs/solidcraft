@@ -98,6 +98,10 @@ pub enum EngineError {
     BadParams { cmd: String, msg: String },
     #[error("{0}")]
     Other(String),
+    /// A feature that failed with a kernel call's error: its error, as [`EngineError::Other`]
+    /// words it, and the call's stable code ([`solidcraft_kernel::failure`]).
+    #[error("{}", .0.error)]
+    Feature(Box<FeatureFailure>),
     #[error("plugin: {0}")]
     Plugin(#[from] craft_plugin::HostError),
     /// A plugin failed while it ran or was refused before it ran: named, with its file.
@@ -149,10 +153,32 @@ impl EngineError {
             _ => None,
         }
     }
-    /// The error a failed feature's result reports: internal when the kernel caught a panic.
+    /// The error a failed feature's result reports: internal when the kernel caught a panic,
+    /// with the kernel call's code when the result has one.
     pub(crate) fn of_feature(r: &solidcraft_doc::FeatureResult, error: String) -> EngineError {
-        if r.internal { EngineError::Internal(String::new(), error) } else { EngineError::Other(error) }
+        match &r.error_code {
+            _ if r.internal => EngineError::Internal(String::new(), error),
+            Some(code) => EngineError::Feature(Box::new(FeatureFailure { error, code: code.clone() })),
+            None => EngineError::Other(error),
+        }
     }
+    /// The stable code of the kernel call this error was made from, when it was made from one: a
+    /// failed feature's ([`EngineError::Feature`]).
+    pub fn error_code(&self) -> Option<&solidcraft_kernel::ErrorCode> {
+        match self {
+            EngineError::Feature(f) => Some(&f.code),
+            _ => None,
+        }
+    }
+}
+
+/// A feature that failed with a kernel call's error ([`EngineError::Feature`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FeatureFailure {
+    /// The feature's error, as its result words it.
+    pub error: String,
+    /// The kernel call's stable code.
+    pub code: solidcraft_kernel::ErrorCode,
 }
 impl From<solidcraft_io::IoError> for EngineError {
     fn from(e: solidcraft_io::IoError) -> Self {
