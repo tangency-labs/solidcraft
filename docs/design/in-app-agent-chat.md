@@ -235,8 +235,8 @@ loads the user's claude.ai connectors and their own MCP servers (#19554). The se
 `_meta.claudeCode.options`, which the adapter spreads over its own defaults, close all of that:
 - `tools: ["ExitPlanMode"]` (`acp::CLAUDE_TOOLS`): the only built-in tools. A list of what is
   allowed, so a tool a later Claude Code adds stays off. `ExitPlanMode` ends the plan mode the
-  mode picker offers; without it the agent stays in plan mode. Read, Glob and Grep join it when the
-  adapter was recognised (below).
+  mode picker offers; without it the agent stays in plan mode. Read, Glob and Grep, and Write and
+  Edit for the plan, join it when the adapter was recognised (below).
 - `disallowedTools` (`acp::CLAUDE_DISALLOWED_TOOLS`): the shell, file and web tools, a second
   guard.
 - `strictMcpConfig: true`: only the servers in `session/new`'s `mcpServers`, that is
@@ -295,15 +295,17 @@ plan in its reply worked for a first plan but never for a revised one. So Write 
 tools) and set `plansDirectory: "plans"`, which Claude Code resolves against the
 working folder: `<data>/agent-chat/work/plans`, not the user's `~/.claude/plans`.
 `acp::write_path` takes the file from a `Write <path>` or `Edit <path>` question of kind `edit`
-with an absolute `rawInput.file_path`; the chat allows it when the file is a `.md` right in that
-folder, links followed (`is_plan_file`), and declines any other write of Claude Code's before the
-user's mode or remembered answers are consulted. A Read of a plan file is allowed the same way,
-so Claude Code can read its plan back before revising it. `acp::plan_text` takes the plan (at most 20 000
+from its `rawInput.file_path` (a WSL agent's `/mnt/c/...` taken back to its drive); the chat allows
+it when the file is an absolute `.md` path right in that folder, the folder reached through links
+but the file itself not a link (`is_plan_file`), and declines any other write of Claude Code's
+before the user's mode or remembered answers are consulted. Another agent's write is never a plan
+write: it goes through the user's mode. A Read of a plan file is allowed the same way, so Claude
+Code can read its plan back before revising it. `acp::plan_text` takes the plan (at most 20 000
 characters) and the panel draws it as Markdown inside the question, above its answers; a question
 with a plan is never answered by the mode or a remembered answer. Starting
-the agent makes the folder and deletes plans not changed for seven days (`tidy_plans`); several
-SolidCraft windows share the folder, so nothing deletes a plan a running conversation may still
-read. Checked with `claude-agent-acp` 0.107.0 and Sonnet: with these options, a first plan and a
+the agent makes the folder and deletes plans not changed for seven days (`tidy_plans`). Several
+SolidCraft windows share the folder and the cleanup doesn't know which conversation wrote a plan,
+so a plan left unchanged for seven days in a conversation still open is deleted too. Checked with `claude-agent-acp` 0.107.0 and Sonnet: with these options, a first plan and a
 revised one both arrived in the question (two runs each), and Claude Code wrote nowhere else.
 Other agents' own permission requests appear in the panel with their options, writes included.
 

@@ -220,8 +220,11 @@ pub fn read_path(call: &Value) -> Option<std::path::PathBuf> {
 
 /// The file a permission question would write, when it asks for one of Claude Code's own write
 /// tools ([`CLAUDE_PLAN_TOOLS`]) as the Claude adapter forms such a question: `Write <path>` or
-/// `Edit <path>` of kind `edit` with an absolute `rawInput.file_path`. An MCP tool's question
-/// (`_meta.claudeCode.mcpServer`) never counts. Anything else is `None`.
+/// `Edit <path>` of kind `edit` with a `rawInput.file_path`. An MCP tool's question
+/// (`_meta.claudeCode.mcpServer`) never counts. Anything else is `None`. The path is kept even
+/// when it isn't absolute, so the chat declines such a write instead of leaving it to the mode; a
+/// WSL path the host doesn't read as absolute (`/mnt/c/...` on Windows) is taken back to the
+/// drive it names ([`host_path`]).
 pub fn write_path(call: &Value) -> Option<std::path::PathBuf> {
     if call.pointer("/_meta/claudeCode/mcpServer").is_some() || call.get("kind")?.as_str()? != "edit" {
         return None;
@@ -231,7 +234,25 @@ pub fn write_path(call: &Value) -> Option<std::path::PathBuf> {
         return None;
     }
     let path = std::path::PathBuf::from(call.pointer("/rawInput/file_path")?.as_str()?);
-    path.is_absolute().then_some(path)
+    if path.is_absolute() {
+        return Some(path);
+    }
+    Some(host_path(&path).unwrap_or(path))
+}
+
+/// The Windows drive path a WSL path under the default mount root names, the reverse of
+/// [`wsl_path`]: `/mnt/c/Users/u` is `C:\Users\u`. Anything else is `None`.
+pub fn host_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let text = path.to_str()?.strip_prefix("/mnt/")?;
+    let mut chars = text.chars();
+    let drive = chars.next().filter(char::is_ascii_alphabetic)?;
+    let rest = chars.as_str();
+    let rest = match rest.strip_prefix('/') {
+        Some(rest) => rest,
+        None if rest.is_empty() => rest,
+        None => return None,
+    };
+    Some(format!("{}:\\{}", drive.to_ascii_uppercase(), rest.replace('/', "\\")).into())
 }
 
 /// The most of a plan a question shows, in characters.
@@ -1442,16 +1463,28 @@ mod tests {
         assert_eq!(calls.question(Some("t1"), None), None, "a new turn");
     }
 
-    /// Only the Claude adapter's own Write and Edit questions, with an absolute path, give a file
-    /// to check; the plan comes only from its "Approve Plan" question, cut at [`MAX_PLAN`].
+    /// Only the Claude adapter's own Write and Edit questions give a file to check; the plan comes
+    /// only from its "Approve Plan" question, cut at [`MAX_PLAN`].
     #[test]
     fn claudes_writes_and_plan_are_read_from_its_questions() {
         let f = "/w/plans/plan-a.md";
         let write = |v: Value| write_path(&v);
         assert_eq!(write(json!({"title": format!("Write {f}"), "kind": "edit", "rawInput": {"file_path": f, "content": "# Plan"}})), Some(f.into()));
         assert_eq!(write(json!({"title": "Edit plans/plan-a.md", "kind": "edit", "rawInput": {"file_path": f}})), Some(f.into()));
+        // A path that isn't absolute is kept, so the chat declines it; WSL's form goes back to its drive.
+        assert_eq!(
+            write(json!({"title": "Write plans/plan-a.md", "kind": "edit", "rawInput": {"file_path": "plans/plan-a.md"}})),
+            Some("plans/plan-a.md".into())
+        );
+        let wsl = "/mnt/c/Users/u/plans/a.md";
+        let host = if std::path::Path::new(wsl).is_absolute() { wsl.into() } else { std::path::PathBuf::from(r"C:\Users\u\plans\a.md") };
+        assert_eq!(write(json!({"title": format!("Write {wsl}"), "kind": "edit", "rawInput": {"file_path": wsl}})), Some(host));
+        assert_eq!(host_path(std::path::Path::new(wsl)), Some(r"C:\Users\u\plans\a.md".into()));
+        assert_eq!(host_path(std::path::Path::new("/mnt/d")), Some(r"D:\".into()));
+        for other in ["/mnt/cd/x", "/mnt/1/x", "/home/u/a.md", "plans/a.md"] {
+            assert_eq!(host_path(std::path::Path::new(other)), None, "{other}");
+        }
         for call in [
-            json!({"title": "Write plans/plan-a.md", "kind": "edit", "rawInput": {"file_path": "plans/plan-a.md"}}),
             json!({"title": format!("Write {f}"), "kind": "read", "rawInput": {"file_path": f}}),
             json!({"title": format!("Writer {f}"), "kind": "edit", "rawInput": {"file_path": f}}),
             json!({"title": format!("MultiEdit {f}"), "kind": "edit", "rawInput": {"file_path": f}}),
