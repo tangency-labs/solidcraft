@@ -988,8 +988,9 @@ pub struct PathFlangeParams {
 }
 
 /// Read a sheet's flat pattern: its size, outline, cut-outs, pockets, bends and perforations, in
-/// flat coordinates (mm, on the base panel's bottom face). Refused while a feature that is not
-/// sheet metal (a fillet, a join) has changed the body.
+/// flat coordinates (mm, in the sheet's flat: the plane its surface is laid out in, where the
+/// feature that made the sheet put it, its sketch's plane or the converted face's). Refused while
+/// a feature that is not sheet metal (a fillet, a join) has changed the body.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct FlatPatternParams {
@@ -1351,8 +1352,10 @@ pub struct FlatBore {
     pub length: f64,
 }
 
-/// What `sheet.flat_pattern` returns: the sheet's flat pattern in flat coordinates (mm, on the
-/// base panel's bottom face). The `json` form of `sheet.export_bend_table` is this as text.
+/// What `sheet.flat_pattern` returns: the sheet's flat pattern in flat coordinates (mm, in the
+/// sheet's flat: the plane its surface is laid out in, where the feature that made the sheet put
+/// it, its sketch's plane or the converted face's). The `json` form of `sheet.export_bend_table`
+/// is this as text.
 #[derive(Debug, serde::Serialize, JsonSchema)]
 pub struct FlatPatternResult {
     /// The sheet metal body.

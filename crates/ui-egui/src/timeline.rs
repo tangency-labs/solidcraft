@@ -1783,7 +1783,7 @@ mod tests {
             cases.push((format!("construct.point.{id}"), FeatureKind::ConstructionPoint { def }));
         }
         for (id, plane) in [
-            ("midplane", PlaneRef::Midplane { a: reference(), b: reference() }),
+            ("midplane", PlaneRef::Midplane { a: reference(), b: reference(), old_frame: false }),
             ("axis_point", PlaneRef::AxisPoint { axis: reference(), point: reference() }),
             ("two_edges", PlaneRef::TwoEdges { a: reference(), b: reference() }),
             ("three_points", PlaneRef::ThreePoints { a: reference(), b: reference(), c: reference() }),

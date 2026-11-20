@@ -1331,6 +1331,35 @@ mod tests {
         assert!(h.app.session.drawing("drawing.inspect").unwrap().view(id).is_some(), "and Ctrl+Z brings it back");
     }
 
+    /// A view's panel offers every visual style, the shaded ones too: picking Shaded with visible
+    /// edges and OK saves the view in it.
+    #[test]
+    fn a_views_panel_shades_it() {
+        use serde_json::json;
+        use solidcraft_engine::render::VisualStyle;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.frames(4);
+        h.app.run("drawing.create", json!({})).unwrap();
+        let made = h.app.run("drawing.view.base", json!({"sheet": "Sheet 1"})).unwrap();
+        let view = solidcraft_engine::doc::ids::decode(made["view"].as_str().unwrap()).unwrap();
+        h.frames(4);
+        edit(&mut h.app, view, egui::pos2(400.0, 300.0));
+        h.frames(4);
+        assert_eq!(h.app.drawing_workspace.options, Some(Tool::Edit(Some(view))));
+        h.step(&json!({"click": {"handle": "drawing:edit:style"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Shaded with visible edges"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "OK"})).unwrap();
+        h.frames(2);
+        let style = h.app.session.drawing("drawing.inspect").unwrap().resolve_view(view).unwrap().visual_style.value;
+        assert_eq!(style, VisualStyle::ShadedVisible);
+        assert!(h.app.drawing_workspace.options.is_none(), "OK closes the panel");
+    }
+
     /// A blank sheet's ribbon offers every tool that has a working panel: a click opens it.
     #[test]
     fn a_blank_sheets_working_tools_open_from_the_ribbon() {

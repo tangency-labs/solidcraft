@@ -227,19 +227,19 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
     };
     let mut edit =
         app.drawing_workspace.view_edit.take().filter(|edit| edit.view == view).unwrap_or_else(|| ViewEdit { view, scale: scale.to_string(), style });
-    let styles = [VisualStyle::Visible, VisualStyle::VisibleHidden];
-    let mut labels = vec![tr("ui.drawing_panel.visible"), tr("ui.drawing_panel.hidden")];
-    let mut index = styles.iter().position(|candidate| *candidate == edit.style).unwrap_or(styles.len());
-    if index == styles.len() {
-        labels.push(tr(match edit.style {
-            VisualStyle::Shaded => "ui.drawing_panel.shaded",
-            VisualStyle::ShadedVisible => "ui.drawing_panel.shaded_visible",
-            _ => "ui.drawing_panel.shaded_hidden",
-        }));
-    }
+    let styles = VisualStyle::ALL;
+    let labels = [
+        tr("ui.drawing_panel.visible"),
+        tr("ui.drawing_panel.hidden"),
+        tr("ui.drawing_panel.shaded"),
+        tr("ui.drawing_panel.shaded_visible"),
+        tr("ui.drawing_panel.shaded_hidden"),
+    ];
+    let mut index = styles.iter().position(|candidate| *candidate == edit.style).unwrap_or_default();
     let (cancel, apply, ok) = super::inset(ui, |ui| {
         ui_kit::section_heading(ui, tr("ui.drawing_panel.display"));
-        ui_kit::choice_row(ui, tr("ui.drawing_panel.visual_style"), "drawing:edit:style", &mut index, &labels);
+        let row = ui_kit::choice_row(ui, tr("ui.drawing_panel.visual_style"), "drawing:edit:style", &mut index, &labels);
+        crate::scenario::publish_handle("drawing:edit:style", row.rect.right_center() - egui::vec2(12.0, 0.0));
         if let Some(value) = styles.get(index) {
             edit.style = *value;
         }

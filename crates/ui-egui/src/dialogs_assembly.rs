@@ -2156,8 +2156,8 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
     // A constraint's reply: how free its part is with the constraint the preview shows.
     let placed = cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.")).map(|(_, r)| r.clone());
     // A moved component looks like itself (no new surface), with its old place as the ghost.
-    // A plugin's run in a design with nothing placed keeps the colours of a new body.
-    let colors = if was_placed { Colors { added: colors.body, new_body: colors.body, ..colors } } else { colors };
+    // A plugin can both move and make bodies: the builder distinguishes them per body.
+    let colors = if was_placed && !plugin { Colors { added: colors.body, new_body: colors.body, ..colors } } else { colors };
     let plugin_summary = crate::preview::plugin_summary(cmds, &preview.replies);
     Some(build_world_preview(preview, colors).map(|mut built| {
         built.plugin_summary = plugin_summary;

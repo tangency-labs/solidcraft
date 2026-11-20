@@ -1,5 +1,6 @@
 //! Manage configuration table. Commands and cell decoding remain in dialogs_motion.
 use super::{cell_value, column_parts, configuration_rules_ui, table, unit_of};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, ui_kit};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::DEFAULT_MATERIAL;
@@ -46,16 +47,27 @@ pub(super) fn configurations_rows(
         .collect();
     let gap = ui.spacing().item_spacing.x;
     let name_width = tb.rows.iter().map(|(name, _)| ui_kit::ContentWidth::name(ui, name)).fold(0.0, f32::max);
-    let status_width = (ui_kit::ContentWidth::label(ui, "Active") + gap + ui_kit::ContentWidth::button(ui, "Apply"))
-        .max(ui_kit::ContentWidth::button(ui, "Activate"));
+    let status_width = (ui_kit::ContentWidth::label(ui, "Active")
+        + gap
+        + ui_kit::ContentWidth::button(ui, "Apply")
+        + gap
+        + ui_kit::ContentWidth::button(ui, solidcraft_ui_text::tr("config.update")))
+    .max(ui_kit::ContentWidth::button(ui, "Activate"));
+    // Widths the user dragged a column's header divider to, by column key, so a column keeps its
+    // width when others are added or removed (T-693). The shared table stores them by index.
+    let keys: Vec<&str> = std::iter::once(NAME_KEY).chain(tb.columns.iter().map(String::as_str)).collect();
+    let dragged = column_widths(ui.ctx(), &keys);
+    let t = solidcraft_theme::Tokens::get();
     let columns: Vec<_> = labels
         .iter()
         .enumerate()
         .map(|(index, label)| {
             let min_width = if index == 0 {
-                name_width + gap + status_width + solidcraft_theme::Tokens::get().space_24
+                name_width + gap + status_width + t.space_24
             } else {
-                ui_kit::row_height() * 2.0 + solidcraft_theme::Tokens::get().space_24
+                // Room for the whole heading where it fits, so long feature and parameter names
+                // read without hovering; a longer one elides and shows in full on hover.
+                (ui_kit::row_height() * 2.0 + t.space_24).max((ui_kit::ContentWidth::label(ui, label) + t.space_24).min(t.form_card_width))
             };
             if index == labels.len() - 1 {
                 ui_kit::Column::new(label, 0.0)
@@ -72,7 +84,10 @@ pub(super) fn configurations_rows(
                         _ => 1.3,
                     }
                 };
-                ui_kit::Column::new(label, weight).flex().min_content_width(min_width)
+                let column =
+                    ui_kit::Column::new(label, weight).flex().min_content_width(min_width).manual_width(dragged.get(index).copied().flatten());
+                // The configuration names stay in view while the other columns scroll sideways.
+                if index == 0 { column.frozen() } else { column }
             }
         })
         .collect();
@@ -95,7 +110,7 @@ pub(super) fn configurations_rows(
     column_menu(app, ui, error, &tb.columns, rule_editor);
     ui.add_space(solidcraft_theme::Tokens::get().space_6);
     ui_kit::table_custom(ui, "configuration_table", &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
-        table.headers(ui, |ui, index| {
+        table.headers_resizable(ui, widths_by_index(), |ui, index| {
             if index == labels.len() - 1 {
                 true
             } else if index > 0 {
@@ -133,6 +148,26 @@ pub(super) fn configurations_rows(
                             crate::scenario::publish_handle(&format!("config:activate:{name}"), apply.rect.center());
                             if apply.clicked() {
                                 *error = app.run_heavy("config.activate", json!({"row":name})).err();
+                            }
+                            // The other way round: the row takes the design's current values (T-686).
+                            let update = ui_kit::button(ui, solidcraft_ui_text::tr("config.update"), ui_kit::Button::Small)
+                                .backing_on_hover_text(solidcraft_ui_text::tr("config.update_tip"));
+                            crate::scenario::publish_handle(&format!("config:update:{name}"), update.rect.center());
+                            if update.clicked() {
+                                match app.run("config.update_from_design", json!({"row":name})) {
+                                    Ok(reply) => {
+                                        *error = None;
+                                        let missed: Vec<String> = reply["not_captured"]
+                                            .as_array()
+                                            .into_iter()
+                                            .flatten()
+                                            .filter_map(Value::as_str)
+                                            .map(str::to_owned)
+                                            .collect();
+                                        rule_editor.not_captured = (!missed.is_empty()).then_some((app.session.revision, missed));
+                                    }
+                                    Err(e) => *error = Some(e),
+                                }
                             }
                         }
                     } else {
@@ -312,6 +347,22 @@ pub(super) fn configurations_rows(
             rule_editor.focus_new_row = true;
         }
     });
+    remember_column_widths(ui.ctx(), &keys);
+    // What Update couldn't take into the row, right under the table it concerns.
+    if let Some((_, missed)) = rule_editor.not_captured.as_ref().filter(|(at, _)| *at == app.session.revision) {
+        let names: Vec<String> = missed
+            .iter()
+            .map(|key| match column_parts(key) {
+                ("suppress", name) => format!("{} {name}", solidcraft_ui_text::tr_label("Suppress")),
+                (_, name) => name.to_owned(),
+            })
+            .collect();
+        ui_kit::text(
+            ui,
+            &solidcraft_ui_text::format("config.not_captured", &[("names", &names.join(", "))]),
+            ui_kit::Text::Report("not_captured", false),
+        );
+    }
     configuration_rules_ui::show(ui, app, error, rule_editor);
     if let Some(styles) = v["style_status"].as_array() {
         for style in styles.iter().filter(|style| style["dormant"].as_bool() == Some(true)) {
@@ -364,6 +415,54 @@ fn with_units(app: &SolveApp, mut tb: super::Table) -> super::Table {
         }
     }
     tb
+}
+
+/// The key the Configuration (name) column's width is kept under.
+const NAME_KEY: &str = "configuration";
+
+/// Where the dragged widths are kept by column key, across designs and sessions.
+fn widths_by_key() -> egui::Id {
+    egui::Id::unique("sc_configuration_column_widths")
+}
+
+/// Where the shared table reads and writes this frame's dragged widths, by column index.
+fn widths_by_index() -> egui::Id {
+    egui::Id::unique("sc_configuration_column_widths_shown")
+}
+
+/// The dragged width of each column of `keys`, in order, handed to the table by index.
+fn column_widths(ctx: &egui::Context, keys: &[&str]) -> Vec<Option<f32>> {
+    let kept: std::collections::BTreeMap<String, f32> = ctx.data_mut(|m| m.get_persisted(widths_by_key())).unwrap_or_default();
+    let widths: Vec<Option<f32>> = keys.iter().map(|key| kept.get(*key).copied().filter(|w| w.is_finite() && *w > 0.0)).collect();
+    ctx.data_mut(|m| m.insert_persisted(widths_by_index(), widths.clone()));
+    widths
+}
+
+/// Keep a width the user dragged (or reset with a double-click) this frame under its column key.
+fn remember_column_widths(ctx: &egui::Context, keys: &[&str]) {
+    let shown: Vec<Option<f32>> = ctx.data_mut(|m| m.get_persisted(widths_by_index())).unwrap_or_default();
+    ctx.data_mut(|m| {
+        let mut kept: std::collections::BTreeMap<String, f32> = m.get_persisted(widths_by_key()).unwrap_or_default();
+        let before = kept.clone();
+        for (key, width) in keys.iter().zip(&shown) {
+            match width {
+                Some(width) if width.is_finite() && *width > 0.0 => {
+                    kept.insert((*key).to_owned(), *width);
+                }
+                _ => {
+                    kept.remove(*key);
+                }
+            }
+        }
+        // A design with hundreds of columns must not grow the kept list without bound.
+        while kept.len() > 512 {
+            let Some(first) = kept.keys().next().cloned() else { break };
+            kept.remove(&first);
+        }
+        if kept != before {
+            m.insert_persisted(widths_by_key(), kept);
+        }
+    });
 }
 
 fn column_menu(

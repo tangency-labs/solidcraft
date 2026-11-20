@@ -2272,7 +2272,7 @@ fn a_dimension_not_drawn_has_no_layout_and_says_why() {
 
     let (mut s, view) = front_view();
     let added = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"visual_style": "shaded_visible"}}));
+    crate::drawing_scene::tests::not_drawable_yet(&mut s, view);
     let shaded = run(&mut s, INSPECT, json!({"dimension": added["dimension"]}));
     assert!(shaded.get("layout").is_none(), "{shaded}");
     assert_eq!((&shaded["layout_why"], &scene_why(&mut s, &added)), (&not_drawn, &not_drawn), "{shaded}");
@@ -2697,7 +2697,7 @@ fn a_drag_that_cant_place_is_refused_and_changes_nothing() {
             (&length, json!({"line_through_mm": [0, 1e8]}), "on paper"),
         ],
     );
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"visual_style": "shaded_visible"}}));
+    crate::drawing_scene::tests::not_drawable_yet(&mut s, view);
     refuses(&mut s, &[(&length, json!({"line_through_mm": [200, 190]}), "its view isn't drawn")]);
 
     let (mut s, drawing, dimension) = read_once();

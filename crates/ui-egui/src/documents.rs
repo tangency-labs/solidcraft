@@ -13,8 +13,8 @@ use solidcraft_viewport::Camera;
 
 use crate::SolveApp;
 use crate::design_tab_prefs::DesignTabPrefs;
-use crate::design_views::{DesignView, ViewKind, ViewSet};
 use crate::ui_kit;
+use solidcraft_views::{DesignView, ViewKind, ViewSet};
 
 /// Continue transient shot queues without adopting their document or view into the active tab.
 pub(crate) fn advance_render_batches(app: &mut SolveApp, ctx: &egui::Context) {
@@ -667,13 +667,36 @@ pub(crate) fn sync_views(app: &mut SolveApp) {
 /// shows the new one ([`apply_view`]).
 fn change_views<T>(app: &mut SolveApp, change: impl FnOnce(&mut ViewSet) -> T) -> T {
     let before = app.docs.views.active().id;
+    keep_look(app);
     let result = change(&mut app.docs.views);
     let active = app.docs.views.active();
     if active.id != before {
         let active = active.clone();
         apply_view(app, &active);
+        show_look(app, &active);
     }
     result
+}
+
+/// Keep how the shown Model view looks at the design (its camera) with that view, so it comes back
+/// as it was left: two Model views of one design are two angles, not one.
+fn keep_look(app: &mut SolveApp) {
+    let active = app.docs.views.active();
+    if active.kind == ViewKind::Model {
+        let id = active.id;
+        app.docs.views.set_spec(id, solidcraft_viewport::ViewSpec::new(app.cam));
+    }
+}
+
+/// Show `view` from the angle it was left at. A view that was never left (a new one) keeps the
+/// angle the design looks from now.
+fn show_look(app: &mut SolveApp, view: &DesignView) {
+    if view.kind == ViewKind::Model
+        && let Some(spec) = view.spec
+    {
+        app.cam = spec.camera;
+        app.cam_anim = None;
+    }
 }
 
 /// Open a view of `kind` showing `subject` in the shown design and show it (`reuse`: one that
@@ -683,7 +706,7 @@ fn change_views<T>(app: &mut SolveApp, change: impl FnOnce(&mut ViewSet) -> T) -
 pub fn view_open(app: &mut SolveApp, kind: ViewKind, subject: Option<String>, reuse: bool) -> u64 {
     let prefs = DesignTabPrefs::from(&app.preferences);
     if !prefs.opens_sub_tab(kind) {
-        apply_view(app, &DesignView { id: 0, kind, name: String::new(), subject });
+        apply_view(app, &DesignView { id: 0, kind, name: String::new(), subject, spec: None });
         return app.docs.views.active().id;
     }
     change_views(app, |views| views.open(kind, subject, reuse && prefs.reuse_views))
@@ -708,6 +731,12 @@ fn remember_views_in(app: &SolveApp, i: usize, dir: &std::path::Path) {
     }
     let session = if i == app.docs.active { Some(&app.session) } else { app.docs.slots.get(i).and_then(Option::as_ref).map(|slot| &slot.session) };
     let (Some(path), Some(views)) = (session.and_then(|session| session.path.as_deref()), views_of(app, i)) else { return };
+    // The shown Model view is saved from the angle the design looks from now.
+    let mut views = views.clone();
+    if i == app.docs.active && views.active().kind == ViewKind::Model {
+        let id = views.active().id;
+        views.set_spec(id, solidcraft_viewport::ViewSpec::new(app.cam));
+    }
     if let Err(e) = crate::view_memory::remember(dir, path, views.to_json()) {
         log::warn!("could not remember the views of {path}: {e}");
     }
@@ -736,6 +765,7 @@ fn restore_views_in(app: &mut SolveApp, path: &str, dir: &std::path::Path) {
         app.docs.views = set;
         let active = app.docs.views.active().clone();
         apply_view(app, &active);
+        show_look(app, &active);
     } else if let Some(slot) = app.docs.slots.iter_mut().flatten().find(|slot| slot.session.path.as_deref().is_some_and(|p| same_path(p, path))) {
         slot.views = set;
     }
@@ -1928,9 +1958,10 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             },
             view_menu: &crate::design_view_ui::VIEW_MENU,
             view_right_row: crate::design_view_ui::VIEW_CLOSE_RIGHT,
-            view_rename: view_edit.as_mut().zip(view_place).map(|(r, place)| {
-                (place, crate::app_bar::TabRename { text: &mut r.text, focused: &mut r.focused, max: crate::design_views::MAX_NAME })
-            }),
+            view_rename: view_edit
+                .as_mut()
+                .zip(view_place)
+                .map(|(r, place)| (place, crate::app_bar::TabRename { text: &mut r.text, focused: &mut r.focused, max: solidcraft_views::MAX_NAME })),
             plus_menu: &plus_menu,
             switcher_menu: &SWITCHER_MENU,
             tear_off_below: TEAR_OFF_BELOW,
@@ -3721,15 +3752,40 @@ mod tests {
         h.frames(2);
         let sketch = h.app.session.active_sketch.unwrap();
         let active = h.app.docs.views.active().clone();
-        assert_eq!((active.kind, active.subject), (crate::design_views::ViewKind::Sketch, Some(sketch.to_string())));
+        assert_eq!((active.kind, active.subject), (solidcraft_views::ViewKind::Sketch, Some(sketch.to_string())));
         assert_eq!(h.app.docs.views.len(), before + 1);
         h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
         h.frames(2);
-        assert_eq!(h.app.docs.views.active().kind, crate::design_views::ViewKind::Model);
+        assert_eq!(h.app.docs.views.active().kind, solidcraft_views::ViewKind::Model);
         assert_eq!(h.app.docs.views.len(), before + 1, "the sketch's view stays");
         assert!(view_activate(&mut h.app, active.id));
         assert_eq!(h.app.session.active_sketch, Some(sketch), "showing it edits the sketch again");
+    }
+
+    /// Two Model views of one design are two angles: each keeps the camera it was left with, and a
+    /// new one starts from where the design looks now.
+    #[test]
+    fn model_views_keep_their_own_angle() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let first = h.app.docs.views.active().id;
+        h.app.cam.yaw = 0.25;
+        let second = view_open(&mut h.app, ViewKind::Model, None, false);
+        assert_ne!(first, second, "a second Model view is opened, not the first reused");
+        assert_eq!(h.app.cam.yaw, 0.25, "a new view starts from the angle the design looks from");
+        h.app.cam.yaw = 1.5;
+        assert!(view_activate(&mut h.app, first));
+        assert_eq!(h.app.cam.yaw, 0.25, "the first view comes back at its own angle");
+        assert!(view_activate(&mut h.app, second));
+        assert_eq!(h.app.cam.yaw, 1.5, "and the second at its own");
+        let copy = view_duplicate(&mut h.app, second).unwrap();
+        assert_eq!(h.app.cam.yaw, 1.5, "a copy starts at the angle of the view it copies");
+        h.app.cam.yaw = -0.5;
+        assert!(view_activate(&mut h.app, second));
+        assert_eq!(h.app.cam.yaw, 1.5);
+        assert!(view_activate(&mut h.app, copy));
+        assert_eq!(h.app.cam.yaw, -0.5);
     }
 
     /// The Layout page's "Design tabs" choices govern the views: a kind kept out of sub-tabs is

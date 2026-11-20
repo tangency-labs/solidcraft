@@ -1253,20 +1253,24 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
     }
     for a in &after.bodies {
         let am = a.mesh();
-        let old = before.body(&a.name).map(|b| b.mesh());
+        let old_body = before.body(&a.name);
+        // A placement changes no surface: compare the shared source geometry before asking
+        // which faces differ in world coordinates (or reading the source's old history).
+        let moved = old_body.is_some_and(|b| a.display_moved_from(b).is_some());
+        let old = old_body.map(|b| b.mesh());
         if old.as_ref().is_some_and(|bm| same(bm, &am)) {
             continue;
         }
         // Material removed from a body (a hole, a pocket): its new faces also show through the
         // body in the cut colour, so the cut is seen from any side. A combine's cut shows its
         // tools instead, as ghosts that bodies in front of them hide.
-        let cut = c.cut_tint && combine.is_none() && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
+        let cut = !moved && c.cut_tint && combine.is_none() && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
         // Which of the body's faces the feature made, asked only when something is drawn from
         // the answer: the cut above, and the tint the preference offers. A changed body is
         // otherwise drawn as itself, so a preview looks like the model and nothing has to be
         // worked out face by face.
         let new_face: Vec<bool> = match &old {
-            Some(bm) if cut || tint_new => {
+            Some(bm) if !moved && (cut || tint_new) => {
                 let mut new = new_faces(&am, am.tri_face.iter().max().map_or(0, |m| *m as usize + 1), bm);
                 // The kernel recorded which faces the operation that made this body generated,
                 // i.e. has no face of an input under it. The two answers are taken together
