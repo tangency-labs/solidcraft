@@ -136,8 +136,8 @@
 //! - **Recursion.** None.
 
 use crate::curve::curve::p2::{Curve, CurveKind};
-use crate::error::boolean::BooleanStage;
-use crate::error::{Result, SolidError};
+use crate::error::boolean::{BooleanFailure, BooleanStage};
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{SolutionObject, SolutionType};
@@ -2788,9 +2788,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                                 | SolidError::InvalidInput { .. }
                                 | SolidError::PortInvariant { .. }),
                             ) => return Err(err),
-                            Err(_) => {
+                            Err(cause) => {
                                 if !ignore_problems {
-                                    return Err(SolidError::boolean_stage_failed(OP_EDGE_FACE_COIN, BooleanStage::Coincidence, "the coincidence of an edge with a face could not be resolved"));
+                                    return Err(coincidence_unresolved(cause));
                                 }
                             }
                         }
@@ -2801,6 +2801,21 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         Ok(out)
     }
+}
+
+/// The failure of [`TopologyIntersector::edge_face_coincidence`] where the glue of a new
+/// edge to the edge it was made from fails: a coincidence stage failure (status `SM_ERR`,
+/// upstream `return SE(SM_ERR)`), keeping the glue's error as its cause (#13790).
+fn coincidence_unresolved(cause: SolidError) -> SolidError {
+    Failure::new(
+        OP_EDGE_FACE_COIN,
+        BooleanFailure::StageFailed {
+            stage: BooleanStage::Coincidence,
+            what: "the coincidence of an edge with a face could not be resolved",
+        },
+    )
+    .caused_by(cause)
+    .into_error()
 }
 
 /// Whether `~SmProtoTopologyManager` reads freed memory (UB-175): it deletes the listed
@@ -3114,5 +3129,48 @@ mod tests {
             ti.forget_deleted_edge_relationships(deleted_primary, deleted_other)
                 .unwrap();
         }
+    }
+
+    /// The glue failure of an edge-face coincidence is reported as before (the same
+    /// coincidence stage failure, operation and status), keeping the glue's error as its
+    /// cause, whose class it now takes (#13790).
+    #[test]
+    fn an_unresolved_edge_face_coincidence_keeps_the_glue_error() {
+        let reason = crate::error::Reason::Boolean(BooleanFailure::StageFailed {
+            stage: BooleanStage::Coincidence,
+            what: "the coincidence of an edge with a face could not be resolved",
+        });
+        for cause in [
+            SolidError::sm_err("glue"),
+            SolidError::blend("glue", crate::error::blend::BlendFailure::StageFailed),
+            SolidError::PreparationRequired { operation: "glue" },
+        ] {
+            let e = coincidence_unresolved(cause.clone());
+            assert_eq!(e.operation(), OP_EDGE_FACE_COIN, "{e:?}");
+            assert_eq!(e.failure().map(|f| &f.reason), Some(&reason), "{e:?}");
+            assert_eq!(e.sm_status(), Some(crate::error::SM_ERR), "{e:?}");
+            assert_eq!(e.kind(), crate::error::ErrorKind::Failed, "{e:?}");
+            assert_eq!(e.cause(), Some(&cause), "{e:?}");
+            let source = std::error::Error::source(e.failure().unwrap()).map(ToString::to_string);
+            assert_eq!(source, Some(cause.to_string()));
+            assert_eq!(
+                e.to_string(),
+                format!("{OP_EDGE_FACE_COIN}: {reason}; caused by {cause}")
+            );
+            assert_eq!(e.is_defect(), cause.is_defect(), "{e:?}");
+            assert_eq!(e.is_refusal(), cause.is_refusal(), "{e:?}");
+            assert_eq!(e.is_port_failure(), cause.is_port_failure(), "{e:?}");
+        }
+        // a bare status under it leaves it unclassed, as it was; a stage failure under it
+        // reads as a defect, a solidcore-side failure as no status answer
+        let bare = coincidence_unresolved(SolidError::sm_err("glue"));
+        assert!(!bare.is_defect() && !bare.is_refusal() && bare.is_status_answer());
+        let stage = coincidence_unresolved(SolidError::blend(
+            "glue",
+            crate::error::blend::BlendFailure::StageFailed,
+        ));
+        assert!(stage.is_defect() && stage.is_status_answer());
+        let port = coincidence_unresolved(SolidError::PreparationRequired { operation: "glue" });
+        assert!(port.is_port_failure() && !port.is_status_answer());
     }
 }
