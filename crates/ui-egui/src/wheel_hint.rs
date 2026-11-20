@@ -187,7 +187,7 @@ impl Action {
 }
 
 /// Handles of the notice for scripts: its rect, its buttons in order and its close.
-pub const HANDLES: [&str; 3] = ["toast:wheel_hint", "toast:wheel_hint:zoom", "toast:wheel_hint:dismiss"];
+pub const HANDLES: &[&str] = &["toast:wheel_hint", "toast:wheel_hint:zoom", "toast:wheel_hint:dismiss"];
 
 /// Whether the question may still be asked: automatic routing is chosen and it was not dismissed.
 fn askable(app: &SolveApp) -> bool {
