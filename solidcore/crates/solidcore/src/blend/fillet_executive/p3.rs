@@ -3215,8 +3215,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut overflow = false;
         let mut concave = false;
         let mut concave_overflow = false;
-        // Solvers with a concave overflow bounded by an end or a tangent join.
-        let mut bounded = BTreeSet::new();
+        // The Roll-over's second pass is one concave chain (#10876).
+        let mut rolled_overflow = false;
+        // A continued cliff only bounds the overflow of the solver that crosses it.
+        let mut bounded_cliffs = BTreeSet::new();
         let mut round_into_material = false;
         let mut rolls_over = false;
         let mut wraps = false;
@@ -3248,7 +3250,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 overflowing.push(edge);
             }
             if continued && fit {
-                bounded.insert(solver);
+                bounded_cliffs.insert(solver);
             } else if access.geometry_blend_adds_material(k, solver)? {
                 // the event's only where its rails leave across the cliff's rim at V and its
                 // end sections stay on their end faces (an end section's overflow is not
@@ -3257,7 +3259,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     && access.geometry_overflows_at_roll_over(k, solver, &judged.left_across)?
                     && access.geometry_end_sections_fit(k, solver, self)?
                 {
-                    bounded.insert(solver);
+                    rolled_overflow = true;
                 } else {
                     concave_overflow = true;
                 }
@@ -3268,12 +3270,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         }
         // whether the other blends add material (concave), when one overflows
         let mut index = 0;
-        while overflow && !concave_overflow && !concave {
+        while overflow && !concave_overflow && !rolled_overflow && !concave {
             let Some(solver) = self.solvers.get(index).copied() else {
                 break;
             };
             index += 1;
-            if !bounded.contains(&solver) {
+            if !bounded_cliffs.contains(&solver) {
                 concave = access.geometry_blend_adds_material(k, solver)?;
             }
         }
@@ -3285,7 +3287,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 && overflow
                 && self.solvers.len() > 1
                 && !concave_overflow
-                && bounded.is_empty()
+                && !rolled_overflow
+                && bounded_cliffs.is_empty()
                 && !concave
                 && !round_into_material)
         {
