@@ -227,7 +227,10 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
 }
 
 /// Whether `link`, as the design saved at `design` keeps it, names a file in the design's own
-/// folder or below it, judged from the text alone (`..` is followed, nothing is asked of the disk).
+/// folder or below it, judged from the link's text (`..` is followed, the link itself is not
+/// asked of the disk). The folder counts both as the design's path names it and as the disk
+/// resolves it: a link is kept with its symlinks resolved, so a design opened through a symlink
+/// (`/var` → `/private/var` on macOS, a linked home folder) still finds its own links inside.
 /// An unsaved design has no folder.
 fn inside_design_folder(design: Option<&str>, link: &str) -> bool {
     use std::path::{Component, Path, PathBuf};
@@ -247,7 +250,8 @@ fn inside_design_folder(design: Option<&str>, link: &str) -> bool {
     };
     let Ok(dir) = std::path::absolute(dir) else { return false };
     let dir = lexical(&dir);
-    lexical(&dir.join(link)).starts_with(&dir)
+    let target = lexical(&dir.join(link));
+    target.starts_with(&dir) || std::fs::canonicalize(&dir).is_ok_and(|real| target.starts_with(real))
 }
 
 /// Update Links (`options` as it was asked) read the shown design's links again: those it read
@@ -791,7 +795,65 @@ mod tests {
         assert!(inside_design_folder(Some(&base), "part.sc") && inside_design_folder(Some(&base), "sub/../parts/a.sc"));
         assert!(!inside_design_folder(Some(&base), "../housing.solidcraft") && !inside_design_folder(Some(&base), "parts/../../x.sc"));
         assert!(!inside_design_folder(Some(&base), &outside.to_string_lossy()) && !inside_design_folder(None, "part.sc"));
+        // A design opened through a symlinked folder: its links, kept with symlinks resolved, are
+        // still inside; one out of the real folder is still out.
+        #[cfg(unix)]
+        {
+            let alias = folder.join("alias");
+            std::os::unix::fs::symlink(folder.join("received"), &alias).unwrap();
+            let through = alias.join("case.solidcraft").to_string_lossy().into_owned();
+            let real = folder.join("received").canonicalize().unwrap();
+            assert!(inside_design_folder(Some(&through), &real.join("part.sc").to_string_lossy()));
+            assert!(!inside_design_folder(Some(&through), &real.join("../housing.solidcraft").to_string_lossy()));
+        }
         let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// Relative links are judged by the file the reader opens for them, as `component.links`
+    /// reports it: these two are outside the design's folder, so neither is read as it opens.
+    #[cfg(unix)]
+    #[test]
+    fn resolves_like_the_reader_for_relative_links() {
+        let top = std::env::temp_dir().join(format!("solidcraft-links-reader-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        let real = top.join("a").join("r");
+        std::fs::create_dir_all(real.join("sub")).unwrap();
+        std::fs::create_dir_all(top.join("a").join("view")).unwrap();
+        let up = top.join("x.solidcraft");
+        let beside = top.join("a").join("view").join("x.solidcraft");
+        save_part(&up, [10.0, 20.0, 30.0], false);
+        save_part(&beside, [10.0, 20.0, 30.0], false);
+        let case = real.join("case.solidcraft");
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.run("component.insert_design", json!({"path": up})).unwrap();
+        app.run("component.insert_design", json!({"path": beside})).unwrap();
+        app.run("file.save", json!({"path": case})).unwrap();
+        drop(app);
+        // How the design keeps the links.
+        let (saved, _) = solidcraft_engine::io::read_design_file(&case.to_string_lossy(), None::<fn(solidcraft_engine::io::DesignPreview)>).unwrap();
+        let mut kept: Vec<&str> = saved.links.values().map(|l| l.path.as_str()).collect();
+        kept.sort_unstable();
+        assert_eq!(kept, ["../../x.solidcraft", "../view/x.solidcraft"], "how the design keeps the links");
+        save_part(&up, [10.0, 20.0, 30.0], true);
+        save_part(&beside, [10.0, 20.0, 30.0], true);
+        let view = real.join("sub").join("view");
+        std::os::unix::fs::symlink(&real, &view).unwrap();
+        let through = view.join("case.solidcraft");
+        let mut opened = Session::default();
+        opened.execute("doc.open", &json!({"path": through})).unwrap();
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        crate::documents::adopt(&mut app, opened);
+        assert!(app.file_load.idle(), "neither link is read as the design opens");
+        assert!((volume(&app) - 12000.0).abs() < 1e-6, "{}", volume(&app));
+        let links = app.session.execute("component.links", &json!({})).unwrap();
+        let files: Vec<std::path::PathBuf> =
+            links["links"].as_array().unwrap().iter().map(|l| std::path::PathBuf::from(l["file"].as_str().unwrap())).collect();
+        let (up, beside) = (up.canonicalize().unwrap(), beside.canonicalize().unwrap());
+        assert!(files.contains(&up) && files.contains(&beside), "the reader opens the files outside the folder: {files:?}");
+        assert!(links["links"].as_array().unwrap().iter().all(|l| l["changed"] == true), "both stay out of date: {links}");
+        let design = through.to_string_lossy().into_owned();
+        assert!(app.session.doc.links.values().all(|l| !inside_design_folder(Some(&design), &l.path)), "{:?}", app.session.doc.links);
+        let _ = std::fs::remove_dir_all(top);
     }
 
     #[test]

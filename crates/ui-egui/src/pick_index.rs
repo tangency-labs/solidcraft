@@ -3,9 +3,8 @@
 //! prepares the largest visible imported mesh during open. Other indexes start on first use.
 //! Imported outlines have their own index, requested only by Measure. The picker asks for the nearest triangle along the
 //! cursor's ray and for the edge segments near that ray, then runs its exact screen tests on
-//! those alone. A large mesh's index takes a while to make (a third of a second for a long
-//! modelled thread, #3745), so it is made on a worker thread, and picks scan the mesh until it
-//! is there: a scan takes a few milliseconds, the index a frame never waits for.
+//! those alone. A large mesh's index is made on a worker thread. While it builds, explicit picks
+//! can scan the mesh. Hover and origin feedback defer the scan for very large meshes.
 
 use solidcraft_engine::geom::prelude::*;
 use std::collections::HashMap;
@@ -59,7 +58,7 @@ type Indexes = HashMap<(usize, Kind), (Arc<Mesh>, Option<Arc<MeshIndex>>)>;
 const AT_ONCE: usize = 20_000;
 
 impl PickIndexes {
-    /// The index of `mesh`, or `None` while it is being made (the caller scans the mesh).
+    /// The index of `mesh`, or `None` while it is being made.
     pub(crate) fn of(&self, mesh: &Arc<Mesh>) -> Option<Arc<MeshIndex>> {
         self.get(mesh, Kind::Body)
     }

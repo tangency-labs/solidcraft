@@ -2787,10 +2787,11 @@ fn shown_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState,
     let (vals, _) = doc.param_values();
     let mut decals = Vec::new();
     for c in doc.canvases.iter().filter(|c| c.visible) {
-        let Some(image) = c.bytes() else {
+        let image = c.bytes().to_vec();
+        if image.is_empty() {
             warnings.push(format!("decal `{}`: its image is damaged: left out", c.name));
             continue;
-        };
+        }
         let corners = match doc.canvas_corners(&vals, c, st) {
             Ok(corners) => corners,
             Err(e) => {

@@ -133,6 +133,10 @@ pub enum PlaneRef {
     AlongPath { path: Box<GeoRef>, t: Expr },
     /// Through a straight edge (or line, axis) and square to a plane (or planar face).
     Perpendicular { plane: Box<GeoRef>, line: Box<GeoRef> },
+    /// Through a picked point, square to a straight edge (or line, axis): with the point on the
+    /// line, Plane Along Path at that position; with it off the line, the plane keeps the line's
+    /// direction and passes through the point.
+    SquareToLine { line: Box<GeoRef>, point: Box<GeoRef> },
     /// A planar body face. Certified attachments resolve only their exact source and report
     /// an error when it is lost; `plane` then supplies a repair guide. Legacy references without
     /// an anchor try the persistent `name`, then the nearest parallel face at `at`, and retain
@@ -3145,6 +3149,17 @@ impl FeatureKind {
         )
     }
 
+    /// Profile sketch id for a constructor feature that captures `Feature::profile_frame`.
+    pub fn constructor_profile_sketch(&self) -> Option<u64> {
+        match self {
+            FeatureKind::Extrude { sketch, .. }
+            | FeatureKind::Revolve { sketch, .. }
+            | FeatureKind::SurfaceExtrude { sketch, .. }
+            | FeatureKind::SurfaceRevolve { sketch, .. } => Some(sketch.0),
+            _ => None,
+        }
+    }
+
     /// Short type name (timeline tooltip, `inspect`).
     pub fn type_name(&self) -> &'static str {
         match self {
@@ -3570,6 +3585,13 @@ pub struct Feature {
     /// default), or every piece stays one body.
     #[serde(default, skip_serializing_if = "Touching::is_separate")]
     pub touching: Touching,
+    /// For a constructor feature (`Extrude`, `Revolve`, `SurfaceExtrude`, `SurfaceRevolve`) built
+    /// from a profile sketch owned by another component: the rigid transform of this feature's
+    /// component relative to the lowest common ancestor of both components at feature creation
+    /// time. Later moves or joints on this component then carry the built body rigidly with it,
+    /// while moves of the sketch's own component still propagate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_frame: Option<crate::Mat>,
     #[serde(flatten)]
     pub kind: FeatureKind,
 }
@@ -4701,19 +4723,35 @@ impl Document {
     /// container keeps, as parts of their own. Empty when the design saves as JSON whole.
     pub fn binary_data(&self) -> Vec<&'static str> {
         let mut kinds = Vec::new();
+        if self.canvases.iter().any(|c| !c.data.is_empty()) {
+            kinds.push("images");
+        }
+        if self.drawings.iter().any(|d| d.images.iter().next().is_some()) {
+            kinds.push("drawing images");
+        }
+        if self.point_clouds.iter().any(|c| !c.points.is_empty()) {
+            kinds.push("point clouds");
+        }
+        if !self.render.resources.is_empty() || !self.render.texture_resources.is_empty() {
+            kinds.push("render environments and textures");
+        }
         if !self.plugin_data.is_empty() {
             kinds.push("plugin files");
         }
         kinds
     }
 
+    /// The design as the text of a `.json` file. The same design always gives the same text, and a
+    /// short list of numbers such as a point stays on one line (the layout is in `json_layout.rs`).
     pub fn to_json(&self) -> String {
-        if self.newer_file.is_some() {
+        let compact = if self.newer_file.is_some() {
             let mut value = serde_json::to_value(self).unwrap_or_default();
             crate::newer_file::restore(self, &mut value);
-            return serde_json::to_string_pretty(&value).unwrap_or_default();
-        }
-        serde_json::to_string_pretty(self).unwrap_or_default()
+            serde_json::to_string(&value).unwrap_or_default()
+        } else {
+            serde_json::to_string(self).unwrap_or_default()
+        };
+        crate::json_layout::pretty(&compact)
     }
 
     pub fn feature(&self, id: u64) -> Option<&Feature> {
@@ -4870,6 +4908,7 @@ impl Document {
             link_faces: Vec::new(),
             link_threads: Vec::new(),
             touching: Touching::Separate,
+            profile_frame: None,
             kind,
         };
         self.place_feature(f);
@@ -5321,6 +5360,7 @@ impl Document {
             | PlaneRef::Tangent { .. }
             | PlaneRef::AlongPath { .. }
             | PlaneRef::Perpendicular { .. }
+            | PlaneRef::SquareToLine { .. }
             | PlaneRef::ThroughPoint { .. } => {
                 let st = st.ok_or_else(|| DocError::Invalid("this plane is built from the model: evaluate first".into()))?;
                 crate::construct::resolve_geo_plane(&crate::construct::Ctx { doc: self, vals, st, depth, component }, p)
