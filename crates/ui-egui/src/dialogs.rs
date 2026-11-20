@@ -4479,7 +4479,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let vp = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
     let placement = crate::shell::editor_space(app, vp);
     let side = crate::frame::Side::Right;
-    let top = crate::shell::panel_top(app, placement, placement.bottom(), side);
+    // In a small window, a card that would take more than half of the view's width goes along
+    // the view's bottom instead, as wide as the view and at most half as tall: its top follows
+    // the height the card took last frame, and its body scrolls past that.
+    let along_bottom = crate::small_window::card_at_bottom(ctx.content_rect().width(), placement.width(), card_width(&d));
+    let top = if along_bottom {
+        let gap = crate::ui_kit::Container::for_layout(app.ui.layout, crate::ui_kit::Surface::Feature).gap();
+        let height = app.viewport.dialog_rect.map_or(0.0, |r| r.height());
+        (placement.bottom() - gap - height).max(placement.center().y)
+    } else {
+        crate::shell::panel_top(app, placement, placement.bottom(), side)
+    };
     // Empty/hostile viewport geometry cannot provide a safe window rectangle.
     if !vp.is_finite() || !vp.is_positive() {
         app.dialog = Some(d);
@@ -4489,7 +4499,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let moved = crate::frame::dock_offset(ctx, drag_key);
     let docked = egui::pos2(side.anchor_x(placement), top);
     let drag_bounds = crate::shell::tool_drag_rect(app, vp);
-    let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
+    let anchor = if along_bottom { docked } else { crate::frame::offset_anchor(docked, moved, drag_bounds, side) };
     let mut keep = true;
     let mut ok = false;
     let mut applied = false;
@@ -4541,7 +4551,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // The configuration table's card is resized by its edges, like the Parameters card (T-693).
     let sized = matches!(d.kind, Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })).then_some(CONFIGURATIONS_SIZE);
     let panel = panel.body_height(sized.as_ref().and_then(|size| size.height(ctx)));
-    let panel = if manager {
+    let panel = if along_bottom {
+        panel.width((docked.x - placement.left()).max(0.0))
+    } else if manager {
         panel.width(sized.as_ref().and_then(|size| size.width(ctx)).unwrap_or_else(|| card_width(&d)).min(max_width))
     } else {
         panel.width((card_width(&d) + label_grow).min(max_width)).grow_label(grow_key)

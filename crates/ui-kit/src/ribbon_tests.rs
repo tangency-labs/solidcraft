@@ -355,6 +355,7 @@ impl TabsRig {
             add: Some("Tabs"),
             menu_open_from: &|_| false,
             search_width: 120.0,
+            fold_search: false,
             buttons: vec![TabButton { id: "go", label: "Go", ready: Ok(()) }, TabButton { id: "stop", label: "Stop", ready: Err("Nothing runs") }],
             floating: false,
             underline: None,
