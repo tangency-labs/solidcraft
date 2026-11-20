@@ -6307,6 +6307,9 @@ fn a_body_the_cache_keeps_after_its_state_is_gone_lets_go_of_its_forms() {
     let block = first.body("Block").unwrap().body.clone();
     let state = std::sync::Arc::downgrade(&first);
     drop(first);
+    // A full cache drops the result that took the least time to compute per byte, which a clock
+    // decides: the state goes here, before the edit, and the cache keeps the body in `Change`.
+    s.model.cache.lock().unwrap().forget_states();
     run(&mut s, "parameters.change", json!({"name": "w", "expression": "50 mm"}));
     assert!(state.upgrade().is_none(), "the state is gone");
     assert!(!block.holds_kernel_form());

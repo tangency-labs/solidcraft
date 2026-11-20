@@ -1405,6 +1405,14 @@ impl EvalCache {
         self.states.budget = if bytes == 0 { CACHE_BYTES } else { bytes };
     }
 
+    /// For tests: drops every whole-model result kept, as the budget does for the ones it has no
+    /// room for. Which result a full cache drops is decided by how long each took to compute, so a
+    /// test that needs a state gone says so here and does not leave it to a clock.
+    #[doc(hidden)]
+    pub fn forget_states(&mut self) {
+        self.states = Store::new(self.states.budget);
+    }
+
     /// The byte budget of whole-model results.
     pub fn budget(&self) -> usize {
         self.states.budget
