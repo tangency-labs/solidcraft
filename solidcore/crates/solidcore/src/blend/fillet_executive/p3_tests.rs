@@ -1523,7 +1523,7 @@ fn a_refusal_or_a_cancellation_under_a_stage_error_is_not_passed_on() {
         );
     }
     let refused = failing_at("vertices", over_refusal).1.unwrap_err();
-    assert!(refused.blend_failure() == failure().blend_failure());
+    assert_eq!(refused.blend_failure(), failure().blend_failure());
     assert!(refused.is_refusal() && refused.sized() && refused.is_status_answer());
     let stopped = failing_at("vertices", over_cancellation).1.unwrap_err();
     assert!(!stopped.is_cancelled() && !stopped.is_status_answer());
