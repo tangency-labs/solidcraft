@@ -3284,7 +3284,7 @@ fn plane_datum_paths(p: &PlaneRef, out: &mut Vec<Vec<u64>>) {
             plane_datum_paths(base, out);
             geo_datum_paths(point, out);
         }
-        PlaneRef::Midplane { a, b }
+        PlaneRef::Midplane { a, b, .. }
         | PlaneRef::TwoEdges { a, b }
         | PlaneRef::AxisPoint { axis: a, point: b }
         | PlaneRef::Perpendicular { plane: a, line: b } => {

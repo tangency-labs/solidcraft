@@ -8796,7 +8796,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a, b } } => {
+        FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a, b, .. } } => {
             let mut d = start("construct.plane.midplane")?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = geo_sel(s, a).into_iter().collect();

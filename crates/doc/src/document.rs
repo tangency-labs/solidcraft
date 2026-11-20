@@ -103,7 +103,15 @@ pub enum PlaneRef {
         about_y: bool,
     },
     /// Halfway between two planes (or planar faces); bisecting them when they meet at an angle.
-    Midplane { a: Box<GeoRef>, b: Box<GeoRef> },
+    Midplane {
+        a: Box<GeoRef>,
+        b: Box<GeoRef>,
+        /// The design was saved before the midplane took a world plane's frame (#18260): the
+        /// frame it was saved with (the first plane's own origin and axes) is kept, so the
+        /// sketch stays where it was saved.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        old_frame: bool,
+    },
     /// Through two straight edges (lines) that lie in one plane.
     TwoEdges { a: Box<GeoRef>, b: Box<GeoRef> },
     /// Through a line (axis) and a point not on that line.
