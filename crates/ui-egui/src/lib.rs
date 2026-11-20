@@ -25,6 +25,7 @@ pub mod browser_search;
 #[cfg(test)]
 mod browser_search_tests;
 pub mod canvas;
+mod card_resize;
 pub mod cli_link;
 #[cfg(test)]
 mod colour_tokens_tests;
