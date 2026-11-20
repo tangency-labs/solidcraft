@@ -21,7 +21,14 @@ pub fn exporter_for(session: &Session, path: &str, format: Option<&str>) -> Resu
 pub fn describe(session: &Session) -> Vec<ImporterInfo> {
     exporters(session)
         .into_iter()
-        .map(|e| ImporterInfo { id: e.id, name: e.name, label: e.label, extensions: e.extensions, input_schema: e.input_schema })
+        .map(|e| ImporterInfo {
+            id: e.id,
+            name: e.name,
+            label: e.label,
+            extensions: e.extensions,
+            input_schema: e.input_schema,
+            output: Some(e.output),
+        })
         .collect()
 }
 
@@ -46,12 +53,12 @@ pub(super) fn refuse_unreadable(runtime: &RuntimeManifest) -> Result<()> {
 /// Write the open design to `path` with `exporter`. Nothing is written unless the whole export
 /// succeeds, and then in one step: an export that fails, traps or runs out of fuel leaves the file
 /// that was there (or no file) as it was. The design is never changed.
-pub fn export_file(session: &mut Session, exporter: &FormatSlot, path: &str, options: &Value) -> Result<ExportedFile> {
+pub fn export_file(session: &mut Session, exporter: &FormatSlot, path: &str, options: &Value, overwrite: bool) -> Result<ExportedFile> {
     let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
-    convert(session, exporter, path, options).map_err(super::messages::named_export(&exporter.name, &file))
+    convert(session, exporter, path, options, overwrite).map_err(super::messages::named_export(&exporter.name, &file))
 }
 
-fn convert(session: &mut Session, exporter: &FormatSlot, path: &str, options: &Value) -> Result<ExportedFile> {
+fn convert(session: &mut Session, exporter: &FormatSlot, path: &str, options: &Value, overwrite: bool) -> Result<ExportedFile> {
     if !options.is_object() {
         return Err(HostError::InvalidInput { field: "options".into(), reason: "the exporter's options are an object".into() }.into());
     }
@@ -107,8 +114,14 @@ fn convert(session: &mut Session, exporter: &FormatSlot, path: &str, options: &V
         if solidcraft_doc::progress::cancelled() {
             return Err(HostError::Cancelled.into());
         }
-        solidcraft_io::write_atomic(Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        let files = if exporter.output == ExportOutput::Files {
+            write_archive(path, &bytes, overwrite)?
+        } else {
+            solidcraft_io::write_atomic(Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+            vec![path.to_string()]
+        };
         Ok(ExportedFile {
+            files,
             path: path.into(),
             bytes: bytes.len(),
             format: exporter.id.clone(),
@@ -119,7 +132,27 @@ fn convert(session: &mut Session, exporter: &FormatSlot, path: &str, options: &V
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
-        let _ = (runtime, warnings, file);
+        let _ = (runtime, warnings, file, overwrite);
         Err(error("exporting with a plugin needs the desktop app"))
+    }
+}
+
+/// Validate all entries before touching either destination, including a target kept as a zip.
+#[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn write_archive(path: &str, bytes: &[u8], overwrite: bool) -> Result<Vec<String>> {
+    use solidcraft_io::safe_zip::{self, Error};
+    const MAX_BYTES: u64 = craft_plugin::MAX_EXPORT_FILE_BYTES as u64;
+    const LIMITS: safe_zip::Limits = safe_zip::Limits { max_entries: 10_000, max_entry_bytes: MAX_BYTES, max_total_bytes: MAX_BYTES };
+    let files = safe_zip::read(bytes, LIMITS).map_err(|error| match error {
+        Error::TooManyEntries(_) | Error::EntryTooLarge { .. } | Error::TooLarge { .. } => HostError::LimitExceeded { limit: error.to_string() },
+        _ => HostError::InvalidInput { field: "output".into(), reason: error.to_string() },
+    })?;
+    let path = Path::new(path);
+    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")) {
+        solidcraft_io::write_atomic(path, bytes, false).map_err(|e| EngineError::Other(e.to_string()))?;
+        Ok(vec![path.to_string_lossy().into_owned()])
+    } else {
+        solidcraft_io::safe_write::write_files_atomic(path, &files, overwrite).map_err(|e| EngineError::Other(e.to_string()))?;
+        Ok(files.iter().map(|f| path.join(&f.path).to_string_lossy().into_owned()).collect())
     }
 }

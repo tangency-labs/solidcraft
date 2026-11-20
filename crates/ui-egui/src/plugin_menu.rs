@@ -723,6 +723,9 @@ pub(crate) struct EntryDialog {
     /// An export slot's extensions: its button chooses where to save, then exports the design
     /// with these options.
     pub(crate) writes: Option<Vec<String>>,
+    /// A multi-file exporter offers a folder and the original zip.
+    pub(crate) files_output: bool,
+    pub(crate) zip_target: bool,
     /// The design the selection fields' picks were made on. A change to it (an edit, an undo, an
     /// update) clears them: a reference into an older model never stands for another item.
     pub(crate) picked_on: Option<Arc<solidcraft_engine::doc::Document>>,
@@ -753,6 +756,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
     }
     let mut fields = form(&entry.input_schema);
     let opens = (entry.kind == solidcraft_engine::plugin::EntryKind::Importer).then(|| entry.extensions.clone());
+    let files_output = entry.output == solidcraft_engine::plugin::ExportOutput::Files;
     let writes = (entry.kind == solidcraft_engine::plugin::EntryKind::Exporter).then(|| entry.extensions.clone());
     let id = app.plugin_menu.next_dialog;
     app.plugin_menu.next_dialog += 1;
@@ -779,6 +783,8 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         result: None,
         opens,
         writes,
+        files_output,
+        zip_target: false,
         picked_on: prefilled.then(|| app.session.doc.clone()),
         picks_cleared: false,
         preview: true,
@@ -1046,6 +1052,15 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
     // with the options from this dialog. The dialog stays open with any error until it is done.
     if let Some(extensions) = dialog.writes.clone() {
         let format = std::format!("{}.{}", dialog.plugin.id, dialog.entry);
+        if dialog.files_output && !dialog.zip_target {
+            app.pick_folder(move |app, path| {
+                let Some(path) = path else { return };
+                let request = json!({"command":"file.export","params":{"path":path,"format":format,"options":params}});
+                queue(app, id, request);
+            });
+            return Ok(());
+        }
+        let extensions = if dialog.files_output { vec!["zip".to_string()] } else { extensions };
         let extension = extensions.first().cloned().unwrap_or_default();
         let name = std::format!("{}.{extension}", crate::export_name::offered(app, None, &app.session.doc.name));
         let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
@@ -1181,6 +1196,8 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     let title = dialog.label.clone();
     let run_key = if dialog.opens.is_some() {
         "ui.plugin_dialog_choose_file"
+    } else if dialog.files_output {
+        "plugin_export.folder"
     } else if dialog.writes.is_some() {
         "plugin_export.button"
     } else {
@@ -1191,9 +1208,11 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     let mut picker = if picking(app) == Some(dialog.id) { app.dialog.take() } else { None };
     let mut claim = None;
     let icon = dialog.icon.clone();
+    let zip_label = app.tr("plugin_export.zip").to_owned();
     let (closed, action) = ui_kit::Window::new(dialog_window_id(dialog, app.preferences.plugin_remember_dialog_position), &icon, &title)
         .fields()
-        .actions(&run_label, &close_label, None)
+        .actions(&run_label, &close_label, dialog.files_output.then_some(zip_label.as_str()))
+        .apply_enabled(ready.is_ok() && !running)
         .show(ctx, ready.is_ok() && !running, |ui| body(app, ui, dialog, ready.as_ref().err(), &mut picker, &mut claim));
     if let Some(picker) = picker {
         take_picks(dialog, &picker, &app.session.doc.clone());
@@ -1211,7 +1230,11 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
         }
         return (false, false, None);
     }
-    (true, action == ui_kit::Action::Ok, claim)
+    let run = action == ui_kit::Action::Ok || (dialog.files_output && action == ui_kit::Action::Apply);
+    if run && dialog.files_output {
+        dialog.zip_target = action == ui_kit::Action::Apply;
+    }
+    (true, run, claim)
 }
 
 fn body(

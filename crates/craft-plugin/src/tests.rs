@@ -340,6 +340,25 @@ fn an_export_slot_claims_extensions_reads_the_design_and_asks_for_no_files() {
 }
 
 #[test]
+fn export_output_defaults_to_file_and_only_exporters_may_return_files() {
+    let mut value = exporter();
+    let entry = |v: &Value| parse(v).unwrap().runtime.unwrap().entries.remove(0);
+    assert_eq!(serde_json::to_value(entry(&value)).unwrap()["output"], "file");
+    for output in ["file", "files"] {
+        value["runtime"]["entries"][0]["output"] = json!(output);
+        assert_eq!(serde_json::to_value(entry(&value)).unwrap()["output"], output);
+    }
+    value["runtime"]["entries"][0]["output"] = json!("folder");
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { .. })));
+    let mut command = manifest();
+    command["runtime"]["entries"] = json!([{"name":"make"}]);
+    for mut other in [command, importer()] {
+        other["runtime"]["entries"][0]["output"] = json!("files");
+        assert!(matches!(parse(&other), Err(HostError::InvalidManifest { .. })));
+    }
+}
+
+#[test]
 fn a_plugin_that_keeps_design_data_names_storage_and_its_data_format() {
     let mut keeps = manifest();
     keeps["capabilities"] = json!(["commands@0.1", "storage@0.1"]);

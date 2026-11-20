@@ -833,7 +833,7 @@ fn exporter_manifest() -> Manifest {
     craft_plugin::parse_manifest(
         json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.1"],"runtime":{
             "module":"sample.wasm","commands":["app.write","document.inspect","file.export"],
-            "entries":[slot("copy"),slot("error"),slot("trap"),slot("loop"),slot("write")],
+            "entries":[slot("copy"),json!({"name":"zip","kind":"exporter","extensions":["smp"],"output":"files"}),slot("error"),slot("trap"),slot("loop"),slot("write")],
             "limits":{"fuel":10000000,"memory_mib":2,"deadline_ms":2000}
         }})
         .to_string()
@@ -849,6 +849,15 @@ fn exporter_component() -> Vec<u8> {
 fn export(app: App, slot: &str) -> (App, Result<Vec<u8>>) {
     crate::run_export(app, &exporter_manifest(), &exporter_component(), slot, &json!({}))
 }
+#[test]
+fn a_files_exporter_returns_its_stored_zip_without_changing_the_design() {
+    let (app, bytes) = export(App::default(), "zip");
+    let bytes = bytes.unwrap();
+    assert!(bytes.starts_with(b"PK\x03\x04"));
+    assert!(bytes.windows(b"parts/side.dxf".len()).any(|w| w == b"parts/side.dxf"));
+    assert_eq!((app.begins, app.commits, app.rollbacks), (1, 0, 1));
+}
+
 #[test]
 fn an_exporter_reads_the_design_through_read_commands_and_returns_the_file() {
     let mut exporter = exporter_manifest();

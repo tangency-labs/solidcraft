@@ -103,10 +103,15 @@ pub(super) fn describe(session: &Session, id: &str) -> Result<Option<Value>> {
 fn format_schema(entry: &Entry) -> Value {
     let extensions: Vec<String> = entry.extensions.iter().map(|e| format!(".{e}")).collect();
     let action = if entry.kind == EntryKind::Exporter { "write" } else { "open" };
+    let destination = if entry.output == ExportOutput::Files {
+        "The destination folder, or a .zip file to keep the archive".to_string()
+    } else {
+        format!("The file to {action} ({})", extensions.join(", "))
+    };
     json!({
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": format!("The file to {action} ({})", extensions.join(", "))},
+            "path": {"type": "string", "description": destination},
             "options": craft_plugin::strict_input_schema(&entry.input_schema),
         },
         "required": ["path"],

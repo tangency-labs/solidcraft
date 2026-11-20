@@ -314,6 +314,119 @@ pub fn write_atomic(path: &Path, bytes: &[u8], backup: bool) -> std::io::Result<
     write_steps(&resolve_links(path)?, bytes, backup, None)
 }
 
+/// Write validated relative files into a folder. Every file is written through the atomic
+/// writer in a private staging directory beside the target. Existing files are hard-linked
+/// (or copied where links are unavailable), so replacing a staged file never alters the old
+/// one. Only after every write succeeds is the completed directory moved into place.
+/// Existing links and special files are refused; unrelated regular files are preserved.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn write_files_atomic(path: &Path, files: &[crate::safe_zip::File], overwrite: bool) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+    crate::vfs::check(&path.to_string_lossy())?;
+    for file in files {
+        crate::safe_zip::checked_path(&file.path).map_err(|e| Error::new(ErrorKind::InvalidInput, e))?;
+        crate::vfs::check_new(&path.join(&file.path).to_string_lossy())?;
+    }
+    let existing = match fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => true,
+        Ok(_) => return Err(Error::new(ErrorKind::InvalidInput, "the export target is not a regular folder")),
+        Err(e) if e.kind() == ErrorKind::NotFound => false,
+        Err(e) => return Err(e),
+    };
+    // A guard owns only a directory created by this call, including on an early return.
+    struct Staging(PathBuf);
+    impl Drop for Staging {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let staging_path = temp_beside(path, "files");
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    let mut directory = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        directory.mode(0o700);
+    }
+    directory.create(&staging_path)?;
+    let staging = Staging(staging_path);
+    if existing {
+        stage_existing(path, &staging.0)?;
+    }
+    for file in files {
+        if cancelled() {
+            return Err(cancelled_error());
+        }
+        let target = staging.0.join(&file.path);
+        if !overwrite && fs::symlink_metadata(&target).is_ok() {
+            return Err(Error::new(ErrorKind::AlreadyExists, format!("{} already exists; pass overwrite: true to replace it", file.path)));
+        }
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        write_atomic_no_follow(&target, &file.bytes)?;
+    }
+    if cancelled() {
+        return Err(cancelled_error());
+    }
+    if existing {
+        let old = temp_beside(path, "previous");
+        // Never replace a sibling left by another operation.
+        if fs::symlink_metadata(&old).is_ok() {
+            return Err(Error::new(ErrorKind::AlreadyExists, "the export backup folder already exists"));
+        }
+        fs::rename(path, &old)?;
+        if let Err(error) = fs::rename(&staging.0, path) {
+            fs::rename(&old, path)
+                .map_err(|restore| Error::new(restore.kind(), format!("{error}; restoring {} failed: {restore}", old.display())))?;
+            return Err(error);
+        }
+        // All new bytes are committed; backup cleanup cannot turn a successful export into a
+        // reported write failure. The old directory contains no links or special files.
+        let _ = fs::remove_dir_all(old);
+    } else {
+        fs::rename(&staging.0, path)?;
+    }
+    sync_dir(path);
+    Ok(())
+}
+
+/// Copy the directory structure without following links, with bounded traversal and stack use.
+#[cfg(not(target_arch = "wasm32"))]
+fn stage_existing(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+    fs::set_permissions(destination, fs::metadata(source)?.permissions())?;
+    let mut pending = vec![(source.to_path_buf(), destination.to_path_buf())];
+    let mut count = 0usize;
+    while let Some((source, destination)) = pending.pop() {
+        for entry in fs::read_dir(source)? {
+            if cancelled() {
+                return Err(cancelled_error());
+            }
+            count += 1;
+            // A 10,000-file export can also create up to 64 parent folders per path.
+            if count > 650_000 {
+                return Err(Error::new(ErrorKind::InvalidInput, "the destination folder has more than 650,000 entries"));
+            }
+            let entry = entry?;
+            let kind = entry.file_type()?;
+            let target = destination.join(entry.file_name());
+            if kind.is_dir() {
+                fs::create_dir(&target)?;
+                fs::set_permissions(&target, entry.metadata()?.permissions())?;
+                pending.push((entry.path(), target));
+            } else if kind.is_file() {
+                if fs::hard_link(entry.path(), &target).is_err() {
+                    fs::copy(entry.path(), &target)?;
+                }
+            } else {
+                return Err(Error::new(ErrorKind::InvalidInput, "the destination folder contains a link or special file"));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Write `bytes` to the file named `path` itself, atomically: a link at `path` is never followed,
 /// and what it points to is never touched. Anything there that isn't a regular file is refused. For
 /// the app's own small files beside a design, which never live anywhere else.
@@ -409,6 +522,41 @@ mod tests {
     /// refused, as before hard links were used), taking turns. The file saved is
     /// `SOLIDCRAFT_SAVE_BENCH_FILE` (a design), in a new folder in `SOLIDCRAFT_SAVE_BENCH_DIR`
     /// (on the drive to measure; else the temporary folder). Run with `--ignored --nocapture`.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn folder_exports_stage_all_files_and_preserve_existing_files_on_failure() {
+        let dir = std::env::temp_dir().join(format!("sc-folder-export-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        let target = dir.join("sheets");
+        let files = vec![
+            crate::safe_zip::File { path: "parts/side.dxf".into(), bytes: b"side".to_vec() },
+            crate::safe_zip::File { path: "cutlist.csv".into(), bytes: b"list".to_vec() },
+        ];
+        write_files_atomic(&target, &files, false).unwrap();
+        fs::write(target.join("keep.txt"), b"keep").unwrap();
+        fs::write(target.join("parts/side.dxf"), b"old").unwrap();
+        assert!(write_files_atomic(&target, &files, false).is_err());
+        assert_eq!(fs::read(target.join("parts/side.dxf")).unwrap(), b"old");
+        let mut broken = files.clone();
+        broken.push(crate::safe_zip::File { path: "keep.txt/child".into(), bytes: b"fail".to_vec() });
+        assert!(write_files_atomic(&target, &broken, true).is_err());
+        assert_eq!(fs::read(target.join("parts/side.dxf")).unwrap(), b"old");
+        assert_eq!(fs::read(target.join("keep.txt")).unwrap(), b"keep");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1, "no staging folders remain");
+        let invalid = vec![
+            crate::safe_zip::File { path: "a".into(), bytes: b"one".to_vec() },
+            crate::safe_zip::File { path: "a/child".into(), bytes: b"two".to_vec() },
+        ];
+        assert!(write_files_atomic(&dir.join("new"), &invalid, false).is_err());
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1, "a failed first export leaves no folder");
+        write_files_atomic(&target, &files, true).unwrap();
+        assert_eq!(fs::read(target.join("parts/side.dxf")).unwrap(), b"side");
+        assert_eq!(fs::read(target.join("keep.txt")).unwrap(), b"keep");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     #[ignore = "manual save measurement"]
     fn save_time_with_the_backup_linked_or_copied() {

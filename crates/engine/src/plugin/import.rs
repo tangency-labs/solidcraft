@@ -22,6 +22,7 @@ pub struct FormatSlot {
     pub input_schema: Value,
     /// Export only: the export would read the design's plugin data (not passed yet).
     pub needs_plugin_data: bool,
+    pub output: ExportOutput,
     /// The installed package's folder.
     pub folder: String,
 }
@@ -75,6 +76,7 @@ pub fn format_slots(session: &Session, kind: EntryKind) -> Vec<FormatSlot> {
                 extensions: entry.extensions.clone(),
                 input_schema: entry.input_schema.clone(),
                 needs_plugin_data: entry.needs_plugin_data,
+                output: entry.output,
                 folder: folder.clone(),
             });
         }
@@ -158,7 +160,7 @@ pub fn open_filters(session: &Session) -> Vec<(String, Vec<String>)> {
 pub fn describe(session: &Session) -> Vec<ImporterInfo> {
     importers(session)
         .into_iter()
-        .map(|i| ImporterInfo { id: i.id, name: i.name, label: i.label, extensions: i.extensions, input_schema: i.input_schema })
+        .map(|i| ImporterInfo { id: i.id, name: i.name, label: i.label, extensions: i.extensions, input_schema: i.input_schema, output: None })
         .collect()
 }
 

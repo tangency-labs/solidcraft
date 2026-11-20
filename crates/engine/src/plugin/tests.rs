@@ -1689,7 +1689,7 @@ mod exporters {
         let slot = |name: &str, extension: &str| json!({"name":name,"kind":"exporter","extensions":[extension]});
         json!({"id":"smp","name":"Sample Exporter","version":"1","capabilities":["formats@0.1"],"runtime":{
             "module":"exporter.wasm","commands":commands,
-            "entries":[slot("copy","smp"),slot("error","bad"),slot("trap","bad"),slot("loop","bad"),slot("write","bad")],
+            "entries":[slot("copy","smp"),json!({"name":"zip","kind":"exporter","extensions":["bundle"],"output":"files"}),slot("error","bad"),slot("trap","bad"),slot("loop","bad"),slot("write","bad")],
             "limits":{"fuel":10_000_000,"memory_mib":2,"deadline_ms":5000}}})
     }
     struct Fixture(std::path::PathBuf);
@@ -1769,6 +1769,128 @@ mod exporters {
         let mut inspected = s.execute("document.inspect", &json!({})).unwrap();
         inspected["undo"] = json!(0);
         assert_eq!(written, inspected);
+    }
+
+    #[test]
+    fn a_files_export_slot_writes_a_folder_or_the_original_zip_and_lists_files() {
+        let (mut s, root) = installed("multi-file");
+        let before = s.doc.to_json();
+        let listed = s.execute("plugin.list", &json!({})).unwrap();
+        let slot = listed["exporters"].as_array().unwrap().iter().find(|e| e["id"] == "smp.zip").unwrap();
+        assert_eq!(slot["output"], "files");
+        let tools = s.execute("plugin.tools", &json!({"name":"smp.zip"})).unwrap();
+        assert!(tools["tools"][0]["input_schema"]["properties"]["path"]["description"].as_str().unwrap().contains("destination folder"));
+        let reply = s.execute("file.export", &json!({"path":at(&root,"sheets"),"format":"smp.zip"})).unwrap();
+        let destination = std::path::PathBuf::from(at(&root, "sheets"));
+        assert_eq!(reply["files"], json!([destination.join("parts/side.dxf").to_string_lossy(), destination.join("cutlist.csv").to_string_lossy(),]));
+        assert_eq!(std::fs::read(at(&root, "sheets/parts/side.dxf")).unwrap(), b"side");
+        assert_eq!(std::fs::read(at(&root, "sheets/cutlist.csv")).unwrap(), b"part,count\nside,1\n");
+        let reply = s.execute("file.export", &json!({"path":at(&root,"sheets.ZIP"),"format":"smp.zip"})).unwrap();
+        assert_eq!(reply["files"], json!([at(&root, "sheets.ZIP")]));
+        let zip = std::fs::read(at(&root, "sheets.ZIP")).unwrap();
+        assert!(zip.starts_with(b"PK\x03\x04"));
+        let payload = include_str!("exporter_fixture.wat").lines().find(|line| line.ends_with(";; archive payload")).unwrap();
+        let encoded = payload.split('"').nth(1).unwrap();
+        let original: Vec<u8> = encoded.split('\\').filter(|s| !s.is_empty()).map(|s| u8::from_str_radix(s, 16).unwrap()).collect();
+        assert_eq!(zip, original, "a zip target keeps the plugin's archive byte for byte");
+        let unpacked = solidcraft_io::safe_zip::read(
+            &zip,
+            solidcraft_io::safe_zip::Limits { max_entries: 10_000, max_entry_bytes: 256 << 20, max_total_bytes: 256 << 20 },
+        )
+        .unwrap();
+        assert_eq!(unpacked.len(), 2);
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(files(&root), ["sheets", "sheets.ZIP"]);
+    }
+
+    fn install_archive(root: &Path, bytes: &[u8]) {
+        let source = include_str!("exporter_fixture.wat");
+        let escaped: String = bytes.iter().map(|b| format!("\\{b:02x}")).collect();
+        let source = source
+            .lines()
+            .map(|line| {
+                if line.ends_with(";; archive payload") {
+                    format!("    (data (i32.const 4096) \"{escaped}\") ;; archive payload")
+                } else if line.ends_with(";; archive length") {
+                    format!("        i32.const {} ;; archive length", bytes.len())
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (package, version) = API.split_once('@').unwrap();
+        let source = source
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("(memory (;0;) 4)", "(memory (;0;) 64)")
+            .replace("i32.const 8192", "i32.const 2097152");
+        std::fs::write(root.join("plugins/smp/exporter.wasm"), wat::parse_str(source).unwrap()).unwrap();
+        let mut manifest = exporter_manifest(json!(["document.inspect"]));
+        manifest["runtime"]["limits"]["memory_mib"] = json!(8);
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+    }
+
+    #[test]
+    fn hostile_export_archives_return_typed_errors_and_write_nothing() {
+        let (mut s, root) = installed("hostile-archives");
+        let zip = |files: &[(&str, &[u8])]| solidcraft_io::safe_zip::write(files).unwrap();
+        let mut archives = vec![b"not a zip".to_vec()];
+        for path in ["../escape", "/absolute", "C:/drive", "a\\b", "nested/../../escape"] {
+            archives.push(zip(&[(path, b"bad")]));
+        }
+        archives.push(zip(&[("Side.dxf", b"a"), ("side.dxf", b"b")]));
+        archives.push(zip(&[("part", b"a"), ("part/side.dxf", b"b")]));
+        let mut link = zip(&[("link", b"elsewhere")]);
+        let central = link.windows(4).position(|w| w == b"PK\x01\x02").unwrap();
+        link[central + 5] = 3; // Unix creator, with a symlink's type bits.
+        link[central + 38..central + 42].copy_from_slice(&(0o120777u32 << 16).to_le_bytes());
+        archives.push(link);
+        for bytes in archives {
+            install_archive(&root, &bytes);
+            for target in ["sheets", "sheets.zip"] {
+                let failure = s.execute("file.export", &json!({"path":at(&root,target),"format":"smp.zip"})).unwrap_err();
+                assert!(matches!(failure, EngineError::PluginFailed(ref f) if matches!(f.error, HostError::InvalidInput { .. })), "{failure:?}");
+                assert!(files(&root).is_empty());
+            }
+        }
+        let names: Vec<String> = (0..10_001).map(|i| format!("part{i}")).collect();
+        let entries: Vec<(&str, &[u8])> = names.iter().map(|name| (name.as_str(), &b""[..])).collect();
+        let many = zip(&entries);
+        let mut oversized = zip(&[("part", b"x")]);
+        let central = oversized.windows(4).position(|w| w == b"PK\x01\x02").unwrap();
+        oversized[central + 24..central + 28].copy_from_slice(&((256u32 << 20) + 1).to_le_bytes());
+        let mut total = zip(&[("part1", b"x"), ("part2", b"x")]);
+        let headers: Vec<usize> = total.windows(4).enumerate().filter_map(|(i, w)| (w == b"PK\x01\x02").then_some(i)).collect();
+        for central in headers {
+            total[central + 24..central + 28].copy_from_slice(&((128u32 << 20) + 1).to_le_bytes());
+        }
+        for bytes in [many, oversized, total] {
+            install_archive(&root, &bytes);
+            for target in ["sheets", "sheets.zip"] {
+                let failure = s.execute("file.export", &json!({"path":at(&root,target),"format":"smp.zip"})).unwrap_err();
+                assert!(matches!(failure, EngineError::PluginFailed(ref f) if matches!(f.error, HostError::LimitExceeded { .. })), "{failure:?}");
+                assert!(files(&root).is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn a_files_export_refuses_existing_files_unless_overwrite_is_requested() {
+        let (mut s, root) = installed("multi-overwrite");
+        std::fs::create_dir_all(at(&root, "sheets/parts")).unwrap();
+        std::fs::write(at(&root, "sheets/parts/side.dxf"), b"old").unwrap();
+        std::fs::write(at(&root, "sheets/keep.txt"), b"keep").unwrap();
+        let params = json!({"path":at(&root,"sheets"),"format":"smp.zip"});
+        assert!(s.execute("file.export", &params).is_err());
+        assert_eq!(std::fs::read(at(&root, "sheets/parts/side.dxf")).unwrap(), b"old");
+        assert!(!Path::new(&at(&root, "sheets/cutlist.csv")).exists());
+        let mut params = params;
+        params["overwrite"] = json!(true);
+        s.execute("file.export", &params).unwrap();
+        assert_eq!(std::fs::read(at(&root, "sheets/parts/side.dxf")).unwrap(), b"side");
+        assert_eq!(std::fs::read(at(&root, "sheets/keep.txt")).unwrap(), b"keep");
+        assert_eq!(files(&root), ["sheets"]);
     }
 
     #[test]

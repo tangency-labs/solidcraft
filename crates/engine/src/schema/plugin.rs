@@ -184,14 +184,19 @@ pub struct ImporterInfo {
     pub extensions: Vec<String>,
     /// Its options, as a JSON schema.
     pub input_schema: Value,
+    /// Export only: a single file or a zip of relative paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<craft_plugin::ExportOutput>,
 }
 
 /// What an exporter plugin wrote: `file.export` with a format an exporter plugin writes.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ExportedFile {
-    /// The file written.
+    /// Every file written: the zip target itself, or the paths inside the destination folder.
+    pub files: Vec<String>,
+    /// The file or destination folder written.
     pub path: String,
-    /// Its size in bytes.
+    /// The returned buffer size in bytes (the zip size for multiple files).
     pub bytes: usize,
     /// The exporter that wrote it, as `plugin_id.entry`.
     pub format: String,

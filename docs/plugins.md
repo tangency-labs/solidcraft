@@ -528,6 +528,22 @@ are listed in `runtime.commands`:
   (subject to the caller's file scope), in one step through a temporary file beside it, and only
   when the whole export succeeded. An export that fails, traps, runs out of fuel or is cancelled
   leaves the folder as it was.
+- **Several files.** An export slot may declare `"output": "files"`; the default is `"file"`,
+  which keeps the single-file behaviour above. With `files`, `export-file` returns the bytes of a
+  zip archive the plugin builds (stored or deflated entries), containing files with relative,
+  `/`-separated paths. The WIT signature stays the same. File › Export offers **Folder…** and **.zip…** after the options.
+  For a programmatic call, name the slot with `format`: a `path` ending in `.zip` (ignoring case)
+  receives the original zip; any other path is the destination folder. For example,
+  `{"path":"/exports/sheets","format":"cabinet.sheets","options":{}}` writes into that folder.
+  Before writing either target, the app checks the entire archive: at most 10,000 entries,
+  at most 256 MiB uncompressed in total and per entry, no absolute paths, `..`, drive letters,
+  backslashes, links, devices, duplicate paths or case-colliding names. Malformed archives and
+  file/folder name conflicts are refused too. Folder output uses temporary files in a staging
+  folder beside the destination, then moves the completed folder into place. Existing files
+  are preserved unless `overwrite: true` permits replacement; unrelated files are kept. A failed
+  write leaves the destination unchanged and removes staging files. Zip targets use the existing
+  atomic file writer and replacement behaviour. The reply's `files` array lists the paths written
+  (the zip path for a zip target); `bytes` is the returned zip's size.
 - **Plugin data.** `"needs_plugin_data": true` marks a slot that will also read the design's own
   data of its plugin (RFC 0015 §5). The flag is accepted, but exporters do not yet receive plugin
   data. The export runs without it and its reply carries a warning saying so. The `storage@0.1`

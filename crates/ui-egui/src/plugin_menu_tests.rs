@@ -1,6 +1,9 @@
 //! The Plugins menu and its entry dialog: schema fields, selection fields picked in the viewport,
 //! required gating, and a run through the dialog matching `plugin.run`.
 use super::*;
+use crate::scenario::Harness;
+#[path = "../tests/support/raster.rs"]
+mod raster;
 use std::collections::BTreeSet;
 
 fn gear_schema() -> Value {
@@ -612,6 +615,66 @@ fn an_open_tool_keeps_the_viewport_until_it_is_done() {
     h.frames(2);
     assert!(h.app.dialog.is_none());
     assert!(h.app.plugin_menu.dialogs.is_empty());
+}
+
+#[test]
+fn a_files_export_dialog_offers_folder_and_zip_pickers_and_queues_file_export() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    for zip_target in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        let entry = serde_json::from_value(json!({"name":"sheets","kind":"exporter","extensions":["dxf"],"output":"files"})).unwrap();
+        h.app.plugin_menu.listed = vec![listed("cabinet", vec![entry])];
+        let picked = Rc::new(RefCell::new(Vec::new()));
+        let folder_picked = picked.clone();
+        h.app.services.pick_folder = Some(Box::new(move || {
+            folder_picked.borrow_mut().push("folder".to_string());
+            Box::pin(std::future::ready(Some("/tmp/sheets".to_string())))
+        }));
+        let zip_picked = picked.clone();
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            assert!(name.ends_with(".zip"));
+            assert_eq!(extensions, ["zip"]);
+            zip_picked.borrow_mut().push("zip".to_string());
+            Box::pin(std::future::ready(Some("/tmp/sheets.zip".to_string())))
+        }));
+        open_entry(&mut h.app, 0, 0);
+        h.app.home.open = false;
+        h.ctx = egui::Context::default();
+        crate::fonts::setup_bundled_fonts(&h.ctx);
+        solidcraft_theme::apply(&h.ctx);
+        let mut textures = std::collections::HashMap::new();
+        for _ in 0..8 {
+            raster::paint(&mut h, &mut textures, vec![]);
+        }
+        let out = raster::paint(&mut h, &mut textures, vec![]);
+        let image = raster::raster(&mut h, &textures, out);
+        let card = crate::scenario::rect_of("dialog:window").unwrap();
+        let ppp = h.ctx.pixels_per_point();
+        let image = image::imageops::crop_imm(
+            &image,
+            (card.left() * ppp).max(0.0) as u32,
+            (card.top() * ppp).max(0.0) as u32,
+            (card.width() * ppp) as u32,
+            (card.height() * ppp) as u32,
+        )
+        .to_image();
+        let review = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/plugin-export-files");
+        std::fs::create_dir_all(&review).unwrap();
+        image.save(review.join("dialog.png")).unwrap();
+        assert!(crate::scenario::handle_at("dialog:ok").is_some());
+        assert!(crate::scenario::handle_at("dialog:apply").is_some());
+        let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+        dialog.zip_target = zip_target;
+        let id = dialog.id;
+        run_dialog(&mut h.app, id).unwrap();
+        crate::file_picker::tick(&mut h.app, &h.ctx);
+        assert_eq!(*picked.borrow(), [if zip_target { "zip" } else { "folder" }]);
+        let request = h.app.control_held.front().unwrap();
+        assert_eq!(request.params["command"], "file.export");
+        assert_eq!(request.params["params"]["format"], "cabinet.sheets");
+        assert_eq!(request.params["params"]["path"], if zip_target { "/tmp/sheets.zip" } else { "/tmp/sheets" });
+    }
 }
 
 #[test]

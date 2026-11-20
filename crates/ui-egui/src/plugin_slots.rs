@@ -176,7 +176,11 @@ pub(crate) fn export_slots(app: &SolveApp) -> Vec<(String, String)> {
         for entry in plugin.entries.iter().filter(|e| e.kind == solidcraft_engine::plugin::EntryKind::Exporter) {
             let label = if entry.label.is_empty() { plugin.name.as_str() } else { entry.label.as_str() };
             let extensions = entry.extensions.iter().map(|e| format!(".{e}")).collect::<Vec<_>>().join(", ");
-            let label = solidcraft_ui_text::format("plugin_export.menu", &[("format", label), ("extensions", &extensions)]);
+            let label = if entry.output == solidcraft_engine::plugin::ExportOutput::Files {
+                solidcraft_ui_text::format("plugin_export.files_menu", &[("format", label)])
+            } else {
+                solidcraft_ui_text::format("plugin_export.menu", &[("format", label), ("extensions", &extensions)])
+            };
             rows.push((format!("{}.{}", plugin.id, entry.name), label));
         }
     }
@@ -370,6 +374,36 @@ pub(crate) fn wait_for_discovery(app: &mut SolveApp) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn export_menu_names_folder_and_zip_targets_for_a_files_slot() {
+        let mut h = crate::scenario::Harness::new();
+        let plugin = plugins::Plugin {
+            id: "cabinet".into(),
+            name: "Cabinet".into(),
+            version: "1".into(),
+            description: String::new(),
+            path: String::new(),
+            approval: String::new(),
+            disabled: false,
+            groups: Default::default(),
+            images: Default::default(),
+            entries: serde_json::from_value(json!([
+                {"name":"sheets","kind":"exporter","extensions":["dxf"],"output":"files","label":"Cut sheets"},
+                {"name":"list","kind":"exporter","extensions":["csv"]}
+            ]))
+            .unwrap(),
+        };
+        h.app.plugin_slots.inventory = Some(Inventory { root: None, plugins: vec![plugin], skipped: vec![] });
+        let rows = export_slots(&h.app);
+        assert_eq!(
+            rows,
+            vec![
+                ("cabinet.sheets".to_string(), "Export Cut sheets (folder or .zip)…".to_string()),
+                ("cabinet.list".to_string(), "Export Cabinet (.csv)…".to_string()),
+            ]
+        );
+    }
 
     #[test]
     fn plugin_unknown_menus_and_ribbons_have_no_second_placement_beside_the_model_plugins_group() {
