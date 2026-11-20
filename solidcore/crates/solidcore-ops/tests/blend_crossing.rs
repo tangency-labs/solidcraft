@@ -409,6 +409,7 @@ fn sphere_trimmed_block(s: f64) -> (Body, [usize; 4]) {
 /// face, eight round the bottom, and two that split the side circles on the faces x = 30 and
 /// y = -20 at z = 12.5), and each round adds a face, three edges and two vertices.
 #[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_refused() {
     let rho2 = 35.75_f64.powi(2) - 12.5_f64.powi(2);
     let fit = 25.0 - (625.0 - (1300.0 - rho2) / 2.0).sqrt();
@@ -432,9 +433,20 @@ fn rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_refused() {
         // two opposite edges share the top face but their bands lie apart: they build at 2, two
         // faces, six edges and four vertices more than the part
         let c = part.copy().unwrap();
-        blend(&c, Blend::Round, &[top[0], top[1]], &[2.0 * s], &[], Corners::Filled)
-            .unwrap_or_else(|e| panic!("scale {s}, opposite edges: {e:?}"));
-        assert_eq!(c.counts().unwrap(), [12, 32, 22], "scale {s}, opposite edges");
+        blend(
+            &c,
+            Blend::Round,
+            &[top[0], top[1]],
+            &[2.0 * s],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap_or_else(|e| panic!("scale {s}, opposite edges: {e:?}"));
+        assert_eq!(
+            c.counts().unwrap(),
+            [12, 32, 22],
+            "scale {s}, opposite edges"
+        );
         assert!(c.check(CheckLevel::All).unwrap().is_valid(), "scale {s}");
         for r in [1.0, fit - 0.01] {
             let c = part.copy().unwrap();
