@@ -291,10 +291,20 @@ pub(crate) fn skin_with_end_tangents(
         let mut moved = Vec::new();
         for (p, q) in row.iter().zip(neighbour.cpts()) {
             let speed = dist_pt_pt(p.to_euclid(), q.to_euclid()) / dt;
-            let d = unit * (weight * speed);
+            // (a finite weight over a tiny step, or a point near the largest coordinate, can
+            // still overflow: refused, never carried into the strip)
+            let length = weight * speed;
+            if !length.is_finite() {
+                return Err(bad("an end derivative that is not a finite number"));
+            }
+            let d = unit * length;
             // The first section's strip ends at the section (its last row), the last
             // section's starts there.
-            moved.push(p.translate(if last { d } else { -d }));
+            let m = p.translate(if last { d } else { -d });
+            if ![m.x, m.y, m.z, m.w].iter().all(|c| c.is_finite()) {
+                return Err(bad("an end derivative that is not a finite number"));
+            }
+            moved.push(m);
         }
         let net = if last {
             vec![row, moved]
@@ -588,6 +598,9 @@ mod tests {
                 "{weight}"
             );
         }
+        // A finite weight whose derivative overflows.
+        assert!(run([t(UP, f64::MAX), None], Direction::U, None).is_err());
+        assert!(run([None, t(UP, f64::MAX)], Direction::U, None).is_err());
         for direction in [Vec3::ZERO, Vec3::new(f64::NAN, 0.0, 1.0)] {
             assert!(run([None, t(direction, 1.0)], Direction::U, None).is_err());
         }
