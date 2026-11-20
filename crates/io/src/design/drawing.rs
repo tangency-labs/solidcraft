@@ -25,7 +25,7 @@ use solidcraft_doc::drawing::{self, Drawing, MAX_DRAWING_BYTES};
 use solidcraft_doc::format::DRAWING;
 use solidcraft_doc::{Document, ids};
 
-use super::{PackageReader, PackageWriter, VERSION, invalid, is_design_container};
+use super::{DesignCompression, PackageReader, PackageWriter, VERSION, invalid, is_design_container};
 use crate::{IoError, MAX_DESIGN_BYTES, Result};
 
 /// The part a drawing container keeps its drawing in.
@@ -73,7 +73,7 @@ pub(super) fn container_kind<R: Read + Seek>(reader: &mut PackageReader<R>) -> R
 
 /// The drawing as a container: the same bytes for the same drawing.
 pub fn write_drawing_container(drawing: &Drawing) -> Result<Vec<u8>> {
-    let mut writer = PackageWriter::new();
+    let mut writer = PackageWriter::new(DesignCompression::Fast);
     let text = record(&mut writer, drawing)?;
     writer.part(DRAWING_PART, text.as_bytes(), true)?;
     let container = json!({"format": VERSION, "content": DRAWING_CONTENT});

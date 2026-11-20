@@ -226,7 +226,7 @@ fn drawing() -> Drawing {
 
 /// A container written part by part, in this order, through the container writer.
 fn package(parts: &[(&str, &[u8])]) -> Vec<u8> {
-    let mut writer = PackageWriter::new();
+    let mut writer = PackageWriter::new(DesignCompression::Fast);
     for (name, bytes) in parts {
         writer.part(name, bytes, true).unwrap();
     }

@@ -117,11 +117,25 @@ const LIMITS: Limits = Limits {
 /// is still written in full, never refused (data loss), and the caller says it is over the limit.
 const SAVE_LIMITS: Limits = Limits { max_expanded: || usize::MAX, part_limit: |_| usize::MAX, ..LIMITS };
 
+/// A Compact save's budgets: the same, with the model cache deflated at [`COMPACT_CACHE_LEVEL`].
+const COMPACT_SAVE_LIMITS: Limits = Limits { level: compact_part_level, ..SAVE_LIMITS };
+
 /// The Deflate level of a part: STEP sources take [`STEP_LEVEL`], and so does a mesh past the file
 /// limit: level 1 of a large payload leaves more on disk, and that part exists only because
 /// compression is what makes it fit. Everything else is level 1.
 fn part_level(name: &str, length: usize) -> i64 {
     if name.ends_with(".step") || name.ends_with(".records") || (name.ends_with(".mesh") && length > max_part()) { STEP_LEVEL } else { 1 }
+}
+
+/// Deflate level of the model cache in a Compact save. Level 1 uses fixed Huffman codes: an
+/// 11.8 MB `cache/bodies.bin` took 14 ms to 1.77 MB, level 6 46 ms to 0.93 MB, level 9 79 ms to
+/// 0.85 MB; reading it back took 13, 10 and 9 ms. Fast saves keep level 1.
+const COMPACT_CACHE_LEVEL: i64 = 6;
+
+/// A Compact save's level of a part: the model cache takes [`COMPACT_CACHE_LEVEL`], the rest as a
+/// Fast save.
+fn compact_part_level(name: &str, length: usize) -> i64 {
+    if native_cache::ENTRIES.contains(&name) { COMPACT_CACHE_LEVEL } else { part_level(name, length) }
 }
 
 /// A design container being written, within [`LIMITS`].
@@ -153,8 +167,11 @@ fn part_limit(name: &str) -> usize {
 }
 
 impl PackageWriter {
-    fn new() -> PackageWriter {
-        PackageWriter(Writer::new(SAVE_LIMITS))
+    fn new(compression: DesignCompression) -> PackageWriter {
+        PackageWriter(Writer::new(match compression {
+            DesignCompression::Fast => SAVE_LIMITS,
+            DesignCompression::Compact => COMPACT_SAVE_LIMITS,
+        }))
     }
     fn finish(self) -> Result<Vec<u8>> {
         Ok(self.0.finish()?)
@@ -239,7 +256,7 @@ fn write_container(
     provenance: Option<&ProvenanceSave<'_>>,
 ) -> Result<Vec<u8>> {
     doc.render.validate().map_err(invalid)?;
-    let mut writer = PackageWriter::new();
+    let mut writer = PackageWriter::new(compression);
     if provenance.is_some() {
         writer.track_parts(provenance::is_authoritative);
     }
@@ -392,7 +409,7 @@ fn write_container(
     if let Some((manifest, data)) = cache {
         let [manifest_entry, payload_entry] = native_cache::ENTRIES;
         // Deflated whatever the policy: the encoded bodies shrink about fourfold to tenfold, faster
-        // than the extra bytes would be written and read.
+        // than the extra bytes would be written and read. Compact deflates them harder.
         writer.part(manifest_entry, &manifest, true)?;
         writer.part(payload_entry, &data, true)?;
     }
@@ -1788,6 +1805,32 @@ mod tests {
         assert!(count.get() < 256 * 1024, "read {} bytes before native display", count.get());
         assert_eq!(reader.read_document().unwrap().to_json(), doc.to_json());
         assert!(count.get() >= step.len() / 4);
+    }
+
+    /// A Compact save deflates the model cache harder than a Fast one; both read back the same
+    /// model, and every other part keeps its level.
+    #[test]
+    fn compact_saves_deflate_the_model_cache_harder_and_read_it_back() {
+        assert_eq!(compact_part_level("cache/bodies.bin", 1), COMPACT_CACHE_LEVEL);
+        assert_eq!(compact_part_level("cache/model.json", 1), COMPACT_CACHE_LEVEL);
+        for name in ["document.json", "blobs/a.step", "blobs/a.mesh", "cache/preview.bin"] {
+            assert_eq!(compact_part_level(name, 1), part_level(name, 1), "{name}");
+        }
+        use solidcore_record::Vec3;
+        let bodies = (0..4).map(|i| solidcraft_kernel::box_solid(Vec3::new(f64::from(i) * 20., 0., 0.), Vec3::new(10., 20., 30.)).unwrap());
+        let model = saved_model(bodies.collect());
+        let doc = document();
+        let stored = |bytes: &[u8], name: &str| zip::ZipArchive::new(Cursor::new(bytes)).unwrap().by_name(name).unwrap().compressed_size();
+        let fast = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&model)).unwrap();
+        let compact = write_design_container_with_cache(&doc, DesignCompression::Compact, None, Some(&model)).unwrap();
+        assert!(stored(&compact, "cache/model.json") <= stored(&fast, "cache/model.json"));
+        let (tight, loose) = (stored(&compact, "cache/bodies.bin"), stored(&fast, "cache/bodies.bin"));
+        assert!(tight < loose, "bodies: {tight} vs {loose}");
+        assert_eq!(parts(&compact)["cache/bodies.bin"], parts(&fast)["cache/bodies.bin"], "the same bodies, only packed tighter");
+        let read = DesignContainerReader::new(Cursor::new(&compact)).unwrap().geometry().unwrap();
+        assert_eq!(read.records, model.records);
+        assert_eq!(read.bodies.len(), model.bodies.len());
+        assert_eq!(crate::read_design(&compact).unwrap().to_json(), doc.to_json());
     }
 
     #[test]

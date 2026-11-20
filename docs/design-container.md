@@ -34,13 +34,16 @@ Both counts must be divisible by three; the byte length must match exactly. Coor
 must be finite and at most 1e9 mm in magnitude; indices must address an existing vertex.
 Names and colours remain in JSON. Signed zero and full coordinate precision survive.
 
-The default `fast` policy stores STEP and binary meshes without Deflate for faster
-saving and reading. Small document metadata uses Deflate level one; PNG/JPEG are
-stored directly. An explicit `compact` policy compresses STEP and mesh payloads at
-level one. Readers support both policies. This deliberately favors interactive file
-operations over maximum compression; compressed STEP was slower in the storage benchmark.
-Use `"compression":"compact"` with `file.save` or `file.save_as` to favor file size,
-or `io::write_design_container_with_compression` from Rust.
+The default `fast` policy stores binary meshes without Deflate for faster saving and
+reading, unless a mesh is larger than the design file limit. STEP sources (and import
+records) are always Deflate-compressed at level two, under either policy, so a large
+import still fits in a design file (#3221). Small document metadata uses Deflate level
+one; PNG/JPEG are stored directly. An explicit `compact` policy also compresses smaller
+mesh payloads at level one, and deflates the model cache at level six instead of one
+(see [Model cache](#model-cache)). Readers support both policies. This deliberately
+favors interactive file operations over maximum compression. Use
+`"compression":"compact"` with `file.save` or `file.save_as` to favor file size, or
+`io::write_design_container_with_compression` from Rust.
 
 ## Bounds and recovery
 
@@ -144,9 +147,13 @@ A design whose stored names predate format 14 (marked `?`) saves without a model
 those names find no face or edge, and the features holding them ask for their
 references to be picked again (a sketch names the projections it lost instead).
 
-Both entries are Deflate-compressed (level one) under either compression policy: the
-encoded bodies shrink about fourfold (an imported assembly) to tenfold (modelled parts),
-for a few tens of milliseconds.
+Both entries are Deflate-compressed under either compression policy: the encoded
+bodies shrink about fourfold (an imported assembly) to tenfold (modelled parts), for a
+few tens of milliseconds. `fast` uses level one, whose fixed Huffman codes are quickest;
+`compact` uses level six, which roughly halves the stored cache again. Measured with the
+container's own Deflate on an 11.8 MB `cache/bodies.bin`: level one 1.77 MB in 14 ms,
+level six 0.93 MB in 46 ms (a whole save of that design took about 180 ms); reading it
+back took 13 and 10 ms. A modelled part's 571 KB cache went from 74 KB to 38 KB.
 
 `cache/bodies.bin` holds every distinct body once, in
 [SolidCraft's native B-rep encoding](native-brep.md), as contiguous slices. The
