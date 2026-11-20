@@ -3671,7 +3671,7 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
     let (features, bodies) = pattern_sources(s, p, cmd)?;
     // The path is a chain of a body's edges (#16084) or the curves of a sketch.
     let (path_sketch, path, path_body, path_edges) = if p.get("path_body").is_some_and(|b| !b.is_null()) {
-        sweep_path(s, p, cmd)?
+        one_sketch_path(s, p, cmd)?
     } else {
         let path_sketch = sketch_id(s, p.get("path_sketch").or_else(|| p.get("sketch")), cmd, "path_sketch")?;
         let path = string_list(cmd, p, "path")?;
@@ -5165,6 +5165,21 @@ pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<
     Ok((path_sketch, path, None, Vec::new()))
 }
 
+/// [`sweep_path`] for a feature whose path is curves of its path sketch only (Pipe, Pattern
+/// on Path): each entry as its curve id. A curve of another sketch is refused.
+fn one_sketch_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<String>, Option<BodyName>, Vec<Position>)> {
+    let (path_sketch, path, path_body, path_edges) = sweep_path(s, p, cmd)?;
+    let path = path
+        .into_iter()
+        .map(|e| match e {
+            solidcraft_doc::PathEntry::OfPathSketch(id) => Ok(id),
+            solidcraft_doc::PathEntry::OfSketch { sketch, curve } if sketch.0 == path_sketch => Ok(curve),
+            solidcraft_doc::PathEntry::OfSketch { .. } => Err(bad(cmd, "the path's curves must all be in `path_sketch`")),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok((path_sketch, path, path_body, path_edges))
+}
+
 /// The points on the edges of a sweep's path (`path_edges`), one on each edge of the chain.
 fn path_edge_points(p: &Value, cmd: &str) -> Result<Vec<Position>> {
     let a = p.get("path_edges").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`path_edges` must be a list of points"))?;
@@ -5541,7 +5556,7 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
 fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.pipe";
     // The path is a chain of a body's edges (#16084) or the curves of a sketch, as a sweep's.
-    let (path_sketch, path, path_body, path_edges) = sweep_path(s, p, cmd)?;
+    let (path_sketch, path, path_body, path_edges) = one_sketch_path(s, p, cmd)?;
     let diameter = req_expr(cmd, p, "diameter")?;
     check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
     let wall = expr(p, "wall");
