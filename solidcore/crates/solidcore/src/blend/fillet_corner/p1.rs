@@ -3287,20 +3287,19 @@ impl FilletCorner {
         // Compute marching direction for solver
         let mid_pnt = base_arc.evaluate_point(env.k, base_arc.natural_interval().evaluate(0.5))?;
         let march_dir = mid_pnt - opposite_pnt;
-        match env.pseudo.re_calc_fillet_geom(
-            env.k,
-            new_fg,
-            &mut new_fs,
-            env.target,
-            false,
-            Some(march_dir),
-            Some(&center_curve),
-        ) {
-            Ok(()) => {}
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            // Unable to convert (the re-solve's error is kept as the cause, #13790)
-            Err(e) => return Err(keeping_cause(sm_err(), e)),
-        }
+        // Unable to convert when the re-solve fails (its error is kept as the cause)
+        re_solved(
+            env.pseudo.re_calc_fillet_geom(
+                env.k,
+                new_fg,
+                &mut new_fs,
+                env.target,
+                false,
+                Some(march_dir),
+                Some(&center_curve),
+            ),
+            sm_err,
+        )?;
 
         // EdgeUse current UVTrimCurves
         let rail_curve = |pseudo: &FilletBrep, e: EdgeId| -> Result<Curve> {
@@ -3685,13 +3684,34 @@ fn make_face(
 }
 
 /// `error`, a failure this module builds in place of a routine's error, keeping `cause`,
-/// that routine's error (guide rule 6). Its operation, reason and status stay `error`'s. An
-/// error that is not a [`SolidError::Failed`] has no record to keep a cause in and is
-/// returned as it is.
+/// that routine's error (guide rule 6, #13790). Its operation, reason and status stay
+/// `error`'s.
+///
+/// **An `error` that is not a [`SolidError::Failed`] is returned as it is and `cause` is
+/// dropped**: only the record of a `Failed` holds a cause. No information is lost today:
+/// the only callers ([`re_solved`] at the two corner conversions) pass the failure their
+/// local `sm_err` closure builds, `SolidError::blend_failed`, which is always a `Failed`.
+/// A new caller must pass a `Failed` too.
 pub(super) fn keeping_cause(error: SolidError, cause: SolidError) -> SolidError {
     match error {
         SolidError::Failed(failure) => (*failure).caused_by(cause).into_error(),
         other => other,
+    }
+}
+
+/// The result of a corner conversion's re-solve (`ReCalcFilletGeom`, whose failure means
+/// the corner cannot be converted): an unported call, a cancellation or a certificate past
+/// its work budget ([`SolidError::is_unported_or_cancelled`]) passes on as it is; any other
+/// error becomes `unable()`, the conversion's own failure, keeping the re-solve's error as
+/// its cause ([`keeping_cause`]).
+///
+/// # Errors
+/// As above.
+pub(super) fn re_solved(result: Result<()>, unable: impl FnOnce() -> SolidError) -> Result<()> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(e) => Err(keeping_cause(unable(), e)),
     }
 }
 
@@ -3972,19 +3992,57 @@ mod tests {
         }
     }
 
+    /// A calculator error whose own cause chain holds a cancellation: the corner failure
+    /// keeps it, so the failure is no longer a status answer (it was one without its
+    /// cause), while its status and class stay as the outer error reports them.
+    #[test]
+    fn a_failed_corner_vertex_over_a_cancellation_is_no_status_answer() {
+        let cancelled = SolidError::Cancelled {
+            operation: "re-solve",
+        };
+        let cause = Failure::new(
+            "calculator",
+            crate::error::blend::BlendFailure::Failed("the calculation stopped"),
+        )
+        .caused_by(cancelled.clone())
+        .into_error();
+        // the site passes on only a cancellation itself, not one beneath another error
+        assert!(!cause.is_unported_or_cancelled());
+        let e = corner_vertex_failure(&cause);
+        assert_corner_failure_keeps(
+            &e,
+            OP_VERT_GEOM,
+            "a corner vertex's geometry could not be calculated",
+            &cause,
+        );
+        assert_eq!(e.root_cause(), &cancelled);
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert!(!e.is_status_answer(), "{e:?}");
+        assert!(!e.is_port_failure() && !e.is_defect() && !e.is_refusal());
+    }
+
     /// A constant-radius conversion whose re-solve fails is reported as before (the
-    /// failure its `sm_err` builds), keeping the re-solve's error as its cause.
+    /// failure `unable` builds, here the conversion's `sm_err` failure), keeping the
+    /// re-solve's error as its cause; an unported call, a cancellation or a certificate
+    /// past its budget passes on as it is, and a re-solve that succeeds goes on.
     #[test]
     fn a_failed_constant_radius_re_solve_keeps_its_error() {
         let phrase = "the corner cannot be made a constant-radius fillet";
+        let sm_err = || SolidError::blend_failed(OP_CONST_RAD, phrase);
         for cause in calculator_errors() {
-            let e = keeping_cause(
-                SolidError::blend_failed(OP_CONST_RAD, phrase),
-                cause.clone(),
-            );
+            let e = re_solved(Err(cause.clone()), sm_err).unwrap_err();
             assert_corner_failure_keeps(&e, OP_CONST_RAD, phrase, &cause);
         }
-        // an error without a record has no cause to keep
+        assert_eq!(re_solved(Ok(()), sm_err), Ok(()));
+        for passed in [
+            SolidError::unported("ReCalcFilletGeom", "blend.fillet_geom_p3"),
+            SolidError::Cancelled {
+                operation: "re-solve",
+            },
+        ] {
+            assert_eq!(re_solved(Err(passed.clone()), sm_err), Err(passed));
+        }
+        // an error without a record has no cause to keep (no caller passes one)
         let bare = SolidError::sm_err(OP_CONST_RAD);
         assert_eq!(
             keeping_cause(bare.clone(), SolidError::sm_err("re-solve")),

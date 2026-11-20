@@ -1658,18 +1658,17 @@ impl FilletCorner {
 
         // Compute marching direction for solver
         let march_dir = tangent(ivl.min())?;
-        match new_fs.re_calc_fillet_geom(
-            env.k,
-            env.pseudo,
-            false,
-            Some(march_dir),
-            Some(&center_curve),
-        ) {
-            Ok(()) => {}
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            // Unable to convert (the re-solve's error is kept as the cause, #13790)
-            Err(e) => return Err(super::p1::keeping_cause(sm_err(), e)),
-        }
+        // Unable to convert when the re-solve fails (its error is kept as the cause)
+        super::p1::re_solved(
+            new_fs.re_calc_fillet_geom(
+                env.k,
+                env.pseudo,
+                false,
+                Some(march_dir),
+                Some(&center_curve),
+            ),
+            sm_err,
+        )?;
 
         if self.corner_type() == FilletCornerType::NByNConcave {
             // Test if the fillet intersect the corner
@@ -2383,8 +2382,8 @@ mod tests {
     }
 
     /// A variable-radius conversion whose re-solve fails is reported as before (the
-    /// failure its `sm_err` builds: operation, phrase, status), keeping the re-solve's error
-    /// as its cause, whose class it takes (#13790).
+    /// failure `unable` builds, here the conversion's `sm_err` failure: operation, phrase,
+    /// status), keeping the re-solve's error as its cause, whose class it takes (#13790).
     #[test]
     fn a_failed_variable_radius_re_solve_keeps_its_error() {
         use crate::blend::fillet_executive::NoRoomReason;
@@ -2398,10 +2397,8 @@ mod tests {
             SolidError::blend("re-solve", BlendFailure::StageFailed),
             SolidError::sm_err("re-solve"),
         ] {
-            let e = super::super::p1::keeping_cause(
-                SolidError::blend_failed(OP_VAR_RAD, phrase),
-                cause.clone(),
-            );
+            let sm_err = || SolidError::blend_failed(OP_VAR_RAD, phrase);
+            let e = super::super::p1::re_solved(Err(cause.clone()), sm_err).unwrap_err();
             assert_eq!(e.operation(), OP_VAR_RAD, "{e:?}");
             assert_eq!(
                 e.blend_failure(),
