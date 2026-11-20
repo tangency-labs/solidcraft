@@ -40,6 +40,7 @@ pub const DOCUMENTED: &[&str] = &[
     "construct.plane.midplane",
     "construct.plane.offset",
     "construct.plane.perpendicular",
+    "construct.plane.square_to_line",
     "construct.plane.tangent",
     "construct.plane.three_points",
     "construct.plane.two_edges",
