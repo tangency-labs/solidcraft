@@ -33,6 +33,7 @@ carry into a worker thread.
 | `effective_language(preference)` | The catalog id a preference resolves to |
 | `pin_system_language()` | Make the system language English, for tests outside this crate |
 | `each_english_message(f)` | Every English `(id, text)` |
+| `SHARED_ENGLISH` | The English shared catalogue (`locales/en.json`) as JSON, for a shared crate's tests of the ids it names |
 | `bidi::visual`, `bidi::visual_template`, `bidi::has_rtl`, `bidi::screen_order` | Right-to-left text in the order a left-to-right layout draws correctly |
 
 ## Installing catalogs
@@ -56,3 +57,12 @@ Install before the first lookup (the system language is chosen from the installe
 first time it is read). Installing the same list again does nothing; a different list is
 ignored and logged. A test harness outside this crate calls `pin_system_language()` so its
 tests read English on every PC.
+
+## Shared catalogues
+
+`locales/<language>.json` holds the messages the shared crates own: the Preferences window's
+words and the kit's Preferences pages (`prefs.*` ids, #17904). One file per language SolidCraft
+ships, with the same language ids as the app's `assets/locales`. The app's build merges each of
+these files into the app's catalog for that language, so an id lives in one of the two places
+only (`cargo xtask lists` checks it). A host that installs its own
+catalogues merges the same files the same way; a message it lacks reads as English, then as its id.

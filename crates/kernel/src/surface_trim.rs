@@ -258,6 +258,24 @@ mod tests {
         );
     }
 
+    /// A spline tool face (an extruded cubic: its surface ends where the face does, so there is
+    /// nothing more of it to extend along) that runs 10 into the 40 square and stops is refused
+    /// for not reaching across, not as a miss (#19927). Extruded on across the square, the same
+    /// cubic trims it along x = 22.25, where the cubic crosses z = 0 (its middle, by symmetry:
+    /// (20 + 3 * 23 + 3 * 23 + 20) / 8), keeping 22.25 * 40 = 890 of the square.
+    #[test]
+    fn a_tool_face_that_stops_inside_the_surface_is_refused_for_not_reaching_across() {
+        let square = rect(&Plane::XY, 0.0, 0.0, 40.0, 40.0);
+        let cubic = vec![Seg2::Cubic { p0: Vec2::new(20.0, -10.0), p1: Vec2::new(23.0, -3.0), p2: Vec2::new(23.0, 3.0), p3: Vec2::new(20.0, 10.0) }];
+        let keep = Vec3::new(5.0, 20.0, 0.0);
+        let short = extrude_sheet(&Plane::XZ, std::slice::from_ref(&cubic), -10.0, 10.0).unwrap();
+        let e = trim(&square, &SplitTool::Face { body: &short, face: 0 }, keep).unwrap_err().to_string();
+        assert!(e.contains("the tool face doesn't reach across the surface, even extended"), "{e}");
+        let long = extrude_sheet(&Plane::XZ, &[cubic], -10.0, 50.0).unwrap();
+        let cut = trim(&square, &SplitTool::Face { body: &long, face: 0 }, keep).unwrap();
+        assert!(rel(area(&cut), 890.0) < 1e-6, "{}", area(&cut));
+    }
+
     /// A 10 × 10 square cut by two sketch lines (x = 3 and x = 7): a side is no answer for two
     /// curves, so a point picks its region; two picks keep the two outer strips.
     #[test]

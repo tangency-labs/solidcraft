@@ -7,9 +7,11 @@ use std::collections::BTreeMap;
 
 use egui::{Modifiers, Pos2};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 use solidcore_record::Vec3;
 pub use solidcraft_engine::doc::display_units::{format_length, length_number, length_precision, unit_scale};
+use solidcraft_engine::doc::drawing::template;
+use solidcraft_engine::geom::cell::Projection;
 use solidcraft_viewport::Camera;
 
 /// The key the apps keep the preferences under in eframe's storage.
@@ -903,6 +905,13 @@ pub fn apply_sketch_limit(p: &Prefs) {
     }
 }
 
+/// The STEP files read from now on heal the parts SMLib's check fails, and Repair heals a part
+/// first, as the preference says (Preferences › Design › Imported files). A read already done
+/// keeps what it was read with until the design is evaluated again.
+pub fn apply_tolerance_heal(p: &Prefs) {
+    solidcraft_engine::kernel::set_heals_tolerance_defects(p.heal_tolerance_defects);
+}
+
 /// Perspective view's default field of view (about 34°), in radians.
 const PERSPECTIVE_FOV: f64 = 0.6;
 
@@ -1094,6 +1103,27 @@ preference_settings! {
     library_thumbnail_size: crate::library::ThumbnailSize = crate::library::ThumbnailSize::Large, PAGE_LAYOUT;
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
+    /// First or third angle for new drawings (third when not set, or set to one this version
+    /// doesn't know).
+    default_projection: Projection = Projection::Third, PAGE_DESIGN;
+    /// The template new drawings of a part start from: a part's built-in, by name (ISO A3 when not set,
+    /// or set to one this version doesn't have for a part).
+    part_drawing_template: String = template::default_for(false).into(), PAGE_DESIGN;
+    /// The template new drawings of an assembly start from: an assembly's built-in, by name (ISO A2
+    /// when not set, or set to one this version doesn't have for an assembly).
+    assembly_drawing_template: String = template::default_for(true).into(), PAGE_DESIGN;
+    /// The drawing sheet's colour on screen: `auto` (follows the theme: White in a light theme, the
+    /// theme's dark sheet in a dark one), `white`, `blueprint` or `prussian_blue`
+    /// (`crate::drawing_sheet_page::SheetColour`). Screen only: printed
+    /// and exported sheets are always white, and nothing reaches the design or undo.
+    drawing_sheet_colour: String = "white".into(), PAGE_DESIGN;
+    /// The on-screen drawing canvas pattern: datum_cloud, grid or none (default none, a plain background).
+    drawing_sheet_backdrop: String = "none".into(), PAGE_DESIGN;
+    /// Where the Drawing workspace shows its sheet chooser.
+    drawing_sheets_visibility: String = "multiple".into(), PAGE_DESIGN;
+    /// Scales true size on the drawing sheet so 100 % measures 1 mm as 1 mm on this screen, against
+    /// a ruler held to the 100 mm bar in Preferences.
+    drawing_calibration: f32 = 1.0, PAGE_DESIGN, accept(0.5..=2.0) => slider("ui.sheet_page.calibration", 0.5..=2.0, 0.005, |v| format!("{v:.3}×"), "prefs:drawing_calibration");
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
     /// Touchscreen drags orbit/pan; off preserves the mouse mapping's selection behavior.
@@ -1113,6 +1143,10 @@ preference_settings! {
     /// An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and
     /// keeps turning; false stops the drag at the edge of the screen, as before.
     orbit_cursor_wrap: bool = true, PAGE_NAVIGATION => check_tr("nav.orbit_cursor_wrap.label");
+    /// While an orbit turns about the origin or the model point under the cursor (Orbit around),
+    /// a faint ball marks that point, as it does for the 3D mouse (#17474); false draws nothing,
+    /// as before.
+    mark_orbit_point: bool = true, PAGE_NAVIGATION => check_tr("nav.mark_orbit_point.label");
     /// A right-click in the view with a dialog open confirms its input: on to the next one, then OK.
     /// Off: it does nothing there, as before (#6159).
     right_click_confirms: bool = false, PAGE_GENERAL => check("Right-click confirms dialog inputs", "With a dialog open, a right-click in the view goes on to its next empty input, and on the last one runs OK");
@@ -1151,6 +1185,9 @@ preference_settings! {
     navigator_home: bool = true, PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
     radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
+    /// The quick menu (`quick_menu`) also opens by itself shortly after a click in the viewport
+    /// selects something a command takes (#5501). Off by default: a click only selects.
+    quick_menu_after_selection: bool = false, PAGE_NAVIGATION => check_tr("prefs.quick_menu_after_selection");
     /// Work on the model directly in the viewport (pull a face to extrude or cut); off by default.
     direct_interaction: bool = false, PAGE_TOOLS;
     /// Mouse gestures: a ring of tools on the right button.
@@ -1378,6 +1415,12 @@ preference_settings! {
     /// A FreeCAD file opens or inserts as its sketches and features, rebuilt; off brings in only
     /// its solids as one Import feature, as before.
     freecad_history: bool = true, PAGE_GENERAL => check_id("settings.freecad_history");
+    /// Import with cadmpeg: a STEP, FreeCAD or Rhino file is read from cadmpeg's model straight
+    /// into B-rep records: a STEP file decoded by cadmpeg's STEP decoder instead of SolidCraft's
+    /// own STEP reader, and a FreeCAD or Rhino file's solids instead of restated as STEP by
+    /// cadmpeg's STEP writer and read by SolidCraft's STEP reader. Off (the default) keeps
+    /// SolidCraft's STEP reader for all three, as before.
+    cadmpeg_import: bool = false, PAGE_GENERAL => check_id("settings.cadmpeg_import");
     /// Explicit assembly Move uses joint handles; off keeps the previous Move panel.
     assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
     /// Degrees per step near the assembly Move ring.
@@ -1519,6 +1562,11 @@ preference_settings! {
     /// Compact history: the browser lists each component's features in history order with the
     /// marker, and neither timeline is shown.
     history_in_browser: bool = false, PAGE_LAYOUT;
+    /// Drawing sheet strip placement; independent of Design's feature history.
+    drawing_sheet_dock: String = "top".into(), PAGE_LAYOUT;
+    /// Drawing properties use the same left/right, resizable panel pattern as Assistant.
+    drawing_panel_side: String = "right".into(), PAGE_LAYOUT;
+    drawing_panel_width: f32 = 320.0, PAGE_LAYOUT, accept(240.0..=560.0);
     /// Whether vertical History lists a sketch under the feature built from it.
     history_sketches: HistorySketches = HistorySketches::default(), PAGE_LAYOUT;
     /// A Play History button in the History controls, between Previous and Next (#3688). Off
@@ -1609,6 +1657,11 @@ preference_settings! {
     remember_stand_up: bool = true, PAGE_DESIGN => check_id("prefs.remember_stand_up");
     /// Reopen an unchanged CAD import from the existing saved-design model cache.
     reuse_imports: bool = true, PAGE_DESIGN => check_id("prefs.reuse_imports");
+    /// A STEP part SMLib's check fails is healed of its tolerance-scale defects (edges shorter
+    /// than their tolerance, slivers between coincident edges, curve pieces of no length) in the
+    /// background once it is imported, and Repair heals a part first (#17689). Off: the part
+    /// stays as read, with its check's warning, and Repair does not heal first, as before.
+    heal_tolerance_defects: bool = true, PAGE_DESIGN => check_id("prefs.heal_tolerance_defects");
     /// Oldest-first bounded file answers; resetting settings preserves user history.
     stand_up_answers: crate::stand_up::Answers = Default::default();
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
@@ -1843,6 +1896,13 @@ preference_settings! {
     construction_line_classic: bool = false, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
     sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
+    /// An image (Canvas or Decal) placed on the plane of the sketch being edited gets a
+    /// construction rectangle around it in that sketch and follows it, so the sketch's constraints
+    /// and dimensions place and size the image (#18405). A mode of the Canvas and Decal tools, set
+    /// in the Sketch Palette while one runs and kept for the next time; no Preferences page shows
+    /// or resets it. Off by default, so placing an image works as it always has: on its own, with
+    /// Frame Sketch to tie it to a rectangle when asked.
+    frame_images_in_sketch: bool = false;
     /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
     /// starts the tool or dialog again.
     shortcut_again_ends_tool: bool = true, PAGE_SKETCH;
@@ -1954,6 +2014,9 @@ preference_settings! {
     move_drag_highlights: bool = false, PAGE_TOOLS => check_id("prefs.move_drag_highlights");
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
     disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
+    /// Remember a moved plugin command window's position for the current design, until the
+    /// application closes (#18684). Off keeps the previously centred reopen behaviour.
+    plugin_remember_dialog_position: bool = false, PAGE_PLUGINS;
     /// Approved install permissions survive page resets and Cancel, like installed files.
     plugin_grants: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants> = std::collections::BTreeMap::new();
     /// User ceilings, not automatic increases to a package's approved execution budget.
@@ -2229,6 +2292,7 @@ impl Snapshot {
         self.panel_visibility.restore(app);
         sync_surface_analysis(app);
         crate::render_workspace::apply_memory_policy(app);
+        apply_tolerance_heal(&app.preferences);
         app.preferences.stand_up_answers = stand_up_answers;
         app.preferences.update = update;
         if units_changed {
@@ -2529,6 +2593,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
     crate::plugins::sync_policy(app);
     sync_surface_analysis(app);
     crate::render_workspace::apply_memory_policy(app);
+    apply_tolerance_heal(&app.preferences);
     if app.preferences.default_units != units {
         default_units_changed(app);
     }
@@ -2643,6 +2708,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     }
     apply_file_limits(&app.preferences);
     apply_sketch_limit(&app.preferences);
+    apply_tolerance_heal(&app.preferences);
     // The viewport's display quality (an unknown saved value draws at Normal).
     solidcraft_engine::doc::display_quality::set_current(
         solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default(),
@@ -2722,6 +2788,26 @@ pub fn apply_network(p: &Prefs) {
 /// blank design left when the last tab closes. A design that already has features is unchanged.
 pub fn apply_new_design(app: &mut SolveApp) {
     apply_new_design_units(app, &app.preferences.default_units.clone());
+}
+
+/// What `drawing.create` run from the app starts from when it names no template: the preferred
+/// template for a drawing of a part or of an assembly, as the design is one
+/// ([`template::is_assembly`]), in the preferred projection and the interface font when that is a
+/// family (drawings name fonts by family, never a file), unless it names them. A template it names
+/// keeps its own projection and font.
+pub fn new_drawing_params(app: &SolveApp, mut params: Value) -> Value {
+    let Some(given) = params.as_object_mut() else { return params };
+    if !given.contains_key("template") {
+        let p = &app.preferences;
+        let chosen = if template::is_assembly(&app.session.doc) { &p.assembly_drawing_template } else { &p.part_drawing_template };
+        given.insert("template".into(), json!(chosen));
+        given.entry("projection").or_insert_with(|| json!(p.default_projection));
+        let font = p.ui_font.trim();
+        if solidcraft_engine::sketch::check_family(font).is_ok() {
+            given.entry("font").or_insert_with(|| json!(font));
+        }
+    }
+    params
 }
 
 /// The new-design preference also applies to the blank, unsaved design already open.
@@ -3159,9 +3245,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             ok: "OK",
             cancel: "Cancel",
             apply: "Apply",
-            search: solidcraft_ui_text::tr("prefs.search"),
-            no_results: solidcraft_ui_text::tr("prefs.search_empty"),
-            restore_defaults: solidcraft_ui_text::tr("prefs.restore_page_defaults"),
             restore_defaults_hint: solidcraft_ui_text::tr(if layout_page {
                 "ui.panel_layout.page_defaults_hint"
             } else {
@@ -3842,8 +3925,10 @@ fn button_jobs_that_read<'de, D: serde::Deserializer<'de>>(
 fn theme_choices(app: &SolveApp) -> Vec<(String, String)> {
     let modes =
         THEMES.iter().filter(|(id, _)| *id != "system").map(|(id, label)| ((*id).to_string(), solidcraft_ui_text::tr_label(label).to_string()));
-    let files = crate::theme_files::builtin().iter().chain(&app.preferences.custom_themes).map(|t| (t.id.clone(), t.name.clone()));
-    let mut choices: Vec<_> = modes.chain(files).collect();
+    // Built-in names are UI labels; a custom theme keeps the name its author gave it.
+    let builtins = crate::theme_files::builtin().iter().map(|t| (t.id.clone(), solidcraft_ui_text::tr_label(&t.name).to_string()));
+    let custom = app.preferences.custom_themes.iter().map(|t| (t.id.clone(), t.name.clone()));
+    let mut choices: Vec<_> = modes.chain(builtins).chain(custom).collect();
     choices.sort_by_key(|(id, _)| match id.as_str() {
         "light" => 0,
         "dark" => 1,
@@ -4011,9 +4096,6 @@ fn blur_availability_for(app: &SolveApp, offered: bool) -> crate::theme_options:
     }
     if reduced == Some(true) {
         return Unavailable("prefs.blur_reduce_transparency");
-    }
-    if app.home.open || crate::render_workspace::result_active(app) {
-        return Unavailable("prefs.blur_source");
     }
     match capability {
         crate::blur::Capability::Available => Available,
@@ -4416,6 +4498,14 @@ pub fn migrate(mut p: Prefs) -> Prefs {
         log::warn!("preferences: the 3D mouse axis assignment {:?} doesn't drive each axis once; using the default", p.space_mouse_axis_source);
         p.space_mouse_axis_source = crate::space_mouse::SAME_AXES;
     }
+    // A template this version doesn't have for that kind (a newer one's, or a saved template since removed).
+    for (chosen, assembly) in [(&mut p.part_drawing_template, false), (&mut p.assembly_drawing_template, true)] {
+        if !is_template_for(chosen, assembly) {
+            let default = template::default_for(assembly);
+            log::warn!("preferences: there is no drawing template `{chosen}` for this kind of design; using `{default}`");
+            *chosen = default.into();
+        }
+    }
     p.space_mouse_calibrations.retain(|device, calibration| {
         let usable = calibration.is_usable();
         if !usable {
@@ -4492,6 +4582,11 @@ fn limit_toolbar_tabs(mut p: Prefs) -> Prefs {
     let allowed: Vec<&str> = crate::workspace::choosable_tabs().collect();
     p.hidden_toolbar_tabs = known_once(std::mem::take(&mut p.hidden_toolbar_tabs), &allowed);
     p
+}
+
+/// Whether `name` is one of the built-in templates of an assembly's drawings (`assembly`) or a part's.
+pub(crate) fn is_template_for(name: &str, assembly: bool) -> bool {
+    template::BUILT_INS.contains(&name) && template::assembly(name) == Some(assembly)
 }
 
 /// Saved preferences, keeping every one that still reads. A value this version doesn't
@@ -4617,6 +4712,15 @@ fn prepare_preferences(
     if !accepted::wheel_zoom_speed(&new) {
         return Err("`wheel_zoom_speed` must be 0.25…4".into());
     }
+    // Before `migrate`, which puts a template this version doesn't have back to the default.
+    for (key, chosen, assembly) in
+        [("part_drawing_template", &new.part_drawing_template, false), ("assembly_drawing_template", &new.assembly_drawing_template, true)]
+    {
+        if !is_template_for(chosen, assembly) {
+            let kind: Vec<&str> = template::BUILT_INS.iter().copied().filter(|name| is_template_for(name, assembly)).collect();
+            return Err(format!("`{key}` must be one of {}", kind.join(", ")));
+        }
+    }
     if !accepted::home_fit_size(&new) {
         return Err("`home_fit_size` must be 0.1…1".into());
     }
@@ -4725,6 +4829,21 @@ fn prepare_preferences(
     if !accepted::perspective_fov(&new) {
         return Err("`perspective_fov` must be 15°…90° in radians (0.2618…1.5708)".into());
     }
+    if crate::drawing_sheet_page::SheetBackdrop::parse(&new.drawing_sheet_backdrop).is_none() {
+        return Err("`drawing_sheet_backdrop` must be datum_cloud, grid or none".into());
+    }
+    if !crate::drawing_workspace::valid_sheets_visibility(&new.drawing_sheets_visibility) {
+        return Err("`drawing_sheets_visibility` must be multiple, always, off or legacy".into());
+    }
+    if !accepted::drawing_calibration(&new) || crate::drawing_sheet_page::SheetColour::parse(&new.drawing_sheet_colour).is_none() {
+        return Err("`drawing_calibration` must be 0.5…2 and `drawing_sheet_colour` white, theme, blueprint or prussian_blue".into());
+    }
+    if !accepted::drawing_panel_width(&new)
+        || !["top", "bottom", "under_browser"].contains(&new.drawing_sheet_dock.as_str())
+        || !["left", "right"].contains(&new.drawing_panel_side.as_str())
+    {
+        return Err("Drawing preferences require a valid docking position and panel width of 240…560".into());
+    }
     if !accepted::dimension_step_mm(&new) || !accepted::dimension_step_deg(&new) {
         return Err("`dimension_step_mm` must be 0.001…1000 and `dimension_step_deg` 0.001…180".into());
     }
@@ -4783,6 +4902,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     crate::render_workspace::apply_memory_policy(app);
     apply_file_limits(&app.preferences);
     apply_sketch_limit(&app.preferences);
+    apply_tolerance_heal(&app.preferences);
     if units_changed {
         default_units_changed(app);
     }
@@ -7172,6 +7292,7 @@ mod tests {
         use super::*;
         let fields = [
             ("default_units", json!("ft"), PAGE_DESIGN),
+            ("default_projection", json!("first"), PAGE_DESIGN),
             ("length_decimals", json!(5), PAGE_DESIGN),
             ("angle_decimals", json!(4), PAGE_DESIGN),
             ("parameter_list_rows", json!(75), PAGE_DESIGN),
@@ -9522,6 +9643,24 @@ mod tests {
         h.frames(2);
         assert_eq!(Tokens::get().panel, Tokens::dark().panel);
         assert_eq!((Tokens::get().control_radius, Tokens::get().radius_xl), (6, 10));
+
+        // Built-in names follow the UI language; an imported name stays as authored even when
+        // it matches a translated label. The theme file itself keeps its original name too.
+        let out = h.call(
+            "ui.prefs",
+            json!({"language": "ja", "theme_import": {"format": "solidcraft-theme/1", "name": "Blueprint", "base": "light"}, "theme_export": true}),
+        );
+        let imported = out["result"]["theme_imported"].as_str().unwrap();
+        assert_ne!(imported, "blueprint", "the built-in id remains reserved");
+        assert_eq!(out["result"]["theme_file"]["name"], "Blueprint");
+        let _language = solidcraft_ui_text::scope("ja");
+        let choices = theme_choices(&h.app);
+        let name = |id: &str| choices.iter().find(|(key, _)| key == id).unwrap().1.as_str();
+        let translated = solidcraft_ui_text::tr("ui.sheet_page.colour.blueprint");
+        assert_ne!(translated, "Blueprint");
+        assert_eq!(name("blueprint"), translated);
+        assert_eq!(name(imported), "Blueprint");
+        assert_eq!(crate::theme_files::find("blueprint", &[]).unwrap().name, "Blueprint");
     }
 
     /// A theme tile's Export… writes the theme file through `vfs`, like the other saves, so the
@@ -9768,6 +9907,37 @@ mod tests {
         assert_eq!(super::lenient(&json!({"display_quality": "ultra"})).display_quality, "ultra");
         super::defaults(&mut app, super::PAGE_GRAPHICS);
         assert_eq!(app.preferences.display_quality, "normal");
+    }
+
+    /// #17689: the tolerance heal is on by default, a saved choice reads back as saved, and the
+    /// preference reaches the kernel, which every STEP read and Repair consult: set off, the
+    /// kernel stops healing; set on, it heals again. (The kernel's switch is the process's: the
+    /// test holds it, as every test that turns it does.)
+    #[test]
+    fn heal_tolerance_defects_is_on_by_default_and_reaches_the_kernel() {
+        use serde_json::json;
+        use solidcraft_engine::kernel;
+        let _held = kernel::heal_preference_for_tests(true);
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        assert!(app.preferences.heal_tolerance_defects, "on by default");
+        assert!(!super::lenient(&json!({"heal_tolerance_defects": false})).heal_tolerance_defects, "off reads back as saved");
+        assert!(super::lenient(&json!({})).heal_tolerance_defects);
+        let out = super::set(&mut app, &json!({"heal_tolerance_defects": false})).unwrap();
+        assert_eq!(out["heal_tolerance_defects"], false);
+        assert!(!kernel::heals_tolerance_defects(), "off: the kernel stops healing");
+        let out = super::set(&mut app, &json!({"heal_tolerance_defects": true})).unwrap();
+        assert_eq!(out["heal_tolerance_defects"], true);
+        assert!(kernel::heals_tolerance_defects(), "on: the kernel heals again");
+        // Cancel and Restore Defaults reach the kernel at once too, not at the next frame.
+        let snapshot = super::Snapshot::take(&app);
+        super::set(&mut app, &json!({"heal_tolerance_defects": false})).unwrap();
+        snapshot.restore_other_preferences(&mut app).unwrap();
+        assert!(app.preferences.heal_tolerance_defects);
+        assert!(kernel::heals_tolerance_defects(), "cancelled: the kernel heals as before");
+        super::set(&mut app, &json!({"heal_tolerance_defects": false})).unwrap();
+        super::defaults(&mut app, super::PAGE_DESIGN);
+        assert!(app.preferences.heal_tolerance_defects);
+        assert!(kernel::heals_tolerance_defects(), "defaults: the kernel heals again");
     }
 
     /// The validation mode is once per feature by default; set by name or by the command, the
@@ -11303,6 +11473,24 @@ mod tests {
         assert!(!h.app.preferences.orbit_cursor_wrap);
     }
 
+    #[test]
+    fn mark_orbit_point_defaults_on_and_can_be_turned_off() {
+        let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
+        assert!(old.mark_orbit_point, "saved preferences from before the option mark the point");
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.step(&json!({"click":{"handle":"prefs:mark_orbit_point"}})).unwrap();
+        assert!(!h.app.preferences.mark_orbit_point);
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(!restored.preferences.mark_orbit_point);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.mark_orbit_point);
+        h.call("ui.prefs", json!({"mark_orbit_point":false,"button":"apply"}));
+        assert!(!h.app.preferences.mark_orbit_point);
+    }
+
     /// An agent's slow commands compute off the window thread unless a person turned that off:
     /// a settings file without the setting follows the default, one that has it keeps its value.
     #[test]
@@ -12244,6 +12432,49 @@ mod tests {
         assert_eq!(format_length(25.4, "in", 3), "1.000 in");
     }
 
+    /// Projection of new drawings: third angle unless chosen, refused when it is neither when set,
+    /// read as third when saved so; a new drawing takes it without an undo step of its own.
+    #[test]
+    fn new_drawings_take_the_preferred_projection() {
+        use solidcraft_engine::geom::cell::Projection;
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert_eq!(app.preferences.default_projection, Projection::Third);
+        assert!(set(&mut app, &json!({"default_projection": "second"})).is_err());
+        let saved = json!({"default_projection": "fourth", "default_units": "in"});
+        assert_eq!((lenient(&saved).default_projection, lenient(&saved).default_units.as_str()), (Projection::Third, "in"));
+        let drawn = |projection: &str| {
+            let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+            set(&mut app, &json!({"default_projection": projection})).unwrap();
+            app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+            app.run("drawing.create", json!({})).unwrap();
+            (app.session.drawing("test").ok().map(|d| d.projection), app.session.undo.len())
+        };
+        let (first, third) = (drawn("first"), drawn("third"));
+        assert_eq!((first.0, third.0), (Some(Projection::First), Some(Projection::Third)));
+        assert_eq!(first.1, third.1, "the projection is no undo step of its own");
+    }
+
+    /// A new drawing is set in the interface font when that is a family, and in the built-in font
+    /// when it is a font file or none, still taking the preferred projection; it is no undo step of
+    /// its own.
+    #[test]
+    fn new_drawings_take_the_interface_font_by_family() {
+        let drawn = |ui_font: &str| {
+            let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+            app.preferences.ui_font = ui_font.into();
+            set(&mut app, &json!({"default_projection": "first"})).unwrap();
+            app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+            app.run("drawing.create", json!({})).unwrap();
+            let d = app.session.drawing("test").unwrap();
+            (d.font.clone(), d.projection, app.session.undo.len())
+        };
+        let (family, file, none) = (drawn(" IBM Plex Mono "), drawn("C:/Fonts/arial.ttf"), drawn(""));
+        assert_eq!((family.0.as_str(), file.0.as_str(), none.0.as_str()), ("IBM Plex Mono", "", ""));
+        let first = solidcraft_engine::geom::cell::Projection::First;
+        assert_eq!((family.1, file.1, none.1), (first, first, first), "a font file doesn't cost the projection");
+        assert_eq!((family.2, file.2), (none.2, none.2), "the font is no undo step of its own");
+    }
+
     /// #6474, #2742: Maya moves the camera with Alt and any button, HFSS with Alt or Shift+Alt and
     /// the left button. A plain left drag still selects, and HFSS leaves Ctrl+left to the drag
     /// from empty space every preset has, so a Ctrl+click on geometry still adds to the selection.
@@ -12272,6 +12503,47 @@ mod tests {
         assert_eq!(other.preferences.nav, "hfss");
     }
 
+    /// The templates of new drawings: ISO A3 for a part and ISO A2 for an assembly unless chosen, each
+    /// refused when not one of its kind's built-ins and read as its default when saved so; the old
+    /// one setting still loads. A new drawing starts from its design's kind's, in the preferred
+    /// projection and the interface font; a template named keeps its own.
+    #[test]
+    fn new_drawings_start_from_the_preferred_template() {
+        use solidcraft_engine::geom::drawing_sheet::{PaperSize, SheetSize};
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let chosen = |p: &Prefs| (p.part_drawing_template.clone(), p.assembly_drawing_template.clone());
+        assert_eq!(chosen(&app.preferences), ("iso-a3-part".to_string(), "iso-a2-assembly".to_string()));
+        for (key, wrong) in [("part_drawing_template", "iso-a2-assembly"), ("assembly_drawing_template", "iso-a3-part")] {
+            for old in [wrong, "iso-b2", "iso-a3"] {
+                assert!(set(&mut app, &json!({key: old})).is_err(), "{key} {old}");
+                assert_eq!(chosen(&lenient(&json!({key: old}))), chosen(&Prefs::default()), "{key} {old}");
+            }
+        }
+        assert_eq!(chosen(&lenient(&json!({"drawing_template": "iso-a1"}))), chosen(&Prefs::default()), "the old setting still loads");
+        let read = lenient(&json!({"part_drawing_template": "iso-a1-part", "assembly_drawing_template": "iso-a0-assembly"}));
+        assert_eq!(chosen(&read), ("iso-a1-part".to_string(), "iso-a0-assembly".to_string()));
+        set(
+            &mut app,
+            &json!({"part_drawing_template": "iso-a4-part", "assembly_drawing_template": "iso-a1-assembly", "default_projection": "first"}),
+        )
+        .unwrap();
+        app.preferences.ui_font = "IBM Plex Mono".into();
+        app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+        app.run("drawing.create", json!({})).unwrap();
+        let d = app.session.drawing("test").unwrap().clone();
+        assert_eq!((d.sheets[0].sheet.size, d.projection, d.font.as_str()), (SheetSize::Standard(PaperSize::A4), Projection::First, "IBM Plex Mono"));
+        app.run("drawing.close", json!({})).unwrap();
+        app.run("drawing.create", json!({"template": "iso-a2-part"})).unwrap();
+        let d = app.session.drawing("test").unwrap().clone();
+        assert_eq!((d.sheets[0].sheet.size, d.projection, d.font.as_str()), (SheetSize::Standard(PaperSize::A2), Projection::Third, ""));
+        app.run("drawing.close", json!({})).unwrap();
+        // The design places a component now: an assembly's template.
+        app.run("component.create", json!({"name": "Bracket"})).unwrap();
+        app.run("component.activate", json!({"component": "root"})).unwrap();
+        app.run("drawing.create", json!({})).unwrap();
+        let d = app.session.drawing("test").unwrap().clone();
+        assert_eq!(d.sheets[0].sheet.size, SheetSize::Standard(PaperSize::A1));
+    }
     #[test]
     fn maya_zoom_axis_preference_is_saved_and_reset_with_navigation() {
         let mut h = crate::scenario::Harness::new();

@@ -13,8 +13,36 @@ use crate::{cargo, root};
 /// A test executable from `cargo test --no-run`.
 struct TestBin {
     label: String,
+    /// nextest's binary id, which the known-failing and quarantine lists name tests by:
+    /// `solidcraft-kernel` for a library, `solidcraft-cli::naming_corpus` for an integration
+    /// test, `solidcraft::bin/solidcraft` for a binary.
+    id: String,
     exe: String,
     dir: String,
+}
+
+/// The kernel's boolean property tests draw new random inputs every run, so CI runs them only in
+/// its nightly property-tests job, and so does this unless `SOLIDCRAFT_PROPERTY_TESTS` is set.
+const PROPERTY_TESTS: &str = "solidcraft-kernel::boolean_props";
+
+/// The tests CI's gate (`cargo xtask known-failing`) lets fail: those known to fail today and
+/// the flaky ones in quarantine, by nextest's `<binary id>::<test name>`.
+#[derive(Default)]
+struct Allowed {
+    known: Vec<String>,
+    quarantined: Vec<String>,
+}
+
+impl Allowed {
+    fn read(root: &std::path::Path) -> Result<Self, String> {
+        let names = |file: &str| -> Result<Vec<String>, String> {
+            let path = root.join(file);
+            let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let list = crate::kernel_cases::known_failing(&text).map_err(|e| format!("{file}: {e}"))?;
+            Ok(list.into_iter().map(|(test, _)| test.to_string()).collect())
+        };
+        Ok(Self { known: names(crate::known_failing::LIST)?, quarantined: names(crate::known_failing::QUARANTINE)? })
+    }
 }
 
 /// Build the tests with `cargo_args` (e.g. `--locked`), run each binary with `test_args`, and run
@@ -23,15 +51,21 @@ struct TestBin {
 pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>) -> Result<(), String> {
     let limit = job_limit(std::env::var_os("SOLIDCRAFT_TEST_JOBS").as_deref())?;
     let split = thread_split(limit, std::thread::available_parallelism().map_or(1, |n| n.get()));
-    let bins = build(cargo_args)?;
+    let allowed = Allowed::read(&root())?;
+    let mut bins = build(cargo_args)?;
+    if std::env::var_os("SOLIDCRAFT_PROPERTY_TESTS").is_none() && bins.iter().any(|b| b.id == PROPERTY_TESTS) {
+        bins.retain(|b| b.id != PROPERTY_TESTS);
+        eprintln!("test: {PROPERTY_TESTS} left out: it draws new random inputs every run (CI runs it nightly); SOLIDCRAFT_PROPERTY_TESTS=1 runs it");
+    }
     let start = Instant::now();
     let side_count = side.len();
-    let mut batches = Vec::with_capacity(bins.len() + 1);
+    let mut batches: Vec<Vec<(String, Command, Option<String>)>> = Vec::with_capacity(bins.len() + 1);
     if !side.is_empty() {
-        batches.push(side);
+        batches.push(side.into_iter().map(|(label, c)| (label, c, None)).collect());
     }
+    let graded_args = graded_args(test_args);
     for b in &bins {
-        batches.push(vec![(b.label.clone(), binary_command(b, test_args, split))]);
+        batches.push(vec![(b.label.clone(), binary_command(b, &graded_args, split), Some(b.id.clone()))]);
     }
     let jobs = limit.unwrap_or(batches.len()).min(batches.len());
     let split_note = split.map_or(String::new(), |t| format!("; {t} test threads and matrix workers per binary unless overridden"));
@@ -41,9 +75,13 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>
         batches,
         jobs,
         |batch, tx| {
-            for (label, c) in batch {
+            for (label, c, id) in batch {
                 let t0 = Instant::now();
-                let _ = tx.send((label, finish(c), t0.elapsed().as_secs_f64()));
+                let result = match id {
+                    Some(id) => finish_graded(c, &id, &allowed),
+                    None => finish(c),
+                };
+                let _ = tx.send((label, result, t0.elapsed().as_secs_f64()));
             }
         },
         |(label, result, secs)| match result {
@@ -56,6 +94,18 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>
     );
     println!("test: {} binaries in {:.1}s", bins.len(), start.elapsed().as_secs_f64());
     if failed.is_empty() { Ok(()) } else { Err(format!("failed: {}", failed.join(", "))) }
+}
+
+/// The arguments a graded binary gets: the caller's, with `--format pretty` added unless the
+/// caller chose a format. The grader reads passing tests from pretty's `test <name> ... ok`
+/// lines, and an explicit `--format pretty` outranks `-q`/`--quiet` (terse output names only
+/// failures), so a known-failing test that passes is still reported as fixed.
+fn graded_args<'a>(test_args: &[&'a str]) -> Vec<&'a str> {
+    let mut args = test_args.to_vec();
+    if !test_args.iter().any(|a| *a == "--format" || a.starts_with("--format=")) {
+        args.extend(["--format", "pretty"]);
+    }
+    args
 }
 
 /// An absent limit preserves the existing unbounded default; invalid input fails before the test build.
@@ -147,6 +197,115 @@ fn finish(mut c: Command) -> Result<String, String> {
     }
 }
 
+/// Run a test binary to the end and grade it as CI's gate does: a test on the known-failing or
+/// quarantine list may fail, any other may not, and a known-failing test that passes is fixed
+/// and must leave the list. A binary that ends without its `test result:` line (a crash, an
+/// abort) fails whatever its tests did.
+fn finish_graded(mut c: Command, id: &str, allowed: &Allowed) -> Result<String, String> {
+    let out = c.stdin(Stdio::null()).output().map_err(|e| format!("failed to spawn: {e}"))?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let all = || format!("{stdout}{}\n({})", String::from_utf8_lossy(&out.stderr), out.status);
+    grade(id, out.status.success(), &stdout, allowed).map_err(|why| format!("{}\n{why}", all()))
+}
+
+/// The verdict on one binary's run from its libtest output: the summary to print, or why it
+/// fails.
+fn grade(id: &str, success: bool, stdout: &str, allowed: &Allowed) -> Result<String, String> {
+    let summary = stdout.lines().rev().find(|l| l.starts_with("test result:")).map(|l| l.trim_start_matches("test result: ").to_string());
+    let full = |name: &str| format!("{id}::{name}");
+    let failed: Vec<String> = failures(stdout).iter().map(|n| full(n)).collect();
+    let fixed: Vec<String> = passes(stdout).iter().map(|n| full(n)).filter(|t| allowed.known.contains(t) && !failed.contains(t)).collect();
+    let mut problems = Vec::new();
+    if !success && (summary.is_none() || failed.is_empty()) {
+        problems.push("the binary failed without a test failing (a crash or abort)".to_string());
+    }
+    if let Some(n) = summary.as_deref().and_then(failed_count).filter(|n| *n != failed.len()) {
+        problems.push(format!("libtest counted {n} failed but its failures list names {}", failed.len()));
+    }
+    for test in &failed {
+        if !allowed.known.contains(test) && !allowed.quarantined.contains(test) {
+            problems.push(format!("REGRESSION, failed and not on the known-failing list: {test}"));
+        }
+    }
+    for test in &fixed {
+        problems.push(format!("FIXED, remove it from {}: {test}", crate::known_failing::LIST));
+    }
+    if !problems.is_empty() {
+        return Err(problems.join("\n"));
+    }
+    let summary = summary.unwrap_or_default();
+    let known = failed.iter().filter(|t| allowed.known.contains(t)).count();
+    let quarantined = failed.len() - known;
+    Ok(match (known, quarantined) {
+        (0, 0) => summary,
+        (k, 0) => format!("{summary}; {k} known failing"),
+        (0, q) => format!("{summary}; {q} quarantined failed"),
+        (k, q) => format!("{summary}; {k} known failing, {q} quarantined failed"),
+    })
+}
+
+/// The tests libtest names in its closing `failures:` list, just above `test result:`. The
+/// list is the only record that survives `--nocapture` (a test's own output can land between
+/// `test <name> ... ` and its `FAILED`) and that captured output cannot imitate (it is printed
+/// in the first `failures:` section, above this one).
+fn failures(stdout: &str) -> Vec<String> {
+    let lines: Vec<&str> = stdout.lines().collect();
+    let Some(end) = lines.iter().rposition(|l| l.starts_with("test result:")) else { return Vec::new() };
+    let mut i = end;
+    while i > 0 && lines[i - 1].trim().is_empty() {
+        i -= 1;
+    }
+    let mut names = Vec::new();
+    while i > 0 && lines[i - 1].starts_with("    ") {
+        i -= 1;
+        names.push(lines[i].trim().to_string());
+    }
+    if i == 0 || lines[i - 1] != "failures:" {
+        return Vec::new();
+    }
+    names.reverse();
+    names
+}
+
+/// The failed count in a `test result:` summary (`FAILED. 2 passed; 1 failed; …`).
+fn failed_count(summary: &str) -> Option<usize> {
+    summary.split(';').find_map(|part| part.trim().strip_suffix(" failed")?.parse().ok())
+}
+
+/// The tests that passed, from pretty output's `test <name> ... ok` lines above the first
+/// `failures:` section, so captured output is never read. A pass whose line a test's own
+/// output split (`--nocapture`) is missed, which can only hide a fix, never a failure.
+fn passes(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .take_while(|line| *line != "failures:")
+        .filter_map(|line| {
+            let name = line.strip_prefix("test ")?.strip_suffix(" ... ok")?;
+            let name = name.strip_suffix(" - should panic").unwrap_or(name);
+            (!name.contains(" ... ")).then(|| name.to_string())
+        })
+        .collect()
+}
+
+/// nextest's binary id for a test target of `package`.
+fn binary_id(package: &str, kind: &str, name: &str) -> String {
+    match kind {
+        "lib" | "rlib" | "proc-macro" | "cdylib" | "staticlib" | "dylib" => package.to_string(),
+        "test" => format!("{package}::{name}"),
+        other => format!("{package}::{other}/{name}"),
+    }
+}
+
+/// The package name in a cargo package id: `path+file:///…/crates/engine#solidcraft-engine@0.45.0`,
+/// or `path+file:///…/solidcraft-cli#0.45.0` where the folder has the package's name.
+fn package_name(package_id: &str) -> String {
+    let (url, fragment) = package_id.split_once('#').unwrap_or((package_id, ""));
+    match fragment.split_once('@') {
+        Some((name, _)) => name.to_string(),
+        None => url.rsplit('/').next().unwrap_or("").to_string(),
+    }
+}
+
 /// `cargo test --workspace --profile ci --no-run`, and the executables it built.
 fn build(cargo_args: &[&str]) -> Result<Vec<TestBin>, String> {
     let mut c = cargo();
@@ -169,8 +328,10 @@ fn build(cargo_args: &[&str]) -> Result<Vec<TestBin>, String> {
         let dir = manifest.parent().map(|d| d.to_path_buf()).unwrap_or_else(root);
         let pkg = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let kind = m["target"]["kind"][0].as_str().unwrap_or("");
-        let label = format!("{pkg} {kind} {}", m["target"]["name"].as_str().unwrap_or(""));
-        bins.push(TestBin { label, exe: exe.to_string(), dir: dir.to_string_lossy().into_owned() });
+        let name = m["target"]["name"].as_str().unwrap_or("");
+        let label = format!("{pkg} {kind} {name}");
+        let id = binary_id(&package_name(m["package_id"].as_str().unwrap_or_default()), kind, name);
+        bins.push(TestBin { label, id, exe: exe.to_string(), dir: dir.to_string_lossy().into_owned() });
     }
     if bins.is_empty() {
         return Err("cargo test --no-run built no test executables".into());
@@ -187,7 +348,10 @@ pub fn doc_tests(cargo_args: &[&str], test_args: &[&str]) -> (String, Command) {
 
 #[cfg(test)]
 mod tests {
-    use super::{TEST_STACK, TestBin, binary_command, budget_env, job_limit, run_bounded, stack_env, thread_split};
+    use super::{
+        Allowed, TEST_STACK, TestBin, binary_command, binary_id, budget_env, failed_count, failures, grade, graded_args, job_limit, package_name,
+        passes, run_bounded, stack_env, thread_split,
+    };
     use std::ffi::OsStr;
     use std::path::Path;
     use std::sync::Barrier;
@@ -292,7 +456,7 @@ mod tests {
         assert_eq!(stack_env(None), Some(TEST_STACK));
         assert_eq!(stack_env(Some(OsStr::new("65536"))), None);
         if std::env::var_os("RUST_MIN_STACK").is_none() {
-            let bin = TestBin { label: "pkg test t".into(), exe: "true".into(), dir: ".".into() };
+            let bin = TestBin { label: "pkg test t".into(), id: "pkg::t".into(), exe: "true".into(), dir: ".".into() };
             let c = binary_command(&bin, &[], None);
             let stack = c.get_envs().find(|(k, _)| *k == OsStr::new("RUST_MIN_STACK")).and_then(|(_, v)| v);
             assert_eq!(stack, Some(OsStr::new(TEST_STACK)));
@@ -311,7 +475,7 @@ mod tests {
 
     #[test]
     fn binary_command_bounds_threads_and_matrix_workers_only_under_a_budget() {
-        let bin = TestBin { label: "pkg test t".into(), exe: "true".into(), dir: ".".into() };
+        let bin = TestBin { label: "pkg test t".into(), id: "pkg::t".into(), exe: "true".into(), dir: ".".into() };
         let env_of = |c: &std::process::Command, name: &str| {
             c.get_envs().find(|(k, _)| *k == OsStr::new(name)).and_then(|(_, v)| v).map(|v| v.to_string_lossy().into_owned())
         };
@@ -325,5 +489,124 @@ mod tests {
         assert_eq!(c.get_current_dir(), Some(Path::new(".")));
         assert_eq!(env_of(&c, "CARGO_MANIFEST_DIR").as_deref(), Some("."));
         assert_eq!(c.get_args().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>(), ["--exact", "x"]);
+    }
+
+    fn allowed() -> Allowed {
+        Allowed { known: vec!["pkg::a::known".into()], quarantined: vec!["pkg::a::flaky".into()] }
+    }
+
+    #[test]
+    fn binary_ids_match_nextest() {
+        assert_eq!(binary_id("solidcraft-kernel", "lib", "solidcraft_kernel"), "solidcraft-kernel");
+        assert_eq!(binary_id("solidcraft-cli", "test", "naming_corpus"), "solidcraft-cli::naming_corpus");
+        assert_eq!(binary_id("solidcraft", "bin", "solidcraft"), "solidcraft::bin/solidcraft");
+        assert_eq!(package_name("path+file:///w/crates/engine#solidcraft-engine@0.45.0"), "solidcraft-engine");
+        assert_eq!(package_name("path+file:///w/apps/solidcraft-cli#0.45.0"), "solidcraft-cli");
+    }
+
+    /// libtest's pretty output for `results`, (name, passed), with each failure's captured
+    /// output and the closing list, as Rust 1.99 prints it.
+    fn pretty(results: &[(&str, bool)]) -> String {
+        let mut out = format!("\nrunning {} tests\n", results.len());
+        for (name, ok) in results {
+            out += &format!("test {name} ... {}\n", if *ok { "ok" } else { "FAILED" });
+        }
+        let failed: Vec<&str> = results.iter().filter(|(_, ok)| !ok).map(|(n, _)| *n).collect();
+        if !failed.is_empty() {
+            out += "\nfailures:\n\n";
+            for name in &failed {
+                out += &format!("---- {name} stdout ----\n\nthread '{name}' panicked at t.rs:1:1:\nboom\n\n");
+            }
+            out += "\nfailures:\n";
+            for name in &failed {
+                out += &format!("    {name}\n");
+            }
+        }
+        let verdict = if failed.is_empty() { "ok" } else { "FAILED" };
+        out + &format!(
+            "\ntest result: {verdict}. {} passed; {} failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n",
+            results.len() - failed.len(),
+            failed.len()
+        )
+    }
+
+    #[test]
+    fn libtest_output_gives_failures_and_passes() {
+        let out = pretty(&[("a::x", true), ("a::y - should panic", true), ("a::z", false)]);
+        assert_eq!(failures(&out), ["a::z"]);
+        assert_eq!(passes(&out), ["a::x", "a::y"]);
+        assert_eq!(failed_count("FAILED. 2 passed; 1 failed; 0 ignored"), Some(1));
+        assert_eq!(failures("running 1 test\ntest a::x ... ok\n\ntest result: ok. 1 passed; 0 failed\n"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn listed_failures_pass_the_gate_and_others_do_not() {
+        let both = pretty(&[("a::ok", true), ("a::known", false), ("a::flaky", false)]);
+        assert_eq!(
+            grade("pkg", false, &both, &allowed()).unwrap(),
+            "FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s; 1 known failing, 1 quarantined failed"
+        );
+        let new = pretty(&[("a::known", false), ("a::new", false)]);
+        assert!(grade("pkg", false, &new, &allowed()).unwrap_err().contains("REGRESSION, failed and not on the known-failing list: pkg::a::new"));
+        // The same names in another binary are not listed.
+        assert!(grade("other", false, &both, &allowed()).is_err());
+    }
+
+    /// `--nocapture --test-threads=1`, as Rust 1.99 prints it: a test's output lands between its
+    /// name and its result, so only the closing list names every failure.
+    #[test]
+    fn a_failure_hidden_by_its_own_output_is_still_graded() {
+        let out = "\nrunning 3 tests\ntest a::known ... FAILED\ntest a::new ... \nthread 'a::new' panicked at t.rs:2:47:\nboom\nhalf a lineFAILED\n\
+                   test a::ok ... ok\n\nfailures:\n\nfailures:\n    a::known\n    a::new\n\n\
+                   test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n";
+        assert!(grade("pkg", false, out, &allowed()).unwrap_err().contains("REGRESSION, failed and not on the known-failing list: pkg::a::new"));
+    }
+
+    /// A failing test whose captured output looks like a result line invents no failure.
+    #[test]
+    fn captured_output_is_not_read_as_results() {
+        let out = pretty(&[("a::known", false)]).replace("boom\n", "boom\ntest a::other ... FAILED\ntest a::known ... ok\n");
+        assert_eq!(
+            grade("pkg", false, &out, &allowed()).unwrap(),
+            "FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s; 1 known failing"
+        );
+    }
+
+    #[test]
+    fn a_failures_list_that_disagrees_with_the_count_fails_the_gate() {
+        let out = pretty(&[("a::known", false)]).replace("1 failed", "2 failed");
+        assert!(grade("pkg", false, &out, &allowed()).unwrap_err().contains("libtest counted 2 failed but its failures list names 1"));
+    }
+
+    /// `-q` prints dots for passes, so the grader asks for pretty output unless a format was chosen.
+    #[test]
+    fn graded_binaries_get_pretty_output() {
+        assert_eq!(graded_args(&["-q"]), ["-q", "--format", "pretty"]);
+        assert_eq!(graded_args(&["--format", "terse"]), ["--format", "terse"]);
+        assert_eq!(graded_args(&["--format=json"]), ["--format=json"]);
+    }
+
+    #[test]
+    fn a_known_failure_that_passes_must_leave_the_list() {
+        let out = pretty(&[("a::known", true), ("a::flaky", true)]);
+        let err = grade("pkg", true, &out, &allowed()).unwrap_err();
+        assert!(err.contains("FIXED, remove it from tests/KNOWN_FAILING_TESTS: pkg::a::known"), "{err}");
+        assert!(!err.contains("flaky"), "a quarantined test that passes is not an error: {err}");
+    }
+
+    #[test]
+    fn a_crash_fails_even_when_every_failed_test_is_listed() {
+        assert!(grade("pkg", false, "test a::known ... FAILED\n", &allowed()).unwrap_err().contains("crash"));
+        assert!(grade("pkg", false, "running 3 tests\n", &allowed()).unwrap_err().contains("crash"));
+        assert_eq!(
+            grade("pkg", true, &pretty(&[("a::ok", true)]), &allowed()).unwrap(),
+            "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+        );
+    }
+
+    #[test]
+    fn the_real_lists_parse() {
+        let allowed = Allowed::read(&crate::root()).unwrap();
+        assert!(allowed.known.iter().chain(&allowed.quarantined).all(|t| t.contains("::")));
     }
 }

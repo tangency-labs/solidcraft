@@ -30,13 +30,15 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use solidcore::blend::fillet_executive::api::{create_face_from_surface, fillet_edges};
 use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
 use solidcore::curve::curve::Curve;
 use solidcore::error::EntityRef;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::tol;
-use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point2, Point3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
@@ -55,17 +57,10 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, vertex, EdgeId, FaceId};
 use solidcore::{Brep, Kernel, SolidError};
 
-/// SolidCraft's fix list (`tests/kernel_cases/fixes.json`).
+/// SolidCraft's fix list (`support/solidcraft_fixes.rs`).
 fn kernel() -> Kernel {
-    let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
-    let mut f = UpstreamFixes::default();
-    for name in &names {
-        if let Some(flag) = f.flag_mut(name) {
-            *flag = true;
-        }
-    }
     Kernel {
-        fixes: f,
+        fixes: solidcraft_fixes::solidcraft_fixes(),
         ..Kernel::default()
     }
 }
@@ -694,6 +689,39 @@ fn a_twisted_side_round_is_its_walls_round_between_sections() {
         assert!(judged > 1000, "{f:?} judged {judged}");
         assert!(worst <= 1e-6, "{f:?} worst {worst:e}");
     }
+}
+
+/// The twisted disc's top round at 1.10 (narrower than the side rounds it meets, which are
+/// only fitted): every edge of the result carries a stored tolerance at least its measured
+/// gap to its faces, and every vertex one whose half bounds its gap, so the level-2 check
+/// reports no edge-use gaps. Only the vertex/face gaps over the intersection tolerance that
+/// the side rounds' fit leaves remain (tangency-labs/solidcraft#13772).
+#[test]
+fn the_twisted_disc_s_top_round_keeps_tolerances_at_least_its_measured_gaps() {
+    let mut k = kernel();
+    let mut b = side_rounded_disc(&mut k, 2);
+    let top = top_edges(&b);
+    fillet_edges(&mut k, &mut b, &top, 1.10, 1, 1, 1.0).unwrap();
+    b.refresh_cached_topology();
+    for e in solidcore::topology::brep::p1::edges(&b, None).unwrap() {
+        let tol = edge::tolerance(&b, e).unwrap();
+        for eu in b.edge(e).unwrap().edgeuses.clone() {
+            if let Some(g) =
+                solidcore::topology::edgeuse::p1::max_edge_face_gap(&k, &mut b, eu, true).unwrap()
+            {
+                assert!(
+                    g.gap_3d <= tol,
+                    "edge {e:?}: tolerance {tol:e} under its gap {:e}",
+                    g.gap_3d
+                );
+            }
+        }
+    }
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    let edge_use: Vec<_> = lines.iter().filter(|l| l.contains("SmEdgeuse")).collect();
+    assert!(edge_use.is_empty(), "edge-use gaps: {edge_use:#?}");
 }
 
 // ---- helpers (as `issue_2648_twisted_disc_top_round.rs`'s) -----------------------------

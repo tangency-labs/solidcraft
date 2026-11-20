@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="760" height="470" viewBox="0 0 760 470">
+  <title>offset-tie</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="760" height="470" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 24 36)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Classifying a trimmed offset: its mid point lies exactly d from its own curve</tspan></text>
+    <path id="original_arc" data-name="original arc" d="M110 150 C253.594 150 370 266.406 370 410" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <path id="offset_arc" data-name="offset arc" d="M110 190 C231.503 190 330 288.497 330 410" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <line id="radius" x1="110" y1="410" x2="293.85" y2="226.15" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <circle id="P" cx="265.56" cy="254.44" r="4" fill="#000000"/>
+    <circle id="Q" cx="293.85" cy="226.15" r="4" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 302 218)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">Q</tspan></text>
+    <text transform="matrix(1 0 0 1 318 218)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">its foot on the arc</tspan></text>
+    <text transform="matrix(1 0 0 1 282 250)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-style="italic" fill="#000000"><tspan x="0" y="0">d</tspan></text>
+    <text transform="matrix(1 0 0 1 118 140)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">original arc, r 8.98 about (102.5, -32.5)</tspan></text>
+    <text transform="matrix(1 0 0 1 24 440)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">centre</tspan></text>
+    <circle id="centre" cx="110" cy="410" r="3" fill="#555555"/>
+    <line id="centre_leader" data-name="centre leader" x1="62" y1="436" x2="106" y2="413" fill="none" stroke="#555555" stroke-width="0.75" stroke-miterlimit="10"/>
+    <rect id="bound_band" data-name="bound band" x="420" y="200" width="320" height="40" fill="#dce9f5"/>
+    <line id="axis" x1="420" y1="220" x2="740" y2="220" fill="none" stroke="#000000" stroke-miterlimit="10"/>
+    <line id="d_tick" data-name="d tick" x1="700" y1="206" x2="700" y2="234" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="cutoff_tick" data-name="cutoff tick" x1="630" y1="210" x2="630" y2="230" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <circle id="value" cx="615.2" cy="220" r="4" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 706 198)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-style="italic" fill="#000000"><tspan x="0" y="0">d</tspan></text>
+    <text transform="matrix(1 0 0 1 560 166)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">upstream&apos;s cutoff</tspan></text>
+    <text transform="matrix(1 0 0 1 560 181)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">d (1 - 1e-12) = d - 1.7e-14</tspan></text>
+    <line id="cutoff_leader" data-name="cutoff leader" x1="628" y1="186" x2="630" y2="208" fill="none" stroke="#555555" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 470 266)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">computed at 2 mm: d - 2.1e-14</tspan></text>
+    <line id="value_leader" data-name="value leader" x1="600" y1="256" x2="613" y2="224" fill="none" stroke="#555555" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 420 350)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">upstream: below the cutoff, the offset arc is dropped</tspan></text>
+    <text transform="matrix(1 0 0 1 420 366)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">and its wall is missing (9 faces, not closed)</tspan></text>
+    <text transform="matrix(1 0 0 1 420 392)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">now: not proved closer than d, the offset arc is kept</tspan></text>
+    <text transform="matrix(1 0 0 1 420 408)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">(10 faces at every height)</tspan></text>
+    <text transform="matrix(1 0 0 1 252 266)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="end"><tspan x="0" y="0">mid point of the offset   P</tspan></text>
+    <text transform="matrix(1 0 0 1 420 110)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">|P - Q| near d, zoomed: 40 pt = 1e-14 mm</tspan></text>
+    <text transform="matrix(1 0 0 1 318 386)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="end"><tspan x="0" y="0">offset arc, d = 0.0175 inside</tspan></text>
+    <text transform="matrix(1 0 0 1 318 401)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="end"><tspan x="0" y="0">(drawn far wider)</tspan></text>
+    <text transform="matrix(1 0 0 1 420 300)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">the rounding bound (the distance&apos;s own and twice the arc&apos;s</tspan></text>
+    <text transform="matrix(1 0 0 1 420 315)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">point error bound) is wider than this whole zoom</tspan></text>
+  </g>
+</svg>

@@ -35,8 +35,8 @@ fn strict_keeps_todays_errors() {
 
 /// #10942: a body's edges and faces and the design's threads reply as their output schemas say,
 /// in Warn without warnings for good calls and with them for a misspelt key. A cylindrical face
-/// carries `cylinder` and a folded sheet's face `sheet_face`; strict refuses a `body` that isn't
-/// text, which the handlers read as no body.
+/// carries `cylinder`, and a folded sheet's faces are named by the model; strict refuses a `body`
+/// that isn't text, which the handlers read as no body.
 #[test]
 fn model_lists_reply_with_their_schemas() {
     let (edges, faces, threads) = (output_schema_for::<ModelEdges>(), output_schema_for::<ModelFaces>(), output_schema_for::<ModelThreads>());
@@ -64,7 +64,11 @@ fn model_lists_reply_with_their_schemas() {
     assert!(r["faces"].as_array().into_iter().flatten().any(|f| f["cylinder"]["radius"].as_f64().is_some_and(|r| (r - 4.0).abs() < 1e-9)), "{r}");
     let r = run(&mut s, "model.faces", json!({"body": sheet}));
     matches(&faces, &r, false);
-    assert!(r["faces"].as_array().into_iter().flatten().any(|f| f["sheet_face"].as_str().is_some_and(|n| n.starts_with("sheet:"))), "{r}");
+    // A sheet's faces are named by the model, after what made each (#7990).
+    assert!(
+        r["faces"].as_array().into_iter().flatten().any(|f| f["name"].as_str().is_some_and(|n| n.starts_with('F') && n.ends_with(":top"))),
+        "{r}"
+    );
     let r = run(&mut s, "model.threads", json!({}));
     matches(&threads, &r, false);
     assert_eq!((r["threads"][0]["designation"].as_str(), r["threads"][0]["hand"].as_str()), (Some("M8"), Some("right")), "{r}");
