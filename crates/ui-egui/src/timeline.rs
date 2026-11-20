@@ -274,6 +274,9 @@ impl TimelineKind {
             FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } | FeatureKind::Sweep { sketch, .. } => Self::Profile(*sketch),
             // Sheet metal drawn from a sketch: the base flange's outline and the contour flange's chain.
             FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. } => Self::Profile(*sketch),
+            // An edge flange made from a profile sketch (#3516): the sketch is where its outline
+            // is edited, so its menus offer Edit Profile Sketch as an extrude's do.
+            FeatureKind::SheetFlange { profile: Some(sketch), .. } => Self::Profile(*sketch),
             _ => Self::Other,
         }
     }

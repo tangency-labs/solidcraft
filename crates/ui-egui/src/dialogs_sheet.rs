@@ -139,6 +139,16 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// by the point of the edge each belongs to: one stretch of that edge each, with
                 /// its own fractions, angle, height and side; an edge with none is the whole edge.
                 segments: Vec<(Vec3, Vec<SegmentRow>)>,
+                /// Edge flanges: Profile Sketch (#3516). A new flange draws its profile sketch and is
+                /// made from it (the command's `profile_sketch`); an edited one keeps the sketch it
+                /// has while this stays ticked, and becomes a plain flange when it is cleared.
+                profile_sketch: bool,
+                /// The dialog edits a flange already made. An edit is rebuilt in a scratch copy of the
+                /// design, where a sketch drawn for it would land after the flange it shapes, so an
+                /// edit never draws one: Profile Sketch only keeps or clears the sketch in `profile`.
+                editing: bool,
+                /// The profile sketch of the flange being edited, if it has one.
+                profile: Option<u64>,
             },
             Unfold {
                 refold: bool,
@@ -239,6 +249,31 @@ fn new_flange(app: &SolveApp, ty: usize) -> Sm {
         relief_size: String::new(),
         then: Vec::new(),
         segments: Vec::new(),
+        // As the last Flange window left it (`remember_profile_sketch`); off until then, so a
+        // new flange is a plain rectangle, as before.
+        profile_sketch: app.flange_profile_sketch.unwrap_or(false),
+        editing: false,
+        profile: None,
+    }
+}
+
+/// A new edge flange's Profile Sketch starts as the last Flange window left it, across sessions:
+/// the choice is kept in egui's persisted memory, like the Parameters window's sort order, not in
+/// Preferences (review of #18498). Before the options draw (`after` false), the first window since
+/// the app started takes the kept choice; after them, a changed tick is kept for the next one.
+fn remember_profile_sketch(app: &mut SolveApp, ctx: &egui::Context, profile_sketch: &mut bool, after: bool) {
+    let id = egui::Id::unique("sc_flange_profile_sketch");
+    match app.flange_profile_sketch {
+        None if !after => {
+            let kept = ctx.data_mut(|m| m.get_persisted::<bool>(id)).unwrap_or(false);
+            app.flange_profile_sketch = Some(kept);
+            *profile_sketch = kept;
+        }
+        Some(last) if after && last != *profile_sketch => {
+            app.flange_profile_sketch = Some(*profile_sketch);
+            ctx.data_mut(|m| m.insert_persisted(id, *profile_sketch));
+        }
+        _ => {}
     }
 }
 
@@ -370,7 +405,26 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
     let t = Tokens::get();
     let mut enter = false;
     match k {
-        Sm::Flange { ty, height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then, segments } => {
+        Sm::Flange {
+            ty,
+            height,
+            angle,
+            radius,
+            position,
+            height_from,
+            flip,
+            distance,
+            reverse,
+            rule,
+            own,
+            relief,
+            relief_size,
+            then,
+            segments,
+            profile_sketch,
+            editing,
+            profile,
+        } => {
             *ty = flange_type(inputs);
             form_row(ui, "Type", |ui| {
                 ui.label(FLANGE_TYPES.get(*ty).copied().map(solidcraft_ui_text::tr).unwrap_or(""));
@@ -509,6 +563,16 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             }
             if *ty == 2 {
                 crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip), ("Other side", reverse)]);
+            } else if *ty == 1 && (!*editing || profile.is_some()) {
+                // An edit of a plain flange has no Profile Sketch to offer: it can't draw one (see
+                // `editing`), and a flange with a profile can only keep it or drop it.
+                if !*editing {
+                    remember_profile_sketch(app, ui.ctx(), profile_sketch, false);
+                }
+                crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip), ("Profile Sketch", profile_sketch)]);
+                if !*editing {
+                    remember_profile_sketch(app, ui.ctx(), profile_sketch, true);
+                }
             } else {
                 crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
             }
@@ -924,6 +988,32 @@ fn flange_edges_segmented(inputs: &[SelInput], own: &[(Vec3, String, String)], s
     Ok(out)
 }
 
+/// Profile Sketch with more or fewer edges than one.
+const PROFILE_ONE_EDGE: &str = "Profile Sketch takes one edge: pick just one, or clear Profile Sketch";
+/// Profile Sketch on an edge with segments, or an angle or height of its own.
+const PROFILE_PLAIN_EDGE: &str = "Profile Sketch takes the whole edge at the flange's own angle and height: remove its segments and its own angle and height, or clear Profile Sketch";
+/// Profile Sketch with further bends.
+const PROFILE_NO_BENDS: &str = "Profile Sketch takes no further bends: bend the flange's far edge in its own feature, or clear Profile Sketch";
+/// Profile Sketch with the height from anywhere but the outer sharp.
+const PROFILE_HEIGHT_FROM: &str = "a flange from a profile sketch is as high as its profile: set Height From to Outer Sharp, or clear Profile Sketch";
+/// Profile Sketch ticked while editing a flange that has none (see `Sm::Flange::editing`).
+const PROFILE_ONLY_NEW: &str = "Profile Sketch draws its sketch for a new flange only: make this flange again with Profile Sketch ticked";
+
+/// Why Profile Sketch can't make the flange the dialog sends, or None when it can. `edges` are
+/// the edges as the command gets them ([`flange_edges_segmented`]): the command takes a profile
+/// on one edge given as a plain point, so an edge sent as an object (with segments, or an angle
+/// or height of its own, even one left over from an edge since removed) is refused like a second
+/// edge. Further bends and a height from anywhere but the outer sharp are refused too.
+fn profile_refusal(edges: &[Value], bends: usize, height_from: usize) -> Option<&'static str> {
+    match edges {
+        [edge] if !edge.is_array() => Some(PROFILE_PLAIN_EDGE),
+        [_] if bends > 0 => Some(PROFILE_NO_BENDS),
+        [_] if height_from > 0 => Some(PROFILE_HEIGHT_FROM),
+        [_] => None,
+        _ => Some(PROFILE_ONE_EDGE),
+    }
+}
+
 /// Where the segments of the edge picked at `p` are kept (an empty entry on first use).
 fn segments_slot(segments: &mut Vec<(Vec3, Vec<SegmentRow>)>, p: Vec3) -> usize {
     segments.iter().position(|s| s.0.dist(p) < 1e-9).unwrap_or_else(|| {
@@ -1020,7 +1110,24 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
     let s = &app.session;
     let (cmd, mut p): (&str, Value) = match k {
         Sm::Flange {
-            height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then, segments, ..
+            height,
+            angle,
+            radius,
+            position,
+            height_from,
+            flip,
+            distance,
+            reverse,
+            rule,
+            own,
+            relief,
+            relief_size,
+            then,
+            segments,
+            profile_sketch,
+            editing,
+            profile,
+            ..
         } => {
             let mut p = match flange_type(inputs) {
                 1 => {
@@ -1059,6 +1166,24 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                             bends.push(b);
                         }
                         p["then"] = json!(bends);
+                    }
+                    if *profile_sketch {
+                        // A ticked Profile Sketch is never dropped for a plain flange: what the
+                        // command would refuse is refused here, saying what to change.
+                        let edges = p["edges"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+                        if let Some(why) = profile_refusal(edges, then.len(), *height_from) {
+                            return Err(why.into());
+                        }
+                        match (*editing, *profile) {
+                            // An edited flange keeps the sketch it has; it draws no other.
+                            (true, Some(sketch)) => p["profile"] = json!(sketch),
+                            (true, None) => return Err(PROFILE_ONLY_NEW.into()),
+                            (false, _) => p["profile_sketch"] = json!(true),
+                        }
+                    } else if *editing && profile.is_some() {
+                        // Cleared on a flange that has a profile: an explicit null, so the flange
+                        // becomes a plain one and nothing kept from the feature brings it back.
+                        p["profile"] = Value::Null;
                     }
                     p
                 }
@@ -1283,7 +1408,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (f, curves.iter().map(|id| crate::selection::curve_pick(id, sketch.0, app.session.active_sketch)).collect())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief, height_from, .. } => {
+        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief, height_from, profile } => {
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
             }
@@ -1343,6 +1468,11 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 relief_size: corner_relief.as_deref().map(str::to_string).unwrap_or_default(),
                 then: Vec::new(),
                 segments,
+                // A flange from a profile sketch reopens with it ticked and keeps that sketch,
+                // which is where its outline is edited.
+                profile_sketch: profile.is_some(),
+                editing: true,
+                profile: profile.map(|sketch| sketch.0),
             };
             (f, picked)
         }

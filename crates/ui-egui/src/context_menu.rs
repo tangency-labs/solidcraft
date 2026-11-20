@@ -737,10 +737,13 @@ pub(crate) fn face_feature(app: &SolveApp, body: &ModelBody, index: usize) -> Op
 
 /// A feature and its profile sketch, if it has one.
 fn feature_and_sketch(app: &SolveApp, f: Option<u64>) -> (Option<u64>, Option<u64>) {
-    let sketch = f
-        .and_then(|f| app.session.doc.feature(f))
-        .and_then(|f| serde_json::to_value(&f.kind).ok())
-        .and_then(|v| v.get("sketch").and_then(Value::as_u64).or_else(|| v.as_object()?.values().find_map(|x| x.get("sketch")?.as_u64())));
+    let feature = f.and_then(|f| app.session.doc.feature(f));
+    // An edge flange's profile sketch is its `profile`, not a `sketch` field (#3516).
+    let sketch = feature.and_then(|f| crate::timeline::TimelineKind::of(&f.kind).profile_sketch().map(|s| s.0)).or_else(|| {
+        feature
+            .and_then(|f| serde_json::to_value(&f.kind).ok())
+            .and_then(|v| v.get("sketch").and_then(Value::as_u64).or_else(|| v.as_object()?.values().find_map(|x| x.get("sketch")?.as_u64())))
+    });
     (f, sketch)
 }
 

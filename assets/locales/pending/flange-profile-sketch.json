@@ -1,42 +1,26 @@
 {
   "en": {
-    "Profile Sketch": "Profile Sketch",
-    "prefs.flange_profile_sketch": "New edge flanges draw a profile sketch",
-    "prefs.flange_profile_sketch.help": "The Flange window opens with Profile Sketch ticked. An edge flange on one edge then draws a sketch on its face, and editing that sketch changes the flange's outline and holes."
+    "Profile Sketch": "Profile Sketch"
   },
   "ar": {
-    "Profile Sketch": "رسم المقطع",
-    "prefs.flange_profile_sketch": "الشفاه الحافية الجديدة ترسم رسم مقطع",
-    "prefs.flange_profile_sketch.help": "تُفتح نافذة الشفة مع تحديد «رسم المقطع». عندها ترسم الشفة الحافية على حافة واحدة رسمًا على وجهها، وتعديل هذا الرسم يغيّر محيط الشفة وثقوبها."
+    "Profile Sketch": "رسم المقطع"
   },
   "he": {
-    "Profile Sketch": "סקיצת פרופיל",
-    "prefs.flange_profile_sketch": "אוגני קצה חדשים יוצרים סקיצת פרופיל",
-    "prefs.flange_profile_sketch.help": "חלון האוגן נפתח כאשר \"סקיצת פרופיל\" מסומן. אוגן קצה על קצה אחד יוצר אז סקיצה על הפאה שלו, ועריכת הסקיצה משנה את מתאר האוגן ואת החורים שבו."
+    "Profile Sketch": "סקיצת פרופיל"
   },
   "ja": {
-    "Profile Sketch": "プロファイルスケッチ",
-    "prefs.flange_profile_sketch": "新しいエッジフランジでプロファイルスケッチを作成",
-    "prefs.flange_profile_sketch.help": "フランジウィンドウが「プロファイルスケッチ」にチェックが入った状態で開きます。1 本のエッジ上のエッジフランジはその面にスケッチを作成し、そのスケッチを編集するとフランジの外形と穴が変わります。"
+    "Profile Sketch": "プロファイルスケッチ"
   },
   "vi": {
-    "Profile Sketch": "Phác thảo biên dạng",
-    "prefs.flange_profile_sketch": "Gờ cạnh mới tạo phác thảo biên dạng",
-    "prefs.flange_profile_sketch.help": "Cửa sổ Gờ mở ra với Phác thảo biên dạng đã được chọn. Khi đó gờ cạnh trên một cạnh sẽ tạo một phác thảo trên mặt của nó, và sửa phác thảo đó sẽ thay đổi đường bao và các lỗ của gờ."
+    "Profile Sketch": "Phác thảo biên dạng"
   },
   "zh": {
-    "Profile Sketch": "轮廓草图",
-    "prefs.flange_profile_sketch": "新建边线法兰时绘制轮廓草图",
-    "prefs.flange_profile_sketch.help": "法兰窗口打开时勾选“轮廓草图”。单条边上的边线法兰会在其面上绘制草图，编辑该草图即可改变法兰的外形和孔。"
+    "Profile Sketch": "轮廓草图"
   },
   "de": {
-    "Profile Sketch": "Profil-Skizze",
-    "prefs.flange_profile_sketch": "Neue Kantenlaschen zeichnen eine Profil-Skizze",
-    "prefs.flange_profile_sketch.help": "Das Fenster „Lasche“ öffnet sich mit aktivierter Profil-Skizze. Eine Kantenlasche an einer Kante zeichnet dann eine Skizze auf ihre Fläche, und eine Änderung dieser Skizze ändert Umriss und Löcher der Lasche."
+    "Profile Sketch": "Profil-Skizze"
   },
   "ko": {
-    "Profile Sketch": "윤곽 스케치",
-    "prefs.flange_profile_sketch": "새 모서리 플랜지에 윤곽 스케치 그리기",
-    "prefs.flange_profile_sketch.help": "플랜지 창이 윤곽 스케치가 선택된 상태로 열립니다. 모서리 하나에 만드는 모서리 플랜지는 면에 스케치를 그리고, 그 스케치를 편집하면 플랜지의 외곽과 구멍이 바뀝니다."
+    "Profile Sketch": "윤곽 스케치"
   }
 }
