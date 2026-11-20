@@ -562,7 +562,12 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         let mut filters = c.filters.clone();
         if let Some(f) = filters.get_mut(p.filter) {
             f.keep = Keep::Range { range: p.now };
-            edit = Some(json!({ "cloud": c.id, "filters": filters_json(&filters) }));
+            // Joined to a change made on the same frame, so neither is lost.
+            let mut e = edit.take().unwrap_or_else(|| json!({ "cloud": c.id }));
+            if let Some(o) = e.as_object_mut() {
+                o.insert("filters".into(), json!(filters_json(&filters)));
+            }
+            edit = Some(e);
         }
     }
     if reload {
