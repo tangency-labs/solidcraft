@@ -558,7 +558,8 @@ fn rules_dialog_unfolds_from_a_press_brake_charts_90_degree_value() {
 
 /// The rule manager's card widens to fit its longest label, as feature cards do (#10620): at
 /// 1280×720 "Bend Deduction at 90°" and "Bend Allowance at 90°" drew as "Bend Deduction a…", and
-/// the card widens no further than its labels need.
+/// the card widens no further than its labels need. It widens only while a 90° row shows: a rule
+/// that unfolds from its K-factor, as every rule did before, keeps the card's fixed width.
 #[test]
 fn the_rule_managers_card_fits_its_90_degree_labels() {
     let mut h = crate::scenario::Harness::new();
@@ -584,7 +585,13 @@ fn the_rule_managers_card_fits_its_90_degree_labels() {
             .collect();
         assert!(drawn.iter().any(|t| t == label), "{label} drawn whole: {drawn:?}");
         let wide = card(&h).unwrap_or(plain);
-        assert!(wide >= plain && wide <= plain * 1.5, "{label}: card {wide} from {plain}");
+        assert!(wide > plain && wide <= plain * 1.5, "{label}: card {wide} from {plain}");
+        // Back on K Factor the card is the width it was.
+        if let Some(Kind::Sheet(Sm::Rules { unfold, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *unfold = 0;
+        }
+        h.frames(4);
+        assert_eq!(card(&h), Some(plain), "the K Factor card keeps its fixed width after {label}");
     }
 }
 
