@@ -271,6 +271,8 @@ pub fn crash_test() -> Result<()> {
 /// A B-rep. Immutable: operations return new bodies.
 pub struct Brep {
     body: core::Body,
+    /// Every bounded region with more than one shell had its outer shell confirmed on import.
+    enclosing_shell_order_proven: bool,
     /// The body's number in a trace ([`trace`]).
     id: u64,
 }
@@ -284,7 +286,7 @@ impl std::fmt::Debug for Brep {
 impl Brep {
     /// A body solidcore made.
     fn made_core(body: core::Body) -> Brep {
-        Brep { body, id: trace::next_id() }
+        Brep { body, enclosing_shell_order_proven: false, id: trace::next_id() }
     }
 
     /// solidcore's body.
