@@ -193,6 +193,41 @@ pub(crate) fn bisect_at(
     Ok(Nodes { points: out.iter().map(|p| p.1).collect(), params: out.iter().map(|p| p.0).collect(), snapped: Vec::new(), capped })
 }
 
+/// Merge exact bounded display parameters once per native edge, preserving its
+/// existing canonical endpoints and contact metadata. These are not snapped
+/// contacts and never borrow another edge's point.
+pub(crate) fn insert_parameters(b: &brep::Brep, ei: usize, nodes: &mut Nodes, parameters: &[f64]) -> Result<()> {
+    let fail = |why: &str| TessError::Failed(format!("not supported yet: guided tessellation: edge {ei}: {why}"));
+    let edge = b.edges.get(ei).ok_or_else(|| fail("missing edge"))?;
+    let [low, high] = edge.interval;
+    if nodes.points.len() != nodes.params.len()
+        || parameters.len() > MAX_EDGE_NODES
+        || parameters.iter().any(|t| !t.is_finite() || *t < low || *t > high)
+    {
+        return Err(fail("invalid bounded parameter stations"));
+    }
+    let mut extra = parameters.to_vec();
+    extra.sort_by(f64::total_cmp);
+    extra.dedup();
+    extra.retain(|t| nodes.params.binary_search_by(|p| p.total_cmp(t)).is_err());
+    let count = nodes.params.len().checked_add(extra.len()).ok_or_else(|| fail("node count overflow"))?;
+    if count > MAX_EDGE_NODES {
+        return Err(fail("edge node budget exhausted"));
+    }
+    let curve = kernel::curve(edge.parameters()).map_err(|error| fail(&error.to_string()))?;
+    let curve = CurveEval::new(&curve).map_err(|error| fail(&error.to_string()))?;
+    let mut all: Vec<_> = nodes.params.iter().copied().zip(nodes.points.iter().copied()).collect();
+    all.try_reserve(extra.len()).map_err(|_| fail("edge allocation refused"))?;
+    for parameter in extra {
+        let point = curve.point(parameter).filter(|point| point.is_finite()).ok_or_else(|| fail("curve station does not evaluate"))?;
+        all.push((parameter, point));
+    }
+    all.sort_by(|a, b| a.0.total_cmp(&b.0));
+    nodes.params = all.iter().map(|&(parameter, _)| parameter).collect();
+    nodes.points = all.into_iter().map(|(_, point)| point).collect();
+    Ok(())
+}
+
 /// Edge `ei`'s nodes with each of its segments `segs` (counted from its start) halved at the
 /// middle of its curve parameters, the new node on the curve (on a line, halfway between the two,
 /// as [`sample_edge`] spaces a line's nodes). A segment too short to halve in floating point keeps

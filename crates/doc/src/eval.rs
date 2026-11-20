@@ -1305,7 +1305,11 @@ impl ModelState {
             {
                 b.transferred = true;
                 b.component = old.component;
-                b.source_transform = old.source_transform;
+                // Move has already composed the source frame in its result;
+                // retaining ownership must not replace it with the input frame.
+                if !matches!(f.kind, FeatureKind::Move { copy: false, .. }) {
+                    b.source_transform = old.source_transform;
+                }
             }
             let kept = olds.iter().find(|x| x.body.same(&b.body));
             match kept {
@@ -3239,6 +3243,9 @@ fn reads_none_of(f: &Feature, st: &ModelState, moved: &[(u64, Vec<ModelBody>)], 
         }
         FeatureKind::Extrude { extent, .. } if extent.to.is_some() || extent.from.is_some() => return false,
         FeatureKind::Revolve { to: Some(_), .. } | FeatureKind::Revolve { axis: AxisRef::Model { .. }, .. } => return false,
+        FeatureKind::Form { definition, .. } if definition.profile.is_some() || definition.matching.is_some() || definition.pipe.is_some() => {
+            return false;
+        }
         kind if drawn_tools_change_bodies(kind) => {
             let mut reads = PlacementReads::default();
             reads.drawn_targets(Some(st), f);
@@ -3472,6 +3479,21 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             }
             for b in bodies {
                 reads.placed_body(st, &b.0);
+            }
+        }
+        FeatureKind::Form { definition, .. } => {
+            if definition.profile.is_none() && drawn_tools_change_bodies(&f.kind) {
+                reads.drawn_targets(st, f);
+            }
+            for support in definition.profile.iter().map(|profile| &profile.source).chain(definition.matching.iter().map(|matching| &matching.source))
+            {
+                reads.placed_body(st, support.body().as_ref());
+            }
+            if let Some(pipe) = definition.pipe.as_ref().filter(|pipe| pipe.follow_path) {
+                match &pipe.source {
+                    crate::forms::PipeSource::Edges { body, .. } => reads.placed_body(st, body.as_ref()),
+                    crate::forms::PipeSource::Sketch { sketch, .. } => reads.sketch(doc, sketch.0),
+                }
             }
         }
         // Joins, cuts and intersects meet their targets where those are placed (#3383).
@@ -4342,7 +4364,7 @@ impl Model {
                         let (r, deferred) = kernel::validating(validation, || {
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = self.import_digests.heals(f.id).cloned());
                             let meshes = prepared_meshes.as_ref().filter(|(id, _)| *id == f.id).map(|(_, meshes)| meshes);
-                            let r = eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair, heal, meshes);
+                            let r = eval_feature(doc, &vals, f, &mut next, (&mut warning, &out), &mut import_report, &mut repair, heal, meshes);
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = None);
                             r
                         });
@@ -8259,6 +8281,109 @@ pub(crate) fn thin_regions(vals: &BTreeMap<String, Value>, ss: &SolvedSketch, th
 /// How far apart (mm) profiles must stay for their extruded tools to be cut as one.
 const APART_GAP: f64 = 1e-3;
 
+struct PreparedForm {
+    tool: Traced,
+    note: Option<String>,
+    replacement: Option<(Traced, String, usize, f64)>,
+}
+
+fn evaluate_form_surface(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
+    let FeatureKind::Form { definition, tolerance, .. } = &f.kind else {
+        return Err(DocError::Invalid("expected a Form Surface".into()));
+    };
+    let profile = definition.profile.as_ref().ok_or_else(|| DocError::Invalid("missing Form Surface source".into()))?;
+    if definition.pipe.is_some() || definition.matching.is_some() || definition.hierarchy.is_some() || definition.symmetry.is_some() {
+        return Err(DocError::Invalid("Form Surface uses its fixed regular guide grid".into()));
+    }
+    let source = state_in_frame(doc, st, f.component)?;
+    let (resolved, cage) = profile.recompute(definition, &source)?;
+    let tolerance = val(vals, tolerance, Kind::Length)?;
+    let (base, _) = resolved.resolve(&source)?;
+    let name = base.name.clone();
+    let crate::forms::ProfileFit { open, patch, solid, patch_roots, .. } = resolved.fit(&source, &cage, &definition.placement, tolerance)?;
+    let open = Traced::step(open, &[&base.traced()]);
+    // The filling's edges come from the open source; its face belongs to this Form.
+    let roles = patch_roots.map_or_else(
+        || vec![vec!["FormSurface".into()]],
+        |roots| roots.iter().map(|id| vec!["FormSurface".into(), format!("FormSurfacePatch{}", id + 1)]).collect(),
+    );
+    let patch = Traced::made(patch, Some(roles));
+    let combined = Traced::step(solid, &[&open, &patch]);
+    let combined = tool_in(&combined, tool_frame(&name))?;
+    let original = st.body(&name).ok_or_else(|| DocError::Invalid("the Form Surface source disappeared".into()))?;
+    let mut changed = original.remade(combined);
+    changed.transferred = original.transferred;
+    changed.source_name = original.source_name.clone();
+    if let Some(slot) = st.bodies.iter_mut().find(|b| b.name == name) {
+        *slot = changed;
+    }
+    Ok(())
+}
+
+fn form_tool(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<PreparedForm> {
+    let FeatureKind::Form { definition, tolerance, operation, .. } = &f.kind else {
+        return Err(DocError::Invalid("expected an editable Form feature".into()));
+    };
+    if definition.profile.is_some() {
+        return Err(DocError::Invalid("pattern the resulting body of a Form Surface".into()));
+    }
+    let tolerance = val(vals, tolerance, Kind::Length)?;
+    let source = if definition.matching.is_some() || definition.pipe.is_some() {
+        state_in_frame(doc, st, f.component)?
+    } else {
+        std::borrow::Cow::Borrowed(st)
+    };
+    let mut resolved = std::borrow::Cow::Borrowed(definition.as_ref());
+    if let Some(pipe) = &definition.pipe {
+        let cage = pipe.recompute(&definition.cage, &source)?;
+        resolved.to_mut().cage = cage;
+    }
+    if let Some(matching) = &definition.matching {
+        resolved = std::borrow::Cow::Owned(matching.recompute(&resolved, &source, tolerance)?.0);
+    }
+    let (body, report) = crate::forms::convert(&resolved, tolerance)?;
+    let hierarchy = resolved.hierarchy.as_ref();
+    let roles = Some(
+        report
+            .patch_roots
+            .iter()
+            .enumerate()
+            .map(|(i, &root)| {
+                let mut roles = vec![format!("FormPatch{}", root + 1)];
+                // A cap may use several exact native charts. Its persistent name follows the
+                // reserved slot, never an ordinal that the skin can later acquire.
+                if !hierarchy.is_some_and(|h| h.is_quad_cap_face(root) || h.has_detached_material() || h.has_boundary_collapse()) {
+                    roles.push(format!("FormPiece{}", i + 1));
+                }
+                roles
+            })
+            .collect(),
+    );
+    let tool = Traced::made(body, roles);
+    if *operation == Operation::NewBody || !tool.body.is_surface() {
+        return Ok(PreparedForm { tool, note: None, replacement: None });
+    }
+    match crate::forms::cap(&resolved, &source, &tool.body, tolerance) {
+        Ok(Some((solid, cap))) => {
+            let roles = Some((0..cap.face_count()).map(|i| vec!["FormCap".into(), format!("FormCapPiece{}", i + 1)]).collect());
+            let cap = Traced::made(cap, roles);
+            let replacement = resolved.matching.as_ref().and_then(|matching| match &matching.source {
+                crate::forms::SupportRef::Face { body, name, pick } => source.body(body).and_then(|b| {
+                    crate::naming::face_on_body(b, name, *pick)
+                        .map(|(i, _)| (tool.clone(), body.0.clone(), i, matching.config.tolerances.position_mm.min(tolerance).max(1e-7)))
+                }),
+                _ => None,
+            });
+            Ok(PreparedForm { tool: Traced::step(solid, &[&tool, &cap]), note: None, replacement })
+        }
+        Ok(None) => {
+            Ok(PreparedForm { tool, note: Some("Open Form kept separately; match a face or thicken it before combining".into()), replacement: None })
+        }
+        Err(error @ DocError::Kernel(kernel::KernelError::Internal(_))) => Err(error),
+        Err(error) => Ok(PreparedForm { tool, note: Some(format!("Form kept separately: {error}")), replacement: None }),
+    }
+}
+
 /// The tool bodies a feature adds or removes (extrude, revolve, primitives), in the current state.
 /// `to_body` is the body a To Object extent runs to (an extrude), when it found one.
 fn feature_tools_with_constructor(
@@ -8273,6 +8398,7 @@ fn feature_tools_with_constructor(
     *to_body = None;
     let unnamed = |bodies: Vec<Body>| -> Vec<Traced> { bodies.into_iter().map(Traced::unnamed).collect() };
     match &f.kind {
+        FeatureKind::Form { .. } => Ok(vec![form_tool(doc, vals, f, st)?.tool]),
         FeatureKind::Extrude { sketch, profiles, extent, operation, targets, thin } => {
             let ss = constructor_profile_in_frame(
                 doc,
@@ -9645,7 +9771,9 @@ pub(crate) fn extent_sides(vals: &BTreeMap<String, Value>, extent: &crate::Exten
 /// Operation and targets of a feature that makes tools.
 fn feature_op(f: &Feature) -> (Operation, Vec<String>) {
     match &f.kind {
-        FeatureKind::Extrude { operation, targets, .. } | FeatureKind::Revolve { operation, targets, .. } => (*operation, crate::plain(targets)),
+        FeatureKind::Extrude { operation, targets, .. }
+        | FeatureKind::Form { operation, targets, .. }
+        | FeatureKind::Revolve { operation, targets, .. } => (*operation, crate::plain(targets)),
         FeatureKind::Box { operation, .. }
         | FeatureKind::Cylinder { operation, .. }
         | FeatureKind::Sphere { operation, .. }
@@ -10637,8 +10765,9 @@ fn replay(
     st: &mut ModelState,
     features: &[FeatureId],
     mats: &[Mat],
-    warning: &mut Option<String>,
+    feedback: (&mut Option<String>, &[FeatureResult]),
 ) -> Result<()> {
+    let (warning, history) = feedback;
     if features.is_empty() {
         return Err(DocError::Invalid("no features selected".into()));
     }
@@ -10893,20 +11022,31 @@ fn replay(
         } else {
             // Each copy's faces are named as the source feature's, with the instance. Its face
             // points follow their named faces, as the feature's own did (#2121): a To Object
-            // extrude's copies reach the face where it is now, not where it was picked. They follow
-            // them to where the feature found them, before it ran: a cut up to a face it splits has
-            // left no one face of that name to find (#15054).
-            let moved = match st.named_faces.get(&src.id) {
-                Some(points) => {
-                    let mut g = (*src).clone();
-                    for (p, q) in g.kind.face_points_mut().into_iter().zip(points) {
-                        *p = *q;
+            // extrude's copies reach the face where it is now, not where it was picked.
+            let tools = if matches!(src.kind, FeatureKind::Form { .. }) {
+                // The saved Form is its original tool, not the body after it was
+                // combined. A face used to cap/match it may already be consumed.
+                // Earlier evaluation results also survive saved-model reloads.
+                let index = history
+                    .iter()
+                    .position(|r| r.id == src.id)
+                    .ok_or_else(|| DocError::Invalid("the Form pattern source has no earlier evaluation state".into()))?;
+                let empty = ModelState::default();
+                let before = history.get(..index).and_then(|results| results.iter().rev().find(|r| !r.skipped)).map_or(&empty, |r| r.state.as_ref());
+                feature_tools_with_constructor(doc, vals, src, before, &mut None, &mut None, &mut None)?
+            } else {
+                let moved = match st.named_faces.get(&src.id) {
+                    Some(points) => {
+                        let mut g = (*src).clone();
+                        for (p, q) in g.kind.face_points_mut().into_iter().zip(points) {
+                            *p = *q;
+                        }
+                        Some(g)
                     }
-                    Some(g)
-                }
-                None => with_named_face_points(doc, vals, named_from.as_ref().unwrap_or(st), src)?.map(|(g, _)| g),
+                    None => with_named_face_points(doc, vals, named_from.as_ref().unwrap_or(st), src)?.map(|(g, _)| g),
+                };
+                feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None, &mut None)?
             };
-            let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None, &mut None)?;
             for (k, m) in mats.iter().enumerate() {
                 let start = copies.len();
                 for t in &tools {
@@ -10964,6 +11104,7 @@ pub mod cell_grid;
 pub(crate) mod frame_member;
 #[path = "eval_surface.rs"]
 mod surface;
+pub use surface::refined_symmetric_uses_half_walls;
 #[path = "eval_thread.rs"]
 mod thread;
 use thread::thread_on;
@@ -11773,14 +11914,15 @@ fn eval_feature(
     vals: &BTreeMap<String, Value>,
     f: &Feature,
     st: &mut ModelState,
-    warning: &mut Option<String>,
+    feedback: (&mut Option<String>, &[FeatureResult]),
     import_report: &mut Option<Arc<kernel::ImportReport>>,
     repair: &mut Option<Arc<kernel::RepairReport>>,
     heal: bool,
     prepared_meshes: Option<&PreparedMeshImport>,
 ) -> Result<()> {
+    let (warning, history) = feedback;
     JOINED_TARGETS.with(|n| n.borrow_mut().clear());
-    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes);
+    let r = eval_feature_kind(doc, vals, f, st, (&mut *warning, history), import_report, repair, heal, prepared_meshes);
     for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
         append_warning(warning, note);
     }
@@ -11796,17 +11938,100 @@ fn eval_feature_kind(
     vals: &BTreeMap<String, Value>,
     f: &Feature,
     st: &mut ModelState,
-    warning: &mut Option<String>,
+    feedback: (&mut Option<String>, &[FeatureResult]),
     import_report: &mut Option<Arc<kernel::ImportReport>>,
     repair: &mut Option<Arc<kernel::RepairReport>>,
     heal: bool,
     prepared_meshes: Option<&PreparedMeshImport>,
 ) -> Result<()> {
+    let (warning, history) = feedback;
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
     refuse_ambiguous_targets(doc, st, f, &f.participants)?;
     match &f.kind {
         FeatureKind::NewerFileFeature { raw } => Err(DocError::Invalid(raw.why())),
+        FeatureKind::Form { definition, operation, targets, .. } => {
+            if definition.profile.is_some() {
+                return evaluate_form_surface(doc, vals, f, st);
+            }
+            let PreparedForm { tool, note, replacement } = form_tool(doc, vals, f, st)?;
+            let tools = vec![tool];
+            let targets: Vec<_> = targets.iter().map(|t| t.0.clone()).collect();
+            if *operation == Operation::NewBody {
+                return apply_traced(doc, st, f, tools, *operation, &targets);
+            }
+            if tools.iter().any(|t| t.body.is_surface()) {
+                *warning = note;
+                return apply_traced(doc, st, f, tools, Operation::NewBody, &[]);
+            }
+            if matches!(operation, Operation::Join | Operation::Cut)
+                && let Some((skin, source, index, tolerance)) = replacement
+            {
+                refuse_ambiguous_targets(doc, st, f, &targets)?;
+                let participants = if targets.is_empty() { &f.participants } else { &targets };
+                let all = participants.as_slice() == ["*"];
+                let eligible: Vec<_> = st
+                    .bodies
+                    .iter()
+                    .filter(|b| {
+                        all || if participants.is_empty() { b.component == f.component || b.feature == f.id } else { participants.contains(&b.name) }
+                    })
+                    .take(2)
+                    .map(|b| b.name.as_str())
+                    .collect();
+                if eligible == [source.as_str()]
+                    && let Some(base) = st.body(&source)
+                {
+                    let skin = tool_in(&skin, tool_frame(&source))?;
+                    let replacement = match kernel::replace_matched_face(&base.body, index, &skin.body, *operation == Operation::Cut, tolerance) {
+                        Err(error @ kernel::KernelError::Internal(_)) => return Err(error.into()),
+                        Err(_) => None,
+                        Ok(replacement) => replacement,
+                    };
+                    if let Some(body) = replacement {
+                        let result = Traced::step(body, &[&base.traced(), &skin]);
+                        let mut changed = base.remade(result);
+                        changed.transferred = base.transferred;
+                        changed.source_name = base.source_name.clone();
+                        if let Some(slot) = st.bodies.iter_mut().find(|b| b.name == source) {
+                            *slot = changed;
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+            let mut candidate = st.clone();
+            let result = apply_traced(doc, &mut candidate, f, tools.clone(), *operation, &targets).and_then(|()| {
+                let made: Vec<_> = candidate.bodies.iter().filter(|b| st.body(&b.name).is_none_or(|old| !old.body.same_shape(&b.body))).collect();
+                let removed = st.bodies.iter().any(|b| candidate.body(&b.name).is_none());
+                if made.is_empty() {
+                    return if removed && *operation == Operation::Cut {
+                        Ok(())
+                    } else if removed {
+                        Err(DocError::Invalid("combining the Form did not produce one solid".into()))
+                    } else {
+                        Err(DocError::Invalid("the Form does not change its target".into()))
+                    };
+                }
+                for body in made {
+                    if body.is_surface() || body.body.lumps()?.len() != 1 {
+                        return Err(DocError::Invalid("combining the Form must produce a single solid per changed body".into()));
+                    }
+                }
+                Ok(())
+            });
+            match result {
+                Ok(()) => {
+                    *st = candidate;
+                    Ok(())
+                }
+                Err(error @ DocError::Kernel(kernel::KernelError::Internal(_))) => Err(error),
+                Err(error) => {
+                    *warning = Some(format!("Form kept separately: {error}"));
+                    apply_traced(doc, st, f, tools, Operation::NewBody, &[])
+                }
+            }
+        }
         FeatureKind::BodyTransfer { bodies, from, to, transform } => {
             crate::body_transfer::evaluate(doc, st, &crate::plain(bodies), *from, *to, *transform)
         }
@@ -11824,6 +12049,7 @@ fn eval_feature_kind(
         FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. } => {
             more::plastic_eval(doc, vals, f, st)
         }
+        FeatureKind::Stitch { form_seam: Some(_), .. } => surface::eval_refined_weld(doc, vals, f, st, history),
         FeatureKind::Patch { .. }
         | FeatureKind::Stitch { .. }
         | FeatureKind::Thicken { .. }
@@ -12423,7 +12649,7 @@ fn eval_feature_kind(
         FeatureKind::Pattern { features, pattern, bodies, placements } => {
             let mats = pattern_transforms(doc, vals, st, f.component, pattern)?;
             if bodies.is_empty() {
-                return replay(doc, vals, f, st, features, &mats, warning);
+                return replay(doc, vals, f, st, features, &mats, (warning, history));
             }
             // Bodies: each copy is a new body named after its source. A body that cannot be
             // copied (gone, its placement gone, or its geometry refused by the move) is left out
@@ -12457,7 +12683,7 @@ fn eval_feature_kind(
         FeatureKind::Mirror { features, plane, bodies, combine, placements } => {
             let pl = doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?;
             if bodies.is_empty() {
-                return replay(doc, vals, f, st, features, &[mirror_matrix(&pl)], warning);
+                return replay(doc, vals, f, st, features, &[mirror_matrix(&pl)], (warning, history));
             }
             let m = mirror_matrix(&pl);
             let mut output = 0;
@@ -12895,17 +13121,18 @@ fn eval_feature_kind(
                 Some(about) => move_turn_line(doc, st, f.component, about, origin, axis, warning)?,
                 None => (origin, axis),
             };
+            let matrix = kernel::affine::rigid(t, origin, axis, ang)?;
             // With `copy` set, the source body is kept in place and the transform lands on a new
             // body pushed beside it instead of replacing it.
             let mut output = 0;
             for n in bodies {
                 let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
                 let Some(mb) = st.bodies.get(i).cloned() else { continue };
-                let nb = kernel::transform(&mb.body, t, origin, axis, ang)?;
+                let nb = kernel::transform_matrix(&mb.body, matrix)?;
                 if *copy {
-                    let mut motion = crate::rigid(t, origin, axis, ang);
+                    let mut motion = matrix;
                     let nb = if let Some(frame) = copy_frames.get(output).filter(|m| !crate::is_identity(m)) {
-                        motion = crate::mat_mul(frame, &motion);
+                        motion = kernel::affine::then(&motion, frame)?;
                         kernel::transform_matrix(&nb, *frame)?
                     } else {
                         nb
@@ -12916,11 +13143,14 @@ fn eval_feature_kind(
                     st.bodies.push(ModelBody::traced_new(name, traced, f.id));
                     output += 1;
                 } else if let Some(slot) = st.bodies.get_mut(i) {
-                    *slot = mb.remade(Traced::step(nb, &[&mb.traced()]));
+                    let mut moved = mb.remade(Traced::step(nb, &[&mb.traced()]));
+                    moved.source_name = mb.source_name.clone();
+                    moved.source_transform = kernel::affine::then(&mb.source_transform, &matrix)?;
+                    *slot = moved;
                 }
             }
             if !*copy {
-                move_constructions_with(doc, st, bodies, &crate::rigid(t, origin, axis, ang));
+                move_constructions_with(doc, st, bodies, &matrix);
             }
             Ok(())
         }
@@ -13363,6 +13593,7 @@ thread_local! {
 /// frame; it moves them itself.)
 fn drawn_tools_change_bodies(kind: &FeatureKind) -> bool {
     match kind {
+        FeatureKind::Form { definition, operation, .. } => definition.profile.is_some() || *operation != Operation::NewBody,
         FeatureKind::Box { operation, .. }
         | FeatureKind::Cylinder { operation, .. }
         | FeatureKind::Sphere { operation, .. }
@@ -13481,7 +13712,7 @@ pub fn state_in_frame<'a>(doc: &Document, st: &'a ModelState, comp: u64) -> Resu
 pub fn face_point_state<'a>(doc: &Document, st: &'a ModelState, kind: &FeatureKind, comp: u64) -> Result<std::borrow::Cow<'a, ModelState>> {
     match kind {
         FeatureKind::Extrude { extent, .. } => state_in_frame_pinned_to(doc, st, comp, &extent.picked_placements),
-        FeatureKind::Revolve { .. } => state_in_frame(doc, st, comp),
+        FeatureKind::Revolve { .. } | FeatureKind::Form { .. } => state_in_frame(doc, st, comp),
         _ => Ok(std::borrow::Cow::Borrowed(st)),
     }
 }
@@ -13514,6 +13745,29 @@ fn extrude_normal(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64
 /// otherwise take the name, and evaluation would move the pick onto that body's face.
 pub fn face_point_names(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64) -> Result<Vec<String>> {
     let pts = kind.face_points();
+    if let FeatureKind::Form { definition, .. } = kind {
+        // Support picks are stored in the feature frame, as in Form recomputation.
+        // A flush unrelated body must never acquire the retained support's name.
+        let framed = face_point_state(doc, st, kind, comp)?;
+        return Ok(definition
+            .profile
+            .iter()
+            .map(|profile| &profile.source)
+            .chain(definition.matching.iter().map(|matching| &matching.source))
+            .filter_map(|source| match source {
+                crate::forms::SupportRef::Face { body, name, pick } => Some(
+                    framed
+                        .body(body)
+                        .and_then(|body| {
+                            crate::naming::face_on_body(body, name, *pick).and_then(|(index, _)| crate::naming::face_names(body).get(index).cloned())
+                        })
+                        .unwrap_or_default(),
+                ),
+                crate::forms::SupportRef::Wire { .. } => None,
+            })
+            .collect());
+    }
+
     if thread_target_bodies(doc, st, kind)?.is_some() {
         let mut names = Vec::with_capacity(pts.len());
         for (slot, point) in pts.iter().enumerate() {
@@ -14154,6 +14408,86 @@ mod section_tests {
 #[cfg(test)]
 mod world_placement_cache_tests {
     use super::*;
+
+    #[test]
+    fn ordinary_moves_retain_the_definition_frame_through_transfers_and_component_placement() {
+        for transferred in [false, true] {
+            let mut doc = Document::new("Moved support frame");
+            let component = doc.add_component(Some("Part"), 0).unwrap();
+            let source = doc
+                .add_feature(
+                    FeatureKind::Cylinder {
+                        base: crate::point_expr(Vec3::ZERO),
+                        axis: Vec3::Z.into(),
+                        radius: "3".into(),
+                        height: "2".into(),
+                        operation: Operation::NewBody,
+                        references: Vec::new(),
+                    },
+                    None,
+                )
+                .unwrap();
+            doc.feature_mut(source).unwrap().component = component;
+            doc.feature_mut(source).unwrap().body_names = vec!["Support".into()];
+            let mut model = Model::new();
+            model.evaluate(&doc);
+            assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+            let original = model.state();
+            let point = kernel::edge_geometry(&original.bodies[0].body, &[0]).unwrap()[0].at(0.25).unwrap().0;
+            let mut expected = crate::IDENTITY;
+            if transferred {
+                expected = crate::rigid(Vec3::new(3.0, -2.0, 1.0), Vec3::ZERO, Vec3::Z, 0.3);
+                doc.add_feature(
+                    FeatureKind::BodyTransfer { bodies: vec!["Support".into()], from: component, to: component, transform: expected },
+                    None,
+                )
+                .unwrap();
+            }
+            for (translate, origin, axis, angle, text) in [
+                (Vec3::new(7.0, -4.0, 9.0), None, Vec3::X, std::f64::consts::FRAC_PI_2, "90 deg"),
+                (Vec3::new(-1.0, 2.0, 0.5), Some(Vec3::new(2.0, 1.0, 3.0)), Vec3::Z, std::f64::consts::FRAC_PI_4, "45 deg"),
+            ] {
+                let moved = doc
+                    .add_feature(
+                        FeatureKind::Move {
+                            bodies: vec!["Support".into()],
+                            translate: [translate.x.to_string().into(), translate.y.to_string().into(), translate.z.to_string().into()],
+                            rotate_axis: Some(axis.into()),
+                            rotate_about: None,
+                            origin: origin.map(crate::point_expr),
+                            angle: Some(text.into()),
+                            copy: false,
+                            copy_frames: vec![],
+                        },
+                        None,
+                    )
+                    .unwrap();
+                doc.feature_mut(moved).unwrap().component = component;
+                expected = crate::mat_mul(&crate::rigid(translate, origin.unwrap_or(Vec3::ZERO), axis, angle), &expected);
+                model.evaluate(&doc);
+                assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+                let state = model.state();
+                let body = &state.bodies[0];
+                assert_eq!(body.source_transform, expected, "ordinary Move discarded its support source frame (transferred={transferred})");
+                assert_eq!(body.transferred, transferred);
+                assert_eq!(doc.model_body_component(body), component);
+                let physical = kernel::edge_geometry(&body.body, &[0]).unwrap()[0].at(0.25).unwrap().0;
+                assert!(physical.dist(crate::apply_point(&expected, point)) < 1e-9);
+            }
+            let placement = crate::rigid(Vec3::new(20.0, 10.0, -3.0), Vec3::ZERO, Vec3::Y, 0.4);
+            doc.occurrences.iter_mut().find(|o| o.component == component).unwrap().transform = placement;
+            let state = model.state();
+            let world = world_state(&doc, &state).unwrap();
+            let world_body = &world.bodies[0];
+            let world_frame = crate::mat_mul(&placement, &expected);
+            assert_eq!(world_body.source_transform, world_frame);
+            let physical = kernel::edge_geometry(&world_body.body, &[0]).unwrap()[0].at(0.25).unwrap().0;
+            assert!(physical.dist(crate::apply_point(&world_frame, point)) < 1e-9);
+            // Component-local support resolution also uses the real frame path.
+            let local = state_in_frame(&doc, &state, component).unwrap();
+            assert!(local.bodies[0].source_transform.iter().flatten().zip(expected.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-12));
+        }
+    }
 
     #[test]
     fn placed_real_feature_retains_names_from_its_original_feature_context() {

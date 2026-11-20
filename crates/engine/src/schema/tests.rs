@@ -24,6 +24,38 @@ fn messages(issues: &[Issue]) -> Vec<String> {
 }
 
 #[test]
+fn immutable_read_queries_keep_strict_refusal_and_warning_contracts_without_a_session() {
+    use std::cell::Cell;
+
+    let params = json!({"tolerance":0.01,"tolernace":0.02});
+    let calls = Cell::new(0);
+    let query = || {
+        calls.set(calls.get() + 1);
+        Ok(json!({"read_only":true}))
+    };
+    assert!(run_read_query_checked(ParamCheck::Strict, &params, "form.prototype.validate", query).is_err());
+    assert_eq!(calls.get(), 0, "strict contract refusal must precede query execution");
+    let warned = run_read_query_checked(ParamCheck::Warn, &params, "form.prototype.validate", query).unwrap();
+    assert_eq!(calls.get(), 1);
+    assert_eq!(warned["read_only"], true);
+    let mut legacy = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let legacy = super::check::run_checked_as(&mut legacy, &params, "form.prototype.validate", |_, _| Ok(json!({"read_only":true}))).unwrap();
+    assert_eq!(warned, legacy, "an immutable query must retain the complete existing command warning payload");
+    // Validate denies unknown fields: one typo produces both the shared key
+    // warning and a typed-deserialization issue. Neither may be dropped.
+    assert!(serde_json::from_value::<super::forms_prototype::Validate>(params.clone()).is_err());
+    let warnings = warned["param_warnings"].as_array().unwrap();
+    assert!(warnings.contains(&json!("unknown key `tolernace`; did you mean `tolerance`?")));
+    assert!(warnings.iter().any(|warning| warning.as_str().is_some_and(|message| message.contains("unknown field `tolernace`"))));
+    let off = run_read_query_checked(ParamCheck::Off, &params, "form.prototype.validate", query).unwrap();
+    assert_eq!(calls.get(), 2);
+    assert!(off.get("param_warnings").is_none());
+    let failed =
+        run_read_query_checked(ParamCheck::Warn, &params, "form.prototype.validate", || Err(crate::EngineError::Other("query refused".into())));
+    assert_eq!(failed.unwrap_err().to_string(), "query refused");
+}
+
+#[test]
 fn expressions_accept_what_params_expr_accepts() {
     for v in [json!(5), json!(-2.5), json!("w / 2"), json!("  30 mm  "), json!(999_999_999.0)] {
         let want = crate::params::expr(&json!({ "v": v.clone() }), "v");

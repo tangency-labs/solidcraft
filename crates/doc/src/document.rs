@@ -883,6 +883,16 @@ pub enum FeatureKind {
     NewerFileFeature {
         raw: crate::newer_file::RawFeature,
     },
+    /// Editable subdivision source and its fitted CAD result.
+    Form {
+        definition: Box<crate::forms::Definition>,
+        #[walk(length = "Fit tolerance")]
+        tolerance: Expr,
+        #[serde(default)]
+        operation: Operation,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        targets: Vec<BodyName>,
+    },
     /// A recorded timeline ownership boundary. Geometry is converted from its
     /// current local frame into the destination component frame exactly once.
     BodyTransfer {
@@ -2069,6 +2079,9 @@ pub enum FeatureKind {
         #[serde(default = "zero_expr")]
         #[walk(length = "Tolerance")]
         tolerance: Expr,
+        /// Source-scoped refined Form seam. Ordinary Stitch has no seam record.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        form_seam: Option<Box<crate::forms::RefinedWeldSeam>>,
     },
     /// Surface bodies thickened into solids along their normals (by half each way when
     /// `symmetric`).
@@ -2078,6 +2091,14 @@ pub enum FeatureKind {
         thickness: Expr,
         #[serde(default)]
         symmetric: bool,
+        /// Construction chosen at authoring, in source body order. A true slot
+        /// builds two half walls. Older documents did not record that choice.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        form_half_walls: Option<Vec<bool>>,
+        /// A true slot retains the exact planar skin and sweeps its boundary
+        /// curves instead of offsetting the fitted surface in the kernel.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        form_planar_walls: Option<Vec<bool>>,
         operation: Operation,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
@@ -3166,6 +3187,7 @@ impl FeatureKind {
             FeatureKind::NewerFileFeature { .. } => "NewerFileFeature",
             FeatureKind::BodyTransfer { .. } => "BodyTransferFeature",
             FeatureKind::Sketch { .. } => "Sketch",
+            FeatureKind::Form { .. } => "FormFeature",
             FeatureKind::Extrude { .. } => "ExtrudeFeature",
             FeatureKind::Revolve { .. } => "RevolveFeature",
             FeatureKind::Fillet { .. } => "FilletFeature",
@@ -3255,6 +3277,7 @@ impl FeatureKind {
     pub fn kind_key(&self) -> &'static str {
         match self {
             FeatureKind::NewerFileFeature { .. } => "newer_file_feature",
+            FeatureKind::Form { .. } => "form",
             FeatureKind::BodyTransfer { .. } => "body_transfer",
             FeatureKind::Sketch { .. } => "sketch",
             FeatureKind::Extrude { .. } => "extrude",
@@ -3344,6 +3367,7 @@ impl FeatureKind {
         Some(match name {
             "BodyTransferFeature" => "body_transfer",
             "Sketch" => "sketch",
+            "FormFeature" => "form",
             "ExtrudeFeature" => "extrude",
             "RevolveFeature" => "revolve",
             "FilletFeature" => "fillet",
@@ -3509,6 +3533,7 @@ impl FeatureKind {
             FeatureKind::SurfaceUntrim { .. } => "Untrim",
             FeatureKind::Import { .. } => "Import",
             FeatureKind::MeshImport { .. } => "Mesh",
+            FeatureKind::Form { .. } => "Form",
             FeatureKind::MeshConvert { .. } => "ConvertMesh",
             FeatureKind::Repair { .. } => "Repair",
         }
@@ -4871,6 +4896,7 @@ impl Document {
         if self.features.len() >= MAX_FEATURES {
             return Err(DocError::Invalid("too many features".into()));
         }
+        self.check_form_pattern_order(&kind)?;
         let component = if let FeatureKind::BodyTransfer { bodies, from, to, transform } = &kind {
             crate::validate_body_transfer(self, &crate::plain(bodies), *from, *to, transform)?;
             *to
@@ -4922,6 +4948,7 @@ impl Document {
         if self.features.len() >= MAX_FEATURES {
             return Err(DocError::Invalid("too many features".into()));
         }
+        self.check_form_pattern_order(&f.kind)?;
         if f.id == 0 {
             f.id = self.next_id.max(1);
         } else if f.id > MAX_FEATURE_ID {
@@ -4973,6 +5000,19 @@ impl Document {
         self.params.extend(params.into_iter().map(|p| Param { model: true, ..p }));
         self.place_feature(f);
         Ok(id)
+    }
+
+    fn check_form_pattern_order(&self, kind: &FeatureKind) -> Result<()> {
+        if let (Some(marker), FeatureKind::Pattern { features, .. }) = (self.marker, kind)
+            && self
+                .features
+                .iter()
+                .skip(marker)
+                .any(|source| matches!(source.kind, FeatureKind::Form { .. }) && features.iter().any(|id| id.0 == source.id))
+        {
+            return Err(DocError::Invalid("put the Form before its pattern in the timeline".into()));
+        }
+        Ok(())
     }
 
     /// Put a feature at the marker (or the end), in the timeline folder that spans that slot,

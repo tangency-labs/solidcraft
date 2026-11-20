@@ -8,7 +8,9 @@ use solidcore_record::brep::Curve;
 use solidcore_tess::PlanStats;
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::tess::TessPlan;
+use solidcraft_geom::tess::from_kernel;
 
+use crate::history::BodyHistory;
 use crate::{Body, BoolOp};
 
 /// The mesher's plan of `b` at chord tolerance `tol` and, when given, a facet angle: its public
@@ -788,6 +790,36 @@ fn a_loop_corner_within_its_tolerance_of_a_pole_is_a_pole() {
     assert!(e.to_string().contains("winds around the surface"), "{e}");
 }
 
+#[test]
+fn guided_display_refuses_unqualified_chart_routes_without_changing_the_ordinary_plan_or_record() {
+    let body = ok(crate::box_solid(Vec3::ZERO, Vec3::new(2.0, 3.0, 4.0))).keeping_meshes();
+    let tolerance = crate::MeshTolerance::chord(0.01);
+    let before = ok(body.mesh_plan(&tolerance));
+    let record = serde_json::to_value(body.record()).unwrap();
+    let guides = [crate::DisplayGuide {
+        face: 0,
+        points: vec![crate::DisplayGuidePoint::Surface([0.25, 0.25]), crate::DisplayGuidePoint::Surface([0.75, 0.75])],
+    }];
+    let error = match body.mesh_with_guides(&tolerance, &guides) {
+        Ok(_) => panic!("analytic planes are outside this certified spline-quilt route"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("requires spline charts"), "{error}");
+    assert_eq!(ok(body.mesh_plan(&tolerance)), before);
+    assert_eq!(serde_json::to_value(body.record()).unwrap(), record);
+
+    // A genuine existing spline fixture whose trim winds around a periodic
+    // parameter direction must not be accepted from its UV bounding box.
+    let spline = pyramid_past_a_near_pole(1e-6);
+    let before = serde_json::to_value(&spline).unwrap();
+    let error = match solidcore_tess::mesh_with_guides(&spline, &crate::MeshTolerance::chord(0.01), 1.0, &guides) {
+        Ok(_) => panic!("periodic/partial trims need their own certified route"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("requires bounded nonperiodic charts"), "{error}");
+    assert_eq!(serde_json::to_value(&spline).unwrap(), before);
+}
+
 /// A whole sphere as one face (its seam the only edge) in a body many times its size: at the
 /// body's chord the seam gets two segments, pole to equator to pole, and every node off the poles
 /// follows a pole. The loop used to start at a pole and close across the other, which unwrapped
@@ -847,5 +879,219 @@ fn a_face_whose_edge_cannot_be_sampled_is_left_out_and_the_rest_meshed() {
         let [left_out] = stats.unmeshed.as_slice() else { panic!("{t:?}: {:?}", stats.unmeshed) };
         assert!(!has[left_out.face], "{t:?}");
         assert!(left_out.reason.contains("nodes"), "{t:?}: {}", left_out.reason);
+    }
+}
+
+#[test]
+fn public_exact_face_and_edge_adapters_preserve_boundaries_and_parameters() {
+    for body in [crate::box_solid(Vec3::ZERO, Vec3::new(4.0, 6.0, 8.0)).unwrap(), crate::cylinder(Vec3::ZERO, Vec3::Z, 3.0, 5.0).unwrap()] {
+        for index in 0..body.face_count() {
+            let face = crate::face_geometry(&body, index).unwrap();
+            let adjacency = crate::face_boundaries(&body, index).unwrap();
+            assert_eq!(adjacency.len(), face.loops.len());
+            for (edges, wire) in adjacency.iter().zip(&face.loops) {
+                assert_eq!(edges.len(), wire.len());
+                for (edge, curve) in edges.iter().zip(wire) {
+                    assert!(edge.neighbor.is_none_or(|neighbor| neighbor != index && neighbor < body.face_count()));
+                    if body.face_count() == 6 {
+                        assert!(edge.neighbor.is_some());
+                    }
+                    let exact = crate::edge_geometry(&body, &[edge.edge]).unwrap().remove(0);
+                    let point = curve.at(0.0).unwrap().0;
+                    assert!(point.dist(exact.at(0.0).unwrap().0).min(point.dist(exact.at(1.0).unwrap().0)) < 1e-8);
+                }
+            }
+            assert!(face.outer < face.loops.len());
+            for wire in &face.loops {
+                for (edge, next) in wire.iter().zip(wire.iter().cycle().skip(1)) {
+                    assert!(edge.at(1.0).unwrap().0.dist(next.at(0.0).unwrap().0) < 1e-9);
+                    for fraction in [0.0, 0.21, 0.67, 1.0] {
+                        let (point, tangent) = edge.at(fraction).unwrap();
+                        assert!(tangent.is_finite());
+                        let uv = face.parameters(point, None, 1e-7).unwrap();
+                        assert!(from_kernel(face.surface.eval(uv[0], uv[1]).0).dist(point) < 1e-7);
+                    }
+                }
+            }
+            let at = face.loops[face.outer][0].at(0.37).unwrap().0;
+            let uv = face.parameters(at, None, 1e-7).unwrap();
+            let (_, normal) = face.surface.eval(uv[0], uv[1]);
+            assert!(face.parameters(at + from_kernel(normal), Some(uv), 1e-7).is_err());
+            assert!(face.parameters(Vec3::ZERO, None, f64::NAN).is_err());
+        }
+        let mesh = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+        let ids: Vec<_> = (0..mesh.edges.len()).collect();
+        let curves = crate::edge_geometry(&body, &ids).unwrap();
+        for ((curve, polyline), source) in curves.iter().zip(&mesh.edges).zip(&body.record().edges) {
+            let exact = solidcraft_geom::brep::eval::CurveEval::new(source.parameters()).unwrap();
+            for fraction in [0.0, 0.21, 0.67, 1.0] {
+                let [a, b] = source.interval;
+                let parameter = a * (1.0 - fraction) + b * fraction;
+                let (point, derivative) = exact.derivs(parameter).unwrap();
+                let actual = curve.at(fraction).unwrap();
+                assert!(actual.0.dist(point) < 1e-10);
+                assert!(actual.1.dist(derivative * (b - a)) < 1e-10);
+            }
+            assert!(curve.at(0.0).unwrap().0.dist(*polyline.first().unwrap()) < 1e-7);
+            assert!(curve.at(1.0).unwrap().0.dist(*polyline.last().unwrap()) < 1e-7);
+            assert!(curve.at(f64::NAN).is_none());
+        }
+        assert!(crate::face_geometry(&body, usize::MAX).is_err());
+        assert!(crate::face_boundaries(&body, usize::MAX).is_err());
+        assert!(crate::edge_geometry(&body, &[usize::MAX]).is_err());
+    }
+}
+#[test]
+fn exact_face_adapter_resolves_a_reordered_curved_exterior() {
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
+    let region = Region2 { outer: Loop2::circle(Vec2::ZERO, 3.0), holes: vec![Loop2::circle(Vec2::ZERO, 1.0)] };
+    let body = crate::patch_region(&Plane::XY, &region).unwrap();
+    assert_eq!(crate::face_geometry(&body, 0).unwrap().outer, 0);
+    let mut record = body.record().clone();
+    record.faces[0].loops.swap(0, 1);
+    let reordered = crate::Body::from_record(record.canonical().unwrap().brep).unwrap();
+    let face = crate::face_geometry(&reordered, 0).unwrap();
+    assert_eq!(face.outer, 1);
+    assert_eq!(face.loops.len(), 2);
+    let spans = crate::face_parameter_span(&reordered, 0).unwrap();
+    for span in spans {
+        assert!((span[0] + 3.0).abs() < 1e-8 && (span[1] - 3.0).abs() < 1e-8);
+    }
+    let adjacency = crate::face_boundaries(&reordered, 0).unwrap();
+    assert_eq!(adjacency[face.outer].len(), face.loops[face.outer].len());
+}
+
+#[test]
+fn oblique_parameter_trims_stay_on_the_exact_surface_and_split_sewing_keeps_rim_history() {
+    use solidcraft_geom::bspline::NurbsSurface;
+    let points: Vec<_> = (0..3)
+        .flat_map(|j| {
+            (0..3).map(move |i| Vec3::new(i as f64 / 2.0, j as f64 / 2.0, (if i == 2 { 1.0 } else { 0.0 }) + (if j == 2 { 1.0 } else { 0.0 })))
+        })
+        .collect();
+    let surface = NurbsSurface::new([2, 2], std::array::from_fn(|_| vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]), &points, &[1.0; 9]).unwrap();
+    let diamond = vec![[0.5, 0.0], [1.0, 0.5], [0.5, 1.0], [0.0, 0.5]];
+    let trimmed = crate::nurbs_region_sheet(&surface, &[diamond]).unwrap();
+    assert!(trimmed.is_surface());
+    for edge in crate::face_geometry(&trimmed, 0).unwrap().loops.into_iter().flatten() {
+        for t in [0.0, 0.13, 0.57, 0.91, 1.0] {
+            let p = edge.at(t).unwrap().0;
+            assert!((p.z - p.x * p.x - p.y * p.y).abs() < 1e-10);
+        }
+    }
+    assert!(!trimmed.mesh(&crate::MeshTolerance::chord(0.005)).unwrap().triangles.is_empty());
+    let base = crate::box_solid(Vec3::ZERO, Vec3::new(2.0, 2.0, 2.0)).unwrap();
+    let top = (0..base.face_count()).find(|&i| base.planar_face(i).is_some_and(|p| p.normal().z > 0.99)).unwrap();
+    let open = crate::remove_faces(&base, &[top]).unwrap();
+    let surface = NurbsSurface::new(
+        [1, 1],
+        std::array::from_fn(|_| vec![0.0, 0.0, 1.0, 1.0]),
+        &[Vec3::new(0.0, 0.0, 2.0), Vec3::new(2.0, 0.0, 2.0), Vec3::new(0.0, 2.0, 2.0), Vec3::new(2.0, 2.0, 2.0)],
+        &[1.0; 4],
+    )
+    .unwrap();
+    let sheets: Vec<_> = (0..2)
+        .flat_map(|j| (0..2).map(move |i| (i, j)))
+        .map(|(i, j)| {
+            let (u, v) = (i as f64 / 2.0, j as f64 / 2.0);
+            crate::nurbs_region_sheet(&surface, &[vec![[u, v], [u + 0.5, v], [u + 0.5, v + 0.5], [u, v + 0.5]]]).unwrap()
+        })
+        .collect();
+    let skin = crate::stitch(&sheets.iter().collect::<Vec<_>>(), 1e-6).unwrap();
+    let result = crate::stitch_split(&[&open, &skin], 1e-6).unwrap();
+    assert!(!result.is_surface() && result.validity().is_empty());
+    assert_eq!(result.face_count(), 9);
+    assert!((crate::measure(&result).unwrap().volume - 8.0).abs() < 1e-8);
+    result.history().unwrap().check(&result, &[&open, &skin]).unwrap();
+    assert!(crate::stitch_split(&[], 1e-6).is_err());
+    assert!(crate::stitch_split(&[&skin], f64::NAN).is_err());
+}
+#[test]
+fn matched_face_replacement_qualifies_half_spaces_and_keeps_history() {
+    use solidcore_record::{Loop2, Plane, Vec2};
+    use solidcraft_geom::bspline::{HPoint, NurbsSurface};
+    let base = crate::box_solid(Vec3::new(-1.0, -1.0, -2.0), Vec3::new(1.0, 1.0, 0.0)).unwrap();
+    let top = (0..base.face_count()).find(|&i| base.planar_face(i).unwrap().normal().z > 0.99).unwrap();
+    for cut in [false, true] {
+        let ctrl = (0..4)
+            .flat_map(|j| {
+                (0..4).map(move |i| {
+                    let z = if (1..3).contains(&i) && (1..3).contains(&j) { if cut { -1.0 } else { 1.0 } } else { 0.0 };
+                    HPoint::weighted(Vec3::new(-1.0 + 2.0 * i as f64 / 3.0, -1.0 + 2.0 * j as f64 / 3.0, z), 1.0)
+                })
+            })
+            .collect();
+        let surface = NurbsSurface::from_homogeneous([3, 3], std::array::from_fn(|_| vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]), ctrl).unwrap();
+        let skin = crate::nurbs_sheet(&surface).unwrap();
+        let result = crate::replace_matched_face(&base, top, &skin, cut, 1e-6).unwrap().unwrap_or_else(|| panic!("qualified cut={cut}"));
+        assert!(!result.is_surface() && result.validity().is_empty());
+        // Mass properties are tessellated (about 3e-4 relative), rather than
+        // the exact integral of this bicubic height field.
+        let volume = crate::measure(&result).unwrap().volume;
+        assert!((volume - if cut { 7.0 } else { 9.0 }).abs() < 0.003, "cut={cut}, volume={volume}");
+        result.history().unwrap().check(&result, &[&base, &skin]).unwrap();
+        assert!(crate::replace_matched_face(&base, top, &skin, !cut, 1e-6).unwrap().is_none());
+        assert!(crate::replace_matched_face(&base, top, &skin, cut, f64::NAN).unwrap().is_none());
+    }
+    let tool = crate::box_solid(Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 0.0)).unwrap();
+    let cap = (0..tool.face_count()).find(|&i| tool.planar_face(i).unwrap().normal().z > 0.99).unwrap();
+    let skin = crate::remove_faces(&tool, &[cap]).unwrap();
+    assert!(crate::replace_matched_face(&base, top, &skin, true, 1e-6).unwrap().is_none());
+    let tool = crate::box_solid(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 0.0)).unwrap();
+    let cap = (0..tool.face_count()).find(|&i| tool.planar_face(i).unwrap().normal().z > 0.99).unwrap();
+    let skin = crate::remove_faces(&tool, &[cap]).unwrap();
+    let result = crate::replace_matched_face(&base, top, &skin, true, 1e-6).unwrap().expect("coincident walls trimmed");
+    assert!(!result.is_surface() && result.validity().is_empty());
+    assert_eq!(result.face_count(), 6);
+    assert!((crate::measure(&result).unwrap().volume - 4.0).abs() < 1e-8);
+    result.history().unwrap().check(&result, &[&base, &skin]).unwrap();
+
+    let square = |r: f64| Loop2::polygon(&[Vec2::new(-r, -r), Vec2::new(r, -r), Vec2::new(r, r), Vec2::new(-r, r)]);
+    let frustum = crate::loft(&[(Plane::XY.offset(-2.0), square(0.5)), (Plane::XY, square(1.0))]).unwrap();
+    let cap = (0..frustum.face_count()).find(|&i| frustum.planar_face(i).is_some_and(|p| p.normal().z > 0.99)).unwrap();
+    let skin = crate::remove_faces(&frustum, &[cap]).unwrap();
+    let result = crate::replace_matched_face(&base, top, &skin, true, 1e-6).unwrap().expect("coincident bottom trimmed");
+    assert!(!result.is_surface() && result.validity().is_empty());
+    let bottom = (0..result.face_count()).find(|&i| result.planar_face(i).is_some_and(|p| p.normal().z < -0.99)).unwrap();
+    assert_eq!(crate::face_geometry(&result, bottom).unwrap().loops.len(), 2);
+    assert!((crate::measure(&result).unwrap().volume - 10.0 / 3.0).abs() < 1e-8);
+    let history = result.history().unwrap();
+    history.check(&result, &[&base, &skin]).unwrap();
+    let old_bottom = (0..base.face_count()).find(|&i| base.planar_face(i).is_some_and(|p| p.normal().z < -0.99)).unwrap();
+    assert!(history.faces[bottom].origins.contains(&crate::history::FaceOrigin::Face { operand: 0, face: old_bottom }));
+    assert!(history.faces.iter().all(|face| !face.origins.is_empty()), "every face comes from the exact input surfaces");
+    assert!(
+        history.edges.iter().any(|edge| edge.origins.iter().any(|origin| matches!(origin, crate::history::EdgeOrigin::Edge { operand: 1, .. }))),
+        "the trimmed inner rim keeps the original skin curves' lineage"
+    );
+    // With no interior skin left, the fast path must decline without
+    // manufacturing a sheet or disturbing the support. The normal Boolean
+    // path decides the complete-removal result.
+    let all_on_walls = crate::remove_faces(&base, &[top]).unwrap();
+    assert!(crate::replace_matched_face(&base, top, &all_on_walls, true, 1e-6).unwrap().is_none());
+    assert!((crate::measure(&base).unwrap().volume - 8.0).abs() < 1e-10);
+}
+#[test]
+fn matched_face_join_accepts_separated_curved_and_concave_supports() {
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
+    let outline = [(0., 0.), (2., 0.), (2., 1.), (1., 1.), (1., 2.), (0., 2.)].map(|(x, y)| Vec2::new(x, y));
+    let region = Region2 { outer: Loop2::polygon(&outline), holes: vec![] };
+    let prism = |a, b| crate::extrude(&Plane::XY, std::slice::from_ref(&region), a, b).unwrap().pop().unwrap();
+    let cylinder = |z, height| crate::cylinder(Vec3::new(0., 0., z), Vec3::Z, 1., height).unwrap();
+    let cap =
+        |body: &crate::Body, normal| (0..body.face_count()).find(|&i| body.planar_face(i).is_some_and(|p| p.normal().dot(normal) > 0.99)).unwrap();
+    for (base, upper, intruding, expected) in
+        [(prism(-2., 0.), prism(0., 1.), prism(-1., 0.), 9.), (cylinder(-2., 2.), cylinder(0., 1.), cylinder(-1., 1.), 3. * std::f64::consts::PI)]
+    {
+        let top = cap(&base, Vec3::Z);
+        let skin = crate::remove_faces(&upper, &[cap(&upper, -Vec3::Z)]).unwrap();
+        let joined = crate::replace_matched_face(&base, top, &skin, false, 1e-6).unwrap().expect("separated skin joins at the rim");
+        assert!(!joined.is_surface() && joined.validity().is_empty());
+        let volume = crate::measure(&joined).unwrap().volume;
+        assert!((volume - expected).abs() < 0.005, "expected {expected}, got {volume}");
+        joined.history().unwrap().check(&joined, &[&base, &skin]).unwrap();
+
+        let skin = crate::remove_faces(&intruding, &[cap(&intruding, Vec3::Z)]).unwrap();
+        assert!(crate::replace_matched_face(&base, top, &skin, false, 1e-6).unwrap().is_none());
     }
 }

@@ -276,6 +276,7 @@ fn a_rounded_body_moves_exactly_as_the_kernel_moves_it() {
 #[test]
 fn a_placed_body_is_moved_only_when_its_geometry_is_read() {
     let source = periodic_cylinder();
+    assert!(std::sync::Arc::ptr_eq(&source.shared_record(), &source.shared_record()), "sharing a ready record keeps its allocation");
     let (c, s) = (0.6f64.cos(), 0.6f64.sin());
     let turn = [[c, s, 0.0, 0.0], [-s, c, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [5.0, -3.0, 2.0, 1.0]];
     let shift = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [100.0, 0.0, 0.0, 1.0]];
@@ -311,6 +312,10 @@ fn a_placed_body_is_moved_only_when_its_geometry_is_read() {
     let eager = |m: &[[f64; 4]; 4]| {
         solidcraft_geom::brep::placement::moved(source.record(), &solidcraft_geom::brep::placement::Rigid::of_matrix(m).unwrap()).unwrap()
     };
+    let shared = placed.shared_record();
+    assert_eq!(*shared, eager(&turn));
+    assert!(std::sync::Arc::ptr_eq(&shared, &placed.clone().shared_record()), "the placed record is moved once and shared by clones");
+    assert!(!placed.record.pending(), "sharing exact geometry resolves the lazy placement");
     assert_eq!(*placed.record(), eager(&turn));
     assert_topology(&source, &placed, turn);
     let both: [[f64; 4]; 4] = std::array::from_fn(|i| std::array::from_fn(|j| (0..4).map(|k| turn[i][k] * shift[k][j]).sum()));

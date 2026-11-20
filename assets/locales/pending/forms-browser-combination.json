@@ -1,0 +1,42 @@
+{
+  "ar": {
+    "forms.prototype.browser_combination_display_limit": "تتجاوز النتيجة المدمجة حد العرض في المتصفح. استخدم تطبيق سطح المكتب لمعاينتها.",
+    "forms.prototype.browser_combination_source_limit": "تدعم معاينة النتائج المدمجة في المتصفح الأشكال والتصاميم الصغيرة والمستقلة. استخدم تطبيق سطح المكتب لمعاينة هذا التصميم.",
+    "forms.prototype.browser_combination_unavailable": "معاينة النتيجة المدمجة غير متاحة في هذا المتصفح. استخدم تطبيق سطح المكتب لمعاينتها."
+  },
+  "de": {
+    "forms.prototype.browser_combination_display_limit": "Das kombinierte Ergebnis überschreitet die Darstellungsgrenze des Browsers. Zeigen Sie es in der Desktop-App an.",
+    "forms.prototype.browser_combination_source_limit": "Die kombinierte Vorschau im Browser unterstützt kleine unabhängige Formen und Entwürfe. Verwenden Sie für diesen Entwurf die Desktop-App.",
+    "forms.prototype.browser_combination_unavailable": "Die kombinierte Vorschau ist in diesem Browser nicht verfügbar. Zeigen Sie das kombinierte Ergebnis in der Desktop-App an."
+  },
+  "en": {
+    "forms.prototype.browser_combination_display_limit": "The combined result exceeds the browser’s display limit. Use the desktop app to preview it.",
+    "forms.prototype.browser_combination_source_limit": "Browser combined previews support small independent Forms and designs. Use the desktop app to preview this design.",
+    "forms.prototype.browser_combination_unavailable": "Combined preview is unavailable in this browser. Use the desktop app to preview the combined result."
+  },
+  "he": {
+    "forms.prototype.browser_combination_display_limit": "התוצאה המשולבת חורגת ממגבלת התצוגה בדפדפן. אפשר להציג אותה ביישום שולחן העבודה.",
+    "forms.prototype.browser_combination_source_limit": "תצוגה מקדימה משולבת בדפדפן תומכת בצורות חופשיות ובעיצובים קטנים ועצמאיים. יש להציג את העיצוב הזה ביישום שולחן העבודה.",
+    "forms.prototype.browser_combination_unavailable": "תצוגה מקדימה של התוצאה המשולבת אינה זמינה בדפדפן הזה. אפשר להציג אותה ביישום שולחן העבודה."
+  },
+  "ja": {
+    "forms.prototype.browser_combination_display_limit": "結合結果がブラウザーの表示上限を超えています。デスクトップアプリで確認してください。",
+    "forms.prototype.browser_combination_source_limit": "ブラウザーで結合結果をプレビューできるのは、小規模で独立したフォームとデザインです。このデザインはデスクトップアプリで確認してください。",
+    "forms.prototype.browser_combination_unavailable": "このブラウザーでは結合結果をプレビューできません。デスクトップアプリで確認してください。"
+  },
+  "ko": {
+    "forms.prototype.browser_combination_display_limit": "결합 결과가 브라우저의 표시 한도를 초과합니다. 데스크톱 앱에서 미리 보세요.",
+    "forms.prototype.browser_combination_source_limit": "브라우저에서 결합 결과를 미리 볼 수 있는 범위는 작고 독립적인 폼과 설계입니다. 이 설계는 데스크톱 앱에서 확인하세요.",
+    "forms.prototype.browser_combination_unavailable": "이 브라우저에서는 결합 결과를 미리 볼 수 없습니다. 데스크톱 앱에서 확인하세요."
+  },
+  "vi": {
+    "forms.prototype.browser_combination_display_limit": "Kết quả kết hợp vượt giới hạn hiển thị của trình duyệt. Hãy dùng ứng dụng máy tính để xem trước.",
+    "forms.prototype.browser_combination_source_limit": "Trình duyệt hỗ trợ xem trước kết quả kết hợp cho các hình tự do và thiết kế nhỏ, độc lập. Hãy dùng ứng dụng máy tính để xem trước thiết kế này.",
+    "forms.prototype.browser_combination_unavailable": "Trình duyệt này không thể xem trước kết quả kết hợp. Hãy dùng ứng dụng máy tính để xem trước."
+  },
+  "zh": {
+    "forms.prototype.browser_combination_display_limit": "组合结果超出浏览器的显示限制。请在桌面应用中预览。",
+    "forms.prototype.browser_combination_source_limit": "浏览器支持预览小型独立造型和设计的组合结果。请在桌面应用中预览此设计。",
+    "forms.prototype.browser_combination_unavailable": "此浏览器无法预览组合结果。请在桌面应用中预览。"
+  }
+}

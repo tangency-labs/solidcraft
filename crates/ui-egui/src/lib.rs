@@ -84,6 +84,7 @@ mod feature_edit;
 #[cfg(test)]
 mod font_literals_tests;
 pub mod fonts;
+pub mod forms_prototype;
 pub use solidcraft_ui_kit::frame;
 pub mod frame_rate;
 pub mod gizmo;
@@ -646,6 +647,9 @@ pub struct SolveApp {
     pub(crate) blur_session: blur::Session,
     pub(crate) viewport_status: ui_kit::StatusPresentation,
     pub(crate) viewport_status_fixture: viewport_status_fixture::Fixture,
+    pub(crate) forms_prototype: forms_prototype::State,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) browser_form_check: Option<std::rc::Rc<dyn forms_prototype::BrowserCheckHost>>,
     /// Compact browser embed: retain model panels and joint controls without application chrome.
     pub embedded: bool,
     /// Editing embed (#8517): the host page owns the files and the window's chrome. No
@@ -909,6 +913,8 @@ pub struct SolveApp {
     /// The operations under way, in the view's corner ([`operations`]).
     pub operations: operations::Panel,
     pub synthetic: Vec<egui::Event>,
+    /// Whether this frame's control-channel input began a primary gesture.
+    synthetic_primary_press: bool,
     /// The modifiers of the synthetic press in progress (a Ctrl-drag keeps Ctrl while it moves).
     pub synthetic_mods: egui::Modifiers,
     /// A click that came in the same frame as typing before it, held for the next frame.
@@ -934,6 +940,9 @@ pub struct SolveApp {
     control_answering: Vec<control_job::ControlJob>,
     /// Most recent completed inspection per session and package, ordered by request.
     plugin_inspection_versions: std::collections::BTreeMap<(u64, String), usize>,
+    /// Native Form CAD reads awaiting an immutable input or a bounded answer slot.
+    #[cfg(not(target_arch = "wasm32"))]
+    control_form_validation: std::collections::VecDeque<control_job::FormValidationRequest>,
     /// Set by the desktop app ([`Self::share_plugin_grants`]): the approved plugin grants are kept
     /// in the plugins folder's grant store too, shared with the command line and headless MCP.
     plugin_grant_store: Option<solidcraft_engine::plugin::grant_store::Synced>,
@@ -1048,6 +1057,9 @@ impl SolveApp {
             blur: Default::default(),
             blur_session: Default::default(),
             viewport_status_fixture: Default::default(),
+            forms_prototype: Default::default(),
+            #[cfg(target_arch = "wasm32")]
+            browser_form_check: None,
             session,
             ui: UiState::default(),
             shell: Default::default(),
@@ -1173,6 +1185,7 @@ impl SolveApp {
             frame_rate: frame_rate::FrameRate::default(),
             operations: operations::Panel::default(),
             synthetic: Vec::new(),
+            synthetic_primary_press: false,
             synthetic_mods: egui::Modifiers::default(),
             held_click: Vec::new(),
             pen_release: None,
@@ -1188,6 +1201,8 @@ impl SolveApp {
             agent_replies: Vec::new(),
             control_answering: Vec::new(),
             plugin_inspection_versions: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            control_form_validation: Default::default(),
             plugin_grant_store: None,
             plugin_slots: Default::default(),
             agent: Default::default(),
@@ -1213,6 +1228,7 @@ impl SolveApp {
             applied_system_fonts: false,
         };
         easyprint_ui::install(&mut app);
+        forms_prototype::startup(&mut app);
         app
     }
 
@@ -1561,6 +1577,12 @@ impl SolveApp {
         self
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn with_browser_form_check(mut self, host: std::rc::Rc<dyn forms_prototype::BrowserCheckHost>) -> Self {
+        self.browser_form_check = Some(host);
+        self
+    }
+
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, mut params: Value) -> Result<Value, String> {
         // The rules below name registered ids; a command spelled in another case is the same
@@ -1581,6 +1603,17 @@ impl SolveApp {
         }
         if self.file_load_holds() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
+        }
+        if self.session.forms_prototype.is_some() {
+            let prototype_command = match id {
+                "edit.undo" => Some("form.prototype.undo"),
+                "edit.redo" => Some("form.prototype.redo"),
+                _ => None,
+            };
+            if let Some(command) = prototype_command {
+                let result = self.session.execute(command, &params).map_err(|e| e.to_string());
+                return self.command_completed(command, result);
+            }
         }
         // The editor's own marker moves come through here, so only Undo, Redo and Play close it.
         if matches!(id, "edit.undo" | "edit.redo" | "timeline.play") {
@@ -1723,6 +1756,18 @@ impl SolveApp {
             {
                 self.plugin_inspection_versions.insert((self.session.uid, id.to_owned()), control_job::next_plugin_inspection());
             }
+            forms_prototype::command_completed(self, id);
+            if matches!(id, "form.prototype.create" | "form.edit" | "form.repair" | "form.surface" | "form.pipe" | "form.blend.import") {
+                forms_prototype::opened(self);
+            }
+            if v.get("form_restored").and_then(Value::as_bool) == Some(true)
+                && solidcraft_engine::find_command(id).is_some_and(|spec| spec.id == "edit.restore_checkpoint")
+            {
+                self.forms_prototype = Default::default();
+                if self.session.forms_prototype.is_some() {
+                    forms_prototype::opened(self);
+                }
+            }
             match id {
                 "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
                 // The sketch being edited has all new contents: a tool's picks named the old ones.
@@ -1734,6 +1779,8 @@ impl SolveApp {
                         tool.point_picks.clear();
                     }
                 }
+                "view.fit" if self.session.forms_prototype.is_some() => forms_prototype::fit(self),
+                "view.home" if self.session.forms_prototype.is_some() => forms_prototype::home(self),
                 // A drawing inserted with curves kept as drawn that the curve check refuses says so,
                 // as other imports' warnings do (#16190).
                 "sketch.insert_svg" | "sketch.insert_dxf" => {
@@ -1991,6 +2038,8 @@ impl SolveApp {
                     self.tool = None;
                     self.preview.reset();
                     self.cam = Camera::default();
+                    self.forms_prototype = Default::default();
+                    forms_prototype::opened(self);
                     self.fit_view();
                     history_folds::load(self);
                     timeline_scope::reset(self);
@@ -2216,6 +2265,10 @@ impl SolveApp {
             if agent_chat::shown(self) {
                 agent_chat::toggle(self);
             }
+            return;
+        }
+        if matches!(id, "form.blend.import" | "form.blend.export") {
+            forms_prototype::pick_blend(self, id == "form.blend.import");
             return;
         }
         if id == "ui.palette" {
@@ -2624,11 +2677,19 @@ impl SolveApp {
             return;
         }
         if id == "parameters.change" {
-            params_dialog::open(self);
+            if self.session.forms_prototype.is_some() {
+                self.set_status(self.tr("forms.context.finish_before_parameters").to_owned(), true);
+            } else {
+                params_dialog::open(self);
+            }
             return;
         }
         if matches!(id, "document.metadata" | "document.metadata.set") {
-            design_properties::open(self);
+            if self.session.forms_prototype.is_some() {
+                self.set_status(self.tr("forms.context.finish_before_properties").to_owned(), true);
+            } else {
+                design_properties::open(self);
+            }
             return;
         }
         if id == "sketch.inspect" {
@@ -2740,6 +2801,16 @@ impl SolveApp {
             && id != "sketch.create"
         {
             self.last_command = Some((spec.id.to_string(), spec.label.to_string()));
+        }
+        if matches!(id, "form.pipe" | "form.surface") {
+            forms_prototype::start_source(self, id == "form.pipe");
+            return;
+        }
+        if id == "form.prototype.create" {
+            if let Err(error) = self.run(id, json!({})) {
+                self.set_status(error, true);
+            }
+            return;
         }
         if id == "sketch.project"
             && self.preferences.project_options_dialog
@@ -2868,7 +2939,9 @@ impl SolveApp {
 
     /// Does starting `id` open a tool or a dialog?
     fn interactive(&self, id: &str) -> bool {
-        tools::Tool::for_command(id).is_some() || dialogs::Dialog::for_command(self, id).is_some()
+        matches!(id, "form.prototype.create" | "form.pipe" | "form.surface")
+            || tools::Tool::for_command(id).is_some()
+            || dialogs::Dialog::for_command(self, id).is_some()
     }
 
     /// The ribbon has no sketch argument: use one unambiguous sketch pick, otherwise ask.
@@ -2941,7 +3014,8 @@ impl SolveApp {
         let Some(id) = self.pre_edit_component.as_ref().map(|pre| pre.feature) else { return };
         let open = self.dialog.as_ref().is_some_and(|d| d.editing.is_some_and(|(feature, _)| feature == id))
             || self.pending_feature_edit.as_ref().is_some_and(|pending| pending.feature() == Some(id))
-            || self.session.active_sketch == Some(id);
+            || self.session.active_sketch == Some(id)
+            || forms_prototype::editing_feature(self, id);
         if open {
             return;
         }
@@ -2958,6 +3032,10 @@ impl SolveApp {
         self.edit_anchor_hint = at.filter(|p| p.is_finite()).map(|p| (id, p));
         dialogs::cancel(self);
         let Some(f) = self.session.doc.feature(id) else { return };
+        if matches!(f.kind, FeatureKind::Form { .. }) {
+            forms_prototype::enter(self, id);
+            return;
+        }
         if matches!(f.kind, FeatureKind::Sketch { .. }) {
             self.edit_sketch(id);
             return;
@@ -3554,6 +3632,10 @@ impl SolveApp {
     const FIT_WAITS: u32 = 120;
 
     pub fn fit_view(&mut self) {
+        if self.session.forms_prototype.is_some() {
+            forms_prototype::fit(self);
+            return;
+        }
         if render_workspace::result_active(self) {
             render_workspace::fit_result(self);
             return;
@@ -3942,6 +4024,7 @@ impl SolveApp {
         refused_part::next_frame(self, ctx);
         gpu::tick_tessellation(self);
         file_picker::tick(self, ctx);
+        forms_prototype::background_tick(self, ctx);
         dialogs_save_mesh::tick_wait(self, ctx);
         easyprint_ui::tick(self, ctx);
         render_workspace::sync_backend(self);
@@ -4011,6 +4094,9 @@ impl SolveApp {
             }
         }
         recovery_ui::tick(self);
+        if let Some(delay) = recovery_ui::next_wakeup(self) {
+            ctx.request_repaint_after(delay);
+        }
         open_elsewhere::tick(self, ctx);
         update::tick(self, ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {
@@ -4076,6 +4162,7 @@ impl SolveApp {
 
     /// Inject synthetic events (one pointer event per frame).
     fn synthetic_input(&mut self, raw: &mut egui::RawInput) {
+        self.synthetic_primary_press = false;
         if self.synthetic.is_empty() {
             return;
         }
@@ -4104,7 +4191,8 @@ impl SolveApp {
             }
             match &event {
                 egui::Event::ModifiersChanged(modifiers) => self.synthetic_mods = *modifiers,
-                egui::Event::PointerButton { pos, modifiers, pressed, .. } => {
+                egui::Event::PointerButton { pos, modifiers, button, pressed } => {
+                    self.synthetic_primary_press = *button == egui::PointerButton::Primary && *pressed;
                     raw.events.push(egui::Event::PointerMoved(*pos));
                     raw.events.push(egui::Event::ModifiersChanged(*modifiers));
                     // A drag keeps its press's modifiers until the release.
@@ -4254,11 +4342,20 @@ impl SolveApp {
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
+        forms_prototype::repair_prompt(self, ui.ctx());
         update::show(self, ui.ctx());
         install::show(self, ui.ctx());
         // Settings › AI's Add agent dialog: Settings opens over Home too (#3483).
         if agent_chat::shown(self) {
             agent_chat::settings::dialog(self, ui.ctx());
+        }
+        if self.session.forms_prototype.is_some() {
+            dim_view::set_model_drawn(Vec::new());
+            ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Viewport).central().show(ui, |ui| forms_prototype::show(self, ui));
+            messages::show(self, ui.ctx());
+            prefs::show(self, ui.ctx());
+            shortcut_box::show(self, ui.ctx());
+            return;
         }
         library::panel(self, ui);
         if self.home.open {
@@ -4348,7 +4445,10 @@ impl SolveApp {
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
-        if drawing_workspace::active(self) {
+        if self.session.forms_prototype.is_some() {
+            dim_view::set_model_drawn(Vec::new());
+            forms_prototype::show(self, ui);
+        } else if drawing_workspace::active(self) {
             if dialogs_sheet::flat_active(self) {
                 // This is the existing source manufacturing inspector, not a drawing scene.
                 viewport::show(self, ui);
@@ -4591,5 +4691,7 @@ const SKETCH_ENDING_PANELS: [&str; 3] = ["CREATE", "MODIFY", "ASSEMBLE"];
 const SKETCH_TAB: &str = "SKETCH";
 
 fn ends_sketch(id: &str) -> bool {
-    solidcraft_engine::find_command(id).is_some_and(|c| c.tab != SKETCH_TAB && SKETCH_ENDING_PANELS.contains(&c.panel) && c.id != "sketch.create")
+    matches!(id, "form.prototype.create" | "form.pipe" | "form.surface")
+        || solidcraft_engine::find_command(id)
+            .is_some_and(|c| c.tab != SKETCH_TAB && SKETCH_ENDING_PANELS.contains(&c.panel) && c.id != "sketch.create")
 }

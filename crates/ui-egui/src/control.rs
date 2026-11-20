@@ -242,6 +242,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
     }
     if r.is_ok()
         && was_empty
+        && app.session.forms_prototype.is_none()
         && app.session.active_sketch.is_none()
         // Cheap test first: placing the world (`world_state`) after every step of a batch in a
         // design with components placed every component's bodies again once per step.
@@ -315,6 +316,11 @@ pub(crate) fn batch_step_command(step: &Value) -> Option<&str> {
     command(step)
 }
 
+fn form_validation_refusal(app: &SolveApp, steps: &[Value]) -> Option<&'static str> {
+    (app.apply_off_thread.is_some() && steps.iter().any(|step| is_command(command(step), "form.prototype.validate")))
+        .then_some("send form.prototype.validate as a separate engine.execute request so its CAD check can run in the background")
+}
+
 /// `engine.batch {commands, rollback?, timings?, profile?}`: the steps in one request, so in one
 /// frame (#743). With `timings` the reply adds each step's time and `total_ms`, with `profile`
 /// each step's kernel share too (`solidcraft_engine::timing`, #1833). Each
@@ -326,6 +332,9 @@ fn batch(app: &mut SolveApp, q: params::Batch) -> Outcome {
     let steps = &q.commands;
     if steps.len() > MAX_BATCH {
         return err(format!("engine.batch: commands must be an array of at most {MAX_BATCH} steps"));
+    }
+    if let Some(reason) = form_validation_refusal(app, steps) {
+        return err(format!("engine.batch unavailable: {reason}"));
     }
     let panels = steps.iter().filter(|step| command(step).is_some_and(solidcraft_engine::panels::commands::is_command)).count();
     if panels > 0 {
@@ -436,6 +445,9 @@ fn script(app: &mut SolveApp, p: &Value) -> Outcome {
         Ok(steps) => steps,
         Err(e) => return err(e),
     };
+    if let Some(reason) = form_validation_refusal(app, steps) {
+        return err(format!("engine.script unavailable: {reason}"));
+    }
     if let Some(c) = steps.iter().find_map(switches_design) {
         return err(format!("engine.script unavailable: {c} switches to another design (send it on its own)"));
     }
@@ -1018,6 +1030,7 @@ fn ui_agent_cursor(app: &mut SolveApp, p: &Value) -> Outcome {
 /// `ui.inspect`: UI state, viewport rect, camera, tool and dialog.
 fn ui_inspect(app: &SolveApp) -> Outcome {
     ok(json!({
+        "forms_prototype": crate::forms_prototype::inspect(app),
         "render": crate::render_workspace::inspect_state(app),
         "sheet_page": crate::drawing_sheet_page::inspect(app),
         "ui": ui_state(app),
@@ -2170,6 +2183,33 @@ pub(crate) mod tests {
             assert!(reply["result"].get("failed").is_none(), "{reply}");
             assert_ne!(app.session.document_id, previous);
             assert_eq!(app.panel_runtime().unwrap().environment().document.as_ref().unwrap().0, app.session.document_id);
+        }
+    }
+
+    #[test]
+    fn native_form_validation_sequences_refuse_before_any_step_runs() {
+        for off_thread in [false, true] {
+            for method in ["engine.batch", "engine.script"] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+                h.app.preferences.agent_off_thread = off_thread;
+                let document = h.app.session.doc.to_json();
+                let uid = h.app.session.uid;
+                let commands = json!([
+                    {"command":"file.new","params":{}},
+                    {"id":"FORM.PROTOTYPE.VALIDATE","params":{}}
+                ]);
+                let reply = h.call(method, json!({"commands":commands,"rollback":false}));
+                assert_eq!(reply["ok"], false, "{reply}");
+                assert!(reply["error"].as_str().unwrap().contains("separate engine.execute"), "{reply}");
+                assert_eq!(h.app.session.uid, uid);
+                assert_eq!(h.app.session.doc.to_json(), document);
+                if method == "engine.script" {
+                    let reply = h.call(method, commands);
+                    assert_eq!(reply["ok"], false, "{reply}");
+                    assert_eq!(h.app.session.uid, uid);
+                }
+            }
         }
     }
     #[test]
@@ -3439,6 +3479,39 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn failed_batches_restore_the_form_draft_and_editor() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.ui.show_browser = false;
+        h.app.ui.show_timeline = true;
+        let form = |h: &mut crate::scenario::Harness| h.call("engine.execute", json!({"command":"form.prototype.inspect"}))["result"].clone();
+        let create = json!({"command":"form.prototype.create","params":{"primitive":"box","size":10,"segments":[1,1,1],"levels":1}});
+        let pull = json!({"command":"form.prototype.set_vertices","params":{"vertices":[0],"positions":[[-6,-5,-5]]}});
+        let finish = json!({"command":"form.prototype.commit","params":{"tolerance":0.05}});
+        // A known command with parameters that are rejected at its turn.
+        let fail = json!({"command":"solid.extrude","params":{"distance":"bogus +"}});
+        let response = batch(&mut h, json!({"commands":[create.clone(),fail.clone()]}));
+        assert_eq!(response["result"]["rolled_back"], true, "{response}");
+        assert_eq!(form(&mut h)["active"], false);
+        assert!(!h.app.ui.show_browser && h.app.ui.show_timeline, "a rolled-back creation must preserve the chosen panel visibility");
+
+        assert_eq!(h.call("engine.execute", create)["ok"], true);
+        let before = form(&mut h);
+        for step in [pull.clone(), finish] {
+            let response = batch(&mut h, json!({"commands":[step,fail.clone()]}));
+            assert_eq!(response["result"]["failed"]["index"], 1, "{response}");
+            assert_eq!(response["result"]["rolled_back"], true, "{response}");
+            assert_eq!(form(&mut h), before);
+            assert!(h.app.session.doc.features.is_empty());
+            assert!(h.app.session.undo.is_empty());
+            assert!(!h.app.ui.show_browser && h.app.ui.show_timeline);
+        }
+
+        let response = batch(&mut h, json!({"rollback":false,"commands":[pull,fail]}));
+        assert_eq!(response["result"]["rolled_back"], false, "{response}");
+        assert_ne!(form(&mut h)["points"], before["points"]);
+    }
+
+    #[test]
     fn engine_batch_without_rollback_keeps_completed_steps() {
         let mut h = crate::scenario::Harness::new();
         let v = batch(
@@ -3958,6 +4031,21 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    #[test]
+    fn forms_inspection_keeps_the_editor_camera_in_a_single_body_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":2})).unwrap();
+        h.app.run("form.prototype.create", json!({"size":40,"segments":[1,1,1]})).unwrap();
+        h.frames(2);
+        h.call("ui.camera", json!({"target":[1,2,3],"distance":120,"yaw":0.3,"pitch":0.7}));
+        let before = json!(h.app.cam);
+        for _ in 0..3 {
+            let reply = h.call("engine.execute", json!({"command":"form.prototype.inspect"}));
+            assert_eq!(reply["ok"], true);
+            h.frames(2);
+            assert_eq!(json!(h.app.cam), before, "inspecting Forms must not refit the preceding CAD body");
+        }
+    }
     /// `ui.camera` reads the camera and sets it; its reply, passed back, sets the same view
     /// again. Fields left out keep their values, `fit` frames occurrences, and a refused field
     /// changes nothing.

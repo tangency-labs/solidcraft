@@ -49,6 +49,7 @@ pub(crate) mod coons;
 pub(crate) mod cutgrid;
 pub(crate) mod edges;
 pub(crate) mod grid;
+pub(crate) mod guided;
 pub(crate) mod motorcycle;
 pub(crate) mod pieces;
 pub(crate) mod poles;
@@ -60,18 +61,18 @@ pub(crate) mod surface;
 pub(crate) mod tangle;
 pub(crate) mod uv;
 
-pub use size::MAX_ANGLE_BOUNDARY;
 pub use crate::stats::{PlanStats, RefusedFace};
+pub use size::MAX_ANGLE_BOUNDARY;
 
 use crate::vec::VecExt as _;
 use std::collections::HashMap;
 
 use solidcore_convert as kernel;
 
-use solidcore::Vec3;
-use solidcore_record::brep::{self, Curve, Loop, Shell};
-use solidcore::eval::plan::EvalSurface;
 use crate::{FacePlan, TessPlan};
+use solidcore::Vec3;
+use solidcore::eval::plan::EvalSurface;
+use solidcore_record::brep::{self, Curve, Loop, Shell};
 
 use crate::{Result, TessError};
 
@@ -278,9 +279,19 @@ pub(crate) struct Prepared {
 /// facet may turn more than (where it sags above the angle's floor), for `purpose`. Faces and
 /// edges are the record's, in its order.
 pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpose: Purpose<'_>) -> Result<(TessPlan, PlanStats)> {
+    plan_with_stations(b, tol, turn, purpose, &[])
+}
+
+fn plan_with_stations(
+    b: &brep::Brep,
+    tol: f64,
+    turn: Option<size::Turn>,
+    purpose: Purpose<'_>,
+    stations: &[Vec<f64>],
+) -> Result<(TessPlan, PlanStats)> {
     let faces = &b.faces;
     let Prepared { rules, forward, edge_faces, evals, sizes, mut nodes, unsampled_edges, kept_strict, mut boundaries, params, why, tangled } =
-        prepare(b, tol, turn, purpose)?;
+        prepare(b, tol, turn, purpose, stations)?;
     let curved = evals.iter().filter(|e| !matches!(***e, EvalSurface::Plane { .. })).count();
     // One face for `purpose`: its plan, oriented, with its poles of higher order; or the boundary
     // sides the mesh path's shaping split.
@@ -328,7 +339,13 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
         let done = crate::par::map("face tessellation", &todo, curved >= PARALLEL_FACES, |&fi| {
             let purpose = match shape {
                 Some(shape) => {
-                    let sides = if last { Sides::Exhausted } else if kept.get(fi).copied().unwrap_or(true) { Sides::Kept } else { Sides::Split };
+                    let sides = if last {
+                        Sides::Exhausted
+                    } else if kept.get(fi).copied().unwrap_or(true) {
+                        Sides::Kept
+                    } else {
+                        Sides::Split
+                    };
                     Purpose::Mesh(Shape { sides, ..shape })
                 }
                 None => Purpose::Display,
@@ -542,7 +559,7 @@ fn on_edges(f: &brep::Face, nodes: &[edges::Nodes], sides: &[SplitSide]) -> Vec<
 /// ([`Prepared`]), with chord tolerance `tol` and the facet angle `turn`, for `purpose`: on the
 /// mesh path every face, planar ones included, asks for the spec's side where its surface asks
 /// for no less, and every edge follows the caller's size function too.
-pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpose: Purpose<'_>) -> Result<Prepared> {
+pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpose: Purpose<'_>, stations: &[Vec<f64>]) -> Result<Prepared> {
     let faces = &b.faces;
     let forward = forward_faces(b);
     // The faces each edge bounds, each once, in the order of the edge's uses.
@@ -648,6 +665,11 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
             }
         }
     }
+    for (edge, parameters) in stations.iter().enumerate() {
+        if !parameters.is_empty() {
+            edges::insert_parameters(b, edge, nodes.get_mut(edge).ok_or_else(|| unsupported("missing guided edge"))?, parameters)?;
+        }
+    }
     let indexed: Vec<usize> = (0..faces.len()).collect();
     let face_boundary = |fi: usize, nodes: &[edges::Nodes]| {
         let (Some(face), Some(eval), Some(map)) = (faces.get(fi), evals.get(fi), params.get(fi)) else {
@@ -677,6 +699,9 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
         });
     }
     let tangled = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary, &mut why, None)?;
+    if !stations.is_empty() && nodes.iter().any(|nodes| !nodes.snapped.is_empty()) {
+        return Err(unsupported("guided charts require original exact edge nodes, without tolerance-snapped contacts"));
+    }
     Ok(Prepared { rules, forward, edge_faces, evals, sizes, nodes, unsampled_edges, kept_strict, boundaries, params, why, tangled })
 }
 
@@ -764,7 +789,8 @@ fn boundary(
             let mut es: Vec<bool> = n.params.iter().map(|t| n.snapped.contains(t)).collect();
             let mut eq: Vec<[f64; 2]> = Vec::with_capacity(ep.len());
             for (k, (t, p)) in n.params.iter().zip(&n.points).enumerate() {
-                let q = solidcore_convert::curve2(&oe.pcurve).eval(t.clamp(p0, p1))
+                let q = solidcore_convert::curve2(&oe.pcurve)
+                    .eval(t.clamp(p0, p1))
                     .ok_or_else(|| fail(oe.edge, format!("its pcurve does not evaluate at t = {t}")))?;
                 let q = map.to_eval(q);
                 let on =
@@ -1505,7 +1531,13 @@ pub(crate) struct Polygons {
 /// beside the outer loop; and at a pole (within `reach`, [`Boundary::reach`]) the free parameter
 /// split into the previous node's value and the next one's, so the polygon runs along the
 /// collapsed side. Why not, where the boundary winds round the surface and cannot be cut.
-pub(crate) fn polygons(s: &poles::Face, loops: &[seam::Loop], rules: &size::Rules, h: f64, reach: f64) -> std::result::Result<Polygons, &'static str> {
+pub(crate) fn polygons(
+    s: &poles::Face,
+    loops: &[seam::Loop],
+    rules: &size::Rules,
+    h: f64,
+    reach: f64,
+) -> std::result::Result<Polygons, &'static str> {
     let dom = uv::domain(s);
     let mut projected: Vec<seam::Loop> = loops.to_vec();
     // A loop that winds around a periodic direction does not close in (u, v): the face is cut
@@ -1732,7 +1764,14 @@ fn ring_off_boundary(cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3], ranges: &[
     let crossed = run.iter().any(|&x| x * pole_side < 0.0);
     let ours = |k: usize| k == cap.before || k == cap.after || cap.copies.contains(&k);
     let inside = |t: f64| t > 0.0 && t < span;
-    let near = || ranges.iter().flat_map(|r| r.clone()).filter(|k| !ours(*k)).filter_map(|k| uvs.get(k).copied()).any(|q| inside(along(q)) && !(across(q) * pole_side < 0.0));
+    let near = || {
+        ranges
+            .iter()
+            .flat_map(|r| r.clone())
+            .filter(|k| !ours(*k))
+            .filter_map(|k| uvs.get(k).copied())
+            .any(|q| inside(along(q)) && !(across(q) * pole_side < 0.0))
+    };
     // A side of a loop that crosses the ring inside its span, though both its ends lie past the
     // ring's ends or across it (a hole reaching over the ring between its nodes). Sides with an
     // end at the ring's ends or on the run are the cap's own.
@@ -1771,7 +1810,14 @@ fn ring_off_boundary(cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3], ranges: &[
 /// keep the tolerance `tol` (the planner could not put nodes nearer the pole), it is divided more
 /// finely instead, so its chords keep the tolerance, and the face is named short of the angle.
 /// Each node's (u, v) and point; an error where the surface does not evaluate on the ring.
-fn cap_ring(s: &EvalSurface, cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3], tol: f64, min_angle: f64) -> std::result::Result<Vec<([f64; 2], Vec3)>, String> {
+fn cap_ring(
+    s: &EvalSurface,
+    cap: &PoleCap,
+    uvs: &[[f64; 2]],
+    fixed: &[Vec3],
+    tol: f64,
+    min_angle: f64,
+) -> std::result::Result<Vec<([f64; 2], Vec3)>, String> {
     /// Rounds of dividing the ring more finely where a chord still sags past the tolerance.
     const MAX_FINER: usize = 16;
     let (turn, pole, a, b) = ring_turn(s, cap, uvs, fixed)?;
@@ -1813,7 +1859,13 @@ fn cap_ring(s: &EvalSurface, cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3], to
     let nodes = |n: usize| -> std::result::Result<Vec<(f64, [f64; 2], Vec3)>, String> {
         (0..=n)
             .map(|i| {
-                let t = if i == 0 { 0.0 } else if i == n { 1.0 } else { place(i as f64 / n as f64)? };
+                let t = if i == 0 {
+                    0.0
+                } else if i == n {
+                    1.0
+                } else {
+                    place(i as f64 / n as f64)?
+                };
                 Ok((t, at(t), point(t)?))
             })
             .collect()
@@ -1948,7 +2000,15 @@ const SEED_GAP: f64 = 0.8;
 /// the surface runs slower than its fastest (towards a sphere's pole, round a torus's inside)
 /// the lattice crowds in 3D, and the seeds are thinned to the side. Whether the lattice was
 /// looked through ([`cdt::lattice_scanned`]).
-fn mesh_seeds(s: &EvalSurface, bbox: [(f64, f64); 2], h: f64, polys: &[&[[f64; 2]]], fast: [f64; 2], fixed: &[Vec3], size_at: Option<size::SizeAt<'_>>) -> (Vec<[f64; 2]>, bool) {
+fn mesh_seeds(
+    s: &EvalSurface,
+    bbox: [(f64, f64); 2],
+    h: f64,
+    polys: &[&[[f64; 2]]],
+    fast: [f64; 2],
+    fixed: &[Vec3],
+    size_at: Option<size::SizeAt<'_>>,
+) -> (Vec<[f64; 2]>, bool) {
     let (lattice, whole) = cdt::lattice_scanned(bbox, [h / fast[0], h / fast[1]], polys, fast);
     if !(h.is_finite() && h > 0.0) {
         return (lattice, whole);
@@ -1965,7 +2025,8 @@ fn mesh_seeds(s: &EvalSurface, bbox: [(f64, f64); 2], h: f64, polys: &[&[[f64; 2
         let Some((p, _, _)) = s.derivs(q[0], q[1]) else { continue };
         let gap = SEED_GAP * size::local(h, size_at, p);
         let [x, y, z] = cell(p);
-        let crowded = (-1..=1).any(|i| (-1..=1).any(|j| (-1..=1).any(|k| taken.get(&[x + i, y + j, z + k]).is_some_and(|ps| ps.iter().any(|o| o.dist(p) < gap)))));
+        let crowded = (-1..=1)
+            .any(|i| (-1..=1).any(|j| (-1..=1).any(|k| taken.get(&[x + i, y + j, z + k]).is_some_and(|ps| ps.iter().any(|o| o.dist(p) < gap)))));
         if !crowded {
             taken.entry([x, y, z]).or_default().push(p);
             seeds.push(q);
@@ -2024,7 +2085,11 @@ fn plan_face(
             refine: if bare { None } else { Some((sag, MAX_REFINE)) },
             shape: !matches!(**s, EvalSurface::Plane { .. }),
             lenient: lenient == Lenient::Yes,
-            flat: (bare && lenient == Lenient::No).then(|| cdt::Flat { min_angle: FLAT_MIN_ANGLE_DEG, max_points: uvs.len(), min_area: cdt::smallest_area(tol) }),
+            flat: (bare && lenient == Lenient::No).then(|| cdt::Flat {
+                min_angle: FLAT_MIN_ANGLE_DEG,
+                max_points: uvs.len(),
+                min_area: cdt::smallest_area(tol),
+            }),
         };
         cdt::triangulate(&uvs, &ranges, fill).ok_or_else(|| fail("boundary crosses itself"))
     };
@@ -2325,7 +2390,14 @@ fn plan_face(
         // departure involving the shared boundary can leave them outside the tolerance.
         if !caps.is_empty() || refinement.boundary_has_residual(s, tol, &poles, &fixed, &all, &triangles) {
             let (sag, unmeasured) = sag::worst(s, &poles, &fixed, &all, &triangles);
-            stats.over_tolerance.push(crate::OverTolerance { face: fi, sag, unmeasured, tol, within: sag <= tol && unmeasured == 0, caps: std::mem::take(&mut caps) });
+            stats.over_tolerance.push(crate::OverTolerance {
+                face: fi,
+                sag,
+                unmeasured,
+                tol,
+                within: sag <= tol && unmeasured == 0,
+                caps: std::mem::take(&mut caps),
+            });
         }
     }
     // A face the mesh path left short of its shape is named with its smallest angle in 3D.
@@ -2341,7 +2413,16 @@ fn plan_face(
     for q in &mut all {
         *q = s.wrap(*q);
     }
-    Ok(Planned::Face(FacePlan { face: u32::try_from(fi).unwrap_or(u32::MAX), surface: None, uv: all, fixed: fixed.into_iter().map(kernel::record_vec3).collect(), normals: Vec::new(), flip: false, triangles, poles: Vec::new() }))
+    Ok(Planned::Face(FacePlan {
+        face: u32::try_from(fi).unwrap_or(u32::MAX),
+        surface: None,
+        uv: all,
+        fixed: fixed.into_iter().map(kernel::record_vec3).collect(),
+        normals: Vec::new(),
+        flip: false,
+        triangles,
+        poles: Vec::new(),
+    }))
 }
 
 /// A face's (u, v) region and what meshing it needs.
@@ -2614,6 +2695,6 @@ fn closed_boundary(ranges: &[std::ops::Range<usize>], fixed: &[Vec3], uvs: &[[f6
 }
 
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 mod mesh_tests;
+#[cfg(test)]
+mod tests;

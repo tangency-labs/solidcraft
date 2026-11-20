@@ -116,6 +116,53 @@ fn tessellation_without_surfaces_does_not_dispatch() {
 }
 
 #[test]
+fn a_regular_nurbs_patch_keeps_its_normal_with_nearly_parallel_tangents() {
+    let Some(gpu) = gpu() else { return };
+    let mut plan = TessPlan::default();
+    for rise in [5e-7, 1e-24] {
+        let surface = plan.surfaces.len() as u32;
+        plan.surfaces.push(EvalSurface::nurbs(
+            [1, 1],
+            [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]],
+            [2, 2],
+            vec![[0.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0], [1.0, 0.0, rise, 1.0], [2.0, 0.0, rise, 1.0]],
+        ));
+        plan.faces.push(solidcore_tess::FacePlan {
+            face: surface,
+            surface: Some(surface),
+            uv: vec![[0.0, 0.0], [0.5, 0.5], [1.0, 1.0]],
+            ..Default::default()
+        });
+    }
+    let mesh = ok(gpu.evaluate(&plan));
+    assert_eq!(mesh.normals.len(), 6);
+    for normal in mesh.normals {
+        assert!(normal.x.abs() < 1e-5 && (normal.y + 1.0).abs() < 1e-5 && normal.z.abs() < 1e-5, "{normal:?}");
+    }
+}
+
+#[test]
+fn a_regular_boundary_normal_survives_large_inward_spacing() {
+    let Some(gpu) = gpu() else { return };
+    let mut plan = TessPlan::default();
+    for offset in [0.0, 1e6] {
+        let id = plan.surfaces.len() as u32;
+        plan.surfaces.push(EvalSurface::nurbs(
+            [1, 1],
+            [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]],
+            [2, 2],
+            vec![[offset, 0.0, 0.0, 1.0], [offset + 1.0, 0.0, 0.0, 1.0], [offset, 1.0, 0.0, 1.0], [offset + 1.0, 1.0, 1e6, 1.0]],
+        ));
+        plan.faces.push(solidcore_tess::FacePlan { face: id, surface: Some(id), uv: vec![[0.0, 0.0]], ..Default::default() });
+    }
+    let mesh = ok(gpu.evaluate(&plan));
+    assert_eq!(mesh.normals.len(), 2);
+    for normal in mesh.normals {
+        assert!(normal.x.abs() < 1e-6 && normal.y.abs() < 1e-6 && (normal.z - 1.0).abs() < 1e-6, "{normal:?}");
+    }
+}
+
+#[test]
 fn plan_validation_matches_the_packing_refusals() {
     let plan = TessPlan {
         surfaces: vec![EvalSurface::Plane {

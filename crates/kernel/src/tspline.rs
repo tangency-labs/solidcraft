@@ -27,6 +27,152 @@ pub fn tspline_sheet(ts: &TSpline) -> Result<Body> {
     surface_body(&patch_faces(&patches)?.canonical()?.brep)
 }
 
+/// A tensor NURBS surface as an open sheet, retaining its exact rational boundaries
+/// and original surface parameterization. Chart regularization is opt-in through
+/// [`fitted_nurbs_sheet`].
+pub fn nurbs_sheet(surface: &NurbsSurface) -> Result<Body> {
+    crate::surfaces::tensor_sheet(&surface.clamped().map_err(spline_err)?)
+}
+
+/// A subdivision tensor sheet, retaining its exact rim but using a different
+/// fitted chart where a smooth rim corner makes the original chart singular.
+/// The returned distance is sampled in both directions, not a certified bound.
+pub fn fitted_nurbs_sheet(surface: &NurbsSurface, tolerance: f64) -> Result<(Body, f64)> {
+    let [[u0, u1], [v0, v1]] = surface.domain();
+    let wire = vec![[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
+    let body = nurbs_sheet(surface)?;
+    recharted(surface, &[wire], tolerance, body)
+}
+
+/// [`fitted_nurbs_sheet`] for a trimmed region of the source tensor patch.
+pub fn fitted_nurbs_region_sheet(surface: &NurbsSurface, boundaries: &[Vec<[f64; 2]>], tolerance: f64) -> Result<(Body, f64)> {
+    let body = nurbs_region_sheet(surface, boundaries)?;
+    recharted(surface, boundaries, tolerance, body)
+}
+
+fn recharted(surface: &NurbsSurface, boundaries: &[Vec<[f64; 2]>], tolerance: f64, body: Body) -> Result<(Body, f64)> {
+    use solidcraft_geom::prelude::*;
+    if !tolerance.is_finite() || !(0.0..=1.0).contains(&tolerance) {
+        return Err(KernelError::Invalid("the subdivision chart error budget must be finite and 0..1 mm".into()));
+    }
+    // Only this fitted subdivision API may use a different nonplanar atlas.
+    let body = planar_supported(body)?;
+    if body.record().faces.iter().all(|face| matches!(face.surface, b::Surface::Plane { .. })) {
+        return Ok((body, 0.0));
+    }
+    let [[u0, u1], [v0, v1]] = surface.domain();
+    let singular = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].into_iter().any(|[u, v]| {
+        surface
+            .derivs([u, v])
+            .and_then(|(_, a, c)| Some(a.normalized()?.cross(c.normalized()?).len()))
+            .is_none_or(|angle| angle < 0.5_f64.to_radians().sin())
+    });
+    if singular { crate::fill::rechart_tensor(&body, surface, boundaries, tolerance) } else { Ok((body, 0.0)) }
+}
+
+/// One exact trimmed face, using an analytic support only when its complete
+/// positive-weight control hull certifies a plane. Nonplanar charts and their
+/// UV map are unchanged: this never fits, composes a pole chart or adds faces.
+pub fn nurbs_region_sheet_with_planar_support(surface: &NurbsSurface, boundaries: &[Vec<[f64; 2]>]) -> Result<Body> {
+    planar_supported(nurbs_region_sheet(surface, boundaries)?)
+}
+
+fn planar_supported(body: Body) -> Result<Body> {
+    let mut planar = body.record().clone();
+    for face in &mut planar.faces {
+        solidcore_ops::face_surface::planar_tensor(face, &planar.edges).map_err(|error| fail(error.to_string()))?;
+    }
+    if planar.faces.iter().all(|face| matches!(face.surface, b::Surface::Plane { .. })) { surface_body(&planar) } else { Ok(body) }
+}
+/// Trim one tensor surface by closed straight wires in its parameter plane.
+/// The edge and its pcurve share one parameter interval, including oblique trims.
+pub fn nurbs_region_sheet(surface: &NurbsSurface, boundaries: &[Vec<[f64; 2]>]) -> Result<Body> {
+    nurbs_region_sheet_with_budget(surface, boundaries, 16_000_000)
+}
+
+fn nurbs_region_sheet_with_budget(surface: &NurbsSurface, boundaries: &[Vec<[f64; 2]>], mut oblique_work: usize) -> Result<Body> {
+    if boundaries.is_empty()
+        || boundaries.len() > 128
+        || boundaries.iter().any(|w| !(3..=1024).contains(&w.len()))
+        || boundaries.iter().map(Vec::len).sum::<usize>() > 100_000
+    {
+        return Err(fail("a trimmed region requires bounded closed wires"));
+    }
+    let mut parts = Parts::default();
+    let mut vertices = HashMap::<Key, u32>::new();
+    let mut loops = Vec::with_capacity(boundaries.len());
+    let mut domain = [[f64::INFINITY, f64::NEG_INFINITY]; 2];
+    let mut bounds = solidcraft_geom::Aabb3::EMPTY;
+    let mut trim_coefficients = 1_000_000usize;
+    for wire in boundaries {
+        let mut uses = Vec::with_capacity(wire.len());
+        for (&a, &z) in wire.iter().zip(wire.iter().cycle().skip(1)).take(wire.len()) {
+            if a.iter().chain(&z).any(|v| !v.is_finite()) || a == z {
+                return Err(fail("trim edges need finite distinct parameter points"));
+            }
+            let varying = if a[1] == z[1] {
+                Some(0)
+            } else if a[0] == z[0] {
+                Some(1)
+            } else {
+                None
+            };
+            let (knots, controls, from, to, forward) = if let Some(varying) = varying {
+                let dir = if varying == 0 { solidcraft_geom::bspline::Dir::S } else { solidcraft_geom::bspline::Dir::T };
+                let range = [a[varying].min(z[varying]), a[varying].max(z[varying])];
+                let (knots, controls) = surface.iso_curve_segment(dir, a[1 - varying], range).map_err(spline_err)?;
+                if a[varying] < z[varying] { (knots, controls, a, z, true) } else { (knots, controls, z, a, false) }
+            } else {
+                let (knots, controls) = surface.parameter_line_bounded(a, z, &mut oblique_work).map_err(spline_err)?;
+                (knots, controls, a, z, true)
+            };
+            trim_coefficients = trim_coefficients
+                .checked_sub(knots.len() + controls.len())
+                .ok_or_else(|| KernelError::TooLarge("trimmed tensor boundary coefficient budget exceeded".into()))?;
+            let mut corner = |uv: [f64; 2]| -> Result<u32> {
+                let k = key(uv[0], uv[1]);
+                if let Some(&v) = vertices.get(&k) {
+                    return Ok(v);
+                }
+                let p = surface.eval(uv[0], uv[1]).map_err(spline_err)?;
+                if !p.is_finite() {
+                    return Err(fail("trim corner does not evaluate to a finite point"));
+                }
+                let v = index(parts.vertices.len())?;
+                parts.vertices.push(b::Vertex { point: [p.x, p.y, p.z], tolerance: 0.0 });
+                bounds.add(p);
+                vertices.insert(k, v);
+                Ok(v)
+            };
+            let ends = [corner(from)?, corner(to)?];
+            for uv in [a, z] {
+                for (range, value) in domain.iter_mut().zip(uv) {
+                    range[0] = range[0].min(value);
+                    range[1] = range[1].max(value);
+                }
+            }
+            let (curve, interval) = spline_curve(&controls, knots)?;
+            let edge = index(parts.edges.len())?;
+            parts.edges.push(b::Edge { nurbs: None, curve, interval, vertices: ends, tolerance: 0.0, uses: Vec::new() });
+            uses.push(b::OrientedEdge { edge, forward, pcurve: uv_line(from, to, interval) });
+        }
+        loops.push(b::Loop::Edges { edges: uses });
+    }
+    if domain.iter().any(|r| !(r[1] > r[0])) {
+        return Err(fail("trim parameter domain is degenerate"));
+    }
+    parts.tolerance = (bounds.diagonal() * 1e-6).max(1e-5);
+    for vertex in &mut parts.vertices {
+        vertex.tolerance = parts.tolerance;
+    }
+    for edge in &mut parts.edges {
+        edge.tolerance = parts.tolerance;
+    }
+    let face = b::Face { nurbs: None, surface: spline_surface(surface), domain, loops };
+    parts.faces.push((face, true));
+    surface_body(&parts.canonical()?.brep)
+}
+
 fn spline_err(e: SplineError) -> KernelError {
     KernelError::Invalid(format!("t-spline: {e}"))
 }
@@ -234,6 +380,335 @@ mod tests {
     #[test]
     fn regular_tspline_becomes_one_nurbs_face() {
         check_sheet(&surface(1), 1);
+    }
+
+    #[test]
+    fn generic_planar_tensor_and_trimmed_sheets_keep_their_original_uv_map() {
+        use solidcraft_geom::brep::eval::SurfaceEval;
+        let knots = [vec![2.0, 2.0, 2.0, 5.0, 5.0, 5.0], vec![-3.0, -3.0, -3.0, 7.0, 7.0, 7.0]];
+        let mut points = Vec::new();
+        let mut weights = Vec::new();
+        for j in 0..3 {
+            for i in 0..3 {
+                let (x, y) = ([0.0, 0.1, 1.0][i], [0.0, 0.7, 1.0][j]);
+                points.push(Vec3::new(10.0 * x, 4.0 * y, 5.0 + 2.0 * x + 3.0 * y));
+                weights.push(1.0 + 0.15 * (i + j) as f64);
+            }
+        }
+        let surface = NurbsSurface::new([2, 2], knots, &points, &weights).unwrap();
+        let wire = vec![[2.5, -1.0], [4.5, -1.0], [4.5, 6.0], [2.5, 6.0]];
+        for (body, domain) in [
+            (super::nurbs_sheet(&surface).unwrap(), surface.domain()),
+            (super::nurbs_region_sheet(&surface, &[wire]).unwrap(), [[2.5, 4.5], [-1.0, 6.0]]),
+        ] {
+            let face = &body.record().faces[0];
+            assert_eq!(face.domain, domain);
+            let exact = SurfaceEval::new(face.parameters()).unwrap();
+            for uv in [[2.6, -0.7], [3.1, 2.4], [4.3, 5.8]] {
+                assert!(exact.point(uv).unwrap().dist(surface.eval(uv[0], uv[1]).unwrap()) < 1e-11, "original UV map at{uv:?}");
+            }
+        }
+    }
+    #[test]
+    fn planar_only_regions_preserve_one_face_and_a_nonplanar_singular_chart() {
+        let mut points = Vec::new();
+        for j in 0..4 {
+            for i in 0..4 {
+                points.push(Vec3::new(i as f64, j as f64, if (1..3).contains(&i) && (1..3).contains(&j) { 1.0 } else { 0.0 }));
+            }
+        }
+        points[4] = points[1]; // Parallel corner tangents, but a nonplanar interior.
+        let surface = NurbsSurface::new([3, 3], std::array::from_fn(|_| vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]), &points, &[1.0; 16]).unwrap();
+        let wire = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let exact = super::nurbs_region_sheet(&surface, std::slice::from_ref(&wire)).unwrap();
+        let supported = super::nurbs_region_sheet_with_planar_support(&surface, &[wire]).unwrap();
+        assert_eq!(supported.face_count(), 1);
+        assert_eq!(supported.edge_count(), exact.edge_count());
+        assert_eq!(supported.record().faces[0].surface, exact.record().faces[0].surface);
+        assert_eq!(supported.record().faces[0].domain, exact.record().faces[0].domain);
+        let eval = solidcraft_geom::brep::eval::SurfaceEval::new(supported.record().faces[0].parameters()).unwrap();
+        for uv in [[0.1, 0.2], [0.5, 0.5], [0.8, 0.7]] {
+            assert!(eval.point(uv).unwrap().dist(surface.eval(uv[0], uv[1]).unwrap()) < 1e-12);
+        }
+    }
+    #[test]
+    fn fitted_planar_tensor_sheets_use_regular_supports_with_exact_rational_trims() {
+        use solidcore_record::brep::{self as b, Curve2};
+        use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
+        use solidcraft_geom::bspline::HPoint;
+        use solidcraft_geom::subdivision::primitives::Parameters;
+        let cage = Parameters { kind: "plane".into(), dimensions: [10.0; 3], segments: [1; 3], ..Default::default() }.build().unwrap();
+        let fitted = cage.fit_patches(0.05).unwrap().patches.remove(0);
+        let controls = fitted
+            .homogeneous()
+            .iter()
+            .enumerate()
+            .map(|(i, h)| {
+                let p = h.project().unwrap();
+                HPoint::weighted(Vec3::new(p.x + 0.3 * p.y, 0.7 * p.y, 5.0 + 0.5 * p.x + 0.25 * p.y), [0.8, 1.0, 1.2][i % 3])
+            })
+            .collect();
+        let surface = NurbsSurface::from_homogeneous(fitted.degree(), fitted.knots().clone(), controls).unwrap();
+        for body in [
+            super::fitted_nurbs_sheet(&surface, 0.0).unwrap().0,
+            super::fitted_nurbs_region_sheet(&surface, &[vec![[0.5, 0.0], [1.0, 0.5], [0.5, 1.0], [0.0, 0.5]]], 0.0).unwrap().0,
+            super::nurbs_region_sheet_with_planar_support(&surface, &[vec![[0.5, 0.0], [1.0, 0.5], [0.5, 1.0], [0.0, 0.5]]]).unwrap(),
+        ] {
+            let r = body.record();
+            assert!(matches!(r.faces[0].surface, b::Surface::Plane { .. }));
+            let support = SurfaceEval::new(r.faces[0].parameters()).unwrap();
+            for boundary in &r.faces[0].loops {
+                let b::Loop::Edges { edges } = boundary else { panic!("edge loop") };
+                for edge_use in edges {
+                    assert!(matches!(edge_use.pcurve, Curve2::RationalSpline { .. }));
+                    let edge = &r.edges[edge_use.edge as usize];
+                    assert!(matches!(edge.curve, b::Curve::RationalSpline { .. }));
+                    let exact = CurveEval::new(edge.parameters()).unwrap();
+                    for f in [0.0, 0.13, 0.57, 0.91, 1.0] {
+                        let t = edge.interval[0] * (1.0 - f) + edge.interval[1] * f;
+                        let uv = solidcraft_geom::brep::pcurve::eval(&edge_use.pcurve, t).unwrap();
+                        let lifted = support.derivs(uv[0], uv[1]).unwrap().0;
+                        assert!(lifted.dist(exact.point(t).unwrap()) < 1e-10);
+                    }
+                }
+            }
+            let native = solidcraft_smlib::Brep::from_record(r, true).unwrap();
+            assert!(native.check(solidcraft_smlib::CheckLevel::All).unwrap().is_valid());
+            let (sewn, closed) = native.stitch(1e-7).unwrap();
+            assert!(!closed);
+            assert!(sewn.check(solidcraft_smlib::CheckLevel::All).unwrap().is_valid());
+        }
+    }
+
+    #[test]
+    fn planar_support_never_flattens_a_nonplanar_tensor_interior() {
+        let points: Vec<_> = (0..4)
+            .flat_map(|j| (0..4).map(move |i| Vec3::new(i as f64, j as f64, if (1..3).contains(&i) && (1..3).contains(&j) { 1e-8 } else { 0.0 })))
+            .collect();
+        let surface = NurbsSurface::new([3, 3], std::array::from_fn(|_| vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]), &points, &[1.0; 16]).unwrap();
+        let (body, deviation) = super::fitted_nurbs_sheet(&surface, 0.0).unwrap();
+        assert_eq!(deviation, 0.0);
+        assert!(matches!(body.record().faces[0].surface, solidcore_record::brep::Surface::Spline { .. }));
+        let exact = solidcraft_geom::brep::eval::SurfaceEval::new(body.record().faces[0].parameters()).unwrap();
+        let centre = exact.derivs(0.5, 0.5).unwrap().0;
+        assert!((centre.z - 5.625e-9).abs() < 1e-20);
+    }
+
+    #[test]
+    fn planar_support_keeps_curvature_when_translated_far_along_the_plane() {
+        let points: Vec<_> = (0..4)
+            .flat_map(|j| {
+                (0..4).map(move |i| {
+                    let z = if (1..3).contains(&i) && (1..3).contains(&j) { 1e-8 } else { 0.0 };
+                    Vec3::new(1e9 + i as f64, j as f64, z)
+                })
+            })
+            .collect();
+        let surface = NurbsSurface::new([3, 3], std::array::from_fn(|_| vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]), &points, &[1.0; 16]).unwrap();
+        let wire = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let body = super::nurbs_region_sheet_with_planar_support(&surface, &[wire]).unwrap();
+        let record = body.record();
+        let face = &record.faces[0];
+        assert!(matches!(face.surface, solidcore_record::brep::Surface::Spline { .. }));
+        let exact = solidcraft_geom::brep::eval::SurfaceEval::new(face.parameters()).unwrap();
+        assert!((exact.derivs(0.5, 0.5).unwrap().0.z - 5.625e-9).abs() < 1e-20);
+        let [solidcore_record::brep::Loop::Edges { edges }] = face.loops.as_slice() else { panic!("expected one trim") };
+        for use_ in edges {
+            let edge = &record.edges[use_.edge as usize];
+            let t = f64::midpoint(edge.interval[0], edge.interval[1]);
+            let p = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()).unwrap().point(t).unwrap();
+            let [u, v] = solidcraft_geom::brep::pcurve::eval(&use_.pcurve, t).unwrap();
+            assert!(exact.derivs(u, v).unwrap().0.dist(p) < 2e-7);
+        }
+    }
+
+    #[test]
+    fn oblique_trim_edges_share_the_region_extraction_budget() {
+        let degree = 4;
+        let count = degree + 1;
+        let knots: Vec<_> = std::iter::repeat_n(0.0, count).chain(std::iter::repeat_n(1.0, count)).collect();
+        let points: Vec<_> = (0..count).flat_map(|v| (0..count).map(move |u| Vec3::new(u as f64, v as f64, 0.0))).collect();
+        let surface = NurbsSurface::new([degree; 2], [knots.clone(), knots], &points, &vec![1.0; count * count]).unwrap();
+        let a = [0.1, 0.2];
+        let b = [0.8, 0.3];
+        let c = [0.2, 0.9];
+        let budget = 3_000;
+        for (start, end) in [(a, b), (b, c), (c, a)] {
+            let mut remaining = budget;
+            assert!(surface.parameter_line_bounded(start, end, &mut remaining).is_ok());
+        }
+        let wire = vec![a, b, c];
+        let error = super::nurbs_region_sheet_with_budget(&surface, &[wire], budget).unwrap_err();
+        assert!(error.to_string().contains("shared work budget"), "{error}");
+    }
+
+    #[test]
+    fn sculpted_open_subdivision_charts_retain_their_rim_and_pass_native_checks() {
+        use solidcraft_geom::subdivision::primitives::Parameters;
+        for picked in [2, 4] {
+            let mut cage = Parameters { kind: "face".into(), dimensions: [10.0; 3], segments: [2; 3], ..Default::default() }.build().unwrap();
+            cage.points[picked].z = 2.0;
+            let fit = cage.fit_patches(0.05).unwrap();
+            let mut sheets = Vec::new();
+            for patch in &fit.patches {
+                let exact = super::nurbs_sheet(patch).unwrap();
+                let (sheet, deviation) = super::fitted_nurbs_sheet(patch, 0.05 - fit.sampled_deviation).unwrap();
+                assert!(fit.sampled_deviation + deviation <= 0.05);
+                assert_eq!(deviation, 0.0, "exact pole charts must retain the original fitting error");
+                let native = solidcraft_smlib::Brep::from_record(sheet.record(), true).unwrap();
+                assert!(native.check(solidcraft_smlib::CheckLevel::All).unwrap().is_valid());
+                // Every original rim point remains on an exact output edge;
+                // the alternative chart changes only the surface's interior fit.
+                let old = crate::face_geometry(&exact, 0).unwrap();
+                let new = crate::edge_geometry(&sheet, &(0..sheet.edge_count()).collect::<Vec<_>>()).unwrap();
+                for edge in old.loops.into_iter().flatten() {
+                    for f in [0.0, 0.13, 0.57, 0.91, 1.0] {
+                        let point = edge.at(f).unwrap().0;
+                        assert!(new.iter().any(|curve| {
+                            let distance = |t: f64| curve.at(t).unwrap().0.dist(point);
+                            let best: usize = (0..=32).min_by(|a, b| distance(*a as f64 / 32.0).total_cmp(&distance(*b as f64 / 32.0))).unwrap();
+                            let mut lo = best.saturating_sub(1) as f64 / 32.0;
+                            let mut hi = (best + 1).min(32) as f64 / 32.0;
+                            for _ in 0..72 {
+                                let a = lo + (hi - lo) / 3.0;
+                                let b = hi - (hi - lo) / 3.0;
+                                if distance(a) < distance(b) {
+                                    hi = b;
+                                } else {
+                                    lo = a;
+                                }
+                            }
+                            distance((lo + hi) * 0.5) < 1e-9
+                        }));
+                    }
+                }
+                sheets.push(sheet);
+            }
+            let sewn = crate::stitch(&sheets.iter().collect::<Vec<_>>(), 1e-7).unwrap();
+            assert!(sewn.is_surface());
+            assert_eq!(sewn.face_count(), 20);
+            assert_eq!(sewn.edge_count(), 44);
+            let native = solidcraft_smlib::Brep::from_record(sewn.record(), true).unwrap();
+            assert!(native.check(solidcraft_smlib::CheckLevel::All).unwrap().is_valid());
+        }
+    }
+
+    #[test]
+    fn dissolved_subdivision_cusps_use_exact_pole_charts_and_close_as_cad() {
+        use solidcore_record::brep;
+        use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
+        use solidcraft_geom::subdivision::primitives::Parameters;
+        let cube = Parameters { segments: [1; 3], dimensions: [10.0; 3], ..Default::default() }.build().unwrap();
+        let cage = cube.dissolve_edge([cube.faces[0][0], cube.faces[0][1]]).unwrap();
+        assert!(cage.faces.iter().any(|face| face.len() > 4));
+        let fit = cage.fit_patches(0.05).unwrap();
+        let mut sheets = Vec::new();
+        for patch in &fit.patches {
+            let (sheet, additional_error) = super::fitted_nurbs_sheet(patch, 0.05 - fit.sampled_deviation).unwrap();
+            assert_eq!(additional_error, 0.0, "pole composition must preserve the source exactly");
+            let record = sheet.record();
+            let native = solidcraft_smlib::Brep::from_record(record, true).unwrap();
+            assert!(native.check(solidcraft_smlib::CheckLevel::All).unwrap().is_valid());
+            for face in &record.faces {
+                let support = SurfaceEval::new(face.parameters()).unwrap();
+                for boundary in &face.loops {
+                    let brep::Loop::Edges { edges } = boundary else { panic!("edge loop") };
+                    for edge_use in edges {
+                        let edge = &record.edges[edge_use.edge as usize];
+                        let curve = CurveEval::new(edge.parameters()).unwrap();
+                        for f in [0.0, 0.13, 0.57, 0.91, 1.0] {
+                            let t = edge.interval[0] * (1.0 - f) + edge.interval[1] * f;
+                            let uv = solidcraft_geom::brep::pcurve::eval(&edge_use.pcurve, t).unwrap();
+                            assert!(support.point(uv).unwrap().dist(curve.point(t).unwrap()) < 1e-10);
+                        }
+                    }
+                }
+            }
+            sheets.push(sheet);
+        }
+        let sewn = crate::stitch(&sheets.iter().collect::<Vec<_>>(), 1e-7).unwrap();
+        assert!(!sewn.is_surface());
+        assert!(sewn.validity().is_empty());
+        assert_eq!(sewn.face_count(), 38);
+        let native = solidcraft_smlib::Brep::from_record(sewn.record(), true).unwrap();
+        assert!(native.check(solidcraft_smlib::CheckLevel::All).unwrap().is_valid());
+    }
+
+    #[test]
+    fn recharted_leaf_trims_keep_original_curves_and_exact_native_pcurves() {
+        use solidcore_record::brep;
+        use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
+        use solidcraft_geom::subdivision::primitives::Parameters;
+        let mut cage = Parameters { kind: "face".into(), dimensions: [10.0; 3], segments: [2; 3], ..Default::default() }.build().unwrap();
+        cage.points[2].z = 2.0;
+        let source = cage.fit_patches(0.05).unwrap().patches.remove(0);
+        for wire in [
+            vec![[0.0, 0.0], [0.5, 0.0], [0.5, 1.0], [0.0, 1.0]],
+            vec![[0.5, 0.0], [1.0, 0.0], [1.0, 1.0], [0.5, 1.0]],
+            vec![[0.5, 0.0], [1.0, 0.5], [0.5, 1.0], [0.0, 0.5]],
+        ] {
+            let exact = super::nurbs_region_sheet(&source, std::slice::from_ref(&wire)).unwrap();
+            let (fitted, deviation) = super::fitted_nurbs_region_sheet(&source, &[wire], 0.04).unwrap();
+            assert!(deviation <= 0.04);
+            let original_curves = crate::edge_geometry(&exact, &(0..exact.edge_count()).collect::<Vec<_>>()).unwrap();
+            let record = fitted.record();
+            for face in &record.faces {
+                let support = SurfaceEval::new(face.parameters()).unwrap();
+                for boundary in &face.loops {
+                    let brep::Loop::Edges { edges } = boundary else { panic!("edge loop") };
+                    for edge_use in edges {
+                        let edge = &record.edges[edge_use.edge as usize];
+                        let curve = CurveEval::new(edge.parameters()).unwrap();
+                        for fraction in [0.0, 0.13, 0.57, 0.91, 1.0] {
+                            let t = edge.interval[0] * (1.0 - fraction) + edge.interval[1] * fraction;
+                            let point = curve.point(t).unwrap();
+                            let uv = solidcraft_geom::brep::pcurve::eval(&edge_use.pcurve, t).unwrap();
+                            assert!(support.point(uv).unwrap().dist(point) < 1e-7);
+                            if edge.uses.len() == 1 {
+                                assert!(original_curves.iter().any(|old| {
+                                    let distance = |t: f64| old.at(t).unwrap().0.dist(point);
+                                    let best: usize =
+                                        (0..=32).min_by(|a, b| distance(*a as f64 / 32.0).total_cmp(&distance(*b as f64 / 32.0))).unwrap();
+                                    let mut lo = best.saturating_sub(1) as f64 / 32.0;
+                                    let mut hi = (best + 1).min(32) as f64 / 32.0;
+                                    for _ in 0..72 {
+                                        let a = lo + (hi - lo) / 3.0;
+                                        let b = hi - (hi - lo) / 3.0;
+                                        if distance(a) < distance(b) {
+                                            hi = b;
+                                        } else {
+                                            lo = a;
+                                        }
+                                    }
+                                    distance((lo + hi) * 0.5) < 1e-8
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+            let native = solidcraft_smlib::Brep::from_record(record, true).unwrap();
+            assert!(native.check(solidcraft_smlib::CheckLevel::All).unwrap().is_valid());
+        }
+    }
+
+    #[test]
+    fn sharp_thickened_subdivision_sheet_sews_without_singular_planar_supports() {
+        use solidcraft_geom::subdivision::primitives::Parameters;
+        let cage = Parameters { kind: "face".into(), dimensions: [10.0; 3], segments: [2; 3], ..Default::default() }
+            .build()
+            .unwrap()
+            .thicken(2.0, true)
+            .unwrap();
+        let patches = cage.fit_patches(0.02).unwrap();
+        let sheets: Vec<_> = patches.patches.iter().map(|surface| super::fitted_nurbs_sheet(surface, 0.0).unwrap().0).collect();
+        let solid = crate::stitch(&sheets.iter().collect::<Vec<_>>(), 1e-7).unwrap();
+        assert!(!solid.is_surface());
+        assert!(solid.validity().is_empty());
+        let native = solidcraft_smlib::Brep::from_record(solid.record(), true).unwrap();
+        assert!(native.check(solidcraft_smlib::CheckLevel::All).unwrap().is_valid());
+        let (lo, hi) = native.bounds().unwrap();
+        assert!(lo[2].abs() < 1e-10 && (hi[2] - 2.0).abs() < 1e-10);
     }
 
     #[test]

@@ -1,0 +1,26 @@
+{
+  "en": {
+    "forms.context.finish_before_parameters": "Finish or cancel the active Form before opening Change Parameters."
+  },
+  "ar": {
+    "forms.context.finish_before_parameters": "أنهِ الشكل الحر النشط أو ألغِه قبل فتح تغيير المعلمات."
+  },
+  "de": {
+    "forms.context.finish_before_parameters": "Stellen Sie die aktive Form fertig oder brechen Sie die Bearbeitung ab, bevor Sie Parameter ändern öffnen."
+  },
+  "he": {
+    "forms.context.finish_before_parameters": "יש לסיים או לבטל את הצורה החופשית הפעילה לפני פתיחת שינוי פרמטרים."
+  },
+  "ja": {
+    "forms.context.finish_before_parameters": "パラメーター変更を開く前に、現在のフォーム編集を終了またはキャンセルしてください。"
+  },
+  "ko": {
+    "forms.context.finish_before_parameters": "매개변수 변경을 열기 전에 편집 중인 자유형 형상을 완료하거나 취소하세요."
+  },
+  "vi": {
+    "forms.context.finish_before_parameters": "Hoàn tất hoặc hủy chỉnh sửa hình hiện tại trước khi mở Thay đổi tham số."
+  },
+  "zh": {
+    "forms.context.finish_before_parameters": "请先完成或取消当前造型，再打开更改参数。"
+  }
+}

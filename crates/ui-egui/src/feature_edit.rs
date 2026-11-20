@@ -34,12 +34,6 @@ impl PendingFeatureEdit {
         self.next_command = Some(command.to_owned());
     }
 
-    pub(crate) fn view_changed(&mut self, before: u64, after: u64) {
-        if self.source.revision == before {
-            self.source.revision = after;
-        }
-    }
-
     fn result(&self) -> Option<Result<(Session, Session), String>> {
         match self.done.try_recv() {
             Ok(result) => Some(result),

@@ -36,6 +36,13 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         ("frame_member_turn", json!({"type":"frame_member_turn","member":{"feature":7,"line":"l1"},"angle":"turn.angle"})),
         (
+            "form",
+            json!({"type":"form","definition":{
+                "placement":{"origin":[2,3,4],"axes":[[1,0,0],[0,1,0],[0,0,1]]},
+                "cage":{"points":[[0,0,0],[10,0,0],[10,10,0],[0,10,0]],"faces":[[0,1,2,3]]},
+                "parameters":{"kind":"face","dimensions":[10,10,10],"segments":[1,1,1]}},"tolerance":"form.tolerance","targets":["B"]}),
+        ),
+        (
             "body_transfer",
             json!({"type": "body_transfer", "bodies": ["B"], "from": 0, "to": 1, "transform": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}),
         ),

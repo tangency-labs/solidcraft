@@ -1490,6 +1490,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn active_form_refuses_parameters_without_queuing_a_hidden_dialog() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("form.prototype.create", json!({"primitive":"box"})).unwrap();
+        h.app.start("parameters.change");
+        assert!(h.app.params.is_none());
+        let (message, _, error) = h.app.status.as_ref().unwrap();
+        assert!(*error);
+        assert_eq!(message, h.app.tr("forms.context.finish_before_parameters"));
+        h.app.run("form.prototype.close", json!({})).unwrap();
+        assert!(h.app.params.is_none());
+        h.app.start("parameters.change");
+        assert!(h.app.params.is_some());
+    }
+
+    #[test]
     fn numeric_field_waits_for_unit_completion() {
         let ctx = crate::fonts::test_context();
         install_expressions(&ctx);

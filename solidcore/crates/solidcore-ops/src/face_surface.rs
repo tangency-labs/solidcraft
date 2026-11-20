@@ -15,6 +15,104 @@ use solidcore_record::brep::{Brep, Loop, Surface};
 use crate::error::{Error, Result};
 use crate::session::{run, Answer};
 
+/// Whether the natural orientations of two qualified coplanar supports oppose.
+pub fn opposed(
+    face: &solidcore_record::brep::Face,
+    support: &solidcore_record::brep::Face,
+) -> Result<bool> {
+    let evaluator = |surface: &Surface| {
+        let surface = solidcore_convert::surface(surface).map_err(|_| Error::Argument)?;
+        solidcore::eval::SurfaceEval::new(&surface).map_err(|_| Error::Argument)
+    };
+    let a = evaluator(&face.surface)?;
+    let b = evaluator(&support.surface)?;
+    a.opposed_to(face.domain, &b, support.domain)
+        .ok_or(Error::Argument)
+}
+
+/// Give a planar tensor face an analytic support, projecting its existing
+/// boundary curves without changing their intervals or weights.
+pub fn planar_tensor(
+    face: &mut solidcore_record::brep::Face,
+    edges: &[solidcore_record::brep::Edge],
+) -> Result<bool> {
+    use solidcore::eval::planar_tensor::PlanarTensor;
+    let surface = solidcore_convert::surface(&face.surface).map_err(|_| Error::Argument)?;
+    let evaluator = solidcore::eval::SurfaceEval::new(&surface).map_err(|_| Error::Argument)?;
+    let Some(plane) = PlanarTensor::of(&evaluator, face.domain) else {
+        return Ok(false);
+    };
+    let mut loops = face.loops.clone();
+    let mut curves = Vec::new();
+    for boundary in &mut loops {
+        let Loop::Edges { edges: uses } = boundary else {
+            return Err(Error::Argument);
+        };
+        for edge_use in uses {
+            let edge = edges.get(edge_use.edge as usize).ok_or(Error::Argument)?;
+            let curve = solidcore_convert::curve(&edge.curve).map_err(|_| Error::Argument)?;
+            let pcurve = plane.parameter_curve(curve).ok_or(Error::Argument)?;
+            edge_use.pcurve = solidcore_convert::record_curve2(pcurve.clone());
+            curves.push(pcurve);
+        }
+    }
+    let domain = PlanarTensor::parameter_box(curves.iter()).ok_or(Error::Argument)?;
+    let xyz = |p: solidcore::Vec3| [p.x, p.y, p.z];
+    face.nurbs = None;
+    face.surface = Surface::Plane {
+        origin: xyz(plane.origin),
+        u_axis: xyz(plane.u),
+        v_axis: xyz(plane.v),
+    };
+    face.domain = domain;
+    face.loops = loops;
+    Ok(true)
+}
+
+/// Exact spline evaluator and parameter map for a native surface record.
+pub fn eval_surface(
+    surface: &Surface,
+    domain: [[f64; 2]; 2],
+) -> Result<(
+    solidcore::eval::plan::EvalSurface,
+    solidcore::eval::surface_plan::Params,
+)> {
+    let surface = solidcore_convert::surface(surface).map_err(|_| Error::Argument)?;
+    solidcore::eval::surface_plan::eval_surface(&surface, domain).map_err(|error| match error {
+        solidcore::eval::EvalError::Unsupported(_) => {
+            Error::Unsupported("the face has no supported exact evaluator")
+        }
+        other => Error::Record(other.to_string()),
+    })
+}
+
+/// Resolve a point on a qualified chart, retaining the unwrapped branch near a hint.
+pub fn chart_parameters(
+    surface: &solidcore::eval::plan::EvalSurface,
+    point: solidcore_record::Vec3,
+    near: Option<[f64; 2]>,
+    tolerance: f64,
+) -> Option<[f64; 2]> {
+    solidcore::eval::plan::uv::qualified_parameters(
+        surface,
+        solidcore_convert::vec3(point),
+        near,
+        tolerance,
+    )
+}
+
+/// Verify that one outer trim follows all sides of the chart rectangle.
+pub fn rectangular_trim(face: &solidcore_record::brep::Face, span: [[f64; 2]; 2]) -> bool {
+    let [Loop::Edges { edges }] = face.loops.as_slice() else {
+        return false;
+    };
+    let curves: Vec<_> = edges
+        .iter()
+        .map(|edge| solidcore_convert::curve2(&edge.pcurve))
+        .collect();
+    solidcore::eval::planar_tensor::rectangular_trim(&curves, span)
+}
+
 /// What a face's exact surface is.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Exact {

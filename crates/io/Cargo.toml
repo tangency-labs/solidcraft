@@ -34,6 +34,7 @@ solidcraft-sketch = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 zip = { workspace = true }
+ruzstd = { workspace = true }
 quick-xml = { workspace = true }
 gltf = { workspace = true }
 serde = { workspace = true }
@@ -54,7 +55,7 @@ gerber_parser = { version = "0.5.0", default-features = false }
 # Exact area of Gerber copper, mask and silkscreen layers (src/gerber_area.rs): closed polylines
 # with arc segments and booleans on them; pure Rust, no unsafe, MIT OR Apache-2.0.
 cavalier_contours = { version = "0.9.0", default-features = false }
-# Sheet PDFs (src/paper/pdf.rs).
+# Sheet PDFs (src/paper/pdf.rs); flate2 also reads gzip-framed Blender documents (src/blend).
 pdf-writer = { workspace = true }
 flate2 = { workspace = true }
 # Its neutral model read into B-rep records (src/native_cad.rs, `cadir_records`).

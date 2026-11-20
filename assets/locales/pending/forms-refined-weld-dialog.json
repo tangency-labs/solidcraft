@@ -1,0 +1,56 @@
+{
+  "en": {
+    "forms.weld.pick_help": "Pick two saved refined Forms with coincident openings. The first Form supplies the joined body's name.",
+    "forms.weld.select_two": "Select two different saved refined Form surfaces in the active component.",
+    "forms.weld.sources": "Forms",
+    "help.form.refined_weld": "Join the coincident rims of two saved refined Forms while keeping both sources editable."
+  },
+  "de": {
+    "forms.weld.pick_help": "Wählen Sie zwei gespeicherte verfeinerte Formen mit deckungsgleichen Öffnungen. Der verbundene Körper übernimmt den Namen der ersten Form.",
+    "forms.weld.select_two": "Wählen Sie zwei verschiedene gespeicherte verfeinerte Formflächen in der aktiven Komponente.",
+    "forms.weld.sources": "Formen",
+    "help.form.refined_weld": "Verbindet die deckungsgleichen Ränder zweier gespeicherter verfeinerter Formen. Beide Ausgangsformen bleiben bearbeitbar."
+  },
+  "ja": {
+    "forms.weld.pick_help": "開口部が一致する保存済みの細分化フォームを二つ選択します。接合したボディには最初のフォームの名前が使われます。",
+    "forms.weld.select_two": "アクティブなコンポーネントにある異なる二つの保存済み細分化フォーム面を選択してください。",
+    "forms.weld.sources": "フォーム",
+    "help.form.refined_weld": "保存済みの細分化フォームの一致する縁を接合します。元の二つのフォームは編集可能なままです。"
+  },
+  "ko": {
+    "forms.weld.pick_help": "개구부가 일치하는 저장된 세분화 형상 두 개를 선택합니다. 접합된 본체에는 첫 번째 형상의 이름이 사용됩니다.",
+    "forms.weld.select_two": "활성 구성 요소에서 서로 다른 저장된 세분화 형상 표면 두 개를 선택하세요.",
+    "forms.weld.sources": "형상",
+    "help.form.refined_weld": "저장된 두 세분화 형상의 일치하는 테두리를 접합하면서 두 원본을 편집 가능한 상태로 유지합니다."
+  },
+  "zh": {
+    "forms.weld.pick_help": "选择两个开口重合的已保存细分造型。接合后的实体使用第一个造型的名称。",
+    "forms.weld.select_two": "在活动组件中选择两个不同的已保存细分造型曲面。",
+    "forms.weld.sources": "造型",
+    "help.form.refined_weld": "接合两个已保存细分造型的重合边缘，并保留两个源造型的可编辑性。"
+  },
+  "ar": {
+    "forms.weld.pick_help": "اختر شكلين مُنقَّحين محفوظين تتطابق فتحاتهما. يُسمّى الجسم المدمج باسم الشكل الأول.",
+    "forms.weld.select_two": "حدّد سطحين مختلفين لشكلين مُنقَّحين محفوظين في المكوّن النشط.",
+    "forms.weld.sources": "الأشكال الحرة",
+    "help.form.refined_weld": "يدمج محيطي فتحتين متطابقتين في شكلين مُنقَّحين محفوظين، مع إبقاء الشكلين الأصليين قابلين للتحرير."
+  },
+  "fr": {
+    "forms.weld.pick_help": "Sélectionnez deux formes raffinées enregistrées dont les ouvertures coïncident. La première forme donne son nom au corps assemblé.",
+    "forms.weld.select_two": "Sélectionnez deux surfaces de formes raffinées distinctes et enregistrées dans le composant actif.",
+    "forms.weld.sources": "Formes",
+    "help.form.refined_weld": "Joint les contours coïncidents de deux formes raffinées enregistrées et conserve les deux sources modifiables."
+  },
+  "he": {
+    "forms.weld.pick_help": "יש לבחור שתי צורות חופשיות שמורות שעברו עידון ושפתחיהן חופפים. שם הגוף המאוחה יילקח מהצורה הראשונה.",
+    "forms.weld.select_two": "יש לבחור ברכיב הפעיל שני משטחים שונים של צורות חופשיות שמורות שעברו עידון.",
+    "forms.weld.sources": "צורות חופשיות",
+    "help.form.refined_weld": "איחוי שפות חופפות של שתי צורות חופשיות שמורות שעברו עידון. שתי צורות המקור נשארות ניתנות לעריכה."
+  },
+  "vi": {
+    "forms.weld.pick_help": "Chọn hai hình đã chia nhỏ và được lưu có các lỗ hở trùng nhau. Khối sau khi hàn lấy tên của hình đầu tiên.",
+    "forms.weld.select_two": "Chọn hai bề mặt khác nhau của các hình đã chia nhỏ và được lưu trong thành phần hiện tại.",
+    "forms.weld.sources": "Hình tự do",
+    "help.form.refined_weld": "Hàn các vành trùng nhau của hai hình đã chia nhỏ và được lưu, đồng thời giữ cả hai hình nguồn ở trạng thái có thể chỉnh sửa."
+  }
+}

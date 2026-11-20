@@ -25,6 +25,7 @@ const BUILD: &str = "build.json";
 const ON_DEMAND: &[&str] = &["fonts/"];
 /// The version that makes sw.js retire (the template's own).
 const RETIRE_VERSION: &str = "dev";
+const COMPUTE_FILES: [&str; 3] = ["solidcraft-compute-worker_loader.js", "solidcraft-compute-worker.js", "solidcraft-compute-worker_bg.wasm"];
 
 pub fn run(root: &Path, dir: Option<&str>) -> Result<(), String> {
     let dir = match dir {
@@ -34,6 +35,7 @@ pub fn run(root: &Path, dir: Option<&str>) -> Result<(), String> {
                 std::env::var("TRUNK_STAGING_DIR").map_err(|_| "web-offline: give the built site's directory (or run as Trunk's hook)")?,
             );
             if std::env::var("TRUNK_PROFILE").is_ok_and(|p| p != "release") {
+                prepare_compute_bundle(&dir)?;
                 retire(root, &dir)?;
                 println!("web-offline: debug build, {SW} retires a kept release build");
                 return Ok(());
@@ -49,6 +51,7 @@ pub fn run(root: &Path, dir: Option<&str>) -> Result<(), String> {
 /// Write `dir/sw.js` and `dir/build.json` for the site in `dir`; returns its version and how many
 /// files it keeps.
 pub fn generate(root: &Path, dir: &Path) -> Result<(String, usize), String> {
+    prepare_compute_bundle(dir)?;
     let files = list(dir)?;
     if !files.iter().any(|(name, _)| name == "index.html") {
         return Err(format!("web-offline: {} has no index.html", dir.display()));
@@ -63,6 +66,36 @@ pub fn generate(root: &Path, dir: &Path) -> Result<(String, usize), String> {
     let build = json!({ "version": version, "files": manifest }).to_string();
     std::fs::write(dir.join(BUILD), build).map_err(|e| format!("{}: {e}", dir.join(BUILD).display()))?;
     Ok((version, files.len()))
+}
+
+/// Trunk 0.21.14 names worker artifacts without a content hash. Pin the three
+/// generated files together, before the offline manifest hashes index.html.
+/// Paths inside the generated module and loader stay relative to this bundle.
+fn prepare_compute_bundle(dir: &Path) -> Result<(), String> {
+    if !COMPUTE_FILES.iter().any(|file| dir.join(file).exists()) {
+        return Ok(()); // fixture or an already packaged build
+    }
+    let mut digest = Sha256::new();
+    for file in COMPUTE_FILES {
+        let bytes = std::fs::read(dir.join(file)).map_err(|e| format!("incomplete browser worker bundle ({file}): {e}"))?;
+        digest.update(Sha256::digest(bytes));
+    }
+    let identity: String = digest.finalize().iter().map(|byte| format!("{byte:02x}")).collect();
+    let relative = format!("workers/{identity}");
+    let index = dir.join("index.html");
+    let html = std::fs::read_to_string(&index).map_err(|e| format!("{}: {e}", index.display()))?;
+    let (head, tail) = html.split_once("</head>").ok_or("browser worker bundle has no index head")?;
+    if head.contains("solidcraft-compute-worker") {
+        return Err("index already contains a browser worker loader".into());
+    }
+    let loader = COMPUTE_FILES[0];
+    let html = format!("{head}<meta name=\"solidcraft-compute-worker\" content=\"./{relative}/{loader}\">\n</head>{tail}");
+    let destination = dir.join(relative);
+    std::fs::create_dir_all(&destination).map_err(|e| e.to_string())?;
+    for file in COMPUTE_FILES {
+        std::fs::rename(dir.join(file), destination.join(file)).map_err(|e| format!("could not package browser worker {file}: {e}"))?;
+    }
+    std::fs::write(&index, html).map_err(|e| format!("{}: {e}", index.display()))
 }
 
 /// Write `dir/sw.js` as the worker that keeps nothing and retires a kept release build.
@@ -128,6 +161,45 @@ fn render(template: &str, version: &str, files: &Value) -> Result<String, String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compute_bundle_identity_covers_loader_glue_and_wasm_and_generation_is_idempotent() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-compute-bundle-unit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let package = |variant: &str, changed: Option<&str>| {
+            let stage = dir.join(variant);
+            std::fs::create_dir_all(&stage).unwrap();
+            std::fs::write(stage.join("index.html"), "<html><head></head><body></body></html>").unwrap();
+            for file in COMPUTE_FILES {
+                let bytes = if Some(file) == changed { "new worker asset" } else { file };
+                std::fs::write(stage.join(file), bytes).unwrap();
+            }
+            let version = generate(&crate::root(), &stage).unwrap();
+            let index = std::fs::read_to_string(stage.join("index.html")).unwrap();
+            let loader = index.split_once("content=\"./").unwrap().1.split_once('"').unwrap().0;
+            let bundle = Path::new(loader).parent().unwrap();
+            for file in COMPUTE_FILES {
+                assert!(!stage.join(file).exists());
+                assert!(stage.join(bundle).join(file).is_file());
+            }
+            let manifest = std::fs::read(stage.join(BUILD)).unwrap();
+            assert_eq!(version, generate(&crate::root(), &stage).unwrap());
+            assert_eq!(manifest, std::fs::read(stage.join(BUILD)).unwrap());
+            assert_eq!(version.1, 4, "index plus the three exact worker files");
+            loader.to_owned()
+        };
+        let a = package("a", None);
+        assert_eq!(a, package("same", None));
+        for file in COMPUTE_FILES {
+            assert_ne!(a, package(file, Some(file)));
+        }
+        let incomplete = dir.join("incomplete");
+        std::fs::create_dir_all(&incomplete).unwrap();
+        std::fs::write(incomplete.join(COMPUTE_FILES[0]), "loader only").unwrap();
+        assert!(generate(&crate::root(), &incomplete).is_err());
+        assert!(incomplete.join(COMPUTE_FILES[0]).is_file(), "verify completeness before moving files");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn render_replaces_the_marker_line_only() {

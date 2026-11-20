@@ -31,6 +31,7 @@ pub mod fill;
 pub mod fill_general;
 pub mod fill_iso;
 pub mod fill_matched;
+mod fill_solve;
 mod grid;
 pub mod hlr;
 pub mod ids;
@@ -48,14 +49,71 @@ pub mod section;
 pub mod simplify;
 pub mod spline_space;
 pub mod stderr;
+pub mod subdivision;
 pub mod table;
 /// The plan evaluator, now the kernel's (`solidcore::eval::plan`), and the display plan, now
 /// solidcore-tess's (RFC 0003, item 1.1), under their old path.
 pub mod tess {
     pub use solidcore::eval::plan::*;
+    use solidcore_tess::SurfaceJet as PlanSurfaceJet;
     pub use solidcore_tess::{FacePlan, TessPlan};
 
     use solidcore_record::Vec3;
+
+    /// The plan representation of a fitted, nonperiodic spline patch.
+    pub fn nurbs_surface(surface: &crate::bspline::NurbsSurface) -> EvalSurface {
+        EvalSurface::Nurbs {
+            degree: surface.degree(),
+            knots: surface.knots().clone(),
+            count: surface.count(),
+            ctrl: surface.homogeneous().iter().map(|p| [p.x, p.y, p.z, p.w]).collect(),
+            closed: [false, false],
+        }
+    }
+
+    /// A surface differential in record coordinates.
+    #[derive(Clone, Copy, Debug)]
+    pub struct SurfaceJet {
+        pub point: Vec3,
+        pub du: Vec3,
+        pub dv: Vec3,
+        pub duu: Vec3,
+        pub duv: Vec3,
+        pub dvv: Vec3,
+    }
+
+    impl SurfaceJet {
+        pub fn from_kernel(jet: PlanSurfaceJet) -> Self {
+            Self {
+                point: from_kernel(jet.point),
+                du: from_kernel(jet.du),
+                dv: from_kernel(jet.dv),
+                duu: from_kernel(jet.duu),
+                duv: from_kernel(jet.duv),
+                dvv: from_kernel(jet.dvv),
+            }
+        }
+
+        fn to_kernel(self) -> PlanSurfaceJet {
+            PlanSurfaceJet {
+                point: to_kernel(self.point),
+                du: to_kernel(self.du),
+                dv: to_kernel(self.dv),
+                duu: to_kernel(self.duu),
+                duv: to_kernel(self.duv),
+                dvv: to_kernel(self.dvv),
+            }
+        }
+
+        pub fn normal(&self) -> Option<Vec3> {
+            self.to_kernel().normal().map(from_kernel)
+        }
+
+        /// Normal curvature for two tangent directions on this surface.
+        pub fn curvature(&self, a: Vec3, b: Vec3) -> Option<f64> {
+            self.to_kernel().curvature(to_kernel(a), to_kernel(b))
+        }
+    }
 
     /// A vector of SolidCraft's as the kernel's.
     pub fn to_kernel(v: Vec3) -> solidcore::Vec3 {
@@ -119,10 +177,10 @@ pub use aabb2::Aabb2;
 pub use arcfit::{Loop2ArcFit, MAX_FIT_PIECES, Region2ArcFit, Seg2ArcFit};
 pub use ball::Ball;
 pub use blend::hermite_bezier;
-pub use bvh::{Bvh, MeshIndex};
+pub use bvh::{Bvh, MeshIndex, MeshIndexWire};
 pub use chain::{Chain, Closed, Ends, Open, Path, Planar, Ring};
 pub use grid::Grid;
-pub use mesh::{Aabb3, BoxedTriangle, InsideIndex, MassProperties, Mesh, MeshGeom, MeshMeasure, TANGENT_CHAIN, find_close_pair};
+pub use mesh::{Aabb3, BoxedTriangle, InsideIndex, MassProperties, Mesh, MeshBufferLimits, MeshGeom, MeshMeasure, TANGENT_CHAIN, find_close_pair};
 pub use plane::PlaneGeom;
 pub use profile::{ArcMap, Loop2Geom, MAX_DERIVATIVE_ORDER, Region2Geom, Seg2Geom, Similarity2, bezier, regions_apart};
 pub use unit_vec3::UnitVec3;
