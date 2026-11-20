@@ -491,8 +491,29 @@ fn a_hand_past_the_right_one_changes_nothing() {
 /// as its catalogue key.
 #[test]
 fn a_groups_name_is_the_users_words_or_the_catalogues() {
+    crate::i18n::install();
     let mine = RingGroup { name: "My tools".into(), ..RingGroup::default() };
     assert_eq!(mine.shown_name(), "My tools");
     let view = &VrSettings::default().ring_groups[0];
     assert!(!view.shown_name().is_empty() && view.shown_name() != view.name, "{}", view.shown_name());
+}
+
+/// A ring's slot choosers fill a settings row as far as they fit and go on in the next, each row
+/// taking one at least; ones not drawn yet count a quarter of the row, and a width that is no
+/// number fits one a row.
+#[test]
+fn ring_slots_take_as_many_a_row_as_fit() {
+    // Four choosers 100 wide and the "+" 30 wide (last), 8 apart, in a row 330 wide.
+    let widths = [100.0, 100.0, 100.0, 100.0, 30.0];
+    let first = row_end(&widths, 0, 5, 330.0, 8.0);
+    assert_eq!(first, 3, "three choosers fit 330, a fourth does not");
+    assert_eq!(row_end(&widths, first, 5, 330.0, 8.0), 5, "the last chooser and the + share the next row");
+    // Nothing measured yet: a quarter of the row each.
+    assert_eq!(row_end(&[], 0, 9, 400.0, 0.0), 4);
+    // A chooser wider than the row still takes one.
+    assert_eq!(row_end(&[500.0, 100.0], 0, 2, 300.0, 8.0), 1);
+    for width in [f32::NAN, f32::INFINITY, -5.0, 0.0] {
+        assert_eq!(row_end(&widths, 0, 5, width, 8.0), 1, "{width}");
+    }
+    assert_eq!(row_end(&widths, 5, 5, 330.0, 8.0), 5, "nothing left: an empty row ends at once");
 }

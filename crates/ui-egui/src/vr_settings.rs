@@ -801,8 +801,28 @@ fn buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+/// Where a row of a ring's slot choosers ends that begins at item `start` of `shown` (the choosers,
+/// then the "+"): as many as fit `width` with `gap` between them, at least one. `widths` are the
+/// items' widths as last drawn, in the same order; one not drawn yet counts as a quarter of the row.
+pub(crate) fn row_end(widths: &[f32], start: usize, shown: usize, width: f32, gap: f32) -> usize {
+    let width = if width.is_finite() { width.max(0.0) } else { 0.0 };
+    let unknown = width / 4.0;
+    let mut used = 0.0;
+    let mut end = start;
+    while end < shown {
+        let w = widths.get(end).copied().filter(|w| w.is_finite() && *w > 0.0).unwrap_or(unknown);
+        let next = used + w + if end > start { gap } else { 0.0 };
+        if end > start && next > width {
+            break;
+        }
+        used = next;
+        end += 1;
+    }
+    end.max((start + 1).min(shown))
+}
+
 /// The ring menu's layout: the first ring's slots, then each group's name, pictogram and slots,
-/// each slot a small chooser in a row (an empty choice takes it out), "+" adding one.
+/// each slot a small chooser, four a row (an empty choice takes it out), "+" adding one.
 fn ring_settings(app: &mut SolveApp, ui: &mut egui::Ui) {
     let tr = |k: &str| solidcraft_ui_text::tr(k).to_string();
     ui_kit::text(ui, &tr("prefs.vr.ring"), ui_kit::Text::Hint("vr_ring"));
@@ -819,33 +839,67 @@ fn ring_settings(app: &mut SolveApp, ui: &mut egui::Ui) {
         RingAction::Empty => tr("prefs.vr.remove_slot"),
         other => tr(other.words()),
     };
-    // A ring's slots as choosers in a row, and "+" while there is room for another.
-    let slots = |ui: &mut egui::Ui, id: &str, list: &mut Vec<RingAction>, choices: &[RingAction]| {
-        ui.horizontal_wrapped(|ui| {
-            let mut out: Vec<RingAction> = Vec::new();
-            for (k, slot) in list.iter().enumerate() {
-                let mut chosen = *slot;
-                ui_kit::compact_dropdown_menu(ui, format!("{id}_{k}"), &name_of(*slot), |ui| {
-                    for choice in choices.iter().copied().chain([RingAction::Empty]) {
-                        if ui_kit::list_picker(ui, &format!("{id}_{k}_{choice:?}"), &name_of(choice), choice == *slot).clicked() {
-                            chosen = choice;
+    // A ring's slots as choosers, as many a row as fit (a form row holds one line: what does not
+    // fit goes on the next), and "+" after the last while there is room for another; the first
+    // row carries `label`. The widths are the ones measured the frame before.
+    let slots = |ui: &mut egui::Ui, label: &str, id: &str, list: &mut Vec<RingAction>, choices: &[RingAction]| {
+        let mut out: Vec<RingAction> = Vec::new();
+        let mut add = false;
+        let room = list.len() < RING_SLOTS;
+        // The choosers' widths, then the "+"'s.
+        let widths_id = ui.scope_id().with((id, "slot_widths"));
+        let known: Vec<f32> = ui.ctx().data(|d| d.get_temp(widths_id)).unwrap_or_default();
+        let mut measured = vec![0.0_f32; list.len() + 1];
+        let shown = list.len() + usize::from(room);
+        let mut start = 0;
+        // Each row takes one item at least, so this ends within `shown` rows.
+        for r in 0..shown.max(1) {
+            let gap = ui.spacing().item_spacing.x;
+            let end = ui_kit::row(ui, if r == 0 { label } else { "" }, |ui| {
+                ui.horizontal(|ui| {
+                    let end = row_end(&known, start, shown, ui.available_width(), gap);
+                    for (k, slot) in list.iter().enumerate().skip(start).take(end.saturating_sub(start)) {
+                        let mut chosen = *slot;
+                        let response = ui_kit::compact_dropdown_menu(ui, format!("{id}_{k}"), &name_of(*slot), |ui| {
+                            for choice in choices.iter().copied().chain([RingAction::Empty]) {
+                                if ui_kit::list_picker(ui, &format!("{id}_{k}_{choice:?}"), &name_of(choice), choice == *slot).clicked() {
+                                    chosen = choice;
+                                }
+                            }
+                        });
+                        if let Some(w) = measured.get_mut(k) {
+                            *w = response.rect.width();
+                        }
+                        if chosen != RingAction::Empty {
+                            out.push(chosen);
                         }
                     }
-                });
-                if chosen != RingAction::Empty {
-                    out.push(chosen);
-                }
+                    if room && end >= shown {
+                        let response = ui_kit::icon_action(ui, &tr("prefs.vr.add_slot"), "plus", true, false);
+                        if let Some(w) = measured.last_mut() {
+                            *w = response.rect.width();
+                        }
+                        add = response.clicked();
+                    }
+                    end
+                })
+                .inner
+            });
+            start = end;
+            if start >= shown {
+                break;
             }
-            if out.len() < RING_SLOTS && ui_kit::icon_action(ui, &tr("prefs.vr.add_slot"), "plus", true, false).clicked() {
-                let next = choices.iter().copied().find(|c| !out.contains(c)).unwrap_or(RingAction::ShowAll);
-                out.push(next);
-            }
-            *list = out;
-        });
+        }
+        ui.ctx().data_mut(|d| d.insert_temp(widths_id, measured));
+        if add && out.len() < RING_SLOTS {
+            let next = choices.iter().copied().find(|c| !out.contains(c)).unwrap_or(RingAction::ShowAll);
+            out.push(next);
+        }
+        *list = out;
     };
     let all = RingAction::all();
     let actions: Vec<RingAction> = all.iter().copied().filter(|a| !matches!(a, RingAction::Group(_))).collect();
-    ui_kit::row(ui, &tr("prefs.vr.ring_first"), |ui| slots(ui, "vr_ring", &mut s.ring, &all));
+    slots(ui, &tr("prefs.vr.ring_first"), "vr_ring", &mut s.ring, &all);
     for g in 0..GROUPS {
         let label = format!("{} {}", tr("prefs.vr.ring_group"), g + 1);
         let group = &mut s.ring_groups[g];
@@ -864,7 +918,7 @@ fn ring_settings(app: &mut SolveApp, ui: &mut egui::Ui) {
                 group.icon = GROUP_ICONS[at.min(GROUP_ICONS.len() - 1)].to_string();
             });
         });
-        ui_kit::row(ui, "", |ui| slots(ui, &format!("vr_ring_group_{g}"), &mut group.items, &actions));
+        slots(ui, "", &format!("vr_ring_group_{g}"), &mut group.items, &actions);
     }
 }
 
