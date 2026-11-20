@@ -118,7 +118,9 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
 
 fn plus_row(app: &mut SolveApp, id: &str) -> bool {
     if let Some(kind) = id.strip_prefix("plus.").and_then(ViewKind::from_key) {
-        let reuse = matches!(kind, ViewKind::Model | ViewKind::Render) && app.preferences.design_reuse_views;
+        // A Model view is another angle on the design, so "+ Model" always opens a new one; the
+        // Render workspace is one place, so it is reused.
+        let reuse = kind == ViewKind::Render && app.preferences.design_reuse_views;
         documents::view_open(app, kind, None, reuse);
         return true;
     }

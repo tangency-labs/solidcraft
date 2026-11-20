@@ -1798,6 +1798,8 @@ pub struct Model {
     /// Results another copy of this model evaluated (ahead, off the window thread) that
     /// `evaluate` takes for features they match ([`Model::prime`]), with that copy's context.
     primed: Option<(u64, Arc<std::collections::HashMap<u64, FeatureResult>>)>,
+    /// Mesh bodies from the import reader, offered to the next evaluation only.
+    prepared_meshes: Option<(u64, PreparedMeshImport)>,
     /// Shared with copies of this evaluator; states hold only a weak reference.
     frame_bodies: Arc<std::sync::Mutex<FrameBodies>>,
     /// When SMLib's check runs on the features this model evaluates ([`Model::set_validation`]).
@@ -3931,6 +3933,12 @@ impl Model {
         self.primed = None;
     }
 
+    /// Offer the import reader's validated bodies for the new feature's first evaluation.
+    pub fn prime_mesh_import(&mut self, id: u64, meshes: PreparedMeshImport) {
+        self.prepared_meshes = Some((id, meshes));
+        self.placement_inputs = None;
+    }
+
     /// When SMLib's check runs on the features this model evaluates.
     pub fn validation(&self) -> kernel::Validation {
         self.validation
@@ -3954,6 +3962,7 @@ impl Model {
 
     /// Re-evaluate the document, reusing results up to the first changed feature.
     pub fn evaluate(&mut self, doc: &Document) {
+        let prepared_meshes = self.prepared_meshes.take();
         // A failed sketch held for its editor is built again from the evaluated design: when the
         // sketch and every feature after it fail, the results end in the state they ended in
         // before, which would keep showing the sketch as it was before the edit.
@@ -4301,7 +4310,8 @@ impl Model {
                         let _val_guard = EvalValidationGuard::new(validation);
                         let (r, deferred) = kernel::validating(validation, || {
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = self.import_digests.heals(f.id).cloned());
-                            let r = eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair, heal);
+                            let meshes = prepared_meshes.as_ref().filter(|(id, _)| *id == f.id).map(|(_, meshes)| meshes);
+                            let r = eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair, heal, meshes);
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = None);
                             r
                         });
@@ -9589,7 +9599,13 @@ fn feature_op(f: &Feature) -> (Operation, Vec<String>) {
         FeatureKind::Pipe { operation, targets, .. } => (*operation, crate::plain(targets)),
         FeatureKind::Loft { operation, targets, .. } | FeatureKind::Sweep { operation, targets, .. } => (*operation, crate::plain(targets)),
         FeatureKind::Coil { operation, targets, .. } => (*operation, crate::plain(targets)),
-        FeatureKind::CellGrid { targets, .. } => (Operation::Cut, crate::plain(targets)),
+        FeatureKind::CellGrid { targets, mode, .. } => (
+            match mode {
+                crate::CellGridMode::Cut => Operation::Cut,
+                crate::CellGridMode::Raised => Operation::Join,
+            },
+            crate::plain(targets),
+        ),
         FeatureKind::Rib { .. } => (Operation::Join, Vec::new()),
         _ => (Operation::NewBody, Vec::new()),
     }
@@ -11705,9 +11721,10 @@ fn eval_feature(
     import_report: &mut Option<Arc<kernel::ImportReport>>,
     repair: &mut Option<Arc<kernel::RepairReport>>,
     heal: bool,
+    prepared_meshes: Option<&PreparedMeshImport>,
 ) -> Result<()> {
     JOINED_TARGETS.with(|n| n.borrow_mut().clear());
-    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal);
+    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes);
     for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
         append_warning(warning, note);
     }
@@ -11727,6 +11744,7 @@ fn eval_feature_kind(
     import_report: &mut Option<Arc<kernel::ImportReport>>,
     repair: &mut Option<Arc<kernel::RepairReport>>,
     heal: bool,
+    prepared_meshes: Option<&PreparedMeshImport>,
 ) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
@@ -11851,12 +11869,22 @@ fn eval_feature_kind(
             unchanged(st, warning);
             Ok(())
         }
-        FeatureKind::CellGrid { targets, .. } => {
+        FeatureKind::CellGrid { targets, mode, .. } => {
             let tools = cell_grid::tools(doc, vals, f, st, warning)?;
             // A grid beside the body, or cut the wrong way, changes nothing: say so, as a cut does.
+            // Raised cells are joined, as a join extrude's tool is: with no body to join they are
+            // a new body, and one that stands inside the body changes nothing, with no warning.
             let before: Vec<Body> = st.bodies.iter().map(|b| b.body.clone()).collect();
-            apply_traced(doc, st, f, tools, Operation::Cut, &crate::plain(targets))?;
-            if !before.is_empty() && st.bodies.len() == before.len() && st.bodies.iter().zip(&before).all(|(b, old)| old.same(&b.body)) {
+            let op = match mode {
+                crate::CellGridMode::Cut => Operation::Cut,
+                crate::CellGridMode::Raised => Operation::Join,
+            };
+            apply_traced(doc, st, f, tools, op, &crate::plain(targets))?;
+            if op == Operation::Cut
+                && !before.is_empty()
+                && st.bodies.len() == before.len()
+                && st.bodies.iter().zip(&before).all(|(b, old)| old.same(&b.body))
+            {
                 append_warning(warning, "the cut removes no material; check where its profile lies, the direction and the depth".into());
             }
             Ok(())
@@ -12879,7 +12907,7 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::MeshImport { meshes, .. } => {
-            for (k, (name, b)) in mesh_bodies(meshes)?.into_iter().enumerate() {
+            for (k, (name, b)) in mesh_bodies(meshes, prepared_meshes)?.into_iter().enumerate() {
                 let name = copy_body_name(st, f, k, &name);
                 st.bodies.push(ModelBody::new(name, b, f.id));
             }
@@ -13037,18 +13065,50 @@ fn moved_copy(source: &ModelBody, copy: Body, instance: usize) -> Traced {
     Traced::step(copy, &[&source.before_as(crate::lineage::Operand::Copy { body: source.name.clone(), instance })])
 }
 
-/// Mesh bodies of a MeshImport feature.
-fn mesh_bodies(meshes: &[crate::MeshData]) -> Result<Vec<(String, Body)>> {
-    let mut out = Vec::with_capacity(meshes.len());
-    for m in meshes {
-        if !m.corner_normals.is_empty() && m.corner_normals.len() != m.triangles.len().saturating_mul(3) {
-            return Err(DocError::Invalid(format!("mesh `{}`: invalid shading normal count", m.name)));
-        }
-        let b = Body::from_packed_mesh(m.positions.as_chunks::<3>().0, m.triangles.as_chunks::<3>().0, m.corner_normals.as_chunks::<9>().0)
-            .map_err(|e| DocError::Invalid(format!("mesh `{}`: {e}", m.name)))?;
-        out.push((m.name.clone(), b.with_color(m.color)));
+/// Meshes validated by the import reader for a newly added MeshImport feature.
+#[derive(Clone, Debug)]
+pub struct PreparedMeshImport(Vec<(crate::MeshData, Body)>);
+
+impl PreparedMeshImport {
+    /// Build the exact inputs that the timeline would use. Prepare before adding the feature
+    /// so a malformed source is reported as an import error.
+    pub fn build(meshes: &[crate::MeshData]) -> Result<Self> {
+        let bodies: Result<Vec<_>> = meshes.iter().map(|m| Ok((m.clone(), build_import_mesh(m)?))).collect();
+        bodies.map(Self)
     }
-    Ok(out)
+
+    fn body(&self, index: usize, mesh: &crate::MeshData) -> Option<&Body> {
+        let (input, body) = self.0.get(index)?;
+        // The command can generate different shading normals before it adds the feature.
+        // Keep the input arrays to prove that the body was built from these exact values.
+        (Arc::ptr_eq(&input.positions, &mesh.positions)
+            && Arc::ptr_eq(&input.triangles, &mesh.triangles)
+            && Arc::ptr_eq(&input.corner_normals, &mesh.corner_normals))
+        .then_some(body)
+    }
+}
+
+fn build_import_mesh(mesh: &crate::MeshData) -> Result<Body> {
+    if !mesh.corner_normals.is_empty() && mesh.corner_normals.len() != mesh.triangles.len().saturating_mul(3) {
+        return Err(DocError::Invalid(format!("mesh `{}`: invalid shading normal count", mesh.name)));
+    }
+    Body::from_packed_mesh(mesh.positions.as_chunks::<3>().0, mesh.triangles.as_chunks::<3>().0, mesh.corner_normals.as_chunks::<9>().0)
+        .map_err(|e| DocError::Invalid(format!("mesh `{}`: {e}", mesh.name)))
+}
+
+/// Mesh bodies of a MeshImport feature.
+fn mesh_bodies(meshes: &[crate::MeshData], prepared: Option<&PreparedMeshImport>) -> Result<Vec<(String, Body)>> {
+    meshes
+        .iter()
+        .enumerate()
+        .map(|(index, mesh)| {
+            let body = match prepared.and_then(|prepared| prepared.body(index, mesh)) {
+                Some(body) => body.clone(),
+                None => build_import_mesh(mesh)?,
+            };
+            Ok((mesh.name.clone(), body.with_color(mesh.color)))
+        })
+        .collect()
 }
 
 /// The names an Import feature gives the file's bodies, added after the bodies of `st`, in the

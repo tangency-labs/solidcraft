@@ -1263,6 +1263,39 @@ fn unfold_cut_refold_and_convert() {
     assert!(rel(size.0.max(size.1), 80.0) < 1e-9 && rel(size.0.min(size.1), 60.0) < 1e-9, "{f}");
 }
 
+/// #17544: a hem on a wall that a cut in the flat has shortened runs along what is left of the
+/// wall's edge. A 100 x 100 sheet folded 90° along Y 30, cut back to X 60 in the flat and refolded
+/// is the same part as a 60 x 100 sheet folded there, and the same hem on either is the same: the
+/// hem used to run the wall's original 100 and stand out to X 100.
+#[test]
+fn a_hem_on_a_wall_shortened_by_a_cut_runs_along_what_the_cut_left() {
+    let folded = |s: &mut Session, w: f64| {
+        run(s, "sketch.create", json!({"plane": "XY", "name": "Flat"}));
+        run(s, "sketch.line", json!({"points": [[0, 0], [w, 0], [w, 100], [0, 100]], "closed": true}));
+        run(s, "sketch.finish", json!({}));
+        run(s, "sheet.flange", json!({"type": "base", "sketch": "Flat", "name": "Base"}));
+        run(s, "sheet.fold", json!({"points": [[0, 30, 2.5], [w, 30, 2.5]], "angle": "90 deg", "fixed": [w / 2.0, 70, 2.5], "name": "FoldB"}));
+    };
+    let hem = |s: &mut Session| run(s, "sheet.hem", json!({"edges": [[30, 29, 30]], "length": 5, "gap": 2, "name": "Hem"}));
+    let box_of = |s: &mut Session| run(s, "inspect.measure", json!({}))["bodies"][0]["bbox"].clone();
+    let mut cut = Session::default();
+    folded(&mut cut, 100.0);
+    run(&mut cut, "sheet.unfold", json!({}));
+    run(&mut cut, "solid.box", json!({"corner": [60, -1, -1], "length": 41, "width": 102, "height": 6, "operation": "cut", "name": "Trim"}));
+    run(&mut cut, "sheet.refold", json!({}));
+    hem(&mut cut);
+    let mut narrow = Session::default();
+    folded(&mut narrow, 60.0);
+    hem(&mut narrow);
+    let (b, want) = (box_of(&mut cut), box_of(&mut narrow));
+    assert!((b["max"][0].as_f64().unwrap_or(f64::NAN) - 60.0).abs() < 1e-6, "{b}");
+    for (end, axis) in [("min", 0), ("min", 1), ("min", 2), ("max", 0), ("max", 1), ("max", 2)] {
+        let (got, wanted) = (b[end][axis].as_f64().unwrap_or(f64::NAN), want[end][axis].as_f64().unwrap_or(f64::NAN));
+        assert!((got - wanted).abs() < 1e-6, "{end} {axis}: {b} vs {want}");
+    }
+    assert!(rel(volume(&mut cut), volume(&mut narrow)) < 1e-6, "{} vs {}", volume(&mut cut), volume(&mut narrow));
+}
+
 /// A pattern of a cut made in the flat is a set of cuts in the flat, kept like the cut itself: in
 /// the flat pattern and refolded, its count following a parameter. A circular pattern too, and a
 /// pattern of a cut through a folded sheet. They were refused ("this sheet machining cannot be

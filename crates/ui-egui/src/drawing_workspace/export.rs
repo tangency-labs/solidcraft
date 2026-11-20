@@ -1,4 +1,5 @@
-//! The drawing's Export panel (Drawing Review › Output › Export): the file format, and for a PDF
+//! The drawing's Export panel (Drawing Review › Output › Export): the file format (PDF, SVG, PNG or
+//! DXF), and for a PDF
 //! whether it holds the sheet shown or every sheet, one page each, then a file dialog. The file is
 //! written by `drawing.export` off the window thread, as an agent's export is
 //! ([`crate::file_load::Kind::ExportSheet`]), so a large sheet doesn't stop the window.
@@ -11,8 +12,12 @@ use crate::drawing_sheet_page::active_sheet;
 use crate::ui_kit::{self, Button};
 
 /// The formats offered, first the default: (label id, `format`, extension).
-const FORMATS: [(&str, &str, &str); 3] =
-    [("ui.drawing_export.pdf", "pdf", "pdf"), ("ui.drawing_export.svg", "svg", "svg"), ("ui.drawing_export.png", "png", "png")];
+const FORMATS: [(&str, &str, &str); 4] = [
+    ("ui.drawing_export.pdf", "pdf", "pdf"),
+    ("ui.drawing_export.svg", "svg", "svg"),
+    ("ui.drawing_export.png", "png", "png"),
+    ("ui.drawing_export.dxf", "dxf", "dxf"),
+];
 
 /// The panel's choices, kept while it is open.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -84,7 +89,9 @@ pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
             let note = if form.all_sheets && sheets > 1 { "ui.drawing_export.pdf_pages" } else { "ui.drawing_export.pdf_note" };
             ui_kit::text(ui, tr(note), ui_kit::Text::Note(note));
         } else {
-            ui_kit::text(ui, tr("ui.drawing_export.one_sheet"), ui_kit::Text::Note("ui.drawing_export.one_sheet"));
+            let note =
+                if FORMATS[form.format.min(FORMATS.len() - 1)].1 == "dxf" { "ui.drawing_export.dxf_note" } else { "ui.drawing_export.one_sheet" };
+            ui_kit::text(ui, tr(note), ui_kit::Text::Note(note));
         }
         ui.separator();
         ui.horizontal(|ui| {
@@ -164,5 +171,6 @@ mod tests {
         assert_eq!(params(ExportForm { format: 0, all_sheets: false }, sheet), json!({"format": "pdf", "sheet": id}));
         assert_eq!(params(ExportForm { format: 1, all_sheets: true }, sheet), json!({"format": "svg", "sheet": id}), "svg is one sheet");
         assert_eq!(params(ExportForm { format: 2, all_sheets: false }, sheet), json!({"format": "png", "sheet": id}));
+        assert_eq!(params(ExportForm { format: 3, all_sheets: true }, sheet), json!({"format": "dxf", "sheet": id}), "dxf is one sheet");
     }
 }

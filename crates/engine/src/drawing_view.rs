@@ -155,10 +155,12 @@ impl From<&ResolvedView> for Styles {
 }
 
 impl Styles {
-    /// Leaves out a shaded part's own lines: its picture draws it, and it still hides what lies
-    /// behind it.
+    /// Leaves out the lines of a part shaded with no lines: its picture draws it, and it still
+    /// hides what lies behind it. A part shaded with its edges keeps its exact lines (visible, and
+    /// hidden too for shaded with hidden edges), drawn over its picture, so where the picture's
+    /// tessellated outline and the exact lines differ, the lines win.
     pub fn leave_shaded_to_pictures(&self, lines: &mut Lines) {
-        let shaded = |reference: bool| (if reference { self.reference } else { self.display }).is_shaded();
+        let shaded = |reference: bool| (if reference { self.reference } else { self.display }) == VisualStyle::Shaded;
         lines.lines.retain(|l| !shaded(l.reference));
         lines.threads.retain(|t| !shaded(t.reference));
     }
@@ -523,13 +525,6 @@ pub struct OnSheet {
     pub unmeasured: Option<Unmeasured>,
 }
 
-/// Why a view drawing in `display` and `reference` styles can't be drawn yet, if it can't: shaded
-/// views with lines need the view's exact lines. The snapshot and the sheet scene refuse alike.
-pub fn not_drawable(display: VisualStyle, reference: VisualStyle) -> Option<&'static str> {
-    let lined = |style: VisualStyle| style.is_shaded() && style != VisualStyle::Shaded;
-    (lined(display) || lined(reference)).then_some("not supported yet: shaded views with lines need the view's exact lines (W06)")
-}
-
 /// Why section view `view` can't be drawn yet, if it can't (#13046): only a full section's lines
 /// are cut so far, and a shaded part's picture isn't. The sheet scene refuses it; its settings stay
 /// editable. Pictures and dimensions leave out every section view for now.
@@ -738,9 +733,8 @@ pub(crate) fn on_its_sheet(s: &Session, d: &Drawing, id: u64, cmd: &str) -> std:
     if d.view(id).and_then(no_model_edges).is_some() {
         return Err(NO_PLACE);
     }
-    let unstyled = not_drawable(view.visual_style.value, view.reference_style.value);
     // Not yet on a section view: its cut faces' edges are in no part (#13046).
-    if unstyled.or_else(|| not_drawable_apart(&view)).is_some() || view.cut.is_some() {
+    if not_drawable_apart(&view).is_some() || view.cut.is_some() {
         return Err(NOT_DRAWN);
     }
     let on = on_sheet(s, d, id, cmd).ok().filter(|on| on.unmeasured.is_none()).ok_or(NOT_DRAWN)?;

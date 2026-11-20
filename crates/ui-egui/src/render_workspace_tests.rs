@@ -9156,15 +9156,21 @@ fn live_image_imported_mesh_keeps_selected_and_hovered_face_and_body_feedback() 
         255,
     ];
 
-    // Expand actual highlighted placements too: an empty CPU triangle list alone
-    // does not mean that a whole-body GPU highlight is missing.
+    // Count the triangles and check the palette colour of both copied and shared feedback.
     let filled_vertices = |app: &SolveApp, expected_color: [u8; 4]| {
         let feedback = crate::viewport::build_highlight(app).merged();
         assert!(feedback.overlay.is_empty() && feedback.xray.is_empty(), "feedback must remain depth-tested");
         assert!(feedback.selected_planned.is_empty() && feedback.hover_planned.is_empty());
         assert!(feedback.selected_blocks.is_empty() && feedback.hover_blocks.is_empty() && feedback.recoloured.is_empty());
+        if active(app) {
+            assert!(feedback.selected_face_instanced.is_empty(), "Render keeps the selected face in its own feedback geometry");
+        } else if app.viewport.gpu.is_some() {
+            let [face] = feedback.selected_face_instanced.as_slice() else { panic!("Design draws one selected reference mesh") };
+            assert!(Arc::ptr_eq(&face.tris, &reference_shared), "Design shares the model's reference triangles");
+            assert_eq!(face.count(), 1, "Design tints the reference at one placement");
+        }
         let mut tris = feedback.tris.clone();
-        for mesh in feedback.selected_instanced.iter().chain(&feedback.hover_instanced) {
+        for mesh in feedback.selected_instanced.iter().chain(&feedback.hover_instanced).chain(&feedback.selected_face_instanced) {
             mesh.expand_into(&mut tris);
         }
         let vertices = tris.as_chunks::<{ crate::gpu::TRI_SIZE }>().0;

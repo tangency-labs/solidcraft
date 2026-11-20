@@ -1121,3 +1121,54 @@ fn configuration_card_and_columns_resize_and_remember() {
         scenario::rect_of("dialog:table:configuration_table:Default:cell:Configuration").unwrap().x_range()
     );
 }
+
+/// When the design no longer matches the active configuration, Update sits beside Apply and takes
+/// the design's values into the row; a change the table has no column for is named below it
+/// ([T-686](https://tickets.solidcraft.io/t/686)).
+#[test]
+fn configuration_update_takes_the_designs_values_into_the_active_row() {
+    let mut h = fixture();
+    h.app.run("config.configure", json!({"params":["width"]})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    assert!(scenario::handle_at("config:update:Default").is_none(), "nothing to update while the design matches the row");
+    h.app.run("parameters.change", json!({"name":"width","expression":"25 mm"})).unwrap();
+    let feature = h.app.session.doc.features[0].id;
+    h.app.run("timeline.suppress", json!({"feature":feature,"suppressed":true})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"config:update:Default"}})).unwrap();
+    h.frames(3);
+    assert_eq!(config_cell(&h, "Default", 0), "25 mm");
+    assert!(h.app.session.doc.configuration_matches());
+    assert!(scenario::handle_at("config:update:Default").is_none(), "the design matches the row again");
+    assert!(scenario::rect_of("dialog:report:not_captured").is_some(), "the suppression without a column is named");
+}
+
+/// Configurations as columns ([T-690](https://tickets.solidcraft.io/t/690)): the same table the
+/// other way round, a row per parameter and a column per configuration. Cells edit as before;
+/// Enter goes down to the configuration's next value and Tab across to the next configuration.
+#[test]
+fn configurations_as_columns_swap_the_table_and_its_keys() {
+    let mut h = configuration_cells();
+    let rows: Vec<String> = h.app.session.doc.configs.rows.iter().map(|r| r.name.clone()).collect();
+    let (first, second) = (&rows[0], &rows[1]);
+    h.step(&json!({"click":{"handle":"config:as_columns"}})).unwrap();
+    h.frames(3);
+    assert!(scenario::rect_of("dialog:table:configuration_table_swapped:viewport").is_some(), "the swapped table is shown");
+    assert!(scenario::rect_of(&format!("dialog:column:configuration_table_swapped:{second}")).is_some(), "a column per configuration");
+    h.run(&json!([{"click":{"handle":format!("config:cell:{first}:param:width")}}, {"key":"A","cmd":true}, {"text":"11 mm"}, {"key":"Enter"}, {"frames":2}]))
+        .unwrap();
+    assert_eq!(config_cell(&h, first, 0), "11 mm", "Enter commits the cell");
+    h.run(&json!([{"text":"6 mm"}, {"frames":1}, {"key":"Tab"}, {"frames":2}])).unwrap();
+    assert_eq!(config_cell(&h, first, 1), "6 mm", "Enter went down to the configuration's next value");
+    h.run(&json!([{"text":"7 mm"}, {"frames":1}, {"key":"Enter"}, {"frames":2}])).unwrap();
+    assert_eq!(config_cell(&h, second, 1), "7 mm", "Tab went across to the next configuration");
+    // The choice is the viewer's: the design is unchanged by it, and it is kept for next time.
+    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+    h.app.start("config.table");
+    h.frames(3);
+    assert!(scenario::rect_of("dialog:table:configuration_table_swapped:viewport").is_some(), "kept when the table opens again");
+    h.step(&json!({"click":{"handle":"config:as_columns"}})).unwrap();
+    h.frames(3);
+    assert!(scenario::rect_of("dialog:table:configuration_table:viewport").is_some(), "and switched back");
+}
