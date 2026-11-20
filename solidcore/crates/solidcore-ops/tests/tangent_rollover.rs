@@ -1352,6 +1352,10 @@ fn a_corner_round_whose_rail_ends_on_the_top_s_edge_builds() {
 /// -65 - r4 = -90 + sqrt 205.
 const CORNER_ROUND_REACHES_W: f64 = 25.0 - 14.317_821_063_276_353;
 
+/// Width of the certified volume enclosure asked of the round built next to W: asked for 1e-2,
+/// the enclosure stops at 0.16 there; the round adds 122.5.
+const NEXT_TO_W_ENCLOSURE: f64 = 0.2;
+
 /// The corner round `r4` on [`arm_boss_foot_only`] (or on `b`), with the corpus's fix set
 /// (`corpus`) or none, under [`Contract::Proved`]: its result, the fix set restored after.
 fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
@@ -1378,13 +1382,18 @@ fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
 ///   z >= 5; they share only the side's segment from R to W on z = 5).
 ///   - Without the corpus's fixes the round builds, as it does past W by more
 ///     ([`a_corner_round_whose_rail_ends_past_the_top_under_the_foot_round_builds`]): valid at
-///     the full check, and the kernel's certified enclosure of its volume holds the closed
-///     form (the input's plus 5 r4^2 (1 - pi / 4)), as does the computed volume. Main refused it
+///     the full check, its rails on edges and its cap edge on z = 5 next to R, and the
+///     kernel's certified enclosure of its volume, at most [`NEXT_TO_W_ENCLOSURE`] wide, holds
+///     the closed form (the input's plus 5 r4^2 (1 - pi / 4)), as does the computed volume.
+///     (The round adds 122.5: an enclosure that narrow rules out a round lost, doubled or
+///     cut by more than that width.) Main refused it
 ///     as the rounds crossing at R: the joint there is judged by the vertex, left at W (1e-3
 ///     from R) under the vertex's tolerance, and the lobe's edge kept 4.6e-5 under a trim that
 ///     upstream's corner fix (`sm_FixUVTrimCurves`) had moved 1e-3 off its curve, uncovered.
 ///     Its tolerance now covers its trim (#18166), and the joint at R is seen.
-///   - With them, main's outcome stands: refused as crossing at R.
+///   - With them it is still refused as crossing at R, as on main. By the geometry above that
+///     refusal is a false one (the rounds meet at R); it is pinned here as main's outcome so
+///     that a change to it is seen, not as the right answer.
 /// - 5e-6 past it, within the body's tolerance (1e-5), R is not past W: the rail ends on the
 ///   top's edge as on main, and the round builds valid (its volume, MEASURED, 1.4e-5 from the
 ///   closed form, which the end at W within the tolerance does not bound).
@@ -1403,8 +1412,44 @@ fn a_corner_round_whose_rail_meets_the_top_next_to_w_builds_where_the_rounds_mee
                 assert!(report.is_valid(), "r4 {r4} corpus {corpus}: {report}");
                 let expected = before + 5.0 * r4 * r4 * (1.0 - PI / 4.0);
                 let after = b.volume(1e-9).unwrap();
+                let ry = -65.0 - r4;
                 let (k, mut brep) = common::kernel_copy(&b);
-                let e = solidcore::mass::enclosure::enclose_volume(&k, &mut brep, 1e-2).unwrap();
+                let on_edge = |brep: &solidcore::Brep, p: [f64; 3], within: f64| {
+                    let q = solidcore::Vec3::new(p[0], p[1], p[2]);
+                    brep.edge_list().iter().any(|&e| {
+                        solidcore::query::api_queries::edge_closest_point(&k, brep, e, q)
+                            .unwrap()
+                            .closest
+                            .distance
+                            < within
+                    })
+                };
+                for (x, y) in [(-36.0 + r4, -65.0), (-36.0, ry)] {
+                    for z in [0.5, 2.5, 4.5] {
+                        assert!(
+                            on_edge(&brep, [x, y, z], 1e-7),
+                            "r4 {r4} corpus {corpus}: no rail through ({x}, {y}, {z})"
+                        );
+                    }
+                }
+                // The cap edge lies on z = 5 exactly (the top's plane). The foot round's contact
+                // edge on the side, which the round keeps (its material is at z >= 5), runs
+                // above it by (23 - rho)^2 / 10: 3.1e-8 a tenth of the way from R to W, so a
+                // point there within 1e-9 of an edge is on the cap edge, not on that one.
+                let near_r = ry + 0.1 * (w - ry);
+                assert!(
+                    on_edge(&brep, [-36.0, near_r, 5.0], 1e-9),
+                    "r4 {r4} corpus {corpus}: no cap edge through (-36, {near_r}, 5)"
+                );
+                let e =
+                    solidcore::mass::enclosure::enclose_volume(&k, &mut brep, NEXT_TO_W_ENCLOSURE)
+                        .unwrap();
+                assert!(
+                    e.hi - e.lo <= NEXT_TO_W_ENCLOSURE,
+                    "r4 {r4}: enclosure [{}, {}] wider than {NEXT_TO_W_ENCLOSURE}",
+                    e.lo,
+                    e.hi
+                );
                 assert!(
                     e.lo <= expected && expected <= e.hi,
                     "r4 {r4}: closed form {expected} outside [{}, {}]",
