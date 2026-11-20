@@ -51,8 +51,11 @@ With `physics: true`, an export of the whole design also writes OpenUSD physics 
 rigid, revolute, slider, cylindrical, planar and ball joints (revolute and slider joints keep their limits;
 the others are written without them, with a warning), each grounded placement fixed to the world, each
 placement of a component as a rigid body, each component's mass, centre of mass and principal inertia from
-its bodies' materials, and a physics scene. Other joint kinds, suppressed joints and motion links are left
-out with a warning. With bodies chosen, or a placement that is not rigid, no physics is written, and a
+its bodies' materials, and a physics scene. Gears between two revolute joints and a rack and pinion become
+PhysX gear and rack-and-pinion joints that couple the two joints. PhysX's gears turn opposite ways and its
+rack moves with the pinion's turn, so gears that turn the same way (an internal gear, or reversed
+gears), a rack that moves against the pinion's turn, other joint kinds, suppressed joints, screws, cams
+and other motion links are left out with a warning. With bodies chosen, or a placement that is not rigid, no physics is written, and a
 warning says why. With `render_setup: <name>` and a `.usdz` path, the images that render setup gives the
 bodies (base colour, roughness, metallic, and a normal map the file can show as the renderer does) go
 into the package, on each body's mesh; a `.usda` or `.usdc` file is written without them, with a warning.

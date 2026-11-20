@@ -549,6 +549,111 @@ fn physics_writes_joints_grounding_and_mass() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// With `physics`, gears and a rack couple their joints as PhysX does: G1 (radius 10) meshing G2
+/// (radius 20) turns it half as far the other way, a PhysX gear joint of ratio 0.5 from G1's
+/// hinge to G2's; a 10 mm pinion moves its rack 10 mm per radian, 0.1 rad/mm, which the stage
+/// writes in degrees per metre. An internal gear turns its mate the same way, which PhysX's gear
+/// joint does not: it is left out with a warning.
+#[test]
+fn physics_writes_gears_and_racks_as_couplings() {
+    let dir = temp_dir("gears");
+    let mut s = Session::default();
+    let part = |s: &mut Session, name: &str, solid: &str, p: Value| {
+        run(s, "component.activate", json!({"component": "root"}));
+        run(s, "component.create", json!({"name": name, "grounded": false}));
+        run(s, solid, p);
+    };
+    part(&mut s, "Base", "solid.box", json!({"length": 120, "width": 60, "height": 10, "corner": [-30, -30, -20]}));
+    for (name, x, r) in [("G1", 0, 10), ("G2", 30, 20), ("G3", 65, 15)] {
+        part(&mut s, name, "solid.cylinder", json!({"base": [x, 0, 0], "axis": [0, 0, 1], "radius": r, "height": 5}));
+    }
+    part(&mut s, "Rack", "solid.box", json!({"length": 40, "width": 4, "height": 4, "corner": [-20, -14, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let base = s.doc.occurrence_of(s.doc.find_component("Base").unwrap()).unwrap().id;
+    run(&mut s, "occurrence.ground", json!({"occurrence": base, "grounded": true}));
+    let pin = |s: &mut Session, kind: &str, name: &str, b: &str, p: [f64; 3], z: [f64; 3]| {
+        let at = |o: &str| json!({"occurrence": o, "point": p, "z": z});
+        run(s, "joint.create", json!({"type": kind, "a": at("Base"), "b": at(b), "flip": true, "name": name}));
+    };
+    pin(&mut s, "revolute", "H1", "G1", [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+    pin(&mut s, "revolute", "H2", "G2", [30.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+    pin(&mut s, "revolute", "H3", "G3", [65.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+    pin(&mut s, "slider", "Rail", "Rack", [0.0, -10.0, 0.0], [1.0, 0.0, 0.0]);
+    run(&mut s, "joint.gear", json!({"a": "H1", "b": "H2", "ra": 10, "rb": 20}));
+    run(&mut s, "joint.rack_pinion", json!({"a": "H1", "b": "Rail", "radius": 10}));
+    run(&mut s, "joint.gear", json!({"a": "H2", "b": "H3", "ra": 20, "rb": 15, "internal": true}));
+    let path = dir.join("gears.usda");
+    let reply = run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "physics": true}));
+    let warnings: Vec<String> = serde_json::from_value(reply["warnings"].clone()).unwrap();
+    assert!(warnings.iter().any(|w| w.starts_with("motion link 3 between `H2` and `H3`: its gears turn the same way")), "{warnings:?}");
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(text.matches("def PhysxPhysicsGearJoint").count(), 1, "{text}");
+    assert_eq!(text.matches("def PhysxPhysicsRackAndPinionJoint").count(), 1, "{text}");
+    // Each coupled joint: the revolute or prismatic joint whose prim the relationship names,
+    // found by the part its B side moves.
+    let target = |at: usize, rel: &str| -> String {
+        let rest = &text[at..];
+        let line = rest[rest.find(rel).unwrap_or_else(|| panic!("no {rel}:\n{text}"))..].lines().next().unwrap();
+        line[line.find('<').unwrap() + 1..line.find('>').unwrap()].to_string()
+    };
+    let moves = |joint: &str| -> String {
+        let name = joint.rsplit('/').next().unwrap();
+        let at = text.find(&format!("\"{name}\"")).unwrap_or_else(|| panic!("no {joint}:\n{text}"));
+        target(at, "rel physics:body1 = ")
+    };
+    // Each coupling is named after the joints it couples.
+    assert!(text.contains("def PhysxPhysicsGearJoint \"H1_H2\""), "{text}");
+    assert!(text.contains("def PhysxPhysicsRackAndPinionJoint \"H1_Rail\""), "{text}");
+    let gear = text.find("def PhysxPhysicsGearJoint").unwrap();
+    assert!((value_after(&text, gear, "float physics:gearRatio = ")[0] - 0.5).abs() < 1e-6, "{text}");
+    assert!(moves(&target(gear, "rel physics:hinge0 = ")).ends_with("/G1_1"), "{text}");
+    assert!(moves(&target(gear, "rel physics:hinge1 = ")).ends_with("/G2_1"), "{text}");
+    let rack = text.find("def PhysxPhysicsRackAndPinionJoint").unwrap();
+    let ratio = 0.1 * 1000.0 * 180.0 / std::f64::consts::PI;
+    assert!((value_after(&text, rack, "float physics:ratio = ")[0] - ratio).abs() < 1e-3, "{text}");
+    assert!(moves(&target(rack, "rel physics:hinge = ")).ends_with("/G1_1"), "{text}");
+    assert!(moves(&target(rack, "rel physics:prismatic = ")).ends_with("/Rack_1"), "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A gear coupling joins the two gears, the parts its hinges turn, whichever side of each hinge
+/// the grounded base is on: here B of one hinge and A of the other.
+#[test]
+fn a_gear_coupling_joins_the_gears_whichever_side_the_base_is_on() {
+    let dir = temp_dir("gears-sides");
+    let mut s = Session::default();
+    let part = |s: &mut Session, name: &str, solid: &str, p: Value| {
+        run(s, "component.activate", json!({"component": "root"}));
+        run(s, "component.create", json!({"name": name, "grounded": false}));
+        run(s, solid, p);
+    };
+    part(&mut s, "Base", "solid.box", json!({"length": 120, "width": 60, "height": 10, "corner": [-30, -30, -20]}));
+    for (name, x, r) in [("G1", 0, 10), ("G2", 30, 20)] {
+        part(&mut s, name, "solid.cylinder", json!({"base": [x, 0, 0], "axis": [0, 0, 1], "radius": r, "height": 5}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let base = s.doc.occurrence_of(s.doc.find_component("Base").unwrap()).unwrap().id;
+    run(&mut s, "occurrence.ground", json!({"occurrence": base, "grounded": true}));
+    let at = |o: &str, p: [f64; 3]| json!({"occurrence": o, "point": p, "z": [0.0, 0.0, 1.0]});
+    run(&mut s, "joint.create", json!({"type": "revolute", "a": at("Base", [0.0; 3]), "b": at("G1", [0.0; 3]), "flip": true, "name": "H1"}));
+    let p2 = [30.0, 0.0, 0.0];
+    run(&mut s, "joint.create", json!({"type": "revolute", "a": at("G2", p2), "b": at("Base", p2), "flip": true, "name": "H2"}));
+    run(&mut s, "joint.gear", json!({"a": "H1", "b": "H2", "ra": 10, "rb": 20}));
+    let path = dir.join("gears.usda");
+    let reply = run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "physics": true}));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let at = text.find("def PhysxPhysicsGearJoint").unwrap_or_else(|| panic!("no gear joint: {reply}\n{text}"));
+    let rest = &text[at + 1..];
+    let gear = &rest[..rest.find("\n    def ").unwrap_or(rest.len())];
+    let body = |rel: &str| -> String {
+        let line = gear[gear.find(rel).unwrap_or_else(|| panic!("no {rel}:\n{gear}"))..].lines().next().unwrap();
+        line[line.find('<').unwrap() + 1..line.find('>').unwrap()].to_string()
+    };
+    let bodies = [body("rel physics:body0 = "), body("rel physics:body1 = ")];
+    assert!(bodies.iter().any(|b| b.ends_with("/G1_1")) && bodies.iter().any(|b| b.ends_with("/G2_1")), "{bodies:?}\n{gear}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A built-in surface bound in a render setup is written into an OpenUSD package with
 /// `render_setup`: its four images are members and the body's mesh has coordinates.
 #[cfg(feature = "bundled-render-library")]
