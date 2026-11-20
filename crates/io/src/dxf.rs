@@ -32,7 +32,7 @@ impl ParsedDxf {
         if text.starts_with("AutoCAD Binary DXF") {
             return Err(IoError::Invalid("binary DXF is not supported; save as ASCII DXF".into()));
         }
-        // A DWG renamed or picked as a drawing would otherwise read as "no ENTITIES section" (#19131).
+        // A DWG renamed or picked as a drawing would otherwise read as "no ENTITIES section".
         if crate::is_dwg(text.as_bytes()) {
             return Err(IoError::Invalid("this is a DWG file, not a DXF: save the drawing as ASCII DXF and insert that".into()));
         }
