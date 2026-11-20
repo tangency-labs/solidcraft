@@ -1523,7 +1523,7 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
     run(&mut s, "browser.visibility", json!({"items": ["Guide"], "visible": false}));
     let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "Shelf", "width": 40}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png), "plane": "Shelf", "width": 40}));
     run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Profile"}));
     run(&mut s, "sketch.project", json!({"refs": [{"plane": "Shelf"}]}));
     run(&mut s, "sketch.finish", json!({}));
@@ -1834,7 +1834,7 @@ fn edits_after_a_canvas_share_its_image_with_every_undo_state() {
     let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
     png.resize(64 << 10, 0);
-    run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "XY", "width": 40}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png), "plane": "XY", "width": 40}));
     for i in 0..20 {
         run(&mut s, "parameters.add", json!({"name": format!("p{i}"), "expression": "10 mm"}));
     }
@@ -1845,7 +1845,7 @@ fn edits_after_a_canvas_share_its_image_with_every_undo_state() {
         run(&mut s, "edit.undo", json!({}));
     }
     assert_eq!(s.doc.canvases[0].data.as_ptr(), image, "undo brings back the same image");
-    assert_eq!(s.doc.canvases[0].bytes().as_deref(), Some(png.as_slice()));
+    assert_eq!(s.doc.canvases[0].bytes(), png.as_slice());
 }
 
 #[test]

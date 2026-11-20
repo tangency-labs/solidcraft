@@ -390,6 +390,11 @@ impl TabsRig {
             view_right_row: "vright",
             view_rename: self.rename.map(|k| (k, TabRename { text: &mut text, focused: &mut focused, max: 8 })),
             plus_menu: if self.plus { &PLUS_MENU } else { &[] },
+            layout_menu: &[],
+            layout_current: "",
+            layout_tip: "Layout",
+            layout_fill: "",
+            layout_fill_heading: "",
             switcher_menu: &SWITCHER_MENU,
             tear_off_below: 40.0,
         };
@@ -708,7 +713,7 @@ fn menu_row_builders_and_glyphs() {
     assert!(head.heading && head.id == "H" && head.label == "H");
     let row = plain.separated().needing_others().with_icon("close", None);
     assert!(row.separator_before && row.needs_others && row.icon == "close");
-    for glyph in ["model", "sketch", "sheet", "render", "animation", "rename", "window", "close", "duplicate", "reopen"] {
+    for glyph in ["model", "sketch", "sheet", "render", "animation", "rename", "window", "close", "duplicate", "tiles", "reopen"] {
         assert!(!glyph_lines(glyph).is_empty(), "{glyph} has strokes");
     }
 }

@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2};
-use solidcraft_engine::geom::Loop2Geom;
 use solidcraft_engine::geom::paper::{Dashes, Group, Item, ObjectKind, Scene};
+use solidcraft_engine::{Sel, geom::Loop2Geom};
 
 use super::*;
 use crate::scenario::Harness;
@@ -947,6 +947,246 @@ fn pan_moves_the_sheet_and_leaves_the_design_camera() {
     assert!((after.width() - before.width()).abs() < 1e-3, "panning doesn't zoom");
     assert_eq!(h.app.cam, cam);
     assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), (doc, undo));
+}
+
+#[test]
+fn navigation_tools_do_not_drag_drawing_views() {
+    let (mut h, front) = plate_sheet();
+    let (cam, doc, undo) = (h.app.cam, h.app.session.doc.to_json(), h.app.session.undo.len());
+    for tool in ["pan", "zoom"] {
+        for edge in [true, false] {
+            h.call("ui.view", json!({"view": "fit"}));
+            h.frames(4);
+            let view = h.app.run("drawing.view.inspect", json!({"view": front})).unwrap();
+            let bounds = &view["boundary_mm"];
+            let point = Vec2::new(
+                if edge { number(&bounds["min"][0]) } else { (number(&bounds["min"][0]) + number(&bounds["max"][0])) / 2.0 },
+                (number(&bounds["min"][1]) + number(&bounds["max"][1])) / 2.0,
+            );
+            let at = OnScreen::of(&h.app.drawing_workspace.page.cam, h.app.viewport.rect.unwrap());
+            let from = at.screen(point);
+            let before = crate::scenario::rect_of("sheet:paper").unwrap();
+            h.app.run("view.tool", json!({"tool": tool})).unwrap();
+            h.call("ui.drag", json!({"x0": from.x, "y0": from.y, "x1": from.x + 120.0, "y1": from.y + 40.0, "steps": 8}));
+            h.frames(2);
+            let after = crate::scenario::rect_of("sheet:paper").unwrap();
+            if tool == "pan" {
+                let moved = after.min - before.min;
+                assert!((moved.x - 120.0).abs() < 2.0 && (moved.y - 40.0).abs() < 2.0, "{tool}, edge={edge}: {moved:?}");
+                assert!((after.width() - before.width()).abs() < 1e-3);
+            } else {
+                assert!((after.width() - before.width()).abs() > 1.0, "{tool}, edge={edge}: the sheet did not zoom");
+            }
+            assert_eq!(h.app.run("drawing.view.inspect", json!({"view": front})).unwrap(), view);
+            assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), (doc.clone(), undo));
+            assert_eq!(h.app.cam, cam);
+        }
+    }
+}
+
+fn view_edge(h: &mut Harness, view: &str) -> egui::Pos2 {
+    let view = h.app.run("drawing.view.inspect", json!({"view": view})).unwrap();
+    let bounds = &view["boundary_mm"];
+    let point = Vec2::new(number(&bounds["min"][0]), (number(&bounds["min"][1]) + number(&bounds["max"][1])) / 2.0);
+    OnScreen::of(&h.app.drawing_workspace.page.cam, h.app.viewport.rect.unwrap()).screen(point)
+}
+
+#[test]
+fn navigation_tools_keep_view_click_selection() {
+    let (mut h, front) = plate_sheet();
+    let right =
+        h.app.session.drawing("drawing.inspect").unwrap().views.iter().find(|view| solidcraft_engine::doc::ids::encode(view.id) != front).unwrap().id;
+    let right = solidcraft_engine::doc::ids::encode(right);
+    let (doc, undo, cam) = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.cam);
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap().id;
+    let pick = |view: &str| Sel::Drawing { drawing, object: solidcraft_engine::doc::ids::decode(view).unwrap() };
+    assert_ne!(pick(&front), pick(&right));
+    let empty = OnScreen::of(&h.app.drawing_workspace.page.cam, h.app.viewport.rect.unwrap()).screen(Vec2::new(350.0, 80.0));
+    for tool in ["pan", "zoom"] {
+        h.app.run("view.tool", json!({"tool": tool})).unwrap();
+        for view in [&front, &right] {
+            let point = view_edge(&mut h, view);
+            h.step(&json!({"click": [point.x, point.y]})).unwrap();
+            h.frames(4);
+            assert_eq!(h.app.session.selection, [pick(view)], "{tool}: select {view}");
+        }
+        h.step(&json!({"click": [empty.x, empty.y]})).unwrap();
+        h.frames(4);
+        assert!(h.app.session.selection.is_empty(), "{tool}: clear selection on empty paper");
+        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.cam), (doc.clone(), undo, cam));
+    }
+}
+
+#[test]
+fn navigation_cancels_a_view_move_before_release() {
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    for tool in ["pan", "zoom"] {
+        for clear_before_release in [false, true] {
+            let (mut h, front) = plate_sheet();
+            let (doc, undo) = (h.app.session.doc.to_json(), h.app.session.undo.len());
+            let from = view_edge(&mut h, &front);
+            h.step(&json!({"click": [from.x, from.y]})).unwrap();
+            h.frames(4);
+            let drawing = h.app.session.drawing("drawing.inspect").unwrap().id;
+            assert_eq!(h.app.session.selection, [Sel::Drawing { drawing, object: solidcraft_engine::doc::ids::decode(&front).unwrap() }]);
+            let at = OnScreen::of(&h.app.drawing_workspace.page.cam, h.app.viewport.rect.unwrap());
+            h.frame_with(vec![egui::Event::PointerMoved(from), button(from, true)]);
+            let preview = from + vec2(32.0, 24.0);
+            h.frame_with(vec![egui::Event::PointerMoved(preview)]);
+            h.frames(2);
+            assert!(h.ctx.input(|input| input.pointer.primary_down()));
+            let offset = at.paper(preview) - at.paper(from);
+            let label = solidcraft_ui_text::format(
+                "ui.drawing_view_selection.offset",
+                &[("x", &format!("{:+.1}", offset.x)), ("y", &format!("{:+.1}", offset.y))],
+            );
+            assert!(texts(&h.shapes).contains(&label), "a view-move preview is painted");
+            assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), (doc.clone(), undo));
+            h.app.run("view.tool", json!({"tool": tool})).unwrap();
+            let release = preview + vec2(12.0, 6.0);
+            h.frame_with(vec![egui::Event::PointerMoved(release)]);
+            h.frames(2);
+            if clear_before_release {
+                h.app.run("view.tool", json!({"tool": "none"})).unwrap();
+                h.frames(2);
+            }
+            h.frame_with(vec![button(release, false)]);
+            h.app.run("view.tool", json!({"tool": "none"})).unwrap();
+            h.frames(4);
+            assert_eq!(
+                (h.app.session.doc.to_json(), h.app.session.undo.len()),
+                (doc.clone(), undo),
+                "{tool}, clear_before_release={clear_before_release}"
+            );
+            let from = view_edge(&mut h, &front);
+            h.call("ui.drag", json!({"x0": from.x, "y0": from.y, "x1": from.x + 32.0, "y1": from.y + 24.0, "steps": 8}));
+            h.frames(2);
+            assert_ne!(h.app.session.doc.to_json(), doc, "a fresh view drag still works");
+            h.app.run("edit.undo", json!({})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.session.doc.to_json(), doc, "one Undo restores the fresh view move");
+        }
+    }
+}
+
+fn navigation_drag_fixture(kind: &str) -> (Harness, egui::Pos2) {
+    let (mut h, front) = plate_sheet();
+    let point = if kind == "dimension" {
+        let id = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+        text_of(&mut h, id).0
+    } else {
+        let note = h.app.run("drawing.note.add", json!({"anchor": {"sheet": "Sheet 1"}, "at": [300, 230], "content": "DEBURR"})).unwrap();
+        let note = solidcraft_engine::doc::ids::decode(note["note"].as_str().unwrap()).unwrap();
+        settle(&mut h);
+        if kind == "group" {
+            let drawing = h.app.session.drawing("drawing.inspect").unwrap().id;
+            h.app.session.selection =
+                [solidcraft_engine::doc::ids::decode(&front).unwrap(), note].map(|object| Sel::Drawing { drawing, object }).to_vec();
+            h.frames(2);
+            let edge = view_edge(&mut h, &front);
+            return (h, edge);
+        }
+        let sheet = active_sheet(&h.app).unwrap();
+        let bounds =
+            drawing_scene::extract(&mut h.app.session, sheet).unwrap().objects.iter().find(|object| object.object == note).unwrap().bounds_mm;
+        (bounds.min + bounds.max) * 0.5
+    };
+    let screen = OnScreen::of(&h.app.drawing_workspace.page.cam, h.app.viewport.rect.unwrap()).screen(point);
+    (h, screen)
+}
+
+#[test]
+fn navigation_tools_do_not_drag_drawing_annotations_or_groups() {
+    for tool in ["pan", "zoom"] {
+        for kind in ["dimension", "note", "group"] {
+            let (mut h, from) = navigation_drag_fixture(kind);
+            let (doc, undo, cam) = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.cam);
+            let before = crate::scenario::rect_of("sheet:paper").unwrap();
+            h.app.run("view.tool", json!({"tool": tool})).unwrap();
+            h.call("ui.drag", json!({"x0": from.x, "y0": from.y, "x1": from.x + 80.0, "y1": from.y + 24.0, "steps": 8}));
+            h.frames(2);
+            let after = crate::scenario::rect_of("sheet:paper").unwrap();
+            if tool == "pan" {
+                let moved = after.min - before.min;
+                assert!((moved.x - 80.0).abs() < 2.0 && (moved.y - 24.0).abs() < 2.0, "{tool}, {kind}: {moved:?}");
+            } else {
+                assert!((after.width() - before.width()).abs() > 1.0, "{tool}, {kind}: the sheet did not zoom");
+            }
+            assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.cam), (doc, undo, cam), "{tool}, {kind}");
+            assert!(crate::dim_view::dragged().is_none());
+        }
+    }
+}
+
+#[test]
+fn navigation_stops_a_live_drawing_drag() {
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    for tool in ["pan", "zoom"] {
+        for kind in ["dimension", "note", "group"] {
+            let (mut h, from) = navigation_drag_fixture(kind);
+            let original = h.app.session.doc.to_json();
+            h.frame_with(vec![egui::Event::PointerMoved(from), button(from, true)]);
+            let moved = from + vec2(32.0, 24.0);
+            h.frame_with(vec![egui::Event::PointerMoved(moved)]);
+            h.frames(2);
+            assert!(h.ctx.input(|input| input.pointer.primary_down()) && crate::dim_view::dragged().is_some());
+            assert_ne!(h.app.session.doc.to_json(), original, "{kind}: a live drag has applied a move");
+            let (doc, undo, revision) = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision);
+            h.app.run("view.tool", json!({"tool": tool})).unwrap();
+            let release = moved + vec2(16.0, 8.0);
+            h.frame_with(vec![egui::Event::PointerMoved(release)]);
+            h.frames(2);
+            assert!(crate::dim_view::dragged().is_none(), "{tool}, {kind}: the drawing drag stopped");
+            h.frame_with(vec![button(release, false)]);
+            h.app.run("view.tool", json!({"tool": "none"})).unwrap();
+            h.frames(2);
+            assert_eq!(
+                (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision),
+                (doc, undo, revision),
+                "{tool}, {kind}: navigation adds no move or undo step"
+            );
+            h.app.run("edit.undo", json!({})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.session.doc.to_json(), original, "{tool}, {kind}: one Undo restores the earlier live move");
+        }
+    }
+}
+
+/// Orbit can stay latched when Design is left for Drawing. A sheet cannot orbit, so its objects
+/// still take ordinary drags, in one undo step, without moving either camera.
+#[test]
+fn navigation_allows_drawing_drags_with_orbit_latched_in_design() {
+    for kind in ["view", "dimension", "note", "group"] {
+        let (mut h, from) = if kind == "view" {
+            let (mut h, front) = plate_sheet();
+            let from = view_edge(&mut h, &front);
+            (h, from)
+        } else {
+            navigation_drag_fixture(kind)
+        };
+        let point = OnScreen::of(&h.app.drawing_workspace.page.cam, h.app.viewport.rect.unwrap()).paper(from);
+        let selected = h.app.session.selection.clone();
+        assert_eq!(h.call("ui.workspace", json!({"workspace": "design"}))["ok"], true);
+        assert!(!crate::drawing_workspace::active(&h.app));
+        h.app.run("view.tool", json!({"tool": "orbit"})).unwrap();
+        assert_eq!(h.app.viewport.nav, Some(crate::viewport::NavMode::Orbit));
+        assert_eq!(h.call("ui.workspace", json!({"workspace": "drawing"}))["ok"], true);
+        h.frames(4);
+        assert!(crate::drawing_workspace::active(&h.app));
+        assert_eq!(h.app.viewport.nav, Some(crate::viewport::NavMode::Orbit), "Orbit stayed latched after entering Drawing");
+        assert_eq!(h.app.session.selection, selected, "the drawing's selection, including its group, was restored");
+        let from = OnScreen::of(&h.app.drawing_workspace.page.cam, h.app.viewport.rect.unwrap()).screen(point);
+        let (doc, undo, cam, sheet_cam) = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.cam, h.app.drawing_workspace.page.cam);
+        assert_eq!(h.call("ui.drag", json!({"x0": from.x, "y0": from.y, "x1": from.x + 32.0, "y1": from.y + 24.0, "steps": 8}))["ok"], true);
+        h.frames(2);
+        assert_ne!(h.app.session.doc.to_json(), doc, "{kind}: the ordinary drag moved the drawing object");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "{kind}: one undo step for the drag");
+        assert_eq!((h.app.cam, h.app.drawing_workspace.page.cam), (cam, sheet_cam), "{kind}: unsupported Orbit moved neither camera");
+        assert_eq!(h.app.viewport.nav, Some(crate::viewport::NavMode::Orbit));
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.to_json(), doc, "{kind}: one Undo restores the ordinary drag");
+    }
 }
 
 /// Each sheet colour is drawn in its tokens, standing off the backdrop, and is screen only: the

@@ -1375,6 +1375,7 @@ impl Default for EvalCache {
 #[derive(Clone, Debug)]
 struct CachedEval<S> {
     error: Option<String>,
+    error_code: Option<kernel::ErrorCode>,
     warning: Option<String>,
     import_report: Option<Arc<kernel::ImportReport>>,
     repair: Option<Arc<kernel::RepairReport>>,
@@ -1541,6 +1542,7 @@ impl<S> CachedEval<S> {
     fn with<T>(&self, state: T) -> CachedEval<T> {
         CachedEval {
             error: self.error.clone(),
+            error_code: self.error_code.clone(),
             warning: self.warning.clone(),
             import_report: self.import_report.clone(),
             repair: self.repair.clone(),
@@ -1721,6 +1723,10 @@ pub struct FeatureResult {
     pub id: u64,
     pub name: String,
     pub error: Option<String>,
+    /// The stable code of the kernel call `error` was made from ([`kernel::failure`]), when it was
+    /// made from one: to group and replay failures by, without reading `error`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<kernel::ErrorCode>,
     /// `error` is the kernel's internal error (a panic it caught, [`kernel::KernelError::Internal`]),
     /// not the feature's failure: the command that made the feature reports it as one.
     #[serde(skip)]
@@ -3289,7 +3295,8 @@ fn plane_datum_paths(p: &PlaneRef, out: &mut Vec<Vec<u64>>) {
         PlaneRef::Midplane { a, b, .. }
         | PlaneRef::TwoEdges { a, b }
         | PlaneRef::AxisPoint { axis: a, point: b }
-        | PlaneRef::Perpendicular { plane: a, line: b } => {
+        | PlaneRef::Perpendicular { plane: a, line: b }
+        | PlaneRef::SquareToLine { line: a, point: b } => {
             geo_datum_paths(a, out);
             geo_datum_paths(b, out);
         }
@@ -4123,6 +4130,7 @@ impl Model {
                         id: f.id,
                         name: f.name.clone(),
                         error: None,
+                        error_code: None,
                         internal: false,
                         warning: None,
                         import_report: None,
@@ -4158,6 +4166,7 @@ impl Model {
                         id: f.id,
                         name: f.name.clone(),
                         error: Some(e),
+                        error_code: None,
                         internal: false,
                         warning: None,
                         import_report: None,
@@ -4205,6 +4214,7 @@ impl Model {
                         id: f.id,
                         name: f.name.clone(),
                         error: c.error,
+                        error_code: c.error_code,
                         internal: false,
                         warning: c.warning,
                         import_report: c.import_report,
@@ -4247,6 +4257,8 @@ impl Model {
                 // Each feature computed is a profiler span named after its kind.
                 let _feature_span = solidcraft_profile::span("feature", f.kind.type_name());
                 let before = state.clone();
+                // A kernel call that failed before this feature is not its failure.
+                kernel::failure::clear();
                 let t0 = now();
                 let (mut next, cached) = match reused {
                     Some((next, c)) => {
@@ -4293,6 +4305,9 @@ impl Model {
                 // The bodies whose check runs beside the features after this one.
                 let mut apart: Option<(Vec<(String, kernel::KeptCheck)>, Vec<(String, Body, bool)>)> = None;
                 let refused = checks.refused(i);
+                // The feature failed in the kernel (not for a parameter, a reference or a rule of
+                // the design's): its kernel call's code is the last that failed on this thread.
+                let kernel_failed = std::cell::Cell::new(false);
                 let mut r = match frame_error.or(bad_param) {
                     _ if cached.is_some() => Ok(()),
                     Some(e) => Err(kernel::KernelError::Failed(e)),
@@ -4319,6 +4334,7 @@ impl Model {
                             // A panic the kernel caught stays one.
                             crate::DocError::Kernel(kernel::KernelError::Internal(m)) => kernel::KernelError::Internal(m),
                             e => {
+                                kernel_failed.set(matches!(e, crate::DocError::Kernel(_)));
                                 if let crate::DocError::LostProjections { links, .. } = &e {
                                     lost_projections = Some(Arc::new(links.clone()));
                                 }
@@ -4451,12 +4467,21 @@ impl Model {
                     }
                     Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
                 };
+                // The kernel call it failed with, when it failed in the kernel; a result taken from the
+                // cache keeps the code it was made with.
+                let error_code = match (&cached, &error) {
+                    (Some(c), Some(_)) => c.error_code.clone(),
+                    (None, Some(_)) if kernel_failed.get() => kernel::failure::last(),
+                    (None, Some(_)) => None,
+                    (_, None) => None,
+                };
                 let lost_projections = lost_projections.filter(|_| error.is_some());
                 // A panic is no result to reuse: the kernel was replaced after it. Work its watcher
                 // stopped may have been cut short (a boolean that gave up): it is not kept either.
                 if !self.no_cache && !watched.cancelled() && !internal {
                     let whole = CachedEval {
                         error: error.clone(),
+                        error_code: error_code.clone(),
                         warning: warning.clone(),
                         import_report: import_report.clone(),
                         repair: repair.clone(),
@@ -4482,6 +4507,7 @@ impl Model {
                     id: f.id,
                     name: f.name.clone(),
                     error,
+                    error_code,
                     internal,
                     warning,
                     import_report,
@@ -13283,6 +13309,7 @@ fn plane_reads_geometry(plane: &PlaneRef) -> bool {
         | PlaneRef::ThreePoints { .. }
         | PlaneRef::Tangent { .. }
         | PlaneRef::AlongPath { .. }
+        | PlaneRef::SquareToLine { .. }
         | PlaneRef::Perpendicular { .. }
         | PlaneRef::Face { .. } => true,
     }

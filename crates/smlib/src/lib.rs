@@ -10,6 +10,7 @@ use std::path::Path;
 mod check;
 mod core;
 pub mod export;
+pub mod failure;
 pub mod flat;
 pub mod history;
 pub mod import;

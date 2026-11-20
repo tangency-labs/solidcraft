@@ -114,6 +114,9 @@ pub struct Request {
     pub(crate) auto_verify: bool,
     /// Open the file with an importer plugin (`file.import`) even when SolidCraft reads it too.
     pub plugin_import: bool,
+    /// An export written to be printed: once written it opens in the system's PDF viewer
+    /// ([`crate::drawing_workspace::print::written`]).
+    pub print: bool,
 }
 
 impl Request {
@@ -136,6 +139,7 @@ impl Request {
             tries: 0,
             auto_verify: false,
             plugin_import: false,
+            print: false,
         }
     }
     /// It adds what it reads to the active design.
@@ -772,6 +776,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         tries: 0,
         auto_verify: false,
         plugin_import: id == "file.import",
+        print: false,
     };
     let _ = begin_request(app, request);
     None
@@ -1709,6 +1714,10 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
     {
         let request = &running.request;
         match job {
+            Ok(made) if request.kind.exports() && request.print => {
+                crate::drawing_workspace::print::written(app, &request.path);
+                request.answer(Ok(made.result));
+            }
             Ok(made) if request.kind.exports() => {
                 if !request.path.is_empty() {
                     app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &request.path)]), false);

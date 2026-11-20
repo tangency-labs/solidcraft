@@ -408,7 +408,7 @@ fn kit_prefs_ids_are_in_ui_text_for_english() {
     walk(&src, &mut ids, &mut files);
     assert!(files > 0 && !ids.0.is_empty(), "the kit's sources name prefs ids to check");
     let english: serde_json::Map<String, serde_json::Value> =
-        serde_json::from_str(include_str!("../../ui-text/locales/en.json")).expect("the English catalogue is a JSON object");
+        serde_json::from_str(solidcraft_ui_text::SHARED_ENGLISH).expect("the English catalogue is a JSON object");
     let missing: Vec<&String> = ids.0.iter().filter(|id| !english.contains_key(id.as_str())).collect();
     assert!(missing.is_empty(), "not in crates/ui-text/locales/en.json: {missing:?}");
 }
