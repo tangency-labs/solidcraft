@@ -2599,7 +2599,9 @@ impl PlacementReads {
         if st.is_some_and(|st| st.body(name).is_some()) {
             self.bodies.insert(name.to_owned());
         } else {
+            // A further placement's body (`Block (Part:2)`) moves with its occurrence (#20040).
             self.all = true;
+            self.unlisted = true;
         }
     }
 
@@ -8788,14 +8790,21 @@ fn feature_tools_with_constructor(
                         && (region_extent.sweep.abs() - std::f64::consts::TAU).abs() <= 1e-9
                         && bodies_hold_a_seam_in_plane(st, f, &ss.plane);
                     for body in bodies {
-                        let (body, built) = if turn.abs() < 1e-12 {
-                            (body, None)
+                        let traced = if turn.abs() < 1e-12 {
+                            tool(region, body, None)
                         } else {
                             let moved = kernel::transform_matrix(&body, m)?;
-                            (moved, Some(&body))
+                            tool(region, moved, Some(&body))
                         };
-                        let body = if turn_it { turned_seam(rotation_axis, origin_w, &body)? } else { body };
-                        out.push(tool(region, body, built));
+                        // The tool's faces take their roles from the revolve's history before the
+                        // seam is turned: the turned body's own history is the turn's, which says
+                        // nothing of the profile, and read as the revolve's it named the faces after
+                        // the wrong sketch curves (the axis line). The turn keeps the faces' order.
+                        out.push(if turn_it {
+                            Traced { body: turned_seam(rotation_axis, origin_w, &traced.body)?, lineage: traced.lineage, recipe: traced.recipe }
+                        } else {
+                            traced
+                        });
                     }
                 }
                 return Ok(out);
@@ -12758,6 +12767,16 @@ fn eval_feature_kind(
             // target is moved into the target's frame, so it is combined where it is shown (#3383).
             // A tool placed exactly as the target is left as it is.
             let target_world = st.body(target).map(|b| body_world(doc, b));
+            // A tool of a further placement (`Drill (Hinge:2)`) is not in the model, which holds a
+            // component's first placement only: it is placed where its occurrence puts it, in the
+            // target's frame (#20040).
+            let missing: Vec<&str> = tools.iter().map(|t| t.0.as_str()).filter(|t| st.body(t).is_none()).collect();
+            let placed = match &target_world {
+                Some(w) if !missing.is_empty() => {
+                    with_placed_copies(doc, st, std::borrow::Cow::Owned(ModelState::default()), w, &missing).into_owned()
+                }
+                _ => ModelState::default(),
+            };
             let mut tb = Vec::new();
             for t in tools {
                 match st.body(t) {
@@ -12772,6 +12791,14 @@ fn eval_feature_kind(
                                 tb.push(Traced::step(kernel::transform_matrix(&b.body, rel)?, &[&traced]));
                             }
                             None => tb.push(traced),
+                        }
+                    }
+                    None if placed.body(t).is_some() => {
+                        tb.extend(placed.body(t).map(ModelBody::traced));
+                        // Removing it would remove the body from every placement of its component.
+                        if !keep_tools {
+                            let source = placed.body(t).and_then(|b| b.source_name.as_deref()).unwrap_or(t.0.as_str());
+                            append_warning(warning, format!("`{t}` is kept: it is a placement of `{source}`, whose other placements show it"));
                         }
                     }
                     // Designs saved before #2247 combined the pieces a cut split off a body that
@@ -12812,7 +12839,8 @@ fn eval_feature_kind(
             // naming the offending body in user terms before attempting the boolean.
             match op {
                 Operation::Join => {
-                    let surface = std::iter::once(target).chain(tools.iter()).find(|n| st.body(n).is_some_and(|b| b.is_surface()));
+                    let surface =
+                        std::iter::once(target).chain(tools.iter()).find(|n| st.body(n).or_else(|| placed.body(n)).is_some_and(|b| b.is_surface()));
                     if let Some(name) = surface {
                         return Err(DocError::Invalid(format!(
                             "{name} is a surface body, and a join needs solids: Thicken it first, or Stitch closed surfaces with Surface › Stitch"
@@ -12820,14 +12848,14 @@ fn eval_feature_kind(
                     }
                 }
                 Operation::Cut => {
-                    if let Some(name) = tools.iter().find(|n| st.body(n).is_some_and(|b| !b.is_closed())) {
+                    if let Some(name) = tools.iter().find(|n| st.body(n).or_else(|| placed.body(n)).is_some_and(|b| !b.is_closed())) {
                         return Err(DocError::Invalid(format!(
                             "\"{name}\" isn't a closed solid (it has open edges), so it can't cut. Close it with Stitch, or use a closed body as the tool"
                         )));
                     }
                 }
                 Operation::Intersect => {
-                    if let Some(name) = tools.iter().find(|n| st.body(n).is_some_and(|b| !b.is_closed())) {
+                    if let Some(name) = tools.iter().find(|n| st.body(n).or_else(|| placed.body(n)).is_some_and(|b| !b.is_closed())) {
                         return Err(DocError::Invalid(format!(
                             "\"{name}\" isn't a closed solid (it has open edges), so it can't intersect. Close it with Stitch, or use a closed body as the tool"
                         )));
