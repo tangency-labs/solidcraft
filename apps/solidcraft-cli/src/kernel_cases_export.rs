@@ -61,7 +61,7 @@ fn known_failing(dir: &str, id: &str) -> Option<String> {
 /// The trace read as operations and the records that went in and came out.
 struct Trace<'a> {
     /// Each operation: its name, operands, parameters and outputs or error.
-    calls: Vec<(&'static str, &'a [u64], &'a Value, &'a Result<Vec<u64>, String>)>,
+    calls: Vec<(&'static str, &'a [u64], &'a Value, &'a Result<Vec<u64>, String>, Option<solidcraft_engine::kernel::ErrorCode>)>,
     /// The record each body made from a record was made from.
     imports: HashMap<u64, (&'a Brep, bool, bool)>,
     /// The records bodies were written as, in order.
@@ -79,13 +79,13 @@ impl<'a> Trace<'a> {
                     t.imports.insert(*id, (record, *trusted, *keeping_splines));
                 }
                 Event::Export { id, record } => t.exports.push((*id, record)),
-                Event::Call { op, inputs, params, outputs } => {
+                Event::Call { op, inputs, params, outputs, code } => {
                     if let Ok(made) = outputs {
                         for id in made {
                             t.producer.insert(*id, t.calls.len());
                         }
                     }
-                    t.calls.push((*op, inputs, params, outputs));
+                    t.calls.push((*op, inputs, params, outputs, code.map(solidcraft_engine::kernel::ErrorCode::from)));
                 }
             }
         }
@@ -194,7 +194,7 @@ pub fn write(root: &Path, dir: &str, out: &Value, capture: Capture) -> Result<()
 
     let mut unknown = BTreeSet::new();
     let mut available: BTreeSet<u64> = t.imports.keys().copied().collect();
-    for (_, inputs, _, outputs) in &t.calls {
+    for (_, inputs, _, outputs, _) in &t.calls {
         unknown.extend(inputs.iter().filter(|id| !available.contains(id)).copied());
         if let Ok(made) = outputs {
             available.extend(made.iter().copied());
@@ -212,7 +212,7 @@ pub fn write(root: &Path, dir: &str, out: &Value, capture: Capture) -> Result<()
         }
     };
     let mut calls: Vec<Value> = Vec::new();
-    for (i, (op, inputs, params, outputs)) in t.calls.iter().enumerate() {
+    for (i, (op, inputs, params, outputs, code)) in t.calls.iter().enumerate() {
         for &id in inputs.iter() {
             given(id, &mut bodies);
         }
@@ -221,6 +221,11 @@ pub fn write(root: &Path, dir: &str, out: &Value, capture: Capture) -> Result<()
             Ok(made) => c["outputs"] = json!(made.iter().map(|i| format!("b{i}")).collect::<Vec<_>>()),
             Err(e) => {
                 c["error"] = json!(e);
+                // the stable code of the kernel call it failed with: what a replay of it is
+                // checked against (`KERNEL_CASES_ENTRY`)
+                if let Some(code) = code {
+                    c["code"] = json!({"call": code.call, "kind": code.kind, "operation": code.operation});
+                }
                 // The application handled this refusal. Replay must continue to any later
                 // calls and grade the final bodies, even when this was the last attempt.
                 if failed_call != Some(i) {
@@ -273,7 +278,7 @@ mod tests {
     }
 
     fn call(op: &'static str, inputs: &[u64], outputs: Result<Vec<u64>, String>) -> Event {
-        Event::Call { op, inputs: inputs.to_vec(), params: json!({}), outputs }
+        Event::Call { op, inputs: inputs.to_vec(), params: json!({}), outputs, code: None }
     }
 
     fn exported_case(name: &str, events: Vec<Event>, ran: Result<Vec<(String, Brep)>, String>) -> Value {

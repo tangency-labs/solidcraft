@@ -30,6 +30,7 @@ use solidcore_ops::sweep::{
     sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck, SweepFrame,
     SweepRoute, Verdict,
 };
+use solidcore_ops::sweep::{loft_with_ends, LoftEnd};
 use solidcore_ops::{make_box, Body, CheckLevel, Error};
 
 const Z: [f64; 3] = [0.0, 0.0, 1.0];
@@ -1235,4 +1236,169 @@ fn a_loft_sheet_refuses_bad_sections() {
         loft_sheet(&[vec![], vec![]], 1).err(),
         Some(Error::Argument)
     );
+}
+
+/// A loft's end square to its section's plane, with `weight`.
+fn square_end(weight: f64) -> LoftEnd {
+    LoftEnd::Square { weight }
+}
+
+/// The valid solid `loft_with_ends` makes of `sections`.
+fn lofted(sections: &[Vec<Curve>], ends: [LoftEnd; 2]) -> Body {
+    rig_fixes();
+    let b = loft_with_ends(sections, true, ends).unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    b
+}
+
+/// Two equal squares, one above the other: every point's straight way to the next section is
+/// square to the planes already, so with weight 1 at both ends each row's Hermite cubic is that
+/// straight way and the loft is the box, its four flat walls planes.
+#[test]
+fn a_loft_square_at_both_ends_between_stacked_squares_is_the_box() {
+    let sections = [square(0.0, 0.0, 10.0, 0.0), square(0.0, 0.0, 10.0, 7.0)];
+    let b = lofted(&sections, [square_end(1.0); 2]);
+    assert!(rel(b.volume(1e-8).unwrap(), 700.0) < 1e-9);
+    assert_eq!(faces(&b), 6);
+    let m = b.mass_properties(1e-8).unwrap();
+    assert!(rel(m.area, 2.0 * 100.0 + 4.0 * 70.0) < 1e-9, "{}", m.area);
+}
+
+/// The square of side 10 at z = 0 lofted to its copy moved 6 along x at z = 8, both ends
+/// square to their planes: every row's chord is 10, so with the weights 1.2 and 0.6 a corner's
+/// row is the cubic Bezier with z = 0, 4, 6, 8 and x = 0, 0, 6, 6 (the legs at the ends are
+/// weight * chord / 3 along z). z rises all the way (z' = 12 - 12 v + 6 v^2 > 0), so every
+/// section at a height is the square moved by x(z): the volume is the box's, 800, and the
+/// centre's x is 5 + (the integral of x z' dv) / 8 with x = 6 (3 v^2 - 2 v^3), which is
+/// 6 (12 - 15 + 8.4 - 2) / 8 = 2.55. A free loft is the sheared box, its centre at x = 8.
+#[test]
+fn a_loft_square_at_both_ends_between_shifted_squares_has_its_closed_form_centre() {
+    let sections = [square(0.0, 0.0, 10.0, 0.0), square(6.0, 0.0, 10.0, 8.0)];
+    let b = lofted(&sections, [square_end(1.2), square_end(0.6)]);
+    let m = b.mass_properties(1e-8).unwrap();
+    assert!(rel(m.volume, 800.0) < 1e-8, "{}", m.volume);
+    for (got, want) in m.centroid.into_iter().zip([7.55, 5.0, 4.0]) {
+        assert!((got - want).abs() < 1e-7, "{:?}", m.centroid);
+    }
+    // The two walls across y are flat (planes); the two along it are the curved ones.
+    assert_eq!(faces(&b), 6);
+    // One square end: a quadratic row, z = 0, w c / 2, 8 and x = 0, 0, 6, so with weight 0.8
+    // z' = 8 and x = 6 v^2: the centre's x is 5 + 6 / 3.
+    let b = lofted(&sections, [square_end(0.8), LoftEnd::Free]);
+    let m = b.mass_properties(1e-8).unwrap();
+    assert!(rel(m.volume, 800.0) < 1e-8, "{}", m.volume);
+    assert!((m.centroid[0] - 7.0).abs() < 1e-7, "{:?}", m.centroid);
+    let b = lofted(&sections, [LoftEnd::Free, square_end(0.8)]);
+    let m = b.mass_properties(1e-8).unwrap();
+    assert!((m.centroid[0] - 9.0).abs() < 1e-7, "{:?}", m.centroid);
+}
+
+/// Three equal circles on one axis, the first end square with weight 1: the rows through the
+/// three sections at their chord-length parameters with the straight way's speed at the start
+/// are the straight rows, so the loft is the cylinder.
+#[test]
+fn a_loft_square_at_one_end_through_three_stacked_circles_is_the_cylinder() {
+    let ring = |z: f64| vec![circle([0.0, 0.0, z], Z, [1.0, 0.0, 0.0], 5.0)];
+    let b = lofted(
+        &[ring(0.0), ring(5.0), ring(12.0)],
+        [square_end(1.0), LoftEnd::Free],
+    );
+    assert!(rel(b.volume(1e-8).unwrap(), 25.0 * PI * 12.0) < 1e-9);
+    let b = lofted(&[ring(0.0), ring(5.0), ring(12.0)], [square_end(1.0); 2]);
+    assert!(rel(b.volume(1e-8).unwrap(), 25.0 * PI * 12.0) < 1e-9);
+}
+
+/// Sections with a hole: the outline and the hole leave square to the plane alike, so two
+/// equal stacked frames make the box with its passage.
+#[test]
+fn a_loft_square_at_both_ends_keeps_a_section_s_hole() {
+    let frame = |z: f64| {
+        let mut loops = square(0.0, 0.0, 10.0, z);
+        loops.extend(polygon(&[
+            [3.0, 3.0, z],
+            [3.0, 7.0, z],
+            [7.0, 7.0, z],
+            [7.0, 3.0, z],
+        ]));
+        loops
+    };
+    let b = lofted(&[frame(0.0), frame(7.0)], [square_end(1.0); 2]);
+    assert!(rel(b.volume(1e-8).unwrap(), (100.0 - 16.0) * 7.0) < 1e-9);
+    assert_eq!(faces(&b), 10);
+}
+
+/// A larger weight carries the walls further out square to the ends before they turn: between
+/// a small and a large stacked square the volume falls with the first end's weight (the walls
+/// stay at the small square for longer) and grows with the last's, and each is the closed form
+/// of its rows. A corner's row runs from the
+/// half-side 5 to 10 over the height 12: with the weights a and b its half-side over v is the
+/// cubic 5 + 5 (3 v^2 - 2 v^3) (the legs along z move no x) and its height the Bezier
+/// 0, a c / 3, 12 - b c / 3, 12 with c = sqrt(12^2 + 2 * 5^2) the corners' chord; the volume is
+/// the integral of (2 half-side)^2 z' dv.
+#[test]
+fn a_loft_s_end_weights_shape_it_as_their_closed_form() {
+    let centred = |half: f64, z: f64| square(-half, -half, 2.0 * half, z);
+    let sections = [centred(5.0, 0.0), centred(10.0, 12.0)];
+    let c = (144.0_f64 + 50.0).sqrt();
+    let closed_form = |a: f64, b: f64| {
+        let (z1, z2) = (a * c / 3.0, 12.0 - b * c / 3.0);
+        let n = 4000;
+        let f = |v: f64| {
+            let half = 5.0 + 5.0 * (3.0 * v * v - 2.0 * v * v * v);
+            let dz = 3.0
+                * ((1.0 - v) * (1.0 - v) * z1
+                    + 2.0 * (1.0 - v) * v * (z2 - z1)
+                    + v * v * (12.0 - z2));
+            4.0 * half * half * dz
+        };
+        // Simpson's rule: the integrand is a polynomial of degree 8, far inside its reach.
+        let sum: f64 = (0..=n)
+            .map(|i| {
+                let w = if i == 0 || i == n {
+                    1.0
+                } else if i % 2 == 1 {
+                    4.0
+                } else {
+                    2.0
+                };
+                w * f(f64::from(i) / f64::from(n))
+            })
+            .sum();
+        sum / (3.0 * f64::from(n))
+    };
+    let volume = |a: f64, b: f64| {
+        lofted(&sections, [square_end(a), square_end(b)])
+            .volume(1e-8)
+            .unwrap()
+    };
+    for (a, b) in [(1.0, 1.0), (0.4, 1.0), (1.8, 1.0), (1.0, 0.4), (1.0, 1.8)] {
+        assert!(rel(volume(a, b), closed_form(a, b)) < 1e-8, "{a} {b}");
+    }
+    assert!(volume(0.4, 1.0) > volume(1.0, 1.0) && volume(1.0, 1.0) > volume(1.8, 1.0));
+    assert!(volume(1.0, 0.4) < volume(1.0, 1.0) && volume(1.0, 1.0) < volume(1.0, 1.8));
+}
+
+/// What `loft_with_ends` refuses: no square end, a weight that is not a number above 0, and an
+/// end with no side to leave to (the next section in the end section's own plane).
+#[test]
+fn a_loft_s_hostile_ends_are_refused() {
+    rig_fixes();
+    let stacked = [square(0.0, 0.0, 10.0, 0.0), square(0.0, 0.0, 10.0, 7.0)];
+    let refused = |sections: &[Vec<Curve>], ends| loft_with_ends(sections, true, ends).is_err();
+    assert!(matches!(
+        loft_with_ends(&stacked, true, [LoftEnd::Free; 2]),
+        Err(Error::Argument)
+    ));
+    for weight in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert!(matches!(
+            loft_with_ends(&stacked, true, [square_end(weight), LoftEnd::Free]),
+            Err(Error::Argument)
+        ));
+        assert!(refused(&stacked, [LoftEnd::Free, square_end(weight)]));
+    }
+    assert!(refused(&stacked[..1], [square_end(1.0); 2]));
+    // Side by side in one plane: neither end has a side to leave to.
+    let beside = [square(0.0, 0.0, 10.0, 0.0), square(20.0, 0.0, 10.0, 0.0)];
+    assert!(refused(&beside, [square_end(1.0), LoftEnd::Free]));
+    assert!(refused(&beside, [LoftEnd::Free, square_end(1.0)]));
 }

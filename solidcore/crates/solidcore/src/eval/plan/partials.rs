@@ -33,6 +33,38 @@ pub fn tabulate(mut f: impl FnMut(usize, usize) -> Option<Vec3>) -> Option<Parti
 }
 
 impl EvalSurface {
+    /// The first three derivatives of the parameter line `uv + t * direction` on an open
+    /// spline. At the boundary they describe the continuation of the end span. At an internal
+    /// knot the two span jets can differ; the caller must choose a side in that case.
+    pub fn spline_line_derivatives(&self, uv: [f64; 2], direction: [f64; 2]) -> Option<[Vec3; 3]> {
+        let Self::Nurbs {
+            degree,
+            knots,
+            count,
+            closed: [false, false],
+            ..
+        } = self
+        else {
+            return None;
+        };
+        for axis in 0..2 {
+            let k = knots.get(axis)?;
+            let lo = *degree.get(axis)?;
+            let hi = *count.get(axis)?;
+            let t = *uv.get(axis)?;
+            let interior = k.get(lo.checked_add(1)?..hi)?;
+            if t < *k.get(lo)? || t > *k.get(hi)? || interior.get(interior.partition_point(|k| *k < t)) == Some(&t) {
+                return None;
+            }
+        }
+        let d = self.partials(uv[0], uv[1])?;
+        let [u, v] = direction;
+        let d1 = d[1][0] * u + d[0][1] * v;
+        let d2 = d[2][0] * (u * u) + d[1][1] * (2.0 * u * v) + d[0][2] * (v * v);
+        let d3 = d[3][0] * (u * u * u) + d[2][1] * (3.0 * u * u * v) + d[1][2] * (3.0 * u * v * v) + d[0][3] * (v * v * v);
+        [d1, d2, d3].iter().all(|v| v.is_finite()).then_some([d1, d2, d3])
+    }
+
     /// The partial derivatives at (u, v) up to the fourth order ([`Partials`]), exactly: a closed
     /// spline's parameters wrapped first as in [`EvalSurface::derivs`]. `None` where the surface
     /// cannot be evaluated (a malformed spline, a vanishing weight).
@@ -205,6 +237,17 @@ mod tests {
                 [0.0, 2.0, 3.0, 1.0],
             ],
         )
+    }
+
+    #[test]
+    fn a_parameter_line_uses_the_end_span_and_leaves_an_interior_knot_to_its_caller() {
+        let ctrl = [0.0, 1.0].into_iter().flat_map(|y| [-1.0, 0.0, 2.0].map(|x| [x, y, 0.0, 1.0])).collect();
+        let s = EvalSurface::nurbs([1, 1], [vec![-1.0, -1.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]], [3, 2], ctrl);
+        for (u, speed) in [(-1.0, 1.0), (-0.25, 1.0), (0.25, 2.0), (1.0, 2.0)] {
+            let d = s.spline_line_derivatives([u, 0.0], [1.0, -1.0]).unwrap();
+            assert_eq!(d, [Vec3::new(speed, -1.0, 0.0), Vec3::ZERO, Vec3::ZERO]);
+        }
+        assert!(s.spline_line_derivatives([0.0, 0.0], [1.0, -1.0]).is_none());
     }
 
     #[test]

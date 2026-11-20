@@ -1091,7 +1091,9 @@ impl Torus {
     ///
     /// The torus then keeps a copy of `test`'s NURB and rebuilds its analytic data from
     /// it (`SetFromGwNurb`; WR-493: upstream keeps the NURB made from the fitted
-    /// circles). The generator's interval is measured signed (WR-408;
+    /// circles), except where that rebuild's horn snap would move its radii off the NURB
+    /// by more than the test's tolerance: there it keeps the NURB made from the fitted
+    /// circles, as upstream (#18195). The generator's interval is measured signed (WR-408;
     /// a failed angle is not a torus), and the major radius is measured from the torus
     /// origin (WR-501).
     ///
@@ -1267,25 +1269,29 @@ impl Torus {
         //    constant U Curve orientations,
         //    constant V Curve centers and radius,
         //    and computed domain
-        let mut torus = Self::new(
-            k,
-            torus_origin,
-            torus_x_axis,
-            torus_y_axis,
-            anal_uv_domain,
-            maj_rad,
-            min_rad,
-            TorusOptions {
-                swap_uv,
-                inside_out,
-                circle_nurb: Some(Curve::from(circle)),
-            },
-        )?;
-        // (error recovery: the constructor always stores the given generator)
+        let fitted = || -> Result<Self> {
+            let mut torus = Self::new(
+                k,
+                torus_origin,
+                torus_x_axis,
+                torus_y_axis,
+                anal_uv_domain,
+                maj_rad,
+                min_rad,
+                TorusOptions {
+                    swap_uv,
+                    inside_out,
+                    circle_nurb: Some(Curve::from(circle.clone())),
+                },
+            )?;
+            // (error recovery: the constructor always stores the given generator)
 
-        // reparameterize the NURB so that AnalyticSurface->NurbDomain ==
-        // InputSurface->NurbDomain (status ignored)
-        ignore_status(torus.reparameterize(k, &test.natural_uv_domain()))?;
+            // reparameterize the NURB so that AnalyticSurface->NurbDomain ==
+            // InputSurface->NurbDomain (status ignored)
+            ignore_status(torus.reparameterize(k, &test.natural_uv_domain()))?;
+            Ok(torus)
+        };
+        let mut torus = fitted()?;
 
         // not upstream (WR-493; the SolidCraft fork's tangency-labs/smlib@7ea6a96): the
         // torus keeps the NURB tested (SetFromGwNurb, whose rebuild's status is ignored).
@@ -1302,11 +1308,14 @@ impl Torus {
         // radii within its own tolerance, a thousand times the one the circles were found
         // at here (2e-2 a hundred thousand units from the origin). A torus whose radii the
         // rebuild moved by more than this test's tolerance no longer lies on the NURB it
-        // keeps: it is not found (the surface stays the NURB).
+        // keeps. It keeps the NURB made from its fitted circles instead, as upstream does:
+        // that torus lies on its own NURB, and the circles were found on `test` within this
+        // test's tolerance. A ring torus whose tube comes within a rounding of its axis (a
+        // fillet whose writer kept the major radius a hair above the minor) stays a torus.
         if (torus.major_radius() - maj_rad).abs() > scaled_zero
             || (torus.minor_radius() - min_rad).abs() > scaled_zero
         {
-            return Ok(None);
+            torus = fitted()?;
         }
 
         // (Notify(SM_NO_COPY) copies the test surface's attributes: not modelled)
@@ -2565,8 +2574,10 @@ mod tests {
     /// #18195: a torus found in its NURB keeps that NURB, so its analytic radii must lie
     /// on it. The rebuild's horn snap (radii within a thousand times the recognition's
     /// tolerance merge) would make a ring torus a hundred thousand units out, 1e-3 short
-    /// of a horn, a horn torus 1e-3 off the NURB: it is not found. Nearer the origin the
-    /// same torus is found with its own radii, and a horn torus stays a horn torus.
+    /// of a horn, a horn torus 1e-3 off the NURB: it keeps the NURB made from its fitted
+    /// circles instead, as upstream, and its own radii, every point of that NURB on it.
+    /// Nearer the origin the same torus keeps the tested NURB with its own radii, and a
+    /// horn torus stays a horn torus.
     #[test]
     fn torus_found_in_its_nurb_keeps_radii_on_the_nurb() {
         let k = Kernel::default();
@@ -2578,25 +2589,104 @@ mod tests {
             );
             let t = Torus::create_canonical(&k, &frame, maj, min, TorusOptions::default(), None)
                 .unwrap();
-            Torus::is_nurb_surface_torus(&k, &plain(&t), 1.0)
+            let nurbs = plain(&t);
+            Torus::is_nurb_surface_torus(&k, &nurbs, 1.0)
                 .unwrap()
-                .map(|f| (f.major_radius(), f.minor_radius()))
+                .map(|f| {
+                    (
+                        f.major_radius(),
+                        f.minor_radius(),
+                        on_own_nurb(&f),
+                        same_nurb(f.base().base(), &nurbs),
+                    )
+                })
         };
         // the snap's tolerance: 2e-2 at 1e5, 2e-3 at 1e4
-        for (cx, min) in [(1.0e5, 9.999), (1.0e5, 9.99), (1.0e4, 9.999)] {
-            assert_eq!(found(cx, 10.0, min), None, "cx {cx} minor {min}");
-        }
-        for (cx, min) in [(1.0e4, 9.99), (0.0, 9.999)] {
-            let (maj, got) = found(cx, 10.0, min).expect("a torus");
+        for (cx, min, kept) in [
+            (1.0e5, 9.999, false),
+            (1.0e5, 9.99, false),
+            (1.0e4, 9.999, false),
+            (1.0e4, 9.99, true),
+            (0.0, 9.999, true),
+        ] {
+            let (maj, got, off, tested) = found(cx, 10.0, min).expect("a torus");
             assert!(
                 (maj - 10.0).abs() < 1e-9 && (got - min).abs() < 1e-9,
-                "{maj} {got}"
+                "cx {cx} minor {min}: {maj} {got}"
             );
+            assert!(
+                off < 1e-9 * (1.0 + cx),
+                "cx {cx} minor {min}: {off} off its NURB"
+            );
+            assert_eq!(tested, kept, "cx {cx} minor {min}: keeps the tested NURB");
         }
         for cx in [0.0, 1.0e5] {
-            let (maj, min) = found(cx, 10.0, 10.0).expect("a horn torus");
+            let (maj, min, _, _) = found(cx, 10.0, 10.0).expect("a horn torus");
             assert_eq!(maj, min, "cx {cx}");
             assert!((maj - 10.0).abs() < 1e-9, "cx {cx}: {maj}");
+        }
+    }
+
+    /// The largest distance from the torus of its own NURB's points on a 9 × 9 grid of
+    /// its domain.
+    fn on_own_nurb(t: &Torus) -> f64 {
+        let s = t.base().base();
+        let (o, z) = (t.base().position().origin(), t.base().position().z_axis());
+        let d = s.natural_uv_domain();
+        let mut worst = 0.0_f64;
+        for i in 0..9 {
+            for j in 0..9 {
+                let p = s
+                    .evaluate_point(d.evaluate(f64::from(i) / 8.0, f64::from(j) / 8.0))
+                    .unwrap();
+                let v = p - o;
+                let h = v.dot(z);
+                let rho = (v - z * h).length();
+                let off = ((rho - t.major_radius()).powi(2) + h * h).sqrt() - t.minor_radius();
+                worst = worst.max(off.abs());
+            }
+        }
+        worst
+    }
+
+    /// A fillet torus a STEP file writes with its major radius a hair above its minor
+    /// (0.25 mm, 9e-10 mm more: a tube a rounding short of its axis), a millimetre or so
+    /// from the origin, is found with its own radii: the rebuild's horn snap would move it
+    /// 9e-10 off the tested NURB, above the 4e-10 the circles were found within, so it
+    /// keeps the NURB made from them. Before, it was not a torus, and a face on it with its
+    /// NURBS form was refused ("a NURBS form that is not its analytic surface").
+    #[test]
+    fn a_torus_a_rounding_short_of_a_horn_is_found_with_its_radii() {
+        let k = Kernel::default();
+        let (maj, min) = (0.25 + 9e-10, 0.25);
+        let (cx, cy, cz) = (-1.175, -1.625, 0.422);
+        let frame = Axis2Placement::new(
+            Vec3::new(cx, cy, cz),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+        );
+        // A quarter of the sweep over the tube's outer and lower quarters, clear of its inner
+        // equator (a circle of radius 9e-10, too small to be found as one).
+        for dom in [
+            Extent2d::from_bounds(0.0, 0.0, 90.0, 90.0),
+            Extent2d::from_bounds(90.0, -90.0, 180.0, 0.0),
+        ] {
+            let t =
+                Torus::create_canonical(&k, &frame, maj, min, TorusOptions::default(), Some(&dom))
+                    .unwrap();
+            let found = Torus::is_nurb_surface_torus(&k, &plain(&t), 1.0)
+                .unwrap()
+                .expect("a torus");
+            let (r, s, off) = (
+                found.major_radius(),
+                found.minor_radius(),
+                on_own_nurb(&found),
+            );
+            assert!(
+                (r - maj).abs() < 1e-12 && (s - min).abs() < 1e-12,
+                "{dom:?}: {r} {s}"
+            );
+            assert!(off < 1e-12, "{dom:?}: {off} off its NURB");
         }
     }
 
