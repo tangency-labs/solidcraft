@@ -1134,7 +1134,8 @@ pub struct ExportDxfParams {
     /// a cutter that would cut them.
     #[serde(default)]
     pub bend_lines: Option<bool>,
-    /// roles: the layer for each role. single: every entity on layer 0. Default: roles.
+    /// roles: the layer for each role, with a note beside each press-in hardware hole on layer HARDWARE.
+    /// single: every entity on layer 0, with no hardware notes. Default: roles.
     #[serde(default)]
     pub layers: Option<DxfLayersParam>,
     /// A DXF profile: which layer, colour and linetype each role is written with, and the roles

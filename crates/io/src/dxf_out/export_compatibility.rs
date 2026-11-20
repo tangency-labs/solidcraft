@@ -91,6 +91,8 @@ impl Budget {
             (Producer::FlatPattern, "BEND_UP") => Some((1, DxfLinetype::Dashed)),
             (Producer::FlatPattern, "BEND_DOWN") => Some((5, DxfLinetype::Dashed)),
             (Producer::FlatPattern, "BEND_NOTES") => Some((8, DxfLinetype::Continuous)),
+            // The note beside each press-in hardware hole (`M3 nut`).
+            (Producer::FlatPattern, "HARDWARE") => Some((8, DxfLinetype::Continuous)),
             (Producer::FlatPattern, "PERFORATION") => Some((3, DxfLinetype::Continuous)),
             // A roll's lines (where it starts and ends, and its middle), on a layer of their own so
             // a reader of the bend layers doesn't take a roll for bends.
@@ -113,7 +115,7 @@ impl Budget {
             }
             Producer::FlatPattern => match layer {
                 "BEND_UP" | "BEND_DOWN" | "ROLL" => matches!(shape, DxfShape::Line(..)),
-                "BEND_NOTES" => matches!(shape, DxfShape::Text { .. }),
+                "BEND_NOTES" | "HARDWARE" => matches!(shape, DxfShape::Text { .. }),
                 "PERFORATION" => matches!(shape, DxfShape::Circle { .. }),
                 _ => matches!(
                     shape,
@@ -184,8 +186,8 @@ impl DxfFile<DxfShape> {
         let values = (path_entities as u128) * 129 + (bends as u128) * 6 + (perforations as u128) * 2;
         let values = usize::try_from(values).unwrap_or(usize::MAX);
         let text_bytes = usize::try_from((bends as u128) * 2048).unwrap_or(usize::MAX);
-        // Layer 0 and the nine named roles, and at most one pocket layer per contour.
-        let budget = Budget::new(Producer::FlatPattern, add(contours, 10)?, entities, values, text_bytes)?;
+        // Layer 0 and the ten named roles, and at most one pocket layer per contour.
+        let budget = Budget::new(Producer::FlatPattern, add(contours, 11)?, entities, values, text_bytes)?;
         Self::with_export_budget(budget)
     }
 
