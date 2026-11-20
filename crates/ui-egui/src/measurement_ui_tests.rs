@@ -446,6 +446,25 @@ fn the_distance_row_has_a_copy_button_that_copies_the_shown_value() {
     assert_eq!(copied, [want]);
 }
 
+/// Empty viewport space clears Measure's picks and leaves the tool open (#11331).
+#[test]
+fn empty_viewport_click_clears_measure_picks_without_closing() {
+    let mut h = vertex_measurement([0., 0., 0.], [3., 4., 0.]);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2);
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::Measure { result: Some(_), .. }));
+    // Top-left of the fitted view is away from the box.
+    h.step(&json!({"click": [40, 40]})).unwrap();
+    let d = h.app.dialog.as_ref().expect("Measure stays open");
+    assert!(matches!(&d.kind, Kind::Measure { .. }), "Esc is not needed");
+    assert!(d.inputs[0].items.is_empty(), "same as Clear the selection");
+    h.frames(1);
+    match &h.app.dialog.as_ref().unwrap().kind {
+        Kind::Measure { result: None, .. } => {}
+        Kind::Measure { result: Some(r), .. } => panic!("cleared picks leave no readout: {r}"),
+        _ => panic!("Measure closed"),
+    }
+}
+
 /// STL outlines are real distances even though they are not B-rep operands.
 #[test]
 fn measure_imported_stl_edges_and_vertices_from_viewport_clicks() {
