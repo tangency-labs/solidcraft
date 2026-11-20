@@ -110,6 +110,7 @@ for action in out.actions { if let ui_kit::ribbon::Action::Run { id, .. } = acti
             icon,
             size,
             enabled: true,
+            planned: false,
             pressed: false,
             exit: false,
             split: None,
