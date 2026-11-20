@@ -111,7 +111,7 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
-use crate::nurbs::math::{gamma, NOW, NOZ};
+use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
 use crate::surface::plane::Coincidence;
 use crate::surface::surface::p7::SpGlobalSolver;
 use crate::surface::surface_cache::p1::SurfaceCache;
@@ -2773,22 +2773,13 @@ impl Surface {
                 distance_tolerance,
             )?;
 
-            // A curve that lies on the surface over some knot spans and leaves it over
+            // A curve that lies in a plane over some knot spans and leaves it over
             // others (#19912): those spans become ranges, and the general solve looks
             // for crossings over the rest.
             let split = if dist_to_surface <= distance_tolerance {
                 None
             } else {
-                self.coincident_spans(
-                    k,
-                    handles,
-                    cache.as_deref_mut(),
-                    context.as_deref_mut(),
-                    uv_domain,
-                    curve,
-                    interval,
-                    distance_tolerance,
-                )?
+                self.spans_in_plane(k, handles, curve, interval, distance_tolerance)?
             };
 
             // Otherwise: a range solution per dropped curve
@@ -2858,11 +2849,12 @@ impl Surface {
             ],
         };
 
-        // where the coincident ranges (all of `sols` so far) start and end
+        // the curve parameters where the coincident ranges (all of `sols` so far)
+        // start and end
         let mut range_ends = Vec::new();
         for sol in sols.as_slice() {
-            range_ends.push(curve.evaluate_point(k, sol.start.param(0)?)?);
-            range_ends.push(curve.evaluate_point(k, sol.end.param(0)?)?);
+            range_ends.push(sol.start.param(0)?);
+            range_ends.push(sol.end.param(0)?);
         }
 
         // One solve per gap between the coincident ranges, each into its own array
@@ -2899,15 +2891,13 @@ impl Surface {
                 &mut gap_sols,
             )?;
 
-            // A point within the tolerance of a range's end is that end, where the
-            // curve leaves the surface (the combining joins points the same way).
+            // A point at a range's end parameter is that end, where the curve leaves
+            // the surface. (A point elsewhere on the curve stays, even where the curve
+            // comes back to the same place.)
             for sol in gap_sols.as_slice() {
-                if sol.solution_type == SolutionType::SingleValue && !range_ends.is_empty() {
-                    let at = curve.evaluate_point(k, sol.start.param(0)?)?;
-                    if range_ends
-                        .iter()
-                        .any(|end| at.distance(*end) <= distance_tolerance)
-                    {
+                if sol.solution_type == SolutionType::SingleValue {
+                    let t = sol.start.param(0)?;
+                    if range_ends.iter().any(|&end| are_same(t, end)) {
                         continue;
                     }
                 }
@@ -3059,116 +3049,153 @@ impl Surface {
         Ok((uv_curves, dist_to_surface))
     }
 
-    /// The knot spans of `curve` over `interval` that lie on this surface, as range
-    /// solutions, and the intervals between them for the general solve (#19912).
+    /// The knot spans of `curve` over `interval` proved to lie within
+    /// `distance_tolerance` of this surface, when it is a plane, as range solutions,
+    /// and the intervals between them for the general solve (#19912). `None` when the
+    /// surface is not a plane, the curve has no 3D NURB form or a weight that is not
+    /// positive, or no span is proved to lie in the plane: the curve then keeps the
+    /// ranges of its whole drop, as before.
     ///
-    /// A span is one polynomial or rational piece, so it lies on an analytic surface
-    /// all along or meets it at isolated points only. A span lies on the surface when
-    /// all its samples do and its drop stays within `distance_tolerance`; it lies off
-    /// the surface when none of its samples does. The curve is split only when it has
-    /// both kinds of span; `None` otherwise (a curve within the tolerance's noise of
-    /// the surface all along has neither, and keeps the ranges of its whole drop).
-    #[allow(clippy::too_many_arguments)] // the solve's operands and options
-    fn coincident_spans<'c, O: SolutionObject>(
+    /// A B-spline span lies in the convex hull of its `p + 1` control points (a rational
+    /// one, of their points with positive weights), so it lies within the tolerance of
+    /// the plane when each of them does ([`control_point_distance`], rounding counted).
+    /// Every other span is left to the general solve.
+    fn spans_in_plane<O: SolutionObject>(
         &self,
         k: &Kernel,
         handles: [Option<O>; 2],
-        mut cache: Option<&mut SurfaceCache<O>>,
-        mut context: Option<&mut (dyn SurfaceSolveContext<O> + 'c)>,
-        uv_domain: &Extent2d,
         curve: &Curve,
         interval: &Extent1d,
         distance_tolerance: f64,
     ) -> Result<Option<SpanSplit<O>>> {
-        let (knots, _) = curve.knots(k, Some(interval))?;
-        let mut breaks = vec![interval.min()];
-        breaks.extend(knots.into_iter().filter(|&t| {
-            interval.contains_value(t, 0.0) && !interval.is_value_on_boundary(t, EFF_ZERO).0
-        }));
-        breaks.push(interval.max());
+        let SurfaceKind::Plane(plane) = self.kind() else {
+            return Ok(None);
+        };
+        let Some(nurb) = b_spline_part(curve).and_then(BSplineCurve::gw_nurb) else {
+            return Ok(None);
+        };
+        let (p, cpts, knots) = (nurb.degree(), nurb.cpts(), nurb.knots());
+        let rational = nurb.is_rational();
+        if cpts
+            .iter()
+            .any(|q| q.z == NOZ || (rational && !certified::above(q.w, 0.0)))
+        {
+            return Ok(None);
+        }
+        let (origin, normal, _) = plane.is_planar();
 
         let mut ranges = Vec::new();
         let mut gaps: Vec<Extent1d> = Vec::new();
         let mut last_was_gap = false;
-        let mut found_off = false;
-        for pair in breaks.windows(2) {
-            let &[lo, hi] = pair else { continue };
-            let span = Extent1d::from_min_max(lo, hi);
-            let mut found = |partial_coincidence_ok| {
-                self.curve_coincidence_found(
-                    k,
-                    handles,
-                    cache.as_deref(),
-                    context.as_deref_mut(),
-                    uv_domain,
-                    curve,
-                    &span,
-                    distance_tolerance,
-                    partial_coincidence_ok,
-                )
+        for s in p..cpts.len() {
+            // the span [U_s, U_s+1] within the interval, and its control points
+            let (Some(&lo), Some(&hi)) = (knots.get(s), knots.get(s + 1)) else {
+                continue;
             };
-            if found(false)? {
-                let (uv_curves, dist_to_surface) = self.coincident_drop(
-                    k,
-                    handles[1],
-                    cache.as_deref_mut(),
-                    context.as_deref_mut(),
-                    uv_domain,
-                    curve,
-                    &span,
-                    distance_tolerance,
-                )?;
-                if dist_to_surface <= distance_tolerance {
-                    for uv_curve in &uv_curves {
-                        ranges.push(coincident_range(k, handles, uv_curve, dist_to_surface)?);
-                    }
-                    last_was_gap = false;
-                    continue;
+            let (lo, hi) = (lo.max(interval.min()), hi.min(interval.max()));
+            if !certified::above(hi, lo) {
+                continue;
+            }
+            let hull = s.checked_sub(p).and_then(|first| cpts.get(first..=s));
+            let mut farthest = Some(0.0_f64);
+            for q in hull.unwrap_or(&[]) {
+                let d = control_point_distance(q, rational, origin, normal);
+                farthest = farthest
+                    .filter(|_| d.at_most(distance_tolerance).is_yes())
+                    .map(|f| f.max(d.value + d.bound));
+            }
+            if let Some(dist) = farthest.filter(|_| hull.is_some()) {
+                let end = |t| -> Result<(f64, Point2)> {
+                    Ok((
+                        t,
+                        plane.project_point_to_uv_domain(curve.evaluate_point(k, t)?),
+                    ))
+                };
+                ranges.push(range_solution(handles, [end(lo)?, end(hi)?], dist)?);
+                last_was_gap = false;
+            } else {
+                match gaps.last_mut() {
+                    Some(gap) if last_was_gap => gap.add_value(hi),
+                    _ => gaps.push(Extent1d::from_min_max(lo, hi)),
                 }
-            } else if !found(true)? {
-                found_off = true;
+                last_was_gap = true;
             }
-            match gaps.last_mut() {
-                Some(gap) if last_was_gap => gap.add_value(hi),
-                _ => gaps.push(span),
-            }
-            last_was_gap = true;
         }
-        Ok((!ranges.is_empty() && found_off).then_some((ranges, gaps)))
+        Ok((!ranges.is_empty()).then_some((ranges, gaps)))
     }
 }
 
-/// A curve split into knot spans on and off a surface: the range solutions of the
-/// spans on it, and the intervals between them.
+/// A curve split into knot spans in and out of a plane: the range solutions of the
+/// spans in it, and the intervals between them.
 type SpanSplit<O> = (Vec<Solution<O>>, Vec<Extent1d>);
+
+/// The distance of the B-spline control point `q` from the plane through `origin`
+/// with normal `normal` (of any length), certified. Its point `p = q / w` rounds once
+/// per coordinate (not at all for a non-rational `q`), `p - o` once more and the dot
+/// with `n` in three products and two sums, so the height is within
+/// `gamma_6 * sum |n_i| (2 |p_i| + |o_i|)` of exact. Dividing by `|n|` (within
+/// `gamma_5`) and the quotient's rounding add `gamma_7` of the value, and the bound's
+/// own arithmetic is covered by a factor `1 + gamma_8`.
+fn control_point_distance(
+    q: &CPoint,
+    rational: bool,
+    origin: Point3,
+    normal: Vec3,
+) -> certified::Bounded {
+    let w = if rational { q.w } else { 1.0 };
+    let point = Point3::new(q.x / w, q.y / w, q.z / w);
+    let height = normal.dot(point - origin).abs();
+    let size = normal.x.abs() * (2.0 * point.x.abs() + origin.x.abs())
+        + normal.y.abs() * (2.0 * point.y.abs() + origin.y.abs())
+        + normal.z.abs() * (2.0 * point.z.abs() + origin.z.abs());
+    let length = normal.length();
+    let value = height / length;
+    certified::Bounded {
+        value,
+        bound: (gamma(6) * size / length + gamma(7) * value) * (1.0 + gamma(8)),
+    }
+}
 
 /// The range solution of a curve lying on a surface over the drop `uv_curve`
 /// (parameterised as the curve), at the drop distance `dist_to_surface`.
 fn coincident_range<O: SolutionObject>(
     k: &Kernel,
-    [curve_handle, surface_handle]: [Option<O>; 2],
+    handles: [Option<O>; 2],
     uv_curve: &Curve,
     dist_to_surface: f64,
 ) -> Result<Solution<O>> {
     let ivl = uv_curve.natural_interval();
+    let end = |t| -> Result<(f64, Point2)> {
+        let uv = uv_curve.evaluate_point(k, t)?;
+        Ok((t, Point2::new(uv.x, uv.y)))
+    };
+    range_solution(handles, [end(ivl.min())?, end(ivl.max())?], dist_to_surface)
+}
+
+/// The range solution of a curve and a surface from the curve parameter and surface
+/// point at its two ends, at the distance `dist_to_surface`.
+fn range_solution<O: SolutionObject>(
+    [curve_handle, surface_handle]: [Option<O>; 2],
+    ends: [(f64, Point2); 2],
+    dist_to_surface: f64,
+) -> Result<Solution<O>> {
     let mut sol = Solution::<O>::new();
     sol.num_variables = 3;
     sol.solution_type = SolutionType::RangeOfValues;
     sol.num_objects = 2;
     sol.objects[0] = curve_handle;
     sol.objects[1] = surface_handle;
+    let [(t0, uv0), (t1, uv1)] = ends;
 
-    let pnt = uv_curve.evaluate_point(k, ivl.min())?;
     sol.start.solution_value = dist_to_surface;
-    *sol.start.param_mut(0)? = ivl.min();
-    *sol.start.param_mut(1)? = pnt.x;
-    *sol.start.param_mut(2)? = pnt.y;
+    *sol.start.param_mut(0)? = t0;
+    *sol.start.param_mut(1)? = uv0.x;
+    *sol.start.param_mut(2)? = uv0.y;
 
-    let pnt = uv_curve.evaluate_point(k, ivl.max())?;
     sol.end.solution_value = dist_to_surface;
-    *sol.end.param_mut(0)? = ivl.max();
-    *sol.end.param_mut(1)? = pnt.x;
-    *sol.end.param_mut(2)? = pnt.y;
+    *sol.end.param_mut(0)? = t1;
+    *sol.end.param_mut(1)? = uv1.x;
+    *sol.end.param_mut(2)? = uv1.y;
     Ok(sol)
 }
 

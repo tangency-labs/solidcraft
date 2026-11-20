@@ -1169,6 +1169,41 @@ mod tests {
             hits[0].distance(Point2::new(crossing.x, crossing.y)) <= tol,
             "{hits:?}"
         );
+
+        // Heights 1, 1, -1 after the zeros cross once, and the curve ends on the
+        // plane coming up from below, at its start: where the range starts, but at
+        // the other end of the curve, so that end is a point of its own.
+        let returns = curve(
+            &[
+                in_plane.as_slice(),
+                &[
+                    [4.0, 0.0, 1.0],
+                    [2.0, -3.0, 1.0],
+                    [1.0, -1.0, -1.0],
+                    [0.0, 0.0, 0.0],
+                ],
+            ]
+            .concat(),
+        );
+        let sols = solve(&returns);
+        let [range, (kind, t, _), (end_kind, end, _)] = sols[..] else {
+            panic!("{sols:?}")
+        };
+        assert_eq!(range, first_span(&returns));
+        assert_eq!(
+            (kind, end_kind),
+            (SolutionType::SingleValue, SolutionType::SingleValue)
+        );
+        let crossing = returns.evaluate_point(&k, t).unwrap();
+        assert!(t > range.2 && crossing.z.abs() <= tol, "{t} {crossing:?}");
+        assert_eq!(end, 1.0);
+        let hits = curve_plane_crossings(&k, &returns, &returns.natural_interval(), &xy).unwrap();
+        assert_eq!(hits.len(), 2, "{hits:?}");
+        assert!(
+            hits.iter()
+                .any(|h| h.distance(Point2::new(0.0, 0.0)) <= tol),
+            "{hits:?}"
+        );
     }
 
     fn curve(points: &[[f64; 3]]) -> Curve {
