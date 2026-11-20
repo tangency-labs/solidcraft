@@ -1031,6 +1031,37 @@ fn a_sketch_and_a_plane_on_the_end_face_of_a_threaded_revolve_keep_their_attachm
     }
 }
 
+/// A whole-turn revolve cut drawn in the plane a revolved body has its seam in turns its tool's
+/// seam away from that plane (#18039). Its faces keep the names of the profile lines that made
+/// them: the turn's own history says nothing of the profile, and read as the revolve's it named
+/// every face of the groove after the axis line, so a reference to one found none of them.
+#[test]
+fn a_whole_turn_revolve_cut_turned_off_the_seam_names_its_faces_after_their_profile_lines() {
+    let mut s = Session::default();
+    for (sketch, points) in [("A", [[10, 0], [30, 0], [30, 20], [10, 20]]), ("B", [[25, 5], [35, 5], [35, 15], [25, 15]])] {
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": sketch}));
+        run(&mut s, "sketch.line", json!({"points": points, "closed": true}));
+        run(&mut s, "sketch.line", json!({"points": [[0, -5], [0, 25]]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let (name, operation) = if sketch == "A" { ("Ring", "new") } else { ("Groove", "cut") };
+        let axis = json!({"type": "sketch_line", "curve": "l5"});
+        let mut p = json!({"sketch": sketch, "profiles": [0], "axis": axis, "angle": "360 deg", "operation": operation, "name": name});
+        if sketch == "A" {
+            p["body_name"] = json!("Body1");
+        }
+        run(&mut s, "solid.revolve", p);
+        assert_eq!(error(&s, name), None);
+    }
+    let groove = id(&s, "Groove");
+    let named = names(&s, "Body1");
+    // The groove's floor (l4, at x = 25) and its two walls (l1 and l3); l2 lies outside the ring.
+    for line in ["l1", "l3", "l4"] {
+        let face = format!("F{groove}:side:{line}");
+        assert!(named.iter().any(|(n, exact)| *exact && (n == &face || n.starts_with(&format!("{face}#")))), "{face}: {named:?}");
+    }
+    assert!(named.iter().all(|(n, _)| !n.starts_with(&format!("F{groove}:side:l5"))), "named after the axis: {named:?}");
+}
+
 /// The faces of a modelled thread's groove are named by their index, which moves when the
 /// thread's length changes. No exact name leans on one (#18460): a feature on a face beside the
 /// groove finds that same face after the change, or fails asking for it again, never another.

@@ -1247,6 +1247,12 @@ impl Dialog {
         // face or edge stands for its body where bodies are wanted. (Edit Text's selection is the
         // text it edits, not its path.)
         let preselection: &[Sel] = if matches!(d.kind, Kind::Text(_)) { &[] } else { &s.selection };
+        if matches!(d.kind, Kind::Thread { .. })
+            && preselection.iter().filter(|sel| fits(FACES, sel)).take(2).count() > 1
+            && let Some(input) = d.inputs.first_mut()
+        {
+            input.multi = true;
+        }
         for sel in preselection {
             if !matches!(d.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) && is_wire_point(s, sel) {
                 continue;
