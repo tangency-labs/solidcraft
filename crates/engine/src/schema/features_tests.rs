@@ -1691,7 +1691,7 @@ fn draft() -> Value {
 }
 
 /// `base` with `key` set to `value`.
-fn with(base: &Value, key: &str, value: Value) -> Value {
+fn with_key(base: &Value, key: &str, value: Value) -> Value {
     let mut p = base.clone();
     p[key] = value;
     p
@@ -1721,15 +1721,15 @@ fn strict_keeps_the_shell_and_draft_errors() {
         ("solid.draft", json!({"faces": [[1, 2]], "angle": 3, "neutral": "XY"})),
     ]);
     for (id, p) in [
-        ("solid.shell", with(&shell(), "thickness", json!(null))),
-        ("solid.shell", with(&shell(), "thickness", json!("2 deg"))),
-        ("solid.shell", with(&shell(), "direction", json!("sideways"))),
-        ("solid.draft", with(&draft(), "angle", json!("2 mm"))),
+        ("solid.shell", with_key(&shell(), "thickness", json!(null))),
+        ("solid.shell", with_key(&shell(), "thickness", json!("2 deg"))),
+        ("solid.shell", with_key(&shell(), "direction", json!("sideways"))),
+        ("solid.draft", with_key(&draft(), "angle", json!("2 mm"))),
         ("solid.draft", json!({"faces": [[0, 10, 10]], "angle": 3})),
-        ("solid.draft", with(&draft(), "neutral", json!(null))),
-        ("solid.draft", with(&draft(), "neutral", json!(1.5))),
-        ("solid.draft", with(&draft(), "neutral", json!("Nope"))),
-        ("solid.draft", with(&draft(), "neutral", json!({"origin": [0, 0, 0]}))),
+        ("solid.draft", with_key(&draft(), "neutral", json!(null))),
+        ("solid.draft", with_key(&draft(), "neutral", json!(1.5))),
+        ("solid.draft", with_key(&draft(), "neutral", json!("Nope"))),
+        ("solid.draft", with_key(&draft(), "neutral", json!({"origin": [0, 0, 0]}))),
     ] {
         let off = cube(ParamCheck::Off).execute(id, &p).err().map(|e| e.to_string());
         assert!(off.is_some(), "{id} {p} should fail today");
@@ -1743,11 +1743,11 @@ fn strict_keeps_the_shell_and_draft_errors() {
 #[test]
 fn the_shell_and_draft_contracts_refuse_what_the_handlers_ignore() {
     for (id, p, key) in [
-        ("solid.shell", with(&shell(), "tangent_chain", json!("yes")), "tangent_chain"),
-        ("solid.shell", with(&shell(), "direction", json!(5)), "direction"),
-        ("solid.shell", with(&shell(), "body", json!(5)), "body"),
-        ("solid.draft", with(&draft(), "pull", json!("up")), "pull"),
-        ("solid.draft", with(&draft(), "body", json!(["Box"])), "body"),
+        ("solid.shell", with_key(&shell(), "tangent_chain", json!("yes")), "tangent_chain"),
+        ("solid.shell", with_key(&shell(), "direction", json!(5)), "direction"),
+        ("solid.shell", with_key(&shell(), "body", json!(5)), "body"),
+        ("solid.draft", with_key(&draft(), "pull", json!("up")), "pull"),
+        ("solid.draft", with_key(&draft(), "body", json!(["Box"])), "body"),
     ] {
         assert!(cube(ParamCheck::Off).execute(id, &p).is_ok(), "{id} {p} works today");
         let warned = cube(ParamCheck::Warn).execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
@@ -1766,15 +1766,15 @@ fn the_shell_and_draft_schemas_take_what_the_handlers_take() {
     for (id, schema, p) in [
         ("solid.shell", &shell_schema, shell()),
         ("solid.shell", &shell_schema, json!({"faces": [], "thickness": 2})),
-        ("solid.shell", &shell_schema, with(&with(&shell(), "direction", json!("outside")), "tangent_chain", json!(true))),
-        ("solid.shell", &shell_schema, with(&shell(), "direction", json!(""))),
-        ("solid.shell", &shell_schema, with(&shell(), "direction", json!("sideways"))),
+        ("solid.shell", &shell_schema, with_key(&with_key(&shell(), "direction", json!("outside")), "tangent_chain", json!(true))),
+        ("solid.shell", &shell_schema, with_key(&shell(), "direction", json!(""))),
+        ("solid.shell", &shell_schema, with_key(&shell(), "direction", json!("sideways"))),
         ("solid.shell", &shell_schema, json!({"faces": [[10, 10]], "thickness": 2})),
         ("solid.shell", &shell_schema, json!({"thickness": 2})),
         ("solid.draft", &draft_schema, draft()),
-        ("solid.draft", &draft_schema, with(&with(&draft(), "neutral", json!({"origin": [0, 0, 0], "normal": [0, 0, 1]})), "pull", json!([0, 0, 1]))),
-        ("solid.draft", &draft_schema, with(&draft(), "angle", json!("3 deg"))),
-        ("solid.draft", &draft_schema, with(&draft(), "neutral", json!(1.5))),
+        ("solid.draft", &draft_schema, with_key(&with_key(&draft(), "neutral", json!({"origin": [0, 0, 0], "normal": [0, 0, 1]})), "pull", json!([0, 0, 1]))),
+        ("solid.draft", &draft_schema, with_key(&draft(), "angle", json!("3 deg"))),
+        ("solid.draft", &draft_schema, with_key(&draft(), "neutral", json!(1.5))),
         ("solid.draft", &draft_schema, json!({"faces": [[0, 10, 10]], "angle": 3})),
     ] {
         let takes = cube(ParamCheck::Off).execute(id, &p).is_ok();
@@ -1795,7 +1795,7 @@ fn shell_and_draft_reply_with_their_schemas() {
         assert!(r.get("param_warnings").is_none(), "{r}");
         assert_eq!(r["changed_bodies"], json!(["Box"]), "{id}: {r}");
     }
-    let p = with(&shell(), "tangent_chian", json!(true));
+    let p = with_key(&shell(), "tangent_chian", json!(true));
     let r = cube(ParamCheck::Warn).execute("solid.shell", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
     assert!(r["param_warnings"].to_string().contains("tangent_chian"), "{r}");
     let error = cube(ParamCheck::Strict).execute("solid.shell", &p).err().map(|e| e.to_string()).unwrap_or_default();
