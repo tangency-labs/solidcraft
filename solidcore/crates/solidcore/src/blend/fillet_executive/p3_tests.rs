@@ -169,6 +169,7 @@ impl ExecutiveAccess<Handle> for Access {
             rolls_over: false,
             into_material: false,
             left_across: Vec::new(),
+            continued_cliffs: Vec::new(),
             wraps_past_both_ends: false,
         })
     }
@@ -757,6 +758,7 @@ fn state() -> FilletExecutive<Handle> {
         self_intersection_handler: None,
         mark_corner_patches: false,
         cliff_overflow: false,
+        continued_cliffs: BTreeMap::new(),
         open_ends: Vec::new(),
         overflow_first: false,
         classify_only: false,
@@ -906,9 +908,7 @@ fn piecewise_return_restores_both_temporary_flags_on_success_and_error() {
 fn stitching_retries_exactly_five_times_doubles_tolerance_then_passes_on_orientation_error() {
     let gathered = SolidError::topology(
         "topology::brep::p3",
-        crate::error::topology::TopologyFailure::Inconsistent(
-            crate::topology::brep::p3::GATHERED_BOTH_SIDES,
-        ),
+        crate::error::topology::TopologyFailure::GatheredBothSides,
     );
     // (lamina, orientation error, keeps_open answer, unify error, asked, kept)
     for (lamina, error, keeps_open, unify_error, asked, kept) in [

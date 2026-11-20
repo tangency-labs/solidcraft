@@ -17,6 +17,7 @@
 //! | [`TopologyFailure::DropFailed`]      | the drop's own recorded status |
 //! | [`TopologyFailure::JoinedVertexReaches`] | `SM_ERR` (not upstream, #15718) |
 //! | [`TopologyFailure::Defect`]              | `SM_ERR` (or the site's, through `with_status`) |
+//! | the named causes, from [`TopologyFailure::EditingDisabled`] on | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
 //!
 //! [`TopologyFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
@@ -25,8 +26,9 @@
 //! Deviations: not upstream. A failure says in a phrase (or by its variant) what went
 //! wrong; the failure's `operation` path says which routine, and its entity is the one
 //! the site it replaces named (a vertex use for the vertex-use routines, none
-//! elsewhere). The failures that are checks of a caller's arguments stay
-//! [`crate::SolidError::InvalidInput`].
+//! elsewhere). A check of a caller's argument that reports no status (upstream
+//! dereferences null) stays [`crate::SolidError::InvalidInput`]; one that reports a status
+//! is a named cause of class `invalid_input`, keeping that status.
 //! `brep/p9`'s face-orientation repair keeps its bare final status 1 (upstream `TRUE`),
 //! which no failure here stands for.
 
@@ -79,16 +81,71 @@ pub enum TopologyFailure {
         /// The step that failed, and why that is the kernel's fault.
         why: &'static str,
     },
+    /// The routine edits the B-rep, and the caller has not enabled editing on it
+    /// (`Brep::set_editing_enabled`). The caller's state: [`ErrorKind::InvalidInput`].
+    EditingDisabled,
+    /// The caller gave no B-rep. [`ErrorKind::InvalidInput`].
+    NoBrepGiven,
+    /// An entity the caller named (a region, a face) is not one of the B-rep's.
+    /// [`ErrorKind::InvalidInput`].
+    NotInBrep,
+    /// The vertex the caller named to survive is not a vertex of the edge.
+    /// [`ErrorKind::InvalidInput`].
+    VertexNotOnEdge,
+    /// The edge starts and ends at one vertex, which the routine does not take.
+    /// [`ErrorKind::InvalidInput`].
+    ClosedEdge,
+    /// A curve the routine needs as a B-spline is of a kind with no B-spline form here.
+    /// [`ErrorKind::Unsupported`].
+    CurveNotBSpline {
+        /// The curve's owner, in the B-rep the routine read it from, where it has one.
+        entity: Option<EntityRef>,
+    },
+    /// A surface has no NURBS form. [`ErrorKind::Unsupported`].
+    SurfaceWithoutNurbs {
+        /// The face the surface belongs to, where it has one.
+        entity: Option<EntityRef>,
+    },
+    /// The face's upward face use has no edge use (its loops are vertex loops, or it has
+    /// none), so no edge gives a direction to vote with. [`ErrorKind::Unsupported`].
+    FaceWithoutEdges,
+    /// The edge to squeeze ends a wire at the vertex to delete, so no other edge there can
+    /// take the head of the wire's shell. [`ErrorKind::Unsupported`].
+    WireEndSqueezed,
+    /// A search for the point's foot on the face's surface found none.
+    /// Class `failed`.
+    NoFootOnSurface,
+    /// The edge's curve could be neither lifted nor approximated as a B-spline (the
+    /// approximation's failure is the cause). Class `failed`; whether it is a defect or a
+    /// refusal is its cause's ([`crate::SolidError::is_defect`] follows the chain).
+    CurveNotApproximated,
+    /// Gathering the face uses connected to one side of a face reached more face uses than
+    /// faces remain to be oriented (upstream's "Nonorientable Brep" assert): the body is not
+    /// orientable, or it is an open sheet the closed-solid orientation does not take. Class
+    /// `failed`.
+    GatheredBothSides,
 }
 
 impl TopologyFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) | Self::JoinedVertexReaches { .. } | Self::Defect { .. } => SM_ERR,
-            Self::Missing(_) => SM_ERR_NULL_POINTER,
-            Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
-            Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
+            Self::Failed(_)
+            | Self::JoinedVertexReaches { .. }
+            | Self::Defect { .. }
+            | Self::EditingDisabled
+            | Self::NotInBrep
+            | Self::VertexNotOnEdge
+            | Self::ClosedEdge
+            | Self::FaceWithoutEdges
+            | Self::WireEndSqueezed
+            | Self::NoFootOnSurface => SM_ERR,
+            Self::Missing(_)
+            | Self::CurveNotBSpline { .. }
+            | Self::SurfaceWithoutNurbs { .. }
+            | Self::CurveNotApproximated => SM_ERR_NULL_POINTER,
+            Self::InvalidValue(_) | Self::NoBrepGiven => SM_ERR_INVALID_INPUT,
+            Self::Inconsistent(_) | Self::GatheredBothSides => SM_ERR_ASSERT_FAILURE,
             Self::OutOfMemory(_) => SM_ERR_OUT_OF_MEMORY,
             Self::DropFailed { status } => *status,
         }
@@ -96,13 +153,25 @@ impl TopologyFailure {
 
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::Missing`] for
     /// [`TopologyFailure::Missing`], [`ErrorKind::InvalidInput`] for
-    /// [`TopologyFailure::InvalidValue`], the drop status's kind for
-    /// [`TopologyFailure::DropFailed`], [`ErrorKind::Failed`] otherwise.
-    /// [`TopologyFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
+    /// [`TopologyFailure::InvalidValue`] and for a check of the caller's arguments, state or
+    /// body, [`ErrorKind::Unsupported`] for a kind or configuration the routine does not
+    /// handle, the
+    /// drop status's kind for [`TopologyFailure::DropFailed`], [`ErrorKind::Failed`]
+    /// otherwise. [`TopologyFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::EditingDisabled
+            | Self::NoBrepGiven
+            | Self::NotInBrep
+            | Self::VertexNotOnEdge
+            | Self::ClosedEdge => ErrorKind::InvalidInput,
+            Self::CurveNotBSpline { .. }
+            | Self::SurfaceWithoutNurbs { .. }
+            | Self::FaceWithoutEdges
+            | Self::WireEndSqueezed => ErrorKind::Unsupported,
+            Self::CurveNotApproximated => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -135,6 +204,34 @@ impl core::fmt::Display for TopologyFailure {
                 "a joined edge's vertex needs tolerance {needed} to cover the join's gap, which \
                  reaches the far vertex of one of its edges; no tolerance fits"
             ),
+            Self::EditingDisabled => f.write_str("editing is not enabled on the B-rep"),
+            Self::NoBrepGiven => f.write_str("no B-rep was given"),
+            Self::NotInBrep => f.write_str("the entity given is not one of the B-rep's"),
+            Self::VertexNotOnEdge => f.write_str("the surviving vertex is not on the edge"),
+            Self::ClosedEdge => f.write_str("the edge starts and ends at one vertex"),
+            Self::CurveNotBSpline { entity: None } => f.write_str("a curve has no B-spline form"),
+            Self::CurveNotBSpline { entity: Some(e) } => {
+                write!(f, "a curve has no B-spline form ({e})")
+            }
+            Self::SurfaceWithoutNurbs { entity: None } => {
+                f.write_str("a surface has no NURBS form")
+            }
+            Self::SurfaceWithoutNurbs { entity: Some(e) } => {
+                write!(f, "a surface has no NURBS form ({e})")
+            }
+            Self::FaceWithoutEdges => f.write_str("the face has no edges"),
+            Self::WireEndSqueezed => {
+                f.write_str("the edge to squeeze ends its wire at the vertex to delete")
+            }
+            Self::NoFootOnSurface => {
+                f.write_str("the point does not project onto the face's surface")
+            }
+            Self::CurveNotApproximated => {
+                f.write_str("the edge's curve could not be made a B-spline")
+            }
+            Self::GatheredBothSides => {
+                f.write_str("more face uses are connected than faces remain to be oriented")
+            }
         }
     }
 }
@@ -334,6 +431,64 @@ mod tests {
         }
     }
 
+    /// The named causes of the B-rep edits keep the status of the phrase each replaced, and
+    /// have their class.
+    #[test]
+    fn the_brep_edit_causes_keep_their_status_and_have_their_class() {
+        use ErrorKind as K;
+        let op = "topology::op";
+        let cases = [
+            (TopologyFailure::EditingDisabled, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::NoBrepGiven,
+                SM_ERR_INVALID_INPUT,
+                K::InvalidInput,
+            ),
+            (TopologyFailure::NotInBrep, SM_ERR, K::InvalidInput),
+            (TopologyFailure::VertexNotOnEdge, SM_ERR, K::InvalidInput),
+            (TopologyFailure::ClosedEdge, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::CurveNotBSpline { entity: None },
+                SM_ERR_NULL_POINTER,
+                K::Unsupported,
+            ),
+            (
+                TopologyFailure::SurfaceWithoutNurbs { entity: None },
+                SM_ERR_NULL_POINTER,
+                K::Unsupported,
+            ),
+            (TopologyFailure::FaceWithoutEdges, SM_ERR, K::Unsupported),
+            (TopologyFailure::WireEndSqueezed, SM_ERR, K::Unsupported),
+            (TopologyFailure::NoFootOnSurface, SM_ERR, K::Failed),
+            (
+                TopologyFailure::CurveNotApproximated,
+                SM_ERR_NULL_POINTER,
+                K::Failed,
+            ),
+            (
+                TopologyFailure::GatheredBothSides,
+                SM_ERR_ASSERT_FAILURE,
+                K::Failed,
+            ),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::topology(op, failure);
+            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.topology_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+        }
+        // the approximation's failure stays its cause, and decides defect or refusal
+        let why = "a step the kernel got wrong";
+        let cause = SolidError::topology(op, TopologyFailure::Defect { why });
+        let e = Failure::new(op, TopologyFailure::CurveNotApproximated)
+            .caused_by(cause.clone())
+            .into_error();
+        assert_eq!(e.cause(), Some(&cause));
+        assert!(e.is_defect());
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+    }
+
     /// The topology routines describe their failures: their library code builds no bare
     /// `Upstream` status, except the file listed (with the bare sites it may still hold).
     #[test]
@@ -404,7 +559,6 @@ mod tests {
             ("solidcore/src/topology/brep/p1.rs", 42),
             ("solidcore/src/topology/brep/p10.rs", 10),
             ("solidcore/src/topology/brep/p2.rs", 16),
-            ("solidcore/src/topology/brep/p3.rs", 47),
             ("solidcore/src/topology/brep/p4.rs", 50),
             ("solidcore/src/topology/brep/p5.rs", 61),
             ("solidcore/src/topology/brep/p6.rs", 29),

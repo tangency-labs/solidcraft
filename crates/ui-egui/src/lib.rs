@@ -387,6 +387,7 @@ pub mod view_gizmo;
 mod view_memory;
 pub mod view_pick;
 mod view_tiles;
+mod view_window_drag;
 pub mod view_windows;
 pub mod viewport;
 mod viewport_details;
@@ -533,7 +534,9 @@ pub struct Services {
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
     /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
     pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
-    /// Select the local document library root; unavailable in browser hosts.
+    /// Open a dialog asking for a folder. `None` on the web build and when the host has no
+    /// folder picker: a plugin field shows no Browse button and the text field still accepts
+    /// a pasted path, and the document library cannot choose a folder.
     pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
     pub show_in_folder: Option<Box<dyn Fn(&str)>>,
     /// Open a file in the program the system opens its kind with (a PDF in its viewer, to print).
@@ -972,6 +975,7 @@ pub struct SolveApp {
     pub(crate) frame_watch: frame_watch::Watch,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
+    view_window_drag: view_window_drag::State,
     view_windows: view_windows::Windows,
     /// Last OS title inputs; unchanged frames allocate nothing and send no title command.
     pub(crate) window_title: documents::WindowTitle,
@@ -1212,6 +1216,7 @@ impl SolveApp {
             open_meshing_next: false,
             frame_watch: Default::default(),
             docs: documents::Documents::default(),
+            view_window_drag: view_window_drag::State::default(),
             view_windows: view_windows::Windows::default(),
             window_title: Default::default(),
             applied_fonts_language: "en".into(),
@@ -1731,6 +1736,7 @@ impl SolveApp {
                 self.plugin_inspection_versions.insert((self.session.uid, id.to_owned()), control_job::next_plugin_inspection());
             }
             match id {
+                "ui.appBarReset" => self.toolbar_custom.reset_app_bar(),
                 "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
                 // The sketch being edited has all new contents: a tool's picks named the old ones.
                 "sketch.replace" if v.get("sketch_id").and_then(Value::as_u64).is_some_and(|id| self.session.active_sketch == Some(id)) => {
@@ -2220,6 +2226,12 @@ impl SolveApp {
             }
             return;
         }
+        if id == "ui.appBarReset" {
+            if let Err(why) = self.run(id, json!({})) {
+                self.set_status(why, true);
+            }
+            return;
+        }
         if id == "ui.assistant" {
             if agent_chat::shown(self) {
                 agent_chat::toggle(self);
@@ -2381,6 +2393,18 @@ impl SolveApp {
         }
         if render_workspace::start_interactive(self, id) {
             return;
+        }
+        match id {
+            "tab.view.pop_out" => {
+                let view = self.docs.views.active().id;
+                crate::design_view_ui::move_to_window(self, view, json!("new"));
+                return;
+            }
+            "tab.view.move_to_window" => {
+                crate::view_windows::cycle_view(self);
+                return;
+            }
+            _ => {}
         }
         // A display toggle leaves the current modelling tool and camera in place, and the ribbon
         // where it is: F6, the navigation bar and the navigator never went through `start`, so
@@ -3823,6 +3847,11 @@ impl SolveApp {
 
     /// Apply view.fit / view.home to the active canvas, retaining each canvas's framing policy.
     fn frame_view(&mut self, home: bool) {
+        self.frame_view_bounds(home, None);
+    }
+
+    /// Frame a preview's result through the same path, using its bounds before it is committed.
+    fn frame_view_bounds(&mut self, home: bool, preview_bounds: Option<solidcraft_engine::geom::Aabb3>) {
         if render_workspace::result_active(self) {
             render_workspace::fit_result(self);
             return;
@@ -3848,6 +3877,16 @@ impl SolveApp {
         let mut to = self.cam;
         if home {
             to.set_view(StandardView::Iso);
+        }
+        if let Some(bounds) = preview_bounds {
+            let shared = home && self.preferences.navigator_fit;
+            self.pending_fit = Some((to, bounds, true, shared));
+            to = if shared {
+                self.navigator_fitted_bounds(to, &bounds).unwrap_or_else(|| self.fitted_bounds(to, &bounds))
+            } else {
+                self.fitted_bounds(to, &bounds)
+            };
+        } else if home {
             // With the navigators' Fit on, Home shares their zoom, so a face clicked after it
             // keeps the zoom (#10091).
             let shared = self.preferences.navigator_fit;
