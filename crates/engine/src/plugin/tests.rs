@@ -119,7 +119,7 @@ fn an_importer_checks_its_own_design_apart_from_the_open_one() {
     };
     let mut made = Session::new(solidcraft_doc::Document::new("Bracket"));
     made.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
-    host.evaluate_open(&solidcraft_io::write_design(&made.doc)).unwrap();
+    host.evaluate_open(&solidcraft_io::write_design(&made.doc).unwrap()).unwrap();
     let measured = host.evaluate_run("inspect.measure", &json!({})).unwrap();
     assert_eq!(measured["bodies"].as_array().map(Vec::len), Some(1), "{measured}");
     assert!(host.evaluate_run("document.inspect", &json!({})).unwrap()["timeline"].is_array());
@@ -695,6 +695,28 @@ mod native {
     }
 
     #[test]
+    fn plugin_run_omits_hidden_keys_and_refuses_unavailable_choices() {
+        // Return the JSON argument received by the actual Wasm entry, using its canonical result area.
+        let f = Fixture::new("i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
+        let mut m = manifest();
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{
+        "type":"object","required":["shelves"],"properties":{
+            "storage":{"type":"string","enum":["shelves","drawers"]},
+            "shelves":{"type":"integer","x-solidcraft-visible-when":{"field":"storage","eq":"shelves"}},
+            "size":{"type":"string","oneOf":[{"const":"small","x-solidcraft-when":{"field":"storage","eq":"shelves"}},{"const":"large"}]}
+        }}}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        let approval = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
+        let args = |params: Value| json!({"path":f.path(),"approval":approval,"entry":"make","params":params});
+        let output = s.execute("plugin.run", &args(json!({"storage":"drawers","shelves":"ignored","size":"large"}))).unwrap();
+        assert_eq!(output["result"], json!({"storage":"drawers","size":"large"}));
+        let error = s.execute("plugin.run", &args(json!({"storage":"drawers","size":"small"}))).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "params.size"));
+        assert!(s.undo.is_empty(), "a read entry changes no design");
+    }
+
+    #[test]
     fn declared_entry_inputs_are_discoverable_and_namespaced_calls_share_approval() {
         let f = Fixture::new("call $box");
         let mut m = manifest();
@@ -1139,10 +1161,15 @@ mod native {
         s.execute("edit.undo", &json!({})).unwrap();
         assert!(s.doc.plugin_data.is_empty(), "one undo takes the data out again");
         s.execute("edit.redo", &json!({})).unwrap();
-        let saved = s.doc.to_json();
+        let saved = solidcraft_io::write_design_container(&s.doc).unwrap();
+        // A plain JSON design can't carry the data: saving one is refused, and nothing is written.
+        let json = f.0.join("with-data.json");
+        let refused = s.execute("file.save", &json!({"path": json.to_string_lossy(), "format": "json"})).unwrap_err().to_string();
+        assert!(refused.contains("plugin files that a .json design can't carry"), "{refused}");
+        assert!(!json.exists());
 
         // Opened where the plugin is not installed, the data is kept and says whose it is.
-        let mut elsewhere = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+        let mut elsewhere = Session::new(solidcraft_io::read_design(&saved).unwrap());
         elsewhere.plugin_state.plugins_dir = Some(f.0.join("installed"));
         let listed = elsewhere.execute("storage.list", &json!({})).unwrap();
         assert_eq!(listed["plugins"][0]["status"], "missing");
@@ -1151,10 +1178,10 @@ mod native {
 
         // An older version of the plugin reads the data but never changes it.
         write_manifest(1);
-        let before = s.doc.to_json();
+        let before = (s.doc.to_json(), s.doc.plugin_data.clone());
         let refused = f.run(&mut s).unwrap_err().to_string();
         assert!(refused.contains("saved by a newer version of the plugin (data format 2; this version writes 1)"), "{refused}");
-        assert_eq!((s.doc.to_json(), s.undo.len()), (before, 1));
+        assert_eq!(((s.doc.to_json(), s.doc.plugin_data.clone()), s.undo.len()), (before, 1));
         assert_eq!(s.execute("storage.list", &json!({})).unwrap()["plugins"][0]["status"], "older");
         // A newer one migrates it: the next write saves it in the newer format.
         write_manifest(3);
@@ -1458,7 +1485,7 @@ mod importers {
     fn design() -> Vec<u8> {
         let mut made = Session::new(solidcraft_doc::Document::new("Bracket"));
         made.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
-        solidcraft_io::write_design(&made.doc)
+        solidcraft_io::write_design(&made.doc).unwrap()
     }
     fn put(root: &Path, name: &str, bytes: &[u8]) -> String {
         let path = root.join("files").join(name);
@@ -2042,8 +2069,8 @@ mod install_zip {
 #[test]
 fn storage_commands_reach_only_the_running_plugins_data_within_its_limits() {
     let mut s = Session::default();
-    let other = solidcraft_doc::canvas::base64_encode(br#"{"kept":true}"#);
-    s.doc_mut().plugin_data.insert("other-tool/data.json".into(), other.clone().into());
+    let other = br#"{"kept":true}"#;
+    s.doc_mut().plugin_data.insert("other-tool/data.json".into(), other.into());
     s.plugin_state.storage_caller =
         Some(storage::StorageCaller { id: "gears".into(), name: "Gears".into(), version: "1.4.0".into(), data_format: 3 });
     s.execute("storage.set", &json!({"document":{"teeth":24,"module":{"value":2,"unit":"mm"}}})).unwrap();
@@ -2055,7 +2082,7 @@ fn storage_commands_reach_only_the_running_plugins_data_within_its_limits() {
     assert_eq!((meta.name.as_str(), meta.plugin_version.as_str(), meta.format), ("Gears", "1.4.0", 3));
     // A plugin reads only its own data, and never changes another's.
     assert!(s.execute("storage.get", &json!({"plugin":"other-tool"})).unwrap_err().to_string().contains("only its own data"));
-    assert_eq!(s.doc.plugin_data["other-tool/data.json"].as_ref(), other.as_str());
+    assert_eq!(s.doc.plugin_data["other-tool/data.json"].as_bytes(), other);
 
     // A file written in parts reads back in parts; writing it as a cache file moves it.
     let b64 = solidcraft_doc::canvas::base64_encode;
@@ -2126,16 +2153,16 @@ fn storage_large_main_document_reads_in_bounded_parts() {
     assert_eq!(outside["data"], prefix["data"]);
 }
 
-// Fill a quota with shared encoded chunks, keeping boundary tests small in memory.
+// Fill a quota with one shared chunk, keeping boundary tests small in memory.
 fn fill_storage_bytes(s: &mut Session, bytes: u64) {
     let chunk = 1 << 20;
-    let encoded: std::sync::Arc<str> = solidcraft_doc::canvas::base64_encode(&vec![0; chunk]).into();
+    let shared = solidcraft_doc::blob::Blob::from(vec![0; chunk]);
     for i in 0..bytes / chunk as u64 {
-        s.doc_mut().plugin_data.insert(format!("filler/blobs/{i}"), encoded.clone());
+        s.doc_mut().plugin_data.insert(format!("filler/blobs/{i}"), shared.clone());
     }
     let tail = bytes as usize % chunk;
     if tail != 0 {
-        s.doc_mut().plugin_data.insert("filler/blobs/tail".into(), solidcraft_doc::canvas::base64_encode(&vec![0; tail]).into());
+        s.doc_mut().plugin_data.insert("filler/blobs/tail".into(), vec![0; tail].into());
     }
 }
 
@@ -2161,11 +2188,11 @@ fn storage_category_replacement_uses_final_file_and_byte_counts() {
     let b64 = solidcraft_doc::canvas::base64_encode;
     s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[1,2,3])})).unwrap();
     for i in 0..solidcraft_doc::plugin_data::MAX_FILES - 2 {
-        s.doc_mut().plugin_data.insert(format!("filler/blobs/{i}"), "".into());
+        s.doc_mut().plugin_data.insert(format!("filler/blobs/{i}"), Default::default());
     }
     s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[4]),"cache":true})).unwrap();
     assert_eq!(s.doc.plugin_data.len(), solidcraft_doc::plugin_data::MAX_FILES);
-    assert_eq!(storage::blob(&s.doc, "gears", "cache/tool.bin"), Some(vec![4]));
+    assert_eq!(storage::blob(&s.doc, "gears", "cache/tool.bin"), Some(&[4][..]));
     let before = s.doc.plugin_data.clone();
     assert!(s.execute("storage.put_blob", &json!({"name":"new.bin","data":""})).is_err());
     assert_eq!(s.doc.plugin_data, before);
@@ -2178,7 +2205,7 @@ fn storage_category_replacement_uses_final_file_and_byte_counts() {
     let before = s.doc.plugin_data.clone();
     assert!(s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[6,7]),"cache":true})).is_err());
     assert_eq!(s.doc.plugin_data, before);
-    assert_eq!(storage::blob(&s.doc, "gears", "blobs/tool.bin"), Some(vec![5]));
+    assert_eq!(storage::blob(&s.doc, "gears", "blobs/tool.bin"), Some(&[5][..]));
 }
 
 #[test]

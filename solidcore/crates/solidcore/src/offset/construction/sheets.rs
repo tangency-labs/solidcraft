@@ -1039,13 +1039,14 @@ pub fn certify_regular(
     let region = patches_in(s, uv_box)?;
     // the face's net, for the fold witness (none: no fold is proved)
     let net = witness_net(s).ok();
-    let mut stack: Vec<(RegularityForms, [f64; 4])> = Vec::new();
+    let mut stack: Vec<(f64, RegularityForms, [f64; 4])> = Vec::new();
     for patch in &region {
-        stack.push((RegularityForms::new(patch, d, &b)?, patch.range));
+        let forms = RegularityForms::new(patch, d, &b)?;
+        stack.push((forms.middle(), forms, patch.range));
     }
     let mut examined = 0usize;
     let mut folds = false;
-    while let Some((forms, range)) = stack.pop() {
+    while let Some((middle, forms, range)) = stack.pop() {
         k.check_cancelled(OP)?;
         examined += 1;
         if forms.certified() {
@@ -1053,7 +1054,7 @@ pub fn certify_regular(
         }
         let [u0, u1, v0, v1] = range;
         let (um, vm) = (0.5 * (u0 + u1), 0.5 * (v0 + v1));
-        if forms.middle() < 0.0 && net.as_ref().is_some_and(|n| proved_fold(n, d, um, vm)) {
+        if middle < 0.0 && net.as_ref().is_some_and(|n| proved_fold(n, d, um, vm)) {
             // a point where the offset folds, proved
             folds = true;
             break;
@@ -1068,7 +1069,15 @@ pub fn certify_regular(
             [u0, um, vm, v1],
             [um, u1, vm, v1],
         ];
-        stack.extend(forms.quarters().into_iter().zip(ranges));
+        let mut quarters: Vec<(f64, RegularityForms, [f64; 4])> = forms
+            .quarters()
+            .into_iter()
+            .zip(ranges)
+            .map(|(q, r)| (q.middle(), q, r))
+            .collect();
+        // the least middle first: a fold is found before the budget runs out along Q = 0
+        quarters.sort_by(|a, b| b.0.total_cmp(&a.0));
+        stack.extend(quarters);
     }
     if !folds {
         return Ok(Regularity::Regular);

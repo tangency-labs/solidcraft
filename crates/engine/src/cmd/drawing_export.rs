@@ -1,7 +1,7 @@
 //! `drawing.export` (#4890 A7): one sheet of the open drawing written out from its scene
 //! ([`crate::drawing_scene::build`]), the scene the sheet page draws, so a file shows what the page
 //! does: SVG, PNG at a chosen dpi and colour, or a vector PDF at the sheet's paper size, which can
-//! hold several sheets, one page each. DXF comes with the shared DXF writer (#5319). A
+//! hold several sheets, one page each, or DXF in millimetres with a layer for each kind of line. A
 //! sheet with a view or sketch that failed, an image that won't decode or a picture that can't be drawn isn't
 //! written; the refusal names them. Without a path the reply holds the document, as text or as
 //! base64. Both can be on a blue paper (#10679).
@@ -13,6 +13,7 @@ use solidcraft_doc::canvas::base64_encode;
 use solidcraft_doc::drawing::DEFAULT_DPI;
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::ids;
+use solidcraft_geom::paper::line::LineKind;
 use solidcraft_geom::paper::{GridReport, Pictures, Prepared};
 use solidcraft_io::MAX_DRAWING_BYTES;
 use solidcraft_io::paper::{DPI, PaperColour, PdfOptions, PdfPictures, PngColour, PngOptions};
@@ -21,12 +22,14 @@ use super::CommandSpec;
 use crate::drawing_pictures::SheetPictures;
 use crate::drawing_scene::{FillStatus, SheetScene, SketchStatus, Status, sheet_id};
 use crate::params::bad;
-use crate::schema::drawing_export::{ExportColour, ExportFormat, ExportParams, ExportReport, ExportResult};
+use crate::schema::drawing_export::{ExportColour, ExportFormat, ExportParams, ExportReport, ExportResult, PrintParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const CMD: &str = "drawing.export";
 const CONTRACT: TypedContract<ExportParams> = TypedContract::new();
+const PRINT: &str = "drawing.print";
+const PRINT_CONTRACT: TypedContract<PrintParams> = TypedContract::new();
 /// The longest path taken, in bytes, as the view DXF's.
 const MAX_PATH_BYTES: usize = 4096;
 
@@ -38,7 +41,17 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Sheet", cr
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<ExportResult>)
-    .params("sheet: id or name; format?: svg (default) | png | pdf (dxf is not supported yet); pdf only: sheets?: [id or name, ...], one page each in that order (a pdf given neither sheet nor sheets holds every sheet, in the drawing's order), each page the sheet's paper size, its lines and text vector, shaded views and images embedded; path?: a file with the format's extension (else the reply holds the document: its text as svg, its base64 as data for png and pdf, at most 64 MiB); png only: dpi?: 25 to 2400 (default the sheet's own), colour?: grey (default) | black_white | rgb | transparent; paper?: white (default) | blueprint | prussian_blue, whose png is rgb → {sheet, pages? (a pdf's sheets), format, bytes, path | svg | data, report: {widths_snapped, pieces_merged, pixels?: [width, height]}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's lines, then its parts lists and revision tables, then its title block's lines. Refused, naming them, while any view or sketch on the sheet failed or any fill failed or lost its boundary or any image won't decode; a placeholder view draws nothing. A view of another configuration evaluates a copy of the design; the design is unchanged.")];
+    .params("sheet: id or name; format?: svg (default) | png | pdf | dxf (millimetres, layers VISIBLE, THIN, HIDDEN, DASHED, TEXT and FILL, each entity at its line's weight; pictures are left out and counted in report.pictures_left_out); pdf only: sheets?: [id or name, ...], one page each in that order (a pdf given neither sheet nor sheets holds every sheet, in the drawing's order), each page the sheet's paper size, its lines and text vector, shaded views and images embedded; path?: a file with the format's extension (else the reply holds the document: its text as svg or dxf, its base64 as data for png and pdf, at most 64 MiB); png only: dpi?: 25 to 2400 (default the sheet's own), colour?: grey (default) | black_white | rgb | transparent; paper?: white (default) | blueprint | prussian_blue, whose png is rgb → {sheet, pages? (a pdf's sheets), format, bytes, path | svg | dxf | data, report: {widths_snapped, pieces_merged, pixels?: [width, height], pictures_left_out?}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's lines, then its parts lists and revision tables, then its title block's lines. Refused, naming them, while any view or sketch on the sheet failed or any fill failed or lost its boundary or any image won't decode; a placeholder view draws nothing. A view of another configuration evaluates a copy of the design; the design is unchanged."),
+    CommandSpec::new(PRINT, "Print Drawing", crate::checked!("drawing.print", print))
+        .icon("export")
+        .key("Ctrl+P")
+        .in_drawing()
+        .noundo()
+        .doc_only()
+        .contract(&PRINT_CONTRACT)
+        .output(output_schema_for::<ExportResult>)
+        .params("path?: a .pdf file (else the reply holds it, as base64 in data) → as drawing.export's for a pdf. The whole drawing as one vector PDF for printing, one page per sheet in the drawing's order, each page its sheet's paper size and asking a viewer to print it at actual size (PrintScaling None): drawing.export with format pdf and no sheets named. The window opens it in the system's PDF viewer (a new tab in a browser) to print from there."),
+];
 
 /// A document held for the reply, refused once it passes `limit` bytes: a larger one goes to a file.
 struct Held {
@@ -136,6 +149,16 @@ fn chosen_sheets(d: &Drawing, request: &ExportParams) -> Result<Vec<u64>> {
     }
 }
 
+/// `drawing.print`: the whole drawing's PDF, as `drawing.export` writes it.
+fn print(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: PrintParams = crate::schema::read(PRINT, p)?;
+    let mut params = serde_json::json!({"format": "pdf"});
+    if let Some(path) = request.path {
+        params["path"] = Value::String(path);
+    }
+    export(s, &params)
+}
+
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let request: ExportParams = crate::schema::read(CMD, p)?;
     let d = s.drawing(CMD)?.clone();
@@ -164,7 +187,12 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
             };
             Some(PngOptions { dpi, colour })
         }
-        ExportFormat::Dxf => return Err(bad(CMD, "not supported yet: DXF needs the shared DXF writer (#5319)")),
+        ExportFormat::Dxf => {
+            if paper.is_some() {
+                return Err(bad(CMD, "a dxf has no paper: `paper` is for svg and png"));
+            }
+            None
+        }
     };
     if png.is_none() && (request.dpi.is_some() || request.colour.is_some()) {
         return Err(bad(CMD, "`dpi` and `colour` are for png only"));
@@ -190,10 +218,23 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         scenes.push(built.scene.prepare().map_err(|e| bad(CMD, e.to_string()))?);
     }
     let prepared = &scenes[0];
+    let mut pictures_left_out = None;
     let (document, grid, pixels) = match (request.format, png) {
+        (ExportFormat::Dxf, _) => {
+            // Each stroke is read against its own view's line group, or its sheet's.
+            let sheet_group = d.sheets.iter().find(|s| s.id == sheet).and_then(|s| s.line_group).unwrap_or(d.line_group);
+            let wide = |object: u64| {
+                let group = d.resolve_view(object).map_or(sheet_group, |view| view.line_group.value);
+                LineKind::Visible.width_mm(group)
+            };
+            let (dxf, report) = solidcraft_io::paper::paper_dxf(prepared, &wide).map_err(|e| bad(CMD, e.to_string()))?;
+            pictures_left_out = Some(report.pictures_left_out);
+            (dxf.into_bytes(), GridReport::default(), None)
+        }
         (ExportFormat::Pdf, _) => {
             let sources: Vec<&dyn Pictures> = pictures.iter().map(|p| p as &dyn Pictures).collect();
-            let options = PdfOptions { title: Some(d.name.clone()).filter(|name| !name.is_empty()), output_time: None, layers: true };
+            let options =
+                PdfOptions { title: Some(d.name.clone()).filter(|name| !name.is_empty()), output_time: None, layers: true, actual_size: true };
             let (pdf, reports) =
                 solidcraft_io::paper::paper_pdf_pages_with(&scenes, &options, Some(PdfPictures { pages: &sources, dpi: DEFAULT_DPI }))
                     .map_err(|e| bad(CMD, e.to_string()))?;
@@ -219,7 +260,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     drop(pictures);
     drop(scenes);
     let bytes = document.len();
-    let binary = request.format != ExportFormat::Svg;
+    let binary = matches!(request.format, ExportFormat::Png | ExportFormat::Pdf);
     if request.path.is_none() && bytes > MAX_DRAWING_BYTES {
         return Err(bad(CMD, format!("over {} MiB for the reply: give a path", MAX_DRAWING_BYTES >> 20)));
     }
@@ -233,6 +274,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         None if binary => (None, None, Some(base64_encode(&document))),
         None => (None, Some(String::from_utf8(document).map_err(|e| EngineError::Other(e.to_string()))?), None),
     };
+    let (svg, dxf) = if request.format == ExportFormat::Dxf { (None, svg) } else { (svg, None) };
     let pages = if request.format == ExportFormat::Pdf { sheets.iter().map(|id| ids::encode(*id)).collect() } else { Vec::new() };
     let mut reply = ExportResult {
         sheet: ids::encode(sheet),
@@ -241,8 +283,9 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         bytes,
         path,
         svg,
+        dxf,
         data,
-        report: ExportReport { widths_snapped: grid.widths_snapped, pieces_merged: grid.pieces_merged, pixels },
+        report: ExportReport { widths_snapped: grid.widths_snapped, pieces_merged: grid.pieces_merged, pixels, pictures_left_out },
         views: Vec::new(),
         dimensions: Vec::new(),
         notes: Vec::new(),

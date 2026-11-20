@@ -241,6 +241,7 @@ plane_auto	false
 plane_axis_point	false
 plane_midplane	false
 plane_perpendicular	false
+plane_square_to_line	false
 plane_tangent	false
 plane_three_points	false
 plane_two_edges	false

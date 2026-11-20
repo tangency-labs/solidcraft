@@ -33,9 +33,10 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 
 pub type Result<T> = std::result::Result<T, HostError>;
 
+pub mod conditions;
 mod input;
 pub mod swatches;
-pub use input::{check_input, strict_input_schema};
+pub use input::{check_input, prepare_input, strict_input_schema};
 
 /// The host imports that change something outside the design. A `read` entry is refused every
 /// one of them, whatever folders its plugin was granted, as it is refused edit commands.
@@ -536,6 +537,7 @@ impl RuntimeManifest {
                 return Err(invalid(&field, "entry inputs must be an object schema"));
             }
             validate_list_inputs(&entry.input_schema, &field)?;
+            conditions::validate_conditions(&entry.input_schema)?;
             if entry.slots.len() > 16
                 || entry.slots.iter().any(|slot| match slot {
                     UiSlot::Menu { name } | UiSlot::Ribbon { name } => !plain(name, 80),

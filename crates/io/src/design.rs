@@ -61,6 +61,7 @@ fn max_expanded() -> usize {
 const MESH_MAGIC: &[u8; 8] = b"SCMESH01";
 const SHADED_MESH_MAGIC: &[u8; 8] = b"SCMESH02";
 const POINTS_MAGIC: &[u8; 8] = b"SCPNTS01";
+const COMPLEX_MAGIC: &[u8; 8] = b"SCCPLX01";
 const MAX_PREVIEW_BYTES: usize = 8 << 20;
 const MAX_PREVIEW_TRIANGLES: usize = 100_000;
 
@@ -288,16 +289,16 @@ fn write_container(
     }
     let mut canvases = Vec::with_capacity(doc.canvases.len());
     for canvas in &doc.canvases {
-        if canvas.data.len() > solidcraft_doc::canvas::MAX_CANVAS_BYTES.div_ceil(3) * 4 {
-            return Err(invalid("canvas too large"));
-        }
-        let bytes = canvas.bytes().ok_or_else(|| invalid("invalid canvas base64"))?;
+        let bytes = canvas.bytes();
         if !matches!(canvas.format.as_str(), "png" | "jpeg") || bytes.len() > solidcraft_doc::canvas::MAX_CANVAS_BYTES {
             return Err(invalid("invalid canvas format or size"));
         }
-        let blob = writer.blob(&bytes, &canvas.format, false)?;
-        let mut value = replace(canvas, fields([("data", json!(""))])).map_err(invalid)?;
-        value.as_object_mut().ok_or_else(|| invalid("canvas metadata"))?.insert("image_blob".into(), blob);
+        let blob = writer.blob(bytes, &canvas.format, false)?;
+        let mut value = serde_json::to_value(canvas).map_err(invalid)?;
+        let object = value.as_object_mut().ok_or_else(|| invalid("canvas metadata"))?;
+        // The bytes are the blob; an empty `data` keeps the record readable by older releases.
+        object.insert("data".into(), json!(""));
+        object.insert("image_blob".into(), blob);
         canvases.push(value);
     }
     let mut clouds = Vec::with_capacity(doc.point_clouds.len());
@@ -305,7 +306,13 @@ fn write_container(
         cloud.check().map_err(invalid)?;
         let blob = writer.blob(&encode_cloud(cloud)?, "points", compression == DesignCompression::Compact)?;
         let mut value = replace(cloud, fields([("points", json!("")), ("colors", json!(""))])).map_err(invalid)?;
-        value.as_object_mut().ok_or_else(|| invalid("point cloud metadata"))?.insert("points_blob".into(), blob);
+        let record = value.as_object_mut().ok_or_else(|| invalid("point cloud metadata"))?;
+        record.insert("points_blob".into(), blob);
+        // Its segments, triangles and properties' numbers are a part of their own; the record keeps
+        // their shape with empty numbers.
+        if let Some(complex) = encode_complex(&cloud.complex)? {
+            record.insert("complex_blob".into(), writer.blob(&complex, "complex", compression == DesignCompression::Compact)?);
+        }
         clouds.push(value);
     }
     let mut replacements = fields([("features", Value::Array(features)), ("canvases", Value::Array(canvases)), ("drawings", Value::Null)]);
@@ -357,8 +364,7 @@ fn write_container(
     }
     drawing::write(&mut writer, doc)?;
     for (key, data) in &doc.plugin_data {
-        let bytes = solidcraft_doc::canvas::base64_decode(data).ok_or_else(|| invalid(format!("plugin data `{key}` is not base64")))?;
-        writer.part(&format!("{}{key}", solidcraft_doc::plugin_data::PREFIX), &bytes, true)?;
+        writer.part(&format!("{}{key}", solidcraft_doc::plugin_data::PREFIX), data, true)?;
     }
     // The signature binds every authoritative part written above (never the optional caches), and
     // is written before them so their budget sees its bytes.
@@ -507,6 +513,66 @@ fn encode_cloud(cloud: &solidcraft_doc::point_cloud::PointCloud) -> Result<Vec<u
         bytes.extend_from_slice(&cloud.colors.0);
     }
     Ok(bytes)
+}
+
+/// A cloud's segments, triangles and properties' numbers, `None` when it has none: the magic, then
+/// the segment and triangle index counts, the property count and each property's value count (u64
+/// each, little-endian), then the indices (u32) and each property's values (f32) in order.
+fn encode_complex(complex: &solidcraft_doc::point_cloud::Complex) -> Result<Option<Vec<u8>>> {
+    let (segments, triangles) = (&complex.segments.0, &complex.triangles.0);
+    if segments.is_empty() && triangles.is_empty() && complex.columns.iter().all(|c| c.values.0.is_empty()) {
+        return Ok(None);
+    }
+    let words = complex.columns.iter().fold(segments.len().saturating_add(triangles.len()), |n, c| n.saturating_add(c.values.0.len()));
+    let header = 8 * (4 + complex.columns.len());
+    let size = words.checked_mul(4).and_then(|b| b.checked_add(header)).filter(|&b| b <= crate::limits::max_design_bytes());
+    let mut bytes = Vec::with_capacity(size.ok_or_else(|| invalid("point cloud too large"))?);
+    bytes.extend_from_slice(COMPLEX_MAGIC);
+    for n in [segments.len(), triangles.len(), complex.columns.len()].into_iter().chain(complex.columns.iter().map(|c| c.values.0.len())) {
+        bytes.extend_from_slice(&(n as u64).to_le_bytes());
+    }
+    for i in segments.iter().chain(triangles.iter()) {
+        bytes.extend_from_slice(&i.to_le_bytes());
+    }
+    for v in complex.columns.iter().flat_map(|c| c.values.0.iter()) {
+        bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    Ok(Some(bytes))
+}
+
+/// Fills `complex`, read from its record with empty numbers, from its part ([`encode_complex`]).
+/// What the numbers mean is checked with the points ([`decode_cloud`]).
+fn decode_complex(bytes: &[u8], complex: &mut solidcraft_doc::point_cloud::Complex) -> Result<()> {
+    use solidcraft_doc::point_cloud::{Floats, Indices, MAX_CELLS, MAX_COLUMNS, MAX_POINTS};
+    if bytes.get(..8) != Some(COMPLEX_MAGIC.as_slice()) {
+        return Err(invalid("unsupported point cloud complex blob version"));
+    }
+    let mut at = 8;
+    let mut word = || -> Result<usize> {
+        let array: [u8; 8] = bytes.get(at..at + 8).ok_or_else(|| invalid("truncated point cloud complex"))?.try_into().map_err(invalid)?;
+        at += 8;
+        usize::try_from(u64::from_le_bytes(array)).map_err(invalid)
+    };
+    let (segments, triangles, columns) = (word()?, word()?, word()?);
+    if segments > 2 * MAX_CELLS || triangles > 3 * MAX_CELLS || columns > MAX_COLUMNS || columns != complex.columns.len() {
+        return Err(invalid("invalid point cloud complex"));
+    }
+    let mut counts = Vec::with_capacity(columns);
+    for _ in 0..columns {
+        counts.push(word()?.min(MAX_POINTS.max(MAX_CELLS) + 1));
+    }
+    let words = counts.iter().fold(segments + triangles, |n, c| n + c);
+    if bytes.len() != at + words * 4 {
+        return Err(invalid("invalid point cloud complex lengths"));
+    }
+    let mut values = bytes[at..].as_chunks::<4>().0.iter();
+    let mut take = |n: usize| values.by_ref().take(n).copied().collect::<Vec<[u8; 4]>>();
+    complex.segments = Indices(take(segments).into_iter().map(u32::from_le_bytes).collect());
+    complex.triangles = Indices(take(triangles).into_iter().map(u32::from_le_bytes).collect());
+    for (column, n) in complex.columns.iter_mut().zip(counts) {
+        column.values = Floats(take(n).into_iter().map(f32::from_le_bytes).collect());
+    }
+    Ok(())
 }
 
 /// Each point cloud's `complex` (segments, triangles and properties), taken out of the metadata
@@ -987,7 +1053,7 @@ fn hydrate_plugin_data<R: Read + Seek>(doc: &mut Document, reader: &mut PackageR
             break;
         }
         if let Ok(bytes) = reader.limited_part(&name, part_limit(&name)) {
-            doc.plugin_data.insert(key.to_string(), solidcraft_doc::canvas::base64_encode(&bytes).into());
+            doc.plugin_data.insert(key.to_string(), bytes.into());
         }
     }
 }
@@ -1030,21 +1096,25 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     // HDR's typed JSON representation is deliberately strict: no empty placeholders or
     // container-only blob fields may reach the document deserializer. A newer build's section that
     // doesn't pass stays as it is, which the document reader then leaves out.
+    // Their files are the container's parts, handed to the reader as bytes: never text.
+    let mut parts = solidcraft_doc::render_resources::ContainerParts::default();
     let hydrated = if newer {
         let mut copy = metadata.clone();
+        let mut found = solidcraft_doc::render_resources::ContainerParts::default();
         let done = check_hdr_manifest(&bytes).and_then(|()| check_texture_manifest(&bytes)).and_then(|()| {
-            let hdr = hydrate_hdr_resources(&mut copy, reader)?;
-            Ok(hydrate_texture_resources(&mut copy, reader)? || hdr)
+            let hdr = hydrate_hdr_resources(&mut copy, reader, &mut found)?;
+            Ok(hydrate_texture_resources(&mut copy, reader, &mut found)? || hdr)
         });
         if done.is_ok() {
             metadata = copy;
+            parts = found;
         }
         done.unwrap_or(false)
     } else {
         check_hdr_manifest(&bytes)?;
         check_texture_manifest(&bytes)?;
-        let hdr = hydrate_hdr_resources(&mut metadata, reader)?;
-        hydrate_texture_resources(&mut metadata, reader)? || hdr
+        let hdr = hydrate_hdr_resources(&mut metadata, reader, &mut parts)?;
+        hydrate_texture_resources(&mut metadata, reader, &mut parts)? || hdr
     };
     // A cloud's points are in its blob, so its segments, triangles and properties are read and
     // checked with them below (`decode_cloud`), not against the empty points the metadata holds
@@ -1060,13 +1130,17 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     };
     // Migrations and all document validation run on the small parametric metadata.
     // Binary arrays have their own equivalent numeric/index validation below.
-    let mut doc = Document::from_json(text)?;
+    let mut doc = solidcraft_doc::render_resources::with_container_parts(parts, || Document::from_json(text))?;
     if !doc.drawings.is_empty() {
         return Err(invalid("ambiguous drawings in document.json and in their own entries"));
     }
     for (index, complex) in complexes {
         if let Some(cloud) = doc.point_clouds.get_mut(index) {
+            // A record with a part has empty numbers; an older one has them inline, base64.
             cloud.complex = serde::Deserialize::deserialize(&complex).map_err(invalid)?;
+            if let Some(record) = metadata.get("point_clouds").and_then(|v| v.get(index)).filter(|v| v.get("complex_blob").is_some()) {
+                decode_complex(reader.blob(record, "complex_blob", "complex")?, &mut cloud.complex)?;
+            }
         }
         if let Some(cloud) = metadata.get_mut("point_clouds").and_then(|v| v.get_mut(index)).and_then(Value::as_object_mut) {
             cloud.insert("complex".into(), complex);
@@ -1123,7 +1197,7 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         if bytes.len() > solidcraft_doc::canvas::MAX_CANVAS_BYTES {
             return Err(invalid("canvas too large"));
         }
-        canvas.data = solidcraft_doc::canvas::base64_encode(bytes).into();
+        canvas.data = bytes.into();
     }
     for (index, cloud) in doc.point_clouds.iter_mut().enumerate() {
         if !cloud.points.is_empty() || !cloud.colors.is_empty() {
@@ -1218,8 +1292,13 @@ fn check_hdr_manifest(bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn hydrate_hdr_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut PackageReader<R>) -> Result<bool> {
-    use solidcraft_doc::render_resources::{HdrId, MAX_HDR_RESOURCE_BYTES, MAX_HDR_RESOURCES, encode_hdr_base64};
+/// Takes each HDR's part out for the reader (`parts`), leaving its record `{kind, data: ""}`.
+fn hydrate_hdr_resources<R: Read + Seek>(
+    metadata: &mut Value,
+    reader: &mut PackageReader<R>,
+    parts: &mut solidcraft_doc::render_resources::ContainerParts,
+) -> Result<bool> {
+    use solidcraft_doc::render_resources::{HdrId, MAX_HDR_RESOURCE_BYTES, MAX_HDR_RESOURCES};
 
     let Some(resources) = metadata.get_mut("render").and_then(|render| render.get_mut("resources")) else {
         return Ok(false);
@@ -1243,10 +1322,8 @@ fn hydrate_hdr_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut Pack
             return Err(invalid("HDR resource key does not match its blob hash"));
         }
         total = total.checked_add(bytes.len()).ok_or_else(|| invalid("HDR resource size overflow"))?;
-        let encoded = encode_hdr_base64(bytes).map_err(invalid)?;
-        let fields = value.as_object_mut().ok_or_else(|| invalid("invalid HDR metadata"))?;
-        fields.remove("hdr_blob");
-        fields.insert("data".into(), Value::String(encoded));
+        parts.hdr.insert(id, bytes.to_vec());
+        value.as_object_mut().ok_or_else(|| invalid("invalid HDR metadata"))?.remove("hdr_blob");
     }
     Ok(!resources.is_empty())
 }
@@ -1345,9 +1422,14 @@ fn check_texture_manifest(bytes: &[u8]) -> Result<()> {
     let Metadata { render: Render { texture_resources: () } } = serde_json::from_slice(bytes).map_err(invalid)?;
     Ok(())
 }
-fn hydrate_texture_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut PackageReader<R>) -> Result<bool> {
+/// Takes each texture's part out for the reader (`parts`), as [`hydrate_hdr_resources`].
+fn hydrate_texture_resources<R: Read + Seek>(
+    metadata: &mut Value,
+    reader: &mut PackageReader<R>,
+    parts: &mut solidcraft_doc::render_resources::ContainerParts,
+) -> Result<bool> {
     use solidcraft_doc::{
-        render_resources::{HdrId, encode_hdr_base64},
+        render_resources::HdrId,
         render_texture_resources::{MAX_TEXTURE_BYTES, MAX_TEXTURE_RESOURCE_BYTES, MAX_TEXTURE_RESOURCES},
     };
     let Some(resources) = metadata.get_mut("render").and_then(|render| render.get_mut("texture_resources")) else {
@@ -1372,10 +1454,8 @@ fn hydrate_texture_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut 
             return Err(invalid("texture resource key does not match its blob hash"));
         }
         total = total.checked_add(bytes.len()).ok_or_else(|| invalid("texture resource size overflow"))?;
-        let encoded = encode_hdr_base64(bytes).map_err(invalid)?;
-        let fields = value.as_object_mut().ok_or_else(|| invalid("invalid texture metadata"))?;
-        fields.remove("texture_blob");
-        fields.insert("data".into(), Value::String(encoded));
+        parts.textures.insert(id, bytes.to_vec());
+        value.as_object_mut().ok_or_else(|| invalid("invalid texture metadata"))?.remove("texture_blob");
     }
     Ok(!resources.is_empty())
 }
@@ -1873,14 +1953,14 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn opening_adopts_the_model_with_large_point_cloud_metadata() {
+    fn opening_adopts_the_model_with_a_large_point_clouds_properties() {
         use solidcore_record::Vec3;
         use solidcraft_doc::point_cloud::{ColorBy, Colors, Column, Complex, Floats, On, PointCloud, Points};
 
         let mut doc = Document::new("With a scan");
         doc.add_feature(FeatureKind::MeshImport { file: "reference.obj".into(), meshes: vec![mesh()] }, None).unwrap();
-        // Three packed f32 columns put over 16 MiB of base64 in the metadata, even though the
-        // point coordinates themselves live in a separate binary part.
+        // Three f32 columns of 1.1 million points were over 16 MiB of base64 in the metadata; their
+        // numbers are a binary part of their own now, beside the points, and the metadata small.
         let count = 1_100_000;
         let values = Floats(vec![1.0; count].into());
         let id = doc.allocate_id().unwrap();
@@ -1918,8 +1998,7 @@ mod tests {
         {
             let mut reader = DesignContainerReader::new(Cursor::new(&bytes)).unwrap();
             assert!(reader.has_model_cache(), "the cache was written");
-            assert!(reader.reader.document(max_design()).unwrap().len() > 16 << 20);
-            assert!(reader.preview().is_none(), "the standalone preview has a smaller metadata budget");
+            assert!(reader.reader.document(max_design()).unwrap().len() < 64 << 10, "no numbers in the metadata");
         }
 
         let dir = tempfile::tempdir().unwrap();
@@ -2377,7 +2456,7 @@ mod tests {
         assert_eq!(restored, m);
         let mut doc = Document::new("shaded source");
         doc.add_feature(FeatureKind::MeshImport { file: "smooth.obj".into(), meshes: vec![m.clone()] }, None).unwrap();
-        for bytes in [crate::write_design(&doc), write_design_container(&doc).unwrap()] {
+        for bytes in [crate::write_design(&doc).unwrap(), write_design_container(&doc).unwrap()] {
             let back = crate::read_design(&bytes).unwrap();
             assert_eq!(back, doc);
             let mut model = solidcraft_doc::Model::new();
@@ -2428,7 +2507,7 @@ mod tests {
             id,
             name: "Reference".into(),
             format: "png".into(),
-            data: solidcraft_doc::canvas::base64_encode(b"original image bytes").into(),
+            data: b"original image bytes".into(),
             pixels: [1, 1],
             plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() },
             center: Vec2::new(0.0, 0.0),
@@ -2442,6 +2521,13 @@ mod tests {
             anchor: None,
         });
         doc
+    }
+
+    /// `doc` without its canvases, for the plain JSON design, which can't hold their images.
+    fn without_images(doc: &Document) -> Document {
+        let mut plain = doc.clone();
+        plain.canvases.clear();
+        plain
     }
 
     /// A newer build's container: its feature this build can't read, that feature's blob, a part
@@ -2576,8 +2662,9 @@ mod tests {
     }
 
     /// Plugin data under `plugins/<plugin-id>/` opens and saves back byte for byte with no plugin
-    /// installed, in a container and in a plain JSON design; a design without any has no
-    /// `plugins/` part, and a part that is not a plugin data name is not kept.
+    /// installed; a design without any has no `plugins/` part, and a part that is not a plugin data
+    /// name is not kept. The model holds the bytes, never text; a plain JSON design can't carry
+    /// them and refuses to save, while an older one's base64 still opens.
     #[test]
     fn plugin_data_round_trips_untouched_without_the_plugin() {
         let doc = document();
@@ -2609,11 +2696,57 @@ mod tests {
         assert!(metadata.get("plugin_data").is_none(), "the parts stand beside the design, not inside it");
         assert_eq!(crate::read_design(&package(&resaved)).unwrap(), opened);
 
-        // A plain JSON design carries the same data, and a container made from it has the parts.
-        let json = opened.to_json();
-        let from_json = Document::from_json(&json).unwrap();
+        assert_eq!(opened.plugin_data["gear-maker/cache/table.bin"].as_bytes(), binary, "the bytes, not text");
+
+        // A plain JSON design can't carry them: saving one is refused, naming them.
+        let refused = crate::write_design(&opened).unwrap_err().to_string();
+        assert!(refused.contains("plugin files") && refused.contains(".sc"), "{refused}");
+        assert!(!opened.to_json().contains("plugin_data"), "never written as text");
+
+        // An older plain JSON design kept them as base64: it opens with the bytes, and a container
+        // made from it has the parts. Text that is not base64 is left out; the design still opens.
+        let mut older: Value = serde_json::from_str(&opened.to_json()).unwrap();
+        older["plugin_data"] = json!({
+            "gear-maker/state.json": solidcraft_doc::canvas::base64_encode(br#"{"teeth":24}"#),
+            "gear-maker/cache/table.bin": solidcraft_doc::canvas::base64_encode(&binary),
+            "other-tool/notes.txt": solidcraft_doc::canvas::base64_encode(b"kept"),
+            "other-tool/broken.bin": "not base64!",
+        });
+        let from_json = Document::from_json(&older.to_string()).unwrap();
         assert_eq!(from_json.plugin_data, opened.plugin_data);
         assert_eq!(parts(&write_design_container(&from_json).unwrap())["plugins/gear-maker/cache/table.bin"], binary);
+    }
+
+    /// A canvas's image is its bytes: a container keeps them as a part of their own (its record
+    /// has an empty `data`, as older releases read it), a plain JSON design refuses to save it,
+    /// and an older design's base64 image (JSON, or inline in a container) still opens.
+    #[test]
+    fn canvas_images_are_bytes_in_a_part_and_older_base64_still_opens() {
+        let doc = document();
+        assert_eq!(doc.canvases[0].bytes(), b"original image bytes");
+        let entries = parts(&write_design_container(&doc).unwrap());
+        let metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+        let record = &metadata["canvases"][0];
+        assert_eq!(record["data"], "", "older releases read an empty `data` and take the blob");
+        assert_eq!(entries[record["image_blob"].as_str().unwrap()], b"original image bytes");
+        assert_eq!(crate::read_design(&package(&entries)).unwrap(), doc);
+
+        let refused = crate::write_design(&doc).unwrap_err().to_string();
+        assert!(refused.contains("images") && refused.contains(".sc"), "{refused}");
+        assert!(!doc.to_json().contains(&solidcraft_doc::canvas::base64_encode(b"original image bytes")), "never written as text");
+
+        // An older plain JSON design kept the image as base64 in `data`.
+        let mut older: Value = serde_json::from_str(&without_images(&doc).to_json()).unwrap();
+        let mut canvas = serde_json::to_value(&doc.canvases[0]).unwrap();
+        canvas["data"] = json!(solidcraft_doc::canvas::base64_encode(b"original image bytes"));
+        older["canvases"] = json!([canvas]);
+        let opened = Document::from_json(&older.to_string()).unwrap();
+        assert_eq!(opened.canvases, doc.canvases);
+        assert_eq!(parts(&write_design_container(&opened).unwrap())[record["image_blob"].as_str().unwrap()], b"original image bytes");
+        canvas["data"] = json!("not base64!");
+        older["canvases"] = json!([canvas]);
+        let damaged = Document::from_json(&older.to_string()).unwrap();
+        assert!(damaged.canvases[0].bytes().is_empty(), "a damaged image reads as none; the design still opens");
     }
 
     /// A newer build's point cloud with numbers, an edge and a face (#14572): a field this build
@@ -2651,6 +2784,25 @@ mod tests {
         // This build reads its own file whole.
         let file = write_design_container(&doc).unwrap();
         assert_eq!(crate::read_design(&file).unwrap().point_clouds, doc.point_clouds);
+        // Its segments, triangles and properties are a part of their own, never base64 text in the
+        // metadata, which keeps their shape with empty numbers.
+        let saved: Value = serde_json::from_slice(&parts(&file)["document.json"]).unwrap();
+        let record = &saved["point_clouds"][0];
+        assert!(record["complex_blob"].as_str().is_some_and(|name| name.ends_with(".complex")), "{record}");
+        assert_eq!((record["complex"]["segments"].clone(), record["complex"]["columns"][0]["values"].clone()), (json!(""), json!("")));
+        assert_eq!(record["complex"]["columns"][0]["name"], "nz");
+        // An older file kept them inline, base64: it opens the same.
+        let mut older = parts(&file);
+        let mut metadata = saved.clone();
+        let b64 = |words: Vec<[u8; 4]>| json!(solidcraft_doc::canvas::base64_encode(&words.concat()));
+        metadata["point_clouds"][0].as_object_mut().unwrap().remove("complex_blob");
+        metadata["point_clouds"][0]["complex"]["segments"] = b64(vec![0u32.to_le_bytes(), 1u32.to_le_bytes()]);
+        metadata["point_clouds"][0]["complex"]["triangles"] = b64([0u32, 1, 2].map(u32::to_le_bytes).to_vec());
+        metadata["point_clouds"][0]["complex"]["columns"][0]["values"] = b64([1.0f32; 3].map(f32::to_le_bytes).to_vec());
+        older.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
+        assert_eq!(crate::read_design(&package(&older)).unwrap().point_clouds, doc.point_clouds);
+        // A plain JSON design can't hold the points: saving one is refused, naming them.
+        assert!(crate::write_design(&doc).unwrap_err().to_string().contains("point clouds"));
 
         let newer = solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1);
         for complex in [json!("future curvature"), json!("columns this build can't read")] {
@@ -2793,7 +2945,7 @@ mod tests {
         let bytes = write_design_container_with_preview(&doc, DesignCompression::Fast, Some(&DesignPreview { meshes: vec![too_large] })).unwrap();
         assert!(read_design_preview(&bytes).is_none());
         assert_eq!(crate::read_design(&bytes).unwrap(), doc);
-        assert!(read_design_preview(&crate::write_design(&doc)).is_none());
+        assert!(read_design_preview(&crate::write_design(&doc).unwrap()).is_none());
     }
 
     #[test]
@@ -2811,7 +2963,7 @@ mod tests {
         assert_eq!(entries.keys().filter(|n| n.ends_with(".png")).count(), 1);
         let json: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
         assert_eq!(json["features"][2]["meshes"][0]["positions"], json!([]));
-        assert_eq!(crate::read_design(&crate::write_design(&reopened)).unwrap(), source);
+        assert_eq!(crate::read_design(&crate::write_design(&reopened).unwrap()).unwrap(), source);
         assert_eq!(write_design_container(&source).unwrap(), bytes, "deterministic archive");
         let compact = write_design_container_with_compression(&source, DesignCompression::Compact).unwrap();
         assert_eq!(crate::read_design(&compact).unwrap(), source);
@@ -3200,7 +3352,7 @@ mod tests {
             "com.acme.description": {"shop_id": 88123, "list": [1, 2.5, null, true, "x", {"deep": []}]},
         }))
         .unwrap();
-        let expected = crate::read_design(&crate::write_design(&doc)).unwrap();
+        let expected = crate::read_design(&crate::write_design(&doc).unwrap()).unwrap();
         assert_eq!(expected, doc);
         assert_eq!(crate::read_design(&write_design_container(&doc).unwrap()).unwrap(), expected);
     }
@@ -3217,7 +3369,10 @@ mod tests {
                 "environment":{"kind":"sky","rotation_rad":0.25,"intensity":0.5,"gradient":{"zenith":[0.4,0.2,0.1],"horizon":[0.7,0.6,0.3],"ground":[0.2,0.1,0.05]}}}}}
         }})).unwrap());
         assert!(doc.differs_only_in_render(&before));
-        for bytes in [crate::write_design(&doc), write_design_container(&doc).unwrap()] {
+        // A plain JSON design holds no images: the same design without its canvas goes that way.
+        for (doc, bytes) in
+            [(without_images(&doc), crate::write_design(&without_images(&doc)).unwrap()), (doc.clone(), write_design_container(&doc).unwrap())]
+        {
             let reopened = crate::read_design(&bytes).unwrap();
             assert_eq!(reopened, doc);
             assert_eq!(reopened.render, doc.render);
@@ -3248,7 +3403,8 @@ mod tests {
         doc.render = Arc::new(render);
         let bytes = write_design_container(&doc).unwrap();
         assert_eq!(crate::read_design(&bytes).unwrap(), doc);
-        assert_eq!(crate::read_design(&crate::write_design(&doc)).unwrap(), doc);
+        // A plain JSON design can't hold the file: saving one is refused, naming it.
+        assert!(crate::write_design(&without_images(&doc)).unwrap_err().to_string().contains("render environments and textures"));
         let original = parts(&bytes);
         let blob = format!("blobs/{id}.hdr");
         assert_eq!(original.keys().filter(|name| name.ends_with(".hdr")).count(), 1);
@@ -3330,7 +3486,8 @@ mod tests {
         render.setups.insert("Wood".into(), setup);
         let bytes = write_design_container(&doc).unwrap();
         assert_eq!(crate::read_design(&bytes).unwrap(), doc);
-        assert_eq!(crate::read_design(&crate::write_design(&doc)).unwrap(), doc);
+        // A plain JSON design can't hold the file: saving one is refused, naming it.
+        assert!(crate::write_design(&without_images(&doc)).unwrap_err().to_string().contains("render environments and textures"));
         let original = parts(&bytes);
         let blob = format!("blobs/{id}.texture");
         assert_eq!(original.keys().filter(|name| name.ends_with(".texture")).count(), 1);
@@ -3437,7 +3594,7 @@ mod tests {
     }
 
     fn measure_storage(doc: &Document, label: &str) {
-        let json = crate::write_design(doc);
+        let json = crate::write_design(doc).unwrap();
         let container = write_design_container(doc).unwrap();
         let dir = std::env::var_os("CARGO_TARGET_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from("target"));
         std::fs::create_dir_all(&dir).unwrap();
@@ -3446,7 +3603,7 @@ mod tests {
         let mut timings = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
         for _ in 0..9 {
             let start = std::time::Instant::now();
-            std::hint::black_box(crate::write_design(doc));
+            std::hint::black_box(crate::write_design(doc).unwrap());
             timings[0].push(start.elapsed().as_secs_f64() * 1000.0);
             let start = std::time::Instant::now();
             std::hint::black_box(write_design_container(doc).unwrap());
@@ -3476,7 +3633,7 @@ mod tests {
             // Alternate ordering; include encoding, flushing, replacement and backup.
             for index in if round % 2 == 0 { [0, 1] } else { [1, 0] } {
                 let start = std::time::Instant::now();
-                let bytes = if index == 0 { crate::write_design(doc) } else { write_design_container(doc).unwrap() };
+                let bytes = if index == 0 { crate::write_design(doc).unwrap() } else { write_design_container(doc).unwrap() };
                 crate::write_atomic(&dir.join(format!("issue303-{label}-atomic-{index}.solidcraft")), &bytes, true).unwrap();
                 saves[index].push(start.elapsed().as_secs_f64() * 1000.0);
             }
