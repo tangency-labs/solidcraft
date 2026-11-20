@@ -2497,7 +2497,7 @@ fn recentre(cn: &NurbsCurve) -> Option<[f64; 3]> {
 /// (twice `u` covers the quotient's rounding and the `1 / (1 - u)`), the three coordinates'
 /// norm rounded up. `None` for data that are not finite or a weight that is not positive.
 fn translated_pw(pw: &[f64], t: [f64; 3]) -> Option<(Vec<f64>, f64)> {
-    let mut out = Vec::with_capacity(pw.len());
+    let mut out = Vec::new();
     let mut slack = 0.0_f64;
     for p in pw.chunks_exact(4) {
         let [x, y, z, w] = [*p.first()?, *p.get(1)?, *p.get(2)?, *p.get(3)?];
