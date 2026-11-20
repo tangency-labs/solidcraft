@@ -10323,15 +10323,8 @@ fn face_pattern(
     let clear = KeepClear::new(&sources, rules)?;
     // Where a copy goes at a station: its anchor on the face, +Z along the normal (moved out by
     // `offset`), X along the grid turned by `spin` about the normal, all scaled by `scale`.
-    let placement = |s: &kernel::FaceStation, scale: f64, offset: f64, spin: f64| -> Mat {
-        let z = if g.flip { -s.normal } else { s.normal };
-        let x = rotate_vec(s.along, z, spin);
-        let y = z.cross(x);
-        let origin = s.point + z * offset;
-        // Columns: the body's X, Y and Z, scaled; then where its anchor lands.
-        let (sx, sy, sz) = (x * scale, y * scale, z * scale);
-        let t = origin - (sx * anchor.x + sy * anchor.y + sz * anchor.z);
-        [[sx.x, sx.y, sx.z, 0.0], [sy.x, sy.y, sy.z, 0.0], [sz.x, sz.y, sz.z, 0.0], [t.x, t.y, t.z, 1.0]]
+    let placement = |s: &kernel::FaceStation, scale: f64, offset: f64, spin: f64| -> Result<Mat> {
+        Ok(kernel::face_placement(s, anchor, g.flip, scale, offset, spin)?)
     };
     let stations = match g.random {
         Some(r) => {
@@ -10343,7 +10336,7 @@ fn face_pattern(
             };
             // Each place where a copy, as placed before any attractor changes it, keeps clear.
             let mut failed = None;
-            let mut keep = |s: &kernel::FaceStation| match clear.too_close(&placement(s, 1.0, 0.0, 0.0)) {
+            let mut keep = |s: &kernel::FaceStation| match placement(s, 1.0, 0.0, 0.0).and_then(|m| clear.too_close(&m)) {
                 Ok(near) => !near,
                 Err(e) => {
                     failed.get_or_insert(e);
@@ -10387,35 +10380,22 @@ fn face_pattern(
             {
                 continue;
             }
-            let t = match far_d.as_ref().and_then(|f| f.get(k)) {
-                // Between two sets: 0 on the near attractors, 1 on the far ones. The near and far
-                // distances are hold zones: within them of their set, a copy takes that set's
-                // values in full.
-                Some(df) => {
-                    let x = (d - length(&a.near, 0.0)?).max(0.0);
-                    let y = (df - length(&a.far, 0.0)?).max(0.0);
-                    if x <= 0.0 {
-                        0.0
-                    } else if y <= 0.0 {
-                        1.0
-                    } else {
-                        (x / (x + y)).clamp(0.0, 1.0)
-                    }
-                }
-                None => {
-                    let near = length(&a.near, lo)?;
-                    let far = length(&a.far, hi)?;
-                    if (far - near).abs() < 1e-12 { 0.0 } else { ((d - near) / (far - near)).clamp(0.0, 1.0) }
-                }
+            // Between two sets, 0 on the near attractors and 1 on the far ones, the near and far
+            // distances hold zones round each; with one set, from the near distance to the far.
+            let far_here = far_d.as_ref().and_then(|f| f.get(k)).copied();
+            let (near, far) = match far_here {
+                Some(_) => (length(&a.near, 0.0)?, length(&a.far, 0.0)?),
+                None => (length(&a.near, lo)?, length(&a.far, hi)?),
             };
-            let t = match a.falloff {
-                crate::Falloff::Linear => t,
-                crate::Falloff::Smooth => t * t * (3.0 - 2.0 * t),
+            let falloff = match a.falloff {
+                crate::Falloff::Linear => kernel::Falloff::Linear,
+                crate::Falloff::Smooth => kernel::Falloff::Smooth,
             };
+            let t = kernel::attraction(*d, far_here, near, far, falloff);
             let ramp = |n: &Option<crate::Expr>, f: &Option<crate::Expr>, kind: Kind, default: f64| -> Result<f64> {
                 let n = n.as_ref().map_or(Ok(default), |e| val(vals, e, kind))?;
                 let f = f.as_ref().map_or(Ok(default), |e| val(vals, e, kind))?;
-                Ok(n + (f - n) * t)
+                Ok(kernel::ramp(n, f, t))
             };
             scale = ramp(&a.scale_near, &a.scale_far, Kind::Unitless, 1.0)?;
             offset = ramp(&a.offset_near, &a.offset_far, Kind::Length, 0.0)?;
@@ -10427,7 +10407,7 @@ fn face_pattern(
         if out.len() >= MAX_INSTANCES {
             return Err(DocError::Invalid(format!("a face pattern makes at most {MAX_INSTANCES} copies")));
         }
-        let m = placement(s, scale, offset, spin);
+        let m = placement(s, scale, offset, spin)?;
         if clear.too_close(&m)? {
             continue;
         }

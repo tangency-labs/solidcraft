@@ -56,6 +56,7 @@ pub mod develop;
 pub mod error;
 pub mod export_geometry;
 pub mod extend;
+pub mod face_pattern;
 pub mod face_surface;
 pub mod file;
 pub mod fit_projection;
