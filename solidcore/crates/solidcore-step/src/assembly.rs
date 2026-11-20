@@ -1876,10 +1876,8 @@ fn uses_of<'e>(edges: &'e [EdgeB], edge_loops: &[Vec<(u32, bool)>], given: Optio
 }
 
 /// A spline surface's parameter box: its knot ranges.
-/// Where an edge's gap from a face's surface is measured: [`EDGE_GAP_SAMPLES`] even steps over
-/// `[t0, t1]`, and a spline's knot spans' middles there, the points its closed-form pcurve is
-/// checked at. A spline whose knots crowd into one step can lie off the surface only between the
-/// even samples (#11652).
+/// Also a spline's knot spans' middles, where its closed-form pcurve is checked: crowded knots
+/// can lie off the surface only between the even samples (#11652).
 fn gap_samples(curve: &BCurve, [t0, t1]: [f64; 2]) -> Vec<f64> {
     let mut ts: Vec<f64> =
         (0..=EDGE_GAP_SAMPLES).map(|k| if k == EDGE_GAP_SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64) }).collect();
