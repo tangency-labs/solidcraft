@@ -76,7 +76,8 @@ pub static COMMANDS: &[CommandSpec] = &[
              occurrences its body is placed through, from the top; offset_mm?: the dimension line's distance on paper (default 10;              a linear, length or chain one's on the side away from what it measures); \
              text?: centred (default) or {at: [x, y]} from the view's centre; text_to_mm?: [x, y], where its text's centre goes, or line_through_mm?: \
              [x, y], a point its line, arc or leader passes through, in paper mm from the sheet's lower-left corner, as edit's drag \
-             (instead of offset_mm and text); decimals?: 0..6 (default 2); override_text? (not a \
+             (instead of offset_mm and text); decimals?: 0..6 (default 2); override_text?: its text, in which \
+             {value} is its measured number as it reads alone (Ø12.00), so `2× {value} THRU` follows the model, and {{ and }} are a brace each (not a \
              chain's); dry_run?: true to answer what it would add, adding nothing (no id is taken, no undo step) → what \
              drawing.dimension.inspect answers for it. Saved by the edges' names, never the points picked; one the \
              view can't measure, or on a part it doesn't draw, is refused. One undo step; no model is evaluated.",
@@ -88,8 +89,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<EditResult>)
         .params(
-            "dimension: its id; set: {offset_mm?, text?: centred or {at: [x, y]}, decimals?: 0..6, override_text?: text, or null to show \
-             the number again; direction?, reading?: a linear or length dimension's, reading? and other_side?: an angle's, diameter?: a \
+            "dimension: its id; set: {offset_mm?, text?: centred or {at: [x, y]}, decimals?: 0..6, override_text?: its text ({value} is its measured number as it reads alone, {{ and }} \
+             a brace each; without {value} it is shown instead of the number), or null to show the number again; direction?, reading?: a linear or length dimension's, reading? and other_side?: an angle's, diameter?: a \
              radial dimension's, direction?: a chain's or a silhouettes one's; a drag, instead of offset_mm and text: \
              text_to_mm?: [x, y], where its text's centre goes, or line_through_mm?: [x, y], a point its line, arc or leader passes \
              through, each in paper mm from the sheet's lower-left corner, as inspect's layout} → \
@@ -119,7 +120,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<DimensionResult>)
         .params(
             "dimension: its id → {dimension, view, record: as saved, status: ok, overridden, ambiguous, suppressed, failed, lost or unmeasurable, \
-             why?, value? (model mm, or degrees for an angle; a chain's overall), foreshortened?, text? (none for a chain), \
+             why?, value? (model mm, or degrees for an angle; a chain's overall), foreshortened?, text? (none for a chain; its text with {value} filled in), \
+             measured_text?: its number as it reads with no text of its own, \
              members?: a chain's [{value, text}] from its first point, last_good? (the value it last read, kept when the design \
              is saved, when it has none now), exact, candidates?: [{edge: {body, index}}, {corner: [x, y, z]} or {face: {body, index}}]: \
              what an ambiguous name finds, or a lost one's leads; one of a slot's kind passes back to drawing.dimension.repair as it \
@@ -675,6 +677,7 @@ fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
         value: r.measured.map(|m| shown(m.value)),
         foreshortened: r.measured.map(|m| m.foreshortened),
         text: r.text,
+        measured_text: r.number,
         members: r.members.into_iter().map(|m| MemberResult { value: m.measured.value, text: m.text }).collect(),
         last_good: last_good.map(shown),
         exact: r.exact,

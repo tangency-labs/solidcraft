@@ -4041,14 +4041,17 @@ mod tests {
         let mut k = Kernel::default();
         let mut breps = read_part_file(&mut k, "ss_plane_sph1.smp");
         let b = breps.first_mut().unwrap();
-        // (the part file's cover raises: its sheet's trims run off their edges)
-        assert!(!b.trim_cover_raises().edges.is_empty());
+        // (the sheet's sphere keeps the file's NURB, so its kept trims are the file's on
+        // their own surface: each is within its edge's tolerance as read, proved below, and
+        // the cover raises nothing)
+        assert!(b.trim_cover_raises().edges.is_empty());
         let mut widest = 0.0_f64;
-        let mut failures = Vec::new();
+        let (mut failures, mut kept) = (Vec::new(), 0);
         for eu in edgeuses(b, None).unwrap() {
             let Some(bound) = proved_distance(&k, b, eu) else {
                 continue;
             };
+            kept += 1;
             let e = eu1::edge(b, eu).unwrap().unwrap();
             let tol = edge::tolerance(b, e).unwrap();
             let sampled = sampled_distance(&k, b, eu, 256);
@@ -4056,7 +4059,8 @@ mod tests {
                 failures.push(format!("eu {}: {bound:e} {sampled:e} {tol:e}", eu.index()));
             }
         }
-        assert!(failures.is_empty(), "{failures:#?}");
+        // (the sheet's eight edges each have one trimmed use: four B-spline trims, four lines)
+        assert!(kept == 8 && failures.is_empty(), "{kept}: {failures:#?}");
         for (e, _) in b.edges().iter() {
             widest = widest.max(edge::tolerance(b, e).unwrap());
         }

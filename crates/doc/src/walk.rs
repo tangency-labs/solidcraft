@@ -434,7 +434,11 @@ impl PlaneRef {
                     g.walk_feature_refs(f, depth + 1);
                 }
             }
-            Self::Midplane { a, b } | Self::TwoEdges { a, b } | Self::AxisPoint { axis: a, point: b } | Self::Perpendicular { plane: a, line: b } => {
+            Self::Midplane { a, b, .. }
+            | Self::TwoEdges { a, b }
+            | Self::AxisPoint { axis: a, point: b }
+            | Self::Perpendicular { plane: a, line: b }
+            | Self::SquareToLine { line: a, point: b } => {
                 a.walk_feature_refs(f, depth + 1);
                 b.walk_feature_refs(f, depth + 1);
             }
@@ -474,7 +478,11 @@ impl PlaneRef {
                     g.walk_feature_refs_mut(f, depth + 1);
                 }
             }
-            Self::Midplane { a, b } | Self::TwoEdges { a, b } | Self::AxisPoint { axis: a, point: b } | Self::Perpendicular { plane: a, line: b } => {
+            Self::Midplane { a, b, .. }
+            | Self::TwoEdges { a, b }
+            | Self::AxisPoint { axis: a, point: b }
+            | Self::Perpendicular { plane: a, line: b }
+            | Self::SquareToLine { line: a, point: b } => {
                 a.walk_feature_refs_mut(f, depth + 1);
                 b.walk_feature_refs_mut(f, depth + 1);
             }

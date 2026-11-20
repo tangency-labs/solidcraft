@@ -218,14 +218,13 @@ impl Document {
     }
 }
 
-/// All status planes are world-space. A lost plane is a repair guide only. `Sheet` is a sketch on
-/// a flat face of a sheet metal body, attached by the name of its panel (`sheet::sheet_face_name`);
-/// no sheet names a face so now, so such a sketch is `Lost` and nothing is `Sheet`.
+/// All status planes are world-space. A lost plane is a repair guide only. A sketch a design saved
+/// before kept on a flat face of a sheet metal body by the name of its panel
+/// (`sheet::sheet_face_name`) is `Lost`: no sheet names a face so now.
 #[derive(Clone, Debug)]
 pub enum FaceAttachmentStatus {
     Fixed { plane: Option<Plane> },
     Legacy { plane: Option<Plane> },
-    Sheet { plane: Option<Plane> },
     Healthy { plane: Plane, target: ConfigFaceTarget, path: Vec<u64> },
     Lost { message: String, repair_plane: Option<Plane> },
 }

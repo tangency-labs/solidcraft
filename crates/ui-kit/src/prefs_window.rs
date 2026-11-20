@@ -253,10 +253,16 @@ pub fn show<S: Host>(ctx: &egui::Context, host: &mut S, pages: &[Page<S>], optio
         return None;
     }
     hold(host);
-    // The window's copy carries the outline's time: it is set into the context every frame.
+    // The window's copy carries the outline's time: it is set into the context every frame. The
+    // time starts when the row first draws ([`settings_search::follow`]), so it is taken from the
+    // context's copy then and kept until the next reveal.
     let now = ctx.input(|i| i.time) * 1000.0;
     if let Some(reveal) = host.window().reveal.as_mut() {
-        reveal.start(now);
+        if reveal.until.is_nan()
+            && let Some(drawn) = settings_search::current_reveal(ctx).filter(|d| d.page == reveal.page && d.label == reveal.label)
+        {
+            reveal.until = drawn.until;
+        }
         if reveal.expired(now) {
             host.window().reveal = None;
         }

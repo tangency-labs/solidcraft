@@ -1509,7 +1509,7 @@ fn app_quit(app: &mut SolveApp, ctx: &egui::Context, q: params::Quit) -> Outcome
     } else {
         crate::documents::request_quit(app);
     }
-    if app.quit_requested {
+    if app.ready_to_quit() {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
     ok(json!({"quitting": app.quit_requested, "asking": app.docs.closing.is_some()}))
@@ -3644,7 +3644,7 @@ pub(crate) mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
         for d in [&root, &out] {
-            std::fs::write(d.join("part.solidcraft"), solidcraft_engine::io::write_design(&s.doc)).unwrap();
+            std::fs::write(d.join("part.solidcraft"), solidcraft_engine::io::write_design(&s.doc).unwrap()).unwrap();
         }
         s.execute("file.export", &json!({"path": out.join("part.step").to_string_lossy()})).unwrap();
         let load = |command: &str, d: &std::path::Path, file: &str| json!({"command": command, "params": {"path": d.join(file).to_string_lossy()}, "allow_paths": [root.to_string_lossy()]});
