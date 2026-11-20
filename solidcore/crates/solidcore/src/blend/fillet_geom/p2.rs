@@ -3438,7 +3438,9 @@ impl FilletBrep {
         let other_face = as_face(self.fillet_vertex(mate)?.point_class_object(), OP)?
             .ok_or_else(|| missing(OP))?;
         let owner = corners.corner(corner)?;
-        let at_cliff = owner.blend.is_some_and(|blend| blend.is_cliff_join());
+        let at_cliff = owner
+            .blend
+            .is_some_and(crate::blend::blend_corner::BlendCorner::is_cliff_join);
         let cp_vertex = owner.filleted_vertex().ok_or_else(|| missing(OP))?;
 
         let geoms = self.vertex_fillet_geoms(v)?;

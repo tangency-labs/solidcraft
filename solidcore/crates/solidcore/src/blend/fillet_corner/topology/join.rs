@@ -197,7 +197,9 @@ pub(crate) fn tangent_cliff_join(
     };
     let plane_normal = |f| -> Result<Option<crate::math::Vec3>> {
         Ok(
-            match crate::topology::face::p2::surface(target, f)?.map(|s| s.kind()) {
+            match crate::topology::face::p2::surface(target, f)?
+                .map(crate::surface::surface::Surface::kind)
+            {
                 Some(SurfaceKind::Plane(p)) => Some(p.evaluate_normal().unitize()?),
                 _ => None,
             },
@@ -631,7 +633,10 @@ impl FilletCorner {
         // the section's ends: on a side with an edge between the blends (where they change
         // face, or cross a face's seam) where the rails cross it, else (the first side)
         // through the vertex
-        if self.blend.is_some_and(|blend| blend.is_cliff_join()) {
+        if self
+            .blend
+            .is_some_and(crate::blend::blend_corner::BlendCorner::is_cliff_join)
+        {
             // The two rim segments meet here; neither bounds the shared section
             // on the continued support. The face beyond trims the sheet later.
             for edges in &mut between {

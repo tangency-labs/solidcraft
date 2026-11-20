@@ -791,7 +791,9 @@ pub fn extend(
                 if pc == PointClassType::Edge
                     && cross.is_some_and(|e| continued_rim.is_some_and(|rim| rim.contains(&e)))
                 {
-                    piece.crosses[slot] = cross;
+                    if let Some(crossing) = piece.crosses.get_mut(slot) {
+                        *crossing = cross;
+                    }
                     continue;
                 }
                 match rail_end {
