@@ -134,7 +134,10 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<PipeParams>(),
         &["body_name", "body_names", "diameter", "name", "operation", "participants", "path", "path_sketch", "targets", "wall"],
     );
-    assert_keys(input_schema_for::<BoundingSolidParams>(), &["bodies", "body_name", "body_names", "margin", "margins", "name", "participants"]);
+    assert_keys(
+        input_schema_for::<BoundingSolidParams>(),
+        &["bodies", "body_name", "body_names", "component", "margin", "margins", "name", "participants"],
+    );
     assert_keys(input_schema_for::<ScaleParams>(), &["bodies", "factor", "factors", "name", "origin", "participants"]);
     assert_keys(input_schema_for::<OffsetPlaneParams>(), &["base", "name", "offset", "participants", "through"]);
     assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "direction_only", "name", "participants", "pivot"]);
@@ -149,6 +152,7 @@ fn schemas_and_the_key_check_agree() {
             "body_name",
             "body_names",
             "corner",
+            "edge_radii",
             "edges",
             "fit",
             "knots",
@@ -876,6 +880,7 @@ fn fillet_replies_match_its_output_schema() {
     assert!(reduced.get("radius_applied").is_some_and(Value::is_number) && reduced.get("radii_applied").is_some_and(Value::is_array), "{reduced}");
     run(json!({"edges": [[20, 0, 10]], "radius": 1, "type": "chord"}));
     run(json!({"edges": [{"body": "B", "index": 0}], "radius": 0.5, "tangent_chain": false}));
+    run(json!({"edges": [[20, 0, 10], [20, 30, 10]], "radius": 1, "edge_radii": [1, "2 mm"], "tangent_chain": false}));
     run(json!({"edges": [[20, 0, 10]], "radius": 1, "type": "curvature"}));
     // Variable and spline radii: solidcore fails a variable round on a box edge at this pin (status
     // 1001, as `variable_radius_on_a_box_edge`), so their forms are checked against the contract.

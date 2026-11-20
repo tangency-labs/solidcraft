@@ -156,7 +156,8 @@ fn decode(bytes: &[u8]) -> Result<image::RgbaImage> {
         return Err(bad(CMD, format!("the picture is {w}x{h}: over the {} megapixel limit", MAX_DECODED_PIXELS >> 20)));
     }
     let reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().map_err(|e| bad(CMD, format!("cannot read the picture: {e}")))?;
-    let img = reader.decode().map_err(|e| bad(CMD, format!("cannot decode the picture: {e}")))?;
+    // Upright, as every viewer shows it: a phone photo stored turned would otherwise be measured on its side (#19138).
+    let (img, _) = crate::upright_image::decode_upright(reader).map_err(|e| bad(CMD, format!("cannot decode the picture: {e}")))?;
     Ok(img.to_rgba8())
 }
 

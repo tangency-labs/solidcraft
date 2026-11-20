@@ -90,8 +90,7 @@ only definitions is `blend::definition_check::is_definition`, which is
 own surface kind (a torus stays a torus, so every match on the kind still sees it) and carries its
 definition beside it.
 
-The blend definitions are opt-in today: `UpstreamFixes::fillet_round_as_definition` builds and
-reads them, and every `UpstreamFixes` flag is off by default (`kernel.rs`). Tests turn them on (`UpstreamFixes::all`).
+The blend definitions are always built and read.
 
 ### 3.2 Exact nets: lines, arcs and quadrics
 
@@ -272,6 +271,7 @@ written as the operations it counts:
 | where | count | what it bounds |
 |---|---|---|
 | `eval::collapse` (private `de_boor`) | γ_(12p+4) of the largest coordinate | de Boor's p levels, three operations for each coefficient and four for each convex combination |
+| `eval::collapse` (private `bezier_piece`, `rational_partial_bound`) | G γ_(12p+4) of the largest coordinate, G the levels' growth (\|1 − α\| + \|α\| past a span); γ_6, γ_3 and γ_2 on lengths, weight products and weights; the bound × (1 + γ_32); the moved net's gap √3 γ_2 (\|c₀\| w + \|h\|) / w | a rational net's rows in Bézier form over a piece, blossomed past their span, and its partial bound, taken on the net moved by minus its box's middle c₀ |
 | `eval::sphere` (`Coefficient::finish`) | γ_(8 + 8·degree + terms) | a Bernstein coefficient of \|H − CW\|² − R²W² |
 | `blend::fillet_section::recertify::precision_floor` | G (D + γ_K M), K = 2(n + 1) + 6 | the net's rows from the stations |
 | `surface::procedural_sweep::ProceduralSweep::floor` | G γ_(2(p+3)+24) (A + (R + λ)Θ + R) | the sweep's net and evaluation |
@@ -281,6 +281,7 @@ written as the operations it counts:
 | `surface::extend::analytic` (private `certify_iso`) | γ_(12L+6) A_j, plus the plane's own (a parallel's height γ_(12L+7), a meridian's normal γ_(12L+8) + γ_12), × (1 + γ_16) | an extended analytic's iso control point off its plane; L de Boor levels, A_j its stencil's size (#15039) |
 | `surface::sphere::meridian_rounding` | S · 1.75 (γ_K + γ_33) \|P\| + 3.5 γ_4 \|P\| + γ_31 π r, K = 16(p + q + 2) | a half meridian's end angle as `IsArc` fits it; S its first-order conditioning, read off the fit (`end_angle_conditioning`) (#15039) |
 | `primitive::primitive_creation::p2::taper_walls` (`touch_bound`, `circles_may_meet`) | γ_16 (\|w\| + \|q\| + r); γ_12 (D² + (r_a ∓ r_b)²) | a draft's line's foot q off its circle (\|q\| − r) and circle/circle reach at a section crossing; within it, taken as touching |
+| `surface::implicit::off_surface_bound` | γ_(8L+16) A, A = max \|H\|∞ + \|O\|∞ W_max of the source net (the net the patch was cut from), slack 2γA (1/W₀ + (1 + γ) W_max / (W₀ (W₀ − γ W_max))) | a Bézier patch's points after extraction and decomposition: L ≤ L_u + L_v knot-insertion levels, L_u = 2p + p(p − 1)/2 (the extraction's p − mul and p − mur, and the decomposition's chain through the points saved at up to p − 1 earlier knots, Σ_{i=1}^{p−1} i; derived loop by loop in the fn's docs and checked against the loops for degrees 1 to 10 by `the_rounding_count_covers_the_insertion_chains`), L_v alike in q; γ_8 a level (the ratio's two subtractions and division, its complement, `CPoint::combine2`'s two products and sum), 1 for the size's feedback, 8 more for the coefficients' scale |
 
 In `precision_floor`, D is the stations' term (a foot within L_u η_u + L_v η_v of its root,
 η = `STATION_STEP` (1 + max |knot|), L the support's derivative bounds), M the net's size about the

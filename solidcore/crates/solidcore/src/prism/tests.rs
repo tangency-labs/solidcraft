@@ -19,7 +19,7 @@ use super::profile::{
     check_regions, curve_on_frame, largest_arc_sweep, smallest_arc_sweep, tapered_flange_ends,
     Loop2, ProfileRefusal, Region2, Seg2,
 };
-use super::read::{planar_curves, planar_pieces, PlanarPiece, Run};
+use super::read::{arc_before_line, planar_curves, planar_pieces, PlanarPiece, Run};
 use super::sheet::{region_loops, sheet_regions};
 use crate::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
 use crate::curve::curve::{Curve, CurveKind};
@@ -44,6 +44,45 @@ fn xy() -> Frame {
 
 fn p(x: f64, y: f64) -> Point2 {
     Vec2::new(x, y)
+}
+
+#[test]
+fn chord_coordinates_preserve_aspect_ratio_and_refuse_unrepresentable_inputs() {
+    use super::import_geometry::chord_coordinates;
+
+    // c = 1.5 - 0.25 = 1.25; 0.625/c = 0.5, 0.15625/c = 0.125.
+    assert_eq!(
+        chord_coordinates(p(0.875, 0.15625), 0.25, 1.5).unwrap(),
+        p(0.5, 0.125)
+    );
+    assert_eq!(
+        chord_coordinates(p(0.25, 0.0), 0.25, 1.5).unwrap(),
+        Vec2::ZERO
+    );
+    assert_eq!(
+        chord_coordinates(p(1.5, 0.0), 0.25, 1.5).unwrap(),
+        p(1.0, 0.0)
+    );
+    assert_eq!(
+        chord_coordinates(p(0.5, -0.125), 0.0, 1.0).unwrap(),
+        p(0.5, -0.125)
+    );
+    for (point, leading, trailing) in [
+        (p(0.0, 0.0), 0.0, 0.0),
+        (p(0.0, 0.0), 1.0, 0.0),
+        (p(f64::NAN, 0.0), 0.0, 1.0),
+        (p(0.0, f64::INFINITY), 0.0, 1.0),
+        (p(0.0, 0.0), f64::NEG_INFINITY, 1.0),
+        (p(0.0, 0.0), 0.0, f64::INFINITY),
+        (p(0.0, 0.0), -f64::MAX, f64::MAX),
+        (p(f64::MAX, 0.0), -f64::MAX, 0.0),
+        (p(0.0, 1.0), 0.0, f64::from_bits(1)),
+    ] {
+        assert!(
+            chord_coordinates(point, leading, trailing).is_err(),
+            "{point:?}, {leading}, {trailing}"
+        );
+    }
 }
 
 fn polygon(pts: &[Point2]) -> Loop2 {
@@ -942,6 +981,47 @@ fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
         let r = read(&k, &line, iv, true, &xy(), tol).unwrap();
         assert!(matches!(r[..], [Seg2::Line { .. }]), "{off}: {r:?}");
     }
+    // 80 of a circle of radius 4e7 is rational though its middle weight is 1 - 5e-13: its middle
+    // control point lies 4e-5 off the chord, the arc 2e-5 (over the zone tolerance); the same
+    // control points with equal weights (a polynomial) are not
+    let (radius, h) = (4e7, 1e-6_f64);
+    let (w, y) = (h.cos(), radius * h.cos() - radius);
+    let (x, top) = (radius * h.sin(), radius / w - radius);
+    let piece = |w: f64, v: f64| {
+        vec![vec![
+            [-x * v, y * v, v],
+            [0.0, top * w, w],
+            [x * v, y * v, v],
+        ]]
+    };
+    assert!(arc_before_line(&piece(w, 1.0), 1e-5));
+    assert!(!arc_before_line(&piece(w, 1.0), 5e-5));
+    assert!(!arc_before_line(&piece(1.0, 1.0), 1e-5));
+    assert!(!arc_before_line(&piece(0.5, 0.5), 1e-5));
+    // a piece of a circle of radius 1e8 (half-angle 6.3e-7, middle weight 1 - 2e-13, bending
+    // 2e-5 off its chord) raised to degree 32: neighbouring weights differ by at most 1.3e-14,
+    // under their rounding, the span's by 1e-13; it is rational
+    let (radius, h) = (1e8, 4e-13_f64.sqrt());
+    let (w, y) = (h.cos(), radius * h.cos() - radius);
+    let x = radius * h.sin();
+    let mut span = vec![
+        [-x, y, 1.0],
+        [0.0, (radius / w - radius) * w, w],
+        [x, y, 1.0],
+    ];
+    for n in 2..32 {
+        let mut up = vec![span[0]];
+        for i in 1..=n {
+            let a = i as f64 / (n + 1) as f64;
+            up.push(std::array::from_fn(|k| {
+                a * span[i - 1][k] + (1.0 - a) * span[i][k]
+            }));
+        }
+        up.push(span[n]);
+        span = up;
+    }
+    assert_eq!(span.len(), 33);
+    assert!(arc_before_line(&[span], 1e-5));
 }
 
 /// Samples do not certify: a C0 quadratic spline on the x axis at every knot k/16 and bowing 1
@@ -1266,6 +1346,28 @@ fn a_tapered_flange_changes_by_half_its_length_times_the_slope_tangent() {
     assert!(((toe + root) / 2.0 - 14.2).abs() < 1e-12);
     // A non-finite input gives a non-finite answer, never a panic.
     assert!(tapered_flange_ends(f64::NAN, 1.0, 5.0).0.is_nan());
+}
+
+#[test]
+fn directed_planar_sweep_keeps_quadrants_and_tiny_seam_angles() {
+    let sweep = super::profile::counterclockwise_sweep;
+    let center = Point2::new(0.0, 0.0);
+    let x = Point2::new(1.0, 0.0);
+    let y = Point2::new(0.0, 1.0);
+    assert_eq!(sweep(center, x, y), Some(FRAC_PI_2));
+    assert_eq!(sweep(center, y, x), Some(3.0 * FRAC_PI_2));
+    assert_eq!(sweep(center, x, x), Some(0.0));
+    for delta in [0.5e-12_f64, 1e-12, 2e-12] {
+        let end = Point2::new(delta.cos(), delta.sin());
+        assert_eq!(sweep(center, x, end), Some(delta));
+        let start = Point2::new(-1.0, delta / 2.0);
+        let end = Point2::new(-1.0, -delta / 2.0);
+        let expected = (end.y.atan2(end.x) - start.y.atan2(start.x)).rem_euclid(TAU);
+        assert_eq!(sweep(center, start, end), Some(expected));
+        assert!(expected > 0.0 && expected < 3e-12);
+    }
+    assert_eq!(sweep(center, center, x), None);
+    assert_eq!(sweep(center, x, Point2::new(f64::NAN, 0.0)), None);
 }
 
 mod recognition {
@@ -2842,5 +2944,246 @@ mod path_export_regressions {
         assert!(pts.contains(&Vec2::new(0.0, 1.0)));
         assert!(!pts.contains(&Vec2::new(0.0, -1.0)));
         assert_eq!(pts.len(), 5);
+    }
+}
+
+/// Straight members (`member`): closed forms for the middle line, the extrusion range, trims to
+/// planes and butt joints, and the refusals.
+mod member {
+    use std::f64::consts::FRAC_1_SQRT_2;
+
+    use crate::eval::Frame;
+    use crate::geom::vector3d::{Point3, Vec3};
+    use crate::math::Vec2;
+    use crate::prism::member::{axis, butt, extent, to_plane, End, Member, Refusal, Side};
+
+    fn frame(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Frame {
+        Frame {
+            origin: o,
+            x_axis: x,
+            y_axis: y,
+        }
+    }
+
+    /// The plane through `o` with unit normal `n`: its x the unit vector square to `n` in the
+    /// plane of `n` and world y, or world x when `n` is along y; y = n × x.
+    fn plane(o: [f64; 3], n: [f64; 3]) -> Frame {
+        let n = Vec3::new(n[0], n[1], n[2]);
+        let up = if n.y.abs() > 0.9 {
+            Vec3::new(1.0, 0.0, 0.0)
+        } else {
+            Vec3::new(0.0, 1.0, 0.0)
+        };
+        let x = (up - n * up.dot(n)).unitize().unwrap();
+        let y = n.cross(x);
+        frame(o, [x.x, x.y, x.z], [y.x, y.y, y.z])
+    }
+
+    fn near(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    /// A `w` × `w` bar centred on the line from `a` to `b` along +x, its section in y and z.
+    fn bar_along_x(a: f64, b: f64, w: f64) -> Member {
+        let h = w / 2.0;
+        Member::along(
+            frame([a, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+            Point3::new(a, 0.0, 0.0),
+            Point3::new(b, 0.0, 0.0),
+            Vec2::new(-h, -h),
+            Vec2::new(h, h),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_line_without_length_or_a_section_without_area_is_degenerate() {
+        let f = frame([0.0; 3], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+        let p = Point3::new(0.0, 0.0, 0.0);
+        let r = Member::along(f.clone(), p, p, Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0));
+        assert_eq!(r.unwrap_err(), Refusal::Degenerate);
+        let r = Member::along(
+            f,
+            p,
+            Point3::new(1.0, 0.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(-1.0, -1.0),
+        );
+        assert_eq!(r.unwrap_err(), Refusal::Degenerate);
+    }
+
+    /// The plane x + z = 150 cuts a 10 × 10 bar along x: its middle line at 150, its corners at
+    /// 145 and 155, so the section runs past 155 by the slant and 1 more before the cut.
+    #[test]
+    fn a_slanted_end_crosses_the_middle_line_where_the_plane_does() {
+        let m = bar_along_x(0.0, 100.0, 10.0);
+        let ends = [
+            None,
+            Some(plane(
+                [150.0, 0.0, 0.0],
+                [FRAC_1_SQRT_2, 0.0, FRAC_1_SQRT_2],
+            )),
+        ];
+        let a = axis(&m, &ends).unwrap();
+        assert!(
+            near(a.t0, 0.0) && near(a.t1, 150.0) && near(a.length, 150.0),
+            "{a:?}"
+        );
+        let e = extent(&m, &ends).unwrap();
+        assert!(
+            near(e.from, 0.0) && near(e.to, 155.0 + 10.0 + 1.0) && e.cut == [false, true],
+            "{e:?}"
+        );
+        // Square ends: the line's own ends, nothing cut.
+        let e = extent(&m, &[None, None]).unwrap();
+        assert!(
+            near(e.from, 0.0) && near(e.to, 100.0) && e.cut == [false, false],
+            "{e:?}"
+        );
+    }
+
+    /// Ends x + y = 0 and x + y = 30 are parallel: every line through the 45 × 45 section keeps
+    /// 30 between them, though their extents along the line overlap. Ends x + y = 0 and
+    /// x − y = 30 cross inside the section.
+    #[test]
+    fn parallel_slanted_ends_leave_a_short_member_and_crossing_ends_are_refused() {
+        let m = bar_along_x(0.0, 30.0, 45.0);
+        let start = Some(plane([0.0; 3], [-FRAC_1_SQRT_2, -FRAC_1_SQRT_2, 0.0]));
+        let parallel = [
+            start.clone(),
+            Some(plane([30.0, 0.0, 0.0], [FRAC_1_SQRT_2, FRAC_1_SQRT_2, 0.0])),
+        ];
+        let e = extent(&m, &parallel).unwrap();
+        assert!(e.cut == [true, true], "{e:?}");
+        assert!(near(axis(&m, &parallel).unwrap().length, 30.0));
+        let crossing = [
+            start,
+            Some(plane(
+                [30.0, 0.0, 0.0],
+                [FRAC_1_SQRT_2, -FRAC_1_SQRT_2, 0.0],
+            )),
+        ];
+        assert_eq!(extent(&m, &crossing).unwrap_err(), Refusal::EndsCross);
+    }
+
+    #[test]
+    fn end_planes_facing_into_the_member_running_along_it_or_too_far_are_refused() {
+        let m = bar_along_x(0.0, 100.0, 10.0);
+        let into = [None, Some(plane([90.0, 0.0, 0.0], [-1.0, 0.0, 0.0]))];
+        assert_eq!(extent(&m, &into).unwrap_err(), Refusal::WrongWay);
+        let along = [None, Some(plane([0.0, 50.0, 0.0], [0.0, 1.0, 0.0]))];
+        assert_eq!(extent(&m, &along).unwrap_err(), Refusal::WrongWay);
+        assert_eq!(axis(&m, &along).unwrap_err(), Refusal::RunsAlong);
+        let far = [None, Some(plane([2e6, 0.0, 0.0], [1.0, 0.0, 0.0]))];
+        assert_eq!(extent(&m, &far).unwrap_err(), Refusal::TooFar);
+    }
+
+    /// A bar from 0 to 100 trimmed to x = 150 with a gap of 2: its end moves, to the plane
+    /// x = 148 facing on along the line. The start, asked for, moves there instead.
+    #[test]
+    fn a_trim_to_a_plane_moves_the_nearer_end_short_of_it_by_the_gap() {
+        let m = bar_along_x(0.0, 100.0, 10.0);
+        let a = axis(&m, &[None, None]).unwrap();
+        let target = plane([150.0, 0.0, 0.0], [-1.0, 0.0, 0.0]);
+        let (which, cut) = to_plane(&m, &a, End::Nearer, &target, 2.0).unwrap();
+        assert_eq!(which, 1);
+        assert!(
+            near(cut.origin.x, 148.0) && near(cut.normal.dot(Vec3::new(1.0, 0.0, 0.0)), 1.0),
+            "{cut:?}"
+        );
+        let (which, cut) = to_plane(&m, &a, End::Start, &target, 0.0).unwrap();
+        assert_eq!(which, 0);
+        assert!(
+            near(cut.origin.x, 150.0) && near(cut.normal.dot(Vec3::new(-1.0, 0.0, 0.0)), 1.0),
+            "{cut:?}"
+        );
+        // A plane along the bar doesn't trim it.
+        assert!(to_plane(
+            &m,
+            &a,
+            End::Nearer,
+            &plane([0.0, 30.0, 0.0], [0.0, 1.0, 0.0]),
+            0.0
+        )
+        .is_none());
+    }
+
+    /// A 45 × 45 post along +y at x = 0 (its section's x is world −x, y up) and a rail along +x
+    /// from 100: the rail's start butts against the post's side facing it, x = 22.5, which is
+    /// the post's left (−x of its section). Its right faces away; a parallel rail misses.
+    #[test]
+    fn a_butt_joint_cuts_the_nearer_end_on_the_targets_side_facing_it() {
+        let post = Member::along(
+            frame([0.0, -100.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+            Point3::new(0.0, -100.0, 0.0),
+            Point3::new(0.0, 100.0, 0.0),
+            Vec2::new(-22.5, -22.5),
+            Vec2::new(22.5, 22.5),
+        )
+        .unwrap();
+        let post_axis = axis(&post, &[None, None]).unwrap();
+        let rail = bar_along_x(100.0, 300.0, 45.0);
+        let rail_axis = axis(&rail, &[None, None]).unwrap();
+        let (which, cut) = butt(&rail, &rail_axis, End::Nearer, &post, &post_axis, None, 0.0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(which, 0);
+        assert!(
+            near(cut.origin.x, 22.5) && near(cut.normal.dot(Vec3::new(-1.0, 0.0, 0.0)), 1.0),
+            "{cut:?}"
+        );
+        let left = butt(
+            &rail,
+            &rail_axis,
+            End::Nearer,
+            &post,
+            &post_axis,
+            Some(Side::Left),
+            0.0,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(left, (which, cut));
+        let away = butt(
+            &rail,
+            &rail_axis,
+            End::Nearer,
+            &post,
+            &post_axis,
+            Some(Side::Right),
+            0.0,
+        );
+        assert_eq!(away.unwrap_err(), Refusal::FacesAway);
+        let beside = Member::along(
+            frame([100.0, 200.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+            Point3::new(100.0, 200.0, 0.0),
+            Point3::new(300.0, 200.0, 0.0),
+            Vec2::new(-22.5, -22.5),
+            Vec2::new(22.5, 22.5),
+        )
+        .unwrap();
+        let beside_axis = axis(&beside, &[None, None]).unwrap();
+        assert!(butt(
+            &beside,
+            &beside_axis,
+            End::Nearer,
+            &post,
+            &post_axis,
+            None,
+            0.0
+        )
+        .unwrap()
+        .is_none());
+        assert!(butt(
+            &rail,
+            &rail_axis,
+            End::Nearer,
+            &beside,
+            &beside_axis,
+            None,
+            0.0
+        )
+        .unwrap()
+        .is_none());
     }
 }

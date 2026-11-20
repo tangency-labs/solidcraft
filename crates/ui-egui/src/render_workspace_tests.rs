@@ -1963,7 +1963,7 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     );
     assert!(gpu.lines.is_empty() && gpu.overlay.is_empty() && gpu.under.is_empty() && gpu.hidden.is_empty() && gpu.ghost.is_empty());
     s.selection = vec![solidcraft_engine::Sel::Body { name: "Glass".into() }];
-    s.section = Some((solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X));
+    s.section = vec![solidcraft_engine::SectionPlane { id: 1, origin: solidcore_record::Vec3::ZERO, normal: solidcore_record::Vec3::X }];
     let after = solidcraft_engine::product_scene::extract(&s).unwrap();
     assert_eq!(gpu_scene(&after).unwrap().0, key);
     s.execute("appearance.assign", &json!({"bodies":["Glass"],"color":"#336699","opacity":0.0})).unwrap();
@@ -8964,6 +8964,7 @@ fn current_live_pixels_use_only_the_depth_correct_feedback_callback_and_stale_pi
         samples: 1,
         tess: false,
         oit: false,
+        edges: false,
     });
     h.app.render_workspace.host = Some(host_executor(4096, true, 1).unwrap());
     sync_backend(&mut h.app);
@@ -16360,6 +16361,10 @@ fn render_quality_denoise_mask_displays_categorical_receipt_exports_and_returns_
     let host = CpuHost::for_platform().unwrap();
     h.app.session.set_render_job_host(Some(host.clone())).unwrap();
     h.app.render_workspace.image_host = Some(host);
+    if image_host(&h.app, ImageMethod::CpuRaytrace).is_err() {
+        eprintln!("render quality denoise mask test requires raytrace-cpu");
+        return;
+    }
     h.app.run("solid.box", json!({"length":5,"width":4,"height":3,"body_name":"Mask subject"})).unwrap();
     let request = json!({"settings":{"width":16,"height":8,"camera":h.app.cam,"job":{"method":"cpu_raytrace",
         "options":{"threads":1,"progressive":{"samples_per_pixel":2,"seed":81},

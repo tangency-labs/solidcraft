@@ -3,7 +3,8 @@ use solidcraft_doc::canvas::base64_encode;
 
 use super::{
     CanvasCalibrateParams, CanvasCalibrated, CanvasDecalParams, CanvasDeleteParams, CanvasDeleted, CanvasEditParams, CanvasEdited,
-    CanvasInsertParams, CanvasPlaced, CanvasPlane, CanvasStraightenParams, CanvasStraightened, CanvasToSketchParams, CanvasTraced, DecalFace,
+    CanvasFrameSketchParams, CanvasInsertParams, CanvasPlaced, CanvasPlane, CanvasStraightenParams, CanvasStraightened, CanvasToSketchParams,
+    CanvasTraced, DecalFace,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -22,13 +23,17 @@ fn png() -> String {
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<CanvasInsertParams>(),
-        &["angle", "at", "center", "data", "flip", "name", "offset", "opacity", "path", "plane", "width"],
+        &["angle", "at", "center", "data", "flip", "frame", "name", "offset", "opacity", "path", "plane", "resolution", "width"],
     );
     assert_keys(
         input_schema_for::<CanvasDecalParams>(),
-        &["angle", "at", "center", "data", "face", "flip", "name", "offset", "opacity", "path", "width"],
+        &["angle", "at", "center", "data", "face", "flip", "frame", "name", "offset", "opacity", "path", "resolution", "width"],
     );
-    assert_keys(input_schema_for::<CanvasEditParams>(), &["angle", "canvas", "center", "flip", "locked", "name", "opacity", "visible", "width"]);
+    assert_keys(
+        input_schema_for::<CanvasEditParams>(),
+        &["anchor", "angle", "canvas", "center", "flip", "locked", "name", "opacity", "visible", "width"],
+    );
+    assert_keys(input_schema_for::<CanvasFrameSketchParams>(), &["canvas", "name"]);
     assert_keys(input_schema_for::<CanvasCalibrateParams>(), &["a", "b", "canvas", "distance"]);
     assert_keys(input_schema_for::<CanvasStraightenParams>(), &["a", "angle", "b", "canvas"]);
     assert_keys(input_schema_for::<CanvasDeleteParams>(), &["canvas"]);
