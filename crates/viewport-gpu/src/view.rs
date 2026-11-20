@@ -7450,7 +7450,7 @@ mod glass_tests {
         let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false };
         let mut r = Renderer::new(&device, target, None);
         let mut a = test_frame(test_scene(), 1.0);
         let mut b = test_frame(test_scene(), 1.0);
