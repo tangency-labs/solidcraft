@@ -1079,6 +1079,17 @@ pub fn point_on_face(
     point: Point3,
     tolerance: f64,
 ) -> Result<Option<Point3>> {
+    Ok(point_on_face_at(k, b, f, point, tolerance)?.map(|(_, nearest)| nearest))
+}
+
+/// [`point_on_face`], also giving the face's (u, v) of the nearest point.
+pub fn point_on_face_at(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    point: Point3,
+    tolerance: f64,
+) -> Result<Option<(Point2, Point3)>> {
     let mut pc = PointClassification::new(zone_tol3d(k, tolerance));
     let Some(uv) = point_3d_classify_at(
         k,
@@ -1104,7 +1115,7 @@ pub fn point_on_face(
     let Some(nearest) = ignored(surface.evaluate_point(k, uv))? else {
         return Ok(None);
     };
-    Ok((point.distance(nearest) <= tolerance).then_some(nearest))
+    Ok((point.distance(nearest) <= tolerance).then_some((uv, nearest)))
 }
 
 // ---- SmFace::EdgeCurveOnClassify -----------------------------------------------------------

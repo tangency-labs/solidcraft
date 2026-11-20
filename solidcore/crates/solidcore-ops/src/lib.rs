@@ -62,6 +62,7 @@ pub mod fit_projection;
 pub mod hatch;
 pub mod heal;
 pub mod hlr;
+pub mod hole_mouth;
 pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;
