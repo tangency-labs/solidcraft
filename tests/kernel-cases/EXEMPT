@@ -466,8 +466,10 @@ storage.patch                     plugins: a plugin's own data in the design, no
 storage.put_blob                  plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 storage.set                       plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 tab.view.activate                 shows a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
+tab.view.beside                   puts a view beside another in the tiling: no geometry, tested in the views crate and the UI's documents tests
 tab.view.close                    closes a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.duplicate                copies a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
+tab.view.layout                   sets how the design's views are tiled: no geometry, tested in the views crate and the UI's documents tests
 tab.view.list                     a listing of the design's views: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.move                     reorders the design's views: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.open                     opens a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
