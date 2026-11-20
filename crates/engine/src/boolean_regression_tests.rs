@@ -98,6 +98,22 @@ fn a_region_by_two_arcs_crossing_almost_tangentially_extrudes() {
     assert!((v - 1_733_713.898_7).abs() < 1e-3, "{v}");
 }
 
+/// #16098: a traced logo's 27 regions extrude 1 mm (SMLib refused one, status 1005).
+#[test]
+fn a_traced_logo_extrudes() {
+    let s = replay(include_str!("../../../examples/regressions/canvas_trace_extrude.json"));
+    let errors: Vec<_> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let feature = s.doc.features.iter().find(|f| f.name == "Extrude9").unwrap();
+    let solidcraft_doc::FeatureKind::Extrude { sketch, profiles, .. } = &feature.kind else { panic!("Extrude9 is an extrude") };
+    let state = s.model.state();
+    let regions = solidcraft_doc::select_profiles(state.sketch(sketch.0).unwrap(), profiles).unwrap();
+    let area: f64 = regions.iter().map(|r| r.area()).sum();
+    let v: f64 = state.bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum();
+    assert!(regions.len() == 27 && (area - 439.626_6).abs() < 1e-3, "{} regions, area {area}", regions.len());
+    assert!((v - area * 1.0).abs() < 1e-6 * area, "volume {v}, area {area}");
+}
+
 /// #18039: a 360° revolve cut whose sketch is in the same plane as the body it cuts (a body
 /// revolved a whole turn in that plane) was refused: SMLib's boolean split the two seam edges
 /// the solids of revolution share and left an edge near the seam, which its check refuses ("Face
