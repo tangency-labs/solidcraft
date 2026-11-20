@@ -7405,7 +7405,8 @@ impl SessionObjects<'_> {
             Err(e) => Err(e),
         };
         match (made, cusp) {
-            (Err(_), Some((vertex, location, edge))) => {
+            (Err(e), _) if e.is_unported_or_cancelled() => Err(e),
+            (Err(cause), Some((vertex, location, edge))) => {
                 executive.error.note_vertex_error(
                     vertex
                         .map(|v| FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(v))),
@@ -7421,12 +7422,14 @@ impl SessionObjects<'_> {
                     edge.map(|e| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))),
                     fit_kind,
                 );
-                Err(SolidError::blend(
+                Err(crate::error::Failure::new(
                     "SmFilletNx1Corner::MakeCornerTopology",
                     crate::error::blend::BlendFailure::NoRoom(
                         crate::blend::fillet_executive::NoRoomReason::RailLeavesFace,
                     ),
-                ))
+                )
+                .caused_by(cause)
+                .into_error())
             }
             (made, _) => made,
         }
