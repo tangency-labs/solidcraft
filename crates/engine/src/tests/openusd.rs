@@ -745,3 +745,44 @@ fn a_distribution_export_is_meshes_with_pictures() {
     assert!(refused.unwrap_err().to_string().contains("`purpose` must be interchange or distribution"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn openusd_exports_pass_openusd_validators() {
+    let dir = temp_dir("validate");
+    let mut s = pictured();
+    let b = s.doc.occurrence_of(s.doc.find_component("B").unwrap()).unwrap().id;
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    run(&mut s, "browser.visibility", json!({"items": ["Loose"], "visible": false}));
+    let mut files = Vec::new();
+    for (name, options) in [
+        ("interchange.usda", json!({})),
+        ("interchange.usdc", json!({})),
+        ("distribution.usdz", json!({"purpose": "distribution"})),
+        ("physics.usda", json!({"physics": true})),
+    ] {
+        let path = dir.join(name);
+        let mut p = options;
+        p["path"] = json!(path.to_string_lossy());
+        run(&mut s, "file.export", p);
+        files.push(path);
+    }
+    // `SOLIDCRAFT_USD_PYTHON` names a Python that has the bindings: then nothing may skip.
+    let required = std::env::var("SOLIDCRAFT_USD_PYTHON").ok();
+    let python = required.clone().unwrap_or_else(|| "python3".into());
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/usd-validate.py");
+    let out = std::process::Command::new(&python).arg(&script).args(["--ignore", "MissingShaderIdInRegistry"]).args(&files).output();
+    match out {
+        // Exit 3 is the script's "no bindings, nothing checked"; any other failure, a signal
+        // included (no exit code), or a file that does not open (2) fails.
+        Ok(out) if required.is_none() && out.status.code() == Some(3) => {
+            eprintln!("skipped: {python} has no OpenUSD bindings: {}", String::from_utf8_lossy(&out.stderr));
+        }
+        Ok(out) => assert!(out.status.success(), "{}: {}{}", out.status, String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
+        Err(e) => {
+            assert!(required.is_none(), "{python} does not run: {e}");
+            eprintln!("skipped: {python} does not run: {e}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
