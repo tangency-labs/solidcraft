@@ -424,6 +424,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A closing window starts its successor (a graphics restart reopening the saved designs)
+    /// after `stop`: the successor must not hand its designs back to it (#19340).
+    #[test]
+    fn a_stopped_instance_takes_no_files() {
+        let dir = temp("stopped");
+        let file = dir.join("part.sc");
+        std::fs::write(&file, b"x").unwrap();
+        start(Some(&dir), &egui::Context::default());
+        let endpoint = Endpoint::in_settings(&dir).unwrap();
+        let token = std::fs::read_to_string(&endpoint.token).unwrap();
+        stop();
+        let request = json!({ "token": token.trim(), "files": [file.to_string_lossy()] }).to_string();
+        assert!(!ask(&endpoint, &request), "a stopped instance took a hand-off");
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(take().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn long_socket_paths_are_not_used() {
         let long = PathBuf::from(format!("/{}", "a".repeat(200)));
