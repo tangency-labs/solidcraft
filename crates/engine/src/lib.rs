@@ -57,6 +57,8 @@ pub mod status_items;
 pub mod timing;
 pub mod title_block_text;
 pub mod upright_image;
+#[cfg(feature = "usage-stats")]
+pub mod usage;
 pub mod view;
 
 use solidcraft_geom::prelude::*;
@@ -885,6 +887,10 @@ pub struct Session {
     /// Record this session's top-level commands in the crash journal (the app's own design;
     /// never previews or other scratch sessions). See [`crash`].
     pub crash_journal: bool,
+    /// Count the commands the person runs in this session for the app's usage statistics
+    /// ([`usage`]): the app's own design only, like [`Session::crash_journal`].
+    #[cfg(feature = "usage-stats")]
+    pub count_usage: bool,
     /// The last value each drawing dimension read this session, by drawing and dimension: what a
     /// dimension that can't be measured now last measured. Only the file's copy of the document
     /// keeps it ([`as_saved`]): a read is no change to undo or to ask about saving.
@@ -1282,6 +1288,8 @@ impl Session {
             motion_traces: Default::default(),
             command_check: None,
             crash_journal: false,
+            #[cfg(feature = "usage-stats")]
+            count_usage: false,
         }
     }
 
@@ -1315,6 +1323,8 @@ impl Session {
         // The design on screen stays journaled for crash reports at once, not from the app's
         // next frame, so commands sent right after `doc.open` or `file.new` are kept.
         let crash_journal = self.crash_journal;
+        #[cfg(feature = "usage-stats")]
+        let count_usage = self.count_usage;
         let replacements = self.replacements.wrapping_add(1);
         let command_check = self.command_check.take();
         let previous_doc = self.doc.clone();
@@ -1322,6 +1332,10 @@ impl Session {
         let redo_watch = self.redo_watch.take();
         *self = fresh;
         self.crash_journal = crash_journal;
+        #[cfg(feature = "usage-stats")]
+        {
+            self.count_usage = count_usage;
+        }
         self.command_check = command_check;
         self.auto_project = auto_project;
         self.project_construction = project_construction;
@@ -2621,6 +2635,12 @@ impl Session {
                         false
                     };
                     if saves {
+                        // An operation for usage statistics: the action that made this undo step
+                        // (`usage`). A drag's frames make none until it ends; replays make none.
+                        #[cfg(feature = "usage-stats")]
+                        if self.count_usage && live.is_none() {
+                            usage::note(usage::Bucket::Operations, spec.id);
+                        }
                         // A new step ends what could be redone in its part; the other parts' redo
                         // steps still hold, as undo puts back only the part a step changed.
                         let part = before.part;
@@ -2938,6 +2958,8 @@ impl Session {
             motion_traces: self.motion_traces.clone(),
             command_check: self.command_check.clone(),
             crash_journal: false,
+            #[cfg(feature = "usage-stats")]
+            count_usage: false,
         }
     }
 
