@@ -657,6 +657,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         "hover": hit.map(|h| json!({"object": encode(h.object), "kind": kind_name(h.kind), "on_edge": h.on_edge, "lit": lit.contains(&h.object)})),
         "error": app.drawing_workspace.page.marks.as_ref().and_then(|m| m.error.clone()),
     }));
+    // The shared toasts, as the model and render pages show them: what a command or an export or
+    // print just said, which the sheet would otherwise leave unseen.
+    crate::viewport::transient_messages(app, ui, canvas, None);
     true
 }
 

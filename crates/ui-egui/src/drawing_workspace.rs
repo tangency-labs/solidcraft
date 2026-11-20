@@ -18,6 +18,7 @@ mod first_sheet;
 pub(crate) mod note;
 mod panels;
 pub(crate) mod placement;
+pub(crate) mod print;
 
 use panels::Tool;
 
@@ -168,7 +169,7 @@ pub(crate) fn counterpart(command: &'static str) -> Option<&'static str> {
 }
 
 pub fn can_open_options(id: &str) -> bool {
-    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set")
+    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set" | "drawing.print.planned")
 }
 
 /// Dismiss the current Drawing inspector without touching source or drawing data.
@@ -256,6 +257,10 @@ pub fn start(app: &mut SolveApp, id: &str) -> bool {
         if let Err(error) = app.run("select.all", serde_json::json!({"sheet": sheet})) {
             app.set_status(error, true);
         }
+        return true;
+    }
+    if matches!(id, "drawing.print" | "drawing.print.planned") && active(app) && app.session.open_drawing.is_some() {
+        print::start(app);
         return true;
     }
     if !active(app) || !can_open_options(id) {
