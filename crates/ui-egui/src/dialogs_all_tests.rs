@@ -456,7 +456,10 @@ fn representative(h: &Harness, command: &str) -> Dialog {
         if command == "solid.cylinder" {
             continue; // its face and reference edges place it (cylinder reference tests); this form checks its fields
         }
-        if matches!(input.label, "Rail" | "Second Rail" | "Pass through" | "Direction" | "Roller (optional)" | "Tip (optional)" | "Avoid") {
+        if matches!(input.label, "Rail" | "Second Rail" | "Pass through" | "Direction" | "Roller (optional)" | "Tip (optional)") {
+            continue;
+        }
+        if input.label == "Avoid" {
             continue;
         }
         let name = if index == 1 && command != "surface.ruled" { "Body2" } else { "Body1" };
@@ -623,13 +626,13 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
     use egui::accesskit::Role;
     Some(match label {
         "Type" if matches!(command, "sheet.flange" | "sheet.hem" | "solid.revolve" | "solid.emboss" | "solid.scale") => return None,
-        "Direction" => return None,                                 // segmented buttons, labelled by each choice
-        "Layout" if command == "solid.pattern.face" => return None, // Grid | Staggered | Random
-        "Noise" if command == "solid.pattern.face" => return None,  // white | blue | pink | brown
+        "Direction" => return None, // segmented buttons, labelled by each choice
         "ui.fair_strength" | "ui.fair_iterations" => return None,
         "Size" if matches!(command, "solid.cylinder" | "solid.sphere") => return None, // Diameter | Radius
         "Continuity" | "Corners" | "Cells" | "Profile" => return None,
         "Operation" if command == "solid.mirror" => return None,
+        // Segmented buttons, labelled by each choice: Grid | Staggered | Random, and the noises.
+        "Layout" | "Noise" if command == "solid.pattern.face" => return None,
         "Operation" | "Type" | "Orientation" | "Move Type" | "Object Type" | "Rule" | "Rim Edge" | "Catch Direction" | "Shape" | "Holes" | "Size"
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
         | "Nut" | "Cam" | "Follower" | "Anchor" => Role::ComboBox,

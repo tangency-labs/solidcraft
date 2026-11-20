@@ -152,8 +152,8 @@ impl<'a> PointDistance<'a> {
         }
         let failed = || KernelError::Failed("no distance to the face could be found".into());
         guard("a distance to a face", || {
-            let (ops, order) =
-                self.body.ops_body().ok_or_else(|| KernelError::Failed("a distance to a face: the kernel cannot take this body".into()))?;
+            let form = self.body.ops_body().ok_or_else(|| KernelError::Failed("a distance to a face: the kernel cannot take this body".into()))?;
+            let (ops, order) = &*form;
             let p = [[at.x, at.y, at.z]];
             let found = match self.face {
                 Some(f) => ops
