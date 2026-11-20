@@ -17,6 +17,7 @@
 //! | [`IntersectFailure::PointsWhereAPlaneCrosses`] | `SM_ERR`        |
 //! | [`IntersectFailure::StageFailed`]   | the site's (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`) |
 //! | [`IntersectFailure::Defect`]        | the site's (`SM_ERR`, or another through `with_status`) |
+//! | the named causes, from [`IntersectFailure::NoIntersection`] on | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
 //!
 //! **The record** (#15034). A check that refuses builds a typed cause; a stage that fails
 //! with no reason the kernel names is an [`IntersectFailure::StageFailed`], a defect
@@ -29,8 +30,9 @@
 //!
 //! Deviations: not upstream. The failure's `operation` path says which routine. The handles these routines work on are the
 //! classification's or intersector's own, not ids of the caller's B-rep, so no failure
-//! names an entity. The failures that are checks of a caller's handles stay
-//! [`crate::SolidError::InvalidInput`].
+//! names an entity. A check of a caller's handles that reports no status stays
+//! [`crate::SolidError::InvalidInput`]; a check of the caller's argument, state or body that
+//! reports a status is a named cause of class `invalid_input`, keeping that status.
 
 use super::{
     ErrorKind, Failure, Reason, SM_ERR, SM_ERR_ASSERT_FAILURE, SM_ERR_NULL_POINTER,
@@ -84,6 +86,39 @@ pub enum IntersectFailure {
         /// The step that failed, and why that is the kernel's fault.
         why: &'static str,
     },
+    /// The intersection searched for is empty: the curves, surfaces, B-reps or views given
+    /// do not meet, and neither an overlap nor a crossing point was found. Class `failed`.
+    NoIntersection,
+    /// A drop of a point onto a curve, a surface or a volume (a point solve) found no foot
+    /// point. Class `failed`.
+    NoFoot,
+    /// The point solve found `found` nearest points on the face's surface, also within 100
+    /// times the zone tolerance, where the classification needs exactly one. Class `failed`.
+    NotOneFoot {
+        /// How many nearest points the second solve found.
+        found: usize,
+    },
+    /// The object point of a point classification was asked for before its parameters were
+    /// set. The caller's state: [`ErrorKind::InvalidInput`].
+    ParametersNotSet,
+    /// A face of the caller's body has no surface. [`ErrorKind::InvalidInput`].
+    FaceWithoutSurface,
+    /// An edge of the caller's body has no curve. [`ErrorKind::InvalidInput`].
+    EdgeWithoutCurve,
+    /// The point classification has no object, or none of the kind its class names. The
+    /// caller's classification: [`ErrorKind::InvalidInput`].
+    NoClassObject,
+    /// The routine reads what an earlier step of the same object sets up (a drop's start
+    /// points, a cache's tree), and the caller has not run that step.
+    /// [`ErrorKind::InvalidInput`].
+    NotSetUp,
+    /// A face of the caller's poly B-rep has no outer loop, or its outer loop no edge, so
+    /// its plane has no point to pass through. [`ErrorKind::InvalidInput`].
+    PolyFaceWithoutEdges,
+    /// The classification or solution is on an object of a kind the routine does not take
+    /// (for example a region where a point is needed, or a loop where a vertex, edge, face or
+    /// region is). [`ErrorKind::Unsupported`].
+    UnsupportedObjectKind,
 }
 
 impl IntersectFailure {
@@ -94,8 +129,18 @@ impl IntersectFailure {
             | Self::StepTangentTooShort
             | Self::PointsWhereAPlaneCrosses { .. }
             | Self::StageFailed
-            | Self::Defect { .. } => SM_ERR,
-            Self::Missing(_) => SM_ERR_NULL_POINTER,
+            | Self::Defect { .. }
+            | Self::NoIntersection
+            | Self::NoFoot
+            | Self::NotOneFoot { .. }
+            | Self::ParametersNotSet
+            | Self::UnsupportedObjectKind => SM_ERR,
+            Self::Missing(_)
+            | Self::FaceWithoutSurface
+            | Self::EdgeWithoutCurve
+            | Self::NoClassObject
+            | Self::NotSetUp
+            | Self::PolyFaceWithoutEdges => SM_ERR_NULL_POINTER,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
         }
@@ -106,12 +151,21 @@ impl IntersectFailure {
     /// [`ErrorKind::Missing`] for
     /// [`IntersectFailure::Missing`], [`ErrorKind::OutsideDomain`] for
     /// [`IntersectFailure::OutsideDomain`], [`ErrorKind::NotWithinTolerance`] for
-    /// [`IntersectFailure::PointsWhereAPlaneCrosses`], [`ErrorKind::Failed`] otherwise.
+    /// [`IntersectFailure::PointsWhereAPlaneCrosses`], [`ErrorKind::InvalidInput`] for a check
+    /// of the caller's argument, state or body, [`ErrorKind::Unsupported`] for a kind the
+    /// routine does not take, [`ErrorKind::Failed`] otherwise.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
             Self::PointsWhereAPlaneCrosses { .. } => ErrorKind::NotWithinTolerance,
+            Self::ParametersNotSet
+            | Self::FaceWithoutSurface
+            | Self::EdgeWithoutCurve
+            | Self::NoClassObject
+            | Self::NotSetUp
+            | Self::PolyFaceWithoutEdges => ErrorKind::InvalidInput,
+            Self::UnsupportedObjectKind => ErrorKind::Unsupported,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -137,6 +191,25 @@ impl core::fmt::Display for IntersectFailure {
             ),
             Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
             Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
+            Self::NoIntersection => f.write_str("no intersection was found"),
+            Self::NoFoot => f.write_str("the drop found no foot point"),
+            Self::NotOneFoot { found } => write!(
+                f,
+                "no single nearest point on the face's surface was found ({found} found)"
+            ),
+            Self::ParametersNotSet => {
+                f.write_str("the point's classification parameters are not set")
+            }
+            Self::FaceWithoutSurface => f.write_str("the face has no surface"),
+            Self::EdgeWithoutCurve => f.write_str("the edge has no curve"),
+            Self::NoClassObject => {
+                f.write_str("the classification has no object of the kind its class names")
+            }
+            Self::NotSetUp => f.write_str("a step this one reads from has not run"),
+            Self::PolyFaceWithoutEdges => f.write_str("a poly face has no outer loop edge"),
+            Self::UnsupportedObjectKind => {
+                f.write_str("the object is of a kind the routine does not take")
+            }
         }
     }
 }
@@ -329,6 +402,51 @@ pub(super) mod tests {
         );
     }
 
+    /// The named causes of the drops, the point classification, the ray tracer and the
+    /// intersection entries keep the status of the phrase each replaced, so
+    /// `upstream_status` reads what it did, and have their class.
+    #[test]
+    fn the_drop_classification_and_ray_causes_keep_their_status_and_have_their_class() {
+        use ErrorKind as K;
+        use IntersectFailure as F;
+        let op = "intersect::op";
+        let cases = [
+            (F::NoIntersection, SM_ERR, K::Failed),
+            (F::NoFoot, SM_ERR, K::Failed),
+            (F::NotOneFoot { found: 2 }, SM_ERR, K::Failed),
+            (F::ParametersNotSet, SM_ERR, K::InvalidInput),
+            (F::FaceWithoutSurface, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::EdgeWithoutCurve, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::NoClassObject, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::NotSetUp, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (
+                F::PolyFaceWithoutEdges,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (F::UnsupportedObjectKind, SM_ERR, K::Unsupported),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::intersect(op, failure);
+            assert_eq!(e.sm_status(), Some(status), "{failure:?}");
+            assert_eq!(
+                super::super::upstream_status(&e),
+                Some(status),
+                "{failure:?}"
+            );
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.intersect_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+            assert!(e.is_status_answer(), "{failure:?}");
+        }
+        // a site whose status is not the cause's default keeps its own
+        let e = Failure::new(op, F::FaceWithoutSurface)
+            .with_status(SM_ERR)
+            .into_error();
+        assert_eq!(super::super::upstream_status(&e), Some(SM_ERR));
+        assert_eq!(e.kind(), K::InvalidInput);
+    }
+
     /// The intersection routines describe their failures: their library code builds no
     /// bare `Upstream` status.
     #[test]
@@ -358,7 +476,6 @@ pub(super) mod tests {
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
             ("solidcore/src/intersect/adv_surface_intersector.rs", 10),
-            ("solidcore/src/intersect/api_intersectors.rs", 5),
             ("solidcore/src/intersect/curve_class/p1.rs", 9),
             ("solidcore/src/intersect/curve_class/p2.rs", 7),
             ("solidcore/src/intersect/curve_class/p3.rs", 19),
@@ -368,8 +485,6 @@ pub(super) mod tests {
             ("solidcore/src/intersect/curve_class/p7.rs", 17),
             ("solidcore/src/intersect/curve_class/p8.rs", 17),
             ("solidcore/src/intersect/curve_class/p9.rs", 17),
-            ("solidcore/src/intersect/point_class.rs", 12),
-            ("solidcore/src/intersect/ray_tracer.rs", 11),
             ("solidcore/src/intersect/surface_drop_curve.rs", 8),
             ("solidcore/src/intersect/surface_drop_lib/boundary_moves.rs", 3),
             ("solidcore/src/intersect/surface_drop_lib/p1.rs", 4),
@@ -382,7 +497,6 @@ pub(super) mod tests {
             ("solidcore/src/intersect/surface_tracer.rs", 6),
             ("solidcore/src/intersect/topology_solver/p1.rs", 12),
             ("solidcore/src/intersect/topology_solver/p2.rs", 24),
-            ("solidcore/src/intersect/views.rs", 2),
         ];
         assert_pinned(
             "intersection phrase-cause sites",
