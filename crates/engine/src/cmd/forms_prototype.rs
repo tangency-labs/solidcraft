@@ -4398,7 +4398,7 @@ mod tests {
         s.execute("form.prototype.redo", &json!({})).unwrap();
         assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), authored);
         let id = s.execute("form.prototype.commit", &json!({"tolerance":0.05})).unwrap()["feature"].as_u64().unwrap();
-        let saved = solidcraft_io::write_design(s.doc.as_ref());
+        let saved = solidcraft_io::write_design(s.doc.as_ref()).unwrap();
         let mut reopened = Session::new(solidcraft_io::read_design(&saved).unwrap());
         assert!(reopened.model.result(id).unwrap().error.is_none());
         reopened.execute("form.edit", &json!({"feature":id})).unwrap();
@@ -4448,7 +4448,7 @@ mod tests {
         assert!(opened_skin.bodies[0].body.is_surface());
         assert!(crate::doc::naming::named_face_point(&opened_skin, None, &old_name).is_err());
 
-        let bytes = solidcraft_io::write_design(reopened.doc.as_ref());
+        let bytes = solidcraft_io::write_design(reopened.doc.as_ref()).unwrap();
         let mut reopened = Session::new(solidcraft_io::read_design(&bytes).unwrap());
         reopened.execute("form.edit", &json!({"feature":id})).unwrap();
         assert_eq!(reopened.forms_prototype.as_ref().unwrap().definition(), removed);
@@ -5792,7 +5792,7 @@ mod tests {
             assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), after);
             let feature = s.execute("form.prototype.commit", &json!({"tolerance":0.01})).unwrap()["feature"].as_u64().unwrap();
             assert!(s.model.result(feature).unwrap().error.is_none());
-            let saved = solidcraft_io::write_design(s.doc.as_ref());
+            let saved = solidcraft_io::write_design(s.doc.as_ref()).unwrap();
             let mut reopened = Session::new(solidcraft_io::read_design(&saved).unwrap());
             reopened.execute("form.edit", &json!({"feature":feature})).unwrap();
             assert_eq!(reopened.forms_prototype.as_ref().unwrap().definition(), after);
@@ -5917,7 +5917,7 @@ mod tests {
         assert!(s.forms_prototype.as_ref().unwrap().match_report.as_ref().unwrap().position_mm <= 0.001);
         let feature = s.execute("form.prototype.commit", &json!({"operation":"new","tolerance":0.01})).unwrap()["feature"].as_u64().unwrap();
         assert!(s.model.result(feature).unwrap().error.is_none());
-        let mut s = Session::new(solidcraft_io::read_design(&solidcraft_io::write_design(s.doc.as_ref())).unwrap());
+        let mut s = Session::new(solidcraft_io::read_design(&solidcraft_io::write_design(s.doc.as_ref()).unwrap()).unwrap());
         set_height(&mut s, "1.4 mm");
         assert!(s.model.result(feature).unwrap().error.is_none());
         let body = s.model.state().bodies.iter().find(|body| body.feature == feature).unwrap().body.clone();
@@ -6383,7 +6383,7 @@ mod tests {
         assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), after);
         let finish = s.execute("form.prototype.commit", &json!({"tolerance":0.05})).unwrap();
         let id = finish["feature"].as_u64().unwrap();
-        let saved = solidcraft_io::write_design(s.doc.as_ref());
+        let saved = solidcraft_io::write_design(s.doc.as_ref()).unwrap();
         let reopened = solidcraft_io::read_design(&saved).unwrap();
         assert_eq!(reopened.feature(id).unwrap(), s.doc.feature(id).unwrap());
         let mut s = Session::new(reopened);
@@ -6433,7 +6433,7 @@ mod tests {
         s.execute("form.prototype.redo", &json!({})).unwrap();
         assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), after);
         let id = s.execute("form.prototype.commit", &json!({"tolerance":0.05})).unwrap()["feature"].as_u64().unwrap();
-        let saved = solidcraft_io::write_design(s.doc.as_ref());
+        let saved = solidcraft_io::write_design(s.doc.as_ref()).unwrap();
         let reopened = solidcraft_io::read_design(&saved).unwrap();
         assert_eq!(reopened.feature(id).unwrap(), s.doc.feature(id).unwrap());
         let mut s = Session::new(reopened);
@@ -6510,7 +6510,7 @@ mod tests {
         s.execute("form.prototype.redo", &json!({})).unwrap();
         assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), after);
         let id = s.execute("form.prototype.commit", &json!({"tolerance":0.05})).unwrap()["feature"].as_u64().unwrap();
-        let design = solidcraft_io::read_design(&solidcraft_io::write_design(s.doc.as_ref())).unwrap();
+        let design = solidcraft_io::read_design(&solidcraft_io::write_design(s.doc.as_ref()).unwrap()).unwrap();
         let mut s = Session::new(design);
         s.execute("form.edit", &json!({"feature":id})).unwrap();
         let form = s.forms_prototype.as_ref().unwrap();
@@ -6558,7 +6558,7 @@ mod tests {
         assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), before);
         s.execute("form.prototype.redo", &json!({})).unwrap();
         let id = s.execute("form.prototype.commit", &json!({"tolerance":0.05})).unwrap()["feature"].as_u64().unwrap();
-        let design = solidcraft_io::read_design(&solidcraft_io::write_design(s.doc.as_ref())).unwrap();
+        let design = solidcraft_io::read_design(&solidcraft_io::write_design(s.doc.as_ref()).unwrap()).unwrap();
         let mut s = Session::new(design);
         s.execute("form.edit", &json!({"feature":id})).unwrap();
         assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), after);
@@ -6648,7 +6648,7 @@ mod tests {
         assert_eq!(wall.edge_count(), skin.edge_count() + 3);
         assert_eq!(wall.shell_count(), skin.shell_count());
         let id = s.execute("form.prototype.commit", &json!({"tolerance":0.05})).unwrap()["feature"].as_u64().unwrap();
-        let doc = solidcraft_io::read_design(&solidcraft_io::write_design(s.doc.as_ref())).unwrap();
+        let doc = solidcraft_io::read_design(&solidcraft_io::write_design(s.doc.as_ref()).unwrap()).unwrap();
         let mut s = Session::new(doc);
         s.execute("form.edit", &json!({"feature":id})).unwrap();
         let reopened = s.forms_prototype.as_ref().unwrap();

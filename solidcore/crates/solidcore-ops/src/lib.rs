@@ -84,6 +84,7 @@ pub mod offset;
 pub mod order;
 pub mod ordered_solve;
 pub mod outline;
+pub mod parameter_line;
 pub mod path_export;
 pub mod pcurve;
 pub mod pick;

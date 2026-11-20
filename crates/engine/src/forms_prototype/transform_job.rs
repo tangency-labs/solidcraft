@@ -317,7 +317,7 @@ mod tests {
                 let restored = crate::recovery::restore_bytes(&crate::recovery::capture_bytes(&worker).unwrap(), None).unwrap();
                 assert_eq!(restored.forms_prototype.as_ref().unwrap().definition(), after);
                 let feature = worker.execute("form.prototype.commit", &serde_json::json!({"tolerance":0.05})).unwrap()["feature"].as_u64().unwrap();
-                let bytes = solidcraft_io::write_design(worker.doc.as_ref());
+                let bytes = solidcraft_io::write_design(worker.doc.as_ref()).unwrap();
                 let mut reopened = Session::new(solidcraft_io::read_design(&bytes).unwrap());
                 reopened.execute("form.edit", &serde_json::json!({"feature":feature})).unwrap();
                 assert_eq!(reopened.forms_prototype.as_ref().unwrap().definition(), after);

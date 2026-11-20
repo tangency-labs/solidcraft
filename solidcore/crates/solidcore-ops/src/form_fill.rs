@@ -3,8 +3,23 @@ use solidcore::geom::form_fill as kernel;
 use solidcore_convert::record_vec3;
 use solidcore_record::Vec3;
 
+pub mod linkage;
 pub mod quad_cap;
+pub mod rechart;
 pub mod regularity;
+
+/// Fairing weight for a fill constrained by these guide points.
+pub fn guide_regularization(
+    controls: impl Iterator<Item = Vec3>,
+    guides: &[Vec3],
+    tolerance: f64,
+) -> f64 {
+    kernel::guide_regularization(
+        controls.map(solidcore_convert::vec3),
+        guides.iter().copied().map(solidcore_convert::vec3),
+        tolerance,
+    )
+}
 
 /// Cartesian controls and their separately retained homogeneous weights.
 pub struct CoonsNet {

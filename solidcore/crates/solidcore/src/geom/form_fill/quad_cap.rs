@@ -251,6 +251,54 @@ mod tests {
         let [a, b, c, d] = &view;
         construct([a, b, c, d])
     }
+
+    #[test]
+    fn preserves_regular_tangent_sides_and_refuses_a_sub_tolerance_boundary_crossing() {
+        // Degree-(1,2) Coons data for S=(u+v,uv+v²+2h(1-u)v(1-v),0).
+        // For h=0 the Jacobian is u+v, positive except at the first corner.
+        // For h=-e the left side crosses the bottom at 2e/(1+2e), so an
+        // exact-side construction cannot repair the cap by reparameterizing it.
+        let sides = |h: f64| {
+            let controls = [
+                [0., 0., 0., 1.],
+                [1., 0., 0., 1.],
+                [0.5, h, 0., 1.],
+                [1.5, 0.5, 0., 1.],
+                [1., 1., 0., 1.],
+                [2., 2., 0., 1.],
+            ];
+            let line = vec![0., 0., 1., 1.];
+            let quadratic = vec![0., 0., 0., 1., 1., 1.];
+            [
+                vec![([0., 1.], 1, line.clone(), vec![controls[0], controls[1]])],
+                vec![(
+                    [0., 1.],
+                    2,
+                    quadratic.clone(),
+                    vec![controls[1], controls[3], controls[5]],
+                )],
+                vec![([0., 1.], 1, line, vec![controls[5], controls[4]])],
+                vec![(
+                    [0., 1.],
+                    2,
+                    quadratic,
+                    vec![controls[4], controls[2], controls[0]],
+                )],
+            ]
+        };
+        let regular = sides(0.0);
+        let original = regular.clone();
+        let tensor = run(&regular).unwrap();
+        assert_eq!(regular, original);
+        assert_eq!(tensor.controls[2], [0.5, 0.0, 0.0, 1.0]);
+        let folded = sides(-2.0_f64.powi(-40));
+        let original = folded.clone();
+        assert!(run(&folded).is_err());
+        assert_eq!(
+            folded, original,
+            "a refused construction keeps the supplied curves"
+        );
+    }
     fn line(a: [f64; 3], b: [f64; 3]) -> OwnedPiece {
         (
             [0.0, 1.0],

@@ -36,6 +36,7 @@ pub mod matrix;
 pub mod mesh_edit;
 pub mod object;
 pub mod ordered_solve;
+pub mod parameter_line;
 pub mod periodic_extent1d;
 pub mod plane_height;
 pub mod point_set;

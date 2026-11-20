@@ -1256,11 +1256,12 @@ pub(crate) fn insert_guide_knot(
     ctrl: &[[f64; 4]],
     u: f64,
 ) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), String> {
-    insert_knot_with(p, knots, ctrl, u, |lo, u, hi| {
-        let span = hi - lo;
-        ((u - lo) / span, (hi - u) / span)
-    })
-    .map_err(|error| error.to_string())
+    insert_knot_with(p, knots, ctrl, u, guide_factors).map_err(|error| error.to_string())
+}
+
+fn guide_factors(lo: f64, u: f64, hi: f64) -> (f64, f64) {
+    let span = hi - lo;
+    ((u - lo) / span, (hi - u) / span)
 }
 
 fn insert_knot_with(
@@ -1337,6 +1338,37 @@ fn segment_data(
     a: f64,
     b: f64,
 ) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), SegmentError> {
+    segment_data_with(p, knots, ctrl, a, b, insert_knot)
+}
+
+/// Exact authored tensor-row restriction using separate knot-difference factors.
+/// Shares the existing cut and insertion algorithms without changing native pcurves.
+pub(crate) fn segment_guide(
+    p: usize,
+    knots: &[f64],
+    ctrl: &[[f64; 4]],
+    a: f64,
+    b: f64,
+) -> crate::Result<(Vec<f64>, Vec<[f64; 4]>)> {
+    segment_data_with(p, knots, ctrl, a, b, |p, knots, ctrl, t| {
+        insert_knot_with(p, knots, ctrl, t, guide_factors)
+    })
+    .map_err(|error| error.into_solid("eval::pcurve::segment_guide"))
+}
+
+fn segment_data_with(
+    p: usize,
+    knots: &[f64],
+    ctrl: &[[f64; 4]],
+    a: f64,
+    b: f64,
+    insert: impl Fn(
+        usize,
+        &[f64],
+        &[[f64; 4]],
+        f64,
+    ) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), SegmentError>,
+) -> std::result::Result<(Vec<f64>, Vec<[f64; 4]>), SegmentError> {
     let n = ctrl.len();
     if n <= p || knots.len() != n + p + 1 {
         return Err(SegmentError::Input(
@@ -1356,7 +1388,7 @@ fn segment_data(
             if k.iter().filter(|&&x| x == t).count() >= p {
                 break;
             }
-            (k, c) = insert_knot(p, &k, &c, t)?;
+            (k, c) = insert(p, &k, &c, t)?;
         }
     }
     let j0 = k

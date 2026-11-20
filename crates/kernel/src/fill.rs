@@ -53,13 +53,8 @@ fn rechart_tensor_at_depth(
     let [wire] = wires else {
         return Err(KernelError::Invalid("recharting a singular subdivision patch requires one simple exterior trim".into()));
     };
-    let domain: [[f64; 2]; 2] = std::array::from_fn(|d| {
-        [wire.iter().map(|p| p[d]).fold(f64::INFINITY, f64::min), wire.iter().map(|p| p[d]).fold(f64::NEG_INFINITY, f64::max)]
-    });
-    let area = wire.iter().zip(wire.iter().cycle().skip(1)).take(wire.len()).map(|(a, b)| a[0] * b[1] - a[1] * b[0]).sum::<f64>().abs() * 0.5;
-    let rectangle = (domain[0][1] - domain[0][0]) * (domain[1][1] - domain[1][0]);
-    let orthogonal = wire.iter().zip(wire.iter().cycle().skip(1)).take(wire.len()).all(|(a, b)| a[0] == b[0] || a[1] == b[1]);
-    let rectangular = orthogonal && (area - rectangle).abs() <= rectangle.abs() * 1e-12;
+    let trim = solidcore_ops::form_fill::rechart::trim(wire).map_err(|error| KernelError::Invalid(error.to_string()))?;
+    let (domain, rectangular) = (trim.domain, trim.rectangular);
     if rectangular && let Some(sheet) = rechart::pole_atlas(source, domain)? {
         return Ok((sheet, 0.0));
     }
@@ -101,22 +96,20 @@ fn rechart_tensor_at_depth(
 }
 
 fn partition_tensor(source: &solidcraft_geom::bspline::NurbsSurface, tolerance: f64, depth: usize, domain: [[f64; 2]; 2]) -> Result<(Body, f64)> {
-    let halves = domain.map(|[a, b]| [[a, a + (b - a) * 0.5], [a + (b - a) * 0.5, b]]);
+    let domains = solidcore_ops::form_fill::rechart::quarters(domain).map_err(|error| KernelError::Invalid(error.to_string()))?;
     let mut sheets = Vec::with_capacity(4);
     let mut deviation = 0.0_f64;
-    for u in halves[0] {
-        for v in halves[1] {
-            let cropped = rechart::restricted(source, [u, v])?;
-            let boundaries = [vec![[u[0], v[0]], [u[1], v[0]], [u[1], v[1]], [u[0], v[1]]]];
-            let exact = crate::nurbs_region_sheet(&cropped, &boundaries)?;
-            let (sheet, distance) = if checked_rechart(&exact).is_ok() {
-                (exact, 0.0)
-            } else {
-                rechart_tensor_at_depth(&exact, &cropped, &boundaries, tolerance, depth + 1)?
-            };
-            sheets.push(sheet);
-            deviation = deviation.max(distance);
-        }
+    for domain in domains {
+        let cropped = rechart::restricted(source, domain)?;
+        let boundaries = [solidcore_ops::form_fill::rechart::rectangle(domain).to_vec()];
+        let exact = crate::nurbs_region_sheet(&cropped, &boundaries)?;
+        let (sheet, distance) = if checked_rechart(&exact).is_ok() {
+            (exact, 0.0)
+        } else {
+            rechart_tensor_at_depth(&exact, &cropped, &boundaries, tolerance, depth + 1)?
+        };
+        sheets.push(sheet);
+        deviation = deviation.max(distance);
     }
     let sheet = crate::stitch(&sheets.iter().collect::<Vec<_>>(), 1e-7)?;
     checked_rechart(&sheet)?;

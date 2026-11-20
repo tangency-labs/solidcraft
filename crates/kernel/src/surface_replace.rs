@@ -1,27 +1,22 @@
 //! Shared-face replacement qualified by exact positive-weight support bounds.
-use solidcore_record::Plane;
+use solidcore_ops::form_surface_replace::{self, SupportFace};
 use solidcraft_geom::tess::EvalSurface;
 
 use crate::{Body, FaceGeometry, Result, eval_geometry::face_geometry};
 
 mod coincident;
 
-use solidcore_ops::form_surface_replace::{coplanar, epsilon, inside, points, strictly_inside};
-
-fn boundary(geometry: &FaceGeometry) -> Option<Vec<[f64; 4]>> {
-    geometry
-        .loops
-        .iter()
-        .flatten()
-        .map(|edge| edge.control_points().map(<[_]>::to_vec))
-        .collect::<Option<Vec<_>>>()
-        .map(|rows| rows.into_iter().flatten().collect())
+fn support_face(geometry: FaceGeometry, check_wall: bool) -> SupportFace {
+    let edges = || geometry.loops.iter().flatten();
+    let linear_loop = check_wall && geometry.loops.len() == 1 && edges().all(|e| e.is_linear() && e.control_points().is_some_and(|p| !p.is_empty()));
+    let boundary = if matches!(geometry.surface, EvalSurface::Plane { .. }) || linear_loop {
+        edges().map(|edge| edge.control_points()).collect::<Option<Vec<_>>>().map(|curves| curves.concat())
+    } else {
+        None
+    };
+    SupportFace { boundary, linear_loop, edge_count: edges().count(), surface: geometry.surface }
 }
 
-fn maximum_height(geometry: &FaceGeometry, plane: &Plane) -> Option<f64> {
-    let boundary = if matches!(geometry.surface, EvalSurface::Plane { .. }) { boundary(geometry)? } else { Vec::new() };
-    solidcore_ops::form_surface_replace::maximum_height(&geometry.surface, &boundary, plane)
-}
 /// Replace a complete planar face by a matched open skin.
 /// Returns `None` unless positive-weight control hulls prove that the skin lies
 /// on the opposite side of a separating plane (union), or inside every half-space of a convex polyhedron (cut).
@@ -41,80 +36,19 @@ pub fn replace_matched_face(base: &Body, face: usize, skin: &Body, cut: bool, to
         return Ok(None);
     }
     let Some(selected) = base.planar_face(face) else { return Ok(None) };
-    let planar_epsilon = epsilon(base.size(), 1e-9);
     let planes = if cut {
-        let mut planes = Vec::new();
-        let mut corners = Vec::new();
-        for i in 0..base.face_count() {
-            let Some(plane) = base.planar_face(i) else { return Ok(None) };
-            let geometry = face_geometry(base, i)?;
-            if geometry.loops.len() != 1 {
-                return Ok(None);
-            }
-            for edge in geometry.loops.iter().flatten() {
-                if !edge.is_linear() {
-                    return Ok(None);
-                }
-                let Some(p) = edge.control_points().and_then(points) else { return Ok(None) };
-                corners.extend(p);
-            }
-            planes.push(plane);
-        }
-        if corners.len() > 8192 || !inside(&corners, &planes, tolerance) {
-            return Ok(None);
-        }
-        planes
+        let Some(planes) = (0..base.face_count()).map(|i| base.planar_face(i)).collect::<Option<Vec<_>>>() else { return Ok(None) };
+        Some(planes)
     } else {
-        // The selected plane itself separates the bodies. The base can be
-        // concave or curved wherever it stays behind that plane.
-        for i in 0..base.face_count() {
-            let geometry = face_geometry(base, i)?;
-            if maximum_height(&geometry, &selected).is_none_or(|height| height > planar_epsilon.min(tolerance)) {
-                return Ok(None);
-            }
-        }
-        Vec::new()
+        None
     };
-    let opposite = solidcore_ops::form_surface_replace::opposite(selected);
-    let mut rim_count = 0usize;
-    let mut coincident = std::collections::BTreeMap::<usize, Vec<usize>>::new();
-    for i in 0..skin.face_count() {
-        let geometry = face_geometry(skin, i)?;
-        if cut {
-            let boundary = if matches!(geometry.surface, EvalSurface::Plane { .. }) { boundary(&geometry) } else { Some(Vec::new()) };
-            let hull = boundary.and_then(|boundary| solidcore_ops::form_surface_replace::hull(&geometry.surface, &boundary));
-            let Some(hull) = hull else { return Ok(None) };
-            if !inside(&hull, &planes, tolerance) {
-                return Ok(None);
-            }
-            let mut contacts = planes.iter().enumerate().filter(|(_, plane)| coplanar(&hull, plane, planar_epsilon));
-            if let Some((wall, _)) = contacts.next() {
-                if wall == face || contacts.next().is_some() {
-                    return Ok(None);
-                }
-                coincident.entry(wall).or_default().push(i);
-            } else if !strictly_inside(&geometry.surface, &hull, &planes, epsilon(base.size(), 1e-10)) {
-                return Ok(None);
-            }
-        } else {
-            if maximum_height(&geometry, &opposite).is_none_or(|height| height > planar_epsilon.min(tolerance)) {
-                return Ok(None);
-            }
-            let departs_plane = match &geometry.surface {
-                EvalSurface::Nurbs { ctrl, .. } => {
-                    points(ctrl).is_some_and(|hull| strictly_inside(&geometry.surface, &hull, std::slice::from_ref(&opposite), planar_epsilon))
-                }
-                _ => maximum_height(&geometry, &selected).is_some_and(|height| height > planar_epsilon),
-            };
-            if !departs_plane {
-                return Ok(None);
-            }
-        }
-        rim_count = rim_count.saturating_add(geometry.loops.iter().map(Vec::len).sum::<usize>());
-    }
-    if rim_count > 16_384 {
+    let base_faces = (0..base.face_count()).map(|i| face_geometry(base, i).map(|geometry| support_face(geometry, cut)));
+    let skin_faces = (0..skin.face_count()).map(|i| face_geometry(skin, i).map(|geometry| support_face(geometry, false)));
+    let Some(coincident) =
+        form_surface_replace::replacement_contacts(face, selected, planes.as_deref(), base.size(), tolerance, base_faces, skin_faces)?
+    else {
         return Ok(None);
-    }
+    };
     if !coincident.is_empty() {
         return coincident::cut(base, face, skin, &coincident, tolerance);
     }

@@ -4,6 +4,7 @@ use crate::error::nurbs::NurbsFailure;
 use crate::{Result, SolidError, Vec3};
 
 pub mod basis;
+pub mod linkage;
 pub mod quad_cap;
 pub mod rechart;
 pub mod regularity;
@@ -12,6 +13,24 @@ const OP: &str = "geom::form_fill::coons";
 const MAX_POINTS: usize = 1 << 20;
 const CORNER_JOIN_MM: f64 = 1e-9;
 const CORNER_WEIGHT_ULPS: f64 = 256.0 * f64::EPSILON;
+
+/// Scale the fairing weight by the tolerance relative to the extent of all
+/// control and guide points. With no guide constraints, use ordinary fairing.
+pub fn guide_regularization(
+    controls: impl Iterator<Item = Vec3>,
+    mut guides: impl Iterator<Item = Vec3>,
+    tolerance: f64,
+) -> f64 {
+    const UNCONSTRAINED: f64 = 1e-7;
+    let Some(first) = guides.next() else {
+        return UNCONSTRAINED;
+    };
+    let mut extent = crate::geom::extent3d::Extent3d::from_point(first);
+    for point in controls.chain(guides) {
+        extent.add_point(point);
+    }
+    UNCONSTRAINED.min(0.01 * tolerance / extent.min().distance(extent.max()).max(tolerance))
+}
 
 /// Cartesian net plus its separately retained positive weights.
 pub struct CoonsNet {
@@ -172,6 +191,18 @@ pub fn coons(degree: [usize; 2], knots: [&[f64]; 2], sides: [&[[f64; 4]]; 4]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guided_fairing_scales_with_the_diagonal_of_the_whole_fit() {
+        let controls = [Vec3::ZERO];
+        let guides = [Vec3::new(3000.0, 4000.0, 0.0)];
+        let weight = guide_regularization(controls.into_iter(), guides.into_iter(), 0.001);
+        assert!((weight - 2e-9).abs() < 1e-22);
+        assert_eq!(
+            guide_regularization(controls.into_iter(), [].into_iter(), 0.001),
+            1e-7
+        );
+    }
 
     #[test]
     fn coons_preserves_directed_rational_quarter_cylinder_rows() {

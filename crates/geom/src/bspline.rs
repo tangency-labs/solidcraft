@@ -182,14 +182,7 @@ pub fn check_knots(knots: &[f64]) -> SplineResult<()> {
 /// c₂·N[last p+2 merged knots]` (Sederberg et al. 2004, §3; the single-function case of the
 /// NURBS Book eq. 5.10). `None` when `k` is outside the support or the knots are too few.
 pub fn split_basis(knots: &[f64], k: f64) -> Option<(f64, f64)> {
-    let p = knots.len().checked_sub(2)?;
-    let (x0, x1, xp, xl) = (*knots.first()?, *knots.get(1)?, *knots.get(p)?, *knots.get(p + 1)?);
-    if !(k >= x0 && k <= xl) {
-        return None;
-    }
-    let c1 = if k >= xp { 1.0 } else { (k - x0) / (xp - x0) };
-    let c2 = if k <= x1 { 1.0 } else { (xl - k) / (xl - x1) };
-    Some((c1, c2))
+    solidcore_ops::parameter_line::split_basis(knots, k)
 }
 
 /// The two knot vectors of a split basis function (see [`split_basis`]): `k` merged into
@@ -208,53 +201,7 @@ pub fn split_knots<T: Copy + PartialOrd>(knots: &[T], k: T) -> [Vec<T>; 2] {
 /// every surviving piece is a Bernstein polynomial `N[a…a, b…b]` (Sederberg et al. 2004, §3;
 /// NURBS Book §5.4, decomposition into Bézier segments).
 pub fn basis_bezier(knots: &[f64], a: f64, b: f64) -> SplineResult<Vec<f64>> {
-    let Some(p) = knots.len().checked_sub(2) else { return invalid("a basis function needs at least two knots") };
-    if p > MAX_SPLINE_DEGREE {
-        return Err(SplineError::Unsupported(format!("degree {p} (at most {MAX_SPLINE_DEGREE})")));
-    }
-    check_knots(knots)?;
-    if !(a.is_finite() && b.is_finite() && a < b) {
-        return invalid("a Bézier interval must be finite and non-empty");
-    }
-    if knots.iter().any(|&x| x > a && x < b) {
-        return invalid("a knot lies inside the Bézier interval");
-    }
-    let mut out = vec![0.0; p + 1];
-    let mut work = vec![(knots.to_vec(), 1.0)];
-    let mut steps = 0usize;
-    while let Some((kn, c)) = work.pop() {
-        steps += 1;
-        if steps > 1 << 12 {
-            return Err(SplineError::TooLarge("Bézier extraction did not converge".into()));
-        }
-        let (Some(&lo), Some(&hi)) = (kn.first(), kn.last()) else { continue };
-        if hi <= a || lo >= b || c == 0.0 {
-            continue;
-        }
-        let insert = if kn.iter().any(|&x| x < a) {
-            Some(a)
-        } else if kn.iter().any(|&x| x > b) {
-            Some(b)
-        } else {
-            None
-        };
-        match insert {
-            Some(k) => {
-                let (c1, c2) = split_basis(&kn, k).ok_or_else(|| SplineError::Invalid("knot insertion outside the support".into()))?;
-                let [first, second] = split_knots(&kn, k);
-                work.push((first, c * c1));
-                work.push((second, c * c2));
-            }
-            None => {
-                // Knots a×(p+1−i), b×(i+1): the Bernstein polynomial Bᵢ,ₚ.
-                let nb = kn.iter().filter(|&&x| x == b).count();
-                if let Some(slot) = nb.checked_sub(1).and_then(|i| out.get_mut(i)) {
-                    *slot += c;
-                }
-            }
-        }
-    }
-    Ok(out)
+    solidcore_ops::parameter_line::basis_bezier(knots, a, b).map_err(parameter_line::error)
 }
 
 /// Ulps of the domain's magnitude a parameter may lie past a spline's domain end and still be
@@ -576,24 +523,8 @@ impl NurbsSurface {
 
     /// The point at `(u, v)`, which must lie in the domain.
     pub fn eval(&self, u: f64, v: f64) -> SplineResult<Vec3> {
-        let dom = self.domain();
-        let mut spans = [0; 2];
-        let mut basis: [Vec<f64>; 2] = [Vec::new(), Vec::new()];
-        for (d, x) in [u, v].into_iter().enumerate() {
-            let (p, n, kn) = (self.degree[d], self.count[d], &self.knots[d]);
-            let span = find_span(kn, p, n, x).ok_or_else(|| SplineError::Invalid(format!("({u}, {v}) is outside the domain")))?;
-            let x = x.clamp(dom[d][0], dom[d][1]);
-            let side = if x >= dom[d][1] { Side::Left } else { Side::Right };
-            spans[d] = span;
-            basis[d] = (span - p..=span).map(|i| kn.get(i..i + p + 2).map_or(0.0, |k| local_basis(k, x, side, 0)[0])).collect();
-        }
-        let mut acc = HPoint::ZERO;
-        for (b, nj) in basis[1].iter().enumerate() {
-            for (a, ni) in basis[0].iter().enumerate() {
-                acc += self.point(spans[0] - self.degree[0] + a, spans[1] - self.degree[1] + b) * (ni * nj);
-            }
-        }
-        acc.project().ok_or_else(|| SplineError::Invalid("the surface's weights vanish there".into()))
+        solidcore_ops::form_fill::rechart::point(self.degree, &self.knots, self.count, &self.ctrl, [u, v], |h| [h.x, h.y, h.z, h.w])
+            .ok_or_else(|| SplineError::Invalid(format!("the surface cannot be evaluated at ({u}, {v})")))
     }
 
     /// An exact rational isoparametric curve segment. `dir` is its varying

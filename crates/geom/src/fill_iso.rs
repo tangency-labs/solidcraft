@@ -1656,10 +1656,8 @@ fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult
     // The fairing term resolves the conditions' null space. Its bias must be
     // smaller than the requested guide accuracy, including on large parts or at
     // tighter tolerances; refining the same biased problem cannot fix that bias.
-    let mut points = quilt.patches.iter().flat_map(|patch| patch.net.iter().copied()).chain(spec.points.iter().copied());
-    let first = points.next().unwrap_or(Vec3::ZERO);
-    let (lo, hi) = points.fold((first, first), |(lo, hi), point| (lo.min(point), hi.max(point)));
-    let regularization = if spec.points.is_empty() { 1e-7 } else { 1e-7f64.min(0.01 * spec.tol / lo.dist(hi).max(spec.tol)) };
+    let controls = quilt.patches.iter().flat_map(|patch| patch.net.iter().copied());
+    let regularization = solidcore_ops::form_fill::guide_regularization(controls, spec.points, spec.tol);
     for round in 0..rounds {
         let mut rows: Vec<Row> = smooth.clone();
         for s in stations {

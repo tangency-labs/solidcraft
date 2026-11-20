@@ -4,14 +4,10 @@
 //! Exact input knot restrictions reuse the ray query's outward interval insertion.
 //! A work limit or uncertain sign refuses the chart; samples never establish acceptance.
 //!
-//! One part of the chart is left unproven: a piece that keeps an original chart
-//! corner, is at most 2^-12 of its tile along each axis, and whose control hull is
-//! bounded inside `CORNER_JOIN_MM` of that corner.
-//! Two rim sides that meet tangentially give a corner normal that is zero in exact
-//! arithmetic, and any rounded rotation of such a cap turns it into a normal of a
-//! few ulps with either sign, so the chart folds inside a few ulps of the corner.
-//! That fold is smaller than the distance at which two side ends already count as
-//! one corner, so the same length bounds what the proof leaves out.
+//! An exactly zero normal is permitted only at an original chart corner. Every
+//! open piece is proved, including pieces inside a vertex's positional tolerance.
+//! A rounded boundary that reverses its planar corner normal can have another
+//! boundary crossing nearby; distance from a vertex cannot certify regularity.
 
 use crate::eval::ray_spline::{reserved, Axis, Grid, MAX_CONTROLS};
 use crate::eval::ray_tensor::{Control, Interval as I};
@@ -21,18 +17,11 @@ use crate::{Result, SolidError, Vec3};
 const OP: &str = "geom::form_fill::regularity";
 const MAX_WORK: usize = 20_000_000;
 const MAX_DEPTH: usize = 24;
-// A piece that keeps an original chart corner may be halved this often, so that
-// it can shrink inside `CORNER_JOIN_MM` of the corner: 48 halvings per axis reach
-// the spacing of adjacent doubles in the unit parameter square.
+// A regular but microscopic corner normal may need this many halvings before
+// its coefficient bounds separate from zero. No piece is omitted at this depth.
 const MAX_CORNER_DEPTH: usize = 96;
 // Halvings left to a piece cut off such a corner piece beyond `MAX_DEPTH`.
 const BESIDE_CORNER_SPLITS: usize = 6;
-// A corner piece is left unproven only once it was halved this often along each
-// axis. The ordinary proof has then had its whole depth, and what is left out
-// reaches at most 2^-12 of the tile along either edge, so an edge that collapses
-// onto its corner is still refused: the rest of that edge has to be proven.
-const MIN_CORNER_HALVINGS: usize = MAX_DEPTH / 2;
-const CORNER_JOIN_MM: f64 = super::CORNER_JOIN_MM;
 // On fully inserted clamped axes nu=p*spans_u+1 and nv=q*spans_v+1.
 // Three reduced-normal components hold 3*(3p)*(3q) coefficients per tile,
 // so their total is strictly below 27 times the already bounded native grid.
@@ -487,51 +476,6 @@ fn separated_along(
         .collect();
     positive(&Poly::new(x.degree, values)?, corners)
 }
-/// Whether the whole piece is bounded inside `CORNER_JOIN_MM` of one of its
-/// corners that is an original chart corner. With positive weights the piece lies
-/// in the convex hull of its Cartesian controls, and a ball is convex, so every
-/// control inside the ball puts every point of the piece inside it.
-fn joins_corner(position: &Position, original: [bool; 4], work: &mut usize) -> Result<bool> {
-    let [x, y, z, w] = position;
-    if w.values.iter().any(|w| w.lo <= 0.0) {
-        return Ok(false);
-    }
-    let [p, q] = w.degree;
-    let limit = CORNER_JOIN_MM * CORNER_JOIN_MM;
-    for ((u, v), original) in [(0, 0), (p, 0), (0, q), (p, q)].into_iter().zip(original) {
-        if !original {
-            continue;
-        }
-        spend(work, w.values.len())?;
-        let weight = w.at(u, v)?;
-        let corner = [
-            x.at(u, v)?.div(weight),
-            y.at(u, v)?.div(weight),
-            z.at(u, v)?.div(weight),
-        ];
-        let inside = x
-            .values
-            .iter()
-            .zip(&y.values)
-            .zip(&z.values)
-            .zip(&w.values)
-            .all(|(((&x, &y), &z), &w)| {
-                let square =
-                    [x, y, z]
-                        .into_iter()
-                        .zip(corner)
-                        .fold(I::ZERO, |sum, (value, corner)| {
-                            let offset = value.div(w).sub(corner);
-                            sum.add(offset.mul(offset))
-                        });
-                square.is_finite() && square.hi <= limit
-            });
-        if inside {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
 /// One part of a tile still to be proven. `zeros` marks its corners where an
 /// exactly zero normal is allowed, `original` its corners that are original chart
 /// corners, and `position` is kept only while it has such a corner. `halved`
@@ -638,17 +582,6 @@ fn prove_normal(
         }
         if separated {
             continue;
-        }
-        // The signs are unresolved. A piece that keeps an original chart corner
-        // is left unproven once it is small along both axes and all of it is
-        // bounded inside the corner join length; until then it is halved further
-        // than any other piece.
-        if let Some(position) = &position {
-            if halved.iter().all(|&count| count >= MIN_CORNER_HALVINGS)
-                && joins_corner(position, original, work)?
-            {
-                continue;
-            }
         }
         let limit = if position.is_some() {
             MAX_CORNER_DEPTH
@@ -765,10 +698,8 @@ fn prove_seam(a: &Normal, b: &Normal, axis: usize, work: &mut usize) -> Result<b
 /// consistent directed normals across every native knot seam. At the four original
 /// chart corners alone an exactly zero normal is allowed; edge interiors must be regular.
 ///
-/// One piece at each original chart corner may stay unproven: it is at most
-/// 2^-12 of its tile along each axis and is bounded inside `CORNER_JOIN_MM` of the
-/// corner. A corner normal of a few ulps with the wrong sign, as a rounded rotation
-/// of a tangent corner leaves, folds the chart there. All the rest is proven regular.
+/// Positional tolerances never exempt an unresolved corner neighbourhood. The
+/// supplied coefficients themselves must describe a regular open chart.
 ///
 /// Returns false when the chart is singular or its signs remain unresolved within
 /// the fixed budget. Invalid inputs, allocations, and budget exhaustion return errors.
@@ -1099,41 +1030,58 @@ mod tests {
     }
 
     #[test]
-    fn accepts_a_tangent_corner_whose_reversed_normal_folds_inside_the_corner_join() {
-        // The corner normal is -2^-39 against an interior normal of u+v, so the
-        // chart folds where u+v is below about 2^-39: 2e-12 mm from the corner,
-        // far inside the 1e-9 mm at which two side ends are one corner.
-        let controls = tangent_corner(-(2.0_f64.powi(-40)), 0.0, [0.0, 0.0]);
+    fn refuses_a_tangent_corner_with_a_second_boundary_crossing_inside_the_corner_join() {
+        // S=(u+v, uv+v²-2e(1-u)v(1-v), 0). Its left and bottom sides
+        // intersect again at t=2e/(1+2e), strictly inside both source curves.
+        // The corner normal is -2e and the (1,1) normal is 2, so this chart
+        // must fold even though the entire defect fits in the vertex's ball.
+        let e = 2.0_f64.powi(-40);
+        let crossing = 2.0 * e / (1.0 + 2.0 * e);
+        assert!(crossing > 0.0 && crossing < super::super::CORNER_JOIN_MM);
+        let controls = tangent_corner(-e, 0.0, [0.0, 0.0]);
         let ([_, _, z], zero) =
             corner_normal(controls[0], controls[1], controls[2], [1, 2], false).unwrap();
         assert!(!zero && z.hi < 0.0, "the corner normal is reversed: {z:?}");
-        assert!(polynomial([1, 2], &controls).unwrap());
+        assert!(!matches!(polynomial([1, 2], &controls), Ok(true)));
+        // Removing the source curve's negative middle control is a different,
+        // regular input, with J=u+v. Its uniform change is bounded by e/2.
+        // The checker preserves that input instead of treating it as the fold.
+        assert!(polynomial([1, 2], &tangent_corner(0.0, 0.0, [0.0, 0.0])).unwrap());
     }
 
     #[test]
     fn refuses_a_reversed_corner_whose_fold_reaches_past_the_corner_join() {
         // The same corner with a normal of -2^-19 folds the chart out to about
         // 2e-6 mm from the corner, two thousand times the corner join length.
-        // The piece inside the join length is left out; the fold beside it is not.
+        // Its distance from the vertex does not affect the proof requirement.
         let controls = tangent_corner(-(2.0_f64.powi(-20)), 0.0, [0.0, 0.0]);
         assert!(!matches!(polynomial([1, 2], &controls), Ok(true)));
     }
 
     #[test]
-    fn accepts_a_tangent_corner_cap_turned_by_any_whole_degree() {
+    fn rounded_planar_rotations_use_their_actual_corner_orientation() {
         // Turning about a point away from the corner rounds its three collinear
         // controls, which leaves a corner normal of a few ulps with either sign.
-        // Every turned copy is the same cap, so every one is accepted.
+        // A negative planar corner normal followed by a positive interior one
+        // implies a zero in between. Those rounded inputs are folded surfaces.
+        // Regular rounded inputs must still pass, at every whole-degree turn.
         let mut reversed = 0;
         for degrees in 0..360 {
             let controls = tangent_corner(0.0, f64::from(degrees).to_radians(), [37.25, -11.5]);
             let ([_, _, z], _) =
                 corner_normal(controls[0], controls[1], controls[2], [1, 2], false).unwrap();
-            reversed += usize::from(z.hi < 0.0);
-            assert!(
-                polynomial([1, 2], &controls).unwrap(),
-                "turned by {degrees} degrees, corner normal {z:?}"
-            );
+            if z.hi < 0.0 {
+                reversed += 1;
+                assert!(
+                    !matches!(polynomial([1, 2], &controls), Ok(true)),
+                    "turned by {degrees} degrees, reversed corner {z:?}"
+                );
+            } else {
+                assert!(
+                    polynomial([1, 2], &controls).unwrap(),
+                    "turned by {degrees} degrees, corner normal {z:?}"
+                );
+            }
         }
         assert!(reversed > 0, "no turn reversed the corner normal");
     }
