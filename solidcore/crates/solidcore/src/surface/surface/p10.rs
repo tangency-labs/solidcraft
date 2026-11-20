@@ -597,8 +597,9 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         let mut t_guesses = Vec::new();
 
         // Let SurfaceGuessPoint = Drop LinePoint down to SurfacePoint Tangent Plane
+        let (line_point, line_vector) = (self.line_point, self.line_vector);
         let drop = |uv: Point2, t: f64| -> Result<Point2> {
-            let point = self.line_point + t * self.line_vector;
+            let point = line_point + t * line_vector;
             super::p7::drop_points_to_tangent_plane(
                 k,
                 srf_eval,
@@ -649,6 +650,8 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         }
         uv_guesses.insert(0, first_uv);
         t_guesses.insert(0, first_t);
+        // the line interval each guess is solved on: the leaf's (None), or a part of it (#17356)
+        let mut ivl_guesses: Vec<Option<Extent1d>> = uv_guesses.iter().map(|_| None).collect();
 
         // Make the line object (sTmpIvl = the bounded interval of interest).
         let line = Curve::from(Line::infinite(self.line_point, self.line_vector, 3, false));
@@ -673,13 +676,17 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             let index = i;
             i += 1;
 
-            // pass the call along to local curve intersection
+            // pass the call along to local curve intersection, on the guess's part of the interval
+            let guess_ivl = match ivl_guesses.get(index) {
+                Some(Some(part)) => *part,
+                _ => leaf.interval,
+            };
             let Some(hit) = surface_local_curve_intersect(
                 k,
                 leaf.eval,
                 &leaf.domain,
                 &leaf.line,
-                &leaf.interval,
+                &guess_ivl,
                 self.base.tolerance_3d,
                 uv_guess,
                 t_guess,
@@ -752,7 +759,30 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                     }
                     uv_guesses.push(new_uv);
                     t_guesses.push(new_t);
+                    ivl_guesses.push(None);
                 }
+            }
+            // Not upstream (#17356): a leaf can hold several roots; each side of a root found is
+            // searched on its own part of the interval, unless the line lies in the surface there
+            // (every point of it a root; `intersect_srf_bndry_crv` makes the same test).
+            if ignored(leaf.eval.evaluate_normal(k, hit.uv, Side::Left, Side::Left))?
+                .is_none_or(|n| n.is_perpendicular_to(line_vec, 0.05))
+            {
+                continue;
+            }
+            let gap = 2.0 * self.base.tolerance_3d / self.line_vector.length();
+            for part in [
+                Extent1d::from_min_max(guess_ivl.min(), hit.t - gap),
+                Extent1d::from_min_max(hit.t + gap, guess_ivl.max()),
+            ] {
+                if part.max() - part.min() <= gap || uv_guesses.len() >= MAX_GUESSES {
+                    continue;
+                }
+                let t_mid = part.evaluate(0.5);
+                let uv_mid = uv_domain.clamp_point(drop(uv_domain.evaluate(0.5, 0.5), t_mid)?);
+                uv_guesses.push(uv_mid);
+                t_guesses.push(t_mid);
+                ivl_guesses.push(Some(part));
             }
         }
 
