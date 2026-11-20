@@ -500,7 +500,7 @@ fn exact_translated_bound(
             w: p.w,
         })
     };
-    let (mut cur_c, mut cur_s) = (cp.to_vec(), sp.to_vec());
+    let (mut cur_c, mut cur_s) = (cp.to_vec(), sp.clone());
     let mut moved_any = false;
     for _ in 0..TRANSLATION_STEPS {
         let mut lo = [f64::INFINITY; 3];
@@ -551,7 +551,10 @@ fn exact_translated_bound(
     }
     let mcp = mc.control_points().ok()?;
     if mcp.len() != cp.len()
-        || !cp.iter().zip(&cur_c).all(|(p, q)| p.w.to_bits() == q.w.to_bits())
+        || !cp
+            .iter()
+            .zip(&cur_c)
+            .all(|(p, q)| p.w.to_bits() == q.w.to_bits())
         || !cur_c.iter().zip(mcp).all(|(p, q)| same(p, q))
     {
         return None;
@@ -573,7 +576,10 @@ fn exact_translated_bound(
     let (mn, mm, mp) = ms.control_points().ok()?;
     if (n, m) != (mn, mm)
         || sp.len() != mp.len()
-        || !sp.iter().zip(&cur_s).all(|(p, q)| p.w.to_bits() == q.w.to_bits())
+        || !sp
+            .iter()
+            .zip(&cur_s)
+            .all(|(p, q)| p.w.to_bits() == q.w.to_bits())
         || !cur_s.iter().zip(&mp).all(|(p, q)| same(p, q))
     {
         return None;
