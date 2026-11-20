@@ -2,7 +2,7 @@
   "en": {
     "ui.export_allow_missing": "Allow missing bodies (report each skipped body)",
     "ui.export_format_obj": "OBJ",
-    "ui.export_skipped": "Skipped bodies: {bodies}.\n{details}"
+    "ui.export_skipped": "Bodies skipped: {bodies}.\n{details}"
   },
   "ar": {
     "ui.export_allow_missing": "السماح بالأجسام المفقودة (الإبلاغ عن كل جسم متخطى)",

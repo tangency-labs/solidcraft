@@ -2063,7 +2063,7 @@ mod tests {
                 body_mesh(b, body, MeshQuality::default())
             }
         });
-        let error = result.err().expect("a missing body must fail the export").to_string();
+        let error = result.expect_err("a missing body must fail the export").to_string();
         assert!(error.contains("BrokenSliver") && error.contains("face 7"), "{error}");
     }
 
