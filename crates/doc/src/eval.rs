@@ -8756,7 +8756,28 @@ fn feature_tools_with_constructor(
                 Ok::<_, DocError>((Vec3::from(origin), Vec3::from(direction)))
             };
             let (base, direction) = match axis_ref {
-                Some(AxisRef::Construction { name }) => construction_axis_in(Some(doc), st, name, f.component)?,
+                Some(AxisRef::Construction { name }) => {
+                    let recorded = sketch.and_then(|sk| {
+                        let profile_owner = doc.feature(sk.0)?.component;
+                        let axis = st.construct.iter().find(|axis| axis.name == *name)?;
+                        (doc.feature(axis.feature)?.component == profile_owner).then(|| crate::body_transfer::profile_frame(doc, f, sk.0)).flatten()
+                    });
+                    if let Some(frame) = recorded {
+                        // The axis belongs to the transferred profile: read both through the
+                        // same recorded boundary, not the profile's current component placement.
+                        let (origin, direction) = construction_axis_in(None, st, name, f.component)?;
+                        // line_in_frame maps into its argument's local frame. Its argument must
+                        // therefore be the inverse of the owner-to-feature transfer frame.
+                        let inverse =
+                            solidcore_ops::affine::inverse(&frame).map_err(|_| DocError::Invalid("the recorded transfer frame is invalid".into()))?;
+                        let (origin, direction) = solidcore_ops::affine::line_in_frame(&inverse, origin.into(), direction.into())
+                            .map_err(|_| DocError::Invalid("the recorded transfer axis is invalid".into()))?;
+                        (origin.into(), direction.into())
+                    } else {
+                        // An independent axis still follows its live component placement.
+                        construction_axis_in(Some(doc), st, name, f.component)?
+                    }
+                }
                 Some(AxisRef::Model { geo }) => match geo {
                     crate::construct::GeoRef::Edge { .. } | crate::construct::GeoRef::Face { .. } => {
                         // Pick and orient the axis in the same frame as the command and viewport.

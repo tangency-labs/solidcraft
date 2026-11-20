@@ -201,6 +201,67 @@ mod tests {
     }
 
     #[test]
+    fn a_transferred_coil_keeps_a_construction_axis_in_the_profile_component_frame() {
+        use crate::{BodyName, FeatureKind, Model, PlaneRef, rigid, world_state};
+        use solidcore_record::{Vec2, Vec3};
+
+        for independent_axis in [false, true] {
+            let mut doc = Document::new("transferred coil on a construction axis");
+            let destination = doc.add_component(Some("Profile part"), 0).unwrap();
+            let axis_owner = if independent_axis { doc.add_component(Some("Axis part"), 0).unwrap() } else { destination };
+            let placement = |y| rigid(Vec3::new(0., y, 0.), Vec3::ZERO, Vec3::Z, 0.);
+            if independent_axis {
+                doc.occurrences.iter_mut().find(|o| o.component == axis_owner).unwrap().transform = placement(7.);
+            }
+            let mut profile = crate::sketch::Sketch::new();
+            profile.add_circle(Vec2::new(20., 0.), 1., None, None).unwrap();
+            let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "YZ".into() }, sketch: profile }, None).unwrap();
+            doc.feature_mut(sketch).unwrap().component = destination;
+            let axis = serde_json::from_value(serde_json::json!({
+                "type": "construction_axis", "def": {"type": "two_points",
+                    "a": {"type": "point", "p": [0, 0, 0]}, "b": {"type": "point", "p": [0, 0, 1]}}
+            }))
+            .unwrap();
+            let axis = doc.add_feature(axis, Some("Winding axis")).unwrap();
+            doc.feature_mut(axis).unwrap().component = axis_owner;
+            let coil = serde_json::from_value(serde_json::json!({
+                "type": "coil", "base": ["0", "0", "0"], "sketch": sketch,
+                "axis_ref": {"type": "construction", "name": "Winding axis"},
+                "pitch": "8", "turns": "2", "operation": "new_body"
+            }))
+            .unwrap();
+            let coil = doc.add_feature(coil, Some("Coil")).unwrap();
+            doc.feature_mut(coil).unwrap().body_names = vec!["Coil".into()];
+            doc.add_feature(
+                FeatureKind::BodyTransfer { bodies: vec![BodyName("Coil".into())], from: 0, to: destination, transform: placement(-7.) },
+                None,
+            )
+            .unwrap();
+
+            let mut model = Model::new();
+            let half_width = |model: &mut Model, doc: &Document| {
+                model.evaluate(doc);
+                let errors: Vec<_> = model.results.iter().filter_map(|r| r.error.as_ref()).collect();
+                assert!(errors.is_empty(), "{errors:?}");
+                let world = world_state(doc, &model.state()).unwrap();
+                let body = world.body("Coil").unwrap();
+                assert_eq!(body.component, destination);
+                body.body.exact_bounds().unwrap().max.x
+            };
+            assert!((half_width(&mut model, &doc) - 21.).abs() < 1e-6);
+            doc.occurrences.iter_mut().find(|o| o.component == destination).unwrap().transform = placement(10.);
+            if independent_axis {
+                doc.occurrences.iter_mut().find(|o| o.component == axis_owner).unwrap().transform = placement(17.);
+            }
+            // The destination's axis retains the profile's recorded 20 mm radius.
+            // A separate axis moves 10 mm toward the profile, reducing that radius to 10 mm.
+            let expected = if independent_axis { 11. } else { 21. };
+            let after = half_width(&mut model, &doc);
+            assert!((after - expected).abs() < 1e-6, "independent axis: {independent_axis}, half width: {after}");
+        }
+    }
+
+    #[test]
     fn invalid_transfer_constructor_preserves_document_and_allocator() {
         let mut doc = Document::default();
         let before = doc.to_json();
