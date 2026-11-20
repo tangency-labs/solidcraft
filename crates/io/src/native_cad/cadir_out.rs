@@ -16,8 +16,9 @@
 //! Each body: its exact B-rep ([`solidcore_cadir::write_body`], from the body's record), and the
 //! mesh the design is drawn with at the export's quality ([`crate::display_mesh_at`]) as a
 //! tessellation of it, so the writer writes SolidCraft's mesh rather than meshing again. A mesh
-//! body has the mesh alone. A B-rep CADIR cannot hold yet is written as its mesh, with a warning
-//! naming the body.
+//! body has the mesh alone, as is every body of an export asked for meshes only
+//! ([`crate::CadmpegOptions::meshes_only`]). A B-rep CADIR cannot hold yet is written as its mesh,
+//! with a warning naming the body.
 //!
 //! Looks: one appearance per distinct look, named after it, its colour linear (SolidCraft's are
 //! sRGB, CADIR's as USD's linear) with the look's opacity as alpha, and the PBR parameters
@@ -181,6 +182,7 @@ pub(crate) fn design_for(
         ));
     }
     b.optics = &options.optics;
+    b.meshes_only = options.meshes_only;
     if options.physics && !b.physics {
         b.warnings
             .push("joints and mass are written only for the whole design with its components and rigid placements: no physics is written".into());
@@ -251,6 +253,8 @@ struct Builder<'a> {
     decals: &'a [crate::DecalPlan],
     /// The optics a render setup gives bodies.
     optics: &'a [crate::OpticsPlan],
+    /// Each body as its mesh alone ([`crate::CadmpegOptions::meshes_only`]).
+    meshes_only: bool,
     /// The appearances with optics made, by plain appearance (`None`: a body's colour) and
     /// optics.
     optical: HashMap<(Option<AppearanceId>, String), AppearanceId>,
@@ -285,6 +289,7 @@ impl<'a> Builder<'a> {
             decals: &[],
             decal_count: 0,
             optics: &[],
+            meshes_only: false,
             optical: HashMap::new(),
             texture_assets: super::cadir_textures::Assets::default(),
             textured: HashMap::new(),
@@ -870,7 +875,7 @@ impl<'a> Builder<'a> {
         let prefix = format!("solidcraft:body-{n:09}");
         let name = clean(name).unwrap_or_else(|| shown.clone());
         let label = self.writes.label;
-        let brep = if geometry.is_mesh() {
+        let mut brep = if geometry.is_mesh() || self.meshes_only {
             None
         } else {
             match self.brep(geometry, &prefix, &name) {
@@ -881,13 +886,23 @@ impl<'a> Builder<'a> {
                 }
             }
         };
-        let has_brep = brep.is_some();
-        let mesh = if has_brep && !self.writes.brep_meshes {
+        let mesh = if brep.is_some() && !self.writes.brep_meshes {
             None
         } else {
             let made = self.mesh(geometry, &shown);
-            kept_without_mesh(made, has_brep, &shown, &mut self.warnings)?
+            // Asked for meshes only, but the mesh cannot be made: the exact shape is what is left.
+            let instead = shape_instead(&made, self.meshes_only, geometry.is_mesh()).then(|| self.brep(geometry, &prefix, &name).ok()).flatten();
+            match (instead, made) {
+                (Some(written), Err(Unmeshed::Failed(e))) => {
+                    self.warnings
+                        .push(format!("{shown}: its mesh could not be made ({e}): written as its exact shape, although the file is meshes only"));
+                    brep = Some(written);
+                    None
+                }
+                (_, made) => kept_without_mesh(made, brep.is_some(), &shown, &mut self.warnings)?,
+            }
         };
+        let has_brep = brep.is_some();
         let id = match brep {
             Some(id) => Some(id),
             None if self.writes.bound_meshes => {
@@ -1179,6 +1194,13 @@ pub(crate) enum Unmeshed {
     Failed(String),
     /// The export's meshes would pass the file's size cap ([`MAX_BYTES`]), said in full.
     TooLarge(String),
+}
+
+/// Whether a body of a meshes-only export (`meshes_only`) whose mesh failed (`made`) is written
+/// as its exact shape: only when it has one (it is not a mesh body, `is_mesh`), and only when the
+/// mesh failed, not when it passed the size cap.
+pub(crate) fn shape_instead(made: &Result<solidcraft_geom::Mesh, Unmeshed>, meshes_only: bool, is_mesh: bool) -> bool {
+    meshes_only && !is_mesh && matches!(made, Err(Unmeshed::Failed(_)))
 }
 
 /// The mesh `made` for body `shown`, or none: a body with an exact B-rep whose display mesh could

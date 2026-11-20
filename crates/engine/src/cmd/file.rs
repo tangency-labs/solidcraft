@@ -2889,9 +2889,22 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad("file.export", format!("`format: {f}` disagrees with the path's extension, which names {by_path:?}")));
     }
-    // Read before URDF and SDF go their own way, so neither takes them silently.
+    // Read before URDF, SDF and laid-out prints go their own way, so none takes them silently.
     let physics = physics_flag(p, cmd, format)?;
     let setup = render_setup_arg(p, cmd, format)?;
+    // OpenUSD's purpose sets the defaults of its exact shapes and pictures; each given option
+    // overrides it.
+    let purpose = usd_purpose(p, cmd, format)?;
+    let usd_flag = |key: &str| -> Result<Option<bool>> {
+        match p.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::Bool(b)) if format == Format::Usd => Ok(Some(*b)),
+            Some(Value::Bool(_)) if key == "exact_brep" => Err(bad(cmd, "`exact_brep` is for OpenUSD: other formats written here choose their own")),
+            Some(Value::Bool(_)) => Ok(None),
+            Some(_) => Err(bad(cmd, format!("`{key}` must be true or false"))),
+        }
+    };
+    let exact_brep = usd_flag("exact_brep")?;
     if format == Format::Urdf {
         if !string_list(cmd, p, "bodies")?.is_empty() {
             return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));
@@ -2911,14 +2924,12 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if lay {
         return export_laid(s, path, format, &bodies, &parts, quality);
     }
-    // OpenUSD writes the pictures shown on the model only when asked, as URDF does.
-    let images = format == Format::Usd
-        && match p.get("images") {
-            None | Some(Value::Null) => false,
-            Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`images` must be true or false"))?,
-        };
+    // Pictures are written only when asked (or for distribution), as URDF's are.
+    let distribution = purpose == UsdPurpose::Distribution;
+    let images = format == Format::Usd && usd_flag("images")?.unwrap_or(distribution);
+    let meshes_only = format == Format::Usd && !exact_brep.unwrap_or(!distribution);
     if written_by_cadmpeg(format) {
-        return export_cadmpeg(s, cmd, path, &bodies, quality, format, CadmpegChoices { physics, setup, images });
+        return export_cadmpeg(s, cmd, path, &bodies, quality, format, CadmpegChoices { physics, setup, images, meshes_only });
     }
     export_to(s, cmd, path, format, &bodies, &parts, quality, hierarchy(p, cmd, format)?)
 }
@@ -3160,6 +3171,28 @@ struct CadmpegChoices<'a> {
     physics: bool,
     setup: Option<&'a str>,
     images: bool,
+    meshes_only: bool,
+}
+
+/// What an OpenUSD file is for: the defaults of what it holds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum UsdPurpose {
+    /// For another CAD program: each body's exact shape beside its mesh.
+    #[default]
+    Interchange,
+    /// For a viewer, a game engine or a store: meshes only, with the pictures shown on the model.
+    Distribution,
+}
+
+/// `purpose` as `file.export` reads it. Only OpenUSD takes it.
+fn usd_purpose(p: &Value, cmd: &str, format: Format) -> Result<UsdPurpose> {
+    match p.get("purpose") {
+        None | Some(Value::Null) => Ok(UsdPurpose::Interchange),
+        Some(_) if format != Format::Usd => Err(bad(cmd, "`purpose` is for OpenUSD: other formats written here have one form")),
+        Some(Value::String(s)) if s == "interchange" => Ok(UsdPurpose::Interchange),
+        Some(Value::String(s)) if s == "distribution" => Ok(UsdPurpose::Distribution),
+        Some(_) => Err(bad(cmd, "`purpose` must be interchange or distribution")),
+    }
 }
 
 /// The design's shown decals for an OpenUSD export, each in its component's frame and the world.
@@ -3313,7 +3346,7 @@ fn export_cadmpeg(
     format: Format,
     choices: CadmpegChoices<'_>,
 ) -> Result<Value> {
-    let CadmpegChoices { physics, setup, images } = choices;
+    let CadmpegChoices { physics, setup, images, meshes_only } = choices;
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let world = s.world_state()?;
     // The placements the world has, uncaptured moves included, so the assembly is written where
@@ -3339,7 +3372,7 @@ fn export_cadmpeg(
         None => (Vec::new(), Vec::new()),
     };
     let decals = if images { usd_decals(&doc, &s.model.state(), &mut warnings) } else { Vec::new() };
-    let options = solidcraft_io::CadmpegOptions { hidden, physics, surfaces, decals, optics };
+    let options = solidcraft_io::CadmpegOptions { hidden, physics, surfaces, decals, optics, meshes_only };
     let (bytes, written) =
         solidcraft_io::cadmpeg_export(&doc, &s.model.state(), &world, bodies, &options, path, quality, format).map_err(EngineError::Other)?;
     warnings.extend(written);

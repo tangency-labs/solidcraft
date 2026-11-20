@@ -699,3 +699,49 @@ fn render_setup_optics_are_written_as_transmission() {
     assert!((value_after(&text, pbr, "float inputs:transmission_depth = ")[0] - 0.001).abs() < 1e-9, "{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A design with a picture on a 10 mm cube in component B, and a loose cube at the root.
+fn pictured() -> Session {
+    use image::ImageEncoder;
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-30, 0, 0], "body_name": "Loose"}));
+    run(&mut s, "component.create", json!({"name": "B"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png).write_image(&[200u8; 4 * 8], 4, 2, image::ExtendedColorType::Rgba8).unwrap();
+    run(&mut s, "canvas.decal", json!({"path": picture_file(&png), "face": [25, 5, 10], "width": 8, "name": "Logo"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    s
+}
+
+/// `purpose: distribution` writes meshes only, with the pictures shown on the model;
+/// `interchange` (the default) writes the exact shapes and no pictures; `exact_brep` and
+/// `images` override the purpose; `purpose` is for OpenUSD only.
+#[test]
+fn a_distribution_export_is_meshes_with_pictures() {
+    let dir = temp_dir("purpose");
+    let mut s = pictured();
+    let export = |s: &mut Session, name: &str, extra: Value| {
+        let path = dir.join(name);
+        let mut p = json!({"path": path.to_string_lossy()});
+        for (k, v) in extra.as_object().unwrap() {
+            p[k] = v.clone();
+        }
+        run(s, "file.export", p);
+        String::from_utf8_lossy(&std::fs::read(&path).unwrap()).to_string()
+    };
+    let interchange = export(&mut s, "interchange.usdz", json!({}));
+    assert!(interchange.contains("def BrepArray") && !interchange.contains("\"Logo\""), "{interchange}");
+    let distribution = export(&mut s, "distribution.usdz", json!({"purpose": "distribution"}));
+    assert!(!distribution.contains("BrepArray"), "{distribution}");
+    assert_eq!(distribution.matches("def Mesh").count(), 3, "two cubes and the picture:\n{distribution}");
+    assert!(distribution.contains("def Mesh \"Logo\""), "{distribution}");
+    let exact = export(&mut s, "exact.usdz", json!({"purpose": "distribution", "exact_brep": true, "images": false}));
+    assert!(exact.contains("def BrepArray") && !exact.contains("\"Logo\""), "{exact}");
+    let stl = dir.join("x.stl");
+    let refused = s.execute("file.export", &json!({"path": stl.to_string_lossy(), "purpose": "distribution"}));
+    assert!(refused.unwrap_err().to_string().contains("`purpose` is for OpenUSD"));
+    let refused = s.execute("file.export", &json!({"path": dir.join("y.usda").to_string_lossy(), "purpose": "print"}));
+    assert!(refused.unwrap_err().to_string().contains("`purpose` must be interchange or distribution"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

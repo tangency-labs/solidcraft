@@ -5,7 +5,10 @@
 //! mesh SolidCraft draws them with, and their looks), and cadmpeg's USD writer writes the model:
 //! each component an `Xform` prim named after its occurrence, holding its bodies, each named after
 //! it, as the exact B-rep (a `BrepArray` prim) and SolidCraft's `Mesh` of it; a part placed more
-//! than once written once under the abstract `Prototypes` prim and referenced at each placement;
+//! than once written once under the abstract `Prototypes` prim and referenced at each placement
+//! (a part of one body placed so has its body's prim named after the part, as cadmpeg 0.6.12
+//! names it). A mesh body, a body whose exact shape cadmpeg's model cannot hold yet, and every
+//! body of a meshes-only export (`exact_brep: false`) have their `Mesh` alone, no `BrepArray`;
 //! and looks as `UsdPreviewSurface` materials with their colour, opacity, metallic, roughness and
 //! index of refraction, a face with a look of its own bound through a `GeomSubset`. The layer is
 //! in metres with Z up and says so. SolidCraft's colours are sRGB, and USD's are linear, so the

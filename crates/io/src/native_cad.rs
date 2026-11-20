@@ -521,6 +521,9 @@ pub struct CadmpegOptions {
     pub decals: Vec<DecalPlan>,
     /// OpenUSD: the optics a render setup gives bodies (glass).
     pub optics: Vec<OpticsPlan>,
+    /// OpenUSD: each body as its mesh alone, without its exact shape (B-rep), for a file a
+    /// viewer or a game engine shows rather than a CAD program edits.
+    pub meshes_only: bool,
 }
 
 /// The optics a render setup gives one placement of a body: a dielectric (glass) of index `ior`
