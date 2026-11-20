@@ -5773,7 +5773,7 @@ fn hole_defaults(s: &Session) -> Kind {
         cb_depth: length_default(s, "3"),
         cs_diameter: length_default(s, "10"),
         cs_angle: "90 deg".into(),
-        opts: HoleOpts::default(),
+        opts: HoleOpts { head: 1, ..HoleOpts::default() },
     }
 }
 
@@ -8883,6 +8883,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 match hole {
                     HoleKind::Counterbore { cb_diameter: a, cb_depth: b, tip_angle, bridge } => {
                         *kind = 1;
+                        // The saved counterbore is kept as typed: a head would refill it.
+                        opts.head = 0;
                         opts.bridge = bridge.as_ref().map(ToString::to_string).unwrap_or_default();
                         *cb_diameter = a.to_string();
                         *cb_depth = b.to_string();
