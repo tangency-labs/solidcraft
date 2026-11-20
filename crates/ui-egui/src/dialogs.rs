@@ -1246,14 +1246,26 @@ impl Dialog {
         // Pre-selection: what is selected now becomes the input (first input that takes it); a
         // face or edge stands for its body where bodies are wanted. (Edit Text's selection is the
         // text it edits, not its path.)
-        let preselection: &[Sel] = if matches!(d.kind, Kind::Text(_)) { &[] } else { &s.selection };
+        // A new Hole opened on selected sketch points (and no face) places at them: it starts in
+        // Multiple placement with the points, as a click on a point with no face under it does (#3634).
+        let hole_points = hole_preselected_points(s, &d, &s.selection);
+        if !hole_points.is_empty() {
+            set_hole_placement(&mut d, true);
+        }
+        let preselection: Vec<Sel> = if matches!(d.kind, Kind::Text(_)) {
+            Vec::new()
+        } else if hole_points.is_empty() {
+            s.selection.clone()
+        } else {
+            hole_points
+        };
         if matches!(d.kind, Kind::Thread { .. })
             && preselection.iter().filter(|sel| fits(FACES, sel)).take(2).count() > 1
             && let Some(input) = d.inputs.first_mut()
         {
             input.multi = true;
         }
-        for sel in preselection {
+        for sel in &preselection {
             if !matches!(d.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) && is_wire_point(s, sel) {
                 continue;
             }
@@ -1783,9 +1795,14 @@ impl Dialog {
             };
         }
         if snaps_to_points(inp.accept)
-            && let Hit::SketchPoint { sketch, at, .. } = h
+            && let Hit::SketchPoint { sketch, id, at } = h
         {
-            let snap = snap?;
+            // No face under the cursor: there is no face place to take, so a new Single hole takes
+            // the point as Multiple does (`Dialog::pick` switches the placement) instead of
+            // ignoring the click (#3634). With a face under it, the face is picked as before.
+            let Some(snap) = snap else {
+                return single_hole_takes_free_points(self).then(|| Sel::SketchPoint { id: format!("{sketch}:{id}") });
+            };
             return snap.place_at(crate::open_meshing::session_world(s).sketch(*sketch)?.plane.to_world(*at));
         }
         if let Some(sel) = self.circle_centre_pick(s, inp, h, snap) {
@@ -1951,6 +1968,11 @@ impl Dialog {
     pub fn pick(&mut self, s: &Session, sel: Sel) {
         self.awaiting_pick = false;
         self.pick_refused = None;
+        // A Single hole takes a face place; a sketch point picked as itself had no face under the
+        // cursor (`candidate_on`), so the hole goes to Multiple placement and takes it there (#3634).
+        if matches!(sel, Sel::SketchPoint { .. }) && single_hole_takes_free_points(self) {
+            set_hole_placement(self, true);
+        }
         if self.active_input().is_some_and(|i| i.rejects(&sel)) {
             return;
         }
@@ -3271,17 +3293,52 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
     let mut m = usize::from(opts.multiple);
     choice_row(ui, "Placement", "hole_place", &mut m, &["Single", "Multiple"]);
     if (m == 1) != opts.multiple {
-        opts.multiple = m == 1;
-        d.inputs = if opts.multiple { vec![SelInput::new("Points", selection::POINTS, true)] } else { single_hole_inputs() };
-        if !opts.multiple
-            && d.editing.is_some()
-            && let Some(face) = d.inputs.first_mut()
-        {
-            face.multi = false;
-        }
-        d.active = 0;
-        d.extra.remove("direction");
+        set_hole_placement(d, m == 1);
     }
+}
+
+/// Switch a Hole dialog between Single (a face place) and Multiple (sketch points) placement:
+/// the placement inputs start over empty, and the direction taken from a face is dropped.
+fn set_hole_placement(d: &mut Dialog, multiple: bool) {
+    let Kind::Hole { opts, .. } = &mut d.kind else { return };
+    opts.multiple = multiple;
+    d.inputs = if multiple { vec![SelInput::new("Points", selection::POINTS, true)] } else { single_hole_inputs() };
+    if !multiple
+        && d.editing.is_some()
+        && let Some(face) = d.inputs.first_mut()
+    {
+        face.multi = false;
+    }
+    d.active = 0;
+    d.extra.remove("direction");
+}
+
+/// The sketch points a new Single Hole opens on, as a Multiple placement's Points input takes them
+/// (`sketch:id`): every selected sketch point, when the selection holds no face (a face keeps
+/// Single placement on it). Empty for any other dialog.
+fn hole_preselected_points(s: &Session, d: &Dialog, selection: &[Sel]) -> Vec<Sel> {
+    if !single_hole_takes_free_points(d) || d.editing.is_some() || selection.iter().any(|x| matches!(x, Sel::Face { .. })) {
+        return Vec::new();
+    }
+    selection
+        .iter()
+        .filter(|x| !is_wire_point(s, x))
+        .filter_map(|x| match x {
+            Sel::SketchPoint { id } if id.contains(':') => Some(x.clone()),
+            Sel::ExternalSketchPoint { sketch, id } => Some(Sel::SketchPoint { id: format!("{sketch}:{id}") }),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Does a click on a sketch point with no face under the cursor start Multiple placement with
+/// that point (#3634)? Only while a Single hole has no place yet: Single places on faces, and
+/// such a point would otherwise be ignored without a word.
+fn single_hole_takes_free_points(d: &Dialog) -> bool {
+    d.active == 0
+        && matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple)
+        && !crate::hole_folder::active(d)
+        && d.inputs.first().is_some_and(|i| i.items.is_empty())
 }
 
 /// The placement a click on a placed component's world body picks (`None` for root-component

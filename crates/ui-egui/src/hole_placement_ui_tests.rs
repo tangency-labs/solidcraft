@@ -2,6 +2,8 @@
 //! circle's centre) goes to that point, as a Multiple pick of the same point does (#657), and
 //! follows it when the sketch changes (#2110); a pick
 //! away from sketch points, or near one off the face under the cursor, stays where it was clicked.
+//! A sketch point with no face under the cursor turns a new Single hole to Multiple and is taken
+//! there, and a Hole opened on selected sketch points (no face) starts in Multiple at them (#3634).
 //! Only points the sketch shows are snapped to (not lettering's outline points), and Select Other
 //! looks the face up once for every point near the cursor.
 
@@ -545,6 +547,95 @@ fn a_single_hole_picked_near_a_sketch_point_off_the_face_under_it_stays_where_it
         assert!(position.dist(raw) < 1e-9, "the hole stays where it was clicked {raw:?}, not at {position:?}");
         assert!((position.z - 20.0).abs() < 1e-9 && position.dist(Vec3::new(centre.x, centre.y, 20.0)) > 0.1, "{position:?}");
     }
+}
+
+#[test]
+fn a_single_hole_picked_on_a_sketch_point_with_no_face_under_it_goes_to_multiple_placement() {
+    // The circle 20 mm above the block's top face, seen from the iso view: no face is under its
+    // centre on screen, so Single has no face place to take there. The click used to be ignored
+    // without a word (#3634); now the hole switches to Multiple and takes the centre.
+    let (mut h, centre) = block_and_circle_on(json!({"plane": "XY", "offset": 40}), [20.0, 15.0]);
+    assert!(centre.dist(Vec3::new(20.0, 15.0, 40.0)) < 1e-9, "{centre:?}");
+    h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
+    h.settle();
+    let click = screen(&mut h, centre);
+    let hits = hits_at(&h, click);
+    assert!(matches!(hits.first(), Some(Hit::SketchPoint { .. })), "the click reaches the centre: {hits:?}");
+    assert!(!hits.iter().any(|x| matches!(x, Hit::Face { .. })), "no face is under the centre: {hits:?}");
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    h.step(&json!({"move": click})).unwrap();
+    assert!(
+        matches!(&h.app.viewport.hover, Some(Hit::SketchPoint { .. })),
+        "the centre lights up as what the pick takes: {:?}",
+        h.app.viewport.hover
+    );
+    h.step(&json!({"click": click})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(matches!(&d.kind, Kind::Hole { opts, .. } if opts.multiple), "the hole switched to Multiple placement: {:?}", d.kind);
+    assert!(matches!(d.inputs[0].items.as_slice(), [Sel::SketchPoint { .. }]), "the centre is picked: {:?}", d.inputs[0].items);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "OK closed the dialog: {:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let (id, _, at_points) = hole(&h);
+    assert!(at_points, "the hole is at the sketch point");
+    assert!(h.app.session.model.result(id).is_some_and(|r| r.error.is_none() && r.warning.is_none()));
+    // The bore (5 mm across, 10 mm deep) goes down from the top face (z 20) under the centre.
+    assert!(!solid_at(&h, Vec3::new(20.0, 15.0, 17.0)) && !solid_at(&h, Vec3::new(22.4, 15.0, 17.0)), "the bore is empty");
+    assert!(solid_at(&h, Vec3::new(22.6, 15.0, 17.0)) && solid_at(&h, Vec3::new(20.0, 15.0, 5.0)), "the wall and floor are solid");
+
+    // A Single hole that has its face place already keeps it: the click on the centre changes nothing.
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let top = screen(&mut h, Vec3::new(30.0, 8.0, 20.0));
+    h.step(&json!({"click": top})).unwrap();
+    assert_eq!(face_places(&h).len(), 1, "the top face is picked");
+    h.step(&json!({"click": click})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple), "still Single: {:?}", d.kind);
+    assert_eq!(face_places(&h).len(), 1, "the face place stays the only pick");
+}
+
+/// The first sketch's feature id and the id of its circle's centre point.
+fn circle_centre_id(h: &Harness) -> (u64, String) {
+    let st = h.app.session.world_state().unwrap();
+    let ss = st.sketches.first().unwrap();
+    let id = ss
+        .sketch
+        .curves
+        .iter()
+        .find_map(|c| match c.kind {
+            CurveKind::Circle { c, .. } => Some(ss.sketch.points[c].id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    (ss.feature, id)
+}
+
+#[test]
+fn a_hole_opened_on_a_selected_sketch_point_starts_in_multiple_placement_at_it() {
+    let (mut h, centre) = block_with_circle();
+    let (sketch, id) = circle_centre_id(&h);
+    // The centre selected, as a click on it with no command open selects it.
+    h.app.session.selection = vec![Sel::ExternalSketchPoint { sketch, id: id.clone() }];
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(matches!(&d.kind, Kind::Hole { opts, .. } if opts.multiple), "the hole opens in Multiple placement: {:?}", d.kind);
+    let point = Sel::SketchPoint { id: format!("{sketch}:{id}") };
+    assert_eq!(d.inputs[0].items, vec![point], "the selected centre is the hole's point");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "OK closed the dialog: {:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let (id, _, at_points) = hole(&h);
+    assert!(at_points, "the hole is at the sketch point");
+    assert!(h.app.session.model.result(id).is_some_and(|r| r.error.is_none() && r.warning.is_none()));
+    let down = Vec3::new(0.0, 0.0, 5.0);
+    assert!(!solid_at(&h, centre - down) && solid_at(&h, centre - down + Vec3::new(2.6, 0.0, 0.0)), "the bore is at the centre {centre:?}");
+
+    // With a face selected too, the hole keeps Single placement on the face, as before.
+    let (mut h, _) = block_with_circle();
+    let (sketch, id) = circle_centre_id(&h);
+    h.app.session.selection =
+        vec![Sel::Face { body: "Body1".into(), index: 0, point: Vec3::new(30.0, 8.0, 20.0) }, Sel::ExternalSketchPoint { sketch, id }];
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple), "a selected face keeps Single placement: {:?}", d.kind);
 }
 
 #[test]
