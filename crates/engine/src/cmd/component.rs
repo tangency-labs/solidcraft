@@ -15,8 +15,8 @@ use solidcraft_doc::{Document, Feature, FeatureKind, Mat, Occurrence};
 use super::CommandSpec;
 use crate::params::{bad, bool_, name_or_id_values, str_, string_list, vec3};
 use crate::schema::component::{
-    ActivateParams, ActivateResult, CapturePositionParams, CapturePositionResult, ChildEntry, CompactPlacement, ComponentNode, CopyParams,
-    CopyResult, CreateParams, CreateResult, CycleColorParams, CycleColorResult, DeleteParams, DeleteResult, DragParams, DragResult,
+    ActivateParams, ActivateParentParams, ActivateResult, CapturePositionParams, CapturePositionResult, ChildEntry, CompactPlacement, ComponentNode,
+    CopyParams, CopyResult, CreateParams, CreateResult, CycleColorParams, CycleColorResult, DeleteParams, DeleteResult, DragParams, DragResult,
     EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, FromBodiesParams, FromBodiesResult, GroundParams, GroundResult,
     HistoryVisibilityParams, HistoryVisibilityResult, ListParams, ListResult, MoveBodiesParams, MoveBodiesResult, MoveFeaturesParams,
     MoveFeaturesResult, MoveParams, MoveResult, MoveSketchesParams, MoveSketchesResult, MoveSketchesToPartsParams, MoveSketchesToPartsResult,
@@ -28,6 +28,7 @@ use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const ACTIVATE_CONTRACT: TypedContract<ActivateParams> = TypedContract::new();
+const ACTIVATE_PARENT_CONTRACT: TypedContract<ActivateParentParams> = TypedContract::new();
 const CREATE_CONTRACT: TypedContract<CreateParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<DeleteParams> = TypedContract::new();
 const FROM_BODIES_CONTRACT: TypedContract<FromBodiesParams> = TypedContract::new();
@@ -118,6 +119,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ACTIVATE_CONTRACT)
         .output(output_schema_for::<ActivateResult>)
         .params("component: id or name (0 or \"root\" for the design); occurrence?, path?: exact placement used to author shared geometry"),
+    CommandSpec::new("component.activate.parent", "Activate Parent", crate::checked!("component.activate.parent", activate_parent))
+        .icon("finish_edit")
+        .noundo()
+        .doc_only()
+        .enabled(below_the_design)
+        .contract(&ACTIVATE_PARENT_CONTRACT)
+        .output(output_schema_for::<ActivateResult>)
+        .params(
+            "no parameters → active: activates the parent of the active component, at the placement the active one sits in \
+             (one level up a call; the design at the top); refused while the design itself is active",
+        ),
     CommandSpec::new("component.edit_in_place", "Edit in Place", crate::checked!("component.edit_in_place", edit_in_place))
         .icon("edit")
         .noundo()
@@ -566,6 +578,23 @@ fn activate(s: &mut Session, p: &Value) -> Result<Value> {
     s.active_occurrence_path = path;
     s.revision += 1;
     reply(ActivateResult { active: id, param_warnings: Vec::new() })
+}
+
+/// `component.activate.parent` is offered only below the design.
+fn below_the_design(s: &Session) -> std::result::Result<(), String> {
+    if s.active_component != 0 { Ok(()) } else { Err("the design is active: it has no parent to return to".into()) }
+}
+
+/// The parent is where the active placement's path leads one step short of its end, so a part
+/// placed in two assemblies goes back to the one it was activated in.
+fn activate_parent(s: &mut Session, _p: &Value) -> Result<Value> {
+    let mut path = s.active_path();
+    path.pop();
+    let parent = s.doc.path_placement(&path).map_or(0, |(component, _)| component);
+    s.active_component = parent;
+    s.active_occurrence_path = (!path.is_empty()).then_some(path);
+    s.revision += 1;
+    reply(ActivateResult { active: parent, param_warnings: Vec::new() })
 }
 
 fn list(s: &mut Session, p: &Value) -> Result<Value> {

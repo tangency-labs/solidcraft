@@ -6,6 +6,11 @@ component has its own origin, bodies, sketches and timeline entries. The **activ
 (the radio button in the browser) receives new sketches and features; the others are drawn
 faded.
 
+**Activate Parent** (`component.activate.parent`), at the right end of the **MODEL** tab while a
+component is active, activates the component one level up: a part inside a subassembly goes back
+to the subassembly, and the top component goes back to the design. A double-click on empty space
+in the view does the same, unless Preferences, Design, `double_click_components` is off.
+
 Sketches drawn on a part's face while the design was active belong to the design, so they
 collect in its Sketches folder. **Move Sketches to Their Parts**
 (`component.move_sketches.to_parts`), on a Sketches folder's menu and on a sketch's menu, moves

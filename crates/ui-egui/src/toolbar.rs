@@ -37,6 +37,22 @@ pub fn panels(tab: &str) -> Vec<&'static str> {
     crate::workspace::panels(tab)
 }
 
+/// The groups that leave what is open (the sketch, the active component, the edit), pinned at
+/// the ribbon's right end when last: labelled Exit, their own buttons never shown pressed.
+fn exit_panel(tab: &str, panel: &str) -> bool {
+    matches!((tab, panel), ("SKETCH", "FINISH SKETCH") | ("MODEL", "ACTIVE COMPONENT" | "FINISH EDITING"))
+}
+
+/// Whether a panel of `tab` is on the ribbon now: an exit group only while there is something
+/// to leave.
+pub(crate) fn panel_shown(app: &SolveApp, tab: &str, panel: &str) -> bool {
+    match (tab, panel) {
+        ("MODEL", "ACTIVE COMPONENT") => app.session.active_component != 0,
+        ("MODEL", "FINISH EDITING") => app.edit_in_place.active.is_some(),
+        _ => true,
+    }
+}
+
 pub use crate::ribbon::TAB_ROW_HEIGHT;
 pub const RIBBON_HEIGHT: f32 = TAB_ROW_HEIGHT + GROUP_HEIGHT + 1.0;
 pub(crate) const WORKSPACE_WIDTH: f32 = 88.0;
@@ -1221,7 +1237,7 @@ struct RibbonPanels {
     panels: Vec<Panel>,
     /// The Plugins group after the panels, when the tab has one and a plugin is on.
     plugins: Option<PluginGroup>,
-    /// The last panel leaves the sketch or the edit.
+    /// The last panel is an exit group, pinned at the right.
     exit: bool,
     running: Option<String>,
 }
@@ -1229,14 +1245,13 @@ struct RibbonPanels {
 impl RibbonPanels {
     fn new(app: &SolveApp, ui: &egui::Ui, tab: &str, lists: &[PanelList], painter: &egui::Painter, running: Option<String>) -> Self {
         let labels = app.preferences.ribbon_labels;
-        let editing_in_place = app.edit_in_place.active.is_some();
         let open_menu = ui.ctx().data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")));
         let panels = lists
             .iter()
             .map(|(panel, cmds, shown)| {
                 let panel: &'static str = panel;
                 let sketch_create = tab == "SKETCH" && panel == "CREATE";
-                let finish = (tab == "SKETCH" && panel == "FINISH SKETCH") || (tab == "MODEL" && panel == "FINISH EDITING");
+                let finish = exit_panel(tab, panel);
                 let in_gallery = |c: &&'static solidcraft_engine::CommandSpec| crate::toolbar_custom::in_gallery(app, tab, panel, c.id);
                 let button = |c: &'static solidcraft_engine::CommandSpec| {
                     // Only the family's default pin follows the part's choice. Explicitly pinned
@@ -1268,7 +1283,14 @@ impl RibbonPanels {
                         // The buttons that leave the sketch or the edit never show pressed; a
                         // tool pinned into their group does.
                         exit: finish
-                            && matches!(selected.id, "sketch.finish" | "sketch.finish_auto_constrain" | "sketch.cancel" | "component.finish_edit"),
+                            && matches!(
+                                selected.id,
+                                "sketch.finish"
+                                    | "sketch.finish_auto_constrain"
+                                    | "sketch.cancel"
+                                    | "component.activate.parent"
+                                    | "component.finish_edit"
+                            ),
                         persistent,
                         disabled: info.disabled_reason,
                         coming_soon: coming_soon(app, selected),
@@ -1333,10 +1355,9 @@ impl RibbonPanels {
                 }
             })
             .collect::<Vec<_>>();
-        // The Sketch exit group follows the last sketch panel (Finish Edit the last panel while
-        // editing in place).
-        let exit = (tab == "SKETCH" || (tab == "MODEL" && editing_in_place))
-            && panels.last().is_some_and(|p| matches!(p.panel, "FINISH SKETCH" | "FINISH EDITING"));
+        // An exit group shown last is pinned at the right; the caller leaves out the ones with
+        // nothing to leave (`panel_shown`).
+        let exit = panels.last().is_some_and(|p| exit_panel(tab, p.panel));
         let buttons = if tab == "MODEL" { crate::plugin_menu::ribbon_buttons(app) } else { Vec::new() };
         let plugins = (!buttons.is_empty()).then(|| PluginGroup {
             label: app.tr("ui.plugins").to_string(),
@@ -1597,10 +1618,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             && !ribbon::dragging(ui.ctx());
         // Every panel with all its buttons (the user's pins have no cap); a toolbar too narrow
         // for them narrows the buttons, then trims panels into their drop-down and the » menu.
-        let editing_in_place = app.edit_in_place.active.is_some();
         let lists: Vec<_> = crate::toolbar_custom::panel_lists(&tab)
             .into_iter()
-            .filter(|(panel, _, _)| editing_in_place || !(tab == "MODEL" && *panel == "FINISH EDITING"))
+            .filter(|(panel, _, _)| panel_shown(app, &tab, panel))
             .map(|(panel, mut cmds, promote)| {
                 let promote = if tab == "SKETCH" && panel == "CREATE" && !app.preferences.sketch_construction_lines {
                     promote.saturating_sub(1)
@@ -5436,8 +5456,9 @@ mod fill_width_tests {
                 let right = bar.right() - 4.0 - finish.map_or(0.0, |f| f.width() + 4.0);
                 let count = |name: &str| crate::scenario::count_of(name).unwrap_or(-1.0);
                 let (collapsed, trimmed, more) = (count("toolbar_collapsed"), count("toolbar_trimmed"), count("toolbar_more"));
-                // FINISH EDITING is shown only while a linked design is edited in place.
-                let lists: Vec<_> = crate::toolbar_custom::panel_lists(tab).into_iter().filter(|(panel, _, _)| *panel != "FINISH EDITING").collect();
+                // The exit groups with nothing to leave are not on the toolbar.
+                let lists: Vec<_> =
+                    crate::toolbar_custom::panel_lists(tab).into_iter().filter(|(panel, _, _)| panel_shown(&h.app, tab, panel)).collect();
                 let mut end = bar.left();
                 let mut on_bar = 0;
                 for (panel, cmds, promote) in &lists {

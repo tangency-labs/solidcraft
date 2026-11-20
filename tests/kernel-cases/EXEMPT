@@ -43,6 +43,7 @@ canvas.frame_sketch               reference images, and sketches traced from the
 canvas.insert                     reference images, and sketches traced from them (sketch only)
 canvas.straighten                 reference images, and sketches traced from them (sketch only); crates/engine/src/cmd/sketch_canvas.rs tests
 canvas.to_sketch                  reference images, and sketches traced from them (sketch only)
+component.activate.parent         the active component: tested in crates/engine/src/cmd/occurrence_tests.rs
 component.break_link              component links
 component.copies                  a listing of identical copies
 component.cycle_color             component colours

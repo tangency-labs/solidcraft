@@ -751,6 +751,15 @@ impl Session {
         self.occurrence_placement(&path).map(|p| p.world).unwrap_or(IDENTITY)
     }
 
+    /// The active component's placement as occurrence ids from the top: the one it was activated
+    /// at while that still leads to it, else its first. Empty for the design.
+    pub fn active_path(&self) -> Vec<u64> {
+        match &self.active_occurrence_path {
+            Some(path) if self.doc.path_placement(path).is_some_and(|(component, _)| component == self.active_component) => path.clone(),
+            _ => self.doc.first_path(self.active_component),
+        }
+    }
+
     pub fn occurrence_visible(&self, path: &[u64]) -> bool {
         !self.visibility.hidden_occurrences.iter().any(|hidden| path.starts_with(hidden))
     }
