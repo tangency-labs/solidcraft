@@ -195,6 +195,16 @@ pub fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
     crate::offset_backend::shell(b, open, thickness)?.inherit_split_lines(&[b]).with_shell_planar_sources(b, thickness, open)
 }
 
+/// Grow the closed solid `b` by `distance` along its faces' outward normals (negative: shrink it),
+/// SMLib's offset of the whole body: the convex edges are extended until the moved faces meet, or
+/// with `round` rounded with `distance` as the radius, so every point of the result's surface is
+/// `distance` from the body's.
+pub fn offset_solid(b: &Body, distance: f64, round: bool) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "offset_solid");
+    b.require_brep("offset")?;
+    crate::offset_backend::offset_solid(b, distance, round)
+}
+
 /// Tilt the faces near `faces` by `angle` about their line on the neutral plane, so that they
 /// lean in (positive angle) going along `pull` (SMLib's draft).
 pub fn draft(b: &Body, faces: &[Vec3], neutral: &solidcore_record::Plane, pull: Vec3, angle: f64) -> Result<Body> {

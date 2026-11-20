@@ -221,7 +221,7 @@ pub use point_path::{
     sweep_point_path_with,
 };
 pub use polybool::faceted_boolean;
-pub use polyhedron::{HalfSpace, convex_polyhedron, draft, offset_faces, shell};
+pub use polyhedron::{HalfSpace, convex_polyhedron, draft, offset_faces, offset_solid, shell};
 pub use prism::{PLANAR_FIT_TOL, extrude_planar_regions, planar_regions_boolean};
 pub use prism_curve::{PlanarPiece, PlanarSpline};
 pub use prism_measure::{PrismSection, certified_prism_equivalent, certified_prism_section};

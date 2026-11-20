@@ -3308,6 +3308,8 @@ fn boxes_joined(n: usize, pitch: f64) -> (Model, u64, Counts) {
                 tools: tools.iter().map(|t| t.clone().into()).collect(),
                 operation: Operation::Join,
                 keep_tools: false,
+                offset: None,
+                offset_edges: OffsetEdges::Sharp,
             },
             None,
         )
