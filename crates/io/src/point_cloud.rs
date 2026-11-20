@@ -1,7 +1,7 @@
 //! Point cloud files read for a design's point cloud (#5151): PLY ([`crate::ply`]), PCD
-//! ([`crate::pcd`]) and XYZ text (`x y z` per line, optionally followed by `r g b`, or by an
-//! intensity and then `r g b` as PTS files write it; spaces, tabs, commas or semicolons between
-//! the values; an ASC file is the same text). A file with more points than asked for is thinned
+//! ([`crate::pcd`]), E57 ([`crate::e57`]) and XYZ text (`x y z` per line, optionally followed by
+//! `r g b`, or by an intensity and then `r g b` as PTS files write it; spaces, tabs, commas or
+//! semicolons between the values; an ASC file is the same text). A file with more points than asked for is thinned
 //! evenly (every n-th point). The points are kept relative to the first one, in single precision.
 
 use solidcore_record::Vec3;
@@ -14,9 +14,9 @@ use crate::{IoError, Result};
 pub const MAX_POINT_CLOUD_BYTES: usize = 1 << 30;
 /// Points kept from a file unless asked for another number.
 pub const DEFAULT_MAX_POINTS: usize = 5_000_000;
-/// Is this a point cloud file we read (`.ply`, `.pcd`, `.xyz`, `.pts`, `.asc`, any case)?
+/// Is this a point cloud file we read (`.ply`, `.pcd`, `.e57`, `.xyz`, `.pts`, `.asc`, any case)?
 pub fn is_point_cloud_path(path: &str) -> bool {
-    has_extension(path, &["ply", "pcd", "xyz", "pts", "asc"])
+    has_extension(path, &["ply", "pcd", "e57", "xyz", "pts", "asc"])
 }
 
 /// Is this a PLY file (`.ply`, any case)?
@@ -79,8 +79,9 @@ impl Keep {
     }
 }
 
-/// Read a PLY, PCD or XYZ file (by `file`'s extension; a file starting with `ply` is PLY whatever
-/// its name) whose lengths are `scale` millimetres each, keeping at most `max_points` points.
+/// Read a PLY, PCD, E57 or XYZ file (by `file`'s extension; a file starting with `ply` is PLY
+/// whatever its name) whose lengths are `scale` millimetres each, keeping at most `max_points`
+/// points.
 pub fn read_point_cloud(bytes: &[u8], file: &str, scale: f64, max_points: usize) -> Result<CloudFile> {
     crate::limits::check(crate::limits::Kind::PointCloud, bytes.len() as u64).map_err(IoError::Invalid)?;
     if !(scale.is_finite() && scale > 0.0 && scale <= 1e6) {
@@ -89,11 +90,13 @@ pub fn read_point_cloud(bytes: &[u8], file: &str, scale: f64, max_points: usize)
     let max = max_points.clamp(1, MAX_POINTS);
     let mut keep = Keep { scale, origin: None, out: CloudFile::default(), colored: false, bad: 0, max };
     let ply = crate::ply::is_ply(bytes) || (is_ply_path(file) && !bytes.is_empty());
-    // A PLY or PCD file gives its points with their properties beside them.
+    // A PLY, PCD or E57 file gives its points with their properties beside them.
     let table = if ply {
         Some(crate::ply_complex::read_ply_cloud(bytes, max)?)
     } else if has_extension(file, &["pcd"]) {
         Some(crate::pcd::read_pcd_cloud(bytes, max)?)
+    } else if has_extension(file, &["e57"]) {
+        Some(crate::e57::read_e57_cloud(bytes, max)?)
     } else {
         None
     };
@@ -389,6 +392,9 @@ mod tests {
             (b"ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n1e300 0 0\n", "a.ply"),
             (b"PLY", "b.ply"),
             (b"", "a.pcd"),
+            (b"", "a.e57"),
+            (b"ASTM-E57", "a.e57"),
+            (b"1 2 3\n", "a.e57"),
             (b"1 2 3\n", "a.pcd"),
             (b"FIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nPOINTS 1\nDATA ascii\n1e300 0 0\n", "a.pcd"),
             (b"FIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nPOINTS 9\nDATA binary\n", "a.pcd"),
@@ -399,6 +405,6 @@ mod tests {
             assert_eq!(r.ok(), Some(false), "{:?}", String::from_utf8_lossy(b));
         }
         assert!(is_point_cloud_path("x.PLY") && is_point_cloud_path("y.xyz") && is_point_cloud_path("z.pts") && !is_point_cloud_path("w.stl"));
-        assert!(is_point_cloud_path("x.PCD") && is_point_cloud_path("y.asc") && !is_point_cloud_path("z.e57"));
+        assert!(is_point_cloud_path("x.PCD") && is_point_cloud_path("y.asc") && is_point_cloud_path("z.E57") && !is_point_cloud_path("w.las"));
     }
 }

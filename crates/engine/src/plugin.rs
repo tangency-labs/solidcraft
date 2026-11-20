@@ -3,7 +3,7 @@
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
     API, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
-    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, valid_id,
+    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
@@ -330,9 +330,10 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
     }
     let rt = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
     host_limits_for(session, &package.manifest.id, &package.approval).check(&rt.limits)?;
-    if !rt.entries.iter().any(|e| e.name == entry) {
-        return Err(error("unknown entry"));
-    }
+    let declared = rt.entries.iter().find(|e| e.name == entry).ok_or_else(|| error("unknown entry"))?;
+    let prepared =
+        conditions::has_conditions(&declared.input_schema).then(|| craft_plugin::prepare_input(&declared.input_schema, params)).transpose()?;
+    let params = prepared.as_ref().unwrap_or(params);
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         // What this call may reach: the groups both the manifest asks for and the user granted,

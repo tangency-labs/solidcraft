@@ -40,6 +40,7 @@ pub mod p8;
 pub mod p9;
 pub mod planar_section;
 pub mod primitive_outward;
+pub mod seam_turn;
 pub mod sheet;
 pub mod side_extend;
 pub mod trim_extend;

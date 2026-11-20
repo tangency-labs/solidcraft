@@ -2186,7 +2186,7 @@ fn list_commands_narrows_by_prefix_panel_fields_and_page() {
 #[test]
 fn legacy_design_files_open_by_contents() {
     let mut s = server();
-    let saved = String::from_utf8(solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::default())).unwrap();
+    let saved = String::from_utf8(solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::default()).unwrap()).unwrap();
     assert!(saved.contains("\"solidcraft/"), "{saved}");
     let legacy = saved.replace("\"solidcraft/", "\"solvecraft/");
     let path = std::env::temp_dir().join(format!("solidcraft-mcp-legacy-{}.solvecraft", std::process::id()));

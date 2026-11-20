@@ -296,7 +296,6 @@ fn record_refs(out: &mut Vec<(String, bool)>, s: &Session, f: &Feature) {
                 }
                 None => "by its pick".into(),
             },
-            FaceAttachmentStatus::Sheet { .. } => "sheet face".into(),
             FaceAttachmentStatus::Fixed { .. } => "fixed".into(),
         };
         let stored = match (anchor, name) {

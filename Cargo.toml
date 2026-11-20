@@ -43,6 +43,7 @@ solidcraft-display-units = { path = "crates/display-units" }
 solidcraft-ui-text = { path = "crates/ui-text" }
 solidcraft-theme = { path = "crates/theme" }
 solidcraft-viewport = { path = "crates/viewport" }
+solidcraft-views = { path = "crates/views" }
 solidcraft-viewport-egui = { path = "crates/viewport-egui" }
 solidcraft-viewport-gpu = { path = "crates/viewport-gpu" }
 solidcraft-space-mouse = { path = "crates/space-mouse" }

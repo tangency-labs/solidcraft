@@ -5299,7 +5299,6 @@
   "sketch_panel.plane_offset": "{plane}, con un desfase de {distance}",
   "sketch_panel.plane_origin": "El plano {plane}",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "Vinculado a una cara plana de un cuerpo de chapa; sigue ese panel cuando cambia la chapa.",
   "sketch_panel.text_hint": "Edite el texto y su posición y pulse Aceptar.",
   "sketch_panel.use_plane": "Usar plano {plane}",
   "sketch_text.align_center": "Centrar",

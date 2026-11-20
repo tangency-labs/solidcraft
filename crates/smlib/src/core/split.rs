@@ -46,7 +46,7 @@ use solidcore::topology::brep::p9::{OrientSheetNote, orient_sheet_surfaces};
 use solidcore::topology::brep::p10::merge_curves_on_surface_through_surface;
 use solidcore::topology::brep::planar_section::face_planar_section_curves;
 use solidcore::topology::brep_cache::CacheObject;
-use solidcore::topology::edge::NotifyEnv;
+use solidcore::topology::edge::{NotifyEnv, is_embedded};
 use solidcore::topology::face::p2 as face_p2;
 use solidcore::topology::{Brep, EdgeId, FaceId};
 
@@ -226,8 +226,21 @@ fn curve_ref(e: EdgeId, _type_code: i64) -> ObjectRef {
     solidcore::topology::loopuse::notify_ref(EntityRef::Edge(e))
 }
 
-/// `cut_face`: cuts `face` where `tool` meets it; the faces it was split into besides itself.
-fn cut_face(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, face: FaceId, tool: &Tool, tol: f64) -> SolidResult<Out<Vec<FaceId>>> {
+/// What one tool did to one face.
+struct Cut {
+    /// The faces it was split into besides itself.
+    made: Vec<FaceId>,
+    /// The tool ran into the face and ended inside it: its curve on the face is a crack (an
+    /// edge with the face on both sides), which cuts nothing off.
+    stops_inside: bool,
+}
+
+impl Cut {
+    const NONE: Cut = Cut { made: Vec::new(), stops_inside: false };
+}
+
+/// `cut_face`: cuts `face` where `tool` meets it.
+fn cut_face(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, face: FaceId, tool: &Tool, tol: f64) -> SolidResult<Out<Cut>> {
     let Some(surface) = face_p2::surface(b, face)? else {
         return Ok(Err(Error::Status(SM_ERR)));
     };
@@ -250,7 +263,23 @@ fn cut_face(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, face: FaceId,
             uv.as_deref(),
             Some(tool.surface.clone()),
         ) {
-            Ok((made, _)) => Ok(Ok(made)),
+            Ok((made, edges)) => {
+                // Only a cut that split nothing is asked: did its curve stop inside the face?
+                let mut stops_inside = false;
+                if made.is_empty() {
+                    for e in edges {
+                        match is_embedded(k, b, e, Some(face), true) {
+                            Ok(true) => {
+                                stops_inside = true;
+                                break;
+                            }
+                            Ok(false) => {}
+                            Err(e) => return Ok(Err(status(e))),
+                        }
+                    }
+                }
+                Ok(Ok(Cut { made, stops_inside }))
+            }
             Err(e) => Ok(Err(status(e))),
         };
     // A plane reaching over the face sections it exactly (SmPlaneCutter's way); a plane strip,
@@ -260,14 +289,14 @@ fn cut_face(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, face: FaceId,
     {
         // As SmPlaneCutter: a face far from the plane is not sectioned.
         if bx.distance_to_plane(at, normal).abs() > tol {
-            return Ok(Ok(Vec::new()));
+            return Ok(Ok(Cut::NONE));
         }
         let section = match face_planar_section_curves(k, b, face, &surface, &domain, at, normal, Some(approx), None) {
             Ok(s) => s,
             Err(e) => return Ok(Err(status(e))),
         };
         if section.curves_3d.is_empty() {
-            return Ok(Ok(Vec::new()));
+            return Ok(Ok(Cut::NONE));
         }
         let uv = (section.uv_curves.len() == section.curves_3d.len()).then_some(section.uv_curves);
         return merge(k, b, env, section.curves_3d, uv);
@@ -300,7 +329,7 @@ fn cut_face(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, face: FaceId,
         uv1.push(found.surface1_uv_curves.get(i).cloned().flatten());
     }
     if c3.is_empty() {
-        return Ok(Ok(Vec::new()));
+        return Ok(Ok(Cut::NONE));
     }
     let all_uv = uv1.iter().all(Option::is_some);
     merge(k, b, env, c3, all_uv.then_some(uv1))
@@ -309,7 +338,8 @@ fn cut_face(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, face: FaceId,
 /// `smlib_split_faces`: a copy of `body` with faces `faces` (indices in its face order, distinct)
 /// cut where each tool meets them, the tools in turn, each cutting the pieces the earlier ones
 /// left; and for each face how many faces it became besides itself. `None` when no face is split
-/// (`SMLIB_ERR_NO_CUT`).
+/// (`SMLIB_ERR_NO_CUT`), and [`Error::ToolStopsShort`] when none is but a tool ran into a face
+/// and ended inside it.
 pub(crate) fn split_faces(body: &Body, faces: &[usize], tools: &[&Spec]) -> Result<Option<(Body, Vec<usize>)>> {
     if faces.is_empty() || faces.len() > MAX_FACES || tools.is_empty() || tools.len() > MAX_TOOLS {
         return Err(Error::Argument);
@@ -350,24 +380,25 @@ pub(crate) fn split_faces(body: &Body, faces: &[usize], tools: &[&Spec]) -> Resu
         // The edits notify through the kernel's callbacks with the body's own attributes, so
         // the history tags follow each cut (as SMLib's objects notify their attributes).
         let cut = with_kernel_callbacks(k, &mut a, |k, a, env| {
-            let mut total = 0usize;
+            let (mut total, mut stops_inside) = (0usize, false);
             for t in &built {
                 for (i, list) in pieces.iter_mut().enumerate() {
                     let now = list.clone();
                     for f in now {
-                        let split = match cut_face(k, a, env, f, t, tol)? {
-                            Ok(s) => s,
+                        let cut = match cut_face(k, a, env, f, t, tol)? {
+                            Ok(c) => c,
                             Err(e) => return Ok(Err(e)),
                         };
+                        stops_inside |= cut.stops_inside;
                         if let Some(m) = made.get_mut(i) {
-                            *m += split.len();
+                            *m += cut.made.len();
                         }
-                        total += split.len();
-                        list.extend(split);
+                        total += cut.made.len();
+                        list.extend(cut.made);
                     }
                 }
             }
-            Ok(Ok(total))
+            Ok(Ok((total, stops_inside)))
         });
         a.set_editing_enabled(editing);
         k.context.set_doing_boolean(doing);
@@ -377,7 +408,8 @@ pub(crate) fn split_faces(body: &Body, faces: &[usize], tools: &[&Spec]) -> Resu
         a.set_naming(solidcore::topology::NamingScheme::Caller);
         Ok(match cut? {
             Err(e) => Err(e),
-            Ok(0) => Ok(None),
+            Ok((0, true)) => Err(Error::ToolStopsShort),
+            Ok((0, false)) => Ok(None),
             Ok(_) => Ok(Some((a, made))),
         })
     })??;

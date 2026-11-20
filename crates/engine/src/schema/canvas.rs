@@ -21,19 +21,15 @@ use super::motion::require;
 use super::types::{LengthExpr, Point2, Point3};
 use crate::params;
 
-/// Place an image on a plane as a reference to trace, kept in the design. Give the image as
-/// `path` or as base64 `data`; PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a
+/// Place an image on a plane as a reference to trace, kept in the design. Give the image file as
+/// `path`; PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a
 /// PNG. The image goes into the active component. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = image_required)]
 pub struct CanvasInsertParams {
-    /// A PNG, JPEG or SVG file to read (not blank, under 4096 characters). Used when `data` is
-    /// not given.
+    /// The PNG, JPEG or SVG file to read (not blank, under 4096 characters).
     #[serde(default)]
     pub path: Option<String>,
-    /// The image itself, a PNG, JPEG or SVG, as base64. Wins over `path`.
-    #[serde(default)]
-    pub data: Option<String>,
     /// The plane the image lies on. Default: XY. A picked face is read as `sketch.create` reads
     /// one.
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
@@ -97,19 +93,15 @@ pub enum FrameAuto {
 }
 
 /// Put an image on a planar face of the model, like a sticker, kept in the design and written to
-/// a URDF export as a textured visual of its component's link. Give the image as `path` or as
-/// base64 `data`; PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a PNG. The image
+/// a URDF export as a textured visual of its component's link. Give the image file as `path`;
+/// PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a PNG. The image
 /// goes into the active component. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = decal_required)]
 pub struct CanvasDecalParams {
-    /// A PNG, JPEG or SVG file to read (not blank, under 4096 characters). Used when `data` is
-    /// not given.
+    /// The PNG, JPEG or SVG file to read (not blank, under 4096 characters).
     #[serde(default)]
     pub path: Option<String>,
-    /// The image itself, a PNG, JPEG or SVG, as base64. Wins over `path`.
-    #[serde(default)]
-    pub data: Option<String>,
     // Optional in the type and required in the schema (`decal_required`): left out, the handler
     // refuses it with its own message, not the check's "is required".
     /// The face: a point [x, y, z] in mm on a planar face, where the image is centred, or a
@@ -566,7 +558,7 @@ fn face_pick(point: &Schema) -> Value {
 /// `canvas.insert` and `canvas.decal` need `path` or `data`; the handler says so when both are
 /// left out.
 fn need_image(schema: &mut Schema) {
-    schema.insert("anyOf".into(), json!([{"required": ["data"]}, {"required": ["path"]}]));
+    require(schema, "path");
 }
 
 fn image_required(schema: &mut Schema) {

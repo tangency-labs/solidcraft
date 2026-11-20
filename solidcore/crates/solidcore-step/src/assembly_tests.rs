@@ -465,6 +465,31 @@ fn an_edge_across_a_periodic_splines_seam_keeps_its_points() {
     assert!(periodic_edge(curve, [0.0, 4.5]).is_err(), "longer than one period");
 }
 
+/// An edge a rounding from the seam: one a whole number of periods from it, where moving it into
+/// the range by whole periods rounds (1.2 / 0.4 is 2.999…), keeps its points; one all the way
+/// round whose end is a rounding past the range's end is the curve as it is.
+#[test]
+fn an_edge_a_rounding_from_the_seam_starts_at_the_seam() {
+    let square = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]];
+    let curve = spline_curve(1, vec![-0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5], &square, None).unwrap();
+    let (c, [t0, t1]) = periodic_edge(curve, [1.2, 1.25]).unwrap();
+    let eval = crate::kernel::CurveEval::new(&c).unwrap();
+    for (t, want) in [(t0, [0.0, 0.0, 0.0]), (t1, [5.0, 0.0, 0.0])] {
+        let p = eval.point(t).unwrap();
+        assert!(p.dist(Vec3::new(want[0], want[1], want[2])) < 1e-9, "at {t}: {p:?}");
+    } // An edge all the way round whose end the producer wrote a rounding past the range's end (a
+    // closed spline from its start to its end, as one of the Prusa Core One's is): the curve as it
+    // is, not a restart at its start, which no spline can be restarted at.
+    let curve = spline_curve(1, vec![-0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5], &square, None).unwrap();
+    let (c, [t0, t1]) = periodic_edge(curve.clone(), [0.0, 0.4 + 1e-16]).unwrap();
+    assert_eq!(c, curve, "not restarted");
+    assert_eq!([t0, t1], [0.0, 0.4]);
+    // A short edge a rounding short of the range's end, ending before it: where it is, in order.
+    let (c, [t0, t1]) = periodic_edge(curve.clone(), [0.4 - 1e-11, 0.4 - 5e-12]).unwrap();
+    assert_eq!(c, curve, "not restarted");
+    assert!(t0 < t1 && t1 <= 0.4, "{t0} {t1}");
+}
+
 /// A parabola edge is the exact spline over its interval, its ends where the parabola is at the
 /// interval's ends (`f t² x + 2 f t y` from its vertex); a hyperbola's likewise.
 #[test]
