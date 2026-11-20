@@ -118,7 +118,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|usd|3dm|urdf|sdf|json (default from extension; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md; 3dm: Rhino 8, written by cadmpeg: each body where the design shows it (no components), named and in its colour, as its exact shape when every face is planar and every edge straight, else as its mesh, with warnings for what the file leaves out; fcstd is refused, as cadmpeg cannot write a new FreeCAD file yet); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (URDF and OpenUSD, default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF or, for OpenUSD, in the .usdz package, a .usda or .usdc file leaving them out with a warning; an OpenUSD export of chosen bodies writes none, with a warning); quality?: standard|fine|finest (STL, OBJ, 3MF, GLB, OpenUSD and Rhino: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); physics?: bool (OpenUSD only, default false: true also writes the joints, the grounded placements, each placement as a rigid body and each component's mass as OpenUSD physics, for a simulator, for the whole design with its components only, else none with a warning; a jointed placement moved without capturing the move is written where its joints place it, with a warning); render_setup?: name (OpenUSD only, default none: the saved render setup whose image textures (base colour, roughness, metallic, and a normal map the file can show as the renderer does) a .usdz package holds on each body's mesh; a .usda or .usdc file is written without them, with a warning; and the optics it gives bodies, written as glass in every encoding: the index of refraction, and full transmission on the MaterialX OpenPBR shader)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|usd|3dm|urdf|sdf|json (default from extension; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md; 3dm: Rhino 8, written by cadmpeg: each body where the design shows it (no components), named and in its colour, as its exact shape when every face is planar and every edge straight, else as its mesh, with warnings for what the file leaves out; fcstd is refused, as cadmpeg cannot write a new FreeCAD file yet); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (URDF and OpenUSD, default false, true for OpenUSD with purpose: distribution; true: each shown canvas and decal is written as a textured quad, its image next to the URDF or, for OpenUSD, in the .usdz package, a .usda or .usdc file leaving them out with a warning; an OpenUSD export of chosen bodies writes none, with a warning); quality?: standard|fine|finest (STL, OBJ, 3MF, GLB, OpenUSD and Rhino: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); physics?: bool (OpenUSD only, default false: true also writes the joints, the grounded placements, each placement as a rigid body and each component's mass as OpenUSD physics, for a simulator, for the whole design with its components only, else none with a warning; a jointed placement moved without capturing the move is written where its joints place it, with a warning); render_setup?: name (OpenUSD only, default none: the saved render setup whose image textures (base colour, roughness, metallic, and a normal map the file can show as the renderer does) a .usdz package holds on each body's mesh; a .usda or .usdc file is written without them, with a warning; and the optics it gives bodies, written as glass in every encoding: the index of refraction, and full transmission on the MaterialX OpenPBR shader); purpose?: interchange|distribution (OpenUSD only, default interchange: each body's exact shape beside its mesh, for another CAD program; distribution: meshes only, with the pictures shown on the model, for a viewer or a game engine); exact_brep?: bool (OpenUSD only, default true for interchange, false for distribution: each body's exact shape beside its mesh); a given images or exact_brep overrides the purpose's default"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -2699,9 +2699,22 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad("file.export", format!("`format: {f}` disagrees with the path's extension, which names {by_path:?}")));
     }
-    // Read before URDF and SDF go their own way, so neither takes them silently.
+    // Read before URDF, SDF and laid-out prints go their own way, so none takes them silently.
     let physics = physics_flag(p, cmd, format)?;
     let setup = render_setup_arg(p, cmd, format)?;
+    // OpenUSD's purpose sets the defaults of its exact shapes and pictures; each given option
+    // overrides it.
+    let purpose = usd_purpose(p, cmd, format)?;
+    let usd_flag = |key: &str| -> Result<Option<bool>> {
+        match p.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::Bool(b)) if format == Format::Usd => Ok(Some(*b)),
+            Some(Value::Bool(_)) if key == "exact_brep" => Err(bad(cmd, "`exact_brep` is for OpenUSD: other formats written here choose their own")),
+            Some(Value::Bool(_)) => Ok(None),
+            Some(_) => Err(bad(cmd, format!("`{key}` must be true or false"))),
+        }
+    };
+    let exact_brep = usd_flag("exact_brep")?;
     if format == Format::Urdf {
         if !string_list(cmd, p, "bodies")?.is_empty() {
             return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));
@@ -2717,14 +2730,12 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if lay_on_print_faces(p, cmd, format)? {
         return export_laid(s, path, format, &bodies, &parts, quality);
     }
-    // OpenUSD writes the pictures shown on the model only when asked, as URDF does.
-    let images = format == Format::Usd
-        && match p.get("images") {
-            None | Some(Value::Null) => false,
-            Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`images` must be true or false"))?,
-        };
+    // Pictures are written only when asked (or for distribution), as URDF's are.
+    let distribution = purpose == UsdPurpose::Distribution;
+    let images = format == Format::Usd && usd_flag("images")?.unwrap_or(distribution);
+    let meshes_only = format == Format::Usd && !exact_brep.unwrap_or(!distribution);
     if written_by_cadmpeg(format) {
-        return export_cadmpeg(s, cmd, path, &bodies, quality, format, CadmpegChoices { physics, setup, images });
+        return export_cadmpeg(s, cmd, path, &bodies, quality, format, CadmpegChoices { physics, setup, images, meshes_only });
     }
     export_to(s, cmd, path, format, &bodies, &parts, quality)
 }
@@ -2877,6 +2888,28 @@ struct CadmpegChoices<'a> {
     physics: bool,
     setup: Option<&'a str>,
     images: bool,
+    meshes_only: bool,
+}
+
+/// What an OpenUSD file is for: the defaults of what it holds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum UsdPurpose {
+    /// For another CAD program: each body's exact shape beside its mesh.
+    #[default]
+    Interchange,
+    /// For a viewer, a game engine or a store: meshes only, with the pictures shown on the model.
+    Distribution,
+}
+
+/// `purpose` as `file.export` reads it. Only OpenUSD takes it.
+fn usd_purpose(p: &Value, cmd: &str, format: Format) -> Result<UsdPurpose> {
+    match p.get("purpose") {
+        None | Some(Value::Null) => Ok(UsdPurpose::Interchange),
+        Some(_) if format != Format::Usd => Err(bad(cmd, "`purpose` is for OpenUSD: other formats written here have one form")),
+        Some(Value::String(s)) if s == "interchange" => Ok(UsdPurpose::Interchange),
+        Some(Value::String(s)) if s == "distribution" => Ok(UsdPurpose::Distribution),
+        Some(_) => Err(bad(cmd, "`purpose` must be interchange or distribution")),
+    }
 }
 
 /// The design's shown decals for an OpenUSD export, each in its component's frame and the world.
@@ -3030,7 +3063,7 @@ fn export_cadmpeg(
     format: Format,
     choices: CadmpegChoices<'_>,
 ) -> Result<Value> {
-    let CadmpegChoices { physics, setup, images } = choices;
+    let CadmpegChoices { physics, setup, images, meshes_only } = choices;
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let world = s.world_state()?;
     // The placements the world has, uncaptured moves included, so the assembly is written where
@@ -3056,7 +3089,7 @@ fn export_cadmpeg(
         None => (Vec::new(), Vec::new()),
     };
     let decals = if images { usd_decals(&doc, &s.model.state(), &mut warnings) } else { Vec::new() };
-    let options = solidcraft_io::CadmpegOptions { hidden, physics, surfaces, decals, optics };
+    let options = solidcraft_io::CadmpegOptions { hidden, physics, surfaces, decals, optics, meshes_only };
     let (bytes, written) =
         solidcraft_io::cadmpeg_export(&doc, &s.model.state(), &world, bodies, &options, path, quality, format).map_err(EngineError::Other)?;
     warnings.extend(written);

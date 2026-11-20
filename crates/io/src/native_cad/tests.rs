@@ -1255,6 +1255,21 @@ fn a_failed_display_mesh_keeps_the_exact_body() {
     assert!(kept_without_mesh(Ok(solidcraft_geom::Mesh::default()), false, "Body1", &mut warnings).unwrap().is_some());
 }
 
+/// In a meshes-only export, a body whose mesh fails is written as its exact shape, when it has
+/// one; a mesh body has none, a mesh that passes the size cap stays fatal, and an export with exact
+/// shapes keeps its own rule.
+#[test]
+fn a_meshes_only_export_falls_back_to_the_exact_shape() {
+    use cadir_out::{Unmeshed, shape_instead};
+    let failed = Err(Unmeshed::Failed("no face meshed".into()));
+    let large = Err(Unmeshed::TooLarge("too large".into()));
+    assert!(shape_instead(&failed, true, false));
+    assert!(!shape_instead(&failed, true, true));
+    assert!(!shape_instead(&failed, false, false));
+    assert!(!shape_instead(&large, true, false));
+    assert!(!shape_instead(&Ok(solidcraft_geom::Mesh::default()), true, false));
+}
+
 /// cadmpeg's single-precision loss is kept quiet for a mesh beside an exact B-rep, and for a mesh
 /// alone whose rounding is within the weld distance; it is said for a mesh alone so far from the
 /// origin for its size that its points round past it. A 1 mm triangle at x = 1e9 mm: single

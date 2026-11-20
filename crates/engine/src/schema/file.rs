@@ -209,6 +209,16 @@ pub struct ExportParams {
     /// OpenUSD physics, for a simulator. Default: false.
     #[serde(default)]
     pub physics: Option<bool>,
+    /// OpenUSD only: what the file is for. `interchange` (for another CAD program: each body's
+    /// exact shape beside its mesh) or `distribution` (for a viewer or a game engine: meshes only,
+    /// with the pictures shown on the model). `exact_brep` and `images` override it. Default:
+    /// interchange.
+    #[serde(default)]
+    pub purpose: Option<String>,
+    /// OpenUSD only: write each body's exact shape (B-rep) beside its mesh. Default: from
+    /// `purpose` (true for interchange, false for distribution).
+    #[serde(default)]
+    pub exact_brep: Option<bool>,
     /// OpenUSD only: the saved render setup whose image textures a `.usdz` package holds.
     /// Default: none, each body written with its look.
     #[serde(default)]
@@ -296,6 +306,8 @@ impl<'de> Deserialize<'de> for ExportParams {
             lay_on_print_faces: None,
             physics: None,
             render_setup: None,
+            purpose: None,
+            exact_brep: None,
             name: None,
             is_static: None,
             model_uris: None,
@@ -329,6 +341,19 @@ impl<'de> Deserialize<'de> for ExportParams {
             Some(Value::String(_)) if format == Format::Usd => return Err(refuse("`render_setup` must name a render setup")),
             Some(Value::String(_)) => return Err(refuse("`render_setup` is for OpenUSD: other formats written here hold no image textures")),
             Some(_) => return Err(refuse("`render_setup` must be the name of a render setup")),
+        };
+        // Read before URDF and SDF return, so neither takes an OpenUSD option silently.
+        out.purpose = match m.get("purpose") {
+            None | Some(Value::Null) => None,
+            Some(_) if format != Format::Usd => return Err(refuse("`purpose` is for OpenUSD: other formats written here have one form")),
+            Some(Value::String(s)) if s == "interchange" || s == "distribution" => Some(s.clone()),
+            Some(_) => return Err(refuse("`purpose` must be interchange or distribution")),
+        };
+        out.exact_brep = match m.get("exact_brep") {
+            None | Some(Value::Null) => None,
+            Some(Value::Bool(b)) if format == Format::Usd => Some(*b),
+            Some(Value::Bool(_)) => return Err(refuse("`exact_brep` is for OpenUSD: other formats written here choose their own")),
+            Some(_) => return Err(refuse("`exact_brep` must be true or false")),
         };
         if format == Format::Urdf {
             // URDF reads its own keys; `quality` and `objects` are not read.
