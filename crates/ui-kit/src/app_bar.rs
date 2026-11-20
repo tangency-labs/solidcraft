@@ -207,6 +207,10 @@ pub enum BarAction {
     Version,
 }
 
+/// Where the app keeps the width of the offer pill it drew in `BarOut::offer` last frame (its
+/// egui temp data, an `f32`; none while nothing is offered), so the link pills leave it room.
+pub const OFFER_WIDTH: &str = "sc_app_bar_offer_width";
+
 /// The bar drawn: what was chosen, and the places it leaves to the app.
 #[derive(Debug)]
 pub struct BarOut {
@@ -396,7 +400,9 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
         search: data.search.then(|| (crate::CommandSearch::closed_width(ui.ctx(), data.search_shortcut), crate::CommandSearch::compact_width(26.0))),
         assistant: data.assistant,
         version: version.as_ref().map(|(_, galley)| galley.size().x),
-        offered: solidcraft_ui_registry::rect_of("titlebar:update").map(|u| u.width()),
+        // The registry is cleared as each frame starts and the offer is drawn after the bar, so its
+        // width this frame is not known yet: the app keeps last frame's under `OFFER_WIDTH` (#17829).
+        offered: ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::unique(OFFER_WIDTH))),
         pixels_per_point: ui.ctx().pixels_per_point(),
     };
     let spec = application::spec(r.width(), content.left() - r.left(), r.right() - content.right(), measured);
