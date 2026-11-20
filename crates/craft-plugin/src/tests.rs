@@ -386,6 +386,310 @@ fn entry_arguments_are_checked_as_strictly_as_app_commands() {
 }
 
 #[test]
+fn conditional_inputs_hide_required_fields_and_reject_filtered_choices() {
+    let schema = json!({"type":"object","required":["shelves"],"properties":{
+        "storage":{"type":"string","enum":["shelves","drawers"]},
+        "shelves":{"type":"integer","x-solidcraft-visible-when":{"field":"storage","eq":"shelves"}},
+        "size":{"type":"string","oneOf":[
+            {"const":"small","x-solidcraft-when":{"field":"storage","eq":"shelves"}},
+            {"const":"large","x-solidcraft-when":{"not":{"field":"storage","in":["shelves"]}}}]}
+    }});
+    assert_eq!(check_input(&schema, &json!({"storage":"drawers","size":"large"})), Ok(()));
+    assert!(matches!(check_input(&schema, &json!({"storage":"shelves"})), Err(HostError::InvalidInput { field, .. }) if field == "params.shelves"));
+    assert!(
+        matches!(check_input(&schema, &json!({"storage":"drawers","size":"small"})), Err(HostError::InvalidInput { field, .. }) if field == "params.size")
+    );
+}
+
+#[test]
+fn plain_object_scopes_skip_the_conditional_property_limit() {
+    let mut properties: serde_json::Map<String, Value> = (0..1025).map(|i| (format!("p{i}"), json!({"type":"boolean"}))).collect();
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":properties}}]);
+    assert!(parse(&value).is_ok(), "plain schemas keep their existing limits");
+    properties["p2"] = json!({"type":"object","properties":{
+        "mode":{"type":"boolean"},"count":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}
+    }});
+    value["runtime"]["entries"][0]["input_schema"]["properties"] = json!(properties);
+    assert!(parse(&value).is_ok(), "nested annotations do not limit the unannotated parent scope");
+    properties["p1"]["x-solidcraft-visible-when"] = json!({"field":"p0","eq":true});
+    value["runtime"]["entries"][0]["input_schema"]["properties"] = json!(properties);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "input_schema.properties"));
+    properties.remove("p1024");
+    value["runtime"]["entries"][0]["input_schema"]["properties"] = json!(properties);
+    assert!(parse(&value).is_ok(), "1,024 conditional properties remain supported");
+}
+
+#[test]
+fn conditional_preparation_projects_applicable_composition_branches() {
+    let branch = json!({"properties":{
+        "mode":{"type":"boolean"},
+        "secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}},
+        "kept":{"type":"integer","x-solidcraft-enabled-when":{"field":"mode","eq":true}},
+        "rows":{"type":"array","items":{"type":"object","properties":{
+            "mode":{"type":"boolean"},"secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}
+        }}},
+        "nested":{"type":"object","properties":{
+            "mode":{"type":"boolean"},"secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}
+        }}
+    }});
+    for keyword in ["oneOf", "anyOf"] {
+        let mut schema = json!({"type":"object","additionalProperties":true});
+        schema[keyword] = json!([branch]);
+        let input = json!({"mode":false,"secret":"must not reach Wasm","kept":3,"rows":[{"mode":false,"secret":"private"}],"nested":{"mode":false,"secret":"private"},"extra":7});
+        assert_eq!(check_input(&schema, &input), Ok(()));
+        assert_eq!(
+            prepare_input(&schema, &input),
+            Ok(json!({"mode":false,"kept":3,"rows":[{"mode":false}],"nested":{"mode":false},"extra":7})),
+            "{keyword}"
+        );
+        let mut first = branch.clone();
+        first["required"] = json!(["kind"]);
+        first["properties"]["kind"] = json!({"type":"string","const":"private"});
+        schema[keyword] = json!([first,{"required":["kind"],"properties":{"kind":{"type":"string","enum":["public"]},"secret":{"type":"string"}}}]);
+        assert_eq!(prepare_input(&schema, &json!({"kind":"private","mode":false,"secret":"hidden"})), Ok(json!({"kind":"private","mode":false})));
+        assert_eq!(prepare_input(&schema, &json!({"kind":"public","secret":"kept"})), Ok(json!({"kind":"public","secret":"kept"})));
+        // Choose the branch before an enclosing scope hides its discriminator.
+        schema["properties"] = json!({"mode":{"type":"boolean"},"kind":{"type":"string","x-solidcraft-visible-when":{"field":"mode","eq":true}}});
+        assert_eq!(prepare_input(&schema, &json!({"kind":"private","mode":false,"secret":"hidden"})), Ok(json!({"mode":false})));
+    }
+}
+
+#[test]
+fn conditional_composition_shares_hidden_controllers_across_scopes() {
+    for keyword in ["oneOf", "anyOf"] {
+        for reverse in [false, true] {
+            let controller = json!({"gate":{"type":"boolean"},"mode":{"type":"boolean","x-solidcraft-visible-when":{"field":"gate","eq":true}}});
+            let dependent = json!({"mode":{"type":"boolean"},"secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}});
+            let (outer, inner) = if reverse { (dependent, controller) } else { (controller, dependent) };
+            let mut schema = json!({"type":"object","additionalProperties":true,"properties":outer});
+            schema[keyword] = json!([{"additionalProperties":true,"properties":inner}]);
+            assert_eq!(
+                prepare_input(&schema, &json!({"gate":false,"mode":true,"secret":7})),
+                Ok(json!({"gate":false})),
+                "{keyword}, reverse={reverse}"
+            );
+            assert_eq!(prepare_input(&schema, &json!({"gate":true,"mode":true,"secret":7})), Ok(json!({"gate":true,"mode":true,"secret":7})));
+            assert_eq!(prepare_input(&schema, &json!({"gate":false,"mode":true,"secret":"hidden"})), Ok(json!({"gate":false})));
+            schema["required"] = json!(["secret"]);
+            schema[keyword][0]["required"] = json!(["secret"]);
+            assert_eq!(check_input(&schema, &json!({"gate":false,"mode":true})), Ok(()));
+            assert!(check_input(&schema, &json!({"gate":true,"mode":true})).is_err());
+            let properties = if reverse { &mut schema["properties"] } else { &mut schema[keyword][0]["properties"] };
+            properties["choice"] = json!({"type":"string","oneOf":[
+                {"const":"shown","x-solidcraft-when":{"field":"mode","eq":true}},
+                {"const":"hidden","x-solidcraft-when":{"not":{"field":"mode","eq":true}}}
+            ]});
+            properties["inverted"] = json!({"type":"integer","x-solidcraft-visible-when":{"not":{"field":"mode","eq":true}}});
+            assert!(
+                matches!(check_input(&schema, &json!({"gate":false,"mode":true,"choice":"shown"})), Err(HostError::InvalidInput { field, .. }) if field == "params.choice")
+            );
+            assert_eq!(
+                prepare_input(&schema, &json!({"gate":false,"mode":true,"secret":"hidden","choice":"hidden","inverted":9})),
+                Ok(json!({"gate":false,"choice":"hidden","inverted":9}))
+            );
+            let outer = json!({"type":"object","additionalProperties":true,"properties":schema["properties"]});
+            let inner = schema[keyword][0].clone();
+            let mut array = json!({"type":"array","items":outer});
+            array[keyword] = json!([{"type":"array","items":inner}]);
+            assert_eq!(prepare_input(&array, &json!([{"gate":false,"mode":true,"secret":"hidden"}])), Ok(json!([{"gate":false}])));
+            let mut nested = json!({"type":"object","properties":{"nested":outer,"rows":{"type":"array","items":outer}}});
+            nested[keyword] = json!([{"properties":{"nested":inner,"rows":{"type":"array","items":inner}}}]);
+            assert_eq!(
+                prepare_input(
+                    &nested,
+                    &json!({"nested":{"gate":false,"mode":true,"secret":"hidden"},"rows":[{"gate":false,"mode":true,"secret":"hidden"}]})
+                ),
+                Ok(json!({"nested":{"gate":false},"rows":[{"gate":false}]}))
+            );
+        }
+    }
+}
+
+#[test]
+fn conditional_composition_rejects_cross_scope_visibility_cycles_at_load() {
+    let outer = json!({"type":"object","properties":{
+        "a":{"type":"boolean","x-solidcraft-visible-when":{"field":"b","eq":true}},"b":{"type":"boolean"}
+    }});
+    let inner = json!({"type":"object","properties":{
+        "a":{"type":"boolean"},"b":{"type":"boolean","x-solidcraft-visible-when":{"field":"a","eq":true}}
+    }});
+    for keyword in ["oneOf", "anyOf"] {
+        let mut schema = outer.clone();
+        schema[keyword] = json!([inner]);
+        let mut nested = json!({"type":"object","properties":{"nested":outer,"rows":{"type":"array","items":outer}}});
+        nested[keyword] = json!([{"properties":{"nested":inner,"rows":{"type":"array","items":inner}}}]);
+        let mut array = json!({"type":"array","items":outer});
+        array[keyword] = json!([{"type":"array","items":inner}]);
+        let mut alternatives = schema.clone();
+        alternatives[keyword][0]["required"] = json!(["kind"]);
+        alternatives[keyword][0]["properties"]["kind"] = json!({"type":"string","const":"cyclic"});
+        alternatives[keyword].as_array_mut().unwrap().push(json!({"required":["kind"],"properties":{"kind":{"type":"string","const":"plain"}}}));
+        for candidate in [schema, nested, json!({"type":"object","properties":{"rows":array}}), alternatives] {
+            let mut value = manifest();
+            value["runtime"]["entries"] = json!([{"name":"make","input_schema":candidate}]);
+            let result = parse(&value);
+            assert!(
+                matches!(&result, Err(HostError::InvalidManifest { reason, .. }) if reason.contains("cycle") && reason.contains("a") && reason.contains("b")),
+                "{keyword}: {result:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn conditional_composition_keeps_exclusive_visibility_graphs_separate() {
+    let branches: Vec<_> = [("left", "a", "b"), ("right", "b", "a")]
+        .into_iter()
+        .map(|(kind, dependent, controller)| {
+            let mut branch = json!({"type":"object","required":["kind"],"properties":{
+                "kind":{"type":"string","const":kind},"a":{"type":"boolean"},"b":{"type":"boolean"}
+            }});
+            branch["properties"][dependent]["x-solidcraft-visible-when"] = json!({"field":controller,"eq":true});
+            branch
+        })
+        .collect();
+    for keyword in ["oneOf", "anyOf"] {
+        let mut schema = json!({"type":"object"});
+        schema[keyword] = json!(branches);
+        let mut value = manifest();
+        value["runtime"]["entries"] = json!([{"name":"make","input_schema":schema}]);
+        assert!(parse(&value).is_ok(), "{keyword}");
+    }
+}
+
+#[test]
+fn conditional_composition_rejects_ambiguous_branches_at_their_manifest_location() {
+    let branch = json!({"properties":{"mode":{"type":"boolean"},"secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}}});
+    for keyword in ["oneOf", "anyOf", "allOf"] {
+        let mut nested = json!({"type":"object"});
+        nested[keyword] = if keyword == "allOf" { json!([branch]) } else { json!([branch, {}]) };
+        let mut value = manifest();
+        value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"nested":nested}}}]);
+        let result = parse(&value);
+        assert!(
+            matches!(&result, Err(HostError::InvalidManifest { field, .. }) if field == &format!("input_schema.properties.nested.{keyword}")),
+            "{result:?}"
+        );
+    }
+    for (left, right, required) in [(json!(1), json!(1.0), true), (json!("a"), json!("b"), false)] {
+        let branches: Vec<_> = [left, right]
+            .into_iter()
+            .map(|kind| {
+                let mut option = branch.clone();
+                option["properties"]["kind"] = json!({"const":kind});
+                if required {
+                    option["required"] = json!(["kind"]);
+                }
+                option
+            })
+            .collect();
+        let mut value = manifest();
+        value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","oneOf":branches}}]);
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "input_schema.oneOf"));
+    }
+    // Object discriminators cannot distinguish array branches: required/properties do not
+    // constrain arrays, whose item rules could otherwise hide different keys.
+    let branches: Vec<_> =
+        ["a", "b"].iter().map(|kind| json!({"type":"array","required":["kind"],"properties":{"kind":{"const":kind}},"items":branch})).collect();
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"nested":{"type":"array","oneOf":branches}}}}]);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "input_schema.properties.nested.oneOf"));
+}
+
+#[test]
+fn conditional_schemas_reject_missing_non_scalar_impossible_and_cyclic_references() {
+    for properties in [
+        json!({"a":{"type":"number","x-solidcraft-visible-when":{"field":"missing","eq":true}}}),
+        json!({"a":{"type":"array"},"b":{"type":"number","x-solidcraft-enabled-when":{"field":"a","eq":[]}}}),
+        json!({"a":{"type":"string","enum":["yes"]},"b":{"type":"number","x-solidcraft-defaults":[{"when":{"field":"a","eq":"no"},"value":1}]}}),
+        json!({"a":{"type":"string","oneOf":[{"const":"yes"}]},"b":{"type":"string","oneOf":[{"const":"ok","x-solidcraft-when":{"field":"a","eq":"no"}}]}}),
+        json!({"a":{"type":"boolean"},"b":{"type":"number","x-solidcraft-visible-when":{"field":"a","eq":"true"}}}),
+        json!({"a":{"type":"boolean","x-solidcraft-visible-when":{"field":"b","eq":true}},"b":{"type":"boolean","x-solidcraft-enabled-when":{"field":"a","eq":true}}}),
+    ] {
+        let mut manifest = manifest();
+        manifest["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":properties}}]);
+        assert!(matches!(parse(&manifest), Err(HostError::InvalidManifest { .. })), "{properties}");
+    }
+}
+
+#[test]
+fn conditional_inputs_omit_hidden_values_and_keep_disabled_values_in_dependency_order() {
+    let schema = json!({"type":"object","required":["count"],"properties":{
+        "mode":{"type":"string","enum":["a","b"]},
+        "child":{"type":"boolean","x-solidcraft-visible-when":{"field":"mode","eq":"a"}},
+        "count":{"type":"integer","x-solidcraft-visible-when":{"all":[{"field":"child","eq":true},{"any":[{"field":"mode","in":["a"]}]}]}},
+        "disabled":{"type":"integer","x-solidcraft-enabled-when":{"field":"mode","eq":"a"}}
+    }});
+    assert_eq!(prepare_input(&schema, &json!({"mode":"b","child":true,"count":"ignored","disabled":6})), Ok(json!({"mode":"b","disabled":6})));
+    assert!(matches!(check_input(&schema, &json!({"mode":"a","child":true})), Err(HostError::InvalidInput { field, .. }) if field == "params.count"));
+    let rules = conditions::InputConditions::parse(&schema).unwrap();
+    assert!(!rules.fields["disabled"].enabled(json!({"mode":"b"}).as_object().unwrap()));
+}
+
+#[test]
+fn conditional_schema_grammar_literals_defaults_and_work_are_bounded() {
+    let property = json!({"type":"integer","enum":[1,2]});
+    for condition in [
+        json!({"field":"control","eq":3}),
+        json!({"field":"control","eq":"1"}),
+        json!({"field":"control","in":[1,"2"]}),
+        json!({"all":{}}),
+        json!({"not":true}),
+        json!({"field":"control","eq":1,"in":[1]}),
+        json!({"unknown":[]}),
+    ] {
+        let schema = json!({"type":"object","properties":{"control":property,"value":{"type":"number","x-solidcraft-visible-when":condition}}});
+        assert!(conditions::validate_conditions(&schema).is_err(), "{condition}");
+    }
+    for defaults in [json!({}), json!([{"when":{"field":"control","eq":1},"value":"bad"}]), json!([{"when":{"field":"control","eq":1}}])] {
+        let schema = json!({"type":"object","properties":{"control":property,"value":{"type":"number","x-solidcraft-defaults":defaults}}});
+        assert!(conditions::validate_conditions(&schema).is_err());
+    }
+    let mut condition = json!({"field":"control","eq":1});
+    for _ in 0..40 {
+        condition = json!({"not":condition});
+    }
+    let schema = json!({"type":"object","properties":{"control":property,"value":{"type":"number","x-solidcraft-visible-when":condition}}});
+    assert!(conditions::validate_conditions(&schema).is_err());
+    let condition = json!({"all":vec![json!({"field":"control","eq":1});4097]});
+    let schema = json!({"type":"object","properties":{"control":property,"value":{"type":"number","x-solidcraft-visible-when":condition}}});
+    assert!(conditions::validate_conditions(&schema).is_err());
+}
+
+#[test]
+fn conditional_numeric_values_match_gui_numbers_without_rounding_large_integers() {
+    let schema = json!({"type":"object","required":["count"],"properties":{
+        "mode":{"type":"number","enum":[1,9007199254740992_u64,9007199254740993_u64]},
+        "count":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","in":[1,9007199254740993_u64]}}
+    }});
+    assert!(matches!(check_input(&schema, &json!({"mode":1.0})), Err(HostError::InvalidInput { field, .. }) if field == "params.count"));
+    assert_eq!(check_input(&schema, &json!({"mode":9007199254740992.0_f64})), Ok(()));
+    assert!(
+        matches!(check_input(&schema, &json!({"mode":9007199254740993_u64})), Err(HostError::InvalidInput { field, .. }) if field == "params.count")
+    );
+}
+
+#[test]
+fn conditional_preparation_preserves_nested_objects_and_bounds_unconstrained_input_depth() {
+    let schema = json!({"type":"object","properties":{
+        "nested":{"type":"object","required":["count"],"properties":{
+            "enabled":{"type":"boolean"},"count":{"type":"number","x-solidcraft-visible-when":{"field":"enabled","eq":true}}
+        }},
+        "composition":{"type":"object","properties":{"a":{},"b":{}},"oneOf":[{"properties":{"a":{"type":"integer"}}}]}
+    }});
+    assert!(conditions::has_conditions(&schema), "nested annotations opt into conditional execution");
+    assert!(!conditions::has_conditions(&json!({"type":"object","properties":{"size":{"type":"number"}}})));
+    let value = json!({"nested":{"enabled":false,"count":"ignored"},"composition":{"a":1,"b":2}});
+    assert_eq!(prepare_input(&schema, &value), Ok(json!({"nested":{"enabled":false},"composition":{"a":1,"b":2}})));
+    let mut deep = json!(0);
+    for _ in 0..40 {
+        deep = json!({"nested":deep});
+    }
+    assert!(prepare_input(&json!({}), &deep).is_err());
+}
+
+#[test]
 fn additional_property_schemas_are_listed_as_strictly_as_they_are_checked() {
     let schema = json!({"type":"object","additionalProperties":{"type":"object","properties":{"x":{}}}});
     let listed = strict_input_schema(&schema);

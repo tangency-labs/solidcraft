@@ -38,7 +38,7 @@
 //! edge of its face before the trace is not proved on the face beyond as trimmed
 //! ([`RailTrimAccess::rails_rolled_on_their_faces`]).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::blend::fillet_executive::p1::ExecutiveObjects;
 use crate::blend::fillet_executive::session::ball_regular::{BallCheck, BallStation};
@@ -81,13 +81,11 @@ fn invalid(reason: &'static str) -> SolidError {
 }
 
 /// Whether `e` is the closed-solid orientation's "face uses gathered from both sides"
-/// failure ([`crate::topology::brep::p3::GATHERED_BOTH_SIDES`]).
+/// failure ([`crate::error::topology::TopologyFailure::GatheredBothSides`]).
 fn gathered_both_sides(e: &SolidError) -> bool {
     matches!(
-        e.failure().map(|f| &f.reason),
-        Some(crate::error::Reason::Topology(
-            crate::error::topology::TopologyFailure::Inconsistent(reason)
-        )) if *reason == crate::topology::brep::p3::GATHERED_BOTH_SIDES
+        e.topology_failure(),
+        Some(crate::error::topology::TopologyFailure::GatheredBothSides)
     )
 }
 
@@ -255,6 +253,13 @@ pub enum NoRoomReason {
     /// Named for the typed failure record ([`crate::error::ErrorKind::EndOverflowsSideEdge`]);
     /// its refusal notes it once it moves onto the record.
     EndOverflowsSideEdge,
+    /// An End on its end face whose rail passes over that face: the face falls away under
+    /// the round (a ridge between the round's other face and it), so the rail on a face of
+    /// the blended edge never reaches its surface and no section of it ends the round. Noted
+    /// only after the End's vertices or edges failed. The fit is the largest ball whose rail
+    /// still ends on the end face, less the fit margin, on the blended edge (not the fork's,
+    /// SolidCraft #19454).
+    EndPassesOverEndFace,
     /// An End's rail rolls over its face's tangent edge where the round ends at a smooth
     /// vertex. Named for the typed failure record
     /// ([`crate::error::ErrorKind::EndRollsIntoSmoothEnd`]); its refusal notes it once it moves
@@ -772,6 +777,9 @@ pub struct FilletExecutive<O> {
     /// across a cliff; the blend is built on its faces' continuations and the material it
     /// removes is subtracted from the target.
     pub cliff_overflow: bool,
+    /// Rail crossings on continued walls, retained with the solver that supplied them.
+    pub(crate) continued_cliffs:
+        BTreeMap<O, Vec<(crate::topology::EdgeId, crate::topology::FaceId)>>,
     /// `m_vOpenEnds` (the fork's, WR-631): the fillet's ends the Nx1 corner there left
     /// uncut, in a cliff overflow.
     pub open_ends: Vec<OpenEnd<O>>,
@@ -3205,9 +3213,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut overflow = false;
         let mut concave = false;
         let mut concave_overflow = false;
-        // Not upstream (#10876): the concave overflow of the Roll-over's second pass across
-        // the cliff, a blend whose edge ends at V: accepted, trimmed at the creases
+        // The Roll-over's second pass is one concave chain (#10876).
         let mut rolled_overflow = false;
+        // A continued cliff only bounds the overflow of the solver that crosses it.
+        let mut bounded_cliffs = BTreeSet::new();
         let mut round_into_material = false;
         let mut rolls_over = false;
         let mut wraps = false;
@@ -3216,6 +3225,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         while let Some(solver) = self.solvers.get(index).copied() {
             index += 1;
             let judged = access.geometry_rails_fit_judged(k, solver, self)?;
+            let continued = !judged.continued_cliffs.is_empty();
+            if continued {
+                self.continued_cliffs
+                    .insert(solver, judged.continued_cliffs);
+            }
             if judged.rolls_over {
                 rolls_over = true;
             }
@@ -3225,7 +3239,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             // the fork's tangency-labs/smlib@a307480: an end section that runs off its end
             // face overflows it the same way
             let fit = judged.fit && access.geometry_end_sections_fit(k, solver, self)?;
-            if fit {
+            if fit && !continued {
                 continue;
             }
             overflow = true;
@@ -3233,7 +3247,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             if let Some(edge) = access.geometry_overflow_edge(solver)? {
                 overflowing.push(edge);
             }
-            if access.geometry_blend_adds_material(k, solver)? {
+            if continued && fit {
+                bounded_cliffs.insert(solver);
+            } else if access.geometry_blend_adds_material(k, solver)? {
                 // the event's only where its rails leave across the cliff's rim at V and its
                 // end sections stay on their end faces (an end section's overflow is not
                 // located, so it is never taken for the event's)
@@ -3257,7 +3273,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 break;
             };
             index += 1;
-            concave = access.geometry_blend_adds_material(k, solver)?;
+            if !bounded_cliffs.contains(&solver) {
+                concave = access.geometry_blend_adds_material(k, solver)?;
+            }
         }
         // The fork's overflow-first stop (WR-634, tangency-labs/smlib@241f7ba): with
         // `SetOverflowFirst`, when blends of several edges overflow, nothing is built; with
@@ -3268,6 +3286,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 && self.solvers.len() > 1
                 && !concave_overflow
                 && !rolled_overflow
+                && bounded_cliffs.is_empty()
                 && !concave
                 && !round_into_material)
         {
@@ -3292,9 +3311,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             return Err(failure());
         }
         if overflow {
-            // the Roll-over's concave chain (#10876) overflows the cliff at V by
-            // construction (`rolled_overflow`, not refused): the material it adds past the
-            // cliff is trimmed at the creases; any other concave overflow is refused
+            // A known cliff bounds the added material at its creases. A rail leaving its
+            // support elsewhere still needs its own construction.
             let why = if wraps {
                 // not the fork's (tangency-labs/solidcore#2175): no cliff cuts the face off;
                 // it is smaller than the blend beyond both ends of the edge
@@ -3694,6 +3712,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 let edges = ignore(access.edges_calculate(k, corner, self));
                 self.rollover_adjusting = false;
                 if edges?.is_none() {
+                    // an End refused as passing over its end face keeps that reason and
+                    // its fit (noted by the corner's edges)
+                    if self.error.no_room_reason() == Some(NoRoomReason::EndPassesOverEndFace) {
+                        return Err(failure());
+                    }
                     self.corner_vertex_failure(
                         access,
                         corner,
@@ -3751,6 +3774,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             let mut geom_index = 0;
             while let Some(geom) = access.faces_solver_geom(solver, geom_index)? {
                 if ignore(access.faces_make_face(k, geom, fillet, self))?.is_none() {
+                    // an End refused as passing over its end face keeps that reason and
+                    // its fit (noted by the face's blend's corner)
+                    if self.error.no_room_reason() == Some(NoRoomReason::EndPassesOverEndFace) {
+                        return Err(failure());
+                    }
                     self.record_solver_failure(
                         access.geometry_edge(solver)?,
                         2,

@@ -968,6 +968,11 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | .agents/skills/solidcraft-full-stop/SKILL.md | Theo Browne (tstack full-stop), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
 | .agents/skills/solidcraft-modernize/SKILL.md | Theo Browne (tstack modernize), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
 | .agents/skills/solidcraft-takeover/SKILL.md | Theo Browne (tstack takeover), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| assets/locales/eu.json | Ehuntabi | Original Basque (euskara) translation of SolidCraft's English command labels, written with Claude Code from the meaning of each English string; terms from Euskaltzaindia, Elhuyar, Itzuli and Euskalterm; not yet reviewed by a Basque speaker with CAD vocabulary; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/locales/pending/plane-square-to-line.json | SolidCraft contributors | Original Construct plane command label, help text and translations | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/plane_square_to_line.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/rotate_member.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| tests/step-regressions/net_steps_back_within_tolerance.step | SolidCraft contributors | written entity by entity from formulas (a tetrahedron whose spline face's control net steps back 0.5 um); import regression fixture | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 

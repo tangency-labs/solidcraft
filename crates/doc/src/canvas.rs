@@ -1,5 +1,6 @@
 //! Canvases: reference images placed on a plane (Insert Canvas), kept in the design.
-//! The image bytes travel inside the design file (base64), so it reopens without the original.
+//! The image file travels inside the design, as a part of the container of its own, so it
+//! reopens without the original. The design holds its bytes, never text.
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Plane, Vec2, Vec3};
@@ -16,10 +17,13 @@ pub struct Canvas {
     pub name: String,
     /// `png` or `jpeg`.
     pub format: String,
-    /// The image file, base64. Shared rather than owned: every edit clones the document (the undo
+    /// The image file's bytes. Shared rather than owned: every edit clones the document (the undo
     /// history keeps the old one), and an image of up to 16 MiB copied into each of the 200 undo
-    /// states would hold gigabytes. Serialized as the same JSON string as before.
-    pub data: std::sync::Arc<str>,
+    /// states would hold gigabytes. A container writes them to a part of their own; a plain JSON
+    /// design can't hold them ([`crate::Document::binary_data`]), and an older one's base64 is
+    /// decoded as it opens.
+    #[serde(default, skip_serializing, deserialize_with = "crate::blob::lenient")]
+    pub data: crate::blob::Blob,
     /// Pixel size of the image.
     pub pixels: [u32; 2],
     pub plane: PlaneRef,
@@ -107,8 +111,9 @@ impl Canvas {
         let [bl, br, tr, tl] = solidcore_ops::affine::picture_frame(xy(bl), xy(br), tl.map(xy), aspect)?.map(|[x, y]| Vec2::new(x, y));
         Some(if self.flip { [br, bl, tl, tr] } else { [bl, br, tr, tl] })
     }
-    pub fn bytes(&self) -> Option<Vec<u8>> {
-        base64_decode(&self.data)
+    /// The image file.
+    pub fn bytes(&self) -> &[u8] {
+        &self.data
     }
 }
 
@@ -298,7 +303,7 @@ mod tests {
             id: 1,
             name: "Decal1".into(),
             format: "png".into(),
-            data: base64_encode(b"bytes").into(),
+            data: b"bytes".into(),
             pixels,
             plane: PlaneRef::Origin { name: "XY".into() },
             center: Vec2::new(0.0, 0.0),

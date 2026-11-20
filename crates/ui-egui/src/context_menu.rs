@@ -17,7 +17,10 @@ use egui::{Pos2, Rect, Sense, Vec2, pos2, vec2};
 use serde::Serialize;
 use serde_json::{Value, json};
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_engine::{Sel, doc::FeatureKind};
+use solidcraft_engine::{
+    Sel,
+    doc::{FeatureKind, ModelBody},
+};
 
 use crate::SolveApp;
 
@@ -148,8 +151,8 @@ pub enum Target {
 pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
     let info = solidcraft_engine::find_command(id).map(|c| c.info(&app.session));
     let shortcut = match id {
-        "edit.undo" => "Ctrl+Z".to_string(),
-        "edit.redo" => "Ctrl+Y".to_string(),
+        "edit.undo" => crate::ui_kit::chord_label("Ctrl+Z"),
+        "edit.redo" => [crate::ui_kit::chord_label("Ctrl+Y"), crate::ui_kit::chord_label("Ctrl+Shift+Z")].join(", "),
         _ => crate::keymap::display_for(app, id).unwrap_or_default(),
     };
     Item {
@@ -410,27 +413,23 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Workspace => {
             let rendering = crate::render_workspace::active(app);
             let drawing = crate::drawing_workspace::active(app);
-            let mut v = vec![
+            // Design, then Drawing (the owner's order), then Render: the workspaces there are. Ones still
+            // to come aren't listed.
+            vec![
                 act("ui.workspace.design", "Design", "ws_design").with(json!({"workspace":"design"})).key(if rendering || drawing {
                     ""
                 } else {
                     "current"
                 }),
-                act("ui.workspace.render", "Render", "ws_render")
-                    .with(json!({"workspace":"render"}))
-                    .key(if rendering { "current" } else { "" })
-                    .on(crate::render_workspace::entry_open(app)),
-            ];
-            for (w, icon) in [("Animation", "ws_animate"), ("Simulation", ""), ("Manufacture", "")] {
-                v.push(act("ui.workspace", w, icon).key("coming later").on(false));
-            }
-            v.push(
                 act("ui.workspace.drawing", "Drawing", "ws_drawing")
                     .with(json!({"workspace":"drawing"}))
                     .key(if drawing { "current" } else { "" })
                     .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()),
-            );
-            v
+                act("ui.workspace.render", "Render", "ws_render")
+                    .with(json!({"workspace":"render"}))
+                    .key(if rendering { "current" } else { "" })
+                    .on(crate::render_workspace::entry_open(app)),
+            ]
         }
         Target::Units => crate::prefs::UNITS
             .iter()
@@ -596,13 +595,12 @@ fn picked_face_feature(app: &SolveApp) -> Option<u64> {
         Sel::Face { body, index, .. } => Some((body, *index)),
         _ => None,
     })?;
-    face_feature(app, body, index)
+    let state = crate::open_meshing::session_world(&app.session);
+    face_feature(app, state.body(body)?, index)
 }
 
-/// The feature that made face `index` of `body` (by its world name).
-pub(crate) fn face_feature(app: &SolveApp, body: &str, index: usize) -> Option<u64> {
-    let state = crate::open_meshing::session_world(&app.session);
-    let body = state.body(body)?;
+/// The feature that made face `index` of this placed body.
+pub(crate) fn face_feature(app: &SolveApp, body: &ModelBody, index: usize) -> Option<u64> {
     let names = solidcraft_engine::doc::naming::face_names(body);
     let name = names.get(index)?;
     let id = solidcraft_engine::doc::persistent_name::made_by(name)?;
@@ -2064,7 +2062,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         | "ui.toolbarTab"
         | "ui.shortcutPin"
         | "ui.quickAccessAdd"
-        | "ui.quickAccessRemove" => crate::toolbar_custom::run(app, &item.id, &p),
+        | "ui.quickAccessRemove"
+        | "ui.appBarReset" => crate::toolbar_custom::run(app, &item.id, &p),
         "ui.navigatorStyle" => {
             if let Some(style) = p.get("style").and_then(|s| serde_json::from_value(s.clone()).ok()) {
                 crate::view_gizmo::pick_style(app, style);
@@ -3265,7 +3264,6 @@ pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> Re
 fn workspace_style(item: &Item) -> Option<crate::ui_kit::WorkspaceStyle> {
     use crate::ui_kit::WorkspaceStyle;
     use solidcraft_theme::AccentRamp;
-    let planned = |slug, description| WorkspaceStyle { slug, description, tabs: None, ramp: None };
     Some(match item.label.as_str() {
         "Design" => {
             WorkspaceStyle { slug: "design", description: "ui.workspace_design_description", tabs: Some("ui.workspace_design_tabs"), ramp: None }
@@ -3276,10 +3274,9 @@ fn workspace_style(item: &Item) -> Option<crate::ui_kit::WorkspaceStyle> {
             tabs: Some("ui.workspace_render_tabs"),
             ramp: Some(AccentRamp::Render),
         },
-        "Animation" => planned("animation", "ui.workspace_animation_description"),
-        "Simulation" => planned("simulation", "ui.workspace_simulation_description"),
-        "Manufacture" => planned("manufacture", "ui.workspace_manufacture_description"),
-        "Drawing" => planned("drawing", "ui.workspace_drawing_description"),
+        "Drawing" => {
+            WorkspaceStyle { slug: "drawing", description: "ui.workspace_drawing_description", tabs: Some("ui.workspace_drawing_tabs"), ramp: None }
+        }
         _ => return None,
     })
 }
@@ -3978,17 +3975,13 @@ mod workspace_menu_tests {
         h.call("ui.resize", json!({"width":1200,"height":1000}));
         h.step(&json!({"click":{"handle":"ribbon:workspace"}})).unwrap();
         let opener = rect_of("ribbon:workspace").unwrap();
-        let rows: Vec<_> = ["design", "render", "animation", "simulation", "manufacture", "drawing"]
-            .iter()
-            .map(|slug| rect_of(&format!("workspace:menu:{slug}")).unwrap())
-            .collect();
+        // Design, Drawing (the owner's order), Render: no planned workspaces are listed.
+        let rows: Vec<_> = ["design", "drawing", "render"].iter().map(|slug| rect_of(&format!("workspace:menu:{slug}")).unwrap()).collect();
         assert!(rows.windows(2).all(|pair| pair[0].bottom() <= pair[1].top()));
         assert!(rows[0].top() > opener.bottom());
         assert_eq!(rows[0].width(), 450.0);
-        assert!(items(&h.app, &Target::Workspace).iter().skip(2).filter(|item| item.id != "ui.workspace.drawing").all(|item| !item.enabled));
-        h.step(&json!({"click":{"handle":"workspace:menu:animation"}})).unwrap();
-        assert!(!crate::render_workspace::active(&h.app));
-        assert!(h.app.viewport.context_menu.is_some());
+        assert_eq!(items(&h.app, &Target::Workspace).len(), 3, "only the workspaces there are");
+        assert!(rect_of("workspace:menu:animation").is_none(), "a planned workspace has no row");
         h.step(&json!({"click":{"handle":"workspace:menu:render"}})).unwrap();
         assert!(crate::render_workspace::active(&h.app));
         h.step(&json!({"click":{"handle":"ribbon:workspace"}})).unwrap();

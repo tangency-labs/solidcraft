@@ -46,7 +46,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.classify_edge_interval = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
-    k.fixes.found_torus_sphere_keep_tested_nurb = true;
     k.fixes.fillet_point_step_per_point = true;
     k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.offset_extension_from_base = true;
@@ -54,7 +53,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.ssi_tangent_curve_tracer = true;
 }
 
 fn read(k: &mut Kernel) -> Brep {

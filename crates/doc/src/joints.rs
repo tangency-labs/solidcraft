@@ -2308,19 +2308,44 @@ fn close_group(
     vals: &mut Values,
 ) -> Option<BTreeMap<(u64, usize), f64>> {
     let scale = loop_scale(tree, around, vals);
-    let mut vars = unknowns(tree, around, asm, linked, held);
-    if vars.len() > MAX_LOOP_VALUES {
-        // Too many to move at once: only the loops that need to move, or none.
-        match moving_loops_values(tree, closing, moves, asm, held, linked, vals, scale) {
-            Some(few) => vars = few,
-            // The group cannot be narrowed: every loop of it runs through the value that moves (a
-            // ring of links), or none of them needs to move. It is solved whole when it is small
-            // enough to solve, so that closing such a ring moves the model instead of locking it
-            // up (#18880).
-            None if vars.len() <= MAX_LOOP_VALUES_WHOLE => {}
-            None => return Some(BTreeMap::new()),
-        }
+    let vars = unknowns(tree, around, asm, linked, held);
+    if vars.len() <= MAX_LOOP_VALUES {
+        return close_group_by(tree, closing, around, moves, asm, spent, vals, scale, vars);
     }
+    // Too many to move at once: only the loops that need to move, or none.
+    let whole = vars.len() <= MAX_LOOP_VALUES_WHOLE;
+    match moving_loops_values(tree, closing, moves, asm, held, linked, vals, scale) {
+        // The loops that need to move, kept closed by their own values and the closing joints'
+        // of the closed loops those values move. Where that can't follow a held value's motion,
+        // the group is solved whole as below: in a ring of hinged parts (#18880) a hinge turned at
+        // one place folds the ring at another, through values of loops that are closed and stay so.
+        Some(few) => match close_group_by(tree, closing, around, moves, asm, spent, vals, scale, few) {
+            None if whole && !moves.is_empty() && spent.get() <= MAX_LOOP_WORK => {
+                close_group_by(tree, closing, around, moves, asm, spent, vals, scale, vars)
+            }
+            done => done,
+        },
+        // The group cannot be narrowed: every loop of it runs through the value that moves (a
+        // ring of links), or none of them needs to move. It is solved whole when it is small
+        // enough to solve, so that closing such a ring moves the model instead of locking it up
+        // (#18880).
+        None if whole => close_group_by(tree, closing, around, moves, asm, spent, vals, scale, vars),
+        None => Some(BTreeMap::new()),
+    }
+}
+
+/// `close_group` moving the values `vars` (and the held ones), at the loops' size `scale`.
+fn close_group_by(
+    tree: &Tree,
+    closing: &[u64],
+    around: &BTreeSet<u64>,
+    moves: &[(u64, usize, f64, f64)],
+    asm: &Assembly,
+    spent: &std::cell::Cell<usize>,
+    vals: &mut Values,
+    scale: f64,
+    vars: Vec<(u64, usize)>,
+) -> Option<BTreeMap<(u64, usize), f64>> {
     let bounds = limit_bounds(tree, &vars);
     // Closer than the conflict check needs: 1e-7 mm, and turns of 1e-10 rad across the loop.
     let tol = (1e-10 * scale).min(1e-7);
@@ -2492,7 +2517,7 @@ fn least_squares(f: &mut dyn FnMut(&[f64]) -> Option<Vec<f64>>, x: &mut Vec<f64>
     if n == 0 {
         return largest(&r) <= tol;
     }
-    let mut lambda = 1e-3;
+    let (mut lambda, mut stalled) = (1e-3, 0usize);
     for _ in 0..50 {
         if largest(&r) <= tol {
             return true;
@@ -2520,15 +2545,16 @@ fn least_squares(f: &mut dyn FnMut(&[f64]) -> Option<Vec<f64>>, x: &mut Vec<f64>
         }
         let mut stepped = false;
         while lambda < 1e12 {
-            let mut a = jtj.clone();
+            let mut damped = jtj.clone();
             for p in 0..n {
-                a.add(p, p, lambda * (1.0 + jtj.get(p, p)));
+                damped.add(p, p, lambda * (1.0 + jtj.get(p, p)));
             }
-            if let Some(d) = linalg::solve(a, g.clone()) {
+            if let Some(d) = bounded_step(&damped, &g, x, bounds) {
                 let next: Vec<f64> = x.iter().zip(&d).zip(bounds).map(|((v, dv), (lo, hi))| (v + dv).max(*lo).min(*hi)).collect();
                 if let Some(rn) = f(&next)
                     && norm(&rn) < norm(&r)
                 {
+                    stalled = if norm(&rn) > STALLED * norm(&r) { stalled + 1 } else { 0 };
                     *x = next;
                     r = rn;
                     lambda = (lambda / 3.0).max(1e-9);
@@ -2538,11 +2564,83 @@ fn least_squares(f: &mut dyn FnMut(&[f64]) -> Option<Vec<f64>>, x: &mut Vec<f64>
             }
             lambda *= 4.0;
         }
-        if !stepped {
-            return false;
+        // Steps that hardly get closer have reached what the loops can come to (faces modelled a
+        // few nanometres apart): the caller decides whether that is close enough
+        // (`close_within`), without fifty more Jacobians that end in the same place.
+        if !stepped || (stalled >= MAX_STALLED && largest(&r) > tol) {
+            return largest(&r) <= tol;
         }
     }
     largest(&r) <= tol
+}
+
+/// A least squares step that leaves more than this share of the squared gaps has hardly got
+/// closer; `MAX_STALLED` such steps in a row end the solve.
+const STALLED: f64 = 0.99;
+const MAX_STALLED: usize = 3;
+
+/// One damped Gauss–Newton step `d` from `x` (the damped normal equations `damped`, `g` = −Jᵀr)
+/// that stays within `bounds`: the least squares step with its values boxed in. A value
+/// the step would take past one of its bounds is held at that bound and the step is solved again
+/// for the others; a held value is let go again where the step does better with it moving back
+/// inside. So a loop whose values sit at their limits (the pins of a folding toy, #18880) moves
+/// by the values that are free to move. Cut back to the bounds after an unbounded solve instead,
+/// the step spreads the motion over every value, the ones at a limit can't take their share, and
+/// the loops stay open: the solve crept along and stopped.
+fn bounded_step(damped: &linalg::Mat, g: &[f64], x: &[f64], bounds: &[(f64, f64)]) -> Option<Vec<f64>> {
+    let n = x.len();
+    // The values held at a bound: the move that takes each there, and whether it is the lower one.
+    let mut held: Vec<Option<(f64, bool)>> = vec![None; n];
+    let mut last = None;
+    // Each pass holds or lets go of values; a box this small settles in a few.
+    for _ in 0..3 * n + 3 {
+        let mut a = damped.clone();
+        let mut rhs = g.to_vec();
+        for (p, h) in held.iter().enumerate() {
+            let Some((d, _)) = *h else { continue };
+            for q in (0..n).filter(|q| *q != p) {
+                if let Some(r) = rhs.get_mut(q) {
+                    *r -= a.get(q, p) * d;
+                }
+                a.set(q, p, 0.0);
+                a.set(p, q, 0.0);
+            }
+            a.set(p, p, 1.0);
+            if let Some(r) = rhs.get_mut(p) {
+                *r = d;
+            }
+        }
+        let d = linalg::solve(a, rhs)?;
+        // Free values the step takes past a bound are held there.
+        let mut changed = false;
+        for (p, ((v, dv), (lo, hi))) in x.iter().zip(&d).zip(bounds).enumerate() {
+            let Some(slot) = held.get_mut(p).filter(|h| h.is_none()) else { continue };
+            if v + dv < *lo {
+                *slot = Some((lo - v, true));
+                changed = true;
+            } else if v + dv > *hi {
+                *slot = Some((hi - v, false));
+                changed = true;
+            }
+        }
+        if !changed {
+            // Held values the model would rather move back inside are let go: the slope of
+            // ½ dᵀAd − gᵀd along each, which is negative where moving up does better.
+            for (p, slot) in held.iter_mut().enumerate() {
+                let Some((_, lower)) = *slot else { continue };
+                let slope = (0..n).map(|q| damped.get(p, q) * d.get(q).copied().unwrap_or(0.0)).sum::<f64>() - g.get(p).copied().unwrap_or(0.0);
+                if (lower && slope < 0.0) || (!lower && slope > 0.0) {
+                    *slot = None;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            return Some(d);
+        }
+        last = Some(d);
+    }
+    last
 }
 
 /// Place occurrences from the joint graph.

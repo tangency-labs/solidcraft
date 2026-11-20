@@ -5,7 +5,6 @@ use std::collections::{HashMap, VecDeque};
 use std::io::Cursor;
 
 use serde_json::{Value, json};
-use solidcraft_doc::canvas::base64_encode;
 
 use super::CommandSpec;
 use super::silhouette::{self, Silhouette};
@@ -43,9 +42,9 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Compare Picture",
      and no background search runs, for a crop that tightly frames the part; \
      fit?: \"width\" | \"height\" | \"both\" (default \"width\"): one uniform scale, taken from the named \
      dimension (\"both\" claims both and scales by width, reporting aspect_mismatch when the shapes differ); \
-     overlay?: false leaves the overlay PNG out → overlap (0..1), edges: top|bottom|left|right in mm at nine stations \
-     (positive where the model reaches past the picture, null where a station misses one of the two), the grid and its \
-     mm_per_px, and overlay_png (red model, blue picture) as base64 PNG. The compare is outline only: \
+     overlay?: a .png file to write the overlay to (red model, blue picture) → overlap (0..1), edges: top|bottom|left|right \
+     in mm at nine stations (positive where the model reaches past the picture, null where a station misses one of the \
+     two), the grid and its mm_per_px, and overlay: the file written, when asked for. The compare is outline only: \
      holes are not compared — both the picture's and the model's holes are filled",
 )];
 
@@ -65,7 +64,15 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
         },
         Some(_) => return Err(bad(CMD, "`fit` must be a string")),
     };
-    let overlay = p.get("overlay").map(|v| v.as_bool().unwrap_or(false)).unwrap_or(true);
+    // The overlay is a picture: written to the file asked for, never put in the reply as text.
+    let overlay = match p.get("overlay") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => None,
+        Some(Value::String(path)) if path.len() <= 4096 && std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("png")) => {
+            solidcraft_io::vfs::check(path).map_err(|e| crate::EngineError::Other(e.to_string()))?;
+            Some(path.clone())
+        }
+        Some(_) => return Err(bad(CMD, "`overlay` is a .png file to write the overlay picture to")),
+    };
     let part_fills_crop = p.get("part_fills_crop").and_then(Value::as_bool).unwrap_or(false);
 
     // The model side: the same outline inspect.silhouette returns, as filled rows.
@@ -109,8 +116,15 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
         "model": {"width": model.width, "height": model.height, "box_mm": [[round4(model.lo[0]), round4(model.lo[1])], [round4(model.hi[0]), round4(model.hi[1])]], "bodies": model.bodies},
         "picture": {"width": picture.width, "height": picture.height, "source": reference},
     });
-    if overlay {
-        out["overlay_png"] = json!(base64_encode(&overlay_png(&picture, &placed)));
+    if let Some(path) = overlay {
+        let png = overlay_png(&picture, &placed);
+        if png.is_empty() {
+            return Err(bad(CMD, "the overlay picture could not be made"));
+        }
+        // Checked again just before writing, as an export does.
+        solidcraft_io::vfs::check(&path).map_err(|e| crate::EngineError::Other(e.to_string()))?;
+        solidcraft_io::write_atomic(std::path::Path::new(&path), &png, false).map_err(|e| crate::EngineError::Other(format!("{path}: {e}")))?;
+        out["overlay"] = json!(path);
     }
     Ok(out)
 }

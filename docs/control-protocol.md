@@ -582,6 +582,7 @@ version has, so a client can find out before it relies on it: `{"param_check": [
 advertises the `plugin.tools` command. Clients query that command only when advertised;
 an absent or false flag means there are no plugin tools to list or call.
 `joint_drive: true` advertises [interactive joint driving](#driving-a-joint-interactively).
+`joint_pose: true` advertises [reading the solved joint pose](#reading-the-solved-joint-pose).
 
 Any request's `params` may carry `allow_paths: ["/abs/folder", …]`: every file that request
 reads, writes or deletes (command paths such as `file.export`'s `path` or `doc.recovery_*`'s
@@ -675,6 +676,36 @@ The selection alone is the engine command `selection.get` (run it with `engine.e
 
 Commands never open dialogs when run this way. `solidcraft-cli commands` prints the same registry.
 
+### View windows
+
+Run these commands through `engine.execute` with the following parameter objects. Window ids
+belong to the active design. The main window has id `0`.
+
+| Command | Parameters | Result |
+| --- | --- | --- |
+| `tab.view.move_to_window` | `view` (required, from `tab.view.list`), `window?` (a window id or `"new"`, default `"new"`). An existing window accepts `index?` (zero-based insertion position, counted after removing the view for a reorder) or `placement?` (the tile placement used by `tab.view.beside`, for transfers between windows). A new window accepts `display?` (name or zero-based index), `x?`, `y?`, `w?`, `h?` (logical points), and `level?` (`"views_only"`) | `{view, window, created, from, closed_source, placement}` |
+| `tab.window.list` | `{}` | `{windows: [{id, level, views, active, layout, display, placement, tool_window}]}` |
+| `tab.window.focus` | `{window}` | `{window}` |
+| `tab.window.close` | `{window}` (a pop-out id) | `{returned}`, the ids returned to the main strip in order |
+| `tab.view.activate` | `id` or zero-based `index`, and optional `window` | The active view id and the supplied window id |
+| `tab.view.open` | `kind?`, `subject?`, `reuse?`, `window?` | The view id and the checked request |
+| `tab.view.layout` | `layout` (`single\|side_by_side\|stacked\|large_and_two\|grid`), `window?` | The layout and the number of visible views |
+| `tab.view.beside` | `id?`, `edge?` or `placement?`, `window?` | The view id, position, and number of visible views |
+
+View commands with an omitted window target use the last focused window of the active design.
+They use the main window when no window has focus. An explicit window id targets that window.
+
+A placement is `{x, y, w, h, maximised, fullscreen}` or `null`. Positions are relative to the
+requested display. A pop-out opens as Views only. A move to the window that already holds the view
+returns its current placement without moving it. Moving the last view out of a pop-out closes that
+window and sets `closed_source`. Closing a pop-out directly returns its live views to the main
+window. Window changes leave the design and its undo history untouched. A design can have eight
+pop-outs. Opening a ninth returns `too_many_windows`. Trying to move the last main-window view
+returns `last_view_of_main_window`. Closing window `0` returns `cannot_close_main_window`. Invalid ids
+return `no_such_view` or `no_such_window`, and invalid geometry returns `bad_geometry`.
+A browser host returns `windows_unavailable` when asked to open a native window.
+A headless tab host reports its virtual windows with `display: null`.
+
 `document.export`, `document.import` and `document.saved` are control methods, not commands: they
 act on the app's open design rather than on an engine session, and they are not among the methods
 the agent chat may use.
@@ -704,6 +735,35 @@ history. Another edit keeps its own history and discards any pending movement. A
 change, a local editing tool or dialog, leaving the design tab, and Cancel also discard the
 preview. The movement ID expires. Closing the connection without sending Finish discards the
 preview. A Finish already running can still commit. Reconnect with a fresh Begin.
+
+### Reading the solved joint pose
+
+A client that follows a joint while someone adjusts Drive Joints asks `control.joint_pose`,
+which says what the preview shows: the joints it posed and the values the solver reached.
+
+```text
+{"id":1,"method":"control.joint_pose","token":"…"}
+→ {"id":1,"ok":true,"result":{"document_id":"18f3a0c2d4e5b6a7-1","revision":3,"busy":false,"error":null,"pose":{"source":"joint.drive","generation":2,"joints":[{"joint":1,"name":"Hinge","values":[{"name":"angle","value":90.0,"unit":"deg","limits":[0.0,90.0]}]}]}}}
+```
+
+- `document_id` and `revision` are the active design's, as `document.revision` gives them.
+- `busy` is true while a newer preview is computing. The pose is then the one on show: the last
+  that finished, with its own generation.
+- `error` says why the current inputs make no preview (null when there is none).
+- `pose` is null when no solved joint preview is up. Otherwise:
+  - `source` is what posed it: the command that opened the preview (`joint.drive` for Drive
+    Joints, `control.joint_drive` for a movement over this channel).
+  - `generation` counts the completed poses: it moves when the pose moves, and is not the
+    design's revision.
+  - `joints` are the joints the preview posed: the ones it drove and the ones it moved with
+    them (a motion link's follower, a joint a closed loop moved). Each gives its id, its name
+    and its values, as `joint.inspect` and `joint.drive` give them (`deg` for an angle, `mm` for
+    a distance, rounded for reading).
+
+The pose is read, not computed: it is the state the viewport shows, so reading it changes
+nothing in the design, its history, its dirty state or its revision. A preview that poses no
+joint leaves no pose. Cancelling the movement, closing the dialog, switching design and
+changing the design all drop it.
 
 ### Following the design
 
@@ -945,7 +1005,7 @@ no box selection.
 
 | Method | Params | Notes |
 |---|---|---|
-| `ui.inspect` | — | UI state, pending file picker (`file_picker_busy`; compatibility alias `file_dialog_open`, no path), what is hidden (`visibility`: bodies, origin and construction items, sketches, joints (`hidden_joints`, joint ids); set it with the `browser.visibility` command), viewport rect, camera, the active tool (its command id), the open dialog (`dialog`, below, or else the "Recover unsaved design?" prompt shown after an unclean exit as `{kind: "recover_unsaved", title, designs: [{id, name, path, features, saved_at, autosaved}], actions: ["recover", "discard", "later"]}`, answered with `ui.recover`), the windows open beside the model (`windows`, each named by what opens it: the `ui.start` command `parameters.change`, `document.metadata`, `sketch.inspect`, `assembly.bom` or `material.properties.validate`, or the `ui.help` item `about`, `updates`, `shortcuts`, `crashes`, `report`, or `messages`), what is under the pointer (`hover`, in the form of a selection item: `{"type": "edge", "body", "index", "mid", "point"}`, or null), the status line (`status`: text and whether it is an error), renderer, timings, what the GPU drew last frame (`draw`: `draw_calls`, `triangles`, `line_segments`, `supersampled`, and `gpu`: the GPU time of the view's own render passes in a recent frame, `{span_us, slowest, slowest_us, passes, each}` (the span from the first pass's start to the last one's end, the longest pass by its label and its time, how many passes had valid timestamps, and `each`: every pass asked to be timed in order as `{pass, us}`: `us` is the pass's share of the span, from the end of the passes before it (or its own start, if later) to its end, as a tiled GPU starts a pass before the one before it has finished; null where the device gave no valid timestamps for it, as when a driver merges the pass into the one before it), only while the frame-rate readout (`show_frame_rate`) is on and the device has timestamp queries, else null; `draw` is null without a GPU) and the graphics `adapter`, live preview (`active`, `busy`, `error`, `ms`, bodies it stands in for), and in the Drawing workspace the sheet page (`sheet_page`, null without a drawing open): `drawing`, `sheet`, `size_mm`, `zoom` (1 is 100 %, true size), `points_per_mm`, `true_size_points_per_mm`, `visible_mm` ([x0, y0, x1, y1] on paper), `sheet_colour`, `paper` and `ink` as shown, the scene's `generation`, each view's state (`views`: `view`, `status`, `out_of_date`, `words`), `working`, what is under the pointer (`hover`: `object`, `kind`, `on_edge`, and `lit` when it is drawn in the accent colour, as a sketch shows what the pointer is over) and why the sheet is drawn coarser (`error`) |
+| `ui.inspect` | — | UI state, pending file picker (`file_picker_busy`; compatibility alias `file_dialog_open`, no path), what is hidden (`visibility`: bodies, origin and construction items, sketches, joints (`hidden_joints`, joint ids); set it with the `browser.visibility` command), viewport rect, camera, the active tool (its command id), the open dialog (`dialog`, below, or else the "Recover unsaved design?" prompt shown after an unclean exit as `{kind: "recover_unsaved", title, designs: [{id, name, path, features, saved_at, autosaved}], actions: ["recover", "discard", "later"]}`, answered with `ui.recover`), the windows open beside the model (`windows`, each named by what opens it: the `ui.start` command `parameters.change`, `document.metadata`, `sketch.inspect`, `assembly.bom` or `material.properties.validate`, or the `ui.help` item `about`, `updates`, `shortcuts`, `crashes`, `report`, or `messages`), what is under the pointer (`hover`, in the form of a selection item: `{"type": "edge", "body", "index", "mid", "point"}`, or null), the status line (`status`: text and whether it is an error), renderer, timings, what the GPU drew last frame (`draw`: `draw_calls`, `triangles`, `line_segments`, `supersampled`, and `gpu`: the GPU time of the view's own render passes in a recent frame, `{span_us, slowest, slowest_us, passes, each}` (the span from the first pass's start to the last one's end, the longest pass by its label and its time, how many passes had valid timestamps, and `each`: every pass asked to be timed in order as `{pass, us}`: `us` is the pass's share of the span, from the end of the passes before it (or its own start, if later) to its end, as a tiled GPU starts a pass before the one before it has finished; null where the device gave no valid timestamps for it, as when a driver merges the pass into the one before it), only while the frame-rate readout (`show_frame_rate`) is on and the device has timestamp queries, else null; `draw` is null without a GPU) and the graphics `adapter`, live preview (`active`, `busy`, `error`, `ms`, bodies it stands in for), and in the Drawing workspace the sheet page (`sheet_page`, null without a drawing open): `drawing`, `sheet`, `size_mm`, `zoom` (1 is 100 %, true size), `points_per_mm`, `true_size_points_per_mm`, `visible_mm` ([x0, y0, x1, y1] on paper), `sheet_colour`, `paper` and `ink` as shown, the scene's `generation`, each view's state (`views`: `view`, `status`, `out_of_date`, `words`), the views whose first lines are still being worked out and show Projecting… (`waiting_views`), `working`, what is under the pointer (`hover`: `object`, `kind`, `on_edge`, and `lit` when it is drawn in the accent colour, as a sketch shows what the pointer is over) and why the sheet is drawn coarser (`error`) |
 | `ui.set` | any `UiState` field (`tab`, `perspective`, `showGrid`, `dark`, `layout`, …), and the browser's view of the design, saved with it: `showOrigin` (the Origin folder's eye), `showSketches` (the design's Sketches folder, `c0/sketches` in `hiddenFolders`), `hiddenBodies`, `hiddenOrigin`, `hiddenSketches`, `shownSketches`, `hiddenJoints`, `hiddenFolders`, `hiddenProfiles`, `shownDims`, `lockedBodies` (whole lists; `browser.visibility` changes single items) | `dark: false` switches to the light theme; `layout: "floating"` (default) or `"compact"` (`"docked"` is also accepted) selects the transient shell layout without saving a preference. Scenarios use `{"call":"ui.set","params":{"layout":"docked"}}` |
 | `ui.view` | `view`: `front`, `back`, `top`, `bottom`, `left`, `right`, `iso`, `home`, `fit`; `animate` (bool, default false: snap) | On the drawing sheet page: `fit` and `home` show the whole sheet, `actual_size` shows it at 100 % (true size); other views are refused |
 | `ui.camera` | `target?`: `[x, y, z]` (mm), `yaw?`, `pitch?`, `roll?` (radians), `distance?` (mm), `fov?`, `up?`; `fit?`: `true`, `false` or `[occurrence id or name…]` (`root`: the bodies outside every component) | the viewport's orbit camera: it looks at `target` from `distance` away; `yaw` 0 looks along +Y (from the front), `pitch` is the elevation (±π/2: straight down or up), `roll` turns the image. Fields given are set first (the others keep their values), then `fit` frames the listed occurrences (or everything), keeping the direction. The reply, passed back, sets the same view again, so a framing can be stored and replayed. `fov` is the angle the view is drawn with: 0 (parallel) with Perspective view off or while a sketch is open, else `perspective_fov`; in Render, the Render camera's own. `fov` and `up` follow the perspective setting (`ui.set`), its angle (`ui.prefs {perspective_fov}`) and the up axis preference (`ui.prefs`) and can't change here; a refused field changes nothing |
@@ -987,6 +1047,7 @@ no box selection.
 | `ui.window` | `action`: minimize, maximize, restore, toggle, close | what the title bar's caption buttons do (on Windows and Linux the application bar is the title bar); close asks about unsaved designs first |
 | `ui.agent_cursor` | `show` (bool), `speed`: a number from 1 to 5 (times the normal speed) or `"instant"` (no animation: the command runs at once and the pointer jumps to where it acted), `follow_camera` (bool); all optional | the settings. While the cursor is shown, `engine.execute` first glides to the command's toolbar button and to each pick, then runs and replies; later requests wait their turn. The pointer shows the command's localized name, including commands inside a closed toolbar group; an animated batch names each command it visits. It also follows the pointer input sent with `ui.move`, `ui.click`, `ui.drag` and `ui.scroll`, as each event reaches the app, and a press leaves a ripple. `"animate": false` on a call skips it |
 | `engine.execute` → `view.layout` | `mode`: `floating` or `compact` | Apply and save the workspace layout without opening a dialog, changing the design, resetting the camera or cancelling its active tool. General preferences expose the same choice; `ui.prefs {"layout":"compact"}` also saves it. |
+| `engine.execute` → `ui.appBarReset` | `{}` → `{reset:true}` | Restore the default application bar layout with the current quick-access commands. Works without an open design, opens no dialog and preserves the community and Assistant visibility preferences. Also available as Reset App Bar in command search and through `ui.start`. Standalone headless sessions validate the request only. |
 | `engine.execute` → `browser.expand_all` | `path?`: occurrence ids; `component?`: id; omit both for the whole tree | Open every Browser row under that scope, including folders that start closed (Origin, Named Views, Features). Display only: not saved in the design, not an undo step. |
 | `engine.execute` → `browser.collapse_all` | same | Close those rows. The design row stays open when the whole tree is collapsed. |
 | `engine.execute` → `view.history_layout` | `width?`, `dock?`: `bottom`, `left`, `under_browser`, `browser`, `collapsed?` | Update the History panel in the shared layout without changing the design. `browser` shows features in the Browser in place of a separate panel. |

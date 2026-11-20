@@ -59,6 +59,7 @@ pub(super) fn check(ir: &CadIr, records: &ImportRecords, origins: &[Origin], imp
     let definitions: HashMap<&str, &cadmpeg_ir::products::ProductDefinition> =
         ir.model.product_definitions.iter().map(|d| (d.id.as_str(), d)).collect();
     let hidden: HashSet<&str> = ir.model.bodies.iter().filter(|b| b.visible == Some(false)).map(|b| b.id.as_str()).collect();
+    let solids: HashSet<&str> = ir.model.bodies.iter().filter(|b| b.kind == cadmpeg_ir::topology::BodyKind::Solid).map(|b| b.id.as_str()).collect();
     // Definitions that place parts of their own (assemblies): the file means their figures as
     // totals over those parts where they are placed, which the neutral model does not compose, so
     // they are not compared (as cadmpeg's own measuring leaves them), rather than compared with
@@ -83,6 +84,8 @@ pub(super) fn check(ir: &CadIr, records: &ImportRecords, origins: &[Origin], imp
         let sheets = matches!(m.quantity, DeclaredQuantity::SheetArea { .. } | DeclaredQuantity::SheetCentroid { .. });
         let mut parts = Vec::new();
         let mut missing = false;
+        // A solid the reader could not close, come in as an open surface of the faces that read.
+        let mut opened = false;
         for body in &bodies {
             // A body no record came of (its conversion was refused, or its placement) was not
             // imported: the total would leave it out.
@@ -94,6 +97,7 @@ pub(super) fn check(ir: &CadIr, records: &ImportRecords, origins: &[Origin], imp
                 let measured = cache.entry(k).or_insert_with(|| measure(records, origins, &built, k));
                 match measured {
                     Some(p) if p.sheet == sheets => parts.push(k),
+                    Some(_) if !sheets && solids.contains(body) => opened = true,
                     Some(_) => {}
                     None => missing = true,
                 }
@@ -102,6 +106,10 @@ pub(super) fn check(ir: &CadIr, records: &ImportRecords, origins: &[Origin], imp
         let what = quantity_name(&m.quantity);
         if missing {
             warnings.push(format!("{label}: its {what} the file states was not checked: some of its bodies were not imported"));
+            continue;
+        }
+        if opened {
+            warnings.push(format!("{label}: its {what} the file states was not checked: some of its solids came in as open surfaces"));
             continue;
         }
         if parts.is_empty() {
