@@ -30,7 +30,11 @@ code. SolidCraft retains approval, cancellation and plugin preferences.
 **Install plugin…** in **Preferences > Plugins** (desktop only) picks a plugin `.zip`.
 One confirmation screen shows its name, version, summary, requested permissions and entry placements.
 Each command group explains its access in plain words: files, designs, application settings or other plugins.
-Enter an absolute local path for each requested folder. Each folder shows its requested read/write access.
+Use **Browse…** to choose each requested folder, or type or paste its absolute local path.
+Each folder shows its requested read/write access. When updating an installed plugin, a stored folder
+with the same name is kept as the editable starting value. If it no longer exists, **Install** reports
+the folder error; choose a folder again. The plugin gets only the folders displayed and approved with
+**Install**; choosing or editing a folder grants nothing on its own.
 When the plugin asks for more memory than the ceiling in **Preferences > Plugins** (128 MiB unless
 changed), the screen says how much it asks for and what the ceiling is.
 **Install** approves the displayed command groups, folders and memory, publishes the package and stores the
