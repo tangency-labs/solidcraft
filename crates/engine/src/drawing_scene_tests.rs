@@ -917,12 +917,17 @@ fn a_dimensions_text_waits_for_its_font_off_the_windows_thread() {
     extract(&mut s, sheet).unwrap();
     step(&mut s);
     assert!(s.drawing_scenes.dimensions[&added].drawn.pending, "the window's sheet asked, not waited");
-    let first = extract(&mut s, sheet).unwrap();
-    assert!(first.waiting_for_fonts, "the answer says its text is waiting");
+    // The font worker can finish between the step and either read of the sheet.
+    let read = |s: &mut Session| {
+        let answer = extract(s, sheet).unwrap();
+        assert_eq!(answer.waiting_for_fonts, s.drawing_scenes.dimensions[&added].drawn.pending);
+        answer
+    };
+    let first = read(&mut s);
     assert!(!step(&mut s), "it is read again by extract, not by a step");
-    // Still waiting, nothing changed: the sheet isn't put together again.
-    let again = extract(&mut s, sheet).unwrap();
-    if again.waiting_for_fonts {
+    let again = read(&mut s);
+    // The sheet is assembled again only when the font state changes.
+    if again.waiting_for_fonts == first.waiting_for_fonts {
         assert_eq!(again.generation, first.generation);
     }
     assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built(&s, sheet).scene));
