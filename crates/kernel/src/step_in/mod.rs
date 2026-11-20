@@ -179,6 +179,11 @@ pub struct ImportIssue {
     /// The part's name in the file (empty: it has none).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub part: String,
+    /// For each place the file puts the part, the product names from the root to the product
+    /// that holds it, as [`ImportedBody::path`]: where a part that was not imported would have
+    /// been (empty: the file as a whole, or a solid outside any product).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<Vec<String>>,
     /// Faces it concerns: one for a face left out, the count for faces not shown, else 0.
     #[serde(default)]
     pub faces: usize,
@@ -197,6 +202,10 @@ pub struct ImportReport {
     pub solids: usize,
     /// In the order of [`StepImport::warnings`].
     pub issues: Vec<ImportIssue>,
+    /// The file has one root product (the import's own component): the first name of every
+    /// [`ImportIssue::paths`] entry is that root. Otherwise each root is a product below it.
+    #[serde(default)]
+    pub single_root: bool,
     /// SMLib's check of the parts, which may still be running after the import
     /// ([`step_import_shared`]): what it finds follows `issues` ([`Self::current`]). Not saved:
     /// a saved report holds what the checks found in `issues` ([`Self::settled`]).
@@ -229,7 +238,7 @@ impl ImportReport {
     fn with_checks(&self, found: &[ImportIssue]) -> ImportReport {
         let mut issues = self.issues.clone();
         issues.extend(found.iter().cloned());
-        ImportReport { parts: self.parts, solids: self.solids, issues, checks: ImportChecks::default() }
+        ImportReport { parts: self.parts, solids: self.solids, issues, single_root: self.single_root, checks: ImportChecks::default() }
     }
 }
 
@@ -1197,9 +1206,19 @@ impl Reader {
 
     /// The warnings (worded as `warnings`, in their order) by kind and part, and how many of the
     /// file's parts came in as closed solids.
-    fn report(&self, warnings: &[String]) -> ImportReport {
+    fn report(&self, warnings: &[String], single_root: bool) -> ImportReport {
         let parts = self.plan.iter().map(|p| p.item).collect::<HashSet<_>>().len();
         let solids = self.bodies.iter().filter(|b| b.closed && b.refused.is_none()).map(|b| b.source_item).collect::<HashSet<_>>().len();
+        // The products holding each part, at every place the file puts it (each once, in order).
+        let mut paths: HashMap<u64, Vec<&[String]>> = HashMap::new();
+        for p in &self.plan {
+            if let Some(batch) = self.batches.get(p.batch) {
+                let at = paths.entry(p.item).or_default();
+                if !at.contains(&batch.path.as_slice()) {
+                    at.push(&batch.path);
+                }
+            }
+        }
         let issues = self
             .warnings
             .values()
@@ -1208,12 +1227,17 @@ impl Reader {
                 kind: n.kind,
                 item: n.item,
                 part: n.item.map(|i| self.part_name(i)).unwrap_or_default(),
+                paths: n
+                    .item
+                    .and_then(|i| paths.get(&i))
+                    .map(|p| p.iter().filter(|p| !p.is_empty()).map(|p| p.to_vec()).collect())
+                    .unwrap_or_default(),
                 faces: n.faces,
                 times: n.times,
                 detail: detail.clone(),
             })
             .collect();
-        ImportReport { parts, solids, issues, checks: ImportChecks::default() }
+        ImportReport { parts, solids, issues, single_root, checks: ImportChecks::default() }
     }
 
     /// Planned-solid indices (a node's `bodies` after the walk) as body indices and the STEP
@@ -1276,10 +1300,20 @@ impl Reader {
             let (u1, u2) = (self.units_of(r1), self.units_of(r2));
             if ope.name() == "ITEM_DEFINED_TRANSFORMATION" {
                 let p = ope.params();
-                let (i1, i2) = (
+                let (mut i1, mut i2) = (
                     p.get(2).and_then(Param::as_ref_id).ok_or("bad transformation")?,
                     p.get(3).and_then(Param::as_ref_id).ok_or("bad transformation")?,
                 );
+                // item_1 normally goes with rep_1 and item_2 with rep_2, but some writers
+                // cross them (rep_1 the component, item_1 the assembly's placement). Where an
+                // item is listed says whose it is: swap only when the lists say so plainly
+                // (both items listed in the assembly is the usual order).
+                let (side1, side2) = (self.rep_closure(&[r1]), self.rep_closure(&[r2]));
+                let lists = |side: &[u64], item: u64| side.iter().any(|r| self.reps.get(r).is_some_and(|rep| rep.0.contains(&item)));
+                let (i1_in_1, i1_in_2, i2_in_1, i2_in_2) = (lists(&side1, i1), lists(&side2, i1), lists(&side1, i2), lists(&side2, i2));
+                if (i1_in_2 && !i1_in_1 && !i2_in_2) || (i2_in_1 && !i2_in_2 && !i1_in_1) {
+                    std::mem::swap(&mut i1, &mut i2);
+                }
                 let m1 = self.placement_matrix(i1, u1)?;
                 let m2 = self.placement_matrix(i2, u2)?;
                 // rep_1 is normally the component: map its item onto the assembly's item.
@@ -1715,7 +1749,7 @@ impl StepReading {
             rd.warn(warning);
         }
         let warnings: Vec<String> = rd.warnings.iter().map(|(m, n)| if n.times > 1 { format!("{m} (×{})", n.times) } else { m.clone() }).collect();
-        let mut report = rd.report(&warnings);
+        let mut report = rd.report(&warnings, tree.len() == 1);
         let jobs = std::mem::take(&mut rd.check_jobs);
         // A check the caller's token stopped stops the import, as a stopped read does.
         if self.single && rd.check_outcomes.iter().any(|o| matches!(o, checks::Outcome::Stopped)) {

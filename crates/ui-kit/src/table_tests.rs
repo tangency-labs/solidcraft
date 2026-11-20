@@ -362,3 +362,83 @@ fn natural_order_compares_numbers_by_value_and_ignores_case() {
     assert_eq!(natural_cmp("", "a"), std::cmp::Ordering::Less);
     assert_eq!([Sort::Listed.next(), Sort::Ascending.next(), Sort::Descending.next()], [Sort::Ascending, Sort::Descending, Sort::Listed]);
 }
+
+/// A frozen first column stays at the table's left edge while the others scroll sideways beneath
+/// it, its heading with it, and the scrolled cells are clipped where they pass under it (T-693).
+#[test]
+fn a_frozen_column_stays_in_view_while_the_table_scrolls_sideways() {
+    let ctx = crate::test_support::context();
+    let columns = [
+        Column::new("Name", 1.0).flex().min_content_width(120.0).frozen(),
+        Column::new("Wide A", 1.0).flex().min_content_width(400.0),
+        Column::new("Wide B", 1.0).flex().min_content_width(400.0),
+    ];
+    let mut clips = Vec::new();
+    // With `scroll`, the last cell asks to be shown, which scrolls the table to its right end.
+    let draw = |scroll: bool, clips: &mut Vec<egui::Rect>| {
+        clips.clear();
+        harness::frame(&ctx, vec![], |ui| {
+            ui.set_width(360.0);
+            ui.style_mut().scroll_animation = egui::style::ScrollAnimation::none();
+            table_custom(ui, "frozen", &columns, "Empty", |ui, table| {
+                table.headers(ui, |_, _| false);
+                table.row(ui, "row", false, |row| {
+                    row.cell(|ui| crate::text(ui, "Default", crate::Text::Cell));
+                    row.cell(|ui| clips.push(ui.clip_rect()));
+                    row.cell(|ui| {
+                        clips.push(ui.clip_rect());
+                        if scroll {
+                            ui.scroll_to_rect(ui.max_rect(), Some(egui::Align::Max));
+                        }
+                    });
+                });
+            });
+        });
+    };
+    draw(false, &mut clips);
+    draw(false, &mut clips);
+    let name = registry::rect_of("dialog:table:frozen:row:cell:Name").unwrap();
+    let wide = registry::rect_of("dialog:table:frozen:row:cell:Wide A").unwrap();
+    draw(true, &mut clips);
+    draw(false, &mut clips);
+    draw(false, &mut clips);
+    let scrolled = registry::rect_of("dialog:table:frozen:row:cell:Wide A").unwrap();
+    assert!(scrolled.left() < wide.left() - 100.0, "the table scrolled sideways: {wide:?} -> {scrolled:?}");
+    assert_eq!(registry::rect_of("dialog:table:frozen:row:cell:Name").unwrap().x_range(), name.x_range(), "the frozen cell stays put");
+    assert_eq!(registry::rect_of("dialog:column:frozen:Name").unwrap().x_range(), name.x_range(), "its heading too");
+    for clip in &clips {
+        assert!(clip.left() >= name.right(), "a scrolled cell is clipped beside the frozen one: {clip:?} vs {name:?}");
+    }
+}
+
+/// A frozen column wider than half the visible table stops being frozen, so the other columns
+/// can still be scrolled into view.
+#[test]
+fn a_frozen_column_too_wide_for_the_view_scrolls_with_the_rest() {
+    let ctx = crate::test_support::context();
+    let columns = [Column::new("Name", 1.0).flex().min_content_width(300.0).frozen(), Column::new("Wide A", 1.0).flex().min_content_width(400.0)];
+    let draw = |scroll: bool| {
+        harness::frame(&ctx, vec![], |ui| {
+            ui.set_width(360.0);
+            ui.style_mut().scroll_animation = egui::style::ScrollAnimation::none();
+            table_custom(ui, "too_wide", &columns, "Empty", |ui, table| {
+                table.headers(ui, |_, _| false);
+                table.row(ui, "row", false, |row| {
+                    row.cell(|ui| crate::text(ui, "Default", crate::Text::Cell));
+                    row.cell(|ui| {
+                        if scroll {
+                            ui.scroll_to_rect(ui.max_rect(), Some(egui::Align::Max));
+                        }
+                    });
+                });
+            });
+        });
+    };
+    draw(false);
+    draw(false);
+    let name = registry::rect_of("dialog:table:too_wide:row:cell:Name").unwrap();
+    draw(true);
+    draw(false);
+    draw(false);
+    assert!(registry::rect_of("dialog:table:too_wide:row:cell:Name").unwrap().left() < name.left() - 100.0, "the name column scrolled away");
+}

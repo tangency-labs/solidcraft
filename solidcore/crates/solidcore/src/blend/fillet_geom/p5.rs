@@ -27,6 +27,10 @@
 //! | [`FilletBrep::update_geom_split_face`]            | `SmFilletGeom::UpdateSplitFace`                  |
 //!
 //! Deviations:
+//! - **Both ends of a bevel split (not upstream).** When both side-edge rail
+//!   crossings separate, the fillet/fillet edge has two unprocessed ends. Each end
+//!   is the crossing of its remaining rail with the opposite fillet surface; the
+//!   surfaces are then intersected between those ends, without an endpoint dependency.
 //! - **Tangent ends (WR-600, the fork's tangency-labs/smlib@856b54e).**
 //!   `CalcFilletIntSideFace` builds the end rib of a
 //!   fillet with a tangent end vertex from that end outward
@@ -39,10 +43,14 @@
 //!   vertex, against N's own tangent there, with `SrfSrfOptions::closed_by_start_direction`
 //!   (`turned_back_arc`): a closed foot curve is taken the way round that continues N, of
 //!   any length and also across the face's seam.
-//! - **Near-knot rail trims (opt-in, not upstream).** With
-//!   `fixes.fillet_rail_trim_at_near_knot` (WR-664, the fork's tangency-labs/smlib@7d79866),
-//!   `TrimRailCurves` trims a rail at its knot next to a vertex's drop when the rail between
-//!   the two is no longer than the zone tolerance (`snap_rail_end_to_knot`).
+//! - **Near-knot rail trims (not upstream).** As the fork does (WR-664,
+//!   tangency-labs/smlib@7d79866), `TrimRailCurves` trims a rail at its knot next to a
+//!   vertex's drop when the rail between the two is no longer than the target B-rep's zone
+//!   tolerance (`snap_rail_end_to_knot`). The fork reads that tolerance through the solver's
+//!   first edge use; it is read from `target`, where those edge uses live, so a solver
+//!   without edge uses trims too. Where the snap moves a rail end, the geometry's end
+//!   curves at that vertex follow it (`end_curves_follow_rail_end`); upstream's end curves
+//!   stay where the vertex is.
 //! - **Object model.** As in `blend.fillet_geom_p1` / `_p4`, a fillet vertex, edge or
 //!   geometry is an id of the [`FilletBrep`] (`self`, upstream's pseudo B-rep
 //!   `pPseudoBrep`). `GetFilletSolver()` is an opaque [`FilletSolverId`] resolved in
@@ -791,6 +799,126 @@ impl FilletBrep {
         self.set_edgeuse_uv_curve(eu, curve, false, true)
     }
 
+    /// The remaining rail of a split bevel end, and its geometry. The side-gap cut
+    /// uses the plane through the corner, its side edge and this rail end, so the
+    /// support must be planar for that cut to remain exactly on the support.
+    fn planar_split_end_rail(
+        &self,
+        k: &Kernel,
+        v: VertexId,
+        target: &Brep,
+    ) -> Result<(EdgeId, FilletGeomId)> {
+        let Some(crate::error::EntityRef::Face(face)) = self.fillet_vertex(v)?.point_class_object()
+        else {
+            return Err(missing(OP_INT_FILLET));
+        };
+        let support = target
+            .face(face)?
+            .surface
+            .as_ref()
+            .ok_or_else(|| missing(OP_INT_FILLET))?;
+        if crate::blend::fillet_cliff_overflow::plane_of(k, support)?.is_none() {
+            return Err(stage_failed(OP_INT_FILLET));
+        }
+        let mut rail = None;
+        for incident in vertex::edges(self.brep(), v, None)? {
+            if self.fillet_edge(incident)?.fillet_edge_type() == FilletEdgeType::Rail
+                && rail.replace(incident).is_some()
+            {
+                return Err(stage_failed(OP_INT_FILLET));
+            }
+        }
+        let rail = rail.ok_or_else(|| missing(OP_INT_FILLET))?;
+        let (prim, mate) = self.p5_prim_mate(rail, OP_INT_FILLET)?;
+        let own = self
+            .eu_geom(prim)?
+            .or(self.eu_geom(mate)?)
+            .ok_or_else(|| missing(OP_INT_FILLET))?;
+        Ok((rail, own))
+    }
+
+    /// A bevel whose two side-edge rail crossings both split has no known end of its
+    /// fillet/fillet edge. Each new end still lies on its own rail: intersect that rail
+    /// with the opposite fillet, then intersect the fillets between those two ends.
+    /// This is the rail's end event, independent of the other end's processing order.
+    fn calc_rail_limited_fillet_pair(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        context: &impl FilletEdgeContext,
+        target: &Brep,
+    ) -> Result<()> {
+        let (start, end) = self.edge_ends(e, OP_INT_FILLET)?;
+        let (prim, mate) = self.p5_prim_mate(e, OP_INT_FILLET)?;
+        let g1 = self.eu_geom(prim)?.ok_or_else(|| missing(OP_INT_FILLET))?;
+        let g2 = self.eu_geom(mate)?.ok_or_else(|| missing(OP_INT_FILLET))?;
+        let surface = |g| {
+            self.geom(g)?
+                .fillet_surface(None)?
+                .map(exact_surface)
+                .transpose()
+        };
+        let (Some(s1), Some(s2)) = (surface(g1)?, surface(g2)?) else {
+            return Ok(());
+        };
+        let fs1 = context.solver(
+            self.geom(g1)?
+                .fillet_solver()
+                .ok_or_else(|| missing(OP_INT_FILLET))?,
+        )?;
+        let fs2 = context.solver(
+            self.geom(g2)?
+                .fillet_solver()
+                .ok_or_else(|| missing(OP_INT_FILLET))?,
+        )?;
+        let tol = smin(fs1.approx_tol_3d, fs2.approx_tol_3d);
+        let angle_tol = smin(fs1.ang_tol_rad, fs2.ang_tol_rad);
+        let mut points = [self.vertex_point(start)?, self.vertex_point(end)?];
+        for (v, point) in [start, end].into_iter().zip(points.iter_mut()) {
+            let (rail, own) = self.planar_split_end_rail(k, v, target)?;
+            let opposite = if own == g1 {
+                &s2
+            } else if own == g2 {
+                &s1
+            } else {
+                return Err(missing(OP_INT_FILLET));
+            };
+            let curve = edge::curve(self.brep(), rail)?.ok_or_else(|| missing(OP_INT_FILLET))?;
+            let (_, crossing) = super::p4::rail_crossing_nearest(k, curve, opposite, *point, tol)?
+                .ok_or_else(|| stage_failed(OP_INT_FILLET))?;
+            *point = crossing;
+        }
+        let [p, q] = points;
+        set_vertex_point(self.brep_mut(), start, p)?;
+        set_vertex_point(self.brep_mut(), end, q)?;
+        let mut direction = q - p;
+        let curves = srf_srf_intersection(
+            k,
+            self,
+            Some(start),
+            Some(end),
+            Some(&mut direction),
+            None,
+            &s1,
+            &s2,
+            tol,
+            angle_tol,
+            true,
+            None,
+        )?;
+        let curve = curves.curve_3d.ok_or_else(|| missing(OP_INT_FILLET))?;
+        let interval = curve.natural_interval();
+        set_edge_curve(self.brep_mut(), e, Some(curve))?;
+        edge::set_interval(self.brep_mut(), e, &interval)?;
+        self.set_uv(prim, curves.uv_curve1)?;
+        self.set_uv(mate, curves.uv_curve2)?;
+        self.fillet_edge_mut(e)?.set_status(FilStatus::Processed);
+        for v in [start, end] {
+            self.fillet_vertex_mut(v)?.set_status(FilStatus::Processed);
+        }
+        Ok(())
+    }
+
     /// `SmFilletVertex::CalcFilletIntFillet`: the vertex at the end of the
     /// fillet/fillet intersection curve leaving `v`, whose other end is already
     /// processed. An Nx2 corner that is not a bevel corner goes to
@@ -798,7 +926,8 @@ impl FilletBrep {
     /// the fillet/fillet edge, the two fillet surfaces are intersected first (nothing
     /// happens while either surface is missing); the curve and its UV curves are
     /// reversed when needed so that the edge runs from its start vertex, and the vertex
-    /// gets the curve end away from the other vertex.
+    /// gets the curve end away from the other vertex. When both bevel ends split,
+    /// their rail/fillet crossings place both ends before the surfaces are intersected.
     ///
     /// # Errors
     ///
@@ -876,6 +1005,14 @@ impl FilletBrep {
         // get filletFVertex->Point at other end of intersection curve
         let other_fv = edge::other_vertex(self.brep(), curr_edge, Some(v))?
             .ok_or_else(|| missing(OP_INT_FILLET))?;
+        // Both sides of a four-face bevel may have different rail crossings. Its
+        // adjustment then leaves two new ends, each constrained by its own rail.
+        if the_corner.is_bevel_corner()
+            && self.fillet_vertex(other_fv)?.fillet_vertex_type() == FilletVertexType::FilletXFillet
+            && !self.fillet_vertex(other_fv)?.is_processed()
+        {
+            return self.calc_rail_limited_fillet_pair(k, curr_edge, context, target);
+        }
         if !self.fillet_vertex(other_fv)?.is_processed() {
             return Err(stage_failed(OP_INT_FILLET));
         }
@@ -2597,21 +2734,15 @@ impl FilletBrep {
             .fillet_solver()
             .ok_or_else(|| missing(OP_TRIM))?;
         let app_tol = resolve(sid, OP_TRIM)?.approx_tol_3d;
-        // Opt-in (`fixes.fillet_rail_trim_at_near_knot`, WR-664; the fork's
-        // tangency-labs/smlib@7d79866): the target B-rep's zone tolerance
-        // (`SmTol::GetZoneTol3d(GetEdgeuse(0)->GetBrep())`).
-        let zone_tol = if k.fixes.fillet_rail_trim_at_near_knot {
-            resolve(sid, OP_TRIM)?
-                .edgeuse(0)?
-                .ok_or_else(|| missing(OP_TRIM))?;
-            Some(crate::geom::tol::brep_zone_tol_3d(
-                k,
-                target,
-                crate::geom::tol::SmallTopoType::NormalSize,
-            ))
-        } else {
-            None
-        };
+        // WR-664 (the fork's tangency-labs/smlib@7d79866): the target B-rep's zone
+        // tolerance. The fork reads it as `SmTol::GetZoneTol3d(GetEdgeuse(0)->GetBrep())`;
+        // the solver's edge uses live in `target`, so it is read from `target` directly
+        // and a solver without edge uses trims as one with them.
+        let zone_tol = crate::geom::tol::brep_zone_tol_3d(
+            k,
+            target,
+            crate::geom::tol::SmallTopoType::NormalSize,
+        );
 
         // for both rail curves
         for ii in 0..2 {
@@ -2727,22 +2858,24 @@ impl FilletBrep {
                     t = clean_up_noise(t);
 
                     // fork 7d79866: no end span shorter than the zone tolerance
-                    if let Some(zone_tol) = zone_tol {
-                        let rail_tol = held_curve_zone_tol_3d(k, self.brep(), Some(rail))?;
-                        t = snap_rail_end_to_knot(
-                            k,
-                            &rail_curve,
-                            rail_tol,
-                            &trim_ivl,
-                            zone_tol,
-                            true,
-                            t,
-                        )?;
-                    }
+                    let rail_tol = held_curve_zone_tol_3d(k, self.brep(), Some(rail))?;
+                    let dropped = t;
+                    t = snap_rail_end_to_knot(
+                        k,
+                        &rail_curve,
+                        rail_tol,
+                        &trim_ivl,
+                        zone_tol,
+                        true,
+                        t,
+                    )?;
 
                     // set Vertexuse0->UVPoint on filletSurface
                     self.fillet_vertexuse_mut(vu0)?
                         .set_uv_point(Point2::new(t, iso_v));
+                    if t != dropped {
+                        self.end_curves_follow_rail_end(k, g, rail, v0, Point2::new(t, iso_v))?;
+                    }
 
                     // save V0 to d3Curve dropPoint parameter
                     if self.brep().edgeuse(prim)?.orientation == OrientType::Same {
@@ -2780,24 +2913,32 @@ impl FilletBrep {
                     }
 
                     // fork 7d79866: no end span shorter than the zone tolerance
-                    if let Some(zone_tol) = zone_tol {
-                        let mut from_start = Extent1d::default();
-                        from_start.set_min_max(param1, trim_ivl.max())?;
-                        let rail_tol = held_curve_zone_tol_3d(k, self.brep(), Some(rail))?;
-                        param2 = snap_rail_end_to_knot(
-                            k,
-                            &rail_curve,
-                            rail_tol,
-                            &from_start,
-                            zone_tol,
-                            false,
-                            param2,
-                        )?;
-                    }
+                    let mut from_start = Extent1d::default();
+                    from_start.set_min_max(param1, trim_ivl.max())?;
+                    let rail_tol = held_curve_zone_tol_3d(k, self.brep(), Some(rail))?;
+                    let solved = param2;
+                    param2 = snap_rail_end_to_knot(
+                        k,
+                        &rail_curve,
+                        rail_tol,
+                        &from_start,
+                        zone_tol,
+                        false,
+                        param2,
+                    )?;
 
                     // set Vertexuse1->UVPoint on filletSurface
                     self.fillet_vertexuse_mut(vu1)?
                         .set_uv_point(Point2::new(param2, iso_v));
+                    if param2 != solved {
+                        self.end_curves_follow_rail_end(
+                            k,
+                            g,
+                            rail,
+                            v1,
+                            Point2::new(param2, iso_v),
+                        )?;
+                    }
                 }
 
                 // clip the interval to drop points; fork 9b7cd48 passes this on (SER)
@@ -2840,6 +2981,68 @@ impl FilletBrep {
                 // else: more than 1 self intersection found on rail curve - case not
                 // handled yet
             }
+        }
+        Ok(())
+    }
+
+    /// Not upstream (WR-664): the UV trim curves of geometry `g` on its fillet surface that
+    /// end at the rail's end vertex `v` (its end curves and cross sections; none of its
+    /// rails, `rail` among them) end at `uv`, the rail's end the near-knot snap moved. They
+    /// were built before `TrimRailCurves` and end at the vertex; the drop of the vertex onto
+    /// the rail finds that end to the solve's accuracy, and the snap then moves the rail's
+    /// end along it by a rail length of about the zone tolerance (the snap's length test is
+    /// accurate to 1 % of it). A curve left at the vertex opens the fillet
+    /// face's loop at that corner by as much: the face builder closes a loop corner on
+    /// whichever side it meets first (`sm_FixUVTrimCurves`), and a rail's UV curve is
+    /// later dropped again from its trimmed 3D curve, so only a curve that ends where the
+    /// rail does keeps the loop closed.
+    ///
+    /// # Errors
+    /// [`SolidError::NotFound`] for a dangling id; `SM_ERR_NULL_POINTER` for an edge use
+    /// without vertex use or vertex; those of the curve edit (a UV curve that is not a
+    /// B-spline or line); cancellation.
+    fn end_curves_follow_rail_end(
+        &mut self,
+        k: &Kernel,
+        g: FilletGeomId,
+        rail: EdgeId,
+        v: VertexId,
+        uv: Point2,
+    ) -> Result<()> {
+        let geom = self.geom(g)?;
+        let mut rails: Vec<EdgeId> = vec![rail];
+        rails.extend([geom.rail(0), geom.rail(1)].into_iter().flatten());
+        rails.extend(geom.other_rails1.iter().chain(&geom.other_rails2));
+        let mut uses = geom.side_eus.clone();
+        for &eu in &geom.ref_eus {
+            if !uses.contains(&eu) {
+                uses.push(eu);
+            }
+        }
+        for eu in uses {
+            k.check_cancelled(OP_TRIM)?;
+            let rec = self.brep().edgeuse(eu)?;
+            let Some(e) = rec.edge.filter(|e| !rails.contains(e)) else {
+                continue;
+            };
+            if rec.uv_trim_curve.is_none() {
+                continue;
+            }
+            let same = rec.orientation == OrientType::Same;
+            let start = eu_vertex(self.brep(), eu, OP_TRIM)?;
+            let end = edge::other_vertex(self.brep(), e, Some(start))?;
+            // the curve runs along the edge: the use's start is its first end when the use
+            // is `SM_OT_SAME`
+            let edit_start = match (start == v, end == Some(v)) {
+                (true, false) => same,
+                (false, true) => !same,
+                // a closed edge at v, or one not at v
+                _ => continue,
+            };
+            let Some(curve) = self.brep_mut().edgeuse_mut(eu)?.uv_trim_curve.as_mut() else {
+                continue;
+            };
+            crate::topology::face::p2::edit_uv_end_point(k, curve, uv, edit_start)?;
         }
         Ok(())
     }
@@ -3253,8 +3456,8 @@ fn user_surface(
 /// tolerance (`SmEdge::GetTolerance`, zero on a fillet B-rep's rails); the system zone
 /// tolerance when there is no edge. `SmBSplineCurve::Trim` maps it to parameter space
 /// to find degenerate end spans to remove.
-/// The fork's `sm_SnapRailEndToKnot` (tangency-labs/smlib@7d79866, opt-in
-/// `fixes.fillet_rail_trim_at_near_knot`, WR-664), not upstream: where a rail is trimmed
+/// The fork's `sm_SnapRailEndToKnot` (tangency-labs/smlib@7d79866, WR-664), not
+/// upstream: where a rail is trimmed
 /// at an end vertex, the parameter `param` found for the vertex, or the rail's knot next
 /// to it inside `trim_ivl` (above it for the trim's start, below it for its end) when the
 /// rail between the two is no longer than `zone_tol`. A trim there would leave an end span
