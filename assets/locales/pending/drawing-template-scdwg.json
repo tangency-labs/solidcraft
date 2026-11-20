@@ -1,0 +1,26 @@
+{
+  "en": {
+    "drawing.template_saved_as_scdwg": "Saved as {name} (templates with images are saved as .scdwg)"
+  },
+  "ar": {
+    "drawing.template_saved_as_scdwg": "حُفظ باسم {name} (تُحفظ القوالب التي تحتوي على صور بصيغة ‎.scdwg)"
+  },
+  "de": {
+    "drawing.template_saved_as_scdwg": "Gespeichert als {name} (Vorlagen mit Bildern werden als .scdwg gespeichert)"
+  },
+  "he": {
+    "drawing.template_saved_as_scdwg": "נשמר בשם {name} (תבניות עם תמונות נשמרות כ־.scdwg)"
+  },
+  "ja": {
+    "drawing.template_saved_as_scdwg": "{name} として保存しました(画像を含むテンプレートは .scdwg で保存されます)"
+  },
+  "ko": {
+    "drawing.template_saved_as_scdwg": "{name}(으)로 저장했습니다(이미지가 있는 템플릿은 .scdwg로 저장됩니다)"
+  },
+  "vi": {
+    "drawing.template_saved_as_scdwg": "Đã lưu thành {name} (mẫu có hình ảnh được lưu dưới dạng .scdwg)"
+  },
+  "zh": {
+    "drawing.template_saved_as_scdwg": "已另存为 {name}(含图像的模板保存为 .scdwg)"
+  }
+}

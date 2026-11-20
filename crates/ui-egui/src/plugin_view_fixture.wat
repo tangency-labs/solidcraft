@@ -1,4 +1,5 @@
-;; Original test component. `home` inserts a box and calls view.home. `edit` inserts a box
+;; Original test component. `fit` passes its parameters to solid.box, then calls view.home and
+;; view.fit (the last view command wins). `home` inserts a box and calls view.home. `edit` inserts a box
 ;; farther away and calls no view command. `place` makes a component with a box in it and moves
 ;; the component 100 mm along X. `move` only moves an existing component.
 ;; `both` moves the existing component and makes a box. Any other entry calls view.home and then traps.
@@ -78,6 +79,14 @@
       i32.const 0
       call $run
     )
+    (func $fit (type 2)
+      i32.const 660
+      i32.const 8
+      i32.const 1400
+      i32.const 2
+      i32.const 0
+      call $run
+    )
     (func $place (;5;) (type 2)
       i32.const 700
       i32.const 16
@@ -103,6 +112,78 @@
     )
     (func $execute (;6;) (type 1) (param i32 i32 i32 i32) (result i32)
       (local i32)
+      ;; Sketch/Fit and empty/Home entries switch to a solid when their sole field is true.
+      local.get 0
+      i32.load8_u
+      i32.const 115
+      i32.eq
+      local.get 0
+      i32.load8_u
+      i32.const 122
+      i32.eq
+      i32.or
+      if
+        local.get 2
+        i32.const 9
+        i32.add
+        i32.load8_u
+        i32.const 116
+        i32.eq
+        if
+          call $box_far
+        else
+          local.get 0
+          i32.load8_u
+          i32.const 115
+          i32.eq
+          if
+            i32.const 1800
+            i32.const 13
+            i32.const 2000
+            i32.const 14
+            i32.const 0
+            call $run
+            i32.const 1830
+            i32.const 26
+            i32.const 2040
+            i32.const 29
+            i32.const 0
+            call $run
+            i32.const 1870
+            i32.const 13
+            i32.const 1400
+            i32.const 2
+            i32.const 0
+            call $run
+          end
+        end
+        local.get 0
+        i32.load8_u
+        i32.const 115
+        i32.eq
+        if
+          call $fit
+        else
+          call $home
+        end
+        i32.const 0
+        return
+      end
+      local.get 1
+      i32.const 3
+      i32.eq
+      if
+        i32.const 512
+        i32.const 9
+        local.get 2
+        local.get 3
+        i32.const 0
+        call $run
+        call $home
+        call $fit
+        i32.const 0
+        return
+      end
       local.get 0
       i32.load8_u
       local.tee 4
@@ -148,6 +229,7 @@
     )
     (data (;0;) (i32.const 512) "solid.box")
     (data (;1;) (i32.const 640) "view.home")
+    (data (i32.const 660) "view.fit")
     (data (;2;) (i32.const 1024) "{\22length\22:10,\22width\22:10,\22height\22:10,\22corner\22:[0,0,0],\22operation\22:\22new_body\22}")
     (data (;3;) (i32.const 1200) "{\22length\22:10,\22width\22:10,\22height\22:10,\22corner\22:[20,0,0],\22operation\22:\22new_body\22}")
     (data (;4;) (i32.const 1400) "{}")
@@ -155,6 +237,11 @@
     (data (;6;) (i32.const 760) "occurrence.move")
     (data (;7;) (i32.const 1500) "{\22name\22:\22Part\22,\22grounded\22:false}")
     (data (;8;) (i32.const 1600) "{\22occurrence\22:\22Part:1\22,\22translate\22:[100,0,0]}")
+    (data (i32.const 1800) "sketch.create")
+    (data (i32.const 1830) "sketch.rectangle.two_point")
+    (data (i32.const 1870) "sketch.finish")
+    (data (i32.const 2000) "{\22plane\22:\22XY\22}")
+    (data (i32.const 2040) "{\22p0\22:[100,20],\22p1\22:[120,30]}")
     (@producers
       (processed-by "wit-component" "0.254.0")
     )

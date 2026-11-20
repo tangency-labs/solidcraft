@@ -695,6 +695,28 @@ mod native {
     }
 
     #[test]
+    fn plugin_run_omits_hidden_keys_and_refuses_unavailable_choices() {
+        // Return the JSON argument received by the actual Wasm entry, using its canonical result area.
+        let f = Fixture::new("i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
+        let mut m = manifest();
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{
+        "type":"object","required":["shelves"],"properties":{
+            "storage":{"type":"string","enum":["shelves","drawers"]},
+            "shelves":{"type":"integer","x-solidcraft-visible-when":{"field":"storage","eq":"shelves"}},
+            "size":{"type":"string","oneOf":[{"const":"small","x-solidcraft-when":{"field":"storage","eq":"shelves"}},{"const":"large"}]}
+        }}}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        let approval = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
+        let args = |params: Value| json!({"path":f.path(),"approval":approval,"entry":"make","params":params});
+        let output = s.execute("plugin.run", &args(json!({"storage":"drawers","shelves":"ignored","size":"large"}))).unwrap();
+        assert_eq!(output["result"], json!({"storage":"drawers","size":"large"}));
+        let error = s.execute("plugin.run", &args(json!({"storage":"drawers","size":"small"}))).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "params.size"));
+        assert!(s.undo.is_empty(), "a read entry changes no design");
+    }
+
+    #[test]
     fn declared_entry_inputs_are_discoverable_and_namespaced_calls_share_approval() {
         let f = Fixture::new("call $box");
         let mut m = manifest();
@@ -1492,6 +1514,52 @@ mod importers {
         assert!(s.execute("doc.open", &json!({"path": stl})).map_or(true, |r| r.get("loss_report").is_none()));
         assert_eq!(s.execute("file.import", &json!({"path": stl})).unwrap()["format"], "smp.convert");
         assert_eq!(s.execute("doc.open", &json!({"path": stl, "format": "smp.convert"})).unwrap()["bodies"], 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn conditional_importer(name: &str) -> (Session, std::path::PathBuf) {
+        let (s, root) = installed(name, &[("smp", &["smp"], false)]);
+        let mut manifest = importer_manifest("smp", &["smp"], false);
+        manifest["runtime"]["entries"][0]["input_schema"] = json!({"type":"object","properties":{
+            "mode":{"type":"boolean"},
+            "count":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}},
+            "size":{"type":"string","oneOf":[
+                {"const":"small","x-solidcraft-when":{"field":"mode","eq":true}},
+                {"const":"large","x-solidcraft-when":{"field":"mode","eq":false}}]}
+        }});
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+        (s, root)
+    }
+
+    #[test]
+    fn importer_options_omit_hidden_fields_before_entering_wasm() {
+        let (mut s, root) = conditional_importer("conditional-hidden");
+        // The guest traps unless the serialized options contain only {"mode":false}.
+        let (package, version) = API.split_once('@').unwrap();
+        let fixture = include_str!("importer_fixture.wat").replace("\r\n", "\n").replace("__PACKAGE__", package).replace("__VERSION__", version);
+        let signature = "(func $import (;3;) (type 3) (param i32 i32 i32 i32 i64 i32 i32) (result i32)\n";
+        assert!(fixture.contains(signature));
+        let fixture = fixture.replacen(
+            signature,
+            &format!("{signature}      local.get 6\n      i32.const 14\n      i32.ne\n      if\n        unreachable\n      end\n"),
+            1,
+        );
+        std::fs::write(root.join("plugins/smp/importer.wasm"), wat::parse_str(fixture).unwrap()).unwrap();
+        let file = put(&root, "bracket.smp", &design());
+        let importer = importer_for(&s, &file, None).unwrap().unwrap();
+        let imported = import_file(&mut s, &importer, &file, &json!({"mode":false,"count":"hidden"}));
+        assert!(imported.is_ok(), "{imported:?}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn importer_options_reject_unavailable_choices_before_entering_wasm() {
+        let (mut s, root) = conditional_importer("conditional-choice");
+        let file = put(&root, "bracket.smp", &design());
+        let importer = importer_for(&s, &file, None).unwrap().unwrap();
+        let error = import_file(&mut s, &importer, &file, &json!({"mode":false,"size":"small"})).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "params.size"), "{error}");
+        assert!(import_file(&mut s, &importer, &file, &json!({"mode":false,"size":"large"})).is_ok());
         std::fs::remove_dir_all(root).unwrap();
     }
 

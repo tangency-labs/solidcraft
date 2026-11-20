@@ -983,6 +983,8 @@ fn export_with_identity(
     uv_owner_matches: Option<&dyn Fn(EdgeuseId, ObjectRef) -> bool>,
     o: &mut Vec<Item>,
 ) -> Result<(), SolidError> {
+    #[cfg(test)]
+    crate::certify::written(b);
     let mut w = Out {
         o,
         records,

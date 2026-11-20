@@ -494,6 +494,36 @@ fn configuration_inventory_keeps_library_rules_preview_and_inline_row_lifecycle(
 }
 
 #[test]
+fn configuration_rows_rename_by_double_click_and_move_with_the_arrows() {
+    // #17287: a Configuration is renamed by double-clicking its name, and moved up or down the
+    // table with the arrows, without deleting and recreating it.
+    let mut h = fixture();
+    h.app.run("config.configure", json!({"params":["width"]})).unwrap();
+    for name in ["Wide", "Narrow"] {
+        h.app.run("config.row", json!({"name": name})).unwrap();
+    }
+    let names = |h: &Harness| h.app.session.doc.configs.rows.iter().map(|r| r.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&h), ["Default", "Wide", "Narrow"]);
+    h.app.start("config.table");
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"config:up:Narrow"}})).unwrap();
+    assert_eq!(names(&h), ["Default", "Narrow", "Wide"], "the arrow moves the row up one place");
+    h.step(&json!({"click":{"handle":"config:down:Default"}})).unwrap();
+    assert_eq!(names(&h), ["Narrow", "Default", "Wide"], "and down one place");
+    h.step(&json!({"click":{"handle":"config:down:Wide"}})).unwrap();
+    h.step(&json!({"click":{"handle":"config:up:Narrow"}})).unwrap();
+    assert_eq!(names(&h), ["Narrow", "Default", "Wide"], "the last row can't go down and the first can't go up");
+    h.frames(40); // Separate the rename gesture from preceding clicks (egui also recognizes triple-clicks).
+    h.step(&json!({"click":{"handle":"config:name:Wide"},"double":true})).unwrap();
+    h.frames(2);
+    assert!(h.app.dialog.is_some() && h.app.session.doc.configs.rows.iter().any(|r| r.name == "Wide"));
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"Extra wide"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(names(&h), ["Narrow", "Default", "Extra wide"], "double-click renames the row where it stands");
+}
+
+#[test]
 fn configuration_add_column_menu_filters_as_typed_and_resets_on_close() {
     // A design has many parameters, features and bodies: the Add Column menu's filter narrows
     // its list as the user types, Enter picks a lone match, and the next opening starts blank.

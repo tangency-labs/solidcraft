@@ -3437,10 +3437,11 @@ impl FilletBrep {
             as_face(self.fillet_vertex(v)?.point_class_object(), OP)?.ok_or_else(|| missing(OP))?;
         let other_face = as_face(self.fillet_vertex(mate)?.point_class_object(), OP)?
             .ok_or_else(|| missing(OP))?;
-        let cp_vertex = corners
-            .corner(corner)?
-            .filleted_vertex()
-            .ok_or_else(|| missing(OP))?;
+        let owner = corners.corner(corner)?;
+        let at_cliff = owner
+            .blend
+            .is_some_and(crate::blend::blend_corner::BlendCorner::is_cliff_join);
+        let cp_vertex = owner.filleted_vertex().ok_or_else(|| missing(OP))?;
 
         let geoms = self.vertex_fillet_geoms(v)?;
         if geoms.is_empty() {
@@ -3497,6 +3498,15 @@ impl FilletBrep {
                 // surface the edge use's parameters are not on. Its foot is the vertex stepped
                 // into the edge use's face, taken to the nearest point of the rolled-over edge
                 // (on the face beyond) and dropped on that face's surface.
+                // The join is on the supports continued across the sharp rim.
+                // Project onto the infinite plane. A trimmed drop would pin this
+                // foot to the old rim and shorten the chord.
+                if at_cliff {
+                    if let SurfaceKind::Plane(plane) = base.kind() {
+                        *slot = plane.project_point_to_uv_domain(b.point + bin);
+                        continue;
+                    }
+                }
                 if let Some(onto) = fs.rolled_faces.get(ii).copied().flatten() {
                     let tangency = fs.tangency_tolerance;
                     let foot = b.point + bin;
@@ -3584,9 +3594,13 @@ impl FilletBrep {
 
             let (vu, tsect) = self.rail_end_tsect(v, Some(g), None, OP)?;
             let fs = solvers.solver(sid)?;
-            let domain1 = solver_surface(fs, 0, OP)?.natural_uv_domain_with_nurb(k)?;
-            let domain2 = solver_surface(fs, 1, OP)?.natural_uv_domain_with_nurb(k)?;
+            let mut domain1 = solver_surface(fs, 0, OP)?.natural_uv_domain_with_nurb(k)?;
+            let mut domain2 = solver_surface(fs, 1, OP)?.natural_uv_domain_with_nurb(k)?;
             let [uv0, uv1] = uvs;
+            if at_cliff {
+                domain1.add_point(uv0);
+                domain2.add_point(uv1);
+            }
             let (found, tsect) = point_on_plane_solve(
                 k,
                 solvers.solver_ops_mut(sid)?,
@@ -3639,10 +3653,17 @@ impl FilletBrep {
             if let Some(first) = first {
                 let uv_first = tsect.uv_pos(srf(first, OP)?);
                 let uv_other = tsect.uv_pos(other_srf(first, OP)?);
-                let p_first =
-                    face_surface(target, Some(first_face), OP)?.evaluate_point(k, uv_first)?;
-                let p_other =
-                    face_surface(target, Some(other_face), OP)?.evaluate_point(k, uv_other)?;
+                let foot_on_support = |face, uv| -> Result<Point3> {
+                    let surface = face_surface(target, Some(face), OP)?;
+                    if at_cliff && matches!(surface.kind(), SurfaceKind::Plane(_)) {
+                        let mut extended = surface.clone_for_evaluation()?;
+                        crate::surface::surface::p3::set_out_of_bounds_enabled(&mut extended, true);
+                        return extended.evaluate_point(k, uv);
+                    }
+                    surface.evaluate_point(k, uv)
+                };
+                let p_first = foot_on_support(first_face, uv_first)?;
+                let p_other = foot_on_support(other_face, uv_other)?;
                 self.set_processed(v, uv_first, p_first)?;
                 self.set_processed(mate, uv_other, p_other)?;
                 ended = true;

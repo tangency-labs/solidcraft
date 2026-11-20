@@ -73,6 +73,38 @@ fn indexed_picks_match_the_full_scan() {
     assert_eq!(app.viewport.pick_index.len(), 3, "one index per body mesh");
 }
 
+// A pending index can postpone cosmetic hover, but an explicit pick still gets the
+// face under the cursor. The gate makes both decisions happen before the index is ready.
+#[test]
+fn hover_yields_to_the_worker_but_a_click_can_pick_a_large_scan() {
+    use solidcore_record::Vec3;
+    use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
+    let mut doc = Document::new("Large mesh");
+    let mesh = MeshData {
+        name: "Scan".into(),
+        positions: vec![0., 0., 0., 1., 0., 0., 0., 1., 0.].into(),
+        triangles: [0, 1, 2].repeat(525_000).into(),
+        color: None,
+        corner_normals: Default::default(),
+    };
+    doc.add_feature(FeatureKind::MeshImport { file: "scan.stl".into(), meshes: vec![mesh] }, Some("Scan")).unwrap();
+    let mut app = SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
+    app.set_origin_shown(false);
+    let rect = Rect::from_min_size(pos2(0., 0.), vec2(640., 480.));
+    let proj = projection(&app, rect);
+    let at = proj.to_screen(Vec3::new(0.25, 0.25, 0.0)).unwrap();
+    let gate = app.viewport.pick_index.gate();
+    gate.set_closed(true);
+    let hover = crate::viewport::pick_hover(&mut app, &proj, at, &egui::Context::default());
+    let clicks = pick(&app, &proj, at);
+    let pending = app.viewport.pick_index.pending();
+    gate.set_closed(false);
+
+    assert_eq!(pending, 1);
+    assert!(hover.is_empty(), "a partial answer could light up a face behind the scan");
+    assert!(clicks.iter().any(|hit| matches!(hit, Hit::Face { .. })));
+}
+
 /// A new model state lets go of the indexes of meshes it no longer has.
 #[test]
 fn indexes_follow_the_model_state() {
