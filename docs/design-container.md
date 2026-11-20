@@ -13,11 +13,13 @@ Existing serialized document fields are retained automatically, without a second
 of the document schema or a deep clone of embedded payloads.
 
 A drawing file's `container.json` adds `"content":"drawing"`. Experimentally (#6892,
-`io::DesignKind`), a design's kind is kept there the same way: `"content":"part"` (`.scp`),
-`"sheet_metal"` (`.scs`) or `"assembly"` (`.sca`). A single design (`.sc`) writes no `content`,
+`io::DesignKind`), a design's kind is kept there the same way: `"content":"part"` (`.scprt`),
+`"sheet_metal"` (`.scsht`) or `"assembly"` (`.scasm`). A single design (`.sc`) writes no `content`,
 so its file is what it always was. The kind never changes with the file's name. Releases
 since 0.45.0-rc.1 open such a file as a design from a newer SolidCraft and keep its
-`container.json` when saving it.
+`container.json` when saving it. The checks that go with the kinds (a new design takes its first file's
+kind, a save as another kind is refused) are off unless Preferences › General › Saving turns
+them on, or `SOLIDCRAFT_FILE_KINDS=1` for command-line runs.
 
 Within `document.json`:
 
@@ -163,7 +165,8 @@ level six 0.93 MB in 46 ms (a whole save of that design took about 180 ms); read
 back took 13 and 10 ms. A modelled part's 571 KB cache went from 74 KB to 38 KB. The
 experimental preference **Smaller saved files** (Preferences › General › Saving, off by
 default, #19988) makes `fast` saves deflate the cache at level six too, and nothing
-else. The three levels are one table, `CACHE_LEVELS` in `crates/io/src/design.rs`.
+else; command-line runs, which read no preferences, turn it on with `SOLIDCRAFT_SMALLER_SAVES=1`.
+The three levels are one table, `CACHE_LEVELS` in `crates/io/src/design.rs`.
 Every release reads every level, so none of this changes the format.
 
 `cache/bodies.bin` holds every distinct body once, in

@@ -47,9 +47,9 @@ impl DesignKind {
     pub fn extension(self) -> &'static str {
         match self {
             DesignKind::Single => crate::DESIGN_EXT,
-            DesignKind::Part => "scp",
-            DesignKind::SheetMetal => "scs",
-            DesignKind::Assembly => "sca",
+            DesignKind::Part => "scprt",
+            DesignKind::SheetMetal => "scsht",
+            DesignKind::Assembly => "scasm",
         }
     }
 

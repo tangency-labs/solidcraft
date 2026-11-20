@@ -1508,8 +1508,8 @@ preference_settings! {
     /// half its size for a few tens of ms on a large design ([`apply_experiments`]). Off by
     /// default: saves are as before. No format change; every release opens such a file.
     experimental_smaller_saves: bool = false, PAGE_GENERAL => check_id("prefs.experimental_smaller_saves");
-    /// Experimental (#6892): a design's kind (single design `.sc`, part `.scp`, sheet metal part
-    /// `.scs`, assembly `.sca`) is picked by its first file's extension and checked by every save
+    /// Experimental (#6892): a design's kind (single design `.sc`, part `.scprt`, sheet metal part
+    /// `.scsht`, assembly `.scasm`) is picked by its first file's extension and checked by every save
     /// and open ([`apply_experiments`]). Off by default: extensions mean nothing, as before; the
     /// kind a file holds is kept either way.
     experimental_file_kinds: bool = false, PAGE_GENERAL => check_id("prefs.experimental_file_kinds");

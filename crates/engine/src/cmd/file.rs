@@ -3309,35 +3309,35 @@ mod tests {
         let at = |name: &str| dir.join(name).to_string_lossy().to_string();
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
-        let saved = s.execute("file.save", &json!({"path": at("bracket.scp")})).unwrap();
+        let saved = s.execute("file.save", &json!({"path": at("bracket.scprt")})).unwrap();
         assert_eq!(saved["kind"], "part", "{saved}");
         assert_eq!(s.design_kind, DesignKind::Part);
-        assert_eq!(solidcraft_io::read_design_kind_file(&at("bracket.scp")), DesignKind::Part);
+        assert_eq!(solidcraft_io::read_design_kind_file(&at("bracket.scprt")), DesignKind::Part);
         // Saved again, and as another part: still a part, and the reply says so.
         assert_eq!(s.execute("file.save", &json!({})).unwrap()["kind"], "part");
-        assert_eq!(s.execute("file.save_as", &json!({"path": at("bracket-2.scp")})).unwrap()["kind"], "part");
+        assert_eq!(s.execute("file.save_as", &json!({"path": at("bracket-2.scprt")})).unwrap()["kind"], "part");
         // As an assembly, a single design or JSON: refused, and the file is not written.
-        for (name, says) in [("bracket.sca", "create a new assembly"), ("bracket.sc", "create a new single design"), ("bracket.json", "header")] {
+        for (name, says) in [("bracket.scasm", "create a new assembly"), ("bracket.sc", "create a new single design"), ("bracket.json", "header")] {
             let refused = s.execute("file.save_as", &json!({"path": at(name)})).unwrap_err().to_string();
             assert!(refused.contains(says) && refused.contains("a part"), "{name}: {refused}");
             assert!(!std::path::Path::new(&at(name)).exists(), "{name}");
         }
         assert_eq!(s.design_kind, DesignKind::Part, "a refused save changes nothing");
         // Renamed on disk: the header wins, and the reply says so.
-        std::fs::copy(at("bracket.scp"), at("renamed.sca")).unwrap();
+        std::fs::copy(at("bracket.scprt"), at("renamed.scasm")).unwrap();
         let mut o = Session::default();
-        let opened = o.execute("doc.open", &json!({"path": at("renamed.sca")})).unwrap();
+        let opened = o.execute("doc.open", &json!({"path": at("renamed.scasm")})).unwrap();
         assert_eq!(opened["kind"], "part", "{opened}");
         assert!(opened["kind_note"].as_str().is_some_and(|note| note.contains("holds a part")), "{opened}");
         assert!(opened.get("newer_file").is_none(), "this build knows its own kinds: {opened}");
         assert_eq!(o.design_kind, DesignKind::Part);
         // Opened from its own name: no note.
-        let plain = o.execute("doc.open", &json!({"path": at("bracket.scp")})).unwrap();
+        let plain = o.execute("doc.open", &json!({"path": at("bracket.scprt")})).unwrap();
         assert!(plain.get("kind_note").is_none(), "{plain}");
         // Off: the extension means nothing and the kind is kept as it came.
-        assert_eq!(kind::checked(&o, "file.save_as", &at("x.sca"), "container", false).unwrap(), DesignKind::Part);
-        assert_eq!(kind::checked(&Session::default(), "file.save", &at("x.scp"), "container", false).unwrap(), DesignKind::Single);
-        assert_eq!(kind::opened_with(&at("renamed.sca"), false), (DesignKind::Part, None));
+        assert_eq!(kind::checked(&o, "file.save_as", &at("x.scasm"), "container", false).unwrap(), DesignKind::Part);
+        assert_eq!(kind::checked(&Session::default(), "file.save", &at("x.scprt"), "container", false).unwrap(), DesignKind::Single);
+        assert_eq!(kind::opened_with(&at("renamed.scasm"), false), (DesignKind::Part, None));
         // A single design: no kind in any reply, and its file is as before.
         let mut single = Session::default();
         single.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();

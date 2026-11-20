@@ -182,9 +182,10 @@ pub fn set_smaller_default_saves(on: bool) {
     SMALLER_DEFAULT_SAVES.store(on, Ordering::Relaxed);
 }
 
-/// Whether Fast saves deflate the model cache harder ([`set_smaller_default_saves`]).
+/// Whether Fast saves deflate the model cache harder: [`set_smaller_default_saves`] turned it on,
+/// or `SOLIDCRAFT_SMALLER_SAVES` is set (for command-line runs, which read no preferences).
 pub fn smaller_default_saves() -> bool {
-    SMALLER_DEFAULT_SAVES.load(Ordering::Relaxed)
+    SMALLER_DEFAULT_SAVES.load(Ordering::Relaxed) || solidcraft_geom::env::flag("SMALLER_SAVES")
 }
 
 /// The budgets of a save under `compression`, the Fast ones as the experimental switch says.
@@ -1914,7 +1915,7 @@ mod tests {
     /// a Fast save is as before. The switch itself is not flipped here: other tests save at once.
     #[test]
     fn smaller_default_saves_deflate_only_the_fast_model_cache_harder() {
-        assert!(!smaller_default_saves(), "off unless the app turns it on");
+        assert!(solidcraft_geom::env::flag("SMALLER_SAVES") || !smaller_default_saves(), "off unless turned on");
         let level = |compression, smaller, name: &str| (save_limits(compression, smaller).level)(name, 1);
         for name in native_cache::ENTRIES {
             assert_eq!(level(DesignCompression::Fast, false, name), CACHE_LEVELS.fast, "{name}");
@@ -1964,11 +1965,11 @@ mod tests {
             std::fs::remove_file(&path).unwrap();
             assert_eq!(DesignKind::for_path(&format!("a/b.{}", kind.extension().to_uppercase())), Some(kind));
         }
-        for path in ["a.solidcraft", "a.json", "a.step", "a", "a.scd"] {
+        for path in ["a.solidcraft", "a.json", "a.step", "a", "a.scd", "a.scp", "a.scdwg"] {
             assert_eq!(DesignKind::for_path(path), None, "{path}");
         }
         assert_eq!(design_kind(b"{}"), DesignKind::Single, "plain JSON has no header");
-        assert_eq!(read_design_kind_file("no/such/file.scp"), DesignKind::Single);
+        assert_eq!(read_design_kind_file("no/such/file.scprt"), DesignKind::Single);
         // A header naming something this build doesn't know is a single design here, and the
         // newer-file path keeps it as it came.
         let mut entries = parts(&single);

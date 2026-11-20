@@ -1,5 +1,5 @@
-//! The kind of design a file holds (experimental, #6892): single design `.sc`, part `.scp`, sheet
-//! metal part `.scs`, assembly `.sca` ([`solidcraft_io::DesignKind`]). The kind is fixed in the
+//! The kind of design a file holds (experimental, #6892): single design `.sc`, part `.scprt`, sheet
+//! metal part `.scsht`, assembly `.scasm` ([`solidcraft_io::DesignKind`]). The kind is fixed in the
 //! file's header; renaming the file never changes it.
 //!
 //! The session keeps the kind it opened ([`Session::design_kind`]) and every save writes it back,
@@ -25,9 +25,10 @@ pub fn set_experimental_file_kinds(on: bool) {
     EXPERIMENTAL.store(on, Ordering::Relaxed);
 }
 
-/// Whether the experimental file kinds are on ([`set_experimental_file_kinds`]).
+/// Whether the experimental file kinds are on: [`set_experimental_file_kinds`] turned them on, or
+/// `SOLIDCRAFT_FILE_KINDS` is set (for command-line runs, which read no preferences).
 pub fn experimental_file_kinds() -> bool {
-    EXPERIMENTAL.load(Ordering::Relaxed)
+    EXPERIMENTAL.load(Ordering::Relaxed) || solidcraft_geom::env::flag("FILE_KINDS")
 }
 
 /// The kind a save of `s` to `path` in `format` writes: the session's own, or with the experiment
