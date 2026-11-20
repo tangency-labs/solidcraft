@@ -2184,7 +2184,7 @@ impl Instances {
                             (Some((_, t)), _) | (None, Some((_, t, _))) => t.clone(),
                             (None, None) => taken_shared_tris(&mesh).unwrap_or_else(|| build_shared_tris(&mesh, body)),
                         },
-                        if levels { self.lods.levels(&mesh).map(|l| l.as_ref().clone()).unwrap_or_default() } else { Vec::new() },
+                        if levels { self.lods.levels(&mesh, body).map(|l| l.as_ref().clone()).unwrap_or_default() } else { Vec::new() },
                     ),
                 };
                 if levels.is_empty() && wants_levels {
@@ -2347,7 +2347,7 @@ fn publish_levels(app: &mut SolveApp) -> bool {
     let lods = app.viewport.mesh_lods.clone();
     let mut ready: Vec<(usize, crate::mesh_lod::Levels)> = Vec::new();
     if let Ok(mut waiting) = app.viewport.lod_waiting.lock() {
-        waiting.retain(|(at, mesh)| match lods.levels(mesh) {
+        waiting.retain(|(at, mesh)| match lods.levels(mesh, None) {
             Some(levels) => {
                 ready.push((*at, levels));
                 false
