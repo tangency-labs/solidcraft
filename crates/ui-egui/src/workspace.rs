@@ -1136,10 +1136,7 @@ mod tests {
         let plugin = workspace_plugin();
         crate::plugin_workspaces::discovered(&mut h.app, &[plugin]);
         let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Workspace);
-        let item = items
-            .iter()
-            .find(|item| item.params.as_ref().is_some_and(|params| params["workspace"] == "plugin:manufacture/cam"))
-            .unwrap();
+        let item = items.iter().find(|item| item.params.as_ref().is_some_and(|params| params["workspace"] == "plugin:manufacture/cam")).unwrap();
         assert_eq!(item.label, "Machining");
         assert!(item.enabled);
         assert!(items.iter().any(|item| item.id == "ui.workspace.design"));
@@ -1170,10 +1167,7 @@ mod tests {
         let section = layout.containing(&instance).unwrap().id.clone();
         assert_eq!(layout.containing(&instance).unwrap().location.zone(), Zone::Right);
         h.app
-            .dispatch_panel_layout(LayoutAction::Apply {
-                expected_revision: None,
-                mutations: vec![Mutation::Collapse { section, collapsed: true }],
-            })
+            .dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::Collapse { section, collapsed: true }] })
             .unwrap();
         enter(&mut h.app, "design").unwrap();
         assert_eq!(h.app.ui.tab, "MODEL");

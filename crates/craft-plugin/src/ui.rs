@@ -92,8 +92,12 @@ pub struct PanelNode {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum PanelWidget {
-    Group { children: Vec<u32> },
-    Text { text: String },
+    Group {
+        children: Vec<u32>,
+    },
+    Text {
+        text: String,
+    },
     Button {
         label: String,
         #[serde(default)]

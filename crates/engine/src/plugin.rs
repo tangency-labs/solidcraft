@@ -340,12 +340,7 @@ pub fn describe_workspace_ui(package: &Package) -> Result<craft_plugin::UiDeclar
 /// The execution copy retains the original approval hash: narrowing a call's limits never
 /// changes which exact package the user approved. No computed state, camera or history is
 /// adopted, even if a host command classified as read changes transient session state.
-pub fn run_workspace_hook(
-    session: &mut Session,
-    mut package: Package,
-    workspace: &str,
-    entering: bool,
-) -> Result<crate::schema::plugin::RunResult> {
+pub fn run_workspace_hook(session: &mut Session, mut package: Package, workspace: &str, entering: bool) -> Result<crate::schema::plugin::RunResult> {
     let name = package.manifest.name.clone();
     let result = (|| {
         let mut scratch = session.scratch();

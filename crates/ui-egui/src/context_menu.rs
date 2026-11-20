@@ -3964,8 +3964,7 @@ mod workspace_menu_tests {
     #[test]
     fn plugin_workspace_rows_are_drawn_with_the_host_workspace_style() {
         let ctx = crate::fonts::test_context();
-        let item = act("ui.workspace.plugin:manufacture/cam", "Machining", "ws_design")
-            .with(json!({"workspace":"plugin:manufacture/cam"}));
+        let item = act("ui.workspace.plugin:manufacture/cam", "Machining", "ws_design").with(json!({"workspace":"plugin:manufacture/cam"}));
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             workspace_menu(ui, std::slice::from_ref(&item), None, 720.0);
         });

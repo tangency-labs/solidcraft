@@ -1578,8 +1578,12 @@ impl AppPanelRuntime {
                 {
                     layout.columns.push(Column { id: column.clone(), zone, width: size.width });
                 }
-                let column_index = layout.columns.iter().filter(|existing| existing.zone == zone)
-                    .position(|existing| Some(&existing.id) == column.as_ref()).unwrap_or(0);
+                let column_index = layout
+                    .columns
+                    .iter()
+                    .filter(|existing| existing.zone == zone)
+                    .position(|existing| Some(&existing.id) == column.as_ref())
+                    .unwrap_or(0);
                 layout.instances.push(PanelInstance {
                     id: instance.clone(),
                     kind,
@@ -1618,11 +1622,7 @@ impl AppPanelRuntime {
         let mut catalogue = commands::InMemoryCatalogue::from_snapshot(&self.catalogue.state().export()?, &registry)?;
         let preset = crate::plugin_workspaces::identity(&workspace.plugin.id, &workspace.spec.id);
         catalogue.register_builtin(&preset, &LayoutEnvelope::new(layout), &registry)?;
-        catalogue.register_workspace(commands::WorkspaceDescriptor {
-            id,
-            title_key: "ui.plugin_workspace.panel".into(),
-            default_preset: preset,
-        })?;
+        catalogue.register_workspace(commands::WorkspaceDescriptor { id, title_key: "ui.plugin_workspace.panel".into(), default_preset: preset })?;
         let staged = self.catalogue.prepare(catalogue.state().clone())?;
         self.runtime.register_panels(panels)?;
         self.catalogue.publish(staged);

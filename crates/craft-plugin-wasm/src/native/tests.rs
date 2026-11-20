@@ -834,7 +834,7 @@ fn workbench_component(describe_code: &str, command_code: &str) -> Vec<u8> {
     let template = template.replacen("      call $box\n      call $box\n", &format!("      {command_code}\n"), 1);
     let mut component = template.trim_end().strip_suffix(')').unwrap().to_owned();
     component.push_str(
-        r#"
+        r##"
   (type $dock-zone (enum "left" "right" "bottom"))
   (type $design-kind (enum "part" "assembly" "sketch" "drawing"))
   (type $button (record (field "label" string) (field "icon" (option string)) (field "entry" string)))
@@ -865,7 +865,7 @@ fn workbench_component(describe_code: &str, command_code: &str) -> Vec<u8> {
   (instance $provider (export "declarations" (type $declarations)) (export "describe" (func $describe)))
   (export "__PACKAGE__/ui-provider@__VERSION__" (instance $provider))
 )
-"#,
+"##,
     );
     wat::parse_str(component.replace("__PACKAGE__", package).replace("__VERSION__", version).replace("__DESCRIBE_CODE__", describe_code)).unwrap()
 }
@@ -939,9 +939,7 @@ fn typed_workbench_declarations_preserve_layout_ribbon_and_hooks() {
                 nodes: vec![
                     ui::Node { widget: ui::Widget::Group(vec![1, 2, 3]) },
                     ui::Node { widget: ui::Widget::Text("Ready".into()) },
-                    ui::Node {
-                        widget: ui::Widget::Button(ui::ButtonSpec { label: "Run".into(), icon: Some("play".into()), entry: "make".into() }),
-                    },
+                    ui::Node { widget: ui::Widget::Button(ui::ButtonSpec { label: "Run".into(), icon: Some("play".into()), entry: "make".into() }) },
                     ui::Node { widget: ui::Widget::Unknown },
                 ],
             },

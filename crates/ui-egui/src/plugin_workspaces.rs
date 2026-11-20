@@ -231,7 +231,8 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     if app.plugin_workspaces.active.as_ref().is_some_and(|workspace| {
         !plugins::enabled(app, &workspace.plugin.id)
             || !app.plugin_workspaces.items.iter().any(|item| item.id == workspace.id && item.plugin.approval == workspace.plugin.approval)
-    }) && let Err(error) = leave(app) {
+    }) && let Err(error) = leave(app)
+    {
         app.set_status(error, true);
     }
     if app.plugin_workspaces.running.is_none()
