@@ -2309,48 +2309,75 @@ pub fn trim_image_gap_bound_within(
     let trim_kinks = kinks(&wn, r0, r1);
     // (the bound of the curve data `cn` against the net `net` through the reparametrisation
     // `psi`, the curve's slack added, with the pieces closing at `enough`)
-    let run =
-        |psi: &NurbsCurve, cn: &NurbsCurve, net: &NetSurface, enough: f64| -> Result<Option<f64>> {
-            let sides = Sides {
-                curve: cn,
-                trim: &wn,
-                psi,
-                curve_kinks: curve_kinks.clone(),
-                trim_kinks: trim_kinks.clone(),
-                range,
-            };
-            // (the bound adds the curve's slack, at least 0, to the gap: a gap above `over` is
-            // enough; a piece across a corner is bounded to first order by
-            // `piece_reparametrised`, so the first pieces need no cut there)
-            // (a gap at most `enough` less the curve's slack, rounded down, has a bound at most
-            // `enough`: the sum's exact value is at most `enough`, so rounding it up stays there)
-            let enough_gap = (Ivl::from(enough) - Ivl::from(c_slack)).lo;
-            let Some(gap) = bisect(
-                range,
-                FIRST_PIECES,
-                &[],
-                CLOSE_RELATIVE,
-                floor,
-                [enough_gap, over],
-                budget,
-                |a, b| {
-                    k.check_cancelled(OP)?;
-                    piece_reparametrised(&sides, net, a, b)
-                },
-            )?
-            else {
-                return Ok(None);
-            };
-            if gap == f64::INFINITY {
-                return Ok(Some(gap));
-            }
-            let bound = (Ivl::from(gap) + Ivl::from(c_slack)).hi;
-            Ok(bound.is_finite().then_some(bound))
+    let run = |psi: &NurbsCurve,
+               cn: &NurbsCurve,
+               net: &NetSurface,
+               enough: f64,
+               cuts: &[f64]|
+     -> Result<Option<f64>> {
+        let sides = Sides {
+            curve: cn,
+            trim: &wn,
+            psi,
+            curve_kinks: curve_kinks.clone(),
+            trim_kinks: trim_kinks.clone(),
+            range,
         };
+        // (the bound adds the curve's slack, at least 0, to the gap: a gap above `over` is
+        // enough; a piece across a corner is bounded to first order by
+        // `piece_reparametrised`, so the first pieces need no cut there)
+        // (a gap at most `enough` less the curve's slack, rounded down, has a bound at most
+        // `enough`: the sum's exact value is at most `enough`, so rounding it up stays there)
+        let enough_gap = (Ivl::from(enough) - Ivl::from(c_slack)).lo;
+        let Some(gap) = bisect(
+            range,
+            FIRST_PIECES,
+            cuts,
+            CLOSE_RELATIVE,
+            floor,
+            [enough_gap, over],
+            budget,
+            |a, b| {
+                k.check_cancelled(OP)?;
+                piece_reparametrised(&sides, net, a, b)
+            },
+        )?
+        else {
+            return Ok(None);
+        };
+        if gap == f64::INFINITY {
+            return Ok(Some(gap));
+        }
+        let bound = (Ivl::from(gap) + Ivl::from(c_slack)).hi;
+        Ok(bound.is_finite().then_some(bound))
+    };
+    // Where the bound is above `enough` (or not enclosed), the first pieces are cut again at
+    // every interior knot of `ψ` and the smaller bound kept: `ψ` is a C^1 cubic spline whose
+    // second derivative jumps at its knots, and where its refinement chased a steep step in the
+    // correspondence down to spans far narrower than the bisection's deepest piece, a piece
+    // across those spans has a second-order term as large as the steepest span's, which no
+    // halving shrinks (#18166: `topology.brep_local_operation` fc0000, bounds 0.43 and 8.7e-3
+    // from one piece at depth 30, for trims 1.2e-6 and 1.2e-7 from their edges by dense
+    // samples). Pieces within one span of `ψ` each have a cubic's bounded second derivative.
     let with_psi = |psi: &NurbsCurve| -> Result<Option<f64>> {
-        let first = run(psi, &cn, &net, enough)?;
+        let mut first = run(psi, &cn, &net, enough, &[])?;
+        let mut cuts: Vec<f64> = Vec::new();
+        if !first.is_some_and(|g| g <= enough) {
+            cuts = psi
+                .u
+                .iter()
+                .copied()
+                .filter(|&x| r0 < x && x < r1)
+                .collect();
+            cuts.dedup();
+            if !cuts.is_empty() {
+                if let Some(g) = run(psi, &cn, &net, enough, &cuts)? {
+                    first = Some(first.map_or(g, |b| b.min(g)));
+                }
+            }
+        }
         recentred_retry(first, [enough, over], &cn, &net, |cn, net, enough| {
-            run(psi, cn, net, enough)
+            run(psi, cn, net, enough, &cuts)
         })
     };
     let mut bound = with_psi(&psi)?;
@@ -2962,7 +2989,11 @@ mod tests {
                 budget,
                 |a, b| {
                     let h = b - a;
-                    let ends = if (0.25..0.5).contains(&a) { f64::NAN } else { 1.0 };
+                    let ends = if (0.25..0.5).contains(&a) {
+                        f64::NAN
+                    } else {
+                        1.0
+                    };
                     Ok(PieceBound::with(ends, Ivl::from(0.1 * h * h), 0.0))
                 },
             )

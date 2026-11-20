@@ -3556,6 +3556,10 @@ const KEEP_COVERED_PIECES: usize = 64;
 /// upstream's (where upstream's own `SetUVTrimCurve` allowance, twice a reported distance,
 /// stays only while it covers the proved one).
 ///
+/// A bound past the B-rep check's edge tolerance limit
+/// ([`within_edge_tolerance_limit`](crate::topology::edgeuse::p3::within_edge_tolerance_limit))
+/// raises nothing: the edit would be refused with the body.
+///
 /// A trim the edit left as it was (its geometry the same, bit for bit) at a tolerance not
 /// lowered is not bounded at all: it is covered after the edit exactly where it was before.
 ///
@@ -3629,7 +3633,10 @@ fn keep_trim_covered(
         )?,
         Some(was) if was <= before.tolerance
     );
-    if covered {
+    // UNPROVED fallback (#18166): a bound the B-rep check refuses as an edge tolerance is the
+    // enclosure's limit; the tolerance stays, as `trim_raise_distance` keeps upstream's raise
+    // there, and the edge is not proved to cover the edited trim.
+    if covered && crate::topology::edgeuse::p3::within_edge_tolerance_limit(b, bound) {
         crate::topology::edge::set_tolerance(b, e, bound, true, true)?;
     }
     Ok(())

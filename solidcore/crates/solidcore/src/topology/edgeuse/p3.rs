@@ -1774,9 +1774,18 @@ pub fn get_or_create_uv_trim_curve(
 /// is `2 * B` below `upstream`, `2 * upstream` up to twice it, and `B` past that: never
 /// decreasing in `B`, and at least `B` throughout.
 ///
+/// A `B` above twice `upstream` raises the edge only where the B-rep check accepts the
+/// tolerance it leaves ([`within_edge_tolerance_limit`]); past that, upstream's raise. A bound
+/// that far above upstream's sampled distance is where the enclosure did not converge (a
+/// bisection piece at its deepest whose second-order term does not shrink, or a
+/// reparametrisation off the correspondence over a short stretch: `topology.brep_local_operation`
+/// fc0000, bounds 0.43 and 8.7e-3 for trims 1.2e-6 from their edges by dense samples); raising
+/// the edge to it would leave a body the check refuses, the edit refused with it.
+///
 /// Not covered: where `upstream` raises nothing, `B` is not computed, and an edge whose trim
 /// lies farther than its tolerance keeps it (as upstream); bounding every refit trim there
-/// is a follow-up.
+/// is a follow-up. Nor is a trim whose `B` is past the B-rep check's limit: tightening that
+/// enclosure is a follow-up.
 ///
 /// # Errors
 ///
@@ -1809,6 +1818,12 @@ pub(crate) fn trim_raise_distance(
             _ => return Ok(upstream),
         };
     if raise_by > 2.0 * upstream {
+        // UNPROVED fallback (#18166): a `B` the B-rep check refuses as an edge tolerance is
+        // the enclosure's limit, not a distance to raise to. The raise is upstream's, from
+        // its sampled distance: the edge is not proved to cover the trim.
+        if !within_edge_tolerance_limit(b, raise_by) {
+            return Ok(upstream);
+        }
         // (doubled by `SetUVTrimCurve` back to `B`, exactly: a halving is exact here)
         return Ok(0.5 * raise_by);
     }
@@ -1825,6 +1840,14 @@ pub(crate) fn trim_raise_distance(
         Some(others) if others <= lowered => Ok(raise_by),
         _ => Ok(upstream),
     }
+}
+
+/// Not upstream (#18166): whether `tolerance` is one the B-rep check accepts for an edge of
+/// `b`: below [`LARGE_SMALL_SIZE_RATIO`](crate::geom::tol::LARGE_SMALL_SIZE_RATIO) times the
+/// B-rep's tolerance (`ValidatePointers` test 59, the limit the validation's own tolerance
+/// growth keeps under). A raise past it leaves a body the check refuses.
+pub(crate) fn within_edge_tolerance_limit(b: &Brep, tolerance: f64) -> bool {
+    tolerance < crate::geom::tol::LARGE_SMALL_SIZE_RATIO * b.tolerance()
 }
 
 /// Not upstream (#18162): the largest [`trim_deviation_bound`] of the UV trims of `eu`'s
