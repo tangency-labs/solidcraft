@@ -93,8 +93,8 @@ impl Refusal {
 impl crate::session::Answer
     for std::result::Result<solidcore::topology::brep::validation::BrepCheck, Refusal>
 {
-    fn refusal(&self) -> Option<String> {
-        self.as_ref().err().map(|r| r.error().to_string())
+    fn refusal(&self) -> Option<Error> {
+        self.as_ref().err().map(Refusal::error)
     }
 }
 
@@ -120,7 +120,14 @@ impl Body {
                 return Ok(Err(Refusal::Naming));
             }
             match check_brep(k, b, lv) {
-                Err(SolidError::Unported { upstream, .. }) => Ok(Err(Refusal::Unported(upstream))),
+                Err(e @ SolidError::Unported { upstream, .. }) => {
+                    // the refusal keeps the kernel's code ([`crate::session::noted`])
+                    drop(crate::session::noted(
+                        &e,
+                        Refusal::Unported(upstream).error(),
+                    ));
+                    Ok(Err(Refusal::Unported(upstream)))
+                }
                 r => r.map(Ok),
             }
         })? {

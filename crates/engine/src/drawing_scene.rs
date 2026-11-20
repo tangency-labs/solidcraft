@@ -910,8 +910,7 @@ fn draw(
     };
     let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: why.clone(), hatches: Vec::new() };
     let styles = Styles::from(view);
-    let not_drawable = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
-    let not_drawable = not_drawable.or_else(|| crate::drawing_view::not_cut_yet(view));
+    let not_drawable = crate::drawing_view::not_cut_yet(view);
     if let Some(why) = not_drawable.or_else(|| crate::drawing_view::not_drawable_apart(view)) {
         return none(Status::Failed(why.into()));
     }
@@ -1256,6 +1255,28 @@ struct SheetText {
     group: Group,
     fonts: Vec<Font>,
     why: Option<String>,
+}
+
+/// The note `params` (as `drawing.note.add` takes them, on a sheet) would add, alone on its sheet
+/// and drawn exactly as the sheet will draw it once placed: the same group, in the drawing's
+/// lettering, at its paper size. Added on a copy of the session, so nothing is added and no undo
+/// step made. What the Note tool previews while the note follows the pointer.
+pub fn note_preview_scene(s: &Session, params: &serde_json::Value) -> Result<Scene> {
+    const ADD: &str = "drawing.note.add";
+    let mut copy = s.scratch();
+    let reply = copy.execute(ADD, params)?;
+    let id = reply["note"].as_str().and_then(ids::decode).ok_or_else(|| bad(ADD, "the note wasn't added"))?;
+    let d = copy.drawing(ADD)?.clone();
+    let Some(Anchor::Sheet(sheet)) = d.notes.by_id(id).map(|note| note.anchor.clone()) else {
+        return Err(bad(ADD, "only a note on a sheet is previewed"));
+    };
+    let size = sheet_of(&d, sheet)?.sheet.size_mm().map_err(|e| bad(ADD, e.to_string()))?;
+    let lettering = Lettering::of(&copy, &d);
+    let (texts, _) = sheet_texts(&copy, &d, sheet, &lettering, false);
+    let text = texts.into_iter().find(|text| text.object == id).ok_or_else(|| bad(ADD, "the note wasn't drawn"))?;
+    let mut scene = Scene::new(size, vec![text.group]);
+    scene.add_fonts(text.fonts);
+    Ok(scene)
 }
 
 /// The notes on sheet `sheet` of `d`, by id, each with its fields read for that sheet, then its
@@ -2621,6 +2642,14 @@ enum Worked {
 }
 
 impl Job {
+    /// The view whose lines this works out, or none for a picture's setup: for a log line.
+    pub fn view(&self) -> Option<u64> {
+        match &self.0 {
+            Work::View(job) => Some(job.ticket.view),
+            Work::Picture(_) => None,
+        }
+    }
+
     /// Does the job's work: the one long piece of it, on any thread.
     pub fn run(self) -> Done {
         Done(match self.0 {

@@ -18,7 +18,7 @@
 //! | [`BlendFailure::RemovalRefused`]       | the reason's ([`removal_class`]), 130 or 131  |
 //! | [`BlendFailure::StationDidNotConverge`]| [`ErrorKind::StationDidNotConverge`] (125)    |
 //! | [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`] | [`ErrorKind::TrimLeaks`] (126) |
-//! | [`BlendFailure::StageFailed`], [`BlendFailure::SkinMeasureNotFinite`] | [`ErrorKind::StageFailed`] (127) |
+//! | [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinMeasureNotFinite`] | [`ErrorKind::StageFailed`] (127) |
 //! | [`BlendFailure::SkinPastStationCap`]   | [`ErrorKind::NotWithinTolerance`] (9)         |
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
 //! | [`BlendFailure::CreasePieceEndUnbuildable`] | [`ErrorKind::Unsupported`] (5)           |
@@ -34,7 +34,7 @@
 //!
 //! | Rust                                   | Status difftest compares          |
 //! |----------------------------------------|-----------------------------------|
-//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::CrossingNotFinite`] | `SM_ERR` |
+//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::CrossingNotFinite`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`]               | `SM_ERR`                          |
 //! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::CrossingInputMissing`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`            |
@@ -51,8 +51,10 @@
 //! moved onto it. Each keeps the kind of its status, as before the record, and reads as
 //! neither a defect nor a refusal ([`BlendFailure::is_phrase`]); its phrase stays in its
 //! message. They go class by class: a site that has a finer cause moves to it, and one that
-//! has none to [`BlendFailure::StageFailed`], built on purpose. A test counts the library
-//! sites that build a phrase cause, per file, and lets the count only fall.
+//! is the kernel's fault to [`BlendFailure::Defect`], with its reason. A test counts the
+//! library sites that build a phrase cause, per file, and lets the count only fall.
+//! [`BlendFailure::StageFailed`] is the form of a defect not yet reviewed, also counted per
+//! file. The conversion guide: `docs/failure-codes-and-reproduction.md` §6.
 //!
 //! Deviations: not upstream. The failure's `operation` path says which routine. No cause
 //! names an entity of its own: a failure is at the entity the site it replaces named
@@ -105,8 +107,17 @@ pub enum BlendFailure {
     TrimLoopDoesNotSeparate,
     /// A stage of the blend failed with no reason the kernel names: a defect. The failure
     /// holds the operation, the status (for the goldens only) and where in solidcore's source
-    /// it was built ([`Failure::origin`]).
+    /// it was built ([`Failure::origin`]). The form not yet reviewed: new code builds
+    /// [`BlendFailure::Defect`], a named cause or a refusal instead.
     StageFailed,
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
     /// A variable round's skin of balls' touch circles was still measured farther than
     /// `asked` from its balls when its refinement reached its most rounds or stations
     /// (#15256): the worst distance measured was `reached` (infinite where a span's section
@@ -366,7 +377,8 @@ pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
         R::JoinOffsetsDiffer => ErrorKind::JoinOffsetsDiffer,
         R::StripBelowResolution => ErrorKind::StripBelowResolution,
         R::EndPastSideEdge => ErrorKind::EndPastSideEdge,
-        R::EndOverflowsSideEdge => ErrorKind::EndOverflowsSideEdge,
+        // an End the round overflows: past its side edge, or over its end face whole
+        R::EndOverflowsSideEdge | R::EndPassesOverEndFace => ErrorKind::EndOverflowsSideEdge,
         R::EndRollsIntoSmoothEnd => ErrorKind::EndRollsIntoSmoothEnd,
         R::EndAtSeamVertex => ErrorKind::EndAtSeamVertex,
         R::TangentContinuationEndUnsupported => ErrorKind::TangentContinuationEnd,
@@ -477,6 +489,7 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
@@ -501,8 +514,8 @@ impl BlendFailure {
     /// class for [`BlendFailure::NoRoom`] ([`no_room_class`]) and
     /// [`BlendFailure::RemovalRefused`] ([`removal_class`]),
     /// [`ErrorKind::StationDidNotConverge`], [`ErrorKind::TrimLeaks`] for an open or leaking
-    /// trim loop, [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`] and
-    /// [`BlendFailure::SkinMeasureNotFinite`], [`ErrorKind::NotWithinTolerance`] for
+    /// trim loop, [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`],
+    /// [`BlendFailure::Defect`] and [`BlendFailure::SkinMeasureNotFinite`], [`ErrorKind::NotWithinTolerance`] for
     /// [`BlendFailure::SkinPastStationCap`] and for a surface not certified within its
     /// tolerance in its work budget ([`BlendFailure::NotCertified`]), and
     /// [`ErrorKind::BallsFold`] for [`BlendFailure::BallsNest`], and
@@ -516,9 +529,10 @@ impl BlendFailure {
             Self::RemovalRefused(reason) => removal_class(*reason),
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
-            Self::StageFailed | Self::SkinMeasureNotFinite { .. } | Self::CrossingNotFinite => {
-                ErrorKind::StageFailed
-            }
+            Self::StageFailed
+            | Self::Defect { .. }
+            | Self::SkinMeasureNotFinite { .. }
+            | Self::CrossingNotFinite => ErrorKind::StageFailed,
             Self::SkinPastStationCap { .. } | Self::NotCertified { .. } => {
                 ErrorKind::NotWithinTolerance
             }
@@ -551,6 +565,7 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
@@ -587,6 +602,7 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
@@ -636,6 +652,7 @@ impl core::fmt::Display for BlendFailure {
                 write!(f, "{}: the trim loop does not separate", self.class())
             }
             Self::StageFailed => write!(f, "{}", self.class()),
+            Self::Defect { why } => write!(f, "{}: {why}", self.class()),
             Self::SkinPastStationCap {
                 asked,
                 reached,
@@ -1030,6 +1047,10 @@ mod tests {
                 ErrorKind::EndOverflowsSideEdge,
             ),
             (
+                BlendFailure::NoRoom(R::EndPassesOverEndFace),
+                ErrorKind::EndOverflowsSideEdge,
+            ),
+            (
                 BlendFailure::NoRoom(R::EndRollsIntoSmoothEnd),
                 ErrorKind::EndRollsIntoSmoothEnd,
             ),
@@ -1058,6 +1079,7 @@ mod tests {
             (BlendFailure::TrimLoopOpen, ErrorKind::TrimLeaks),
             (BlendFailure::TrimLoopDoesNotSeparate, ErrorKind::TrimLeaks),
             (BlendFailure::StageFailed, ErrorKind::StageFailed),
+            (BlendFailure::Defect { why: "x" }, ErrorKind::StageFailed),
         ];
         for (cause, class) in cases {
             assert_eq!(cause.class(), class, "{cause:?}");
@@ -1148,6 +1170,34 @@ mod tests {
         assert_eq!(stage.kind(), ErrorKind::StageFailed);
         assert_eq!(stage.kind().code(), 127);
         assert!(stage.is_defect() && !stage.is_refusal() && !stage.sized());
+    }
+
+    /// A reviewed defect is of class 127 with the stage failure's status, and says why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why =
+            "the station solve was started off its own previous station, which it never leaves";
+        let defect = BlendFailure::Defect { why };
+        assert!(!defect.is_phrase() && defect.replaces_upstream_status());
+        for status in [SM_ERR, SM_ERR_NULL_POINTER] {
+            let e = Failure::new("blend::op", defect)
+                .with_status(status)
+                .into_error();
+            super::super::tests::assert_defect(
+                &e,
+                &Failure::new("blend::op", BlendFailure::StageFailed)
+                    .with_status(status)
+                    .into_error(),
+                "blend::op",
+                status,
+                &format!("blend::op: stage_failed: {why}"),
+            );
+            assert_eq!(e.blend_failure(), Some(&defect));
+        }
+        assert_eq!(
+            SolidError::blend("blend::op", defect).sm_status(),
+            Some(SM_ERR)
+        );
     }
 
     #[test]
@@ -1365,6 +1415,7 @@ mod tests {
             | BlendFailure::TrimLoopDoesNotSeparate
             | BlendFailure::RemovalRefused(_)
             | BlendFailure::StageFailed
+            | BlendFailure::Defect { .. }
             | BlendFailure::SkinPastStationCap { .. }
             | BlendFailure::SkinMeasureNotFinite { .. }
             | BlendFailure::BallsNest { .. }
@@ -1392,7 +1443,7 @@ mod tests {
     /// sites lowers the pin to the new count, and a new site builds a typed cause.
     #[test]
     fn the_phrase_cause_sites_only_go_down() {
-        const PHRASE_CAUSE_SITES: usize = 1045;
+        const PHRASE_CAUSE_SITES: usize = 897;
         use crate::blend::fillet_executive::NoRoomReason as R;
         let causes = [
             BlendFailure::NoRoom(R::BallDoesNotFit),
@@ -1427,6 +1478,7 @@ mod tests {
             BlendFailure::TrimLoopDoesNotSeparate,
             BlendFailure::RemovalRefused(RemovalRefusal::FaceGrowsPastDomain),
             BlendFailure::StageFailed,
+            BlendFailure::Defect { why: "x" },
             BlendFailure::NotCertified {
                 halvings: 0,
                 stations: 0,

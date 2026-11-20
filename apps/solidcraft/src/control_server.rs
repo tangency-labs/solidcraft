@@ -67,6 +67,7 @@ impl Protocol for SolidCraft {
             "param_check": solidcraft_engine::schema::ParamCheck::ALL.map(|l| l.name()),
             "plugin_tools": true,
             "joint_drive": true,
+            "joint_pose": true,
         })
     }
 }

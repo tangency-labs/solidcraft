@@ -27,6 +27,11 @@ const FACES: [([usize; 4], [f64; 3], [f64; 3]); 6] = [
 /// The box assembled, its edge from corner 0 to corner 1 written with its line running from 1
 /// to 0 while its vertices are given as (0, 1).
 fn assembled_box() -> R<(Solid, Vec<bool>)> {
+    assembled_box_as(Kind::Solid)
+}
+
+/// [`assembled_box`] finished as a record of `kind`.
+fn assembled_box_as(kind: Kind) -> R<(Solid, Vec<bool>)> {
     let mut asm = Assembly::new(1e-6, None);
     let mut vertices = Vec::new();
     for c in 0..8 {
@@ -60,7 +65,7 @@ fn assembled_box() -> R<(Solid, Vec<bool>)> {
         let plane = BSurface::Plane { origin: corner(corners[0]), u_axis, v_axis };
         faces.push((asm.add_face(f as u64, plane, vec![Bound::Edges(uses)], Some(0), true)?, true));
     }
-    Ok((asm.finish(0, "box".into(), vec![faces], Kind::Solid)?, alongs))
+    Ok((asm.finish(0, "box".into(), vec![faces], kind)?, alongs))
 }
 
 #[test]
@@ -79,6 +84,19 @@ fn a_box_assembled_from_its_parts_is_a_closed_solid_record() {
     origins.sort_unstable();
     assert_eq!(origins, vec![0, 1, 2, 3, 4, 5]);
     assert!(solid.turned.is_empty(), "no face disagrees with its loops: {:?}", solid.turned);
+}
+
+/// A solid's shell still closed when faces are left out bounds a region of its own: the
+/// material inside it where it is the outer shell, a cavity where it is a void, and a cavity
+/// still where it is a void left first because every face of the outer shell was left out.
+#[test]
+fn a_closed_shell_of_an_open_solid_keeps_its_role() {
+    for (voids, outer, void) in [(false, true, false), (true, true, false), (true, false, true)] {
+        let (solid, _) = assembled_box_as(Kind::Open { voids, outer }).unwrap();
+        assert!(solid.sheet);
+        let bounded: Vec<bool> = solid.brep.regions.iter().skip(1).map(|r| r.void).collect();
+        assert_eq!(bounded, vec![void], "voids {voids}, outer {outer}");
+    }
 }
 
 /// Two diagonal 1 × 1 × 2 lobes touch along x = y = 0, 0 <= z <= 1. A unit
@@ -445,6 +463,31 @@ fn an_edge_across_a_periodic_splines_seam_keeps_its_points() {
         }
     }
     assert!(periodic_edge(curve, [0.0, 4.5]).is_err(), "longer than one period");
+}
+
+/// An edge a rounding from the seam: one a whole number of periods from it, where moving it into
+/// the range by whole periods rounds (1.2 / 0.4 is 2.999…), keeps its points; one all the way
+/// round whose end is a rounding past the range's end is the curve as it is.
+#[test]
+fn an_edge_a_rounding_from_the_seam_starts_at_the_seam() {
+    let square = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]];
+    let curve = spline_curve(1, vec![-0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5], &square, None).unwrap();
+    let (c, [t0, t1]) = periodic_edge(curve, [1.2, 1.25]).unwrap();
+    let eval = crate::kernel::CurveEval::new(&c).unwrap();
+    for (t, want) in [(t0, [0.0, 0.0, 0.0]), (t1, [5.0, 0.0, 0.0])] {
+        let p = eval.point(t).unwrap();
+        assert!(p.dist(Vec3::new(want[0], want[1], want[2])) < 1e-9, "at {t}: {p:?}");
+    } // An edge all the way round whose end the producer wrote a rounding past the range's end (a
+    // closed spline from its start to its end, as one of the Prusa Core One's is): the curve as it
+    // is, not a restart at its start, which no spline can be restarted at.
+    let curve = spline_curve(1, vec![-0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5], &square, None).unwrap();
+    let (c, [t0, t1]) = periodic_edge(curve.clone(), [0.0, 0.4 + 1e-16]).unwrap();
+    assert_eq!(c, curve, "not restarted");
+    assert_eq!([t0, t1], [0.0, 0.4]);
+    // A short edge a rounding short of the range's end, ending before it: where it is, in order.
+    let (c, [t0, t1]) = periodic_edge(curve.clone(), [0.4 - 1e-11, 0.4 - 5e-12]).unwrap();
+    assert_eq!(c, curve, "not restarted");
+    assert!(t0 < t1 && t1 <= 0.4, "{t0} {t1}");
 }
 
 /// A parabola edge is the exact spline over its interval, its ends where the parabola is at the

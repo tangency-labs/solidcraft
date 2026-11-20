@@ -4833,19 +4833,27 @@ mod tests {
         let e = fb
             .calc_rail_int_edgeuse(&k, v, None, none, &mut solvers, &mut target)
             .unwrap_err();
-        assert!(
-            matches!(e.blend_failure(), Some(BlendFailure::Missing(_))),
+        // the NULL corner (`CornerLookup::corner`, p1): a stage failure (#15034)
+        assert_eq!(
+            (e.operation(), e.blend_failure()),
+            (
+                "blend::fillet_geom::p1::CornerLookup::corner",
+                Some(&BlendFailure::StageFailed)
+            ),
             "{e:?}"
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
-        // an id outside the table is the NULL corner (`CornerLookup::corner`, p1, still a phrase
-        // cause); a corner in it gets to the
-        // geometry check
+        // an id outside the table is the NULL corner (`CornerLookup::corner`, p1, a stage
+        // failure since #15034); a corner in it gets to the geometry check
         let e = fb
             .calc_set_back_vert(&k, v, CornerLookup::table(&[]), &mut solvers, &target)
             .unwrap_err();
-        assert!(
-            matches!(e.blend_failure(), Some(BlendFailure::Missing(_))),
+        assert_eq!(
+            (e.operation(), e.blend_failure()),
+            (
+                "blend::fillet_geom::p1::CornerLookup::corner",
+                Some(&BlendFailure::StageFailed)
+            ),
             "{e:?}"
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
