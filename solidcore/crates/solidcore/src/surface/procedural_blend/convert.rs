@@ -102,16 +102,29 @@ fn to_record_at(k: &Kernel, pb: &ProceduralBlend, depth: u32) -> Result<Procedur
 /// A support's record: a nested blend's own record, or the NURBS form its stations are
 /// solved on ([`as_b_spline`]: an analytic support is evaluated as its net), labelled with
 /// its analytic kind only where reading the record derives that surface back from the form
-/// ([`AnalyticSupport::derive`], then [`AnalyticSupport::build`], as [`exact_from_record`],
-/// [`from_record`] and [`corner_from_record`] do). The record holds no numbers for the
-/// label: reading it takes them off the form's control rows, and a form that lies on the
-/// support's surface only to more than the evaluation's rounding (one short span, such as a
-/// cone's 12 degree arc, whose control points carry the rounding of the conversions that
-/// made them) does not prove the cone read off it, though the support's own numbers prove
-/// the form. Such a support goes unlabelled, as its form, as a face whose form does not
-/// prove its label does (`face_surface::record_face`, owner 22254), and the record reads
-/// back.
+/// written ([`AnalyticSupport::derive`], then [`AnalyticSupport::build`], as
+/// [`exact_from_record`], [`from_record`] and [`corner_from_record`] do). The record holds
+/// no numbers for the label: reading it takes them off the form's control rows, and a form
+/// whose rows give them only to more than the evaluation's rounding (a cone's short arc
+/// span, whose control points carry the rounding of the conversions that made them) does
+/// not prove the surface read off it, though the support's own numbers prove the form. Such
+/// a support goes unlabelled, as its form, as a face whose form does not prove its label
+/// does (`face_surface::record_face`, owner 22254), and the record reads back.
 fn support_record(k: &Kernel, s: &Surface, depth: u32) -> Result<SupportRecord> {
+    nurbs_record(k, s, depth, true)
+}
+
+/// A corner's net or a draft's source or net: its record with its analytic label as it is,
+/// proved or not, since the record requires the label (a swept turn's net is a torus, a
+/// drafted plane a plane and a drafted cone a cone: [`CornerRecord::validate`],
+/// [`DraftRecord::validate`]).
+fn face_record(k: &Kernel, s: &Surface) -> Result<SupportRecord> {
+    nurbs_record(k, s, 1, false)
+}
+
+/// [`support_record`] (`proved`: a label only where reading derives it back) or
+/// [`face_record`].
+fn nurbs_record(k: &Kernel, s: &Surface, depth: u32, proved: bool) -> Result<SupportRecord> {
     if let SurfaceKind::ProceduralBlend(inner) = s.kind() {
         return Ok(SupportRecord::Blend(Box::new(to_record_at(
             k,
@@ -125,17 +138,19 @@ fn support_record(k: &Kernel, s: &Surface, depth: u32) -> Result<SupportRecord> 
             reason: "a support that is not a NURBS surface has no record",
         });
     };
+    let form = surface_record(&b)?;
+    // the reader's own steps on the form as it reads it
     let reads_back = |kind: SupportKind| -> Result<bool> {
-        let made = AnalyticSupport::derive(k, kind, &b).and_then(|a| a.build(k, b.copy()));
-        match made {
+        let read = surface_of(&form)?;
+        match AnalyticSupport::derive(k, kind, &read).and_then(|a| a.build(k, read)) {
             Ok(_) => Ok(true),
             Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
             Err(_) => Ok(false),
         }
     };
     let label = match AnalyticSupport::of(s).map(|a| a.kind()) {
-        Some(kind) => reads_back(kind)?.then_some(kind),
-        None => None,
+        Some(kind) if !proved || reads_back(kind)? => Some(kind),
+        _ => None,
     };
     let kind = match label {
         None => SupportKindRecord::Free,
@@ -145,10 +160,7 @@ fn support_record(k: &Kernel, s: &Surface, depth: u32) -> Result<SupportRecord> 
         Some(SupportKind::Sphere) => SupportKindRecord::Sphere,
         Some(SupportKind::Torus) => SupportKindRecord::Torus,
     };
-    Ok(SupportRecord::Nurbs {
-        kind,
-        form: surface_record(&b)?,
-    })
+    Ok(SupportRecord::Nurbs { kind, form })
 }
 
 /// The kernel's kind a record's label names.
@@ -932,7 +944,7 @@ pub fn corner_to_record(k: &Kernel, surface: &Surface) -> Result<CornerRecord> {
         ));
     };
     let xyz = |p: Point3| [p.x, p.y, p.z];
-    let face_net = || support_record(k, net, 1);
+    let face_net = || face_record(k, net);
     Ok(match corner {
         // the Ball's patch is recorded as its B-rep face, its sphere the face's `BallPatch`
         // label over its net, and read back certified by solidcore-convert's `ball_patch`
@@ -1266,13 +1278,13 @@ pub fn draft_to_record(k: &Kernel, surface: &Surface) -> Result<DraftRecord> {
     let xyz = |p: Point3| [p.x, p.y, p.z];
     let d = draft.draft();
     Ok(DraftRecord {
-        source: support_record(k, draft.source(), 1)?,
+        source: face_record(k, draft.source())?,
         outward: draft.outward(),
         neutral_origin: xyz(d.neutral_origin()),
         neutral_normal: xyz(d.neutral_normal()),
         pull: xyz(d.pull()),
         angle: d.angle(),
-        net: support_record(k, net, 1)?,
+        net: face_record(k, net)?,
     })
 }
 
