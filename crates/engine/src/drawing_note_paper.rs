@@ -1,4 +1,5 @@
-//! A drawing's notes on paper (#4896 W19i): one group for each note, its text centred on its place,
+//! A drawing's notes on paper (#4896 W19i): one group for each note, its text starting at, centred on
+//! or ending at its place by its alignment ([`Align`], #20122), each line of several the same way,
 //! at its own cap height or a dimension's, set in the drawing's lettering by the dimension's text
 //! rule ([`Text::set`]), with its own line breaks only. A note that points at the model has a leader
 //! from where each thing it points at is now to its text, ending in a dimension's arrowhead, with a
@@ -8,9 +9,10 @@
 //! without a leader ([`label_group`]).
 
 use solidcore_record::Vec2;
-use solidcraft_doc::drawing::note::Note;
+use solidcraft_doc::drawing::note::{Align, Note};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::paper::annotate::{LANDING_PER_LINE_WIDTH, Leader};
+use solidcraft_geom::paper::text::TextRun;
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
 use solidcraft_sketch::PaperFonts;
 
@@ -20,9 +22,17 @@ use crate::drawing_dimension_paper::{ARROW, GAP_MM, Layout, OnPaper, TEXT_MM, Te
 /// or from its view's centre as its view's lines are), in lines `line_mm` wide, a leader ending at
 /// each of `tips`, the ends it points at that are found: its group.
 pub fn note_group(note: &Note, text: &str, tips: &[Vec2], line_mm: f64, lettering: &PaperFonts) -> OnPaper {
-    let centre = Vec2::new(note.at[0], note.at[1]);
     let cap_mm = note.cap_mm.unwrap_or(TEXT_MM);
-    let text = Text::set(Some(text), cap_mm, lettering);
+    let mut text = Text::set(Some(text), cap_mm, lettering);
+    // The text's box stands from its place by the alignment, level with it; its leaders, its landings
+    // and its group are laid out from the box.
+    let reach = match note.align {
+        Align::Left => text.half.x,
+        Align::Centre => 0.0,
+        Align::Right => -text.half.x,
+    };
+    let centre = Vec2::new(note.at[0] + reach, note.at[1]);
+    text.runs = justified(std::mem::take(&mut text.runs), note.align, text.half.x * 2.0);
     let mut why = text.why;
     let mut items = Vec::new();
     // Whether a leader has drawn the landing on the text's left and on its right.
@@ -41,6 +51,29 @@ pub fn note_group(note: &Note, text: &str, tips: &[Vec2], line_mm: f64, letterin
         pending: text.pending,
         layout: Layout::default(),
     }
+}
+
+/// `runs` with each of their lines moved along as `align` stands it in a box `width` wide: lines are the
+/// runs that share a baseline, which a text's own breaks make (a line set in more than one font is
+/// several runs).
+fn justified(mut runs: Vec<TextRun>, align: Align, width: f64) -> Vec<TextRun> {
+    if align == Align::Left {
+        return runs;
+    }
+    let mut lines: Vec<(f64, f64)> = Vec::new();
+    for run in &runs {
+        let end = run.reach() + run.origin.x;
+        match lines.iter_mut().find(|(y, _)| (*y - run.origin.y).abs() < 1e-9) {
+            Some((_, widest)) => *widest = widest.max(end),
+            None => lines.push((run.origin.y, end)),
+        }
+    }
+    for run in &mut runs {
+        if let Some((_, line)) = lines.iter().find(|(y, _)| (*y - run.origin.y).abs() < 1e-9) {
+            run.origin.x += align.indent(width, *line);
+        }
+    }
+    runs
 }
 
 /// The height of a view label's capitals: the ISO 3098 height after a dimension's.
