@@ -9,13 +9,29 @@ fn a_chamfer_refused_for_room_is_worded_as_a_chamfer() {
         for why in
             [RoomReason::BallDoesNotFit, RoomReason::BallsFold, RoomReason::OffsetCollapses, RoomReason::FaceConsumed, RoomReason::RailLeavesFace]
         {
-            let text = Error::TooLarge { size: 2.5, kind, at, why: Some(why) }.to_string();
+            let text = Error::TooLarge { size: 2.5, kind, at, face: None, why: Some(why) }.to_string();
             assert!(!text.contains("ball") && !text.contains("roll"), "{kind:?} {why:?}: {text}");
             assert!(text.contains("chamfer") || text.contains("offset"), "{kind:?} {why:?}: {text}");
         }
     }
-    let round = Error::TooLarge { size: 2.5, kind: FitKind::Radius, at, why: Some(RoomReason::BallDoesNotFit) }.to_string();
+    let round = Error::TooLarge { size: 2.5, kind: FitKind::Radius, at, face: None, why: Some(RoomReason::BallDoesNotFit) }.to_string();
     assert!(round.contains("the rolling ball does not fit a face it rolls on"), "{round}");
+}
+
+/// A limiting face survives the adapter separately from the edge it constrains.
+#[test]
+fn a_sized_blend_refusal_names_the_limiting_face() {
+    let e = Error::TooLarge {
+        size: 0.2995,
+        kind: FitKind::Distance,
+        at: Some([5.0, 0.0, 10.0]),
+        face: Some([5.0, 0.5, 10.0]),
+        why: Some(RoomReason::BandsOverlap),
+    };
+    let text = e.to_string();
+    assert!(text.contains("the edge at (5.000, 0.000, 10.000)"), "{text}");
+    assert!(text.contains("limited by the face containing (5.000, 0.500, 10.000)"), "{text}");
+    assert!(text.contains("the largest distance that fits is 0.2995"), "{text}");
 }
 
 #[test]
@@ -799,7 +815,7 @@ fn every_call_starts_clean_on_any_kernel() {
 #[test]
 fn status_sites_only_shrink() {
     const SITES: &[(&str, usize)] =
-        &[("core/blend.rs", 8), ("core/measure.rs", 1), ("core/offset.rs", 7), ("core/split.rs", 3), ("core/ssi.rs", 1), ("core/sweep.rs", 6)];
+        &[("core/blend.rs", 6), ("core/measure.rs", 1), ("core/offset.rs", 7), ("core/split.rs", 3), ("core/ssi.rs", 1), ("core/sweep.rs", 6)];
     /// The lines of `text` outside its top-level inline test modules (rustfmt closes one with a
     /// `}` alone at the start of a line).
     fn code_lines(text: &str) -> Vec<&str> {

@@ -269,7 +269,8 @@ const TAB_HANDLES: TabHandles<'static> = TabHandles {
     switcher: "t:switcher",
 };
 
-const VIEW_MENU: [TabMenuRow<'static>; 3] = [
+const VIEW_MENU: [TabMenuRow<'static>; 4] = [
+    TabMenuRow::new("move_to_window", "Move to window", "").for_local_view().with_children(&[TabMenuRow::new("move_new", "New window", "")]),
     TabMenuRow::new("vclose", "Close view", "Ctrl+W"),
     TabMenuRow::new("vothers", "Close other views", "").needing_others().separated(),
     TabMenuRow::new("vright", "Close views to the right", "").needing_others(),
@@ -290,6 +291,7 @@ const VIEWS: [ViewTab<'static>; 3] = [
         underline: egui::Color32::BLUE,
         state: ViewState::Normal,
         active: true,
+        to_window: None,
         tip: "Model",
     },
     ViewTab {
@@ -299,6 +301,7 @@ const VIEWS: [ViewTab<'static>; 3] = [
         underline: egui::Color32::GREEN,
         state: ViewState::SourceChanged,
         active: false,
+        to_window: None,
         tip: "Sketch 2",
     },
     ViewTab {
@@ -308,6 +311,7 @@ const VIEWS: [ViewTab<'static>; 3] = [
         underline: egui::Color32::RED,
         state: ViewState::Deleted,
         active: false,
+        to_window: None,
         tip: "Sheet 1",
     },
 ];
@@ -321,6 +325,11 @@ struct TabsRig {
     /// The first design has the three [`VIEWS`], shown as sub-tabs (`Some(true)`) or behind a
     /// switcher (`Some(false)`); the strip then has more room.
     views: Option<bool>,
+    room: Option<f32>,
+    single_view: bool,
+    name: &'static str,
+    detached: bool,
+    pop_out: bool,
     /// The + has a menu.
     plus: bool,
     /// The name of this view is being typed: its place, and the text and focus the strip edits.
@@ -345,6 +354,11 @@ impl TabsRig {
             ctx: crate::test_support::context(),
             time: std::cell::Cell::new(0.0),
             views,
+            room: None,
+            single_view: false,
+            name: "One",
+            detached: false,
+            pop_out: false,
             plus,
             rename: rename.map(|(k, _)| k),
             text: std::cell::RefCell::new(text),
@@ -365,12 +379,24 @@ impl TabsRig {
             ..Default::default()
         };
         let tab = |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None, views: &[] };
-        let first = DocTab { views: if self.views.is_some() { &VIEWS } else { &[] }, ..tab("One") };
+        let mut views = VIEWS;
+        if self.detached {
+            views[1].to_window = Some(1);
+        }
+        let views = if self.single_view || self.pop_out {
+            &views[..1]
+        } else if self.views.is_some() {
+            &views[..]
+        } else {
+            &[]
+        };
+        let first = DocTab { views, ..tab(self.name) };
         let (mut text, mut focused) = (self.text.borrow().clone(), self.focused.get());
         let mut strip = TabStrip {
-            tabs: vec![first, tab("Two"), tab("Three")],
+            tabs: if self.pop_out { vec![first] } else { vec![first, tab("Two"), tab("Three")] },
             selected: 0,
             shown_selected: Some(0),
+            pop_out: self.pop_out,
             title_bar: false,
             double_click_renames: true,
             rename: None,
@@ -394,10 +420,16 @@ impl TabsRig {
             view_right_row: "vright",
             view_rename: self.rename.map(|k| (k, TabRename { text: &mut text, focused: &mut focused, max: 8 })),
             plus_menu: if self.plus { &PLUS_MENU } else { &[] },
+            layout_menu: &[],
+            layout_current: "",
+            layout_tip: "Layout",
+            layout_fill: "",
+            layout_fill_heading: "",
             switcher_menu: &SWITCHER_MENU,
             tear_off_below: 40.0,
         };
         let (x0, x1) = if self.views.is_some() { (20.0, 780.0) } else { (100.0, 700.0) };
+        let x1 = self.room.map_or(x1, |room| x0 + room);
         let mut actions = Vec::new();
         crate::test_support::raw_frame(&self.ctx, input, |ui| {
             actions = tabs(ui, &mut strip, Rect::from_min_size(Pos2::ZERO, vec2(800.0, HEIGHT)), x0, x1);
@@ -638,15 +670,97 @@ fn the_sub_tabs_return_what_was_clicked_and_dragged() {
     rig.frame(Vec::new());
     assert_eq!(rig.press(rig.at("t:menu:vclose"), egui::PointerButton::Primary), vec![TabAction::ViewMenu { view: 2, id: "vclose".into() }]);
     // Drag the first sub-tab past the last.
-    let from = rig.at("t:view:0");
+    let origin = solidcraft_ui_registry::rect_of("t:view:0").expect("view 0 is drawn");
+    let from = origin.center();
     let to = solidcraft_ui_registry::rect_of("t:view:2").map(|r| r.right_center() - vec2(4.0, 0.0)).expect("view 2 is drawn");
     let mut actions = rig.frame(vec![egui::Event::PointerMoved(from)]);
     actions.extend(rig.frame(vec![press(from, true)]));
-    actions.extend(rig.frame(vec![egui::Event::PointerMoved(from + vec2(10.0, 0.0))]));
-    actions.extend(rig.frame(vec![egui::Event::PointerMoved(to)]));
-    actions.extend(rig.frame(vec![egui::Event::PointerMoved(to)]));
-    actions.extend(rig.frame(vec![press(to, false)]));
-    assert_eq!(actions, vec![TabAction::ReorderView { from: 0, to: 2 }]);
+    actions.extend(rig.frame(vec![egui::Event::PointerMoved(from + vec2(3.0, 0.0))]));
+    assert!(actions.is_empty(), "three pixels stay a click");
+    let pointer = from + vec2(4.0, 0.0);
+    assert_eq!(rig.frame(vec![egui::Event::PointerMoved(pointer)]), vec![TabAction::DockView { view: 0, origin, pointer, released: false }]);
+    assert_eq!(rig.frame(vec![egui::Event::PointerMoved(to)]), vec![TabAction::DockView { view: 0, origin, pointer: to, released: false }]);
+    assert_eq!(
+        rig.frame(vec![press(to, false)]),
+        vec![TabAction::DockView { view: 0, origin, pointer: to, released: true }, TabAction::ReorderView { from: 0, to: 2 }]
+    );
+}
+
+#[test]
+fn a_view_drag_reports_release_outside_the_client_and_escape_cancels_it() {
+    let rig = TabsRig::with(Some(true));
+    let origin = solidcraft_ui_registry::rect_of("t:view:0").expect("view 0 is drawn");
+    let from = origin.center();
+    let outside = pos2(850.0, from.y);
+    let escape = egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+    for cancel in [false, true] {
+        rig.frame(vec![egui::Event::PointerMoved(from)]);
+        rig.frame(vec![press(from, true)]);
+        rig.frame(vec![egui::Event::PointerMoved(from + vec2(10.0, 0.0))]);
+        assert!(rig.frame(vec![egui::Event::PointerMoved(outside)]).contains(&TabAction::DockView {
+            view: 0,
+            origin,
+            pointer: outside,
+            released: false
+        }));
+        if cancel {
+            assert!(rig.frame(vec![escape.clone()]).is_empty());
+            assert!(rig.frame(vec![egui::Event::PointerMoved(outside + vec2(4.0, 0.0))]).is_empty(), "a cancelled press stays cancelled");
+        }
+        let actions = rig.frame(vec![press(outside, false)]);
+        assert_eq!(actions.contains(&TabAction::DockView { view: 0, origin, pointer: outside, released: true }), !cancel);
+    }
+}
+
+#[test]
+fn touch_lifts_a_view_tab_only_after_the_hold_threshold() {
+    let rig = TabsRig::with(Some(true));
+    let origin = solidcraft_ui_registry::rect_of("t:view:0").expect("view 0 is drawn");
+    let pointer = origin.center();
+    let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(1), phase, pos: pointer, force: None };
+    rig.frame(vec![egui::Event::PointerMoved(pointer)]);
+    assert!(rig.frame(vec![touch(egui::TouchPhase::Start), press(pointer, true)]).is_empty());
+    rig.time.set(rig.time.get() + 0.200);
+    assert!(rig.frame(Vec::new()).is_empty());
+    rig.time.set(rig.time.get() + 0.025);
+    assert_eq!(rig.frame(Vec::new()), vec![TabAction::DockView { view: 0, origin, pointer, released: false }]);
+    assert_eq!(
+        rig.frame(vec![touch(egui::TouchPhase::End), press(pointer, false)]),
+        vec![TabAction::DockView { view: 0, origin, pointer, released: true }]
+    );
+}
+
+#[test]
+fn space_lifts_a_focused_local_view_tab_without_selecting_it() {
+    let rig = TabsRig::with(Some(true));
+    let origin = solidcraft_ui_registry::rect_of("t:view:1").expect("view 1 is drawn");
+    assert_eq!(rig.press(origin.center(), egui::PointerButton::Primary), vec![TabAction::SelectView(1)]);
+    let space = egui::Event::Key { key: egui::Key::Space, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+    assert_eq!(rig.frame(vec![space]), vec![TabAction::LiftView { view: 1, origin }]);
+}
+
+#[test]
+fn a_view_drop_slot_shifts_only_neighbours_at_or_after_the_local_index() {
+    let rig = TabsRig::with(Some(true));
+    rig.ctx.global_style_mut(|style| style.animation_time = 0.0);
+    let strip = egui::Id::unique("test_tabs");
+    let first = rig.at("t:view:0");
+    let second = rig.at("t:view:1");
+    let second_rect = solidcraft_ui_registry::rect_of("t:view:1").unwrap();
+    let plus = rig.at("t:vnew");
+    set_view_drag_slot(&rig.ctx, strip, Some(1), 38.0);
+    rig.frame(Vec::new());
+    assert_eq!(rig.at("t:view:0"), first);
+    assert_eq!(rig.at("t:view:1"), second + vec2(38.0 + VIEW_GAP, 0.0));
+    let gap = view_drag_gap(&rig.ctx, strip, 1).unwrap();
+    assert_eq!(gap.left_top(), second_rect.left_top());
+    assert_eq!(gap.size(), vec2(38.0, VIEW_HEIGHT));
+    assert_eq!(rig.at("t:vnew"), plus + vec2(38.0 + VIEW_GAP, 0.0));
+    set_view_drag_slot(&rig.ctx, strip, None, 0.0);
+    rig.frame(Vec::new());
+    assert_eq!(rig.at("t:view:1"), second);
+    assert_eq!(rig.at("t:vnew"), plus);
+    assert!(view_drag_gap(&rig.ctx, strip, 1).is_none());
 }
 
 /// With a view switcher the views list in a menu: a row picks a view, the footer's rows are the app's.
@@ -712,7 +826,7 @@ fn menu_row_builders_and_glyphs() {
     assert!(head.heading && head.id == "H" && head.label == "H");
     let row = plain.separated().needing_others().with_icon("close", None);
     assert!(row.separator_before && row.needs_others && row.icon == "close");
-    for glyph in ["model", "sketch", "sheet", "render", "animation", "rename", "window", "close", "duplicate", "reopen"] {
+    for glyph in ["model", "sketch", "sheet", "render", "animation", "rename", "window", "close", "duplicate", "tiles", "reopen"] {
         assert!(!glyph_lines(glyph).is_empty(), "{glyph} has strokes");
     }
 }
@@ -740,6 +854,54 @@ fn a_view_menu_opens_under_its_view_and_turns_off_rows_that_do_not_apply() {
     assert_eq!(rig.press(rig.at("t:menu:vothers"), egui::PointerButton::Primary), vec![TabAction::ViewMenu { view: 2, id: "vothers".into() }]);
 }
 
+#[test]
+fn detached_view_has_a_window_mark_and_retains_its_own_click_targets() {
+    let mut rig = TabsRig::with(Some(true));
+    let normal = solidcraft_ui_registry::rect_of("t:view:1").expect("view is drawn");
+    rig.detached = true;
+    rig.frame(Vec::new());
+    let detached = solidcraft_ui_registry::rect_of("t:view:1").expect("detached view stays in the strip");
+    let mark = solidcraft_ui_registry::rect_of("t:view:1:window").expect("detached view has a window mark");
+    let close = solidcraft_ui_registry::rect_of("t:vclose:1").expect("detached view can still be closed");
+    assert!(detached.width() > normal.width());
+    assert!(detached.contains_rect(mark) && detached.contains_rect(close));
+    assert!(mark.right() < close.left(), "the window mark does not cover the close button");
+    assert_eq!(rig.press(mark.center(), egui::PointerButton::Primary), vec![TabAction::SelectView(1)]);
+    assert_eq!(rig.press(close.center(), egui::PointerButton::Primary), vec![TabAction::CloseView(1)]);
+    rig.press(mark.center(), egui::PointerButton::Secondary);
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::handle_at("t:menu:vclose").is_some());
+    assert!(solidcraft_ui_registry::handle_at("t:menu:move_to_window").is_none());
+}
+
+#[test]
+fn pop_out_pill_keeps_one_visible_view_with_no_design_close() {
+    let mut rig = TabsRig::with(Some(false));
+    rig.pop_out = true;
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:view:0").is_some());
+    assert!(solidcraft_ui_registry::rect_of("t:vclose:0").is_some());
+    assert!(solidcraft_ui_registry::rect_of("t:vnew").is_some());
+    assert!(solidcraft_ui_registry::rect_of("t:close:0").is_none());
+    assert!(solidcraft_ui_registry::handle_at("t:new").is_none());
+}
+
+#[test]
+fn view_window_submenu_returns_the_child_action() {
+    let rig = TabsRig::with(Some(true));
+    rig.press(rig.at("t:view:1"), egui::PointerButton::Secondary);
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    let row = rig.at("t:menu:move_to_window");
+    assert!(rig.press(row, egui::PointerButton::Primary).is_empty());
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    let child = rig.at("t:menu:move_new");
+    assert!(child.x > row.x, "the submenu opens beside the parent row");
+    assert_eq!(rig.press(child, egui::PointerButton::Primary), vec![TabAction::ViewMenu { view: 1, id: "move_new".into() }]);
+}
+
 /// A view being renamed shows its name field in its sub-tab: Enter keeps the name (cut to the
 /// longest taken), Escape gives it up.
 #[test]
@@ -753,6 +915,56 @@ fn a_view_is_renamed_in_its_sub_tab() {
     let rig = TabsRig::build(Some(true), false, Some((2, "Sheet 1")));
     rig.frame(Vec::new());
     assert_eq!(rig.frame(vec![key(egui::Key::Escape)]), vec![TabAction::ViewRenameCancelled]);
+}
+
+#[test]
+fn a_narrow_switcher_keeps_its_targets_inside_the_tab() {
+    let mut rig = TabsRig::with(Some(false));
+    rig.room = Some(304.0);
+    rig.name = "A design name much wider than the space left for its tab";
+    rig.frame(Vec::new());
+    let switcher = solidcraft_ui_registry::rect_of("t:switcher").expect("switcher remains available");
+    let close = solidcraft_ui_registry::rect_of("t:close:0").expect("close remains available");
+    assert!(switcher.is_positive() && switcher.left() >= 20.0 && switcher.right() <= 108.0);
+    assert!(close.right() <= 108.0 && !close.intersects(switcher));
+    assert!(rig.press(switcher.center(), egui::PointerButton::Primary).is_empty());
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    assert_eq!(rig.press(rig.at("t:switcher:row:1"), egui::PointerButton::Primary), vec![TabAction::SelectView(1)]);
+}
+
+#[test]
+fn renaming_a_view_remains_editable_in_the_switcher_fallback() {
+    let mut rig = TabsRig::build(Some(true), false, Some((1, "Sketch")));
+    rig.room = Some(304.0);
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:switcher").is_some(), "the narrow strip falls back to its switcher");
+    let field = solidcraft_ui_registry::rect_of("t:rename").expect("the requested editor remains visible");
+    let switcher = solidcraft_ui_registry::rect_of("t:switcher").unwrap();
+    assert!(switcher.contains_rect(field));
+    let key = |key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+    assert_eq!(rig.frame(vec![key(egui::Key::Enter)]), vec![TabAction::ViewRenameDone { view: 1 }]);
+    let mut single = TabsRig::build(Some(false), false, Some((0, "Model")));
+    single.single_view = true;
+    single.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:rename").is_some(), "the single-view tab exposes its requested rename field");
+    assert_eq!(single.frame(vec![key(egui::Key::Enter)]), vec![TabAction::ViewRenameDone { view: 0 }]);
+    let rig = TabsRig::build(Some(false), false, Some((2, "Sheet")));
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:rename").is_some(), "switcher mode can rename too");
+    assert_eq!(rig.frame(vec![key(egui::Key::Escape)]), vec![TabAction::ViewRenameCancelled]);
+}
+
+#[test]
+fn changing_the_design_discards_its_open_view_popup() {
+    let rig = TabsRig::with(Some(true));
+    rig.press(rig.at("t:view:1"), egui::PointerButton::Secondary);
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::handle_at("t:menu:vclose").is_some());
+    clear_view_popup(&rig.ctx, egui::Id::unique("test_tabs"));
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::handle_at("t:menu:vclose").is_none());
 }
 
 // The layout engine: pure arithmetic over a spec, no egui.

@@ -268,10 +268,6 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                         ui.label(solidcraft_ui_text::tr_label("Legacy face attachment. Rebinding to a certified face creates an exact attachment."));
                         *plane
                     }
-                    FaceAttachmentStatus::Sheet { plane } => {
-                        ui.label(solidcraft_ui_text::tr("sketch_panel.sheet_attachment"));
-                        *plane
-                    }
                     FaceAttachmentStatus::Fixed { plane } => {
                         // Name the plane it's on now: an origin or construction plane (#5103).
                         if let Some(FeatureKind::Sketch { plane: on, .. }) = app.session.doc.feature(sketch).map(|f| &f.kind) {

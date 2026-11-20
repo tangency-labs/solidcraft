@@ -35,10 +35,7 @@ const NOTCHED: &[u8] =
 
 /// SolidCraft's rig set at the time of the kernel's check: every fix but those listed.
 fn fixes() {
-    let off = [
-        "fillet_round_on_round_as_definition",
-        "fillet_refuse_rounds_breaking_through",
-    ];
+    let off = ["fillet_round_on_round_as_definition"];
     let on = solidcore::kernel::UpstreamFixes::NAMES
         .iter()
         .copied()
