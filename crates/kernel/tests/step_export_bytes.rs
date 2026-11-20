@@ -60,6 +60,46 @@ const NO_READ_BACK: &[&str] = &["tests/step-regressions/thread_crest_band.step"]
 /// is written as that circle (#17929). Kernel-case 3208 differs only in its uncertainty (line #8,
 /// the largest edge tolerance): 1e-6 where main wrote 1.3356874714460462e-6, as the lazy UV trim
 /// no longer raises its edge past the trim's proved distance, which 1e-6 covers (#18166).
+/// Entries whose export's bytes differ only on macOS's math functions, beside the pinned values
+/// above: the reader's seam split now lands on the edge's own knot, and the pcurves made beside it
+/// carry macOS libm's rounding for these fixtures (on Linux the split solves within the export's
+/// written precision of the knot already, so the pinned values are unchanged). When #15405 (one
+/// pure-Rust libm) lands, macOS writes Linux's bytes and this set should go, as #19284 expects of
+/// the engine's export set.
+#[cfg(target_os = "macos")]
+#[rustfmt::skip]
+const DIGESTS_MACOS: &[(&str, &str)] = &[
+    ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "710ec80508bae43a"),
+    ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "ef5f1b70be16e528"),
+    ("tests/kernel-cases/import/258-cone-point-vertex/input.step", "4bcaf00c71d3beca"),
+    ("tests/kernel-cases/import/258-cone-to-point/input.step", "e9765615a698856d"),
+    ("tests/kernel-cases/import/4005-cylinder-written-as-near-zero-cone/input.step", "ace0f6500312d1e1"),
+    ("tests/step-conformance/cone_point.step", "0345ac19b0d17681"),
+    ("tests/step-conformance/cone_point_vertex.step", "96c735326c578395"),
+    ("tests/step-conformance/grooved_shaft.step", "e08ae1efaaae2696"),
+    ("tests/step-regressions/hole_round_revolved.step", "1749e03c3c2f194a"),
+    ("tests/step-regressions/rod_doubled_edge.step", "ef5f1b70be16e528"),
+    ("tests/step-regressions/thread_crest_band.step", "2053d57556b7dafa"),
+    ("(assembly)", "4256f9f7676566de"),
+];
+
+/// The expected digests with macOS's entries in place of the pinned ones.
+#[cfg(target_os = "macos")]
+fn with_macos_digests(mut expected: Vec<(String, String)>) -> Vec<(String, String)> {
+    for (n, d) in DIGESTS_MACOS {
+        if let Some(entry) = expected.iter_mut().find(|(m, _)| m == n) {
+            entry.1 = (*d).to_string();
+        }
+    }
+    expected
+}
+
+/// The pinned digests, where the export's bytes are the platform's.
+#[cfg(not(target_os = "macos"))]
+fn with_macos_digests(expected: Vec<(String, String)>) -> Vec<(String, String)> {
+    expected
+}
+
 #[rustfmt::skip]
 const DIGESTS: &[(&str, &str)] = &[
     ("solidcore/crates/solidcore-step/tests/fixtures/closed-spline-cylinder.step", "2b7d457b87394f2c"),
@@ -189,7 +229,7 @@ fn step_export_keeps_its_bytes_and_reads_back() {
         }
         return;
     }
-    let expected: Vec<(String, String)> = DIGESTS.iter().map(|(n, d)| ((*n).to_string(), (*d).to_string())).collect();
+    let expected = with_macos_digests(DIGESTS.iter().map(|(n, d)| ((*n).to_string(), (*d).to_string())).collect());
     assert_eq!(table, expected, "the export's bytes changed");
     assert!(failures.is_empty(), "round trips: {failures:#?}");
 }

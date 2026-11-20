@@ -36,10 +36,11 @@ pub const SWITCHER_AS_TABS: &str = "switcher.as_tabs";
 
 /// A view's right-click menu in three groups set apart by lines: rename, copy and move; close
 /// views; close the design.
-pub const VIEW_MENU: [TabMenuRow<'static>; 8] = [
+pub const VIEW_MENU: [TabMenuRow<'static>; 9] = [
     TabMenuRow::new(VIEW_RENAME, "Rename view", "F2").with_icon("rename", None),
     TabMenuRow::new(VIEW_DUPLICATE, "Duplicate view", "").with_icon("duplicate", None),
     TabMenuRow::new(VIEW_BESIDE, "Show beside", "").with_icon("tiles", None),
+    TabMenuRow::new("view.place", "design_view.place", "").with_icon("tiles", None).needing_others(),
     TabMenuRow::new(VIEW_NEW_WINDOW, "Open in new window", "").with_icon("window", None),
     TabMenuRow::new(VIEW_CLOSE, "Close view", "Ctrl+W").with_icon("close", None).separated(),
     TabMenuRow::new(VIEW_CLOSE_OTHERS, "Close other views", "").needing_others(),
@@ -84,7 +85,7 @@ fn view_id(app: &SolveApp, index: usize) -> Option<u64> {
 }
 
 /// Carry out one of the strip's view actions. False for an action that is not a view action.
-pub fn handle(app: &mut SolveApp, action: TabAction) -> bool {
+pub fn handle(app: &mut SolveApp, ctx: &egui::Context, action: TabAction) -> bool {
     match action {
         TabAction::SelectView(i) => {
             if let Some(id) = view_id(app, i) {
@@ -100,6 +101,11 @@ pub fn handle(app: &mut SolveApp, action: TabAction) -> bool {
             documents::view_open(app, ViewKind::Model, None, false);
         }
         TabAction::ReorderView { from, to } => documents::view_move(app, from, to),
+        TabAction::DockView { view, pointer, released } => {
+            if let Some(id) = view_id(app, view) {
+                crate::view_tiles::tab_drag(app, ctx, id, pointer, released);
+            }
+        }
         TabAction::ViewMenu { view, id } => return view_menu(app, view, &id),
         TabAction::PlusMenu { id } | TabAction::LayoutMenu { id } => return plus_row(app, &id),
         TabAction::SwitcherMenu { id } => return switcher_menu(app, &id),
@@ -128,6 +134,9 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
         VIEW_BESIDE => {
             let beside = (view != app.docs.views.active().id).then_some(view);
             return documents::view_beside(app, beside, solidcraft_views::Edge::Right).is_some();
+        }
+        "view.place" => {
+            app.docs.view_placement = Some((app.docs.active_tab(), view));
         }
         VIEW_NEW_WINDOW => {
             let kind = app.docs.views.get(view).map(|v| v.kind.key());
@@ -296,7 +305,7 @@ mod tests {
         h.app.pick_open(|_, _| {});
         assert!(h.app.file_picker_busy());
         h.app.status = None;
-        assert!(handle(&mut h.app, TabAction::TearOff(1)));
+        assert!(handle(&mut h.app, &h.ctx, TabAction::TearOff(1)));
         assert_eq!(h.app.docs.active, 0);
         assert!(h.app.status.is_none(), "the refused switch does not try to open the active design");
     }

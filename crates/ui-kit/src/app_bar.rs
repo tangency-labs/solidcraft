@@ -810,6 +810,12 @@ pub enum TabAction {
         from: usize,
         to: usize,
     },
+    /// A view tab dragged from the strip over the workspace.
+    DockView {
+        view: usize,
+        pointer: Pos2,
+        released: bool,
+    },
     /// A row of a view's right-click menu, of the + menu, of the view switcher's footer.
     ViewMenu {
         view: usize,
@@ -1218,7 +1224,7 @@ fn menu_rows(ui: &mut egui::Ui, rows: &[TabMenuRow], keys: bool, others: bool, o
 /// Every view as a menu row (a check mark on the shown one, a hollow dot on one whose source
 /// changed, a dashed outline on a deleted one): the place of the one chosen. Rows are published
 /// under `prefix` and their place.
-fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str) -> Option<usize> {
+fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str, menu: &mut Option<(usize, Rect)>) -> Option<usize> {
     let t = Tokens::get();
     let mut chosen = None;
     for (k, view) in views.iter().enumerate() {
@@ -1239,7 +1245,9 @@ fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str) -> Option<usize
             }
             ViewState::Normal => {}
         }
-        if resp.clicked() {
+        if resp.secondary_clicked() {
+            *menu = Some((k, resp.rect));
+        } else if resp.clicked() {
             chosen = Some(k);
         }
     }
@@ -1425,18 +1433,22 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     if count < tab.views.len() {
         more_button(ui, strip, Rect::from_min_size(pos2(x, cy - VIEW_HEIGHT / 2.0), vec2(g.more_w, VIEW_HEIGHT)), tab.views.len() - count, pen);
     }
-    if let Some(d) = pen.drag.filter(|d| (first..first + count).contains(&d.from)) {
+    let pointer = ui.input(|i| i.pointer.interact_pos());
+    let released = ui.input(|i| i.pointer.primary_released());
+    if let Some((d, pointer)) = pen.drag.zip(pointer).filter(|(_, p)| p.y > pen.below + 6.0) {
+        pen.actions.push(TabAction::DockView { view: d.from, pointer, released });
+    } else if let Some(d) = pen.drag.filter(|d| (first..first + count).contains(&d.from)) {
         let widths: Vec<f32> = (first..first + count).map(|k| g.view_ws.get(k).copied().unwrap_or(0.0) + VIEW_GAP).collect();
         let left = ui.ctx().pointer_latest_pos().map_or(start, |p| p.x) - d.grab;
         let slot = drop_slot(left, start, &widths, first, d.from);
         let at = slot_left(start, &widths, first, d.from, slot) - 1.0;
         painter.line_segment([pos2(at, cy - 10.0), pos2(at, cy + 10.0)], Stroke::new(2.0, t.accent));
-        if ui.input(|i| i.pointer.primary_released()) {
-            if slot != d.from {
-                pen.actions.push(TabAction::ReorderView { from: d.from, to: slot });
-            }
-            pen.drag = None;
+        if released && slot != d.from {
+            pen.actions.push(TabAction::ReorderView { from: d.from, to: slot });
         }
+    }
+    if released {
+        pen.drag = None;
     }
     plus_button(ui, strip, plus, 14.0, pen);
     if has_layout {
@@ -1632,6 +1644,7 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
         return;
     }
     let h = strip.handles;
+    let mut next_menu = None;
     let resp = crate::Container::new(ui.ctx(), crate::Surface::Popup)
         .area(strip.id.with("view_popup_area"))
         .fixed_pos(at)
@@ -1644,9 +1657,9 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
                 }
                 Popup::Plus => menu_rows(ui, strip.plus_menu, true, true, "", h.menu_row).map(|id| TabAction::PlusMenu { id }),
                 Popup::Layout => layout_grid(ui, strip).map(|id| TabAction::LayoutMenu { id }),
-                Popup::More => view_list(ui, views, &format!("{}:row:", h.view_more)).map(TabAction::SelectView),
+                Popup::More => view_list(ui, views, &format!("{}:row:", h.view_more), &mut next_menu).map(TabAction::SelectView),
                 Popup::Switcher => {
-                    let picked = view_list(ui, views, &format!("{}:row:", h.switcher)).map(TabAction::SelectView);
+                    let picked = view_list(ui, views, &format!("{}:row:", h.switcher), &mut next_menu).map(TabAction::SelectView);
                     crate::menu::Menu::separator(ui);
                     let footer = menu_rows(ui, strip.switcher_menu, true, true, "", h.menu_row).map(|id| TabAction::SwitcherMenu { id });
                     picked.or(footer)
@@ -1658,6 +1671,10 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
         opened != ui.ctx().cumulative_frame_nr() && ui.ctx().input(|i| i.pointer.any_pressed()) && !resp.response.contains_pointer() && !on_opener;
     if resp.inner.is_some() || pressed_outside || ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
         pen.popup = None;
+    }
+    if let Some((view, row)) = next_menu {
+        pen.popup = Some((Popup::View(view), row.right_top(), row, ui.ctx().cumulative_frame_nr()));
+        ui.ctx().request_repaint();
     }
     pen.actions.extend(resp.inner);
 }
