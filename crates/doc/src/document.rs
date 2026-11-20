@@ -5701,6 +5701,10 @@ pub struct UserMaterial {
     /// Candidate engineering data; independent of assigned mass density and optics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub physical_card: Option<crate::physical_material::ValidatedCard>,
+    /// Wi-Fi loss per crossing at 2.4, 5 and 6 GHz (dB), for `inspect.rf_coverage`; `None` uses the
+    /// analysis's guess from the wall's thickness.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::rf::valid_loss")]
+    pub rf_loss_db: Option<crate::rf::RfLoss>,
 }
 
 /// Bound design-owned definitions consistently in commands and normal file loading.

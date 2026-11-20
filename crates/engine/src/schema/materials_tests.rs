@@ -34,10 +34,10 @@ fn with_timber(level: ParamCheck) -> Session {
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<MaterialCreateParams>(), &["appearance", "color", "density_g_cm3", "name", "opacity", "pbr", "physical_card"]);
+    assert_keys(input_schema_for::<MaterialCreateParams>(), &["appearance", "color", "density_g_cm3", "name", "opacity", "pbr", "physical_card", "rf"]);
     assert_keys(
         input_schema_for::<MaterialEditParams>(),
-        &["appearance", "color", "density_g_cm3", "material", "name", "opacity", "pbr", "physical_card"],
+        &["appearance", "color", "density_g_cm3", "material", "name", "opacity", "pbr", "physical_card", "rf"],
     );
     assert_keys(input_schema_for::<MaterialInspectParams>(), &["material"]);
     assert_keys(input_schema_for::<MaterialDeleteParams>(), &["material", "replace"]);
@@ -62,6 +62,10 @@ fn strict_keeps_todays_errors() {
         ("material.create", new(json!({"density_g_cm3": "light"}))),
         ("material.create", new(json!({"density_g_cm3": null}))),
         ("material.create", new(json!({"color": "#zzzzzz"}))),
+        ("material.create", new(json!({"rf": "brick"}))),
+        ("material.create", new(json!({"rf": {"2.4": 3, "5": 4}}))),
+        ("material.create", new(json!({"rf": {"2.4": 3, "5": 4, "6": 101}}))),
+        ("material.create", new(json!({"rf": 12}))),
         ("material.create", new(json!({"color": "#808080", "opacity": 2}))),
         ("material.create", new(json!({"color": "#808080", "opacity": null}))),
         ("material.create", new(json!({"opacity": 0.5}))),

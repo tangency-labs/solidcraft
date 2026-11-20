@@ -44,7 +44,7 @@ fn rich() -> Catalog {
     look.name = "Original opaque study".into();
     look.pbr = Some(PbrParameters::new(1.0, 0.3, 1.5).unwrap());
     doc.appearances.bodies.insert("Body1".into(), look.clone());
-    doc.user_materials.push(UserMaterial { name: "Original candidate".into(), density: 0.8, appearance: Some(look), physical_card: Some(card()) });
+    doc.user_materials.push(UserMaterial { name: "Original candidate".into(), density: 0.8, appearance: Some(look), physical_card: Some(card()), rf_loss_db: None });
     Catalog::from_document(&doc, "user.test", "Original v2 fixture", Default::default()).unwrap()
 }
 
@@ -129,7 +129,7 @@ fn rich_export_bounds_retained_definitions_before_whole_catalog_encoding() {
     let record = ValidatedCard::from_value(&v).unwrap();
     let mut doc = Document::default();
     for i in 0..64 {
-        doc.user_materials.push(UserMaterial { name: format!("Candidate {i}"), density: 0.8, appearance: None, physical_card: Some(record.clone()) });
+        doc.user_materials.push(UserMaterial { name: format!("Candidate {i}"), density: 0.8, appearance: None, physical_card: Some(record.clone()), rf_loss_db: None });
     }
     assert!(Catalog::from_document(&doc, "user.test", "Original large fixture", Default::default()).unwrap_err().to_string().contains("4 MiB"));
 }
