@@ -1446,6 +1446,26 @@ pub enum FlatPerforationPattern {
     Square,
 }
 
+/// The mounting hole of press-in hardware (a nut, stud or standoff) in the flat pattern
+/// (`sheet.hardware`, #17752).
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct FlatHardware {
+    /// The hole feature's id (a pattern's or mirror's, for a copy).
+    pub feature: u64,
+    /// The kind of hardware.
+    pub kind: HardwareKindParam,
+    /// The thread (`M3`).
+    pub thread: String,
+    /// A stud's or standoff's length, in mm; null for a nut.
+    pub length: Option<f64>,
+    /// The part id a component or a drawing can name it by (`nut.m3`).
+    pub part: String,
+    /// The hole's centre in the flat pattern, in mm.
+    pub position: FlatPoint,
+    /// The hole's diameter, in mm.
+    pub hole_diameter: f64,
+}
+
 /// A perforation field: round holes in the flat pattern, not cut into the solid.
 #[derive(Debug, serde::Serialize, JsonSchema)]
 pub struct FlatPerforation {
@@ -1502,6 +1522,10 @@ pub struct FlatPatternResult {
     /// Whether the sheet is unfolded now.
     pub unfolded: bool,
     pub perforations: Vec<FlatPerforation>,
+    /// The mounting holes of press-in hardware the flat has, in the order they were cut. Left out
+    /// when none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hardware: Vec<FlatHardware>,
     /// Each bend zone's bounding box, `[min x, max x, min y, max y]` in mm.
     pub bend_zones: Vec<[f64; 4]>,
     /// Left out when there are none.

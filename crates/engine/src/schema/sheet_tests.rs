@@ -840,4 +840,10 @@ fn hardware_replies_match_the_output_schema() {
     assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
     assert_eq!(r["hardware"]["length"], Value::Null);
     assert!(r["feature"].is_u64() && r["bodies"].is_array(), "{r}");
+    // The flat pattern lists both, and its reply still matches its own schema.
+    let schema = output_schema_for::<FlatPatternResult>();
+    let schema = schema.as_value();
+    let r = quiet(&mut s, "sheet.flat_pattern", json!({}));
+    assert_eq!(r["hardware"].as_array().map(Vec::len), Some(2), "{r}");
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
 }
