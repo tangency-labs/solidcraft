@@ -1956,6 +1956,14 @@ impl SolveApp {
                 if id == "occurrence.ground" {
                     unground_joint_status(self, language, v);
                 }
+                // A template asked for as .json is saved as .scdwg beside it: say so.
+                if id == "drawing.template.save"
+                    && v.get("renamed_from").is_some_and(|from| !from.is_null())
+                    && let Some(path) = v.get("path").and_then(Value::as_str)
+                {
+                    let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    self.set_status(language.format("drawing.template_saved_as_scdwg", &[("name", &name)]), false);
+                }
                 if id == "file.new" {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);

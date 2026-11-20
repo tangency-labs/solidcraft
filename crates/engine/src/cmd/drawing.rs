@@ -64,7 +64,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&TEMPLATE_SAVE_CONTRACT)
         .output(output_schema_for::<TemplateSaveResult>)
         .params(
-            "path: a .json or .scdwg file (a .json template can't hold a logo image: one whose title block shows one is saved as .scdwg) → {path, bytes}. Writes the drawing open as a template: its sheets, borders, title blocks and the text typed over their cells, its projection, units, language and properties but its number, and nothing it draws or documents (its sources, views, dimensions, balloons, revision rows, and the component each sheet documents). drawing.create and drawing.template.apply take the file as their template; a drawing made from it keeps its own copy, so a later save changes no drawing.",
+            "path: a .scdwg file (a .json name gets the .scdwg file beside it, with the same name) → {path: the file written, bytes, renamed_from?: the .json path asked for}. Writes the drawing open as a template: its sheets, borders, title blocks and the text typed over their cells, its projection, units, language and properties but its number, and nothing it draws or documents (its sources, views, dimensions, balloons, revision rows, and the component each sheet documents). drawing.create and drawing.template.apply take the file as their template; a drawing made from it keeps its own copy, so a later save changes no drawing.",
         ),
     CommandSpec::new("drawing.template.list", "List Drawing Templates", crate::checked!("drawing.template.list", template_list))
         .any_part()
@@ -280,7 +280,8 @@ fn template_named(cmd: &str, from: &str) -> Result<Drawing> {
     if !template_path(from) {
         return Err(bad(cmd, format!("no template `{from}`: a built-in's name (drawing.template.list) or a .json or .scdwg template file")));
     }
-    let bytes = solidcraft_io::vfs::read(from, drawing::MAX_DRAWING_BYTES).map_err(|e| bad(cmd, format!("template `{from}`: {e}")))?;
+    // A container holds its images beside the record, up to a design file's size.
+    let bytes = solidcraft_io::vfs::read(from, solidcraft_io::MAX_DESIGN_BYTES).map_err(|e| bad(cmd, format!("template `{from}`: {e}")))?;
     // A container (a template with a logo keeps its image as a part), or JSON text.
     let read = if solidcraft_io::is_design_container(&bytes) {
         solidcraft_io::read_drawing(&bytes)
@@ -303,23 +304,22 @@ fn json_path(path: &str) -> bool {
 
 fn template_save(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.template.save";
-    let path = text(cmd, p, "path")?.filter(|path| template_path(path)).ok_or_else(|| bad(cmd, "`path` must be a .json or .scdwg file"))?;
-    solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
+    let asked = text(cmd, p, "path")?.filter(|path| template_path(path)).ok_or_else(|| bad(cmd, "`path` must be a .json or .scdwg file"))?;
+    // A template is one container file, its images (a logo) parts of it, never text. A .json name,
+    // as templates had, gets the container beside it with the same stem; the reply names it.
+    let path =
+        if json_path(asked) { Path::new(asked).with_extension(solidcraft_io::DRAWING_EXT).to_string_lossy().into_owned() } else { asked.to_string() };
+    solidcraft_io::vfs::check(&path).map_err(|e| EngineError::Other(e.to_string()))?;
     let made = template::from_drawing(s.drawing(cmd)?).map_err(|e| bad(cmd, e.to_string()))?;
-    // A logo is an image file: a container keeps it as a part, never as text, so a .json template
-    // can't hold one.
-    let bytes = if json_path(path) {
-        if made.images.iter().next().is_some() {
-            return Err(bad(cmd, "the template's title block shows a logo, which a .json template can't hold: save it as a .scdwg template"));
-        }
-        made.to_json().map_err(|e| bad(cmd, e.to_string()))?.into_bytes()
-    } else {
-        solidcraft_io::write_drawing_container(&made).map_err(|e| bad(cmd, e.to_string()))?
-    };
+    let bytes = solidcraft_io::write_drawing_container(&made).map_err(|e| bad(cmd, e.to_string()))?;
+    if bytes.len() > solidcraft_io::MAX_DESIGN_BYTES {
+        return Err(bad(cmd, format!("the template is over {} MiB, more than a template file may be", solidcraft_io::MAX_DESIGN_BYTES >> 20)));
+    }
     // Checked again just before writing, as the sheet export does.
-    solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
-    solidcraft_io::write_atomic(Path::new(path), &bytes, false).map_err(|e| EngineError::Other(e.to_string()))?;
-    let reply = TemplateSaveResult { path: path.into(), bytes: bytes.len(), param_warnings: Vec::new() };
+    solidcraft_io::vfs::check(&path).map_err(|e| EngineError::Other(e.to_string()))?;
+    solidcraft_io::write_atomic(Path::new(&path), &bytes, false).map_err(|e| EngineError::Other(e.to_string()))?;
+    let renamed_from = (path != asked).then(|| asked.to_string());
+    let reply = TemplateSaveResult { path, bytes: bytes.len(), renamed_from, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
