@@ -294,8 +294,8 @@ pub struct StepFeature {
     pub import: std::sync::Arc<solidcraft_kernel::StepImport>,
 }
 
-/// Bytes the encoding detector sees at most: the strings that are not UTF-8, which in a STEP or
-/// IGES file are names and descriptions.
+/// Bytes the encoding detector sees at most: the lines with 8-bit bytes in the strings that are
+/// not UTF-8, which in a STEP or IGES file are names and descriptions.
 const ENCODING_SAMPLE_BYTES: usize = 64 << 10;
 
 /// STEP or IGES bytes as text. UTF-8 stays as it is. Some exporters write names in the system's
@@ -319,14 +319,18 @@ fn step_text(bytes: &[u8]) -> String {
     }
     let mut detector = chardetng::EncodingDetector::new();
     let mut fed = 0;
-    for piece in step_pieces(bytes).filter(|piece| std::str::from_utf8(piece).is_err()) {
+    let legacy_lines = step_pieces(bytes)
+        .filter(|piece| std::str::from_utf8(piece).is_err())
+        .flat_map(|piece| piece.split(|b| *b == b'\n'))
+        .filter(|line| !line.is_ascii());
+    for line in legacy_lines {
         if fed >= ENCODING_SAMPLE_BYTES {
             break;
         }
-        let piece = piece.get(..piece.len().min(ENCODING_SAMPLE_BYTES - fed)).unwrap_or_default();
-        detector.feed(piece, false);
+        let line = line.get(..line.len().min(ENCODING_SAMPLE_BYTES - fed)).unwrap_or_default();
+        detector.feed(line, false);
         detector.feed(b"\n", false);
-        fed += piece.len() + 1;
+        fed += line.len() + 1;
     }
     detector.feed(&[], true);
     let encoding = detector.guess(None, false);
