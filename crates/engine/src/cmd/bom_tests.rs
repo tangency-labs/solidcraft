@@ -189,9 +189,9 @@ fn csv_quotes_every_field_and_json_writes_the_rows() {
     let text = std::fs::read_to_string(&csv).unwrap();
     assert_eq!(
         text,
-        "\"item\",\"part_number\",\"description\",\"revision\",\"count\",\"definition\",\"material\",\"quantity\"\n\
-         \"1\",\"PL-100\",\"Plate, 3 mm\",\"B\",\"3\",\"Plate\",\"Default\",\"\"\n\
-         \"2\",\"PN-040\",\"Pin \"\"short\"\", 4 mm\",\"\",\"2\",\"Pin\",\"Default\",\"\"\n"
+        "\"item\",\"part_number\",\"description\",\"revision\",\"count\",\"definition\",\"material\",\"quantity\",\"finish\"\n\
+         \"1\",\"PL-100\",\"Plate, 3 mm\",\"B\",\"3\",\"Plate\",\"Default\",\"\",\"\"\n\
+         \"2\",\"PN-040\",\"Pin \"\"short\"\", 4 mm\",\"\",\"2\",\"Pin\",\"Default\",\"\",\"zinc\"\n"
     );
     let json_path = dir.join("bom.json");
     run(&mut s, "assembly.bom", json!({"path": json_path, "levels": "top"}));
@@ -200,6 +200,58 @@ fn csv_quotes_every_field_and_json_writes_the_rows() {
     assert_eq!(back["rows"][1]["definition"], "Hinge");
     assert!(s.execute("assembly.bom", &json!({"path": dir.join("bom.txt")})).is_err(), "unknown extension");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A part's finish is a part property beside its material: set by `component.metadata.set` (a
+/// parameter or in `values`), read by `component.metadata`, listed by `assembly.bom` (rows, JSON and
+/// CSV, where a part with only a free `finish` property shows that), one undo step, no geometry,
+/// saved with the part.
+#[test]
+fn a_finish_is_a_part_property_every_list_and_file_shows() {
+    let mut s = assembly();
+    let undo = s.undo.len();
+    s.evaluations = 0;
+    let r = run(&mut s, "component.metadata.set", json!({"component": "Plate", "finish": "Powder coat, RAL 9005, matt"}));
+    assert_eq!(r["changed"], json!(["finish"]));
+    assert_eq!((s.undo.len(), s.evaluations), (undo + 1, 0), "one undo step, no geometry");
+    let r = run(&mut s, "component.metadata.set", json!({"component": "Plate", "values": {"finish": "Passiv\u{e9}, #4 brushed"}}));
+    assert_eq!(r["changed"], json!(["finish"]));
+    run(&mut s, "component.metadata.set", json!({"component": "Plate", "finish": "Powder coat, RAL 9005, matt"}));
+    assert_eq!(run(&mut s, "component.metadata", json!({"component": "Plate"}))["finish"], "Powder coat, RAL 9005, matt");
+    assert_eq!(run(&mut s, "component.metadata", json!({"component": "Pin"}))["finish"], Value::Null);
+    let finishes = |r: &Value| r["rows"].as_array().unwrap().iter().map(|r| r["finish"].clone()).collect::<Vec<_>>();
+    let flat = run(&mut s, "assembly.bom", json!({}));
+    assert_eq!(finishes(&flat), [json!("Powder coat, RAL 9005, matt"), json!("zinc")], "the Pin has the free property only: {flat}");
+    let dir = scratch("finish");
+    let csv = dir.join("bom.csv");
+    run(&mut s, "assembly.bom", json!({"path": csv}));
+    let text = std::fs::read_to_string(&csv).unwrap();
+    let column: Vec<&str> = text.lines().map(|l| l.rsplit("\",\"").next().unwrap_or("")).collect();
+    assert_eq!(column, ["finish\"", "Powder coat, RAL 9005, matt\"", "zinc\""], "the last column: {text}");
+    let path = dir.join("part.solidcraft");
+    run(&mut s, "file.save_as", json!({"path": path, "format": "container"}));
+    let mut back = Session::default();
+    run(&mut back, "doc.open", json!({"path": path}));
+    assert_eq!(finishes(&run(&mut back, "assembly.bom", json!({}))), finishes(&flat));
+    run(&mut s, "component.metadata.set", json!({"component": "Plate", "finish": null}));
+    assert_eq!(finishes(&run(&mut s, "assembly.bom", json!({})))[0], json!(""), "cleared");
+    for hostile in [json!("a\u{7}b"), json!("x".repeat(solidcraft_doc::metadata::MAX_TEXT_BYTES + 1)), json!(5), json!({"a": 1}), json!(["x"])] {
+        let before = s.doc.components.clone();
+        assert!(s.execute("component.metadata.set", &json!({"component": "Plate", "finish": hostile})).is_err(), "{hostile}");
+        assert_eq!(s.doc.components, before);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A design of one part lists itself (#19883), over its own material and finish properties.
+#[test]
+fn a_single_part_design_lists_its_own_material_and_finish() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "document.metadata.set", json!({"values": {"material": "CRS, 16 ga", "finish": "Zinc plate, clear"}}));
+    let r = run(&mut s, "assembly.bom", json!({}));
+    let row = &r["rows"][0];
+    assert_eq!((&row["material"], &row["finish"], &row["static"]), (&json!("CRS, 16 ga"), &json!("Zinc plate, clear"), &json!(["material"])), "{r}");
 }
 
 /// A field that a spreadsheet would run as a formula gets a `'` first, so it opens as text

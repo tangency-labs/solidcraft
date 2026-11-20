@@ -405,6 +405,40 @@ mod tests {
         assert_eq!(m.0.keys().collect::<Vec<_>>(), ["description"]);
     }
 
+    /// A material and a finish are free text on a part and on the design itself (a single-part
+    /// design has no component to hold them): the same size and character rules as every text key,
+    /// any script, and empty text or null removes them.
+    #[test]
+    fn material_and_finish_are_free_text_on_a_design_and_on_a_part() {
+        let unicode = "Passiv\u{e9} \u{2014} #4 brushed \u{7814}\u{78e8} \u{2713}";
+        for owner in [Design, Component] {
+            let mut m = Metadata::default();
+            for (key, text) in [("material", "5052-H32, 0.090 in"), ("finish", "Powder coat, RAL 9005, matt"), ("finish", unicode)] {
+                assert!(m.set(owner, key, json!(text)).unwrap(), "{owner:?} {key}");
+                assert_eq!(m.text(key), Some(text));
+            }
+            assert!(!m.set(owner, "finish", json!(unicode)).unwrap(), "the same value is no change");
+            for bad in [json!(7), json!(true), json!(["a"]), json!({"a": 1}), json!("a\u{7}b"), json!("x".repeat(MAX_TEXT_BYTES + 1))] {
+                for key in ["material", "finish"] {
+                    assert!(m.set(owner, key, bad.clone()).is_err(), "{owner:?} {key} {bad}");
+                }
+            }
+            assert_eq!(m.text("finish"), Some(unicode), "a refused value leaves the old one");
+            assert!(m.set(owner, "finish", json!("two\nlines")).unwrap());
+            assert!(m.set(owner, "finish", json!("f".repeat(MAX_TEXT_BYTES))).unwrap(), "the longest text");
+            assert!(m.set(owner, "finish", json!("")).unwrap());
+            assert!(m.set(owner, "material", Value::Null).unwrap());
+            assert!(m.is_empty(), "{owner:?}: both removed");
+        }
+        let names = |owner| keys(owner).map(|k| k.name).collect::<Vec<_>>();
+        for owner in [Design, Component] {
+            assert!(names(owner).contains(&"material") && names(owner).contains(&"finish"), "{owner:?} lists them");
+        }
+        let kept: Metadata = serde_json::from_value(json!({"finish": 5, "material": ["x"]})).unwrap();
+        assert_eq!((kept.text("finish"), kept.text("material")), (None, None), "not text: kept, read as absent");
+        assert_eq!(kept.others().count(), 0, "they are SolidCraft's keys, not another tool's data");
+    }
+
     #[test]
     fn a_bom_type_takes_one_of_its_words_and_reads_as_normal_otherwise() {
         let mut m = Metadata::default();

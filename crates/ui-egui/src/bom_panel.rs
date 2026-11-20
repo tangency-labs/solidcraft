@@ -489,13 +489,63 @@ mod tests {
         h.frames(2);
         assert!(h.widget("Revision").is_some());
         let d = h.app.bom.as_mut().unwrap();
-        assert_eq!(d.fields, ["PL-100", "", "A"], "the row's fields, in the bill of materials' order");
+        assert_eq!(d.fields, ["PL-100", "", "A", "", ""], "the row's fields, in the bill of materials' order, then material and finish");
         d.fields[1] = "Plate, 3 mm".into();
         d.fields[2] = "B".into();
         h.frames(2);
         h.step(&json!({"widget": "Apply"})).unwrap();
         let m = h.app.session.execute("component.metadata", &json!({"component": "Plate"})).unwrap();
         assert_eq!((&m["part_number"], &m["description"], &m["revision"]), (&json!("PL-100"), &json!("Plate, 3 mm"), &json!("B")), "{m}");
+    }
+
+    /// A picked row edits its static material and its finish beside the bill of materials' keys: a
+    /// material the row only works out from its bodies is not offered as typed text, so Apply never
+    /// turns it into a static one.
+    #[test]
+    fn a_picked_row_edits_its_material_and_finish() {
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({"name": "Plate"})).unwrap();
+        h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 3})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("occurrence.copy", json!({"component": "Plate", "translate": [50, 0, 0]})).unwrap();
+        open_report(&mut h);
+        h.frames(2);
+        h.step(&json!({"widget": "1"})).unwrap();
+        h.frames(2);
+        assert!(h.widget("Finish").is_some() && h.widget("Material").is_some(), "both are edit fields");
+        let d = h.app.bom.as_mut().unwrap();
+        assert_eq!(d.fields, ["", "", "", "", ""], "the worked-out material is not a typed one");
+        d.fields[3] = "304, 2 mm".into();
+        d.fields[4] = "Powder coat, RAL 9005, matt".into();
+        h.frames(2);
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"widget": "Apply"})).unwrap();
+        let m = h.app.session.execute("component.metadata", &json!({"component": "Plate"})).unwrap();
+        assert_eq!((&m["material"], &m["finish"]), (&json!("304, 2 mm"), &json!("Powder coat, RAL 9005, matt")), "{m}");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+        h.frames(2);
+        assert!(h.widget("Powder coat, RAL 9005, matt").is_some(), "the list follows the change");
+    }
+
+    /// A design of one part is its own row, and the design holds what a part would: Apply on it sets
+    /// the design's properties, not a component's.
+    #[test]
+    fn the_row_of_a_single_part_design_edits_the_design() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 3})).unwrap();
+        open_report(&mut h);
+        h.frames(2);
+        h.step(&json!({"widget": "1"})).unwrap();
+        h.frames(2);
+        let d = h.app.bom.as_mut().unwrap();
+        d.fields[0] = "SP-1".into();
+        d.fields[3] = "CRS, 16 ga".into();
+        d.fields[4] = "Zinc plate, clear".into();
+        h.frames(2);
+        h.step(&json!({"widget": "Apply"})).unwrap();
+        assert_eq!(h.app.bom.as_ref().unwrap().error, None);
+        let m = &h.app.session.doc.metadata;
+        assert_eq!((m.part_number(), m.text("material"), m.text("finish")), (Some("SP-1"), Some("CRS, 16 ga"), Some("Zinc plate, clear")));
     }
 
     /// `column_widths` for `rows` in a grid `width` wide, and the measured width of each text.

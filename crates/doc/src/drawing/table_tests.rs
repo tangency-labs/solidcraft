@@ -60,6 +60,7 @@ fn bom_row(id: u64, item: u32, count: u64) -> bom::Row {
         part_number: String::new(),
         description: String::new(),
         revision: String::new(),
+        finish: String::new(),
         properties: Default::default(),
         materials: Vec::new(),
         statics: Vec::new(),
@@ -90,6 +91,7 @@ fn a_rows_values_read_as_a_list_shows_them() {
     row.materials = vec!["Steel".into(), "Zinc".into()];
     row.bom_type = BomType::Purchased;
     row.mass = Mass::Grams(1250.0);
+    row.finish = "Powder coat, RAL 9005".into();
     row.properties.insert("finish".into(), "Black".into());
     row.properties.insert("item".into(), "not the item".into());
     let list = bom_of(vec![row]);
@@ -98,9 +100,19 @@ fn a_rows_values_read_as_a_list_shows_them() {
     let read = |key: &str| fields.get(key).map(String::as_str);
     assert_eq!((read("item"), read("quantity"), read("count"), read("name")), (Some("3"), Some("4"), Some("4"), Some("Bolt; Bolt B")));
     assert_eq!((read("part_number"), read("description"), read("revision")), (Some("B-200"), Some("M8"), Some("C")));
-    assert_eq!((read("material"), read("mass"), read("finish")), (Some("Steel; Zinc"), Some("1.25"), Some("Black")));
+    assert_eq!(
+        (read("material"), read("mass"), read("finish")),
+        (Some("Steel; Zinc"), Some("1.25"), Some("Powder coat, RAL 9005")),
+        "the finish property wins over a free one"
+    );
     assert!(rows[0].purchased);
     assert_eq!(rows[0].kind, table::RowKind::Part);
+    let mut free = bom_row(8, 4, 1);
+    free.properties.insert("finish".into(), "Black".into());
+    let freed = parts_list(MassFormat::default()).rows(&bom_of(vec![free]), "mm");
+    assert_eq!(freed[0].fields.get("finish").map(String::as_str), Some("Black"), "a part with only the free property shows it, as before");
+    let bare = parts_list(MassFormat::default()).rows(&bom_of(vec![bom_row(9, 5, 1)]), "mm");
+    assert_eq!(bare[0].fields.get("finish"), None, "no finish: the cell shows the missing mark");
 
     for (mass, format, shown) in [
         (Mass::Grams(1250.0), MassFormat { unit: MassUnit::G, decimals: 0 }, Some("1250")),
@@ -244,7 +256,7 @@ fn a_list_asks_for_its_view() {
     );
     assert!(!request.mass);
     let names = |kind: &Kind| kind.default_table().columns.into_iter().map(|c| c.name).collect::<Vec<_>>();
-    assert_eq!(names(&Kind::PartsList(list)), ["item", "quantity", "name", "description", "material", "mass", "ballooned"]);
+    assert_eq!(names(&Kind::PartsList(list)), ["item", "quantity", "name", "description", "material", "finish", "mass", "ballooned"]);
     assert_eq!(names(&Kind::Revision), ["revision", "description", "designer", "checker", "date"]);
     // How many balloons point at each row, for the editor alone: the only column not printed.
     let unprinted = |kind: &Kind| kind.default_table().columns.iter().filter(|c| !c.printed).map(|c| c.heading.clone()).collect::<Vec<_>>();

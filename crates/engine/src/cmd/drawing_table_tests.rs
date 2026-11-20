@@ -165,6 +165,35 @@ fn a_design_of_one_part_lists_the_part() {
     assert!((bounds.size().y - 2.0 * 7.0).abs() < 1e-9, "a heading and one row: {bounds:?}");
 }
 
+/// A parts list has a FINISH column, which shows each part's finish property, or its free `finish`
+/// property when it has none, and nothing for a part with neither.
+#[test]
+fn a_parts_list_shows_each_parts_finish() {
+    let mut s = assembly();
+    // The model changes only with the drawing closed.
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    s.execute("drawing.close", &json!({})).unwrap();
+    s.execute("component.metadata.set", &json!({"component": "Plate", "finish": "Powder coat, RAL 9005, matt"})).unwrap();
+    s.execute("component.metadata.set", &json!({"component": "Bolt", "properties": {"finish": "Zinc plate"}})).unwrap();
+    s.execute("drawing.open", &json!({"drawing": drawing})).unwrap();
+    let sheet = sheet_of(&s);
+    let list = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "parts_list"})));
+    let d = s.drawing("test").unwrap().clone();
+    let table = d.tables.by_id(list).unwrap();
+    assert!(table.table.columns.iter().any(|c| c.name == "finish" && c.heading == "FINISH" && c.printed), "{:?}", table.table.columns);
+    let lettering = PaperFonts::new(&d.font, &d.language, true);
+    let placed = place(&s, &d, table, drawing_space(&d.sheets[0]), &lettering).ok().unwrap();
+    let words: Vec<_> = std::iter::once(&placed.layout.heading)
+        .chain(&placed.layout.rows)
+        .flat_map(|row| &row.cells)
+        .flat_map(|cell| &cell.lines)
+        .map(|line| line.text.as_str())
+        .collect();
+    for word in ["FINISH", "Powder coat, RAL 9005, matt", "Zinc plate"] {
+        assert!(words.contains(&word), "{word} in {words:?}");
+    }
+}
+
 /// An offset moves an anchored table; a heading at the bottom keeps the same corner of the outline;
 /// a free place names the outline's top left. A change of paper takes an anchored table along and
 /// leaves a free one where it was.

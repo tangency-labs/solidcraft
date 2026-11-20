@@ -828,6 +828,27 @@ mod tests {
         assert!(h.app.design_properties.is_some());
     }
 
+    /// The window lists a material and a finish, so a single-part design can carry them; OK sets them
+    /// with the other properties in one `document.metadata.set`.
+    #[test]
+    fn the_window_edits_the_designs_material_and_finish() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        crate::design_properties::open(&mut h.app);
+        h.frames(2);
+        assert!(h.widget("Material").is_some() && h.widget("Finish").is_some());
+        let d = h.app.design_properties.as_mut().unwrap();
+        use solidcraft_engine::doc::metadata::{Owner, keys};
+        let at = |key: &str| keys(Owner::Design).position(|k| k.name == key).unwrap();
+        d.fields[at("material")] = "5052-H32, 0.090 in".into();
+        d.fields[at("finish")] = "Powder coat, RAL 9005, matt".into();
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"widget": "OK"})).unwrap();
+        let m = &h.app.session.doc.metadata;
+        assert_eq!((m.text("material"), m.text("finish")), (Some("5052-H32, 0.090 in"), Some("Powder coat, RAL 9005, matt")));
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    }
+
     /// #12218: an inertia cell reads as its entry and value; a row whose label does not name each
     /// cell, as the label and the cell's place.
     #[test]
