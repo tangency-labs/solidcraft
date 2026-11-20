@@ -414,6 +414,8 @@ fn saved_stepped_tab_cut_piece_projection_is_named_lost_without_expanding_materi
             keep_tools: false,
             offset: None,
             offset_edges: crate::OffsetEdges::Sharp,
+            offset_faces: Vec::new(),
+            offset_radius: None,
         },
         None,
     )
@@ -436,6 +438,8 @@ fn saved_stepped_tab_cut_piece_projection_is_named_lost_without_expanding_materi
             keep_tools: false,
             offset: None,
             offset_edges: crate::OffsetEdges::Sharp,
+            offset_faces: Vec::new(),
+            offset_radius: None,
         },
         Some("Pocket"),
     )
