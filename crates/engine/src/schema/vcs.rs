@@ -6,14 +6,7 @@ use serde::{Deserialize, Serialize};
 /// Initialize a git repository in the design's folder.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
-pub struct VcsInitParams {
-    /// User name for git commits (falls back to "SolidCraft VCS").
-    #[serde(default)]
-    pub author_name: Option<String>,
-    /// Email address for git commits (falls back to "vcs@solidcraft.local").
-    #[serde(default)]
-    pub author_email: Option<String>,
-}
+pub struct VcsInitParams {}
 
 /// What `vcs.init` returns.
 #[derive(Debug, Serialize, JsonSchema)]
@@ -30,10 +23,10 @@ pub struct VcsInitResult {
 pub struct VcsCommitParams {
     /// Commit message describing this design state.
     pub message: String,
-    /// User name for this commit (overrides the repository default).
+    /// User name for this commit (falls back to "SolidCraft VCS").
     #[serde(default)]
     pub author_name: Option<String>,
-    /// Email address for this commit (overrides the repository default).
+    /// Email address for this commit (falls back to "vcs@solidcraft.local").
     #[serde(default)]
     pub author_email: Option<String>,
 }
@@ -71,7 +64,7 @@ pub struct VcsStatusResult {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct VcsLogParams {
-    /// Maximum commits to return (default 20, capped at 1000).
+    /// Maximum commits to return (default 20, clamped to 1..=10000).
     #[serde(default)]
     pub limit: Option<u64>,
 }

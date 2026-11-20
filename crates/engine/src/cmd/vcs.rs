@@ -21,7 +21,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .any_part()
         .contract(&INIT)
         .output(output_schema_for::<VcsInitResult>)
-        .params("author_name?: str; author_email?: str → repo: path, created: bool"),
+        .params("→ repo: path, created: bool"),
     CommandSpec::new("vcs.commit", "Commit Design", crate::checked!("vcs.commit", vcs_commit))
         .icon("git_commit")
         .noundo()
