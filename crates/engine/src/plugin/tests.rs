@@ -22,7 +22,7 @@ fn named_tool_refusals_keep_plugin_file_and_budget_details() {
                 json!({"plugin":"sample","grant":"memory_mib","approve":tools::APPROVE}),
             ),
             (
-                HostError::OverCeiling { limit: "fuel".into(), requested: 10_000_000_000_000, allowed: 100_000_000_000 },
+                HostError::OverCeiling { limit: "fuel".into(), requested: MAX_APPROVED_FUEL, allowed: 100_000_000_000 },
                 json!({"plugin":"sample","grant":"fuel","approve":tools::APPROVE}),
             ),
         ] {
@@ -32,15 +32,20 @@ fn named_tool_refusals_keep_plugin_file_and_budget_details() {
             assert!(explained.starts_with(&original), "{explained}");
             assert_eq!(structured_tool_error(&explained), Some(structured), "{explained}");
         }
-        let failure = PluginFailure {
-            plugin: "Sample".into(),
-            file: file.map(String::from),
-            error: HostError::Exhausted { limit: "fuel".into(), allowed: 100000 },
-        };
-        let original = failure.text();
-        let unchanged = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure)));
-        assert!(matches!(unchanged, EngineError::PluginFailed(_)));
-        assert_eq!(unchanged.to_string(), original);
+        for error in [
+            HostError::Exhausted { limit: "fuel".into(), allowed: 100000 },
+            HostError::OverCeiling { limit: "fuel".into(), requested: MAX_APPROVED_FUEL + 1, allowed: 100_000_000_000 },
+        ] {
+            let unchanged = explain_named(&session, &manifest, "make", error.clone().into());
+            assert!(matches!(&unchanged, EngineError::Plugin(actual) if actual == &error));
+            assert!(structured_tool_error(&unchanged.to_string()).is_none());
+            let failure = PluginFailure { plugin: "Sample".into(), file: file.map(String::from), error };
+            let original = failure.text();
+            let unchanged = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure)));
+            assert!(matches!(unchanged, EngineError::PluginFailed(_)));
+            assert_eq!(unchanged.to_string(), original);
+            assert!(structured_tool_error(&unchanged.to_string()).is_none());
+        }
     }
     assert!(matches!(explain_named(&session, &manifest, "make", HostError::Cancelled.into()), EngineError::Plugin(HostError::Cancelled)));
 }
