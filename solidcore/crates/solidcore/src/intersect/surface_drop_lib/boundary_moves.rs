@@ -87,6 +87,7 @@
 use crate::blend::fillet_section::interval::{round_down, round_up, Ivl};
 use crate::blend::fillet_section::series::V3;
 use crate::blend::fillet_section::station::Nurbs;
+use crate::error::intersect::IntersectFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector3d::Point3;
@@ -388,19 +389,21 @@ pub fn fix_boundary_curves_bounded(
             "a breakpoint count other than the polygon's knot points",
         ));
     }
-    let refuse = |reason: &'static str| {
+    let refuse = |cause: IntersectFailure| {
         bound.refused.set(true);
-        SolidError::intersect_failed(OP, reason)
+        SolidError::intersect(OP, cause)
     };
     let (dlo, dhi) = (uv_domain.min(), uv_domain.max());
     if !(dlo.x <= dhi.x && dlo.y <= dhi.y) {
-        return Err(refuse("a domain that is empty or not a number"));
+        // the caller's domain (rule 9)
+        return Err(refuse(IntersectFailure::EmptyDomain));
     }
     if ctrl_poly
         .iter()
         .any(|p| !(p.x.is_finite() && p.y.is_finite()))
     {
-        return Err(refuse("a control point that is not a finite number"));
+        // the caller's polygon (rule 9)
+        return Err(refuse(IntersectFailure::NotFinite));
     }
     let bad = || SolidError::invalid_input(OP, "control point index");
     let (lo, hi) = (uv_domain.min(), uv_domain.max());
@@ -495,9 +498,10 @@ pub fn fix_boundary_curves_bounded(
 
     // 6. the total move of every span, against the traced polygon
     let Some(spent) = polygon_bound(k, bound, &traced, ctrl_poly, uv_domain, bound.budget)? else {
-        return Err(refuse(
-            "a span's move is not proved within the tolerance left",
-        ));
+        // a measured refusal: the move does not fit what is left of the tolerance
+        return Err(refuse(IntersectFailure::MoveNotProved {
+            budget: bound.budget,
+        }));
     };
     bound.spent.set(bound.spent.get().max(spent));
     Ok(changed)

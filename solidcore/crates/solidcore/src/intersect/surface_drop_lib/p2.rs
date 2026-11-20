@@ -66,7 +66,8 @@
 //!   messages (`MSG` at 2000 control points).
 
 use crate::curve::curve::Curve;
-use crate::error::{ignored, Result, SolidError, SM_ERR};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::{
     directional_derivs, is_dog_leg, line_point_distance, vec_lin_comb_two_vectors,
@@ -230,9 +231,14 @@ impl DropOffset {
             drop_vectors_at(k, off, uv, side(from_left_u), side(from_left_v), &[vector])?
         };
         dropped.first().copied().ok_or_else(|| {
-            SolidError::intersect_failed(
+            SolidError::intersect(
                 OP_SET,
-                "dropping the vector onto the offset surface gave no uv vector",
+                IntersectFailure::Defect {
+                    why: "the offset surface's first-order evaluation on the knot line's sides \
+                          returned fewer than three rows, though it returns the point and both \
+                          first derivatives (the vector drop returns one vector per vector \
+                          given)",
+                },
             )
         })
     }
@@ -261,9 +267,13 @@ impl DropOffset {
         };
         match d.as_slice() {
             [p, d1, ..] => Ok([*p, *d1]),
-            _ => Err(SolidError::intersect_failed(
+            _ => Err(SolidError::intersect(
                 OP_SET,
-                "the offset surface's directional derivative was not evaluated",
+                IntersectFailure::Defect {
+                    why: "the offset surface's directional evaluation to first order returned \
+                          fewer than two vectors, though it returns the point and the \
+                          derivative asked for",
+                },
             )),
         }
     }
@@ -283,10 +293,15 @@ fn on_sides(
     non_zero_tangents: bool,
 ) -> Result<Vec<Vec3>> {
     let SurfaceKind::OffsetSurface(offset) = off.kind() else {
-        return Err(SolidError::intersect_missing(
+        return Err(Failure::new(
             OP_SET,
-            "the drop's offset surface",
-        ));
+            IntersectFailure::Defect {
+                why: "the drop's stand-in surface is not an offset surface, though the drop \
+                      builds it as one",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error());
     };
     let flags = EvaluateFlags {
         u_side: side(from_left_u),
@@ -674,9 +689,9 @@ impl DropPt {
         if crv_speed < EFF_ZERO && self.degen_curve == Some(false) {
             // inform the public (when the drop was good) either way it is SM_ERR
             self.good_drop = Some(false);
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP_SET,
-                "the curve's first derivative is zero and the curve is not degenerate",
+                IntersectFailure::DegenerateTangent,
             ));
         }
 
@@ -685,11 +700,12 @@ impl DropPt {
             // can't drop Crv1stDeriv vectors parallel to m_SrfNormal (degenerate case)
             let srf_norm_crv_tan_ang_rad =
                 self.srf_normal.angle_between(self.crv_pd[1]).unwrap_or(0.0);
-            if rad_to_deg(srf_norm_crv_tan_ang_rad) < 3.0 {
+            let degrees = rad_to_deg(srf_norm_crv_tan_ang_rad);
+            if degrees < 3.0 {
                 self.good_drop = Some(false);
-                return Err(SolidError::intersect_failed(
+                return Err(SolidError::intersect(
                     OP_SET,
-                    "the curve's tangent is within 3 degrees of the surface normal",
+                    IntersectFailure::TangentAlongNormal { degrees },
                 ));
             }
         }
@@ -887,12 +903,9 @@ impl DropPt {
         let (found_answer, local_uv) =
             local_point_solve(k, surface, uv_domain, end.crv_pd[0], end.uv_pd[0])?;
 
-        // MINIMIZE should always find some solution.
+        // MINIMIZE should always find some solution (none found: rule 7).
         if !found_answer {
-            return Err(SolidError::intersect_failed(
-                OP_NEXT,
-                "the span end could not be dropped onto the surface",
-            ));
+            return Err(SolidError::intersect(OP_NEXT, IntersectFailure::NoFoot));
         }
 
         // load SpanEnd[UV] from DropPoint(SpandEnd[CrvPt]) solution
@@ -1292,9 +1305,11 @@ pub fn add_to_curve_bounded(
 
     // return error for huge drop point counts
     if ctrl_poly.len() >= MAX_CTRL_POINTS {
-        return Err(SolidError::intersect_failed(
+        return Err(SolidError::intersect(
             OP_ADD,
-            "the dropped curve has too many control points",
+            IntersectFailure::TooManyControlPoints {
+                limit: MAX_CTRL_POINTS,
+            },
         ));
     }
 
