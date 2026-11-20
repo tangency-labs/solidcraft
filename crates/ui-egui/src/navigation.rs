@@ -765,6 +765,23 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         )
     });
     let hover = hover.filter(|p| !crate::frame::dock_dragging(ui.ctx()) && !crate::shell::covered(app, *p));
+    // A drag that starts this frame starts where its button went down: the pointer's motion before
+    // it (frames skipped over a still view, #17104, bring it all in one) is not the drag's (#19477).
+    // Only a start: a button pressed while another is already held keeps the running drag's motion.
+    let delta = ui
+        .input(|i| {
+            let buttons = [
+                egui::PointerButton::Primary,
+                egui::PointerButton::Secondary,
+                egui::PointerButton::Middle,
+                egui::PointerButton::Extra1,
+                egui::PointerButton::Extra2,
+            ];
+            let starts = i.pointer.any_pressed() && buttons.iter().all(|b| !i.pointer.button_down(*b) || i.pointer.button_pressed(*b));
+            starts.then(|| i.pointer.press_origin().zip(i.pointer.latest_pos()).map(|(from, to)| to - from)).flatten()
+        })
+        .filter(|d| d.is_finite())
+        .unwrap_or(delta);
     let delta = unwrapped_delta(app, delta);
     // The right button belongs to the marking menu while it is open.
     let secondary_down = secondary_down && app.viewport.context_menu.is_none();
@@ -4860,5 +4877,70 @@ mod view_key_tests {
         crate::dialogs::look_at_sketch(&mut h.app);
         h.frames(2);
         assert!((back_z(&h) - 1.0).abs() < 1e-3, "{:?}", h.app.cam.back());
+    }
+
+    /// Pointer moves over a still view draw no frame (#17104), so the frame a button goes down in
+    /// brings all the motion since the last one. Pressing never moves the view, in any preset,
+    /// with any keys, for a pan, an orbit or a zoom: held still the view stays where it was, and a
+    /// small move after the press moves it exactly as it does when every move drew a frame.
+    #[test]
+    fn a_press_after_unseen_pointer_motion_never_moves_the_view() {
+        use super::*;
+        use egui::{Event, Modifiers, PointerButton, vec2};
+        let keys = [Modifiers::NONE, Modifiers::SHIFT, Modifiers::CTRL, Modifiers::ALT];
+        let close = |a: &Camera, b: &Camera| {
+            a.target.dist(b.target) < 1e-9
+                && (a.yaw - b.yaw).abs() < 1e-9
+                && (a.pitch - b.pitch).abs() < 1e-9
+                && (a.roll - b.roll).abs() < 1e-9
+                && (a.distance - b.distance).abs() < 1e-9
+        };
+        for preset in crate::prefs::NAV_PRESETS {
+            for button in [PointerButton::Middle, PointerButton::Secondary] {
+                for modifiers in keys {
+                    let run = |unseen: bool| {
+                        let mut h = crate::scenario::Harness::new();
+                        h.app.home.open = false;
+                        crate::prefs::choose_nav_preset(&mut h.app.preferences, preset);
+                        h.call("ui.view", serde_json::json!({"view":"iso"}));
+                        h.frames(2);
+                        let rect = h.app.viewport.rect.unwrap();
+                        let from = rect.center() - vec2(200.0, 100.0);
+                        let at = rect.center() + vec2(150.0, 80.0);
+                        h.frame_with(vec![Event::PointerMoved(from)]);
+                        if unseen {
+                            // The pointer travels over empty space with no frame drawn.
+                            for k in 1..=10 {
+                                let p = from + (at - from) * (k as f32 / 10.0);
+                                crate::viewport::follow_pointer_without_frame(&mut h.app, &h.ctx, p);
+                            }
+                        } else {
+                            for k in 1..=10 {
+                                h.frame_with(vec![Event::PointerMoved(from + (at - from) * (k as f32 / 10.0))]);
+                            }
+                        }
+                        let start = h.app.cam;
+                        let event = |pressed, pos| Event::PointerButton { pos, button, pressed, modifiers };
+                        let mut press = vec![Event::PointerMoved(at)];
+                        press.push(event(true, at));
+                        h.frame_with_modifiers(press, modifiers);
+                        for _ in 0..3 {
+                            h.frame_with_modifiers(vec![], modifiers);
+                        }
+                        let held = h.app.cam;
+                        h.frame_with_modifiers(vec![Event::PointerMoved(at + vec2(4.0, 3.0))], modifiers);
+                        let moved = h.app.cam;
+                        h.frame_with_modifiers(vec![event(false, at + vec2(4.0, 3.0))], modifiers);
+                        (start, held, moved)
+                    };
+                    let (start, held, moved) = run(true);
+                    let what = format!("{} {button:?} {modifiers:?}", preset.id);
+                    assert!(close(&start, &held), "{what}: the press moved the view from {start:?} to {held:?}");
+                    let (seen_start, _, seen_moved) = run(false);
+                    assert!(close(&start, &seen_start), "{what}: the two runs start apart");
+                    assert!(close(&moved, &seen_moved), "{what}: a 4 by 3 move after the press went to {moved:?}, not {seen_moved:?}");
+                }
+            }
+        }
     }
 }

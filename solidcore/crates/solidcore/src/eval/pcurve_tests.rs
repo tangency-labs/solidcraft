@@ -22,6 +22,128 @@ fn about_z(origin: [f64; 3], down: bool) -> Frame {
         if down { [0., -1., 0.] } else { [0., 1., 0.] },
     )
 }
+
+/// A face's inward ray is normal × tangent, reversed with the loop. Every
+/// permutation must give the same cyclic order, including an oblique edge.
+#[test]
+fn radial_order_uses_exact_face_directions_in_every_input_order() {
+    for (axis, x) in [
+        (Vec3::new(0., 0., 1.), Vec3::new(1., 0., 0.)),
+        (Vec3::new(1., 0., 0.), Vec3::new(0., 1., 0.)),
+        (Vec3::new(0., 1., 0.), Vec3::new(0., 0., 1.)),
+        (Vec3::new(1., 2., 3.), Vec3::new(2., -1., 0.)),
+    ] {
+        let point = |v: Vec3| [v.x, v.y, v.z];
+        let y = axis.cross(x);
+        let surfaces: Vec<_> = [x, y, -x, -y]
+            .into_iter()
+            .enumerate()
+            .map(|(i, ray)| Surface::Plane {
+                origin: [0.; 3],
+                u_axis: point(axis),
+                v_axis: point(if i & 1 == 0 { ray } else { -ray }),
+            })
+            .collect();
+        let curve = Curve::Line {
+            start: [0.; 3],
+            end: point(axis),
+        };
+        let pc = Curve2::Spline {
+            knots: vec![0., 0., 1., 1.],
+            points: vec![[0., 0.], [1., 0.]],
+        };
+        for a in 0..4 {
+            for b in 0..4 {
+                for c in 0..4 {
+                    for d in 0..4 {
+                        let input = [a, b, c, d];
+                        let mut distinct = input;
+                        distinct.sort_unstable();
+                        if distinct != [0, 1, 2, 3] {
+                            continue;
+                        }
+                        let faces: Vec<_> = input
+                            .iter()
+                            .map(|&i| RadialFace {
+                                surface: &surfaces[i],
+                                pcurve: &pc,
+                                forward: i & 1 == 0,
+                            })
+                            .collect();
+                        let order = radial_order(&curve, [0., 1.], &faces).unwrap();
+                        let rays: Vec<_> = order.into_iter().map(|i| input[i]).collect();
+                        let expected: Vec<_> = (0..4).map(|i| (a + i) % 4).collect();
+                        assert_eq!(rays, expected, "{axis:?}, {input:?}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn radial_order_refuses_undefined_and_indistinguishable_directions() {
+    let curve = Curve::Line {
+        start: [0.; 3],
+        end: [0., 0., 1.],
+    };
+    let surface = Surface::Plane {
+        origin: [0.; 3],
+        u_axis: [0., 0., 1.],
+        v_axis: [1., 0., 0.],
+    };
+    let pc = Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![[0., 0.], [1., 0.]],
+    };
+    let face = RadialFace {
+        surface: &surface,
+        pcurve: &pc,
+        forward: true,
+    };
+    assert!(
+        matches!(radial_order(&curve, [0., 1.], &[face, face]), Err(Error::Failed(m)) if m.contains("tangent faces"))
+    );
+    for interval in [[0., 0.], [1., 0.], [f64::NAN, 1.], [0., f64::INFINITY]] {
+        assert!(matches!(
+            radial_order(&curve, interval, &[face]),
+            Err(Error::Invalid(_))
+        ));
+    }
+    let collapsed = Curve::Line {
+        start: [0.; 3],
+        end: [0.; 3],
+    };
+    assert!(radial_order(&collapsed, [0., 1.], &[face]).is_err());
+    let singular = Surface::Plane {
+        origin: [0.; 3],
+        u_axis: [0., 0., 1.],
+        v_axis: [0., 0., 1.],
+    };
+    assert!(radial_order(
+        &curve,
+        [0., 1.],
+        &[RadialFace {
+            surface: &singular,
+            ..face
+        }]
+    )
+    .is_err());
+    let bad_pc = Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![[f64::NAN, 0.], [1., 0.]],
+    };
+    assert!(radial_order(
+        &curve,
+        [0., 1.],
+        &[RadialFace {
+            pcurve: &bad_pc,
+            ..face
+        }]
+    )
+    .is_err());
+}
+
 fn one(curve: &Curve, interval: [f64; 2]) -> Vec<Vec<EdgeUse<'_>>> {
     vec![vec![EdgeUse {
         edge: 0,
@@ -1101,6 +1223,272 @@ fn a_seam_on_a_spline_closed_in_u_gets_pcurves_a_period_apart() {
     );
 }
 
+/// A loop once round a spline closed in u, given by its producer a period on, with one use
+/// starting 1.56e-9 of a period short of the vertex where the use before it ends, at the period's
+/// start: as SMLib's trims gave face #714 of the file in #19315 (edge #449 ends at u = 1, edge
+/// #450 starts at 1 - 1.56e-9). The loop comes back by the whole period, into the surface's range
+/// but for that rounding; left a period past it, the face's domain (the loops' box within the
+/// range) would hold only that rounding of it.
+#[test]
+fn a_loop_round_a_closed_spline_given_a_period_on_and_a_rounding_short_lands_in_its_range() {
+    fn use_of(edge: u32, curve: &Curve, interval: [f64; 2], forward: bool) -> EdgeUse<'_> {
+        EdgeUse {
+            edge,
+            curve,
+            interval,
+            forward,
+            tolerance: 0.0,
+            given: None,
+        }
+    }
+    let full = [0., TAU];
+    let on = |c: &Curve, iv: [f64; 2]| form::curve(c, iv).unwrap();
+    let (cylinder, _) = form::surface(
+        &Surface::Cylinder {
+            frame: about_z([0.; 3], false),
+            radius: 3.,
+        },
+        [full, [0., 4.]],
+    )
+    .unwrap();
+    let low = on(
+        &Curve::Circle {
+            frame: about_z([0.; 3], false),
+            radius: 3.,
+        },
+        full,
+    );
+    let high = on(
+        &Curve::Circle {
+            frame: about_z([0., 0., 4.], false),
+            radius: 3.,
+        },
+        full,
+    );
+    let line = Curve::Line {
+        start: [3., 0., 0.],
+        end: [3., 0., 4.],
+    };
+    let l = vec![
+        use_of(0, &low.0, low.1, true),
+        use_of(1, &line, [0., 1.], true),
+        use_of(2, &high.0, high.1, false),
+        use_of(1, &line, [0., 1.], false),
+    ];
+    let base = pcurves(&cylinder, std::slice::from_ref(&l), 1e-7)
+        .unwrap()
+        .remove(0);
+    let [u0, u1] = {
+        let r = SurfaceEval::new(&cylinder).unwrap().domain().range[0].unwrap();
+        [r.0, r.1]
+    };
+    let period = SurfaceEval::new(&cylinder).unwrap().domain().period[0].unwrap();
+    assert_eq!((u0, u1, period), (0., 4., 4.));
+    // The loop as made lies in the range, from the seam at its start: the lower circle starts
+    // there, where the seam's second use ends (run backwards: its pcurve, in the line's
+    // direction, starts there).
+    let lowest = base
+        .iter()
+        .flat_map(points)
+        .map(|p| p[0])
+        .fold(f64::INFINITY, f64::min);
+    assert_eq!(lowest, u0);
+    assert_eq!(points(&base[0])[0], [u0, 0.]);
+    assert_eq!(points(&base[3])[0], [u0, 0.]);
+    // Given a period on, the circle starting short of where the seam ends: the vertex is
+    // where the seam puts it, at the period's start. By the rounding of the file, and by a
+    // thousandth of a period, which no slack for rounding on the lowest point covers.
+    for short in [1.56e-9 * period, 1e-3 * period] {
+        let mut given: Vec<Curve2> = base
+            .iter()
+            .map(|c| {
+                let mut c = c.clone();
+                move_by(&mut c, 0, period);
+                c
+            })
+            .collect();
+        match &mut given[0] {
+            Curve2::Spline { points, .. } => points[0][0] -= short,
+            Curve2::RationalSpline { homogeneous, .. } => {
+                homogeneous[0][0] -= short * homogeneous[0][2];
+            }
+        }
+        let l_given: Vec<EdgeUse<'_>> = l
+            .iter()
+            .zip(&given)
+            .map(|(u, g)| EdgeUse {
+                given: Some(g),
+                ..*u
+            })
+            .collect();
+        let out = &pcurves(&cylinder, &[l_given], 1e-7).unwrap()[0];
+        for (k, (got, g)) in out.iter().zip(&given).enumerate() {
+            // Moved back by the whole period: the made pcurve, the circle's start short.
+            let mut want = g.clone();
+            move_by(&mut want, 0, -period);
+            let (p, q) = (points(got), points(&want));
+            assert_eq!(p.len(), q.len(), "use {k}");
+            for (p, q) in p.iter().zip(&q) {
+                assert!(
+                    (p[0] - q[0]).abs() <= 1e-12 * period && (p[1] - q[1]).abs() <= 1e-12,
+                    "short {short}, use {k}: {p:?}, not {q:?} (u range [{u0}, {u1}])"
+                );
+            }
+        }
+    }
+}
+
+/// A loop inside one period of a spline closed in u whose control polygon reaches past the
+/// period's end while its curve does not: a cubic from (3.5, 0.2) to (3.5, 0.8) with control u
+/// 3.5, 4.5625, 3.5, 3.5 (its u peaks at 3.5 + 3 · 1.0625 · 4/27 = 3.97 at t = 1/3) and the line
+/// back. Its lowest point, u = 3.5, lies in the base period [0, 4], so it stays where it is: a
+/// period lower, the whole loop would lie outside the range.
+#[test]
+fn a_loop_whose_control_polygon_reaches_past_its_period_stays_in_it() {
+    let full = [0., TAU];
+    let (cylinder, _) = form::surface(
+        &Surface::Cylinder {
+            frame: about_z([0.; 3], false),
+            radius: 3.,
+        },
+        [full, [0., 4.]],
+    )
+    .unwrap();
+    assert_eq!(
+        SurfaceEval::new(&cylinder).unwrap().domain().period,
+        [Some(4.), None]
+    );
+    let arc = Curve2::Spline {
+        knots: vec![0., 0., 0., 0., 1., 1., 1., 1.],
+        points: vec![[3.5, 0.2], [4.5625, 0.4], [3.5, 0.6], [3.5, 0.8]],
+    };
+    let back = Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![[3.5, 0.8], [3.5, 0.2]],
+    };
+    // The edges' curves are not read: a given pcurve is taken as it is.
+    let line = Curve::Line {
+        start: [3., 0., 0.],
+        end: [3., 0., 4.],
+    };
+    let l = [(0, &arc), (1, &back)].map(|(edge, pc)| EdgeUse {
+        edge,
+        curve: &line,
+        interval: [0., 1.],
+        forward: true,
+        tolerance: 0.0,
+        given: Some(pc),
+    });
+    let out = &pcurves(&cylinder, &[l.to_vec()], 1e-7).unwrap()[0];
+    for (k, (got, given)) in out.iter().zip([&arc, &back]).enumerate() {
+        assert_eq!(points(got), points(given), "use {k}: left where it is");
+    }
+}
+
+/// Loops on a spline closed in u (period and range [0, 4]) that lie outside the range both where
+/// their lowest point puts them and a period lower stay where their lowest point puts them: a
+/// rectangle across the seam, u 3 to 5, and one a period wide from a ten-thousandth of a period
+/// short of the range's end, u 3.9996 to 7.9996, whose uses meet exactly. Both are placed as on
+/// main: only a loop that lies in the range a period lower, to within how far its uses miss each
+/// other, is moved there.
+#[test]
+fn a_loop_outside_the_range_a_period_lower_too_stays_where_its_lowest_point_puts_it() {
+    let full = [0., TAU];
+    let (cylinder, _) = form::surface(
+        &Surface::Cylinder {
+            frame: about_z([0.; 3], false),
+            radius: 3.,
+        },
+        [full, [0., 4.]],
+    )
+    .unwrap();
+    let domain = SurfaceEval::new(&cylinder).unwrap().domain();
+    assert_eq!(
+        (domain.range[0], domain.period[0]),
+        (Some((0., 4.)), Some(4.))
+    );
+    let line = Curve::Line {
+        start: [3., 0., 0.],
+        end: [3., 0., 4.],
+    };
+    for [a, b] in [[3., 5.], [3.9996, 7.9996]] {
+        let corners = [[a, 0.2], [b, 0.2], [b, 0.8], [a, 0.8]];
+        let sides: Vec<Curve2> = (0..4)
+            .map(|k| Curve2::Spline {
+                knots: vec![0., 0., 1., 1.],
+                points: vec![corners[k], corners[(k + 1) % 4]],
+            })
+            .collect();
+        let l: Vec<EdgeUse<'_>> = sides
+            .iter()
+            .zip(0..)
+            .map(|(pc, edge)| EdgeUse {
+                edge,
+                curve: &line,
+                interval: [0., 1.],
+                forward: true,
+                tolerance: 0.0,
+                given: Some(pc),
+            })
+            .collect();
+        let out = &pcurves(&cylinder, &[l], 1e-7).unwrap()[0];
+        assert_eq!(out.len(), 4);
+        for (k, (got, given)) in out.iter().zip(&sides).enumerate() {
+            assert_eq!(
+                points(got),
+                points(given),
+                "u {a} to {b}, use {k}: left where it is"
+            );
+        }
+    }
+}
+
+/// A loop on a sphere from its south pole up the meridian at u = 2π - 0.5, along the equator to
+/// u = 2π + 2.5 and back down to the pole along the meridian at u = 2π + 0.5: its two uses meet at
+/// the pole a radian apart, where u is free, and exactly elsewhere. It lies outside the range
+/// [0, 2π] where its lowest point puts it and would lie inside it a period lower to within that
+/// radian; the pole's free parameter is no rounding, so it stays as on main.
+#[test]
+fn a_loop_whose_uses_meet_at_a_pole_a_radian_apart_stays_where_its_lowest_point_puts_it() {
+    let sphere = Surface::Sphere {
+        frame: about_z([0.; 3], false),
+        radius: 6.,
+    };
+    let domain = SurfaceEval::new(&sphere).unwrap().domain();
+    assert_eq!(domain.period[0], Some(TAU));
+    let (a, b, c) = (TAU - 0.5, TAU + 2.5, TAU + 0.5);
+    let corners = [[a, -FRAC_PI_2], [a, 0.], [b, 0.], [c, 0.], [c, -FRAC_PI_2]];
+    let sides: Vec<Curve2> = corners
+        .windows(2)
+        .map(|w| Curve2::Spline {
+            knots: vec![0., 0., 1., 1.],
+            points: w.to_vec(),
+        })
+        .collect();
+    // The edges' curves are not read: a given pcurve is taken as it is.
+    let line = Curve::Line {
+        start: [6., 0., 0.],
+        end: [0., 0., -6.],
+    };
+    let l: Vec<EdgeUse<'_>> = sides
+        .iter()
+        .zip(0..)
+        .map(|(pc, edge)| EdgeUse {
+            edge,
+            curve: &line,
+            interval: [0., 1.],
+            forward: true,
+            tolerance: 0.0,
+            given: Some(pc),
+        })
+        .collect();
+    let out = &pcurves(&sphere, &[l], 1e-7).unwrap()[0];
+    assert_eq!(out.len(), 4);
+    for (k, (got, given)) in out.iter().zip(&sides).enumerate() {
+        assert_eq!(points(got), points(given), "use {k}: left where it is");
+    }
+}
+
 /// An intersection record evaluates to the point of both surfaces in the leader's normal
 /// plane; it has no exact pcurve on either.
 #[test]
@@ -1260,6 +1648,60 @@ fn a_curve_weaving_across_a_thread_flank_is_refused() {
     assert!(
         matches!(pcurves(&surface, &one(&weave, [a, b]), 1e-3), Err(Error::Failed(m)) if m.contains("no exact pcurve"))
     );
+}
+
+/// A short cubic edge on a cylinder's NURBS form, its angle not moving at a steady pace (θ
+/// quadratic in its parameter), ending on the form's seam. Its end there projects to either side
+/// of the seam; on the far side the segment between its ends ran the wrong way round, and the one
+/// through its middle at its middle's pace was taken, within half a tolerance of 0.02 of the edge
+/// but with its ends 5 um round the axis from the edge's: the loop's pcurves did not meet at the
+/// vertices once healing set the edge tolerances to the edges' own gaps (`SmTrimmingTools` test
+/// 0). The ends are taken on the middle's sheet, so the segment between them is the one taken,
+/// ending where the edge ends, as off the seam.
+#[test]
+fn a_spline_edge_ending_on_a_closed_forms_seam_gets_the_segment_between_its_ends() {
+    let r = 20.;
+    let (surface, _) = form::surface(
+        &Surface::Cylinder {
+            frame: about_z([0.; 3], false),
+            radius: r,
+        },
+        [[0., TAU], [0., 1.]],
+    )
+    .unwrap();
+    let s = SurfaceEval::new(&surface).unwrap();
+    for end in [TAU, 3.0] {
+        // The cubic Bézier with the ends and end tangents of the curve at angle θ(t) and height
+        // 0.35·t, 0.05 rad round the axis (5e-4 rad of it from the quadratic term). The segment
+        // between its ends and the one through its middle each come within 5.0e-3 of it.
+        let start = end - 0.05;
+        let theta = |t: f64| start + 0.0495 * t + 0.0005 * t * t;
+        let dtheta = |t: f64| 0.0495 + 0.001 * t;
+        let at = |t: f64| [r * theta(t).cos(), r * theta(t).sin(), 0.35 * t];
+        let tangent = |t: f64| {
+            let (a, w) = (theta(t), dtheta(t));
+            [-r * w * a.sin(), r * w * a.cos(), 0.35]
+        };
+        let (p0, p3, d0, d3) = (at(0.), at(1.), tangent(0.), tangent(1.));
+        let edge = Curve::Spline {
+            knots: vec![0., 0., 0., 0., 1., 1., 1., 1.],
+            points: vec![
+                p0,
+                [0, 1, 2].map(|k| p0[k] + d0[k] / 3.),
+                [0, 1, 2].map(|k| p3[k] - d3[k] / 3.),
+                p3,
+            ],
+        };
+        let pc = &pcurves(&surface, &one(&edge, [0., 1.]), 0.02).unwrap()[0][0];
+        for (t, p) in [(0., p0), (1., p3)] {
+            let lifted = s.point(eval(pc, t).unwrap()).unwrap();
+            assert!(
+                lifted.dist(v3(p)) < 1e-9,
+                "ending at {end}: the pcurve at {t} lifts to {lifted:?}, the edge is at {p:?}"
+            );
+        }
+        assert!(lift_error(&surface, &edge, [0., 1.], pc) <= 0.01);
+    }
 }
 
 /// The B-spline of degree `p` through `points` at `params` (knots by averaging, NURBS Book §9.2.1).
