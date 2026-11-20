@@ -111,11 +111,11 @@ drawing.open                      a drawing: its tests in crates/engine/src/cmd/
 drawing.pattern.delete            paper hatch patterns: crates/engine/src/cmd/drawing_tests.rs
 drawing.pattern.import            paper hatch patterns: crates/engine/src/cmd/drawing_tests.rs and crates/io/src/pat_tests.rs
 drawing.pattern.inspect           paper hatch patterns: crates/engine/src/cmd/drawing_tests.rs
+drawing.print                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.properties                a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.properties.remove         a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.properties.set            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.revise                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
-drawing.print                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.revision.add              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.revision.delete           a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.revision.edit             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
