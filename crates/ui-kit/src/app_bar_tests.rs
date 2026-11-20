@@ -317,6 +317,9 @@ struct TabsRig {
     /// The first design has the three [`VIEWS`], shown as sub-tabs (`Some(true)`) or behind a
     /// switcher (`Some(false)`); the strip then has more room.
     views: Option<bool>,
+    room: Option<f32>,
+    single_view: bool,
+    name: &'static str,
     /// The + has a menu.
     plus: bool,
     /// The name of this view is being typed: its place, and the text and focus the strip edits.
@@ -341,6 +344,9 @@ impl TabsRig {
             ctx: crate::test_support::context(),
             time: std::cell::Cell::new(0.0),
             views,
+            room: None,
+            single_view: false,
+            name: "One",
             plus,
             rename: rename.map(|(k, _)| k),
             text: std::cell::RefCell::new(text),
@@ -361,7 +367,16 @@ impl TabsRig {
             ..Default::default()
         };
         let tab = |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None, views: &[] };
-        let first = DocTab { views: if self.views.is_some() { &VIEWS } else { &[] }, ..tab("One") };
+        let first = DocTab {
+            views: if self.single_view {
+                &VIEWS[..1]
+            } else if self.views.is_some() {
+                &VIEWS
+            } else {
+                &[]
+            },
+            ..tab(self.name)
+        };
         let (mut text, mut focused) = (self.text.borrow().clone(), self.focused.get());
         let mut strip = TabStrip {
             tabs: vec![first, tab("Two"), tab("Three")],
@@ -399,6 +414,7 @@ impl TabsRig {
             tear_off_below: 40.0,
         };
         let (x0, x1) = if self.views.is_some() { (20.0, 780.0) } else { (100.0, 700.0) };
+        let x1 = self.room.map_or(x1, |room| x0 + room);
         let mut actions = Vec::new();
         crate::test_support::raw_frame(&self.ctx, input, |ui| {
             actions = tabs(ui, &mut strip, Rect::from_min_size(Pos2::ZERO, vec2(800.0, HEIGHT)), x0, x1);
@@ -754,6 +770,56 @@ fn a_view_is_renamed_in_its_sub_tab() {
     let rig = TabsRig::build(Some(true), false, Some((2, "Sheet 1")));
     rig.frame(Vec::new());
     assert_eq!(rig.frame(vec![key(egui::Key::Escape)]), vec![TabAction::ViewRenameCancelled]);
+}
+
+#[test]
+fn a_narrow_switcher_keeps_its_targets_inside_the_tab() {
+    let mut rig = TabsRig::with(Some(false));
+    rig.room = Some(304.0);
+    rig.name = "A design name much wider than the space left for its tab";
+    rig.frame(Vec::new());
+    let switcher = solidcraft_ui_registry::rect_of("t:switcher").expect("switcher remains available");
+    let close = solidcraft_ui_registry::rect_of("t:close:0").expect("close remains available");
+    assert!(switcher.is_positive() && switcher.left() >= 20.0 && switcher.right() <= 108.0);
+    assert!(close.right() <= 108.0 && !close.intersects(switcher));
+    assert!(rig.press(switcher.center(), egui::PointerButton::Primary).is_empty());
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    assert_eq!(rig.press(rig.at("t:switcher:row:1"), egui::PointerButton::Primary), vec![TabAction::SelectView(1)]);
+}
+
+#[test]
+fn renaming_a_view_remains_editable_in_the_switcher_fallback() {
+    let mut rig = TabsRig::build(Some(true), false, Some((1, "Sketch")));
+    rig.room = Some(304.0);
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:switcher").is_some(), "the narrow strip falls back to its switcher");
+    let field = solidcraft_ui_registry::rect_of("t:rename").expect("the requested editor remains visible");
+    let switcher = solidcraft_ui_registry::rect_of("t:switcher").unwrap();
+    assert!(switcher.contains_rect(field));
+    let key = |key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+    assert_eq!(rig.frame(vec![key(egui::Key::Enter)]), vec![TabAction::ViewRenameDone { view: 1 }]);
+    let mut single = TabsRig::build(Some(false), false, Some((0, "Model")));
+    single.single_view = true;
+    single.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:rename").is_some(), "the single-view tab exposes its requested rename field");
+    assert_eq!(single.frame(vec![key(egui::Key::Enter)]), vec![TabAction::ViewRenameDone { view: 0 }]);
+    let rig = TabsRig::build(Some(false), false, Some((2, "Sheet")));
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:rename").is_some(), "switcher mode can rename too");
+    assert_eq!(rig.frame(vec![key(egui::Key::Escape)]), vec![TabAction::ViewRenameCancelled]);
+}
+
+#[test]
+fn changing_the_design_discards_its_open_view_popup() {
+    let rig = TabsRig::with(Some(true));
+    rig.press(rig.at("t:view:1"), egui::PointerButton::Secondary);
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::handle_at("t:menu:vclose").is_some());
+    clear_view_popup(&rig.ctx, egui::Id::unique("test_tabs"));
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::handle_at("t:menu:vclose").is_none());
 }
 
 // The layout engine: pure arithmetic over a spec, no egui.

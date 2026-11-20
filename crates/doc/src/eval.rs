@@ -3340,16 +3340,32 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     let mut reads = PlacementReads::default();
     let mut frame = None;
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    // A sketch, profile or path of another component is moved through both placements.
-    for (sketch, _) in f.kind.profile_sels() {
-        if doc.feature(sketch).is_some_and(|s| s.component != f.component) {
-            reads.sketch(doc, sketch);
-            // A later transfer can preserve this profile's historical frame. Changes to that
-            // boundary (including suppression and rollback) must invalidate the constructor.
-            if let Some(relative) = crate::body_transfer::profile_frame(doc, f, sketch) {
-                "transferred profile".hash(&mut h);
-                sketch.hash(&mut h);
-                hash_placement(&relative, &mut h);
+    let mut has_captured_profile = false;
+    // A sketch, profile or path of another component is moved through both placements, unless the
+    // feature captured its component's frame at creation time (in which case only the sketch's
+    // component motion relative to their common ancestor affects the local profile).
+    if let Some(consumer_in_lca) = f.profile_frame
+        && let Some(sketch) = f.kind.constructor_profile_sketch()
+    {
+        let owner = doc.feature(sketch).map(|s| s.component).unwrap_or(0);
+        let lca = doc.common_ancestor(f.component, owner);
+        let owner_in_lca = doc.component_transform_in(owner, lca);
+        "captured profile frame".hash(&mut h);
+        sketch.hash(&mut h);
+        hash_placement(&consumer_in_lca, &mut h);
+        hash_placement(&owner_in_lca, &mut h);
+        has_captured_profile = true;
+    } else {
+        for (sketch, _) in f.kind.profile_sels() {
+            if doc.feature(sketch).is_some_and(|s| s.component != f.component) {
+                reads.sketch(doc, sketch);
+                // A later transfer can preserve this profile's historical frame. Changes to that
+                // boundary (including suppression and rollback) must invalidate the constructor.
+                if let Some(relative) = crate::body_transfer::profile_frame(doc, f, sketch) {
+                    "transferred profile".hash(&mut h);
+                    sketch.hash(&mut h);
+                    hash_placement(&relative, &mut h);
+                }
             }
         }
     }
@@ -3545,7 +3561,7 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     }
     reads.paths.extend(datums);
     if reads.is_empty() {
-        return 0;
+        return if has_captured_profile { h.finish() } else { 0 };
     }
     let frame = frame.unwrap_or_else(|| doc.component_transform(f.component));
     let Some(inverse) = crate::mat_inverse(&frame) else { return placements_hash(doc) };
@@ -8650,6 +8666,9 @@ fn feature_tools_with_constructor(
                 &*axis_state(doc, st, f.component, axis)?,
                 &|name| construction_axis_in(Some(doc), st, name, f.component),
                 &|owner, curve| {
+                    if owner == sketch.0 {
+                        return sketch_line_world(&ss, curve);
+                    }
                     let solved =
                         st.sketch(owner).ok_or_else(|| DocError::Unknown(format!("sketch {owner} (it must come earlier in the timeline)")))?;
                     sketch_line_world(&sketch_in_feature_frame(doc, solved, f.component)?, curve)
@@ -9176,6 +9195,17 @@ fn sketch_in_feature_frame(doc: &Document, sketch: &SolvedSketch, consumer: u64)
 }
 
 fn constructor_profile_in_frame(doc: &Document, sketch: &SolvedSketch, feature: &Feature) -> Result<SolvedSketch> {
+    if let Some(consumer_in_lca) = feature.profile_frame {
+        if !crate::is_placement(&consumer_in_lca) {
+            return Err(DocError::Invalid("stored profile frame is invalid".into()));
+        }
+        let owner = doc.feature(sketch.feature).map(|f| f.component).unwrap_or(0);
+        let lca = doc.common_ancestor(feature.component, owner);
+        let owner_in_lca = doc.component_transform_in(owner, lca);
+        let inverse = crate::mat_inverse(&consumer_in_lca).ok_or_else(|| DocError::Invalid("stored profile frame is singular".into()))?;
+        let relative = crate::mat_mul(&inverse, &owner_in_lca);
+        return profile_with_transform(sketch, &relative);
+    }
     match crate::body_transfer::profile_frame(doc, feature, sketch.feature) {
         Some(relative) => profile_with_transform(sketch, &relative),
         None => sketch_in_feature_frame(doc, sketch, feature.component),

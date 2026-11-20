@@ -40,6 +40,11 @@ fn the_view_commands_check_and_echo_without_editing_the_design() {
         ("tab.view.layout", json!({"layout": "single"}), json!({"layout": "single"})),
         ("tab.view.beside", json!({}), json!({"edge": "right"})),
         ("tab.view.beside", json!({"id": 2, "edge": "bottom"}), json!({"id": 2, "edge": "bottom"})),
+        (
+            "tab.view.beside",
+            json!({"id": 2, "placement": {"kind":"split", "target":1, "edge":"bottom"}}),
+            json!({"id": 2, "placement": {"kind":"split", "target":1, "edge":"bottom"}}),
+        ),
         ("tab.view.list", json!({}), json!({})),
     ] {
         let r = s.execute(id, &params).unwrap_or_else(|e| panic!("{id} {params}: {e}"));
@@ -77,6 +82,10 @@ fn bad_view_requests_are_refused() {
         ("tab.view.layout", json!({"layout": "triple"})),
         ("tab.view.beside", json!({"edge": "diagonal"})),
         ("tab.view.beside", json!({"id": "2"})),
+        ("tab.view.beside", json!({"placement": {"kind": "empty", "index": 0}})),
+        ("tab.view.beside", json!({"id": 2, "edge": "top", "placement": {"kind": "empty", "index": 0}})),
+        ("tab.view.beside", json!({"id": 2, "placement": {"kind": "empty", "index": -1}})),
+        ("tab.view.beside", json!({"id": 2, "placement": {"kind": "empty", "index": 0, "target": 1}})),
         ("tab.view.list", json!({"all": true})),
     ] {
         assert!(s.execute(id, &params).is_err(), "{id} {params}");

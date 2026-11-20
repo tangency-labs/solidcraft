@@ -207,7 +207,7 @@ impl<'de> DeserializeSeed<'de> for ResourceSeed {
                 f.write_str("opaque_texture kind, bounded base64 data and inert provenance")
             }
             fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
-                let (mut kind, mut data, mut provenance) = (false, None, None);
+                let (mut kind, mut data, mut provenance, mut blob) = (false, None, None, false);
                 while let Some(field) = map.next_key::<Field>()? {
                     match field {
                         Field::Kind if !kind => {
@@ -216,6 +216,11 @@ impl<'de> DeserializeSeed<'de> for ResourceSeed {
                         }
                         Field::Data if data.is_none() => data = Some(map.next_value_seed(PayloadSeed(self.0))?),
                         Field::Provenance if provenance.is_none() => provenance = Some(map.next_value_seed(ProvenanceSeed)?),
+                        // The container's part: its bytes come with the read, by id.
+                        Field::TextureBlob if !blob => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                            blob = true;
+                        }
                         _ => return Err(serde::de::Error::custom("duplicate embedded texture field")),
                     }
                 }
@@ -223,6 +228,9 @@ impl<'de> DeserializeSeed<'de> for ResourceSeed {
                     return Err(serde::de::Error::missing_field("kind"));
                 }
                 let mut data = data.ok_or_else(|| serde::de::Error::missing_field("data"))?;
+                if blob && !data.is_empty() {
+                    return Err(serde::de::Error::custom("a texture's inline data beside its blob is ambiguous"));
+                }
                 // An empty `data`: the file is the container's part.
                 if data.is_empty() {
                     data = crate::render_resources::container_part(&self.1, true)
@@ -240,6 +248,7 @@ enum Field {
     Kind,
     Data,
     Provenance,
+    TextureBlob,
 }
 struct KindSeed;
 impl<'de> DeserializeSeed<'de> for KindSeed {
@@ -354,7 +363,7 @@ impl<'de> DeserializeSeed<'de> for ResourceBudget {
                 f.write_str("bounded texture metadata and base64")
             }
             fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
-                let (mut kind, mut size, mut provenance) = (false, None, false);
+                let (mut kind, mut size, mut provenance, mut blob) = (false, None, false, false);
                 while let Some(field) = map.next_key::<Field>()? {
                     match field {
                         Field::Kind if !kind => {
@@ -371,6 +380,13 @@ impl<'de> DeserializeSeed<'de> for ResourceBudget {
                         Field::Data if size.is_none() => {
                             let raw = map.next_value::<&serde_json::value::RawValue>()?;
                             size = Some(crate::render_resources::json_base64_length(raw.get(), self.0).map_err(serde::de::Error::custom)?);
+                        }
+                        Field::TextureBlob if !blob => {
+                            let raw = map.next_value::<&serde_json::value::RawValue>()?;
+                            if raw.get().len() > 128 {
+                                return Err(serde::de::Error::custom("invalid texture blob reference"));
+                            }
+                            blob = true;
                         }
                         Field::Provenance if !provenance => {
                             let raw = map.next_value::<&serde_json::value::RawValue>()?;

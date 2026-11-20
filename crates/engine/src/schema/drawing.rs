@@ -212,10 +212,13 @@ pub struct TemplateSaveParams {
 /// What `drawing.template.save` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct TemplateSaveResult {
-    /// The file written.
+    /// The file written: always a .scdwg container.
     pub path: String,
     /// How many bytes it holds.
     pub bytes: usize,
+    /// The .json path asked for, when the template went beside it as .scdwg.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renamed_from: Option<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

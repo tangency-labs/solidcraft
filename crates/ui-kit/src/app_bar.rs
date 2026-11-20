@@ -810,6 +810,12 @@ pub enum TabAction {
         from: usize,
         to: usize,
     },
+    /// A view tab dragged from the strip over the workspace.
+    DockView {
+        view: usize,
+        pointer: Pos2,
+        released: bool,
+    },
     /// A row of a view's right-click menu, of the + menu, of the view switcher's footer.
     ViewMenu {
         view: usize,
@@ -1100,10 +1106,20 @@ fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed
     let pill = before + view_ws.iter().map(|w| w + VIEW_GAP).sum::<f32>() + after + TAB_MARGIN;
     let pill_min = before + active_w + VIEW_GAP + more_w + VIEW_GAP + after + TAB_MARGIN;
     let kind = selected_layout(n, strip.views_as_tabs, strip.switcher_always, pill_min, room);
+    let kind = if view_typed.is_some() && kind == SelectedLayout::Plain { SelectedLayout::Switcher } else { kind };
     let shown = tab.views.get(active).map_or("", |v| v.name);
     let switch_w = 8.0 + 15.0 + 6.0 + text_width(ui, shown, view_font(true)).min(VIEW_LABEL_MAX) + 6.0 + badge_width(ui, n) + 6.0 + 13.0 + 4.0;
     let switcher = 13.0 + dot + name_w + 8.0 + SLASH + 8.0 + switch_w + 8.0 + 22.0 + 4.0;
     let width = if kind == SelectedLayout::Pill { pill.min(room) } else { switcher.min(room.max(MIN_TAB)) };
+    let (name_w, switch_w) = if kind == SelectedLayout::Switcher {
+        // The tab's painted frame is two points narrower than its allocation. Keep the
+        // switcher and close targets inside it before giving the design name any room.
+        let available = (width - 2.0 - (13.0 + dot + 8.0 + SLASH + 8.0 + 8.0 + 22.0 + 4.0)).max(0.0);
+        let name_w = name_w.min((available - switch_w.min(72.0)).max(0.0));
+        (name_w, switch_w.min((available - name_w).max(0.0)))
+    } else {
+        (name_w, switch_w)
+    };
     Geom { kind, index: strip.selected, width, dot, name_w, view_ws, more_w, switch_w }
 }
 
@@ -1208,7 +1224,7 @@ fn menu_rows(ui: &mut egui::Ui, rows: &[TabMenuRow], keys: bool, others: bool, o
 /// Every view as a menu row (a check mark on the shown one, a hollow dot on one whose source
 /// changed, a dashed outline on a deleted one): the place of the one chosen. Rows are published
 /// under `prefix` and their place.
-fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str) -> Option<usize> {
+fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str, menu: &mut Option<(usize, Rect)>) -> Option<usize> {
     let t = Tokens::get();
     let mut chosen = None;
     for (k, view) in views.iter().enumerate() {
@@ -1229,7 +1245,9 @@ fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str) -> Option<usize
             }
             ViewState::Normal => {}
         }
-        if resp.clicked() {
+        if resp.secondary_clicked() {
+            *menu = Some((k, resp.rect));
+        } else if resp.clicked() {
             chosen = Some(k);
         }
     }
@@ -1415,18 +1433,22 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     if count < tab.views.len() {
         more_button(ui, strip, Rect::from_min_size(pos2(x, cy - VIEW_HEIGHT / 2.0), vec2(g.more_w, VIEW_HEIGHT)), tab.views.len() - count, pen);
     }
-    if let Some(d) = pen.drag.filter(|d| (first..first + count).contains(&d.from)) {
+    let pointer = ui.input(|i| i.pointer.interact_pos());
+    let released = ui.input(|i| i.pointer.primary_released());
+    if let Some((d, pointer)) = pen.drag.zip(pointer).filter(|(_, p)| p.y > pen.below + 6.0) {
+        pen.actions.push(TabAction::DockView { view: d.from, pointer, released });
+    } else if let Some(d) = pen.drag.filter(|d| (first..first + count).contains(&d.from)) {
         let widths: Vec<f32> = (first..first + count).map(|k| g.view_ws.get(k).copied().unwrap_or(0.0) + VIEW_GAP).collect();
         let left = ui.ctx().pointer_latest_pos().map_or(start, |p| p.x) - d.grab;
         let slot = drop_slot(left, start, &widths, first, d.from);
         let at = slot_left(start, &widths, first, d.from, slot) - 1.0;
         painter.line_segment([pos2(at, cy - 10.0), pos2(at, cy + 10.0)], Stroke::new(2.0, t.accent));
-        if ui.input(|i| i.pointer.primary_released()) {
-            if slot != d.from {
-                pen.actions.push(TabAction::ReorderView { from: d.from, to: slot });
-            }
-            pen.drag = None;
+        if released && slot != d.from {
+            pen.actions.push(TabAction::ReorderView { from: d.from, to: slot });
         }
+    }
+    if released {
+        pen.drag = None;
     }
     plus_button(ui, strip, plus, 14.0, pen);
     if has_layout {
@@ -1562,10 +1584,12 @@ fn draw_switcher(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g:
     let t = Tokens::get();
     let painter = ui.painter().clone();
     let cy = pr.center().y;
-    painter.rect_filled(pr, t.radius_md, t.app_bar_tab_active);
+    painter.rect_filled(pr, PILL_RADIUS, t.app_bar_tab_active);
     let slash_x = pr.left() + 13.0 + g.dot + g.name_w + 8.0;
     painter.text(pos2(slash_x, cy), Align2::LEFT_CENTER, "/", FontId::proportional(t.font_button), t.app_bar_text.gamma_multiply(0.5));
-    if let Some(view) = tab.views.iter().find(|v| v.active).or(tab.views.first()) {
+    let shown =
+        pen.rename.as_ref().and_then(|(index, _)| tab.views.get(*index)).or_else(|| tab.views.iter().find(|v| v.active)).or(tab.views.first());
+    if let Some(view) = shown {
         let btn = Rect::from_min_size(pos2(slash_x + SLASH + 8.0, cy - VIEW_HEIGHT / 2.0), vec2(g.switch_w, VIEW_HEIGHT));
         let resp = ui.interact(btn, ui.scope_id().with("view_switcher"), Sense::click());
         let name = format!("{}: {}. {}", tab.name, view.name, strip.view_text.switch_view);
@@ -1576,20 +1600,32 @@ fn draw_switcher(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g:
         if resp.has_focus() {
             painter.rect_stroke(btn.expand(1.0), VIEW_RADIUS + 1, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
         }
-        paint_view_glyph(&painter, Rect::from_center_size(pos2(btn.left() + 15.5, cy), vec2(15.0, 15.0)), view.icon, view.accent);
-        let galley = painter.layout_no_wrap(view.name.to_string(), view_font(true), t.app_bar_text);
-        let label_x = btn.left() + 29.0;
-        let label_w = galley.size().x.min(VIEW_LABEL_MAX);
-        let label_y = cy - galley.size().y / 2.0;
-        painter.with_clip_rect(Rect::from_min_size(pos2(label_x, btn.top()), vec2(label_w, VIEW_HEIGHT))).galley(
-            pos2(label_x, label_y),
-            galley,
-            t.app_bar_text,
-        );
-        let badge = count_badge(ui, pos2(label_x + label_w + 6.0, cy), tab.views.len(), true);
-        chevron_down(&painter, pos2(badge.right() + 12.5, cy), 13.0, t.app_bar_text.gamma_multiply(0.85));
-        if resp.backing_on_hover_text(strip.view_text.switch_view).clicked() {
-            toggle(ui.ctx(), &mut pen.popup, Popup::Switcher, pos2(btn.left(), pen.below), btn);
+        if let Some((index, rename)) = pen.rename.as_mut() {
+            let field = btn.shrink(2.0);
+            let done = rename_field(ui, field, rename, &strip.handles).map(|action| {
+                if action == TabAction::RenameDone { TabAction::ViewRenameDone { view: *index } } else { TabAction::ViewRenameCancelled }
+            });
+            pen.actions.extend(done);
+        } else {
+            let clip = ui.clip_rect();
+            ui.set_clip_rect(clip.intersect(btn));
+            let painter = painter.with_clip_rect(ui.clip_rect());
+            paint_view_glyph(&painter, Rect::from_center_size(pos2(btn.left() + 15.5, cy), vec2(15.0, 15.0)), view.icon, view.accent);
+            let galley = painter.layout_no_wrap(view.name.to_string(), view_font(true), t.app_bar_text);
+            let label_x = btn.left() + 29.0;
+            let label_w = galley.size().x.min(VIEW_LABEL_MAX).min((btn.width() - 29.0 - badge_width(ui, tab.views.len()) - 29.0).max(0.0));
+            let label_y = cy - galley.size().y / 2.0;
+            painter.with_clip_rect(Rect::from_min_size(pos2(label_x, btn.top()), vec2(label_w, VIEW_HEIGHT)).intersect(btn)).galley(
+                pos2(label_x, label_y),
+                galley,
+                t.app_bar_text,
+            );
+            let badge = count_badge(ui, pos2(label_x + label_w + 6.0, cy), tab.views.len(), true);
+            chevron_down(&painter, pos2(badge.right() + 12.5, cy), 13.0, t.app_bar_text.gamma_multiply(0.85));
+            if resp.backing_on_hover_text(strip.view_text.switch_view).clicked() {
+                toggle(ui.ctx(), &mut pen.popup, Popup::Switcher, pos2(btn.left(), pen.below), btn);
+            }
+            ui.set_clip_rect(clip);
         }
     }
     close_design_button(ui, strip, tab, g, Rect::from_center_size(pos2(pr.right() - 15.0, cy), vec2(22.0, 22.0)), 12.0, pen);
@@ -1608,6 +1644,7 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
         return;
     }
     let h = strip.handles;
+    let mut next_menu = None;
     let resp = crate::Container::new(ui.ctx(), crate::Surface::Popup)
         .area(strip.id.with("view_popup_area"))
         .fixed_pos(at)
@@ -1620,9 +1657,9 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
                 }
                 Popup::Plus => menu_rows(ui, strip.plus_menu, true, true, "", h.menu_row).map(|id| TabAction::PlusMenu { id }),
                 Popup::Layout => layout_grid(ui, strip).map(|id| TabAction::LayoutMenu { id }),
-                Popup::More => view_list(ui, views, &format!("{}:row:", h.view_more)).map(TabAction::SelectView),
+                Popup::More => view_list(ui, views, &format!("{}:row:", h.view_more), &mut next_menu).map(TabAction::SelectView),
                 Popup::Switcher => {
-                    let picked = view_list(ui, views, &format!("{}:row:", h.switcher)).map(TabAction::SelectView);
+                    let picked = view_list(ui, views, &format!("{}:row:", h.switcher), &mut next_menu).map(TabAction::SelectView);
                     crate::menu::Menu::separator(ui);
                     let footer = menu_rows(ui, strip.switcher_menu, true, true, "", h.menu_row).map(|id| TabAction::SwitcherMenu { id });
                     picked.or(footer)
@@ -1635,7 +1672,20 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
     if resp.inner.is_some() || pressed_outside || ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
         pen.popup = None;
     }
+    if let Some((view, row)) = next_menu {
+        pen.popup = Some((Popup::View(view), row.right_top(), row, ui.ctx().cumulative_frame_nr()));
+        ui.ctx().request_repaint();
+    }
     pen.actions.extend(resp.inner);
+}
+
+/// Discard view-index popup and drag state when the host changes the shown design.
+/// Document-tab menus and the document list keep their independent state.
+pub fn clear_view_popup(ctx: &egui::Context, strip: egui::Id) {
+    ctx.data_mut(|data| {
+        data.remove::<PopupState>(strip.with("view_popup"));
+        data.remove::<ViewDrag>(strip.with("view_drag"));
+    });
 }
 
 /// Draws the document tabs in `r` from `x0` to `x1`: click to select, × to close, drag to
@@ -1654,7 +1704,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
     // The selected design's several views: a pill or a switcher, as far as the bar has room (one
     // view gets a switcher only when the app asks for it always).
     let min_views = if strip.switcher_always && !strip.views_as_tabs { 1 } else { 2 };
-    let expands = |tab: &DocTab| strip.shown_selected == Some(strip.selected) && tab.views.len() >= min_views;
+    let expands = |tab: &DocTab| strip.shown_selected == Some(strip.selected) && (tab.views.len() >= min_views || strip.view_rename.is_some());
     let geom = strip.tabs.get(strip.selected).copied().filter(expands).map(|tab| {
         let room = (x1 - x0 - 34.0 - MIN_TAB * n.saturating_sub(1) as f32).max(0.0);
         measure(ui, strip, &tab, typed.as_deref().unwrap_or(tab.name), view_typed.as_ref().map(|(k, text)| (*k, text.as_str())), room)

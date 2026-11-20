@@ -47,11 +47,13 @@ pub fn with_container_parts<T>(parts: ContainerParts, read: impl FnOnce() -> T) 
     read()
 }
 
-/// The bytes of the container's part for this HDR (`texture`: this texture), taken once.
+/// The bytes of the container's part for this HDR (`texture`: this texture). Every decode during
+/// the read gets them: a newer build's file may be checked a section at a time before the whole
+/// design is read.
 pub(crate) fn container_part(id: &HdrId, texture: bool) -> Option<Vec<u8>> {
     CONTAINER_PARTS.with(|held| {
-        let mut held = held.borrow_mut();
-        if texture { held.textures.remove(id) } else { held.hdr.remove(id) }
+        let held = held.borrow();
+        if texture { held.textures.get(id).cloned() } else { held.hdr.get(id).cloned() }
     })
 }
 
@@ -258,8 +260,9 @@ impl<'de> serde::de::Visitor<'de> for ResourceSeed {
         enum Field {
             Kind,
             Data,
+            HdrBlob,
         }
-        let (mut kind, mut data) = (false, None);
+        let (mut kind, mut data, mut blob) = (false, None, false);
         while let Some(field) = map.next_key::<Field>()? {
             match field {
                 Field::Kind if !kind => {
@@ -267,6 +270,11 @@ impl<'de> serde::de::Visitor<'de> for ResourceSeed {
                     kind = true;
                 }
                 Field::Data if data.is_none() => data = Some(map.next_value_seed(PayloadSeed(self.0))?),
+                // The container's part: its bytes come with the read (`with_container_parts`), by id.
+                Field::HdrBlob if !blob => {
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                    blob = true;
+                }
                 _ => return Err(serde::de::Error::custom("duplicate HDR resource field")),
             }
         }
@@ -274,6 +282,9 @@ impl<'de> serde::de::Visitor<'de> for ResourceSeed {
             return Err(serde::de::Error::missing_field("kind"));
         }
         let mut data = data.ok_or_else(|| serde::de::Error::missing_field("data"))?;
+        if blob && !data.is_empty() {
+            return Err(serde::de::Error::custom("an HDR resource's inline data beside its blob is ambiguous"));
+        }
         // An empty `data`: the file is the container's part.
         if data.is_empty() {
             data = container_part(&self.1, false).ok_or_else(|| serde::de::Error::custom(format!("embedded HDR resource {} has no data", self.1)))?;
@@ -403,13 +414,14 @@ impl<'de> serde::de::Visitor<'de> for ResourceBudget {
         enum Field {
             Kind,
             Data,
+            HdrBlob,
         }
         #[derive(Deserialize)]
         #[serde(rename_all = "snake_case")]
         enum Kind {
             RadianceHdr,
         }
-        let (mut kind, mut size) = (false, None);
+        let (mut kind, mut size, mut blob) = (false, None, false);
         while let Some(field) = map.next_key::<Field>()? {
             match field {
                 Field::Kind if !kind => {
@@ -421,6 +433,13 @@ impl<'de> serde::de::Visitor<'de> for ResourceBudget {
                     kind = true;
                 }
                 Field::Data if size.is_none() => size = Some(map.next_value_seed(EncodedBudget(self.0))?),
+                Field::HdrBlob if !blob => {
+                    let raw: &serde_json::value::RawValue = map.next_value()?;
+                    if raw.get().len() > 128 {
+                        return Err(serde::de::Error::custom("invalid HDR blob reference"));
+                    }
+                    blob = true;
+                }
                 _ => return Err(serde::de::Error::custom("duplicate HDR resource field")),
             }
         }
