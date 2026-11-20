@@ -3258,7 +3258,7 @@ pub struct SurfaceSheet {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub perforation_joints: Vec<(u64, usize)>,
     /// The mounting holes of press-in hardware in the flat (#17752), as the hardware's features
-    /// cut them: what the flat pattern lists.
+    /// cut them: what the flat pattern lists and the DXF notes beside each hole.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hardware: Vec<crate::sheet::SheetHardware>,
     /// The sketch lines that made panels' edges: the panel (by its key, `Panel::name`), each line's

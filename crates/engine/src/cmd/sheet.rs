@@ -215,7 +215,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              layers?: roles|single (default roles, the layers below; single: every entity on layer 0), \
              per_body?: bool (a file for every sheet body, `<path>-<body>.dxf`, or their DXF texts without a path → files: [{body, path | dxf, bends}]; not with `body`) \
              → DXF (AutoCAD 2000, mm): layers OUTLINE (the outer contour), CUT (what is cut out inside it), TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES, \
-             POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM (one per side and depth) and PERFORATION; inner contours come before the outline",
+             POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM (one per side and depth), PERFORATION and HARDWARE (with layers: roles, a note beside each press-in hardware hole, `M3 nut`, as high as note_height); inner contours come before the outline",
         ),
     CommandSpec::new("sheet.export_bend_table", "Export Bend Table", crate::checked!("sheet.export_bend_table", export_bend_table)).icon("bendtable")
         .noundo()
@@ -1523,6 +1523,9 @@ pub struct DxfOptions {
     pub no_bend_lines: bool,
     /// Everything on layer 0 instead of a layer for each role (#4314).
     pub one_layer: bool,
+    /// The height (mm) of the note beside each press-in hardware hole, on layer HARDWARE (#17752);
+    /// none: no notes. Asked for when layers go by role, as the note has a layer of its own.
+    pub hardware_notes: Option<f64>,
 }
 
 /// The layer of a role: its AutoCAD colour index (1 red, 2 yellow, 3 green, 4 cyan, 5 blue,
@@ -1544,7 +1547,7 @@ fn dxf_layer(
         "ETCH" => (6, DxfLinetype::Continuous),
         "BEND_UP" => (1, DxfLinetype::Dashed),
         "BEND_DOWN" => (5, DxfLinetype::Dashed),
-        "BEND_NOTES" => (8, DxfLinetype::Continuous),
+        "BEND_NOTES" | "HARDWARE" => (8, DxfLinetype::Continuous),
         _ => (3, DxfLinetype::Continuous),
     };
     file.declare_layer(name, color, linetype, None)
@@ -1577,6 +1580,15 @@ fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::A
     }
 }
 
+/// The note beside a hardware hole: its thread, kind and a stud's or standoff's length, `M4 stud 10 mm`.
+fn hardware_note(h: &solidcraft_doc::sheet::SheetHardware) -> String {
+    let kind = h.kind.name().replace('_', " ");
+    match h.length {
+        Some(length) => format!("{} {kind} {} mm", h.thread, compact(length)),
+        None => format!("{} {kind}", h.thread),
+    }
+}
+
 /// A DXF (AutoCAD 2000, mm) of a sheet's flat pattern (#6748) on layers by role: OUTLINE (the
 /// outer contour of each piece), CUT (what is cut out inside it, and the loose pieces of a cut),
 /// TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES (when asked
@@ -1596,6 +1608,7 @@ fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -
         bends: sk.bend_infos(),
         rolls: sk.roll_lines.iter().map(|l| (l.start, l.end)).collect(),
         slits: sk.slits.iter().map(|[a, b]| (*a, *b)).collect(),
+        hardware: sk.hardware_holes().into_iter().map(|h| (h.center, h.radius, hardware_note(h))).collect(),
         display,
         thickness: sk.thickness,
     };
@@ -1615,6 +1628,8 @@ struct FlatDrawing {
     bends: Vec<solidcraft_doc::sheet::BendInfo>,
     rolls: Vec<(Vec2, Vec2)>,
     slits: Vec<(Vec2, Vec2)>,
+    /// Each press-in hardware hole: its centre, radius and the note that names it (#17752).
+    hardware: Vec<(Vec2, f64, String)>,
     display: sheet::AngleDisplay,
     thickness: f64,
 }
@@ -1681,7 +1696,8 @@ impl FlatDrawing {
         loops.sort_by_key(|(pass, ..)| *pass);
         // Slits (two lines each) and rolls (one line each) are planned like bends: at most two
         // entities and a bend's few values apiece.
-        let lines = self.bends.len().saturating_add(self.rolls.len()).saturating_add(self.slits.len().saturating_mul(2));
+        let lines =
+            self.bends.len().saturating_add(self.rolls.len()).saturating_add(self.slits.len().saturating_mul(2)).saturating_add(self.hardware.len());
         let mut file = DxfFile::for_flat_pattern_export(loops.len(), lines, self.perforation.len())?;
         if !o.one_layer {
             // These four baseline roles exist even without matching geometry. The
@@ -1725,6 +1741,14 @@ impl FlatDrawing {
             let layer = dxf_layer(&mut file, "PERFORATION", o.one_layer)?;
             for (c, r) in &self.perforation {
                 file.push(layer, DxfShape::Circle { c: *c, r: *r }, None)?;
+            }
+        }
+        // The hardware's notes, each beside its hole on layer HARDWARE, as a bend's note is.
+        if let Some(height) = o.hardware_notes {
+            for (c, r, text) in &self.hardware {
+                let layer = dxf_layer(&mut file, "HARDWARE", o.one_layer)?;
+                let at = solidcore_ops::prism::note_beside((*c, *r), height);
+                file.push(layer, DxfShape::Text { at, height, angle_deg: 0.0, text: text.clone() }, None)?;
             }
         }
         // A roll's lines on a layer of their own, so that a reader of the bend layers doesn't
@@ -1801,7 +1825,9 @@ fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
         None => false,
         Some(v) => v.as_str().and_then(dxf_layers).ok_or_else(|| bad(cmd, "`layers` must be roles or single"))?,
     };
-    Ok(DxfOptions { curves, text, bend_notes, no_bend_lines, one_layer })
+    // Press-in hardware is noted beside its hole on a layer of its own: with the layers by role.
+    let hardware_notes = (!one_layer).then_some(height);
+    Ok(DxfOptions { curves, text, bend_notes, no_bend_lines, one_layer, hardware_notes })
 }
 
 /// The files of an export of every sheet body: `path` with `-<body>` before its extension
