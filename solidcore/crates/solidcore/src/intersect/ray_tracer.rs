@@ -1296,7 +1296,12 @@ impl<'s> RayTracer<'s> {
                 .with_status(SM_ERR)
                 .into_error()
         })?;
-        let top = tree.top_node().ok_or_else(|| tree_without_top_node(OP))?;
+        // a tree with no top node was not built either (the caller's cache)
+        let top = tree.top_node().ok_or_else(|| {
+            Failure::new(OP, IntersectFailure::NotSetUp)
+                .with_status(SM_ERR)
+                .into_error()
+        })?;
         let bbox = tree.node(top)?.bbox;
         let id = self.add_surface_with_bbox(surface, &bbox)?;
         self.grid.expand_hierarchy_fetched(k, id, &mut cache)
@@ -1762,14 +1767,15 @@ fn poly_cache_without_tree(op: &'static str) -> SolidError {
     .into_error()
 }
 
-/// The surface cache's tree has no top node, though building a cache's tree makes the top
-/// node for the surface's domain (`SM_ERR`).
+/// The surface cache's tree has no top node right after [`SurfaceCache::get_tree`] built or
+/// returned it, though a successful build makes the top node for the surface's domain
+/// (`SM_ERR`).
 fn tree_without_top_node(op: &'static str) -> SolidError {
     SolidError::intersect(
         op,
         IntersectFailure::Defect {
-            why: "the surface cache's tree has no top node, though its build makes one for \
-                  the surface's domain",
+            why: "the surface cache's tree has no top node after GetTree, though a successful \
+                  build makes one for the surface's domain",
         },
     )
 }
@@ -1780,6 +1786,26 @@ mod tests {
     use crate::geom::extent3d::Extent3d;
     use crate::geom::polar_box::PolarBox;
     use crate::geom::pseudo_box::PseudoBox;
+
+    /// A cache whose tree the caller has not built is the caller's state, refused with
+    /// upstream's `SM_ERR`.
+    #[test]
+    fn a_fetched_cache_without_its_tree_is_not_set_up() {
+        let k = Kernel::default();
+        let surface = Surface::from(crate::nurbs::b_spline_surface::BSplineSurface::new());
+        let cache = SurfaceCache::new(
+            surface.clone(),
+            Extent2d::new(),
+            crate::surface::surface_cache::SurfaceCacheOptions::default(),
+        );
+        let mut tracer = RayTracer::new(grid(), 1.0e-6, 1.0e-9);
+        let e = tracer
+            .add_surface_with_fetched_cache(&k, &surface, cache)
+            .unwrap_err();
+        assert_eq!(e.intersect_failure(), Some(&IntersectFailure::NotSetUp));
+        assert_eq!(crate::error::upstream_status(&e), Some(SM_ERR));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+    }
 
     fn grid() -> Grid<usize> {
         let bbox = Extent3d::from_bounds(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);

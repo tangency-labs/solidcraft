@@ -1699,15 +1699,10 @@ impl<O: ClassObject> PointClassification<O> {
                     env,
                     curve_identity,
                 )?;
+                // no vertex: editing is off, or the parameter is off the edge (the caller's
+                // B-rep and classification, rule 9)
                 let v = split.vertex.ok_or_else(|| {
-                    SolidError::intersect(
-                        OP_MERGE,
-                        IntersectFailure::Defect {
-                            why: "the edge split gave no vertex: it makes one when it splits, \
-                                  and near an end it gives the edge's vertex there, a link \
-                                  the kernel keeps on every edge",
-                        },
-                    )
+                    SolidError::intersect(OP_MERGE, IntersectFailure::EdgeNotSplit)
                 })?;
                 if !split.split {
                     // Native assigns these two fields directly; in particular an

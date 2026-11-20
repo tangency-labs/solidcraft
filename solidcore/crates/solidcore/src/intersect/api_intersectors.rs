@@ -1211,7 +1211,11 @@ mod tests {
             .unwrap(),
         );
         let e = intersect_curve_brep(&k, &far, &mut b).unwrap_err();
-        assert!(e.intersect_failure().is_some(), "{e:?}");
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::NoIntersection),
+            "{e:?}"
+        );
         assert_eq!(e.sm_status(), Some(SM_ERR), "{e:?}");
     }
 

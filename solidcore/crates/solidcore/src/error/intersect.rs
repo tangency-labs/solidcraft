@@ -86,8 +86,10 @@ pub enum IntersectFailure {
         /// The step that failed, and why that is the kernel's fault.
         why: &'static str,
     },
-    /// The intersection searched for is empty: the curves, surfaces, B-reps or views given
-    /// do not meet, and neither an overlap nor a crossing point was found. Class `failed`.
+    /// The intersection searched for is empty: the search found nothing of what the caller
+    /// asked for (no curve, overlap or point; points count only where the caller asked for
+    /// them), so the curves, surfaces, B-reps or views given do not meet in it. Class
+    /// `failed`.
     NoIntersection,
     /// A drop of a point onto a curve, a surface or a volume (a point solve) found no foot
     /// point. Class `failed`.
@@ -119,6 +121,10 @@ pub enum IntersectFailure {
     /// (for example a region where a point is needed, or a loop where a vertex, edge, face or
     /// region is). [`ErrorKind::Unsupported`].
     UnsupportedObjectKind,
+    /// The edge was not split at the classified point: editing is not enabled on the
+    /// caller's B-rep, or the classification's parameter is not within the edge's interval.
+    /// [`ErrorKind::InvalidInput`].
+    EdgeNotSplit,
 }
 
 impl IntersectFailure {
@@ -134,7 +140,8 @@ impl IntersectFailure {
             | Self::NoFoot
             | Self::NotOneFoot { .. }
             | Self::ParametersNotSet
-            | Self::UnsupportedObjectKind => SM_ERR,
+            | Self::UnsupportedObjectKind
+            | Self::EdgeNotSplit => SM_ERR,
             Self::Missing(_)
             | Self::FaceWithoutSurface
             | Self::EdgeWithoutCurve
@@ -164,7 +171,8 @@ impl IntersectFailure {
             | Self::EdgeWithoutCurve
             | Self::NoClassObject
             | Self::NotSetUp
-            | Self::PolyFaceWithoutEdges => ErrorKind::InvalidInput,
+            | Self::PolyFaceWithoutEdges
+            | Self::EdgeNotSplit => ErrorKind::InvalidInput,
             Self::UnsupportedObjectKind => ErrorKind::Unsupported,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
@@ -210,6 +218,7 @@ impl core::fmt::Display for IntersectFailure {
             Self::UnsupportedObjectKind => {
                 f.write_str("the object is of a kind the routine does not take")
             }
+            Self::EdgeNotSplit => f.write_str("the edge was not split at the point"),
         }
     }
 }
@@ -425,6 +434,7 @@ pub(super) mod tests {
                 K::InvalidInput,
             ),
             (F::UnsupportedObjectKind, SM_ERR, K::Unsupported),
+            (F::EdgeNotSplit, SM_ERR, K::InvalidInput),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::intersect(op, failure);
