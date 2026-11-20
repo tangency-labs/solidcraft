@@ -22,10 +22,8 @@ struct App {
 }
 impl PluginHost for App {
     fn design_token(&self) -> Result<Option<craft_plugin::DesignToken>> {
-        Ok((!self.no_design).then(|| craft_plugin::DesignToken {
-            document_id: "design-one".into(),
-            revision: "0123456789abcdef0123456789abcdef:7".into(),
-        }))
+        Ok((!self.no_design)
+            .then(|| craft_plugin::DesignToken { document_id: "design-one".into(), revision: "0123456789abcdef0123456789abcdef:7".into() }))
     }
     fn command_catalog(&self) -> Vec<CommandSchema> {
         vec![CommandSchema {
