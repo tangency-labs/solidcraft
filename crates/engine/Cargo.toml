@@ -43,6 +43,7 @@ solidcraft-viewport = { workspace = true }
 tiny-skia = { workspace = true }
 png = { workspace = true }
 solidcore-ops = { workspace = true }
+solidcraft-views = { workspace = true }
 solidcore-record = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-control = { workspace = true }

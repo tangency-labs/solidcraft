@@ -1299,6 +1299,27 @@ fn packed_mesh_winding_repairs_pairs_and_leaves_non_manifold_edges_alone() {
 }
 
 #[test]
+fn mesh_winding_cannot_close_a_nonorientable_surface() {
+    // Six-vertex projective plane. Each side belongs to two triangles, but their
+    // directions cannot all be made opposite in one consistent winding.
+    let triangles = [[0, 1, 2], [0, 1, 3], [0, 2, 4], [0, 3, 5], [0, 4, 5], [1, 2, 5], [1, 3, 4], [1, 4, 5], [2, 3, 4], [2, 3, 5]];
+    let positions = [Vec3::X, Vec3::Y, Vec3::Z, -Vec3::X, -Vec3::Y, -Vec3::Z];
+    let body = crate::mesh_body(&positions, &triangles).unwrap();
+    let (_, triangles) = body.triangle_mesh().unwrap();
+    let mut edges = std::collections::BTreeMap::new();
+    for &[a, b, c] in triangles {
+        for (from, to) in [(a, b), (b, c), (c, a)] {
+            let (uses, balance) = edges.entry((from.min(to), from.max(to))).or_insert((0, 0));
+            *uses += 1;
+            *balance += if from < to { 1 } else { -1 };
+        }
+    }
+    assert!(edges.values().all(|(uses, _)| *uses == 2));
+    assert!(edges.values().any(|(_, balance)| *balance != 0));
+    assert!(!body.is_closed_mesh());
+}
+
+#[test]
 fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     // Unit cube as 12 triangles with repeated corners (welded on construction).
     let c = |i: u32| Vec3::new((i & 1) as f64 * 10.0, ((i >> 1) & 1) as f64 * 10.0, ((i >> 2) & 1) as f64 * 10.0);
@@ -1318,8 +1339,10 @@ fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     assert!((m.volume - 1000.0).abs() < 1e-9 && (m.area - 600.0).abs() < 1e-9, "{m:?}");
     assert_eq!((m.faces, m.edges, m.vertices), (12, 18, 8));
     let moved = crate::transform(&b, Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.7).unwrap();
+    assert!(moved.is_closed_mesh());
     assert!((measure(&moved).unwrap().volume - 1000.0).abs() < 1e-9);
     let mirrored = crate::transform_matrix(&b, [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]).unwrap();
+    assert!(mirrored.is_closed_mesh());
     assert!((measure(&mirrored).unwrap().volume - 1000.0).abs() < 1e-9);
     let solid = box_solid(Vec3::ZERO, Vec3::new(5.0, 5.0, 5.0)).unwrap();
     assert!(fillet(&b, &[Vec3::new(5.0, 0.0, 0.0)], 1.0).unwrap_err().to_string().contains("mesh"));

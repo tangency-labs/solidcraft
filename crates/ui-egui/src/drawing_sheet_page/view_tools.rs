@@ -48,7 +48,8 @@ pub(super) fn owns_drag(app: &SolveApp, response: &egui::Response, at: OnScreen,
     // With the Dimension tool in hand a placed dimension or note still drags, as in a sketch; a
     // view does not.
     let tool = drawing_workspace::placing_dimension(app);
-    !drawing_workspace::placing_view(app)
+    !matches!(app.viewport.nav, Some(crate::viewport::NavMode::Pan | crate::viewport::NavMode::Zoom))
+        && !drawing_workspace::placing_view(app)
         && !drawing_workspace::placing_note(app)
         && ((!tool && app.drawing_workspace.page.view_tools.drag.is_some())
             || dragging_dimension()
@@ -234,9 +235,17 @@ impl Canvas<'_> {
             crate::tool_modifiers::selection_click(crate::tool_modifiers::Held::from_modifiers(mods), app.preferences.selection_shift_add_only);
         // The Dimension tool leaves a placed dimension or note draggable, as the sketch's does.
         let tool = placing && drawing_workspace::placing_dimension(app);
+        let navigating = matches!(app.viewport.nav, Some(crate::viewport::NavMode::Pan | crate::viewport::NavMode::Zoom));
+        if navigating {
+            state.drag = None;
+            if dragging_dimension() {
+                crate::dim_view::drag_end();
+            }
+        }
         if placing && !tool {
             state.drag = None;
-        } else if !tool
+        } else if !navigating
+            && !tool
             && self.response.drag_started_by(PointerButton::Primary)
             && let Some((_, pointer)) = selected_origin(app, self.response, self.at, self.objects)
             && let Some(items) = Some(self.group(app)).filter(|items| items.len() > 1)
@@ -244,7 +253,8 @@ impl Canvas<'_> {
             // A drag from one of several selected things moves them all together by the pointer's
             // way, as a sketch drags its selected geometry: one undo step.
             crate::dim_view::begin_group_drag(app, items, pointer);
-        } else if self.response.drag_started_by(PointerButton::Primary)
+        } else if !navigating
+            && self.response.drag_started_by(PointerButton::Primary)
             && let Some((dimension, pointer)) = dimension_origin(app, self.response, self.at, self.objects)
             // With the tool in hand only its text is the dimension's: the rest is the tool's to pick.
             && (!tool || self.drawing.notes.by_id(dimension).is_some() || over_text(app, dimension, pointer, HOVER_BAND / self.at.scale))
@@ -263,7 +273,8 @@ impl Canvas<'_> {
         } else if tool {
             // Nothing else of the sheet's own with the tool in hand: its clicks are picks.
             state.drag = None;
-        } else if self.response.drag_started_by(PointerButton::Primary)
+        } else if !navigating
+            && self.response.drag_started_by(PointerButton::Primary)
             && let Some((view, pointer)) = origin(app, self.response, self.at, self.objects)
             && let Ok(from) = self.drawing.view_centre(view)
         {

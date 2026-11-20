@@ -78,16 +78,17 @@ use solidcraft_doc::bom::{Tree, Unlisted};
 use solidcraft_doc::drawing::balloon::{Balloon, RowRead, balloon_rows};
 use solidcraft_doc::drawing::dimension::{self, Dimension};
 use solidcraft_doc::drawing::note::{Anchor, Note};
-use solidcraft_doc::drawing::view::{FlatOf, ResolvedView, View, ViewPlace};
+use solidcraft_doc::drawing::view::{FlatOf, ResolvedView, View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing::{Drawing, FillRegionStatus, ResolvedSketchFill, Sheet, SheetSketch, SketchFill, Updates};
 use solidcraft_doc::drawing_view::TangentEdges;
 use solidcraft_doc::{DocError, Document, ModelState, ThreadInfo, expr::ParamDef, ids};
 use solidcraft_geom::cell::{Part, Projection};
-use solidcraft_geom::drawing_view::{ViewFrame, is_paper_coordinate};
+use solidcraft_geom::drawing_detail::{Boundary, Shape};
+use solidcraft_geom::drawing_view::{Scale, ViewFrame, is_paper_coordinate};
 use solidcraft_geom::hlr::Source;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::text::{Font, TextRun, font_in};
-use solidcraft_geom::paper::{DrawnFor, Group, Item, MAX_RECORDS, ObjectKind, Picture, Scene};
+use solidcraft_geom::paper::{Clip, DrawnFor, Group, Item, MAX_RECORDS, ObjectKind, Picture, Scene};
 use solidcraft_geom::pixel_grid::{GridWindow, PixelGrid, PixelGridError};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb2, ArcMap};
@@ -910,8 +911,7 @@ fn draw(
     };
     let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: why.clone(), hatches: Vec::new() };
     let styles = Styles::from(view);
-    let not_drawable = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
-    let not_drawable = not_drawable.or_else(|| crate::drawing_view::not_cut_yet(view));
+    let not_drawable = crate::drawing_view::not_cut_yet(view).or_else(|| crate::drawing_view::not_detailed_yet(view));
     if let Some(why) = not_drawable.or_else(|| crate::drawing_view::not_drawable_apart(view)) {
         return none(Status::Failed(why.into()));
     }
@@ -929,10 +929,12 @@ fn draw(
     let reference_hides_model = view.reference_hides_model.value;
     let (hidden, reference_hidden) = (view.visual_style.value.draws_hidden(), view.reference_style.value.draws_hidden());
     let request = LineRequest { shows: around, hidden, reference_hidden, reference_hides_model, tangent_edges, chord_mm };
-    let frame = match crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, Vec2::ZERO, CMD) {
+    let frame = match crate::drawing_view::view_frame(view, &extents.model, Vec2::ZERO, CMD) {
         Ok(frame) => frame,
         Err(e) => return none(Status::Failed(reason(e))),
     };
+    // A detail view shows only its region: its boundary is the region's.
+    let around = view.detail.map_or(around, |region| region.shape().bounds());
     let lines = frame.boundary(&around).map_err(|e| bad(CMD, e.to_string())).and_then(|rect| {
         let mut lines = crate::drawing_view::lines(s, &set, &frame, &request, prepared, CMD)?;
         styles.leave_shaded_to_pictures(&mut lines);
@@ -944,7 +946,16 @@ fn draw(
     });
     match lines {
         Ok((lines, rect, hatched)) => {
-            let (mut group, drew) = paper_lines(&lines, id, view.line_group.value);
+            let (group, drew) = paper_lines(&lines, id, view.line_group.value);
+            // A detail view's lines are cut to its window, each line on its own, so each part keeps
+            // the line's owner.
+            let (mut group, drew) = match view.detail {
+                Some(region) => match cut_to_window(&group, &drew, &crate::drawing_view::detail_window(&region, &frame)) {
+                    Ok(cut) => cut,
+                    Err(e) => return none(Status::Failed(e)),
+                },
+                None => (group, drew),
+            };
             // The pictures, then the hatching, go under the strokes, so the owners start with one empty
             // entry for each.
             let mut under = picture_items(id, &view_parts(&set, styles), rect);
@@ -991,6 +1002,21 @@ fn draw(
         }
         Err(e) => none(Status::Failed(reason(e))),
     }
+}
+
+/// `group`'s items cut to `window`, one at a time ([`solidcraft_geom::paper::clip::clipped`]), and
+/// for each part the line of `drew` its item drew.
+fn cut_to_window(group: &Group, drew: &[Option<usize>], window: &Shape) -> std::result::Result<(Group, Vec<Option<usize>>), String> {
+    let clip = Clip::from(*window);
+    let mut items = Vec::with_capacity(group.items.len());
+    let mut owners = Vec::with_capacity(drew.len());
+    for (at, item) in group.items.iter().enumerate() {
+        let one = Group { object: group.object, kind: group.kind, items: vec![item.clone()] };
+        let cut = solidcraft_geom::paper::clip::clipped(&one, &clip).map_err(|e| format!("its region can't be cut: {e}"))?;
+        owners.extend(std::iter::repeat_n(drew.get(at).copied().flatten(), cut.items.len()));
+        items.extend(cut.items);
+    }
+    Ok((Group { items, ..group.clone() }, owners))
 }
 
 /// A section view's hatching as paper items: each filled body's cut faces painted solid, then each
@@ -1324,7 +1350,29 @@ struct SetLabel {
     /// Where its middle sits from its view's centre: none above the view ([`label_place`]).
     offset: Option<Vec2>,
     why: Option<String>,
+    /// A detail view's mark on its parent: its boundary and its letter.
+    mark: Option<DetailMark>,
 }
+
+/// What a detail view draws on its parent: the outline of its region, thin, and its letter beside
+/// it (ISO 128-30), as [`solidcraft_geom::drawing_detail::Detail`] places them on the parent's
+/// paper.
+#[derive(Clone, Debug, PartialEq)]
+struct DetailMark {
+    parent: u64,
+    boundary: Boundary,
+    scale: Scale,
+    line_group: LineGroup,
+    letter: Group,
+    fonts: Vec<Font>,
+    half: Vec2,
+}
+
+/// Where a detail's letter sits, from its outline's centre: up and to the right, as a reader looks
+/// for it.
+const MARK_DIRECTION: f64 = std::f64::consts::FRAC_PI_4;
+/// The gap between a detail's outline and its letter, in paper millimetres.
+const MARK_GAP_MM: f64 = 2.0;
 
 /// The labels `views` of `d` draw, in their order ([`Drawing::label_text`]), set in `lettering`; and
 /// whether a text waits for a font to fall back to, which only the window's sheet leaves to the
@@ -1340,10 +1388,32 @@ fn view_labels<'a>(d: &Drawing, views: impl Iterator<Item = &'a View>, lettering
     let mut set = |(view, text, offset): (u64, String, Option<Vec2>)| {
         let (paper, half) = crate::drawing_note_paper::label_group(view, &text, &fonts);
         pending |= paper.pending;
-        SetLabel { view, group: paper.group, fonts: paper.fonts, half, offset, why: paper.why }
+        let mark = detail_mark(d, view, &fonts);
+        pending |= mark.as_ref().is_some_and(|(_, waits)| *waits);
+        SetLabel { view, group: paper.group, fonts: paper.fonts, half, offset, why: paper.why, mark: mark.map(|(mark, _)| mark) }
     };
     let labels = texts.into_iter().map(&mut set).collect();
     (labels, pending)
+}
+
+/// Detail view `view`'s mark on its parent, its letter set in `fonts`, and whether that text waits
+/// for a font: none for any other view, or one whose letter isn't shown.
+fn detail_mark(d: &Drawing, view: u64, fonts: &PaperFonts) -> Option<(DetailMark, bool)> {
+    let record = d.view(view)?;
+    let ViewKind::Detail { parent, boundary } = &record.kind else { return None };
+    let label = record.label.as_ref().filter(|label| label.shown && label.show_letter)?;
+    let resolved = d.resolve_view(view).ok()?;
+    let (paper, half) = crate::drawing_note_paper::label_group(view, &label.letter, fonts);
+    let mark = DetailMark {
+        parent: *parent,
+        boundary: boundary.geometry().ok()?,
+        scale: resolved.scale.value,
+        line_group: resolved.line_group.value,
+        letter: paper.group,
+        fonts: paper.fonts,
+        half,
+    };
+    Some((mark, paper.pending))
 }
 
 /// Where a label `half` in size sits from its view's centre: at its `offset`, else centred over the
@@ -1516,6 +1586,21 @@ impl Assembly {
         }
     }
 
+    /// Adds detail view `view`'s `mark` on its parent, where the parent is drawn: its outline and its
+    /// letter. Nothing is drawn while the parent isn't on the sheet, or the region doesn't fit it.
+    fn add_mark(&mut self, view: u64, mark: &DetailMark) {
+        let Some((frame, centre)) = self.placed.get(&mark.parent).copied() else { return };
+        let Ok(detail) = solidcraft_geom::drawing_detail::Detail::new(&frame, mark.boundary, mark.scale, Vec2::ZERO) else { return };
+        let Ok(anchor) = detail.label_anchor(MARK_DIRECTION, MARK_GAP_MM) else { return };
+        let width_mm = LineKind::Thin.width_mm(mark.line_group);
+        let mut items = vec![Item::Stroke { path: detail.outline(), closed: true, width_mm, pattern: None }];
+        // The letter's middle a half its size further out, so its nearest corner meets the gap.
+        let out = Vec2::from_angle(MARK_DIRECTION);
+        items.extend(moved(&mark.letter, anchor + Vec2::new(out.x * mark.half.x, out.y * mark.half.y)).items);
+        let group = Group { object: view, kind: ObjectKind::ViewLabel, items };
+        let _ = self.add(&group, &mark.fonts, centre, DrawnFor::View);
+    }
+
     /// Adds the sheet's `tables`, each already where it stands on the sheet, in their own paint band
     /// ([`ObjectKind::band`]), and gives each one's state. One that can't be read, or that would take
     /// the scene past a paper scene's limits, is left out and says why; the rest still draw.
@@ -1675,6 +1760,12 @@ fn assemble<D: Borrow<Drawn>>(
             .extend(SheetObject::on_paper(view, ObjectKind::View, lines.unwrap_or(Aabb2::EMPTY), boundary_mm).map(banded(DrawnFor::View)));
         let label = labels.iter().find(|label| label.view == view).map(|label| assembly.add_label(label, centre, drawn.boundary));
         assembly.states.push(ViewState { view, status, stats: drawn.stats, why: drawn.why.clone(), label, hatches: drawn.hatches.clone() });
+    }
+    // Once every view is placed: each detail's mark on its parent.
+    for label in labels {
+        if let Some(mark) = &label.mark {
+            assembly.add_mark(label.view, mark);
+        }
     }
     Ok(assembly)
 }

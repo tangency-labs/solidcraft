@@ -21,7 +21,7 @@ pub struct ExportParams {
     #[serde(default, deserialize_with = "some_sheets", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Vec<String>")]
     pub sheets: Option<Vec<String>>,
-    /// The file format (svg when not given). DXF is not supported yet.
+    /// The file format (svg when not given).
     #[serde(default)]
     pub format: ExportFormat,
     /// The file to write, ending in the format's extension (the reply holds the document when
@@ -41,6 +41,17 @@ pub struct ExportParams {
     /// PNG is rgb.
     #[serde(default)]
     pub paper: ExportPaper,
+}
+
+/// Print the whole open drawing: its PDF, written to a file or returned.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct PrintParams {
+    /// The .pdf file to write (the reply holds the document when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub path: Option<String>,
 }
 
 /// [`sheet_ref`], for a key that may be absent (`null` is refused).
@@ -72,6 +83,7 @@ pub enum ExportFormat {
     Png,
     /// Vector, at the sheet's paper size, one page a sheet.
     Pdf,
+    /// Lines in millimetres, a layer for each kind of line; pictures left out.
     Dxf,
 }
 
@@ -146,6 +158,9 @@ pub struct ExportReport {
     /// A PNG's width and height in pixels.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pixels: Option<[u32; 2]>,
+    /// A DXF's pictures (shaded views, images), left out: it holds only lines.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pictures_left_out: Option<usize>,
 }
 
 /// What `drawing.export` returns.
@@ -165,6 +180,9 @@ pub struct ExportResult {
     /// The SVG's text when no path was given.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub svg: Option<String>,
+    /// The DXF's text when no path was given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dxf: Option<String>,
     /// The document as base64 when no path was given and it is binary (PNG, PDF).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<String>,

@@ -408,6 +408,114 @@ fn entry_arguments_are_checked_as_strictly_as_app_commands() {
 }
 
 #[test]
+fn conditional_inputs_hide_required_fields_and_reject_filtered_choices() {
+    let schema = json!({"type":"object","required":["shelves"],"properties":{
+        "storage":{"type":"string","enum":["shelves","drawers"]},
+        "shelves":{"type":"integer","x-solidcraft-visible-when":{"field":"storage","eq":"shelves"}},
+        "size":{"type":"string","oneOf":[
+            {"const":"small","x-solidcraft-when":{"field":"storage","eq":"shelves"}},
+            {"const":"large","x-solidcraft-when":{"not":{"field":"storage","in":["shelves"]}}}]}
+    }});
+    assert_eq!(check_input(&schema, &json!({"storage":"drawers","size":"large"})), Ok(()));
+    assert!(matches!(check_input(&schema, &json!({"storage":"shelves"})), Err(HostError::InvalidInput { field, .. }) if field == "params.shelves"));
+    assert!(
+        matches!(check_input(&schema, &json!({"storage":"drawers","size":"small"})), Err(HostError::InvalidInput { field, .. }) if field == "params.size")
+    );
+}
+
+#[test]
+fn conditional_schemas_reject_missing_non_scalar_impossible_and_cyclic_references() {
+    for properties in [
+        json!({"a":{"type":"number","x-solidcraft-visible-when":{"field":"missing","eq":true}}}),
+        json!({"a":{"type":"array"},"b":{"type":"number","x-solidcraft-enabled-when":{"field":"a","eq":[]}}}),
+        json!({"a":{"type":"string","enum":["yes"]},"b":{"type":"number","x-solidcraft-defaults":[{"when":{"field":"a","eq":"no"},"value":1}]}}),
+        json!({"a":{"type":"string","oneOf":[{"const":"yes"}]},"b":{"type":"string","oneOf":[{"const":"ok","x-solidcraft-when":{"field":"a","eq":"no"}}]}}),
+        json!({"a":{"type":"boolean"},"b":{"type":"number","x-solidcraft-visible-when":{"field":"a","eq":"true"}}}),
+        json!({"a":{"type":"boolean","x-solidcraft-visible-when":{"field":"b","eq":true}},"b":{"type":"boolean","x-solidcraft-enabled-when":{"field":"a","eq":true}}}),
+    ] {
+        let mut manifest = manifest();
+        manifest["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":properties}}]);
+        assert!(matches!(parse(&manifest), Err(HostError::InvalidManifest { .. })), "{properties}");
+    }
+}
+
+#[test]
+fn conditional_inputs_omit_hidden_values_and_keep_disabled_values_in_dependency_order() {
+    let schema = json!({"type":"object","required":["count"],"properties":{
+        "mode":{"type":"string","enum":["a","b"]},
+        "child":{"type":"boolean","x-solidcraft-visible-when":{"field":"mode","eq":"a"}},
+        "count":{"type":"integer","x-solidcraft-visible-when":{"all":[{"field":"child","eq":true},{"any":[{"field":"mode","in":["a"]}]}]}},
+        "disabled":{"type":"integer","x-solidcraft-enabled-when":{"field":"mode","eq":"a"}}
+    }});
+    assert_eq!(prepare_input(&schema, &json!({"mode":"b","child":true,"count":"ignored","disabled":6})), Ok(json!({"mode":"b","disabled":6})));
+    assert!(matches!(check_input(&schema, &json!({"mode":"a","child":true})), Err(HostError::InvalidInput { field, .. }) if field == "params.count"));
+    let rules = conditions::InputConditions::parse(&schema).unwrap();
+    assert!(!rules.fields["disabled"].enabled(json!({"mode":"b"}).as_object().unwrap()));
+}
+
+#[test]
+fn conditional_schema_grammar_literals_defaults_and_work_are_bounded() {
+    let property = json!({"type":"integer","enum":[1,2]});
+    for condition in [
+        json!({"field":"control","eq":3}),
+        json!({"field":"control","eq":"1"}),
+        json!({"field":"control","in":[1,"2"]}),
+        json!({"all":{}}),
+        json!({"not":true}),
+        json!({"field":"control","eq":1,"in":[1]}),
+        json!({"unknown":[]}),
+    ] {
+        let schema = json!({"type":"object","properties":{"control":property,"value":{"type":"number","x-solidcraft-visible-when":condition}}});
+        assert!(conditions::validate_conditions(&schema).is_err(), "{condition}");
+    }
+    for defaults in [json!({}), json!([{"when":{"field":"control","eq":1},"value":"bad"}]), json!([{"when":{"field":"control","eq":1}}])] {
+        let schema = json!({"type":"object","properties":{"control":property,"value":{"type":"number","x-solidcraft-defaults":defaults}}});
+        assert!(conditions::validate_conditions(&schema).is_err());
+    }
+    let mut condition = json!({"field":"control","eq":1});
+    for _ in 0..40 {
+        condition = json!({"not":condition});
+    }
+    let schema = json!({"type":"object","properties":{"control":property,"value":{"type":"number","x-solidcraft-visible-when":condition}}});
+    assert!(conditions::validate_conditions(&schema).is_err());
+    let condition = json!({"all":vec![json!({"field":"control","eq":1});4097]});
+    let schema = json!({"type":"object","properties":{"control":property,"value":{"type":"number","x-solidcraft-visible-when":condition}}});
+    assert!(conditions::validate_conditions(&schema).is_err());
+}
+
+#[test]
+fn conditional_numeric_values_match_gui_numbers_without_rounding_large_integers() {
+    let schema = json!({"type":"object","required":["count"],"properties":{
+        "mode":{"type":"number","enum":[1,9007199254740992_u64,9007199254740993_u64]},
+        "count":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","in":[1,9007199254740993_u64]}}
+    }});
+    assert!(matches!(check_input(&schema, &json!({"mode":1.0})), Err(HostError::InvalidInput { field, .. }) if field == "params.count"));
+    assert_eq!(check_input(&schema, &json!({"mode":9007199254740992.0_f64})), Ok(()));
+    assert!(
+        matches!(check_input(&schema, &json!({"mode":9007199254740993_u64})), Err(HostError::InvalidInput { field, .. }) if field == "params.count")
+    );
+}
+
+#[test]
+fn conditional_preparation_preserves_nested_objects_and_bounds_unconstrained_input_depth() {
+    let schema = json!({"type":"object","properties":{
+        "nested":{"type":"object","required":["count"],"properties":{
+            "enabled":{"type":"boolean"},"count":{"type":"number","x-solidcraft-visible-when":{"field":"enabled","eq":true}}
+        }},
+        "composition":{"type":"object","properties":{"a":{},"b":{}},"oneOf":[{"properties":{"a":{"type":"integer"}}}]}
+    }});
+    assert!(conditions::has_conditions(&schema), "nested annotations opt into conditional execution");
+    assert!(!conditions::has_conditions(&json!({"type":"object","properties":{"size":{"type":"number"}}})));
+    let value = json!({"nested":{"enabled":false,"count":"ignored"},"composition":{"a":1,"b":2}});
+    assert_eq!(prepare_input(&schema, &value), Ok(json!({"nested":{"enabled":false},"composition":{"a":1,"b":2}})));
+    let mut deep = json!(0);
+    for _ in 0..40 {
+        deep = json!({"nested":deep});
+    }
+    assert!(prepare_input(&json!({}), &deep).is_err());
+}
+
+#[test]
 fn additional_property_schemas_are_listed_as_strictly_as_they_are_checked() {
     let schema = json!({"type":"object","additionalProperties":{"type":"object","properties":{"x":{}}}});
     let listed = strict_input_schema(&schema);
