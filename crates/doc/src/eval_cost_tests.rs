@@ -1536,14 +1536,7 @@ fn a_mirror_of_a_cut_naming_a_further_placements_body_reads_every_placement() {
     let cut = doc.features.last().unwrap().id;
     doc.feature_mut(cut).unwrap().participants = vec![format!("{plate} (Part:2)")];
     let second = doc.add_occurrence(part, 0, rigid(Vec3::new(50.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
-    let kind = FeatureKind::Mirror {
-        features: vec![FeatureId(cut)],
-        plane: PlaneRef::Origin { name: "YZ".into() },
-        bodies: Vec::new(),
-        combine: false,
-        placements: Vec::new(),
-    };
-    let mirror = doc.add_feature(kind, None).unwrap();
+    let mirror = mirror_of(&mut doc, &[cut], PlaneRef::Origin { name: "YZ".into() });
     let digests = |doc: &Document| {
         let mut model = Model::new();
         model.evaluate(doc);
@@ -1565,14 +1558,7 @@ fn a_mirror_of_a_cut_reads_where_the_cuts_target_is_placed() {
     let other = doc.add_component(Some("Other"), 0).unwrap();
     plate_with_holes(&mut doc, part, 0, 1);
     let cut = doc.features.last().unwrap().id;
-    let kind = FeatureKind::Mirror {
-        features: vec![FeatureId(cut)],
-        plane: PlaneRef::Origin { name: "YZ".into() },
-        bodies: Vec::new(),
-        combine: false,
-        placements: Vec::new(),
-    };
-    let mirror = doc.add_feature(kind, None).unwrap();
+    let mirror = mirror_of(&mut doc, &[cut], PlaneRef::Origin { name: "YZ".into() });
     let digest = |doc: &Document| {
         let mut model = Model::new();
         model.evaluate(doc);
@@ -1584,6 +1570,49 @@ fn a_mirror_of_a_cut_reads_where_the_cuts_target_is_placed() {
     assert_eq!(digest(&doc), before, "another part moved");
     place(&mut doc, part, rigid(Vec3::new(0.0, 0.0, 20.0), Vec3::ZERO, Vec3::Z, std::f64::consts::PI));
     assert_ne!(digest(&doc), before, "the cut's target moved");
+}
+
+/// A mirror of `features` across `plane`, in the root.
+fn mirror_of(doc: &mut Document, features: &[u64], plane: PlaneRef) -> u64 {
+    let kind = FeatureKind::Mirror {
+        features: features.iter().map(|id| FeatureId(*id)).collect(),
+        plane,
+        bodies: Vec::new(),
+        combine: false,
+        placements: Vec::new(),
+    };
+    doc.add_feature(kind, None).unwrap()
+}
+
+/// #19451: a mirror of a round in a design with nothing placed copies it as before, without the
+/// exact box of any body: those found the frame the round's edges are kept in, which is the
+/// mirror's own when nothing is placed.
+#[test]
+fn a_mirror_of_a_round_with_nothing_placed_measures_no_box() {
+    let mut doc = Document::new("blocks");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(-10.0, 20.0, 0.0), [20.0, 10.0, 10.0]);
+    let kind = FeatureKind::Fillet {
+        edges: vec![Position(Vec3::new(10.0, 5.0, 5.0))],
+        radius: "1".into(),
+        body: None,
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain: false,
+        edge_radii: Vec::new(),
+    };
+    let round = doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let rounded = volume(&model, "A");
+    let mirror = mirror_of(&mut doc, &[round], PlaneRef::Origin { name: "YZ".into() });
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(model.result(mirror).and_then(|r| r.error.clone()), None);
+    assert!(volume(&model, "A") < rounded - 1e-3, "the copy rounds A's other edge");
+    assert_eq!(work.tight_boxes, 0, "{work:?}");
 }
 
 /// `comps` parts, each with `bodies` boxes, `sketches` sketches and `taps` taps, placed `copies`

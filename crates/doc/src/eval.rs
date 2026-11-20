@@ -3184,7 +3184,7 @@ fn hash_placement(m: &Mat, h: &mut impl Hasher) {
 fn copy_frames_digest(doc: &Document, f: &Feature, features: &[FeatureId], st: &ModelState, reads: &mut PlacementReads, h: &mut impl Hasher) -> bool {
     let own = f.component;
     let sources = replayed_sources(doc, features);
-    if (doc.occurrences.is_empty() && doc.body_offsets.is_empty()) || !sources.iter().any(|g| kept_in(doc, st, own, g).is_some()) {
+    if !sources.iter().any(|g| kept_in(doc, st, own, g).is_some()) {
         return false;
     }
     let vals = evaluation_values(doc).0;
@@ -6371,6 +6371,8 @@ fn body_at(st: &ModelState, body: &Option<crate::BodyName>, points: &[Vec3]) -> 
 
 /// How far `p` is from body `b`'s exact box (0 inside it).
 fn box_dist(b: &ModelBody, p: Vec3) -> f64 {
+    #[cfg(test)]
+    cost_tests::count(|c| c.tight_boxes += 1);
     match b.body.exact_bounds() {
         Ok(bb) if !bb.is_empty() => Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z)).dist(p),
         _ => f64::INFINITY,
@@ -11310,8 +11312,12 @@ fn copy_targets<'a>(st: &ModelState, f: &'a Feature, src: &Feature) -> (Operatio
 
 /// The frame `src`'s geometry is kept in, in component `own`'s frame, when it is another
 /// (#19451): its tools' component's ([`tools_component`]), a pattern's or mirror's own
-/// component's (its copies' transforms), else that of the body it picked on or made.
+/// component's (its copies' transforms), else that of the body it picked on or made. Nothing,
+/// without measuring a body, when nothing is placed.
 fn kept_in(doc: &Document, st: &ModelState, own: u64, src: &Feature) -> Option<Mat> {
+    if doc.occurrences.is_empty() && doc.body_offsets.is_empty() {
+        return None;
+    }
     match (&src.kind, tools_component(doc, src)) {
         (_, Some(c)) => component_in(doc, own, c),
         (FeatureKind::Pattern { bodies, .. } | FeatureKind::Mirror { bodies, .. }, None) if bodies.is_empty() => {
