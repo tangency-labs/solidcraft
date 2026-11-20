@@ -227,12 +227,13 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
     };
     let mut edit =
         app.drawing_workspace.view_edit.take().filter(|edit| edit.view == view).unwrap_or_else(|| ViewEdit { view, scale: scale.to_string(), style });
-    let styles = [VisualStyle::Visible, VisualStyle::VisibleHidden];
-    let mut labels = vec![tr("ui.drawing_panel.visible"), tr("ui.drawing_panel.hidden")];
+    // The styles a view can be drawn in. Shaded with lines over it waits on the view's exact lines
+    // (W06, `drawing_view::not_drawable`): a view already saved in one shows it, as the last choice.
+    let styles = [VisualStyle::Visible, VisualStyle::VisibleHidden, VisualStyle::Shaded];
+    let mut labels = vec![tr("ui.drawing_panel.visible"), tr("ui.drawing_panel.hidden"), tr("ui.drawing_panel.shaded")];
     let mut index = styles.iter().position(|candidate| *candidate == edit.style).unwrap_or(styles.len());
     if index == styles.len() {
         labels.push(tr(match edit.style {
-            VisualStyle::Shaded => "ui.drawing_panel.shaded",
             VisualStyle::ShadedVisible => "ui.drawing_panel.shaded_visible",
             _ => "ui.drawing_panel.shaded_hidden",
         }));
