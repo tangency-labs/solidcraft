@@ -42,9 +42,9 @@
 use super::original_trim::OriginalSurfaceDeletion;
 use super::{invalid, FilletBody, FilletObject, FilletSession, SessionObjects};
 use crate::blend::fillet_cliff_overflow::Refusal;
+use crate::blend::fillet_corner::p1::keeping_cause;
 use crate::blend::fillet_executive::p3::{
-    caught, keeping_cause, ErrorInfo, FilletExecutive, FilletFinishAccess, StitchAttempt,
-    StitchSettings,
+    caught, ErrorInfo, FilletExecutive, FilletFinishAccess, StitchAttempt, StitchSettings,
 };
 use crate::blend::fillet_geom::p1::FilletErrorType;
 use crate::error::{EntityRef, Result, SolidError};

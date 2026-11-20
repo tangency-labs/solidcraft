@@ -40,6 +40,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::blend::fillet_corner::p1::keeping_cause;
 use crate::blend::fillet_executive::p1::ExecutiveObjects;
 use crate::blend::fillet_executive::session::ball_regular::{BallCheck, BallStation};
 use crate::blend::fillet_geom::p1::{FilStatus, FilletCornerType, FilletEdgeType, FilletErrorType};
@@ -133,18 +134,6 @@ fn caught_but_refusal(result: Result<()>) -> Result<Result<()>> {
 /// the same operation, phrase and status.
 fn failure_after(cause: SolidError) -> SolidError {
     keeping_cause(failure(), cause)
-}
-
-/// `error`, a failure the executive reports in place of a stage's error, keeping `cause`,
-/// that stage's error (guide rule 6, #13790). Its operation, reason and status stay
-/// `error`'s. **An `error` that is not a [`SolidError::Failed`] is returned as it is and
-/// `cause` is dropped**, since only a `Failed` record holds a cause; every caller passes one
-/// built by `SolidError::blend_failed`, which is always a `Failed`.
-pub(super) fn keeping_cause(error: SolidError, cause: SolidError) -> SolidError {
-    match error {
-        SolidError::Failed(failure) => (*failure).caused_by(cause).into_error(),
-        other => other,
-    }
 }
 
 /// Which of the port's blend-too-large refusals noted [`FilletErrorType::NoRoom`] (not
@@ -3888,7 +3877,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             self.error.code = 7; // SM_FILERR_BAD_MERGE
             self.error.comment =
                 "Fillet Stitching Failure: Error Stitching Fillets Together".into();
-            return Err(failure());
+            return Err(failure_after(error));
         }
         Ok(attempt)
     }
@@ -4758,7 +4747,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     self.error.code = 7; // SM_FILERR_BAD_MERGE
                     self.error.comment =
                         "Fillet Stitching Failure: Error Stitching Fillets To Original Brep".into();
-                    return Err(failure());
+                    return Err(failure_after(error.clone()));
                 }
             }
             tolerance *= 2.0;
