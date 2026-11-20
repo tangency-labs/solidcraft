@@ -363,7 +363,6 @@ pub(crate) fn placement_overlay(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let mut chosen = None;
     let mut buttons = 0;
-    let tokens = Tokens::get();
     let container = crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Navigation);
     for (i, zone) in zones(app, view, free, &covers).into_iter().enumerate() {
         let button = zone.rect.shrink(2.0);
@@ -389,7 +388,8 @@ pub(crate) fn placement_overlay(app: &mut SolveApp, ctx: &egui::Context) {
             .movable(false)
             .fade_in(false)
             .show(ctx, |ui| {
-                let response = ui.add_sized(size, egui::Button::new(solidcraft_ui_text::tr(label)).fill(tokens.dialog_body));
+                let rect = Rect::from_min_size(ui.next_widget_position(), size);
+                let response = crate::ui_kit::button_at(ui, "view_placement_zone", rect, solidcraft_ui_text::tr(label), crate::ui_kit::Button::Normal);
                 if response.hovered() || response.has_focus() {
                     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("view_tile_preview")));
                     paint_preview(&painter, zone.preview);
@@ -482,10 +482,13 @@ fn empty_picker(app: &SolveApp, ui: &mut egui::Ui, ordinal: usize, cell: Rect) -
         let mut chosen = None;
         crate::ui_kit::Menu::button_with(
             &mut child,
-            |ui, _| ui.add_sized(button.size(), egui::Button::new(title)),
+            |ui, _| {
+                let rect = Rect::from_min_size(ui.next_widget_position(), button.size());
+                crate::ui_kit::button_at(ui, "empty_cell_open", rect, title, crate::ui_kit::Button::Normal)
+            },
             |ui| {
                 for (angle, label) in angles {
-                    if ui.button(solidcraft_ui_text::tr_label(label)).clicked() {
+                    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label(label), "").clicked() {
                         chosen = Some(EmptyAction::Angle(angle));
                         ui.close();
                     }
@@ -494,7 +497,7 @@ fn empty_picker(app: &SolveApp, ui: &mut egui::Ui, ordinal: usize, cell: Rect) -
                     ui.separator();
                     egui::ScrollArea::vertical().max_height(210.0).show(ui, |ui| {
                         for (id, name) in &open {
-                            if ui.button(*name).clicked() {
+                            if crate::ui_kit::menu::button(ui, name, "").clicked() {
                                 chosen = Some(EmptyAction::Open(*id));
                                 ui.close();
                             }
@@ -502,7 +505,7 @@ fn empty_picker(app: &SolveApp, ui: &mut egui::Ui, ordinal: usize, cell: Rect) -
                     });
                 }
                 ui.separator();
-                if ui.button(solidcraft_ui_text::tr_label("Close this cell")).clicked() {
+                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Close this cell"), "").clicked() {
                     chosen = Some(EmptyAction::Close);
                     ui.close();
                 }
