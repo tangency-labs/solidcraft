@@ -369,10 +369,11 @@ mod tests {
         for dark in [false, true] {
             solidcraft_theme::set_dark(dark);
             let ctx = crate::test_support::context();
-            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                 ui.set_width(262.0);
                 super::paint_layout(ui, LayoutPreview { compact: false, labels: true, history_in_browser: false }, "Where the panels go");
             });
+            output.textures_delta.clear();
             let background = output
                 .shapes
                 .iter()

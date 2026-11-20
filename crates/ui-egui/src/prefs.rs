@@ -8100,9 +8100,10 @@ mod tests {
         // The view: two bands, the middle colour across the middle.
         let ctx = egui::Context::default();
         let t = Tokens::get();
-        let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
             solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_middle, t.viewport_bottom)
         });
+        out.textures_delta.clear();
         let mesh = out
             .shapes
             .iter()
