@@ -1096,21 +1096,25 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     // HDR's typed JSON representation is deliberately strict: no empty placeholders or
     // container-only blob fields may reach the document deserializer. A newer build's section that
     // doesn't pass stays as it is, which the document reader then leaves out.
+    // Their files are the container's parts, handed to the reader as bytes: never text.
+    let mut parts = solidcraft_doc::render_resources::ContainerParts::default();
     let hydrated = if newer {
         let mut copy = metadata.clone();
+        let mut found = solidcraft_doc::render_resources::ContainerParts::default();
         let done = check_hdr_manifest(&bytes).and_then(|()| check_texture_manifest(&bytes)).and_then(|()| {
-            let hdr = hydrate_hdr_resources(&mut copy, reader)?;
-            Ok(hydrate_texture_resources(&mut copy, reader)? || hdr)
+            let hdr = hydrate_hdr_resources(&mut copy, reader, &mut found)?;
+            Ok(hydrate_texture_resources(&mut copy, reader, &mut found)? || hdr)
         });
         if done.is_ok() {
             metadata = copy;
+            parts = found;
         }
         done.unwrap_or(false)
     } else {
         check_hdr_manifest(&bytes)?;
         check_texture_manifest(&bytes)?;
-        let hdr = hydrate_hdr_resources(&mut metadata, reader)?;
-        hydrate_texture_resources(&mut metadata, reader)? || hdr
+        let hdr = hydrate_hdr_resources(&mut metadata, reader, &mut parts)?;
+        hydrate_texture_resources(&mut metadata, reader, &mut parts)? || hdr
     };
     // A cloud's points are in its blob, so its segments, triangles and properties are read and
     // checked with them below (`decode_cloud`), not against the empty points the metadata holds
@@ -1126,7 +1130,7 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     };
     // Migrations and all document validation run on the small parametric metadata.
     // Binary arrays have their own equivalent numeric/index validation below.
-    let mut doc = Document::from_json(text)?;
+    let mut doc = solidcraft_doc::render_resources::with_container_parts(parts, || Document::from_json(text))?;
     if !doc.drawings.is_empty() {
         return Err(invalid("ambiguous drawings in document.json and in their own entries"));
     }
@@ -1288,8 +1292,13 @@ fn check_hdr_manifest(bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn hydrate_hdr_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut PackageReader<R>) -> Result<bool> {
-    use solidcraft_doc::render_resources::{HdrId, MAX_HDR_RESOURCE_BYTES, MAX_HDR_RESOURCES, encode_hdr_base64};
+/// Takes each HDR's part out for the reader (`parts`), leaving its record `{kind, data: ""}`.
+fn hydrate_hdr_resources<R: Read + Seek>(
+    metadata: &mut Value,
+    reader: &mut PackageReader<R>,
+    parts: &mut solidcraft_doc::render_resources::ContainerParts,
+) -> Result<bool> {
+    use solidcraft_doc::render_resources::{HdrId, MAX_HDR_RESOURCE_BYTES, MAX_HDR_RESOURCES};
 
     let Some(resources) = metadata.get_mut("render").and_then(|render| render.get_mut("resources")) else {
         return Ok(false);
@@ -1313,10 +1322,8 @@ fn hydrate_hdr_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut Pack
             return Err(invalid("HDR resource key does not match its blob hash"));
         }
         total = total.checked_add(bytes.len()).ok_or_else(|| invalid("HDR resource size overflow"))?;
-        let encoded = encode_hdr_base64(bytes).map_err(invalid)?;
-        let fields = value.as_object_mut().ok_or_else(|| invalid("invalid HDR metadata"))?;
-        fields.remove("hdr_blob");
-        fields.insert("data".into(), Value::String(encoded));
+        parts.hdr.insert(id, bytes.to_vec());
+        value.as_object_mut().ok_or_else(|| invalid("invalid HDR metadata"))?.remove("hdr_blob");
     }
     Ok(!resources.is_empty())
 }
@@ -1415,9 +1422,14 @@ fn check_texture_manifest(bytes: &[u8]) -> Result<()> {
     let Metadata { render: Render { texture_resources: () } } = serde_json::from_slice(bytes).map_err(invalid)?;
     Ok(())
 }
-fn hydrate_texture_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut PackageReader<R>) -> Result<bool> {
+/// Takes each texture's part out for the reader (`parts`), as [`hydrate_hdr_resources`].
+fn hydrate_texture_resources<R: Read + Seek>(
+    metadata: &mut Value,
+    reader: &mut PackageReader<R>,
+    parts: &mut solidcraft_doc::render_resources::ContainerParts,
+) -> Result<bool> {
     use solidcraft_doc::{
-        render_resources::{HdrId, encode_hdr_base64},
+        render_resources::HdrId,
         render_texture_resources::{MAX_TEXTURE_BYTES, MAX_TEXTURE_RESOURCE_BYTES, MAX_TEXTURE_RESOURCES},
     };
     let Some(resources) = metadata.get_mut("render").and_then(|render| render.get_mut("texture_resources")) else {
@@ -1442,10 +1454,8 @@ fn hydrate_texture_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut 
             return Err(invalid("texture resource key does not match its blob hash"));
         }
         total = total.checked_add(bytes.len()).ok_or_else(|| invalid("texture resource size overflow"))?;
-        let encoded = encode_hdr_base64(bytes).map_err(invalid)?;
-        let fields = value.as_object_mut().ok_or_else(|| invalid("invalid texture metadata"))?;
-        fields.remove("texture_blob");
-        fields.insert("data".into(), Value::String(encoded));
+        parts.textures.insert(id, bytes.to_vec());
+        value.as_object_mut().ok_or_else(|| invalid("invalid texture metadata"))?.remove("texture_blob");
     }
     Ok(!resources.is_empty())
 }
@@ -3393,7 +3403,8 @@ mod tests {
         doc.render = Arc::new(render);
         let bytes = write_design_container(&doc).unwrap();
         assert_eq!(crate::read_design(&bytes).unwrap(), doc);
-        assert_eq!(crate::read_design(&crate::write_design(&without_images(&doc)).unwrap()).unwrap(), without_images(&doc));
+        // A plain JSON design can't hold the file: saving one is refused, naming it.
+        assert!(crate::write_design(&without_images(&doc)).unwrap_err().to_string().contains("render environments and textures"));
         let original = parts(&bytes);
         let blob = format!("blobs/{id}.hdr");
         assert_eq!(original.keys().filter(|name| name.ends_with(".hdr")).count(), 1);
@@ -3475,7 +3486,8 @@ mod tests {
         render.setups.insert("Wood".into(), setup);
         let bytes = write_design_container(&doc).unwrap();
         assert_eq!(crate::read_design(&bytes).unwrap(), doc);
-        assert_eq!(crate::read_design(&crate::write_design(&without_images(&doc)).unwrap()).unwrap(), without_images(&doc));
+        // A plain JSON design can't hold the file: saving one is refused, naming it.
+        assert!(crate::write_design(&without_images(&doc)).unwrap_err().to_string().contains("render environments and textures"));
         let original = parts(&bytes);
         let blob = format!("blobs/{id}.texture");
         assert_eq!(original.keys().filter(|name| name.ends_with(".texture")).count(), 1);

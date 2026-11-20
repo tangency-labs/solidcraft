@@ -100,8 +100,20 @@ fn an_image_on_a_sheet_round_trips_and_a_lying_one_is_refused() {
     let read = read_design(&bytes).unwrap();
     assert_eq!(read.drawings, doc.drawings);
     assert_eq!(write_design_container(&read).unwrap(), bytes, "save, open, save: the same bytes");
-    let json = write_design(&doc).unwrap();
-    assert_eq!(read_design(&json).unwrap().drawings, doc.drawings, "the plain form too");
+    // The record names each image's part and keeps no bytes as text.
+    let entries = parts(&bytes);
+    let mut record: Value = serde_json::from_slice(&entries[&entry(doc.drawings[0].id)]).unwrap();
+    let part = record["images"][0]["part"].as_str().unwrap().to_string();
+    assert_eq!((record["images"][0]["data"].as_str(), entries[&part].as_slice()), (Some(""), header.as_slice()));
+    // An older design kept the bytes as base64 in the record: it opens the same.
+    let mut older = entries.clone();
+    record["images"][0].as_object_mut().unwrap().remove("part");
+    record["images"][0]["data"] = json!(solidcraft_doc::canvas::base64_encode(&header));
+    older.insert(entry(doc.drawings[0].id), record.to_string().into_bytes());
+    older.remove(&part);
+    assert_eq!(read_design(&container(&older)).unwrap().drawings, doc.drawings);
+    // A plain JSON design can't hold the image: saving one is refused, naming it.
+    assert!(write_design(&doc).unwrap_err().to_string().contains("drawing images"));
 
     let mut inside = parts(&bytes);
     let name = entry(doc.drawings[0].id);
