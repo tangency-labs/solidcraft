@@ -709,6 +709,8 @@ fn the_built_in_blocks_projection_cell_holds_the_3_5_mm_symbol() {
     assert!(near(cell.value_box, rect(381.175, 45.175, 408.65, 54.325)), "{:?}", cell.value_box);
     assert_eq!(cell.symbol_mm, Some(3.5));
     assert_eq!(layout.cells.iter().filter(|c| c.symbol_mm.is_some()).count(), 1);
+    // The layout draws only the block's lines: the outline and fourteen more. The symbol is the drawing's.
+    assert_eq!(layout.paper(7).items.len(), 15);
     assert_eq!(serde_json::to_value(&block.cells[11].kind).unwrap(), json!("projection_symbol"));
     for fixed in [json!("first_angle_symbol"), json!({"projection_symbol": "first"})] {
         assert!(serde_json::from_value::<CellKind>(fixed.clone()).is_err(), "{fixed}");

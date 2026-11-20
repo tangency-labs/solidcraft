@@ -799,11 +799,11 @@ fn the_provider_draws_a_view_a_step_until_it_is_the_built_scene() {
     let (mut s, sheet, [front, top]) = front_and_top();
     let order = if front < top { [front, top] } else { [top, front] };
     let whole = built(&s, sheet).scene;
+    // The border's three groups with the font table their frame labels are set in (#20121).
+    let mut border_scene = Scene::new(whole.size_mm, whole.groups[..3].to_vec());
+    border_scene.add_fonts(whole.fonts.clone());
     let first = extract(&mut s, sheet).unwrap();
-    assert_eq!(
-        (bytes(&first.scene), first.stale.as_slice(), first.views.len()),
-        (bytes(&Scene::new(whole.size_mm, whole.groups[..3].to_vec())), &order[..], 0)
-    );
+    assert_eq!((bytes(&first.scene), first.stale.as_slice(), first.views.len()), (bytes(&border_scene), &order[..], 0));
     let again = extract(&mut s, sheet).unwrap();
     assert!(Arc::ptr_eq(&again.scene, &first.scene) && again.generation == first.generation);
     assert_eq!(s.drawing_scenes.projections, 0);
@@ -4379,7 +4379,9 @@ fn sheet_sketch_assembly_budget_names_only_the_excluded_sketch_and_can_recover()
             pattern: None,
         }],
     };
-    let left = MAX_RECORDS - border(&s, sheet).iter().map(Group::records).sum::<usize>();
+    // This assembly has no frame text (`assemble_with_sketches` gives it none): the border's lines alone.
+    let lines = record.border.as_ref().unwrap().layout(&record.sheet).unwrap().paper(sheet);
+    let left = MAX_RECORDS - lines.iter().map(Group::records).sum::<usize>();
     let view = Drawn {
         hatches: Vec::new(),
         group: Some(Arc::new(group(10, ObjectKind::View, left - 12))),
