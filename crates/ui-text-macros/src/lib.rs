@@ -347,6 +347,46 @@ mod tests {
         assert_ne!(fingerprint(["ab", "c"]), fingerprint(["a", "bc"]));
     }
 
+    fn refused(tokens: &str, unfilled: bool) -> String {
+        let input: Input = syn::parse_str(tokens).unwrap();
+        check(&input, unfilled).err().map(|e| e.to_string()).unwrap_or_default()
+    }
+
+    /// What `tr!`, `msg!` and `template!` refuse, and say about it. (The ids are the repository's
+    /// own: `ui.file` has no placeholder, `recovery.days_ago` has `{count}`.)
+    #[test]
+    fn a_wrong_id_and_wrong_placeholders_are_refused_with_what_is_wrong() {
+        assert_eq!(refused(r#""ui.file""#, false), "");
+        assert_eq!(refused(r#""recovery.days_ago", count = x"#, false), "");
+        // An id no catalog has, with the nearest one.
+        let unknown = refused(r#""ui.fiel""#, false);
+        assert!(unknown.contains("`ui.fiel` is not a message id") && unknown.contains("did you mean `ui.file`?"), "{unknown}");
+        assert!(refused(r#""ui.no_message_has_this_id_at_all""#, false).contains("is not a message id"));
+        // A placeholder left without a value, a name the message lacks, a name too many.
+        assert!(refused(r#""recovery.days_ago""#, false).contains("has the placeholder `{count}`"));
+        assert!(refused(r#""recovery.days_ago", days = x"#, false).contains("has no placeholder `{days}`"));
+        assert!(refused(r#""recovery.restore_row", name = x"#, false).contains("also has the placeholder `{when}`"));
+        assert!(refused(r#""ui.file", count = x"#, false).contains("has no placeholder `{count}`"));
+        // `template!` takes a message with placeholders unfilled, and still wants a real id.
+        assert_eq!(refused(r#""recovery.days_ago""#, true), "");
+        assert!(refused(r#""recovery.days_agoo""#, true).contains("did you mean `recovery.days_ago`?"));
+    }
+
+    /// A message's place is its position among the catalog's ids in the order of their bytes,
+    /// and every message of one catalog carries the same fingerprint.
+    #[test]
+    fn a_message_is_numbered_by_its_place_among_the_sorted_ids() {
+        let (catalog, ids) = catalog().as_ref().unwrap();
+        let place = |id: &str| {
+            let input: Input = syn::parse_str(&format!("{id:?}")).unwrap();
+            check(&input, true).unwrap().0
+        };
+        for (expected, id) in catalog.keys().enumerate().step_by(97) {
+            assert_eq!(place(id), (expected as u32, *ids), "{id}");
+        }
+        assert_eq!(*ids, fingerprint(catalog.keys().map(String::as_str)));
+    }
+
     /// The repository's own English catalog reads, with the messages of the app, of the shared
     /// crate and of the pending files.
     #[test]
