@@ -1,6 +1,6 @@
 use super::*;
 use serde_json::{Value, json};
-use solidcraft_doc::{pbr_appearance::PbrParameters, physical_material::ValidatedCard};
+use solidcraft_doc::{UserMaterial, appearance::Look, pbr_appearance::PbrParameters, physical_material::ValidatedCard};
 
 fn catalog() -> Catalog {
     let entry = Entry::new(
