@@ -3,10 +3,9 @@ use super::blend::{finish, on_copy, points_ok, status, tolerance_ok};
 use super::offset::{face_miss, pick_faces};
 use crate::{Error, Result};
 
-/// The solid with the fillet faces under `points` (each within `tolerance`) taken off, one after
-/// another, each gap closed by the sharp edge its two tangent neighbours meet in. A face that is
-/// not a four-sided fillet (no pair of opposite edges tangent to its neighbours, or a neighbour
-/// that cannot be extended) is refused as solidcore refuses it.
+/// The solid with the fillet or chamfer faces under `points` (each within `tolerance`) taken off,
+/// one after another, each gap closed by the sharp edge its two side neighbours meet in. A face
+/// solidcore cannot take is refused as solidcore refuses it.
 pub(crate) fn delete_fillet_faces(body: &Body, points: &[[f64; 3]], tolerance: f64) -> Result<Body> {
     if !points_ok(points, false) || !tolerance_ok(tolerance) {
         return Err(Error::Argument);
