@@ -416,7 +416,8 @@ pub fn placed_edge_pick(doc: &Document, st: &ModelState, geo: &GeoRef) -> Option
     let GeoRef::PlacedEdge { body, path, at, name, .. } = geo else { return None };
     let (body, frame, hit) = placed_edge(doc, st, body.as_ref(), path, *at, name).ok()?;
     let world_name = doc.world_body_name(st, &body.name, doc.model_body_component(body), path);
-    Some((world_name, hit.edge, crate::apply_point(&frame, hit.point)))
+    let point = solidcore_ops::affine::apply_point(&frame, hit.point.into());
+    Some((world_name, hit.edge, point.into()))
 }
 
 /// The closest point on a polyline to `target`, projecting onto each segment rather than
@@ -756,9 +757,10 @@ pub fn model_axis_in(doc: Option<&Document>, st: &ModelState, g: &GeoRef, compon
             } else {
                 doc.path_transform(component, author_path).ok_or_else(|| DocError::reselect(name.as_str()))?
             };
-            let inverse = crate::mat_inverse(&author).ok_or_else(|| bad("the feature's component frame is invalid"))?;
-            let direction = crate::apply_vector(&frame, direction).normalized().ok_or_else(|| bad("the axis has no direction"))?;
-            Ok((crate::apply_point(&inverse, crate::apply_point(&frame, origin)), crate::apply_vector(&inverse, canonical_dir(direction))))
+            let inverse = solidcore_ops::affine::inverse(&author).map_err(|_| bad("the feature's component frame is invalid"))?;
+            let (origin, direction) = solidcore_ops::affine::placed_axis(&frame, &inverse, origin.into(), direction.into())
+                .map_err(|_| bad("the axis has no direction"))?;
+            Ok((origin.into(), direction.into()))
         }
         // A construction axis by name: where it is on each evaluation, so what turns about it follows it.
         GeoRef::Axis { name } => crate::eval::construction_axis_in(doc, st, name, component),
@@ -769,12 +771,7 @@ pub fn model_axis_in(doc: Option<&Document>, st: &ModelState, g: &GeoRef, compon
 /// `d` or `-d`, whichever has its largest component (the first of equal ones) positive: how
 /// [`model_axis`] orients an axis, for a preview of one to point the same way.
 pub fn canonical_dir(d: Vec3) -> Vec3 {
-    let c = [d.x, d.y, d.z];
-    let big = c.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
-    match c.iter().find(|v| v.abs() >= big - 1e-9) {
-        Some(v) if *v < 0.0 => -d,
-        _ => d,
-    }
+    solidcore_ops::affine::canonical_axis_direction(d.into()).into()
 }
 
 /// A reference as a line (origin, unit direction).

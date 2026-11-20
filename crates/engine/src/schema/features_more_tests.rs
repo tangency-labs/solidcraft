@@ -140,7 +140,9 @@ fn coil_axis_contract_accepts_directions_and_revolve_references() {
         json!("@origin/1/X"),
         json!({"dir": [0, 0, 1]}),
         json!({"origin": ["offset = 10 mm", 0, 0], "dir": [0, 1, 0]}),
+        json!({"curve": "l1"}),
         json!({"sketch": "Section", "curve": "l1"}),
+        json!({"type": "sketch_line", "sketch": "Section", "curve": "l1"}),
         json!({"edge": [10, 0, 0]}),
         json!({"face": [10, 0, 0]}),
         json!({"type": "edge", "at": [10, 0, 0]}),
@@ -148,6 +150,7 @@ fn coil_axis_contract_accepts_directions_and_revolve_references() {
         json!({"type": "sketch_axis", "axis": "x"}),
         json!({"type": "sketch_axis", "axis": "y"}),
         json!({"type": "world", "axis": "Y"}),
+        json!({"type": "placed_edge", "body": "Stock", "path": [4], "at": [10, 0, 0], "name": "F5:top|F5:side"}),
     ] {
         let p = with(&coil(), "axis", axis.clone());
         let parsed: CoilParams = serde_json::from_value(p.clone()).unwrap();
@@ -175,6 +178,28 @@ fn coil_axis_contract_accepts_directions_and_revolve_references() {
         let error = serde_json::from_value::<CoilParams>(with(&coil(), "axis", axis.clone())).unwrap_err().to_string();
         let original = serde_json::from_value::<crate::schema::RevolveAxis>(axis).unwrap_err().to_string();
         assert!(error.contains(&original), "{error} does not preserve {original}");
+    }
+}
+
+#[test]
+fn coil_axis_contract_rejects_malformed_tags_with_other_axis_fields() {
+    let schema = input_schema_for::<CoilParams>();
+    for axis in [
+        json!({"type": "sketch_axis", "axis": "z", "curve": "l1"}),
+        json!({"type": "sketch_axis", "curve": "l1", "dir": [0, 1, 0]}),
+        json!({"type": "sketch_axis", "axis": "y", "edge": null}),
+        json!({"type": "world", "axis": "x", "curve": "l1"}),
+        json!({"type": "world", "curve": "l1"}),
+        json!({"type": "world", "axis": "X", "face": [0, 0]}),
+        json!({"edge": null, "curve": "l1"}),
+        json!({"face": [0, 0], "curve": "l1"}),
+        json!({"type": "placed_edge", "curve": "l1"}),
+        json!({"type": "placed_edge", "dir": [0, 1, 0]}),
+        json!({"type": "placed_edge", "x": 0, "y": 1, "z": 0}),
+    ] {
+        let params = with(&coil(), "axis", axis);
+        assert!(serde_json::from_value::<CoilParams>(params.clone()).is_err(), "{params}");
+        assert!(!conforms(schema.as_value(), schema.as_value(), &params), "{params}");
     }
 }
 

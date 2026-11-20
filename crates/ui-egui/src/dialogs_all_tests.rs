@@ -1557,23 +1557,17 @@ fn coil_keeps_the_selected_edge_and_occurrence_when_the_occurrence_moves() {
     let state = h.app.session.model.state();
     let world_body = h.app.session.doc.world_body_name(&state, "Box", component, &[occurrence]);
     let body = state.body("Box").unwrap();
-    // At the corner, a second proximity pick would find the first incident edge.
-    let (index, points) = body
-        .mesh()
-        .edges
-        .iter()
-        .enumerate()
-        .filter(|(_, points)| points.contains(&Vec3::ZERO))
-        .nth(1)
-        .map(|(index, points)| (index, (*points.first().unwrap(), *points.last().unwrap())))
-        .unwrap();
-    let direction = (points.1 - points.0).normalized().unwrap();
+    // The corner also lies on a horizontal edge that appears earlier than the named vertical edge.
+    let mesh = body.mesh();
+    let mut incident = mesh.edges.iter().enumerate().filter(|(_, points)| points.contains(&Vec3::ZERO));
+    let (first, _) = incident.next().unwrap();
+    let (index, _) = incident.find(|(_, points)| points.contains(&Vec3::new(0., 0., 10.))).unwrap();
+    assert!(index > first);
     let axial_span = |body: &solidcraft_engine::doc::ModelBody| {
         let bounds = body.body.exact_bounds().unwrap();
-        (bounds.max - bounds.min).dot(Vec3::new(direction.x.abs(), direction.y.abs(), direction.z.abs()))
+        bounds.max.z - bounds.min.z
     };
-    for (local_pick, coil_name) in [((points.0 + points.1) * 0.5, "Middle Coil"), (Vec3::ZERO, "Corner Coil")] {
-        let point = solidcraft_engine::doc::apply_point(&frame, local_pick);
+    for (point, coil_name) in [(Vec3::new(150., 0., 5.), "Middle Coil"), (Vec3::new(150., 0., 0.), "Corner Coil")] {
         let edge = Sel::Edge { body: world_body.clone(), index, point };
         let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
         d.active = 1;

@@ -8772,12 +8772,7 @@ fn feature_tools_with_constructor(
                         owner.or(sketch.map(|id| id.0)).ok_or_else(|| DocError::Invalid("a sketch-line axis needs its owning sketch".into()))?;
                     let solved =
                         st.sketch(owner).ok_or_else(|| DocError::Unknown(format!("sketch {owner} (it must come earlier in the timeline)")))?;
-                    let solved = if sketch.is_some_and(|id| id.0 == owner) {
-                        constructor_profile_in_frame(doc, solved, f)?
-                    } else {
-                        sketch_in_feature_frame(doc, solved, f.component)?
-                    };
-                    sketch_line_world(&solved, curve)?
+                    sketch_line_world(&constructor_profile_in_frame(doc, solved, f)?, curve)?
                 }
                 Some(AxisRef::World { axis }) => {
                     let direction = match axis.to_ascii_uppercase().as_str() {

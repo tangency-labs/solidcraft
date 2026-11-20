@@ -319,10 +319,10 @@ impl JsonSchema for CoilAxis {
         let point = generator.subschema_for::<Point3>();
         json_schema!({
             "description": "X, Y or Z (any case), a non-zero direction [x, y, z], a named or picked axis in the same forms as Revolve, or an edge on a specific occurrence. Use the tagged sketch_axis form for the profile sketch's x or y axis. A placed edge names the definition body and persistent edge and records the pick point in the body's frame.",
-            "anyOf": [direction, {
+            "anyOf": [{
                 "type": "object",
                 "properties": {
-                    "type": {"const": "placed_edge"},
+                    "type": {"enum": ["placed_edge"]},
                     "body": {"type": "string"},
                     "path": {"type": "array", "maxItems": solidcraft_doc::MAX_PLACEMENT_DEPTH + 1, "items": {"type": "integer", "minimum": 1}},
                     "author_path": {"type": "array", "maxItems": solidcraft_doc::MAX_PLACEMENT_DEPTH + 1, "items": {"type": "integer", "minimum": 1}},
@@ -331,10 +331,13 @@ impl JsonSchema for CoilAxis {
                 },
                 "required": ["type", "body", "path", "at", "name"]
             }, {
-                "allOf": [reference, {"anyOf": [
-                    {"type": "string", "minLength": 1, "pattern": not_blank_pattern()},
-                    {"type": "object"}
-                ]}]
+                "not": {"type": "object", "required": ["type"], "properties": {"type": {"enum": ["placed_edge"]}}},
+                "anyOf": [direction, {
+                    "allOf": [reference, {"anyOf": [
+                        {"type": "string", "minLength": 1, "pattern": not_blank_pattern()},
+                        {"type": "object"}
+                    ]}]
+                }]
             }]
         })
     }
@@ -1688,19 +1691,29 @@ impl JsonSchema for RevolveAxis {
         let point = generator.subschema_for::<Point3>();
         let origin = generator.subschema_for::<PointExpr3>();
         let id_or_name = generator.subschema_for::<IdOrName>();
-        let model = json!({"anyOf": [{"required": ["edge"]}, {"required": ["face"]}, {"required": ["type"], "properties": {"type": {"enum": ["edge", "face"]}}}]});
+        // The parser resolves a model pick or tagged coordinate axis before reading a curve or direction.
+        let model_pick = json!({"anyOf": [{"required": ["edge"]}, {"required": ["face"]}]});
+        let model_or_coordinate_axis = json!({"anyOf": [
+            model_pick,
+            {"required": ["type"], "properties": {"type": {"enum": ["edge", "face", "sketch_axis", "world"]}}}
+        ]});
         json_schema!({
             "description": "The axis to turn about: a sketch line's id or name (a line of the profile's sketch wins over a construction axis of the same name); {\"sketch\"?: an id or name, \"curve\": an id} — a line of that sketch, which the revolve follows when that sketch is edited; x or y, the sketch's own axes; X, Y or Z, the world axes (any other case is a name); a construction axis's name, which the revolve follows when it is edited; {\"type\": \"world\", \"axis\": X, Y or Z}, as timeline.inspect gives one back; {\"origin\"?: [x, y, z] (numbers or length expressions; default: the world origin), \"dir\": [x, y, z]}, which the revolve follows when parameters change; or an edge or face of a body ({\"edge\": [x, y, z]} or {\"face\": [x, y, z]}, a point on a straight or circular edge, or on a cylinder, cone or torus face, or as saved: {\"type\": \"edge\" or \"face\", \"at\", \"name\"?}), about whose axis it turns, followed as the model changes.",
             "anyOf": [
                 {"type": "string"},
-                {"type": "object", "properties": {"type": {"enum": ["sketch_axis"]}, "axis": {"enum": ["x", "y"]}}, "required": ["type", "axis"]},
-                {"type": "object", "properties": {"type": {"enum": ["world"]}, "axis": {"enum": ["X", "Y", "Z"]}}, "required": ["type", "axis"]},
-                {"type": "object", "properties": {"sketch": id_or_name, "curve": {"type": "string"}}, "required": ["curve"]},
+                {"type": "object", "properties": {"type": {"enum": ["sketch_axis"]}, "axis": {"enum": ["x", "y"]}}, "required": ["type", "axis"], "not": model_pick},
+                {"type": "object", "properties": {"type": {"enum": ["world"]}, "axis": {"enum": ["X", "Y", "Z"]}}, "required": ["type", "axis"], "not": model_pick},
+                {
+                    "type": "object",
+                    "properties": {"sketch": id_or_name, "curve": {"type": "string"}},
+                    "required": ["curve"],
+                    "not": model_or_coordinate_axis
+                },
                 {
                     "type": "object",
                     "properties": {"origin": origin, "dir": point},
                     "required": ["dir"],
-                    "not": {"anyOf": [model, {"required": ["type"], "properties": {"type": {"enum": ["sketch_axis", "world"]}}}]}
+                    "not": model_or_coordinate_axis
                 },
                 picked_at("face", &point),
                 picked_at("edge", &point),

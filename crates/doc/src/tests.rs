@@ -1152,13 +1152,11 @@ fn a_named_coil_axis_keeps_its_edge_at_a_shared_vertex() {
     let state = model.state();
     let body = state.bodies.first().unwrap();
     let mesh = body.mesh();
-    let (index, points) = mesh.edges.iter().enumerate().filter(|(_, points)| points.contains(&Vec3::ZERO)).nth(1).unwrap();
-    let (start, end) = (*points.first().unwrap(), *points.last().unwrap());
-    let expected = (end - start).normalized().unwrap();
+    let index = mesh.edges.iter().position(|points| points.contains(&Vec3::ZERO) && points.contains(&Vec3::new(0., 0., 10.))).unwrap();
     let name = crate::naming::edge_names(body)[index].clone();
-    for at in [(start + end) * 0.5, Vec3::ZERO] {
+    for at in [Vec3::new(0., 0., 5.), Vec3::ZERO] {
         let (_, direction) = coil_model_axis(&state, &GeoRef::Edge { at, name: Some(name.clone()) }).unwrap();
-        assert!(direction.dot(expected).abs() >= 1. - 1e-9, "{at:?}: {direction:?} versus {expected:?}");
+        assert_eq!(direction, Vec3::Z, "the named vertical edge is used at {at:?}");
     }
 }
 

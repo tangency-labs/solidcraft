@@ -2,23 +2,23 @@
 use crate::{DocError, Document, Mat, ModelBody, ModelState, Result};
 use std::collections::BTreeSet;
 
-/// A profile moved into the component receiving its own body is read through the recorded
-/// transfer frame. Reading its live placement would move the source geometry when that
-/// component moves, then move the transferred body a second time. All outputs of a constructor
-/// must reach the sketch's component through the same frame; independent cross-component
-/// references retain their ordinary live placement.
+/// A profile and references from its component are read through the recorded transfer frame
+/// when that component receives the profile's body. Reading live placements would move the
+/// source geometry when the component moves, then move the transferred body a second time.
+/// All outputs of a constructor must reach the profile's component through the same frame.
+/// Independent cross-component references retain their ordinary live placement.
 pub(crate) fn profile_frame(doc: &Document, feature: &crate::Feature, sketch: u64) -> Option<Mat> {
-    if !matches!(
-        feature.kind,
-        crate::FeatureKind::Extrude { operation: crate::Operation::NewBody, .. }
-            | crate::FeatureKind::Revolve { operation: crate::Operation::NewBody, .. }
-            | crate::FeatureKind::Coil { sketch: Some(_), operation: crate::Operation::NewBody, .. }
-    ) || feature.body_names.is_empty()
-    {
+    if feature.body_names.is_empty() {
         return None;
     }
-    let owner = doc.feature(sketch)?.component;
-    if owner == feature.component {
+    let profile = match &feature.kind {
+        crate::FeatureKind::Extrude { sketch, operation: crate::Operation::NewBody, .. }
+        | crate::FeatureKind::Revolve { sketch, operation: crate::Operation::NewBody, .. }
+        | crate::FeatureKind::Coil { sketch: Some(sketch), operation: crate::Operation::NewBody, .. } => sketch,
+        _ => return None,
+    };
+    let owner = doc.feature(profile.0)?.component;
+    if owner == feature.component || (profile.0 != sketch && doc.feature(sketch)?.component != owner) {
         return None;
     }
     let mut frames: std::collections::BTreeMap<&str, (u64, Mat)> =
@@ -147,6 +147,56 @@ mod tests {
             doc.feature_mut(transfer).unwrap().suppressed = true;
             let live = check(&mut model, &doc, 0, 46.);
             assert!((live.min.y - after.min.y).abs() < 1e-6 && (live.max.y - after.max.y).abs() < 1e-6, "{live:?}");
+        }
+    }
+
+    #[test]
+    fn a_transferred_coil_keeps_a_separate_axis_in_the_profile_component_frame() {
+        use crate::{BodyName, FeatureKind, Model, PlaneRef, rigid, world_state};
+        use solidcore_record::{Vec2, Vec3};
+
+        for independent_axis in [false, true] {
+            let mut doc = Document::new("transferred coil with a separate axis sketch");
+            let profile_owner = doc.add_component(Some("Profile part"), 0).unwrap();
+            let axis_owner = if independent_axis { doc.add_component(Some("Axis part"), 0).unwrap() } else { profile_owner };
+            let plane = || PlaneRef::Origin { name: "YZ".into() };
+            let mut profile = crate::sketch::Sketch::new();
+            profile.add_circle(Vec2::new(20., 0.), 1., None, None).unwrap();
+            let sketch = doc.add_feature(FeatureKind::Sketch { plane: plane(), sketch: profile }, None).unwrap();
+            doc.feature_mut(sketch).unwrap().component = profile_owner;
+            let mut line = crate::sketch::Sketch::new();
+            line.add_line(Vec2::ZERO, Vec2::new(0., 10.), None, None, Some("l1")).unwrap();
+            let axis_sketch = doc.add_feature(FeatureKind::Sketch { plane: plane(), sketch: line }, None).unwrap();
+            doc.feature_mut(axis_sketch).unwrap().component = axis_owner;
+            let coil = serde_json::from_value(serde_json::json!({
+                "type": "coil", "base": ["0", "0", "0"], "sketch": sketch,
+                "axis_ref": {"type": "sketch_line", "sketch": axis_sketch, "curve": "l1"},
+                "pitch": "8", "turns": "2", "operation": "new_body"
+            }))
+            .unwrap();
+            let coil = doc.add_feature(coil, Some("Coil")).unwrap();
+            doc.feature_mut(coil).unwrap().body_names = vec!["Coil".into()];
+            let transfer = |from, to| FeatureKind::BodyTransfer { bodies: vec![BodyName("Coil".into())], from, to, transform: crate::IDENTITY };
+            doc.add_feature(transfer(0, profile_owner), None).unwrap();
+            if independent_axis {
+                doc.add_feature(transfer(profile_owner, axis_owner), None).unwrap();
+            }
+
+            let mut model = Model::new();
+            model.evaluate(&doc);
+            doc.occurrences.iter_mut().find(|o| o.component == axis_owner).unwrap().transform =
+                rigid(Vec3::new(0., 10., 0.), Vec3::ZERO, Vec3::Z, 0.);
+            model.evaluate(&doc);
+            let errors: Vec<_> = model.results.iter().filter_map(|r| r.error.as_ref()).collect();
+            assert!(errors.is_empty(), "{errors:?}");
+            let world = world_state(&doc, &model.state()).unwrap();
+            let body = world.body("Coil").unwrap();
+            assert_eq!(body.component, axis_owner);
+            // The section adds 1 mm to the axis radius. An axis in the profile's component
+            // keeps its recorded 20 mm radius. An independent axis moves 10 mm toward the profile.
+            let half_width = if independent_axis { 11. } else { 21. };
+            let bounds = body.body.exact_bounds().unwrap();
+            assert!((bounds.max.x - half_width).abs() < 1e-6, "independent axis: {independent_axis}, {bounds:?}");
         }
     }
 

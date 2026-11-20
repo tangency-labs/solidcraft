@@ -178,6 +178,23 @@ impl Vec3 {
     /// constructor).
     pub const UNDEF: Self = Self::new(UNDEF_DOUBLE, UNDEF_DOUBLE, UNDEF_DOUBLE);
 
+    /// Orient an undirected axis toward the positive side of its largest component.
+    /// Components within 1e-9 of the largest magnitude tie in X, Y, Z order.
+    #[must_use]
+    pub fn canonical_axis_direction(self) -> Self {
+        let coordinates = self.to_array();
+        let largest = coordinates
+            .iter()
+            .fold(0.0_f64, |size, coordinate| size.max(coordinate.abs()));
+        match coordinates
+            .iter()
+            .find(|coordinate| coordinate.abs() >= largest - 1e-9)
+        {
+            Some(coordinate) if *coordinate < 0.0 => -self,
+            _ => self,
+        }
+    }
+
     /// Creates a vector from its components (`SmVector3d(dX, dY, dZ)`, `Set`).
     #[must_use]
     pub const fn new(x: f64, y: f64, z: f64) -> Self {
