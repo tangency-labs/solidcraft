@@ -167,7 +167,11 @@ pub(crate) fn home_escape(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 fn zones(content: Rect, out: &app_bar::BarOut) -> [(Zone, Rect); 2] {
-    [Zone::Start, Zone::End].map(|zone| {
+    let [start, end] = out.cards;
+    [(Zone::Start, start), (Zone::End, end)].map(|(zone, card)| {
+        if let Some(card) = card {
+            return (zone, card);
+        }
         let mut left = f32::INFINITY;
         let mut right = f32::NEG_INFINITY;
         for item in out.edit_items.iter().filter(|p| !p.locked && p.zone == zone) {
@@ -189,11 +193,11 @@ fn zones(content: Rect, out: &app_bar::BarOut) -> [(Zone, Rect); 2] {
                 hi = hi.min(fixed.left);
             }
         }
-        (zone, Rect::from_min_max(pos2((left - 5.0).max(lo), content.top() + 1.0), pos2((right + 5.0).min(hi), content.bottom() - 1.0)))
+        (zone, Rect::from_min_max(pos2(left.max(lo), content.top()), pos2(right.min(hi).max(left.max(lo)), content.bottom())))
     })
 }
 
-/// Fill reserved background shapes, keeping card padding entirely outside layout arithmetic.
+/// Paint the cards whose padding the shared layout already reserved.
 pub(crate) fn backing(ui: &egui::Ui, content: Rect, out: &app_bar::BarOut, shapes: [egui::layers::ShapeIdx; 2]) {
     let t = solidcraft_theme::Tokens::get();
     for ((zone, rect), shape) in zones(content, out).into_iter().zip(shapes) {
@@ -223,7 +227,7 @@ pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, out: &ap
         }
         let response = ui.interact(rect, Id::unique(("appbar_edit", &item.id)), Sense::click_and_drag());
         if response.contains_pointer() && !drag.as_ref().is_some_and(|d| d.active) {
-            ui.ctx().set_cursor_icon(app_bar::grab_cursor());
+            ui.ctx().set_cursor_icon(app_bar::drag_cursor(false));
         }
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label_icon(app, &item.id).0));
         crate::scenario::publish_target(&format!("appbar:edit:{}", item.id), rect);
@@ -338,7 +342,7 @@ pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, out: &ap
     let active = drag.as_ref().is_some_and(|d| d.active);
     app_bar::dragging(ui.ctx(), active);
     if active {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        ui.ctx().set_cursor_icon(app_bar::drag_cursor(true));
     }
     ui.ctx().data_mut(|d| match drag {
         Some(drag) => {
@@ -454,7 +458,7 @@ fn tile(app: &mut SolveApp, ui: &mut egui::Ui, id: &str, version: &str) {
     let on_bar = app.toolbar_custom.app_bar.items.iter().any(|p| p.id == id && p.shown) && !returning;
     let placeable = !on_bar && !empty;
     if placeable && response.contains_pointer() && !app_bar::is_dragging(ui.ctx()) {
-        ui.ctx().set_cursor_icon(app_bar::grab_cursor());
+        ui.ctx().set_cursor_icon(app_bar::drag_cursor(false));
     }
     app_bar::paint_hover(ui, &format!("tray:{id}"), cell, 9, placeable && response.contains_pointer(), |ui| {
         let palette = app_bar::edit_palette(t);
@@ -711,7 +715,8 @@ pub(crate) fn shield(app: &SolveApp, ctx: &egui::Context) {
         return;
     }
     let screen = ctx.content_rect();
-    let below = Rect::from_min_max(pos2(screen.left(), screen.top() + app_bar::HEIGHT), screen.right_bottom());
+    let below =
+        Rect::from_min_max(pos2(screen.left(), screen.top() + app_bar::height(app.toolbar_custom.app_bar_customizing)), screen.right_bottom());
     Container::new(ctx, Surface::InputShield)
         .area(Id::unique("sc_appbar_edit_scrim"))
         .order(egui::Order::Foreground)
@@ -739,7 +744,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let t = solidcraft_theme::Tokens::get();
     let screen = ctx.content_rect();
     let width = 1040.0_f32.min((screen.width() - t.space_12 * 2.0).max(120.0));
-    let at = pos2(screen.center().x - width / 2.0, screen.top() + app_bar::HEIGHT + t.space_12);
+    let at = pos2(screen.center().x - width / 2.0, screen.top() + app_bar::height(true) + t.space_12);
     let host = Container::floating_card(Surface::Panel);
     let removing =
         ctx.data(|d| d.get_temp::<Drag>(drag_key())).is_some_and(|d| d.active && d.from_bar && d.below && app_bar_items::can_remove(&d.id));
@@ -809,7 +814,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     });
     if let Some((id, pointer, outside)) = lifted {
         if app_bar::is_dragging(ctx) {
-            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+            ctx.set_cursor_icon(app_bar::drag_cursor(true));
         }
         let warning = id == "file" && outside;
         let version = format!("v{}", crate::update::current_version());

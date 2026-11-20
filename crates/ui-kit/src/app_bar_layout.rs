@@ -134,6 +134,7 @@ enum State {
 /// An item as the loop sees it.
 struct Work {
     zone: Zone,
+    card: bool,
     /// Cleaned ladder: non-empty, never widening.
     ladder: Vec<f32>,
     priority: u8,
@@ -155,18 +156,37 @@ impl Work {
     }
 }
 
-fn total(work: &[Work], gap: f32, button: f32) -> f32 {
+fn card_item(item: &Item) -> bool {
+    !item.locked && item.zone != Zone::Centre && !matches!(item.id.as_str(), "managed" | "offered")
+}
+
+fn total(work: &[Work], gap: f32, button: f32, captions: (bool, bool)) -> f32 {
     let mut sum = 0.0_f32;
     let mut count = 0_usize;
+    let mut cards = [false; 2];
+    let mut first_start = None;
     for w in work.iter().filter(|w| w.state == State::Placed) {
         sum += w.width();
         count += 1;
+        if w.zone == Zone::Start && first_start.is_none() {
+            first_start = Some(w.card);
+        }
+        if w.card {
+            match w.zone {
+                Zone::Start => cards[0] = true,
+                Zone::End => cards[1] = true,
+                Zone::Centre => {}
+            }
+        }
     }
     if work.iter().any(|w| w.state == State::Overflow) {
         sum += button;
         count += 1;
     }
     sum + gap * count.saturating_sub(1) as f32
+        + application::CARD_PADDING * 2.0 * cards.into_iter().filter(|v| *v).count() as f32
+        + if captions.0 && first_start == Some(true) { gap } else { 0.0 }
+        + if captions.1 && cards.into_iter().any(|v| v) { gap } else { 0.0 }
 }
 
 /// Lays `spec` out. Deterministic: ties in priority go to the earlier item in source order.
@@ -181,6 +201,8 @@ fn layout_row(spec: &Spec) -> Placed {
     let (width, left, right) = (clean(spec.width), clean(spec.captions_left), clean(spec.captions_right));
     let (gap, button) = (clean(spec.gap), clean(spec.overflow_button_width));
     let room = (width - left - right).max(0.0);
+    let editing = spec.application.as_ref().is_some_and(|p| p.editing);
+    let captions = (editing && left > 0.0, editing && right > 0.0);
 
     let mut seen = std::collections::HashSet::new();
     // A saved list is bounded to 64 movable objects. Application chrome has its own
@@ -206,6 +228,7 @@ fn layout_row(spec: &Spec) -> Placed {
             let state = if taken && !second_centre { State::Placed } else { State::Out };
             Work {
                 zone: item.zone,
+                card: editing && card_item(item),
                 ladder,
                 priority: item.priority,
                 locked: item.locked || item.never_overflow,
@@ -218,7 +241,7 @@ fn layout_row(spec: &Spec) -> Placed {
 
     // Give way, lowest priority first, until the row fits.
     let mut dropped: Vec<usize> = Vec::new();
-    while total(&work, gap, button) > room {
+    while total(&work, gap, button, captions) > room {
         let pick = work
             .iter()
             .enumerate()
@@ -236,44 +259,61 @@ fn layout_row(spec: &Spec) -> Placed {
         }
     }
     // Still too wide: leave out the lowest-priority placed items, locked ones included.
-    while total(&work, gap, button) > room {
+    while total(&work, gap, button, captions) > room {
         let pick = work.iter().enumerate().filter(|(_, w)| w.state == State::Placed).min_by_key(|(i, w)| (w.priority, *i)).map(|(i, _)| i);
         let Some(i) = pick else { break };
         if let Some(w) = work.get_mut(i) {
             w.state = State::Out;
         }
     }
-    let show_button = work.iter().any(|w| w.state == State::Overflow) && total(&work, gap, button) <= room;
+    let show_button = work.iter().any(|w| w.state == State::Overflow) && total(&work, gap, button, captions) <= room;
+    let card_range = |zone| {
+        let mut indices = work.iter().enumerate().filter(|(_, w)| w.state == State::Placed && w.card && w.zone == zone).map(|(i, _)| i);
+        indices.next().map(|first| (first, indices.next_back().unwrap_or(first)))
+    };
+    let (start_card, end_card) = (card_range(Zone::Start), card_range(Zone::End));
+    let left_gap =
+        if captions.0 && work.iter().find(|w| w.state == State::Placed && w.zone == Zone::Start).is_some_and(|w| w.card) { gap } else { 0.0 };
+    let right_gap = if captions.1 && (start_card.is_some() || end_card.is_some()) { gap } else { 0.0 };
 
     let mut placements: Vec<Option<Placement>> = vec![None; work.len()];
     // Start items, left to right.
-    let mut x = left;
+    let mut x = left + left_gap;
     let mut starts = 0_usize;
     for (i, w) in work.iter().enumerate() {
         if w.zone == Zone::Start && w.state == State::Placed {
+            if start_card.is_some_and(|(first, _)| first == i) {
+                x += application::CARD_PADDING;
+            }
             let width = w.width();
             if let Some(slot) = placements.get_mut(i) {
                 *slot = Some(Placement { x, width, step: w.step });
             }
             x += width;
+            if start_card.is_some_and(|(_, last)| last == i) {
+                x += application::CARD_PADDING;
+            }
             starts += 1;
             x += gap;
         }
     }
     let start_end = if starts > 0 { x - gap } else { left };
     // End items, right to left; the overflow button ends up leftmost.
-    let mut edge = left + room;
+    let mut edge = left + room - right_gap;
     let mut end_left = edge;
     let mut ends = 0_usize;
     for (i, w) in work.iter().enumerate().rev() {
         if w.zone == Zone::End && w.state == State::Placed {
+            if end_card.is_some_and(|(_, last)| last == i) {
+                edge -= application::CARD_PADDING;
+            }
             let width = w.width();
             let at = (edge - width).max(left);
             if let Some(slot) = placements.get_mut(i) {
                 *slot = Some(Placement { x: at, width, step: w.step });
             }
-            edge = at - gap;
-            end_left = at;
+            end_left = at - if end_card.is_some_and(|(first, _)| first == i) { application::CARD_PADDING } else { 0.0 };
+            edge = end_left - gap;
             ends += 1;
         }
     }
@@ -289,7 +329,7 @@ fn layout_row(spec: &Spec) -> Placed {
     if let Some((i, w)) = work.iter().enumerate().find(|(_, w)| w.zone == Zone::Centre && w.state == State::Placed) {
         let min = w.width();
         let from = if starts > 0 { start_end + gap } else { start_end };
-        let to = if ends > 0 { end_left - gap } else { left + room };
+        let to = if ends > 0 { end_left - gap } else { left + room - right_gap };
         let width = if w.flexible { (to - from).max(min) } else { min };
         if let Some(slot) = placements.get_mut(i) {
             *slot = Some(Placement { x: from, width, step: 0 });
@@ -311,13 +351,16 @@ pub mod application {
 
     /// Every adjacent pair, including chrome and tabs, uses this one spacing rule.
     pub const GAP: f32 = 4.0;
-    pub const ICON_WIDTH: f32 = 28.0;
-    pub const PILL_HEIGHT: f32 = 22.0;
+    pub const ICON_WIDTH: f32 = 26.0;
+    pub const PILL_HEIGHT: f32 = 20.0;
     pub const SEPARATOR_WIDTH: f32 = 1.0;
+    pub const EDIT_SEPARATOR_WIDTH: f32 = 16.0;
+    pub const CARD_PADDING: f32 = 6.0;
     pub const SPACE_WIDTH: f32 = 16.0;
     pub const VERSION_PADDING: f32 = 12.0;
     pub const CONTENT_PADDING: f32 = 8.0;
-    pub const PILL_ICON: f32 = 13.0;
+    pub const PILL_ICON: f32 = 14.0;
+    pub const SQUARE_ICON: f32 = 18.0;
     pub const PILL_MIN: f32 = CONTENT_PADDING * 2.0 + PILL_ICON * 2.0 + GAP;
     const TABS_MIN: f32 = 124.0;
     /// Measurements only; no egui state or registry access enters the engine.
@@ -346,6 +389,7 @@ pub mod application {
     /// Counts and label availability only: projection never adds item-specific offsets.
     #[derive(Clone, Debug, PartialEq)]
     pub struct Policy {
+        pub(super) editing: bool,
         name: bool,
         action_count: usize,
         quick_count: usize,
@@ -373,6 +417,7 @@ pub mod application {
     /// unchanged and remains the painter's responsibility.
     #[derive(Clone, Debug, Default, PartialEq)]
     pub struct Geometry {
+        pub cards: [Option<Span>; 2],
         pub compact: bool,
         pub name_visible: bool,
         pub visible: Vec<String>,
@@ -508,7 +553,7 @@ pub mod application {
             gap: GAP,
             overflow_button_width: ICON_WIDTH,
             items,
-            application: Some(Policy { name: name > 0.0, action_count, quick_count, pill_count, report_label: !m.report_icon_only }),
+            application: Some(Policy { editing: false, name: name > 0.0, action_count, quick_count, pill_count, report_label: !m.report_icon_only }),
         }
     }
 
@@ -518,6 +563,18 @@ pub mod application {
 
     pub fn spec_with_items(dimensions: (f32, f32, f32), m: Measurements, saved: &Layout, actions: &[&str], quick: &[&str], pills: &[&str]) -> Spec {
         build(dimensions.0, dimensions.1, dimensions.2, m, Some((saved, actions, quick, pills)))
+    }
+
+    /// Editing changes only separator slots and measured card padding. Saved data and
+    /// all other item ladders stay unchanged. Calling this repeatedly is idempotent.
+    pub fn set_editing(spec: &mut Spec, editing: bool) {
+        let Some(policy) = &mut spec.application else { return };
+        policy.editing = editing;
+        for item in &mut spec.items {
+            if item.id.starts_with("separator:") {
+                item.ladder = vec![if editing { EDIT_SEPARATOR_WIDTH } else { SEPARATOR_WIDTH }];
+            }
+        }
     }
 
     pub(super) fn place(spec: &Spec, policy: &Policy) -> Placed {
@@ -537,7 +594,21 @@ pub mod application {
         let report = at("report");
         let offer = at("offered");
         let managed = at("managed");
+        let cards = [Zone::Start, Zone::End].map(|zone| {
+            let mut edges: Option<(f32, f32)> = None;
+            for (item, slot) in spec.items.iter().zip(&p.placements) {
+                if policy.editing
+                    && item.zone == zone
+                    && super::card_item(item)
+                    && let Some(slot) = slot
+                {
+                    edges = Some(edges.map_or((slot.x, slot.right()), |(lo, hi)| (lo.min(slot.x), hi.max(slot.right()))));
+                }
+            }
+            edges.map(|(lo, hi)| Span { left: lo - CARD_PADDING, right: hi + CARD_PADDING })
+        });
         let g = Geometry {
+            cards,
             compact: false,
             name_visible: policy.name && logo.is_some_and(|p| p.step == 0),
             visible: spec.items.iter().zip(&p.placements).filter(|(_, p)| p.is_some()).map(|(i, _)| i.id.clone()).collect(),

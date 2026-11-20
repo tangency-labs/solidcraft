@@ -29,6 +29,9 @@ struct ItemMotion {
     from: Pos2,
     target: Pos2,
     drawn: Pos2,
+    from_width: f32,
+    target_width: f32,
+    drawn_width: f32,
     seen: u64,
     appeared: u64,
     active: bool,
@@ -80,15 +83,30 @@ fn motion_offset(ctx: &egui::Context, id: &str, rect: Rect) -> egui::Vec2 {
         }
         let previous = state.items.get(id).cloned();
         let appeared = previous.as_ref().is_none_or(|item| item.seen.saturating_add(1) < frame);
-        let mut item =
-            previous.unwrap_or(ItemMotion { from: rect.min, target: rect.min, drawn: rect.min, seen: frame, appeared: frame, active: false });
+        // Only separators change width as part of customization; other controls retain
+        // the existing position-only motion and appearance/resize rules.
+        let width = if id.starts_with("separator:") { rect.width() } else { 0.0 };
+        let mut item = previous.unwrap_or(ItemMotion {
+            from: rect.min,
+            target: rect.min,
+            drawn: rect.min,
+            from_width: width,
+            target_width: width,
+            drawn_width: width,
+            seen: frame,
+            appeared: frame,
+            active: false,
+        });
         let snap = instant || state.resized || appeared || item.appeared == frame;
-        let retarget = item.target != rect.min;
+        let retarget = item.target != rect.min || item.target_width != width;
         let reused = item.seen == frame && !snap && !retarget;
         if snap {
             item.from = rect.min;
             item.target = rect.min;
             item.drawn = rect.min;
+            item.from_width = width;
+            item.target_width = width;
+            item.drawn_width = width;
             item.active = false;
             if appeared {
                 item.appeared = frame;
@@ -96,7 +114,9 @@ fn motion_offset(ctx: &egui::Context, id: &str, rect: Rect) -> egui::Vec2 {
         } else if retarget {
             item.from = item.drawn;
             item.target = rect.min;
-            item.active = item.from.distance(item.target) > 0.5;
+            item.from_width = item.drawn_width;
+            item.target_width = width;
+            item.active = item.from.distance(item.target) > 0.5 || (item.from_width - width).abs() > 0.5;
         }
         item.seen = frame;
         Some((item, snap, retarget, reused))
@@ -108,6 +128,7 @@ fn motion_offset(ctx: &egui::Context, id: &str, rect: Rect) -> egui::Vec2 {
     let animation = egui::Id::unique(("sc_appbar_motion_progress", ctx.viewport_id(), id));
     if snap || !item.active {
         item.drawn = item.target;
+        item.drawn_width = item.target_width;
         ctx.animate_value_with_time(animation, 1.0, 0.0);
     } else {
         if retarget {
@@ -115,8 +136,10 @@ fn motion_offset(ctx: &egui::Context, id: &str, rect: Rect) -> egui::Vec2 {
         }
         let progress = ctx.animate_value_with_time(animation, 1.0, 0.15);
         item.drawn = pos2(animated_step(item.from.x, item.target.x, progress, 1.0), animated_step(item.from.y, item.target.y, progress, 1.0));
-        if item.drawn.distance(item.target) <= 0.5 {
+        item.drawn_width = animated_step(item.from_width, item.target_width, progress, 1.0);
+        if item.drawn.distance(item.target) <= 0.5 && (item.drawn_width - item.target_width).abs() <= 0.5 {
             item.drawn = item.target;
+            item.drawn_width = item.target_width;
             item.active = false;
             ctx.animate_value_with_time(animation, 1.0, 0.0);
         }
@@ -131,13 +154,17 @@ fn motion_offset(ctx: &egui::Context, id: &str, rect: Rect) -> egui::Vec2 {
 /// Read the painted position for decoration only. Interaction always uses the original rect.
 pub fn drawn_rect(ctx: &egui::Context, id: &str, rect: Rect) -> Rect {
     let (key, frame) = (motion_key(ctx), ctx.cumulative_frame_nr());
-    let offset = ctx
-        .data(|data| {
-            data.get_temp::<BarMotion>(key)
-                .and_then(|state| state.items.get(id).filter(|item| item.seen == frame).map(|item| item.drawn - item.target))
+    ctx.data(|data| {
+        data.get_temp::<BarMotion>(key).and_then(|state| {
+            state.items.get(id).filter(|item| item.seen == frame).map(|item| {
+                Rect::from_min_size(
+                    rect.min + (item.drawn - item.target),
+                    vec2(if id.starts_with("separator:") { item.drawn_width } else { rect.width() }, rect.height()),
+                )
+            })
         })
-        .unwrap_or_default();
-    rect.translate(offset)
+    })
+    .unwrap_or(rect)
 }
 
 fn translate_paint(ctx: &egui::Context, layer: egui::LayerId, start: egui::layers::ShapeIdx, offset: egui::Vec2) {
@@ -161,16 +188,17 @@ fn translate_paint(ctx: &egui::Context, layer: egui::LayerId, start: egui::layer
 pub fn paint_motion<R>(ui: &mut egui::Ui, id: &str, rect: Rect, paint: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let (ctx, layer) = (ui.ctx().clone(), ui.layer_id());
     let start = ctx.graphics_mut(|graphics| graphics.entry(layer).next_idx());
+    let offset = motion_offset(&ctx, id, rect);
     let result = paint(ui);
-    translate_paint(&ctx, layer, start, motion_offset(&ctx, id, rect));
+    translate_paint(&ctx, layer, start, offset);
     result
 }
 
 /// The same paint-only displacement for an app-owned control with its own area layer.
 pub fn paint_layers_motion<R>(ctx: &egui::Context, id: &str, rect: Rect, layers: &[egui::LayerId], paint: impl FnOnce() -> R) -> R {
     let starts: Vec<_> = layers.iter().take(16).map(|&layer| (layer, ctx.graphics_mut(|graphics| graphics.entry(layer).next_idx()))).collect();
-    let result = paint();
     let offset = motion_offset(ctx, id, rect);
+    let result = paint();
     for (layer, start) in starts {
         translate_paint(ctx, layer, start, offset);
     }
@@ -209,6 +237,11 @@ pub fn paint_item(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, response:
         paint_motion(ui, id, rect, |ui| {
             let movable = editing_active(ui.ctx()) && !matches!(id, "overflow" | "more");
             let hovered = movable && !is_dragging(ui.ctx()) && ui.rect_contains_pointer(rect);
+            let rect = if matches!(control, Control::Separator) {
+                Rect::from_min_size(rect.min, vec2(drawn_rect(ui.ctx(), id, rect).width(), rect.height()))
+            } else {
+                rect
+            };
             paint_hover(ui, id, item_rect(rect, control), control_radius(control), hovered, |ui| {
                 if movable {
                     ui.painter().rect_filled(
@@ -225,9 +258,9 @@ pub fn paint_item(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, response:
 
 pub const ITEM_HEIGHT: f32 = crate::app_bar_layout::application::ICON_WIDTH;
 pub const PILL_HEIGHT: f32 = crate::app_bar_layout::application::PILL_HEIGHT;
-pub const ITEM_ICON_SIZE: f32 = 16.0;
+pub const ITEM_ICON_SIZE: f32 = crate::app_bar_layout::application::SQUARE_ICON;
 pub const PILL_ICON_SIZE: f32 = crate::app_bar_layout::application::PILL_ICON;
-pub const ITEM_RADIUS: u8 = 6;
+pub const ITEM_RADIUS: u8 = 5;
 pub const ITEM_PILL_RADIUS: u8 = (PILL_HEIGHT / 2.0) as u8;
 const HOVER_TIME: f32 = 0.12;
 
@@ -246,8 +279,15 @@ pub fn icon_control(control: Control<'_>) -> bool {
 
 /// Winit 0.30's Windows backend maps Grab/Grabbing to IDC_SIZEALL. IDC_HAND is
 /// exposed through PointingHand, so use that for an actual hand when hovering on Windows.
-pub fn grab_cursor() -> egui::CursorIcon {
-    if cfg!(target_os = "windows") { egui::CursorIcon::PointingHand } else { egui::CursorIcon::Grab }
+/// One mapping for movable bar controls, tray tiles and draggable document/view tabs.
+pub fn drag_cursor(dragging: bool) -> egui::CursorIcon {
+    if dragging {
+        egui::CursorIcon::Grabbing
+    } else if cfg!(target_os = "windows") {
+        egui::CursorIcon::PointingHand
+    } else {
+        egui::CursorIcon::Grab
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -358,6 +398,11 @@ pub fn tray_accent() -> (egui::Color32, egui::Color32) {
 
 /// The bar's height: the window's title bar on desktop builds.
 pub const HEIGHT: f32 = 34.0;
+
+/// Edit cards keep six points above and below the square controls, without clipping.
+pub fn height(editing: bool) -> f32 {
+    if editing { ITEM_HEIGHT + crate::app_bar_layout::application::CARD_PADDING * 2.0 } else { HEIGHT }
+}
 /// The least width of a document tab before the tabs scroll behind the » list.
 const MIN_TAB: f32 = 90.0;
 /// The expanded design tab (option A): its height and corner radius.
@@ -647,7 +692,7 @@ pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, respon
                 // background. A passive response suppresses the entry's smaller hover frame.
                 let passive = ui.new_child(egui::UiBuilder::new().max_rect(rect).disabled());
                 // assistant_entry's icon has a seven-point inset; this passive paint target
-                // produces the shared 16-point icon without changing the 28-point item slot.
+                // produces the shared icon without changing the square item slot.
                 let entry = Rect::from_center_size(rect.center(), egui::Vec2::splat(ITEM_ICON_SIZE + 2.0 * (t.space_6 + 1.0)));
                 let quiet = passive.interact(entry, passive.scope_id().with("assistant_mark"), Sense::hover());
                 crate::assistant_entry(&passive, &quiet, state, false, ui.ctx().global_style().animation_time > 0.0);
@@ -679,7 +724,7 @@ pub fn preview_control(ui: &mut egui::Ui, cell: Rect, control: Control<'_>, opac
     // widgets on a tooltip layer occlude clicks, so keep its widgets outside the viewport.
     let size = control_size(ui.ctx(), control);
     // Adapt the same widget to the tile width; elide its label rather than shrinking the
-    // 28/22-point body or its 16/13-point icon. A lifted chip keeps its natural width.
+    // 26/20-point body or its 18/14-point icon. A lifted chip keeps its natural width.
     let size = if lifted { size } else { vec2(size.x.min(cell.width()).max(1.0), size.y) };
     let native = Rect::from_min_size(ui.ctx().content_rect().right_bottom() + vec2(100.0, 100.0), size);
     let layer = egui::LayerId::new(egui::Order::Tooltip, ui.scope_id().with("control_preview_paint"));
@@ -814,6 +859,8 @@ pub enum BarAction {
 /// The bar drawn: what was chosen, and the places it leaves to the app.
 #[derive(Debug)]
 pub struct BarOut {
+    /// Measured edit cards, including all six-point padding, in Start/End order.
+    pub cards: [Option<Rect>; 2],
     /// Actual control hit regions, in screen coordinates, for editing the saved item list.
     pub edit_items: Vec<crate::app_bar_items::DropItem>,
     /// Each quick button's source-list index and centre x, including reordered/cross-zone ones.
@@ -968,7 +1015,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         pixels_per_point: ui.ctx().pixels_per_point(),
     };
     let dimensions = (r.width(), content.left() - r.left(), r.right() - content.right());
-    let spec = if let Some(items) = data.items {
+    let mut spec = if let Some(items) = data.items {
         application::spec_with_items(
             dimensions,
             measured,
@@ -981,6 +1028,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     } else {
         application::spec(dimensions.0, dimensions.1, dimensions.2, measured)
     };
+    application::set_editing(&mut spec, editing_active(ui.ctx()));
     let placed = layout(&spec);
     let geometry = placed.application.clone().unwrap_or_default();
     begin_motion(ui.ctx(), content.width());
@@ -1229,6 +1277,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         }
     }
     BarOut {
+        cards: geometry.cards.map(|span| span.map(|span| rect(span, height(true)))),
         edit_items,
         quick_slots: geometry.quick_slots.iter().map(|&(i, x)| (i, r.left() + x)).collect(),
         leading,
@@ -1989,6 +2038,9 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
     let painter = ui.painter().clone();
     let main = if view.active { Rect::from_min_max(vr.min, pos2(vr.right() - 20.0, vr.bottom())) } else { vr };
     let resp = ui.interact(main, ui.scope_id().with(("doc_view", k)), Sense::click_and_drag()).backing_on_hover_text(view.tip);
+    if pen.rename.as_ref().is_none_or(|(i, _)| *i != k) && resp.hovered() {
+        ui.ctx().set_cursor_icon(drag_cursor(resp.is_pointer_button_down_on()));
+    }
     solidcraft_ui_registry::publish_target(&format!("{}{k}", h.view), vr);
     resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, view.active, view.name));
     let deleted = view.state == ViewState::Deleted;
@@ -2311,6 +2363,9 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         let hit = if plain { tr } else { Rect::from_min_size(tr.min, vec2((13.0 + dot + name_w + 10.0).min(tr.width()), tr.height())) };
         let active = strip.shown_selected == Some(i);
         let resp = ui.interact(hit, ui.scope_id().with(("doc_tab", i)), Sense::click_and_drag());
+        if (n > 1 || strip.title_bar) && !(active && strip.rename.is_some()) && resp.hovered() {
+            ui.ctx().set_cursor_icon(drag_cursor(resp.is_pointer_button_down_on()));
+        }
         solidcraft_ui_registry::publish_target(&format!("{}{i}", h.tab), hit);
         // Dragging a tab along the strip moves it. The tabs are also part of the title bar:
         // dragging the only tab, or one mostly up or down, moves the window. A double click
@@ -2419,6 +2474,9 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         } else if (if held.is_some() { resp } else { resp.backing_on_hover_text(tip) }).clicked() {
             pick = Some(i);
         }
+    }
+    if drag.is_some() || pen.drag.is_some() {
+        ui.ctx().set_cursor_icon(drag_cursor(true));
     }
     ui.ctx().data_mut(|d| match drag {
         Some(v) => {

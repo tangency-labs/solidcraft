@@ -222,6 +222,7 @@ const APP_BAR_HANDLES: app_bar::Handles<'static> = app_bar::Handles {
 pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let preview_layout = crate::app_bar_custom::preview(app, ui.ctx());
     let customizing = app.toolbar_custom.app_bar_customizing;
+    let bar_height = crate::app_bar::height(customizing);
     crate::plugin_slots::refresh(app);
     if app.plugin_slots.discovery_pending() {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
@@ -229,7 +230,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let app_bar = Container::new(ui.ctx(), Surface::ApplicationBar).edge("sc_appbar", Edge::Top);
     let frame = Container::new(ui.ctx(), Surface::ApplicationBar).edge_frame(t.app_bar);
-    Container::new(ui.ctx(), Surface::ApplicationBar).show_edge(ui, app_bar.exact_size(APP_BAR_HEIGHT).show_separator_line(false), frame, |ui| {
+    Container::new(ui.ctx(), Surface::ApplicationBar).show_edge(ui, app_bar.exact_size(bar_height).show_separator_line(false), frame, |ui| {
         let r = ui.max_rect();
         // The bar is the window's title bar: its empty space moves the window, the traffic lights
         // or the caption buttons take its ends. In full screen macOS shows the traffic lights in
@@ -5012,7 +5013,7 @@ mod app_bar_tests {
         let at = resting.center();
         h.step(&json!({"move":[at.x,at.y]})).unwrap();
         h.frames(8);
-        assert_eq!(h.output.cursor_icon, app_bar::grab_cursor());
+        assert_eq!(h.output.cursor_icon, app_bar::drag_cursor(false));
         assert_eq!(rect_of("appbar:edit:separator:1"), Some(resting), "hover lift cannot move the hit target");
         let press =
             |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
@@ -5040,18 +5041,18 @@ mod app_bar_tests {
     }
 
     #[test]
-    fn app_bar_edit_cards_keep_normal_fit_and_visible_report_version() {
+    fn app_bar_edit_cards_reserve_padding_and_keep_report_version_item_sizes() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.resize", json!({"width":1280,"height":720}));
         h.frames(6);
         let keys = ["appbar:file", "appbar:home", "appbar:save", "titlebar:preferences", "titlebar:report", "titlebar:version"];
-        let before: Vec<_> = keys.iter().map(|key| crate::scenario::handle_at(key).unwrap()).collect();
+        let before: Vec<_> = keys.iter().map(|key| crate::scenario::rect_of(key).unwrap().size()).collect();
         let saved = h.app.toolbar_custom.app_bar.clone();
         h.app.start("ui.appBarCustomize");
         h.frames(6);
-        let after: Vec<_> = keys.iter().map(|key| crate::scenario::handle_at(key).unwrap()).collect();
-        assert_eq!(before, after, "cards and elevation cannot change final positions or overflow");
+        let after: Vec<_> = keys.iter().map(|key| crate::scenario::rect_of(key).unwrap().size()).collect();
+        assert_eq!(before, after, "only separators change item width; card padding moves the stacks");
         assert_eq!(h.app.toolbar_custom.app_bar, saved);
         let mut leaves = Vec::new();
         for clipped in &h.shapes {
@@ -5059,16 +5060,34 @@ mod app_bar_tests {
         }
         for label in [h.app.tr("ui.report_a_bug").to_owned(), format!("v{}", crate::update::current_version())] {
             assert!(
-                leaves.iter().any(|shape| matches!(shape, egui::Shape::Text(text) if text.pos.y < app_bar::HEIGHT && text.galley.job.text == label)),
+                leaves
+                    .iter()
+                    .any(|shape| matches!(shape, egui::Shape::Text(text) if text.pos.y < app_bar::height(true) && text.galley.job.text == label)),
                 "{label} still paints in the lit bar"
             );
         }
         for (zone, ids) in [("start", &["file", "home", "save"][..]), ("end", &["settings", "help", "report", "version"][..])] {
             let card = crate::scenario::rect_of(&format!("appbar:zone:{zone}")).unwrap();
+            let mut last = f32::NEG_INFINITY;
             for id in ids {
                 let item = crate::scenario::handle_at(&format!("appbar:edit:{id}")).unwrap();
                 assert!(card.contains(item), "{id} is inside its section card");
+                let key = match *id {
+                    "settings" => "titlebar:preferences".to_owned(),
+                    "report" => "titlebar:report".to_owned(),
+                    "version" => "titlebar:version".to_owned(),
+                    _ => format!("appbar:{id}"),
+                };
+                let body = crate::scenario::rect_of(&key).unwrap();
+                last = last.max(body.right());
+                assert!(
+                    (body.top() - card.top() - ui_kit::app_bar_layout::application::CARD_PADDING).abs() < 0.1
+                        || body.height() == app_bar::PILL_HEIGHT
+                );
             }
+            assert!(last + ui_kit::app_bar_layout::application::CARD_PADDING <= card.right() + 0.1);
+            let captions = if h.app.custom_titlebar { crate::window_chrome::WIDTH + ui_kit::app_bar_layout::application::GAP } else { 0.0 };
+            assert!(card.right() <= 1280.0 - captions + 0.1);
             if let Some(tab) = crate::scenario::rect_of("tab:close:0") {
                 assert!(!card.intersects(tab));
             }
@@ -5146,7 +5165,7 @@ mod app_bar_tests {
             let card = rect_of("appbar:tray").unwrap();
             assert!((card.width() - 1040.0_f32.min(width - 24.0)).abs() <= 2.0, "{card:?}");
             assert!((card.center().x - width / 2.0).abs() <= 1.0, "the card is centred: {card:?}");
-            assert!((card.top() - 46.0).abs() <= 1.0);
+            assert!((card.top() - app_bar::height(true) - 12.0).abs() <= 1.0);
             let mut tiles = Vec::new();
             for (column, ids) in [
                 (0, &["documents", "home", "save", "undo", "redo", "assistant", "settings", "help"][..]),
@@ -5188,7 +5207,7 @@ mod app_bar_tests {
             let t = solidcraft_theme::Tokens::get();
             let shared = Container::floating_card(Surface::Panel).frame(&h.ctx, t.panel, ui_kit::frame::Side::Left);
             let panel = shapes.iter().position(|shape| matches!(shape, egui::Shape::Rect(r) if (r.rect.width() - card.width()).abs() <= 2.0 && r.rect.contains(card.center()) && r.fill == shared.fill && r.stroke == shared.stroke && r.corner_radius == shared.corner_radius)).expect("the shared panel fill, alpha, border and radius back the tray");
-            let scrim = shapes.iter().position(|shape| matches!(shape, egui::Shape::Rect(r) if r.rect.top() == 34.0 && r.rect.bottom() == 720.0 && r.rect.width() == width && r.fill.a() > 0)).expect("the scrim is painted");
+            let scrim = shapes.iter().position(|shape| matches!(shape, egui::Shape::Rect(r) if r.rect.top() == app_bar::height(true) && r.rect.bottom() == 720.0 && r.rect.width() == width && r.fill.a() > 0)).expect("the scrim is painted");
             assert!(scrim < panel, "the card paints above the scrim");
             for (id, label) in [("assistant", "Assistant"), ("settings", "Settings"), ("home", "Start page")] {
                 let bounds = rect_of(&format!("appbar:label:{id}")).unwrap();
@@ -7218,6 +7237,9 @@ mod quick_access_tests {
         // Dragged before Extrude, Fillet comes first.
         h.app.start("ui.appBarCustomize");
         h.frames(3);
+        // Edit-mode separator slots and card padding move these buttons.
+        let extrude = handle_at("appbar:quick:solid.extrude").unwrap();
+        let fillet = handle_at("appbar:quick:solid.fillet").unwrap();
         h.step(&json!({"drag": [[fillet.x, fillet.y], [extrude.x - 10.0, extrude.y]]})).unwrap();
         h.frames(3);
         let ordered: Vec<_> = h.app.toolbar_custom.app_bar.items.iter().filter_map(|p| p.id.strip_prefix("quick:")).collect();
