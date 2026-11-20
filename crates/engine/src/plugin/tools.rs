@@ -175,7 +175,7 @@ fn explain(error: HostError, manifest: &Manifest, grants: &Grants, entry: &str) 
             error.into()
         }
         HostError::LimitExceeded { limit } if limit.starts_with("memory exceeds") => missing_grant(id, "memory_mib"),
-        HostError::OverCeiling { limit, .. } if limit == "memory_mib" => missing_grant(id, "memory_mib"),
+        HostError::OverCeiling { limit, .. } if limit == "memory_mib" || limit == "fuel" => missing_grant(id, limit),
         _ => error.into(),
     }
 }
