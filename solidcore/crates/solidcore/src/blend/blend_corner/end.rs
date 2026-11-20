@@ -1057,6 +1057,19 @@ pub fn describe_end_passing_over_end_face(fit: f64) -> String {
     )
 }
 
+/// The ball touching the rail's face at a point of an end face's crossing with it, and the
+/// round's other face, as [`largest_ball_ending_on_end_face`] judges it.
+enum CrossingBall {
+    /// Its radius, below the round's and the margin.
+    Radius(f64),
+    /// As large as the round and the margin, or larger: the round's rail reaches the crossing.
+    Reaches,
+    /// The point lies on the other face: the crossing is back on the blended edge.
+    OnOtherFace,
+    /// Not solved.
+    Unknown,
+}
+
 /// The most steps [`largest_ball_ending_on_end_face`] walks along the end face's surface on
 /// a rail's face: a forty-eighth of the blended edge's length each, so twice that length.
 const END_FACE_WALK_STEPS: usize = 96;
@@ -1080,15 +1093,27 @@ const END_FACE_SOLVE_STEPS: usize = 60;
 /// passes over E whole, and no section of E ends it.
 ///
 /// C is walked from the vertex in steps of a forty-eighth of the blended edge's length, at
-/// most [`END_FACE_WALK_STEPS`], each point solved on both surfaces, until it leaves F (that
-/// point found by bisection), the ball there is the round's (its rail does end on E: nothing
-/// is judged), or a solve fails. An inner largest ball is refined by golden section.
+/// most [`END_FACE_WALK_STEPS`], each point solved on both surfaces. A rail is judged only
+/// where the walk comes to C's end on F: C leaves F across F's rim (the last point on F found
+/// by bisection, and classified on the rim) or comes back onto the blended edge. Where the
+/// ball at a point is the round's (its rail does end on E), the steps run out, or a solve
+/// fails inside F, the walk has not seen all of C and its largest ball so far is no bound:
+/// nothing is judged of that rail. The largest ball walked is refined by golden section over
+/// the two steps about it, on points of F only. Between the points walked the ball is not
+/// enclosed: a larger ball between two of them, away from the largest walked, is not seen,
+/// which can only make the size named smaller than the largest that ends on E.
+///
+/// With `missed`, only a rail is judged whose end the corner's vertices looked for on E's
+/// surface and did not find (`SM_FIL_SURF_INT_FAILURE`, from the rail curve's intersection
+/// with that surface): that the round's rail misses E is then that search's finding, not
+/// this walk's.
 ///
 /// `Some(largest)` of a constant round where a rail's largest ball is smaller than the round
 /// and `margin` together (a round within `margin` of that ball ends on E only where its rail
 /// does, so it is judged with the larger ones): the least over the rails judged. `None` where
 /// nothing is judged: not an End on its end face, capped at a smooth vertex, a solver whose
-/// offsets change along the blend or differ, or no rail whose balls all stay below that.
+/// offsets change along the blend or differ, or no rail judged whose balls all stay below
+/// that.
 ///
 /// Since it is asked only on the failure path, an End that builds is never refused by it.
 ///
@@ -1105,6 +1130,7 @@ pub fn largest_ball_ending_on_end_face(
     solvers: &dyn SweptSolvers,
     extended_surfaces: &std::collections::BTreeMap<FaceId, crate::surface::surface::Surface>,
     margin: f64,
+    missed: bool,
 ) -> Result<Option<f64>> {
     if !corner
         .blend
@@ -1151,6 +1177,9 @@ pub fn largest_ball_ending_on_end_face(
     for &fv in &corner.vertices {
         if pseudo.fillet_vertex(fv)?.fillet_vertex_type() != FilletVertexType::RailXExtendedEdgeuse
         {
+            continue;
+        }
+        if missed && pseudo.fillet_vertex(fv)?.status() != FilStatus::SurfIntFailure {
             continue;
         }
         // the end rib at this rail end, its geometry and solver
@@ -1250,8 +1279,9 @@ pub fn largest_ball_ending_on_end_face(
             }
             Ok(None)
         };
-        // whether a point of F's surface lies on the face F
-        let on_f_face = |target: &mut Brep, p: Point3| -> Result<bool> {
+        // where a point of F's surface lies on the face F: `None` off it, `Some(true)` on
+        // its rim (an edge or a vertex of it), `Some(false)` inside it
+        let on_f_face = |target: &mut Brep, p: Point3| -> Result<Option<bool>> {
             let mut class = PointClassification::new(zone);
             point_3d_classify(
                 k,
@@ -1263,24 +1293,23 @@ pub fn largest_ball_ending_on_end_face(
                 &mut class,
                 Point3dClassifyOptions::default(),
             )?;
-            Ok(matches!(
-                class.point_class(),
-                PointClassType::Face
-                    | PointClassType::Edge
-                    | PointClassType::Edgeuse
-                    | PointClassType::Vertex
-            ))
+            Ok(match class.point_class() {
+                PointClassType::Face => Some(false),
+                PointClassType::Edge | PointClassType::Edgeuse | PointClassType::Vertex => {
+                    Some(true)
+                }
+                _ => None,
+            })
         };
-        // the ball touching F at a point of C and G: `None` where it is the round's and the
-        // margin, or larger (the round's rail reaches C), `Some(None)` where there is none
-        // to judge
+        // the ball touching F at a point of C and G, judged up to the round's and the margin
         let most_judged = radius + margin;
-        let ball = |target: &Brep, p: Point3| -> Result<Option<Option<f64>>> {
+        let ball = |target: &Brep, p: Point3| -> Result<CrossingBall> {
             match ball_touching_on(k, target, fs, side, g_face, p, Some(most_judged)) {
-                Ok((false, false, _)) => Ok(None),
-                Ok((false, true, rho)) => Ok(Some(Some(rho))),
+                Ok((true, _, _)) => Ok(CrossingBall::OnOtherFace),
+                Ok((false, false, _)) => Ok(CrossingBall::Reaches),
+                Ok((false, true, rho)) => Ok(CrossingBall::Radius(rho)),
                 Err(e) if e.is_unported_or_cancelled() => Err(e),
-                Ok((true, _, _)) | Err(_) => Ok(Some(None)),
+                Err(_) => Ok(CrossingBall::Unknown),
             }
         };
 
@@ -1294,8 +1323,10 @@ pub fn largest_ball_ending_on_end_face(
             d *= -1.0;
         }
         let mut walked = vec![(p, 0.0_f64)];
+        // how the walk stopped: the round's rail reaches C; or C came to its end on F
         let mut reached = false;
-        // the step that left F, or that no point of C was solved at (past a surface's end)
+        let mut ended = false;
+        // the step that left F, or that no point of C was solved at
         let mut left: Option<Point3> = None;
         for _ in 0..END_FACE_WALK_STEPS {
             let ahead = p + d * step;
@@ -1303,17 +1334,21 @@ pub fn largest_ball_ending_on_end_face(
                 left = Some(ahead);
                 break;
             };
-            if !on_f_face(target, q)? {
+            if on_f_face(target, q)?.is_none() {
                 left = Some(q);
                 break;
             }
             match ball(target, q)? {
-                None => {
+                CrossingBall::Reaches => {
                     reached = true;
                     break;
                 }
-                Some(None) => break,
-                Some(Some(rho)) => walked.push((q, rho)),
+                CrossingBall::OnOtherFace => {
+                    ended = true;
+                    break;
+                }
+                CrossingBall::Unknown => break,
+                CrossingBall::Radius(rho) => walked.push((q, rho)),
             }
             let Some((_, mut u)) = along.length_and_unit() else {
                 break;
@@ -1327,32 +1362,41 @@ pub fn largest_ball_ending_on_end_face(
         if reached {
             continue;
         }
-        // where C leaves F, or ends: between the last point on F and the step past it
+        // the last point of C on F before the step past it. C ends there only where that
+        // point lies on F's rim: a step that no point was solved at inside F shows nothing
         if let Some(off) = left {
             let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
             let mut last = None;
             for _ in 0..END_FACE_SOLVE_STEPS {
                 let mid = 0.5 * (lo + hi);
                 let on = match on_both(p + (off - p) * mid)? {
-                    Some((q, _)) if on_f_face(target, q)? => Some(q),
-                    _ => None,
+                    Some((q, _)) => on_f_face(target, q)?.map(|rim| (q, rim)),
+                    None => None,
                 };
-                if let Some(q) = on {
+                if on.is_some() {
                     lo = mid;
-                    last = Some(q);
+                    last = on;
                 } else {
                     hi = mid;
                 }
             }
-            if let Some(q) = last {
-                match ball(target, q)? {
-                    None => continue,
-                    Some(None) => {}
-                    Some(Some(rho)) => walked.push((q, rho)),
-                }
+            match last {
+                Some((q, rim)) => match ball(target, q)? {
+                    CrossingBall::Reaches => continue,
+                    CrossingBall::Radius(rho) => {
+                        walked.push((q, rho));
+                        ended = rim;
+                    }
+                    CrossingBall::OnOtherFace => ended = true,
+                    CrossingBall::Unknown => {}
+                },
+                // no point of C past the last one walked: it is C's end where it is on the rim
+                None => ended = on_f_face(target, p)? == Some(true),
             }
         }
-        if walked.len() < 2 {
+        // a walk that ran out of steps, or stopped inside F, has not seen all of C: its
+        // largest ball so far bounds nothing
+        if !ended || walked.len() < 2 {
             continue;
         }
         let mut at = 0;
@@ -1369,7 +1413,8 @@ pub fn largest_ball_ending_on_end_face(
             walked.get(at),
             walked.get(at + 1),
         ) {
-            let rho_at = |target: &Brep, x: f64| -> Result<Option<f64>> {
+            // (a probe off F, or with no ball solved, ends the search and adds nothing)
+            let rho_at = |target: &mut Brep, x: f64| -> Result<Option<f64>> {
                 let guess = if x < 0.0 {
                     here + (before - here) * -x
                 } else {
@@ -1378,9 +1423,13 @@ pub fn largest_ball_ending_on_end_face(
                 let Some((q, _)) = on_both(guess)? else {
                     return Ok(None);
                 };
+                if on_f_face(target, q)?.is_none() {
+                    return Ok(None);
+                }
                 Ok(match ball(target, q)? {
-                    None => Some(most_judged),
-                    Some(found) => found,
+                    CrossingBall::Reaches => Some(most_judged),
+                    CrossingBall::Radius(rho) => Some(rho),
+                    CrossingBall::OnOtherFace | CrossingBall::Unknown => None,
                 })
             };
             let gold = 0.5 * (5.0_f64.sqrt() - 1.0);
