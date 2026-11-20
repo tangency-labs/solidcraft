@@ -1439,6 +1439,8 @@ fn prefilled_directory_values_keep_extras_and_require_the_install_grant() {
         "folder":{"type":"string","format":"directory"}
     }});
     h.app.plugin_menu.listed = vec![listed("files", vec![command])];
+    // Keep the injected registry when open_form ensures installed entries are listed.
+    h.app.plugin_menu.loaded = true;
     let grants = h.app.session.plugin_state.grants.entry("files".into()).or_default();
     grants.folders.push(solidcraft_engine::plugin::FileGrant { name: "work".into(), folder: granted.clone(), read: true, write: true });
     open_form(&mut h.app, "files", "export", &json!({"folder":outside.to_string_lossy(),"operation_id":"saved"})).unwrap();
