@@ -1771,8 +1771,9 @@ pub fn get_or_create_uv_trim_curve(
 /// otherwise, or where one of them is not enclosed, `upstream`. A trim set without a raise
 /// (read from a file, or attached by an operation that does not raise) may be covered by
 /// upstream's larger raise only, and a smaller raise must not uncover it. The tolerance left
-/// is `2 * B` below `upstream`, `2 * upstream` up to twice it, and `B` past that: never
-/// decreasing in `B`, and at least `B` throughout.
+/// is `2 * B` below `upstream`, `2 * upstream` up to twice it, and `B` past that within the
+/// B-rep check's limit: never decreasing in `B`, and at least `B`, up to that limit (past it,
+/// `2 * upstream`, below `B`: the unproved fallback below).
 ///
 /// A `B` above twice `upstream` raises the edge only where the B-rep check accepts the
 /// tolerance it leaves ([`within_edge_tolerance_limit`]); past that, upstream's raise. A bound
@@ -1824,7 +1825,8 @@ pub(crate) fn trim_raise_distance(
         if !within_edge_tolerance_limit(b, raise_by) {
             return Ok(upstream);
         }
-        // (doubled by `SetUVTrimCurve` back to `B`, exactly: a halving is exact here)
+        // (doubled by `SetUVTrimCurve` back to `B`, exactly: halving a double is exact for
+        // any `B` of at least `2 * f64::MIN_POSITIVE` (normal halves), far below a tolerance)
         return Ok(0.5 * raise_by);
     }
     if raise_by >= upstream {
@@ -1836,10 +1838,43 @@ pub(crate) fn trim_raise_distance(
     // not uncover it. Where the lowered tolerance does not cover each other trim's proved
     // distance (or one is not enclosed), the raise is upstream's.
     let lowered = tol.max(2.0 * raise_by);
+    // The lowered tolerance must also cover what an evaluation of the edge curve can observe:
+    // `B` plus the evaluation's own rounding where the curve lies (`sqrt 3` times
+    // [`Curve::point_error_bound`] at its interval's ends, the larger: a line's grows with its
+    // parameter). Where that rounding is not bounded, or the lowered tolerance does not cover
+    // it (a curve far from the origin for its bound), the raise is upstream's.
+    if !lowered_covers_rounding(b, e, raise_by, lowered)? {
+        return Ok(upstream);
+    }
     match other_trims_bound(k, b, eu, fit, lowered)? {
         Some(others) if others <= lowered => Ok(raise_by),
         _ => Ok(upstream),
     }
+}
+
+/// Not upstream (#18166): whether the tolerance `lowered` covers the proved distance `bound`
+/// plus the evaluation rounding of `e`'s curve (`sqrt 3` times the larger
+/// [`Curve::point_error_bound`] at its interval's ends, rounded up), as
+/// [`trim_raise_distance`] requires of a lowering; `false` without a curve or a bound.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id.
+fn lowered_covers_rounding(b: &Brep, e: EdgeId, bound: f64, lowered: f64) -> Result<bool> {
+    let rec = b.edge(e)?;
+    let Some(curve) = rec.curve.as_ref() else {
+        return Ok(false);
+    };
+    let (Some(e0), Some(e1)) = (
+        curve.point_error_bound(rec.interval.min()),
+        curve.point_error_bound(rec.interval.max()),
+    ) else {
+        return Ok(false);
+    };
+    // (each of the sum's two roundings and the product's is at most one `EPSILON` relative:
+    // `4 EPSILON` covers them, rounding the total up)
+    let need = (bound + e0.max(e1) * 3.0_f64.sqrt()) * (1.0 + 4.0 * f64::EPSILON);
+    Ok(need.is_finite() && need <= lowered)
 }
 
 /// Not upstream (#18166): whether `tolerance` is one the B-rep check accepts for an edge of
@@ -3396,6 +3431,76 @@ mod tests {
         let mut b = Brep::new();
         let eu = b.add_edgeuse_record(Edgeuse::default()).unwrap();
         (b, eu)
+    }
+
+    /// A `sphere_no_pole` of radius 23.567 centred at `center` (built at the origin and moved
+    /// there), each B-spline edge's tolerance set to 1e-5, with one trimmed use of each.
+    fn sphere_edges(center: Point3) -> (Kernel, Brep, Vec<(EdgeId, EdgeuseId, Curve)>) {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_sphere_no_pole(&mut k, center, 23.567)
+            .unwrap();
+        let mut out = Vec::new();
+        let edges: Vec<EdgeId> = b.edges().iter().map(|(e, _)| e).collect();
+        for e in edges {
+            let rec = b.edge(e).unwrap();
+            if !matches!(
+                rec.curve.as_ref().map(Curve::kind),
+                Some(CurveKind::BSpline(_))
+            ) {
+                continue;
+            }
+            let Some((eu, trim)) = rec.edgeuses.iter().find_map(|&eu| {
+                let t = b.edgeuse(eu).ok()?.uv_trim_curve.as_ref()?.clone();
+                Some((eu, t))
+            }) else {
+                continue;
+            };
+            edge_set_tolerance(&mut b, e, 1e-5).unwrap();
+            out.push((e, eu, trim));
+        }
+        (k, b, out)
+    }
+
+    /// gen1157's centre, about 8e8 from the origin.
+    const FAR: Point3 = Point3::new(-423123980.82400393, -605023292.1569545, 445743038.3134029);
+
+    /// #18166: at the origin a sphere's edges, given upstream's distance as 1 (so every
+    /// enclosed bound below it is a lowering), are lowered below it.
+    #[test]
+    fn a_sphere_s_edges_are_lowered_to_their_bound() {
+        let (k, mut b, edges) = sphere_edges(Point3::new(0.0, 0.0, 0.0));
+        assert!(!edges.is_empty());
+        for (_, eu, trim) in &edges {
+            let raise = trim_raise_distance(&k, &mut b, *eu, trim, 1.0).unwrap();
+            assert!(raise > 0.0 && raise < 1.0, "lowered, got {raise:e}");
+        }
+    }
+
+    /// #18166: a lowering must cover the evaluation's rounding where the edge lies. gen1157's
+    /// proved bound `B = 7.392e-6`, lowered to `2 B`, covers it at the origin; 8e8 away the
+    /// edge curves' evaluation rounding (`sqrt 3` times their point error bound there, about
+    /// 4e-5) is more than `2 B` leaves over `B`, so [`trim_raise_distance`] keeps upstream's
+    /// raise. A bound enclosed there is loose by that rounding (each edge's below), and twice
+    /// it covers it.
+    #[test]
+    fn a_lowering_covers_the_evaluation_rounding_where_the_edge_lies() {
+        let (b_proved, lowered) = (7.392e-6, 1.4784e-5);
+        let (_, near, edges) = sphere_edges(Point3::new(0.0, 0.0, 0.0));
+        assert!(!edges.is_empty());
+        for (e, _, _) in &edges {
+            assert!(lowered_covers_rounding(&near, *e, b_proved, lowered).unwrap());
+        }
+        let (k, mut far, far_edges) = sphere_edges(FAR);
+        assert_eq!(far_edges.len(), edges.len());
+        for (e, eu, trim) in &far_edges {
+            assert!(!lowered_covers_rounding(&far, *e, b_proved, lowered).unwrap());
+            let fit = fit_tolerance(&k, &mut far, *e).unwrap();
+            let bound = trim_deviation_bound(&k, &far, *eu, trim, fit, [5e-6, f64::INFINITY], None)
+                .unwrap()
+                .unwrap();
+            assert!(bound > b_proved, "far: bound {bound:e}");
+            assert!(lowered_covers_rounding(&far, *e, bound, 2.0 * bound).unwrap());
+        }
     }
 
     #[test]

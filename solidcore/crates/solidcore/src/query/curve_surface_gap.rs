@@ -2359,6 +2359,9 @@ pub fn trim_image_gap_bound_within(
     // halving shrinks (#18166: `topology.brep_local_operation` fc0000, bounds 0.43 and 8.7e-3
     // from one piece at depth 30, for trims 1.2e-6 and 1.2e-7 from their edges by dense
     // samples). Pieces within one span of `ψ` each have a cubic's bounded second derivative.
+    // (The cuts are `ψ`'s distinct interior knots: one per interpolated point, so at most
+    // [`PSI_MAX_POINTS`]. The first pieces are then at most [`FIRST_PIECES`] plus the cuts,
+    // and no piece is cut further past [`MAX_PIECES`]: the work stays bounded.)
     let with_psi = |psi: &NurbsCurve| -> Result<Option<f64>> {
         let mut first = run(psi, &cn, &net, enough, &[])?;
         let mut cuts: Vec<f64> = Vec::new();

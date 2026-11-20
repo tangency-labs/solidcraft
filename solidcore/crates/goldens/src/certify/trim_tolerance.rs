@@ -41,9 +41,13 @@
 use solidcore::curve::curve::p2::CurveKind;
 use solidcore::curve::curve::Curve;
 use solidcore::kernel::Kernel;
+use solidcore::math::Point3;
+use solidcore::nurbs::b_spline_curve::ControlPointForm;
+use solidcore::nurbs::math::CPoint;
 use solidcore::query::curve_surface_gap::{
     curve_face_gap_bound_within, line_evaluation_slack, plane_uv_lipschitz, trim_image_gap_bound,
 };
+use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::{edge, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
@@ -56,8 +60,9 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 
 /// The moved edges (and vertices) this certificate does not certify yet, one per line: unit,
 /// case, body, edge index (`v` and the index for a vertex, accepted only when its old
-/// tolerance did not cover its edge ends either), class, and (diagnostic only, never part of
-/// a proof) a dense-sampling estimate of the edge's largest trim gap and its new tolerance.
+/// tolerance did not cover its edge ends either), class, (diagnostic only, never part of a
+/// proof) a dense-sampling estimate of the edge's largest trim gap, and its new tolerance
+/// (checked bit for bit for a `loose-raise`, [`open_tolerance`]; diagnostic otherwise).
 /// Classes:
 /// - `UNCOVERED`: the sampled gap of one of the edge's trims exceeds the new (and the old)
 ///   tolerance: an open defect, the tolerance does not cover that trim either way (the 27
@@ -68,16 +73,16 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 ///   `u = 71.94`, `v` from 0 to 139.4, far outside the face's B-spline domain
 ///   `[-0.05, 1.05]^2`, so its image is the surface's extrapolation; the trim is in another
 ///   parameterisation than its face's, in both kernels, and no tolerance covers it);
-/// - `loose`: the sampled gap is within the new tolerance but the enclosure `B` is not
-///   (`primitive.api_primitives`' `gen0244`, `gen0893` and `gen1157`);
-/// - `rounding-bound`: an entity of `primitive.api_primitives`' `gen0244`, `gen0893` and
-///   `gen1157`, whose vertices lie about 8e8 from the origin, where the evaluation's own
-///   error bound at that scale exceeds what the tolerance can show: a vertex whose edge
-///   ends evaluate onto its point, but whose curves' error bounds (1.4e-5 to 2.4e-5 a
-///   coordinate, times `sqrt 3`) exceed both tolerances; `gen1157` edge 3 ([`MEASURED_OPEN`],
-///   open even though the old tolerance certifies it), kept at upstream's tolerance, whose
-///   `B` (1.71e-5 and 1.54e-5 over its 1.48e-5) is mostly that error bound, its trims
-///   sampled within 9.6e-6;
+/// - `loose`: the sampled gap is within the new tolerance but the enclosure `B` is not, on
+///   the body as built nor on an exactly translated copy ([`exact_translated_bound`]):
+///   `primitive.api_primitives`' `gen0244` edges 1 and 3 and `gen1157` edge 5, about 8e8
+///   from the origin (the other moved edges of those cases and of `gen0893` are certified
+///   on that copy);
+/// - `rounding-bound`: a vertex of `primitive.api_primitives`' `gen0244`, `gen0893` and
+///   `gen1157`, about 8e8 from the origin, where the evaluation's own error bound at that
+///   scale exceeds what the tolerance can show: its edge ends evaluate onto its point, but
+///   their curves' error bounds (1.4e-5 to 2.4e-5 a coordinate, times `sqrt 3`) exceed both
+///   tolerances;
 /// - `invalid-input`: a vertex of `gen0195`, whose input holds a non-finite coordinate
 ///   (`y = -inf`), so no tolerance covers its edge ends with their error bounds;
 /// - `no-estimate`: the trim's image could not be sampled;
@@ -104,10 +109,18 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 /// certified (or a new failure) shows up.
 const OPEN: &str = include_str!("trim_tolerance_open.tsv");
 
-/// The [`OPEN`] class of an edge open even where the old tolerance certifies its trims: the
-/// enclosure, most of it the evaluation's own error bound, cannot show what sampling
-/// measures, so the entry is counted open, never proved.
-const MEASURED_OPEN: [&str; 1] = ["rounding-bound"];
+/// The smallest coordinate magnitude at which a `rounding-bound` entry is accepted: the class
+/// is the evaluation's own error bound at about 8e8, so an entity of that class nearer the
+/// origin is a new failure, not this one.
+const ROUNDING_BOUND_SCALE: f64 = 1.0e8;
+
+/// Whether every one of `points` has a coordinate past [`ROUNDING_BOUND_SCALE`] in magnitude.
+fn all_far(points: &[Point3]) -> bool {
+    !points.is_empty()
+        && points
+            .iter()
+            .all(|p| p.x.abs().max(p.y.abs()).max(p.z.abs()) > ROUNDING_BOUND_SCALE)
+}
 
 /// [`OPEN`] entries of `unit`: `(case, body, entity)`, the entity an edge's index or `v` and
 /// a vertex's, to its class.
@@ -128,6 +141,21 @@ fn open_entries(unit: &str) -> std::collections::BTreeMap<(String, usize, String
             })
         })
         .collect()
+}
+
+/// The new tolerance an [`OPEN`] entry of `unit` records (its last column), for a class whose
+/// entry pins it (`loose-raise`: the raise is open only at exactly that tolerance).
+fn open_tolerance(unit: &str, key: &(String, usize, String)) -> Option<f64> {
+    OPEN.lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .map(|l| l.split('\t').collect::<Vec<&str>>())
+        .find(|f| {
+            f.first() == Some(&unit)
+                && f.get(1) == Some(&key.0.as_str())
+                && f.get(2).and_then(|b| b.parse::<usize>().ok()) == Some(key.1)
+                && f.get(3) == Some(&key.2.as_str())
+        })
+        .and_then(|f| f.get(6).and_then(|t| t.parse().ok()))
 }
 
 /// The moved output values that are not a moved entity's tolerance, one per line: unit,
@@ -395,20 +423,138 @@ fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> UseBound {
     let mut surface = surface.clone_for_evaluation().expect("a copy");
     let _ = surface.set_owner(None);
     let ivl = rec.interval;
-    match trim_image_gap_bound(
-        k,
-        &surface,
-        curve,
-        trim,
-        [ivl.min(), ivl.max()],
-        FLOOR * rec.tolerance,
-    )
-    .expect("the bound")
-    {
+    let range = [ivl.min(), ivl.max()];
+    let floor = FLOOR * rec.tolerance;
+    let mut bound =
+        trim_image_gap_bound(k, &surface, curve, trim, range, floor).expect("the bound");
+    // Past the tolerance (or not enclosed), the same pair is bounded again on an exactly
+    // translated copy ([`exact_translated_bound`]): the same geometry, nearer the origin,
+    // where the enclosures are not widened by the coordinates; the smaller bound is kept.
+    if !bound.is_some_and(|x| x + line_slack <= rec.tolerance) {
+        if let Some(x) = exact_translated_bound(k, &surface, curve, trim, range, floor) {
+            bound = Some(bound.map_or(x, |b| b.min(x)));
+        }
+    }
+    match bound {
         Some(x) if line_slack == 0.0 => UseBound::Bound(x),
         Some(x) => UseBound::Bound((x + line_slack) * (1.0 + 4.0 * f64::EPSILON)),
         None => UseBound::Open,
     }
+}
+
+/// [`trim_image_gap_bound`] of `trim` against `curve` on `surface`, computed on a copy of the
+/// curve and the surface moved by `-T`, where the move is exact: every distance of the copy
+/// is the original's, so its bound is a bound of the original pair (#18166: a body built at
+/// the origin, its tolerances proved there, then moved about 8e8 away, where the enclosures
+/// widen with the coordinates: `primitive.api_primitives` gen1157).
+///
+/// `T` is, per axis, the power of two at most the middle of the curve's control points'
+/// coordinate (`0` for a middle that is zero or not normal). The copy is built here, not by
+/// a transform (which divides by the weight and multiplies back, rounding): each stored
+/// homogeneous coordinate `X` of weight `w` (`1` for a non-rational point) becomes `X - w T`,
+/// so the Euclidean point `X / w` moves by exactly `-T`. Exactness is checked, never assumed:
+/// `w T` exact (a power of two times a weight, normal or zero), `X - w T` with no rounding
+/// error (Knuth's two-sum error `0`), and the copy's stored coordinate that value, its weight
+/// unchanged. `None` where any point fails, for a curve or surface that is not a B-spline, or
+/// where the bound is not enclosed.
+fn exact_translated_bound(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    trim: &Curve,
+    range: [f64; 2],
+    floor: f64,
+) -> Option<f64> {
+    let CurveKind::BSpline(c) = curve.kind() else {
+        return None;
+    };
+    let SurfaceKind::BSpline(sb) = surface.kind() else {
+        return None;
+    };
+    let weight = |p: &CPoint| if p.w > 0.0 { p.w } else { 1.0 };
+    let cp = c.control_points().ok()?;
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for p in cp {
+        for (i, x) in [p.x, p.y, p.z].into_iter().enumerate() {
+            let e = x / weight(p);
+            lo[i] = lo[i].min(e);
+            hi[i] = hi[i].max(e);
+        }
+    }
+    let t: [f64; 3] = std::array::from_fn(|i| {
+        let m = 0.5 * lo[i] + 0.5 * hi[i];
+        if m.is_normal() {
+            // (the exponent bits alone: the largest power of two at most |m|)
+            f64::from_bits(m.abs().to_bits() & 0x7ff0_0000_0000_0000).copysign(m)
+        } else {
+            0.0
+        }
+    });
+    if t == [0.0; 3] {
+        return None;
+    }
+    // `p` moved by `-T`, or `None` where a coordinate's move is not exact
+    let moved = |p: &CPoint| -> Option<Point3> {
+        let mut out = [0.0; 3];
+        for (o, (x, tc)) in out.iter_mut().zip([(p.x, t[0]), (p.y, t[1]), (p.z, t[2])]) {
+            let s = weight(p) * tc;
+            let d = x - s;
+            // (Knuth's two-sum of `x` and `-s`: its error, exactly)
+            let bb = d - x;
+            let err = (x - (d - bb)) + (-s - bb);
+            if !((s == 0.0 || s.is_normal()) && d.is_finite() && err == 0.0) {
+                return None;
+            }
+            *o = d;
+        }
+        Some(Point3::new(out[0], out[1], out[2]))
+    };
+    let same = |p: &CPoint, q: &CPoint, d: Point3| {
+        p.w.to_bits() == q.w.to_bits()
+            && [(q.x, d.x), (q.y, d.y), (q.z, d.z)]
+                .into_iter()
+                .all(|(y, d)| y.to_bits() == d.to_bits())
+    };
+    let mut mc = c.clone();
+    for (i, p) in cp.iter().enumerate() {
+        mc.set_control_point(ControlPointForm::HomogeneousRational, i, moved(p)?, p.w)
+            .ok()?;
+    }
+    let mcp = mc.control_points().ok()?;
+    if mcp.len() != cp.len()
+        || !cp
+            .iter()
+            .zip(mcp)
+            .all(|(p, q)| moved(p).is_some_and(|d| same(p, q, d)))
+    {
+        return None;
+    }
+    let (n, m, sp) = sb.control_points().ok()?;
+    let mut ms = sb.clone();
+    if m == 0 {
+        return None;
+    }
+    // (`n` rows of `m` points: point `[i][j]` at `i m + j`)
+    for (i, row) in sp.chunks(m).enumerate() {
+        for (j, p) in row.iter().enumerate() {
+            ms.set_control_point(ControlPointForm::HomogeneousRational, i, j, moved(p)?, p.w)
+                .ok()?;
+        }
+    }
+    let (mn, mm, mp) = ms.control_points().ok()?;
+    if (n, m) != (mn, mm)
+        || sp.len() != mp.len()
+        || !sp
+            .iter()
+            .zip(&mp)
+            .all(|(p, q)| moved(p).is_some_and(|d| same(p, q, d)))
+    {
+        return None;
+    }
+    let moved_curve = Curve::from(mc);
+    let moved_surface = Surface::from(ms);
+    trim_image_gap_bound(k, &moved_surface, &moved_curve, trim, range, floor).ok()?
 }
 
 /// The owner of a value of a geometry record (`topology_brep_mirror::geometry`).
@@ -445,7 +591,7 @@ fn record_owners(k: &Kernel, b: &Brep, status: bool, uv_trim: bool) -> Vec<Owner
     };
     // as `surface_samples`: -1 for no surface, else the type, the domain's corners and the
     // 3 x 3 grid of samples
-    let surface = |s: Option<&solidcore::surface::surface::Surface>| match s {
+    let surface = |s: Option<&Surface>| match s {
         None => 1,
         Some(s) => {
             let d = s.natural_uv_domain_if_built();
@@ -980,13 +1126,17 @@ fn certify(unit: &str) -> Tally {
                 let key = (row.case.clone(), body, index.to_string());
                 if raised {
                     // a raise: the new tolerance covers every trim, and one trim's bound is
-                    // above the old tolerance (in OPEN only as a `loose-raise`, its every
-                    // enclosed trim within the new tolerance: counted open, never proved)
+                    // above the old tolerance (in OPEN only as a `loose-raise`: no enclosed
+                    // trim past the old tolerance, every one within the new, and the new
+                    // tolerance exactly the entry's, so a raise that moves is seen; counted
+                    // open, never proved)
                     let past = bounds.iter().flatten().any(|x| *x > old);
                     if bad.is_empty() && past {
                         tally.raised += 1;
                     } else if open.get(&key).is_some_and(|c| c == "loose-raise")
+                        && !past
                         && bounds.iter().flatten().all(|x| *x <= new)
+                        && open_tolerance(unit, &key).map(f64::to_bits) == Some(new.to_bits())
                     {
                         open_seen.insert(key);
                         tally.open += 1;
@@ -1005,10 +1155,11 @@ fn certify(unit: &str) -> Tally {
                     // open: the old tolerance does not certify the new geometry either (some
                     // trim's `B` past it, or not enclosed). Not a claim about the old geometry,
                     // which this test does not build: the entry is counted open, never proved.
-                    // A `MEASURED_OPEN` class is open even where the old tolerance certifies it
-                    if !MEASURED_OPEN.contains(&class.as_str())
-                        && bounds.iter().all(|x| x.is_some_and(|x| x <= old))
-                    {
+                    assert!(
+                        class != "rounding-bound",
+                        "{at}: `rounding-bound` is a vertex class"
+                    );
+                    if bounds.iter().all(|x| x.is_some_and(|x| x <= old)) {
                         failures.push(format!(
                             "{at}: {old:e} -> {new:e}: certified at the old tolerance, not \
                              the new: {bad:?}"
@@ -1065,6 +1216,12 @@ fn certify(unit: &str) -> Tally {
                 } else if open.contains_key(&key) && !vertex_covers_its_ends(&k, b, v, old) {
                     // open: neither tolerance covers the new edge ends (the old geometry is
                     // not built here: counted open, never proved)
+                    if open.get(&key).is_some_and(|c| c == "rounding-bound") {
+                        assert!(
+                            all_far(&[rec.point]),
+                            "{at}: `rounding-bound` near the origin"
+                        );
+                    }
                     open_seen.insert(key);
                     tally.open += 1;
                 } else {
@@ -1252,22 +1409,42 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
         missing.is_empty(),
         "ROWS units with no expected file: {missing:?}"
     );
+    let mut left_out: Vec<(String, String)> = Vec::new();
     for (unit, want) in &main {
         let text = std::fs::read_to_string(dir.join(format!("{unit}.jsonl")))
             .unwrap_or_else(|e| panic!("{unit}: {e}"));
         // (a known-failing case has no line here or on main, so it is outside the golden diff;
-        // its rows are certified by the unit's own test all the same)
+        // its rows are certified by the unit's own test all the same. Each one left out must be
+        // known-failing on main too: [`LEDGER_KNOWN_FAILING`])
         let known = crate::golden::known_failing(&dir, unit).unwrap_or_else(|e| panic!("{e}"));
-        let rows: Vec<Row> = rows(unit)
+        let (out, rows): (Vec<Row>, Vec<Row>) = rows(unit)
             .into_iter()
-            .filter(|r| !known.contains_key(&r.case))
-            .collect();
+            .partition(|r| known.contains_key(&r.case));
+        left_out.extend(out.into_iter().map(|r| (unit.clone(), r.case)));
         let mut replay = |case: &str| replay_case(unit, case);
         let got =
             expected_digest(&text, &rows, &mut replay).unwrap_or_else(|e| panic!("{unit}: {e}"));
         assert_eq!(got, *want, "{unit}: {got:016x}, main {want:016x}");
     }
+    let pinned: Vec<(String, String)> = LEDGER_KNOWN_FAILING
+        .iter()
+        .map(|&(u, c)| (u.to_string(), c.to_string()))
+        .collect();
+    assert_eq!(
+        left_out, pinned,
+        "the known-failing ROWS cases the ledger leaves out (each must be known-failing on main)"
+    );
 }
+
+/// The [`ROWS`] cases the ledger leaves out as known-failing (`expected/known_failing.json`),
+/// each known-failing on main as well (main's list at [`MAIN`]'s commit, checked when the
+/// digests were written): unit, case, in the ledger's order. Pinned, so a case that becomes
+/// known-failing on this branch only is not dropped from the diff unseen.
+const LEDGER_KNOWN_FAILING: &[(&str, &str)] = &[
+    ("topology.brep_local_operation", "gen0014"),
+    ("topology.brep_local_operation", "gen0019"),
+    ("topology.brep_mirror", "mat0076"),
+];
 
 /// The Rust output of `case` of `unit`, run as [`certify`] runs it.
 fn replay_case(unit: &str, case: &str) -> Result<crate::Output, String> {
@@ -1307,6 +1484,15 @@ fn expected_units(dir: &std::path::Path) -> std::collections::BTreeSet<String> {
 /// Writes [`MAIN`] from main's expected files in `MAIN_EXPECTED_DIR` (every unit, each
 /// [`ROWS`] case's line blessed again by main's kernel) to `MAIN_EXPECTED_OUT`, after the line
 /// `# main <MAIN_SHA>`.
+///
+/// To make that directory: in a worktree at main's commit, check out main's
+/// `crates/goldens/expected`, delete from it the line of every [`ROWS`] case, and bless those
+/// units again (`cargo run --profile goldens -p goldens -- --unit <unit> ... --goldens
+/// --bless`), which writes each deleted line from main's kernel and leaves every other line as
+/// main's file has it; then run this test (`MAIN_EXPECTED_DIR=<that expected dir>
+/// MAIN_SHA=<main's commit> MAIN_EXPECTED_OUT=<file> cargo test --profile goldens -p goldens
+/// --lib certify::trim_tolerance::main_expected_digests -- --ignored --exact`) and copy the
+/// file to `trim_tolerance_main.tsv`.
 #[test]
 #[ignore = "writes the main digests of the ledger; run on main's expected files"]
 fn main_expected_digests() {
@@ -1339,7 +1525,7 @@ fn an_edge_face_without_a_trim_is_bounded_against_its_surface() {
     let mut k = Kernel::default();
     let mut b = solidcore::primitive::api_primitives::create_box(
         &mut k,
-        solidcore::Point3::new(0.0, 0.0, 0.0),
+        Point3::new(0.0, 0.0, 0.0),
         10.0,
         20.0,
         30.0,

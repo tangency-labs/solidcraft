@@ -455,6 +455,54 @@ fn geometry_site(ints: &[i64], i: usize) -> Site {
     Site::EdgeTolerance { e: r / 3 }
 }
 
+/// Tolerances raised past twice their need although main's was under it: (case, body
+/// prefix, `geometry` index). The refit's proved deviation bound is loose at these corners
+/// (#19784 tracks tightening it); the raise reaches that bound, which covers the measured
+/// need, so the tolerance goes from main's uncertified one to a certified, looser one.
+const RAISED_TO_A_LOOSE_BOUND: &[(&str, &str, usize)] = &[
+    ("fc0000", "", 499),
+    ("fc0000", "", 740),
+    ("fc0006", "", 499),
+    ("fc0006", "", 740),
+    ("fc0008", "", 499),
+    ("fc0008", "", 740),
+    ("fc0025", "", 499),
+    ("fc0025", "", 740),
+];
+
+/// The class of a tolerance moved from main's `m` to `n`, both against `need`, the bound
+/// the tolerance must cover (`n >= need` already asserted): lowered is closer; raised by at
+/// most `need` is equal (within what the trims need); raised from under its need to at most
+/// twice it is closer (main's uncovered, this branch's covering it with no more slack than
+/// the need itself); any other raise is farther, except the listed
+/// [`RAISED_TO_A_LOOSE_BOUND`] rows, closer as documented there (each must still be raised
+/// from under its need past twice it, or its entry is stale).
+fn tolerance_class(name: &str, prefix: &str, i: usize, m: f64, n: f64, need: f64) -> Class {
+    let listed = RAISED_TO_A_LOOSE_BOUND.contains(&(name, prefix, i));
+    let class = if n < m {
+        Class::Closer
+    } else if m < need {
+        if n - need <= need {
+            Class::Closer
+        } else if listed {
+            eprintln!("    raised to a loose proved bound (#19784): {name} {prefix} geometry[{i}]");
+            return Class::Closer;
+        } else {
+            Class::Farther
+        }
+    } else if n - m <= need {
+        Class::Equal
+    } else {
+        Class::Farther
+    };
+    assert!(
+        !listed,
+        "{name} {prefix}: geometry[{i}] no longer raised to a loose bound, remove its \
+         RAISED_TO_A_LOOSE_BOUND entry"
+    );
+    class
+}
+
 /// An upper bound on how far `e`'s curve lies from its uses' trims' images (each trim
 /// certified, [`certify_brep`]) and its ends from its vertices: the most of these.
 fn edge_need(b: &Brep, certs: &[crate::trims_on_edges::TrimCertificate], e: EdgeId) -> f64 {
@@ -705,6 +753,8 @@ pub(crate) fn certify_body(
     let mut done: Vec<(&str, usize)> = Vec::new();
     // the edges a moved value lies on or ends
     let mut touched: Vec<EdgeId> = Vec::new();
+    // the `geometry` indices of this body's [`RAISED_TO_A_LOOSE_BOUND`] rows reached
+    let mut loose_reached: Vec<usize> = Vec::new();
     for &(key, i, _, _) in moved {
         let site = match key {
             "record" => record_site_in(&record, i, head, slot),
@@ -777,17 +827,11 @@ pub(crate) fn certify_body(
                     n >= need,
                     "{name}: edge {e} tolerance {m:e} / {n:e} under {need:e}"
                 );
-                // (main's under its need, this branch's raised to cover it: closer, from
-                // an uncertified tolerance to a certified one; #18166's fc rows)
-                let class = if n < m || m < need {
-                    Class::Closer
-                } else if n - m <= need {
-                    Class::Equal
-                } else {
-                    Class::Farther
-                };
+                let class = tolerance_class(name, prefix, i, m, n, need);
+                loose_reached.push(i);
                 eprintln!(
-                    "  edge {e} tolerance: main {m:e}, now {n:e}, need at most {need:e}: {class:?}"
+                    "  edge {e} tolerance (geometry[{i}]): main {m:e}, now {n:e}, need at most \
+                     {need:e}: {class:?}"
                 );
                 classes.push(class);
             }
@@ -807,16 +851,12 @@ pub(crate) fn certify_body(
                         n >= need,
                         "{name}: vertex {v} tolerance {m:e} / {n:e} under {need:e}"
                     );
-                    // (main's under its need, this branch's raised to cover it: closer, from
-                    // an uncertified tolerance to a certified one; #18166's fc rows)
-                    let class = if n < m || m < need {
-                        Class::Closer
-                    } else if n - m <= need {
-                        Class::Equal
-                    } else {
-                        Class::Farther
-                    };
-                    eprintln!("  vertex {v} tolerance: main {m:e}, now {n:e}, need at most {need:e}: {class:?}");
+                    let class = tolerance_class(name, prefix, i, m, n, need);
+                    loose_reached.push(i);
+                    eprintln!(
+                        "  vertex {v} tolerance (geometry[{i}]): main {m:e}, now {n:e}, need at \
+                         most {need:e}: {class:?}"
+                    );
                     classes.push(class);
                     continue;
                 }
@@ -841,6 +881,13 @@ pub(crate) fn certify_body(
                 classes.push(point_class(&k, b, &faces, main, now));
             }
         }
+    }
+    for &(case, p, i) in RAISED_TO_A_LOOSE_BOUND {
+        assert!(
+            case != name || p != prefix || loose_reached.contains(&i),
+            "{name} {prefix}: geometry[{i}] is not a moved tolerance, remove its \
+             RAISED_TO_A_LOOSE_BOUND entry"
+        );
     }
     // a moved domain bound moves the face's samples taken on it: it is classed as the most
     // distant of the face's moved samples. Where none moved (a bound moved by a few ulps that
