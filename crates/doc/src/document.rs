@@ -4701,6 +4701,9 @@ impl Document {
     /// container keeps, as parts of their own. Empty when the design saves as JSON whole.
     pub fn binary_data(&self) -> Vec<&'static str> {
         let mut kinds = Vec::new();
+        if self.canvases.iter().any(|c| !c.data.is_empty()) {
+            kinds.push("images");
+        }
         if !self.plugin_data.is_empty() {
             kinds.push("plugin files");
         }
