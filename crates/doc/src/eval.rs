@@ -8043,25 +8043,6 @@ fn turned_seam(axis: Vec3, origin: Vec3, body: &Body) -> Result<Body> {
     kernel::transform_matrix(body, m).map_err(DocError::Kernel)
 }
 
-/// How far a coil's radius grows per turn at cone angle `taper` (radians from the axis): `|pitch| ·
-/// tan(taper)`, negative when it narrows. The angle stays within ±80° so the tangent is bounded.
-fn coil_growth_per_turn(taper: f64, pitch: f64) -> Result<f64> {
-    if !taper.is_finite() || taper.abs() > 80.0_f64.to_radians() {
-        return Err(DocError::Invalid("a coil's taper must be between -80 and 80 degrees".into()));
-    }
-    Ok(pitch.abs() * taper.tan())
-}
-
-/// A coil's helical sweep: a cylinder at no growth, otherwise the radial sweep with the profile
-/// moving `growth` mm further from the axis each turn (#4735).
-fn coil_sweep(plane: &Plane, region: &Region2, base: Vec3, axis: Vec3, pitch: f64, turns: f64, growth: f64) -> Result<Body> {
-    if growth == 0.0 {
-        return Ok(kernel::sweep_helix(plane, region, base, axis, pitch, turns)?);
-    }
-    let law = [(0.0, 0.0), (turns, growth * turns)];
-    Ok(kernel::sweep_helix_radial(plane, region, base, axis, pitch, turns, &law, true)?)
-}
-
 /// Whether any of the bodies the feature cuts holds a seam in the plane `plane`.
 fn bodies_hold_a_seam_in_plane(st: &ModelState, f: &Feature, plane: &Plane) -> bool {
     let FeatureKind::Revolve { targets, .. } = &f.kind else { return false };
@@ -8887,10 +8868,10 @@ fn feature_tools_with_constructor(
             let k = axis.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
             let p = val(vals, pitch, Kind::Length)?;
             let n = val(vals, turns, Kind::Unitless)?;
-            // The radius grows by `|pitch| · tan(taper)` per turn; the sign of the taper, not the
-            // hand of the coil, says whether it widens or narrows.
-            let growth = match taper {
-                Some(e) => coil_growth_per_turn(val(vals, e, Kind::Angle)?, p)?,
+            // The cone angle: the kernel turns it into the coil's radial growth and refuses one
+            // that leaves its range or takes the coil through its axis (#4735).
+            let taper = match taper {
+                Some(e) => val(vals, e, Kind::Angle)?,
                 None => 0.0,
             };
             if sketch.is_some()
@@ -8919,7 +8900,7 @@ fn feature_tools_with_constructor(
                 let axis = if *clockwise { k * -1.0 } else { k };
                 // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
                 let pitch = if *clockwise { -p } else { p };
-                return Ok(unnamed(vec![coil_sweep(&ss.plane, region, *base, axis, pitch, n, growth)?]));
+                return Ok(unnamed(vec![kernel::sweep_helix_tapered(&ss.plane, region, *base, axis, pitch, n, taper)?]));
             }
             let diameter = diameter.as_ref().ok_or_else(|| DocError::Invalid("a coil needs a `sketch` or a `diameter`".into()))?;
             let section_size = section_size.as_ref().ok_or_else(|| DocError::Invalid("a coil needs a `sketch` or a `section_size`".into()))?;
@@ -8930,9 +8911,6 @@ fn feature_tools_with_constructor(
             let r = d / 2.0 + f64::from(*position) * s / 2.0;
             if r <= s / 2.0 {
                 return Err(DocError::Invalid("the section reaches the coil's axis".into()));
-            }
-            if r + growth * n <= s / 2.0 {
-                return Err(DocError::Invalid("the taper takes the coil through its axis before its last turn".into()));
             }
             let a0 = match start_angle {
                 Some(e) => val(vals, e, Kind::Angle)?,
@@ -8955,7 +8933,7 @@ fn feature_tools_with_constructor(
             let axis = if *clockwise { k * -1.0 } else { k };
             // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
             let pitch = if *clockwise { -p } else { p };
-            let coil = Traced::unnamed(coil_sweep(&plane, &region, *base, axis, pitch, n, growth)?);
+            let coil = Traced::unnamed(kernel::sweep_helix_tapered(&plane, &region, *base, axis, pitch, n, taper)?);
             Ok(vec![coil.with_recipe(tool_recipe(doc, f, vals))])
         }
         FeatureKind::Loft { sections, rails, rail_fit, .. } => {
