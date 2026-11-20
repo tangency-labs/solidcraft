@@ -116,6 +116,7 @@ fn discovered(app: &mut SolveApp, inventory: Inventory) {
     {
         app.plugin_slots.items = inventory.plugins.iter().flat_map(declared).take(8192).collect();
     }
+    crate::plugin_workspaces::discovered(app, &inventory.plugins);
     app.plugin_slots.inventory = Some(inventory);
 }
 pub(crate) fn refresh(app: &mut SolveApp) {
@@ -140,12 +141,35 @@ pub(crate) fn refresh(app: &mut SolveApp) {
     }
     let root = app.session.plugin_state.plugins_dir();
     let inspected = app.session.plugin_state.packages.clone();
+    #[cfg(not(target_arch = "wasm32"))]
+    let disabled = app.preferences.disabled_plugins.clone();
     let (tx, rx) = std::sync::mpsc::channel();
     #[cfg(not(target_arch = "wasm32"))]
     if std::thread::Builder::new()
         .name("plugin-discovery".into())
         .spawn(move || {
-            let (plugins, skipped) = plugins::inventory(root.as_deref(), inspected.values());
+            let (mut plugins, mut skipped) = plugins::inventory(root.as_deref(), inspected.values());
+            // Menus also use the inert inventory reader. Only this worker runs guest describe.
+            for plugin in &mut plugins {
+                if disabled.contains(&plugin.id) {
+                    plugin.declarations = Default::default();
+                    continue;
+                }
+                if plugin.declarations.is_empty() {
+                    continue;
+                }
+                let described = solidcraft_engine::plugin::read_package(&plugin.path).and_then(|package| {
+                    solidcraft_engine::plugin::describe_workspace_ui(&package).map(|declarations| (package.approval, declarations))
+                });
+                match described {
+                    Ok((approval, declarations)) if approval == plugin.approval => plugin.declarations = declarations,
+                    Ok(_) => plugin.declarations = Default::default(),
+                    Err(error) => {
+                        skipped.push(plugins::Skipped { folder: plugin.id.clone(), reason: error.to_string() });
+                        plugin.declarations = Default::default();
+                    }
+                }
+            }
             let _ = tx.send(Inventory { root, plugins, skipped });
         })
         .is_err()
@@ -366,6 +390,7 @@ mod tests {
             disabled: false,
             groups: Default::default(),
             images: Default::default(),
+            declarations: Default::default(),
             entries: serde_json::from_value(json!([
                 {"name":"report","effect":"read","slots":[
                     {"kind":"menu","name":"Manufacturing"}, {"kind":"menu","name":"Plugins"},

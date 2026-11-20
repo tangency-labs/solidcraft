@@ -35,7 +35,12 @@ pub type Result<T> = std::result::Result<T, HostError>;
 
 pub mod conditions;
 mod input;
+mod ui;
 pub use input::{check_input, prepare_input, strict_input_schema};
+pub use ui::{
+    DesignKind, DockZone, MAX_PANEL_NODES, MAX_PLUGIN_PANELS, MAX_PLUGIN_WORKSPACES, MAX_WORKSPACE_RIBBON_ENTRIES, MAX_WORKSPACE_RIBBON_TABS,
+    PanelLayout, PanelNode, PanelSpec, PanelWidget, RibbonGroup, RibbonTab, UiDeclarations, WORKSPACE_HOOK_DEADLINE_MS, WorkspaceSpec,
+};
 
 /// The host imports that change something outside the design. A `read` entry is refused every
 /// one of them, whatever folders its plugin was granted, as it is refused edit commands.
@@ -110,7 +115,8 @@ fn exhausted(limit: &str, allowed: u64) -> String {
 /// The capabilities this host serves, as name and `major.minor`. Each is a set of WIT interfaces
 /// a plugin names in its manifest's `capabilities` list. While a major version is 0, a minor
 /// version may break the one before it, so 0.x matches only the same minor.
-pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 2)), ("evaluate", (0, 2)), ("formats", (0, 2)), ("storage", (0, 1))];
+pub const CAPABILITIES: &[(&str, (u32, u32))] =
+    &[("commands", (0, 2)), ("evaluate", (0, 2)), ("formats", (0, 2)), ("storage", (0, 1)), ("workspaces", (0, 1))];
 /// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
 /// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
 pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
@@ -481,6 +487,10 @@ pub struct Manifest {
     /// needs `commands`. The host refuses a capability it does not serve, before any code runs.
     #[serde(default)]
     pub capabilities: Vec<String>,
+    /// Static approval catalog for a `workspaces@0.1` plugin. Its typed provider must return
+    /// exactly these declarations before the host makes any of its UI available.
+    #[serde(default)]
+    pub declarations: UiDeclarations,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeManifest>,
 }
@@ -774,6 +784,7 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         runtime.validate()?;
     }
     check_storage(&manifest)?;
+    ui::check_declarations(&manifest)?;
     Ok(manifest)
 }
 

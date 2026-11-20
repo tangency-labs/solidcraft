@@ -179,6 +179,99 @@ with an explanation. Opening the dialog executes no plugin code; for a command e
 existing `plugin.run` transaction. An importer entry is not a command: its dialog shows the options,
 then its button chooses the file and opens it as a new design with `file.import`, as File > Open does.
 
+## Plugin workspaces
+
+
+An enabled plugin can add up to two workspaces beside Design and Render with the opt-in
+`workspaces@0.1` capability. Plugins without it keep their existing command, menu and ribbon
+behaviour. A workspace's id is `plugin:<plugin-id>/<workspace-id>`; select it through
+the usual switcher or `ui.workspace {"workspace":"plugin:manufacture/cam"}`.
+The switcher shows the workspace's name and disables workspaces that do not apply to the current
+design kind (`part`, `assembly`, `sketch` or `drawing`).
+
+A workspace component targets `craft:plugin/workbench-plugin@0.2.0`, which includes the current
+command world and exports typed `ui-provider.describe`. The manifest carries an inert
+`declarations` catalogue so installation can review it without executing plugin code. Background
+discovery calls `describe` without a design, commands, files or clock, under short budgets; its
+typed result must match the reviewed manifest declarations exactly before the workspace appears.
+These calls cannot acquire permissions through a component's start function.
+
+For example, the following manifest declares a workspace, a docked panel, a ribbon button and
+read-only enter and exit hooks:
+
+```json
+{
+  "id": "manufacture",
+  "name": "Manufacture",
+  "version": "1.0.0",
+  "capabilities": ["commands@0.2", "workspaces@0.1"],
+  "runtime": {
+    "module": "manufacture.wasm",
+    "entries": [
+      {"name": "pocket", "effect": "edit"},
+      {"name": "ws_enter", "effect": "read"},
+      {"name": "ws_exit", "effect": "read"}
+    ],
+    "commands": ["document.inspect", "solid.box"]
+  },
+  "declarations": {
+    "ui_version": 1,
+    "panels": [{
+      "id": "operations",
+      "title": "Operations",
+      "zones": ["right", "bottom"],
+      "layout": {"root": 0, "nodes": [
+        {"widget": {"kind": "group", "children": [1, 2]}},
+        {"widget": {"kind": "text", "text": "Choose an operation."}},
+        {"widget": {"kind": "button", "label": "Pocket", "entry": "pocket"}}
+      ]}
+    }],
+    "workspaces": [{
+      "id": "cam",
+      "name": "Manufacture",
+      "icon": "ws_design",
+      "applies_to": ["part", "assembly"],
+      "ribbon": [{"name": "Machining", "groups": [{"name": "Operations", "entries": ["pocket"]}]}],
+      "panels": [["right", ["operations"]]],
+      "builtin_panels": ["browser"],
+      "on_enter": "ws_enter",
+      "on_exit": "ws_exit"
+    }]
+  }
+}
+```
+
+Names in ribbon groups and panel buttons refer to the plugin's declared command entries. The
+host invokes the same namespaced commands and input-schema forms as the Plugins menu. Icons
+name the host's icon registry. The host supplies all drawing, theme colours, plugin badges and
+panel headers. Unknown widget kinds display a newer-version placeholder; known widgets still render at newer UI versions.
+The initial panel subset consists of `group`, `text` and `button`; layouts have a root index and
+at most 512 flat nodes forming a tree. A plugin can declare eight panels, each allowing any of
+`left`, `right` and `bottom`. Workspace panel placements must respect those allowed zones and
+place each panel only once. Each workspace has at most six ribbon tabs and 60 ribbon entries.
+`builtin_panels` names existing host panels to retain, such as `browser`.
+
+Entering a workspace seeds its declared panel placements once. User rearrangements are remembered
+per workspace, and leaving restores the previous workspace's layout. On restart, the host workspace
+opens first while plugins are discovered; returning to the plugin restores its saved arrangement.
+Updating a plugin with registered workspace panels requires restarting SolidCraft before re-entry.
+No design-format default
+changes. Missing, disabled or unsupported plugins leave Design and Render available.
+
+`on_enter` and `on_exit` name optional `read` command entries. Their parameters contain
+`{"workspace":"cam"}` in this example. They run on a worker against a snapshot; the switch
+continues and failures appear in the workspace. Each hook receives at most one second, 1,000,000
+fuel and 32 MiB of memory, respecting lower package and user limits; an explicit stack request is
+capped at 256 KiB. Narrowing these budgets preserves the approval for the original manifest and
+component. Read hooks cannot call edit commands or write files, even with grants. The host adopts
+no computed design, camera, selection or undo history from a hook, on success or failure.
+
+This is the workspace portion of [RFC 0015](rfcs/0015-plugin-ui-workspaces.md). The docked panel
+host required for it is included here because the broader panel work from #19516 is not present.
+Dynamic `ui.set-data`, `ui-provider.on-event`, design-changed listeners, the remaining panel
+widgets and viewport overlays remain follow-up work. Hooks can inspect a design now; panel and
+overlay updates will become available with those interfaces.
+
 ## Integration APIs
 
 Preferences and the Plugins menu share `plugin_install::start(app)` in

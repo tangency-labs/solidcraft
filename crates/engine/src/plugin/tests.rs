@@ -46,6 +46,52 @@ fn manifest() -> Value {
         "module":"plugin.wasm","entries":["make"],"commands":["solid.box"],
         "limits":{"fuel":100000,"memory_mib":1,"deadline_ms":5000}}})
 }
+
+fn workspace_manifest() -> Value {
+    let mut value = manifest();
+    value["capabilities"] = json!(["commands@0.1", "workspaces@0.1"]);
+    value["runtime"]["entries"] = json!([{"name":"make", "effect":"read"}]);
+    value["declarations"] = json!({"ui_version":1,"panels":[],"workspaces":[{
+        "id":"manufacture","name":"Manufacture","icon":"wrench","applies_to":["part"],
+        "ribbon":[],"panels":[],"builtin_panels":["browser"],"on_enter":"make","on_exit":"make"
+    }]});
+    value
+}
+
+#[test]
+fn workspace_hook_budgets_are_capped_without_raising_smaller_limits() {
+    let limits = workspace_hook_limits(&Limits::default(), HostLimits::default());
+    assert_eq!((limits.fuel, limits.memory_mib, limits.deadline_ms), (1_000_000, 32, 1000));
+    let requested = Limits { fuel: 100, memory_mib: 1, deadline_ms: 5, stack_kib: Some(64) };
+    let limits = workspace_hook_limits(&requested, HostLimits::default());
+    assert_eq!((limits.fuel, limits.memory_mib, limits.deadline_ms, limits.stack_kib), (100, 1, 5, Some(64)));
+    let limits = workspace_hook_limits(&Limits { stack_kib: Some(1024), ..Limits::default() }, HostLimits { max_fuel: 500, max_memory_mib: 2 });
+    assert_eq!((limits.fuel, limits.memory_mib, limits.deadline_ms, limits.stack_kib), (500, 2, 1000, Some(256)));
+}
+
+#[test]
+fn workspace_hooks_require_enabled_plugins_and_the_workspace_capability() {
+    let mut session = Session::default();
+    let package = |value: Value| Package {
+        manifest: parse_manifest(&serde_json::to_vec(&value).unwrap(), "sample").unwrap(),
+        approval: "approved".into(),
+        component: vec![],
+    };
+    let before = session.doc.clone();
+    let state = session.plugin_state.clone();
+    assert!(run_workspace_hook(&mut session, package(manifest()), "manufacture", true).unwrap_err().to_string().contains("workspaces@0.1"));
+    session.disabled_plugins.insert("sample".into());
+    assert!(run_workspace_hook(&mut session, package(workspace_manifest()), "manufacture", false).unwrap_err().to_string().contains("disabled"));
+    session.disabled_plugins.clear();
+    assert!(run_workspace_hook(&mut session, package(workspace_manifest()), "missing", true).unwrap_err().to_string().contains("unknown workspace"));
+    let mut value = workspace_manifest();
+    value["declarations"]["workspaces"][0]["on_enter"] = Value::Null;
+    assert_eq!(run_workspace_hook(&mut session, package(value), "manufacture", true).unwrap().result, json!({}));
+    assert!(std::sync::Arc::ptr_eq(&session.doc, &before));
+    assert_eq!(session.plugin_state, state);
+    assert!(session.undo.is_empty() && session.redo.is_empty());
+}
+
 #[test]
 fn manifest_is_inert_bounded_and_refuses_unknown_capabilities() {
     assert!(parse_manifest(br#"{"id":"sample","name":"Sample","version":"1"}"#, "sample").unwrap().runtime.is_none());
@@ -402,10 +448,50 @@ mod native {
         assert!(template.contains(original));
         wat::parse_str(template.replacen(original, &format!("      {code}\n"), 1)).unwrap()
     }
+    // Hook tests exercise the workbench entry world directly. Its provider is inert here;
+    // matching the typed catalogue to the manifest is tested by the shared Wasm host.
+    fn with_workspace_provider(template: &str) -> Vec<u8> {
+        let (package, version) = API.split_once('@').unwrap();
+        let mut component = template.trim_end().strip_suffix(')').unwrap().to_owned();
+        let provider = r#"
+  (type $ws-zone (enum "left" "right" "bottom"))
+  (type $ws-design (enum "part" "assembly" "sketch" "drawing"))
+  (type $ws-button (record (field "label" string) (field "icon" (option string)) (field "entry" string)))
+  (type $ws-widget (variant (case "group" (list u32)) (case "text" string) (case "button" $ws-button) (case "unknown")))
+  (type $ws-node (record (field "widget" $ws-widget)))
+  (type $ws-layout (record (field "root" u32) (field "nodes" (list $ws-node))))
+  (type $ws-panel (record (field "id" string) (field "title" string) (field "zones" (list $ws-zone)) (field "layout" $ws-layout)))
+  (type $ws-group (record (field "name" string) (field "entries" (list string))))
+  (type $ws-tab (record (field "name" string) (field "groups" (list $ws-group))))
+  (type $ws-spec (record
+    (field "id" string) (field "name" string) (field "icon" string)
+    (field "applies-to" (list $ws-design)) (field "ribbon" (list $ws-tab))
+    (field "panels" (list (tuple $ws-zone (list string))))
+    (field "builtin-panels" (list string)) (field "on-enter" (option string)) (field "on-exit" (option string))))
+  (type $ws-declarations (record (field "ui-version" u32) (field "panels" (list $ws-panel)) (field "workspaces" (list $ws-spec))))
+  (type $ws-describe-type (func (result $ws-declarations)))
+  (core module $ws-module
+    (import "" "memory" (memory 1))
+    (data (i32.const 3000) "\01\00\00\00")
+    (func (export "describe") (result i32) i32.const 3000))
+  (core instance $ws-args (export "memory" (memory $memory)))
+  (core instance $ws-instance (instantiate $ws-module (with "" (instance $ws-args))))
+  (alias core export $ws-instance "describe" (core func $ws-describe-core))
+  (func $ws-describe (type $ws-describe-type) (canon lift (core func $ws-describe-core) (memory $memory) (realloc $realloc)))
+  (instance $ws-provider (export "declarations" (type $ws-declarations)) (export "describe" (func $ws-describe)))
+  (export "__PACKAGE__/ui-provider@__VERSION__" (instance $ws-provider))
+)
+"#;
+        component.push_str(provider);
+        wat::parse_str(component.replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap()
+    }
     fn file_component(write: bool) -> Vec<u8> {
         file_component_path(write, "secret.txt")
     }
     fn file_component_path(write: bool, path: &str) -> Vec<u8> {
+        wat::parse_str(file_component_source(write, path)).unwrap()
+    }
+    fn file_component_source(write: bool, path: &str) -> String {
         let path_len = path.len();
         let (package, version) = API.split_once('@').unwrap();
         let template = component_template();
@@ -417,7 +503,7 @@ mod native {
             ("read-file", "(result (list u8) (error $error))", "", "")
         };
         let core_parameters = if write { "i32 i32 i32 i32 i32 i32 i32" } else { "i32 i32 i32 i32 i32" };
-        let source = format!(
+        format!(
             r#"{types}
   (type $files-type (instance
     (alias outer 1 $plugin-error (type $error))
@@ -460,8 +546,7 @@ mod native {
     (export "execute" (func $execute)))
   (export "{package}/entry@{version}" (instance $command))
 )"#
-        );
-        wat::parse_str(source).unwrap()
+        )
     }
     #[test]
     fn larger_declared_budgets_need_user_ceilings_and_exact_content_approval() {
@@ -575,6 +660,83 @@ mod native {
             }
         }
     }
+    #[test]
+    fn workspace_enter_and_exit_hooks_read_without_adopting_session_state() {
+        let f = Fixture::new("");
+        let wat = component_template()
+            .replace("solid.box", "document.inspect")
+            .replace(r#"{\22length\22:2,\22width\22:3,\22height\22:4}"#, "{}")
+            .replace("i32.const 9\n", "i32.const 16\n")
+            .replace("i32.const 33\n", "i32.const 2\n");
+        std::fs::write(f.0.join("sample/plugin.wasm"), with_workspace_provider(&wat)).unwrap();
+        let mut m = workspace_manifest();
+        m["runtime"]["commands"] = json!(["document.inspect"]);
+        // Ordinary commands may have generous limits; hooks always narrow them without
+        // invalidating approvals for the exact manifest and component on disk.
+        m["runtime"]["limits"] = json!({"fuel":200_000_000_000_u64,"memory_mib":256,"deadline_ms":5000});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut session = Session::default();
+        session.execute("solid.box", &json!({"length":1,"width":2,"height":3})).unwrap();
+        let package = read_package(&f.path()).unwrap();
+        session.plugin_state.grants.insert("sample".into(), Grants { package_hash: Some(package.approval.clone()), ..Default::default() });
+        let before = session.doc.clone();
+        let state = session.plugin_state.clone();
+        let history = (session.undo.len(), session.redo.len());
+        let camera = session.camera;
+        for entering in [true, false] {
+            let result = run_workspace_hook(&mut session, read_package(&f.path()).unwrap(), "manufacture", entering).unwrap();
+            assert!(result.result.is_object(), "the read command actually ran");
+            assert!(result.sketch_exits.is_empty() && result.view.is_none());
+            assert!(std::sync::Arc::ptr_eq(&session.doc, &before));
+            assert_eq!(session.plugin_state, state);
+            assert_eq!((session.undo.len(), session.redo.len()), history);
+            assert_eq!(session.camera, camera);
+        }
+    }
+
+    #[test]
+    fn workspace_hooks_refuse_design_and_file_writes_and_stop_at_small_budgets() {
+        for (code, diagnostic) in [
+            ("call $box", "edit command solid.box from read entry"),
+            ("(loop $forever br $forever)", "1000000 fuel"),
+            ("i32.const 10000 memory.grow drop", "32 MiB"),
+        ] {
+            let f = Fixture::new(code);
+            let wat = component_template().replacen("      call $box\n      call $box\n", &format!("      {code}\n"), 1);
+            std::fs::write(f.0.join("sample/plugin.wasm"), with_workspace_provider(&wat)).unwrap();
+            let mut m = workspace_manifest();
+            m["runtime"]["limits"] = json!({"fuel":200_000_000_000_u64,"memory_mib":256,"deadline_ms":5000});
+            std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+            let mut session = Session::default();
+            let before = session.doc.clone();
+            let error = run_workspace_hook(&mut session, read_package(&f.path()).unwrap(), "manufacture", true).unwrap_err();
+            assert!(error.to_string().contains(diagnostic), "{code}: {error}");
+            assert!(std::sync::Arc::ptr_eq(&session.doc, &before));
+            assert!(session.undo.is_empty() && session.redo.is_empty());
+        }
+        let f = Fixture::new("");
+        std::fs::write(f.0.join("sample/plugin.wasm"), with_workspace_provider(&file_component_source(true, "secret.txt"))).unwrap();
+        let mut m = workspace_manifest();
+        m["runtime"]["permissions"] = json!({"files":[{"name":"project","read":true,"write":true}]});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let package = read_package(&f.path()).unwrap();
+        let mut session = Session::default();
+        session.plugin_state.grants.insert(
+            "sample".into(),
+            Grants {
+                package_hash: Some(package.approval.clone()),
+                folders: vec![FileGrant { name: "project".into(), folder: f.0.join("sample"), read: true, write: true }],
+                ..Default::default()
+            },
+        );
+        let state = session.plugin_state.clone();
+        let error = run_workspace_hook(&mut session, package, "manufacture", false).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { permission }) if permission.ends_with("write-file")), "{error}");
+        assert!(!f.0.join("sample/secret.txt").exists());
+        assert_eq!(session.plugin_state, state);
+        assert!(session.undo.is_empty() && session.redo.is_empty());
+    }
+
     #[test]
     fn traps_fuel_memory_and_denied_calls_leave_design_and_history_untouched() {
         for (code, diagnostic) in [

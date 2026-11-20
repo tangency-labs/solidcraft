@@ -725,3 +725,160 @@ fn schema_composition_does_not_implicitly_close_object_constraints() {
         assert!(check_input(&schema, &json!({"a":1})).is_err());
     }
 }
+
+fn workspace_manifest() -> Value {
+    let mut value = manifest();
+    value["capabilities"] = json!(["commands@0.2", "workspaces@0.1"]);
+    value["runtime"]["entries"] = json!([{"name":"make"}, {"name":"enter", "effect":"read"}, {"name":"leave", "effect":"read"}]);
+    value["declarations"] = json!({
+        "ui_version": 1,
+        "panels": [{"id":"tools", "title":"Tools", "zones":["left","right"], "layout":{
+            "root":0, "nodes":[
+                {"widget":{"kind":"group", "children":[1,2]}},
+                {"widget":{"kind":"text", "text":"Choose a tool"}},
+                {"widget":{"kind":"button", "label":"Make", "entry":"make"}}
+            ]
+        }}],
+        "workspaces": [{"id":"cam", "name":"Manufacture", "icon":"gear", "applies_to":["part","assembly"],
+            "ribbon":[{"name":"Tools", "groups":[{"name":"Setup", "entries":["make"]}]}],
+            "panels":[["left",["tools"]]], "builtin_panels":["browser"], "on_enter":"enter", "on_exit":"leave"
+        }]
+    });
+    value
+}
+
+#[test]
+fn workspace_declarations_validate_and_round_trip() {
+    let parsed = parse(&workspace_manifest()).unwrap();
+    let declarations = parsed.declarations;
+    assert_eq!(declarations.ui_version, 1);
+    assert_eq!(declarations.workspaces[0].applies_to, vec![DesignKind::Part, DesignKind::Assembly]);
+    assert_eq!(declarations.workspaces[0].panels, vec![(DockZone::Left, vec!["tools".into()])]);
+    assert_eq!(declarations.workspaces[0].on_enter.as_deref(), Some("enter"));
+    assert_eq!(declarations.workspaces[0].on_exit.as_deref(), Some("leave"));
+    let encoded = serde_json::to_value(&declarations).unwrap();
+    assert_eq!(serde_json::from_value::<UiDeclarations>(encoded).unwrap(), declarations);
+    assert_eq!(WORKSPACE_HOOK_DEADLINE_MS, 1000);
+}
+
+#[test]
+fn workspace_declarations_require_opt_in_and_a_command_runtime() {
+    let unchanged = parse(&manifest()).unwrap();
+    assert_eq!(unchanged.declarations, UiDeclarations::default());
+    assert!(unchanged.declarations.is_empty());
+
+    let mut missing_capability = workspace_manifest();
+    missing_capability["capabilities"] = json!(["commands@0.2"]);
+    assert!(matches!(parse(&missing_capability), Err(HostError::InvalidManifest { field, .. }) if field == "declarations"));
+
+    let mut no_runtime = workspace_manifest();
+    no_runtime.as_object_mut().unwrap().remove("runtime");
+    assert!(matches!(parse(&no_runtime), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+
+    let mut importer_value = importer();
+    importer_value["capabilities"] = json!(["formats@0.1", "workspaces@0.1"]);
+    assert!(matches!(parse(&importer_value), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+
+    let mut unsupported = workspace_manifest();
+    unsupported["capabilities"] = json!(["commands@0.2", "workspaces@0.2"]);
+    assert!(matches!(parse(&unsupported), Err(HostError::UnsupportedCapability { capability, .. }) if capability == "workspaces@0.2"));
+}
+
+#[test]
+fn workspace_hooks_and_ribbon_only_reference_declared_entries() {
+    for bad_hook in ["make", "missing"] {
+        for field in ["on_enter", "on_exit"] {
+            let mut value = workspace_manifest();
+            value["declarations"]["workspaces"][0][field] = json!(bad_hook);
+            assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("hooks")));
+        }
+    }
+    let mut value = workspace_manifest();
+    value["declarations"]["workspaces"][0]["ribbon"][0]["groups"][0]["entries"] = json!(["other.make"]);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("ribbon")));
+    value = workspace_manifest();
+    value["declarations"]["panels"][0]["layout"]["nodes"][2]["widget"]["entry"] = json!("missing");
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("layout")));
+}
+
+#[test]
+fn workspace_panel_placements_require_allowed_zones_and_unique_ids() {
+    for panels in [
+        json!([["bottom", ["tools"]]]),
+        json!([["left", ["missing"]]]),
+        json!([["left", ["tools"]], ["right", ["tools"]]]),
+        json!([["left", []], ["left", ["tools"]]]),
+    ] {
+        let mut value = workspace_manifest();
+        value["declarations"]["workspaces"][0]["panels"] = panels;
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("panels")));
+    }
+    let mut value = workspace_manifest();
+    let duplicate = value["declarations"]["panels"][0].clone();
+    value["declarations"]["panels"].as_array_mut().unwrap().push(duplicate);
+    assert!(parse(&value).is_err());
+    value = workspace_manifest();
+    value["declarations"]["workspaces"][0]["applies_to"] = json!(["part", "part"]);
+    assert!(parse(&value).is_err());
+}
+
+#[test]
+fn workspace_ribbon_limits_allow_boundaries_and_refuse_excess() {
+    let mut value = workspace_manifest();
+    let tabs = (0..6).map(|i| json!({"name":format!("Tab {i}"), "groups":[{"name":"Tools", "entries":vec!["make"; 10]}]})).collect::<Vec<_>>();
+    value["declarations"]["workspaces"][0]["ribbon"] = json!(tabs);
+    assert!(parse(&value).is_ok());
+    value["declarations"]["workspaces"][0]["ribbon"][0]["groups"][0]["entries"] = json!(vec!["make"; 11]);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("ribbon")));
+    value["declarations"]["workspaces"][0]["ribbon"][0]["groups"][0]["entries"] = json!(vec!["make"; 10]);
+    value["declarations"]["workspaces"][0]["ribbon"].as_array_mut().unwrap().push(json!({"name":"Extra", "groups":[]}));
+    assert!(parse(&value).is_err());
+}
+
+#[test]
+fn workspace_and_panel_count_limits_allow_boundaries_and_refuse_excess() {
+    let mut value = workspace_manifest();
+    for i in 1..8 {
+        let mut panel = value["declarations"]["panels"][0].clone();
+        panel["id"] = json!(format!("panel-{i}"));
+        value["declarations"]["panels"].as_array_mut().unwrap().push(panel);
+    }
+    let mut workspace = value["declarations"]["workspaces"][0].clone();
+    workspace["id"] = json!("inspection");
+    value["declarations"]["workspaces"].as_array_mut().unwrap().push(workspace.clone());
+    assert!(parse(&value).is_ok());
+    workspace["id"] = json!("extra");
+    value["declarations"]["workspaces"].as_array_mut().unwrap().push(workspace);
+    assert!(parse(&value).is_err());
+    value["declarations"]["workspaces"].as_array_mut().unwrap().pop();
+    let mut panel = value["declarations"]["panels"][0].clone();
+    panel["id"] = json!("extra");
+    value["declarations"]["panels"].as_array_mut().unwrap().push(panel);
+    assert!(parse(&value).is_err());
+}
+
+#[test]
+fn plugin_panel_layouts_are_bounded_trees_with_forward_compatible_widgets() {
+    let mut value = workspace_manifest();
+    value["declarations"]["ui_version"] = json!(2);
+    value["declarations"]["panels"][0]["layout"]["nodes"][1]["widget"] = json!({"kind":"future-widget", "data":"ignored"});
+    let parsed = parse(&value).unwrap();
+    assert_eq!(parsed.declarations.panels[0].layout.nodes[1].widget, PanelWidget::Unknown);
+
+    for layout in [
+        json!({"root":2,"nodes":[{"widget":{"kind":"text","text":"Hello"}}]}),
+        json!({"root":0,"nodes":[{"widget":{"kind":"group","children":[1]}},{"widget":{"kind":"group","children":[0]}}]}),
+        json!({"root":0,"nodes":[{"widget":{"kind":"group","children":[1,1]}},{"widget":{"kind":"text","text":"Hello"}}]}),
+        json!({"root":0,"nodes":[{"widget":{"kind":"group","children":[2]}},{"widget":{"kind":"text","text":"Hello"}}]}),
+        json!({"root":0,"nodes":[{"widget":{"kind":"text","text":"Hello"}},{"widget":{"kind":"text","text":"Unreachable"}}]}),
+    ] {
+        value["declarations"]["panels"][0]["layout"] = layout;
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("layout")));
+    }
+    let mut nodes = vec![json!({"widget":{"kind":"group","children":(1..512).collect::<Vec<_>>()}})];
+    nodes.extend((1..512).map(|_| json!({"widget":{"kind":"text","text":"Node"}})));
+    value["declarations"]["panels"][0]["layout"] = json!({"root":0,"nodes":nodes});
+    assert!(parse(&value).is_ok());
+    value["declarations"]["panels"][0]["layout"]["nodes"].as_array_mut().unwrap().push(json!({"widget":{"kind":"text","text":"Too many"}}));
+    assert!(parse(&value).is_err());
+}

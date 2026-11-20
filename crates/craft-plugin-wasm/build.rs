@@ -35,5 +35,25 @@ fn main() -> Result<(), Box<dyn Error>> {
          macro_rules! call_import {{ ($guest:expr, $store:expr, $entry:expr, $file:expr, $options:expr) => {{ $guest.{namespace}_{name}_importer().call_import_file($store, $entry, $file, $options) }}; }}\n"
     );
     fs::write(PathBuf::from(env::var("OUT_DIR")?).join("importer.rs"), importer)?;
+    let workbench = format!(
+        "mod workbench_bindings {{\n\
+             wasmtime::component::bindgen!({{\n\
+                 path: \"../craft-plugin/wit\",\n\
+                 world: \"workbench-plugin\",\n\
+                 with: {{\n\
+                     \"{package_name}/types\": super::bindings::{namespace}::{name}::types,\n\
+                     \"{package_name}/commands\": super::bindings::{namespace}::{name}::commands,\n\
+                     \"{package_name}/log\": super::bindings::{namespace}::{name}::log,\n\
+                     \"{package_name}/control\": super::bindings::{namespace}::{name}::control,\n\
+                     \"{package_name}/files\": super::bindings::{namespace}::{name}::files,\n\
+                     \"{package_name}/clock\": super::bindings::{namespace}::{name}::clock,\n\
+                 }},\n\
+             }});\n\
+         }}\n\
+         use workbench_bindings::{namespace}::{name}::ui;\n\
+         macro_rules! call_describe {{ ($guest:expr, $store:expr) => {{ $guest.{namespace}_{name}_ui_provider().call_describe($store) }}; }}\n\
+         macro_rules! call_workbench_entry {{ ($guest:expr, $store:expr, $entry:expr, $params:expr) => {{ $guest.{namespace}_{name}_entry().call_execute($store, $entry, $params) }}; }}\n"
+    );
+    fs::write(PathBuf::from(env::var("OUT_DIR")?).join("workbench.rs"), workbench)?;
     Ok(())
 }

@@ -46,7 +46,7 @@ impl ContentOwner {
     pub fn validate(&self) -> PanelResult<()> {
         match self {
             Self::Application => Ok(()),
-            Self::Workspace(id) => valid_id(&id.0),
+            Self::Workspace(id) => valid_workspace_id(&id.0),
             Self::Document(id) => valid_id(&id.0),
             Self::Window(id) => valid_id(&id.0),
         }
@@ -64,7 +64,7 @@ pub struct RuntimeEnvironment {
 }
 impl RuntimeEnvironment {
     pub fn validate(&self) -> PanelResult<()> {
-        valid_id(&self.workspace.0)?;
+        valid_workspace_id(&self.workspace.0)?;
         valid_id(&self.window.0)?;
         valid_id(&self.viewport.0)?;
         if let Some(doc) = &self.document {
@@ -374,6 +374,23 @@ impl PanelRuntime {
             destroyed: false,
             update_errors: Vec::new(),
         })
+    }
+    pub(crate) fn register_panels(&mut self, panels: Vec<(PanelSpec, ControllerBinding)>) -> PanelResult<()> {
+        self.require_live()?;
+        if self.bindings.len().saturating_add(panels.len()) > MAX_INSTANCES {
+            return Err(error(Rule::CollectionLimit, "binding cap"));
+        }
+        let mut kinds = std::collections::BTreeSet::new();
+        for (spec, _) in &panels {
+            if self.bindings.contains_key(&spec.kind) || !kinds.insert(spec.kind.clone()) {
+                return Err(error(Rule::DuplicateId, "controller binding already registered"));
+            }
+        }
+        self.layout.register_panels(panels.iter().map(|(spec, _)| spec.clone()).collect())?;
+        for (spec, binding) in panels {
+            self.bindings.insert(spec.kind, binding);
+        }
+        Ok(())
     }
     pub fn register(&mut self, kind: PanelKind, binding: ControllerBinding) -> PanelResult<()> {
         self.require_live()?;

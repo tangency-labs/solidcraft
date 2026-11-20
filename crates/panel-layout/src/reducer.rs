@@ -306,6 +306,17 @@ impl LayoutService {
             capabilities,
         })
     }
+    /// Add inert panel kinds atomically. Existing layouts and controller identities stay valid.
+    pub fn register_panels(&mut self, specs: Vec<PanelSpec>) -> PanelResult<()> {
+        let mut registry = self.registry.clone();
+        for spec in specs {
+            registry.register(spec)?;
+        }
+        let revision = self.revision.checked_add(1).ok_or_else(|| error(Rule::Revision, "layout revision exhausted"))?;
+        self.registry = registry;
+        self.revision = revision;
+        Ok(())
+    }
     pub fn registry(&self) -> &PanelRegistry {
         &self.registry
     }

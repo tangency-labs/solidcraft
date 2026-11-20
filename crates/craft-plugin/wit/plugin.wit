@@ -7,7 +7,8 @@ package craft:plugin@0.2.0;
 // - `evaluate@0.2`: with `formats`, evaluate, so an importer can check its result;
 // - `storage@0.1`: with `commands`, the app's `storage.*` commands, so a plugin keeps its own data
 //   in the open design (no interface of its own).
-// Later capabilities (ui, viewport) arrive as their own interfaces. While the version is
+// - `workspaces@0.1`: commands plus typed UI declarations (world `workbench-plugin`).
+// Later capabilities (viewport) arrive as their own interfaces. While the version is
 // 0.x, a minor version may break the one before it. 0.2 added `plugin-error.unsupported`. A host
 // still runs plugins built against 0.1 (`../wit-0.1/plugin.wit`): it reads the version from the
 // component's imports and exports, and shows their `invalid-input` as before.
@@ -117,4 +118,45 @@ world importer-plugin {
     import design;
     import evaluate;
     export importer;
+}
+
+// The initial workspace surface. Layouts are flat and the host owns all drawing. More widget
+// variants can be added with a new UI version; unsupported widgets draw a placeholder.
+interface ui {
+    enum dock-zone { left, right, bottom }
+    enum design-kind { part, assembly, sketch, drawing }
+    record button-spec { label: string, icon: option<string>, entry: string }
+    variant widget {
+        group(list<u32>),
+        text(string),
+        button(button-spec),
+        unknown,
+    }
+    record node { widget: widget }
+    record layout { root: u32, nodes: list<node> }
+    record panel-spec { id: string, title: string, zones: list<dock-zone>, layout: layout }
+    record ribbon-group { name: string, entries: list<string> }
+    record ribbon-tab { name: string, groups: list<ribbon-group> }
+    record workspace-spec {
+        id: string,
+        name: string,
+        icon: string,
+        applies-to: list<design-kind>,
+        ribbon: list<ribbon-tab>,
+        panels: list<tuple<dock-zone, list<string>>>,
+        builtin-panels: list<string>,
+        on-enter: option<string>,
+        on-exit: option<string>,
+    }
+    record declarations { ui-version: u32, panels: list<panel-spec>, workspaces: list<workspace-spec> }
+}
+interface ui-provider {
+    use ui.{declarations};
+    // Describing UI has no app or filesystem authority and runs with short, fixed ceilings.
+    describe: func() -> declarations;
+}
+world workbench-plugin {
+    include command-plugin;
+    import ui;
+    export ui-provider;
 }

@@ -254,6 +254,9 @@ pub struct InstallResult {
     pub description: String,
     /// Host capabilities it needs, as `name@major.minor`.
     pub capabilities: Vec<String>,
+    /// Inert workspace and panel declarations covered by this approval.
+    #[serde(default, skip_serializing_if = "craft_plugin::UiDeclarations::is_empty")]
+    pub declarations: craft_plugin::UiDeclarations,
     /// What it asks for: command groups, named folders, the clock.
     pub permissions: craft_plugin::Permissions,
     /// The fuel, memory and time it asks for. Memory above `host_limits` is approved at install

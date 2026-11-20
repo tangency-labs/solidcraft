@@ -1200,7 +1200,7 @@ impl crate::SolveApp {
     }
 }
 
-pub(super) fn ensure_production(app: &mut crate::SolveApp) -> PanelResult<()> {
+pub(crate) fn ensure_production(app: &mut crate::SolveApp) -> PanelResult<()> {
     if app.panel_runtime.is_none() {
         super::production::enable_production(app)?;
     }
@@ -1214,6 +1214,7 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             integration.last_error = Some(reason);
         }
     }
+    crate::plugin_workspaces::tick(app, ctx);
     if let Err(reason) = super::production::drain_production_actions(app)
         .and_then(|()| super::production::sync_production_visibility(app))
         .and_then(|()| super::production::refresh_production(app))
@@ -1512,5 +1513,119 @@ impl crate::SolveApp {
         if self.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some()) && !self.preferences.agent_chat_popped {
             crate::agent_chat::finish_shared(self, ui.ctx());
         }
+    }
+}
+
+impl AppPanelRuntime {
+    /// Extend the host with a validated plugin's own panel kinds and immutable starting layout.
+    pub(crate) fn register_plugin_workspace(
+        &mut self,
+        workspace: &crate::plugin_workspaces::Workspace,
+        base: &Layout,
+        queue: crate::plugin_workspaces::CommandQueue,
+    ) -> PanelResult<()> {
+        use commands::LayoutCatalogue as _;
+        let id = WorkspaceId::new(&workspace.id)?;
+        let registered = self.catalogue.state().summaries().iter().any(|entry| entry.id == id);
+        let panels = crate::plugin_workspaces::panels(workspace, queue)
+            .into_iter()
+            .filter(|(spec, _)| self.runtime.layout().registry().get(&spec.kind).is_err())
+            .collect::<Vec<_>>();
+        let mut registry = self.runtime.layout().registry().clone();
+        for (spec, _) in &panels {
+            registry.register(spec.clone())?;
+        }
+        if registered {
+            if !panels.is_empty() {
+                self.runtime.register_panels(panels)?;
+            }
+            return Ok(());
+        }
+        let mut layout = base.clone();
+        layout.workspace = id.clone();
+        layout.extent_priority_context = ExtentPriorityContext::default();
+        for builtin in &workspace.spec.builtin_panels {
+            if !layout.instances.iter().any(|instance| instance.id.0 == *builtin && !instance.id.0.starts_with("plugin.")) {
+                return Err(error(Rule::MissingTarget, "workspace names an unavailable built-in panel"));
+            }
+        }
+        layout.instances.retain(|instance| workspace.spec.builtin_panels.contains(&instance.id.0));
+        let retained = layout.instances.iter().map(|instance| instance.id.clone()).collect::<std::collections::BTreeSet<_>>();
+        for section in &mut layout.sections {
+            section.tabs.retain(|instance| retained.contains(instance));
+            if !section.tabs.contains(&section.active)
+                && let Some(first) = section.tabs.first()
+            {
+                section.active = first.clone();
+            }
+        }
+        layout.sections.retain(|section| !section.tabs.is_empty());
+        layout.columns.retain(|column| layout.sections.iter().any(|section| section.column.as_ref() == Some(&column.id)));
+        for (dock, ids) in &workspace.spec.panels {
+            let zone = crate::plugin_workspaces::zone(*dock);
+            for panel in ids {
+                let key = crate::plugin_workspaces::identity(&workspace.plugin.id, panel);
+                let instance = InstanceId::new(&key)?;
+                let kind = PanelKind::new(&key)?;
+                let spec = registry.get(&kind)?;
+                let size = spec.default_size;
+                let section = SectionId::new(&key)?;
+                let location = SectionLocation::Dock { zone };
+                let dock_key = format!("{}.{zone:?}", workspace.spec.id);
+                let column = zone.side().then(|| ColumnId(crate::plugin_workspaces::identity(&workspace.plugin.id, &dock_key)));
+                if let Some(column) = &column
+                    && !layout.columns.iter().any(|existing| existing.id == *column)
+                {
+                    layout.columns.push(Column { id: column.clone(), zone, width: size.width });
+                }
+                let column_index = layout.columns.iter().filter(|existing| existing.zone == zone)
+                    .position(|existing| Some(&existing.id) == column.as_ref()).unwrap_or(0);
+                layout.instances.push(PanelInstance {
+                    id: instance.clone(),
+                    kind,
+                    requested_open: true,
+                    memory: PlacementMemory {
+                        section: section.clone(),
+                        location: location.clone(),
+                        section_index: layout.sections.len(),
+                        tab_index: 0,
+                        size,
+                        collapsed: false,
+                        column: column.clone(),
+                        column_index,
+                        column_width: column.as_ref().map(|_| size.width),
+                        weight: 1.0,
+                        preferred_extent: None,
+                        extent_priority: 0,
+                    },
+                });
+                layout.sections.push(Section {
+                    id: section,
+                    location,
+                    tabs: vec![instance.clone()],
+                    active: instance,
+                    size,
+                    collapsed: false,
+                    column,
+                    weight: 1.0,
+                    preferred_extent: None,
+                    extent_priority: 0,
+                });
+            }
+        }
+        normalize_column_widths(&mut layout, &registry)?;
+        validate(&layout, &registry)?;
+        let mut catalogue = commands::InMemoryCatalogue::from_snapshot(&self.catalogue.state().export()?, &registry)?;
+        let preset = crate::plugin_workspaces::identity(&workspace.plugin.id, &workspace.spec.id);
+        catalogue.register_builtin(&preset, &LayoutEnvelope::new(layout), &registry)?;
+        catalogue.register_workspace(commands::WorkspaceDescriptor {
+            id,
+            title_key: "ui.plugin_workspace.panel".into(),
+            default_preset: preset,
+        })?;
+        let staged = self.catalogue.prepare(catalogue.state().clone())?;
+        self.runtime.register_panels(panels)?;
+        self.catalogue.publish(staged);
+        Ok(())
     }
 }

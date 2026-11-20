@@ -1,7 +1,7 @@
 //! An app-independent component sandbox. Only explicitly bound Craft imports exist.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-use craft_plugin::{LossReport, Manifest, PluginHost, Result};
+use craft_plugin::{LossReport, Manifest, PluginHost, Result, UiDeclarations};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -47,8 +47,8 @@ pub fn run_with_options<H: PluginHost + 'static>(
 /// Checks `component` against `manifest` the way a call would, without running any of its code:
 /// the runtime declaration, the component's size, that it is a component (not a core module) that
 /// compiles, imports nothing but this host's interfaces at its version (never WASI or the network),
-/// and exports the entry interface of its world (`command-plugin`, or `importer-plugin` for an
-/// importer). The error names what is wrong; `plugin check` adds how to fix it.
+/// and exports the interfaces of its world (`command-plugin`, `workbench-plugin` for a workspace,
+/// or `importer-plugin` for an importer). The error names what is wrong; `plugin check` adds how to fix it.
 pub fn check_component(manifest: &Manifest, component: &[u8]) -> Result<()> {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
@@ -58,6 +58,20 @@ pub fn check_component(manifest: &Manifest, component: &[u8]) -> Result<()> {
     {
         let _ = (manifest, component);
         Err(craft_plugin::HostError::Trap { reason: "checking a component requires an x86-64 or AArch64 native build".into() })
+    }
+}
+
+/// Reads a workbench's typed UI declaration in a fresh instance with no app or filesystem
+/// authority. The result must match the static declarations reviewed with the manifest.
+pub fn describe(manifest: &Manifest, component: &[u8]) -> Result<UiDeclarations> {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::describe(manifest, component, RuntimeOptions::default())
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (manifest, component);
+        Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() })
     }
 }
 
