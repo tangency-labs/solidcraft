@@ -12,11 +12,25 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<PointCloudInsertParams>(),
-        &["center", "color", "color_by", "color_range", "filters", "height_range", "max_points", "name", "path", "point_size", "units"],
+        &["center", "color", "color_by", "color_range", "filters", "height_range", "max_points", "name", "path", "point_size", "units", "up"],
     );
     assert_keys(
         input_schema_for::<PointCloudEditParams>(),
-        &["cloud", "color", "color_by", "color_range", "filters", "height_range", "matrix", "name", "point_size", "tolerance", "units", "visible"],
+        &[
+            "cloud",
+            "color",
+            "color_by",
+            "color_range",
+            "filters",
+            "height_range",
+            "matrix",
+            "name",
+            "point_size",
+            "tolerance",
+            "units",
+            "up",
+            "visible",
+        ],
     );
     assert_keys(input_schema_for::<PointCloudReloadParams>(), &["cloud"]);
     assert_keys(input_schema_for::<PointCloudDeleteParams>(), &["cloud"]);
