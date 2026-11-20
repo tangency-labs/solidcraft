@@ -288,6 +288,7 @@ mod tests {
 
     #[test]
     fn plugin_install_lists_workspaces_and_read_only_hooks_before_approval() {
+        crate::i18n::install();
         let lines = permission_lines(&json!({"declarations":{"workspaces":[
             {"name":"Machining", "on_enter":"refresh"}, {"name":"Review"}
         ]}}));

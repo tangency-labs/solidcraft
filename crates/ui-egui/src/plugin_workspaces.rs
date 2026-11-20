@@ -20,6 +20,33 @@ pub(crate) struct Workspace {
     pub plugin: plugins::Plugin,
     pub spec: WorkspaceSpec,
 }
+
+#[derive(Clone, PartialEq, Eq)]
+struct HookDocument {
+    session: u64,
+    id: String,
+}
+impl HookDocument {
+    fn current(app: &SolveApp) -> Self {
+        Self { session: app.session.uid, id: app.session.document_id.clone() }
+    }
+    fn is_current(&self, app: &SolveApp) -> bool {
+        self.session == app.session.uid && self.id == app.session.document_id
+    }
+}
+
+struct QueuedHook {
+    workspace: Workspace,
+    entering: bool,
+    document: HookDocument,
+}
+
+struct RunningHook {
+    workspace: String,
+    document: HookDocument,
+    receiver: Receiver<Result<(), String>>,
+}
+
 #[derive(Default)]
 pub(crate) struct State {
     items: Vec<Workspace>,
@@ -27,11 +54,11 @@ pub(crate) struct State {
     previous: Option<(String, WorkspaceId)>,
     base_layout: Option<Layout>,
     registered: BTreeMap<String, String>,
-    design_kind: Option<DesignKind>,
+    drawing_document: Option<HookDocument>,
     tabs: BTreeMap<String, usize>,
     errors: BTreeMap<String, String>,
-    hooks: VecDeque<(Workspace, bool)>,
-    running: Option<Receiver<(String, Result<(), String>)>>,
+    hooks: VecDeque<QueuedHook>,
+    running: Option<RunningHook>,
     commands: CommandQueue,
 }
 
@@ -68,8 +95,15 @@ pub(crate) fn discovered(app: &mut SolveApp, plugins: &[plugins::Plugin]) {
 }
 
 fn applicable(app: &SolveApp, workspace: &Workspace) -> bool {
-    let kind = app.plugin_workspaces.design_kind.unwrap_or_else(|| design_kind(app));
-    workspace.spec.applies_to.contains(&kind)
+    workspace.spec.applies_to.contains(&workspace_kind(app))
+}
+
+fn workspace_kind(app: &SolveApp) -> DesignKind {
+    if app.plugin_workspaces.drawing_document.as_ref().is_some_and(|document| document.is_current(app)) {
+        DesignKind::Drawing
+    } else {
+        design_kind(app)
+    }
 }
 
 fn design_kind(app: &SolveApp) -> DesignKind {
@@ -146,7 +180,7 @@ pub(crate) fn enter(app: &mut SolveApp, id: &str) -> Result<(), String> {
     integration.register_plugin_workspace(&workspace, &base, queue).map_err(|error| error.to_string())?;
     let previous = integration.runtime().layout().layout().workspace.clone();
     let old_tab = app.ui.tab.clone();
-    let kind = design_kind(app);
+    let kind = workspace_kind(app);
     let old = app.plugin_workspaces.active.replace(workspace.clone());
     app.ui.tab = "PLUGIN".into();
     if let Err(error) = switch_layout(app, &WorkspaceId::new(&workspace.id).map_err(|error| error.to_string())?) {
@@ -159,8 +193,8 @@ pub(crate) fn enter(app: &mut SolveApp, id: &str) -> Result<(), String> {
     } else {
         app.plugin_workspaces.previous = Some((old_tab, previous));
         app.plugin_workspaces.base_layout = Some(base);
-        app.plugin_workspaces.design_kind = Some(kind);
     }
+    app.plugin_workspaces.drawing_document = (kind == DesignKind::Drawing).then(|| HookDocument::current(app));
     app.plugin_workspaces.registered.insert(id.to_owned(), workspace.plugin.approval.clone());
     // Built-in workspace state is retained. The plugin uses its own ribbon selection.
     app.ui.tab = "PLUGIN".into();
@@ -183,7 +217,7 @@ pub(crate) fn leave(app: &mut SolveApp) -> Result<(), String> {
     }
     app.plugin_workspaces.previous = None;
     app.plugin_workspaces.base_layout = None;
-    app.plugin_workspaces.design_kind = None;
+    app.plugin_workspaces.drawing_document = None;
     queue_hook(app, workspace, false);
     Ok(())
 }
@@ -204,30 +238,57 @@ fn queue_hook(app: &mut SolveApp, workspace: Workspace, entering: bool) {
     if app.plugin_workspaces.hooks.len() >= 16 {
         app.plugin_workspaces.hooks.pop_front();
     }
-    app.plugin_workspaces.hooks.push_back((workspace, entering));
+    let document = HookDocument::current(app);
+    app.plugin_workspaces.hooks.push_back(QueuedHook { workspace, entering, document });
 }
 
 #[cfg(test)]
 pub(crate) fn pending_hooks(app: &SolveApp) -> Vec<(String, bool)> {
-    app.plugin_workspaces.hooks.iter().map(|(workspace, entering)| (workspace.id.clone(), *entering)).collect()
+    app.plugin_workspaces.hooks.iter().map(|hook| (hook.workspace.id.clone(), hook.entering)).collect()
+}
+
+fn report_hook_error(app: &mut SolveApp, document: &HookDocument, id: String, error: String) {
+    let message = solidcraft_ui_text::format("ui.plugin_workspace.hook_failed", &[("workspace", &id), ("error", &error)]);
+    if document.is_current(app) && active_id(app) == Some(id.as_str()) {
+        app.set_status(message, true);
+    } else {
+        // A finished exit hook has no ribbon; keep its failure in the shared Messages window.
+        app.messages.push(&message, true, crate::now_ms());
+    }
+    if document.is_current(app) {
+        app.plugin_workspaces.errors.insert(id, error);
+    }
+}
+
+pub(crate) fn poll_hook(app: &mut SolveApp) {
+    let Some(running) = &app.plugin_workspaces.running else { return };
+    let completion = running.receiver.try_recv().map(|result| (running.document.clone(), running.workspace.clone(), result));
+    match completion {
+        Ok((document, id, result)) => {
+            app.plugin_workspaces.running = None;
+            if let Err(error) = result {
+                report_hook_error(app, &document, id, error);
+            }
+        }
+        Err(TryRecvError::Disconnected) => app.plugin_workspaces.running = None,
+        Err(TryRecvError::Empty) => {}
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn hook_reply_channel(app: &mut SolveApp, workspace: &str) -> std::sync::mpsc::Sender<Result<(), String>> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    app.plugin_workspaces.running = Some(RunningHook { workspace: workspace.to_owned(), document: HookDocument::current(app), receiver });
+    sender
+}
+
+#[cfg(test)]
+pub(crate) fn hook_running(app: &SolveApp) -> bool {
+    app.plugin_workspaces.running.is_some()
 }
 
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
-    if let Some(receiver) = &app.plugin_workspaces.running {
-        match receiver.try_recv() {
-            Ok((id, result)) => {
-                if let Err(error) = result {
-                    if active_id(app) == Some(id.as_str()) {
-                        app.set_status(error.clone(), true);
-                    }
-                    app.plugin_workspaces.errors.insert(id, error);
-                }
-                app.plugin_workspaces.running = None;
-            }
-            Err(TryRecvError::Disconnected) => app.plugin_workspaces.running = None,
-            Err(TryRecvError::Empty) => {}
-        }
-    }
+    poll_hook(app);
     if app.plugin_workspaces.active.as_ref().is_some_and(|workspace| {
         !plugins::enabled(app, &workspace.plugin.id)
             || !app.plugin_workspaces.items.iter().any(|item| item.id == workspace.id && item.plugin.approval == workspace.plugin.approval)
@@ -235,8 +296,10 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     {
         app.set_status(error, true);
     }
+    let current_document = HookDocument::current(app);
+    app.plugin_workspaces.hooks.retain(|hook| hook.document == current_document);
     if app.plugin_workspaces.running.is_none()
-        && let Some((workspace, entering)) = app.plugin_workspaces.hooks.pop_front()
+        && let Some(QueuedHook { workspace, entering, document }) = app.plugin_workspaces.hooks.pop_front()
     {
         crate::plugins::sync_policy(app);
         let mut session = app.session.scratch();
@@ -258,20 +321,17 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                     })
                     .map(|_| ())
                     .map_err(|error| error.to_string());
-                let _ = sender.send((id, result));
+                let _ = sender.send(result);
             })
             .map(|_| ());
         #[cfg(target_arch = "wasm32")]
         let started: Result<(), String> = {
-            let _ = (session, sender, id, workspace, entering);
+            let _ = (session, sender, workspace, entering);
             Err(app_error("ui.plugins_desktop"))
         };
         match started {
-            Ok(()) => app.plugin_workspaces.running = Some(receiver),
-            Err(error) => {
-                let key = active_id(app).unwrap_or_default().to_owned();
-                app.plugin_workspaces.errors.insert(key, error.to_string());
-            }
+            Ok(()) => app.plugin_workspaces.running = Some(RunningHook { workspace: id, document, receiver }),
+            Err(error) => report_hook_error(app, &document, id, error.to_string()),
         }
     }
     if app.plugin_workspaces.running.is_some() || !app.plugin_workspaces.hooks.is_empty() {
@@ -284,7 +344,8 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-pub(crate) fn ribbon(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, folded: bool) -> Option<String> {
+/// Returns `Some(already shown)` when a tab was clicked, like the built-in ribbon.
+pub(crate) fn ribbon(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, folded: bool) -> Option<bool> {
     let workspace = app.plugin_workspaces.active.clone()?;
     let t = solidcraft_theme::Tokens::get();
     let tab = app.plugin_workspaces.tabs.entry(workspace.id.clone()).or_default();
@@ -297,8 +358,8 @@ pub(crate) fn ribbon(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, fo
             for (index, ribbon) in workspace.spec.ribbon.iter().enumerate() {
                 let button = egui::Button::selectable(*tab == index, &ribbon.name);
                 if ui.add_sized([0.0, t.control_height], button).clicked() {
+                    clicked = Some(*tab == index);
                     *tab = index;
-                    clicked = Some(ribbon.name.clone());
                 }
             }
         });

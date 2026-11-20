@@ -265,6 +265,9 @@ fuel and 32 MiB of memory, respecting lower package and user limits; an explicit
 capped at 256 KiB. Narrowing these budgets preserves the approval for the original manifest and
 component. Read hooks cannot call edit commands or write files, even with grants. The host adopts
 no computed design, camera, selection or undo history from a hook, on success or failure.
+A queued hook is dropped if its design is no longer active when it would start. Hook failures
+remain in Messages after leaving the workspace. A result from an earlier design does not replace
+the current design's status or workspace error.
 
 This is the workspace portion of [RFC 0015](rfcs/0015-plugin-ui-workspaces.md). The docked panel
 host required for it is included here because the broader panel work from #19516 is not present.
