@@ -452,7 +452,7 @@ fn read_at<'a>(
         skipped |= any;
         shells.push(faces);
     }
-    b.finish(item, name, shells, if skipped || sheets { Kind::Open { voids: kind == Kind::Voids } } else { kind })
+    b.finish(item, name, shells, if skipped || sheets { Kind::Open { voids: kind == Kind::Voids, outer: true } } else { kind })
 }
 
 /// A face of a solid read on its own ([`read_faces_with`]).
@@ -671,7 +671,13 @@ impl<'b, 'a> Builder<'b, 'a> {
         // the arc between them, however short: a 20.4 um arc between vertices a 20.5 um uncertainty
         // does not tell apart is that arc, not a turn around its face.
         let full = closed || ps == pe;
-        let mapped = map_edge(&curve, ps, pe, same_sense, closed, full, self.asm.tol).map_err(|m| format!("edge #{id}: {m}"))?;
+        let mut mapped = map_edge(&curve, ps, pe, same_sense, closed, full, self.asm.tol).map_err(|m| format!("edge #{id}: {m}"))?;
+        // A control polygon that turns back on itself within the tolerance is a wiggle of the
+        // file's, taken out before anything is measured on the curve.
+        if let Some((unfolded, moved)) = unfolded_curve(&mapped.curve, self.asm.tol) {
+            self.asm.points_unfolded += moved;
+            mapped.curve = unfolded;
+        }
         if mapped.sense_mismatch {
             self.asm.sense_mismatches += 1;
         }
@@ -1306,6 +1312,176 @@ pub(crate) fn closed_within(s: &BSurface, tol: f64) -> Option<BSurface> {
         BSurface::RationalSpline { u_knots, v_knots, homogeneous: rows }
     } else {
         BSurface::Spline { u_knots, v_knots, points: rows.iter().map(|r| r.iter().map(|h| [h[0], h[1], h[2]]).collect()).collect() }
+    })
+}
+
+/// The angle (degrees) past which the kernel's check takes a control polygon's step as turning
+/// back on the one before it (its B-spline surface test 5, "NonMonotonic CPts").
+const TURNS_BACK_DEGREES: f64 = 170.0;
+
+/// A step no longer than this times its two points' magnitudes is within their rounding, as the
+/// kernel's check bounds it: `2u + gamma_3`, `u` half the machine epsilon, `gamma_3 = 3u / (1 - 3u)`.
+const ROUNDING: f64 = f64::EPSILON + 3.0 * (0.5 * f64::EPSILON) / (1.0 - 3.0 * (0.5 * f64::EPSILON));
+
+/// A line of homogeneous control points with its steps that turn back on themselves by no more
+/// than `tol` (mm) taken out, `original` being the line as the file wrote it. A step turns back
+/// when it points more than [`TURNS_BACK_DEGREES`] away from the last step before it that has a
+/// length (more than the rounding of its points). Such a step no longer than `tol`, and shorter
+/// than the step it turns back on, is a wiggle of the file's, not a shape:
+///
+/// - inside the line, its inner end is moved onto its start;
+/// - where it reaches the line's last point (which the curve or surface passes through, as it
+///   does its first), the end is kept and the run back to it is the wiggle: every point from the
+///   end of the last forward step to the one before the last is moved onto the last.
+///
+/// At the line's first point the wiggle is the step before: a run out of the first point, no
+/// longer than `tol`, that the step after it turns back on and carries past the first point by
+/// more than the run. The first point is kept and the run is turned the way the line goes, each
+/// of its points moved to its mirror image through the first point. The steps keep their lengths,
+/// so the curve or surface keeps its speed at its start and leaves it the way it goes on, without
+/// turning. Moved onto the first point, the run would stop it there: a zero-speed end, which the
+/// kernel's check takes as a vanishing radius of curvature (its tests 13 and 14) wherever the
+/// faces at that end are not tangent. A point of the run moves by twice its distance from the
+/// first point.
+///
+/// Each point keeps its weight, and a move is made only when it leaves the point within `tol` of
+/// where `original` has it. With positive weights every point of the curve or surface is a convex
+/// combination of its control points, so it moves by at most `tol`, however many passes moved
+/// its points. A line with a weight that is not positive, or not the length of `original`, is left
+/// as it is.
+fn unfold_line(line: &mut [[f64; 4]], original: &[[f64; 4]], tol: f64) {
+    if line.len() != original.len() || !line.iter().chain(original).all(|h| h[3] > 0.0 && h.iter().all(|x| x.is_finite())) {
+        return;
+    }
+    let point = |h: &[f64; 4]| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]);
+    let within = |i: usize, p: Vec3| original.get(i).map(point).is_some_and(|o| o.dist(p) <= tol);
+    let cos_back = TURNS_BACK_DEGREES.to_radians().cos();
+    let origin = Vec3::new(0.0, 0.0, 0.0);
+    let last = line.len().saturating_sub(1);
+    // The last step that had a direction, and the point it ended at.
+    let mut before: Option<(Vec3, usize)> = None;
+    // No step with a direction has turned back yet: the line is on its run out of its first point.
+    let mut running_out = true;
+    for k in 0..last {
+        let (Some(a), Some(b)) = (line.get(k).map(point), line.get(k + 1).map(point)) else { break };
+        let step = Vec3::new(b.x - a.x, b.y - a.y, b.z - a.z);
+        let length = step.dist(origin);
+        // A step within the rounding of its two points carries no direction, as the check takes
+        // it (`step_within_rounding`: 2u and gamma_3 of their magnitudes): a pole row one ulp
+        // apart, or a rational form's points divided by their weights, is no step.
+        if length <= ROUNDING * (a.dist(origin) + b.dist(origin)) {
+            continue;
+        }
+        let back = before.filter(|(d, _)| (d.x * step.x + d.y * step.y + d.z * step.z) < cos_back * d.dist(origin) * length);
+        // Back on the step before it, and shorter than that step: a wiggle on the way, not the
+        // polygon running back (a curve that turns round, or one written back and forth).
+        let turn = back.filter(|(d, _)| length <= tol && length < d.dist(origin));
+        if let Some((_, from)) = turn {
+            // The points that move, and where to.
+            let (run, onto) = if k + 1 < last { (k + 1..=k + 1, a) } else { (from..=k, b) };
+            if run.clone().all(|i| within(i, onto)) {
+                for i in run {
+                    if let Some(h) = line.get_mut(i) {
+                        let w = h[3];
+                        *h = [onto.x * w, onto.y * w, onto.z * w, w];
+                    }
+                }
+                continue;
+            }
+        }
+        // Back past the first point, farther than the run out of it went: the run is the
+        // wiggle, and is turned the way the line goes.
+        if let (true, Some(_), Some(first)) = (running_out, back, line.first().map(point)) {
+            let run = first.dist(a);
+            let mirror = |p: Vec3| Vec3::new(2.0 * first.x - p.x, 2.0 * first.y - p.y, 2.0 * first.z - p.z);
+            let run_points: Vec<Vec3> = (1..=k).filter_map(|i| line.get(i).map(point)).collect();
+            if run <= tol && first.dist(b) > run && run_points.len() == k && run_points.iter().zip(1..).all(|(&p, i)| within(i, mirror(p))) {
+                for (p, i) in run_points.into_iter().zip(1..) {
+                    if let Some(h) = line.get_mut(i) {
+                        let (m, w) = (mirror(p), h[3]);
+                        *h = [m.x * w, m.y * w, m.z * w, w];
+                    }
+                }
+                let tip = mirror(a);
+                before = Some((Vec3::new(b.x - tip.x, b.y - tip.y, b.z - tip.z), k + 1));
+                running_out = false;
+                continue;
+            }
+        }
+        running_out &= back.is_none();
+        before = Some((step, k + 1));
+    }
+}
+
+/// How many of `line`'s points differ from `original`'s.
+fn moved_points(line: &[[f64; 4]], original: &[[f64; 4]]) -> usize {
+    line.iter().zip(original).filter(|(a, b)| a != b).count()
+}
+
+/// A spline surface whose control lines (each row and each column) turn back on themselves by
+/// no more than `tol`, with those steps taken out ([`unfold_line`]), and how many control points
+/// were moved; `None` when none was. Every move is bounded against the net as the file wrote it,
+/// so a point a row and its column both move stays within `tol` of where it was.
+pub(crate) fn unfolded_surface(s: &BSurface, tol: f64) -> Option<(BSurface, usize)> {
+    let (u_knots, v_knots, original, rational): (&Vec<f64>, &Vec<f64>, Vec<Vec<[f64; 4]>>, bool) = match s {
+        BSurface::Spline { u_knots, v_knots, points } => {
+            (u_knots, v_knots, points.iter().map(|r| r.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()).collect(), false)
+        }
+        BSurface::RationalSpline { u_knots, v_knots, homogeneous } => (u_knots, v_knots, homogeneous.clone(), true),
+        _ => return None,
+    };
+    let nv = original.first().map_or(0, Vec::len);
+    if original.iter().any(|r| r.len() != nv) {
+        return None;
+    }
+    let mut rows = original.clone();
+    for (row, was) in rows.iter_mut().zip(&original) {
+        unfold_line(row, was, tol);
+    }
+    for j in 0..nv {
+        let mut column: Vec<[f64; 4]> = rows.iter().filter_map(|r| r.get(j).copied()).collect();
+        let was: Vec<[f64; 4]> = original.iter().filter_map(|r| r.get(j).copied()).collect();
+        unfold_line(&mut column, &was, tol);
+        for (r, h) in rows.iter_mut().zip(column) {
+            if let Some(slot) = r.get_mut(j) {
+                *slot = h;
+            }
+        }
+    }
+    let moved: usize = rows.iter().zip(&original).map(|(r, o)| moved_points(r, o)).sum();
+    if moved == 0 {
+        return None;
+    }
+    let (u_knots, v_knots) = (u_knots.clone(), v_knots.clone());
+    Some((
+        if rational {
+            BSurface::RationalSpline { u_knots, v_knots, homogeneous: rows }
+        } else {
+            BSurface::Spline { u_knots, v_knots, points: rows.iter().map(|r| r.iter().map(|h| [h[0], h[1], h[2]]).collect()).collect() }
+        },
+        moved,
+    ))
+}
+
+/// A spline curve whose control polygon turns back on itself by no more than `tol`, with those
+/// steps taken out ([`unfold_line`]), and how many control points were moved; `None` when none
+/// was. Its ends stay where they are.
+pub(crate) fn unfolded_curve(c: &BCurve, tol: f64) -> Option<(BCurve, usize)> {
+    let (knots, original): (&Vec<f64>, Vec<[f64; 4]>) = match c {
+        BCurve::Spline { knots, points } => (knots, points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()),
+        BCurve::RationalSpline { knots, homogeneous } => (knots, homogeneous.clone()),
+        _ => return None,
+    };
+    let mut line = original.clone();
+    unfold_line(&mut line, &original, tol);
+    let moved = moved_points(&line, &original);
+    (moved > 0).then(|| {
+        let knots = knots.clone();
+        let curve = match c {
+            BCurve::RationalSpline { .. } => BCurve::RationalSpline { knots, homogeneous: line },
+            _ => BCurve::Spline { knots, points: line.iter().map(|h| [h[0], h[1], h[2]]).collect() },
+        };
+        (curve, moved)
     })
 }
 

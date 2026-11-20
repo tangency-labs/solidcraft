@@ -1800,6 +1800,27 @@ fn scale_scales_the_dimensions_it_takes_with_it() {
     assert!(close(s.doc.eval(&radius, solidcraft_doc::expr::Kind::Length).unwrap(), 5.0), "one undo restores the radius");
 }
 
+/// #16611: a filleted rectangle scaled about a base point other than the origin keeps its
+/// shape: the fillet's virtual corner left on the curves' extensions at the sketch origin is
+/// let go when the scale moves away from it, instead of the solver bending the profile back.
+#[test]
+fn scale_about_another_base_point_keeps_the_profile() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 20], [0, 20]], "closed": true}));
+    run(&mut s, "sketch.fillet", json!({"points": ["l1.end", "l2.end", "l3.end", "l4.end"], "radius": 5}));
+    let curves = ["l1", "l2", "l3", "l4", "a1", "a2", "a3", "a4"];
+    let out = run(&mut s, "sketch.scale", json!({"entities": curves, "base": [20, 10], "factor": 2}));
+    assert_eq!(out["sketch"]["solved"], true, "{out}");
+    let sk = sketch(&s);
+    let ids: Vec<String> = curves.iter().map(|c| c.to_string()).collect();
+    assert!(box_is(&sk, &ids, [-20.0, -10.0], [60.0, 30.0]), "{:?}", bounds(&sk, &ids));
+    let (p, q) = (sk.point(sk.resolve_point("l1.start").unwrap()).unwrap(), sk.point(sk.resolve_point("l1.end").unwrap()).unwrap());
+    assert!((p.x + 10.0).abs() < 1e-6 && (p.y + 10.0).abs() < 1e-6 && (q.x - 50.0).abs() < 1e-6 && (q.y + 10.0).abs() < 1e-6, "l1: {p:?} {q:?}");
+    // 80 × 40 − (4 − π) × 10² = 3114.159265358979, the issue's expected volume at height 1.
+    let area = 3114.159265358979;
+    assert!((profiles(&s)[0] - area).abs() < 1e-6, "{:?}", profiles(&s));
+}
+
 /// #1485: after a circle is trimmed between two construction lines, clicking the trimmed end
 /// picks the construction line's end lying there, not the arc's own; the tangent arc still starts
 /// from the trimmed arc, tangent to it.
@@ -6657,4 +6678,113 @@ fn closed_control_point_spline_draws_and_extrudes_to_one_profile() {
     let mut few = new_sketch();
     let refused = few.execute("sketch.spline.control_point", &json!({"points": [[0, 0], [10, 0], [10, 10]], "periodic": true}));
     assert!(refused.is_err(), "three control points cannot close a cubic spline: {refused:?}");
+}
+
+/// #18075: a fillet reaches the corner symmetric to the one it rounds. Two corners tied by a
+/// Symmetry constraint round together: the counterpart gets the same radius held by an Equal
+/// constraint, and both sharp corners stay as virtual corners for the constraint to measure to.
+#[test]
+fn a_fillet_reaches_the_corner_symmetric_to_the_one_it_rounds() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"closed": true, "points": [[-20, 0], [20, 0], [20, 20], [-20, 20]]}));
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": "l1.start", "b": "l1.end", "line": "y"}));
+    let f = run(&mut s, "sketch.fillet", json!({"point": "l1.start", "radius": 5}));
+    assert_eq!(f["sketch"]["solved"], true, "{f}");
+    let corners = ids(&f["virtual_corners"]);
+    assert_eq!(corners.len(), 2, "{f}");
+    assert_eq!(ids(&f["curves"]).len(), 2, "{f}");
+    let sk = sketch(&s);
+    let mut cs: Vec<Vec2> = corners.iter().map(|c| sk.point(sk.resolve_point(c).unwrap()).unwrap()).collect();
+    cs.sort_by(|a, b| a.x.total_cmp(&b.x));
+    assert!(cs[0].dist(Vec2::new(-20.0, 0.0)) < 1e-6, "{cs:?}");
+    assert!(cs[1].dist(Vec2::new(20.0, 0.0)) < 1e-6, "{cs:?}");
+    assert_eq!(sk.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Equal { .. })).count(), 1, "{:?}", sk.constraints);
+    for (point, expected) in
+        [("l1.start", Vec2::new(-15.0, 0.0)), ("l1.end", Vec2::new(15.0, 0.0)), ("l2.start", Vec2::new(20.0, 5.0)), ("l4.end", Vec2::new(-20.0, 5.0))]
+    {
+        let actual = sk.point(sk.resolve_point(point).unwrap()).unwrap();
+        assert!(actual.dist(expected) < 1e-6, "{point}: {actual:?}, expected {expected:?}");
+    }
+    let area = profiles(&s);
+    assert_eq!(area.len(), 1);
+    assert!(close(area[0], 800.0 - 50.0 * (1.0 - std::f64::consts::PI / 4.0)), "{area:?}");
+}
+
+/// #18075: a fillet reaches the mirrored corner of a mirrored copy. The Mirror tool ties every
+/// copied point to its source with a Symmetry constraint, so rounding one corner of the source
+/// rounds the matching corner of the copy too.
+#[test]
+fn a_fillet_reaches_the_mirrored_corner_of_a_mirrored_copy() {
+    let mut s = new_sketch();
+    run(
+        &mut s,
+        "sketch.line",
+        json!({"closed": true, "points": [[-20, 0], [-20, 20], [-5, 20], [-5, 0]], "ids": ["left", "top", "right", "bottom"]}),
+    );
+    let mirror = run(&mut s, "sketch.mirror", json!({"entities": ["left", "top", "right", "bottom"], "line": "y"}));
+    let copies = ids(&mirror["curves"]);
+    assert_eq!(copies.len(), 4, "{mirror}");
+    let f = run(&mut s, "sketch.fillet", json!({"point": "left.start", "radius": 3}));
+    assert_eq!(f["sketch"]["solved"], true, "{f}");
+    let corners = ids(&f["virtual_corners"]);
+    assert_eq!(corners.len(), 2, "{f}");
+    let arcs = ids(&f["curves"]);
+    assert_eq!(arcs.len(), 2, "{f}");
+    let sk = sketch(&s);
+    let mut cs: Vec<Vec2> = corners.iter().map(|c| sk.point(sk.resolve_point(c).unwrap()).unwrap()).collect();
+    cs.sort_by(|a, b| a.x.total_cmp(&b.x));
+    assert!(cs[0].dist(Vec2::new(-20.0, 0.0)) < 1e-6, "{cs:?}");
+    assert!(cs[1].dist(Vec2::new(20.0, 0.0)) < 1e-6, "{cs:?}");
+    // The arc of the source's corner and the arc of the copy's: both corners are rounded, with the
+    // same radius.
+    let mut centres: Vec<Vec2> = arcs
+        .iter()
+        .map(|a| {
+            let CurveKind::Arc { c, .. } = sk.curves[sk.curve_index(a).unwrap()].kind else { panic!("a fillet arc") };
+            sk.point(c).unwrap()
+        })
+        .collect();
+    centres.sort_by(|a, b| a.x.total_cmp(&b.x));
+    assert!(centres[0].dist(Vec2::new(-17.0, 3.0)) < 1e-6, "{centres:?}");
+    assert!(centres[1].dist(Vec2::new(17.0, 3.0)) < 1e-6, "{centres:?}");
+    assert_eq!(sk.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Equal { .. })).count(), 1, "{:?}", sk.constraints);
+    for (point, expected) in [
+        ("left.start", Vec2::new(-20.0, 3.0)),
+        ("bottom.end", Vec2::new(-17.0, 0.0)),
+        // A mirror maps each source end to the copy's opposite end.
+        (format!("{}.end", copies[0]).as_str(), Vec2::new(20.0, 3.0)),
+        (format!("{}.start", copies[3]).as_str(), Vec2::new(17.0, 0.0)),
+    ] {
+        let actual = sk.point(sk.resolve_point(point).unwrap()).unwrap();
+        assert!(actual.dist(expected) < 1e-6, "{point}: {actual:?}, expected {expected:?}");
+    }
+    // Both rectangles lose the same corner: the copy is rounded as the source is.
+    let area = profiles(&s);
+    assert_eq!(area.len(), 2, "{area:?}");
+    let cut = 9.0 * (1.0 - std::f64::consts::PI / 4.0);
+    assert!(close(area[0], 300.0 - cut) && close(area[1], 300.0 - cut), "{area:?}");
+}
+
+/// #18075: a chamfer reaches the corner symmetric to the one it cuts, and keeps the distances it
+/// measures along the mirrored sides.
+#[test]
+fn a_chamfer_reaches_the_corner_symmetric_to_the_one_it_cuts() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"closed": true, "points": [[-20, 0], [20, 0], [20, 20], [-20, 20]]}));
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": "l1.start", "b": "l1.end", "line": "y"}));
+    let c = run(&mut s, "sketch.chamfer.equal_distance", json!({"point": "l1.start", "distance": 5}));
+    assert_eq!(c["sketch"]["solved"], true, "{c}");
+    assert_eq!(ids(&c["virtual_corners"]).len(), 2, "{c}");
+    assert_eq!(ids(&c["curves"]).len(), 2, "{c}");
+    let sk = sketch(&s);
+    for (point, expected) in
+        [("l1.start", Vec2::new(-15.0, 0.0)), ("l1.end", Vec2::new(15.0, 0.0)), ("l2.start", Vec2::new(20.0, 5.0)), ("l4.end", Vec2::new(-20.0, 5.0))]
+    {
+        let actual = sk.point(sk.resolve_point(point).unwrap()).unwrap();
+        assert!(actual.dist(expected) < 1e-6, "{point}: {actual:?}, expected {expected:?}");
+    }
+    // Each corner loses the triangle its chamfer cuts off.
+    let area = profiles(&s);
+    assert_eq!(area.len(), 1);
+    assert!(close(area[0], 800.0 - 2.0 * 0.5 * 5.0 * 5.0), "{area:?}");
 }

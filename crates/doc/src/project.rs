@@ -322,8 +322,12 @@ fn resolve_uncached(
                 Some(b) => Ok(exact_edges(b, plane, &[e])?.pop().flatten()),
                 None => Ok(None),
             };
+            let section = || match st.bodies.get(bi) {
+                Some(b) => edge_section(b, e, plane),
+                None => Err(lost("the edge")),
+            };
             let pts = mesh.edges.get(e).cloned().unwrap_or_default();
-            edge_geom(plane, kind, planar, (pts, || edge_curves(st.bodies.get(bi), e)), &mut wires, &mut exact)?
+            edge_geom(plane, kind, planar, section, (pts, || edge_curves(st.bodies.get(bi), e)), &mut wires, &mut exact)?
         }
         LinkSource::Face { body, at } => {
             let (bi, mesh) = body_mesh(st, body, *at)?;
@@ -577,19 +581,25 @@ fn off_plane(plane: &Plane, pts: &[Vec3]) -> bool {
 }
 
 /// What a body edge (its `exact` curve when read, and its polyline `pts`) gives a sketch: its
-/// section with the sketch plane, itself as a 3D curve (its points into `wires`, its exact
-/// curve into `exact`) when it is included and leaves the plane, else its projection (the exact
-/// planar curve `planar`, or the polyline fitted).
+/// section with the sketch plane (`section`: where its exact curve crosses it, the whole edge
+/// when it lies in the plane, a mesh body's polyline crossings), itself as a 3D curve (its
+/// points into `wires`, its exact curve into `exact`) when it is included and leaves the plane,
+/// else its projection (the exact planar curve `planar`, or the polyline fitted).
 fn edge_geom(
     plane: &Plane,
     kind: LinkKind,
     planar: impl FnOnce() -> Result<Option<Vec<LinkGeom>>>,
+    section: impl FnOnce() -> Result<EdgeSection>,
     (pts, curves): (Vec<Vec3>, impl FnOnce() -> Vec<WireCurve>),
     wires: &mut Vec<Vec<Vec3>>,
     exact: &mut Vec<Vec<WireCurve>>,
 ) -> Result<Vec<LinkGeom>> {
     Ok(match kind {
-        LinkKind::Intersect => section_of_polyline(plane, &pts),
+        LinkKind::Intersect => match section()? {
+            EdgeSection::Crossings(points) => points,
+            EdgeSection::InPlane => planar()?.unwrap_or_else(|| fit_world(plane, &pts)),
+            EdgeSection::Mesh => section_of_polyline(plane, &pts),
+        },
         LinkKind::Include if off_plane(plane, &pts) => {
             wires.push(pts);
             exact.push(curves());
@@ -610,6 +620,35 @@ fn edge_curves(body: Option<&crate::ModelBody>, e: usize) -> Vec<WireCurve> {
         .filter(|edge| !matches!(edge.curve, solidcore_record::brep::Curve::SurfaceIntersection { .. }))
         .map(|edge| vec![WireCurve { curve: edge.parameters().clone(), interval: edge.interval }])
         .unwrap_or_default()
+}
+
+/// Where a body edge meets a sketch plane.
+enum EdgeSection {
+    /// The points where its exact curve crosses or touches the plane, in the plane's coordinates.
+    Crossings(Vec<LinkGeom>),
+    /// It lies in the plane: it meets the plane along its whole length.
+    InPlane,
+    /// A mesh body's edge: its display polyline is the edge.
+    Mesh,
+}
+
+/// Where edge `e` of `body` meets `plane`: the kernel's crossings of the curve it evaluates the
+/// edge on (an intersection curve's NURBS form). The kernel counts a contact at either end of
+/// the edge and gives no crossings for a curve lying in the plane, so an edge with none whose
+/// two vertices are in the plane (each within its own tolerance) lies in it.
+fn edge_section(body: &crate::ModelBody, e: usize, plane: &Plane) -> Result<EdgeSection> {
+    if body.body.is_mesh() {
+        return Ok(EdgeSection::Mesh);
+    }
+    let record = body.body.record();
+    let edge = record.edges.get(e).ok_or_else(|| lost("the edge"))?;
+    let hits = solidcore_ops::curve::plane_crossings(edge.parameters(), edge.interval, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
+    if !hits.is_empty() {
+        return Ok(EdgeSection::Crossings(hits.into_iter().map(LinkGeom::Point).collect()));
+    }
+    let on_plane =
+        |v: &u32| record.vertices.get(*v as usize).is_some_and(|v| plane.height(Vec3::new(v.point[0], v.point[1], v.point[2])).abs() <= v.tolerance);
+    Ok(if edge.vertices.iter().all(on_plane) { EdgeSection::InPlane } else { EdgeSection::Crossings(Vec::new()) })
 }
 
 /// The sketch segments `segs` of `ss` projected along the sketch normal `normal` (turned toward
@@ -1022,7 +1061,8 @@ fn resolve_named_edge(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
         .ok_or_else(|| lost("named projection edge"))?;
     let (mut wires, mut exact) = (Vec::new(), Vec::new());
     let planar = || Ok(exact_edges(target, plane, &[index])?.pop().flatten());
-    let geom = edge_geom(plane, kind, planar, (pts, || edge_curves(Some(target), index)), &mut wires, &mut exact)?;
+    let section = || edge_section(target, index, plane);
+    let geom = edge_geom(plane, kind, planar, section, (pts, || edge_curves(Some(target), index)), &mut wires, &mut exact)?;
     if geom.is_empty() && wires.is_empty() {
         return Err(DocError::Invalid("named edge projects to nothing on this sketch plane".into()));
     }
@@ -2285,6 +2325,53 @@ fn surface_facing(m: &Mesh, t: &[u32; 3], flat: Vec3) -> Vec3 {
     sum.normalized().unwrap_or(flat)
 }
 
+/// Whole-body outlines already traced, newest first. Each is kept with what it was traced from,
+/// which is all it depends on ([`exact_silhouette_traced`]): the body (kept, so its shared data
+/// stays alive and no other body is taken for it), its record as written (JSON, which tells
+/// `-0.0` from `0.0`), its size, whether it is a mesh, and the sketch plane as written. A re-evaluation that makes the
+/// very same body ([`solidcraft_kernel::Body::same_shape`]), or one with the same record and
+/// size (recomputing the timeline, opening the design again), reuses the outline.
+struct TracedOutline {
+    body: solidcraft_kernel::Body,
+    record: String,
+    size: u64,
+    plane: String,
+    outline: Option<Vec<LinkGeom>>,
+}
+static OUTLINES: std::sync::Mutex<Vec<TracedOutline>> = std::sync::Mutex::new(Vec::new());
+const OUTLINES_KEPT: usize = 16;
+/// Records written longer than this (bytes) are not kept: comparing them would cost more than
+/// it saves, and they would hold too much memory.
+const OUTLINE_RECORD_MAX: usize = 4 << 20;
+
+/// [`exact_silhouette_traced`], kept for each body and plane ([`OUTLINES`]).
+fn exact_silhouette(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGeom>> {
+    // A mesh body has no exact outline, whatever its record.
+    let plane_text = format!("{plane:?}|{}", body.body.is_mesh());
+    let size = body.body.size().to_bits();
+    let mut record: Option<Option<String>> = None;
+    let mut written =
+        || record.get_or_insert_with(|| serde_json::to_string(body.body.record()).ok().filter(|r| r.len() <= OUTLINE_RECORD_MAX)).clone();
+    if let Ok(kept) = OUTLINES.lock() {
+        let mut hit = kept.iter().filter(|k| k.plane == plane_text && k.size == size).find(|k| k.body.same_shape(&body.body));
+        if hit.is_none() && kept.iter().any(|k| k.plane == plane_text && k.size == size) {
+            let now = written();
+            hit = kept.iter().find(|k| k.plane == plane_text && k.size == size && now.as_ref() == Some(&k.record));
+        }
+        if let Some(k) = hit {
+            return k.outline.clone();
+        }
+    }
+    let outline = exact_silhouette_traced(body, plane);
+    if let Some(written) = written()
+        && let Ok(mut kept) = OUTLINES.lock()
+    {
+        kept.insert(0, TracedOutline { body: body.body.clone(), record: written, size, plane: plane_text, outline: outline.clone() });
+        kept.truncate(OUTLINES_KEPT);
+    }
+    outline
+}
+
 /// The outline of a solid seen along the sketch normal, from its exact faces and edges: the
 /// stretches of its edges between a face that faces the sketch and one that does not (and of an
 /// open sheet's border where its face faces the sketch; the kernel's
@@ -2301,7 +2388,7 @@ fn surface_facing(m: &Mesh, t: &[u32; 3], flat: Vec3) -> Vec3 {
 /// then ([`silhouette`]).
 ///
 /// [`hlr::silhouettes`]: solidcraft_geom::hlr::silhouettes
-fn exact_silhouette(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGeom>> {
+fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGeom>> {
     use solidcraft_geom::hlr;
     if body.body.is_mesh() {
         return None;
@@ -2338,15 +2425,16 @@ fn exact_silhouette(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGe
         edges.extend(solidcore_ops::outline::tidy_stretch(geom.into_iter().map(outline_piece).collect()));
     }
     // The silhouettes of the curved faces, traced where they lie inside them.
-    let opts = hlr::Options { trim_samples: 1024, threads: 1, ..hlr::Options::default() };
-    let def = hlr::prepare(rec, &opts).ok()?;
+    // Prepared once per body: every sketch that projects it, on any plane, shares it.
+    let def = body.body.outline_prepared()?;
+    let opts = hlr::Options { trim_samples: solidcraft_kernel::OUTLINE_TRIM_SAMPLES, threads: 1, ..hlr::Options::default() };
     if !def.report.freeform_faces.is_empty() || !def.report.unsupported_trims.is_empty() {
         return None;
     }
     let view = hlr::View { x: plane.x, y: plane.y, d: n };
     let placed = hlr::Placement { body: 0, rotation: [Vec3::X, Vec3::Y, Vec3::Z], translation: Vec3::ZERO - plane.origin };
     let mut sils = Vec::new();
-    for s in hlr::silhouettes(&def, &placed, &view, &opts).ok()? {
+    for s in hlr::silhouettes(def, &placed, &view, &opts).ok()? {
         match s.accuracy {
             solidcraft_geom::section::CurveAccuracy::Analytic => {
                 let pieces: Vec<LinkGeom> = s.geometry.iter().map(LinkGeom::from_seg).collect::<Option<_>>()?;

@@ -49,7 +49,12 @@ pub fn map_with_local_pools<T: Sync, R: Send>(items: &[T], max_threads: usize, f
             let pool = cell.get().ok_or_else(|| crate::KernelError::Failed("missing mesh worker".into()))?;
             let scope = crate::validation::current();
             let stop = solidcraft_smlib::stop::current();
-            pool.install(|| solidcraft_smlib::stop::scoped(stop, || crate::validation::within(scope, || guard("mesh worker", || f(item)))))
+            let traced = solidcraft_smlib::trace::current();
+            pool.install(|| {
+                solidcraft_smlib::trace::scoped(traced, || {
+                    solidcraft_smlib::stop::scoped(stop, || crate::validation::within(scope, || guard("mesh worker", || f(item))))
+                })
+            })
         })
     };
     #[cfg(target_arch = "wasm32")]
@@ -63,11 +68,15 @@ pub fn map_with_local_pools<T: Sync, R: Send>(items: &[T], max_threads: usize, f
 /// `f` over `items` as [`for_each_on_threads`] runs it, results in item order (`None` where an
 /// item panicked).
 pub fn map_on_threads<T: Sync, R: Send>(items: &[T], max_threads: usize, f: impl Fn(&T) -> R + Sync) -> Vec<Option<R>> {
-    // The threads run under the caller's validation mode (`crate::validation`) and stop token.
+    // The threads run under the caller's validation mode (`crate::validation`), stop token and
+    // traced run (`solidcraft_smlib::trace`).
     let scope = crate::validation::current();
     let stop = solidcraft_smlib::stop::current();
+    let traced = solidcraft_smlib::trace::current();
     let one = |item: &T| {
-        solidcraft_smlib::stop::scoped(stop.clone(), || crate::validation::within(scope.clone(), || guard("parallel item", || Ok(f(item))).ok()))
+        solidcraft_smlib::trace::scoped(traced.clone(), || {
+            solidcraft_smlib::stop::scoped(stop.clone(), || crate::validation::within(scope.clone(), || guard("parallel item", || Ok(f(item))).ok()))
+        })
     };
     #[cfg(not(target_arch = "wasm32"))]
     {

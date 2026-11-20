@@ -1,7 +1,7 @@
 //! Point cloud files read for a design's point cloud (#5151): PLY ([`crate::ply`]), PCD
-//! ([`crate::pcd`]) and XYZ text (`x y z` per line, optionally followed by `r g b`, or by an
-//! intensity and then `r g b` as PTS files write it; spaces, tabs, commas or semicolons between
-//! the values; an ASC file is the same text). A file with more points than asked for is thinned
+//! ([`crate::pcd`]), E57 ([`crate::e57`]) and XYZ text (`x y z` per line, optionally followed by
+//! `r g b`, or by an intensity and then `r g b` as PTS files write it; spaces, tabs, commas or
+//! semicolons between the values; an ASC file is the same text). A file with more points than asked for is thinned
 //! evenly (every n-th point). The points are kept relative to the first one, in single precision.
 
 use solidcore_record::Vec3;
@@ -14,9 +14,9 @@ use crate::{IoError, Result};
 pub const MAX_POINT_CLOUD_BYTES: usize = 1 << 30;
 /// Points kept from a file unless asked for another number.
 pub const DEFAULT_MAX_POINTS: usize = 5_000_000;
-/// Is this a point cloud file we read (`.ply`, `.pcd`, `.xyz`, `.pts`, `.asc`, any case)?
+/// Is this a point cloud file we read (`.ply`, `.pcd`, `.e57`, `.xyz`, `.pts`, `.asc`, any case)?
 pub fn is_point_cloud_path(path: &str) -> bool {
-    has_extension(path, &["ply", "pcd", "xyz", "pts", "asc"])
+    has_extension(path, &["ply", "pcd", "e57", "xyz", "pts", "asc"])
 }
 
 /// Is this a PLY file (`.ply`, any case)?
@@ -79,8 +79,9 @@ impl Keep {
     }
 }
 
-/// Read a PLY, PCD or XYZ file (by `file`'s extension; a file starting with `ply` is PLY whatever
-/// its name) whose lengths are `scale` millimetres each, keeping at most `max_points` points.
+/// Read a PLY, PCD, E57 or XYZ file (by `file`'s extension; a file starting with `ply` is PLY
+/// whatever its name) whose lengths are `scale` millimetres each, keeping at most `max_points`
+/// points.
 pub fn read_point_cloud(bytes: &[u8], file: &str, scale: f64, max_points: usize) -> Result<CloudFile> {
     crate::limits::check(crate::limits::Kind::PointCloud, bytes.len() as u64).map_err(IoError::Invalid)?;
     if !(scale.is_finite() && scale > 0.0 && scale <= 1e6) {
@@ -89,17 +90,21 @@ pub fn read_point_cloud(bytes: &[u8], file: &str, scale: f64, max_points: usize)
     let max = max_points.clamp(1, MAX_POINTS);
     let mut keep = Keep { scale, origin: None, out: CloudFile::default(), colored: false, bad: 0, max };
     let ply = crate::ply::is_ply(bytes) || (is_ply_path(file) && !bytes.is_empty());
-    // A PLY or PCD file gives its points with their properties beside them.
+    // A PLY, PCD or E57 file gives its points with their properties beside them.
     let table = if ply {
         Some(crate::ply_complex::read_ply_cloud(bytes, max)?)
     } else if has_extension(file, &["pcd"]) {
         Some(crate::pcd::read_pcd_cloud(bytes, max)?)
+    } else if has_extension(file, &["e57"]) {
+        Some(crate::e57::read_e57_cloud(bytes, max)?)
     } else {
         None
     };
     let stride;
     if let Some(r) = table {
-        stride = r.vertices.div_ceil(r.positions.len().max(1) as u64).max(1);
+        // Points without a position were left out before thinning: they count as unread.
+        keep.bad += r.skipped;
+        stride = r.vertices.saturating_sub(r.skipped).div_ceil(r.positions.len().max(1) as u64).max(1);
         keep.colored = r.colors.is_some();
         let colors = r.colors.unwrap_or_default();
         let mut read = Vec::with_capacity(r.positions.len());
@@ -158,6 +163,7 @@ fn numbers(line: &str, out: &mut Vec<f64>) -> bool {
 /// Read an XYZ file into `keep`; returns the thinning stride.
 fn read_xyz(bytes: &[u8], keep: &mut Keep) -> Result<u64> {
     let text = String::from_utf8_lossy(bytes);
+    let text = text.trim_start_matches('\u{feff}');
     // An ESRI grid is an ASC file too, but one of heights in rows: read as points it is nonsense.
     let first = text.lines().find_map(|line| line.split_whitespace().next());
     if first.is_some_and(|word| word.eq_ignore_ascii_case("ncols")) {
@@ -311,11 +317,12 @@ mod tests {
         assert_eq!(&*c.complex.column("intensity", On::Point).unwrap().values.0, &[10.0, 12.0, 13.0], "the point left out takes its number with it");
         c.complex.check(3).unwrap();
         assert_eq!(c.warnings, ["1 point(s) could not be read and were left out"]);
+        // Thinned, the point without a position takes no place: every second of the other three.
         let thinned = read_point_cloud(pcd.as_bytes(), "scan.pcd", 1.0, 2).unwrap();
-        assert_eq!((thinned.source_points, &thinned.points[..]), (4, &[0.0, 0.0, 0.0, 0.5, 0.0, 0.0][..]));
-        assert_eq!(thinned.colors, [255, 0, 0, 0, 255, 0]);
-        assert_eq!(&*thinned.complex.column("intensity", On::Point).unwrap().values.0, &[10.0, 12.0]);
-        assert_eq!(thinned.warnings, ["2 of the file's 4 points kept (one in 2)"]);
+        assert_eq!((thinned.source_points, &thinned.points[..]), (4, &[0.0, 0.0, 0.0, 1.0, 0.0, 0.0][..]));
+        assert_eq!(thinned.colors, [255, 0, 0, 0, 0, 255]);
+        assert_eq!(&*thinned.complex.column("intensity", On::Point).unwrap().values.0, &[10.0, 13.0]);
+        assert_eq!(thinned.warnings, ["1 point(s) could not be read and were left out", "2 of the file's 4 points kept (one in 2)"]);
     }
 
     #[test]
@@ -330,6 +337,10 @@ mod tests {
         // An ESRI grid has the same extension: rows of heights, which are no points.
         let grid = b"ncols 3\nnrows 2\nxllcorner 0\nyllcorner 0\ncellsize 10\nNODATA_value -9999\n1 2 3\n4 5 6\n";
         let refused = read_point_cloud(grid, "terrain.asc", 1.0, DEFAULT_MAX_POINTS).unwrap_err().to_string();
+        assert!(refused.contains("grid of heights"), "{refused}");
+        // The same with the byte-order mark a Windows editor writes first.
+        let marked = [&b"\xef\xbb\xbf"[..], grid].concat();
+        let refused = read_point_cloud(&marked, "terrain.asc", 1.0, DEFAULT_MAX_POINTS).unwrap_err().to_string();
         assert!(refused.contains("grid of heights"), "{refused}");
     }
 
@@ -381,6 +392,9 @@ mod tests {
             (b"ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n1e300 0 0\n", "a.ply"),
             (b"PLY", "b.ply"),
             (b"", "a.pcd"),
+            (b"", "a.e57"),
+            (b"ASTM-E57", "a.e57"),
+            (b"1 2 3\n", "a.e57"),
             (b"1 2 3\n", "a.pcd"),
             (b"FIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nPOINTS 1\nDATA ascii\n1e300 0 0\n", "a.pcd"),
             (b"FIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nPOINTS 9\nDATA binary\n", "a.pcd"),
@@ -391,6 +405,6 @@ mod tests {
             assert_eq!(r.ok(), Some(false), "{:?}", String::from_utf8_lossy(b));
         }
         assert!(is_point_cloud_path("x.PLY") && is_point_cloud_path("y.xyz") && is_point_cloud_path("z.pts") && !is_point_cloud_path("w.stl"));
-        assert!(is_point_cloud_path("x.PCD") && is_point_cloud_path("y.asc") && !is_point_cloud_path("z.e57"));
+        assert!(is_point_cloud_path("x.PCD") && is_point_cloud_path("y.asc") && is_point_cloud_path("z.E57") && !is_point_cloud_path("w.las"));
     }
 }

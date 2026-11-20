@@ -27,6 +27,17 @@ impl Drop for Folder {
 
 pub(crate) mod mesh_convert;
 
+/// Writes `bytes` to an image file of its own for a test and returns its path: an image is given
+/// to `canvas.insert` and `canvas.decal` as a file, never as text.
+pub(crate) fn image_file(bytes: &[u8]) -> String {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-test-images-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{}.img", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    std::fs::write(&path, bytes).unwrap();
+    path.to_string_lossy().into_owned()
+}
+
 /// Counts the copies `Session::doc_mut` makes of a shared document.
 pub(crate) mod doc_copies {
     use std::cell::Cell;
@@ -1170,6 +1181,7 @@ fn hostile_params_never_panic() {
         "distance",
         "profiles",
         "direction",
+        "parallel_to",
         "distance2",
         "start_offset",
         "operation",
@@ -1438,6 +1450,7 @@ fn unknown_commands_suggest_the_closest_ids() {
     let mut msg = |id: &str| s.execute(id, &serde_json::json!({})).unwrap_err().to_string();
     assert_eq!(msg("file.open"), "unknown command `file.open` (did you mean `doc.open`, `panel.open` or `drawing.open`?)");
     assert!(msg("solid.extrud").starts_with("unknown command `solid.extrud` (did you mean `solid.extrude`"), "{}", msg("solid.extrud"));
+    assert!(msg("tab.window.clsoe").starts_with("unknown command `tab.window.clsoe` (did you mean `tab.window.close`"));
     assert!(msg("Extrude").contains("`solid.extrude`"), "{}", msg("Extrude"));
     assert_eq!(msg("FusionFilletEdgesCommand"), "unknown command `FusionFilletEdgesCommand`");
     let long = "x".repeat(10_000);
@@ -2856,6 +2869,58 @@ fn section_folder_hides_and_shows_its_planes() {
     assert!(s.execute("inspect.section", &json!({"folder": "no"})).is_err());
 }
 
+/// Switching linked views restores every section plane, its hidden-folder state and hatch,
+/// without turning a passive paint swap into a model, history or display edit.
+#[test]
+fn inspect_snapshots_keep_independent_multi_plane_sections_without_refreshing_display() {
+    let mut s = Session::default();
+    for params in [
+        json!({"plane": "XZ", "at": 15, "hatch": false}),
+        json!({"plane": "YZ", "at": 20, "add": true}),
+        json!({"plane": "XY", "at": 5, "add": true}),
+        json!({"hide": 3}),
+        json!({"folder": false}),
+    ] {
+        run(&mut s, "inspect.section", params);
+    }
+    s.colored_components = Some(());
+    let hidden_section = s.section_state();
+    assert!(hidden_section.planes.is_empty());
+    assert_eq!(hidden_section.hidden.len(), 3);
+    assert_eq!(hidden_section.folder, Some(vec![1, 2]));
+    assert!(!hidden_section.hatch);
+    let hidden_view = s.inspect();
+
+    for params in [
+        json!({"plane": "XZ", "at": -7, "hatch": true}),
+        json!({"plane": "YZ", "at": 11, "add": true}),
+        json!({"plane": "XY", "at": 2, "add": true}),
+        json!({"hide": 2}),
+    ] {
+        run(&mut s, "inspect.section", params);
+    }
+    s.colored_components = None;
+    let shown_section = s.section_state();
+    assert_eq!((shown_section.planes.len(), shown_section.hidden.len()), (2, 1));
+    assert_eq!(shown_section.folder, None);
+    assert!(shown_section.hatch);
+    let shown_view = s.inspect();
+    let doc = s.doc.clone();
+    let world = s.model.state();
+    let unchanged = (s.revision, s.visibility_revision, s.undo.len(), s.redo.len());
+    for _ in 0..3 {
+        s.set_inspect(hidden_view.clone());
+        assert_eq!(s.section_state(), hidden_section);
+        assert_eq!(s.inspect(), hidden_view);
+        s.set_inspect(shown_view.clone());
+        assert_eq!(s.section_state(), shown_section);
+        assert_eq!(s.inspect(), shown_view);
+        assert!(std::sync::Arc::ptr_eq(&s.doc, &doc));
+        assert!(std::sync::Arc::ptr_eq(&s.model.state(), &world));
+        assert_eq!((s.revision, s.visibility_revision, s.undo.len(), s.redo.len()), unchanged);
+    }
+}
+
 /// Hostile `inspect.section` parameters are refused and leave the section as it was.
 #[test]
 fn section_analysis_refuses_hostile_params() {
@@ -3907,6 +3972,67 @@ fn split_body_by_a_sketch_line() {
     let saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
     let split = saved["features"].as_array().and_then(|f| f.iter().find(|f| f["type"] == "split")).cloned().unwrap();
     assert_eq!((split["sketch"].as_u64(), split["line"].as_str()), (Some(sk), Some("cut")), "{split}");
+}
+
+/// A 10 mm block in a new component, then the design's root active again.
+fn block_in_component(s: &mut Session) -> (u64, u64) {
+    let created = run(s, "component.create", json!({"name": "Part"}));
+    let component = created["component"].as_u64().unwrap();
+    let occurrence = created["occurrence"].as_u64().unwrap();
+    run(s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(s, "component.activate", json!({"component": 0}));
+    (component, occurrence)
+}
+
+fn body_components(s: &Session) -> Vec<(String, u64)> {
+    let st = s.model.state();
+    let mut v: Vec<(String, u64)> = st.bodies.iter().map(|b| (b.name.clone(), s.doc.model_body_component(b))).collect();
+    v.sort();
+    v
+}
+
+/// Split Body made while another component is active: every piece stays in the component the
+/// body belongs to (an imported part split from the design's root, #2979), not only the first.
+#[test]
+fn split_body_pieces_stay_in_the_component_of_the_split_body() {
+    let mut s = Session::default();
+    let (component, _) = block_in_component(&mut s);
+    run(&mut s, "solid.split_body", json!({"body": "Block", "plane": {"origin": [4, 0, 0], "normal": [1, 0, 0]}}));
+    assert_eq!(body_components(&s), [("Block".to_string(), component), ("Block (1)".to_string(), component)]);
+    // The design's owner sets agree.
+    let st = s.model.state();
+    assert_eq!(s.doc.body_owners(&st), std::collections::HashSet::from([component]));
+}
+
+/// The same for a body moved into a component after it was made.
+#[test]
+fn split_body_piece_of_a_body_moved_into_a_component_stays_there() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    let created = run(&mut s, "component.from_bodies", json!({"bodies": ["Block"]}));
+    let component = created["components"][0]["component"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "solid.split_body", json!({"body": "Block", "plane": {"origin": [4, 0, 0], "normal": [1, 0, 0]}}));
+    assert_eq!(body_components(&s), [("Block".to_string(), component), ("Block (1)".to_string(), component)]);
+}
+
+/// The pieces of a body in a placed component are shown where the body was.
+#[test]
+fn split_body_pieces_are_shown_where_the_body_was() {
+    let mut s = Session::default();
+    let (_, occurrence) = block_in_component(&mut s);
+    // The design's first part is grounded when it is made.
+    run(&mut s, "occurrence.ground", json!({"occurrence": occurrence, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [30, 0, 0], "capture": false}));
+    let before = s.world_state().unwrap().body("Block").unwrap().mesh().bounds();
+    run(&mut s, "solid.split_body", json!({"body": "Block", "plane": {"origin": [34, 0, 0], "normal": [1, 0, 0]}}));
+    let world = s.world_state().unwrap();
+    let (a, b) = (world.body("Block").unwrap().mesh().bounds(), world.body("Block (1)").unwrap().mesh().bounds());
+    // Together the pieces fill the block where it was shown, each on one side of the cut.
+    for p in [a, b] {
+        assert!(p.min.x >= before.min.x - 1e-6 && p.max.x <= before.max.x + 1e-6, "{p:?} outside {before:?}");
+    }
+    assert!((a.min.x.min(b.min.x) - before.min.x).abs() < 1e-6 && (a.max.x.max(b.max.x) - before.max.x).abs() < 1e-6);
 }
 
 /// Split Body of a body of two separate pieces joined into one (#6738): a plane through both
@@ -7716,4 +7842,56 @@ fn head_counterbore_is_the_head_plus_the_default_gap() {
     assert_eq!(cmd::head_counterbore("socket_head_cap_screw", "M4"), Some((8.0, 4.5)), "the family name parts.insert takes");
     assert_eq!(cmd::head_counterbore("ISO 7380-1", "M2"), None, "ISO 7380-1 has no M2");
     assert_eq!(cmd::head_counterbore("DIN 912", "M4"), None);
+}
+
+/// Rounding the flat face of a half torus (Ø60 centre circle, Ø16 tube, cut at Z = 0) with 0.8 mm
+/// where a Ø1.9 notch is cut 4 mm into the outer rim, its side 0.00002 mm clear of the torus's
+/// seam: 0.43.0 failed with status 1001, "Fillet Surface Computation Failure" (#18565). The
+/// issue's two picks take the inner rim and the outer rim's arc (the notch's arc meets that at a
+/// corner, so it is not in its tangent chain); a third pick on the notch's arc rounds the whole
+/// outer loop. Each builds one valid solid with the corners of the picked edges rounded away and
+/// the volume of the half torus less the notch and the rounds (Pappus on the corner between the
+/// flat face and the tube; the notch's own round about 0.41 mm³ more).
+#[test]
+fn a_notched_half_torus_rounds_its_flat_face_loops() {
+    let (cx, cy): (f64, f64) = (37.9881251185, 0.949921038509);
+    // The notch's innermost point on the flat face, 0.95 in from the rim along its centre's ray.
+    let a = cy.atan2(cx);
+    let notch_in = cx.hypot(cy) - 0.95;
+    let at = |s: f64, a: f64, z: f64| solidcore_record::Vec3::new(s * a.cos(), s * a.sin(), z);
+    let rims = [[-20.6732376573, -7.52444315316, 0.0], [-35.7083195899, -12.9967654464, 0.0]];
+    let notch_arc = [notch_in * a.cos(), notch_in * a.sin(), 0.0];
+    for (with_notch, want) in [(false, 18885.45), (true, 18885.04)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.torus", json!({"major": 30, "minor": 8, "operation": "new", "body_name": "Base"}));
+        let cut = json!({"length": 78, "width": 78, "height": 9, "corner": [-39, -39, -9], "operation": "cut", "targets": ["Base"]});
+        run(&mut s, "solid.box", cut);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "NotchSketch1"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [cx, cy], "diameter": 1.9}));
+        run(&mut s, "sketch.finish", json!({}));
+        let notch = json!({"sketch": "NotchSketch1", "distance": 4, "direction": "positive", "operation": "cut", "targets": ["Base"]});
+        run(&mut s, "solid.extrude", notch);
+        let mut edges = rims.to_vec();
+        if with_notch {
+            edges.push(notch_arc);
+        }
+        run(&mut s, "solid.fillet", json!({"edges": edges, "radius": 0.8, "body": "Base"}));
+        let bodies = &s.model.state().bodies;
+        assert_eq!(bodies.len(), 1);
+        let body = &bodies[0].body;
+        let bad = body.validity();
+        assert!(bad.is_empty() && body.shell_count() == 1, "notch {with_notch}: {bad:?}, {} shells", body.shell_count());
+        let class = |p| body.classify_point(p).unwrap();
+        use solidcraft_kernel::PointClass::{Inside, Outside};
+        for (what, p) in [("inner rim", at(22.1, PI, 0.1)), ("outer rim", at(37.9, PI, 0.1))] {
+            assert_eq!(class(p), Outside, "notch {with_notch}: the {what}'s corner is rounded away");
+        }
+        let notch_corner = if with_notch { Outside } else { Inside };
+        assert_eq!(class(at(notch_in - 0.1, a, 0.1)), notch_corner, "notch {with_notch}: the notch's corner");
+        for (what, p) in [("the tube", at(30.0, PI, 4.0)), ("beside the notch's corner", at(notch_in - 0.6, a, 0.9))] {
+            assert_eq!(class(p), Inside, "notch {with_notch}: {what} is material");
+        }
+        let v = volume(&mut s);
+        assert!((v - want).abs() < 0.2, "notch {with_notch}: volume {v}, want {want}");
+    }
 }

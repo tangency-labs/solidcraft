@@ -87,8 +87,10 @@ existing standard `-Y +X` orientation. Headers, every scanline and finite correc
 radiance are checked before insertion. Invalid types, hashes and required
 references fail; none is treated as an optional cache.
 
-Plain JSON stores `{kind:"radiance_hdr",data:"canonical base64"}`. Before the
-migration reader builds a JSON value tree, a borrowed RawValue probe limits the
+The design holds each resource's bytes and never writes them as text: a plain
+JSON design can't hold one, and saving it as `.json` is refused. An older JSON
+design stored `{kind:"radiance_hdr",data:"canonical base64"}` and still opens:
+before the migration reader builds a JSON value tree, a borrowed RawValue probe limits the
 resource count, detects duplicate keys and counts base64 characters, including
 legal JSON escapes, against per-source and aggregate quotas. It does not allocate
 an unescaped HDR string or decoded payload to measure them. The typed reader then
@@ -99,8 +101,9 @@ The container writes one required `blobs/<sha256>.hdr` entry per resource. Small
 metadata contains `kind`, an empty `data`, and `hdr_blob`. A separate bounded raw
 probe rejects duplicate references, inline payloads and oversized metadata strings
 before constructing the value tree. Opening checks blob size before allocation,
-the container hash and the resource key, then hydrates the strict JSON form before
-normal document validation. Missing, corrupt, wrongly typed or oversized blobs
+the container hash and the resource key, then hands the bytes to the strict
+reader as they are (the record's empty `data` takes them) before normal document
+validation. Missing, corrupt, wrongly typed or oversized blobs
 prevent opening the authoritative design. No entry is extracted to disk. Existing
 archive, expanded-size and overall 256 MiB design-file limits remain in force.
 

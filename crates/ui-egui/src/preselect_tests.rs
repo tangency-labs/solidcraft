@@ -1873,39 +1873,44 @@ fn thread_size_suggestion_follows_picks_without_overwriting_manual_sizes() {
     assert_eq!(apply_commands(&app, &d).unwrap()[0].1["designation"], "M8x1");
 }
 
-/// Explicitly adding faces keeps automatic sizing separate for different shaft diameters.
+/// Preselection and explicit additions keep automatic sizing separate for different shaft diameters.
 #[test]
 fn threads_on_different_selected_diameters_keep_each_faces_automatic_size() {
-    let mut app = app_with(json!([
-        {"command":"solid.cylinder","params":{"radius":4,"height":10}},
-        {"command":"solid.cylinder","params":{"base":[30,0,0],"radius":10,"height":10}}
-    ]));
-    let small = thread_face(&app, "Body1");
-    let large = thread_face(&app, "Body2");
-    let before = app.session.doc.to_json();
-    let mut d = start(&mut app, vec![small.clone(), large.clone()], "solid.thread");
-    assert!(!d.inputs[0].multi);
-    assert_eq!(d.inputs[0].items, vec![small.clone()]);
-    d.take_box(&app.session, vec![large.clone()], true);
-    assert!(d.inputs[0].multi);
-    assert_eq!(d.inputs[0].items, vec![small, large]);
-    assert!(matches!(&d.kind, Kind::Thread { designation, .. } if designation == "M8"));
-    assert_eq!(app.session.doc.to_json(), before, "suggesting a size is read-only");
-    let commands = apply_commands(&app, &d).unwrap();
-    assert_eq!(commands.len(), 1);
-    let (command, params) = &commands[0];
-    assert_eq!(command, "solid.thread");
-    assert_eq!(params["faces"].as_array().unwrap().len(), 2);
-    assert!(params.get("designation").is_none(), "each face must keep automatic sizing");
-    let reply = app.session.execute(command, params).unwrap();
-    let id = reply["feature"].as_u64().unwrap();
-    let state = app.session.model.state();
-    assert_eq!(state.threads.len(), 2);
-    for (thread, (body, expected)) in state.threads.iter().zip([("Body1", "M8"), ("Body2", "M20")]) {
-        assert_eq!(thread.body, body);
-        assert_eq!(thread.designation, expected);
-        assert!(!thread.internal);
-        assert_eq!(thread.feature, id, "different automatic sizes still belong to one feature");
+    for preselect_both in [false, true] {
+        let mut app = app_with(json!([
+            {"command":"solid.cylinder","params":{"radius":4,"height":10}},
+            {"command":"solid.cylinder","params":{"base":[30,0,0],"radius":10,"height":10}}
+        ]));
+        let small = thread_face(&app, "Body1");
+        let large = thread_face(&app, "Body2");
+        let before = app.session.doc.to_json();
+        let selection = if preselect_both { vec![small.clone(), large.clone()] } else { vec![small.clone()] };
+        let mut d = start(&mut app, selection, "solid.thread");
+        if !preselect_both {
+            assert!(!d.inputs[0].multi);
+            assert_eq!(d.inputs[0].items, vec![small.clone()]);
+            d.take_box(&app.session, vec![large.clone()], true);
+        }
+        assert!(d.inputs[0].multi);
+        assert_eq!(d.inputs[0].items, vec![small, large]);
+        assert!(matches!(&d.kind, Kind::Thread { designation, .. } if designation == "M8"));
+        assert_eq!(app.session.doc.to_json(), before, "suggesting a size is read-only");
+        let commands = apply_commands(&app, &d).unwrap();
+        assert_eq!(commands.len(), 1);
+        let (command, params) = &commands[0];
+        assert_eq!(command, "solid.thread");
+        assert_eq!(params["faces"].as_array().unwrap().len(), 2);
+        assert!(params.get("designation").is_none(), "each face must keep automatic sizing");
+        let reply = app.session.execute(command, params).unwrap();
+        let id = reply["feature"].as_u64().unwrap();
+        let state = app.session.model.state();
+        assert_eq!(state.threads.len(), 2);
+        for (thread, (body, expected)) in state.threads.iter().zip([("Body1", "M8"), ("Body2", "M20")]) {
+            assert_eq!(thread.body, body);
+            assert_eq!(thread.designation, expected);
+            assert!(!thread.internal);
+            assert_eq!(thread.feature, id, "different automatic sizes still belong to one feature");
+        }
     }
 }
 
