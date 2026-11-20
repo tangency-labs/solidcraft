@@ -163,7 +163,11 @@ fn sketch_on_a_face_follows_a_moved_body() {
 }
 
 /// A 1 x 1 PNG for canvases.
-const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+fn png_1x1() -> Vec<u8> {
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 255])).write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
 
 /// Canvases belong to the active component and move with its occurrence; one put on a moved
 /// component's face from the root sits on the face (and stays the root's).
@@ -172,17 +176,17 @@ fn canvases_move_with_their_component() {
     let mut s = moved_part();
     let part = s.active_component;
     assert_ne!(part, 0);
-    run(&mut s, "canvas.insert", json!({"data": PNG, "plane": "XY", "name": "Plan"}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png_1x1()), "plane": "XY", "name": "Plan"}));
     run(
         &mut s,
         "construct.plane.three_points",
         json!({"a": {"point": [50, 0, 5]}, "b": {"point": [51, 0, 5]}, "c": {"point": [50, 1, 5]}, "name": "ImagePlane"}),
     );
-    run(&mut s, "canvas.insert", json!({"data": PNG, "plane": "ImagePlane", "name": "OnPoints"}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png_1x1()), "plane": "ImagePlane", "name": "OnPoints"}));
     // From the root, on the moved block's top face (world).
     run(&mut s, "component.activate", json!({"component": "root"}));
-    run(&mut s, "canvas.insert", json!({"data": PNG, "plane": {"face": [65, 10, 10]}, "name": "Lid", "width": 10}));
-    run(&mut s, "canvas.insert", json!({"data": PNG, "plane": "XZ", "name": "Root"}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png_1x1()), "plane": {"face": [65, 10, 10]}, "name": "Lid", "width": 10}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png_1x1()), "plane": "XZ", "name": "Root"}));
     let (vals, _) = s.doc.param_values();
     let world = |s: &Session, name: &str| {
         let c = s.doc.canvases.iter().find(|c| c.name == name).unwrap();
@@ -210,7 +214,7 @@ fn canvases_move_with_their_component() {
     let root = s.doc.canvases.iter().find(|c| c.name == "Root").unwrap();
     assert!(near(s.doc.canvas_plane(&vals, root, &s.model.state()).unwrap().origin, Vec3::ZERO));
     // The component survives a save and reopen.
-    let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let back = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
     assert_eq!(back.canvases, s.doc.canvases);
 }
 

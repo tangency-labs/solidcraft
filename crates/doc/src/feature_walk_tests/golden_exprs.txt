@@ -189,6 +189,7 @@ construction_plane
     Angle = cplane.angle (Angle)
     Offset = cplane.offset (Length)
   expressions: cplane.angle, cplane.offset, 0, 0, 0
+construction_plane_square_to_line
 split
   inputs:
     Angle = split.angle (Angle)

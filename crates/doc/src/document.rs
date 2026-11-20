@@ -133,6 +133,10 @@ pub enum PlaneRef {
     AlongPath { path: Box<GeoRef>, t: Expr },
     /// Through a straight edge (or line, axis) and square to a plane (or planar face).
     Perpendicular { plane: Box<GeoRef>, line: Box<GeoRef> },
+    /// Through a picked point, square to a straight edge (or line, axis): with the point on the
+    /// line, Plane Along Path at that position; with it off the line, the plane keeps the line's
+    /// direction and passes through the point.
+    SquareToLine { line: Box<GeoRef>, point: Box<GeoRef> },
     /// A planar body face. Certified attachments resolve only their exact source and report
     /// an error when it is lost; `plane` then supplies a repair guide. Legacy references without
     /// an anchor try the persistent `name`, then the nearest parallel face at `at`, and retain
@@ -4701,6 +4705,18 @@ impl Document {
     /// container keeps, as parts of their own. Empty when the design saves as JSON whole.
     pub fn binary_data(&self) -> Vec<&'static str> {
         let mut kinds = Vec::new();
+        if self.canvases.iter().any(|c| !c.data.is_empty()) {
+            kinds.push("images");
+        }
+        if self.drawings.iter().any(|d| d.images.iter().next().is_some()) {
+            kinds.push("drawing images");
+        }
+        if self.point_clouds.iter().any(|c| !c.points.is_empty()) {
+            kinds.push("point clouds");
+        }
+        if !self.render.resources.is_empty() || !self.render.texture_resources.is_empty() {
+            kinds.push("render environments and textures");
+        }
         if !self.plugin_data.is_empty() {
             kinds.push("plugin files");
         }
@@ -5321,6 +5337,7 @@ impl Document {
             | PlaneRef::Tangent { .. }
             | PlaneRef::AlongPath { .. }
             | PlaneRef::Perpendicular { .. }
+            | PlaneRef::SquareToLine { .. }
             | PlaneRef::ThroughPoint { .. } => {
                 let st = st.ok_or_else(|| DocError::Invalid("this plane is built from the model: evaluate first".into()))?;
                 crate::construct::resolve_geo_plane(&crate::construct::Ctx { doc: self, vals, st, depth, component }, p)

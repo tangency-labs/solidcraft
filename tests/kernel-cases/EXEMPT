@@ -65,6 +65,7 @@ component.update_links            component links
 config.update_from_design         configuration table bookkeeping; tested in crates/engine/src/cmd/config.rs
 construct.axis                    builds with the first construct.axis.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
 construct.plane                   builds with the first construct.plane.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
+construct.plane.square_to_line    a plane through a point, square to a line: plane_through_point_square_to_line_* (crates/engine/src/construct_tests.rs)
 construct.point                   builds with the first construct.point.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
 diagnostics.crash_report          crash reports
 diagnostics.crash_reports         crash reports
@@ -111,6 +112,7 @@ drawing.open                      a drawing: its tests in crates/engine/src/cmd/
 drawing.pattern.delete            paper hatch patterns: crates/engine/src/cmd/drawing_tests.rs
 drawing.pattern.import            paper hatch patterns: crates/engine/src/cmd/drawing_tests.rs and crates/io/src/pat_tests.rs
 drawing.pattern.inspect           paper hatch patterns: crates/engine/src/cmd/drawing_tests.rs
+drawing.print                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.properties                a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.properties.remove         a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.properties.set            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
@@ -149,6 +151,7 @@ drawing.update                    a drawing: its tests in crates/engine/src/draw
 drawing.view.auxiliary            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.base                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.copy_to_sheet        a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.view.detail               a drawing: its tests in crates/engine/src/drawing_scene_tests.rs and crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.edit                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.flat                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.inspect              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
@@ -466,8 +469,10 @@ storage.patch                     plugins: a plugin's own data in the design, no
 storage.put_blob                  plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 storage.set                       plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 tab.view.activate                 shows a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
+tab.view.beside                   puts a view beside another in the tiling: no geometry, tested in the views crate and the UI's documents tests
 tab.view.close                    closes a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.duplicate                copies a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
+tab.view.layout                   sets how the design's views are tiled: no geometry, tested in the views crate and the UI's documents tests
 tab.view.list                     a listing of the design's views: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.move                     reorders the design's views: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.open                     opens a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
