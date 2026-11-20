@@ -343,9 +343,9 @@ impl WorkCounters {
     }
 
     /// Curved intersection pieces classified as running along a face edge
-    /// (`CurveClassification::classify_edge_interval`, WR-305): each one certified tangent to
-    /// the edge at both ends and within the intersection tolerance of it as a whole
-    /// (`curve_runs_along`). Not the fork's (a test's witness that a body reaches the
+    /// (`CurveClassification::classify_edge_interval`, WR-305): each one certified within the
+    /// intersection tolerance of it as a whole (`curve_runs_along`, or the worst-first bound of
+    /// #18065). Not the fork's (a test's witness that a body reaches the
     /// certificate).
     #[must_use]
     pub fn curved_edge_runs(&self) -> u64 {

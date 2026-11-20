@@ -2194,16 +2194,17 @@ pub fn fix_problems_by_squeezing<O: ClassObject>(
 /// bound of the distance between the interval's curve and the edge, past the intersection
 /// tolerance and within the tolerance of a vertex of the edge whose ball holds an end of the
 /// interval ([`tail_gap_within_vertex_ball`]). The caller raises the edge
-/// ([`crate::topology::edge::set_tolerance`], cascading to its vertices) and then classifies
-/// the interval ([`CurveClassification::set_edge_interval`]), or leaves it unclassified.
+/// ([`crate::topology::edge::set_tolerance`], only if larger, cascading to its vertices: the
+/// edge's other vertex can rise to `tolerance` too) and then classifies the interval
+/// ([`CurveClassification::set_edge_interval`]), or leaves it unclassified.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EdgeToleranceRaise<O> {
     /// The interval's index in the classification.
     pub index: usize,
     /// The edge handle the interval runs along.
     pub edge: O,
-    /// The tolerance the edge needs; `None` for an interval on the edge as it is.
-    pub tolerance: Option<f64>,
+    /// The tolerance the edge needs.
+    pub tolerance: f64,
     /// For the interval's start and end, the parameter on the edge of one that was
     /// unclassified and lies on it.
     pub unclassified: [Option<f64>; 2],
@@ -2237,16 +2238,19 @@ impl<O: ClassObject> CurveClassification<O> {
     /// the other unclassified: `E` is then each edge of the classification's face at that
     /// vertex in turn.
     ///
-    /// Not upstream (#18065): a curved interval not proved within the band, whose curve leaves
-    /// `E` tangentially into the ball of a vertex of `E` (a round's arc running off a straight
-    /// edge at its end), is returned as an [`EdgeToleranceRaise`] when its certified distance
-    /// from `E` is within that vertex's tolerance ([`tail_gap_within_vertex_ball`]); it is left
-    /// unclassified for the caller to raise `E` and classify it. A certified distance below
-    /// the band classifies it here.
+    /// Not upstream (#18065): a curved interval not proved within the band, with an end in the
+    /// ball of a vertex of `E` wider than the band, is returned as an [`EdgeToleranceRaise`]
+    /// when its certified distance from `E` is within that vertex's tolerance
+    /// ([`tail_gap_within_vertex_ball`]; typically a round's arc leaving a straight edge
+    /// tangentially at its end); it is left unclassified for the caller to raise `E` and
+    /// classify it. A certified distance below the band classifies it here. Every candidate
+    /// edge is tried before a raise is returned: an edge the interval runs along as it is wins
+    /// over one that needs a raise, and of those the first in candidate order is returned.
     ///
     /// # Errors
     ///
     /// An unresolved handle; those of the evaluations and the drops to the edge.
+    #[must_use = "a returned raise leaves the interval unclassified until it is applied"]
     pub fn classify_edge_interval(
         &mut self,
         k: &Kernel,
@@ -2299,6 +2303,7 @@ impl<O: ClassObject> CurveClassification<O> {
             }
         }
 
+        let mut first_raise = None;
         for edge in candidates {
             // an edge with no 3D curve proves nothing: no interval runs along it (checked
             // before any lookup below that needs the curve and would fail without it)
@@ -2337,14 +2342,8 @@ impl<O: ClassObject> CurveClassification<O> {
                 )?
             };
 
-            let raise = EdgeToleranceRaise {
-                index,
-                edge,
-                tolerance: None,
-                unclassified,
-            };
             if on_edge {
-                self.set_edge_interval(&raise)?;
+                self.mark_edge_interval(index, edge, unclassified)?;
                 return Ok(None);
             }
             // Not upstream (#18065): a curved piece leaving the edge tangentially into the ball
@@ -2360,18 +2359,22 @@ impl<O: ClassObject> CurveClassification<O> {
                 )? {
                     if gap < xsect_tol_3d {
                         // proved within the band after all (a finer cut than `curve_runs_along`'s)
-                        self.set_edge_interval(&raise)?;
+                        self.mark_edge_interval(index, edge, unclassified)?;
                         k.work_counters.add_curved_edge_run();
                         return Ok(None);
                     }
-                    return Ok(Some(EdgeToleranceRaise {
-                        tolerance: Some(gap),
-                        ..raise
-                    }));
+                    if first_raise.is_none() {
+                        first_raise = Some(EdgeToleranceRaise {
+                            index,
+                            edge,
+                            tolerance: gap,
+                            unclassified,
+                        });
+                    }
                 }
             }
         }
-        Ok(None)
+        Ok(first_raise)
     }
 
     /// Classify interval `raise.index` as on edge `raise.edge`, with each end
@@ -2383,15 +2386,25 @@ impl<O: ClassObject> CurveClassification<O> {
     ///
     /// An interval index out of range.
     pub fn set_edge_interval(&mut self, raise: &EdgeToleranceRaise<O>) -> Result<()> {
-        let at = self.at_mut(raise.index)?;
-        at.mid
-            .set_class_object(PointClassType::Edge, Some(raise.edge));
+        self.mark_edge_interval(raise.index, raise.edge, raise.unclassified)
+    }
+
+    /// Classify interval `index` as on `edge`, each end unclassified before and on the edge at
+    /// its parameter `unclassified` there.
+    fn mark_edge_interval(
+        &mut self,
+        index: usize,
+        edge: O,
+        unclassified: [Option<f64>; 2],
+    ) -> Result<()> {
+        let at = self.at_mut(index)?;
+        at.mid.set_class_object(PointClassType::Edge, Some(edge));
         for (pc, param) in [
-            (&mut at.start, raise.unclassified[0]),
-            (&mut at.end, raise.unclassified[1]),
+            (&mut at.start, unclassified[0]),
+            (&mut at.end, unclassified[1]),
         ] {
             if let Some(param) = param {
-                pc.set_class_object(PointClassType::Edge, Some(raise.edge));
+                pc.set_class_object(PointClassType::Edge, Some(edge));
                 pc.set_t_param(param, false);
             }
         }
@@ -3060,9 +3073,11 @@ fn closed_edge<O: ClassObject>(geometry: &impl ClassGeometry<O>, edge: O) -> Res
 /// A round's arc that leaves a straight edge tangentially, at the edge's end, departs from it
 /// quadratically: it stays within the band over most of its length and leaves it near the end,
 /// inside the ball the vertex there already has. Its distance from the edge, bounded over the
-/// whole piece on enclosures, is the tolerance the edge needs for the piece to run along it;
-/// taken only within that vertex's tolerance, the edge is not raised past a tolerance its end
-/// already has. The edge is open (a closed edge's pieces run through its seam,
+/// whole piece on enclosures, is the tolerance the edge needs for the piece to run along it:
+/// any piece within that bound of the edge lies within the raised edge's tolerance, wherever
+/// along the piece the bound is reached, so no tangency or position of the gap is required.
+/// Taken only within that vertex's tolerance, the edge is not raised past a tolerance its end
+/// already has (its other vertex can rise to the bound with it). The edge is open (a closed edge's pieces run through its seam,
 /// [`runs_through_seam`]), the piece's ends are farther than `tol` apart and drop onto the edge
 /// at two parameters.
 ///
@@ -3950,7 +3965,7 @@ mod tests {
             .classify_edge_interval(&k, &geo, 0)
             .expect("classify")
             .expect("a raise");
-        let gap = raise.tolerance.expect("a tolerance");
+        let gap = raise.tolerance;
         assert_eq!((raise.index, raise.edge), (0, edge));
         assert!((1.5e-5..=2e-5).contains(&gap), "{gap}");
         assert_eq!(
@@ -3966,6 +3981,26 @@ mod tests {
         // the same piece with the corner's ball no wider than the band: nothing at the edge's
         // end tolerates the 1.5e-5, so the edge is not raised and the interval is left alone
         let (k, geo, mut cc, _) = tangent_tail_to_the_corner(1.5e-5, 1e-5);
+        let raise = cc.classify_edge_interval(&k, &geo, 0).expect("classify");
+        assert_eq!(raise, None);
+        assert_eq!(
+            cc.at(0).expect("interval").mid.point_class(),
+            PointClassType::Unknown
+        );
+    }
+
+    #[test]
+    fn a_curved_piece_bowing_off_the_edge_farther_than_its_vertex_ball_is_left_alone() {
+        // ends 1.5e-5 off the corner, inside its ball (2e-5), but the piece bows about 4e-5
+        // off the edge before it (y = 3c t^2 (1-t) + h t^3 at t = 3/4): its certified distance
+        // is past that ball, so the edge is not raised and the interval is left alone
+        let len = 1e-2;
+        let (k, mut geo, mut cc, _) = bezier_from_the_edge(
+            [1.0 - len, 1.0 - 2.0 * len / 3.0, 1.0 - len / 3.0, 1.0],
+            [0.0, 0.0, 8e-5, 1.5e-5],
+        );
+        let corner = geo.vertex_at(Point3::new(1.0, 0.0, 1.0));
+        topo_vertex::set_tolerance(&mut geo.brep, corner, 2e-5, true, true).expect("tolerance");
         let raise = cc.classify_edge_interval(&k, &geo, 0).expect("classify");
         assert_eq!(raise, None);
         assert_eq!(

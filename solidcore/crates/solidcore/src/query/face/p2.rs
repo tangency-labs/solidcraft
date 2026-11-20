@@ -29,7 +29,15 @@
 //! - **WR-305 (#1057).** `CurveOnClassify` runs the fork's `ClassifyEdgeInterval` on each
 //!   interval before `ClassifyFaceInterval` (`CurveClassification::classify_edge_interval`):
 //!   a straight interval along a straight edge is certified by its ends, a curved one on
-//!   control points over the whole piece (the fork reads its midpoint only).
+//!   control points over the whole piece (the fork reads its midpoint only). Not upstream
+//!   (#18065): a curved interval within a certified distance of the edge that is past the
+//!   band but within the tolerance of a vertex of the edge holding one of its ends raises the
+//!   edge's tolerance to that distance (cascading to its vertices) and is then classified on
+//!   the edge. Every caller of `CurveOnClassify` (booleans, queries, sweep, offset, face
+//!   splits) can so raise an edge's tolerance, on the B-rep it classifies on (the private copy
+//!   for [`curve_on_classify`]). The raise lands while the intervals are classified in order:
+//!   the edge crossings of step 1 were found at the old tolerance (still valid, as the raise
+//!   only widens), and later intervals on that edge see the raised one.
 //! - **Classification B-rep (temporary).** [`curve_on_classify_mut`] runs on the face's own
 //!   B-rep through [`CurveOnClassifyBrep`] and makes upstream's lazy edits (UV trim curves,
 //!   gap caches, the trimmed cache's tolerance growth) on it in place, in upstream order.
@@ -2412,13 +2420,20 @@ fn curve_on_classify_body<O: ClassObject>(
         if let Some(raise) = cc.classify_edge_interval(k, &*objects, ii)? {
             // Not upstream (#18065): the interval runs along the edge at the certified distance
             // the classification found; raised on the face's B-rep (cascading to its
-            // vertices) it is on the edge, else left for the face classification
+            // vertices) it is on the edge, else left for the face classification. Later
+            // intervals on that edge see the raised tolerance (module docs)
             let edge = match objects.topology_entity(raise.edge) {
                 Some((b, EntityRef::Edge(e))) if core::ptr::eq(b, objects.brep()) => Some(e),
                 _ => None,
             };
-            if let (Some(e), Some(tolerance)) = (edge, raise.tolerance) {
-                crate::topology::edge::set_tolerance(objects.brep_mut(), e, tolerance, true, true)?;
+            if let Some(e) = edge {
+                crate::topology::edge::set_tolerance(
+                    objects.brep_mut(),
+                    e,
+                    raise.tolerance,
+                    true,
+                    true,
+                )?;
                 cc.set_edge_interval(&raise)?;
             }
         }
