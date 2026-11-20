@@ -2790,7 +2790,7 @@ fn skeleton_components_get_numbered_names_and_round_trip() {
     assert!(s.doc.is_skeleton(id(&a)) && s.doc.is_skeleton(id(&named)));
     let (plain, _) = created(&mut s, "Part");
     assert!(!s.doc.is_skeleton(plain));
-    let saved = solidcraft_io::write_design(&s.doc);
+    let saved = solidcraft_io::write_design(&s.doc).unwrap();
     let text = String::from_utf8_lossy(&saved).into_owned();
     assert_eq!(text.matches("\"skeleton\"").count(), 3, "only skeletons save a kind");
     let reopened = solidcraft_io::read_design(&saved).unwrap();
