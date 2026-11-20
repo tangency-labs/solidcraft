@@ -81,6 +81,14 @@ pub enum Event {
         /// The tool call's kind, as the agent gives it.
         kind: Option<String>,
         options: Vec<PermissionOption>,
+        /// The path it would read, when it is one of Claude Code's own read tools
+        /// ([`super::acp::read_path`]).
+        reads: Option<std::path::PathBuf>,
+        /// The file it would write, when it is one of Claude Code's own write tools
+        /// ([`super::acp::write_path`]).
+        writes: Option<std::path::PathBuf>,
+        /// The plan it asks the user to approve ([`super::acp::plan_text`]).
+        plan: Option<String>,
     },
     /// It needs the user to sign in; `methods` are its own ways to do so.
     AuthRequired {
