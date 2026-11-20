@@ -6588,6 +6588,15 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                 } else {
                                     q0
                                 };
+                                // the face both rails lie on, where it is a plane
+                                let plane_normal =
+                                    crate::topology::face::p2::surface(self.target, *face_a)?
+                                        .and_then(|s| match s.kind() {
+                                            crate::surface::surface::SurfaceKind::Plane(pl) => {
+                                                Some(pl.is_planar().1)
+                                            }
+                                            _ => None,
+                                        });
                                 let inside = match inside_band_past_run_end(
                                     k,
                                     curve_b,
@@ -6598,6 +6607,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                         sample: p,
                                         on_rail: (on_rail.parameter, r),
                                         kept: [kept_b.min(), kept_b.max()],
+                                        plane_normal,
                                     },
                                     tol,
                                     apart,
@@ -6715,6 +6725,8 @@ struct PastRunEnd {
     on_rail: (f64, crate::math::Point3),
     /// The parameters of the ends of the rail's kept part.
     kept: [f64; 2],
+    /// The normal of the face the rail lies on, where that face is a plane.
+    plane_normal: Option<crate::math::Vec3>,
 }
 
 /// The band check past an end of a band's own edge (#18563): whether the sample lies in the
@@ -6723,15 +6735,16 @@ struct PastRunEnd {
 /// run-on is the rail's part from that point to the end of its kept part on the side away from
 /// the edge (the side the point across from the edge's other end does not lie on). The sample
 /// is in the run-on's band where its nearest point of the rail lies strictly within the
-/// run-on, and it lies on the end's side of the rail in the end section's direction, further
-/// than `tol` from the rail and short of that section's width by more than `apart`, as the
-/// check beside the edge judges a sample. The section's direction is the end's, not the rail's
-/// at the sample's nearest point: the two agree where the run-on is straight and stays on a
-/// plane. A rail without a point across from either end, or a section no wider than `2 apart`,
-/// takes no band there.
+/// run-on, and it lies on the end's side of the rail, square to the rail at that point in the
+/// face's plane, further than `tol` from the rail and short of the end section's width by more
+/// than `apart`, as the check beside the edge judges a sample. The end's side is the side of
+/// the rail the end lies on, which a rail on a plane keeps along its whole length, however it
+/// turns. On a face that is not a plane the run-on takes no band, as beside any other run end.
+/// Nor does a rail without a point across from either end, a section no wider than `2 apart`,
+/// or a rail without a tangent at either point.
 ///
 /// # Errors
-/// Those of the drops onto the rail and its evaluation.
+/// Those of the drops onto the rail and its evaluations.
 fn inside_band_past_run_end(
     k: &Kernel,
     rail: &crate::curve::curve::Curve,
@@ -6747,7 +6760,11 @@ fn inside_band_past_run_end(
         sample,
         on_rail: (t, r),
         kept: [t0, t1],
+        plane_normal,
     } = at;
+    let Some(normal) = plane_normal else {
+        return Ok(false);
+    };
     let drop = |q| {
         rail.drop_point(
             k,
@@ -6782,7 +6799,22 @@ fn inside_band_past_run_end(
     ) {
         return Ok(false);
     }
-    let from_rail = (sample - r).dot(section * (1.0 / width));
+    // The square to the rail in the plane, at the point across from the end and at the
+    // sample's nearest point. Rotating with the rail's tangent, the second points across the
+    // band where the rail has turned away from the end's direction (a run-on along an arc).
+    let side = |s| -> Result<crate::math::Vec3> {
+        let v = rail.evaluate(k, s, 1, false, false)?;
+        Ok(normal.cross(v.get(1).copied().ok_or_else(band_stage_failed)?))
+    };
+    let side_end = side(across.parameter)?;
+    let side_at = side(t)?;
+    let towards_end = section.dot(side_end);
+    let side_len = side_at.length();
+    if !(towards_end.abs() > 0.0 && side_len > 0.0) {
+        return Ok(false);
+    }
+    let across_band = side_at * (towards_end.signum() / side_len);
+    let from_rail = (sample - r).dot(across_band);
     Ok(from_rail > tol && from_rail < width - apart && (sample - r).length() < width)
 }
 
@@ -8782,7 +8814,7 @@ mod tests {
             .unwrap(),
         );
         let ivl = rail.natural_interval();
-        let judge = |sample: Point3| {
+        let judge_on = |sample: Point3, plane_normal| {
             let foot = rail
                 .drop_point(
                     &k,
@@ -8806,18 +8838,22 @@ mod tests {
                     sample,
                     on_rail: (foot.parameter, r),
                     kept: [ivl.min(), ivl.max()],
+                    plane_normal,
                 },
                 1e-6,
                 1e-5,
             )
             .unwrap()
         };
+        let judge = |sample| judge_on(sample, Some(Point3::new(0.0, 0.0, 1.0)));
         for degrees in [30.0, 120.0] {
             assert!(judge(at(10.5, degrees)), "outside the arc at {degrees}");
             assert!(!judge(at(9.5, degrees)), "inside the arc at {degrees}");
         }
         // on the edge's side of the end there is no run-on
         assert!(!judge(at(10.5, -20.0)));
+        // nor on a face that is not a plane, as beside any other run end
+        assert!(!judge_on(at(10.5, 30.0), None));
     }
 
     /// An empty edge list is a typed refusal of the value, with the status of the bare
