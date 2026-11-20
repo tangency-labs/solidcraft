@@ -41,9 +41,9 @@ The **layout function** is pure and works on one length, so both routes call it:
 - **Offsets:** keep-out lengths at one or both ends.
 - **Closed edges** (a disc's rim) have no ends: the tabs go round one pitch apart.
 
-The first version of #12261 needs only the count. The rest come with this route.
+The function is `joint_layout::lay_out` in `crates/doc`. A finger joint (#12261) is equal spacing with tabs at the ends and gaps as wide as the tabs: for `n` fingers, `n + 1` tabs of width length / (2n + 1). One plate keeps the spans and the other keeps the gaps between them.
 
-**Randomization** changes each tab's width, never its position: each tab keeps its center, and its width is the nominal width plus a value between minus and plus the variation, drawn from the seed and the tab's index by a fixed generator (SplitMix64). A width never goes below 10% of nominal. The feature refuses a variation larger than the smallest gap between tabs, so whether a joint builds never depends on the seed. The record keeps an on/off switch, the seed (default 1000) and the variation; the dialog has a "new seed" button.
+**Randomization** changes each tab's width, never its position: each tab keeps its center, and its width is the nominal width plus a value between minus and plus the variation, drawn from the seed and the tab's index by a fixed generator (SplitMix64). A width never goes below 10% of nominal. A tab at an end of an open length that grows past the end stops there. The feature refuses a variation equal to or larger than the smallest gap between tabs (on a loop, counting the gap across its closing point), so whether a joint builds never depends on the seed. The record keeps an on/off switch, the seed (default 1000) and the variation; the dialog has a "new seed" button.
 
 **Tip chamfer width:** default 0.5 mm, 0 for none. Each route applies it to its own geometry.
 
@@ -66,7 +66,7 @@ The defaults are OnlyTabs' (1 in, 0.05 in, 0.01 in, 0, 0.03 in, 0.02 in, 0.1 in)
 
 Each names the edge or tab and why, in the feature's report:
 
-- a variation larger than the smallest gap;
+- a variation equal to or larger than the smallest gap;
 - a tab that reaches no part (open edge);
 - a slot the receiving sheet cannot take as a straight-through cut (for example one that would stop inside a bend);
 - a tab span shorter than its two tip chamfers.
