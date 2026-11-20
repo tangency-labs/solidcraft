@@ -327,6 +327,9 @@ pub struct FilletCorner {
     /// corner type, exact points and, until the patch takes it, the facet's face; set
     /// with [`Self::blend`] on a 3x3 chamfer corner that is the event.
     pub chamfer_corner: Option<crate::blend::blend_corner::chamfer::ChamferCorner>,
+    /// The chamfer event's configuration at a vertex of three but for chamfers of both
+    /// convexities (`ChamferClass::MixedConvexity`): as a bevel the corner is refused.
+    pub chamfer_mixed_convexity: bool,
     /// The fork's Setback's own members (`m_vSetBacks`, `m_lFillOrder`, `m_bConvexSetBack`,
     /// `m_bSetBackOverflows`, `m_pFill`; smlib#104, WR-697): set at its creation on a blend
     /// corner that is a Setback.
@@ -682,6 +685,7 @@ impl FilletCorner {
             swept: None,
             ball: None,
             chamfer_corner: None,
+            chamfer_mixed_convexity: false,
             setback: None,
             mixed: None,
             end_cap: None,
@@ -1021,8 +1025,25 @@ impl FilletCorner {
                 if edge::is_closed(b, e)? {
                     // The fork's (WR-697, smlib#79 step 4d, 543d25a): a closed edge meeting
                     // itself G1 is the blend corner's Join (its shared section)
-                    match total_eus {
-                        1..=3 => {
+                    let cliff_join = if is_chamfer_corner {
+                        super::topology::join::tangent_cliff_join(
+                            k,
+                            b,
+                            vertex,
+                            solver_eus,
+                            &all_eus,
+                            tan_tol_deg,
+                        )?
+                    } else {
+                        None
+                    };
+                    match (cliff_join, total_eus) {
+                        (Some(event), _) => Some(blend_corner(
+                            FilletCornerKind::NByTwo,
+                            event,
+                            BlendEnd::OnEndFace,
+                        )),
+                        (None, 1..=3) => {
                             if test_g1_continuity(k, b, vertex, e, e, tan_tol_deg)? {
                                 Some(blend_corner(
                                     FilletCornerKind::NByTwo,
@@ -1309,7 +1330,7 @@ impl FilletCorner {
                                     }
                                     _ => behind_deg,
                                 };
-                                let blend = crate::blend::blend_corner::classify(
+                                let mut blend = crate::blend::blend_corner::classify(
                                     k,
                                     b,
                                     Some(vertex),
@@ -1318,6 +1339,13 @@ impl FilletCorner {
                                     tan_tol_deg,
                                     join_deg,
                                 )?;
+                                if is_chamfer_corner && !blend.is_join() {
+                                    if let Some(event) = super::topology::join::tangent_cliff_join(
+                                        k, b, vertex, solver_eus, &all_eus, join_deg,
+                                    )? {
+                                        blend.event = event;
+                                    }
+                                }
                                 let mut c = make(FilletCornerKind::NByTwo);
                                 c.blend = Some(blend);
                                 Some(c)

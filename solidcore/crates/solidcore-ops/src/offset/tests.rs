@@ -4,10 +4,12 @@
 use std::f64::consts::PI;
 
 use solidcore::geom::extent3d::Extent3d;
+use solidcore::geom::vector3d::Point3;
 use solidcore::kernel::Kernel;
-use solidcore::query::api_queries::face_bounding_box;
+use solidcore::query::api_queries::{edge_closest_point, face_bounding_box};
 
 use super::{offset_faces, offset_sheet, shell, thicken};
+use crate::blend::{blend, Blend, Corners};
 use crate::session::{self, run};
 use crate::{make_box, make_cylinder, make_sphere, Body, Error, Order};
 
@@ -174,6 +176,55 @@ fn a_half_torus_keeps_a_periodic_seam_when_its_offsets_still_meet() {
         .collect();
     assert_eq!(seam_edges.len(), 1, "one retained outer-rim seam");
     assert_eq!(query.edge_faces(seam_edges[0]), [cavity, cavity]);
+}
+
+/// A 30 x 30 x 20 block with a conical recess from its bottom (radius 7.2 at z = 0, falling
+/// 0.4 per mm), in which a 12 x 12 post stands from z = 1 up: the post's sides poke into the
+/// recess between z = 1 and z = 3, each through a lens whose hyperbola has its apex on the
+/// cone's seam.
+fn block_with_a_post_in_a_conical_recess() -> Body {
+    let block = make_box([-15.0, -15.0, 0.0], [30.0, 30.0, 20.0]).unwrap();
+    let cone = crate::make_cone([0.0; 3], 7.2, 3.2, 10.0).unwrap();
+    let post = make_box([-6.0, -6.0, 1.0], [12.0, 12.0, 20.0]).unwrap();
+    let recess = crate::boolean::boolean(cone, post, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    crate::boolean::boolean(block, recess, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// #19714: shelled open at the post's bottom, the cone's seam still ends on each lens's
+/// hyperbola. The piece of the hyperbola beyond the open face, down to the recess's rim, is
+/// not the edge's image, so the seam is kept and the body is hollow.
+///
+/// The hollow is the body less its core. With no change of topology the core is the same
+/// solid with every face's surface moved t into the material and the open face left in
+/// place: the block inset by t, less the cone r(z) = 7.2 + t sqrt(1.16) - 0.4 z outside the
+/// post of half side 6 - t from z = 1. Its volume is a frustum plus the integral, from z = 1
+/// to where r(z) = 6 - t, of the disc's area outside the square,
+/// 4 (r^2 acos(s / r) - s sqrt(r^2 - s^2)); the values are in the finding
+/// `offset.offset_geometry_creation--periodic-end-leaves-far-support-19714.md`.
+#[test]
+fn a_post_in_a_conical_recess_shells_open_at_its_bottom() {
+    crate::test_corpus::rig_fixes();
+    let whole = 17_835.098_082_931_83;
+    for (t, hollow) in [(0.4, 1_631.138_823_196_25), (0.2, 822.872_121_654_74)] {
+        let body = block_with_a_post_in_a_conical_recess();
+        assert!(rel(volume(&body), whole) < 1e-9, "body {}", volume(&body));
+        let o = order(&body);
+        let bottom = face(&body, &o, |bx| {
+            (bx.min().z - 1.0).abs() < 1e-9 && (bx.max().z - 1.0).abs() < 1e-9
+        });
+        shell(&body, &o, &[bottom], -t).unwrap_or_else(|e| panic!("t {t}: {e:?}"));
+        let report = body.check(crate::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "t {t}: {}", report.text);
+        let actual = volume(&body);
+        assert!(
+            rel(actual, hollow) < 1e-9,
+            "t {t}: shell volume {actual:.17}"
+        );
+    }
 }
 
 /// The Dutchman stress corpus's Shell family (S0003, S0012, S0061): a feature no wider than
@@ -440,6 +491,33 @@ fn half_a_cylinders_side_moves_out_over_a_step() {
     );
     let v = PI * 2500.0 * 100.0 + PI * (54.0 * 54.0 - 2500.0) * 50.0;
     moved_to(&b, &[[50.0, 0.0, 75.0]], 4.0, v, [5, 7, 4]);
+}
+
+/// [`half_a_cylinders_side_moves_out_over_a_step`] with only the upper band split along its
+/// rulings by the plane x = 0 and the whole lower band moved out 4: where such a ruling
+/// meets the circle at z = 50, the two kept upper pieces are one surface sharing a straight
+/// edge, and the third surface at the vertex is the move's own cylinder (a quadric, not a
+/// plane). Every two of the three coaxial cylinders are parallel, so they meet in no one
+/// point and the annulus at z = 50 closes the step, as the hinge's knuckle (a barrel piece
+/// beside the coaxial piece it was split from, plus a straight kept edge) needs.
+/// V = 2500 pi 50 + 2916 pi 50 = 850743.291, with the split's 9 faces, 17 edges and 10
+/// vertices (the same split body as `three_cylinder_faces_at_a_corner_move_out_over_a_step`,
+/// the whole lower band moved instead of the three upper pieces).
+#[test]
+fn a_cylinders_whole_band_moves_out_beside_its_split_kept_halves() {
+    all_fixes();
+    let halves = split_at_height(
+        &make_cylinder([0.0; 3], 50.0, 100.0).unwrap(),
+        [50.0, 0.0, 25.0],
+        50.0,
+    );
+    let b = split_by_plane(
+        &halves,
+        [-50.0, 0.0, 75.0],
+        ([0.0; 3], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+    );
+    let v = PI * 2500.0 * 50.0 + PI * 2916.0 * 50.0;
+    moved_to(&b, &[[50.0, 0.0, 25.0]], 4.0, v, [9, 17, 10]);
 }
 
 /// Both halves of that side moved out 4 together: one cylinder r 54, V = 2916 pi 100, with
@@ -1950,6 +2028,39 @@ mod drafts {
         assert!(rel(volume(&c), v) < 1e-9, "{} {v}", volume(&c));
     }
 
+    /// Acid-6's needle: R = 0.5, h = 1000, neutral at z = -1600, theta = 0.02 degrees.
+    /// r(z) = R - (z + 1600) tan(theta), so the frustum volume is
+    /// `pi h (R^2 + R r_top + r_top^2) / 3` = 364.684642297274456 mm^3;
+    /// `r_top` = 0.150934135423594902 mm.
+    #[test]
+    fn a_long_thin_cylinder_drafts_to_a_frustum() {
+        all_fixes();
+        let base = [0.0, 0.0, -1600.0];
+        let c = make_cylinder(base, 0.5, 1000.0).unwrap();
+        let o = order(&c);
+        // 0.02 pi / 180 and tan(0.02 pi / 180), rounded to doubles.
+        let angle = 0.000_349_065_850_398_865_93;
+        let slope = 0.000_349_065_864_576_405_1;
+        draft(&c, &o, &[curved(&c, &o)], base, Z, Z, angle).unwrap();
+        let small = 0.5 - 1000.0 * slope;
+        let want = PI * 1000.0 * (0.25 + 0.5 * small + small * small) / 3.0;
+        let got = volume(&c);
+        assert!(rel(got, want) < 1e-9, "{got} {want}");
+        assert!(c.is_manifold_solid().unwrap());
+        assert_eq!(c.check(crate::CheckLevel::All).unwrap().failures, 0);
+        assert_eq!(c.counts().unwrap(), [3, 3, 2]);
+        // At z = -601 the radius is about 0.1513; at -1599 it is about 0.4997.
+        for (point, class) in [
+            ([0.0, 0.0, -601.0], crate::PointClass::Inside),
+            ([0.2, 0.0, -601.0], crate::PointClass::Outside),
+            ([0.2, 0.0, -1599.0], crate::PointClass::Inside),
+            ([0.0, 0.0, -1601.0], crate::PointClass::Outside),
+            ([0.0, 0.0, -599.0], crate::PointClass::Outside),
+        ] {
+            assert_eq!(c.classify_point(point).unwrap(), class, "{point:?}");
+        }
+    }
+
     /// A cone r 10 at its base to 8 at its top, 20 tall, drafted 5 degrees about its base turns
     /// its generators 5 degrees more: r 10 + 20 tan(atan(-0.1) - 5 degrees) at the top.
     #[test]
@@ -2367,5 +2478,50 @@ fn offset_substages_keep_their_failure_reason() {
             "{}",
             diagnostic.detail
         );
+    }
+}
+
+/// The index of the edge of `body` through `p`, in its edge list.
+fn edge_at(body: &Body, p: [f64; 3]) -> usize {
+    let k = Kernel::default();
+    let b = body.lock();
+    let p = Point3::new(p[0], p[1], p[2]);
+    b.edge_list()
+        .iter()
+        .position(|&e| edge_closest_point(&k, &b, e, p).is_ok_and(|c| c.closest.distance < 1e-9))
+        .unwrap()
+}
+
+/// A shell over a 4 mm G2 corner names its largest wall, 0.9674 mm, rather than "not proved
+/// regular" (#17246).
+#[test]
+fn shell_of_g2_corner_names_largest_wall() {
+    all_fixes();
+    let b = make_box([-7.5, -7.5, 0.0], [36.5, 38.5, 10.0]).unwrap();
+    // the three edges meeting at the corner (29, 31, 10)
+    let edges = [
+        edge_at(&b, [10.75, 31.0, 10.0]),
+        edge_at(&b, [29.0, 11.75, 10.0]),
+        edge_at(&b, [29.0, 31.0, 5.0]),
+    ];
+    blend(&b, Blend::Curvature, &edges, &[4.0], &[], Corners::Filled).unwrap();
+    let (_, order) = b.to_record().unwrap();
+    let counts = b.counts().unwrap();
+    let mut top: Option<(usize, f64)> = None;
+    for i in 0..counts[0] {
+        let c = b.face_centroid(&order, i, 1e-8).unwrap();
+        if c.centroid[2] >= 9.999 && top.is_none_or(|(_, a)| c.area > a) {
+            top = Some((i, c.area));
+        }
+    }
+    let (top, _) = top.expect("a top face at z = 10");
+    match shell(&b, &order, &[top], -1.0) {
+        Err(Error::WallFolds { largest: Some(l) }) => {
+            assert!(
+                (l - 0.9674).abs() < 1e-3,
+                "largest wall {l}, expected 0.9674"
+            );
+        }
+        other => panic!("expected WallFolds naming the largest wall, got {other:?}"),
     }
 }

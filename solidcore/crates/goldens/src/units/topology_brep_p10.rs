@@ -448,6 +448,7 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
         always_heal,
         healer_enabled,
     };
+    crate::refit::before_topology(&k, &mut data, add_analytics);
     match make_topology_from_data(&mut k, &mut b, &mut data, &mut env, options) {
         Ok(()) => {
             crate::tolsub::after_read(&mut b);
@@ -982,6 +983,8 @@ fn export_with_identity(
     uv_owner_matches: Option<&dyn Fn(EdgeuseId, ObjectRef) -> bool>,
     o: &mut Vec<Item>,
 ) -> Result<(), SolidError> {
+    #[cfg(test)]
+    crate::certify::written(b);
     let mut w = Out {
         o,
         records,
