@@ -3791,6 +3791,10 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             format!("`position` [{}, {}, {}] is not on a face of a body; pick a point on the face to drill", position.x, position.y, position.z),
         ));
     }
+    // The bodies a pick on the placed model met (#18057): another part with a face at the same
+    // point in its own frame only (two leaves of a hinge, one turned) is not the one picked, so
+    // neither its face nor its body is taken. Read before reference edges move the position.
+    let picked = if points.is_none() { picked_bodies(s, position) } else { None };
     let supplied_direction = p.get("direction").and_then(vec3);
     // Ordinary sketch-point holes use the sketch normal and ignore this input.
     if supplied_direction.is_none() && p.get("direction").is_some_and(|v| !v.is_null()) && points.as_ref().is_none_or(|(sp, _, _)| sp.single) {
@@ -3809,7 +3813,11 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
                     v if v.is_empty() => string_list(cmd, p, "targets")?,
                     v => v,
                 };
-                let scope: &[String] = if named.iter().any(|b| b == "*") { &[] } else { &named };
+                let scope: &[String] = match (named.iter().any(|b| b == "*"), &picked) {
+                    (true, _) => &[],
+                    (false, Some(under)) if named.is_empty() => under,
+                    _ => &named,
+                };
                 let st = s.model.state();
                 solidcraft_doc::hole_direction_at(&st, position, scope).ok_or_else(|| bad(cmd, "no face at `position`; give `direction`"))?
             }
@@ -3919,7 +3927,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             // reopening keep the same scope.
             p["participants"] = json!([body]);
         } else if points.is_none()
-            && let Some(body) = body_of_other_component_at(s, position)
+            && let Some(body) = body_of_other_component_at(s, position, picked.as_deref())
         {
             // A hole picked on a body of another component (a moved one, shown where it is
             // placed) cuts that body: the pick is already in that body's frame, and the
@@ -4023,11 +4031,20 @@ fn hole_reference_params(s: &Session, p: &Value, cmd: &str) -> Result<Vec<solidc
 }
 
 /// The body whose face is nearest `p` (within its pick tolerance), when it belongs to another
-/// component than the active one.
-fn body_of_other_component_at(s: &Session, p: Vec3) -> Option<String> {
+/// component than the active one: among the bodies `picked` names, or any body when it is `None`.
+fn body_of_other_component_at(s: &Session, p: Vec3, picked: Option<&[String]>) -> Option<String> {
     let st = s.model.state();
-    let body = body_with_face_at(&st, p, |_| true)?;
+    let body = body_with_face_at(&st, p, |b| picked.is_none_or(|names| names.contains(&b.name)))?;
     (s.doc.model_body_component(body) != s.active_component).then(|| body.name.clone())
+}
+
+/// The bodies of the model a pick at `p` met, when the running command picked it on the placed
+/// model (as a face pick reads them, #419); `None` otherwise.
+fn picked_bodies(s: &Session, p: Vec3) -> Option<Vec<String>> {
+    let names = crate::frames::picked(p)?;
+    let st = s.model.state();
+    let bodies: Vec<String> = st.bodies.iter().filter(|b| names.iter().any(|n| n == b.definition_name())).map(|b| b.name.clone()).collect();
+    (!bodies.is_empty()).then_some(bodies)
 }
 
 /// The hidden body whose face holds `p`, when no shown body has a face there: a face shared by

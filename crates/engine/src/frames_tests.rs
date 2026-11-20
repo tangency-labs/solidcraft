@@ -921,6 +921,55 @@ fn edge_picks_on_a_moved_part_find_it_past_other_parts_frames() {
     assert_eq!(blend_edges(&s), vec![Vec3::new(20.0, 0.0, 0.0)]);
 }
 
+/// #18057: a hole picked on one of two parts drills that part, the way into its face, though the
+/// other part has a face at the same point in its own frame (two leaves of a hinge, one turned by
+/// its joint). Base holds a 40 x 30 x 10 block from its origin, Cap one from `cap`. The part
+/// named is turned 180° about Z and moved 10 mm along -X, so a point (x, y, z) of its own frame
+/// is shown at (-x - 10, -y, z). The hole goes in the middle of a face of Cap's block. Cases:
+/// Cap's top face (Base's top face is there in Base's frame), with the root or Base active;
+/// Cap's bottom face (Base's top face there points the other way); Cap unmoved with Base turned
+/// (Base comes first in the model).
+#[test]
+fn a_hole_picked_on_a_turned_part_drills_it_past_other_parts_frames() {
+    // A flat-bottomed hole of diameter 4, 5 deep.
+    let bore = std::f64::consts::PI * 2.0 * 2.0 * 5.0;
+    let down = Vec3::new(0.0, 0.0, -1.0);
+    let mut wrong = Vec::new();
+    for (case, cap, turned, active, at, into) in [
+        ("top, root active", [0.0, 0.0, 0.0], "Cap:1", "root", [-30.0, -15.0, 10.0], down),
+        ("top, Base active", [0.0, 0.0, 0.0], "Cap:1", "Base", [-30.0, -15.0, 10.0], down),
+        ("bottom", [0.0, 0.0, 10.0], "Cap:1", "root", [-30.0, -15.0, 10.0], Vec3::new(0.0, 0.0, 1.0)),
+        ("Base turned", [0.0, 0.0, 0.0], "Base:1", "root", [20.0, 15.0, 10.0], down),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Base", "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Base block"}));
+        run(&mut s, "component.create", json!({"name": "Cap", "parent": "root"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": cap, "body_name": "Cap block"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "occurrence.move", json!({"occurrence": turned, "axis": [0, 0, 1], "angle": "180 deg", "translate": [-10, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": active}));
+        run(&mut s, "solid.hole", json!({"position": at, "diameter": 4, "depth": 5, "name": "H"}));
+        let f = s.doc.find_feature("H").unwrap();
+        let participants = f.participants.clone();
+        let solidcraft_doc::FeatureKind::Hole { direction, .. } = &f.kind else { panic!("{case}: not a hole") };
+        let direction = direction.0;
+        let (b, c) = (body_volume(&s, "Base block"), body_volume(&s, "Cap block"));
+        // The box's 6 faces, 12 edges and 8 corners, and the hole's wall and floor, its two rims
+        // and the wall's seam, and the seam's two ends.
+        let m = run(&mut s, "inspect.measure", json!({"bodies": ["Cap block"]}))["bodies"][0]["kernel"].clone();
+        if participants != ["Cap block"]
+            || !near(direction, into)
+            || b != BLOCK
+            || (c - (BLOCK - bore)).abs() > 1e-6 * BLOCK
+            || m != json!({"faces": 8, "edges": 15, "vertices": 10, "shells": 1})
+        {
+            wrong.push(format!("{case}: participants {participants:?}, direction {direction:?}, Base {b}, Cap {c}, Cap's {m}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// Where the edges of two parts lie in one place in the world, a pick without `body` is refused,
 /// naming both; with `body`, or a pick's own `body`, the named part is cut.
 #[test]

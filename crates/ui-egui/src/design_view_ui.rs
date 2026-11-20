@@ -126,9 +126,8 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
             documents::view_duplicate(app, view);
         }
         VIEW_BESIDE => {
-            // Beside the shown view; a view that is not shown is shown first.
-            documents::view_activate(app, view);
-            return documents::view_beside(app, None, solidcraft_views::Edge::Right).is_some();
+            let beside = (view != app.docs.views.active().id).then_some(view);
+            return documents::view_beside(app, beside, solidcraft_views::Edge::Right).is_some();
         }
         VIEW_NEW_WINDOW => {
             let kind = app.docs.views.get(view).map(|v| v.kind.key());

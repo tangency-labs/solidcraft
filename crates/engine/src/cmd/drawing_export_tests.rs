@@ -834,8 +834,9 @@ fn a_sheet_exports_as_dxf_with_a_layer_for_each_kind_of_line() {
 }
 
 /// `drawing.print` is the whole drawing's PDF, as `drawing.export` makes it with no sheet named:
-/// the same bytes, every sheet a page, asking to print at actual size, written to its path. The app's
-/// own print takes the same bytes in-process (`print_pdf`); the command never puts them in its reply.
+/// every sheet a page, asking to print at actual size (an export doesn't), written to its path.
+/// The app's own print takes the same bytes in-process (`print_pdf`); the command never puts them
+/// in its reply.
 #[test]
 fn print_is_the_whole_drawings_pdf() {
     let (mut s, first, _) = front_and_top();
@@ -845,7 +846,8 @@ fn print_is_the_whole_drawings_pdf() {
     let path = folder.path("Drawing.pdf");
     let printed = run(&mut s, "drawing.print", json!({"path": path}));
     let bytes = std::fs::read(&path).unwrap();
-    assert_eq!(bytes, exported(&mut s, json!({"format": "pdf"})));
+    let export = exported(&mut s, json!({"format": "pdf"}));
+    assert!(!String::from_utf8_lossy(&export).contains("PrintScaling"), "an export leaves printing to the viewer");
     assert_eq!(printed["pages"], json!([ids::encode(first), second]), "{printed}");
     assert!(String::from_utf8_lossy(&bytes).contains("/PrintScaling /None"));
     assert_eq!(super::print_pdf(&mut s).unwrap(), bytes, "the app's print: the same bytes");

@@ -47,10 +47,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("from, to: places in tab order (0 first) → from, to; moves the view among the views of its design"),
     CommandSpec::new("tab.view.layout", "Show Views Together", crate::checked!("tab.view.layout", layout))
         .icon("list").noundo().doc_only().contract(&LAYOUT_CONTRACT).output(output_schema_for::<TabViewReply>)
-        .params("layout: single|side_by_side|stacked|large_and_two|grid → layout, shown: how many views the window shows together; fills the layout with the design's Model views in tab order (the active one among them); single shows one view at a time again; never edits the design"),
+        .params("layout: single|side_by_side|stacked|large_and_two|grid → layout, shown: how many views the window shows together; fills the layout with the design's Model and Render views in tab order (the active one among them); single shows one view at a time again; never edits the design"),
     CommandSpec::new("tab.view.beside", "Show View Beside", crate::checked!("tab.view.beside", beside))
         .icon("copy").noundo().doc_only().contract(&BESIDE_CONTRACT).output(output_schema_for::<TabViewReply>)
-        .params("id?: the Model view to show (default: a new copy of the active view, so a second angle is one call); edge?: left|right|top|bottom of the active view (default: right) → id, edge, shown; an error when four views are shown already or the view is not a Model view"),
+        .params("id?: the open Model or Render view to show (default: a new Model angle); edge?: left|right|top|bottom of the active view (default: right) → id, edge, shown; allows up to four views, including one Render view"),
     CommandSpec::new("tab.view.list", "List Views", crate::checked!("tab.view.list", list))
         .icon("list").noundo().doc_only().contract(&NO_PARAMS_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("no parameters → views: [{id, kind, name, subject?, active}] of the shown design in tab order; read-only")];

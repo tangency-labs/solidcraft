@@ -52,6 +52,7 @@ fn file(d: &Drawing) -> Value {
     let mut v: Value = serde_json::from_str(&d.to_json().unwrap()).unwrap();
     for (i, image) in d.images.iter().enumerate() {
         v["images"][i]["data"] = base64_encode(&image.data).into();
+        v["images"][i].as_object_mut().unwrap().remove("part");
     }
     v
 }
