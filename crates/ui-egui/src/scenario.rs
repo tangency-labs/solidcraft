@@ -120,6 +120,9 @@ pub struct Harness {
     pub opened: Vec<String>,
     /// The last frame's painted shapes.
     pub shapes: Vec<egui::epaint::ClippedShape>,
+    /// Every texture the frames have uploaded (the font atlas, icons), for [`Harness::picture`].
+    #[cfg(test)]
+    textures: std::collections::HashMap<egui::TextureId, egui::ColorImage>,
     /// Files the scenario saves and opens live here; file pickers answer from it.
     pub dir: PathBuf,
     /// The file the next Open picker returns (a `choose_file` step).
@@ -165,6 +168,8 @@ impl Harness {
             output: Default::default(),
             opened: Vec::new(),
             shapes: Vec::new(),
+            #[cfg(test)]
+            textures: std::collections::HashMap::new(),
             dir: scratch_dir(),
             next_file: Rc::new(RefCell::new(None)),
             queue: None,
@@ -232,7 +237,9 @@ impl Harness {
             app.logic(ui.ctx());
             app.ui(ui);
         });
-        // Nothing is painted: drop the frame's texture changes.
+        // Nothing is painted: drop the frame's texture changes, which tests keep for pictures.
+        #[cfg(test)]
+        crate::ui_kit::test_textures_update(&mut self.textures, &out.textures_delta);
         out.textures_delta.clear();
         self.opened.extend(out.platform_output.commands.iter().filter_map(|c| match c {
             egui::OutputCommand::OpenUrl(u) => Some(u.url.clone()),
@@ -240,6 +247,14 @@ impl Harness {
         }));
         self.output = out.platform_output;
         self.shapes = out.shapes;
+    }
+
+    /// The last frame as a picture of the whole window, drawn on the CPU. The 3D view is drawn
+    /// on the GPU, so it shows as its backdrop.
+    #[cfg(test)]
+    pub fn picture(&self) -> image::RgbaImage {
+        let window = egui::Rect::from_min_size(egui::Pos2::ZERO, self.size);
+        crate::ui_kit::test_raster(&self.ctx, self.shapes.clone(), self.ctx.pixels_per_point(), window, &self.textures)
     }
 
     /// The URLs opened since the last call.
