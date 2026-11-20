@@ -200,6 +200,9 @@ fn edit_handles(c: &Canvas, plane: &Plane, proj: &Proj) -> Vec<(u8, Pos2)> {
 
 /// Whether a calibration marker or Edit Canvas grip owns the pointer.
 pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, screen: Pos2) -> bool {
+    if app.tool.is_some() {
+        return false;
+    }
     let Some(panel) = app.tree.canvas_panel.as_ref() else { return false };
     if panel.dragging.is_some() || panel.edit_drag.is_some() {
         return true;
@@ -219,6 +222,9 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, screen: Pos2) -> bool {
 
 /// Start or continue dragging a calibration marker or direct-edit grip.
 pub(crate) fn drag(app: &mut SolveApp, proj: &Proj, screen: Option<Pos2>, pressed: bool, down: bool) -> bool {
+    if app.tool.is_some() {
+        return false;
+    }
     let Some(mut panel) = app.tree.canvas_panel.clone() else { return false };
     if !down {
         let owned = panel.dragging.take().is_some() || panel.edit_drag.take().is_some();
@@ -376,6 +382,9 @@ pub(crate) fn hint(panel: &crate::browser::CanvasPanel) -> &'static str {
 
 /// A viewport click while Calibrate is open: set Point A or B on the image (#9108).
 pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
+    if app.tool.is_some() {
+        return false;
+    }
     let Some(mut panel) = app.tree.canvas_panel.clone() else {
         return false;
     };
