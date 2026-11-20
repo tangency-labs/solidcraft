@@ -848,6 +848,13 @@ impl Cone {
                 CircleCircle::Crossing(p, q) => vec![p, q],
                 CircleCircle::Coincident => return Ok(true),
             };
+            // Axes within EFF_ZERO_SQRT are parallel here, but a move along `axis` leaves `other`
+            // by that angle times the move, past `zero` (#15727): test on `other`'s generator.
+            let other_along = if axis.dot(other_axis) < 0.0 {
+                -other_axis
+            } else {
+                other_axis
+            };
             for point in points {
                 let line_point = point + (min - param) * axis;
                 // Upstream tests the bottom end of the line, which lies outside a face
@@ -856,9 +863,10 @@ impl Cone {
                 // WR-259). The middle of the clipped line lies within both faces' axial
                 // ranges (to the tolerance); the inversions below decide the rest.
                 let test_point = line_point + 0.5 * (max - min) * axis;
+                let other_test_point = point + ((min - param) + 0.5 * (max - min)) * other_along;
                 let zero = EFF_ZERO * (1.0 + line_point.max_dimension());
                 let inv = intersection_inversion(self, k, test_point, zero)?;
-                let other_inv = intersection_inversion(other, k, test_point, zero)?;
+                let other_inv = intersection_inversion(other, k, other_test_point, zero)?;
                 let (Some(inv), Some(other_inv)) = (inv, other_inv) else {
                     continue;
                 };
