@@ -5432,8 +5432,9 @@ fn taken(s: &mut Session) -> Vec<&'static str> {
 /// `begin` and `step` take the provider's work in its one order ([`Next`], #5624): views out of date,
 /// then dimensions, then fills and sketches, then a picture's setup, then its bands, and `begin` hands
 /// out only the long kinds.
-/// A dimension edited and a new dpi leave the dimension and the picture waiting together: the
-/// dimension is read first, and `begin` hands out nothing until it is.
+/// A dimension edited, a new sheet sketch with a fill and a new dpi leave all four waiting together:
+/// the dimension is read first, then the fill, then the sketch, and `begin` hands out nothing until
+/// they are.
 #[test]
 fn begin_and_step_take_the_work_in_one_order() {
     let (mut s, sheet, id) = shaded_front([200.0, 150.0]);
@@ -5441,11 +5442,18 @@ fn begin_and_step_take_the_work_in_one_order() {
     extract(&mut s, sheet).unwrap();
     // A view's job reads its dimensions with its lines.
     assert_eq!(taken(&mut s), ["view", "picture setup", "bands"]);
+    let made = run(&mut s, "drawing.sketch.create", json!({"owner": ids::encode(sheet)}));
+    let sketch = made["sketch"].clone();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [15, 10], "p1": [55, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let boundary = run(&mut s, "drawing.fill.profiles", json!({"sketch": sketch}))["fill_profiles"]["boundaries"][0].clone();
+    run(&mut s, "drawing.sketch.fill", json!({"sketch": sketch, "boundary": boundary, "paint": {"kind": "solid"}}));
     run(&mut s, "drawing.dimension.edit", json!({"dimension": ids::encode(dimension), "set": {"offset_mm": 20.0}}));
     run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "dpi": DEFAULT_DPI / 2.0}));
     let answer = extract(&mut s, sheet).unwrap();
     assert!(answer.stale.is_empty() && !answer.stale_dimensions.is_empty() && answer.drawing_pictures, "a dimension and the picture wait");
-    assert_eq!(taken(&mut s), ["dimensions", "picture setup", "bands"]);
+    assert!(!answer.stale_fills.is_empty() && !answer.stale_sketches.is_empty(), "a fill and a sketch wait");
+    assert_eq!(taken(&mut s), ["dimensions", "fills", "sketches", "picture setup", "bands"]);
 }
 
 /// A view of lines hands no picture, nothing waits for one, and no bodies are read for pictures.
