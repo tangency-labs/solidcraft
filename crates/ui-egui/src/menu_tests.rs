@@ -1196,8 +1196,8 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     png.extend(400u32.to_be_bytes());
     png.extend(200u32.to_be_bytes());
     png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-    let id = app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
+    let data = crate::scenario::image_file(&png);
+    let id = app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
     let t = Target::Canvas { id };
     act(&mut app, &t, "Show/Hide");
     assert!(!app.session.doc.canvases[0].visible);
@@ -1244,9 +1244,9 @@ fn deleting_sketch_entities_ignores_a_canvas_removed_by_undo() {
         png.extend(2u32.to_be_bytes());
         png.extend(2u32.to_be_bytes());
         png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-        let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-        let kept = app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 40})).unwrap()["canvas"].as_u64().unwrap();
-        let removed = app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 40})).unwrap()["canvas"].as_u64().unwrap();
+        let data = crate::scenario::image_file(&png);
+        let kept = app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 40})).unwrap()["canvas"].as_u64().unwrap();
+        let removed = app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 40})).unwrap()["canvas"].as_u64().unwrap();
         // A Browser selection is UI state, so Undo leaves the removed canvas picked.
         app.tree.picked_canvases = vec![removed];
         app.run("edit.undo", json!({})).unwrap();
@@ -1283,9 +1283,9 @@ fn edit_canvas_from_the_toolbar_edits_the_picked_canvas() {
     png.extend(400u32.to_be_bytes());
     png.extend(200u32.to_be_bytes());
     png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-    let first = app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
-    let second = app.run("canvas.insert", json!({"data": data, "plane": "XZ", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
+    let data = crate::scenario::image_file(&png);
+    let first = app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
+    let second = app.run("canvas.insert", json!({"path": data, "plane": "XZ", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
     app.tree.picked_canvases = vec![second];
     assert!(!crate::sketch_tools::start_hook(&mut app, "canvas.edit"));
     let panel = app.tree.canvas_panel.clone().unwrap();
@@ -1685,8 +1685,8 @@ fn rename_shows_f2_and_f2_with_a_menu_open_renames_what_the_menu_is_for() {
     png.extend(400u32.to_be_bytes());
     png.extend(200u32.to_be_bytes());
     png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-    let canvas = h.app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
+    let data = crate::scenario::image_file(&png);
+    let canvas = h.app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
     let rename_key = |app: &SolveApp, target: &Target| {
         context_menu::entries(app, target)
             .into_iter()

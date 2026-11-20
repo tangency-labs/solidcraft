@@ -75,6 +75,13 @@ impl<'de> Deserialize<'de> for Blob {
     }
 }
 
+/// An older design's base64 text, as [`Blob`]'s own reading, except that text which is not base64
+/// reads as no bytes: a damaged image never stops the design opening.
+pub fn lenient<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Blob, D::Error> {
+    let text = <std::borrow::Cow<'de, str>>::deserialize(deserializer)?;
+    Ok(from_legacy_text(&text).unwrap_or_default())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
