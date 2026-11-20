@@ -699,24 +699,33 @@ pub(crate) fn held(s: &Session, d: &Drawing) -> bool {
 struct DrawnSketch {
     group: Option<Group>,
     status: SketchStatus,
+    /// The view it is drawn through: its strokes are in that view's plane until the sheet is put
+    /// together ([`Assembly::add_sketches`]). None for a sheet's own, already on paper.
+    view: Option<u64>,
 }
 
-/// Solve a read-only copy, then convert exact authored geometry in physical paper mm.
+/// Solve a read-only copy, then convert exact authored geometry: a sheet's sketch in physical paper
+/// mm, a view's in its view's plane, with its view's line width.
 fn draw_sketch(s: &Session, drawing: &Drawing, record: &SheetSketch) -> DrawnSketch {
     let id = record.id;
-    let line_group = drawing.sheets.iter().find(|sheet| sheet.id == record.sheet).and_then(|sheet| sheet.line_group).unwrap_or(drawing.line_group);
-    let result = drawing
-        .solve_sheet_sketch(&s.doc, id)
-        .map_err(|e| bad(CMD, e.to_string()))
-        .and_then(|solved| sketch::paper_group(&solved, LineKind::Visible.width_mm(line_group)));
+    let sheet = drawing.sketch_sheet(record);
+    let view = record.owner.view();
+    let line_group = match view {
+        Some(view) => drawing.resolve_view(view).ok().map(|resolved| resolved.line_group.value),
+        None => drawing.sheets.iter().find(|on| Some(on.id) == sheet).and_then(|on| on.line_group),
+    };
+    let width_mm = LineKind::Visible.width_mm(line_group.unwrap_or(drawing.line_group));
+    let result =
+        drawing.solve_sheet_sketch(&s.doc, id).map_err(|e| bad(CMD, e.to_string())).and_then(|solved| sketch::paper_group(&solved, width_mm));
     match result {
-        Ok(group) => DrawnSketch { group: Some(group), status: SketchStatus::Drawn },
+        Ok(group) => DrawnSketch { group: Some(group), status: SketchStatus::Drawn, view },
         Err(e) => DrawnSketch {
+            view,
             group: None,
             status: SketchStatus::Failed(format!(
                 "drawing {} sheet {} sketch {}: {}",
                 ids::encode(drawing.id),
-                ids::encode(record.sheet),
+                sheet.map(ids::encode).unwrap_or_default(),
                 ids::encode(id),
                 reason(e)
             )),
@@ -1558,13 +1567,25 @@ impl Assembly {
         }
     }
 
-    /// Adds the already-paper sketches after dimensions/fills, using the same whole-sheet admission.
+    /// Adds the sketches after dimensions/fills, using the same whole-sheet admission: a sheet's as
+    /// they are, a view's through its view's frame and to its centre, as the view's dimensions go.
+    /// A view's sketch whose view isn't in the scene is left out and says so.
     fn add_sketches<K: Borrow<DrawnSketch>>(&mut self, sketches: impl Iterator<Item = (u64, K)>) {
         for (sketch, drawn) in sketches {
             let drawn = drawn.borrow();
             let mut status = drawn.status.clone();
             if let Some(group) = &drawn.group {
-                match self.admit(group, &[], DrawnFor::Sheet, || group.clone()) {
+                let admitted = match drawn.view {
+                    None => self.admit(group, &[], DrawnFor::Sheet, || group.clone()),
+                    Some(view) => match self.placed.get(&view).copied() {
+                        Some((frame, centre)) => match sketch::through(group, &frame) {
+                            Ok(placed) => self.admit(group, &[], DrawnFor::View, || moved(&placed, centre)),
+                            Err(why) => Err(LeftOut::Invalid(why)),
+                        },
+                        None => Err(LeftOut::Invalid(NOT_DRAWN.into())),
+                    },
+                };
+                match admitted {
                     Ok(_) => {}
                     Err(LeftOut::TooManyRecords) => {
                         status = SketchStatus::Failed(format!(
@@ -1774,20 +1795,21 @@ pub(crate) fn views_on(d: &Drawing, sheet: u64) -> Result<Vec<(u64, ResolvedView
         .collect()
 }
 
-/// `e`'s message without the command's name: a view's reason in a sheet scene.
+/// The sketches on sheet `sheet`: its own, and its views' (drawn through their view).
 fn sketches_on(d: &Drawing, sheet: u64) -> Vec<&Arc<SheetSketch>> {
-    let mut on: Vec<_> = d.sketches.iter().filter(|record| record.sheet == sheet).collect();
+    let mut on: Vec<_> = d.sketches.iter().filter(|record| d.sketch_sheet(record) == Some(sheet)).collect();
     on.sort_unstable_by_key(|record| record.id);
     on
 }
 
 fn fills_on(d: &Drawing, sheet: u64) -> Vec<&Arc<SketchFill>> {
-    let on: BTreeSet<_> = d.sketches.iter().filter(|sketch| sketch.sheet == sheet).map(|sketch| sketch.id).collect();
+    let on: BTreeSet<_> = sketches_on(d, sheet).into_iter().map(|sketch| sketch.id).collect();
     let mut fills: Vec<_> = d.fills.iter().filter(|fill| on.contains(&fill.sketch)).collect();
     fills.sort_unstable_by_key(|fill| fill.id);
     fills
 }
 
+/// `e`'s message without the command's name: a view's reason in a sheet scene.
 fn reason(e: EngineError) -> String {
     match e {
         EngineError::BadParams { msg, .. } => msg,
@@ -1857,8 +1879,9 @@ struct SketchContext {
 }
 
 /// Solving admits the complete drawing's structure and cumulative sketch budgets. Every such
-/// input participates, even when it belongs to another sheet. A valid numeric move of an otherwise
-/// unchanged view cannot affect admission: keep its context and avoid solving sketches on a move.
+/// input participates, even when it belongs to another sheet. A valid numeric move or a new scale
+/// of an otherwise unchanged view cannot affect admission (a view's sketch is solved in its plane,
+/// and its view's frame places it later): keep its context and avoid solving sketches again.
 fn same_sketch_context(was: &Drawing, now: &Drawing) -> bool {
     if was.sketches.len() != now.sketches.len()
         || !was.sketches.iter().zip(&now.sketches).all(|(a, b)| Arc::ptr_eq(a, b))
@@ -1879,6 +1902,7 @@ fn same_sketch_context(was: &Drawing, now: &Drawing) -> bool {
         }
         let mut unmoved = (**b).clone();
         unmoved.place = a.place;
+        unmoved.settings.scale = a.settings.scale;
         if **a != unmoved {
             return false;
         }

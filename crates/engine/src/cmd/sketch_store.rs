@@ -91,14 +91,12 @@ pub(super) fn sheet_target(s: &Session, p: &Value, cmd: &str) -> Result<std::syn
     }
     // Target selection checks identity, not every payload. Staging checks the
     // candidate before solving; edit_drawing validates the whole publication.
-    if owner.sketches.iter().filter(|record| record.id == entry.sketch).count() != 1
-        || owner.sheets.iter().filter(|sheet| sheet.id == entry.sheet).count() != 1
-    {
-        return Err(bad(cmd, "the edited sketch or sheet id is missing or ambiguous"));
+    if owner.sketches.iter().filter(|record| record.id == entry.sketch).count() != 1 {
+        return Err(bad(cmd, "the edited sketch id is missing or ambiguous"));
     }
     let record = owner.sheet_sketch(entry.sketch).ok_or_else(|| bad(cmd, "the edited sheet sketch no longer exists"))?;
-    if record.sheet != entry.sheet {
-        return Err(bad(cmd, "the edited sketch's owning sheet changed"));
+    if record.owner != entry.owner || owner.sketch_sheet(record).is_none() {
+        return Err(bad(cmd, "the edited sketch's owner changed or is gone"));
     }
     if let Some(given) = p.get("sketch").filter(|value| !value.is_null()) {
         let target = match given {
@@ -136,8 +134,8 @@ pub(super) fn edit_sheet<T>(
             *sketch = candidate;
             Ok(())
         })?;
-        if solved.sheet != entry.sheet {
-            return Err(bad(cmd, "the edited sketch's owning sheet changed"));
+        if drawing.sheet_sketch(entry.sketch).is_none_or(|record| record.owner != entry.owner) {
+            return Err(bad(cmd, "the edited sketch's owner changed"));
         }
         Ok(solved)
     })?;

@@ -1223,7 +1223,7 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
 fn sheet_records_do_not_redirect_the_shared_model_sketch_store() {
     use crate::cmd::sketch_store;
     use solidcore_record::Vec2;
-    use solidcraft_doc::drawing::SheetSketch;
+    use solidcraft_doc::drawing::{Owner, SheetSketch};
     use solidcraft_sketch::Sketch;
 
     let mut s = Session::default();
@@ -1241,7 +1241,7 @@ fn sheet_records_do_not_redirect_the_shared_model_sketch_store() {
         for id in [model_id, separate] {
             drawing.sketches.push(Arc::new(SheetSketch {
                 id,
-                sheet: drawing.sheets[0].id,
+                owner: Owner::Sheet(drawing.sheets[0].id),
                 name: "Sheet sketch".into(),
                 sketch: sheet_sketch.clone(),
             }));
@@ -1851,9 +1851,91 @@ fn sheet_editor_new_commands_validate_hostile_inputs_and_declare_schemas() {
     run(&mut s, "sketch.cancel", json!({}));
 }
 
+/// A sketch can belong to a view (#5425). `drawing.sketch.create` makes one from the view's id, and
+/// it is edited, finished and cancelled as a sheet's is, its replies naming its view as well as its
+/// sheet. While it is being edited, neither its view nor its view's sheet can be deleted. Copying
+/// the view to a sheet copies it, owned by the copy; deleting its view takes it, as it takes the
+/// view's notes. A view projected from it goes too, so a sketch being edited there holds the delete.
+#[test]
+fn a_view_sketch_is_made_edited_copied_and_deleted_with_its_view() {
+    use solidcraft_doc::drawing::Owner;
+    let (mut s, d, on_sheet, made) = sheet_editor();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let sheet = made["sheet"].clone();
+    let other = run(&mut s, "drawing.sheet.add", json!({"name": "Other"}))["sheet"].clone();
+    let view = run(&mut s, "drawing.view.base", json!({"sheet": sheet, "scale": "1:1"}))["view"].clone();
+    let view_id = ids::decode(view.as_str().unwrap()).unwrap();
+    let before = open_one(&s);
+    let e = refused(&mut s, "drawing.sketch.create", json!({"owner": ids::encode(on_sheet)}));
+    assert!(e.contains("no such sheet or view"), "{e}");
+    assert!(Arc::ptr_eq(&before, &open_one(&s)) && s.active_sheet_sketch.is_none(), "a refused owner changes nothing");
+
+    let undo = s.undo.len();
+    let made = run(&mut s, "drawing.sketch.create", json!({"owner": view, "name": "On the view"}));
+    assert_eq!((&made["sheet"], &made["view"], made["editing"].as_bool()), (&sheet, &view, Some(true)));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    let on_view = ids::decode(made["sketch"].as_str().unwrap()).unwrap();
+    assert_eq!(open_one(&s).sheet_sketch(on_view).unwrap().owner, Owner::View(view_id));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]]}));
+    let item = json!({"items": [{"type": "drawing", "drawing": ids::encode(d), "object": view}]});
+    let e = refused(&mut s, "selection.delete", item.clone());
+    assert!(e.contains("finish or cancel"), "{e}");
+    let e = refused(&mut s, "drawing.sheet.delete", json!({"sheet": sheet, "contents": "delete"}));
+    assert!(e.contains("finish or cancel"), "{e}");
+    let finished = run(&mut s, "sketch.finish", json!({}));
+    assert_eq!((&finished["view"], finished["editing"].as_bool()), (&view, Some(false)));
+
+    let kept = open_one(&s).sheet_sketch(on_view).unwrap().clone();
+    let entered = run(&mut s, "drawing.sketch.edit", json!({"sketch": made["sketch"]}));
+    assert_eq!((&entered["view"], entered["editing"].as_bool()), (&view, Some(true)));
+    run(&mut s, "sketch.line", json!({"points": [[0, 10], [30, 10]]}));
+    let cancelled = run(&mut s, "sketch.cancel", json!({}));
+    assert_eq!((&cancelled["sheet"], &cancelled["view"], cancelled["removed"].as_bool()), (&sheet, &view, Some(false)));
+    assert!(Arc::ptr_eq(open_one(&s).sheet_sketch(on_view).unwrap(), &kept), "cancel restores it");
+    let entered = run(&mut s, "drawing.sketch.edit", json!({"sketch": ids::encode(on_sheet)}));
+    assert!(entered.get("view").is_none(), "a sheet's sketch names no view: {entered}");
+    run(&mut s, "sketch.finish", json!({}));
+
+    let copy = run(&mut s, "drawing.view.copy_to_sheet", json!({"view": view, "sheet": other}))["view"].clone();
+    let copy = ids::decode(copy.as_str().unwrap()).unwrap();
+    let after = open_one(&s);
+    let copies: Vec<_> = after.sketches.iter().filter(|record| record.owner == Owner::View(copy)).collect();
+    assert_eq!(copies.len(), 1, "the copy takes its view's sketch");
+    assert!(copies[0].id != on_view && copies[0].sketch == kept.sketch && copies[0].name == kept.name);
+    assert!(Arc::ptr_eq(after.sheet_sketch(on_view).unwrap(), &kept), "the original is unchanged");
+
+    let deleted = run(&mut s, "selection.delete", item);
+    assert_eq!(
+        (&deleted["views"], &deleted["sketches"], &deleted["fills"]),
+        (&json!([view]), &json!([ids::encode(on_view)]), &json!([])),
+        "{deleted}"
+    );
+    let after = open_one(&s);
+    assert!(after.sheet_sketch(on_view).is_none(), "the view's sketch goes with it");
+    assert!(after.sheet_sketch(on_sheet).is_some() && after.sheet_sketch(copies[0].id).is_some(), "the others stay");
+
+    // A view projected from the copy goes with it (#19615), and so does a sketch on that view: while
+    // the sketch is being edited, the delete waits for it as for one on the view asked for.
+    let copy = ids::encode(copy);
+    let projected = run(&mut s, "drawing.view.projected", json!({"parent": copy, "side": "right"}))["view"].clone();
+    let on_projected = run(&mut s, "drawing.sketch.create", json!({"owner": projected}))["sketch"].clone();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0]]}));
+    let item = json!({"items": [{"type": "drawing", "drawing": ids::encode(d), "object": copy}], "contents": "delete"});
+    let before = open_one(&s);
+    let e = refused(&mut s, "selection.delete", item.clone());
+    assert!(e.contains("finish or cancel"), "{e}");
+    assert!(Arc::ptr_eq(&before, &open_one(&s)), "the refused delete changes nothing");
+    run(&mut s, "sketch.finish", json!({}));
+    let deleted = run(&mut s, "selection.delete", item);
+    let went = deleted["sketches"].as_array().unwrap();
+    assert!(went.len() == 2 && went.contains(&json!(ids::encode(copies[0].id))) && went.contains(&on_projected), "{deleted}");
+    assert!(open_one(&s).sheet_sketch(on_sheet).is_some(), "the sheet's own stays");
+}
+
 #[test]
 fn sheet_editor_same_numeric_id_in_two_drawings_and_model_never_retargets_geometry() {
-    use solidcraft_doc::drawing::SheetSketch;
+    use solidcraft_doc::drawing::{Owner, SheetSketch};
     use solidcraft_sketch::Sketch;
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Model"}));
@@ -1863,7 +1945,7 @@ fn sheet_editor_same_numeric_id_in_two_drawings_and_model_never_retargets_geomet
     let model = s.doc.sketch(id).unwrap().clone();
     run(&mut s, "drawing.create", json!({"name": "First"}));
     s.edit_drawing("test", |drawing| {
-        drawing.sketches.push(Arc::new(SheetSketch { id, sheet: drawing.sheets[0].id, name: "Same id".into(), sketch: Sketch::new() }));
+        drawing.sketches.push(Arc::new(SheetSketch { id, owner: Owner::Sheet(drawing.sheets[0].id), name: "Same id".into(), sketch: Sketch::new() }));
         Ok(())
     })
     .unwrap();

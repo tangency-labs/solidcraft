@@ -6,7 +6,7 @@ use crate::schema::{drawing_sketch as contract, output_schema_for};
 use crate::{Result, Session, SheetSketchEdit};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use solidcraft_doc::drawing::SheetSketch;
+use solidcraft_doc::drawing::{Owner, SheetSketch};
 use solidcraft_doc::ids;
 use solidcraft_sketch::Sketch;
 use std::sync::Arc;
@@ -15,15 +15,15 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.sketch.create", "Create Sheet Sketch", crate::checked!("drawing.sketch.create", create))
         .in_drawing().doc_only().icon("sketch")
         .contract(&contract::CREATE).output(output_schema_for::<contract::Reading>)
-        .params("owner: exact sheet id in the open drawing; name?: text. Creates and enters one sheet sketch in paper XY millimetres; one drawing undo step."),
+        .params("owner: exact sheet or view id in the open drawing; name?: text. Creates and enters one sketch: a sheet's in paper XY millimetres, a view's in model millimetres in the view's plane; one drawing undo step."),
     CommandSpec::new("drawing.sketch.edit", "Edit Sheet Sketch", crate::checked!("drawing.sketch.edit", edit))
         .in_drawing().doc_only().noundo().icon("sketch")
         .contract(&contract::EDIT).output(output_schema_for::<contract::Reading>)
-        .params("sketch: exact encoded sketch id in the open drawing. Enters that sheet sketch without changing its data or the source design."),
+        .params("sketch: exact encoded sketch id in the open drawing. Enters that sketch (a sheet's in paper XY millimetres, a view's in model millimetres in the view's plane) without changing its data or the source design."),
     CommandSpec::new("drawing.sketch.inspect", "Inspect Sheet Sketch", crate::checked!("drawing.sketch.inspect", inspect))
         .in_drawing().doc_only().noundo().icon("inspect")
         .contract(&contract::INSPECT).output(output_schema_for::<contract::Reading>)
-        .params("sketch?: exact encoded id, else the active sheet sketch. Reports resolved paper-mm points and local entity ids without adopting the solution."),
+        .params("sketch?: exact encoded id, else the active sheet sketch. Reports resolved points in its owner's frame (paper millimetres for a sheet's sketch, model millimetres in the view's plane for a view's) and local entity ids without adopting the solution."),
 
 ];
 
@@ -46,10 +46,15 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     no_entry(s, cmd)?;
     let owner = s.drawing(cmd)?.clone();
     owner.validate().map_err(|e| bad(cmd, e.to_string()))?;
-    let sheet = id(cmd, &p.owner)?;
-    if !owner.sheets.iter().any(|record| record.id == sheet) {
-        return Err(bad(cmd, "the open drawing has no such sheet"));
-    }
+    // Ids are unique in a drawing, so the id says which kind of owner it is.
+    let given = id(cmd, &p.owner)?;
+    let place = if owner.sheets.iter().any(|record| record.id == given) {
+        Owner::Sheet(given)
+    } else if owner.view(given).is_some() {
+        Owner::View(given)
+    } else {
+        return Err(bad(cmd, "the open drawing has no such sheet or view"));
+    };
     let name = p.name.unwrap_or_else(|| "Sheet sketch".into());
     // Any object id held by drawing undo/redo must not name a new sketch either.
     let taken: std::collections::BTreeSet<u64> = std::iter::once(owner.as_ref())
@@ -58,10 +63,10 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
         .collect();
     let sketch = s.ids.next(&taken).map_err(|e| bad(cmd, e.to_string()))?;
     s.edit_drawing(cmd, |drawing| {
-        drawing.sketches.push(Arc::new(SheetSketch { id: sketch, sheet, name, sketch: Sketch::new() }));
+        drawing.sketches.push(Arc::new(SheetSketch { id: sketch, owner: place, name, sketch: Sketch::new() }));
         Ok(())
     })?;
-    s.active_sheet_sketch = Some(Arc::new(SheetSketchEdit { drawing: owner.id, sheet, sketch, original: None }));
+    s.active_sheet_sketch = Some(Arc::new(SheetSketchEdit { drawing: owner.id, owner: place, sketch, original: None }));
     s.selection.clear();
     reading(s, sketch, cmd)
 }
@@ -77,9 +82,10 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         }
         return Err(bad(cmd, "finish or cancel the sheet sketch before entering another"));
     }
-    let solved = s.doc.solve_sheet_sketch(owner.id, sketch)?;
+    // Solving first refuses a sketch that can't be edited, before the entry is made.
+    s.doc.solve_sheet_sketch(owner.id, sketch)?;
     let original = owner.sheet_sketch(sketch).cloned().ok_or_else(|| bad(cmd, "the open drawing has no such sketch"))?;
-    s.active_sheet_sketch = Some(Arc::new(SheetSketchEdit { drawing: owner.id, sheet: solved.sheet, sketch, original: Some(original) }));
+    s.active_sheet_sketch = Some(Arc::new(SheetSketchEdit { drawing: owner.id, owner: original.owner, sketch, original: Some(original) }));
     s.selection.clear();
     s.revision += 1;
     reading(s, sketch, cmd)
@@ -102,12 +108,13 @@ fn reading(s: &Session, sketch: u64, cmd: &str) -> Result<Value> {
     let reading = contract::Reading {
         drawing: ids::encode(owner.id),
         sheet: ids::encode(solved.sheet),
+        view: record.owner.view().map(ids::encode),
         sketch: ids::encode(sketch),
         name: record.name.clone(),
         editing: s
             .active_sheet_sketch
             .as_ref()
-            .is_some_and(|active| active.drawing == owner.id && active.sheet == solved.sheet && active.sketch == sketch),
+            .is_some_and(|active| active.drawing == owner.id && active.owner == record.owner && active.sketch == sketch),
         solved: solved.report.keeps_orientation(),
         dof: solved.report.dof,
         points: solved
@@ -140,6 +147,12 @@ pub(super) fn cancel(s: &mut Session, p: &Value) -> Result<Value> {
     let _: contract::Empty = parsed(cmd, p)?;
     let entry = sketch_store::sheet_target(s, &Value::Null, cmd)?;
     let removed = entry.original.is_none();
+    // The sheet it is on, read before a new sketch is taken out again.
+    let open = s.drawing(cmd)?;
+    let sheet = open
+        .sheet_sketch(entry.sketch)
+        .and_then(|record| open.sketch_sheet(record))
+        .ok_or_else(|| bad(cmd, "the edited sheet sketch no longer exists"))?;
     s.edit_drawing(cmd, |drawing| {
         let at = drawing
             .sketches
@@ -162,7 +175,8 @@ pub(super) fn cancel(s: &mut Session, p: &Value) -> Result<Value> {
     s.revision += 1;
     serde_json::to_value(contract::Cancelled {
         drawing: ids::encode(entry.drawing),
-        sheet: ids::encode(entry.sheet),
+        sheet: ids::encode(sheet),
+        view: entry.owner.view().map(ids::encode),
         sketch: ids::encode(entry.sketch),
         removed,
     })
