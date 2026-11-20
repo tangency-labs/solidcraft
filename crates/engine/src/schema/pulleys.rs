@@ -1,6 +1,6 @@
 //! Contracts and result types for the commands in `cmd/pulleys.rs`: timing-belt pulleys (#20116).
 
-use schemars::JsonSchema;
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 
 /// The belt profile a pulley fits.
@@ -31,9 +31,8 @@ pub struct PulleyInsertParams {
     /// A flange at each end to keep the belt on (default true).
     #[serde(default)]
     pub flanges: Option<bool>,
-    /// An axle hole's diameter in mm (default: no hole).
     #[serde(default)]
-    #[schemars(range(min = 0.0))]
+    #[schemars(schema_with = "bore_diameter_schema")]
     pub bore_diameter: Option<f64>,
     /// The axle hole's centre along +X, in mm (default 0: on the axis).
     #[serde(default)]
@@ -41,6 +40,15 @@ pub struct PulleyInsertParams {
     /// The component's name (default: the pulley's, such as `GT2 Pulley 20T 6mm`).
     #[serde(default)]
     pub name: Option<String>,
+}
+
+/// More than 0 mm, as `pulley.insert` takes it; left out or `null`: no hole.
+fn bore_diameter_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "An axle hole's diameter in mm, more than 0 (default: no hole).",
+        "type": ["number", "null"],
+        "exclusiveMinimum": 0
+    })
 }
 
 /// What `pulley.insert` returns.
