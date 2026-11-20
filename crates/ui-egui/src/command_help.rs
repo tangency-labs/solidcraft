@@ -114,6 +114,7 @@ pub const DOCUMENTED: &[&str] = &[
     "material.assign",
     "material.properties.validate",
     "mesh.convert",
+    "mesh.section_stack",
     "motion.study",
     "motion.trace",
     "occurrence.ground",

@@ -45,6 +45,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Sweep { .. } => Some("solid.sweep"),
         Kind::Midplane => Some("construct.plane.midplane"),
         Kind::MeshConvert { .. } => Some("mesh.convert"),
+        Kind::MeshSectionStack { .. } => Some("mesh.section_stack"),
         Kind::Construct { command, .. } => Some(command),
         Kind::ConstructAuto { command, .. } => Some(command),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
@@ -1003,6 +1004,12 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::MeshConvert { tolerance } => {
             form_row(ui, "Tolerance", |ui| enter |= field(ui, tolerance));
+        }
+        Kind::MeshSectionStack { from, to, spacing, extrude } => {
+            form_row(ui, "Spacing", |ui| enter |= field(ui, spacing));
+            form_row(ui, "From", |ui| enter |= field(ui, from));
+            form_row(ui, "To", |ui| enter |= field(ui, to));
+            ui_kit::options(ui, "section_stack_options", &mut [("Extrude slabs", extrude)]);
         }
         Kind::Construct { t: Some(t), .. } => {
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));

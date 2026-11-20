@@ -260,6 +260,15 @@ crate::dialog_descriptor::dialog_descriptors! {
             MeshConvert {
                 tolerance: String,
             },
+            /// A row of parallel planes through a mesh body, a fitted sketch on each, and the
+            /// slabs between them when `extrude` (#2698). An empty `from` or `to` is left to the
+            /// command: the body's reach along the plane's normal.
+            MeshSectionStack {
+                from: String,
+                to: String,
+                spacing: String,
+                extrude: bool,
+            },
             /// A construction axis, point or plane made from picks alone (#2474): input `i` is the
             /// command's parameter `keys[i]`, and `t` (along a path) when it takes one.
             Construct {
@@ -746,14 +755,20 @@ fn display_quality(app: &SolveApp) -> solidcraft_engine::doc::display_quality::D
     solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default()
 }
 
+/// Whether OK computes the dialog's commands as one transaction, beside the window where it can:
+/// a dialog with a live preview, several modelled threads at once, and a Section Stack, which
+/// fits a sketch for every plane of the stack (seconds on a large scan) and has no preview.
+fn computes_on_ok(d: &Dialog) -> bool {
+    d.previews() || (matches!(d.kind, Kind::Thread { .. }) && sels(d, 0).len() > 1) || matches!(d.kind, Kind::MeshSectionStack { .. })
+}
+
 /// Desktop feature dialogs evaluate the entire command and its dependent suffix once; so does
 /// any feature edit, with a live preview or without. Results wait until a later frame before
 /// adoption, keeping the computing state visible.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn begin_applying(app: &SolveApp, d: &Dialog) -> Option<Applying> {
     let wait = app.apply_off_thread?;
-    let multiple_threads = matches!(d.kind, Kind::Thread { .. }) && sels(d, 0).len() > 1;
-    if !d.previews() && !multiple_threads && d.editing.is_none() {
+    if !computes_on_ok(d) && d.editing.is_none() {
         return None;
     }
     let computation = DialogComputation::new(app, d).ok()?;
@@ -1051,6 +1066,10 @@ impl Dialog {
             "mesh.convert" => Dialog::new(
                 Kind::MeshConvert { tolerance: crate::length_input::model(&s.doc, 0.05) },
                 vec![SelInput::new("Mesh body", BODIES, false)],
+            ),
+            "mesh.section_stack" => Dialog::new(
+                Kind::MeshSectionStack { from: String::new(), to: String::new(), spacing: length_default(s, "1"), extrude: false },
+                vec![SelInput::new("Mesh body", BODIES, false), SelInput::new("Plane", PLANES | PLANAR_FACES, false)],
             ),
             // Plane, Axis and Point open as the method their picks call for (`dialogs_auto`).
             _ if solidcraft_engine::cmd::is_construct_tool(id) => return auto::start(app, id),
@@ -2934,6 +2953,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Material { .. } => "PHYSICAL MATERIAL",
         Kind::Midplane => "MIDPLANE",
         Kind::MeshConvert { .. } => "CONVERT MESH",
+        Kind::MeshSectionStack { .. } => "SECTION STACK",
         Kind::Construct { title, .. } => title,
         Kind::ConstructAuto { command: "construct.plane", .. } => "cmd.construct.plane",
         Kind::ConstructAuto { command: "construct.axis", .. } => "cmd.construct.axis",
@@ -4810,6 +4830,7 @@ fn rememberable(kind: &Kind) -> bool {
             | Kind::Loft { .. }
             | Kind::Sweep { .. }
             | Kind::MeshConvert { .. }
+            | Kind::MeshSectionStack { .. }
             | Kind::Construct { .. }
             | Kind::PathPlane { .. }
             | Kind::Rib { .. }
@@ -5703,8 +5724,7 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
     if let Kind::SaveMesh(k) = &d.kind {
         return crate::dialogs_save_mesh::run(app, k, &d.inputs);
     }
-    let multiple_threads = matches!(d.kind, Kind::Thread { .. }) && sels(d, 0).len() > 1;
-    if d.previews() || multiple_threads {
+    if computes_on_ok(d) {
         let prepared = DialogComputation::new(app, d)?.compute()?;
         return adopt_dialog(app, prepared, d);
     }
@@ -6469,6 +6489,23 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 _ => return Err("pick the mesh body to convert".into()),
             };
             ("mesh.convert", json!({"body": body, "tolerance": tolerance}))
+        }
+        Kind::MeshSectionStack { from, to, spacing, extrude } => {
+            need(0, "the mesh body")?;
+            need(1, "the first plane")?;
+            let body = match sels(d, 0).first() {
+                Some(Sel::Body { name }) => name.clone(),
+                _ => return Err("pick the mesh body to cut".into()),
+            };
+            let plane = plane_arg(app, sels(d, 1).first())?;
+            let mut p = json!({"body": body, "plane": plane, "spacing": spacing, "extrude": extrude});
+            // Left empty, an end is the body's own along the plane's normal.
+            for (key, value) in [("from", from), ("to", to)] {
+                if !value.trim().is_empty() {
+                    p[key] = json!(value);
+                }
+            }
+            ("mesh.section_stack", p)
         }
         Kind::Midplane => {
             need(0, "the first plane")?;

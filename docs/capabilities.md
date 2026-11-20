@@ -66,7 +66,9 @@ and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
   appearances) import as mesh bodies (they render, measure, move and export; solid features
   need B-rep bodies). The `mesh.convert` command reconstructs closed meshes as parametric
   solids — constant-section parts with planar and circular cylindrical faces, any other closed
-  mesh as the faceted solid its triangles describe;
+  mesh as the faceted solid its triangles describe — and `mesh.section_stack` (Section Stack)
+  sketches the fitted lines, arcs and circles of a mesh body's section on each of a row of
+  parallel planes, optionally extruding them into joined slabs that stand in for the mesh;
   STEP import (AP203/AP214/AP242 solids, assemblies, units, names, colours) and IGES import
   (manifold solid B-reps, or trimmed and bounded surfaces sewn into solids) as a base feature
   that later features build on — open a `.step`/`.stp`/`.igs`/`.iges` file, insert one into a

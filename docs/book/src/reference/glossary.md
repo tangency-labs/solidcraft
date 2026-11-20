@@ -537,6 +537,22 @@ to each other keep a quarter, three an eighth. A section has at most six.
 - **For translators:** a view-only cut that changes no geometry, not a Split Body or a Plane
   feature.
 
+### section stack
+
+A row of parallel planes through a mesh body, each with a sketch of the curves fitted to the
+mesh's section there, and optionally the slabs extruded between them.
+
+The planes run along one plane's normal at a set spacing; a plane that misses the mesh gets no
+sketch. The sketches and slabs are ordinary features in one timeline folder.
+
+- **In SolidCraft:** `mesh.section_stack` (`body`, `plane`, `from`, `to`, `spacing`,
+  `max_sections`, `extrude`, `name`); the Section Stack button under SURFACE › Convert.
+- **Don't use:** slice stack, X-ray (for the command), section sketch.
+- **Elsewhere:** mesh slicing, cross-section stack.
+- **For translators:** "section" is a cut through a mesh body that makes sketch geometry, not
+  a section plane of Section Analysis, which only changes the view; "slabs" are the solid layers
+  extruded between the planes.
+
 ### settings profile
 
 A named set of input and interface preferences that can be switched, exported and imported as

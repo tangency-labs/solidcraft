@@ -4179,6 +4179,64 @@ fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
     assert!(!state.body("Mesh").unwrap().body.is_mesh(), "rebuilt as faces");
 }
 
+/// #2698: Section Stack opens a dialog that takes the selected mesh body and a plane, and OK
+/// sketches a section on each plane (the 10 x 20 x 30 mm box every 10 mm up from XY, just inside
+/// its ends: 0.001, 10.001, 20.001 and 29.999) without changing the mesh.
+#[test]
+fn section_stack_takes_the_mesh_and_a_plane_and_sketches_each_section() {
+    use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
+    let body = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+    let mesh = body.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.01)).unwrap();
+    let mut doc = Document::default();
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "box.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        Some("Imported mesh"),
+    )
+    .unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.session = Session::new(doc);
+    h.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
+    h.app.start("mesh.section_stack");
+    h.frames(1);
+    let d = h.app.dialog.as_mut().expect("the Section Stack dialog");
+    assert!(matches!(d.kind, Kind::MeshSectionStack { .. }), "{:?}", d.kind);
+    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Mesh".into() }]);
+    // OK with no plane is refused in the dialog, and nothing is made.
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_some(), "no plane yet");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[1].items = vec![Sel::Plane { name: "XY".into() }];
+    if let Kind::MeshSectionStack { spacing, .. } = &mut d.kind {
+        *spacing = "10 mm".into();
+    }
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    let state = h.app.session.model.state();
+    let heights: Vec<f64> = h
+        .app
+        .session
+        .doc
+        .features
+        .iter()
+        .filter(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
+        .filter_map(|f| state.sketch(f.id).map(|sk| sk.plane.origin.z))
+        .collect();
+    assert_eq!(heights.len(), 4, "{heights:?}");
+    for (z, want) in heights.iter().zip([0.001, 10.001, 20.001, 29.999]) {
+        assert!((z - want).abs() < 1e-9, "{heights:?}");
+    }
+    assert!(state.body("Mesh").unwrap().body.is_mesh());
+}
+
 /// #3745: hovering a large body never waits for its pick index. A long modelled thread's mesh
 /// has a quarter of a million triangles and its index took a third of a second to make, on the
 /// first hover, in the frame. Now the index is made on a worker and the first hovers scan the

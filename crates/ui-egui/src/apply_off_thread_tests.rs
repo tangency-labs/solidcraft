@@ -541,3 +541,51 @@ fn a_changed_display_quality_warms_the_result_without_replaying_commands() {
     assert!(h.app.dialog.is_none());
     h.step(&json!({"expect":{"bodies":1,"volume":13000}})).unwrap();
 }
+
+/// #2698: Section Stack fits a sketch for every plane, which takes seconds on a large scan, so OK
+/// computes it beside the window though the dialog has no live preview, and adopts it as one
+/// undo step.
+#[test]
+fn a_section_stack_is_computed_beside_the_window() {
+    use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
+    let body = solidcraft_engine::kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(10., 20., 30.)).unwrap();
+    let mesh = body.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.01)).unwrap();
+    let mut doc = Document::default();
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "box.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        Some("Imported mesh"),
+    )
+    .unwrap();
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.session = solidcraft_engine::Session::new(doc);
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: "Mesh".into() }];
+    h.app.start("mesh.section_stack");
+    h.frames(2);
+    let d = h.app.dialog.as_mut().expect("the Section Stack dialog");
+    d.inputs[1].items = vec![solidcraft_engine::Sel::Plane { name: "XY".into() }];
+    if let crate::dialogs::Kind::MeshSectionStack { spacing, .. } = &mut d.kind {
+        *spacing = "10 mm".into();
+    }
+    let undo = h.app.session.undo.len();
+    let (finish, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+    assert!(h.app.applying.is_some(), "computing beside the window");
+    finish.send(()).unwrap();
+    until_applied(&mut h);
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    let sketches = h.app.session.doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Sketch { .. })).count();
+    assert_eq!(sketches, 4, "0.001, 10.001, 20.001 and 29.999");
+}
