@@ -15,6 +15,7 @@ fn cloud(points: &[[f32; 3]], segments: &[u32], triangles: &[u32], columns: Vec<
         colors: Colors::default(),
         source_points: points.len() as u64,
         units: "mm".into(),
+        up: Default::default(),
         transform: IDENTITY,
         point_size: 2.0,
         color_by: ColorBy::File,

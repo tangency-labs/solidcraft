@@ -7,7 +7,7 @@
 //! one opening are one undo step.
 
 use serde_json::{Value, json};
-use solidcraft_engine::doc::point_cloud::{COORDINATES, ColorBy, Filter, Keep, MAX_FILTERS, Names, PLAIN, PointCloud, UNITS, byte, label_color};
+use solidcraft_engine::doc::point_cloud::{COORDINATES, ColorBy, Filter, Keep, MAX_FILTERS, Names, PLAIN, PointCloud, UNITS, Up, byte, label_color};
 use solidcraft_engine::view::POINT_CLOUDS_FOLDER;
 
 use super::{Actions, Row, Rows, Spec, is_open, node_row, rows_start_open, toggle, toggle_folder};
@@ -325,6 +325,17 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                 && let Some(u) = units.get(unit)
             {
                 edit = Some(json!({ "cloud": c.id, "units": u }));
+            }
+            // The file's up axis: Y turns a scan written with Y up to stand on the design's Z.
+            let axes = [Up::Z, Up::Y];
+            let labels = ["Z", "Y"];
+            let was = axes.iter().position(|a| *a == c.up).unwrap_or(0);
+            let mut axis = was;
+            ui_kit::row(ui, solidcraft_ui_text::tr("ui.point_cloud_up"), |ui| ui_kit::dropdown(ui, "point_cloud_up", &mut axis, &labels));
+            if axis != was
+                && let Some(a) = axes.get(axis)
+            {
+                edit = Some(json!({ "cloud": c.id, "up": a.name() }));
             }
             // The ways of colouring, then every property of the file.
             let properties: Vec<&str> = c.property_names().filter(|n| !COORDINATES.contains(n)).collect();

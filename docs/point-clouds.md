@@ -22,12 +22,19 @@ metres. `units` (`mm`, `cm`, `m`, `in`, `ft`) says what it is; the default is mi
 every other import, and metres for an E57 file. Lidar and SLAM maps are usually in metres. The unit can be changed afterwards (Browser › Point Clouds › Edit Point Cloud,
 or `pointcloud.edit` with `units`): the points are scaled from the unit they came in as.
 
+Many scanners, phone scanning apps and photogrammetry tools write their files with Y up, so such
+a scan comes in lying on its back in SolidCraft, which is Z up. `up: y` on insert, or **Up axis**
+› Y in the Edit Point Cloud card (`pointcloud.edit` with `up`), turns the points a quarter turn
+about X so the file's Y is the design's Z. The turn is in the cloud's own frame: its placement is
+kept, and `up: z` puts the points back as the file has them. A cloud centred on insert is centred
+after the turn.
+
 ## Reloading
 
 A cloud remembers where its file was (`source`, the absolute path it was inserted from), so a
 file that changed can be read again: **Reload from file** in the Edit Point Cloud card, or
 `pointcloud.reload`. The points, colours, segments, triangles and properties are replaced; the
-name, placement, units, point size and colouring are kept, and so are the filters on properties
+name, placement, units, up axis, point size and colouring are kept, and so are the filters on properties
 the file still has. A filter on a set of named values goes when the file no longer names them.
 Colouring by a property the file no longer has goes back to the file's colours. The file is read
 under the limit the cloud was inserted with (`max_points`), so the same file reads as the very
@@ -161,14 +168,14 @@ What the numbers do and do not say:
 
 ## Commands
 
-- `pointcloud.insert` — `path`; `name?`, `units?`, `max_points?`, `center?` (move the middle of
+- `pointcloud.insert` — `path`; `name?`, `units?`, `up?` (`z` or `y`), `max_points?`, `center?` (move the middle of
   its base to the origin), `point_size?` (pixels), `color_by?` (`file`, `single`, `height` or a
   property's name), `color?` (`[r, g, b]` 0…1; alone it means `single`, `null` means `file`),
   `color_range?` (`[low, high]`, or `null` for the automatic range; `height_range` is the same),
   `filters?` (`[{"property": …, "range": [low, high]}` or `{"property": …, "values": [whole
   numbers]}]`, or `null` for none).
 - `pointcloud.edit` — `cloud` (id or name); `name?`, `visible?`, `point_size?`, `color_by?`,
-  `color?`, `color_range?`, `filters?`, `units?`, `matrix?` (a rigid placement, as
+  `color?`, `color_range?`, `filters?`, `units?`, `up?`, `matrix?` (a rigid placement, as
   `occurrence.move` takes it).
 - `pointcloud.reload` — `cloud`; reads its file again (see [Reloading](#reloading)).
 - `pointcloud.delete`.
