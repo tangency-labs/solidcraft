@@ -1,14 +1,15 @@
 //! The Bill of Materials panel: `assembly.bom`'s rows (flat or top level, grouped by part
 //! number or by definition, a part's sub-parts in its row or not), with Export CSV… and Export
 //! JSON…. Picking a row edits its part
-//! number, description and revision (`metadata::BOM_KEYS`) through one `component.metadata.set`
+//! number, description and revision (`metadata::BOM_KEYS`), a typed-in material and the finish (with a
+//! list of common finishes) through one `component.metadata.set`
 //! per definition. The toolbar's Bill of Materials (`ui.start` of `assembly.bom`) opens it.
 
 use std::rc::Rc;
 
 use egui::RichText;
 use serde_json::{Map, Value, json};
-use solidcraft_engine::doc::metadata::{self, BOM_KEYS};
+use solidcraft_engine::doc::metadata::{self, BOM_KEYS, FINISH, MATERIAL};
 
 use crate::SolveApp;
 use solidcraft_theme::Tokens;
@@ -26,9 +27,11 @@ pub struct BomPanel {
     pub group_children: bool,
     /// The rows for (design revision, top, by_definition, group_children).
     cache: Option<(u64, [bool; 3], Rc<Value>)>,
-    /// The picked row's index, and its fields as edited (one for each of [`BOM_KEYS`]).
+    /// The picked row's index, its fields as edited (one for each of [`edit_keys`]), and what they
+    /// were when it was picked.
     pub picked: Option<usize>,
     pub fields: Vec<String>,
+    opened: Vec<String>,
     /// The selected definitions, whose row index can change when the table refreshes.
     target: Option<(Value, Value)>,
     /// The last refusal.
@@ -43,6 +46,7 @@ impl BomPanel {
         self.picked = None;
         self.target = None;
         self.fields.clear();
+        self.opened.clear();
     }
 
     fn reconcile_pick(&mut self, rows: &[Value]) {
@@ -122,14 +126,22 @@ fn text(row: &Value, k: &str) -> String {
 }
 
 /// The grid's headers and the row key each column shows.
-const HEADERS: [&str; 6] = ["Item", "Part number", "Description", "Rev", "Qty", "Definition"];
-const COLUMN_KEYS: [&str; 6] = ["item", "part_number", "description", "revision", "count", "definition"];
+const HEADERS: [&str; 8] = ["Item", "Part number", "Description", "Rev", "Qty", "Definition", "Material", "Finish"];
+const COLUMN_KEYS: [&str; 8] = ["item", "part_number", "description", "revision", "count", "definition", "material", "finish"];
+/// The keys a picked row edits, in the order of [`BomPanel::fields`]: [`BOM_KEYS`], then the static
+/// material and the finish.
+fn edit_keys() -> impl Iterator<Item = &'static str> {
+    BOM_KEYS.iter().copied().chain([MATERIAL, FINISH])
+}
+/// How many of [`edit_keys`] are [`BOM_KEYS`]: Apply always sends those, and the material and the
+/// finish only when they were changed.
+const ALWAYS: usize = BOM_KEYS.len();
 /// The column that takes the space the others leave, truncating its text.
 const DESCRIPTION: usize = 2;
 const COLUMN_SPACING: f32 = 14.0;
 
 /// Each column's width: every column fits its widest cell, Description takes what is left.
-fn column_widths(ui: &egui::Ui, rows: &[Value]) -> [f32; 6] {
+fn column_widths(ui: &egui::Ui, rows: &[Value]) -> [f32; 8] {
     let font = egui::TextStyle::Body.resolve(ui.style());
     let width = |s: &str| ui.painter().layout_no_wrap(s.to_owned(), font.clone(), egui::Color32::PLACEHOLDER).size().x.ceil();
     // The item cell is a picker button, padded on both sides.
@@ -156,17 +168,33 @@ fn cell<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R) 
     .inner
 }
 
-/// The label of one of [`BOM_KEYS`].
+/// The label of one of [`edit_keys`].
 fn field_label(key: &str) -> &str {
     metadata::key(key).map_or(key, |k| solidcraft_ui_text::tr(k.label))
 }
 
-/// Apply the picked row's fields to each of its definitions (one undo step each).
+/// The fields a row opens with: its part properties, then its static material (what the row says
+/// only when typed in: a material worked out from the bodies is not offered as text to apply) and
+/// its finish.
+fn opened_fields(row: &Value) -> Vec<String> {
+    let typed = row["static"].as_array().is_some_and(|keys| keys.iter().any(|k| k == MATERIAL));
+    edit_keys().map(|k| if k == MATERIAL && !typed { String::new() } else { text(row, k) }).collect()
+}
+
+/// Apply the picked row's fields to each of its definitions (one undo step each). The design is
+/// the part of a design that places nothing (component 0): its properties are the design's own.
 fn apply(app: &mut SolveApp, d: &mut BomPanel, row: &Value) {
-    let mut params: Map<String, Value> = BOM_KEYS.iter().zip(&d.fields).map(|(k, v)| (k.to_string(), json!(v))).collect();
+    let sent = |at: usize, now: &String| at < ALWAYS || d.opened.get(at) != Some(now);
+    let params: Map<String, Value> =
+        edit_keys().zip(&d.fields).enumerate().filter(|(at, (_, v))| sent(*at, v)).map(|(_, (k, v))| (k.to_string(), json!(v))).collect();
     for c in row["components"].as_array().into_iter().flatten() {
-        params.insert("component".into(), c.clone());
-        let r = app.run("component.metadata.set", Value::Object(params.clone()));
+        let r = if c.as_u64() == Some(0) {
+            app.run("document.metadata.set", json!({"values": params}))
+        } else {
+            let mut each = params.clone();
+            each.insert("component".into(), c.clone());
+            app.run("component.metadata.set", Value::Object(each))
+        };
         if let Err(e) = r {
             d.refuse(app.session.revision, e);
             return;
@@ -317,7 +345,7 @@ fn report(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut BomPanel) -> (Option<Va
     (d.picked.and_then(|i| rows.get(i)).cloned(), table_extra)
 }
 
-fn table(ui: &mut egui::Ui, d: &mut BomPanel, rows: &[Value], widths: [f32; 6]) {
+fn table(ui: &mut egui::Ui, d: &mut BomPanel, rows: &[Value], widths: [f32; 8]) {
     let t = Tokens::get();
     // The item cell (a picker for a row, dim text for a sub-part) is drawn by the caller.
     let rest = |ui: &mut egui::Ui, row: &Value| {
@@ -328,7 +356,7 @@ fn table(ui: &mut egui::Ui, d: &mut BomPanel, rows: &[Value], widths: [f32; 6]) 
         ui.end_row();
     };
     // No minimum column width: padding a narrow column would push the grid wider.
-    egui::Grid::new("sc_bom_grid").num_columns(6).striped(true).min_col_width(0.0).spacing([COLUMN_SPACING, 4.0]).show(ui, |ui| {
+    egui::Grid::new("sc_bom_grid").num_columns(8).striped(true).min_col_width(0.0).spacing([COLUMN_SPACING, 4.0]).show(ui, |ui| {
         for (h, w) in HEADERS.iter().zip(widths) {
             cell(ui, w, |ui| ui.label(RichText::new(*h).strong().color(t.text_dim)));
         }
@@ -345,7 +373,8 @@ fn table(ui: &mut egui::Ui, d: &mut BomPanel, rows: &[Value], widths: [f32; 6]) 
                 } else {
                     d.picked = Some(i);
                     d.target = Some((row["components"].clone(), row["definition"].clone()));
-                    d.fields = BOM_KEYS.iter().map(|k| text(row, k)).collect();
+                    d.fields = opened_fields(row);
+                    d.opened = d.fields.clone();
                 }
             }
             rest(ui, row);
@@ -359,9 +388,14 @@ fn table(ui: &mut egui::Ui, d: &mut BomPanel, rows: &[Value], widths: [f32; 6]) 
 
 fn details(ui: &mut egui::Ui, d: &mut BomPanel, selected: bool) {
     if selected {
-        for (key, field) in BOM_KEYS.iter().zip(d.fields.iter_mut()) {
+        for (key, field) in edit_keys().zip(d.fields.iter_mut()) {
             let label = field_label(key);
             let name = ui.label(label);
+            if key == FINISH {
+                // The pick list sits beside the text, which keeps what is typed as it is.
+                crate::finish_field::editor(ui, "bom_panel", field);
+                continue;
+            }
             let response = crate::ui_kit::cell_editor(ui, ui.make_persistent_id(key), field, label, false).labelled_by(name.id);
             crate::panel_runtime::register_content_focus(ui.ctx(), &response);
         }
@@ -549,9 +583,9 @@ mod tests {
     }
 
     /// `column_widths` for `rows` in a grid `width` wide, and the measured width of each text.
-    fn widths_in(width: f32, rows: &[serde_json::Value], texts: &[&str]) -> ([f32; 6], Vec<f32>) {
+    fn widths_in(width: f32, rows: &[serde_json::Value], texts: &[&str]) -> ([f32; 8], Vec<f32>) {
         let ctx = egui::Context::default();
-        let mut out = ([0.0; 6], Vec::new());
+        let mut out = ([0.0; 8], Vec::new());
         // The first frame loads the fonts.
         ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
         ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -573,7 +607,7 @@ mod tests {
             [json!({"item": 1, "part_number": "ISO 4762 M5x16", "description": "Bolt", "revision": "A", "count": 12, "definition": "SHCS M5x16"})];
         let (w, text) = widths_in(800.0, &short, &["ISO 4762 M5x16", "SHCS M5x16"]);
         assert!(w[1] >= text[0] && w[5] >= text[1], "part number and definition are not cut: {w:?} {text:?}");
-        let used = w.iter().sum::<f32>() + super::COLUMN_SPACING * 5.0;
+        let used = w.iter().sum::<f32>() + super::COLUMN_SPACING * 7.0;
         assert!((used - 800.0).abs() < 0.5, "the description fills the grid: {w:?} uses {used}");
 
         let long = [json!({"item": 1, "part_number": "P", "description": "Socket head cap screw ".repeat(20), "count": 1})];

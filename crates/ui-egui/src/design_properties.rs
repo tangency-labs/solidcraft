@@ -1,5 +1,6 @@
 //! The Design Properties window (#1015): the design's project, part number, revision, author,
-//! organization, description and licence, and a read-only list of the data other tools keep in
+//! organization, description, material, finish (with a list of common finishes to pick from; a
+//! design that is one part carries them itself, #20114) and licence, and a read-only list of the data other tools keep in
 //! the design. OK applies the edited fields through one `document.metadata.set` (one undo step);
 //! Cancel and the close button change nothing. File → Design Properties…, the Browser's
 //! Document Settings, the root component's menu and `ui.start` of `document.metadata` or
@@ -15,7 +16,7 @@ use std::sync::Arc;
 use egui::{Align2, FontId, Stroke};
 use serde_json::{Map, Value, json};
 use solidcore_record::Vec3;
-use solidcraft_engine::doc::metadata::{DESCRIPTION, Owner, keys};
+use solidcraft_engine::doc::metadata::{DESCRIPTION, FINISH, Owner, keys};
 use solidcraft_engine::doc::progress::Progress;
 
 use crate::SolveApp;
@@ -109,6 +110,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             let Some(field) = d.fields.get_mut(i) else { continue };
             if key == DESCRIPTION {
                 ui_kit::multiline_text_field(ui, label, egui::Id::unique(("sc_design_properties", key)), field);
+            } else if key == FINISH {
+                ui_kit::row(ui, label, |ui| crate::finish_field::editor(ui, "design_properties", field));
             } else {
                 ui_kit::row(ui, label, |ui| ui_kit::text_field(ui, field, ""));
             }
