@@ -112,6 +112,7 @@ pub use sheet_surface_convert::{
     measure_sheet_body,
 };
 pub use sheet_surface_cuts::{Loose, Recess};
+pub use sheet_surface_profile::PROFILE_OFF_PLANE;
 pub mod text_params;
 pub mod thread_forms;
 pub mod tolerance;
