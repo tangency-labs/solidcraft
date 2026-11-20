@@ -524,3 +524,22 @@ fn capped_columns_keep_their_dividers() {
     assert!(registry::rect_of("dialog:column_divider:capdiv:0").is_some(), "Name keeps its divider");
     assert!(registry::rect_of("dialog:column_divider:capdiv:1").is_some(), "Comment keeps its divider");
 }
+
+/// When the only uncapped column has been dragged to a width (#18846), the capped columns stop
+/// at nothing and share the rest by weight, so the table still fills its width.
+#[test]
+fn caps_are_dropped_when_every_uncapped_column_was_dragged() {
+    let columns = [
+        Column::new("Name", 2.0).flex().max_width(Some(120.0)),
+        Column::new("Value", 1.0).flex().max_width(Some(80.0)),
+        Column::new("Comment", 1.0).flex().manual_width(Some(60.0)),
+    ];
+    let spacing = Tokens::get().space_8 * 4.0;
+    for available in [600.0, 1000.0] {
+        let widths = widths_at(&columns, available);
+        assert!((widths[2] - 60.0).abs() <= 0.5, "the dragged column keeps its width: {widths:?}");
+        let total: f32 = widths.iter().sum();
+        assert!((total + spacing - available).abs() <= 1.0, "the table fills {available}: {widths:?}");
+        assert!((widths[0] - 2.0 * widths[1]).abs() <= 1.0, "the others share by weight: {widths:?}");
+    }
+}

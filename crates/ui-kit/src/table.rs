@@ -33,7 +33,8 @@ impl<'a> Column<'a> {
 
     /// Stop a flexible column growing at `width`, so the width past it goes to the columns that
     /// still share. A column held at a dragged width ignores this; one with a larger content
-    /// minimum keeps that minimum.
+    /// minimum keeps that minimum. While no uncapped column shares (all were dragged), caps are
+    /// ignored so the table still fills its width.
     pub fn max_width(mut self, width: Option<f32>) -> Self {
         self.max = width.filter(|w| w.is_finite() && *w > 0.0);
         self
@@ -178,10 +179,14 @@ fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
 /// held between its minimum (its width on entry) and its cap, at the one rate where the widths add
 /// up to `remaining`. A column held at its minimum or cap leaves its portion to the others, and
 /// width a cap gives back reaches every other column, including one that was at its minimum. If
-/// the minimums alone overfill the space every column keeps its minimum (the table scrolls); if
-/// every column is capped, the rest of the space stays empty.
+/// the minimums alone overfill the space every column keeps its minimum (the table scrolls).
+///
+/// Caps only say where the extra width should go instead. When every column still sharing has a
+/// cap (the uncapped ones were dragged to a width, #18846), nothing could take the width past the
+/// caps and the table would end short of its card, so the caps are dropped and the columns share
+/// by weight alone.
 fn share_by_weight(columns: &[Column<'_>], sharing: &[bool], widths: &mut [f32], remaining: f32) {
-    let members: Vec<_> = (0..columns.len())
+    let mut members: Vec<_> = (0..columns.len())
         .filter(|&i| sharing[i])
         .map(|i| {
             let weight = dimension(columns[i].width);
@@ -192,6 +197,11 @@ fn share_by_weight(columns: &[Column<'_>], sharing: &[bool], widths: &mut [f32],
         .collect();
     if members.is_empty() {
         return;
+    }
+    if members.iter().all(|&(_, _, _, high)| high.is_finite()) {
+        for member in &mut members {
+            member.3 = f32::INFINITY;
+        }
     }
     let total = |rate: f32| members.iter().map(|&(_, w, low, high)| (w * rate).clamp(low, high)).sum::<f32>();
     // The total grows linearly between the rates where a column leaves its minimum or meets its
