@@ -73,6 +73,40 @@ fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+/// #19237: `plugin --help` says what each operation does, and an operation's own help says what
+/// that operation does: `plugin check --help` does not print `plugin test`.
+#[test]
+fn plugin_help_lists_each_operation_and_each_operation_has_its_own_help() {
+    let both = cli(&["plugin", "--help"]);
+    assert!(both.status.success(), "{}", text(&both.stderr));
+    let check = cli(&["plugin", "check", "--help"]);
+    assert!(check.status.success(), "{}", text(&check.stderr));
+    let test = cli(&["plugin", "test", "--help"]);
+    assert!(test.status.success(), "{}", text(&test.stderr));
+    let (both, check, test) = (text(&both.stdout), text(&check.stdout), text(&test.stdout));
+    assert!(both.contains("solidcraft-cli plugin check") && both.contains("solidcraft-cli plugin test"), "{both}");
+    assert!(check.contains("solidcraft-cli plugin check") && !check.contains("solidcraft-cli plugin test"), "{check}");
+    assert!(test.contains("solidcraft-cli plugin test") && !test.contains("solidcraft-cli plugin check"), "{test}");
+    // `plugin --help` is both operations' help, one after the other.
+    let body = |usage: &str| usage.strip_prefix("usage:\n").unwrap_or_default().to_string();
+    assert_eq!(both, format!("usage:\n{}{}", body(&check), body(&test)));
+}
+
+/// #19237: an argument that is not a plugin says what was expected (the plugin's package folder,
+/// or its .zip), not the CLI's generic usage.
+#[test]
+fn an_argument_that_is_not_a_plugin_says_what_it_expected() {
+    let scratch = Scratch::new();
+    let nowhere = scratch.path("nowhere");
+    for action in ["check", "test"] {
+        let output = cli(&["plugin", action, &nowhere]);
+        assert!(!output.status.success(), "`plugin {action}` succeeded");
+        let (stdout, stderr) = (text(&output.stdout), text(&output.stderr));
+        assert!(stdout.contains("fix: Give the plugin's package folder"), "plugin {action}: {stdout}");
+        assert!(!stderr.contains("usage:"), "plugin {action}: {stderr}");
+    }
+}
+
 #[test]
 fn check_passes_good_packages_and_names_each_broken_one_with_its_fix() {
     let scratch = Scratch::new();
@@ -111,6 +145,22 @@ fn check_passes_good_packages_and_names_each_broken_one_with_its_fix() {
     }
     let output = cli(&["plugin", "check", &scratch.path("nowhere")]);
     assert!(!output.status.success() && text(&output.stdout).contains("error   package: could not read"), "{}", text(&output.stdout));
+}
+
+#[test]
+fn check_reports_invalid_conditional_fields_without_running_wasm() {
+    let scratch = Scratch::new();
+    for condition in [json!({"field":"missing","eq":true}), json!({"field":"size","eq":1})] {
+        let mut manifest = command_manifest();
+        manifest["runtime"]["entries"][0]["input_schema"] = json!({"type":"object","properties":{
+            "size":{"type":"number","x-solidcraft-visible-when":condition}}});
+        let path = package(&scratch.0, &manifest, &command_component("unreachable"), &[]);
+        let output = cli(&["plugin", "check", &path, "--json"]);
+        assert!(!output.status.success(), "{}", text(&output.stdout));
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["ok"], false);
+        assert!(text(&output.stdout).contains("input_schema"));
+    }
 }
 
 #[test]
@@ -188,7 +238,7 @@ fn an_importers_cases_open_their_files_and_check_the_loss_report() {
     // The fixture copies the file into the design: give it a design's bytes. A file starting with T traps.
     let mut made = solidcraft_engine::Session::new(solidcraft_engine::doc::Document::new("Bracket"));
     made.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
-    std::fs::write(Path::new(&path).join("tests/bracket.smp"), solidcraft_engine::io::write_design(&made.doc)).unwrap();
+    std::fs::write(Path::new(&path).join("tests/bracket.smp"), solidcraft_engine::io::write_design(&made.doc).unwrap()).unwrap();
     std::fs::write(Path::new(&path).join("tests/trap.smp"), b"T").unwrap();
     std::fs::write(Path::new(&path).join("tests/sketch.smp"), b"U").unwrap();
     let output = cli(&["plugin", "test", &path]);

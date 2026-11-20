@@ -1244,11 +1244,12 @@ pub struct TopologyIntersector<O> {
 /// gap; and `v`, with twice its largest gap, when that passes its tolerance (`AssertValid`
 /// checks a vertex's gaps against half of it). A curve end is the end of the edge's
 /// interval nearer `v` (the farther for a closed edge): for an edge longer than twice the
-/// gap that is the end at its vertex. The vertex's cover comes with its reach (the far
-/// vertex of each of the edges, a lower bound of its distance and its tolerance) and its
-/// stored tolerance, and each edge's growth with the raise it gives its two vertices
-/// (`set_topology_tolerance` cascades an edge's tolerance to them), which the caller
-/// checks once every growth is known ([`first_reaching`], [`covers_staying_clear`]).
+/// gap that is the end at its vertex. The vertex's cover comes with its reach
+/// ([`merged_reach`]) and its stored tolerance, and each edge's growth with the raise it
+/// gives its two vertices (`set_topology_tolerance` cascades an edge's tolerance to them),
+/// which the caller judges as a growth of each vertex the raised one becomes one with
+/// ([`raise_growths`]), once every growth is known ([`first_reaching`],
+/// [`covers_staying_clear`]).
 ///
 /// # Errors
 ///
@@ -1267,12 +1268,10 @@ fn certified_vertex_gaps<O: ClassObject>(
         });
     };
     let point = b.vertex(vid)?.point;
-    let own_tolerance = b.vertex(vid)?.tolerance;
     let rounded = |p: Point3, q: Point3| p.distance(q) + gamma(8) * (p.length() + q.length());
     let mut out = Vec::new();
     let mut raised = Vec::new();
     let mut gap: f64 = 0.0;
-    let mut reach = Vec::new();
     for o in std::iter::once(v).chain(mates.iter().copied()) {
         let Some((ob, EntityRef::Vertex(ovid))) = ClassGeometry::topology_entity(brep, o) else {
             continue;
@@ -1297,25 +1296,12 @@ fn certified_vertex_gaps<O: ClassObject>(
                     out.push((h, edge_gap));
                     for x in [start, end].into_iter().flatten() {
                         if let Some(vertex) = brep.topology_handle_in(ob, EntityRef::Vertex(x)) {
-                            raised.push(Growth {
-                                vertex,
-                                tolerance: edge_gap,
-                                reach: Vec::new(),
-                            });
+                            raised.push((vertex, edge_gap));
                         }
                     }
                 }
             }
             gap = max2(gap, edge_gap);
-            let far = if start == Some(ovid) { end } else { start };
-            if let Some(far) = far.filter(|&f| f != ovid) {
-                let f = ob.vertex(far)?;
-                // the distance less its rounding: a lower bound
-                let apart =
-                    point.distance(f.point) - gamma(8) * (point.length() + f.point.length());
-                let handle = brep.topology_handle_in(ob, EntityRef::Vertex(far));
-                reach.push((handle, apart, f.tolerance));
-            }
         }
         for f in vertex::faces(ob, ovid)? {
             let Some(SurfaceKind::Plane(plane)) = ob.face(f)?.surface.as_ref().map(Surface::kind)
@@ -1335,25 +1321,67 @@ fn certified_vertex_gaps<O: ClassObject>(
             gap = max2(gap, face_gap);
         }
     }
-    let cover = Growth {
-        vertex: v,
-        tolerance: zone_tol3d(k, 2.0 * gap),
-        reach,
-    };
+    let cover = merged_reach(brep, v, mates)?.map(|(reach, own_tolerance)| {
+        let cover = Growth {
+            vertex: v,
+            tolerance: zone_tol3d(k, 2.0 * gap),
+            reach,
+        };
+        (cover, own_tolerance)
+    });
     Ok(CertifiedGaps {
         edges: out,
         raised,
-        cover: Some((cover, own_tolerance)),
+        cover,
     })
+}
+
+/// Not upstream: the reach of vertex `v`, which the merge makes one with `mates` at either
+/// point: the far vertex of each edge of `v` or of `mates`, with a lower bound of its
+/// distance from `v`'s point (less its rounding) and its stored tolerance; with `v`'s
+/// stored tolerance. `None` for an object that is no vertex.
+///
+/// # Errors
+///
+/// Those of the topology walks.
+fn merged_reach<O: ClassObject>(
+    brep: &impl IntersectorBrep<O>,
+    v: O,
+    mates: &[O],
+) -> Result<Option<(Reach<O>, f64)>> {
+    let Some((b, EntityRef::Vertex(vid))) = ClassGeometry::topology_entity(brep, v) else {
+        return Ok(None);
+    };
+    let point = b.vertex(vid)?.point;
+    let own_tolerance = b.vertex(vid)?.tolerance;
+    let mut reach = Vec::new();
+    for o in std::iter::once(v).chain(mates.iter().copied()) {
+        let Some((ob, EntityRef::Vertex(ovid))) = ClassGeometry::topology_entity(brep, o) else {
+            continue;
+        };
+        for e in vertex::edges(ob, ovid, None)? {
+            let (start, end) = (edge::start_vertex(ob, e)?, edge::end_vertex(ob, e)?);
+            let far = if start == Some(ovid) { end } else { start };
+            if let Some(far) = far.filter(|&f| f != ovid) {
+                let f = ob.vertex(far)?;
+                // the distance less its rounding: a lower bound
+                let apart =
+                    point.distance(f.point) - gamma(8) * (point.length() + f.point.length());
+                let handle = brep.topology_handle_in(ob, EntityRef::Vertex(far));
+                reach.push((handle, apart, f.tolerance));
+            }
+        }
+    }
+    Ok(Some((reach, own_tolerance)))
 }
 
 /// What [`certified_vertex_gaps`] returns.
 struct CertifiedGaps<O> {
     /// The edges to grow, each with its tolerance.
     edges: Vec<(O, f64)>,
-    /// The raise each of those growths gives the edge's two vertices (no reach of their
-    /// own: they are judged as far vertices only).
-    raised: Vec<Growth<O>>,
+    /// The raise each of those growths gives the edge's two vertices: each vertex with
+    /// the edge's tolerance.
+    raised: Vec<(O, f64)>,
     /// The vertex's cover (twice its largest gap) with its reach, and its stored tolerance;
     /// `None` for an object that is no vertex.
     cover: Option<(Growth<O>, f64)>,
@@ -1368,8 +1396,11 @@ pub(crate) struct Growth<K> {
     /// Its grown tolerance.
     pub(crate) tolerance: f64,
     /// `(far vertex, distance lower bound, stored tolerance)` per far vertex.
-    pub(crate) reach: Vec<(Option<K>, f64, f64)>,
+    pub(crate) reach: Reach<K>,
 }
+
+/// A growth's far vertices: `(far vertex, distance lower bound, stored tolerance)` each.
+pub(crate) type Reach<K> = Vec<(Option<K>, f64, f64)>;
 
 /// Not upstream (#15718): the first of `growths` whose grown ball would reach one of its far
 /// vertices, judged against every growth at once, with the tolerance below which it would
@@ -1455,20 +1486,62 @@ pub(crate) fn covers_staying_clear<K: Copy + PartialEq>(
 
 /// Not upstream: the vertices of one definition as one vertex (`relate` gives each the
 /// larger tolerance): every cover of `members` (each with its stored tolerance) at the
-/// largest of them, for the members that tolerance raises. A NaN cover raises nothing.
-fn shared_cover<K>(members: Vec<(Growth<K>, f64)>) -> Vec<Growth<K>> {
-    let shared = members
-        .iter()
-        .map(|(g, _)| g.tolerance)
-        .fold(f64::NEG_INFINITY, f64::max);
-    members
-        .into_iter()
-        .filter(|&(_, own)| shared > own)
-        .map(|(mut g, _)| {
-            g.tolerance = shared;
-            g
-        })
-        .collect()
+/// largest of them, for the members that tolerance raises. `None` when a cover is NaN:
+/// that vertex's gaps are not known, so no tolerance is known to cover them, and the
+/// group is refused whole rather than raised to a mate's cover.
+fn shared_cover<K>(members: Vec<(Growth<K>, f64)>) -> Option<Vec<Growth<K>>> {
+    let mut shared = f64::NEG_INFINITY;
+    for (g, _) in &members {
+        if g.tolerance.is_nan() {
+            return None;
+        }
+        shared = shared.max(g.tolerance);
+    }
+    Some(
+        members
+            .into_iter()
+            .filter(|&(_, own)| shared > own)
+            .map(|(mut g, _)| {
+                g.tolerance = shared;
+                g
+            })
+            .collect(),
+    )
+}
+
+/// Not upstream: the growths the `raises` give (an exact edge growth cascades its
+/// tolerance to its two vertices): the raised vertex and each vertex it becomes one with
+/// (`merged_with`, itself among them; `relate` gives them the larger tolerance) take the
+/// raise wherever it passes their stored tolerance, each judged against its own reach from
+/// its own point (`reach_of(vertex, its mates)`, [`merged_reach`]), as a cover is.
+///
+/// # Errors
+///
+/// Those of `reach_of`.
+fn raise_growths<O: Copy + Ord>(
+    raises: &[(O, f64)],
+    merged_with: &BTreeMap<O, Vec<O>>,
+    mut reach_of: impl FnMut(O, &[O]) -> Result<Option<(Reach<O>, f64)>>,
+) -> Result<Vec<Growth<O>>> {
+    let mut out = Vec::new();
+    for &(x, tolerance) in raises {
+        let group = merged_with.get(&x).map_or_else(|| vec![x], Clone::clone);
+        for &m in &group {
+            let mates: Vec<O> = group.iter().copied().filter(|&o| o != m).collect();
+            let Some((reach, own)) = reach_of(m, &mates)? else {
+                continue;
+            };
+            // a NaN raise is kept, and `first_reaching` refuses it
+            if tolerance > own || tolerance.is_nan() {
+                out.push(Growth {
+                    vertex: m,
+                    tolerance,
+                    reach,
+                });
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Not upstream (WR-306): the growths of the raise that makes each vertex of an absorbing
@@ -2574,6 +2647,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let mut grow: Vec<(O, f64)> = Vec::new();
         let mut growths: Vec<Growth<O>> = Vec::new();
         let mut covers: Vec<Vec<Growth<O>>> = Vec::new();
+        let mut definitions: Vec<(bool, Vec<O>)> = Vec::new();
         let pvs = mgr.proto_vertices().to_vec();
         for pv in pvs {
             let Some(proto_vertex) = mgr.proto_vertex(pv) else {
@@ -2594,27 +2668,60 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         finals.push(v);
                     }
                 }
-                let mut members = Vec::new();
-                for &v in &finals {
-                    let mates: Vec<O> = finals.iter().copied().filter(|&m| m != v).collect();
-                    let gaps = certified_vertex_gaps(k, &*brep, v, &mates)?;
-                    if exact {
-                        grow.extend(gaps.edges);
-                        growths.extend(gaps.raised);
+                definitions.push((exact, finals));
+            }
+        }
+        // the vertices each vertex becomes one with, itself among them
+        let mut merged_with: BTreeMap<O, Vec<O>> = BTreeMap::new();
+        for (_, finals) in &definitions {
+            for &v in finals {
+                let group = merged_with.entry(v).or_insert_with(|| vec![v]);
+                for &m in finals {
+                    if !group.contains(&m) {
+                        group.push(m);
                     }
-                    members.extend(gaps.cover);
-                }
-                // `relate` gives the definition's vertices one tolerance, the larger: each
-                // ball is judged at that one, about its own point
-                let group = shared_cover(members);
-                if exact {
-                    grow.extend(group.iter().map(|g| (g.vertex, g.tolerance)));
-                    growths.extend(group);
-                } else if !group.is_empty() {
-                    covers.push(group);
                 }
             }
         }
+        let mut raises: Vec<(O, f64)> = Vec::new();
+        for (exact, finals) in definitions {
+            let mut members = Vec::new();
+            for &v in &finals {
+                let mates: Vec<O> = finals.iter().copied().filter(|&m| m != v).collect();
+                let gaps = certified_vertex_gaps(k, &*brep, v, &mates)?;
+                if exact {
+                    grow.extend(gaps.edges);
+                    raises.extend(gaps.raised);
+                }
+                members.extend(gaps.cover);
+            }
+            // `relate` gives the definition's vertices one tolerance, the larger: each
+            // ball is judged at that one, about its own point
+            let Some(group) = shared_cover(members) else {
+                if exact {
+                    // NaN refuses: an exact definition's gap is all its vertex must cover
+                    return Err(Failure::new(
+                        OP_CERTIFIED_GAPS,
+                        BooleanFailure::MergedVertexReaches {
+                            needed: f64::NAN,
+                            fits_below: None,
+                        },
+                    )
+                    .into_error());
+                }
+                continue;
+            };
+            if exact {
+                grow.extend(group.iter().map(|g| (g.vertex, g.tolerance)));
+                growths.extend(group);
+            } else if !group.is_empty() {
+                covers.push(group);
+            }
+        }
+        // a raise is judged like a growth of every vertex the raised one becomes one with
+        growths.extend(raise_growths(&raises, &merged_with, |m, mates| {
+            merged_reach(&*brep, m, mates)
+        })?);
         if let Some((_, needed, fits_below)) = first_reaching(&growths) {
             return Err(Failure::new(
                 OP_CERTIFIED_GAPS,
@@ -5540,6 +5647,11 @@ pub struct Relations {
     pub edges: MateMap<EdgeId>,
     /// Vertex mates in both directions.
     pub vertices: MateMap<VertexId>,
+    /// Not upstream (WR-361): the primary edges `MergeEdge` made as copies of an
+    /// other-operand edge with no mate (that operand's own edges), as against edges the
+    /// intersection related. Only an edge here takes the other face's UV trim over
+    /// (`boolean.merge_p2`'s `MakeFaceuse`).
+    pub copied_edges: BTreeSet<EdgeId>,
 }
 
 impl Relations {
@@ -5859,13 +5971,13 @@ mod tests {
         assert_eq!(covers_staying_clear(&[], &nan), vec![]);
     }
 
-    /// #19045 review: a far vertex is taken at the raise an edge growth cascades to it (no
-    /// reach of its own): the 1.6 beside a far vertex 3 away with a stored 0.2 fits, but
+    /// #19045 review: a far vertex is taken at the raise an edge growth cascades to it: the 1.6 beside a far vertex 3 away with a stored 0.2 fits, but
     /// not once an edge of that vertex grows to 1.5 (1.6 + 1.5 > 3). And the two vertices
     /// of one definition are judged at the tolerance `relate` gives both, the larger: of
     /// covers of 1.6 and 0.8, the 0.8 one with its far vertex 2 away (stored 0.05), both
     /// are taken at 1.6 (1.65 < 2); with that far vertex 1.2 away the 0.8 alone would fit
-    /// (0.85 < 1.2) but the shared 1.6 does not (1.65 > 1.2), and neither is taken.
+    /// (0.85 < 1.2) but the shared 1.6 does not (1.65 > 1.2), and neither is taken. A NaN
+    /// cover refuses its group: its finite mate's cover is not given to it.
     #[test]
     fn a_cover_is_judged_at_its_cascaded_far_vertices_and_its_shared_tolerance() {
         let g = |vertex: u8, far: u8, apart: f64, stored: f64, tolerance: f64| Growth {
@@ -5892,7 +6004,7 @@ mod tests {
                 (g(2, 4, apart, 0.05, 0.8), 0.01),
             ]
         };
-        let fits = shared_cover(members(2.0));
+        let fits = shared_cover(members(2.0)).unwrap();
         assert_eq!(
             fits.iter()
                 .map(|g| (g.vertex, g.tolerance))
@@ -5901,16 +6013,71 @@ mod tests {
         );
         assert_eq!(covers_staying_clear(&[], &[fits]), vec![(1, 1.6), (2, 1.6)]);
         assert_eq!(
-            covers_staying_clear(&[], &[shared_cover(members(1.2))]),
+            covers_staying_clear(&[], &[shared_cover(members(1.2)).unwrap()]),
             vec![]
         );
-        // a member whose stored tolerance is past the shared one is not raised; NaN raises
-        // nothing
-        assert_eq!(shared_cover(vec![(g(1, 2, 3.0, 0.0, 0.5), 0.7)]).len(), 0);
+        // a member whose stored tolerance is past the shared one is not raised
         assert_eq!(
-            shared_cover(vec![(g(1, 2, 3.0, 0.0, f64::NAN), 0.0)]).len(),
-            0
+            shared_cover(vec![(g(1, 2, 3.0, 0.0, 0.5), 0.7)]).map(|v| v.len()),
+            Some(0)
         );
+        // a NaN cover refuses its group, alone or beside a finite mate
+        assert!(shared_cover(vec![(g(1, 2, 3.0, 0.0, f64::NAN), 0.0)]).is_none());
+        assert!(shared_cover(vec![
+            (g(1, 3, 5.0, 0.05, 1.6), 0.01),
+            (g(2, 4, 5.0, 0.05, f64::NAN), 0.01),
+        ])
+        .is_none());
+    }
+
+    /// #19114 review: the raise an exact edge growth cascades to its far end B is judged
+    /// like a growth of B and of every vertex B becomes one with, each against its own far
+    /// vertices from its own point. B raised to 0.6 beside C 0.7 away (stored 0.2) is
+    /// refused (0.8 > 0.7), and fits with C 1.0 away; B's mate B2, raised with it, is
+    /// refused beside its own far vertex D 0.62 away (stored 0.05: 0.65 > 0.62) although B
+    /// fits. A raise at or below a vertex's stored tolerance gives it no growth.
+    #[test]
+    fn a_cascaded_raise_is_judged_at_every_vertex_it_becomes_one_with() {
+        const B: u8 = 2;
+        const B2: u8 = 3;
+        const C: u8 = 4;
+        const D: u8 = 5;
+        let reaches = |bc: f64, b2d: f64| {
+            move |m: u8, _: &[u8]| -> Result<Option<(Reach<u8>, f64)>> {
+                Ok(match m {
+                    B => Some((vec![(Some(C), bc, 0.2)], 0.1)),
+                    B2 => Some((vec![(Some(D), b2d, 0.05)], 0.1)),
+                    _ => None,
+                })
+            }
+        };
+        let alone = BTreeMap::new();
+        let raised = |bc: f64| raise_growths(&[(B, 0.6)], &alone, reaches(bc, 5.0)).unwrap();
+        let refused = raised(0.7);
+        assert_eq!(refused.len(), 1);
+        assert_eq!(
+            first_reaching(&refused).map(|(at, needed, _)| (at, needed)),
+            Some((B, 0.6))
+        );
+        assert!(first_reaching(&raised(1.0)).is_none());
+
+        let merged = BTreeMap::from([(B, vec![B, B2]), (B2, vec![B2, B])]);
+        let both = raise_growths(&[(B, 0.6)], &merged, reaches(1.0, 0.62)).unwrap();
+        assert_eq!(
+            both.iter()
+                .map(|g| (g.vertex, g.tolerance))
+                .collect::<Vec<_>>(),
+            vec![(B, 0.6), (B2, 0.6)]
+        );
+        assert_eq!(
+            first_reaching(&both).map(|(at, needed, _)| (at, needed)),
+            Some((B2, 0.6))
+        );
+        let clear = raise_growths(&[(B, 0.6)], &merged, reaches(1.0, 1.0)).unwrap();
+        assert!(first_reaching(&clear).is_none());
+        assert!(raise_growths(&[(B, 0.1)], &merged, reaches(0.7, 0.62))
+            .unwrap()
+            .is_empty());
     }
 
     /// WR-306 (#17888 review): the raise that makes each vertex of an absorbing pair cover

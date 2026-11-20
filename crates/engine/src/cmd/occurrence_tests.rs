@@ -320,6 +320,29 @@ fn component_create_rejects_unknown_keys_and_accepts_documented_keys() {
     assert_eq!(s.active_occurrence_path, Some(vec![occurrence]));
 }
 
+/// The viewport asks whether every body is shown several times a frame. While no body is
+/// hidden (hidden joints hide none), the answers build no index of the hidden items; hiding a
+/// copy still hides it.
+#[test]
+fn asking_whether_bodies_are_shown_builds_nothing_while_no_body_is_hidden() {
+    use crate::occurrences::visibility_work;
+    let mut s = Session::default();
+    let (component, first) = created(&mut s, "Knob");
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Knob"}));
+    let second = run(&mut s, "occurrence.copy", json!({"component": component, "translate": [20, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let name = |s: &Session, path: &[u64]| s.occurrence_placement(path).unwrap().bodies[0].world.clone();
+    s.visibility.hidden_joints = (1_000..1_100).collect();
+    visibility_work::built_take();
+    for _ in 0..3 {
+        assert!(s.body_visible(&name(&s, &[first])) && s.body_visible(&name(&s, &[second])));
+    }
+    assert_eq!(visibility_work::built_take(), 0, "no index is built to answer that nothing is hidden");
+    let hidden = name(&s, &[second]);
+    run(&mut s, "browser.visibility", json!({"items": [hidden], "visible": false}));
+    assert!(s.body_visible(&name(&s, &[first])));
+    assert!(!s.body_visible(&name(&s, &[second])), "a hidden copy is still hidden");
+}
+
 #[test]
 fn body_and_component_renames_keep_hidden_copies_through_history() {
     let mut s = Session::default();
@@ -1034,7 +1057,7 @@ fn designs_without_saved_visibility_open_unchanged() {
     let (dir, path) = temp_design("legacy", "json");
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":4,"width":4,"height":4,"body_name":"Base"}));
-    let mut legacy: Value = serde_json::from_slice(&solidcraft_io::write_design(&s.doc)).unwrap();
+    let mut legacy: Value = serde_json::from_slice(&solidcraft_io::write_design(&s.doc).unwrap()).unwrap();
     assert!(legacy.get("visibility").is_none(), "nothing hidden: no visibility in the file");
     legacy["format"] = json!("solidcraft/15");
     std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();

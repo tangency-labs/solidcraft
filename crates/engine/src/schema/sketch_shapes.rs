@@ -26,7 +26,7 @@ fn point_arg_schema(generator: &mut SchemaGenerator, snaps: bool) -> Schema {
     let mut forms = vec![
         json!(point),
         json!({
-            "description": "[x, y] where a coordinate may be an expression over the design's parameters, such as [\"w / 2\", 5]: a point that follows the parameters and is fixed; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point.",
+            "description": "[x, y] where a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"), such as [\"w / 2\", 5]: a point that follows the parameters and is fixed; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point.",
             "type": "array", "items": coordinate, "minItems": 2, "maxItems": 2
         }),
         json!({"description": "An existing point's id such as \"l1.end\" or \"p3\", or a snap such as \"mid:l1\".", "type": "string"}),
@@ -39,7 +39,7 @@ fn point_arg_schema(generator: &mut SchemaGenerator, snaps: bool) -> Schema {
         forms.push(json!({"description": "A point on a model edge [x, y, z] in mm, projected into the sketch.", "type": "object", "properties": {"on_edge": model}, "required": ["on_edge"]}));
         "A sketch point: [x, y] in mm (a coordinate may be an expression), an existing point's id (\"l1.end\"), {ref} or {at}, a snap as text (\"mid:<line>\", \"on:<curve>:x,y\", \"x:<a>+<b>:x,y\", \"vertex:x,y,z\"), or a model {vertex} or {on_edge}."
     } else {
-        "A sketch point: [x, y] in mm (a coordinate may be an expression over the design's parameters), an existing point's id such as \"l1.end\", or {ref} or {at}."
+        "A sketch point: [x, y] in mm (a coordinate may be an expression over the design's parameters or over another point's coordinate, \"p1.x\"), an existing point's id such as \"l1.end\", or {ref} or {at}."
     };
     json_schema!({"description": description, "anyOf": forms})
 }
@@ -207,7 +207,7 @@ impl JsonSchema for PointOrSnap {
         let coordinate = generator.subschema_for::<LengthExpr>();
         let model = generator.subschema_for::<Point3>();
         json_schema!({
-            "description": "A point to make: [x, y] in mm (a coordinate may be an expression over the design's parameters: the point is then fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point), or a snap that makes it and holds it: \"mid:<line>\" (the line's midpoint), \"on:<curve>:x,y\" (on the curve, near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves, near x,y), \"vertex:x,y,z\" or {vertex: [x,y,z]} (a model vertex, projected) or {on_edge: [x,y,z]} (a point on a model edge, projected). An existing point's id is not taken.",
+            "description": "A point to make: [x, y] in mm (a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the point is then fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point), or a snap that makes it and holds it: \"mid:<line>\" (the line's midpoint), \"on:<curve>:x,y\" (on the curve, near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves, near x,y), \"vertex:x,y,z\" or {vertex: [x,y,z]} (a model vertex, projected) or {on_edge: [x,y,z]} (a point on a model edge, projected). An existing point's id is not taken.",
             "anyOf": [
                 point,
                 {"type": "array", "items": coordinate, "minItems": 2, "maxItems": 2},
@@ -663,8 +663,9 @@ pub struct PointResult {
 }
 
 /// A rectangle corner as `sketch::corner_arg` reads it: `[x, y]` or `{x, y}` of numbers, or
-/// `[x, y]` with a coordinate typed as an expression over the design's parameters. Not a point's
-/// id or a snap. Kept as given, for the handler, which evaluates the expressions.
+/// `[x, y]` with a coordinate typed as an expression over the design's parameters or over
+/// another point's coordinate. Not a point's id or a snap. Kept as given, for the handler,
+/// which evaluates the expressions.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CornerPoint(pub Value);
 
@@ -692,7 +693,7 @@ impl JsonSchema for CornerPoint {
         let point = generator.subschema_for::<Point2>();
         let coordinate = generator.subschema_for::<LengthExpr>();
         json_schema!({
-            "description": "A corner: [x, y] or {x, y} in mm, or [x, y] where a coordinate is an expression over the design's parameters, such as [\"w / 2\", 5]: the corner is then fixed and follows the parameters; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner. Not a point's id or a snap.",
+            "description": "A corner: [x, y] or {x, y} in mm, or [x, y] where a coordinate is an expression over the design's parameters and the sketch's other points (\"p1.x\"), such as [\"w / 2\", 5]: the corner is then fixed and follows the parameters; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner. Not a point's id or a snap.",
             "anyOf": [
                 point,
                 {"type": "array", "items": coordinate, "minItems": 2, "maxItems": 2}

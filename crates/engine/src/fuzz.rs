@@ -91,10 +91,10 @@ fn classify(e: &EngineError) -> Outcome {
         // A failed boolean is a failure even when it says "not supported": those are the cases
         // to fix. Features the kernel doesn't do yet are limitations.
         // Picks the generator got wrong (a centroid off its face).
-        EngineError::Other(_) if msg.starts_with("invalid input") => Outcome::new("rejected", msg),
-        EngineError::Other(_) if msg.contains("boolean") => Outcome::new("failed", msg),
-        EngineError::Other(_) if msg.contains("not supported") || msg.contains("only ") => Outcome::new("unsupported", msg),
-        EngineError::Other(_) | EngineError::Plugin(_) | EngineError::PluginFailed(_) => Outcome::new("failed", msg),
+        EngineError::Other(_) | EngineError::Feature(_) if msg.starts_with("invalid input") => Outcome::new("rejected", msg),
+        EngineError::Other(_) | EngineError::Feature(_) if msg.contains("boolean") => Outcome::new("failed", msg),
+        EngineError::Other(_) | EngineError::Feature(_) if msg.contains("not supported") || msg.contains("only ") => Outcome::new("unsupported", msg),
+        EngineError::Other(_) | EngineError::Feature(_) | EngineError::Plugin(_) | EngineError::PluginFailed(_) => Outcome::new("failed", msg),
     }
 }
 

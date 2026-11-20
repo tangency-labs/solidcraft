@@ -1717,9 +1717,6 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
         // Every typed body reference, those outside `BODY_KEYS` too: a sweep along a body's
         // edges (`path_body`) or a mutual surface trim (`with`) (#17386).
         f.kind.remap_bodies(&BTreeMap::from([(old.clone(), name.to_string())]));
-        if let FeatureKind::Sketch { plane, .. } = &mut f.kind {
-            solidcraft_doc::sheet::rename_plane_sheet_body(plane, &old, name);
-        }
         if let FeatureKind::Sketch { plane, sketch } = &mut f.kind
             && let Some(anchor) = super::sketch::face::anchor_mut(plane)
             && anchor.target.body == old
@@ -1884,13 +1881,9 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     s.pending_moves = trial.pending_moves;
 
     let attachment = s.doc.feature(id).and_then(|feature| match &feature.kind {
-        FeatureKind::Sketch { plane, .. } => Some(if super::sketch::face::anchor(plane).is_some() {
-            RedefineAttachment::ExactFace
-        } else if solidcraft_doc::sheet::plane_sheet_face(plane).is_some() {
-            RedefineAttachment::SheetFace
-        } else {
-            RedefineAttachment::Fixed
-        }),
+        FeatureKind::Sketch { plane, .. } => {
+            Some(if super::sketch::face::anchor(plane).is_some() { RedefineAttachment::ExactFace } else { RedefineAttachment::Fixed })
+        }
         _ => None,
     });
     let note = frame.and_then(|f| super::sketch::frame_note(Some(f), &placement)).map(str::to_string);
@@ -2921,6 +2914,39 @@ mod tests {
         let placed = state.sketch(sketch).unwrap().plane;
         assert!(placed.normal().z > 1.0 - 1e-6, "{placed:?}");
         assert!((placed.origin.z + 5.0).abs() < 1e-6, "{placed:?}");
+    }
+
+    /// #18260: a sketch redefined onto a plane parallel to the one it is on moves straight along
+    /// the normal: the midplane between the box's two XY-parallel faces takes the world XY frame,
+    /// so the sketch keeps its world XY and only its Z moves to the midplane.
+    #[test]
+    fn redefining_onto_a_parallel_midplane_keeps_the_world_xy() {
+        use solidcore_record::Vec3;
+        use solidcraft_geom::prelude::*;
+
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Box"}));
+        run(&mut s, "construct.plane.midplane", json!({"a": {"face": [20, 15, 20]}, "b": {"face": [20, 15, 0]}, "name": "Mid"}));
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 7], "p1": [12, 13]}));
+        run(&mut s, "sketch.spline.fit_point", json!({"points": [[5, 7], [8, 11], [12, 13]]}));
+        run(&mut s, "sketch.finish", json!({}));
+
+        let world_points = |s: &Session| -> Vec<(String, Vec3)> {
+            let state = s.model.state();
+            let resolved = state.sketch(sk).unwrap();
+            resolved.sketch.points.iter().map(|point| (point.id.clone(), resolved.plane.to_world(point.pos))).collect()
+        };
+
+        let before = world_points(&s);
+        assert!(before.len() > 4, "the sketch has its four lines and its spline: {before:?}");
+        run(&mut s, "sketch.redefine", json!({"sketch": sk, "plane": "Mid"}));
+        let after = world_points(&s);
+        assert_eq!(before.len(), after.len(), "the redefine keeps the sketch's points: {before:?} {after:?}");
+        for ((id, before), (_, after)) in before.iter().zip(after.iter()) {
+            assert!((after.x - before.x).abs() < 1e-9 && (after.y - before.y).abs() < 1e-9, "{id} keeps its world XY: {before:?} -> {after:?}");
+            assert!((after.z - 10.0).abs() < 1e-9, "{id} moves up to the midplane: {before:?} -> {after:?}");
+        }
     }
 
     #[test]

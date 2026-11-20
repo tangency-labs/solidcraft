@@ -31,6 +31,8 @@ mod attributed;
 mod contract;
 #[path = "blend_fillet_executive_p3/end_to_end.rs"]
 mod end_to_end;
+#[cfg(test)]
+pub(crate) use end_to_end::result_body_of;
 #[path = "blend_fillet_executive_p3/preview.rs"]
 mod preview;
 #[path = "blend_fillet_executive_p3/surface_bodies.rs"]
@@ -933,6 +935,7 @@ fn rust_with_fixes(
         fit_kind: solidcore::blend::fillet_executive::FitKind::Radius,
         fit_setback: -1.0,
         rollover_adjusting: false,
+        rolled_beside_band: false,
     };
     // The executive constructor sets this after constructing its SmMerge base.
     executive.intersector.ignore_tangency = true;

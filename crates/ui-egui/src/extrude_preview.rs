@@ -169,6 +169,8 @@ impl StraightPreview {
             error: crate::preview::extrusion_target_error(&app.session, commands, &app.session.model.state()),
             bounds,
             layer: None,
+            joints: Vec::new(),
+            plugin_view: None,
         }))
     }
 }

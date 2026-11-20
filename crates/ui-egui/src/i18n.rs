@@ -15,6 +15,7 @@ static GERMAN: Catalog = Catalog::new("de", "Deutsch", include_str!(concat!(env!
 /// English in UK spelling: only the messages whose spelling differs; the rest are English's.
 static ENGLISH_UK: Catalog = Catalog::new("en-GB", "English (UK)", include_str!(concat!(env!("OUT_DIR"), "/locales/en-GB.json")));
 static SPANISH: Catalog = Catalog::new("es", "Español (España)", include_str!(concat!(env!("OUT_DIR"), "/locales/es.json")));
+static BASQUE: Catalog = Catalog::new("eu", "Euskara", include_str!(concat!(env!("OUT_DIR"), "/locales/eu.json")));
 static FINNISH: Catalog = Catalog::new("fi", "Suomi", include_str!(concat!(env!("OUT_DIR"), "/locales/fi.json")));
 static FRENCH: Catalog = Catalog::new("fr", "Français", include_str!(concat!(env!("OUT_DIR"), "/locales/fr.json")));
 static GALICIAN: Catalog = Catalog::new("gl", "Galego", include_str!(concat!(env!("OUT_DIR"), "/locales/gl.json")));
@@ -55,6 +56,7 @@ pub const LOCALES: &[&Catalog] = &[
     &GERMAN,
     &ENGLISH_UK,
     &SPANISH,
+    &BASQUE,
     &FINNISH,
     &FRENCH,
     &GALICIAN,
@@ -108,8 +110,9 @@ pub trait LocaleNames {
     /// multi-word Hebrew or Arabic name reads from the right like the interface's own labels (#10471).
     fn given_name(self, text: &str) -> String;
     /// Evaluation errors stay English for scripts; the empty Cut/Intersect hint that names
-    /// another component, a feature's request to reselect a reference it lost, and an open
-    /// Stitch result are translated where they are shown. Other text is returned unchanged.
+    /// another component, a feature's request to reselect a reference it lost, an open Stitch
+    /// result and a profile pick with too many curves are translated where they are shown. Other
+    /// text is returned unchanged.
     fn diagnostic(self, text: &str) -> String;
     /// Translate generated browser names and labels, preserving custom names otherwise.
     fn dynamic(self, text: &str) -> String;
@@ -162,6 +165,11 @@ impl LocaleNames for Locale {
             let body = self.given_name(body);
             let message = self.format("diagnostic.stitch_open_edges", &[("body", &body), ("count", count)]);
             return format!("{before}{message}{after}");
+        }
+        // A profile pick with more curves than a design keeps track of, after anything naming
+        // the feature or command in front.
+        if let Some(before) = text.strip_suffix(solidcraft_engine::doc::WHOLE_PROFILE_TOO_MANY_CURVES) {
+            return format!("{before}{}", self.text("diagnostic.whole_profile_too_many_curves"));
         }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)
@@ -234,6 +242,15 @@ pub fn tr_engine_error(error: &str) -> String {
     use solidcraft_ui_text::{format, tr};
     // `EngineError::BadParams` carries `invalid parameters for `<command>`: ` in front.
     let text = error.strip_prefix("invalid parameters for `").and_then(|rest| rest.split_once("`: ")).map_or(error, |(_, text)| text);
+    for (english, id) in [
+        ("Boundary Fill cell points must be away from tool boundaries", "boundary_fill.error.boundary_point"),
+        ("Boundary Fill needs closed solid tools; open surface and mesh tools are not supported", "boundary_fill.error.closed_tools"),
+        ("Boundary Fill did not produce a closed solid cell", "boundary_fill.error.open_cell"),
+    ] {
+        if text == english {
+            return tr(id).to_string();
+        }
+    }
     if let Some((name, ids)) = text
         .strip_prefix("ambiguous component `")
         .and_then(|rest| rest.strip_suffix("; use a numeric component ID"))
@@ -347,6 +364,23 @@ mod tests {
         assert_eq!(super::tr_engine_error(&message), expected);
         assert_eq!(super::tr_engine_error(&format!("invalid parameters for `component.delete`: {message}")), expected);
         assert_eq!(super::tr_engine_error("another error"), "another error");
+    }
+
+    #[test]
+    fn boundary_fill_refusals_are_translated() {
+        install();
+        let _scope = scope("de");
+        for (english, id) in [
+            ("Boundary Fill cell points must be away from tool boundaries", "boundary_fill.error.boundary_point"),
+            ("Boundary Fill needs closed solid tools; open surface and mesh tools are not supported", "boundary_fill.error.closed_tools"),
+            ("Boundary Fill did not produce a closed solid cell", "boundary_fill.error.open_cell"),
+        ] {
+            assert_eq!(Locale::for_language("en").text(id), english);
+            let expected = Locale::for_language("de").text(id);
+            assert_ne!(expected, english);
+            assert_eq!(super::tr_engine_error(english), expected);
+            assert_eq!(super::tr_engine_error(&format!("invalid parameters for `solid.boundary_fill`: {english}")), expected);
+        }
     }
 
     #[test]
@@ -663,6 +697,20 @@ mod tests {
                 assert!(translated.contains(feature) && translated.contains(shown), "{language}: {translated}");
                 assert!(!translated.contains(" more"), "the count of the rest is translated too: {language}: {translated}");
             }
+        }
+    }
+
+    #[test]
+    fn a_profile_pick_with_too_many_curves_reads_in_the_interface_language() {
+        install();
+        let message = format!("solid.extrude: {}", solidcraft_engine::doc::WHOLE_PROFILE_TOO_MANY_CURVES);
+        let english = Locale::for_language("en").diagnostic(&message);
+        assert_eq!(english, format!("solid.extrude: {}", Locale::for_language("en").text("diagnostic.whole_profile_too_many_curves")));
+        assert!(english.contains("Pick fewer profiles"), "{english}");
+        for language in ["ar", "de", "he", "ja", "ko", "pt-BR", "vi", "zh"] {
+            let translated = Locale::for_language(language).diagnostic(&message);
+            assert!(translated.starts_with("solid.extrude: "), "{language}: {translated}");
+            assert_ne!(translated, english, "{language}: the refusal must be translated");
         }
     }
 

@@ -150,7 +150,7 @@ fn catalog_appearance_copy_keeps_mass_and_survives_undo_and_cold_reopen_without_
     assert_eq!(s.undo.len(), undo + 1);
     assert_eq!(s.doc.appearances.bodies["Body1"].name, "Warm oak colour");
     assert_eq!(s.execute("component.properties", &json!({})).unwrap()["total"]["mass_g"].as_f64().unwrap(), before);
-    let saved = solidcraft_io::write_design(&s.doc);
+    let saved = solidcraft_io::write_design(&s.doc).unwrap();
     std::fs::remove_file(&file.0).unwrap();
     s.execute("edit.undo", &json!({})).unwrap();
     assert!(s.doc.appearances.bodies.is_empty());
@@ -172,7 +172,7 @@ fn catalog_physical_copy_preserves_exact_look_label_and_is_one_transaction() {
     assert_eq!(s.doc.user_materials[0].appearance.as_ref().unwrap().name, "Timber tint");
     let mass = s.execute("component.properties", &json!({})).unwrap()["total"]["mass_g"].as_f64().unwrap();
     assert!((mass - 0.7).abs() < 1e-8);
-    let saved = solidcraft_io::write_design(&s.doc);
+    let saved = solidcraft_io::write_design(&s.doc).unwrap();
     std::fs::remove_file(&file.0).unwrap();
     let mut reopened = Session::new(solidcraft_io::read_design(&saved).unwrap());
     let actual = reopened.execute("component.properties", &json!({})).unwrap()["total"]["mass_g"].as_f64().unwrap();
@@ -335,7 +335,7 @@ fn rich_appearance_copy_preserves_product_response_and_mass_without_source_file(
     assert!(Arc::ptr_eq(&scene.meshes[0].mesh, &after.meshes[0].mesh));
     assert_eq!(after.meshes[0].surface.unwrap().metallic(), 1.0);
     assert_eq!(s.execute("component.properties", &json!({})).unwrap(), mass);
-    let saved = solidcraft_io::write_design(&s.doc);
+    let saved = solidcraft_io::write_design(&s.doc).unwrap();
     std::fs::remove_file(&file.0).unwrap();
     s.execute("edit.undo", &json!({})).unwrap();
     assert!(s.doc.appearances.bodies.is_empty());
@@ -363,7 +363,7 @@ fn rich_material_copy_retains_engineering_card_label_optics_and_explicit_mass_de
     assert_eq!(material.density, 0.8);
     let mass = s.execute("component.properties", &json!({})).unwrap()["total"]["mass_g"].as_f64().unwrap();
     assert!((mass - 0.8).abs() < 1e-8);
-    let saved = solidcraft_io::write_design(&s.doc);
+    let saved = solidcraft_io::write_design(&s.doc).unwrap();
     std::fs::remove_file(&file.0).unwrap();
     let reopened = Session::new(solidcraft_io::read_design(&saved).unwrap());
     assert_eq!(reopened.doc.user_materials, s.doc.user_materials);

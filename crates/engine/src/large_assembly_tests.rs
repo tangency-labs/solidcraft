@@ -98,7 +98,7 @@ fn generated_assembly_opens_with_every_body_in_place() {
         }
     }
     // A saved copy opens to the same model.
-    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design(&doc)).unwrap();
+    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design(&doc).unwrap()).unwrap();
     assert_eq!(measured(&mut Session::new(reopened)), after);
 }
 
@@ -107,7 +107,7 @@ fn generated_assembly_opens_with_every_body_in_place() {
 #[ignore = "benchmark: run with --release --ignored --nocapture"]
 fn bench_generated_assembly() {
     let parts = std::env::var("SOLIDCRAFT_BENCH_PARTS").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
-    let bytes = solidcraft_io::write_design(&generated_assembly(parts));
+    let bytes = solidcraft_io::write_design(&generated_assembly(parts)).unwrap();
     let ms = |t: std::time::Instant| t.elapsed().as_secs_f64() * 1000.0;
     let t = std::time::Instant::now();
     let doc = solidcraft_io::read_design(&bytes).unwrap();
