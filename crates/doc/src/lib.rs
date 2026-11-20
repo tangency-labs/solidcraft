@@ -8,6 +8,7 @@
 pub mod appearance;
 pub mod appearance_pack;
 mod assembly;
+pub mod blob;
 mod body_transfer;
 mod body_transfer_sheet;
 pub mod bom;
@@ -123,8 +124,8 @@ pub use assembly::{
 pub use document::*;
 pub use eval::cell_grid::{MAX_CUT_CELLS, SLOW_CUT_CELLS};
 pub use eval::{
-    EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PendingChecks, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch,
-    ThreadInfo, blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state,
+    EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PendingChecks, PlacedBodies, PreparedMeshImport, RevolveExtent, SavedModel,
+    SolvedSketch, ThreadInfo, blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state,
     from_slope_height, hole_direction_at, hole_on_surface, hole_start, import_body_names, join_pieces_added, keep_one_sided_direction, map_wire,
     metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices, refined_symmetric_uses_half_walls, revolve_extent,
     revolve_extent_for_handle, revolve_extent_with_convention, same_extrude_from_face, select_profiles, sketch_hole_direction, sketch_line_plane,

@@ -1589,12 +1589,9 @@ impl SurfaceSheet {
             b.base.x = -b.base.x;
             b.axis.x = -b.axis.x;
         }
-        // Each panel's own sketch lines and its rims as its own layout would keep them: each edge
-        // where its chart turned it, the material still on its left.
+        // Each panel's own sketch lines as its own layout would keep them: each edge where its
+        // chart turned it, the material still on its left.
         for (_, _, a, b) in &mut self.sketch_curves {
-            (*a, *b) = (f(*b), f(*a));
-        }
-        for (_, a, b, _) in &mut self.rims {
             (*a, *b) = (f(*b), f(*a));
         }
         // The holes' loops and their sketch curves as drawn, where the chart turned them: each
@@ -1882,7 +1879,67 @@ impl SurfaceSheet {
         let edge = self
             .free_edge_at(pick)?
             .ok_or_else(|| DocError::Invalid("pick a free edge of the sheet (one no bend, seam or cut runs along)".into()))?;
+        let edge = self.edge_left_by_cuts(edge, pick)?;
         self.add_hem_on(edge, length, gap, flip)
+    }
+
+    /// What the sheet's cuts leave of the free edge `edge` (see [`Cut`]: cuts that cross a joint,
+    /// which the panels' outlines don't show): the stretch of it clear of them nearest `pick` (the
+    /// body's coordinates), of two as near the first along it, as the edge of the same panel. The
+    /// cuts are drawn in the flat; the edge is read there just inside its material, so a cut that
+    /// only touches its line from outside leaves it whole. Refused where they took all of it (#17544).
+    pub fn edge_left_by_cuts(&self, edge: FreeEdge, pick: Vec3) -> Result<FreeEdge> {
+        if self.sheet.cuts.is_empty() {
+            return Ok(edge);
+        }
+        let (a, b, d) = straight(&edge)?;
+        let len = a.dist(b);
+        let dev = self.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
+        let Some(back) = dev.placements.get(edge.panel).copied().flatten().map(|p| p.inverse()) else { return Ok(edge) };
+        let cuts: Vec<Region2> =
+            self.sheet.cuts.iter().filter_map(|c| dev.placements.get(c.panel).copied().flatten().map(|p| p.then(&back).region(&c.region))).collect();
+        // Just inside the material, which lies on the edge's left from `a` to `b`.
+        let inset = d.perp() * (len * 1e-7).max(1e-9);
+        let (a_in, b_in) = (a + inset, b + inset);
+        let line = [Seg2::Line { a: a_in, b: b_in }];
+        let mut breaks = vec![0.0, len];
+        for r in &cuts {
+            for l in std::iter::once(&r.outer).chain(&r.holes) {
+                breaks.extend(solidcraft_develop::crossings(&line, &l.segs).iter().map(|c| (c.4 - a_in).dot(d)));
+            }
+        }
+        breaks.retain(|s| (0.0..=len).contains(s));
+        breaks.sort_by(f64::total_cmp);
+        let mut left: Vec<(f64, f64)> = Vec::new();
+        for w in breaks.windows(2) {
+            let (lo, hi) = (w[0], w[1]);
+            if !(hi - lo > len * 1e-9) {
+                continue;
+            }
+            let m = a_in + d * ((lo + hi) / 2.0);
+            if cuts.iter().any(|r| crate::sheet_surface_cuts::region_holds(r, m)) {
+                continue;
+            }
+            match left.last_mut() {
+                Some(last) if last.1 >= lo => last.1 = hi,
+                _ => left.push((lo, hi)),
+            }
+        }
+        if left.first().is_some_and(|&(lo, hi)| lo <= 0.0 && hi >= len) {
+            return Ok(edge);
+        }
+        // The pick, in the edge's panel's chart: as far along the edge as it lies.
+        let folded = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places)?;
+        let at = folded.places.get(edge.panel).copied().flatten().map_or(0.0, |place| {
+            let q = place.inverse().point(pick);
+            (Vec2::new(q.x, q.y) - a).dot(d)
+        });
+        let away = |s: &(f64, f64)| (s.0 - at).max(at - s.1).max(0.0);
+        let (lo, hi) = left
+            .into_iter()
+            .min_by(|x, y| away(x).total_cmp(&away(y)))
+            .ok_or_else(|| DocError::Invalid("a cut has taken that edge away; pick an edge the sheet still has".into()))?;
+        Ok(FreeEdge { a: a + d * lo, b: a + d * hi, ..edge })
     }
 
     /// [`SurfaceSheet::add_hem`] on an edge already found.

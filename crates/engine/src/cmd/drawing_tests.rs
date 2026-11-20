@@ -195,8 +195,8 @@ fn a_template_file_saves_and_starts_drawings() {
     let applied = run(&mut s, "drawing.template.apply", json!({"template": path, "dry_run": true}));
     assert_eq!(applied["changed"], json!([]), "the file now holds this drawing's own format: {applied}");
     for (command, p, why) in [
-        ("drawing.template.save", json!({"path": folder.path("company.txt")}), "`path` must be a .json file"),
-        ("drawing.template.save", json!({}), "`path` must be a .json file"),
+        ("drawing.template.save", json!({"path": folder.path("company.txt")}), "`path` must be a .json or .scdwg file"),
+        ("drawing.template.save", json!({}), "`path` must be a .json or .scdwg file"),
         ("drawing.create", json!({"template": folder.path("missing.json")}), "template `"),
         ("drawing.create", json!({"template": "company"}), "no template `company`"),
     ] {

@@ -49,8 +49,9 @@ pub trait GnScalar:
     /// as the sum of the expansions of `S` and of `r N`. The two are the same algebra; an
     /// enclosure (an interval or a Taylor model) keeps the cancellation between `S` and
     /// `r N` only in the first, which matters where the offset nears the face's focal
-    /// distance (a cylinder's chamfer near its radius). The floating-point jets keep the
-    /// sum, as the fork computes them.
+    /// distance (a cylinder's chamfer near its radius), and it takes the first only there
+    /// (`station::offset_near_focal`). The floating-point jets keep the sum, as the fork
+    /// computes them.
     const JOINT_OFFSET: bool = false;
     /// `T(double)`.
     fn of(d: f64) -> Self;

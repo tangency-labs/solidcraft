@@ -91,6 +91,8 @@ draft
   face points: [0, 0, 0]
 construction_plane
   moves: plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2]
+construction_plane_square_to_line
+  moves: plane.line.at[0], plane.line.at[1], plane.line.at[2], plane.point.p[0], plane.point.p[1], plane.point.p[2]
 split
   moves: plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2], tool.point[0], tool.point[1], tool.point[2]
   face points: [0, 0, 0]

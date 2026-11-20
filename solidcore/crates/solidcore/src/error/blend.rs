@@ -18,7 +18,7 @@
 //! | [`BlendFailure::RemovalRefused`]       | the reason's ([`removal_class`]), 130 or 131  |
 //! | [`BlendFailure::StationDidNotConverge`]| [`ErrorKind::StationDidNotConverge`] (125)    |
 //! | [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`] | [`ErrorKind::TrimLeaks`] (126) |
-//! | [`BlendFailure::StageFailed`], [`BlendFailure::SkinMeasureNotFinite`] | [`ErrorKind::StageFailed`] (127) |
+//! | [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinMeasureNotFinite`] | [`ErrorKind::StageFailed`] (127) |
 //! | [`BlendFailure::SkinPastStationCap`]   | [`ErrorKind::NotWithinTolerance`] (9)         |
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
 //! | [`BlendFailure::CreasePieceEndUnbuildable`] | [`ErrorKind::Unsupported`] (5)           |
@@ -33,7 +33,7 @@
 //!
 //! | Rust                                   | Status difftest compares          |
 //! |----------------------------------------|-----------------------------------|
-//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`] | `SM_ERR` |
+//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`]               | `SM_ERR`                          |
 //! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`            |
@@ -50,8 +50,10 @@
 //! moved onto it. Each keeps the kind of its status, as before the record, and reads as
 //! neither a defect nor a refusal ([`BlendFailure::is_phrase`]); its phrase stays in its
 //! message. They go class by class: a site that has a finer cause moves to it, and one that
-//! has none to [`BlendFailure::StageFailed`], built on purpose. A test counts the library
-//! sites that build a phrase cause, per file, and lets the count only fall.
+//! is the kernel's fault to [`BlendFailure::Defect`], with its reason. A test counts the
+//! library sites that build a phrase cause, per file, and lets the count only fall.
+//! [`BlendFailure::StageFailed`] is the form of a defect not yet reviewed, also counted per
+//! file. The conversion guide: `docs/failure-codes-and-reproduction.md` §6.
 //!
 //! Deviations: not upstream. The failure's `operation` path says which routine. No cause
 //! names an entity of its own: a failure is at the entity the site it replaces named
@@ -104,8 +106,17 @@ pub enum BlendFailure {
     TrimLoopDoesNotSeparate,
     /// A stage of the blend failed with no reason the kernel names: a defect. The failure
     /// holds the operation, the status (for the goldens only) and where in solidcore's source
-    /// it was built ([`Failure::origin`]).
+    /// it was built ([`Failure::origin`]). The form not yet reviewed: new code builds
+    /// [`BlendFailure::Defect`], a named cause or a refusal instead.
     StageFailed,
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
     /// A variable round's skin of balls' touch circles was still measured farther than
     /// `asked` from its balls when its refinement reached its most rounds or stations
     /// (#15256): the worst distance measured was `reached` (infinite where a span's section
@@ -441,6 +452,7 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
@@ -462,8 +474,8 @@ impl BlendFailure {
     /// class for [`BlendFailure::NoRoom`] ([`no_room_class`]) and
     /// [`BlendFailure::RemovalRefused`] ([`removal_class`]),
     /// [`ErrorKind::StationDidNotConverge`], [`ErrorKind::TrimLeaks`] for an open or leaking
-    /// trim loop, [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`] and
-    /// [`BlendFailure::SkinMeasureNotFinite`], [`ErrorKind::NotWithinTolerance`] for
+    /// trim loop, [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`],
+    /// [`BlendFailure::Defect`] and [`BlendFailure::SkinMeasureNotFinite`], [`ErrorKind::NotWithinTolerance`] for
     /// [`BlendFailure::SkinPastStationCap`] and for a surface not certified within its
     /// tolerance in its work budget ([`BlendFailure::NotCertified`]), and
     /// [`ErrorKind::BallsFold`] for [`BlendFailure::BallsNest`], and
@@ -477,7 +489,9 @@ impl BlendFailure {
             Self::RemovalRefused(reason) => removal_class(*reason),
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
-            Self::StageFailed | Self::SkinMeasureNotFinite { .. } => ErrorKind::StageFailed,
+            Self::StageFailed | Self::Defect { .. } | Self::SkinMeasureNotFinite { .. } => {
+                ErrorKind::StageFailed
+            }
             Self::SkinPastStationCap { .. } | Self::NotCertified { .. } => {
                 ErrorKind::NotWithinTolerance
             }
@@ -510,6 +524,7 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
@@ -544,6 +559,7 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
@@ -591,6 +607,7 @@ impl core::fmt::Display for BlendFailure {
                 write!(f, "{}: the trim loop does not separate", self.class())
             }
             Self::StageFailed => write!(f, "{}", self.class()),
+            Self::Defect { why } => write!(f, "{}: {why}", self.class()),
             Self::SkinPastStationCap {
                 asked,
                 reached,
@@ -1000,6 +1017,7 @@ mod tests {
             (BlendFailure::TrimLoopOpen, ErrorKind::TrimLeaks),
             (BlendFailure::TrimLoopDoesNotSeparate, ErrorKind::TrimLeaks),
             (BlendFailure::StageFailed, ErrorKind::StageFailed),
+            (BlendFailure::Defect { why: "x" }, ErrorKind::StageFailed),
         ];
         for (cause, class) in cases {
             assert_eq!(cause.class(), class, "{cause:?}");
@@ -1090,6 +1108,34 @@ mod tests {
         assert_eq!(stage.kind(), ErrorKind::StageFailed);
         assert_eq!(stage.kind().code(), 127);
         assert!(stage.is_defect() && !stage.is_refusal() && !stage.sized());
+    }
+
+    /// A reviewed defect is of class 127 with the stage failure's status, and says why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why =
+            "the station solve was started off its own previous station, which it never leaves";
+        let defect = BlendFailure::Defect { why };
+        assert!(!defect.is_phrase() && defect.replaces_upstream_status());
+        for status in [SM_ERR, SM_ERR_NULL_POINTER] {
+            let e = Failure::new("blend::op", defect)
+                .with_status(status)
+                .into_error();
+            super::super::tests::assert_defect(
+                &e,
+                &Failure::new("blend::op", BlendFailure::StageFailed)
+                    .with_status(status)
+                    .into_error(),
+                "blend::op",
+                status,
+                &format!("blend::op: stage_failed: {why}"),
+            );
+            assert_eq!(e.blend_failure(), Some(&defect));
+        }
+        assert_eq!(
+            SolidError::blend("blend::op", defect).sm_status(),
+            Some(SM_ERR)
+        );
     }
 
     #[test]
@@ -1296,44 +1342,56 @@ mod tests {
         );
     }
 
-    /// What builds a phrase cause in source: the helpers, and each phrase cause by name. A
-    /// new cause is placed here (the match has no wildcard), so the ratchet below counts
-    /// every phrase cause there is.
-    fn phrase_needle(cause: &BlendFailure) -> Option<&'static str> {
+    /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
+    /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
+    /// raising this number; the test below then fails until `causes` holds the new variant.
+    const VARIANTS: usize = 22;
+
+    /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
+    /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
+    /// every variant there is.
+    fn variant_index_and_phrase_name(cause: &BlendFailure) -> (usize, Option<&'static str>) {
         match cause {
-            BlendFailure::NoRoom(_)
-            | BlendFailure::StationDidNotConverge { .. }
-            | BlendFailure::TrimLoopOpen
-            | BlendFailure::TrimLoopDoesNotSeparate
-            | BlendFailure::RemovalRefused(_)
-            | BlendFailure::StageFailed
-            | BlendFailure::SkinPastStationCap { .. }
-            | BlendFailure::SkinMeasureNotFinite { .. }
-            | BlendFailure::BallsNest { .. }
-            | BlendFailure::CreasePieceEndUnbuildable { .. }
-            | BlendFailure::BandInputMissing(_)
-            | BlendFailure::NotCertified { .. } => None,
-            BlendFailure::Failed(_) => Some("BlendFailure::Failed("),
-            BlendFailure::Missing(_) => Some("BlendFailure::Missing("),
-            BlendFailure::InvalidValue(_) => Some("BlendFailure::InvalidValue("),
-            BlendFailure::Inconsistent(_) => Some("BlendFailure::Inconsistent("),
-            BlendFailure::BadIntersections(_) => Some("BlendFailure::BadIntersections("),
-            BlendFailure::NotConverged(_) => Some("BlendFailure::NotConverged("),
-            BlendFailure::OutsideDomain(_) => Some("BlendFailure::OutsideDomain("),
-            BlendFailure::NotWithinTolerance(_) => Some("BlendFailure::NotWithinTolerance("),
-            BlendFailure::PassedOn { .. } => Some("BlendFailure::PassedOn {"),
+            BlendFailure::NoRoom(_) => (0, None),
+            BlendFailure::StationDidNotConverge { .. } => (1, None),
+            BlendFailure::TrimLoopOpen => (2, None),
+            BlendFailure::TrimLoopDoesNotSeparate => (3, None),
+            BlendFailure::RemovalRefused(_) => (4, None),
+            BlendFailure::StageFailed => (5, None),
+            BlendFailure::Defect { .. } => (6, None),
+            BlendFailure::SkinPastStationCap { .. } => (7, None),
+            BlendFailure::SkinMeasureNotFinite { .. } => (8, None),
+            BlendFailure::BallsNest { .. } => (9, None),
+            BlendFailure::CreasePieceEndUnbuildable { .. } => (10, None),
+            BlendFailure::BandInputMissing(_) => (11, None),
+            BlendFailure::NotCertified { .. } => (12, None),
+            BlendFailure::Failed(_) => (13, Some("Failed")),
+            BlendFailure::Missing(_) => (14, Some("Missing")),
+            BlendFailure::InvalidValue(_) => (15, Some("InvalidValue")),
+            BlendFailure::Inconsistent(_) => (16, Some("Inconsistent")),
+            BlendFailure::BadIntersections(_) => (17, Some("BadIntersections")),
+            BlendFailure::NotConverged(_) => (18, Some("NotConverged")),
+            BlendFailure::OutsideDomain(_) => (19, Some("OutsideDomain")),
+            BlendFailure::NotWithinTolerance(_) => (20, Some("NotWithinTolerance")),
+            BlendFailure::PassedOn { .. } => (21, Some("PassedOn")),
         }
     }
 
-    /// The blend sites not yet converted to a typed cause: the library code of the blend
-    /// routines builds exactly this many phrase causes (read by the scanner the bare-status
-    /// ratchet uses). A phrase cause is neither a defect nor a refusal, so this is the set of
-    /// blend failures nobody has classed yet, and it may only shrink: a change that converts
-    /// sites lowers the pin to the new count, and a new site builds a typed cause.
+    /// `causes` holds every variant once, `variant_index_and_phrase_name` names a cause exactly when it is a phrase cause, and the
+    /// `BlendFailure` variants the per-file scan (`phrase_sites::BLEND`) counts are exactly
+    /// those names, so the per-file pins in `error/phrase_sites.rs` see every phrase cause.
     #[test]
-    fn the_phrase_cause_sites_only_go_down() {
-        const PHRASE_CAUSE_SITES: usize = 903;
+    fn the_phrase_scan_lists_exactly_the_phrase_variants() {
+        use super::super::site_scan::Builder;
         use crate::blend::fillet_executive::NoRoomReason as R;
+        let scanned: Vec<&str> = super::super::phrase_sites::BLEND
+            .builders
+            .iter()
+            .filter_map(|b| match b {
+                Builder::Variant("BlendFailure", v) => Some(*v),
+                _ => None,
+            })
+            .collect();
         let causes = [
             BlendFailure::NoRoom(R::BallDoesNotFit),
             BlendFailure::StationDidNotConverge {
@@ -1365,6 +1423,7 @@ mod tests {
             BlendFailure::TrimLoopDoesNotSeparate,
             BlendFailure::RemovalRefused(RemovalRefusal::FaceGrowsPastDomain),
             BlendFailure::StageFailed,
+            BlendFailure::Defect { why: "x" },
             BlendFailure::NotCertified {
                 halvings: 0,
                 stations: 0,
@@ -1382,31 +1441,26 @@ mod tests {
                 status: SM_ERR,
             },
         ];
-        let mut needles = vec![
-            "SolidError::blend_failed(",
-            "SolidError::blend_missing(",
-            "SolidError::blend_invalid_value(",
-        ];
+        let mut names = Vec::new();
+        let mut indices = Vec::new();
         for cause in &causes {
-            let needle = phrase_needle(cause);
-            assert_eq!(needle.is_some(), cause.is_phrase(), "{cause:?}");
-            needles.extend(needle);
+            let (index, name) = variant_index_and_phrase_name(cause);
+            indices.push(index);
+            assert_eq!(name.is_some(), cause.is_phrase(), "{cause:?}");
+            names.extend(name);
         }
-        let per_file: Vec<(String, usize)> = super::super::bare_scan::library_files("blend", 100)
-            .into_iter()
-            .filter_map(|(relative, text)| {
-                let code = super::super::bare_scan::library_code(&text);
-                let n: usize = needles.iter().map(|n| code.matches(n).count()).sum();
-                (n > 0).then_some((relative, n))
-            })
-            .collect();
-        let found: usize = per_file.iter().map(|(_, n)| n).sum();
+        indices.sort_unstable();
         assert_eq!(
-            found, PHRASE_CAUSE_SITES,
-            "the blend routines build {found} phrase causes, pinned at {PHRASE_CAUSE_SITES}: \
-             the number may only go down. Converting sites to a typed cause lowers the pin to \
-             the new count; a new site builds a typed cause, not a phrase. Per file: \
-             {per_file:?}"
+            indices,
+            (0..VARIANTS).collect::<Vec<_>>(),
+            "`causes` must hold each BlendFailure variant exactly once"
+        );
+        names.sort_unstable();
+        let mut scanned = scanned;
+        scanned.sort_unstable();
+        assert_eq!(
+            scanned, names,
+            "phrase_sites::BLEND must list exactly the phrase variants of BlendFailure"
         );
     }
 }

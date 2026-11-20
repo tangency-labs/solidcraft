@@ -16,6 +16,11 @@
 //! | [`TopologyFailure::OutOfMemory`]     | `SM_ERR_OUT_OF_MEMORY`        |
 //! | [`TopologyFailure::DropFailed`]      | the drop's own recorded status |
 //! | [`TopologyFailure::JoinedVertexReaches`] | `SM_ERR` (not upstream, #15718) |
+//! | [`TopologyFailure::Defect`]              | `SM_ERR` (or the site's, through `with_status`) |
+//!
+//! [`TopologyFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
+//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
+//! not yet converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. A failure says in a phrase (or by its variant) what went
 //! wrong; the failure's `operation` path says which routine, and its entity is the one
@@ -66,13 +71,21 @@ pub enum TopologyFailure {
         /// The tolerance that fits, if any.
         fits_below: Option<f64>,
     },
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
 }
 
 impl TopologyFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) | Self::JoinedVertexReaches { .. } => SM_ERR,
+            Self::Failed(_) | Self::JoinedVertexReaches { .. } | Self::Defect { .. } => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
@@ -85,9 +98,13 @@ impl TopologyFailure {
     /// [`TopologyFailure::Missing`], [`ErrorKind::InvalidInput`] for
     /// [`TopologyFailure::InvalidValue`], the drop status's kind for
     /// [`TopologyFailure::DropFailed`], [`ErrorKind::Failed`] otherwise.
+    /// [`TopologyFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
-        ErrorKind::of_status(self.comparison_status())
+        match self {
+            Self::Defect { .. } => ErrorKind::StageFailed,
+            _ => ErrorKind::of_status(self.comparison_status()),
+        }
     }
 }
 
@@ -96,6 +113,7 @@ impl core::fmt::Display for TopologyFailure {
         match self {
             Self::Failed(what) | Self::InvalidValue(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::OutOfMemory(what) => write!(f, "out of memory for {what}"),
             Self::DropFailed { .. } => {
@@ -321,5 +339,113 @@ mod tests {
     #[test]
     fn the_topology_routines_build_no_bare_statuses() {
         super::super::bare_scan::assert_waiting("topology", 53, &[]);
+    }
+
+    /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
+    /// and says why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why = "the edge use the loop walk just reached has no loop use, which the B-rep's links always give";
+        let defect = TopologyFailure::Defect { why };
+        let op = "topology::op";
+        super::super::tests::assert_defect(
+            &SolidError::topology(op, defect),
+            &SolidError::topology(op, TopologyFailure::Failed("x")),
+            op,
+            SM_ERR,
+            &format!("{op}: stage_failed: {why}"),
+        );
+        let missing = Failure::new(op, defect)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error();
+        super::super::tests::assert_defect(
+            &missing,
+            &SolidError::topology(op, TopologyFailure::Missing("x")),
+            op,
+            SM_ERR_NULL_POINTER,
+            &format!("{op}: stage_failed: {why}"),
+        );
+        assert_eq!(missing.topology_failure(), Some(&defect));
+    }
+
+    /// The sites that build a topology phrase cause only fall:
+    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
+    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
+    /// files' counts here, and a file at 0 loses its line (the conversion guide:
+    /// `docs/failure-codes-and-reproduction.md` §6).
+    #[test]
+    fn the_topology_phrase_cause_sites_only_shrink() {
+        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
+        const PHRASES: Scan = Scan {
+            builders: &[
+                Builder::Variant("TopologyFailure", "Failed"),
+                Builder::Variant("TopologyFailure", "Missing"),
+                Builder::Variant("TopologyFailure", "InvalidValue"),
+                Builder::Variant("TopologyFailure", "Inconsistent"),
+                Builder::Variant("TopologyFailure", "OutOfMemory"),
+                Builder::Method("topology_failed", Some(1)),
+                Builder::Method("topology_missing", Some(1)),
+                Builder::Method("topology_invalid_value", Some(1)),
+                Builder::Shared(
+                    "solidcore/src/topology/trimming_tools",
+                    "invalid_value",
+                    Some(0),
+                ),
+            ],
+            wrappers: Wrappers::Phrase,
+        };
+        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
+        const PINNED: &[(&str, usize)] = &[
+            ("solidcore/src/topology/api_files.rs", 9),
+            ("solidcore/src/topology/api_projection.rs", 7),
+            ("solidcore/src/topology/brep/cutting.rs", 11),
+            ("solidcore/src/topology/brep/local_operation.rs", 5),
+            ("solidcore/src/topology/brep/mirror.rs", 2),
+            ("solidcore/src/topology/brep/p1.rs", 42),
+            ("solidcore/src/topology/brep/p10.rs", 10),
+            ("solidcore/src/topology/brep/p2.rs", 16),
+            ("solidcore/src/topology/brep/p3.rs", 47),
+            ("solidcore/src/topology/brep/p4.rs", 50),
+            ("solidcore/src/topology/brep/p5.rs", 61),
+            ("solidcore/src/topology/brep/p6.rs", 29),
+            ("solidcore/src/topology/brep/p7.rs", 13),
+            ("solidcore/src/topology/brep/p8.rs", 15),
+            ("solidcore/src/topology/brep/p9.rs", 18),
+            ("solidcore/src/topology/brep/planar_section.rs", 3),
+            ("solidcore/src/topology/brep/sheet.rs", 4),
+            ("solidcore/src/topology/brep/validation/assert_valid.rs", 1),
+            ("solidcore/src/topology/brep/validation/assert_valid/seams.rs", 1),
+            ("solidcore/src/topology/brep/validation/pointers.rs", 2),
+            ("solidcore/src/topology/brep/vertex_fans.rs", 6),
+            ("solidcore/src/topology/brep_cache.rs", 17),
+            ("solidcore/src/topology/brep_constructor.rs", 24),
+            ("solidcore/src/topology/brep_data.rs", 5),
+            ("solidcore/src/topology/brep_data_write.rs", 5),
+            ("solidcore/src/topology/database_io.rs", 3),
+            ("solidcore/src/topology/edge.rs", 7),
+            ("solidcore/src/topology/edgeuse/p1.rs", 2),
+            ("solidcore/src/topology/edgeuse/p2.rs", 4),
+            ("solidcore/src/topology/edgeuse/p3.rs", 12),
+            ("solidcore/src/topology/face/p1.rs", 24),
+            ("solidcore/src/topology/face/p2.rs", 10),
+            ("solidcore/src/topology/geometry_write.rs", 2),
+            ("solidcore/src/topology/loopuse.rs", 9),
+            ("solidcore/src/topology/part_file.rs", 1),
+            ("solidcore/src/topology/proto_topology/p1/owning_topology.rs", 6),
+            ("solidcore/src/topology/proto_topology/p1/proto.rs", 16),
+            ("solidcore/src/topology/proto_topology/p2.rs", 8),
+            ("solidcore/src/topology/proto_topology/p3.rs", 6),
+            ("solidcore/src/topology/shell.rs", 15),
+            ("solidcore/src/topology/topology_traverser.rs", 3),
+            ("solidcore/src/topology/trimming_tools.rs", 22),
+            ("solidcore/src/topology/trimming_tools/curve_loops.rs", 12),
+            ("solidcore/src/topology/vertex/corner.rs", 1),
+            ("solidcore/src/topology/vertexuse.rs", 10),
+        ];
+        assert_pinned(
+            "topology phrase-cause sites",
+            &crate_sites(&PHRASES),
+            PINNED,
+        );
     }
 }

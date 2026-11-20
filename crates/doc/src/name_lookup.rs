@@ -981,10 +981,9 @@ pub fn locate_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
 }
 
 fn locate_face_with(st: &ModelState, name: &str, p: Vec3, round: bool) -> Option<FaceHit> {
-    if crate::sheet::split_sheet_face_name(name).is_some() {
-        return sheet_locate(st, name, p).ok();
-    }
-    if legacy_name(name).is_some() {
+    // A `sheet:<body>:<panel>:<side>` name a design saved before keeps finds no face: no sheet
+    // names a face so now (see [`crate::sheet::sheet_face_name`]).
+    if crate::sheet::split_sheet_face_name(name).is_some() || legacy_name(name).is_some() {
         return None;
     }
     // Every body's names are read below: work out the ones not known yet on all cores first
@@ -1151,23 +1150,6 @@ fn locate_face_on_body_with(st: &ModelState, body: Option<&str>, name: &str, p: 
         }
     }
     locate_face_with(st, name, p, round)
-}
-
-/// [`locate_face`] for a sheet face's readable name (`sheet:<body>:<panel>:<side>`, see
-/// [`crate::sheet::body_sheet_face_names`]): the face of that body the sheet names so. The sheet
-/// itself says which face it is, so the name holds however the faces of the body are numbered.
-fn sheet_locate(st: &ModelState, name: &str, p: Vec3) -> Result<FaceHit, Miss> {
-    let (body, _) = crate::sheet::split_sheet_face_name(name).ok_or(Miss::Gone)?;
-    let (bi, b) = st.bodies.iter().enumerate().find(|(_, b)| b.name == body && !b.body.is_mesh()).ok_or(Miss::Gone)?;
-    let names = crate::sheet::body_sheet_face_names(st, b);
-    let faces: Vec<usize> = names.iter().enumerate().filter(|(_, n)| n.as_deref() == Some(name)).map(|(i, _)| i).collect();
-    let face = match faces.as_slice() {
-        [face] => *face,
-        [] => return Err(Miss::Gone),
-        _ => return Err(Miss::Several),
-    };
-    let (distance, point) = nearest_on_face(&b.mesh(), face, p).ok_or(Miss::Gone)?;
-    Ok(FaceHit { body: bi, face, point, verified: true, on_point: distance <= (b.body.size() * 1e-3).max(1e-3) })
 }
 
 /// [`locate_face`] among `bodies` (with their indices): the one face the name finds there.
@@ -1373,10 +1355,8 @@ pub fn locate_one(st: &ModelState, body: Option<&str>, name: &str) -> Result<Fac
         if body.is_some_and(|n| n != sheet_body) {
             return Err(format!("`{name}` is a face of `{sheet_body}`"));
         }
-        return sheet_locate(st, name, Vec3::ZERO).map_err(|miss| match miss {
-            Miss::Gone => format!("no face is named `{name}` (`model.faces` lists the names)"),
-            Miss::Several => format!("`{name}` names more than one face (pieces of a split face): give the name of one piece"),
-        });
+        // No sheet names a face so now (see [`crate::sheet::sheet_face_name`]).
+        return Err(format!("no face is named `{name}` (`model.faces` lists the names)"));
     }
     let bodies: Vec<(usize, &ModelBody)> =
         st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh() && body.is_none_or(|n| b.name == n)).collect();

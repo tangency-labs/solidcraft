@@ -446,29 +446,44 @@ impl BvhWire {
     }
 }
 
+fn pad_pick_bounds(mut bounds: Aabb3) -> Aabb3 {
+    // Grow flat boxes by enough to keep rays on a face from rounding out of the box.
+    let scale = [bounds.min.x, bounds.min.y, bounds.min.z, bounds.max.x, bounds.max.y, bounds.max.z].iter().fold(1.0f64, |m, v| m.max(v.abs()));
+    let e = scale * 1e-9;
+    bounds.min -= Vec3::new(e, e, e);
+    bounds.max += Vec3::new(e, e, e);
+    bounds
+}
+
 impl MeshIndex {
     /// The index of `mesh`.
     pub fn new(mesh: &Mesh) -> MeshIndex {
-        let pad = |mut b: Aabb3| {
-            // Flat boxes (a triangle square to an axis) are grown a little, so a ray through
-            // them is never lost to rounding in the box test.
-            let scale = [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z].iter().fold(1.0f64, |m, v| m.max(v.abs()));
-            let e = scale * 1e-9;
-            b.min -= Vec3::new(e, e, e);
-            b.max += Vec3::new(e, e, e);
-            b
-        };
+        let mut index = Self::triangles_only(mesh);
+        let outlines = Self::segments_only(mesh);
+        index.segments = outlines.segments;
+        index.segment_of = outlines.segment_of;
+        index.edge_lengths = outlines.edge_lengths;
+        index
+    }
+
+    /// Index the triangles without the display outlines of an imported mesh.
+    pub fn triangles_only(mesh: &Mesh) -> MeshIndex {
         let boxes: Vec<Aabb3> = mesh
             .triangles
             .iter()
             .map(|t| {
-                let mut b = Aabb3::EMPTY;
+                let mut bounds = Aabb3::EMPTY;
                 for p in mesh.tri(t).into_iter().flatten() {
-                    b.add(p);
+                    bounds.add(p);
                 }
-                if b.is_empty() { b } else { pad(b) }
+                if bounds.is_empty() { bounds } else { pad_pick_bounds(bounds) }
             })
             .collect();
+        MeshIndex { triangles: Bvh::new(&boxes), triangle_count: mesh.triangles.len(), position_count: mesh.positions.len(), ..Default::default() }
+    }
+
+    /// Index the edge polylines separately when a tool can pick display outlines.
+    pub fn segments_only(mesh: &Mesh) -> MeshIndex {
         let mut segment_of = Vec::new();
         let mut seg_boxes = Vec::new();
         for (ei, e) in mesh.edges.iter().enumerate() {
@@ -479,18 +494,11 @@ impl MeshIndex {
                 let mut bx = Aabb3::EMPTY;
                 bx.add(*a);
                 bx.add(*b);
-                seg_boxes.push(pad(bx));
+                seg_boxes.push(pad_pick_bounds(bx));
                 segment_of.push((ei as u32, si as u32));
             }
         }
-        MeshIndex {
-            triangles: Bvh::new(&boxes),
-            triangle_count: mesh.triangles.len(),
-            position_count: mesh.positions.len(),
-            edge_lengths: mesh.edges.iter().map(Vec::len).collect(),
-            segments: Bvh::new(&seg_boxes),
-            segment_of,
-        }
+        MeshIndex { segments: Bvh::new(&seg_boxes), segment_of, edge_lengths: mesh.edges.iter().map(Vec::len).collect(), ..Default::default() }
     }
 
     /// Copy the prepared flat index for transfer to another runtime.

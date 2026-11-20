@@ -41,6 +41,7 @@ mod emboss;
 mod eval_geometry;
 #[cfg(test)]
 mod face_source_tests;
+pub mod failure;
 mod fair;
 mod fill;
 #[cfg(test)]
@@ -203,6 +204,7 @@ pub use eval_geometry::{
     BoundaryEdge, CurveGeometry, FaceGeometry, edge_geometry, edge_wire_plane, face_boundaries, face_geometry, face_parameter_span,
     has_rectangular_trim, trimmed_guides,
 };
+pub use failure::ErrorCode;
 pub use fair::{
     FairCurve, FairNet, FairOptions, FairReport, MAX_FAIR_ITERATIONS, MAX_FAIR_POINTS, fair_bspline_curve, fair_bspline_surface, fair_curve,
     fair_faces, fair_net, fair_nurbs_curve, fair_nurbs_surface, fair_surface,

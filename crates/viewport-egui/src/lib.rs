@@ -11,6 +11,10 @@ use solidcraft_viewport_gpu::view::{DrawStatsHandle, Frame, GpuTarget, Renderer}
 
 /// A frame of the viewport as an egui paint callback.
 pub struct ViewportCallback(pub Frame);
+/// A frame of one of several views drawn in the same window (tiles): the view `.0` keeps its own
+/// picture on the GPU, so the tiles of one egui frame do not draw over each other
+/// ([`Renderer::prepare_view`]).
+pub struct TileCallback(pub u32, pub Frame);
 /// A transparent, depth-correct selection/hover layer over live product pixels.
 pub struct ProductHighlightCallback(pub Frame);
 
@@ -150,6 +154,28 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
         let Some(res) = resources.get::<Renderer>() else { return };
         let vp = info.viewport_in_pixels();
         res.paint(&self.0, pass, [vp.left_px as f32, vp.top_px as f32, vp.width_px as f32, vp.height_px as f32]);
+    }
+}
+
+impl egui_wgpu::CallbackTrait for TileCallback {
+    fn prepare(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _screen: &egui_wgpu::ScreenDescriptor,
+        _encoder: &mut wgpu::CommandEncoder,
+        resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        if let Some(res) = resources.get_mut::<Renderer>() {
+            res.prepare_view(self.0, device, queue, &self.1);
+        }
+        Vec::new()
+    }
+
+    fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
+        let Some(res) = resources.get::<Renderer>() else { return };
+        let vp = info.viewport_in_pixels();
+        res.paint_view(self.0, &self.1, pass, [vp.left_px as f32, vp.top_px as f32, vp.width_px as f32, vp.height_px as f32]);
     }
 }
 

@@ -605,7 +605,7 @@ mod tests {
             fs::create_dir_all(&d).unwrap();
             let id = "1-2-3";
             let doc = Document::default();
-            fs::write(d.join(format!("{id}.{ext}")), solidcraft_io::write_design(&doc)).unwrap();
+            fs::write(d.join(format!("{id}.{ext}")), solidcraft_io::write_design(&doc).unwrap()).unwrap();
             let entry = Entry { id: id.into(), path: Some(format!("/d/part.{ext}")), name: "part".into(), saved_at: 1, features: 0 };
             fs::write(d.join(format!("{id}.json")), serde_json::to_vec(&entry).unwrap()).unwrap();
             assert_eq!(orphans(&d).iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), [id], ".{ext}");
@@ -976,7 +976,7 @@ mod tests {
         let d = dir("discard");
         fs::create_dir_all(&d).unwrap();
         let part = d.join("part.solidcraft");
-        fs::write(&part, solidcraft_io::write_design(&Document::default())).unwrap();
+        fs::write(&part, solidcraft_io::write_design(&Document::default()).unwrap()).unwrap();
         let mut s = Session::default();
         let discard = |s: &mut Session, id: &str| s.execute("doc.recovery_discard", &json!({"dir": d.to_string_lossy(), "id": id}));
         let e = discard(&mut s, "part").unwrap_err();
@@ -1010,7 +1010,7 @@ mod tests {
         assert_eq!(r["features"], 1, "{r}");
         assert!(orphans(&d).is_empty() && !file(&d, &id, "json").exists() && !file(&d, &id, solidcraft_io::DESIGN_EXT).exists());
         let part = d.join("part.solidcraft");
-        fs::write(&part, solidcraft_io::write_design(&Document::default())).unwrap();
+        fs::write(&part, solidcraft_io::write_design(&Document::default()).unwrap()).unwrap();
         assert!(t.execute("doc.recover", &json!({"dir": d.to_string_lossy(), "id": "part", "discard": true})).is_err());
         assert!(part.exists());
         let _ = fs::remove_dir_all(&d);
@@ -1050,7 +1050,7 @@ mod tests {
         boundary.name = "x".repeat((1 << 20) - base_len);
         let oversized = Entry { id: "oversized".into(), name: "x".repeat(1 << 20), ..good.clone() };
         for entry in [&good, &boundary, &oversized] {
-            fs::write(file(&d, &entry.id, solidcraft_io::DESIGN_EXT), solidcraft_io::write_design(&Document::default())).unwrap();
+            fs::write(file(&d, &entry.id, solidcraft_io::DESIGN_EXT), solidcraft_io::write_design(&Document::default()).unwrap()).unwrap();
             fs::write(file(&d, &entry.id, "json"), serde_json::to_vec(entry).unwrap()).unwrap();
         }
         assert_eq!(fs::metadata(file(&d, "boundary", "json")).unwrap().len(), 1 << 20);
@@ -1074,7 +1074,7 @@ mod tests {
         let wrong = Entry { id: "other".into(), path: Some("/unrelated-design.solidcraft".into()), name: "wrong".into(), saved_at: 1, features: 0 };
         fs::write(file(&d, "actual", "json"), serde_json::to_vec(&wrong).unwrap()).unwrap();
         for id in ["actual", "other"] {
-            fs::write(file(&d, id, solidcraft_io::DESIGN_EXT), solidcraft_io::write_design(&Document::default())).unwrap();
+            fs::write(file(&d, id, solidcraft_io::DESIGN_EXT), solidcraft_io::write_design(&Document::default()).unwrap()).unwrap();
         }
         assert!(orphans(&d).is_empty(), "metadata under another ID must not be offered");
         assert!(load(&d, "actual").is_err(), "a mismatched path must not become the next save target");

@@ -196,6 +196,7 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
                     "construct.plane.tangent",
                     "construct.plane.along_path",
                     "construct.plane.perpendicular",
+                    "construct.plane.square_to_line",
                 ],
             },
             CommandGroup {
@@ -283,7 +284,7 @@ pub const SECTIONS: &[Section] = &[
         ids: &[
             "drawing.view.base.planned",
             "drawing.view.section.planned",
-            "drawing.view.detail",
+            "drawing.view.detail.planned",
             "drawing.view.break",
             "drawing.view.auxiliary.planned",
             "drawing.view.pictorial",
@@ -342,7 +343,7 @@ pub const SECTIONS: &[Section] = &[
         promoted: 3,
         ids: &["drawing.revision", "drawing.revise.planned", "drawing.revision.tag.add.planned"],
     },
-    Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export.planned", "drawing.print"] },
+    Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export", "drawing.print.planned"] },
     Section {
         tab: "MODEL",
         panel: "SKETCH",
@@ -673,13 +674,13 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.check.planned", "Check Drawing"),
     ("drawing.dimension", "Dimension"),
     ("drawing.dimension.from_model.planned", "Model Dims."),
-    ("drawing.export.planned", "Export"),
+    ("drawing.export", "Export"),
     ("drawing.hole_callout", "Hole Callout"),
     ("drawing.image", "Image"),
     ("drawing.leader", "Leader Note"),
     ("drawing.note", "Note"),
     ("drawing.replace_model", "Replace"),
-    ("drawing.print", "Print"),
+    ("drawing.print.planned", "Print"),
     ("drawing.revise.planned", "Issue Rev."),
     ("drawing.revision", "Add Revision"),
     ("drawing.revision_table", "Revision Tbl."),
@@ -1212,7 +1213,7 @@ mod tests {
         let buttons = crate::toolbar_custom::buttons(&h.app, "DRAWING LAYOUT", "VIEWS", &views, count);
         assert_eq!(
             buttons.iter().map(|command| command.id).collect::<Vec<_>>(),
-            ["drawing.view.base.planned", "drawing.view.section.planned", "drawing.view.detail", "drawing.view.break"]
+            ["drawing.view.base.planned", "drawing.view.section.planned", "drawing.view.detail.planned", "drawing.view.break"]
         );
         assert!(views.iter().any(|command| command.id == "drawing.view.flat_pattern"));
         assert!(!views.iter().any(|command| command.id == "drawing.view.projected.planned"));
@@ -1230,7 +1231,7 @@ mod tests {
         let buttons = crate::toolbar_custom::buttons(&h.app, "DRAWING LAYOUT", "VIEWS", &views, count);
         assert_eq!(
             buttons.iter().map(|command| command.id).collect::<Vec<_>>(),
-            ["drawing.view.base.planned", "drawing.view.section.planned", "drawing.view.detail", "drawing.view.flat_pattern"]
+            ["drawing.view.base.planned", "drawing.view.section.planned", "drawing.view.detail.planned", "drawing.view.flat_pattern"]
         );
     }
 
