@@ -452,6 +452,16 @@ fn null(what: &'static str) -> SolidError {
     SolidError::topology_missing(OP, what)
 }
 
+/// A record the kernel wrote is missing a field it writes with every such record: the
+/// kernel's own data is incomplete here (the conversion guide §2's kernel-built
+/// missing thing), kept on the status the phrase reported (`SM_ERR_NULL_POINTER`).
+/// `why` names the step that failed and the kernel's obligation (§4).
+fn record_incomplete(why: &'static str) -> SolidError {
+    Failure::new(OP, TopologyFailure::Defect { why })
+        .with_status(crate::error::SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
 /// `SmBrep::LocalOperation(rFaces, rNewSurfaces)`: `surfaces[i]` becomes the surface of
 /// `faces[i]` (turned about if its normal opposes the old one's), every other face
 /// keeping a copy of its surface (as an analytic one when possible), and the faces are
@@ -943,7 +953,7 @@ fn refuse_kept_edges_not_clear(
     let mut faces: Vec<(FaceId, MovedFace)> = Vec::new();
     for face in moved_faces {
         let surface = face_ops::surface(&copy, face)?
-            .ok_or_else(|| null("the face's surface"))?
+            .ok_or_else(|| record_incomplete("the kept-edge clearance read the moved face's surface, and the face's record carries none, though the kernel writes every face record with its surface"))?
             .clone();
         let mut uv_box: Option<Extent2d> = None;
         for l in face_ops::loops(&copy, face, false, None)? {
@@ -2318,7 +2328,7 @@ fn moved_result_faces(k: &mut Kernel, b: &mut Brep) -> Result<Vec<MovedFaceCut>>
             continue;
         }
         let surface = face_ops::surface(b, face)?
-            .ok_or_else(|| null("the face's surface"))?
+            .ok_or_else(|| record_incomplete("the moved-face extraction read the result face's surface, and the record carries none, though the kernel writes every face record with its surface"))?
             .clone();
         let mut uv_box: Option<Extent2d> = None;
         for l in face_ops::loops(b, face, false, None)? {
@@ -2357,7 +2367,7 @@ fn moved_result_faces(k: &mut Kernel, b: &mut Brep) -> Result<Vec<MovedFaceCut>>
                 region.loops.push(TrimLoop { segments });
             }
         }
-        let primary = primary.ok_or_else(|| null("the face's face use"))?;
+        let primary = primary.ok_or_else(|| record_incomplete("the moved-face extraction read the face's primary face use, and the record carries none, though the kernel writes every face with its face uses"))?;
         let outward_same = eu1::faceuse_orientation(b, primary)?
             == crate::nurbs::b_spline_surface_n_lib::OrientType::Same;
         let plane = PlaneCut::of(&surface, outward_same);
@@ -2388,7 +2398,7 @@ fn cuts_for_faces(k: &mut Kernel, b: &mut Brep, faces: &[FaceId]) -> Result<Vec<
     let mut out = Vec::new();
     for &face in faces {
         let surface = face_ops::surface(b, face)?
-            .ok_or_else(|| null("the face's surface"))?
+            .ok_or_else(|| record_incomplete("the cut collection read the face's surface, and the record carries none, though the kernel writes every face record with its surface"))?
             .clone();
         let mut uv_box: Option<Extent2d> = None;
         for l in face_ops::loops(b, face, false, None)? {
@@ -2427,7 +2437,7 @@ fn cuts_for_faces(k: &mut Kernel, b: &mut Brep, faces: &[FaceId]) -> Result<Vec<
                 region.loops.push(TrimLoop { segments });
             }
         }
-        let primary = primary.ok_or_else(|| null("the face's face use"))?;
+        let primary = primary.ok_or_else(|| record_incomplete("the cut collection read the face's primary face use, and the record carries none, though the kernel writes every face with its face uses"))?;
         let outward_same = eu1::faceuse_orientation(b, primary)?
             == crate::nurbs::b_spline_surface_n_lib::OrientType::Same;
         let plane = PlaneCut::of(&surface, outward_same);
@@ -2576,7 +2586,7 @@ fn classify_edge_crossing_inner(
     };
     let (t0, t1) = (interval.min(), interval.max());
     if !(t0.is_finite() && t1.is_finite() && t0 < t1) {
-        return Err(null("the edge curve's interval of distinct ends"));
+        return Err(record_incomplete("the crossing classification read the edge curve's interval of distinct ends, and the record carries none, though the kernel writes every edge with its curve's interval"));
     }
     // 1. proved clear of the face: no decision to make
     let kept = KeptEdge {
@@ -2849,7 +2859,7 @@ fn certify_clip_on_edge(
     let curve = record
         .curve
         .clone()
-        .ok_or_else(|| null("the edge's curve"))?;
+        .ok_or_else(|| record_incomplete("the clip certification read the survivor edge's curve, and the record carries none, though the kernel writes every edge record with its curve"))?;
     let interval = record.interval;
     let tolerance = (Ivl::from(record.tolerance) + Ivl::from(face.moved.tolerance)).hi;
     let clip_t = clip_param(k, &curve, interval, clip)?;
@@ -2931,7 +2941,7 @@ fn follow_merged_clips(
     }
     for (i, clip_t, removes_low, proof) in updates {
         let Some(record) = clips.get_mut(i) else {
-            return Err(null("the clip record"));
+            return Err(record_incomplete("the merged-clip follow read the clip record it updates, and the list holds none, though the pass writes one record per clip before following it"));
         };
         record.edge = survivor;
         record.clip_t = clip_t;
@@ -3133,7 +3143,7 @@ fn use_ends(
     use crate::topology::edge;
     use crate::topology::edgeuse::p1 as eu1;
     use crate::topology::vertexuse as vu1;
-    let e = eu1::edge(b, eu)?.ok_or_else(|| null("the edge use's edge"))?;
+    let e = eu1::edge(b, eu)?.ok_or_else(|| record_incomplete("the use-end walk read the edge use's edge, and the record carries none, though the kernel writes every edge use with its edge"))?;
     let v = eu1::vertexuse(b, eu)?.and_then(|vu| vu1::vertex(b, vu).ok().flatten());
     Ok((v, edge::other_vertex(b, e, v)?))
 }
@@ -3274,10 +3284,10 @@ fn sever_edge(
     for &eu in &uses {
         b.edgeuse_mut(eu)?.uv_trim_curve = None;
         let eu_cw = eu1::cw_edgeuse(b, eu)?
-            .ok_or_else(|| null("the edge use's clockwise loop neighbour"))?;
+            .ok_or_else(|| record_incomplete("the edge sever read the edge use's clockwise loop neighbour, and the record carries none, though the kernel writes every edge use with its loop neighbours"))?;
         let eu_ccw = eu1::ccw_edgeuse(b, eu)?
-            .ok_or_else(|| null("the edge use's counter-clockwise loop neighbour"))?;
-        let lu = eu1::loopuse(b, eu)?.ok_or_else(|| null("the edge use's loop use"))?;
+            .ok_or_else(|| record_incomplete("the edge sever read the edge use's counter-clockwise loop neighbour, and the record carries none, though the kernel writes every edge use with its loop neighbours"))?;
+        let lu = eu1::loopuse(b, eu)?.ok_or_else(|| record_incomplete("the edge sever read the edge use's loop use, and the record carries none, though the kernel writes every edge use with its loop use"))?;
         if b.loopuse(lu)?.start == crate::topology::LoopuseStart::Edgeuse(Some(eu)) {
             b.loopuse_mut(lu)?.start = crate::topology::LoopuseStart::Edgeuse(Some(eu_cw));
         }
@@ -3286,8 +3296,8 @@ fn sever_edge(
     }
     // delete the uses and their vertex uses (p3.rs:3959-3969)
     for &eu in &uses {
-        let vu = eu1::vertexuse(b, eu)?.ok_or_else(|| null("the edge use's vertex use"))?;
-        let v = vu1::vertex(b, vu)?.ok_or_else(|| null("the vertex use's vertex"))?;
+        let vu = eu1::vertexuse(b, eu)?.ok_or_else(|| record_incomplete("the edge sever read the edge use's vertex use, and the record carries none, though the kernel writes every edge use with its vertex uses"))?;
+        let v = vu1::vertex(b, vu)?.ok_or_else(|| record_incomplete("the edge sever read the vertex use's vertex, and the record carries none, though the kernel writes every vertex use with its vertex"))?;
         b.edge_mut(e)?.edgeuses.retain(|&x| x != eu);
         b.vertex_mut(v)?.vertexuses.retain(|&x| x != vu);
         b.remove_edgeuse_record(eu)?;
@@ -3321,8 +3331,8 @@ fn merge_lamina_twins(
     let slot = |b: &Brep,
                 eu: crate::topology::EdgeuseId|
      -> Result<(crate::topology::EdgeuseId, FaceId, bool)> {
-        let f = eu1::face(b, eu)?.ok_or_else(|| null("the edge use's face"))?;
-        let lu = eu1::loopuse(b, eu)?.ok_or_else(|| null("the edge use's loop use"))?;
+        let f = eu1::face(b, eu)?.ok_or_else(|| record_incomplete("the lamina twin merge read the edge use's face, and the record carries none, though the kernel writes every edge use with its face"))?;
+        let lu = eu1::loopuse(b, eu)?.ok_or_else(|| record_incomplete("the lamina twin merge read the edge use's loop use, and the record carries none, though the kernel writes every edge use with its loop use"))?;
         Ok((eu, f, b.loopuse(lu)?.faceuse == b.face(f)?.faceuse))
     };
     let keeps: Vec<_> = edge::edgeuses(b, keep, None, None)?
@@ -3454,7 +3464,7 @@ fn split_vertex(
     })?;
     for &e in moved {
         for eu in edge::edgeuses(b, e, None, None)? {
-            let vu = eu1::vertexuse(b, eu)?.ok_or_else(|| null("the edge use's vertex use"))?;
+            let vu = eu1::vertexuse(b, eu)?.ok_or_else(|| record_incomplete("the vertex split read the edge use's vertex use, and the record carries none, though the kernel writes every edge use with its vertex uses"))?;
             // (issue #18502) the end is a point, not a record: an edge closing to a
             // point leaves the records at that corner several copies, and a split that
             // matched one record left the other copies' uses behind
@@ -3503,7 +3513,7 @@ fn clip_param(
     let d = z - a;
     let dd = d.dot(d);
     if dd.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
-        return Err(null("the curve's span between distinct ends"));
+        return Err(record_incomplete("the clip projection read the curve's span between distinct ends, and the span is not there, though the kernel writes every curve with a domain of distinct ends"));
     }
     Ok(ivl.min() + (point - a).dot(d) / dd * (ivl.max() - ivl.min()))
 }
@@ -3594,8 +3604,8 @@ fn insert_bridge(
         let fu = b
             .loopuse(lu)?
             .faceuse
-            .ok_or_else(|| null("the loop use's face use"))?;
-        eu1::faceuse_face(b, fu)?.ok_or_else(|| null("the face use's face"))
+            .ok_or_else(|| record_incomplete("the bridge insertion read the loop use's face use, and the record carries none, though the kernel writes every loop use with its face use"))?;
+        eu1::faceuse_face(b, fu)?.ok_or_else(|| record_incomplete("the bridge insertion read the face use's face, and the record carries none, though the kernel writes every face use with its face"))
     };
     let mut slots_by_side: Vec<(
         FaceId,
@@ -3616,7 +3626,7 @@ fn insert_bridge(
     let gap_loopuse = || -> Result<crate::topology::LoopuseId> {
         match slots.first() {
             Some((lu, _, _)) => Ok(*lu),
-            None => Err(null("the gap's loop use")),
+            None => Err(record_incomplete("the bridge insertion read the gap's loop use, and the record carries none, though the gap pass records each gap with its loop use")),
         }
     };
     let pick = |want: (FaceId, bool)| -> Result<(
@@ -3628,7 +3638,7 @@ fn insert_bridge(
             .iter()
             .find(|(f, u, _)| (*f, *u) == want)
             .map(|(_, _, g)| *g)
-            .ok_or_else(|| null("the gap's edge use on one side"))
+            .ok_or_else(|| record_incomplete("the bridge insertion read the gap's edge use on one side, and the record carries none, though the gap pass records each gap with both its sides"))
     };
     let mut chain_slots: Vec<(
         crate::topology::LoopuseId,
@@ -3676,7 +3686,7 @@ fn insert_bridge(
     let mut uses = Vec::new();
     for (lu, prev, next) in chain_slots {
         let start = use_ends(b, prev)?.1;
-        let start = start.ok_or_else(|| null("the edge use's end"))?;
+        let start = start.ok_or_else(|| record_incomplete("the bridge insertion read the edge use's end, and the record carries none, though the kernel writes every edge use's end as its vertex use"))?;
         if start != a && start != by {
             return Err(refusal(ReconstructionRefusal::BoundaryInvalid {
                 fault: BoundaryFault::LoopDiverges { loopuse: lu },
@@ -3765,7 +3775,7 @@ fn restore_region_pair(
             }
         }
     }
-    let seed = seed.ok_or_else(|| null("a down face use"))?;
+    let seed = seed.ok_or_else(|| record_incomplete("the region pair restore found no down face use among the face's uses, though the kernel writes every closed face with uses on both sides"))?;
     let mut marks = crate::topology::topology_traverser::Marks::default();
     crate::topology::brep::p6::test_closure_split_region(k, b, &mut marks, env, true, seed)?;
     Ok(())
@@ -3959,7 +3969,7 @@ fn validate_completed_boundary(
             }
             let e = clip.edge;
             let curve = edge::curve(b, e)?
-                .ok_or_else(|| null("the edge's curve"))?
+                .ok_or_else(|| record_incomplete("the completed-boundary validation read the edge's curve, and the record carries none, though the kernel writes every edge record with its curve"))?
                 .clone();
             let interval = edge::interval(b, e)?;
             let tolerance = edge::tolerance(b, e)?.max(b.tolerance());
@@ -4091,7 +4101,7 @@ fn reconstruct_crossed_boundaries(
                 return Err(deferred_edge_vanish(pending));
             };
             let Some(curve) = record.curve.clone() else {
-                return Err(null("the edge's curve"));
+                return Err(record_incomplete("the boundary reconstruction read the edge's curve, and the record carries none, though the kernel writes every edge record with its curve"));
             };
             let interval = record.interval;
             for face in &cuts {
@@ -4148,7 +4158,7 @@ fn reconstruct_crossed_boundaries(
                 continue;
             };
             let Some(curve) = record.curve.clone() else {
-                return Err(null("the edge's curve"));
+                return Err(record_incomplete("the boundary reconstruction read the edge's curve, and the record carries none, though the kernel writes every edge record with its curve"));
             };
             let interval = record.interval;
             let edge_tolerance = record.tolerance;
@@ -4446,7 +4456,7 @@ fn reconstruct_crossed_boundaries(
             }
             let record = b.edge(e)?;
             let Some(curve) = record.curve.clone() else {
-                return Err(null("the edge's curve"));
+                return Err(record_incomplete("the boundary reconstruction read the edge's curve, and the record carries none, though the kernel writes every edge record with its curve"));
             };
             let interval = record.interval;
             let tolerance = record.tolerance.max(b.tolerance());
@@ -4641,7 +4651,7 @@ fn reconstruct_crossed_boundaries(
                 let fu = b
                     .loopuse(lu)?
                     .faceuse
-                    .ok_or_else(|| null("the loop use's face use"))?;
+                    .ok_or_else(|| record_incomplete("the boundary reconstruction read the loop use's face use, and the record carries none, though the kernel writes every loop use with its face use"))?;
                 if let Some(f) = eu1::faceuse_face(b, fu)? {
                     affected_faces.push(f);
                 }
