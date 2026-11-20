@@ -3193,10 +3193,10 @@ pub struct Attract {
     pub scale_far: Option<Expr>,
     /// How far a copy moves out along the face's normal (negative: into it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[walk(length = "Offset near")]
+    #[walk(length = "Offset from face near")]
     pub offset_near: Option<Expr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[walk(length = "Offset far")]
+    #[walk(length = "Offset from face far")]
     pub offset_far: Option<Expr>,
     /// How far a copy rotates about the face's normal.
     #[serde(default, skip_serializing_if = "Option::is_none")]

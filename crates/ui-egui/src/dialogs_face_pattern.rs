@@ -182,10 +182,10 @@ pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
             }
             enter |= expr_row(ui, "Scale near", &mut f.scale_near);
             enter |= expr_row(ui, "Scale far", &mut f.scale_far);
-            enter |= hint_row(ui, "Offset near", &mut f.offset_near, "none");
-            enter |= hint_row(ui, "Offset far", &mut f.offset_far, "none");
             enter |= hint_row(ui, "Rotate near", &mut f.rotate_near, "none");
             enter |= hint_row(ui, "Rotate far", &mut f.rotate_far, "none");
+            enter |= hint_row(ui, "Offset from face near", &mut f.offset_near, "none");
+            enter |= hint_row(ui, "Offset from face far", &mut f.offset_far, "none");
             enter |= hint_row(ui, "Cutoff", &mut f.cutoff, "none");
             choice_row(ui, "Falloff", "fp_falloff", &mut f.falloff, &["Linear", "Smooth"]);
         }
