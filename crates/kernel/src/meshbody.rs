@@ -19,6 +19,8 @@ pub struct TriMesh {
     pub positions: Vec<Vec3>,
     pub triangles: Vec<[u32; 3]>,
     pub corner_normals: Vec<[Vec3; 3]>,
+    /// Each side has exactly two incident triangles, running in opposite directions.
+    pub(crate) closed: bool,
 }
 
 impl TriMesh {
@@ -146,8 +148,8 @@ fn build_mesh(
     if out.triangles.is_empty() {
         return Err(KernelError::Invalid("mesh has no triangles".into()));
     }
-    unify_winding(&mut out);
-    if out.volume6() < 0.0 && is_closed(&out) {
+    out.closed = unify_winding(&mut out);
+    if out.closed && out.volume6() < 0.0 {
         for (i, t) in out.triangles.iter_mut().enumerate() {
             t.swap(1, 2);
             if let Some(n) = out.corner_normals.get_mut(i) {
@@ -167,8 +169,9 @@ enum EdgeTriangles {
 
 /// Wind every connected piece one way: a triangle that runs a side in the same direction as
 /// its neighbour is turned over (files with stray inverted facets). Sides shared by more than
-/// two triangles are left alone.
-fn unify_winding(m: &mut TriMesh) {
+/// two triangles are left alone. Returns whether every side has two opposite runs
+/// after repair, using the same adjacency table as the walk.
+fn unify_winding(m: &mut TriMesh) -> bool {
     let mut sides = HashMap::new();
     // The mesh builder caps the triangle count at MAX_TRIANGLES.
     for (triangle, &[a, b, c]) in (0u32..).zip(&m.triangles) {
@@ -187,6 +190,7 @@ fn unify_winding(m: &mut TriMesh) {
     let runs = |&[u, v, w]: &[u32; 3], a, b| [(u, v), (v, w), (w, u)].contains(&(a, b));
     let mut done = vec![false; m.triangles.len()];
     let mut stack = Vec::new();
+    let mut closed = true;
     for start in 0..m.triangles.len() {
         if done[start] {
             continue;
@@ -196,10 +200,16 @@ fn unify_winding(m: &mut TriMesh) {
         while let Some(i) = stack.pop() {
             let Some(&[a, b, c]) = m.triangles.get(i) else { continue };
             for (a, b) in [(a, b), (b, c), (c, a)] {
-                let Some(&EdgeTriangles::Two(left, right)) = sides.get(&(a.min(b), a.max(b))) else { continue };
+                let Some(&EdgeTriangles::Two(left, right)) = sides.get(&(a.min(b), a.max(b))) else {
+                    closed = false;
+                    continue;
+                };
                 let neighbor = if left as usize == i { right as usize } else { left as usize };
                 let Some(visited) = done.get_mut(neighbor) else { continue };
                 if *visited {
+                    // A visited triangle has its final winding. Two equal runs here mean
+                    // the component cannot be oriented consistently.
+                    closed = closed && m.triangles.get(neighbor).is_some_and(|triangle| !runs(triangle, a, b));
                     continue;
                 }
                 *visited = true;
@@ -215,6 +225,7 @@ fn unify_winding(m: &mut TriMesh) {
             }
         }
     }
+    closed
 }
 
 /// Where the ray from `o` along unit `d` first meets mesh body `m` (its triangles are its exact
@@ -227,18 +238,7 @@ pub(crate) fn mesh_ray(m: &TriMesh, o: Vec3, d: Vec3) -> Option<(f64, Vec3)> {
     let (t, ti) = mesh.raycast(o, d)?;
     let [a, b, c] = mesh.tri(mesh.triangles.get(ti)?)?;
     let n = (b - a).cross(c - a).normalized()?;
-    Some((t, if !is_closed(m) && n.dot(d) > 0.0 { n * -1.0 } else { n }))
-}
-
-/// Every triangle side is shared by exactly two triangles in opposite directions.
-pub(crate) fn is_closed(m: &TriMesh) -> bool {
-    let mut count: HashMap<(u32, u32), i32> = HashMap::new();
-    for t in &m.triangles {
-        for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
-            *count.entry((a, b)).or_default() += 1;
-        }
-    }
-    count.iter().all(|(&(a, b), &n)| n == 1 && count.get(&(b, a)) == Some(&1))
+    Some((t, if !m.closed && n.dot(d) > 0.0 { n * -1.0 } else { n }))
 }
 
 impl Body {
@@ -259,7 +259,7 @@ impl Body {
     }
     /// Does a mesh body enclose a volume (every side shared by two triangles)?
     pub fn is_closed_mesh(&self) -> bool {
-        self.mesh.as_ref().is_some_and(|m| is_closed(m))
+        self.mesh.as_ref().is_some_and(|m| m.closed)
     }
 
     /// A mesh body moved by a column-major affine matrix (reflections keep outward winding).
@@ -291,6 +291,7 @@ impl Body {
             positions: tm.positions.iter().map(|p| f(*p)).collect(),
             triangles: tm.triangles.clone(),
             corner_normals: tm.corner_normals.iter().map(|n| n.map(normal)).collect(),
+            closed: tm.closed,
         };
         if det < 0.0 {
             for (i, t) in out.triangles.iter_mut().enumerate() {

@@ -6170,6 +6170,7 @@ version = "0.45.0"
 dependencies = [
  "craft-plugin",
  "craft-plugin-wasm",
+ "flate2",
  "image",
  "log",
  "png",
@@ -6194,6 +6195,7 @@ dependencies = [
  "solidcraft-sketch",
  "solidcraft-ui-text",
  "solidcraft-viewport",
+ "solidcraft-views",
  "thiserror 2.0.21",
  "tiny-skia",
  "toml_edit",
@@ -6477,6 +6479,7 @@ dependencies = [
  "solidcraft-viewport",
  "solidcraft-viewport-egui",
  "solidcraft-viewport-gpu",
+ "solidcraft-views",
  "syn 2.0.119",
  "tiny-skia",
  "ttf-parser",
@@ -6563,6 +6566,13 @@ dependencies = [
  "solidcraft-viewport",
  "thiserror 2.0.21",
  "wgpu",
+]
+
+[[package]]
+name = "solidcraft-views"
+version = "0.45.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]

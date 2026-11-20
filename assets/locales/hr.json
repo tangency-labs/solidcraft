@@ -3784,7 +3784,6 @@
   "sketch_panel.plane_offset": "{plane}, odmaknuta za {distance}",
   "sketch_panel.plane_origin": "Ravnina {plane}",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "Pričvršćeno za ravno lice limenog tijela; prati taj panel kad se lim promijeni.",
   "sketch_panel.text_hint": "Uredite tekst i njegov položaj, a zatim pritisnite U redu.",
   "sketch_panel.use_plane": "Upotrijebi ravninu {plane}",
   "sketch_text.align_center": "Središte",

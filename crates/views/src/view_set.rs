@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 /// Most views one design keeps open (and most a saved set may hold).
 pub const MAX_VIEWS: usize = 64;
 /// Longest view name, in characters (what `tab.view.rename` takes too).
-pub const MAX_NAME: usize = solidcraft_engine::schema::tab_views::MAX_NAME;
+pub const MAX_NAME: usize = 64;
 /// Longest subject (the id of the sketch or sheet a view shows), in bytes.
 const MAX_SUBJECT: usize = 256;
 /// Closed views kept for Reopen Closed View.

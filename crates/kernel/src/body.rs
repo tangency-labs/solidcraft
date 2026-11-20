@@ -1973,7 +1973,7 @@ impl Body {
     /// mesh, a volume that isn't positive. Empty when it is sound.
     pub fn validity(&self) -> Vec<String> {
         if let Some(m) = &self.mesh {
-            return if crate::meshbody::is_closed(m) { Vec::new() } else { vec!["the mesh is not closed".into()] };
+            return if m.closed { Vec::new() } else { vec!["the mesh is not closed".into()] };
         }
         let mut out = Vec::new();
         for (i, shell) in self.record.shells.iter().enumerate() {
