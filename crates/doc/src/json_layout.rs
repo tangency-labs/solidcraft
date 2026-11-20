@@ -17,11 +17,27 @@ const MAX_INLINE: usize = 16;
 /// `compact`, serde_json's compact text of a value, laid out for reading and diffing. Text that is
 /// not compact JSON comes back laid out as far as it goes, never a panic.
 pub fn pretty(compact: &str) -> String {
+    layout(compact, usize::MAX).unwrap_or_default()
+}
+
+/// [`pretty`], or `None` once the laid-out text would pass `budget` bytes. Each line is indented two
+/// spaces a level, so text from a file can lay out to many times its size. A caller laying out text
+/// it did not write gives a budget.
+pub fn pretty_within(compact: &str, budget: usize) -> Option<String> {
+    layout(compact, budget)
+}
+
+fn layout(compact: &str, budget: usize) -> Option<String> {
     let b = compact.as_bytes();
     let mut out = String::with_capacity(compact.len() + compact.len() / 2);
     let mut depth = 0usize;
     let mut i = 0;
     while let Some(&c) = b.get(i) {
+        // One step adds at most a string of the input or one indented line, so this stops soon
+        // after the budget is passed.
+        if out.len() > budget {
+            return None;
+        }
         match c {
             b'"' => {
                 let end = string_end(b, i);
@@ -68,7 +84,7 @@ pub fn pretty(compact: &str) -> String {
             }
         }
     }
-    out
+    (out.len() <= budget).then_some(out)
 }
 
 /// `text` with the whitespace outside its strings taken out (spaces, tabs, line feeds and carriage
@@ -230,6 +246,19 @@ mod tests {
             let _ = pretty(broken);
             let _ = compact(broken);
         }
+    }
+
+    /// Within a budget the text is the same as without one. Past it there is no text, and the layout
+    /// stops near the budget instead of finishing.
+    #[test]
+    fn a_budget_stops_the_layout() {
+        let v = json!({"a": [1, 2], "b": [{"c": "d"}, {"e": [[1, 0], [0, 1]]}]});
+        let text = serde_json::to_string(&v).unwrap();
+        let full = pretty(&text);
+        assert_eq!(pretty_within(&text, full.len()).as_deref(), Some(full.as_str()));
+        assert_eq!(pretty_within(&text, full.len() - 1), None);
+        let wide = format!("[{}0]", "[1,\"x\"],".repeat(100_000));
+        assert_eq!(pretty_within(&wide, 1000), None);
     }
 
     /// The depth counts brackets outside strings only, and broken text never panics.

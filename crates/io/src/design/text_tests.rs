@@ -134,6 +134,18 @@ fn deeply_nested_json_is_summed_up() {
     assert!(text.contains("# document.json\n# JSON nested more than") && text.len() < 1000, "{}", text.get(..200).unwrap_or_default());
     let fits = format!("{}{}", "[".repeat(MAX_DEPTH), "]".repeat(MAX_DEPTH));
     assert!(!design_text(fits.as_bytes()).starts_with("# "), "{MAX_DEPTH} levels are laid out");
+    let past = format!("{}{}", "[".repeat(MAX_DEPTH + 1), "]".repeat(MAX_DEPTH + 1));
+    assert!(design_text(past.as_bytes()).starts_with("# JSON nested more than"), "one level more is summed up");
+}
+
+/// JSON within the depth limit that would still lay out to more than its budget is summed up too.
+/// Every line is indented two spaces a level, so 400,000 numbers 100 levels deep would take about
+/// 80 MB, where the file is under 1 MB.
+#[test]
+fn json_that_lays_out_too_large_is_summed_up() {
+    let wide = format!("{}{}1{}", "[".repeat(100), "1,".repeat(400_000), "]".repeat(100));
+    let text = design_text(wide.as_bytes());
+    assert_eq!(text, summary(&format!("JSON that would lay out to more than {} bytes", budget(wide.len())), wide.as_bytes()));
 }
 
 /// A part that does not read (here its bytes no longer match the CRC-32 the ZIP keeps) is named

@@ -3,9 +3,10 @@
 //! `diff.solidcraft.textconv` (the user guide's "Designs in Git" section). The text comes from
 //! [`solidcraft_engine::io::design_text`], which says what it shows and leaves out.
 //!
-//! Git stops the whole diff when this command fails. So a file it can read but not show (too large,
-//! not a design, a damaged container) prints one line with its size and SHA-256 and exits 0. Only a
-//! file it cannot read at all is an error. The text never names the file. For the old side of a
+//! Git stops the whole diff when this command fails. So a file it can read but not show prints one
+//! line with its size and SHA-256 and exits 0. That covers a file over the design file limit, one
+//! that is neither JSON nor a container, and a container that does not open. Only a file it cannot
+//! read at all is an error. The text never names the file. For the old side of a
 //! diff git hands textconv a temporary copy, and for the working tree side the file itself, whose
 //! name may start with `--`. So the one argument is always a path, never an option.
 

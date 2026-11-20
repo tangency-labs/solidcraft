@@ -464,8 +464,9 @@ slashes. A path with a space needs single quotes of its own inside the double qu
 raw change again. The Snap and Flatpak builds can't read the files Git hands to textconv, so use
 the AppImage, a `.deb` or `.rpm` package, or a release download for this.
 
-textconv prints the design or drawing first, laid out as a `.json` save lays it out. Then each other
-file the container holds, such as an imported STEP file or the signature log, gets one line with
+For a container, textconv prints its `container.json` on one line, then the design or drawing, laid
+out as a `.json` save lays it out. Then each other file the container holds, such as an imported
+STEP file or the signature log, gets one line with
 its size and SHA-256, so a changed import shows as a changed line. The model cache, the preview and
 a plugin's own cache are left out, because a save or the plugin writes them afresh. A file textconv
 cannot show prints one line with its size and SHA-256 instead, and Git goes on with the rest of the
