@@ -37,19 +37,30 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     crate::apply_vector(&sketch_transform, ss.plane.y),
                 )
                 .ok_or_else(|| DocError::Invalid("invalid cylinder sketch frame".into()))?;
-                let mut at = crate::apply_point(&crate::mat_mul(&inverse, &author_frame), face.at.0);
+                let at = crate::apply_point(&crate::mat_mul(&inverse, &author_frame), face.at.0);
                 let name = f
                     .face_names
                     .first()
                     .filter(|name| !name.is_empty())
-                    .ok_or_else(|| DocError::Invalid("selected cylinder face has no persistent identity".into()))?;
-                {
+                    .ok_or_else(|| DocError::Invalid("selected emboss face has no persistent identity".into()))?;
+                let hit = {
                     let mut scoped = ModelState::default();
                     scoped.bodies.push(mb.clone());
-                    let hit = crate::name_lookup::locate_face(&scoped, name, at).ok_or_else(|| DocError::reselect(name.as_str()))?;
-                    at = kernel::cylinder_emboss_anchor(&mb.body, hit.face, hit.point)?;
-                }
-                let result = kernel::emboss_cylinder_at(&mb.body, at, &plane, &regions, if *deboss { -d } else { d })?;
+                    crate::name_lookup::locate_face(&scoped, name, at).ok_or_else(|| DocError::reselect(name.as_str()))?
+                };
+                let signed = if *deboss { -d } else { d };
+                // A sketch tangent to a complete cylinder wall, outside or a bore, takes the wrap
+                // (whose refusals stand); a partial wall, a sketch off the wall and every other
+                // face are projected.
+                let result = match kernel::cylinder_emboss_anchor(&mb.body, hit.face, hit.point) {
+                    Ok(at) if kernel::infer_cylinder_emboss(&mb.body, &plane, &regions, signed)?.is_some() => {
+                        kernel::emboss_cylinder_at(&mb.body, at, &plane, &regions, signed)?
+                    }
+                    _ => {
+                        let at = kernel::emboss_anchor(&mb.body, hit.face, hit.point)?;
+                        kernel::emboss_project_face(&mb.body, hit.face, at, &plane, &regions, signed)?
+                    }
+                };
                 if let Some(slot) = st.bodies.get_mut(i) {
                     *slot = ModelBody::new(mb.name, result, mb.feature);
                 }
@@ -2311,6 +2322,20 @@ pub(super) fn tools_inside(mb: &ModelBody, reach: &[Option<Aabb3>]) -> bool {
     }
     let b = b.inflated(2.0 * mb.body.record().tolerance + 1e-6);
     reach.iter().flatten().all(|tool| b.contains(tool.min) && b.contains(tool.max))
+}
+
+/// Whether some tool of `reach` meets the box of `mb`'s vertices, grown as [`exact_box`] grows
+/// the exact box. Every vertex lies in the body's exact box, so such a tool meets the exact box
+/// too and the exact box cannot show it apart of the body: it need not be measured. A tool cut
+/// through a wall of a rounded spline body reaches out of its mesh box ([`tools_inside`]), and
+/// measuring that body's exact box took the kernel over a minute for each of its holes.
+pub(super) fn tools_meet_vertices(mb: &ModelBody, reach: &[Option<Aabb3>]) -> bool {
+    let b: Aabb3 = mb.body.record().vertices.iter().map(|v| Vec3::new(v.point[0], v.point[1], v.point[2])).collect();
+    if b.is_empty() || !b.min.is_finite() || !b.max.is_finite() {
+        return false;
+    }
+    let b = b.inflated(2.0 * mb.body.record().tolerance + 1e-6);
+    reach.iter().flatten().any(|tool| b.meets(tool))
 }
 
 /// Whether the line through `at` along `dir` is known to pass farther than `reach` from the

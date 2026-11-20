@@ -44,7 +44,7 @@ mod drawing_balloon;
 mod drawing_break;
 mod drawing_check;
 mod drawing_dimension;
-mod drawing_export;
+pub(crate) mod drawing_export;
 mod drawing_fill;
 mod drawing_image;
 mod drawing_model_dimensions;

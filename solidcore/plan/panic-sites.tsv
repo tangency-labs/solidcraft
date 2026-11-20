@@ -3,6 +3,7 @@
 # SolidError (checked arithmetic, .get(), a length check) and drop its row. `proven` marks
 # a site that cannot panic, with the reason; it is exempt from the ratchet.
 file	fn	pattern	n	status	code	reason
+crates/solidcore-cadir/src/lib.rs	Model::region_tolerance	f64::clamp	1	proven	clamp(MIN_TOLERANCE, MAX_FIT_TOLERANCE)	constant bounds MIN_TOLERANCE (1e-7) <= MAX_FIT_TOLERANCE (1.0)
 crates/solidcore-cadir/src/lib.rs	tolerance	f64::clamp	1	proven	clamp(MIN_TOLERANCE, MAX_FIT_TOLERANCE)	constant bounds MIN_TOLERANCE (1e-7) <= MAX_FIT_TOLERANCE (1.0)
 crates/solidcore-step/src/eval.rs	BSplineSurface::point	with_capacity	1	proven	Vec::with_capacity(nu)	nu = points.len(), already in memory
 crates/solidcore-step/src/eval.rs	expanded	with_capacity	1	proven	Vec::with_capacity(total)	total == points + degree + 1 with degree < points, checked just above: at most twice the points, already in memory
@@ -906,8 +907,8 @@ crates/solidcore/src/surface/plane/p1.rs	Plane::plane_overlap	windows	1	proven	w
 crates/solidcore/src/surface/plane/p1.rs	Plane::plane_overlap	with_capacity	1	proven	Vec::with_capacity(5)	constant capacity
 crates/solidcore/src/surface/plane/p1.rs	Plane::surface_overlap	with_capacity	1	open	Vec::with_capacity(bdrys_3d1.len())	
 crates/solidcore/src/surface/plane/p1.rs	transpose	int-div	1	open	a.len() / num_rows	
-crates/solidcore/src/surface/plane/p2.rs	Plane::make_new_plane_ellipse	int-rem	1	proven	((ii + count) - 1) % count	inside for ii in 0..count, so count > 0
-crates/solidcore/src/surface/plane/p2.rs	Plane::make_new_plane_ellipse	int-rem	2	proven	(ii + 1) % count	inside for ii in 0..count, so count > 0
+crates/solidcore/src/surface/plane/p2.rs	Plane::make_new_plane_ellipse_in_contact	int-rem	1	proven	((ii + count) - 1) % count	inside for ii in 0..count, so count > 0
+crates/solidcore/src/surface/plane/p2.rs	Plane::make_new_plane_ellipse_in_contact	int-rem	2	proven	(ii + 1) % count	inside for ii in 0..count, so count > 0
 crates/solidcore/src/surface/procedural_blend/convert.rs	corner_from_record	with_capacity	1	open	Vec::with_capacity(r.rounds.len())	
 crates/solidcore/src/surface/procedural_blend/convert.rs	non_decreasing	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/surface/procedural_sweep.rs	ProceduralSweep::create	windows	1	proven	windows(2)	constant non-zero size
