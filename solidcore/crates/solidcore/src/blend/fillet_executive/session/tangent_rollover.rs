@@ -6,7 +6,8 @@
 //! ([`crate::blend::fillet_tangent_rollover::tangent_rollover_supports`]), and so is a round of
 //! several along such an edge that no other round meets (#18411), another round's edge on
 //! the face it rolls onto counting only at the rolled edge's ends or where that round rolls
-//! over the same edge (#18830: the two sides of a slot beside a hole's seam); any other round of
+//! over the same edge (#18830: the two sides of a slot beside a hole's seam; the bands' check
+//! then compares the two rounds on that face, with or without its fix, #19242); any other round of
 //! several, such as one of a chain, from its ball's sections along its edge
 //! (`rails_wholly_past`, upstream's unimplemented tangent case of
 //! `SmFilletSolver::ProcessFullRollOver`).
@@ -77,6 +78,19 @@ fn face_vertices(target: &Brep, face: FaceId) -> Result<Vec<VertexId>> {
 /// each side, or `None` for a round outside the sections it decides.
 type Decision = Option<[Option<Rollover>; 2]>;
 
+/// Whether a round of several is apart from the others ([`FilletSession::round_apart`]).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Apart {
+    /// Another round meets it where its rollover would not be checked: decided by its ball's
+    /// sections.
+    No,
+    /// No other round's edge has a vertex on a face it may roll on.
+    Clear,
+    /// Another round stands on a face it may roll onto, away from the edge it rolls over:
+    /// only the bands' check compares that round's band with this round's rolled rail.
+    BesideBand,
+}
+
 /// The intervals a round's edge is cut into to tell where its ball's contacts lie: the ball's
 /// section is solved at each cut, the edge's ends among them.
 const SAMPLES: u32 = 16;
@@ -110,6 +124,7 @@ impl FilletSession<'_> {
     /// Those of the topology queries, of the tangency test, of [`tangent_rollover_supports`] and
     /// of [`rails_wholly_past`].
     pub(super) fn roll_over_tangent_edges(&mut self, k: &Kernel) -> Result<()> {
+        self.executive.rolled_beside_band = false;
         let lone = self.executive.solvers.len() == 1;
         let ids: Vec<FilletSolverId> = self
             .executive
@@ -175,8 +190,12 @@ impl FilletSession<'_> {
             let Some(inputs) = all_inputs.get(i).and_then(Option::as_ref) else {
                 continue;
             };
-            let apart = !lone && self.round_apart(k, i, ends.as_deref(), inputs, &decided)?;
-            let closed = if lone || apart {
+            let apart = if lone {
+                Apart::No
+            } else {
+                self.round_apart(k, i, ends.as_deref(), inputs, &decided)?
+            };
+            let closed = if lone || apart != Apart::No {
                 match own_decisions.get_mut(i).and_then(Option::take) {
                     Some(decision) => decision?,
                     None => return Err(stage_failed()),
@@ -193,6 +212,12 @@ impl FilletSession<'_> {
                     if lone || exact {
                         self.objects.solver_mut(id)?.base_mut().rollover_proof =
                             RolloverProof::ClosedForm;
+                    }
+                    // the other round's band on the face this one rolls onto is compared
+                    // with its rolled rail by the bands' check alone, so that check runs
+                    // whatever `fixes.fillet_refuse_overlapping_bands` says (#19242)
+                    if apart == Apart::BesideBand && rollovers.iter().any(Option::is_some) {
+                        self.executive.rolled_beside_band = true;
                     }
                     rollovers
                 }
@@ -228,8 +253,10 @@ impl FilletSession<'_> {
     /// [`tangent_rollover_supports`]) shows it does not roll over T itself. Nothing of another
     /// round then lies at its ends or on the face it may roll off, and another round's band
     /// on the face beyond is a band on a face both rounds' rails lie on, which the bands'
-    /// check (`geometry_bands_clear_other_rails`) compares with this round's rolled rail.
-    /// `false` where `ends` is `None`.
+    /// check (`geometry_bands_clear_other_rails`) compares with this round's rolled rail:
+    /// [`Apart::BesideBand`], for which [`Self::roll_over_tangent_edges`] makes that check run
+    /// even with `fixes.fillet_refuse_overlapping_bands` off. [`Apart::No`] where `ends` is
+    /// `None`.
     ///
     /// # Errors
     /// Those of the topology queries and of the tangency test.
@@ -240,9 +267,9 @@ impl FilletSession<'_> {
         ends: Option<&[Vec<VertexId>]>,
         inputs: &Inputs,
         decided: &[Decision],
-    ) -> Result<bool> {
+    ) -> Result<Apart> {
         let Some(ends) = ends else {
-            return Ok(false);
+            return Ok(Apart::No);
         };
         let others: Vec<VertexId> = ends
             .iter()
@@ -252,8 +279,9 @@ impl FilletSession<'_> {
             .collect();
         let met = |vertices: &[VertexId]| vertices.iter().any(|v| others.contains(v));
         if ends.get(i).is_none_or(|own| met(own)) {
-            return Ok(false);
+            return Ok(Apart::No);
         }
+        let mut beside_band = false;
         let target = &mut *self.objects.target;
         for &face in &inputs.faces {
             for e in face_p4::edges(target, face, None, false, None)? {
@@ -279,7 +307,7 @@ impl FilletSession<'_> {
                     let on_face = face_vertices(target, f)?;
                     if f == face {
                         if met(&on_face) {
-                            return Ok(false);
+                            return Ok(Apart::No);
                         }
                         continue;
                     }
@@ -292,13 +320,18 @@ impl FilletSession<'_> {
                             None => true,
                         };
                         if rolls_over_t || own.iter().any(|v| t_ends.contains(v)) {
-                            return Ok(false);
+                            return Ok(Apart::No);
                         }
+                        beside_band = true;
                     }
                 }
             }
         }
-        Ok(true)
+        Ok(if beside_band {
+            Apart::BesideBand
+        } else {
+            Apart::Clear
+        })
     }
 
     /// The vertices of each solver's edge of `ids`, in order; `None` where a solver has no

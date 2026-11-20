@@ -88,8 +88,9 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     ("crates/doc/src/eval.rs:ModelState::warm_display", "display meshes made ahead"),
     ("crates/doc/src/eval.rs:ModelState::warm_display_at", "display meshes made ahead"),
     ("crates/doc/src/eval.rs:ModelState::warm_meshes", "display meshes made ahead"),
+    ("crates/doc/src/eval.rs:PreparedMeshImport::body", "mesh-body imports: compares retained source-array identities"),
+    ("crates/doc/src/eval.rs:build_import_mesh", "mesh bodies: a mesh import's triangles"),
     ("crates/doc/src/eval.rs:feature_json", "fingerprints feature inputs; triangles are only embedded mesh-body source data"),
-    ("crates/doc/src/eval.rs:mesh_bodies", "mesh bodies: a mesh import's triangles"),
     ("crates/doc/src/eval.rs:mesh_content_digest", "mesh-body imports: hashes source arrays without geometric classification"),
     ("crates/doc/src/placement_reuse.rs:same_feature", "mesh bodies: compares imported mesh source-array identities"),
     ("crates/doc/src/project3d.rs:flat_outline", "mesh bodies: the flat patch of an imported mesh's triangles that a face pick on it means"),
@@ -99,6 +100,7 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     ("crates/kernel/src/body.rs:Body::mesh_untimed", "the mesher: a body's tessellation"),
     ("crates/kernel/src/body.rs:Body::retained_bytes", "the evaluation cache's memory estimate"),
     ("crates/kernel/src/body.rs:Body::unmeshed_faces", "the mesher's report of faces it left out"),
+    ("crates/kernel/src/step_in/records.rs:mesh_part", "mesh bodies: an imported part given as triangles, checked and made a mesh body"),
 ];
 
 /// What a function does with a mesh, the patterns the check matches:

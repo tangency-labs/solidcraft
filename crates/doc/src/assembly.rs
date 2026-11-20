@@ -444,7 +444,8 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
         | PlaneRef::AxisPoint { .. }
         | PlaneRef::ThreePoints { .. }
         | PlaneRef::AlongPath { .. }
-        | PlaneRef::Perpendicular { .. } => {
+        | PlaneRef::Perpendicular { .. }
+        | PlaneRef::SquareToLine { .. } => {
             for r in p.refs_mut() {
                 map_geo_ref(m, r);
             }
@@ -582,6 +583,20 @@ impl Document {
     /// A branch stops past [`MAX_PLACEMENT_DEPTH`] levels, the walk past [`MAX_PLACEMENTS`] placements.
     pub fn placements(&self) -> Vec<(u64, Vec<u64>, Mat)> {
         crate::occurrence_tree::OccurrenceTree::new(self).placements_with(|o| o.transform)
+    }
+
+    /// Every placement inside `component`, `component` itself first: (component, occurrence
+    /// path ids from `component`, transform into `component`'s frame). Limited as
+    /// [`Document::placements`] is.
+    pub fn placements_within(&self, component: u64) -> Vec<(u64, Vec<u64>, Mat)> {
+        crate::occurrence_tree::OccurrenceTree::new(self).placements_from(component, |o| o.transform)
+    }
+
+    /// [`Document::placements_within`], or `None` when the walk stopped at a limit before it
+    /// reached every placement.
+    pub fn all_placements_within(&self, component: u64) -> Option<Vec<(u64, Vec<u64>, Mat)>> {
+        let (placements, complete) = crate::occurrence_tree::OccurrenceTree::new(self).walk_from(component, |o| o.transform);
+        complete.then_some(placements)
     }
 
     /// Whether [`Document::placements`] reaches every placement. Its walk stops at

@@ -211,6 +211,11 @@ pub struct Resolved {
     /// The vertex a `Vertex` reference resolved to (its index in the body's B-rep record),
     /// whose persistent name the link keeps ([`resolved_vertex_name`]). Computed metadata only.
     pub vertex_index: Option<usize>,
+    /// For a face's projection, the persistent name of the edge each piece of `geom` comes from
+    /// (empty for an edge no name follows exactly); empty when the pieces do not stand one for
+    /// one for edges. The link records them ([`Link::curve_edges`]) and is matched by them when
+    /// it is read again (#18711).
+    pub edge_names: Vec<String>,
 }
 
 /// Resolutions of body-based references, keyed by the reference, the sketch plane and the
@@ -297,6 +302,7 @@ fn resolve_uncached(
     let mut face_index = None;
     let mut edge_index = None;
     let mut vertex_index = None;
+    let mut edge_names = Vec::new();
     let mut source = src.clone();
     let mut wires: Vec<Vec<Vec3>> = Vec::new();
     let mut exact: Vec<Vec<WireCurve>> = Vec::new();
@@ -342,8 +348,11 @@ fn resolve_uncached(
                     if target.body.is_mesh() {
                         crate::project3d::flat_outline(&mesh, q).iter().flat_map(|outline| fit_mesh_outline(plane, outline)).collect()
                     } else {
-                        let g = projected_edges(target, &mesh, plane, &projection_face_edges(target, &mesh, f, plane)?)?;
-                        if certified_planar_construction(target, f as usize) { merge_family_lines(g)? } else { g }
+                        let (g, names) = projected_edges_named(target, &mesh, plane, &projection_face_edges(target, &mesh, f, plane)?)?;
+                        let before = g.len();
+                        let g = if certified_planar_construction(target, f as usize) { merge_family_lines(g)? } else { g };
+                        edge_names = names_kept(names, before, &g);
+                        g
                     }
                 }
             }
@@ -353,7 +362,10 @@ fn resolve_uncached(
             let mesh = b.mesh();
             match kind {
                 LinkKind::Intersect => section(plane, &mesh, None),
-                _ => silhouette(plane, &mesh, Some(&b.body)),
+                _ => match exact_silhouette(b, plane) {
+                    Some(g) if !g.is_empty() => g,
+                    _ => silhouette(plane, &mesh, Some(&b.body)),
+                },
             }
         }
         LinkSource::Vertex { body, at } => {
@@ -554,7 +566,8 @@ fn resolve_uncached(
     if geom.is_empty() && wires.is_empty() {
         return Err(DocError::Invalid(format!("the {} projects to nothing on this sketch plane", src.describe())));
     }
-    Ok(Resolved { geom: merge_split_circles(geom), wires, exact, source, moved, face_index, edge_index, vertex_index })
+    let edge_names = names_kept(edge_names, geom.len(), &geom);
+    Ok(Resolved { geom: merge_split_circles(geom), wires, exact, source, moved, face_index, edge_index, vertex_index, edge_names })
 }
 
 /// Whether a curve (world points) leaves the sketch plane: included, it then stays 3D.
@@ -784,46 +797,77 @@ fn projection_links(geometry: Vec<solidcore_ops::conic_projection::Projection>) 
 
 /// `edges` of `body` projected on `plane`: each exactly ([`exact_edges`]) or fitted to its
 /// polyline in `mesh`.
-fn projected_edges(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &[usize]) -> Result<Vec<LinkGeom>> {
-    let mut out = projected_edges_apart(body, mesh, plane, edges)?;
+///
+/// With each piece, the persistent name of the edge it comes from, when
+/// that name follows exact history (the faces it separates do, and it is not one of several edges
+/// between them numbered by where they lie); empty otherwise, and for a mesh body.
+fn projected_edges_named(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &[usize]) -> Result<(Vec<LinkGeom>, Vec<String>)> {
+    let (mut out, owners) = projected_edges_owned(body, mesh, plane, edges)?;
     if body.body.is_mesh() {
         meet_at_shared_ends(&mut out, order::join_tolerance(mesh));
     }
-    Ok(out)
+    let named = (!body.body.is_mesh()).then(|| crate::name_lookup::BodyEdges::new(body));
+    let name = |e: usize| named.as_ref().filter(|n| n.verified(e)).and_then(|n| n.name(e)).unwrap_or_default().to_string();
+    let names = owners.into_iter().map(name).collect();
+    Ok((out, names))
+}
+
+/// The names of `geom`'s pieces (see [`Resolved::edge_names`]) after a pass that keeps each piece
+/// where it was unless it joins pieces together: kept while the pass gave as many pieces back.
+fn names_kept(names: Vec<String>, before: usize, geom: &[LinkGeom]) -> Vec<String> {
+    if names.len() == before && geom.len() == before { names } else { Vec::new() }
 }
 
 /// Where curve ends lie within `gap` of each other, moves them onto the first of them. A fitted
 /// round's edges end a few 1e-5 mm short of their neighbours (#8284); the sketch only shares a
 /// point between ends 1e-7 apart, and without it the outline has no closed profile.
 fn meet_at_shared_ends(geom: &mut [LinkGeom], gap: f64) {
-    let mut seen: Vec<Vec2> = Vec::new();
-    let mut snap = |p: &mut Vec2| match seen.iter().find(|q| q.dist(*p) <= gap) {
-        Some(q) => *p = *q,
-        None => seen.push(*p),
-    };
-    for g in geom {
-        match g {
-            LinkGeom::Line(a, b) | LinkGeom::Arc { a, b, .. } | LinkGeom::Conic { a, b, .. } => {
-                snap(a);
-                snap(b);
-            }
-            LinkGeom::Spline { pts, periodic: false, .. } => {
-                if let Some(first) = pts.first_mut() {
-                    snap(first);
-                }
-                if let Some(last) = pts.last_mut() {
-                    snap(last);
-                }
-            }
-            _ => {}
+    let met = solidcore_ops::outline::meet_at_shared_ends(geom.iter().cloned().map(outline_piece).collect(), gap);
+    for (g, m) in geom.iter_mut().zip(met) {
+        *g = link_of_piece(m);
+    }
+}
+
+/// Link geometry as an outline piece of the kernel's ([`solidcore_ops::outline::Piece`]), field
+/// by field.
+fn outline_piece(g: LinkGeom) -> solidcore_ops::outline::Piece {
+    use solidcore_ops::outline::Piece;
+    match g {
+        LinkGeom::Point(p) => Piece::Point(p),
+        LinkGeom::Line(a, b) => Piece::Line(a, b),
+        LinkGeom::Circle(c, r) => Piece::Circle(c, r),
+        LinkGeom::Arc { c, a, b } => Piece::Arc { c, a, b },
+        LinkGeom::Conic { a, apex, b, rho } => Piece::Conic { a, apex, b, rho },
+        LinkGeom::Ellipse { c, major, minor } => Piece::Ellipse { c, major, minor },
+        LinkGeom::Spline { pts, control, degree, periodic, nurbs } => {
+            Piece::Spline { pts, control, degree, periodic, nurbs: nurbs.map(|n| (n.knots, n.weights)) }
         }
     }
 }
 
-/// Each of `edges` projected on its own ([`projected_edges`] without the ends brought together).
-fn projected_edges_apart(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &[usize]) -> Result<Vec<LinkGeom>> {
+/// An outline piece of the kernel's as link geometry, field by field.
+fn link_of_piece(g: solidcore_ops::outline::Piece) -> LinkGeom {
+    use solidcore_ops::outline::Piece;
+    match g {
+        Piece::Point(p) => LinkGeom::Point(p),
+        Piece::Line(a, b) => LinkGeom::Line(a, b),
+        Piece::Circle(c, r) => LinkGeom::Circle(c, r),
+        Piece::Arc { c, a, b } => LinkGeom::Arc { c, a, b },
+        Piece::Conic { a, apex, b, rho } => LinkGeom::Conic { a, apex, b, rho },
+        Piece::Ellipse { c, major, minor } => LinkGeom::Ellipse { c, major, minor },
+        Piece::Spline { pts, control, degree, periodic, nurbs } => {
+            LinkGeom::Spline { pts, control, degree, periodic, nurbs: nurbs.map(|(knots, weights)| solidcraft_sketch::Nurbs { knots, weights }) }
+        }
+    }
+}
+
+/// Each of `edges` projected on its own ([`projected_edges_named`] without the ends brought together).
+/// With each piece, the edge (of `edges`) it comes from.
+fn projected_edges_owned(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &[usize]) -> Result<(Vec<LinkGeom>, Vec<usize>)> {
     let mut out = Vec::new();
+    let mut owners = Vec::new();
     for (e, exact) in edges.iter().zip(exact_edges(body, plane, edges)?) {
+        let before = out.len();
         match exact {
             Some(mut g) => {
                 at_vertices(body, plane, *e, &mut g);
@@ -835,8 +879,9 @@ fn projected_edges_apart(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, ed
                 }
             }
         }
+        owners.resize(out.len().max(before), *e);
     }
-    Ok(out)
+    Ok((out, owners))
 }
 
 /// Edge `e`'s exact pieces `g` with their outer ends on the edge's vertices, where they lie
@@ -991,6 +1036,7 @@ fn resolve_named_edge(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
         face_index: None,
         edge_index: Some(index),
         vertex_index: None,
+        edge_names: Vec::new(),
     })
 }
 
@@ -1008,6 +1054,7 @@ fn resolve_named_vertex(plane: &Plane, body: &str, index: usize, at: Vec3) -> Re
         face_index: None,
         edge_index: None,
         vertex_index: Some(index),
+        edge_names: Vec::new(),
     })
 }
 
@@ -1019,15 +1066,19 @@ fn resolve_named_face(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
     }
     let face_index = Some(index);
     let index = u32::try_from(index).map_err(|_| DocError::Invalid("named projection face index exceeds limit".into()))?;
+    let mut edge_names = Vec::new();
     let geom = if kind == LinkKind::Intersect {
         match axial_section(target, plane, index)? {
             Some(exact) => exact,
             None => section(plane, &mesh, Some(index)),
         }
     } else {
-        let geom = projected_edges(target, &mesh, plane, &projection_face_edges(target, &mesh, index, plane)?)?;
+        let (geom, names) = projected_edges_named(target, &mesh, plane, &projection_face_edges(target, &mesh, index, plane)?)?;
+        let before = geom.len();
         let geom = merge_split_circles(geom);
-        if certified_planar_construction(target, index as usize) { merge_family_lines(geom)? } else { geom }
+        let geom = if certified_planar_construction(target, index as usize) { merge_family_lines(geom)? } else { geom };
+        edge_names = names_kept(names, before, &geom);
+        geom
     };
     if geom.is_empty() {
         return Err(DocError::Invalid("named face projects to nothing on this sketch plane".into()));
@@ -1041,6 +1092,7 @@ fn resolve_named_face(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
         face_index,
         edge_index: None,
         vertex_index: None,
+        edge_names,
     })
 }
 
@@ -1089,6 +1141,7 @@ pub fn resolve_face_indices(st: &ModelState, plane: &Plane, kind: LinkKind, body
     }
     let selected: std::collections::BTreeSet<_> = indices.iter().copied().collect();
     let mut geometry = Vec::new();
+    let mut edge_names = Vec::new();
     if kind == LinkKind::Intersect {
         for index in indices {
             let index = u32::try_from(*index).map_err(|_| DocError::Invalid("anchored face index exceeds format bounds".into()))?;
@@ -1108,10 +1161,17 @@ pub fn resolve_face_indices(st: &ModelState, plane: &Plane, kind: LinkKind, body
         } else {
             order::family_edges(&mesh, &selected, plane)?
         };
-        geometry.extend(projected_edges(body, &mesh, plane, &edges)?);
+        let (pieces, names) = projected_edges_named(body, &mesh, plane, &edges)?;
+        // Only a single face's pieces are named: a family's edges are its outline, not one face's.
+        if indices.len() == 1 {
+            edge_names = names;
+        }
+        geometry.extend(pieces);
     }
     if kind != LinkKind::Intersect && (indices.len() > 1 || indices.first().is_some_and(|index| certified_planar_construction(body, *index))) {
+        let before = geometry.len();
         geometry = merge_family_lines(geometry)?;
+        edge_names = names_kept(edge_names, before, &geometry);
     }
     let point = mesh
         .triangles
@@ -1131,6 +1191,7 @@ pub fn resolve_face_indices(st: &ModelState, plane: &Plane, kind: LinkKind, body
         face_index: if indices.len() == 1 { indices.first().copied() } else { None },
         edge_index: None,
         vertex_index: None,
+        edge_names,
     })
 }
 
@@ -1364,6 +1425,7 @@ fn refresh_links_in(
                     face_index: None,
                     edge_index: None,
                     vertex_index: None,
+                    edge_names: Vec::new(),
                 })
             })
         } else if l.auto_face {
@@ -1407,7 +1469,11 @@ fn refresh_links_in(
                 let words_follow = matches!(&l.source, LinkSource::Text { exprs, .. } if exprs.text.is_some());
                 let others = |sk: &Sketch| (sk.constraints.len(), sk.curves.len().saturating_sub(sk.link_curves(&l.id).len()));
                 let before = others(sk);
-                match sk.update_link(&l.id, &r.geom) {
+                // A face's projection is matched to its curves by the names of its edges, where
+                // the link recorded them (#18711).
+                let updated =
+                    if l.kind == LinkKind::Project { sk.update_link_named(&l.id, &r.geom, &r.edge_names) } else { sk.update_link(&l.id, &r.geom) };
+                match updated {
                     Ok(true) if words_follow => {}
                     // A rebuilt projection is only worth a warning when it took something of
                     // the user's with it: a constraint, a dimension or a curve drawn on it.
@@ -2217,6 +2283,146 @@ fn surface_facing(m: &Mesh, t: &[u32; 3], flat: Vec3) -> Vec3 {
         }
     }
     sum.normalized().unwrap_or(flat)
+}
+
+/// Whole-body outlines already traced, newest first. Each is kept with what it was traced from,
+/// which is all it depends on ([`exact_silhouette_traced`]): the body (kept, so its shared data
+/// stays alive and no other body is taken for it), its record as written (JSON, which tells
+/// `-0.0` from `0.0`), its size, whether it is a mesh, and the sketch plane as written. A re-evaluation that makes the
+/// very same body ([`solidcraft_kernel::Body::same_shape`]), or one with the same record and
+/// size (recomputing the timeline, opening the design again), reuses the outline.
+struct TracedOutline {
+    body: solidcraft_kernel::Body,
+    record: String,
+    size: u64,
+    plane: String,
+    outline: Option<Vec<LinkGeom>>,
+}
+static OUTLINES: std::sync::Mutex<Vec<TracedOutline>> = std::sync::Mutex::new(Vec::new());
+const OUTLINES_KEPT: usize = 16;
+/// Records written longer than this (bytes) are not kept: comparing them would cost more than
+/// it saves, and they would hold too much memory.
+const OUTLINE_RECORD_MAX: usize = 4 << 20;
+
+/// [`exact_silhouette_traced`], kept for each body and plane ([`OUTLINES`]).
+fn exact_silhouette(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGeom>> {
+    // A mesh body has no exact outline, whatever its record.
+    let plane_text = format!("{plane:?}|{}", body.body.is_mesh());
+    let size = body.body.size().to_bits();
+    let mut record: Option<Option<String>> = None;
+    let mut written =
+        || record.get_or_insert_with(|| serde_json::to_string(body.body.record()).ok().filter(|r| r.len() <= OUTLINE_RECORD_MAX)).clone();
+    if let Ok(kept) = OUTLINES.lock() {
+        let mut hit = kept.iter().filter(|k| k.plane == plane_text && k.size == size).find(|k| k.body.same_shape(&body.body));
+        if hit.is_none() && kept.iter().any(|k| k.plane == plane_text && k.size == size) {
+            let now = written();
+            hit = kept.iter().find(|k| k.plane == plane_text && k.size == size && now.as_ref() == Some(&k.record));
+        }
+        if let Some(k) = hit {
+            return k.outline.clone();
+        }
+    }
+    let outline = exact_silhouette_traced(body, plane);
+    if let Some(written) = written()
+        && let Ok(mut kept) = OUTLINES.lock()
+    {
+        kept.insert(0, TracedOutline { body: body.body.clone(), record: written, size, plane: plane_text, outline: outline.clone() });
+        kept.truncate(OUTLINES_KEPT);
+    }
+    outline
+}
+
+/// The outline of a solid seen along the sketch normal, from its exact faces and edges: the
+/// stretches of its edges between a face that faces the sketch and one that does not (and of an
+/// open sheet's border where its face faces the sketch; the kernel's
+/// [`Query::outline_stretches`](solidcore_ops::query::Query::outline_stretches)), each projected exactly as an edge link
+/// projects it ([`exact_edges`], or the kernel's projection of the stretch), and the silhouettes of
+/// its curved faces as the drawing's hidden lines trace them ([`hlr::silhouettes`]). A face faces
+/// the sketch where its normal out of the material leans toward it; edge-on is away, as in
+/// [`silhouette`]. A circle seen at a slant is an ellipse: its stretches come out as exact
+/// elliptical arcs, not lines and circular arcs fitted to the mesh (which bulged the wrong way and
+/// ran to hundreds of curves on a sketch at 45 degrees).
+///
+/// `None` for a mesh body, a body hidden lines leave out (a freeform face, a trim they cannot
+/// read), or an edge or face the kernel cannot read exactly here: the mesh's outline is traced
+/// then ([`silhouette`]).
+///
+/// [`hlr::silhouettes`]: solidcraft_geom::hlr::silhouettes
+fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGeom>> {
+    use solidcraft_geom::hlr;
+    if body.body.is_mesh() {
+        return None;
+    }
+    let rec = body.body.record();
+    let n = plane.normal();
+    let size = body.body.size().max(1e-9);
+    let q = solidcore_ops::query::Query::new(rec);
+    let mut edges = Vec::new();
+    // The stretches of the edges on the outline, each projected as an edge link projects it.
+    for stretch in q.outline_stretches(n, size).ok()? {
+        let e = stretch.edge;
+        let edge = rec.edges.get(e)?;
+        let geom = if stretch.whole {
+            let mut g = exact_edges(body, plane, &[e]).ok()?.pop().flatten()?;
+            at_vertices(body, plane, e, &mut g);
+            g
+        } else {
+            let pieces = solidcore_ops::spline_projection::project_curve(
+                edge.parameters(),
+                stretch.range,
+                true,
+                stretch.ends,
+                plane,
+                body.body.planar_edges_tolerance(),
+                &mut 262_144,
+            )?;
+            let classified =
+                solidcore_ops::conic_projection::classify_pieces(plane, &pieces, solidcraft_sketch::MAX_SPLINE_POINTS, solidcraft_sketch::MAX_COORD)
+                    .ok()?;
+            projection_links(classified).ok()?
+        };
+        // Tidied by the kernel: an edge seen end on is a point of the outline, not a curve of it.
+        edges.extend(solidcore_ops::outline::tidy_stretch(geom.into_iter().map(outline_piece).collect()));
+    }
+    // The silhouettes of the curved faces, traced where they lie inside them.
+    // Prepared once per body: every sketch that projects it, on any plane, shares it.
+    let def = body.body.outline_prepared()?;
+    let opts = hlr::Options { trim_samples: solidcraft_kernel::OUTLINE_TRIM_SAMPLES, threads: 1, ..hlr::Options::default() };
+    if !def.report.freeform_faces.is_empty() || !def.report.unsupported_trims.is_empty() {
+        return None;
+    }
+    let view = hlr::View { x: plane.x, y: plane.y, d: n };
+    let placed = hlr::Placement { body: 0, rotation: [Vec3::X, Vec3::Y, Vec3::Z], translation: Vec3::ZERO - plane.origin };
+    let mut sils = Vec::new();
+    for s in hlr::silhouettes(def, &placed, &view, &opts).ok()? {
+        match s.accuracy {
+            solidcraft_geom::section::CurveAccuracy::Analytic => {
+                let pieces: Vec<LinkGeom> = s.geometry.iter().map(LinkGeom::from_seg).collect::<Option<_>>()?;
+                sils.extend(solidcore_ops::outline::tidy_silhouette(pieces.into_iter().map(outline_piece).collect()));
+            }
+            _ => {
+                let pts: Vec<Vec2> = s.points.iter().map(|p| Vec2::new(p[0], p[1])).collect();
+                // A traced silhouette along an edge already in the outline (a round's end, where
+                // the view grazes the round) is that edge.
+                if pts.iter().all(|p| edges.iter().any(|g| solidcore_ops::outline::near(g, *p, size * 1e-6))) {
+                    continue;
+                }
+                let tol = size * 1e-5;
+                let mut fitted = Vec::new();
+                match as_spline(&pts, tol) {
+                    Some(sp) => fitted.push(sp),
+                    None => fit_chain(&pts, Some(tol), &mut fitted),
+                }
+                sils.extend(fitted.into_iter().map(outline_piece));
+            }
+        }
+    }
+    // A silhouette ends where it meets an edge, on the face's trim: within its chords of the
+    // edge's own end there. Edges come first, so their exact ends are the ones kept.
+    let mut out = edges;
+    out.extend(sils);
+    let out = solidcore_ops::outline::meet_at_shared_ends(out, 8.0 * def.report.max_trim_chord + size * 1e-7);
+    Some(solidcore_ops::outline::drop_coincident(out, (size * 1e-9).max(1e-7)).into_iter().map(link_of_piece).collect())
 }
 
 /// The outline of a body seen along the sketch normal: mesh edges between triangles facing the

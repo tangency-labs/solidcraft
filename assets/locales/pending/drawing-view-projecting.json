@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "ui.sheet_page.projecting": "جارٍ الإسقاط…"
+  },
+  "de": {
+    "ui.sheet_page.projecting": "Wird projiziert…"
+  },
+  "en": {
+    "ui.sheet_page.projecting": "Projecting…"
+  },
+  "he": {
+    "ui.sheet_page.projecting": "מתבצעת הטלה…"
+  },
+  "ja": {
+    "ui.sheet_page.projecting": "投影中…"
+  },
+  "ko": {
+    "ui.sheet_page.projecting": "투영 중…"
+  },
+  "vi": {
+    "ui.sheet_page.projecting": "Đang chiếu…"
+  },
+  "zh": {
+    "ui.sheet_page.projecting": "正在投影…"
+  }
+}

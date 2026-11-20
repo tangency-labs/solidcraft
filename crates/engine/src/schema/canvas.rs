@@ -1,6 +1,6 @@
 //! Contracts and result types for the commands in `cmd/sketch_canvas.rs`: `canvas.insert`,
-//! `canvas.decal`, `canvas.edit`, `canvas.calibrate`, `canvas.straighten` and `canvas.delete`, and
-//! for `canvas.to_sketch` in `cmd/canvas_sketch.rs`.
+//! `canvas.decal`, `canvas.edit`, `canvas.calibrate`, `canvas.straighten`, `canvas.delete` and
+//! `canvas.frame_sketch`, and for `canvas.to_sketch` in `cmd/canvas_sketch.rs`.
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether an image can be read, a canvas exists
@@ -21,19 +21,15 @@ use super::motion::require;
 use super::types::{LengthExpr, Point2, Point3};
 use crate::params;
 
-/// Place an image on a plane as a reference to trace, kept in the design. Give the image as
-/// `path` or as base64 `data`; PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a
+/// Place an image on a plane as a reference to trace, kept in the design. Give the image file as
+/// `path`; PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a
 /// PNG. The image goes into the active component. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = image_required)]
 pub struct CanvasInsertParams {
-    /// A PNG, JPEG or SVG file to read (not blank, under 4096 characters). Used when `data` is
-    /// not given.
+    /// The PNG, JPEG or SVG file to read (not blank, under 4096 characters).
     #[serde(default)]
     pub path: Option<String>,
-    /// The image itself, a PNG, JPEG or SVG, as base64. Wins over `path`.
-    #[serde(default)]
-    pub data: Option<String>,
     /// The plane the image lies on. Default: XY. A picked face is read as `sketch.create` reads
     /// one.
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
@@ -70,21 +66,42 @@ pub struct CanvasInsertParams {
     /// Default: 1024. A PNG or JPEG is kept as it is.
     #[serde(default)]
     pub resolution: Option<f64>,
+    /// Tie the image to a construction rectangle drawn exactly around it, as `canvas.frame_sketch`
+    /// does: in the sketch being edited (the image must lie on its plane), else in a new sketch.
+    /// Dimensions and constraints on that rectangle then place, turn and size the image.
+    /// `"auto"`: framed in the sketch being edited only when the image lies on its plane, else a
+    /// free image (as the image tools place it). Default: false.
+    #[serde(default)]
+    pub frame: Option<FrameParam>,
 }
 
-/// Put an image on a planar face of the model, like a sticker, kept in the design. Give the image
-/// as `path` or as base64 `data`; PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a
-/// PNG. The image goes into the active component. One undo step.
+/// `frame`: true or false, or `"auto"`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum FrameParam {
+    /// Frame the image (true) or not (false).
+    Always(bool),
+    /// Frame it in the sketch being edited when it lies on that sketch's plane.
+    Auto(FrameAuto),
+}
+
+/// The one word `frame` takes besides true and false.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FrameAuto {
+    Auto,
+}
+
+/// Put an image on a planar face of the model, like a sticker, kept in the design and written to
+/// a URDF export as a textured visual of its component's link. Give the image file as `path`;
+/// PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a PNG. The image
+/// goes into the active component. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = decal_required)]
 pub struct CanvasDecalParams {
-    /// A PNG, JPEG or SVG file to read (not blank, under 4096 characters). Used when `data` is
-    /// not given.
+    /// The PNG, JPEG or SVG file to read (not blank, under 4096 characters).
     #[serde(default)]
     pub path: Option<String>,
-    /// The image itself, a PNG, JPEG or SVG, as base64. Wins over `path`.
-    #[serde(default)]
-    pub data: Option<String>,
     // Optional in the type and required in the schema (`decal_required`): left out, the handler
     // refuses it with its own message, not the check's "is required".
     /// The face: a point [x, y, z] in mm on a planar face, where the image is centred, or a
@@ -124,6 +141,12 @@ pub struct CanvasDecalParams {
     /// Default: 1024. A PNG or JPEG is kept as it is.
     #[serde(default)]
     pub resolution: Option<f64>,
+    /// Tie the image to a construction rectangle drawn exactly around it, as `canvas.frame_sketch`
+    /// does: in the sketch being edited (the face must be on its plane), else in a new sketch.
+    /// `"auto"`: framed in the sketch being edited only when the face is on its plane, else a free
+    /// image. Default: false.
+    #[serde(default)]
+    pub frame: Option<FrameParam>,
 }
 
 /// Change a canvas or decal: its place, size, angle, opacity, mirroring, visibility or name. Keys
@@ -161,6 +184,46 @@ pub struct CanvasEditParams {
     /// and Delete until it is unlocked; its opacity, visibility and name can still change.
     #[serde(default)]
     pub locked: Option<bool>,
+    /// The sketch points the image's corners follow, or `null` to let its own centre, width and
+    /// angle place it again. An anchored canvas refuses a new centre, width or angle, Calibrate
+    /// and Straighten.
+    #[serde(default)]
+    pub anchor: Option<CanvasAnchorParam>,
+}
+
+/// The sketch points a canvas's corners follow, as `canvas.edit` reads them.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CanvasAnchorParam {
+    /// The sketch's feature id.
+    pub sketch: u64,
+    /// The point at the image's bottom-left corner (its id in that sketch, at most 256 bytes).
+    pub bottom_left: String,
+    /// The point at the image's bottom-right corner.
+    pub bottom_right: String,
+    /// The point at the image's top-left corner. Left out, the image's height follows its shape.
+    #[serde(default)]
+    pub top_left: Option<String>,
+}
+
+/// Draw a construction rectangle exactly around a canvas or decal image and anchor the image's
+/// corners to it, so the sketch's dimensions and constraints place, turn and size the image. The
+/// rectangle goes into the sketch being edited, which the image must lie on (it can then be tied
+/// to that sketch's own geometry), or, with no sketch being edited, into a new sketch on the
+/// image's plane. The canvas must belong to the active component and follow no sketch yet. One
+/// undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = canvas_required)]
+pub struct CanvasFrameSketchParams {
+    /// The canvas, by id or name.
+    // Optional in the type and required in the schema, as `face` above.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "CanvasRef")]
+    pub canvas: Option<CanvasRef>,
+    /// The new sketch's name, when no sketch is being edited. Default: `<the canvas's name>
+    /// frame`.
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 /// Scale a canvas so that two points on it are a known distance apart: the image is scaled about
@@ -495,7 +558,7 @@ fn face_pick(point: &Schema) -> Value {
 /// `canvas.insert` and `canvas.decal` need `path` or `data`; the handler says so when both are
 /// left out.
 fn need_image(schema: &mut Schema) {
-    schema.insert("anyOf".into(), json!([{"required": ["data"]}, {"required": ["path"]}]));
+    require(schema, "path");
 }
 
 fn image_required(schema: &mut Schema) {
@@ -532,9 +595,26 @@ pub struct CanvasPlaced {
     pub name: String,
     /// The image's size in pixels, [width, height].
     pub pixels: [u32; 2],
+    /// With `frame`: the rectangle the image follows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<CanvasFrame>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// The construction rectangle a framed image follows.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct CanvasFrame {
+    /// The sketch holding it, by feature id.
+    pub sketch: u64,
+    /// That sketch's name.
+    pub name: String,
+    /// The ids of the rectangle's points at the image's bottom-left, bottom-right and top-left
+    /// corners.
+    pub bottom_left: String,
+    pub bottom_right: String,
+    pub top_left: String,
 }
 
 /// What `canvas.edit` returns.
@@ -578,6 +658,25 @@ pub struct CanvasStraightened {
 pub struct CanvasDeleted {
     /// The id the canvas had.
     pub deleted: u64,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `canvas.frame_sketch` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CanvasFramed {
+    /// The canvas, by id.
+    pub canvas: u64,
+    /// The sketch holding the rectangle, by feature id: the one being edited, or the new one.
+    pub sketch: u64,
+    /// Its name.
+    pub name: String,
+    /// The ids of the rectangle's points at the image's bottom-left, bottom-right and top-left
+    /// corners.
+    pub bottom_left: String,
+    pub bottom_right: String,
+    pub top_left: String,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

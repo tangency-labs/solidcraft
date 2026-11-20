@@ -306,7 +306,7 @@ fn unsupported_sheet_machining_is_atomic_but_true_no_change_is_allowed() {
     let before = s.doc.to_json();
     let undo = s.undo.len();
     let error = s.execute("solid.extrude", &json!({"sketch":"Taper","distance":1,"operation":"cut","taper":"5 deg"})).unwrap_err().to_string();
-    assert!(error.contains("sheet") && error.contains("preserv"), "{error}");
+    assert!(error.contains("sheet") && error.contains("read back"), "{error}");
     assert_eq!(s.doc.to_json(), before);
     assert_eq!(s.undo.len(), undo);
     rectangle_tool(&mut s, "Outside", [120.0, 20.0], [130.0, 30.0]);
@@ -638,6 +638,97 @@ fn a_refused_rule_names_the_value_at_fault() {
     // `a_bend_radius_of_0_is_refused_wherever_it_is_given`).
     let e = refused(&mut s, json!({"name": "R", "thickness": 2, "bend_radius": 0}));
     assert!(e.contains("the bend radius must be more than 0") && !e.contains("negative"), "{e}");
+}
+
+/// A rule made from the standard library (#18304) takes the gauge's thickness and keeps its own
+/// working radius; its K-factor is the bend model's estimate at that R/T, said so in the reply.
+/// An edge flange's flat is then the closed form: the base and the leg, each short of the outer
+/// sharp by R + T, and the bend's allowance (π/2)(R + K·T).
+#[test]
+fn a_library_material_flattens_by_its_closed_form_bend_allowance() {
+    // 5052-H32 14 ga: 0.0641 in at the default rule's R = T, air bent: the soft column's 0.40 for
+    // R/T from T to 3T. 6061-T6 14 ga at R = 3T: the same band, so 0.40 again.
+    for (material, radius_over_t, radius) in [("Aluminium 5052-H32", 1.0, None), ("Aluminium 6061-T6", 3.0, Some("3 * Thickness"))] {
+        let mut s = Session::default();
+        let mut p = json!({"name": "Stock", "material": material, "gauge": "14 ga", "active": true});
+        if let Some(r) = radius {
+            p["bend_radius"] = json!(r);
+        }
+        let made = run(&mut s, "sheet.manage_rules", p);
+        assert_eq!(made["rule"]["material"], material, "{made}");
+        assert_eq!(made["rule"]["k_factor"], "0.40", "{made}");
+        let notes = made["notes"].to_string();
+        assert!(notes.contains("estimate from the generic air chart") && !notes.contains("minimum"), "{made}");
+        let t = 0.0641 * 25.4;
+        let r = radius_over_t * t;
+        assert!((made["values"]["thickness"].as_f64().unwrap_or(0.0) - t).abs() < 1e-12, "{made}");
+        assert!((made["values"]["bend_radius"].as_f64().unwrap_or(0.0) - r).abs() < 1e-12, "{made}");
+        base(&mut s, 100.0, 60.0);
+        run(&mut s, "sheet.flange", json!({"edges": [[50, 0, t]], "height": 20}));
+        let want = (60.0 - (r + t)) + FRAC_PI_2 * (r + 0.40 * t) + (20.0 - (r + t));
+        let f = flat(&mut s);
+        assert!((f["flat_size_mm"][1].as_f64().unwrap_or(0.0) - want).abs() < 1e-6, "{material}: {f}");
+        assert!((f["bends"][0]["allowance"].as_f64().unwrap_or(0.0) - FRAC_PI_2 * (r + 0.40 * t)).abs() < 1e-6, "{material}: {f}");
+        // The material is saved with the rule, and reads back.
+        let saved = s.doc.to_json();
+        assert!(saved.contains(&format!("\"material\": \"{material}\"")) || saved.contains(&format!("\"material\":\"{material}\"")), "{saved}");
+        let listed = run(&mut s, "sheet.rules", json!({}));
+        assert_eq!(listed["rules"][0]["rule"]["material"], material, "{listed}");
+    }
+}
+
+#[test]
+fn library_rules_keep_the_values_given_beside_them_and_refuse_what_the_library_lacks() {
+    let mut s = Session::default();
+    let made = run(&mut s, "sheet.manage_rules", json!({"name": "SS", "material": "stainless steel 304", "gauge": "16", "k_factor": 0.42}));
+    assert_eq!(made["rule"]["k_factor"], "0.42", "{made}");
+    assert!(made.get("notes").is_none(), "a K-factor given is no estimate: {made}");
+    // A metric thickness is picked as a gauge is.
+    let metric = run(&mut s, "sheet.manage_rules", json!({"name": "SS2", "material": "Stainless steel 304", "gauge": "2 mm"}));
+    assert_eq!(metric["rule"]["thickness"], "2 mm", "{metric}");
+    // Bottoming at R = T reads the hard column's 0.48.
+    let bottomed =
+        run(&mut s, "sheet.manage_rules", json!({"name": "SSB", "material": "Stainless steel 304", "gauge": "16", "bend_method": "bottoming"}));
+    assert_eq!(bottomed["rule"]["k_factor"], "0.48", "{bottomed}");
+    // 6061-T6 at 1T is under its published minimum (2T at 16 ga): kept, and said.
+    let tight = run(&mut s, "sheet.manage_rules", json!({"name": "AL", "material": "Aluminium 6061-T6", "gauge": "16", "bend_radius": "Thickness"}));
+    assert_eq!(tight["rule"]["bend_radius"], "Thickness", "{tight}");
+    assert!(tight["notes"].to_string().contains("under Aluminium 6061-T6's published minimum of 2.581 mm"), "{tight}");
+    assert_eq!(made["rule"]["thickness"], "0.0625 in", "{made}");
+    assert_eq!(made["rule"]["material"], "Stainless steel 304", "{made}");
+    // A material of one's own is a label.
+    let own = run(&mut s, "sheet.manage_rules", json!({"name": "Galv", "material": "Galvanneal", "thickness": "1.6 mm"}));
+    assert_eq!(own["rule"]["material"], "Galvanneal", "{own}");
+    let refused =
+        |s: &mut Session, p: Value| s.execute("sheet.manage_rules", &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("{p} was accepted"));
+    // 128 characters, counted as characters, not bytes.
+    let accented = run(&mut s, "sheet.manage_rules", json!({"name": "Accented", "material": "é".repeat(128), "thickness": "2 mm"}));
+    assert_eq!(accented["rule"]["material"], "é".repeat(128));
+    let before = s.doc.to_json();
+    let e = refused(&mut s, json!({"name": "X", "material": "Copper C110", "gauge": "16", "bend_method": "folding"}));
+    assert!(e.contains("air, bottoming or coining"), "{e}");
+    let e = refused(&mut s, json!({"name": "X", "gauge": "16"}));
+    assert!(e.contains("`gauge` needs `material`"), "{e}");
+    let e = refused(&mut s, json!({"name": "X", "material": "Titanium", "gauge": "16"}));
+    assert!(e.contains("not in the standard library") && e.contains("Aluminium 5052-H32"), "{e}");
+    let e = refused(&mut s, json!({"name": "X", "material": "Stainless steel 304", "gauge": "13"}));
+    assert!(e.contains("no gauge `13`") && e.contains("14 ga"), "{e}");
+    let e = refused(&mut s, json!({"name": "X", "material": "é".repeat(129)}));
+    assert!(e.contains("128 characters"), "{e}");
+    let e = refused(&mut s, json!({"name": "X", "material": "a\nb"}));
+    assert!(e.contains("one line"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+    // A rule without a material saves without the field, as designs did before.
+    let mut plain = Session::default();
+    run(&mut plain, "sheet.manage_rules", json!({"name": "Plain", "thickness": "2 mm"}));
+    assert!(!plain.doc.to_json().contains("\"material\""));
+    let lib = run(&mut s, "sheet.rule_library", json!({"material": "copper c110"}));
+    let rules = lib["rules"].as_array().cloned().unwrap_or_default();
+    // 8 Brown & Sharpe gauges and the 12 metric thicknesses.
+    assert_eq!(rules.len(), 8 + 12, "{lib}");
+    assert!(rules.iter().all(|r| r["material"] == "Copper C110" && r["sources"].as_array().is_some_and(|s| !s.is_empty())), "{lib}");
+    assert!(lib["sources"].as_array().is_some_and(|s| s.len() >= 5), "{lib}");
+    assert!(s.execute("sheet.rule_library", &json!({"material": "unobtainium"})).is_err());
 }
 
 /// Every bend keeps an inside radius. At 0 the inside fiber would close to nothing (all of its
@@ -1172,6 +1263,39 @@ fn unfold_cut_refold_and_convert() {
     assert!(rel(size.0.max(size.1), 80.0) < 1e-9 && rel(size.0.min(size.1), 60.0) < 1e-9, "{f}");
 }
 
+/// #17544: a hem on a wall that a cut in the flat has shortened runs along what is left of the
+/// wall's edge. A 100 x 100 sheet folded 90° along Y 30, cut back to X 60 in the flat and refolded
+/// is the same part as a 60 x 100 sheet folded there, and the same hem on either is the same: the
+/// hem used to run the wall's original 100 and stand out to X 100.
+#[test]
+fn a_hem_on_a_wall_shortened_by_a_cut_runs_along_what_the_cut_left() {
+    let folded = |s: &mut Session, w: f64| {
+        run(s, "sketch.create", json!({"plane": "XY", "name": "Flat"}));
+        run(s, "sketch.line", json!({"points": [[0, 0], [w, 0], [w, 100], [0, 100]], "closed": true}));
+        run(s, "sketch.finish", json!({}));
+        run(s, "sheet.flange", json!({"type": "base", "sketch": "Flat", "name": "Base"}));
+        run(s, "sheet.fold", json!({"points": [[0, 30, 2.5], [w, 30, 2.5]], "angle": "90 deg", "fixed": [w / 2.0, 70, 2.5], "name": "FoldB"}));
+    };
+    let hem = |s: &mut Session| run(s, "sheet.hem", json!({"edges": [[30, 29, 30]], "length": 5, "gap": 2, "name": "Hem"}));
+    let box_of = |s: &mut Session| run(s, "inspect.measure", json!({}))["bodies"][0]["bbox"].clone();
+    let mut cut = Session::default();
+    folded(&mut cut, 100.0);
+    run(&mut cut, "sheet.unfold", json!({}));
+    run(&mut cut, "solid.box", json!({"corner": [60, -1, -1], "length": 41, "width": 102, "height": 6, "operation": "cut", "name": "Trim"}));
+    run(&mut cut, "sheet.refold", json!({}));
+    hem(&mut cut);
+    let mut narrow = Session::default();
+    folded(&mut narrow, 60.0);
+    hem(&mut narrow);
+    let (b, want) = (box_of(&mut cut), box_of(&mut narrow));
+    assert!((b["max"][0].as_f64().unwrap_or(f64::NAN) - 60.0).abs() < 1e-6, "{b}");
+    for (end, axis) in [("min", 0), ("min", 1), ("min", 2), ("max", 0), ("max", 1), ("max", 2)] {
+        let (got, wanted) = (b[end][axis].as_f64().unwrap_or(f64::NAN), want[end][axis].as_f64().unwrap_or(f64::NAN));
+        assert!((got - wanted).abs() < 1e-6, "{end} {axis}: {b} vs {want}");
+    }
+    assert!(rel(volume(&mut cut), volume(&mut narrow)) < 1e-6, "{} vs {}", volume(&mut cut), volume(&mut narrow));
+}
+
 /// A pattern of a cut made in the flat is a set of cuts in the flat, kept like the cut itself: in
 /// the flat pattern and refolded, its count following a parameter. A circular pattern too, and a
 /// pattern of a cut through a folded sheet. They were refused ("this sheet machining cannot be
@@ -1686,7 +1810,7 @@ fn a_fold_keeps_the_side_its_fixed_point_picked_when_its_line_moves_past_the_poi
 }
 
 /// Takes `stays` out of every fold in a design's file: the file a version from before folds kept
-/// their side wrote.
+/// their side wrote (which also kept a fold's fixed point, put back where a test needs it).
 fn strip_stays(v: &mut Value) {
     match v {
         Value::Object(m) => {
@@ -1727,7 +1851,15 @@ fn an_older_designs_fold_gets_its_side_once_as_it_opens_and_keeps_it() {
         let made = bbox(&mut s);
         let mut file: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
         strip_stays(&mut file);
-        let older = solidcraft_doc::Document::from_json(&file.to_string()).unwrap();
+        let mut older = solidcraft_doc::Document::from_json(&file.to_string()).unwrap();
+        // A fold made then kept the point it was given, which the one made now does not.
+        if let Some([x, y, z]) = fixed {
+            for f in &mut older.features {
+                if let solidcraft_doc::FeatureKind::SheetFold { fixed: kept, .. } = &mut f.kind {
+                    *kept = Some(solidcraft_doc::Position(solidcore_record::Vec3::new(x, y, z)));
+                }
+            }
+        }
         assert!(older.features.iter().any(|f| matches!(f.kind, solidcraft_doc::FeatureKind::SheetFold { stays: None, .. })), "{fixed:?}");
         let mut s = Session::new(older);
         assert_eq!(fold_stays(&s), Some(side), "{fixed:?}: converted as it opens");
@@ -6964,10 +7096,12 @@ fn edge_flange_material_outside_and_tangent_positions_start_the_bend_where_they_
     assert!((bbox(&mut s)["min"][1].as_f64().unwrap_or(f64::NAN)).abs() < 1e-6);
 }
 
-/// A new fold still refuses a `fixed` point in a cut-out or past the outline, leaving the design
-/// untouched (#263); a stored one that drifts off the sheet keeps its side with a warning (#370).
+/// A new fold refuses a `fixed` point in a cut-out or past the outline, leaving the design
+/// untouched (#263). A point on the sheet decides the side that stays as the fold is made: the
+/// fold keeps that side and not the point, so a recompute that takes the material from under
+/// where the point was keeps the side and says nothing about the point (#370).
 #[test]
-fn fold_refuses_a_new_fixed_point_off_the_sheet_but_warns_on_recompute() {
+fn fold_refuses_a_new_fixed_point_off_the_sheet_and_keeps_only_its_side() {
     let mut s = Session::default();
     run(&mut s, "parameters.change", json!({"name": "w", "expression": "100 mm"}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
@@ -6987,16 +7121,21 @@ fn fold_refuses_a_new_fixed_point_off_the_sheet_but_warns_on_recompute() {
     }
     run(&mut s, "sheet.fold", json!({"points": [[40, 0, 2.5], [40, 60, 2.5]], "fixed": [90, 30, 2.5], "name": "Fold1"}));
     assert!(run(&mut s, "timeline.inspect", json!({"feature": "Fold1"}))["warning"].is_null());
+    let kept = s.doc.features.last().map(|f| f.kind.clone());
+    assert!(
+        matches!(kept, Some(solidcraft_doc::FeatureKind::SheetFold { fixed: None, stays: Some(solidcraft_doc::FoldSide::Right), .. })),
+        "{kept:?}"
+    );
     run(&mut s, "parameters.change", json!({"name": "w", "expression": "80 mm"}));
     let fold = run(&mut s, "timeline.inspect", json!({"feature": "Fold1"}));
     assert!(fold["error"].is_null(), "{fold}");
-    assert!(fold["warning"].as_str().is_some_and(|w| w.contains("fixed point is not on the sheet") && w.contains("stays")), "{fold}");
+    assert!(fold["warning"].as_str().is_none_or(|w| !w.contains("fixed point")), "{fold}");
 }
 
 /// A side given (`stays`) says which side of the fold stays, and `fixed` is then ignored: neither
 /// checked against the sheet nor kept. On the 100 x 60 plate (T 2.5, R 2.5, K 0.44) folded at
 /// x = 40 with `stays: right` and a fixed point at x = 150, past the plate's end (refused alone,
-/// see `fold_refuses_a_new_fixed_point_off_the_sheet_but_warns_on_recompute`), the fold is made
+/// see `fold_refuses_a_new_fixed_point_off_the_sheet_and_keeps_only_its_side`), the fold is made
 /// with its right side (x > 40, right of the line drawn along +y seen from the top) put, and no
 /// warning. By hand, as in `fold_takes_the_bend_out_of_the_flat_sheet`: BA = (π/2)(2.5 + 0.44 ·
 /// 2.5) = 5.6549; the left side stands up, its outer face at 40 + BA/2 − R − T = 37.8274 and its
@@ -7051,11 +7190,12 @@ fn fold_fixed_point_must_touch_the_sheet_but_any_face_will_do() {
     let x = bb["max"][0].as_f64().unwrap_or(f64::NAN);
     run(&mut f, "sheet.fold", json!({"points": [[40, 0, 2.5], [40, 60, 2.5]], "fixed": [x, 30, 15], "name": "Fold1"}));
     assert!(run(&mut f, "timeline.inspect", json!({"feature": "Fold1"}))["warning"].is_null());
-    // A shorter leg leaves the stored point in the air: the fold recomputes, keeps its side and warns.
+    // A shorter leg leaves where the point was in the air: the fold kept its side, not the point,
+    // so it recomputes, keeps that side and says nothing about the point.
     run(&mut f, "parameters.change", json!({"name": "h", "expression": "10 mm"}));
     let fold = run(&mut f, "timeline.inspect", json!({"feature": "Fold1"}));
     assert!(fold["error"].is_null(), "{fold}");
-    assert!(fold["warning"].as_str().is_some_and(|w| w.contains("fixed point is not on the sheet")), "{fold}");
+    assert!(fold["warning"].as_str().is_none_or(|w| !w.contains("fixed point")), "{fold}");
     assert!((bbox(&mut f)["max"][0].as_f64().unwrap_or(f64::NAN) - x).abs() < 1e-6, "the right side stays");
 }
 
@@ -7478,6 +7618,31 @@ fn perforation_outline_on_a_folded_sheet_stays_in_its_panel() {
     assert!(holes.iter().all(|&(_, y, r)| y - r - 1.0 >= top - 1e-9), "every hole is in the base, beyond the bend zone's y {top}");
     let refused = s.execute("sheet.perforate", &json!({"diameter": "1", "pitch": "1.5", "sketch": "Above"}));
     assert!(refused.is_err_and(|e| e.to_string().contains("must lie on a face of the sheet")));
+}
+
+/// #19631: an outline that lies clear of the sheet holds no holes, and the perforation says so instead of making none
+/// in silence: when it is made and when an edit moves the outline off the sheet. An outline on the sheet stays silent.
+#[test]
+fn perforation_outline_off_the_sheet_says_it_holds_no_holes() {
+    let mut s = Session::default();
+    sheet_with_a_field_outline(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Vent"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [200, 10], "p1": [240, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let params = |sketch: &str| json!({"diameter": "4", "pitch": "7", "sketch": sketch});
+    let made = run(&mut s, "sheet.perforate", params("Vent"));
+    assert!(made["warning"].as_str().is_some_and(|w| w.contains("outline") && w.contains("holds no holes")), "{made}");
+    assert_eq!(flat(&mut s)["perforations"][0]["count"].as_u64(), Some(0), "an outline off the sheet holds no holes");
+    // The same field on an outline over the sheet: holes, and nothing to say.
+    let edit = |s: &mut Session, sketch: &str| {
+        run(s, "timeline.redefine", json!({"feature": made["feature"], "command": "sheet.perforate", "params": params(sketch)}));
+    };
+    edit(&mut s, "Field");
+    assert!(flat(&mut s)["perforations"][0]["count"].as_u64().is_some_and(|n| n > 0));
+    assert!(last_warning(&s).is_empty(), "{}", last_warning(&s));
+    // Moved off the sheet again by an edit, it warns again.
+    edit(&mut s, "Vent");
+    assert!(last_warning(&s).contains("holds no holes"), "{}", last_warning(&s));
 }
 
 /// #732: a mirrored copy's bounded field is the mirror image of its source's.
@@ -7968,8 +8133,8 @@ fn a_fillet_on_a_sheet_corner_is_an_arc_of_its_outline_kept_by_a_later_flange() 
 }
 
 /// A cosmetic thread in a sheet's hole leaves its flat pattern as it is; a modelled thread cuts
-/// material the flat pattern lacks, so it is refused like a fillet until a sheet feature rebuilds
-/// the body and says the thread is not kept.
+/// material the flat pattern lacks, so it is refused like a fillet, and so is a later sheet
+/// feature that would rebuild the body without it (#18292).
 #[test]
 fn a_modelled_thread_in_a_sheet_hole_is_refused_but_a_cosmetic_one_is_not() {
     let mut s = Session::default();
@@ -7986,9 +8151,36 @@ fn a_modelled_thread_in_a_sheet_hole_is_refused_but_a_cosmetic_one_is_not() {
         let error = result.expect_err("a modelled thread the flat pattern lacks");
         assert!(error.contains("can't include Thread2"), "{error}");
     }
-    let out = run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
-    assert!(out["warning"].as_str().is_some_and(|w| w.contains("what Thread2 changed is not kept")), "{out}");
-    assert!(flat_exports(&mut s).into_iter().all(|r| r.is_ok()));
+    let error = s.execute("sheet.flange", &json!({"edges": [[50, 0, 2.5]], "height": 20})).unwrap_err().to_string();
+    assert!(error.contains("would lose what Thread2 changed"), "{error}");
+}
+
+/// #18292: a pad extruded onto a sheet and joined to it would be lost by a later flange, which
+/// rebuilds the body from its sheet features. The flange is refused, naming the pad's extrude,
+/// and the design keeps the pad (the issue's script).
+#[test]
+fn a_flange_that_would_lose_a_pad_extruded_onto_the_sheet_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": 1, "k_factor": 0.44, "bend_radius": 1, "active": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+    run(&mut s, "sketch.line", json!({"points": [[-50, -20], [50, -20], [50, 20], [-50, 20]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Outline", "rule": "R", "body_name": "Main"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 1], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pad"}));
+    run(&mut s, "sketch.line", json!({"points": [[-5, -5], [5, -5], [5, 5], [-5, 5]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Pad", "distance": 5, "operation": "join", "targets": ["Main"]}));
+    assert!((volume(&mut s) - 4500.0).abs() < 1e-6, "sheet and pad");
+    let features = s.doc.features.len();
+
+    let error = s
+        .execute("sheet.flange", &json!({"edges": [[50, 0, 1]], "height": 30, "angle": "90 deg", "radius": 1, "body": "Main"}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("`Main`") && error.contains("would lose what Extrude1 changed"), "{error}");
+    assert_eq!(s.doc.features.len(), features, "the flange is not added");
+    assert!((volume(&mut s) - 4500.0).abs() < 1e-6, "the pad stays");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
 }
 
 /// A sheet built and machined with sheet features (flanges, a hem, a hole and a cut across a
@@ -8101,9 +8293,7 @@ fn a_mirrored_sheet_copy_is_the_opposite_hand_with_the_mirror_image_flat_pattern
     assert_eq!(dxf["bends"], 3);
 }
 
-/// A mirrored sheet copy's rims turn over with its charts: each lies where the copy's own layout
-/// puts it, the material on its left. A flange picked on the copy's back edge stores the name the
-/// model gives that edge (the source's back edge's, as the copy's: `@` the mirror that made it),
+/// A flange picked on a mirrored sheet copy's back edge stores the name the model gives that edge (the source's back edge's, as the copy's: `@` the mirror that made it),
 /// lands on the copy's edge, and finds the edge by that name again when the base grows and the
 /// edge moves off the pick. The copy keeps what its faces were made for as its own build reports
 /// it, each bend's ends counted from where its turned anchors start: through that flange, the
@@ -8125,20 +8315,6 @@ fn a_flange_on_a_mirrored_sheet_copy_is_picked_by_its_rims_name_and_lands_on_the
     run(&mut s, "sheet.flange", json!({"edges": [[100, 30, 2.5]], "height": 15}));
     run(&mut s, "solid.mirror", json!({"bodies": ["Body1"], "plane": "YZ"}));
     let copy = "Body1 (2)";
-
-    // The copy's rims where its own layout puts them: the same panel and edge in its chart, the
-    // material on the edge's left.
-    let state = s.model.state();
-    let named = state.surface_sheets.iter().find(|sk| sk.body == copy).expect("the copy's sheet").clone();
-    drop(state);
-    let mut own = named.clone();
-    own.build().unwrap();
-    assert!(!own.rims.is_empty());
-    assert_eq!(named.rims.len(), own.rims.len(), "{:?}\n{:?}", named.rims, own.rims);
-    for r in &own.rims {
-        let same = |q: &&(usize, solidcore_record::Vec2, solidcore_record::Vec2, String)| q.0 == r.0 && q.1.dist(r.1) < 1e-9 && q.2.dist(r.2) < 1e-9;
-        assert!(named.rims.iter().any(|q| same(&q)), "the copy's own rim {r:?} is not among {:?}", named.rims);
-    }
 
     // The faces at either end of the copy's front flange, by the names the model gives them, each
     // read on the copy alone (the source's faces at x = 0 lie on the copy's there). The front
@@ -9546,4 +9722,45 @@ fn a_cut_passing_a_hair_off_a_flange_corner_builds() {
         }
     }
     assert!(failed.is_empty(), "{failed:?}");
+}
+
+/// #18576: a 1.5 mm sheet with a closed spline outline and a 0.72 mm square notch cut into its
+/// edge folds 90° about a line away from the notch. v0.43.0 refused the half-depth notch ("an
+/// edge not read exactly in the plane"). With no notch, a half-depth one or one through the
+/// sheet, the fold is one sound body and adds the same bend volume to the flat sheet, so the
+/// notch is kept as cut.
+#[test]
+fn a_spline_sheet_with_a_notch_at_its_edge_folds() {
+    let sheet = |notch: Option<f64>, fold: bool| {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name": "Rule", "thickness": 1.5, "k_factor": 0.44, "bend_radius": 1.5, "active": true}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SheetOutline"}));
+        let points = [[30.0, 0.0], [22.7, 15.1], [0.0, 18.0], [-22.7, 15.1], [-30.0, 0.0], [-19.7, -13.1], [0.0, -22.0], [19.7, -13.1]];
+        run(&mut s, "sketch.spline.fit_point", json!({"points": points, "periodic": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "SheetOutline", "type": "base", "body_name": "Base"}));
+        if let Some(depth) = notch {
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Notch", "offset": 1.5}));
+            run(&mut s, "sketch.rectangle.center", json!({"center": [0, 18], "corner": [0.36, 18.36]}));
+            run(&mut s, "sketch.finish", json!({}));
+            let cut = json!({"sketch": "Notch", "distance": depth, "direction": "negative", "operation": "cut", "targets": ["Base"]});
+            run(&mut s, "solid.extrude", cut);
+        }
+        if fold {
+            run(&mut s, "sheet.fold", json!({"points": [[12, -1, 1.5], [12, 1, 1.5]], "angle": "90 deg", "fixed": [-12, 0, 1.5]}));
+        }
+        let state = s.world_state().unwrap();
+        assert_eq!(state.bodies.len(), 1, "{notch:?} fold {fold}");
+        assert!(state.bodies[0].body.validity().is_empty(), "{notch:?} fold {fold}: {:?}", state.bodies[0].body.validity());
+        drop(state);
+        volume(&mut s)
+    };
+    let bend = sheet(None, true) - sheet(None, false);
+    assert!(bend > 1.0, "the bend adds material: {bend}");
+    for depth in [0.75, 1.5] {
+        let flat = sheet(Some(depth), false);
+        assert!(flat < sheet(None, false) - 0.1, "the notch is cut: {flat}");
+        let folded = sheet(Some(depth), true);
+        assert!((folded - flat - bend).abs() < 1e-3, "depth {depth}: the fold adds {} not {bend}", folded - flat);
+    }
 }
