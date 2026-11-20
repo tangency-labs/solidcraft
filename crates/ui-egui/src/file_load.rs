@@ -1798,8 +1798,13 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                 if let Kind::Recover { .. } = request.kind {
                     recovered(app, request);
                 } else {
+                    // A command script that stopped at a step opened what it built regardless:
+                    // this status is where the failure is seen.
+                    let failed = made.result.get("error").and_then(Value::as_str).map(str::to_string);
                     app.set_status(
-                        if made.result.get("read_only").and_then(Value::as_bool) == Some(true) {
+                        if let Some(error) = failed.clone() {
+                            error
+                        } else if made.result.get("read_only").and_then(Value::as_bool) == Some(true) {
                             solidcraft_ui_text::tr("document.opened_read_only").to_string()
                         } else if let Some(summary) = crate::timeline::import_warning_status(app, &made.result) {
                             summary
@@ -1828,7 +1833,7 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                             };
                             language.format(key, &[("name", &name)])
                         },
-                        false,
+                        failed.is_some(),
                     );
                     if !request.insert() {
                         app.say_newer_file();

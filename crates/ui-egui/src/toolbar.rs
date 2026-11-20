@@ -646,6 +646,9 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     // The icon `drawing.create` itself uses.
     rows.push(row("new_drawing", app.tr("ui.new_drawing"), "", "new", FileAction::NewDrawing.enabled(app)));
     rows.push(row("open", &format!("{}…", app.tr("ui.open")), "Ctrl+O", "open", true));
+    // A command script (`timeline.export_script`, or an importer pipeline's output) opens as a
+    // new design built by replaying it (`doc.open`, #20102).
+    rows.push(row("open_script", app.tr_label("Open Command Script…"), "", "open", FileAction::Open.enabled(app)));
     let mut recent: Vec<FileRow> = app
         .home
         .recent
@@ -740,6 +743,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "new" => FileAction::New.run(app),
         "new_drawing" => FileAction::NewDrawing.run(app),
         "open" => FileAction::Open.run(app),
+        "open_script" => open_command_script(app),
         "clear_recent" => FileAction::ClearRecent.run(app),
         "file.insert_step" => FileAction::Command("file.insert_step").run(app),
         "file.insert_mesh" => FileAction::Command("file.insert_mesh").run(app),
@@ -777,6 +781,19 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "quit" => FileAction::Quit.run(app),
         _ => {}
     }
+}
+
+/// File › Open Command Script…: ask for a `.json` and open it as a new design built by replaying
+/// its commands (`doc.open` takes the script when the file does not read as a design).
+fn open_command_script(app: &mut SolveApp) {
+    if !FileAction::Open.enabled(app) {
+        return;
+    }
+    app.pick_open_for(&["json"], |app, path| {
+        if let Some(path) = path {
+            app.open_path_async(&path);
+        }
+    });
 }
 
 /// The Drawing tool `key` starts on a drawing's sheet (`on_sheet`): the one that does there what
@@ -4118,6 +4135,49 @@ mod home_tests {
         h.settle();
         let files: Vec<String> = std::fs::read_dir(&h.dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         assert!(files.iter().any(|f| f.ends_with(".urdf")) && files.iter().any(|f| f.ends_with("-base.stl")), "{files:?}");
+    }
+
+    /// File › Open Command Script… asks for a `.json` and opens the script as a new design built
+    /// by replaying its commands (an importer pipeline's `<part>.script.json`) (#20102).
+    #[test]
+    fn file_menu_opens_a_command_script() {
+        let mut h = crate::scenario::Harness::new();
+        let path = h.dir.join("Plate.script.json");
+        std::fs::write(&path, r#"{"commands":[{"command":"solid.box","params":{"length":10,"width":10,"height":10}}]}"#).unwrap();
+        let asked: std::rc::Rc<std::cell::RefCell<Vec<Vec<String>>>> = std::rc::Rc::default();
+        let log = asked.clone();
+        let chosen = path.to_string_lossy().into_owned();
+        h.app.services.pick_open = Some(Box::new(move |extensions| {
+            log.borrow_mut().push(extensions.iter().map(|e| e.to_string()).collect());
+            Box::pin(std::future::ready(Some(chosen.clone())))
+        }));
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+        h.step(&json!({"widget": "Open Command Script…"})).unwrap();
+        h.settle();
+        assert_eq!(asked.borrow().last().cloned(), Some(vec!["json".to_string()]), "the picker asks for scripts");
+        assert_eq!(h.app.session.doc.name, "Plate");
+        assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1, "the script built its box");
+        assert!(h.app.session.path.is_none(), "the script is not the design's file");
+    }
+
+    /// A script that stops at a step still opens what it built, and the status bar says which
+    /// step failed (as an error): the design alone would look like a complete part (#20102).
+    #[test]
+    fn a_script_that_stops_reports_the_failed_step() {
+        let mut h = crate::scenario::Harness::new();
+        let path = h.dir.join("Gear.script.json");
+        let script = r#"{"commands":[
+            {"command":"solid.box","params":{"length":10,"width":10,"height":10}},
+            {"command":"solid.no_such_command","params":{}}
+        ]}"#;
+        std::fs::write(&path, script).unwrap();
+        h.app.open_path_async(&path.to_string_lossy());
+        h.settle();
+        let (text, _, error) = h.app.status.clone().expect("a status");
+        assert!(error && text.contains("step 2"), "{text}");
+        assert_eq!(h.app.session.doc.name, "Gear");
+        assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1, "what the script built before the failure stays");
     }
 
     /// The disabled buttons' tooltip is translated in every catalog (not English fallback).

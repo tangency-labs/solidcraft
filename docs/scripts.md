@@ -14,6 +14,14 @@ A script is a JSON list of commands, the same ones the UI runs:
 
 Run one with `solidcraft-cli run script.json --out part.step`; see [building](building.md) and the [command list](features.md).
 
+In the app, **File › Open Command Script…** opens one as a new design named after the file
+without its `.script` part (`bracket.script.json` → "bracket"): the commands run in order, as
+they would from the toolbar, and the timeline holds what they made. Dropping the file on the
+window, File › Open and `doc.open` reach the same path. A step that fails stops the script, as
+`solidcraft-cli run` does, but the part built before it stays open and the status bar names the
+failed step (`doc.open` reports it in `error`). The script is not the design's file: Save asks
+where to write the `.solidcraft`.
+
 ## File paths
 
 By default, relative file paths in commands resolve against the folder where you run the CLI.
