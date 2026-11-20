@@ -341,6 +341,22 @@ fn closed_triangle_survives_many_short_wires_elsewhere() {
 }
 
 #[test]
+fn closed_triangle_survives_many_wires_joined_to_it() {
+    // #19464 review: 100 wires from the triangle's corner (0,0,0) to points at z = 100 make one
+    // chain with over 100 key points; thinning dropped (0,1,0) and the z = 0 plane was lost.
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    let v = |x: f64, y: f64, z: f64| Vec3 { x, y, z };
+    sk.wires.push(wire("tri", &[v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0), v(0.0, 0.0, 0.0)]));
+    for i in 0..100 {
+        sk.wires.push(wire(&format!("s{i}"), &[v(0.0, 0.0, 0.0), v(10.0 + 3.0 * i as f64, 0.0, 100.0)]));
+    }
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert_eq!(ps.len(), 1);
+    assert!((ps[0].area - 0.5).abs() < 1e-9, "area {}", ps[0].area);
+}
+
+#[test]
 fn nothing_without_3d_wires() {
     let mut sk = Sketch::new();
     let a = sk.add_point(Vec2 { x: 0.0, y: 0.0 }, None).unwrap();
