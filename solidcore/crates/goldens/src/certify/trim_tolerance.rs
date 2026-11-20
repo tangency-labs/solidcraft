@@ -70,7 +70,24 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 ///   parameterisation than its face's, in both kernels, and no tolerance covers it);
 /// - `loose`: the sampled gap is within the new tolerance but the enclosure `B` is not
 ///   (`primitive.api_primitives`' `gen0244`, `gen0893` and `gen1157`);
+/// - `rounding-bound`: an entity of `primitive.api_primitives`' `gen0244`, `gen0893` and
+///   `gen1157`, whose vertices lie about 8e8 from the origin, where the evaluation's own
+///   error bound at that scale exceeds what the tolerance can show: a vertex whose edge
+///   ends evaluate onto its point, but whose curves' error bounds (1.4e-5 to 2.4e-5 a
+///   coordinate, times `sqrt 3`) exceed both tolerances; `gen1157` edge 3 ([`MEASURED_OPEN`],
+///   open even though the old tolerance certifies it), kept at upstream's tolerance, whose
+///   `B` (1.71e-5 and 1.54e-5 over its 1.48e-5) is mostly that error bound, its trims
+///   sampled within 9.6e-6;
+/// - `invalid-input`: a vertex of `gen0195`, whose input holds a non-finite coordinate
+///   (`y = -inf`), so no tolerance covers its edge ends with their error bounds;
 /// - `no-estimate`: the trim's image could not be sampled;
+/// - `line-trim`: an edge with a UV trim that is a line on a B-spline surface, which is not
+///   enclosed (the line's own rounding moves its parameter, and only a plane carries that
+///   to the surface: [`plane_uv_lipschitz`]), its other trims enclosed within the new
+///   tolerance; the one class a raise may be open in (`topology.brep_local_operation`'s
+///   `fc0000`, `fc0006`, `fc0008` and `fc0025`: edge 89, lowered to 1e-5, its other trim's
+///   `B` 4.1e-8; edge 93, raised to 1.7e-3 by the bound of a trim as it stood before a later
+///   refit, its trim on face 39 now at `B` 1.7e-6);
 /// - `face-bound-loose`: an edge whose B-rep keeps no UV trim, whose face-gap enclosure
 ///   exceeds the new tolerance.
 /// - `blend-surface`: an edge with a trim on a procedural blend surface, which has no exact
@@ -81,18 +98,26 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 /// certified (or a new failure) shows up.
 const OPEN: &str = include_str!("trim_tolerance_open.tsv");
 
+/// The [`OPEN`] class of an edge open even where the old tolerance certifies its trims: the
+/// enclosure, most of it the evaluation's own error bound, cannot show what sampling
+/// measures, so the entry is counted open, never proved.
+const MEASURED_OPEN: [&str; 1] = ["rounding-bound"];
+
 /// [`OPEN`] entries of `unit`: `(case, body, entity)`, the entity an edge's index or `v` and
-/// a vertex's.
-fn open_entries(unit: &str) -> std::collections::BTreeSet<(String, usize, String)> {
+/// a vertex's, to its class.
+fn open_entries(unit: &str) -> std::collections::BTreeMap<(String, usize, String), String> {
     OPEN.lines()
         .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
         .filter_map(|l| {
             let f: Vec<&str> = l.split('\t').collect();
             (f.first() == Some(&unit)).then(|| {
                 (
-                    f[1].to_string(),
-                    f[2].parse().expect("body"),
-                    f[3].to_string(),
+                    (
+                        f[1].to_string(),
+                        f[2].parse().expect("body"),
+                        f[3].to_string(),
+                    ),
+                    f[4].to_string(),
                 )
             })
         })
@@ -845,7 +870,7 @@ fn certify(unit: &str) -> Tally {
                             }
                             // the trim of an edge in OPEN: open with it (the edge's own
                             // entry is checked below)
-                            _ if open.contains(&key) => {
+                            _ if open.contains_key(&key) => {
                                 covered = false;
                                 tally.open_values += 1;
                             }
@@ -949,10 +974,17 @@ fn certify(unit: &str) -> Tally {
                 let key = (row.case.clone(), body, index.to_string());
                 if raised {
                     // a raise: the new tolerance covers every trim, and one trim's bound is
-                    // above the old tolerance (not in OPEN: a raise is certified or fails)
+                    // above the old tolerance (in OPEN only as a `line-trim`, its every
+                    // enclosed trim within the new tolerance: counted open, never proved)
                     let past = bounds.iter().flatten().any(|x| *x > old);
                     if bad.is_empty() && past {
                         tally.raised += 1;
+                    } else if open.get(&key).is_some_and(|c| c == "line-trim")
+                        && bounds.iter().any(Option::is_none)
+                        && bounds.iter().flatten().all(|x| *x <= new)
+                    {
+                        open_seen.insert(key);
+                        tally.open += 1;
                     } else {
                         failures.push(format!(
                             "{at}: raised {old:e} -> {new:e}: {bad:?}, a bound past old: {past}"
@@ -960,12 +992,18 @@ fn certify(unit: &str) -> Tally {
                     }
                 } else if bad.is_empty() {
                     tally.edges += 1;
-                    assert!(!open.contains(&key), "{at}: certified, remove it from OPEN");
-                } else if open.contains(&key) {
+                    assert!(
+                        !open.contains_key(&key),
+                        "{at}: certified, remove it from OPEN"
+                    );
+                } else if let Some(class) = open.get(&key) {
                     // open: the old tolerance does not certify the new geometry either (some
                     // trim's `B` past it, or not enclosed). Not a claim about the old geometry,
-                    // which this test does not build: the entry is counted open, never proved
-                    if bounds.iter().all(|x| x.is_some_and(|x| x <= old)) {
+                    // which this test does not build: the entry is counted open, never proved.
+                    // A `MEASURED_OPEN` class is open even where the old tolerance certifies it
+                    if !MEASURED_OPEN.contains(&class.as_str())
+                        && bounds.iter().all(|x| x.is_some_and(|x| x <= old))
+                    {
                         failures.push(format!(
                             "{at}: {old:e} -> {new:e}: certified at the old tolerance, not \
                              the new: {bad:?}"
@@ -1007,13 +1045,19 @@ fn certify(unit: &str) -> Tally {
                 let follows = raised && follows_a_raised_edge();
                 if follows && vertex_covers_its_ends(&k, b, v, new) {
                     tally.vertices += 1;
-                    assert!(!open.contains(&key), "{at}: certified, remove it from OPEN");
+                    assert!(
+                        !open.contains_key(&key),
+                        "{at}: certified, remove it from OPEN"
+                    );
                 } else if raised && !follows && vertex_covers_its_ends(&k, b, v, old) {
                     failures.push(format!("{at}: raised {old:e} -> {new:e}: old covered"));
                 } else if vertex_covers_its_ends(&k, b, v, new) {
                     tally.vertices += 1;
-                    assert!(!open.contains(&key), "{at}: certified, remove it from OPEN");
-                } else if open.contains(&key) && !vertex_covers_its_ends(&k, b, v, old) {
+                    assert!(
+                        !open.contains_key(&key),
+                        "{at}: certified, remove it from OPEN"
+                    );
+                } else if open.contains_key(&key) && !vertex_covers_its_ends(&k, b, v, old) {
                     // open: neither tolerance covers the new edge ends (the old geometry is
                     // not built here: counted open, never proved)
                     open_seen.insert(key);
@@ -1025,7 +1069,11 @@ fn certify(unit: &str) -> Tally {
         }
     }
     println!("{unit}: {tally:?}");
-    assert_eq!(open_seen, open, "{unit}: OPEN entries not reached");
+    assert_eq!(
+        open_seen,
+        open.keys().cloned().collect(),
+        "{unit}: OPEN entries not reached"
+    );
     assert_eq!(
         other_seen,
         other.keys().cloned().collect(),

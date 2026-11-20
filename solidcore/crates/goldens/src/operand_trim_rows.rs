@@ -774,10 +774,12 @@ pub(crate) fn certify_body(
                 assert_eq!(b.edge(eid).unwrap().tolerance, n, "{name}: edge {e}");
                 let need = edge_need(b, &certs, eid);
                 assert!(
-                    m >= need && n >= need,
+                    n >= need,
                     "{name}: edge {e} tolerance {m:e} / {n:e} under {need:e}"
                 );
-                let class = if n < m {
+                // (main's under its need, this branch's raised to cover it: closer, from
+                // an uncertified tolerance to a certified one; #18166's fc rows)
+                let class = if n < m || m < need {
                     Class::Closer
                 } else if n - m <= need {
                     Class::Equal
@@ -802,10 +804,12 @@ pub(crate) fn certify_body(
                     let (m, n) = (main_of("geometry", i, geometry[i]), geometry[i]);
                     let need = vertex_need(b, &certs, vid);
                     assert!(
-                        m >= need && n >= need,
+                        n >= need,
                         "{name}: vertex {v} tolerance {m:e} / {n:e} under {need:e}"
                     );
-                    let class = if n < m {
+                    // (main's under its need, this branch's raised to cover it: closer, from
+                    // an uncertified tolerance to a certified one; #18166's fc rows)
+                    let class = if n < m || m < need {
                         Class::Closer
                     } else if n - m <= need {
                         Class::Equal
