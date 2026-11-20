@@ -1,0 +1,10 @@
+{
+  "en": {"ui.plugin_dialog_building_preview": "Building preview…"},
+  "ar": {"ui.plugin_dialog_building_preview": "جارٍ إنشاء المعاينة…"},
+  "de": {"ui.plugin_dialog_building_preview": "Vorschau wird erstellt…"},
+  "he": {"ui.plugin_dialog_building_preview": "התצוגה המקדימה נבנית…"},
+  "ja": {"ui.plugin_dialog_building_preview": "プレビューを作成中…"},
+  "ko": {"ui.plugin_dialog_building_preview": "미리보기 생성 중…"},
+  "vi": {"ui.plugin_dialog_building_preview": "Đang tạo bản xem trước…"},
+  "zh": {"ui.plugin_dialog_building_preview": "正在生成预览…"}
+}

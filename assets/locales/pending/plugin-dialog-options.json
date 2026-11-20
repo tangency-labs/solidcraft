@@ -1,0 +1,66 @@
+{
+  "en": {
+    "ui.plugin_dialog_check_targets": "Check the remaining selections and pick the missing geometry again.",
+    "ui.plugin_dialog_choice_unavailable": "{choice} is no longer available. Review the current options.",
+    "ui.plugin_dialog_finding_options": "Finding compatible options…",
+    "ui.plugin_dialog_invalid_choices": "The plug-in returned an empty or invalid list of options.",
+    "ui.plugin_dialog_rechecking_choice": "Design changed. Rechecking {choice}…",
+    "ui.plugin_dialog_review_changed": "The design changed. Review the options before running again."
+  },
+  "ar": {
+    "ui.plugin_dialog_check_targets": "تحقّق من العناصر المحددة المتبقية وأعد تحديد الأجزاء الهندسية المفقودة.",
+    "ui.plugin_dialog_choice_unavailable": "لم يعد الخيار {choice} متاحًا. راجع الخيارات الحالية.",
+    "ui.plugin_dialog_finding_options": "جارٍ البحث عن الخيارات المتوافقة…",
+    "ui.plugin_dialog_invalid_choices": "أعاد الملحق قائمة خيارات فارغة أو غير صالحة.",
+    "ui.plugin_dialog_rechecking_choice": "تغيّر التصميم. جارٍ التحقق مجددًا من {choice}…",
+    "ui.plugin_dialog_review_changed": "تغيّر التصميم. راجع الخيارات قبل التشغيل مجددًا."
+  },
+  "de": {
+    "ui.plugin_dialog_check_targets": "Verbleibende Auswahl prüfen und fehlende Geometrie erneut auswählen.",
+    "ui.plugin_dialog_choice_unavailable": "{choice} ist nicht mehr verfügbar. Bitte die aktuellen Optionen prüfen.",
+    "ui.plugin_dialog_finding_options": "Passende Optionen werden ermittelt…",
+    "ui.plugin_dialog_invalid_choices": "Das Plug-in hat eine leere oder ungültige Optionsliste zurückgegeben.",
+    "ui.plugin_dialog_rechecking_choice": "Entwurf geändert. {choice} wird erneut geprüft…",
+    "ui.plugin_dialog_review_changed": "Der Entwurf wurde geändert. Vor dem erneuten Ausführen die Optionen prüfen."
+  },
+  "he": {
+    "ui.plugin_dialog_check_targets": "יש לבדוק את הפריטים שעדיין מסומנים ולבחור שוב את הגאומטריה החסרה.",
+    "ui.plugin_dialog_choice_unavailable": "האפשרות {choice} כבר אינה זמינה. יש לבדוק את האפשרויות העדכניות.",
+    "ui.plugin_dialog_finding_options": "מתבצע חיפוש אחר אפשרויות מתאימות…",
+    "ui.plugin_dialog_invalid_choices": "התוסף החזיר רשימת אפשרויות ריקה או לא תקינה.",
+    "ui.plugin_dialog_rechecking_choice": "התכנון השתנה. האפשרות {choice} נבדקת מחדש…",
+    "ui.plugin_dialog_review_changed": "התכנון השתנה. יש לבדוק את האפשרויות לפני הפעלה חוזרת."
+  },
+  "ja": {
+    "ui.plugin_dialog_check_targets": "残りの選択を確認し、不足している形状を選び直してください。",
+    "ui.plugin_dialog_choice_unavailable": "{choice} は選べなくなりました。現在の選択肢を確認してください。",
+    "ui.plugin_dialog_finding_options": "適合する選択肢を検索中…",
+    "ui.plugin_dialog_invalid_choices": "プラグインが返した選択肢の一覧が空か無効です。",
+    "ui.plugin_dialog_rechecking_choice": "設計が変更されました。{choice} を再確認中…",
+    "ui.plugin_dialog_review_changed": "設計が変更されました。再実行する前に選択肢を確認してください。"
+  },
+  "ko": {
+    "ui.plugin_dialog_check_targets": "남은 선택 항목을 확인하고 누락된 형상을 다시 선택하세요.",
+    "ui.plugin_dialog_choice_unavailable": "{choice} 항목을 더 이상 선택할 수 없습니다. 현재 옵션을 확인하세요.",
+    "ui.plugin_dialog_finding_options": "호환되는 옵션을 찾는 중…",
+    "ui.plugin_dialog_invalid_choices": "플러그인이 비어 있거나 유효하지 않은 옵션 목록을 반환했습니다.",
+    "ui.plugin_dialog_rechecking_choice": "설계가 변경되었습니다. {choice} 항목을 다시 확인하는 중…",
+    "ui.plugin_dialog_review_changed": "설계가 변경되었습니다. 다시 실행하기 전에 옵션을 확인하세요."
+  },
+  "vi": {
+    "ui.plugin_dialog_check_targets": "Kiểm tra các mục vẫn được chọn rồi chọn lại phần hình học còn thiếu.",
+    "ui.plugin_dialog_choice_unavailable": "{choice} không còn khả dụng. Hãy xem lại các lựa chọn hiện có.",
+    "ui.plugin_dialog_finding_options": "Đang tìm các lựa chọn phù hợp…",
+    "ui.plugin_dialog_invalid_choices": "Phần bổ trợ trả về danh sách lựa chọn trống hoặc không hợp lệ.",
+    "ui.plugin_dialog_rechecking_choice": "Thiết kế đã thay đổi. Đang kiểm tra lại {choice}…",
+    "ui.plugin_dialog_review_changed": "Thiết kế đã thay đổi. Hãy xem lại các lựa chọn trước khi chạy lại."
+  },
+  "zh": {
+    "ui.plugin_dialog_check_targets": "请检查仍选中的对象，并重新选择缺失的几何对象。",
+    "ui.plugin_dialog_choice_unavailable": "{choice} 已不可用。请查看当前可用的选项。",
+    "ui.plugin_dialog_finding_options": "正在查找兼容选项…",
+    "ui.plugin_dialog_invalid_choices": "插件返回的选项列表为空或无效。",
+    "ui.plugin_dialog_rechecking_choice": "设计已更改。正在重新检查 {choice}…",
+    "ui.plugin_dialog_review_changed": "设计已更改。请先检查选项，再重新运行。"
+  }
+}

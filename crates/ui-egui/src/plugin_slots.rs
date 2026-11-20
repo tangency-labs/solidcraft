@@ -364,6 +364,7 @@ mod tests {
             path: String::new(),
             approval: String::new(),
             disabled: false,
+            requests_folders: false,
             groups: Default::default(),
             images: Default::default(),
             entries: serde_json::from_value(json!([

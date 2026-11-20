@@ -1,5 +1,5 @@
 ;; Original test component, derived from the engine's plugin fixture: its entry passes its
-;; parameters straight to `solid.box` and returns that command's reply.
+;; parameters to `solid.box` and supplies a summary when the box succeeds.
 (component
   (type $ty-PLUGIN_PACKAGE/types@PLUGIN_VERSION (;0;)
     (instance
@@ -53,15 +53,90 @@
       local.get $at
     )
     (func $execute (;2;) (type 1) (param i32 i32 i32 i32) (result i32)
+      ;; The five-byte "refit" entry queries or builds a geometry-dependent choice.
+      (if (i32.eq (local.get 1) (i32.const 5))
+        (then (return (call $refit (local.get 2) (local.get 3)))))
+      ;; The seven-byte "options" entry supplies two ranked choices for dialog tests.
+      local.get 1
+      i32.const 7
+      i32.eq
+      if
+        i32.const 0
+        i32.const 0
+        i32.store
+        i32.const 4
+        i32.const 720
+        i32.store
+        i32.const 8
+        i32.const 129
+        i32.store
+        i32.const 0
+        return
+      end
       i32.const 512
       i32.const 9
       local.get 2
       local.get 3
       i32.const 0
       call $run
+      ;; Preserve the command's error. On success, put a summary in the returned JSON string.
+      i32.const 0
+      i32.load8_u
+      i32.eqz
+      if
+        i32.const 4
+        i32.const 640
+        i32.store
+        i32.const 8
+        i32.const 37
+        i32.store
+      end
       i32.const 0
     )
+    ;; Query results reflect the current document. A RevisedBlank changes the ranking. A
+    ;; WithdrawnBlank removes 18/45. The edit deliberately trusts the submitted value:
+    ;; an obsolete or substituted value reaching Run produces an observable body.
+    (func $refit (param $params i32) (param $length i32) (result i32)
+      (if (call $contains (local.get $params) (local.get $length) (i32.const 1096))
+        (then
+          (call $run (i32.const 1120) (i32.const 16) (i32.const 1152) (i32.const 35) (i32.const 0))
+          (if (i32.load8_u (i32.const 0)) (then (return (i32.const 0))))
+          (if (call $contains (i32.load (i32.const 4)) (i32.load (i32.const 8)) (i32.const 1100))
+            (then (return (call $json (i32.const 1488) (i32.const 81)))))
+          (if (call $contains (i32.load (i32.const 4)) (i32.load (i32.const 8)) (i32.const 1104))
+            (then (return (call $json (i32.const 1328) (i32.const 115)))))
+          (return (call $json (i32.const 1200) (i32.const 81)))))
+      (if (call $contains (local.get $params) (local.get $length) (i32.const 1108))
+        (then (call $run (i32.const 512) (i32.const 9) (i32.const 1616) (i32.const 101) (i32.const 0)))
+        (else (call $run (i32.const 512) (i32.const 9) (i32.const 1752) (i32.const 103) (i32.const 0))))
+      (i32.const 0))
+    (func $json (param $ptr i32) (param $length i32) (result i32)
+      (i32.store (i32.const 0) (i32.const 0))
+      (i32.store (i32.const 4) (local.get $ptr))
+      (i32.store (i32.const 8) (local.get $length))
+      (i32.const 0))
+    (func $contains (param $ptr i32) (param $length i32) (param $word i32) (result i32)
+      (block $done (loop $next
+        (br_if $done (i32.lt_u (local.get $length) (i32.const 4)))
+        (if (i32.eq (i32.load (local.get $ptr)) (i32.load (local.get $word))) (then (return (i32.const 1))))
+        (local.set $ptr (i32.add (local.get $ptr) (i32.const 1)))
+        (local.set $length (i32.sub (local.get $length) (i32.const 1)))
+        (br $next)))
+      (i32.const 0))
+    (data (i32.const 1096) "@opt")
+    (data (i32.const 1100) "With")
+    (data (i32.const 1104) "Revi")
+    (data (i32.const 1108) "18/4")
+    (data (i32.const 1120) "document.inspect")
+    (data (i32.const 1152) "{\"timeline\":false,\"bodies\":\"names\"}")
+    (data (i32.const 1200) "{\"options\":[{\"value\":\"19/47\",\"label\":\"19/47\"},{\"value\":\"18/45\",\"label\":\"18/45\"}]}")
+    (data (i32.const 1328) "{\"options\":[{\"value\":\"20/50\",\"label\":\"20/50\"},{\"value\":\"19/47\",\"label\":\"19/47\"},{\"value\":\"18/45\",\"label\":\"18/45\"}]}")
+    (data (i32.const 1488) "{\"options\":[{\"value\":\"20/50\",\"label\":\"20/50\"},{\"value\":\"19/47\",\"label\":\"19/47\"}]}")
+    (data (i32.const 1616) "{\"length\":3,\"width\":4,\"height\":5,\"corner\":[60,0,0],\"operation\":\"new_body\",\"body_name\":\"SelectedPair\"}")
+    (data (i32.const 1752) "{\"length\":3,\"width\":4,\"height\":5,\"corner\":[60,0,0],\"operation\":\"new_body\",\"body_name\":\"SubstitutePair\"}")
     (data (;0;) (i32.const 512) "solid.box")
+    (data (i32.const 640) "{\"summary\":\"Box dimensions accepted\"}")
+    (data (i32.const 720) "{\"options\":[{\"value\":\"fine\",\"label\":\"Fine\",\"summary\":\"Fine pitch\"},{\"value\":\"coarse\",\"label\":\"Coarse\",\"summary\":\"Coarse pitch\"}]}")
     (@producers
       (processed-by "wit-component" "0.254.0")
     )

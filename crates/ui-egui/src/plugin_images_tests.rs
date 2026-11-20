@@ -113,6 +113,7 @@ fn the_command_icon_and_option_pictures_are_drawn_where_the_command_is() {
         path: dir.to_string_lossy().into_owned(),
         approval: String::new(),
         disabled: false,
+        requests_folders: false,
         groups: Default::default(),
         entries: vec![seat.clone()],
         images: Default::default(),

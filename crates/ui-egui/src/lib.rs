@@ -4358,11 +4358,6 @@ impl SolveApp {
             if req.refuse_cancelled_chat() {
                 continue;
             }
-            // A Plugins-menu run is for the design its dialog was opened on (`plugin_menu`).
-            if let Err(error) = plugin_menu::check_dispatch(self, &req) {
-                let _ = req.reply.send(json!({"ok":false,"error":error}));
-                continue;
-            }
             if let Err(error) = plugins::normalize_request(&self.session, &req.method, &mut req.params) {
                 let _ = req.reply.send(json!({"ok":false,"error":error}));
                 continue;
@@ -4390,6 +4385,10 @@ impl SolveApp {
             // Its client cancelled it while it waited (`control.cancel`): it does not run.
             if !req.ticket.take() {
                 let _ = req.reply.send(control_job::cancelled_reply(&req.method));
+                continue;
+            }
+            if let Err(reply) = plugin_menu::check_attempt(self, &req) {
+                let _ = req.reply.send(reply);
                 continue;
             }
             req.started.store(true, std::sync::atomic::Ordering::Relaxed);

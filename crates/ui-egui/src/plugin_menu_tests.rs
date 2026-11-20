@@ -71,6 +71,38 @@ fn choice_options_show_their_titles_and_send_their_values() {
 }
 
 #[test]
+fn a_computed_dropdown_queries_with_just_the_other_inputs() {
+    let schema = json!({"type":"object","required":["style"],"x-solidcraft-options":{"field":"fit","query":"@options"},
+        "properties":{"fit":{"type":"string","title":"Tooth pair"},"style":{"type":"string","default":"spur"}}});
+    let fields = form(&schema).expect("drawn");
+    assert_eq!(fields[1].0.kind, Kind::Options { query: "@options".into(), retry: false });
+    let mut retry = schema.clone();
+    retry["x-solidcraft-options"]["retryOnDesignChange"] = json!(true);
+    assert_eq!(form(&retry).unwrap()[1].0.kind, Kind::Options { query: "@options".into(), retry: true });
+    retry["x-solidcraft-options"]["retryOnDesignChange"] = json!("true");
+    assert!(form(&retry).is_none());
+    assert_eq!(fields[1].1, Input::Options);
+    assert_eq!(params(&fields), Ok(json!({"style":"spur"})));
+    let mut legacy = schema.clone();
+    legacy.as_object_mut().unwrap().remove("x-solidcraft-options");
+    assert_eq!(params(&form(&legacy).expect("optional fit works on older hosts")), Ok(json!({"style":"spur"})));
+
+    for (path, value) in [
+        ("/required", json!(["style", "fit"])),
+        ("/properties/fit", json!({"type":"integer"})),
+        ("/properties/fit", json!({"type":"string","default":"a"})),
+        ("/properties/fit", json!({"type":"string","minLength":1})),
+        ("/x-solidcraft-options/field", json!("missing")),
+        ("/x-solidcraft-options/query", json!("")),
+        ("/x-solidcraft-options", json!({"field":"fit","query":"@options","unknown":true})),
+    ] {
+        let mut unsupported = schema.clone();
+        *unsupported.pointer_mut(path).unwrap() = value;
+        assert!(form(&unsupported).is_none(), "{unsupported}");
+    }
+}
+
+#[test]
 fn other_lists_and_nested_objects_are_not_guessed() {
     for property in [
         // A target list of strings: not body names (only `bodies` and `body_ids` send those).
@@ -261,6 +293,7 @@ fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
         path: String::new(),
         disabled: false,
         approval: String::new(),
+        requests_folders: false,
         groups: BTreeSet::new(),
         entries,
         images: Default::default(),
@@ -502,6 +535,40 @@ fn picks(h: &crate::scenario::Harness) -> Vec<Vec<Sel>> {
 }
 
 #[test]
+fn a_viewport_pick_waiting_for_the_dialog_cannot_overwrite_the_verified_selection_after_an_edit() {
+    let mut h = crate::scenario::Harness::new();
+    let mut entry = entry("choose", "edit", json!([]));
+    entry.input_schema = json!({"type":"object","x-solidcraft-options":{"field":"fit","query":"list"},
+        "properties":{"fit":{"type":"string"},"bodies":{"type":"array","minItems":1,"x-solidcraft-selection":{"version":1,"accept":["body"]}}}});
+    h.app.plugin_menu.listed = vec![listed("gears", vec![entry])];
+    let add = |h: &mut crate::scenario::Harness, name, x| {
+        h.app.session.execute("solid.box", &json!({"body_name":name, "operation":"new", "length":2,"width":2,"height":2,"corner":[x,0,0]})).unwrap();
+    };
+    let pick = |h: &mut crate::scenario::Harness, name: &str| {
+        h.app.dialog.as_mut().unwrap().pick(&h.app.session, Sel::Body { name: name.into() });
+    };
+    add(&mut h, "First", 0);
+    h.app.session.selection.clear();
+    open_entry(&mut h.app, 0, 0);
+    // Even the very first hit has a known revision before the dialog takes it.
+    pick(&mut h, "First");
+    add(&mut h, "Second", 10);
+    sync_picks(&mut h.app);
+    assert!(picks(&h)[0].is_empty());
+    assert!(h.app.plugin_menu.dialog().unwrap().picks_cleared);
+
+    // A later hit racing another edit cannot substitute a different body for the proven one.
+    pick(&mut h, "First");
+    sync_picks(&mut h.app);
+    assert!(!h.app.plugin_menu.dialog().unwrap().picks_cleared);
+    pick(&mut h, "Second");
+    add(&mut h, "Third", 20);
+    sync_picks(&mut h.app);
+    assert_eq!(picks(&h)[0], [Sel::Body { name: "First".into() }]);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, picks(&h)[0]);
+}
+
+#[test]
 fn selection_fields_pick_in_the_viewport_each_into_its_own_field() {
     let mut h = box_and_pick_plugin();
     open_dialog(&mut h);
@@ -709,11 +776,235 @@ mod native {
         run(&mut h.app).unwrap();
         settle(&mut h);
         assert!(h.app.plugin_menu.dialogs.is_empty(), "an edit closes the dialog");
+        assert!(h.app.status.as_ref().is_some_and(|(text, _, error)| !error && text.ends_with("Box dimensions accepted")));
         assert_eq!(h.app.session.doc.as_ref(), reference.doc.as_ref(), "same document as plugin.run");
         assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.as_ref(), before.as_ref(), "undo takes back the whole run");
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn default_and_selected_options_feed_preview_and_run_even_with_preview_off() {
+        let root = package("computed-options");
+        let path = root.join("boxes/plugin.json");
+        let mut manifest: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        manifest["runtime"]["entries"][0] = json!({"name":"options","effect":"edit","slots":[{"kind":"menu","name":"Options"}],
+            "input_schema":{"type":"object","x-solidcraft-options":{"field":"fit","query":"@options"},"properties":{
+                "fit":{"type":"string"},"style":{"type":"string","default":"spur"}}}});
+        std::fs::write(&path, manifest.to_string()).unwrap();
+        let mut h = crate::scenario::Harness::new();
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        open_entry(&mut h.app, 0, 0);
+        let mut dialog = h.app.plugin_menu.dialogs.pop().unwrap();
+        dialog.preview = false;
+        assert!(dialog.ready(&h.app).is_err());
+        dialog.sync_options(&h.app);
+        dialog.choices.wait();
+        assert_eq!(dialog.ready(&h.app), Ok(json!({"style":"spur","fit":"fine"})));
+        dialog.choices.choose(1);
+        let coarse = json!({"style":"spur","fit":"coarse"});
+        assert_eq!(dialog.ready(&h.app), Ok(coarse.clone()));
+        h.app.plugin_menu.dialogs.push(dialog);
+        assert!(preview_commands(&h.app).is_none());
+        h.app.plugin_menu.dialogs[0].preview = true;
+        assert_eq!(preview_commands(&h.app).unwrap().2[0].1["params"], coarse);
+
+        // An edit before the next lookup frame must block both commands immediately.
+        let (_, input) = h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "style").unwrap();
+        *input = Input::Text("helical".into());
+        assert!(preview_commands(&h.app).is_none());
+        assert!(run(&mut h.app).is_err());
+        assert!(h.app.control_held.is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum EditDuring {
+        Queue,
+        Computation,
+    }
+
+    /// Real command worker and native dialog, with a release gate to put the edit on either
+    /// side of dispatch. The fixture trusts Run so the host must enforce the choice it offered.
+    struct ChoiceRace {
+        h: crate::scenario::Harness,
+        root: std::path::PathBuf,
+        dialog_id: u64,
+    }
+
+    impl Drop for ChoiceRace {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    impl ChoiceRace {
+        fn new(tag: &str, retry: bool) -> Self {
+            Self::with_permissions(tag, retry, json!({}))
+        }
+
+        fn with_permissions(tag: &str, retry: bool, permissions: Value) -> Self {
+            let root = package(tag);
+            let path = root.join("boxes/plugin.json");
+            let mut manifest: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            manifest["runtime"]["permissions"] = permissions;
+            let mut annotation = json!({"field":"fit","query":"@options"});
+            if retry {
+                annotation["retryOnDesignChange"] = json!(true);
+            }
+            manifest["runtime"]["commands"] = json!(["solid.box", "document.inspect"]);
+            manifest["runtime"]["entries"][0]["input_schema"]["properties"]["body_name"] = json!({"type":"string"});
+            manifest["runtime"]["entries"].as_array_mut().unwrap().push(json!({
+                "name":"refit","effect":"edit","input_schema":{"type":"object","x-solidcraft-options":annotation,
+                    "properties":{"fit":{"type":"string"}}}
+            }));
+            std::fs::write(&path, manifest.to_string()).unwrap();
+
+            let mut h = crate::scenario::Harness::new();
+            h.app.plugin_menu.listed = list(&h.app, Some(&root));
+            h.app.plugin_menu.loaded = true;
+            let entry = h.app.plugin_menu.listed[0].entries.iter().position(|e| e.name == "refit").unwrap();
+            open_entry(&mut h.app, 0, entry);
+            let mut dialog = h.app.plugin_menu.dialogs.pop().unwrap();
+            dialog.preview = false;
+            dialog.sync_options(&h.app);
+            dialog.choices.wait();
+            assert_eq!(dialog.ready(&h.app).unwrap()["fit"], "19/47");
+            dialog.choices.choose(1);
+            assert_eq!(dialog.ready(&h.app).unwrap()["fit"], "18/45");
+            let dialog_id = dialog.id;
+            h.app.plugin_menu.dialogs.push(dialog);
+            Self { h, root, dialog_id }
+        }
+
+        fn hold_across_edit(&mut self, when: EditDuring, body: &str) -> std::sync::mpsc::Sender<()> {
+            let (release, gate) = std::sync::mpsc::channel();
+            self.h.app.apply_gate = Some(Arc::new(std::sync::Mutex::new(gate)));
+            let edit = json!({"length":5,"width":5,"height":5,"body_name":body});
+            match when {
+                EditDuring::Queue => {
+                    let plugin = &self.h.app.plugin_menu.listed[0];
+                    let (earlier, _reply) = solidcraft_control::ControlRequest::new(
+                        "engine.execute",
+                        json!({
+                            "command":"plugin.run","params":{"path":plugin.path,"approval":plugin.approval,"entry":"make","params":edit}
+                        }),
+                    );
+                    self.h.app.control_held.push_back(earlier);
+                    self.h.frames(1);
+                    assert!(self.h.app.control_job.is_some(), "the earlier worker owns the gate");
+                    run_dialog(&mut self.h.app, self.dialog_id).unwrap();
+                    self.h.frames(1);
+                    assert_eq!(self.h.app.control_held.len(), 1, "the Run is still queued");
+                }
+                EditDuring::Computation => {
+                    run_dialog(&mut self.h.app, self.dialog_id).unwrap();
+                    self.h.frames(1);
+                    assert!(self.h.app.control_job.is_some(), "the fit worker took its snapshot");
+                    self.h.app.run("solid.box", edit).unwrap();
+                }
+            }
+            self.h.app.apply_gate = None;
+            release
+        }
+
+        fn body_names(&mut self) -> Value {
+            self.h.app.run("document.inspect", json!({"timeline":false,"bodies":"names"})).unwrap()["bodies"].clone()
+        }
+
+        fn settled(&mut self) {
+            for _ in 0..500 {
+                self.h.frames(1);
+                if self.h.app.control_job.is_none()
+                    && self.h.app.control_held.is_empty()
+                    && self.h.app.plugin_menu.dialog().is_none_or(|d| d.error.is_some())
+                {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            panic!("neither committed nor returned the dialog to the person");
+        }
+    }
+
+    #[test]
+    fn queued_and_inflight_runs_finish_the_explicit_pair_after_its_rank_changes() {
+        for when in [EditDuring::Queue, EditDuring::Computation] {
+            let mut race = ChoiceRace::new(&format!("preserve-{when:?}"), true);
+            race.hold_across_edit(when, "RevisedBlank").send(()).unwrap();
+            race.settled();
+            assert!(race.h.app.plugin_menu.dialogs.is_empty(), "{when:?}");
+            assert_eq!(race.body_names(), json!(["RevisedBlank", "SelectedPair"]), "{when:?}");
+            assert_eq!(race.h.app.session.undo.len(), 2, "one edit and exactly one pair");
+            race.h.app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(race.body_names(), json!(["RevisedBlank"]), "undo does not affect the earlier edit");
+        }
+    }
+
+    #[test]
+    fn disappeared_choices_and_commands_without_retry_hold_for_review() {
+        for when in [EditDuring::Queue, EditDuring::Computation] {
+            for (retry, marker) in [(true, "WithdrawnBlank"), (false, "RevisedBlank")] {
+                let mut race = ChoiceRace::new(&format!("review-{when:?}-{retry}"), retry);
+                race.hold_across_edit(when, marker).send(()).unwrap();
+                race.settled();
+                let dialog = race.h.app.plugin_menu.dialog().expect("the person can review a new choice");
+                assert!(dialog.error.is_some(), "{when:?} retry={retry}");
+                assert_eq!(race.body_names(), json!([marker]), "no unexamined substitute or stale pair was built");
+                assert_eq!(race.h.app.session.undo.len(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn an_edit_during_the_retried_run_checks_the_selected_pair_again() {
+        let mut race = ChoiceRace::new("changed-again", true);
+        let first = race.hold_across_edit(EditDuring::Queue, "RevisedBlank");
+        let (release, gate) = std::sync::mpsc::channel();
+        race.h.app.apply_gate = Some(Arc::new(std::sync::Mutex::new(gate)));
+        first.send(()).unwrap();
+        for _ in 0..500 {
+            race.h.frames(1);
+            if race.h.app.session.undo.len() == 1 && race.h.app.control_job.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(race.h.app.session.undo.len(), 1);
+        assert!(race.h.app.control_job.is_some(), "the revalidated pair is computing");
+        race.h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[15,0,0],"body_name":"WithdrawnBlank"})).unwrap();
+        race.h.app.apply_gate = None;
+        release.send(()).unwrap();
+        race.settled();
+        assert!(race.h.app.plugin_menu.dialog().unwrap().error.is_some());
+        assert_eq!(race.body_names(), json!(["RevisedBlank", "WithdrawnBlank"]));
+        assert_eq!(race.h.app.session.undo.len(), 2, "both intervening edits survive and neither pair attempt commits");
+    }
+
+    #[test]
+    fn closing_a_stale_run_before_its_worker_replies_never_retries_it() {
+        let mut race = ChoiceRace::new("cancel-before-refresh", true);
+        let release = race.hold_across_edit(EditDuring::Computation, "RevisedBlank");
+        race.h.frames(2);
+        race.h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
+        assert!(race.h.app.plugin_menu.dialogs.is_empty());
+        let _ = release.send(());
+        race.settled();
+        assert_eq!(race.body_names(), json!(["RevisedBlank"]));
+        assert_eq!(race.h.app.session.undo.len(), 1);
+    }
+
+    #[test]
+    fn an_entry_requesting_file_access_never_replays_a_stale_run() {
+        let permissions = json!({"files":[{"name":"exports","write":true}]});
+        let mut race = ChoiceRace::with_permissions("file-capable", true, permissions);
+        assert!(race.h.app.plugin_menu.dialog().unwrap().plugin.requests_folders);
+        race.hold_across_edit(EditDuring::Computation, "RevisedBlank").send(()).unwrap();
+        race.settled();
+        assert!(race.h.app.plugin_menu.dialog().unwrap().error.is_some());
+        assert_eq!(race.body_names(), json!(["RevisedBlank"]));
+        assert_eq!(race.h.app.session.undo.len(), 1);
     }
 
     #[test]
@@ -797,6 +1088,7 @@ mod native {
     fn the_plugins_menu_opens_from_the_ribbon_group_and_its_entry_opens_the_dialog() {
         let root = package("menu");
         let mut h = crate::scenario::Harness::new();
+        h.app.session.plugin_state.plugins_dir = Some(root.clone());
         h.app.session.plugin_state.packages.insert("boxes".into(), root.join("boxes").to_string_lossy().into_owned());
         h.frames(2);
         // The ribbon's Plugins group label opens the menu below it.
@@ -838,6 +1130,7 @@ mod native {
             ((b.max.x - b.min.x).round(), (b.max.y - b.min.y).round(), (b.max.z - b.min.z).round())
         };
         assert_eq!(size(&h), (20.0, 10.0, 3.0), "the defaults");
+        assert!(crate::scenario::rect_of("dialog:report:plugin_feedback").is_some(), "the successful result is visible in the open form");
         assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc), "the design is untouched");
         assert_eq!(h.app.session.undo.len(), undo, "no undo step");
         // A changed value is previewed again.
@@ -848,6 +1141,7 @@ mod native {
         h.app.plugin_menu.dialogs[0].preview = false;
         previewed(&mut h);
         assert!(!h.app.preview.active);
+        assert!(crate::scenario::rect_of("dialog:report:plugin_feedback").is_none(), "switching Preview off clears the result");
         h.app.plugin_menu.dialogs[0].preview = true;
         h.step(&json!({"start":"solid.fillet"})).unwrap();
         assert!(preview_commands(&h.app).is_none(), "the open tool's preview is the one shown");

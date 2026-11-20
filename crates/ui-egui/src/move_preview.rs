@@ -337,6 +337,7 @@ impl MovePreview {
             replaced,
             outlines: Vec::new(),
             error: None,
+            plugin_summary: None,
             bounds,
             layer,
             joints: Vec::new(),

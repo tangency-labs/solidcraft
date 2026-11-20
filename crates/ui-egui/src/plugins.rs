@@ -79,6 +79,8 @@ pub struct Plugin {
     pub approval: String,
     pub disabled: bool,
     pub groups: std::collections::BTreeSet<String>,
+    /// Whether the manifest requests any external folder access.
+    pub requests_folders: bool,
     pub entries: Vec<solidcraft_engine::plugin::Entry>,
     /// The images its entries name, read from the package (`plugin_images`): each relative path
     /// with the icon name it is drawn by.
@@ -146,6 +148,7 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         path: String::new(),
         approval: String::new(),
         disabled: false,
+        requests_folders: false,
         groups: Default::default(),
         entries: Vec::new(),
         images: Default::default(),
@@ -166,6 +169,7 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
     let executable = parsed.runtime.is_some();
     if let Some(runtime) = parsed.runtime {
         plugin.entries = runtime.entries;
+        plugin.requests_folders = !runtime.permissions.files.is_empty() || runtime.permissions.input_folder;
         plugin.groups = runtime.permissions.command_groups;
     }
     plugin.images = crate::plugin_images::load(dir, &plugin.id, &plugin.entries);
@@ -1560,6 +1564,7 @@ mod tests {
             path: String::new(),
             approval: String::new(),
             disabled: false,
+            requests_folders: false,
             groups: Default::default(),
             entries: Vec::new(),
             images: Default::default(),
