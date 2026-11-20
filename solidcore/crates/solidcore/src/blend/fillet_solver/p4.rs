@@ -3865,10 +3865,14 @@ mod tests_c5 {
         f.add_geom(FilletGeomType::Blends);
         let e = f.run().unwrap_err();
         assert_eq!(
-            (e.operation(), e.blend_failure(), e.upstream_status()),
+            (
+                e.operation(),
+                e.kind() == crate::error::ErrorKind::StageFailed && e.is_defect(),
+                e.upstream_status()
+            ),
             (
                 "blend::fillet_geom::p4::FilletBrep::calc_blending_geom",
-                Some(&crate::error::blend::BlendFailure::StageFailed),
+                true,
                 Some(SM_ERR_NULL_POINTER)
             )
         );
@@ -3885,10 +3889,13 @@ mod tests_c5 {
         // a stage failure (#15034) that keeps SM_ERR_NULL_POINTER (#13790)
         let e = f.run().unwrap_err();
         assert_eq!(
-            (e.operation(), e.blend_failure()),
+            (
+                e.operation(),
+                e.kind() == crate::error::ErrorKind::StageFailed && e.is_defect()
+            ),
             (
                 "blend::fillet_geom::p5::FilletBrep::calc_cross_section",
-                Some(&crate::error::blend::BlendFailure::StageFailed)
+                true
             )
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
