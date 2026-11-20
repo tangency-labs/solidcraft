@@ -3048,8 +3048,9 @@ fn fin_top_edge(b: &Body, y0: f64) -> usize {
 
 /// The fin top's round `r` on [`tube_with_fin`]`(y0)`, checked: built, a valid closed solid, its
 /// volume the closed form's, its faces and edges where the torus, the tube, the fin's top, the
-/// fin's sides and the Root rounds continued upward put them.
-fn assert_fin_top_round_rolls_over(y0: f64, r: f64) {
+/// fin's sides and the Root rounds continued upward put them. Returns the body's total face,
+/// edge and vertex counts (checked here against Euler's formula for a closed genus 0 solid).
+fn assert_fin_top_round_rolls_over(y0: f64, r: f64) -> (usize, usize, usize) {
     use solidcore::query::api_queries::{brep_is_closed_manifold, face_internal_point};
     let b = tube_with_fin(y0);
     let before = b.volume(1e-9).unwrap();
@@ -3218,6 +3219,17 @@ fn assert_fin_top_round_rolls_over(y0: f64, r: f64) {
         );
     }
     assert!(on_torus > 0, "y0 {y0} r {r}: no face on the torus");
+    let counts = (
+        brep.face_list().len(),
+        brep.edge_list().len(),
+        brep.vertex_list().len(),
+    );
+    assert_eq!(
+        counts.2 + counts.0,
+        counts.1 + 2,
+        "y0 {y0} r {r}: V - E + F is not 2"
+    );
+    counts
 }
 
 /// The closed form of the fin top's round is the kernel's where the round already builds: below
@@ -3259,7 +3271,15 @@ fn a_fin_top_round_that_stays_on_the_root_rounds_adds_the_closed_form() {
 #[test]
 fn a_fin_top_round_past_the_fin_s_sides_rolls_over_the_root_rounds() {
     fixes();
-    assert_fin_top_round_rolls_over(-0.31, 1.0);
+    // 13 faces: the tube's side, top and bottom, the fin's end and two sides and top, the two Root
+    // rounds, their two continuations above the fin's top, and the torus, which the seam (the
+    // fin's sides straddle it) cuts in two. The edge and vertex totals follow from those faces'
+    // boundaries and are tied to them by V - E + F = 2 (21 - 32 + 13), which the helper asserts.
+    assert_eq!(
+        assert_fin_top_round_rolls_over(-0.31, 1.0),
+        (13, 32, 21),
+        "faces, edges, vertices"
+    );
 }
 
 /// #19476 with the fin clear of the tube's seam (y from 2 to 2.62): one edge, a cliff at each
@@ -3268,7 +3288,14 @@ fn a_fin_top_round_past_the_fin_s_sides_rolls_over_the_root_rounds() {
 #[test]
 fn a_fin_top_round_on_a_tube_with_its_seam_elsewhere_rolls_over_the_root_rounds() {
     fixes();
-    assert_fin_top_round_rolls_over(2.0, 1.0);
+    // 12 faces: the same as with the seam in the fin, but the torus is one face (the seam is
+    // clear of the fin), so one face, and with it the seam's two edges and one vertex on the
+    // torus, fewer. V - E + F = 2 holds: 19 - 29 + 12.
+    assert_eq!(
+        assert_fin_top_round_rolls_over(2.0, 1.0),
+        (12, 29, 19),
+        "faces, edges, vertices"
+    );
 }
 
 /// The kernel's decision: the fin top's edge, with the piece it runs on into across the seam's

@@ -1046,7 +1046,10 @@ fn live_corner_vert_geom(
 /// ([`super::NoRoomReason::EndPassesOverEndFace`]) carrying that fit. Anything else returns
 /// `error` as it is. Asked only after the failure, so it never refuses an End that builds.
 /// A round within the margin of that largest ball is refused with the larger ones: its End
-/// takes all of its blend, and its edges or its face fail.
+/// takes all of its blend, and its edges or its face fail. With `missed` (the vertices'
+/// failure) only a rail is judged whose end the vertices did not find on the end face. The
+/// refusal keeps `error`'s operation, the step that failed. A judgement that itself fails
+/// establishes no fit, and `error` stands.
 ///
 /// The fit named is the least over every such End of the session (the other corners are
 /// judged the same way, on their topology, whether or not their vertices are computed yet),
@@ -1064,6 +1067,7 @@ fn end_passing_over_end_face(
     extended_surfaces: &BTreeMap<FaceId, Surface>,
     corners: &[FilletCorner],
     failed: usize,
+    missed: bool,
     executive: &mut FilletExecutive<FilletObject>,
     error: SolidError,
 ) -> Result<SolidError> {
@@ -1071,43 +1075,51 @@ fn end_passing_over_end_face(
         describe_end_passing_over_end_face, largest_ball_ending_on_end_face,
     };
     use crate::blend::fillet_executive::NoRoomReason;
-    const OP_END: &str = "SmBlendCorner::CalcCornerVertGeom";
+    // the refusal keeps the operation of the failure it stands for: the step that failed
+    let operation = error.operation();
     let lookup = SweptSessionSolvers {
         solvers,
         executive: None,
     };
-    // the fit of one corner, with its blended edge: `None` where it is not such an End
-    let judge =
-        |target: &mut Brep, corner: &FilletCorner| -> Result<Option<(f64, Option<EdgeId>)>> {
-            let Some(first) = corner
-                .solver_eus
-                .as_deref()
-                .and_then(|eus| eus.first().copied())
-            else {
-                return Ok(None);
-            };
-            let edge = crate::topology::edgeuse::p1::edge(target, first)?;
-            // FitMargin: a thousand of the blended edge's tolerances
-            let margin = match edge {
-                Some(e) => 1000.0 * crate::topology::edge::tolerance(target, e)?,
-                None => 0.0,
-            };
-            let largest = largest_ball_ending_on_end_face(
-                k,
-                target,
-                pseudo,
-                corner,
-                &lookup,
-                extended_surfaces,
-                margin,
-            )?;
-            Ok(largest.map(|largest| (largest - margin, edge)))
+    // the fit of one corner, with its blended edge: `None` where it is not such an End.
+    // `missed`: only of a rail whose end the corner's vertices did not find on the end face
+    let judge = |target: &mut Brep,
+                 corner: &FilletCorner,
+                 missed: bool|
+     -> Result<Option<(f64, Option<EdgeId>)>> {
+        let Some(first) = corner
+            .solver_eus
+            .as_deref()
+            .and_then(|eus| eus.first().copied())
+        else {
+            return Ok(None);
         };
+        let edge = crate::topology::edgeuse::p1::edge(target, first)?;
+        // FitMargin: a thousand of the blended edge's tolerances
+        let margin = match edge {
+            Some(e) => 1000.0 * crate::topology::edge::tolerance(target, e)?,
+            None => 0.0,
+        };
+        let largest = largest_ball_ending_on_end_face(
+            k,
+            target,
+            pseudo,
+            corner,
+            &lookup,
+            extended_surfaces,
+            margin,
+            missed,
+        )?;
+        Ok(largest.map(|largest| (largest - margin, edge)))
+    };
     let Some(this) = corners.get(failed) else {
         return Ok(error);
     };
-    let Some(mut least) = judge(target, this)? else {
-        return Ok(error);
+    // a judgement that fails establishes no fit: the construction's own failure stands
+    let mut least = match judge(target, this, missed) {
+        Ok(Some(found)) => found,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Ok(None) | Err(_) => return Ok(error),
     };
     let mut at = this;
     for (i, other) in corners.iter().enumerate() {
@@ -1115,7 +1127,7 @@ fn end_passing_over_end_face(
             continue;
         }
         // another corner's judgement that fails proves nothing of this one's
-        let judged = match judge(target, other) {
+        let judged = match judge(target, other, false) {
             Ok(judged) => judged,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => None,
@@ -1151,7 +1163,7 @@ fn end_passing_over_end_face(
         crate::blend::fillet_executive::p3::FitKind::Radius,
     );
     let mut failure = crate::error::Failure::new(
-        OP_END,
+        operation,
         crate::error::blend::BlendFailure::NoRoom(NoRoomReason::EndPassesOverEndFace),
     )
     .with_fit(crate::error::Fit::new(
@@ -3650,6 +3662,7 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
                 extended_surfaces,
                 corners.as_slice(),
                 id.0 as usize,
+                false,
                 executive,
                 e,
             )?),
@@ -5684,23 +5697,30 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
         // blend at the size where its rail only just ends on that face: the face then has no
         // extent. Refused as too large, naming the radius that fits (noted, so the executive
         // keeps it)
-        // (a geometry without a live solver has failed for that: its error stands)
-        let blended = match self.pseudo.geom(id)?.fillet_solver() {
-            Some(sid) => match self.solvers.get(sid.0 as usize).and_then(Option::as_ref) {
-                Some(solver) => solver.base().edgeuse(0)?,
-                None => None,
-            },
-            None => None,
+        // (a lookup that fails, or a geometry without a live solver, shows no such End: the
+        // face's failure stands)
+        let ends = || -> Result<[Option<VertexId>; 2]> {
+            let Some(sid) = self.pseudo.geom(id)?.fillet_solver() else {
+                return Ok([None, None]);
+            };
+            let Some(solver) = self.solvers.get(sid.0 as usize).and_then(Option::as_ref) else {
+                return Ok([None, None]);
+            };
+            let Some(eu) = solver.base().edgeuse(0)? else {
+                return Ok([None, None]);
+            };
+            let Some(e) = crate::topology::edgeuse::p1::edge(self.target, eu)? else {
+                return Ok([None, None]);
+            };
+            Ok([
+                crate::topology::edge::start_vertex(self.target, e)?,
+                crate::topology::edge::end_vertex(self.target, e)?,
+            ])
         };
-        let ends = match blended {
-            Some(eu) => match crate::topology::edgeuse::p1::edge(self.target, eu)? {
-                Some(e) => [
-                    crate::topology::edge::start_vertex(self.target, e)?,
-                    crate::topology::edge::end_vertex(self.target, e)?,
-                ],
-                None => [None, None],
-            },
-            None => [None, None],
+        let ends = match ends() {
+            Ok(ends) => ends,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Err(error),
         };
         let mut error = error;
         for v in ends.into_iter().flatten() {
@@ -5723,6 +5743,7 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
                 extended_surfaces,
                 corners.as_slice(),
                 corner.0 as usize,
+                false,
                 executive,
                 error,
             )?;
@@ -6555,15 +6576,29 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                 continue;
                             };
                             // A constrained closest point can return an endpoint one
-                            // parameter ulp inside the interval. It is still beside
-                            // the band: testing only t would extend the band's chord
-                            // across the face and falsely catch a distant rail (#2903).
-                            // Use the existing solver tolerance in geometric space,
-                            // independent of the edge curve's parameterization. An end
-                            // the run's next edge continues from is no end of the band.
+                            // parameter ulp inside the interval. Use the existing solver
+                            // tolerance in geometric space, independent of the edge curve's
+                            // parameterization. An end the run's next edge continues from is
+                            // no end of the band.
                             let at_run_end = (end0
                                 && (t <= ivl_j.min() || (e - *start_j).length() <= tol))
                                 || (end1 && (t >= ivl_j.max() || (e - *stop_j).length() <= tol));
+                            // Not the fork's (#18563): a sample past the run's end is judged
+                            // only where that end is an end of edge `b` itself (below);
+                            // otherwise it is beside the band: testing only t would extend the
+                            // band's chord across the face and falsely catch a distant rail
+                            // (#2903), and an end on another edge of the run (a tangent
+                            // chain's) says nothing of band `b`'s width. A closed edge (both
+                            // ends one point) has no end to run on past.
+                            let own_end_b = edge_curves
+                                .get(b)
+                                .map(|(_, _, ends)| *ends)
+                                .filter(|[q0, q1]| (*q0 - *q1).length() > tol)
+                                .filter(|ends| ends.iter().any(|&q| (e - q).length() <= tol));
+                            let past_end = match own_end_b {
+                                Some(ends) if at_run_end && band_has_ends => Some(ends),
+                                _ => None,
+                            };
                             let on_rail = match curve_b.drop_point(
                                 k,
                                 &ivl_b,
@@ -6581,7 +6616,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                     return Err(error);
                                 }
                             };
-                            if at_run_end || !on_rail.success {
+                            if (at_run_end && past_end.is_none()) || !on_rail.success {
                                 continue; // beside the band, not across it
                             }
                             let r = match curve_b.evaluate_point(k, on_rail.parameter) {
@@ -6599,6 +6634,48 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                     || band_ends_b.iter().any(|&q| (r - q).length() <= tol))
                             {
                                 continue; // past the section that ends the band
+                            }
+                            if let Some([q0, q1]) = past_end {
+                                // Not the fork's (#18563): `p` lies past an end of edge `b`,
+                                // beside rail `b`'s kept part. Where that part runs on past
+                                // the edge's end (a round running out onto a face beyond it,
+                                // as onto the sphere that trims a block's corner), the band
+                                // runs on with it: a sample in it refuses as one beside the
+                                // edge does. Where the judgement cannot be made (an
+                                // evaluation fails), the sample is classified as for its own
+                                // evaluations: off the face it is dropped, on it the failure
+                                // is returned (#19243).
+                                let other_end = if (e - q0).length() <= (e - q1).length() {
+                                    q1
+                                } else {
+                                    q0
+                                };
+                                let inside = match inside_band_past_run_end(
+                                    k,
+                                    curve_b,
+                                    &ivl_b,
+                                    PastRunEnd {
+                                        end: e,
+                                        other_end,
+                                        sample: p,
+                                        on_rail: (on_rail.parameter, r),
+                                        kept: [kept_b.min(), kept_b.max()],
+                                    },
+                                    tol,
+                                    apart,
+                                ) {
+                                    Ok(inside) => inside,
+                                    Err(error) => {
+                                        if sample_off_face(k, self.target, *face_a, p)? {
+                                            continue;
+                                        }
+                                        return Err(error);
+                                    }
+                                };
+                                if inside && !sample_off_face(k, self.target, *face_a, p)? {
+                                    return Ok(false);
+                                }
+                                continue;
                             }
                             // Not the fork's (#18823): the band's section through `r` reaches
                             // the run at `r`'s own foot there, which is `p`'s where `p` lies in
@@ -6683,6 +6760,92 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         }
         Ok(true)
     }
+}
+
+/// A sample of the band check whose foot on a band's run is an end of the band's own edge
+/// ([`inside_band_past_run_end`]).
+#[derive(Clone, Copy)]
+struct PastRunEnd {
+    /// The edge's end: the sample's foot on the run.
+    end: crate::math::Point3,
+    /// The edge's other end.
+    other_end: crate::math::Point3,
+    /// The sample.
+    sample: crate::math::Point3,
+    /// The point of the band's rail nearest the sample, by its parameter, inside the rail's
+    /// kept part.
+    on_rail: (f64, crate::math::Point3),
+    /// The parameters of the ends of the rail's kept part.
+    kept: [f64; 2],
+}
+
+/// The band check past an end of a band's own edge (#18563): whether the sample lies in the
+/// band's run-on, the part of the band beside the rail's kept part past the edge's end. The
+/// band's section at that end goes from the rail's point across from the end to the end. The
+/// run-on is the rail's part from that point to the end of its kept part on the side away from
+/// the edge (the side the point across from the edge's other end does not lie on). The sample
+/// is in the run-on's band where its nearest point of the rail lies strictly within the
+/// run-on, and it lies on the end's side of the rail in the end section's direction, further
+/// than `tol` from the rail and short of that section's width by more than `apart`, as the
+/// check beside the edge judges a sample. The section's direction is the end's, not the rail's
+/// at the sample's nearest point: the two agree where the run-on is straight and stays on a
+/// plane. A rail without a point across from either end, or a section no wider than `2 apart`,
+/// takes no band there.
+///
+/// # Errors
+/// Those of the drops onto the rail and its evaluation.
+fn inside_band_past_run_end(
+    k: &Kernel,
+    rail: &crate::curve::curve::Curve,
+    ivl: &crate::geom::extent1d::Extent1d,
+    at: PastRunEnd,
+    tol: f64,
+    apart: f64,
+) -> Result<bool> {
+    use crate::geom::global_solver::SolverOperation;
+    let PastRunEnd {
+        end,
+        other_end,
+        sample,
+        on_rail: (t, r),
+        kept: [t0, t1],
+    } = at;
+    let drop = |q| {
+        rail.drop_point(
+            k,
+            ivl,
+            q,
+            None,
+            crate::math::BIG_DOUBLE,
+            None,
+            SolverOperation::Minimize,
+        )
+    };
+    let across = drop(end)?;
+    let across_other = drop(other_end)?;
+    if !across.success || !across_other.success {
+        return Ok(false);
+    }
+    // the run-on: from the point across from the end to the kept end on the side away from
+    // the point across from the edge's other end
+    let (lo, hi) = if across_other.parameter <= across.parameter {
+        (across.parameter, t1)
+    } else {
+        (t0, across.parameter)
+    };
+    if !(t > lo && t < hi) {
+        return Ok(false);
+    }
+    let section = end - rail.evaluate_point(k, across.parameter)?;
+    let width = section.length();
+    if !matches!(
+        width.partial_cmp(&(2.0 * apart)),
+        Some(core::cmp::Ordering::Greater)
+    ) {
+        return Ok(false);
+    }
+    let from_rail = (sample - r).dot(section * (1.0 / width));
+    Ok(from_rail > tol && from_rail < width - apart && (sample - r).length() < width)
 }
 
 /// A step of the band check that found nothing where a point always exists (a drop onto a
@@ -8512,6 +8675,7 @@ impl CornerVertexAccess<FilletObject> for SessionObjects<'_> {
                     extended_surfaces,
                     corners.as_slice(),
                     id.0 as usize,
+                    true,
                     executive,
                     e,
                 )?)
