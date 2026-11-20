@@ -17,7 +17,10 @@ use egui::{Pos2, Rect, Sense, Vec2, pos2, vec2};
 use serde::Serialize;
 use serde_json::{Value, json};
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_engine::{Sel, doc::FeatureKind};
+use solidcraft_engine::{
+    Sel,
+    doc::{FeatureKind, ModelBody},
+};
 
 use crate::SolveApp;
 
@@ -592,13 +595,12 @@ fn picked_face_feature(app: &SolveApp) -> Option<u64> {
         Sel::Face { body, index, .. } => Some((body, *index)),
         _ => None,
     })?;
-    face_feature(app, body, index)
+    let state = crate::open_meshing::session_world(&app.session);
+    face_feature(app, state.body(body)?, index)
 }
 
-/// The feature that made face `index` of `body` (by its world name).
-pub(crate) fn face_feature(app: &SolveApp, body: &str, index: usize) -> Option<u64> {
-    let state = crate::open_meshing::session_world(&app.session);
-    let body = state.body(body)?;
+/// The feature that made face `index` of this placed body.
+pub(crate) fn face_feature(app: &SolveApp, body: &ModelBody, index: usize) -> Option<u64> {
     let names = solidcraft_engine::doc::naming::face_names(body);
     let name = names.get(index)?;
     let id = solidcraft_engine::doc::persistent_name::made_by(name)?;
