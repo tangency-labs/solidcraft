@@ -816,6 +816,10 @@ fn bisect(
                         continue;
                     }
                     if bottom || out_of_pieces || closed {
+                        // (a NaN bound encloses nothing: `max` would drop it)
+                        if bound.is_nan() {
+                            return Ok(None);
+                        }
                         if bound > over {
                             return Ok(Some(f64::INFINITY));
                         }
@@ -1159,6 +1163,10 @@ pub fn curve_face_gap_bound_within(
                     let closed =
                         bound <= enough || bound <= seen || p.closes(parent, relative, at_least);
                     if last || closed {
+                        // (a NaN bound encloses nothing: `max` would drop it)
+                        if bound.is_nan() {
+                            return Ok(None);
+                        }
                         if bound > over {
                             return Ok(Some(f64::INFINITY));
                         }
