@@ -108,7 +108,7 @@ fn the_enclosed_floor_and_its_stats() {
     let walls = two_rooms();
     let grid = Grid::covering(walls.bounds().unwrap(), 75.0).unwrap();
     let solid = wall_cells(&walls, &grid);
-    let inside = enclosed(&walls, &grid, &solid);
+    let inside = enclosed(&walls, &grid, &solid, 0.0);
     let cells: Vec<Cell> = solid
         .iter()
         .zip(&inside)
@@ -136,7 +136,33 @@ fn the_enclosed_floor_and_its_stats() {
     // A wall-less plan encloses nothing.
     let open = WallMap::new(vec![wall(0.0, 0.0, 100.0, 100.0, 0)], vec![preset("concrete")]);
     let g = Grid::covering([-1000.0, -1000.0, 1000.0, 1000.0], 75.0).unwrap();
-    assert!(enclosed(&open, &g, &wall_cells(&open, &g)).iter().all(|i| !i));
+    assert!(enclosed(&open, &g, &wall_cells(&open, &g), 0.0).iter().all(|i| !i));
+}
+
+#[test]
+fn an_open_doorway_is_closed_when_finding_the_floor() {
+    // A 4 m × 3 m room with an 800 mm doorway in its south wall, in a grid with room round it.
+    let walls = WallMap::new(
+        vec![
+            wall(-150.0, -150.0, 1600.0, 0.0, 0),
+            wall(2400.0, -150.0, 4150.0, 0.0, 0),
+            wall(-150.0, 3000.0, 4150.0, 3150.0, 0),
+            wall(-150.0, 0.0, 0.0, 3000.0, 0),
+            wall(4000.0, 0.0, 4150.0, 3000.0, 0),
+        ],
+        vec![preset("concrete")],
+    );
+    let grid = Grid::covering([-1000.0, -1000.0, 5000.0, 4000.0], 50.0).unwrap();
+    let solid = wall_cells(&walls, &grid);
+    let area = |cells: &[bool]| cells.iter().filter(|c| **c).count() as f64 * 50.0 * 50.0 / 1e6;
+    // Without closing, the outside flows in through the doorway.
+    assert!(area(&enclosed(&walls, &grid, &solid, 0.0)) < 0.5);
+    // Closing gaps under 1 m keeps the room: 12 m² less the cells its edges touch.
+    let room = area(&enclosed(&walls, &grid, &solid, 1000.0));
+    assert!((10.5..12.1).contains(&room), "{room}");
+    // A gap wider than the opening closes nothing more: the outside stays outside.
+    let wide = area(&enclosed(&walls, &grid, &solid, 1500.0));
+    assert!((10.5..12.1).contains(&wide), "{wide}");
 }
 
 #[test]

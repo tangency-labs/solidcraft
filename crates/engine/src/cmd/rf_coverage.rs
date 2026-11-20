@@ -132,6 +132,9 @@ pub struct RfOverlay {
     pub version: u64,
     /// The legend: (lowest dBm of the step, colour).
     pub legend: Vec<(f64, [u8; 3])>,
+    /// The shown band's figures: % of the floor at −60 dBm or better, at −67 dBm or better, and
+    /// the 5th percentile (dBm).
+    pub summary: Option<[f64; 3]>,
 }
 
 fn rf_coverage(s: &mut Session, p: &Value) -> Result<Value> {
@@ -164,6 +167,7 @@ fn rf_coverage(s: &mut Session, p: &Value) -> Result<Value> {
     let client = length("client_height", params.client_height, 1000.0, -MAX_COORD, MAX_COORD)?;
     let step = length("grid_step", params.grid_step, 75.0, 10.0, 2000.0)?;
     let exponent = length("exponent", params.exponent, 2.2, 1.5, 6.0)?;
+    let gap = length("close_gaps", params.close_gaps, 1000.0, 0.0, 5000.0)?;
     let cap = params.cap_eirp.unwrap_or(true);
     let emitters = emitter_params.iter().enumerate().map(|(i, e)| emitter(i, e, client, cap)).collect::<Result<Vec<_>>>()?;
     let bands: Vec<Band> = match params.band.unwrap_or(BandName::All) {
@@ -210,7 +214,11 @@ fn rf_coverage(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let bounds = match &given {
         Some((r, _)) => r.iter().map(|r| r.bounds).reduce(|a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]),
-        None => walls.bounds(),
+        // Room round the walls for the outside to flow past them.
+        None => walls.bounds().map(|b| {
+            let m = 0.5 * gap + 2.0 * step;
+            [b[0] - m, b[1] - m, b[2] + m, b[3] + m]
+        }),
     }
     .ok_or_else(|| bad(CMD, format!("no body crosses the slice height {slice} mm: nothing makes walls there")))?;
     let grid = Grid::covering(bounds, step).ok_or_else(|| bad(CMD, "the grid would have too many cells: give a larger `grid_step` or a `region`"))?;
@@ -221,7 +229,7 @@ fn rf_coverage(s: &mut Session, p: &Value) -> Result<Value> {
             (inside, kind.clone())
         }
         None => {
-            let e = enclosed(&walls, &grid, &solid);
+            let e = enclosed(&walls, &grid, &solid, gap);
             if e.iter().any(|x| *x) { (e, "enclosed".into()) } else { (vec![true; grid.len()], "open".into()) }
         }
     };
@@ -266,19 +274,23 @@ fn rf_coverage(s: &mut Session, p: &Value) -> Result<Value> {
         .map(|pt| {
             let mut rssi = BTreeMap::new();
             let mut from = BTreeMap::new();
+            let mut walls_db = BTreeMap::new();
             for &b in &bands {
                 if let Some((v, i)) = best_at(&walls, &emitters, &model, b, pt.at, &mut scratch) {
                     rssi.insert(b.name().to_string(), (v * 10.0).round() / 10.0);
-                    from.insert(b.name().to_string(), emitters.get(i).map(|e| e.name.clone()).unwrap_or_default());
+                    if let Some(e) = emitters.get(i) {
+                        from.insert(b.name().to_string(), e.name.clone());
+                        walls_db.insert(b.name().to_string(), (walls.path_loss(e.at, pt.at, b, &mut scratch) * 10.0).round() / 10.0);
+                    }
                 }
             }
-            PointReply { name: pt.name.clone(), at: pt.at, rssi_dbm: rssi, from }
+            PointReply { name: pt.name.clone(), at: pt.at, rssi_dbm: rssi, from, walls_db }
         })
         .collect();
     let shown_values = values.get(&shown).cloned().unwrap_or_default();
     let picture = rgba(&shown_values, &cells, &grid);
     let png = match &params.png {
-        Some(path) => Some(write_png(path, &picture, &grid, &emitters)?),
+        Some(path) => Some(write_png(path, &picture, &grid, &emitters, &walls)?),
         None => None,
     };
     let show = params.show.unwrap_or(true);
@@ -293,6 +305,7 @@ fn rf_coverage(s: &mut Session, p: &Value) -> Result<Value> {
             params: p.clone(),
             version,
             legend: crate::rf_coverage::SCALE.to_vec(),
+            summary: stats_out.iter().find(|st| st.band == shown.name()).map(|st| [st.pct_at_least_60, st.pct_at_least_67, st.p5_dbm]),
         }));
         s.refresh_display();
     }
@@ -593,6 +606,29 @@ fn cut_body(body: &ModelBody, plane: &Plane, slice: f64) -> std::result::Result<
     {
         return Ok(Some(vec![rings_of(&prism.region)]));
     }
+    // The kernel's exact check can refuse a cut that lands on a numerical edge case; a cut a
+    // fraction of a millimetre away gives the same walls.
+    let mut first_error = None;
+    for nudge in NUDGES_MM {
+        let at = Plane { origin: Vec3::new(0.0, 0.0, slice + nudge), ..Plane::XY };
+        if bounds.min.z >= slice + nudge - tol || bounds.max.z <= slice + nudge + tol {
+            continue;
+        }
+        match cut_at(body, &at) {
+            Ok(cut) => return Ok(cut),
+            Err(e) => {
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    Err(first_error.unwrap_or_else(|| "it couldn't be cut".into()))
+}
+
+/// How far from the slice height a body is cut again when the cut at the height is refused (mm).
+const NUDGES_MM: [f64; 5] = [0.0, 0.37, -0.37, 1.3, -1.3];
+
+/// The cut faces of `body` on `plane`, by the half-space cut a section view uses.
+fn cut_at(body: &ModelBody, plane: &Plane) -> std::result::Result<Option<Vec<Vec<Vec<[f64; 2]>>>>, String> {
     let Some(kept) = body.section(plane).map_err(|e| e.to_string())? else { return Ok(None) };
     let Some(telling) = crate::drawing_view::hatch::cut_faces(&body.body, &kept.body, plane) else { return Ok(None) };
     let faces = crate::drawing_view::hatch::faces_on(&kept.body, telling, plane, plane);
@@ -696,9 +732,25 @@ fn region(world: &ModelState, r: &crate::schema::rf_coverage::RegionParam) -> Re
     }
 }
 
+/// A wall outline's colour in the PNG, by its preset: glazing blue, metal red, wood brown,
+/// drywall grey, concrete and anything else near black.
+fn outline_colour(loss: Option<&RfLoss>, guessed: bool) -> [u8; 4] {
+    if guessed {
+        return [60, 66, 74, 255];
+    }
+    match loss.and_then(solidcraft_doc::rf::rf_preset_of).map(|p| p.id) {
+        Some("low-e-glass") => [40, 120, 210, 255],
+        Some("interior-glass") => [120, 180, 230, 255],
+        Some("metal") => [200, 60, 60, 255],
+        Some("wood-door") => [160, 110, 60, 255],
+        Some("drywall") => [130, 136, 144, 255],
+        _ => [30, 34, 40, 255],
+    }
+}
+
 /// Write the heatmap seen from above as a PNG at `path`, north up, with the emitters marked;
 /// the path written.
-fn write_png(path: &str, picture: &[u8], grid: &Grid, emitters: &[Emitter]) -> Result<String> {
+fn write_png(path: &str, picture: &[u8], grid: &Grid, emitters: &[Emitter], walls: &WallMap) -> Result<String> {
     if !path.to_ascii_lowercase().ends_with(".png") || path.chars().count() > 4096 {
         return Err(bad(CMD, "`png` must be a path ending in .png"));
     }
@@ -717,6 +769,32 @@ fn write_png(path: &str, picture: &[u8], grid: &Grid, emitters: &[Emitter]) -> R
                 |i: usize| (f64::from(*src.get(i).unwrap_or(&0)) * a + f64::from(*background.get(i).unwrap_or(&255)) * (1.0 - a)).round() as u8;
             if let Some(px) = out.get_mut((y * w + x) * 4..(y * w + x) * 4 + 4) {
                 px.copy_from_slice(&[blend(0), blend(1), blend(2), 255]);
+            }
+        }
+    }
+    // Each wall's outline, in its material's colour, so a pane thinner than a cell shows.
+    let to_px = |p: [f64; 2]| [(p[0] - grid.origin[0]) / grid.step * scale as f64, h as f64 - (p[1] - grid.origin[1]) / grid.step * scale as f64];
+    for r in &walls.regions {
+        let c = outline_colour(walls.materials.get(r.material).map(|(_, l)| l), r.thick.is_some());
+        for ring in &r.rings {
+            for (i, a) in ring.iter().enumerate() {
+                let Some(b) = ring.get((i + 1) % ring.len()) else { continue };
+                let (pa, pb) = (to_px(*a), to_px(*b));
+                let n = ((pb[0] - pa[0]).abs().max((pb[1] - pa[1]).abs()) * 2.0).ceil().clamp(1.0, 1.0e5) as usize;
+                for k in 0..=n {
+                    let t = k as f64 / n as f64;
+                    let (x, y) = (pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t);
+                    for (dx, dy) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+                        let (px, py) = ((x - 0.5 + dx).floor(), (y - 0.5 + dy).floor());
+                        if px < 0.0 || py < 0.0 || px >= w as f64 || py >= h as f64 {
+                            continue;
+                        }
+                        let at = (py as usize * w + px as usize) * 4;
+                        if let Some(dst) = out.get_mut(at..at + 4) {
+                            dst.copy_from_slice(&c);
+                        }
+                    }
+                }
             }
         }
     }

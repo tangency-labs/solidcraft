@@ -514,13 +514,20 @@ fn edge_cells(walls: &WallMap, grid: &Grid) -> Vec<bool> {
     out
 }
 
-/// The floor the walls enclose: the cells a flood from the grid's edge can't reach without
-/// crossing a wall. Empty when the walls enclose nothing (an open plan, a door left out).
-pub fn enclosed(walls: &WallMap, grid: &Grid, wall: &[bool]) -> Vec<bool> {
+/// The floor the walls enclose, with gaps narrower than `gap` mm (open doorways) closed: the
+/// cells a flood from the grid's edge can't reach without crossing a wall or squeezing through a
+/// gap. The flood runs through the cells at least `gap / 2` from any wall, then grows back by
+/// `gap / 2` (a morphological closing), so the outside right up to the walls is still outside.
+/// Empty when the walls enclose nothing.
+pub fn enclosed(walls: &WallMap, grid: &Grid, wall: &[bool], gap: f64) -> Vec<bool> {
     let blocked: Vec<bool> = edge_cells(walls, grid).iter().zip(wall).map(|(e, w)| *e || *w).collect();
+    let (w, h) = (grid.columns, grid.rows);
+    let half = (0.5 * gap / grid.step).max(0.0);
+    // How far each cell is from a blocked one, in cells (a chamfer distance, within 8%).
+    let from_wall = distances(&blocked, w, h);
+    let open: Vec<bool> = from_wall.iter().map(|d| *d > half).collect();
     let mut reached = vec![false; grid.len()];
     let mut stack: Vec<usize> = Vec::new();
-    let (w, h) = (grid.columns, grid.rows);
     for column in 0..w {
         stack.push(column);
         stack.push((h - 1) * w + column);
@@ -530,7 +537,7 @@ pub fn enclosed(walls: &WallMap, grid: &Grid, wall: &[bool]) -> Vec<bool> {
         stack.push(row * w + w - 1);
     }
     while let Some(i) = stack.pop() {
-        if blocked.get(i).copied().unwrap_or(true) || reached.get(i).copied().unwrap_or(true) {
+        if !open.get(i).copied().unwrap_or(false) || reached.get(i).copied().unwrap_or(true) {
             continue;
         }
         if let Some(r) = reached.get_mut(i) {
@@ -550,7 +557,58 @@ pub fn enclosed(walls: &WallMap, grid: &Grid, wall: &[bool]) -> Vec<bool> {
             stack.push(i + w);
         }
     }
-    (0..grid.len()).map(|i| !blocked.get(i).copied().unwrap_or(true) && !reached.get(i).copied().unwrap_or(true)).collect()
+    // Grow the outside back to the walls: every free cell within `half` of a reached one.
+    let from_outside = distances(&reached, w, h);
+    (0..grid.len()).map(|i| !blocked.get(i).copied().unwrap_or(true) && from_outside.get(i).is_none_or(|d| *d > half + 1e-9)).collect()
+}
+
+/// Each cell's distance in cells to the nearest cell `from` marks, by a two-pass chamfer (steps of
+/// 1 and √2); infinite with none marked.
+fn distances(from: &[bool], w: usize, h: usize) -> Vec<f64> {
+    let mut d: Vec<f64> = from.iter().map(|f| if *f { 0.0 } else { f64::INFINITY }).collect();
+    let diagonal = std::f64::consts::SQRT_2;
+    let at = |d: &[f64], c: usize, r: usize| d.get(r * w + c).copied().unwrap_or(f64::INFINITY);
+    for r in 0..h {
+        for c in 0..w {
+            let mut v = at(&d, c, r);
+            if c > 0 {
+                v = v.min(at(&d, c - 1, r) + 1.0);
+            }
+            if r > 0 {
+                v = v.min(at(&d, c, r - 1) + 1.0);
+                if c > 0 {
+                    v = v.min(at(&d, c - 1, r - 1) + diagonal);
+                }
+                if c + 1 < w {
+                    v = v.min(at(&d, c + 1, r - 1) + diagonal);
+                }
+            }
+            if let Some(x) = d.get_mut(r * w + c) {
+                *x = v;
+            }
+        }
+    }
+    for r in (0..h).rev() {
+        for c in (0..w).rev() {
+            let mut v = at(&d, c, r);
+            if c + 1 < w {
+                v = v.min(at(&d, c + 1, r) + 1.0);
+            }
+            if r + 1 < h {
+                v = v.min(at(&d, c, r + 1) + 1.0);
+                if c + 1 < w {
+                    v = v.min(at(&d, c + 1, r + 1) + diagonal);
+                }
+                if c > 0 {
+                    v = v.min(at(&d, c - 1, r + 1) + diagonal);
+                }
+            }
+            if let Some(x) = d.get_mut(r * w + c) {
+                *x = v;
+            }
+        }
+    }
+    d
 }
 
 /// The coverage figures for one band.

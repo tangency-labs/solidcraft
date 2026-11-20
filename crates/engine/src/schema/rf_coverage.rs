@@ -103,6 +103,10 @@ pub struct RfCoverageParams {
     /// nothing, every cell not in a wall).
     #[serde(default)]
     pub region: Option<RegionParam>,
+    /// Without `region`: openings narrower than this (mm) close the floor the walls enclose, so
+    /// open doorways don't let the outside in: 0 to 5000 (default 1000).
+    #[serde(default)]
+    pub close_gaps: Option<f64>,
     /// Points to report the signal at.
     #[serde(default)]
     pub points: Option<Vec<PointParam>>,
@@ -200,6 +204,8 @@ pub struct PointReply {
     pub rssi_dbm: BTreeMap<String, f64>,
     /// The emitter that gives it, by band.
     pub from: BTreeMap<String, String>,
+    /// The wall losses on the way from that emitter, by band (dB).
+    pub walls_db: BTreeMap<String, f64>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]

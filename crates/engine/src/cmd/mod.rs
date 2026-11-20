@@ -132,7 +132,7 @@ mod plugin;
 mod plugin_storage;
 mod point_cloud;
 mod point_cloud_deviation;
-pub(crate) mod rf_coverage;
+pub mod rf_coverage;
 mod script;
 mod section;
 mod selection;
