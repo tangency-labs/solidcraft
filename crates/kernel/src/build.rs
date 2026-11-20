@@ -174,8 +174,35 @@ pub fn revolve_whole(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis
     revolved(plane, regions, axis_origin, axis_dir, angle)
 }
 
+/// [`revolve`] with each run of free-form segments (conics, Béziers) that `one_curve` says are pieces of one curve
+/// (a spline's spans) turned as that one curve into one face, as [`extrude_whole_sides`] sweeps them into one wall.
+/// For tools whose faces must not multiply with the spans of the curves they are drawn with (#17693).
+pub fn revolve_whole_sides(
+    plane: &Plane,
+    regions: &[Region2],
+    axis_origin: Vec2,
+    axis_dir: Vec2,
+    angle: f64,
+    one_curve: &dyn Fn(&Seg2, &Seg2) -> bool,
+) -> Result<Vec<Body>> {
+    let _span = solidcraft_profile::span("kernel", "revolve_whole_sides");
+    revolved_with(plane, regions, axis_origin, axis_dir, angle, Some(one_curve))
+}
+
 /// Each region revolved through SMLib ([`crate::smlib_sweeps::revolve`]).
 fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
+    revolved_with(plane, regions, axis_origin, axis_dir, angle, None)
+}
+
+/// [`revolved`], with the runs of segments `one_curve` says are one curve turned as one curve each.
+fn revolved_with(
+    plane: &Plane,
+    regions: &[Region2],
+    axis_origin: Vec2,
+    axis_dir: Vec2,
+    angle: f64,
+    one_curve: Option<&dyn Fn(&Seg2, &Seg2) -> bool>,
+) -> Result<Vec<Body>> {
     let angle = finite(angle, "angle")?;
     if angle.abs() < 1e-6 {
         return Err(KernelError::Invalid("revolve angle is zero".into()));
@@ -226,7 +253,27 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
         let c = plane.to_world(r.centroid());
         let radial = (c - o) - axis * (c - o).dot(axis);
         let angle = if axis.cross(radial).dot(plane.normal()) < 0.0 { -angle } else { angle };
-        out.push(crate::smlib_sweeps::revolve(plane, &crate::smlib_sweeps::pieces(given.oriented().loops()), o, axis, angle)?);
+        let Some(one_curve) = one_curve else {
+            out.push(crate::smlib_sweeps::revolve(plane, &crate::smlib_sweeps::pieces(given.oriented().loops()), o, axis, angle)?);
+            continue;
+        };
+        // Pieces of one curve: free-form segments of one degree that the caller says are one curve. Each loop
+        // starts where such a run starts, so no run wraps round its end.
+        let joins = |s: &Seg2, t: &Seg2| free_form_degree(s).is_some_and(|d| free_form_degree(t) == Some(d)) && one_curve(s, t);
+        let numbered = given.oriented().map_loops(|l| l.starting_a_run(joins));
+        let mut swept = crate::smlib_sweeps::pieces(numbered.loops());
+        let mut k = 0;
+        for l in numbered.loops() {
+            for i in 1..l.lp.segs.len() {
+                if let (Some(s), Some(t)) = (l.lp.segs.get(i - 1), l.lp.segs.get(i))
+                    && let Some(x) = swept.get_mut(k + i)
+                {
+                    x.joins_previous = joins(s, t);
+                }
+            }
+            k += l.lp.segs.len();
+        }
+        out.push(crate::smlib_sweeps::revolve(plane, &swept, o, axis, angle)?);
     }
     Ok(out)
 }

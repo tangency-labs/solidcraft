@@ -24,7 +24,8 @@
 //! distances and normals), [`contact`] (whether bodies meet, their boundary distance),
 //! [`pick`] (the edge or vertex nearest a point), [`boolean`], [`stitch`], [`prism`] (planar
 //! region booleans and extrusion, prism sections),
-//! [`cell_grid`] (the cells of a grid over a profile).
+//! [`cell_grid`] (the cells of a grid over a profile), [`shaft_spline`] (the outlines of a splined
+//! shaft and its hub from plain numbers).
 //!
 //! Operations change the body they are given, as the kernel does. An application that keeps
 //! its input copies it first ([`Body::copy`]).
@@ -80,6 +81,7 @@ pub mod provenance;
 pub mod query;
 pub mod record_check;
 pub mod session;
+pub mod shaft_spline;
 pub mod spline_projection;
 pub mod split;
 pub mod step_assembly;

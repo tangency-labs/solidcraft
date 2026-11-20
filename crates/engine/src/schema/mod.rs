@@ -144,6 +144,7 @@ pub mod section;
 pub mod select;
 pub mod selection;
 pub mod settings;
+pub mod shaft_spline;
 pub mod sheet;
 pub mod silhouette;
 pub mod sketch;

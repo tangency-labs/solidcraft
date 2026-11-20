@@ -28,6 +28,7 @@
 //! | [`nurbs::NurbsFailure`], [`nurbs::BSplineFailure`] | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`): the `NL_*_ERR` numbers, in solidcore's terms |
 //! | [`defeature::DefeatureFailure`] | none: why a defeature keeps a feature (#3218) |
 //! | [`sweep::SweepFailure`]     | none: why a sweep or loft refuses, and the sweep routines' failures |
+//! | [`teeth::TeethFailure`], [`teeth::Why`], [`teeth::PlanRefusal`] | none: why numbers give no teeth, and the shaft-spline planner's refusals |
 //! | [`curve::CurveFailure`]     | none: why a curve query refuses, and the curve routines' failures |
 //! | [`query::QueryFailure`]     | none: the query routines' failures               |
 //! | [`topology::TopologyFailure`] | none: the topology routines' failures          |
@@ -109,6 +110,7 @@ mod site_scan;
 mod stage_sites;
 pub mod surface;
 pub mod sweep;
+pub mod teeth;
 pub mod topology;
 
 use crate::math::Point3;
@@ -1082,6 +1084,8 @@ pub enum Reason {
     Surface(surface::SurfaceFailure),
     /// A blend routine failed.
     Blend(blend::BlendFailure),
+    /// A tooth outline, fit or shaft-spline plan refused (`crate::teeth`).
+    Teeth(teeth::TeethFailure),
     /// A blend certificate's feet box runs past a support's net in a direction the
     /// support's kind does not continue (not upstream, tangency-labs/solidcraft#14284):
     /// support `support` (0 or 1) over the leader's piece `s`, the box `uv` against the net's
@@ -1118,6 +1122,7 @@ impl Reason {
             | Self::Topology(_)
             | Self::Surface(_)
             | Self::Blend(_)
+            | Self::Teeth(_)
             | Self::FootPastDomainEnd { .. } => None,
             Self::Offset(o) => o.entity(),
             Self::Boolean(b) => b.entity(),
@@ -1144,6 +1149,7 @@ impl Reason {
             Self::Topology(t) => t.comparison_status(),
             Self::Surface(s) => s.comparison_status(),
             Self::Blend(b) => b.comparison_status(),
+            Self::Teeth(t) => t.comparison_status(),
         }
     }
 
@@ -1168,6 +1174,7 @@ impl Reason {
             Self::Topology(t) => t.kind(),
             Self::Surface(s) => s.kind(),
             Self::Blend(b) => b.class(),
+            Self::Teeth(t) => t.kind(),
         }
     }
 }
@@ -1191,6 +1198,7 @@ impl core::fmt::Display for Reason {
             Self::Topology(t) => t.fmt(f),
             Self::Surface(s) => s.fmt(f),
             Self::Blend(b) => b.fmt(f),
+            Self::Teeth(t) => t.fmt(f),
             Self::FootPastDomainEnd {
                 support,
                 s,
@@ -1292,6 +1300,12 @@ impl From<surface::SurfaceFailure> for Reason {
 impl From<blend::BlendFailure> for Reason {
     fn from(b: blend::BlendFailure) -> Self {
         Self::Blend(b)
+    }
+}
+
+impl From<teeth::TeethFailure> for Reason {
+    fn from(t: teeth::TeethFailure) -> Self {
+        Self::Teeth(t)
     }
 }
 

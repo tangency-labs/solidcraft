@@ -64,6 +64,7 @@ pub mod dialogs_parts;
 pub mod dialogs_plastic;
 pub mod dialogs_rotate_member;
 pub mod dialogs_save_mesh;
+pub mod dialogs_shaft_spline;
 pub mod dialogs_sheet;
 pub mod dialogs_surface;
 pub mod dialogs_sweep;
