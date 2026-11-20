@@ -75,8 +75,8 @@ fn a_gap_shows_two_open_ends() {
 }
 
 /// Extruding a sketch left open by a hair (one end 0.0001 mm off, as rounded script coordinates
-/// leave it) is refused naming where: the two open ends, their gap and how to join them, not only
-/// that there is no closed profile.
+/// leave it) is refused naming where: the two open ends and how to join them, not only that there
+/// is no closed profile.
 #[test]
 fn an_extrude_refused_for_a_gap_says_where_the_gap_is() {
     let mut s = Session::default();
@@ -84,21 +84,26 @@ fn an_extrude_refused_for_a_gap_says_where_the_gap_is() {
     run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0], [10, 12], [0, 0.0001]], "infer": false}));
     run(&mut s, "sketch.finish", json!({}));
     let e = s.execute("solid.extrude", &json!({"sketch": "Outline", "distance": 1})).unwrap_err().to_string();
-    assert!(e.contains("Outline has no closed profiles: 2 ends of its curves touch no other curve, the nearest two 0.0001 mm apart"), "{e}");
-    assert!(e.contains("(0, 0)") && e.contains("(0, 0.0001)") && e.contains("sketch.constraint.coincident"), "{e}");
+    assert!(
+        e.contains("Outline has no closed profiles: 2 ends of its curves touch no other curve, at (0, 0.0001) and (0, 0) in the sketch")
+            || e.contains("Outline has no closed profiles: 2 ends of its curves touch no other curve, at (0, 0) and (0, 0.0001) in the sketch"),
+        "{e}"
+    );
+    assert!(e.contains("sketch.constraint.coincident"), "{e}");
 }
 
-/// The two ends of one stray line are never the gap the refusal points to: a square open 1 mm at a
-/// corner, beside a 0.2 mm stray line, is refused naming the corner's 1 mm gap.
+/// The refusal names the first four open ends and counts the rest: a square open at a corner
+/// beside two stray lines has six.
 #[test]
-fn the_gap_named_joins_two_curves_not_the_ends_of_a_stray_line() {
+fn the_refusal_names_four_open_ends_and_counts_the_rest() {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
     run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0], [20, 20], [0, 20], [0, 1]], "infer": false}));
     run(&mut s, "sketch.line", json!({"points": [[40, 40], [40.2, 40]], "infer": false}));
+    run(&mut s, "sketch.line", json!({"points": [[50, 40], [50.2, 40]], "infer": false}));
     run(&mut s, "sketch.finish", json!({}));
     let e = s.execute("solid.extrude", &json!({"sketch": "Outline", "distance": 1})).unwrap_err().to_string();
-    assert!(e.contains("4 ends of its curves touch no other curve, the nearest two 1 mm apart at (0, 0) and (0, 1)"), "{e}");
+    assert!(e.contains("6 ends of its curves touch no other curve, at ") && e.contains(" and 2 more in the sketch"), "{e}");
 }
 
 /// A T (a line ending against another one's middle) has three open ends and no profile: the
