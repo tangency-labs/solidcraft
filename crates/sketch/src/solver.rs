@@ -2480,20 +2480,43 @@ fn assert_same_outcome(with: &SolveReport, without: &SolveReport) {
 /// An arc's ends follow its centre: when the seed moved the centre and did not construct an end,
 /// that end starts carried by the centre's displacement (the arc translates, keeping its radius).
 /// Left behind, the ends of an arc whose centre is put on the origin are turned by LM instead of
-/// following it (reference test 20-slot-constrained).
-fn carry_with_seeded(x: &mut [f64], x0: &[f64], constructed: &[bool], blocks: &[(Block, Vec<usize>)], lay: &Layout) {
+/// following it (reference test 20-slot-constrained). A point held on a circle or an arc
+/// follows its centre the same way.
+fn carry_with_seeded(
+    x: &mut [f64],
+    x0: &[f64],
+    constructed: &[bool],
+    blocks: &[(Block, Vec<usize>)],
+    lay: &Layout,
+    sk: &Sketch,
+    on_curve: &[(usize, usize)],
+) {
     let var = |p: usize| lay.pvar.get(p).copied().flatten();
     let built = |v: usize| constructed.get(v).copied().unwrap_or(false);
+    // How far the seed moved the centre `c`, when it constructed it and moved it at all.
+    let moved = |c: usize| {
+        let vc = var(c).filter(|v| built(*v))?;
+        let (now, was) = (x.get(vc..vc + 2)?, x0.get(vc..vc + 2)?);
+        let d = Vec2::new(now[0] - was[0], now[1] - was[1]);
+        (d.x != 0.0 || d.y != 0.0).then_some(d)
+    };
     let mut carried: Vec<(usize, Vec2)> = Vec::new();
     for (block, _) in blocks {
         let Block::Arc { c, a, b } = *block else { continue };
-        let Some(vc) = var(c).filter(|v| built(*v)) else { continue };
-        let (Some(now), Some(was)) = (x.get(vc..vc + 2), x0.get(vc..vc + 2)) else { continue };
-        let d = Vec2::new(now[0] - was[0], now[1] - was[1]);
-        if d.x == 0.0 && d.y == 0.0 {
-            continue;
-        }
+        let Some(d) = moved(c) else { continue };
         carried.extend([a, b].into_iter().filter_map(var).filter(|v| !built(*v)).map(|v| (v, d)));
+    }
+    // So does a point held on a circle or an arc: left behind, the points of a polygon on a
+    // circle whose centre the seed moved further than the radius are pulled into one by LM, the
+    // polygon's sides squeezed to points (#19301).
+    for &(p, curve) in on_curve {
+        let (Some(CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. }), Some(v)) = (sk.curves.get(curve).map(|k| &k.kind), var(p)) else {
+            continue;
+        };
+        let Some(d) = moved(*c) else { continue };
+        if !built(v) && !carried.iter().any(|(w, _)| *w == v) {
+            carried.push((v, d));
+        }
     }
     for (v, d) in carried {
         if let Some([px, py]) = x.get_mut(v..v + 2) {
@@ -3271,7 +3294,7 @@ fn solve_inner(
     // The blocks, and per block whether it reads a constant point.
     let (blocks, reads_constant) = build_blocks(sk, &lay, &on_curve);
 
-    carry_with_seeded(&mut x, &x0, &constructed, &blocks, &lay);
+    carry_with_seeded(&mut x, &x0, &constructed, &blocks, &lay, sk, &on_curve);
     // The plain start, for the variables whose start the seed (or carrying along it) moved.
     let unseeded = unseeded.map(|plain: Vec<f64>| plain.into_iter().zip(&x).map(|(p, s)| (p != *s).then_some(p)).collect::<Vec<_>>());
 
