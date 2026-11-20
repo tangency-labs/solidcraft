@@ -2825,7 +2825,10 @@ fn get_pointer_move_kind(
 }
 
 /// `WM_DPICHANGED` applies the rect Windows suggests, as is, from Windows 11 on (the first build
-/// is 22000; `None` is any Windows whose version isn't 10.0, so not Windows 10).
+/// is 22000; `None` is a Windows whose version isn't 10.0, or a failed version query).
+///
+/// On this path a size written through the `InnerSizeWriter` of `ScaleFactorChanged` is not
+/// applied: the window takes the suggested rect, whatever size the application wrote.
 ///
 /// The adjustments below it are for earlier Windows 10 builds. On Windows 11 they break the move:
 /// when the shell moves a window (Win+Shift+Arrow, snap) the window is still on the old monitor
