@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::sheet::{self, SheetRule};
+use solidcraft_doc::sheet_library as library;
 use solidcraft_doc::{BodyName, SketchId};
 use solidcraft_doc::{FacePick, Position};
 use solidcraft_doc::{FeatureKind, FlangeEdge, FlangeSegment};
@@ -17,9 +18,9 @@ use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list,
 use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
     BendTableFormat, BendTableParams, BendTableResult, ConvertParams, DxfFile, ExportDxfParams, ExportDxfResult, FlangeParams, FlatCircle,
-    FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HemParams, ListedRule, ManageRulesParams, ManageRulesResult,
-    MeasureBodyParams, PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleReply, RulesParams, RulesResult, SheetBodyMeasure,
-    TabParams, UnfoldParams,
+    FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HemParams, LibraryRule, LibrarySource, ListedRule, ManageRulesParams,
+    ManageRulesResult, MeasureBodyParams, PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleLibraryParams, RuleLibraryResult,
+    RuleReply, RulesParams, RulesResult, SheetBodyMeasure, TabParams, UnfoldParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -36,6 +37,7 @@ const MEASURE_BODY_CONTRACT: TypedContract<MeasureBodyParams> = TypedContract::n
 
 const RULES_CONTRACT: TypedContract<RulesParams> = TypedContract::new();
 const MANAGE_RULES_CONTRACT: TypedContract<ManageRulesParams> = TypedContract::new();
+const RULE_LIBRARY_CONTRACT: TypedContract<RuleLibraryParams> = TypedContract::new();
 
 const PATH_FLANGE_CONTRACT: TypedContract<PathFlangeParams> = TypedContract::new();
 const FLAT_PATTERN_CONTRACT: TypedContract<FlatPatternParams> = TypedContract::new();
@@ -108,9 +110,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&FOLD_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-        "line: sketch + curve (a sketch line on the sheet's base face; followed when the sketch changes) or points: [[x,y,z], [x,y,z]]; \
+        "line: sketch + curve (a sketch line on a flat face of the sheet; followed when the sketch changes) or points: [[x,y,z], [x,y,z]]; \
          angle? (default 90 deg); radius? (default: rule); position?: centerline|start|end|mould (where the line sits in the bend, default centerline); \
-         stays?: left|right (the side of the line as drawn that stays, seen from the sheet's surface) or fixed?: [x,y,z] on that side \
+         stays?: left|right (the side of the line as drawn that stays, seen from the sheet's surface) or fixed?: [x,y,z] on the sheet, on that side \
          (default: the side with more of the sheet joined to it; decided once, as the fold is made, and kept); flip? (fold the other way); body?",
     ),
     CommandSpec::new("sheet.unfold", "Unfold", crate::checked!("sheet.unfold", unfold))
@@ -171,12 +173,27 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&MANAGE_RULES_CONTRACT).output(output_schema_for::<ManageRulesResult>).at("SHEET METAL", "MODIFY").icon("sheet_rules").params(
         "name (new or existing); thickness?, k_factor?, bend_radius?, relief_width?, relief_depth?, corner_relief?, hem_gap?, gap? (expressions; `Thickness` is the rule's; \
          gap: between flanges that meet at a corner, whose ends are closed toward each other at any angle); \
-         corner_relief_shape?: notch|round|rectangular|tear (what is cut where two bends meet at a corner of the base: round and rectangular a relief \
+         corner_relief_shape?: notch|round|rectangular|tear (what is cut where two bends meet at a corner of the panel they stand on: round and rectangular a relief \
          `corner_relief` across; tear none, each bend's end is cut straight from the corner to its flange's end; default notch); \
          angle_display?: bend|included (how the DXF bend notes read the bend angles: the bend angle, default, or the included angle \
          left between the bend's sides, 180° less it; the bend table gives both, and a flange's `angle` is always the bend angle); \
-         active?: bool; delete?: bool",
+         active?: bool; delete?: bool; material?: text (the material the rule is for, a label saved with it); \
+         gauge?: with material, a gauge (16 ga) or metric thickness (1.5 mm) of the standard library (sheet.rule_library): the rule takes its thickness and keeps its own bend radius; \
+         its K-factor is the bend model's estimate at the rule's R/T for bend_method?: air|bottoming|coining (default air), said in notes, \
+         unless k_factor is given; notes also say when the radius is under the material's published minimum",
     ),
+    CommandSpec::new("sheet.rule_library", "Sheet Metal Standard Library", crate::checked!("sheet.rule_library", rule_library))
+        .contract(&RULE_LIBRARY_CONTRACT)
+        .output(output_schema_for::<RuleLibraryResult>)
+        .icon("sheet_rules")
+        .noundo()
+        .doc_only()
+        .params(
+            "material? → the standard library: common materials in standard gauges, each with its thickness (expression and mm), \
+             the gauge's chart, the material's hardness for the generic K-factor chart, its published minimum inside radius where there \
+             is one, and the ids of the published tables they come from (sources). The working radius is the tooling's. \
+             sheet.manage_rules {name, material, gauge} makes a rule of one",
+        ),
     CommandSpec::new("sheet.rules", "List Sheet Metal Rules", crate::checked!("sheet.rules", list_rules))
         .contract(&RULES_CONTRACT).output(output_schema_for::<RulesResult>).icon("sheet_rules").noundo().doc_only().params("→ rules with their expressions and values, and the active one"),
     CommandSpec::new("sheet.flat_pattern", "Create Flat Pattern", crate::checked!("sheet.flat_pattern", flat_pattern))
@@ -195,7 +212,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "body?, path?, curves?: exact|arcs (default exact: an ellipse as ELLIPSE, splines, text outlines and other Béziers as SPLINE; arcs: tangent arcs and lines within 0.001 mm, for machines that read only those), \
              text?: cut|etch (default cut: letters that text cut through the sheet are cut contours on layer TEXT; etch: single contours on layer ETCH and the sheet keeps its material there; text machined to a depth is always on ETCH), \
-             bend_notes?: bool (default false: a note beside each bend line on layer BEND_NOTES, `B1 UP 90%%d R1`, its angle the included angle \
+             bend_notes?: bool (default false: a note beside each bend line on layer BEND_NOTES, `B1 UP 90° R1`, its angle the included angle \
               when the body's rule has angle_display: included), note_height?: mm (default 3), \
              bend_lines?: bool (default true; false leaves BEND_UP and BEND_DOWN out, for a cutter that would cut them), \
              layers?: roles|single (default roles, the layers below; single: every entity on layer 0), \
@@ -711,7 +728,7 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
         None => None,
     };
     // A side given says which side stays: `fixed` is then ignored, neither read nor kept, so it
-    // is neither checked here nor refused off the sheet below.
+    // is not checked against the sheet below.
     let fixed = match p.get("fixed") {
         Some(v) if stays.is_none() => Some(vec3(v).ok_or_else(|| bad(cmd, "`fixed` must be a point [x, y, z]"))?),
         _ => None,
@@ -731,9 +748,10 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
         body: body.map(BodyName),
     };
     // Which side stays is decided once, here, on the sheet as it is now: by `fixed`, else as the
-    // sheet joins on either side. The fold keeps it, so no later edit decides it again. A fold
-    // this cannot decide is left to fail as it is evaluated. It is decided on the fold as it
-    // will be evaluated: in the active component's frame, bare lengths in the design's unit.
+    // sheet joins on either side. The fold keeps that side and not the point, so no later edit
+    // decides it again. A fold this cannot decide keeps its point and is left to decide, or fail,
+    // as it is evaluated. It is decided on the fold as it will be evaluated: in the active
+    // component's frame, bare lengths in the design's unit.
     if stays.is_none() {
         let mut authored = kind.clone();
         super::component::to_active_frame(s, &mut authored);
@@ -743,27 +761,25 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
                 *e = doc.with_design_unit(e, k).into();
             }
         }
-        if let Ok(Some(side)) = s.doc.fold_side_at(&s.model.state(), &authored)
-            && let FeatureKind::SheetFold { stays, .. } = &mut kind
+        let st = s.model.state();
+        // A fixed point that touches no material of the sheet picks no side: refused, here and
+        // only here, against the sheet the fold is made on (#263).
+        if let Some(f) = fixed
+            && s.doc.fold_fixed_off_sheet(&st, &authored)
         {
-            *stays = Some(side);
-        }
-    }
-    let r = add_feature(s, p, kind)?;
-    // A recompute keeps a stored fold whose fixed point no longer touches the sheet (with a
-    // warning); a new fold refuses one, since it picks no side (#263).
-    if let Some(f) = fixed {
-        let id = r.get("feature").and_then(Value::as_u64);
-        let off =
-            id.and_then(|id| s.model.result(id)).and_then(|res| res.warning.as_deref()).is_some_and(|w| w.contains(sheet::FOLD_FIXED_OFF_SHEET));
-        if off {
             return Err(bad(
                 cmd,
                 format!("the fixed point ({:.3}, {:.3}, {:.3}) is not on the sheet: pick a point on the face of the side that stays", f.x, f.y, f.z),
             ));
         }
+        if let Ok(Some(side)) = s.doc.fold_side_at(&st, &authored)
+            && let FeatureKind::SheetFold { stays, fixed, .. } = &mut kind
+        {
+            *stays = Some(side);
+            *fixed = None;
+        }
     }
-    Ok(r)
+    add_feature(s, p, kind)
 }
 
 fn path_flange(s: &mut Session, p: &Value) -> Result<Value> {
@@ -996,10 +1012,16 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut rule =
         s.doc.sheet.rules.iter().find(|r| r.name == name).cloned().unwrap_or_else(|| SheetRule { name: name.clone(), ..s.doc.sheet_rule(None) });
+    let picked = library_material(cmd, p, &mut rule)?;
     for (k, slot) in rule.fields_mut() {
         if let Some(e) = expr(p, k) {
             *slot = e.into();
         }
+    }
+    let mut notes = Vec::new();
+    if let Some(entry) = picked {
+        let (vals, _) = s.doc.param_values();
+        library_k_and_radius(s, cmd, p, entry, &vals, &mut rule, &mut notes)?;
     }
     if let Some(shape) = p.get("corner_relief_shape").filter(|v| !v.is_null()) {
         let shape = shape.as_str().and_then(solidcraft_doc::sheet::ReliefShape::parse);
@@ -1031,9 +1053,136 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
         rule: Box::new(RuleReply::from(&rule)),
         values: values.into(),
         errors,
+        notes,
         param_warnings: Vec::new(),
     })
     .map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// A library pick's K-factor and the radius check (#18304). The K-factor is the pack's own when it
+/// gives one, else the bend model's estimate for `bend_method` (air by default) at the rule's
+/// R/T, said so in `notes`; one given beside the pick wins. A working radius under the material's
+/// published minimum is kept, with a note naming the minimum.
+fn library_k_and_radius(
+    s: &Session,
+    cmd: &str,
+    p: &Value,
+    entry: &library::PackRule,
+    vals: &std::collections::BTreeMap<String, solidcraft_doc::expr::Value>,
+    rule: &mut SheetRule,
+    notes: &mut Vec<String>,
+) -> Result<()> {
+    let method = match str_(p, "bend_method") {
+        None => library::BendMethod::Air,
+        Some(m) => library::BendMethod::parse(m).ok_or_else(|| bad(cmd, "`bend_method` must be air, bottoming or coining"))?,
+    };
+    let v = s.doc.rule_values(vals, rule).map_err(|e| bad(cmd, e.to_string()))?;
+    if expr(p, "k_factor").is_none()
+        && !entry.given.k_factor
+        && let Some(hardness) = entry.hardness
+    {
+        let r_over_t = v.bend_radius / v.thickness;
+        let k = library::k_factor_estimate(method, hardness, r_over_t);
+        rule.k_factor = format!("{k:.2}");
+        notes.push(format!(
+            "the K-factor {k:.2} is an estimate from the generic {} chart at R/T {r_over_t:.2}; your shop's measured value is better",
+            method.name()
+        ));
+    }
+    if let Some(min) = entry.min_bend_radius_mm(v.thickness)
+        && v.bend_radius < min - 1e-9
+    {
+        notes.push(format!(
+            "the bend radius {:.3} mm is under {}'s published minimum of {min:.3} mm at {:.3} mm thick",
+            v.bend_radius, entry.rule.material, v.thickness
+        ));
+    }
+    Ok(())
+}
+
+/// A rule's `material`, and with `gauge` the standard library's thickness for it (#18304), and
+/// the library entry picked. The values given beside them are set after, so they win.
+fn library_material(cmd: &str, p: &Value, rule: &mut SheetRule) -> Result<Option<&'static library::PackRule>> {
+    let material = match p.get("material").filter(|v| !v.is_null()) {
+        None => None,
+        Some(v) => Some(
+            v.as_str()
+                .map(str::trim)
+                .filter(|m| m.chars().count() <= 128 && !m.chars().any(char::is_control))
+                .ok_or_else(|| bad(cmd, "`material` must be text of at most 128 characters on one line"))?,
+        ),
+    };
+    let Some(gauge) = str_(p, "gauge").map(str::trim).filter(|g| !g.is_empty()) else {
+        if let Some(material) = material {
+            rule.material = material.into();
+        }
+        return Ok(None);
+    };
+    let Some(material) = material.filter(|m| !m.is_empty()) else {
+        return Err(bad(cmd, "`gauge` needs `material`: the standard library's gauges are by material"));
+    };
+    let Some(entry) = library::standard_rule(material, gauge) else {
+        let gauges: Vec<&str> = library::standard_gauges(material).iter().map(|r| r.gauge.as_str()).collect();
+        return Err(bad(
+            cmd,
+            if gauges.is_empty() {
+                format!("`{material}` is not in the standard library; it has {}", library::standard_materials().join(", "))
+            } else {
+                format!("the standard library has no gauge `{gauge}` of {material}; it has {}", gauges.join(", "))
+            },
+        ));
+    };
+    rule.material.clone_from(&entry.rule.material);
+    rule.thickness.clone_from(&entry.rule.thickness);
+    // A pack's own K-factor and radius (a shop's); the library gives neither.
+    if entry.given.k_factor {
+        rule.k_factor.clone_from(&entry.rule.k_factor);
+    }
+    if entry.given.bend_radius {
+        rule.bend_radius.clone_from(&entry.rule.bend_radius);
+    }
+    Ok(Some(entry))
+}
+
+fn rule_library(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.rule_library";
+    let lib = library::standard();
+    let only = str_(p, "material").map(str::trim);
+    if let Some(m) = only
+        && library::standard_gauges(m).is_empty()
+    {
+        return Err(bad(cmd, format!("`{m}` is not in the standard library; it has {}", library::standard_materials().join(", "))));
+    }
+    let none = std::collections::BTreeMap::new();
+    let rules = lib
+        .rules
+        .iter()
+        .filter(|r| only.is_none_or(|m| r.rule.material.eq_ignore_ascii_case(m)))
+        .filter_map(|r| {
+            let v = s.doc.rule_values(&none, &r.rule).ok()?;
+            Some(LibraryRule {
+                name: r.rule.name.clone(),
+                material: r.rule.material.clone(),
+                gauge: r.gauge.clone(),
+                chart: r.chart.clone(),
+                thickness: r.rule.thickness.clone(),
+                thickness_mm: v.thickness,
+                hardness: r.hardness.map(|h| h.name().to_string()),
+                min_bend_radius: (!r.min_bend_radius.is_empty()).then(|| r.min_bend_radius.clone()),
+                min_bend_radius_mm: r.min_bend_radius_mm(v.thickness),
+                sources: r.sources.clone(),
+            })
+        })
+        .collect();
+    let reply = RuleLibraryResult {
+        name: lib.name.clone(),
+        note: lib.note.clone(),
+        materials: library::standard_materials().into_iter().map(str::to_string).collect(),
+        sources: lib.sources.iter().map(|x| LibrarySource { id: x.id.clone(), title: x.title.clone(), url: x.url.clone() }).collect(),
+        rules,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn list_rules(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -1054,8 +1203,13 @@ fn no_sheet_body(cmd: &str) -> EngineError {
 /// The sheet (#6748) whose flat a command reads: the named body's, or with none named, the last
 /// sheet metal body. A named body that is no sheet is refused, and so is a design with none.
 fn surfaces_of(s: &Session, p: &Value, cmd: &str) -> Result<solidcraft_doc::SurfaceSheet> {
+    surfaces_named(s, str_(p, "body"), cmd)
+}
+
+/// The sheet metal body `body`, else the last one.
+fn surfaces_named(s: &Session, body: Option<&str>, cmd: &str) -> Result<solidcraft_doc::SurfaceSheet> {
     let st = s.model.state();
-    match str_(p, "body") {
+    match body {
         Some(b) => st.surface_sheets.iter().find(|x| x.body == b).cloned().ok_or_else(|| bad(cmd, format!("`{b}` is not a sheet metal body"))),
         None => st.surface_sheets.last().cloned().ok_or_else(|| no_sheet_body(cmd)),
     }
@@ -1129,7 +1283,7 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
         .collect();
     let mut out = json!({"body": sk.body, "rule": sk.rule, "thickness": sk.thickness, "k_factor": sk.k_factor, "flat_size_mm": [size.x, size.y, sk.thickness],
         "outline": outline, "cutouts": holes, "cutout_shapes": hole_shapes, "pockets": pockets, "bends": bends, "roll_lines": roll_lines, "roll_table": roll_table, "unfolded": sk.unfolded,
-        "perforations": perforations, "bend_zones": bend_zones, "surfaces": true, "rolls": sk.rolls});
+        "perforations": perforations, "bend_zones": bend_zones, "rolls": sk.rolls});
     if !bores.is_empty() {
         out["bores"] = Value::Array(bores);
     }
@@ -1191,7 +1345,13 @@ fn loop_shape(lp: &solidcore_record::Loop2) -> FlatShape {
 }
 
 fn flat_pattern(s: &mut Session, p: &Value) -> Result<Value> {
-    let sk = surfaces_of(s, p, "sheet.flat_pattern")?;
+    flat_reply(s, str_(p, "body"), "sheet.flat_pattern")
+}
+
+/// `sheet.flat_pattern`'s reply for the sheet metal body `body` (else the last one): what the
+/// command reports and a flat pattern view draws, one reader for both.
+pub(crate) fn flat_reply(s: &Session, body: Option<&str>, cmd: &str) -> Result<Value> {
+    let sk = surfaces_named(s, body, cmd)?;
     sk.flat_matches_body()?;
     Ok(surface_flat_json(&sk))
 }
@@ -1261,9 +1421,9 @@ fn compact(v: f64) -> String {
     if t.is_empty() || t == "-0" { "0".into() } else { t.into() }
 }
 
-/// The note beside a bend line, `B1 UP 90%%d R2.5` (number, direction, angle as `display` reads
+/// The note beside a bend line, `B1 UP 90° R2.5` (number, direction, angle as `display` reads
 /// it, inner radius): as high as `height`, centred half a height beside the middle of the line,
-/// parallel to it and readable from below or from the right. (`%%d` is AutoCAD's degree sign.)
+/// parallel to it and readable from below or from the right.
 fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::AngleDisplay) -> solidcraft_io::DxfShape {
     let along = (b.end - b.start).normalized().unwrap_or(Vec2::X);
     let mut angle = along.angle().to_degrees();
@@ -1277,7 +1437,7 @@ fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::A
         at: (b.start + b.end) * 0.5 + beside * (height * 0.5),
         height,
         angle_deg: angle,
-        text: format!("B{} {} {}%%d R{}", b.index, if b.up { "UP" } else { "DOWN" }, compact(display.of(b.angle_deg)), compact(b.radius)),
+        text: format!("B{} {} {}° R{}", b.index, if b.up { "UP" } else { "DOWN" }, compact(display.of(b.angle_deg)), compact(b.radius)),
     }
 }
 

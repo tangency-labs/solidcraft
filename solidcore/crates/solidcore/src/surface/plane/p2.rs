@@ -29,15 +29,6 @@
 //!   own plane section (`Torus::intersect_with_plane_owned_into`, its orders and UV curves
 //!   swapped as for a surface of revolution; WR-721, #2405); upstream has no torus case and
 //!   marches it.
-//! - **A B-spline that is an extrusion (not upstream, #6748).** `GlobalSurfaceIntersect`
-//!   with a B-spline surface that is a profile swept along a vector
-//!   (`extrusion_parallel_to`: `SmSurfOfExtrusion::IsNurbSurfaceSurfOfExtrusion`), where the
-//!   plane lies parallel to the profile's plane, takes the extrusion's own section (the
-//!   profile moved onto the plane, `SmSurfOfExtrusion::IntersectWithPlane`), as for an
-//!   `SmSurfOfExtrusion`. Upstream marches it and fits each plane's section on its own: a
-//!   B-rep record holds an extruded profile as its B-spline, so a sheet cut by an extruded
-//!   ellipse had two cubic fits of the one ellipse on its two faces, 4e-6 apart and
-//!   crossing each other 92 times, which the planar booleans could not take apart.
 //! - **Arguments.** Out-params become return values; `SmContext` arguments are
 //!   dropped. `GlobalSurfaceIntersect`'s and `IntersectWithPlane`'s optional output
 //!   arrays are always filled ([`SurfaceIntersection`]; a plane/plane intersection has
@@ -108,7 +99,6 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p2::EditNotify;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BoundingBoxRequest};
 use crate::nurbs::knots::Side;
-use crate::surface::surf_of_extrusion::{CurveOrientType, ExtrusionIntersection, SurfOfExtrusion};
 use crate::surface::surf_of_revolution::SurfOfRevolution;
 use crate::surface::surface::p1::{evaluate_1st_derivatives, SurfaceIntersectContext};
 use crate::surface::surface::p2::{
@@ -1696,28 +1686,8 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
             core::mem::swap(&mut out.surface1_uv_curves, &mut out.surface2_uv_curves);
             need_nurb_intersection = need?;
         }
-        // Not upstream (#6748): a B-spline surface that is a profile swept along a vector,
-        // against a plane parallel to the profile's plane, is cut as the surface of extrusion
-        // it is (the arm above): the profile itself, moved onto the plane. Any other B-spline,
-        // or a plane at any other angle to the profile, takes the general intersection.
-        SurfaceKind::BSpline(nurbs) => {
-            if let Some(ext) = extrusion_parallel_to(k, nurbs, plane)? {
-                let mut x = ext.intersect_with_plane_on(
-                    k,
-                    other,
-                    other_uv_domain,
-                    plane,
-                    PlaneOwner::of(this)?,
-                    uv_domain,
-                    approx_tol_3d,
-                )?;
-                extrusion_section_uv_curves(k, nurbs, plane, &mut x)?;
-                core::mem::swap(&mut x.surface1_uv_curves, &mut x.surface2_uv_curves);
-                need_nurb_intersection = x.needs_more_intersections;
-                *out = SurfaceIntersection::from(x);
-            }
-        }
-        SurfaceKind::ProceduralBlend(_)
+        SurfaceKind::BSpline(_)
+        | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
@@ -1745,206 +1715,9 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
     Ok(())
 }
 
-/// Not upstream (#6748): `nurbs` as the surface of extrusion its control net makes it
-/// (`SmSurfOfExtrusion::IsNurbSurfaceSurfOfExtrusion`: degree 1 across, its two rows of
-/// control points one profile translated and weighted alike, to the rounding of their
-/// numbers), when its profile is planar and `plane` lies parallel to the profile's plane, to
-/// the rounding of the two normals. The plane then cuts the profile itself, moved onto the
-/// plane along the extrusion ([`SurfOfExtrusion::intersect_with_plane_on`]), exactly. `None`
-/// for any other surface or plane.
-///
-/// # Errors
-///
-/// Those of [`SurfOfExtrusion::is_nurb_surface_surf_of_extrusion`].
-pub(crate) fn extrusion_parallel_to(
-    k: &Kernel,
-    nurbs: &BSplineSurface,
-    plane: &Plane,
-) -> Result<Option<SurfOfExtrusion>> {
-    let Some(ext) = SurfOfExtrusion::is_nurb_surface_surf_of_extrusion(k, nurbs, 1.0)? else {
-        return Ok(None);
-    };
-    let planar = matches!(
-        ext.orientation(),
-        CurveOrientType::Perpendicular | CurveOrientType::Independent
-    );
-    // (the profile's plane normal and the plane's, parallel to their coordinates' rounding)
-    let (profile, normal) = (ext.curve_vec(), plane.position().z_axis());
-    let parallel =
-        profile.cross(normal).length() <= 64.0 * f64::EPSILON * profile.length() * normal.length();
-    Ok((planar && parallel).then_some(ext))
-}
-
-/// Not upstream (#6748): fills the UV curves of `x`, the section of the B-spline `nurbs`
-/// (its first surface, as [`SurfOfExtrusion::intersect_with_plane_on`] orders them) by
-/// `plane` that [`extrusion_parallel_to`] found. The section is the profile moved along the
-/// sweep onto the plane, in the profile's own parameter, so on `nurbs` it is the iso line
-/// at the sweep parameter where the plane cuts, and on the plane its control net in the
-/// plane's parameters (an affine map, so the same curve), both exact. Upstream's special
-/// cases give none; the general intersection this case replaces gave them, and its callers
-/// read them (the offset's mate proves a curve without them only on analytic surfaces,
-/// `SurfaceIntersection::clip_exact_curves`). A curve not of a B-spline kind keeps none.
-///
-/// Along the sweep the B-spline is `C(t) + e σc / ((1 - σ) + σc)`, `σ` the sweep
-/// parameter's fraction and `c` the constant ratio of the end row's weights to the start
-/// row's (1 when not rational): the sweep's middle gives `c`, and the plane's fraction `f`
-/// of the way along `e` is at `σ = f / (c - f (c - 1))`.
-///
-/// # Errors
-///
-/// Those of the evaluations, the iso line and the curves' trims and constructions.
-pub(crate) fn extrusion_section_uv_curves(
-    k: &Kernel,
-    nurbs: &BSplineSurface,
-    plane: &Plane,
-    x: &mut ExtrusionIntersection,
-) -> Result<()> {
-    use crate::curve::iso_curve::IsoCurve;
-    use crate::nurbs::b_spline_curve::p1::CanonicalData;
-    use crate::nurbs::b_spline_surface::SurfParamType;
-    let domain = nurbs.natural_uv_domain();
-    let (sweep, start, end) = if nurbs.degree(SurfParamType::U) == 1 {
-        (SurfParamType::U, domain.min().x, domain.max().x)
-    } else {
-        (SurfParamType::V, domain.min().y, domain.max().y)
-    };
-    // (the point of the profile's start at the fraction `s` of the sweep)
-    let along = |s: f64| match sweep {
-        SurfParamType::U => domain.evaluate(s, 0.0),
-        _ => domain.evaluate(0.0, s),
-    };
-    let p0 = nurbs.evaluate_point(along(0.0))?;
-    let e = nurbs.evaluate_point(along(1.0))? - p0;
-    let n = plane.position().z_axis();
-    let g = (nurbs.evaluate_point(along(0.5))? - p0).dot(n) / e.dot(n);
-    let c = g / (1.0 - g);
-    let f = (plane.position().origin() - p0).dot(n) / e.dot(n);
-    let sigma = f / (c - f * (c - 1.0));
-    let iso = IsoCurve::new(
-        nurbs.copy(),
-        sweep,
-        start + (end - start) * sigma,
-        true,
-        true,
-    )
-    .create_uv_iso_line()?;
-    for (i, curve) in x.curves_3d.iter().enumerate() {
-        let CurveKind::BSpline(b) = curve.kind() else {
-            continue;
-        };
-        let canonical = b.canonical()?;
-        let net: Vec<Point3> = canonical
-            .control_points
-            .iter()
-            .map(|&p| {
-                let q = plane.project_point_to_uv_domain(p);
-                Point3::new(q.x, q.y, 0.0)
-            })
-            .collect();
-        let on_plane = BSplineCurve::create_canonical(&CanonicalData {
-            dim: 2,
-            degree: canonical.degree,
-            control_points: &net,
-            form: canonical.form,
-            knot_multiplicities: &canonical.knot_multiplicities,
-            knots: &canonical.knots,
-            knot_type: canonical.knot_type,
-            weights: if b.is_rational()? {
-                Some(&canonical.weights)
-            } else {
-                None
-            },
-            trim: None,
-        })?;
-        let mut on_nurbs = iso.copy(k)?;
-        let mut ivl = curve.natural_interval();
-        on_nurbs.trim(k, &mut ivl, TrimMode::Notify)?;
-        if let (Some(a), Some(b)) = (
-            x.surface1_uv_curves.get_mut(i),
-            x.surface2_uv_curves.get_mut(i),
-        ) {
-            *a = Some(on_nurbs);
-            *b = Some(Curve::from(on_plane));
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// #6748: a quarter of the ellipse `(x / 2)² + y² = 1` (a rational quadratic) swept 2
-    /// along z, as a B-rep record holds an extruded profile (its B-spline, not its surface
-    /// of extrusion), cut by the plane z = 1: the section is the profile on the plane, on the
-    /// ellipse to rounding, from either side, with its UV curves on both surfaces, each
-    /// lifting onto the section at the same parameter to rounding. The general intersection
-    /// traces it and fits a polynomial, off the ellipse by its approximation tolerance.
-    #[test]
-    fn a_plane_parallel_to_a_b_spline_extrusions_profile_cuts_the_profile_exactly() {
-        use crate::nurbs::crv_basic::Curve as NurbCurve;
-        use crate::nurbs::math::CPoint;
-        let k = &Kernel::default();
-        let c = core::f64::consts::FRAC_1_SQRT_2;
-        // weighted control points (w x, w y, w z, w)
-        let pw = vec![
-            CPoint::new(2.0, 0.0, 0.0, 1.0),
-            CPoint::new(2.0 * c, c, 0.0, c),
-            CPoint::new(0.0, 1.0, 0.0, 1.0),
-        ];
-        let profile = NurbCurve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap();
-        let mut profile = BSplineCurve::from_nurb(profile, 3, false);
-        let nurbs =
-            BSplineSurface::create_linear_sweep(&mut profile, Vec3::new(0.0, 0.0, 2.0)).unwrap();
-        // (what the fix reads the B-spline as)
-        assert!(
-            SurfOfExtrusion::is_nurb_surface_surf_of_extrusion(k, &nurbs, 1.0)
-                .unwrap()
-                .is_some()
-        );
-        let wall_domain = nurbs.natural_uv_domain();
-        let wall = Surface::from(nurbs);
-        let domain = Extent2d::from_bounds(-5.0, -5.0, 5.0, 5.0);
-        let mut plane = Plane::new(
-            Vec3::new(0.0, 0.0, 1.0),
-            Vec3::X,
-            Vec3::Y,
-            Vec2::new(1.0, 1.0),
-            &domain,
-        );
-        plane.make_nurb().unwrap();
-        let plane = Surface::from(plane);
-        let plane_first = plane
-            .global_surface_intersect(k, &domain, &wall, &wall_domain, [true, true], None, None)
-            .unwrap();
-        let wall_first = wall
-            .global_surface_intersect(k, &wall_domain, &plane, &domain, [true, true], None, None)
-            .unwrap();
-        for (x, order) in [
-            (plane_first, [&plane, &wall]),
-            (wall_first, [&wall, &plane]),
-        ] {
-            assert_eq!(x.curves_3d.len(), 1);
-            let curve = x.curves_3d.first().unwrap();
-            let uv = [&x.surface1_uv_curves, &x.surface2_uv_curves]
-                .map(|c| c.first().unwrap().as_ref().expect("a UV curve"));
-            let ivl = curve.natural_interval();
-            for i in 0..=16 {
-                let t = ivl.evaluate(f64::from(i) / 16.0);
-                let p = curve.evaluate_point(k, t).unwrap();
-                assert!((p.z - 1.0).abs() <= 1e-12, "{p:?}");
-                assert!(
-                    ((p.x / 2.0).powi(2) + p.y * p.y - 1.0).abs() <= 1e-12,
-                    "{p:?}"
-                );
-                for (surface, uv) in order.iter().zip(uv) {
-                    let q = uv.evaluate_point(k, t).unwrap();
-                    let lift = surface.evaluate_point(k, Point2::new(q.x, q.y)).unwrap();
-                    assert!(lift.distance(p) <= 1e-12, "{lift:?} vs {p:?}");
-                }
-            }
-        }
-    }
 
     fn skewed_bilinear(domain: Extent2d, shear: f64) -> BSplineSurface {
         let dx = 40.0 * shear;

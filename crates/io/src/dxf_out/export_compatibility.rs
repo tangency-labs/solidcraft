@@ -1,8 +1,9 @@
 //! Explicit contracts for the two pre-existing DXF producers. These are not
 //! looser limits on the generic owned-file writer. Each file retains its immutable
 //! producer plan, and serialization charges the actual stored geometry to it.
-//! The compatibility route deliberately retains legacy numeric/text admission;
+//! The compatibility route deliberately retains legacy geometry/text admission;
 //! the ordinary DxfFile constructor keeps the strict owned-file admission.
+//! Numbers follow the writer's one rule on both routes.
 
 use super::{DxfFile, DxfLinetype, DxfShape, EntityView, LayerView, extend_extents, path, shape_work, write_drawing_views};
 use crate::{IoError, Result};
@@ -264,5 +265,5 @@ pub(super) fn write(file: &DxfFile<DxfShape>, budget: Budget) -> Result<String> 
         .entities()
         .iter()
         .map(|e| Ok(EntityView { layer: file.layer(e.layer())?.name(), shape: e.geometry(), weight: e.weight(), source_text: e.source_text() }));
-    write_drawing_views(layers, entities, Some(budget.bytes), extents.unwrap_or((Vec2::ZERO, Vec2::ZERO)), true, 4)
+    write_drawing_views(layers, entities, Some(budget.bytes), extents.unwrap_or((Vec2::ZERO, Vec2::ZERO)), 4)
 }

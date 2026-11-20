@@ -248,4 +248,107 @@ mod tests {
         )));
         assert!(profile_square_to(&c, Vec3::Z, 1e-9).unwrap().is_yes());
     }
+
+    #[test]
+    fn a_profile_with_a_short_cubic_extrudes_to_a_valid_solid() {
+        // #17735: a traced outline's cubic 0.025 long, about 14 from the origin, closed by
+        // its chord. The wall swept from it is a surface of extrusion whose origin is the
+        // cubic's point at 0.45678; the check's search for that point on the cubic stopped
+        // 2e-11 short of it, beyond the check's 1.5e-11, and refused the solid.
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::CPoint;
+        use crate::topology::brep::validation::{check_brep, CheckLevel};
+        let p = [
+            Point3::new(6.505, 14.3, 0.0),
+            Point3::new(6.5084, 14.2944, 0.0),
+            Point3::new(6.5134, 14.2944, 0.0),
+            Point3::new(6.53, 14.3, 0.0),
+        ];
+        let pw = p.iter().map(|&q| CPoint::from_point(q)).collect();
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let cubic = BSplineCurve::from_nurb(NurbCurve::new(pw, 3, knots).unwrap(), 3, false);
+        let c = vec![
+            Curve::from(cubic),
+            Curve::from(Line::create_line_segment(3, p[3], p[0], None).unwrap()),
+        ];
+        let mut k = Kernel::default();
+        let TaperExtrude::Solid(mut b) =
+            extrude(&mut k, &c, Vec3::Z, 1.0, None, true, &TOL).unwrap()
+        else {
+            panic!()
+        };
+        assert!(is_manifold_solid(&b).unwrap());
+        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert!(check.is_valid(), "{:?}", check.lines());
+    }
+
+    #[test]
+    fn an_uncapped_profile_with_a_short_segment_keeps_every_wall() {
+        // #18515: a 10 x 10 loop whose top side ends in a segment `len` long, extruded 1.2
+        // with no caps. Each curve sweeps one wall, so the sheet has a wall per curve, a
+        // bottom and a top edge per wall, a side edge per profile vertex, and a vertex at
+        // each end of a side edge. The two edges of the short wall's profile copies are
+        // `len` long. The lengths lie between the stitch's first tolerance (2e-5) and its
+        // second (4e-4), where the second pass squeezed both edges out of the sheet.
+        use crate::topology::brep::validation::{check_brep, CheckLevel};
+        use crate::topology::{edge, vertex};
+        for len in [3e-5, 1.7e-4, 3.9e-4] {
+            let p = [
+                Point3::ZERO,
+                Point3::new(10.0, 0.0, 0.0),
+                Point3::new(10.0, 10.0, 0.0),
+                Point3::new(len, 10.0, 0.0),
+                Point3::new(0.0, 10.0, 0.0),
+            ];
+            for closed in [true, false] {
+                let n = if closed { 5 } else { 4 };
+                let c: Vec<Curve> = (0..n)
+                    .map(|i| {
+                        Curve::from(
+                            Line::create_line_segment(3, p[i], p[(i + 1) % 5], None).unwrap(),
+                        )
+                    })
+                    .collect();
+                let mut k = Kernel::default();
+                let TaperExtrude::Solid(mut b) =
+                    extrude(&mut k, &c, Vec3::Z, 1.2, None, false, &TOL).unwrap()
+                else {
+                    panic!()
+                };
+                // the open profile's five points, like the closed one's, give five sides
+                assert_eq!(
+                    (
+                        b.face_list().len(),
+                        b.edge_list().len(),
+                        b.vertex_list().len()
+                    ),
+                    (n, 2 * n + 5, 10),
+                    "len {len}, closed {closed}: faces, edges, vertices"
+                );
+                let short = b
+                    .edge_list()
+                    .iter()
+                    .filter(|&&e| {
+                        let s = edge::start_vertex(&b, e).unwrap().unwrap();
+                        let o = edge::other_vertex(&b, e, Some(s)).unwrap().unwrap();
+                        let d = vertex::point(&b, s)
+                            .unwrap()
+                            .distance(vertex::point(&b, o).unwrap());
+                        (d - len).abs() <= 1e-12
+                    })
+                    .count();
+                assert_eq!(
+                    short, 2,
+                    "len {len}, closed {closed}: the short wall's edges"
+                );
+                let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+                assert!(
+                    check.is_valid(),
+                    "len {len}, closed {closed}: {:?}",
+                    check.lines()
+                );
+            }
+        }
+    }
 }

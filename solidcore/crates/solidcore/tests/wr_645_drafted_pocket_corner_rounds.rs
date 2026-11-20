@@ -176,10 +176,14 @@ fn wr_645_drafted_pocket_corners_are_exact() {
 #[test]
 fn wr_645_vertical_pocket_walls_keep_the_variable_radius_corner() {
     // with vertical walls the rail is the corner round's end edge, and the body is the
-    // one upstream builds (main's values, bit-identical with the flag on and off there)
+    // one upstream builds (its volume as measured here). Since the trim pieces integrate by
+    // Gauss-Kronrod (#14460): forced to accuracy 1e-10 to 1e-12 Gauss-Kronrod gives it to
+    // 1 ulp and the earlier Runge-Kutta trim pieces forced to 1e-12 give 201654.16066753445
+    // (1.4e-15 off); with Runge-Kutta at the test's accuracy it was 201654.16067079167,
+    // 1.6e-11 high
     let fixed = rounded(0.0, 3.0);
     assert_eq!(fixed.counts, (23, 52, 32));
-    let want = 201_654.160_670_791_67_f64;
+    let want = 201_654.160_667_534_16_f64;
     assert!(
         (fixed.volume - want).abs() <= 1e-12 * want,
         "{} vs {want}",

@@ -280,6 +280,18 @@ impl Hyperbola {
 
     // ---- comparison and copies --------------------------------------------------------
 
+    /// Not upstream: the same hyperbola by definition, exactly (IEEE `==`; a NaN
+    /// refuses): the same B-spline part ([`BSplineCurve::same_definition`]), and
+    /// placement, domain and axes equal.
+    #[must_use]
+    pub fn same_definition(&self, other: &Self) -> bool {
+        self.base.same_definition(&other.base)
+            && self.position == other.position
+            && self.anal_domain == other.anal_domain
+            && self.semi_axis == other.semi_axis
+            && self.semi_image_axis == other.semi_image_axis
+    }
+
     /// `operator==`: equal B-spline bases (same dimension, NURBs equal within
     /// `SM_EFF_ZERO`), placements equal within the scaled zero, equal domains and axis
     /// lengths equal within `SM_EFF_ZERO`.

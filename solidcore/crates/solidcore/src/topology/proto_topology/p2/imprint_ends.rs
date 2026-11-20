@@ -22,15 +22,14 @@
 //! Deviations: the fork's `GetOwner() != NULL` checks have no counterpart (curves live in
 //! the owner's store behind handles, none of them owned by an edge yet); replaced curves
 //! stay in that store, as the curves `ProtoTopologyManager::proto_edge_split` replaces do.
-//! WR-452 (trim, always on; upstream has no trim) and WR-453 (extend, opt-in,
-//! `Kernel::fixes.imprint_extends_edge_to_proto_vertex`); both carry the fork's
+//! WR-452 (trim) and WR-453 (extend) are always on (upstream has neither; the WR-453
+//! flag `imprint_extends_edge_to_proto_vertex` was retired by #14246); both carry the fork's
 //! correction ffaf4e8 (WR-498, #1480, #470): an end goes to its proto vertex's position
 //! only when the proto vertex is one vertex in each B-rep.
 //! The fork's `sm_CreateExactlyExtendedCurve` (a8caccd) continues any `SmBSplineCurve`
 //! kind and makes the analytic ones plain B-splines; `extended_curve` continues a plain
 //! B-spline only. Its correction bec8a0b (WR-601) continues a line, circle or ellipse as
-//! that kind and no other analytic kind, so with `imprint_extends_edge_to_proto_vertex` on
-//! the port is the fork at bec8a0b.
+//! that kind and no other analytic kind, so the port is the fork at bec8a0b.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-safe tests
 
@@ -59,7 +58,7 @@ const ANALYTIC_TOL_SCALE: f64 = 100.0;
 impl<O: ClassObject> ProtoTopologyManager<O> {
     /// The block at the top of the fork's `SmEdgeDefinition::Imprint`: for each end of the
     /// definition's interval whose curve point is off its proto vertex, continue the
-    /// curves to the vertex (`imprint_extends_edge_to_proto_vertex`) or else move the end
+    /// curves to the vertex (WR-453) or else move the end
     /// to the curve's point nearest the vertex (WR-452).
     /// Nothing changes for a closed proto edge or where no check passes.
     ///
@@ -131,9 +130,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             if one_vertex && self.move_end_to_pole(k, brep, ed, at_end, pv_pos, gap, pv_tol)? {
                 continue;
             }
-            if k.fixes.imprint_extends_edge_to_proto_vertex
-                && self.extend_end_to_proto_vertex(k, brep, ed, at_end, pv_pos, end_pt, gap)?
-            {
+            if self.extend_end_to_proto_vertex(k, brep, ed, at_end, pv_pos, end_pt, gap)? {
                 continue;
             }
             self.trim_end_to_proto_vertex(k, brep, ed, at_end, pv_pos, gap)?;
@@ -149,12 +146,16 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// pole, inside the domain); on the other face, the vertex's foot (a local point solve
     /// from the end's parameters, within the vertex's tolerance of it).
     ///
-    /// It applies when the gap is within the proto vertex's tolerance, which for a vertex
-    /// that absorbed definitions is their certified distance from it (`resolve_proto_vertex`):
-    /// the end is then a point the vertex stands for. Each curve is clamped, so its end is
-    /// its end control point, and moving that point by `Δ` moves every point of the curve by
-    /// at most `|Δ|` (the basis functions, rational ones with positive weights included, are
-    /// a partition of unity, each at most 1): the 3d curve stays within the gap of where it
+    /// It applies when the gap (the distance from the evaluated end to the vertex,
+    /// computed here) is within the proto vertex's tolerance. For a vertex that combined
+    /// definitions away, that tolerance reaches the computed position and object points of
+    /// each of them, and the curve ends attached when it combined them, from where the
+    /// vertex now is (`ProtoVertex::set_position`); it is not a bound on where any other
+    /// end lies, which is why the gap is measured. Each curve is
+    /// clamped, so its end is its end control point, and moving that point by `Δ` moves
+    /// every point of the curve by at most `|Δ|` (the basis functions, rational ones with
+    /// positive weights included, are a partition of unity, each at most 1): the 3d curve
+    /// stays within the gap of where it
     /// was, ARGUED (not asserted in code). A continuation past the end instead
     /// (`extend_end_to_proto_vertex`) follows the end span's polynomial, which near a pole
     /// runs out of the face's UV domain. Returns whether the curves were replaced.

@@ -164,7 +164,7 @@ impl<'a> Context<'a> {
                 }
             }
             // What these are (origin, direction, position) comes from the measurement above.
-            Sel::Plane { .. } | Sel::Axis { .. } | Sel::ConstructionPoint { .. } => {}
+            Sel::Plane { .. } | Sel::Axis { .. } | Sel::ConstructionPoint { .. } | Sel::Drawing { .. } => {}
         }
     }
 
@@ -274,8 +274,14 @@ fn anchor_of(s: &Session, sel: &Sel) -> Option<Vec3> {
             let st = s.world_state().ok()?;
             st.body(name).map(|b| b.outline_bounds().center())
         }
-        // A construction point: where it sits.
-        Sel::ConstructionPoint { name } => crate::view::construction_points(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p),
+        // A construction or origin point: where it sits.
+        Sel::ConstructionPoint { name } => {
+            if let Some(p) = s.origin_point(name) {
+                Some(p)
+            } else {
+                crate::view::construction_points(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p)
+            }
+        }
         // A datum plane or axis: the point it passes through.
         Sel::Plane { name } => super::measure_sel::plane_named(s, name).map(|(p, _)| p),
         Sel::Axis { name } => super::measure_sel::axis_named(s, name).map(|(p, _)| p),
@@ -289,7 +295,7 @@ fn anchor_of(s: &Session, sel: &Sel) -> Option<Vec3> {
         Sel::ExternalSketchCurve { sketch, id } => sketch_curve_point(s, Some(*sketch), id),
         // An occurrence: where it is placed in the world.
         Sel::Occurrence { path } => s.occurrence_placement(path).ok().map(|p| solidcraft_doc::apply_point(&p.world, Vec3::ZERO)),
-        Sel::Feature { .. } | Sel::SketchConstraint { .. } | Sel::Profile { .. } => None,
+        Sel::Feature { .. } | Sel::SketchConstraint { .. } | Sel::Profile { .. } | Sel::Drawing { .. } => None,
     }
 }
 
