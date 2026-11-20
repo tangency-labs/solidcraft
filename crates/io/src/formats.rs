@@ -149,6 +149,14 @@ const HISTORY: OptionSpec = OptionSpec {
 
 const FREECAD_IMPORT: &[OptionSpec] = &[UP_Z, STEP_NAMES, HISTORY];
 
+/// What an OpenUSD file brings: its meshes as mesh bodies (the default, as before the option), or
+/// its exact B-rep where it has one (see `file.insert_mesh` and [`crate::UsdGeometry`]).
+const USD_GEOMETRY: OptionSpec = OptionSpec {
+    param: "geometry",
+    label: "Geometry",
+    kind: OptionKind::Choice { choices: &[("meshes", "Meshes"), ("exact", "Exact B-rep where the file has it")], default: 0 },
+};
+
 /// A KiCad PCB's import options (see `doc.open`). The board's own thickness and colour are used
 /// unless the command is given others, so neither is offered here.
 const KICAD_IMPORT: &[OptionSpec] = &[
@@ -307,20 +315,39 @@ pub static FORMATS: &[FormatSpec] = &[
         export: Some(ExportSpec { command: "file.export", format: None, options: &[], scope: ExportScope::Bodies, lossless: false }),
     },
     // Read through cadmpeg: meshes as mesh bodies and the prim tree as components, turned to Z up
-    // when the file says Y is up. Written through cadmpeg from the STEP the bodies make: exact
-    // B-rep and meshes, in metres with Z up; the extension picks the encoding.
+    // when the file says Y is up; with `geometry: exact`, its B-reps as B-rep bodies of an Import
+    // feature instead. Written through cadmpeg from the STEP the bodies make: exact B-rep and
+    // meshes, in metres with Z up; the extension picks the encoding.
     FormatSpec {
         id: "usd",
         label: "OpenUSD",
         extensions: &["usd", "usda", "usdc", "usdz"],
         role: Role::Artifact,
-        import: Some(ImportSpec { target: ImportTarget::Mesh, options: &[], native_only: false }),
+        import: Some(ImportSpec { target: ImportTarget::Mesh, options: &[USD_GEOMETRY], native_only: false }),
         export: Some(ExportSpec { command: "file.export", format: None, options: &[], scope: ExportScope::Bodies, lossless: false }),
     },
     FormatSpec {
         id: "ply",
         label: "PLY point cloud",
         extensions: &["ply"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
+        export: None,
+    },
+    // The Point Cloud Library's file: text, binary or compressed.
+    FormatSpec {
+        id: "pcd",
+        label: "PCD point cloud",
+        extensions: &["pcd"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
+        export: None,
+    },
+    // The open file for laser scans (ASTM E2807), often several scans of a site in one file.
+    FormatSpec {
+        id: "e57",
+        label: "E57 point cloud",
+        extensions: &["e57"],
         role: Role::Artifact,
         import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
         export: None,
@@ -337,6 +364,15 @@ pub static FORMATS: &[FormatSpec] = &[
         id: "pts",
         label: "PTS point cloud",
         extensions: &["pts"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
+        export: None,
+    },
+    // The same text as XYZ under another name.
+    FormatSpec {
+        id: "asc",
+        label: "ASC point cloud",
+        extensions: &["asc"],
         role: Role::Artifact,
         import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
         export: None,
@@ -471,7 +507,7 @@ pub fn import_filters(native: bool) -> Vec<(&'static str, Vec<&'static str>)> {
             // An OpenUSD scene is read as meshes, but it is its own kind of file to most people.
             ImportTarget::Mesh if f.id == "usd" => add(f.label, f.extensions),
             ImportTarget::Mesh => add("Mesh (3MF, STL, OBJ, glTF)", f.extensions),
-            ImportTarget::PointCloud => add("Point cloud (PLY, XYZ, PTS)", f.extensions),
+            ImportTarget::PointCloud => add("Point cloud (PLY, PCD, E57, XYZ, PTS, ASC)", f.extensions),
             ImportTarget::Sketch => add("Sketch drawings (DXF, SVG)", f.extensions),
         }
     }
@@ -536,7 +572,7 @@ mod tests {
         for e in ["3mf", "stl", "obj", "glb", "gltf"] {
             assert!(with_target(ImportTarget::Mesh).contains(&e), "registry misses mesh .{e}");
         }
-        for e in ["ply", "xyz", "pts"] {
+        for e in ["ply", "pcd", "e57", "xyz", "pts", "asc"] {
             assert!(with_target(ImportTarget::PointCloud).contains(&e), "registry misses point cloud .{e}");
             assert!(crate::is_point_cloud_path(&format!("scan.{e}")));
             assert!(open_extensions(true).contains(&e));
@@ -611,7 +647,7 @@ mod tests {
         assert_eq!(find("FreeCAD and Rhino"), vec!["fcstd", "3dm"]);
         assert_eq!(find("Mesh (3MF, STL, OBJ, glTF)"), vec!["stl", "3mf", "obj", "glb", "gltf"]);
         assert_eq!(find("OpenUSD"), vec!["usd", "usda", "usdc", "usdz"]);
-        assert_eq!(find("Point cloud (PLY, XYZ, PTS)"), vec!["ply", "xyz", "pts"]);
+        assert_eq!(find("Point cloud (PLY, PCD, E57, XYZ, PTS, ASC)"), vec!["ply", "pcd", "e57", "xyz", "pts", "asc"]);
         assert_eq!(find("Sketch drawings (DXF, SVG)"), vec!["dxf", "svg"]);
         assert!(import_filters(false).iter().all(|(l, _)| *l != "FreeCAD and Rhino"));
     }

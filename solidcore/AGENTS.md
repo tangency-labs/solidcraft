@@ -63,7 +63,8 @@ request that names it. Check all three, and build on the existing work rather th
 - [docs/offset-and-shell.md](docs/offset-and-shell.md): offsets of the definition, folds and the
   largest wall, the offset construction, shell and thicken.
 - [docs/failure-codes-and-reproduction.md](docs/failure-codes-and-reproduction.md): a failure's
-  stable code, a failed call as a rig entry, single-entry replay and the case reducer (design).
+  stable code, a failed call as a rig entry, single-entry replay and the case reducer (design),
+  and how to convert a failure site to a named cause, a refusal or a defect (§6).
 - [docs/coordinating.md](docs/coordinating.md): if you lead other agents: how to understand the
   problem, search for related work, split it into briefs and inspect what comes back.
 

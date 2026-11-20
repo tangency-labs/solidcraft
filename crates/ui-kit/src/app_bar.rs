@@ -748,6 +748,17 @@ pub struct TabStrip<'a> {
     /// A view's name being edited in its sub-tab: its place in the design and the text.
     pub view_rename: Option<(usize, TabRename<'a>)>,
     pub plus_menu: &'a [TabMenuRow<'a>],
+    /// The layouts the Layout button offers, each drawn as a miniature (its id ends in the layout's
+    /// key: `single`, `side_by_side`, `stacked`, `large_and_two`, `grid`); empty: no button.
+    pub layout_menu: &'a [TabMenuRow<'a>],
+    /// The id of the layout shown now, outlined in the menu; empty for none.
+    pub layout_current: &'a str,
+    pub layout_tip: &'a str,
+    /// The id of the choice of what an empty place of a layout shows (a row of `layout_menu`
+    /// whose id starts with `fill.`, listed under the miniatures as a choice of one); empty for none.
+    pub layout_fill: &'a str,
+    /// The heading over those choices.
+    pub layout_fill_heading: &'a str,
     pub switcher_menu: &'a [TabMenuRow<'a>],
     /// A design tab released this far below the bar is torn off ([`is_tear_off`]); 0 turns it off.
     pub tear_off_below: f32,
@@ -805,6 +816,10 @@ pub enum TabAction {
         id: String,
     },
     PlusMenu {
+        id: String,
+    },
+    /// A layout chosen from the Layout button's menu.
+    LayoutMenu {
         id: String,
     },
     SwitcherMenu {
@@ -981,6 +996,7 @@ const SLASH: f32 = 7.0;
 enum Popup {
     View(usize),
     Plus,
+    Layout,
     Switcher,
     More,
 }
@@ -1034,6 +1050,14 @@ fn view_width(label: f32, active: bool, state: ViewState) -> f32 {
     9.0 + 15.0 + 6.0 + label + dot + if active { 6.0 + 20.0 } else { 10.0 }
 }
 
+/// What the Layout button takes in the pill, beside its plus.
+const LAYOUT_BUTTON: f32 = 28.0;
+
+/// What a pill takes after its views: the + (and the Layout button), the separator and the close.
+fn pill_after(strip: &TabStrip) -> f32 {
+    PILL_AFTER + if strip.layout_menu.is_empty() { 0.0 } else { LAYOUT_BUTTON }
+}
+
 /// What a pill takes before its views: border, padding, the unsaved dot, the name and its separator.
 fn pill_before(dot: f32, name_w: f32) -> f32 {
     13.0 + dot + name_w + 10.0 + 1.0 + 8.0 + VIEW_GAP
@@ -1072,13 +1096,24 @@ fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed
     let active = tab.views.iter().position(|v| v.active).unwrap_or(0);
     let active_w = view_ws.get(active).copied().unwrap_or(0.0);
     let before = pill_before(dot, name_w);
-    let pill = before + view_ws.iter().map(|w| w + VIEW_GAP).sum::<f32>() + PILL_AFTER + TAB_MARGIN;
-    let pill_min = before + active_w + VIEW_GAP + more_w + VIEW_GAP + PILL_AFTER + TAB_MARGIN;
+    let after = pill_after(strip);
+    let pill = before + view_ws.iter().map(|w| w + VIEW_GAP).sum::<f32>() + after + TAB_MARGIN;
+    let pill_min = before + active_w + VIEW_GAP + more_w + VIEW_GAP + after + TAB_MARGIN;
     let kind = selected_layout(n, strip.views_as_tabs, strip.switcher_always, pill_min, room);
+    let kind = if view_typed.is_some() && kind == SelectedLayout::Plain { SelectedLayout::Switcher } else { kind };
     let shown = tab.views.get(active).map_or("", |v| v.name);
     let switch_w = 8.0 + 15.0 + 6.0 + text_width(ui, shown, view_font(true)).min(VIEW_LABEL_MAX) + 6.0 + badge_width(ui, n) + 6.0 + 13.0 + 4.0;
     let switcher = 13.0 + dot + name_w + 8.0 + SLASH + 8.0 + switch_w + 8.0 + 22.0 + 4.0;
     let width = if kind == SelectedLayout::Pill { pill.min(room) } else { switcher.min(room.max(MIN_TAB)) };
+    let (name_w, switch_w) = if kind == SelectedLayout::Switcher {
+        // The tab's painted frame is two points narrower than its allocation. Keep the
+        // switcher and close targets inside it before giving the design name any room.
+        let available = (width - 2.0 - (13.0 + dot + 8.0 + SLASH + 8.0 + 8.0 + 22.0 + 4.0)).max(0.0);
+        let name_w = name_w.min((available - switch_w.min(72.0)).max(0.0));
+        (name_w, switch_w.min((available - name_w).max(0.0)))
+    } else {
+        (name_w, switch_w)
+    };
     Geom { kind, index: strip.selected, width, dot, name_w, view_ws, more_w, switch_w }
 }
 
@@ -1125,6 +1160,7 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
         ],
         "close" => &[&[(6.0, 6.0), (18.0, 18.0)], &[(18.0, 6.0), (6.0, 18.0)]],
         "duplicate" => &[&[(8.0, 8.0), (19.0, 8.0), (19.0, 19.0), (8.0, 19.0), (8.0, 8.0)], &[(5.0, 15.0), (5.0, 5.0), (15.0, 5.0)]],
+        "tiles" => &[&[(4.0, 4.0), (20.0, 4.0), (20.0, 20.0), (4.0, 20.0), (4.0, 4.0)], &[(12.0, 4.0), (12.0, 20.0)], &[(4.0, 12.0), (20.0, 12.0)]],
         "reopen" => &[
             &[(3.0, 12.0), (4.2, 16.5), (7.5, 19.8), (12.0, 21.0), (16.5, 19.8), (19.8, 16.5), (21.0, 12.0), (19.8, 7.5), (16.5, 4.2), (12.0, 3.0)],
             &[(3.0, 4.0), (3.0, 9.0), (8.0, 9.0)],
@@ -1134,7 +1170,7 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
 }
 
 /// Draws a view's icon (`model`, `sketch`, `sheet`, `render` or `animation`, or the menu glyphs
-/// `rename`, `window`, `close`, `duplicate` and `reopen`; another name draws nothing) as strokes of `ink` in `r`.
+/// `rename`, `window`, `close`, `duplicate`, `tiles` and `reopen`; another name draws nothing) as strokes of `ink` in `r`.
 pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
     let s = r.width() / 24.0;
     let stroke = Stroke::new(2.0 * s, ink);
@@ -1374,10 +1410,12 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     separator(name_end + 0.5);
     let close = Rect::from_center_size(pos2(pr.right() - 17.0, cy), vec2(24.0, 24.0));
     separator(close.left() - 4.0);
-    let plus = Rect::from_center_size(pos2(close.left() - 20.0, cy), vec2(24.0, 24.0));
+    let has_layout = !strip.layout_menu.is_empty();
+    let layout = Rect::from_center_size(pos2(close.left() - 20.0, cy), vec2(24.0, 24.0));
+    let plus = if has_layout { layout.translate(vec2(-LAYOUT_BUTTON, 0.0)) } else { layout };
     let start = name_end + 1.0 + 8.0 + VIEW_GAP;
     let active = tab.views.iter().position(|v| v.active).unwrap_or(0);
-    let (first, count) = view_window(&g.view_ws, active, pr.right() - PILL_AFTER - start, g.more_w + VIEW_GAP);
+    let (first, count) = view_window(&g.view_ws, active, pr.right() - pill_after(strip) - start, g.more_w + VIEW_GAP);
     let mut x = start;
     for (k, view) in tab.views.iter().enumerate().skip(first).take(count) {
         let w = g.view_ws.get(k).copied().unwrap_or(0.0);
@@ -1401,7 +1439,130 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
         }
     }
     plus_button(ui, strip, plus, 14.0, pen);
+    if has_layout {
+        layout_button(ui, strip, layout, pen);
+    }
     close_design_button(ui, strip, tab, g, close, 12.0, pen);
+}
+
+/// The Layout button next to the +: always there, it opens the miniatures of the ways to arrange
+/// the design's views in the window.
+fn layout_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, pen: &mut Pen) {
+    let t = Tokens::get();
+    let resp = ui.interact(rect, ui.scope_id().with("view_layout"), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, strip.layout_tip));
+    let open = pen.popup.is_some_and(|(which, ..)| which == Popup::Layout);
+    let hot = resp.hovered() || resp.has_focus() || open;
+    if hot {
+        ui.painter().rect_filled(rect, VIEW_RADIUS, t.app_bar_hover_button);
+    }
+    let glyph = Rect::from_center_size(rect.center(), vec2(15.0, 15.0));
+    paint_view_glyph(ui.painter(), glyph, "tiles", t.app_bar_text.gamma_multiply(if hot { 1.0 } else { 0.75 }));
+    let resp = resp.backing_on_hover_text(strip.layout_tip);
+    if resp.clicked() {
+        toggle(ui.ctx(), &mut pen.popup, Popup::Layout, pos2(rect.left(), pen.below), rect);
+    }
+}
+
+/// The key of a layout row's id (`layout.grid` is `grid`).
+fn layout_key(id: &str) -> &str {
+    id.rsplit('.').next().unwrap_or(id)
+}
+
+/// Paints the miniature of the layout `key` in `rect`: the focused view is the tinted cell and
+/// the others are framed.
+fn paint_layout(p: &Painter, rect: Rect, key: &str) {
+    let t = Tokens::get();
+    let inner = rect.shrink(6.0);
+    let gap = 3.0;
+    let (w, h) = (inner.width(), inner.height());
+    let half = |len: f32| (len - gap) / 2.0;
+    let cell = |x: f32, y: f32, cw: f32, ch: f32| Rect::from_min_size(inner.min + vec2(x, y), vec2(cw, ch));
+    let cells: Vec<Rect> = match key {
+        "side_by_side" => vec![cell(0.0, 0.0, half(w), h), cell(half(w) + gap, 0.0, half(w), h)],
+        "stacked" => vec![cell(0.0, 0.0, w, half(h)), cell(0.0, half(h) + gap, w, half(h))],
+        "large_and_two" => {
+            let big = w * 0.6;
+            vec![cell(0.0, 0.0, big, h), cell(big + gap, 0.0, w - big - gap, half(h)), cell(big + gap, half(h) + gap, w - big - gap, half(h))]
+        }
+        "grid" => vec![
+            cell(0.0, 0.0, half(w), half(h)),
+            cell(half(w) + gap, 0.0, half(w), half(h)),
+            cell(0.0, half(h) + gap, half(w), half(h)),
+            cell(half(w) + gap, half(h) + gap, half(w), half(h)),
+        ],
+        _ => vec![cell(0.0, 0.0, w, h)],
+    };
+    for (i, c) in cells.into_iter().enumerate() {
+        if i == 0 {
+            p.rect_filled(c, 3u8, t.accent_soft);
+        } else {
+            p.rect_filled(c, 3u8, t.panel_header);
+            p.rect_stroke(c, 3u8, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+        }
+    }
+}
+
+/// The Layout menu: a miniature and a name for each layout, the current one outlined. The id of
+/// the one chosen.
+fn layout_grid(ui: &mut egui::Ui, strip: &TabStrip) -> Option<String> {
+    const COLUMNS: usize = 3;
+    const THUMB: egui::Vec2 = vec2(88.0, 56.0);
+    let t = Tokens::get();
+    let mut chosen = None;
+    crate::menu::list_row(ui, &crate::Item::heading(strip.layout_tip));
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.set_max_width((THUMB.x + 30.0) * COLUMNS as f32);
+        ui.spacing_mut().item_spacing = vec2(6.0, 8.0);
+        for row in strip.layout_menu.iter().filter(|row| !row.heading && !row.id.starts_with("fill.")) {
+            let (rect, resp) = ui.allocate_exact_size(vec2(THUMB.x + 24.0, THUMB.y + 20.0), Sense::click());
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, solidcraft_ui_text::tr_label(row.label)));
+            let thumb = Rect::from_min_size(rect.min + vec2(12.0, 0.0), THUMB);
+            let current = row.id == strip.layout_current;
+            if resp.hovered() {
+                ui.painter().rect_filled(thumb.expand(2.0), 6u8, t.app_bar_hover_button);
+            }
+            ui.painter().rect_filled(thumb, 6u8, t.dialog_body);
+            let ring = if current { Stroke::new(2.0, t.accent) } else { Stroke::new(1.0, t.border) };
+            ui.painter().rect_stroke(thumb, 6u8, ring, egui::StrokeKind::Inside);
+            paint_layout(ui.painter(), thumb, layout_key(row.id));
+            ui.painter().text(
+                pos2(rect.center().x, thumb.bottom() + 11.0),
+                Align2::CENTER_CENTER,
+                solidcraft_ui_text::tr_label(row.label),
+                if current { crate::type_face::semibold(VIEW_FONT) } else { FontId::proportional(VIEW_FONT) },
+                t.text,
+            );
+            if resp.clicked() {
+                chosen = Some(row.id.to_string());
+            }
+        }
+    });
+    let fills: Vec<_> = strip.layout_menu.iter().filter(|row| row.id.starts_with("fill.")).collect();
+    if !fills.is_empty() {
+        ui.add_space(6.0);
+        ui.separator();
+        crate::menu::list_row(ui, &crate::Item::heading(strip.layout_fill_heading));
+        for row in fills {
+            let (rect, resp) = ui.allocate_exact_size(vec2((THUMB.x + 30.0) * COLUMNS as f32, 24.0), Sense::click());
+            let label = solidcraft_ui_text::tr_label(row.label);
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::RadioButton, true, label));
+            if resp.hovered() {
+                ui.painter().rect_filled(rect, 5u8, t.app_bar_hover_button);
+            }
+            let dot = pos2(rect.left() + 12.0, rect.center().y);
+            ui.painter().circle_stroke(dot, 6.0, Stroke::new(1.5, if row.id == strip.layout_fill { t.accent } else { t.text_dim }));
+            if row.id == strip.layout_fill {
+                ui.painter().circle_filled(dot, 3.0, t.accent);
+            }
+            ui.painter().text(pos2(rect.left() + 26.0, rect.center().y), Align2::LEFT_CENTER, label, FontId::proportional(VIEW_FONT), t.text);
+            if resp.clicked() {
+                chosen = Some(row.id.to_string());
+            }
+        }
+    }
+    chosen
 }
 
 /// The selected design's tab as one tab with a view switcher (option B) in `pr`: the name, a "/",
@@ -1411,10 +1572,12 @@ fn draw_switcher(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g:
     let t = Tokens::get();
     let painter = ui.painter().clone();
     let cy = pr.center().y;
-    painter.rect_filled(pr, t.radius_md, t.app_bar_tab_active);
+    painter.rect_filled(pr, PILL_RADIUS, t.app_bar_tab_active);
     let slash_x = pr.left() + 13.0 + g.dot + g.name_w + 8.0;
     painter.text(pos2(slash_x, cy), Align2::LEFT_CENTER, "/", FontId::proportional(t.font_button), t.app_bar_text.gamma_multiply(0.5));
-    if let Some(view) = tab.views.iter().find(|v| v.active).or(tab.views.first()) {
+    let shown =
+        pen.rename.as_ref().and_then(|(index, _)| tab.views.get(*index)).or_else(|| tab.views.iter().find(|v| v.active)).or(tab.views.first());
+    if let Some(view) = shown {
         let btn = Rect::from_min_size(pos2(slash_x + SLASH + 8.0, cy - VIEW_HEIGHT / 2.0), vec2(g.switch_w, VIEW_HEIGHT));
         let resp = ui.interact(btn, ui.scope_id().with("view_switcher"), Sense::click());
         let name = format!("{}: {}. {}", tab.name, view.name, strip.view_text.switch_view);
@@ -1425,20 +1588,32 @@ fn draw_switcher(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g:
         if resp.has_focus() {
             painter.rect_stroke(btn.expand(1.0), VIEW_RADIUS + 1, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
         }
-        paint_view_glyph(&painter, Rect::from_center_size(pos2(btn.left() + 15.5, cy), vec2(15.0, 15.0)), view.icon, view.accent);
-        let galley = painter.layout_no_wrap(view.name.to_string(), view_font(true), t.app_bar_text);
-        let label_x = btn.left() + 29.0;
-        let label_w = galley.size().x.min(VIEW_LABEL_MAX);
-        let label_y = cy - galley.size().y / 2.0;
-        painter.with_clip_rect(Rect::from_min_size(pos2(label_x, btn.top()), vec2(label_w, VIEW_HEIGHT))).galley(
-            pos2(label_x, label_y),
-            galley,
-            t.app_bar_text,
-        );
-        let badge = count_badge(ui, pos2(label_x + label_w + 6.0, cy), tab.views.len(), true);
-        chevron_down(&painter, pos2(badge.right() + 12.5, cy), 13.0, t.app_bar_text.gamma_multiply(0.85));
-        if resp.backing_on_hover_text(strip.view_text.switch_view).clicked() {
-            toggle(ui.ctx(), &mut pen.popup, Popup::Switcher, pos2(btn.left(), pen.below), btn);
+        if let Some((index, rename)) = pen.rename.as_mut() {
+            let field = btn.shrink(2.0);
+            let done = rename_field(ui, field, rename, &strip.handles).map(|action| {
+                if action == TabAction::RenameDone { TabAction::ViewRenameDone { view: *index } } else { TabAction::ViewRenameCancelled }
+            });
+            pen.actions.extend(done);
+        } else {
+            let clip = ui.clip_rect();
+            ui.set_clip_rect(clip.intersect(btn));
+            let painter = painter.with_clip_rect(ui.clip_rect());
+            paint_view_glyph(&painter, Rect::from_center_size(pos2(btn.left() + 15.5, cy), vec2(15.0, 15.0)), view.icon, view.accent);
+            let galley = painter.layout_no_wrap(view.name.to_string(), view_font(true), t.app_bar_text);
+            let label_x = btn.left() + 29.0;
+            let label_w = galley.size().x.min(VIEW_LABEL_MAX).min((btn.width() - 29.0 - badge_width(ui, tab.views.len()) - 29.0).max(0.0));
+            let label_y = cy - galley.size().y / 2.0;
+            painter.with_clip_rect(Rect::from_min_size(pos2(label_x, btn.top()), vec2(label_w, VIEW_HEIGHT)).intersect(btn)).galley(
+                pos2(label_x, label_y),
+                galley,
+                t.app_bar_text,
+            );
+            let badge = count_badge(ui, pos2(label_x + label_w + 6.0, cy), tab.views.len(), true);
+            chevron_down(&painter, pos2(badge.right() + 12.5, cy), 13.0, t.app_bar_text.gamma_multiply(0.85));
+            if resp.backing_on_hover_text(strip.view_text.switch_view).clicked() {
+                toggle(ui.ctx(), &mut pen.popup, Popup::Switcher, pos2(btn.left(), pen.below), btn);
+            }
+            ui.set_clip_rect(clip);
         }
     }
     close_design_button(ui, strip, tab, g, Rect::from_center_size(pos2(pr.right() - 15.0, cy), vec2(22.0, 22.0)), 12.0, pen);
@@ -1468,6 +1643,7 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
                     menu_rows(ui, strip.view_menu, true, views.len() > 1, off, h.menu_row).map(|id| TabAction::ViewMenu { view: k, id })
                 }
                 Popup::Plus => menu_rows(ui, strip.plus_menu, true, true, "", h.menu_row).map(|id| TabAction::PlusMenu { id }),
+                Popup::Layout => layout_grid(ui, strip).map(|id| TabAction::LayoutMenu { id }),
                 Popup::More => view_list(ui, views, &format!("{}:row:", h.view_more)).map(TabAction::SelectView),
                 Popup::Switcher => {
                     let picked = view_list(ui, views, &format!("{}:row:", h.switcher)).map(TabAction::SelectView);
@@ -1486,6 +1662,15 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
     pen.actions.extend(resp.inner);
 }
 
+/// Discard view-index popup and drag state when the host changes the shown design.
+/// Document-tab menus and the document list keep their independent state.
+pub fn clear_view_popup(ctx: &egui::Context, strip: egui::Id) {
+    ctx.data_mut(|data| {
+        data.remove::<PopupState>(strip.with("view_popup"));
+        data.remove::<ViewDrag>(strip.with("view_drag"));
+    });
+}
+
 /// Draws the document tabs in `r` from `x0` to `x1`: click to select, × to close, drag to
 /// reorder, a right-click for the tab's menu, » for every tab when they don't all fit, + for a
 /// new one. The selected design with several views expands to show them (see [`DocTab::views`]).
@@ -1502,7 +1687,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
     // The selected design's several views: a pill or a switcher, as far as the bar has room (one
     // view gets a switcher only when the app asks for it always).
     let min_views = if strip.switcher_always && !strip.views_as_tabs { 1 } else { 2 };
-    let expands = |tab: &DocTab| strip.shown_selected == Some(strip.selected) && tab.views.len() >= min_views;
+    let expands = |tab: &DocTab| strip.shown_selected == Some(strip.selected) && (tab.views.len() >= min_views || strip.view_rename.is_some());
     let geom = strip.tabs.get(strip.selected).copied().filter(expands).map(|tab| {
         let room = (x1 - x0 - 34.0 - MIN_TAB * n.saturating_sub(1) as f32).max(0.0);
         measure(ui, strip, &tab, typed.as_deref().unwrap_or(tab.name), view_typed.as_ref().map(|(k, text)| (*k, text.as_str())), room)

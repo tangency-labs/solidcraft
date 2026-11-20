@@ -120,7 +120,8 @@ impl Renderer {
         let scopes = crate::error_scopes(device);
         let refused = self.product.take(device, queue, &self.uniform, &self.uniform_bgl, frame.key, &frame.slot, None, false).err();
         let caught = crate::caught(scopes);
-        let highlight_refused = self.highlight.take(device, queue, &self.uniform, &self.uniform_bgl, frame.hl_key, &frame.hl_slot, None, false).err();
+        let highlight_refused =
+            self.pic.highlight.take(device, queue, &self.uniform, &self.uniform_bgl, frame.hl_key, &frame.hl_slot, None, false).err();
         // Only a failed product upload drops the product batches; a refused highlight keeps the
         // product picture and is reported below. A refused scene stays in its slot, so the batches
         // carry no key and the next frame retries it. A scope error means the scene was taken and
@@ -152,18 +153,18 @@ impl Renderer {
     pub fn prepare_product_highlights(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame) {
         self.refused_upload = None;
         let key = frame_key(frame);
-        if self.product_highlights && can_reuse(self.ss_ready && self.ss.is_some(), self.ss_key, key) {
-            let filter = self.ss_scaled && self.cached.is_none();
+        if self.product_highlights && can_reuse(self.pic.ss_ready && self.pic.ss.is_some(), self.pic.ss_key, key) {
+            let filter = self.pic.ss_scaled && self.pic.cached.is_none();
             if filter {
                 self.cache_picture(device, encoder, frame.size_px);
             }
-            self.ss_stats = DrawStats { draw_calls: u32::from(filter), ..DrawStats::default() };
+            self.pic.ss_stats = DrawStats { draw_calls: u32::from(filter), ..DrawStats::default() };
             return;
         }
         self.product_highlights = true;
-        self.cached = None;
-        self.ss_ready = false;
-        self.ss_key = None;
+        self.pic.cached = None;
+        self.pic.ss_ready = false;
+        self.pic.ss_key = None;
         // Feedback without product depth would light occluded faces as if visible.
         if !frame.product || self.target.depth.is_none() {
             return;
@@ -174,13 +175,13 @@ impl Renderer {
         if !self.prepare_product_geometry(device, queue, frame) {
             return;
         }
-        self.ss_ready = self.supersample(device, encoder, frame, false);
-        self.ss_key = self.ss_ready.then_some(key);
+        self.pic.ss_ready = self.supersample(device, encoder, frame, false);
+        self.pic.ss_key = self.pic.ss_ready.then_some(key);
     }
 
     /// Alpha-blit only the prepared feedback. There is no shaded-model fallback.
     pub fn paint_product_highlights(&self, frame: &Frame, pass: &mut wgpu::RenderPass<'static>, viewport: [f32; 4]) {
-        if self.product_highlights && self.ss_ready {
+        if self.product_highlights && self.pic.ss_ready {
             self.paint(frame, pass, viewport);
         }
     }
@@ -239,7 +240,7 @@ impl Renderer {
         }
         // Render's build_highlight emits self-contained mesh triangles/edges, including
         // whole bodies; it intentionally does not reference the Design model's GPU plans.
-        let highlight = &self.highlight;
+        let highlight = &self.pic.highlight;
         pass.set_bind_group(0, scene_bind(highlight, &self.bind), &[]);
         for draw in highlight.hover_instanced.iter().chain(&highlight.selected_instanced).filter(|draw| draw.look == InstanceLook::Opaque) {
             draw.draw(pass, &depth.feedback_smooth, &depth.feedback_flat, tally);
