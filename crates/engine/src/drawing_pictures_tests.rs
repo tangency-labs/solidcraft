@@ -233,8 +233,8 @@ fn block_group(scene: &Scene) -> &Group {
 }
 
 /// A logo of two pixels by one in the legal owner's cell on A3, (230, 44) to (310, 59): the value box
-/// inside its lines and under its label is (231.35, 45.175) to (308.825, 54.15), 8.975 mm high, so the
-/// logo is 17.95 by 8.975, centred on x = 270.0875. It comes first in the block's group, so the lines
+/// inside its lines and under its label is (231.35, 45.175) to (308.825, 54.325), 9.15 mm high (a cell line above the cell, no longer the
+/// outline), so the logo is 18.3 by 9.15, centred on x = 270.0875. It comes first in the block's group, so the lines
 /// draw over it; the SVG holds its own pixels. Taken away, the block is as it was.
 #[test]
 fn a_logo_sits_in_its_cells_value_box_under_the_lines() {
@@ -248,7 +248,7 @@ fn a_logo_sits_in_its_cells_value_box_under_the_lines() {
     let built = crate::drawing_scene::build(&s, &d, sheet).unwrap();
     let group = block_group(&built.scene);
     let Item::Picture(picture) = group.items[0] else { panic!("{:?}", group.items[0]) };
-    let want = Aabb2 { min: Vec2::new(261.1125, 45.175), max: Vec2::new(279.0625, 54.15) };
+    let want = Aabb2 { min: Vec2::new(260.9375, 45.175), max: Vec2::new(279.2375, 54.325) };
     assert!(picture.rect.min.dist(want.min) < 1e-9 && picture.rect.max.dist(want.max) < 1e-9, "{:?}", picture.rect);
     assert_eq!(group.items[1..], block_group(&plain.scene).items[..], "the lines and the symbol are as they were");
     built.scene.validate().unwrap();
