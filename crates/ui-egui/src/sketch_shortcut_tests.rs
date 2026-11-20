@@ -140,7 +140,7 @@ fn a_sketch_key_with_nothing_selected_asks_for_the_plane_then_starts_the_tool() 
 
 #[test]
 fn a_sketch_modify_key_outside_a_sketch_opens_no_sketch() {
-    for key in ["T", "O", "G"] {
+    for key in ["T", "G"] {
         let mut h = Harness::new();
         let id = crate::keymap::commands_for(&h.app, key).into_iter().find(|id| id.starts_with("sketch.")).unwrap_or_default();
         assert_eq!(solidcraft_engine::find_command(id).map(|c| c.panel), Some("MODIFY"), "{key} is a sketch Modify tool's key");
@@ -149,6 +149,12 @@ fn a_sketch_modify_key_outside_a_sketch_opens_no_sketch() {
         assert!(h.app.session.active_sketch.is_none(), "{key}");
         assert!(tool(&h).is_none(), "{key}");
     }
+    // Offset works on a face sketch's projected edges, so its key still starts a sketch.
+    let mut h = Harness::new();
+    assert!(crate::keymap::commands_for(&h.app, "O").contains(&"sketch.offset"));
+    press(&mut h, "O");
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Sketch)));
+    assert!(h.app.session.active_sketch.is_none());
 }
 
 /// #1804: Escape puts down the sketch tool. Another Escape, on its own, does not leave the
