@@ -1129,7 +1129,11 @@ certified_units! {
 
 /// The digest of each [`ROWS`] unit's expected file on main, one `unit<TAB>digest` (hex) per
 /// line after the `#` lines that name main's commit: [`expected_digest`] of the file with
-/// nothing put back, written by [`main_expected_digests`] from main's files.
+/// nothing put back, written by [`main_expected_digests`] from main's files, in which the line
+/// of each [`ROWS`] case is the one main's kernel writes for it (the line main's file keeps can
+/// lag main's own run within the golden compare's tolerance, which the compare accepts, and a
+/// moved line is written whole from the run; the regen blesses those cases again on a tree whose
+/// kernel is main's).
 const MAIN: &str = include_str!("trim_tolerance_main.tsv");
 
 /// FNV-1a 64 of the canonical lines of the expected file `text` ([`crate::json`]: each line
@@ -1215,8 +1219,9 @@ fn row_units() -> std::collections::BTreeSet<String> {
 
 /// The ledger is the whole golden diff from main: every expected file, with each moved value
 /// of [`ROWS`] put back to its old value, is main's file ([`MAIN`] holds the digest of every
-/// unit's expected file on main). So no unit, case, moved value or other change is left out
-/// of the rows, and each row's new value is the expected one.
+/// unit's expected file on main, each row case's line as main's kernel writes it). So no unit,
+/// case, moved value or other change is left out of the rows, and each row's new value is the
+/// expected one.
 #[test]
 fn the_rows_are_the_whole_golden_diff_from_main() {
     let main: std::collections::BTreeMap<String, u64> = MAIN
@@ -1250,9 +1255,16 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
     for (unit, want) in &main {
         let text = std::fs::read_to_string(dir.join(format!("{unit}.jsonl")))
             .unwrap_or_else(|e| panic!("{unit}: {e}"));
+        // (a known-failing case has no line here or on main, so it is outside the golden diff;
+        // its rows are certified by the unit's own test all the same)
+        let known = crate::golden::known_failing(&dir, unit).unwrap_or_else(|e| panic!("{e}"));
+        let rows: Vec<Row> = rows(unit)
+            .into_iter()
+            .filter(|r| !known.contains_key(&r.case))
+            .collect();
         let mut replay = |case: &str| replay_case(unit, case);
-        let got = expected_digest(&text, &rows(unit), &mut replay)
-            .unwrap_or_else(|e| panic!("{unit}: {e}"));
+        let got =
+            expected_digest(&text, &rows, &mut replay).unwrap_or_else(|e| panic!("{unit}: {e}"));
         assert_eq!(got, *want, "{unit}: {got:016x}, main {want:016x}");
     }
 }
@@ -1292,8 +1304,9 @@ fn expected_units(dir: &std::path::Path) -> std::collections::BTreeSet<String> {
         .collect()
 }
 
-/// Writes [`MAIN`] from main's expected files in `MAIN_EXPECTED_DIR` (every unit) to
-/// `MAIN_EXPECTED_OUT`, after the line `# main <MAIN_SHA>`.
+/// Writes [`MAIN`] from main's expected files in `MAIN_EXPECTED_DIR` (every unit, each
+/// [`ROWS`] case's line blessed again by main's kernel) to `MAIN_EXPECTED_OUT`, after the line
+/// `# main <MAIN_SHA>`.
 #[test]
 #[ignore = "writes the main digests of the ledger; run on main's expected files"]
 fn main_expected_digests() {
