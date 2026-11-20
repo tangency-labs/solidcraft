@@ -1313,7 +1313,7 @@ impl FilletCorner {
                                     }
                                     _ => behind_deg,
                                 };
-                                let blend = crate::blend::blend_corner::classify(
+                                let mut blend = crate::blend::blend_corner::classify(
                                     k,
                                     b,
                                     Some(vertex),
@@ -1322,6 +1322,13 @@ impl FilletCorner {
                                     tan_tol_deg,
                                     join_deg,
                                 )?;
+                                if is_chamfer_corner && !blend.is_join() {
+                                    if let Some(event) = super::topology::join::tangent_cliff_join(
+                                        k, b, vertex, solver_eus, &all_eus, join_deg,
+                                    )? {
+                                        blend.event = event;
+                                    }
+                                }
                                 let mut c = make(FilletCornerKind::NByTwo);
                                 c.blend = Some(blend);
                                 Some(c)

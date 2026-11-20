@@ -5838,6 +5838,15 @@ impl crate::blend::fillet_solver::p5::RailClassificationContext for SessionRollO
         self.classification()
             .classify(k, target, pseudo, face, class)
     }
+    fn continued_cliff(&self, vertex: VertexId, edge: EdgeId) -> Option<FaceId> {
+        use crate::blend::blend_corner::BlendCornerEvent;
+        let corner = session_corner_of_vertex(self.executive, vertex)?;
+        match self.corners.get(corner.0 as usize)?.blend?.event {
+            BlendCornerEvent::CliffJoin { rim, cliff } if rim.contains(&edge) => Some(cliff),
+            _ => None,
+        }
+    }
+
     fn corner_type(&self, corner: FilletCornerId) -> Result<FilletCornerType> {
         self.classification().corner_type(corner)
     }

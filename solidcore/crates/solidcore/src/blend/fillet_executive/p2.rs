@@ -683,6 +683,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         };
         // the fork's (WR-631): no cliff overflow, no open ends yet
         self.cliff_overflow = false;
+        self.continued_cliffs.clear();
         self.open_ends.clear();
         // the fork's (WR-634): no overflow edges yet, no mitred edges (9ba2b12)
         self.overflow_edges.clear();

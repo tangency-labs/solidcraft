@@ -116,6 +116,123 @@ fn live(solvers: &[Option<SolverObject>], id: Option<FilletSolverId>) -> Result<
         .ok_or_else(|| invalid("corner solver is not live"))
 }
 
+/// The four edge uses at an isolated tangent contact of a concave chamfer and a
+/// sharp rim. The strips share their supports through the contact, but the
+/// material beyond the rim is absent. Preserve that rim for the crease trim.
+pub(crate) fn tangent_cliff_join(
+    k: &Kernel,
+    target: &mut Brep,
+    vertex: crate::topology::VertexId,
+    selected: &[EdgeuseId],
+    ring: &[EdgeuseId],
+    angle_tol_deg: f64,
+) -> Result<Option<crate::blend::blend_corner::BlendCornerEvent>> {
+    use crate::blend::fillet_corner::p1::test_g1_continuity;
+    use crate::blend::fillet_solver::p5::{edge_bounds_material, is_concave_edge};
+    use crate::surface::surface::SurfaceKind;
+    use crate::topology::edge;
+
+    let [first, second] = selected else {
+        return Ok(None);
+    };
+    if ring.len() != 4 {
+        return Ok(None);
+    }
+    let (Some(a), Some(b)) = (eu1::edge(target, *first)?, eu1::edge(target, *second)?) else {
+        return Ok(None);
+    };
+    if a == b
+        || !edge_bounds_material(target, a)?
+        || !edge_bounds_material(target, b)?
+        || !is_concave_edge(k, target, a)?
+        || !is_concave_edge(k, target, b)?
+        || !test_g1_continuity(k, target, Some(vertex), Some(a), Some(b), angle_tol_deg)?.0
+    {
+        return Ok(None);
+    }
+    let (sides, between) = join_sides(target, selected, ring)?;
+    let (rim_uses, rim_support) = match &between {
+        [before, after]
+            if before.len() == 2
+                && after.is_empty()
+                && sides[1][0].is_some()
+                && sides[1][0] == sides[1][1] =>
+        {
+            (before, &sides[0])
+        }
+        [before, after]
+            if after.len() == 2
+                && before.is_empty()
+                && sides[0][0].is_some()
+                && sides[0][0] == sides[0][1] =>
+        {
+            (after, &sides[1])
+        }
+        _ => return Ok(None),
+    };
+    let [left, right] = rim_uses.as_slice() else {
+        return Ok(None);
+    };
+    let (Some(left), Some(right)) = (eu1::edge(target, *left)?, eu1::edge(target, *right)?) else {
+        return Ok(None);
+    };
+    if left == right
+        || is_concave_edge(k, target, left)?
+        || is_concave_edge(k, target, right)?
+        || !test_g1_continuity(
+            k,
+            target,
+            Some(vertex),
+            Some(left),
+            Some(right),
+            angle_tol_deg,
+        )?
+        .0
+        || !test_g1_continuity(k, target, Some(vertex), Some(a), Some(left), angle_tol_deg)?.0
+    {
+        return Ok(None);
+    }
+    let [Some(f0), Some(f1)] = *rim_support else {
+        return Ok(None);
+    };
+    let plane_normal = |f| -> Result<Option<crate::math::Vec3>> {
+        Ok(
+            match crate::topology::face::p2::surface(target, f)?.map(|s| s.kind()) {
+                Some(SurfaceKind::Plane(p)) => Some(p.evaluate_normal().unitize()?),
+                _ => None,
+            },
+        )
+    };
+    let (Some(n0), Some(n1)) = (plane_normal(f0)?, plane_normal(f1)?) else {
+        return Ok(None);
+    };
+    // Both planes pass through this topological vertex. Equal normals prove
+    // that the second support continues the first, including split faces.
+    if n0.cross(n1).length() > crate::math::EFF_ZERO {
+        return Ok(None);
+    }
+    let left_faces = edge::faces(target, left, None)?;
+    let right_faces = edge::faces(target, right, None)?;
+    let mut common = left_faces
+        .into_iter()
+        .filter(|f| *f != f0 && *f != f1 && right_faces.contains(f));
+    let Some(cliff) = common.next() else {
+        return Ok(None);
+    };
+    let Some(n_cliff) = plane_normal(cliff)? else {
+        return Ok(None);
+    };
+    if common.next().is_some() || n0.cross(n_cliff).length() <= crate::math::EFF_ZERO {
+        return Ok(None);
+    }
+    Ok(Some(
+        crate::blend::blend_corner::BlendCornerEvent::CliffJoin {
+            rim: [left, right],
+            cliff,
+        },
+    ))
+}
+
 /// Whether two blends at a Join are constant and differ: for each of the two faces of side
 /// `faces` first, its offset, and where the blends' offsets on a side differ by more than a
 /// loop's gap closes ([`LOOP_GAP_ZONES`] of the body's tolerance), the blend with the larger
@@ -514,7 +631,13 @@ impl FilletCorner {
         // the section's ends: on a side with an edge between the blends (where they change
         // face, or cross a face's seam) where the rails cross it, else (the first side)
         // through the vertex
-        if between.iter().any(|b| b.len() > 1) {
+        if self.blend.is_some_and(|blend| blend.is_cliff_join()) {
+            // The two rim segments meet here; neither bounds the shared section
+            // on the continued support. The face beyond trims the sheet later.
+            for edges in &mut between {
+                edges.clear();
+            }
+        } else if between.iter().any(|edges| edges.len() > 1) {
             return Ok(JoinTopology::RefusedAcrossEdges);
         }
         let on_edge = [between[0].len() == 1, between[1].len() == 1];

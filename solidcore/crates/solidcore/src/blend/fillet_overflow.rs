@@ -111,6 +111,25 @@ pub fn plane_of(k: &Kernel, surface: &Surface) -> Result<Option<(Point3, Vec3)>>
     Ok(Some((planar.point, normal)))
 }
 
+/// The plane of a cliff, with the normal facing the body's exterior.
+pub(crate) fn outward_plane(k: &Kernel, body: &Brep, f: FaceId) -> Result<(Point3, Vec3)> {
+    let surface = face::p2::surface(body, f)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the cliff's surface"))?;
+    let (origin, normal) =
+        plane_of(k, surface)?.ok_or_else(|| SolidError::blend_missing(OP, "the cliff's plane"))?;
+    let outer = face::p2::outer_faceuse(body, f)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the cliff's outward faceuse"))?;
+    let orientation = crate::topology::edgeuse::p1::faceuse_orientation(body, outer)?;
+    Ok((
+        origin,
+        if orientation == OrientType::Same {
+            normal
+        } else {
+            -normal
+        },
+    ))
+}
+
 /// `sm_DistanceToSurface`: the distance from `point` to face `f`'s surface: to its plane
 /// when planar, else to the surface over its own natural domain (`BIG_DOUBLE` when the
 /// drop fails).
@@ -722,7 +741,9 @@ pub fn extend(
     rails: &[Rail],
     blended: &[EdgeId],
     tol: f64,
+    continued_rim: Option<&std::collections::BTreeSet<EdgeId>>,
 ) -> Result<ExtendOutcome> {
+    let fills_void = continued_rim.is_some();
     // the runs of the rails off the face, in the material
     let mut runs: Vec<OffRun> = Vec::new();
     for rail in rails {
@@ -741,8 +762,8 @@ pub fn extend(
             }
             let mid = curve.evaluate_point(k, run.evaluate(0.5))?;
             let (inside, _) = in_material(k, target, mid)?;
-            if !inside {
-                continue; // in the open: cut off along a crease elsewhere
+            if inside == fills_void {
+                continue;
             }
             let mut off = curve.copy(k)?;
             if run != off.natural_interval() {
@@ -767,6 +788,12 @@ pub fn extend(
                     None
                 };
                 let end = piece.ends.get(slot).copied().unwrap_or(Vec3::UNDEF);
+                if pc == PointClassType::Edge
+                    && cross.is_some_and(|e| continued_rim.is_some_and(|rim| rim.contains(&e)))
+                {
+                    piece.crosses[slot] = cross;
+                    continue;
+                }
                 match rail_end {
                     Some((v, p)) if p.distance(end) <= 10.0 * tol => {
                         if let Some(s) = piece.vertices.get_mut(slot) {
@@ -1047,7 +1074,16 @@ pub fn extend(
                         ext.along_pieces.push((from, to));
                         from = to;
                     }
-                    if takes_off(k, target, &ext, &runs, &chain, (at, normal, x, y), blended)? {
+                    if takes_off(
+                        k,
+                        target,
+                        &ext,
+                        &runs,
+                        &chain,
+                        (at, normal, x, y),
+                        blended,
+                        fills_void,
+                    )? {
                         candidates.push(ext);
                     }
                 }
@@ -1055,6 +1091,9 @@ pub fn extend(
         }
         // each way's loop; the one whose inside beside the chain lies in the material
         for way in &ways {
+            if continued_rim.is_some_and(|rim| way.edges.iter().any(|e| !rim.contains(e))) {
+                continue;
+            }
             let mut ext = Extension::new(at, normal);
             chain_loop(&mut ext)?;
             // the end to the way's first vertex
@@ -1114,7 +1153,16 @@ pub fn extend(
                     ext.along_pieces.push((last_p, ends[0]));
                 }
             }
-            if takes_off(k, target, &ext, &runs, &chain, (at, normal, x, y), blended)? {
+            if takes_off(
+                k,
+                target,
+                &ext,
+                &runs,
+                &chain,
+                (at, normal, x, y),
+                blended,
+                fills_void,
+            )? {
                 candidates.push(ext);
             }
         }
@@ -1141,6 +1189,7 @@ fn takes_off(
     chain: &[(usize, bool)],
     (at, normal, x, y): (Point3, Vec3, Vec3, Vec3),
     blended: &[EdgeId],
+    fills_void: bool,
 ) -> Result<bool> {
     let mut uv = Vec::new();
     loop_polygon(k, &ext.lp, at, x, y, &mut uv)?;
@@ -1183,7 +1232,8 @@ fn takes_off(
         step = step.min(0.5 * width);
     }
     let probe = p + inward * (side * step);
-    let (mut inside, _) = in_material(k, target, probe)?;
+    let (inside, _) = in_material(k, target, probe)?;
+    let mut belongs = inside != fills_void;
     let mut nearest = BIG_DOUBLE;
     let mut toward = Vec3::UNDEF;
     for &e in blended {
@@ -1213,9 +1263,9 @@ fn takes_off(
     let mut off = toward - p;
     off = off - normal * off.dot(normal);
     if off.dot(inward) * side <= 0.0 {
-        inside = false;
+        belongs = false;
     }
-    Ok(inside)
+    Ok(belongs)
 }
 
 /// `sm_MakeExtensionFace`: the face on the plane through `ext.at` square to `ext.normal`
