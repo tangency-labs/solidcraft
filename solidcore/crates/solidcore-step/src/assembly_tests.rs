@@ -882,3 +882,78 @@ fn a_side_within_its_vertexs_tolerance_is_reached_from_its_end() {
     // Along v the side is 10 mm long, past any vertex.
     assert_eq!(side_reach(&eval, [0.0, 0.0], 1, [0.0, 1.0], vertex, 0.003), None);
 }
+
+/// Two unit cubes meeting along the line x = y = 1, the line written as two edges on its two
+/// vertices; `crossed`, each edge pairs a face of one cube with a face of the other (as a file
+/// may write a heatsink's touching fins), else each cube's two faces there.
+fn cubes_on_one_line(crossed: bool) -> R<Solid> {
+    let mut asm = Assembly::new(1e-6, None);
+    let mut vertices: HashMap<[i64; 3], u32> = HashMap::new();
+    let mut edges: HashMap<([u32; 2], u8), u32> = HashMap::new();
+    let mut shell = Vec::new();
+    // Each cube's faces, corners counter-clockwise about the outward normal.
+    let unit: [[[i64; 3]; 4]; 6] = [
+        [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]],
+        [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]],
+        [[0, 0, 0], [0, 0, 1], [0, 1, 1], [0, 1, 0]],
+        [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]],
+        [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]],
+        [[0, 1, 0], [0, 1, 1], [1, 1, 1], [1, 1, 0]],
+    ];
+    for (cube, offset) in [[0, 0, 0], [1, 1, 0]].into_iter().enumerate() {
+        for (side, corners) in unit.iter().enumerate() {
+            let at = |c: [i64; 3]| [c[0] + offset[0], c[1] + offset[1], c[2] + offset[2]];
+            let point = |c: [i64; 3]| c.map(|x| x as f64);
+            let mut uses = Vec::new();
+            for k in 0..4 {
+                let (a, z) = (at(corners[k]), at(corners[(k + 1) % 4]));
+                let (lo, hi) = if a < z { (a, z) } else { (z, a) };
+                let mut id = |c: [i64; 3]| -> R<u32> {
+                    if let Some(v) = vertices.get(&c) {
+                        return Ok(*v);
+                    }
+                    let v = asm.add_vertex(point(c))?;
+                    vertices.insert(c, v);
+                    Ok(v)
+                };
+                let pair = [id(lo)?, id(hi)?];
+                // The shared line's two edges: by cube, or crossed, by the side of x = 1 or y = 1
+                // the face lies on (cube 0's x = 1 face with cube 1's x = 1 face).
+                let on_line = lo[0] == 1 && lo[1] == 1 && hi[0] == 1 && hi[1] == 1;
+                let tag = match (on_line, crossed) {
+                    (false, _) => 0,
+                    (true, false) => 1 + cube as u8,
+                    (true, true) => 1 + u8::from(corners.iter().all(|c| c[1] == corners[0][1])),
+                };
+                let e = match edges.get(&(pair, tag)) {
+                    Some(e) => *e,
+                    None => {
+                        let line = BCurve::Line { start: point(lo), end: point(hi) };
+                        let (e, _) = asm.add_edge(edges.len() as u64, line, [0.0, 1.0], pair)?;
+                        edges.insert((pair, tag), e);
+                        e
+                    }
+                };
+                uses.push((e, a == lo));
+            }
+            let [c0, c1, _, c3] = corners.map(|c| point(at(c)));
+            let axis = |p: [f64; 3]| [p[0] - c0[0], p[1] - c0[1], p[2] - c0[2]];
+            let plane = BSurface::Plane { origin: c0, u_axis: axis(c1), v_axis: axis(c3) };
+            let origin = (cube * 6 + side) as u64;
+            shell.push((asm.add_face(origin, plane, vec![Bound::Edges(uses)], Some(0), true)?, true));
+        }
+    }
+    asm.finish(0, "cubes".into(), vec![shell], Kind::Solid)
+}
+
+/// A line where four faces meet, written as two edges, keeps the shell's sides whichever way
+/// the file pairs the faces across them: their uses cancel over the line, so the shell needs no
+/// repair and is not refused as contradictory.
+#[test]
+fn a_line_of_four_faces_written_as_two_edges_keeps_the_shells_sides_however_paired() {
+    for crossed in [false, true] {
+        let solid = cubes_on_one_line(crossed).unwrap_or_else(|e| panic!("crossed {crossed}: {e:?}"));
+        assert!(!solid.sheet, "crossed {crossed}");
+        assert!((volume(&solid) - 2.0).abs() < 1e-9, "crossed {crossed}: {}", volume(&solid));
+    }
+}

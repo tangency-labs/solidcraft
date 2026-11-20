@@ -76,7 +76,7 @@ A body is refused when (face-local refusals name the face):
 - a loop is not closed in its surface's parameters and cannot be given a seam;
 - a face winds more than one turn about its axis on a surface that is not a cylinder or a cone;
 - the pcurves of a use cannot be made;
-- a closed solid shell needs orientation repair but has a nonmanifold edge, disconnected faces, or contradictory shared-edge parity;
+- a closed solid shell needs orientation repair but has a nonmanifold edge, disconnected faces, or contradictory shared-edge parity (a line where four faces meet that the file writes as two edges on the same vertices and curve counts as one edge, so a shell whose uses cancel along it needs no repair, however the file pairs the faces across them);
 - a repaired shell's absolute orientation cannot be certified by its volume enclosure;
 - the finished record fails its checks.
 

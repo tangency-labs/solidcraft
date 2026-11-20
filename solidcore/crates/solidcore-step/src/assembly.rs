@@ -1179,8 +1179,9 @@ impl<'t> Assembly<'t> {
 
     /// Orient a closed manifold shell by exact shared-edge parity. Across an edge,
     /// the two physical traversals oppose: equal directions require opposite flips.
-    /// An already coherent shell keeps its sides, including a nonmanifold shell;
-    /// an inconsistent nonmanifold or disconnected shell has no supported repair.
+    /// An already coherent shell keeps its sides, including a nonmanifold shell and one whose
+    /// line where four faces meet is written as two edges paired either way; an inconsistent
+    /// nonmanifold or disconnected shell has no supported repair.
     fn orient_shell(&self, shell: &mut [(u32, bool)]) -> R<bool> {
         let mut uses: BTreeMap<u32, Vec<(usize, bool)>> = BTreeMap::new();
         for (side, &(f, forward)) in shell.iter().enumerate() {
@@ -1193,10 +1194,26 @@ impl<'t> Assembly<'t> {
                 }
             }
         }
-        if uses.values().all(|sides| {
+        // An edge the file writes twice where four faces meet along one line (two edges on the
+        // same vertices, interval and curve, each used by two of them) counts as one edge: the
+        // file may pair the faces across the twins either way, and the sides are coherent where
+        // the line's uses cancel.
+        let mut twins: HashMap<[u32; 2], Vec<u32>> = HashMap::new();
+        let mut pooled: BTreeMap<u32, (usize, usize)> = BTreeMap::new();
+        for (&e, sides) in &uses {
+            let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+            let same = twins.entry(edge.vertices).or_default();
+            let twin =
+                same.iter().copied().find(|t| self.edges.get(*t as usize).is_some_and(|t| t.interval == edge.interval && t.curve == edge.curve));
+            let key = twin.unwrap_or_else(|| {
+                same.push(e);
+                e
+            });
             let along = sides.iter().filter(|(_, forward)| *forward).count();
-            sides.len().checked_sub(along) == Some(along)
-        }) {
+            let count = pooled.entry(key).or_default();
+            *count = (count.0 + along, count.1 + sides.len().saturating_sub(along));
+        }
+        if pooled.values().all(|(along, against)| along == against) {
             return Ok(false);
         }
         let mut adjacent: BTreeMap<usize, Vec<(usize, bool)>> = BTreeMap::new();
