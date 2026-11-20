@@ -84,6 +84,23 @@
 //! | [`TopologyFailure::FaceUseWithoutShell`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::ShellHasNoFaceUses`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::UvTrimCurveNotMade`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::NoDataGiven`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::NoCurveGiven`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::NoSurfaceGiven`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::PartNotEmpty`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::TooManyOutputSlots`] | `SM_ERR_OUT_OF_MEMORY` |
+//! | [`TopologyFailure::AllocationFailed`] | `SM_ERR_OUT_OF_MEMORY` |
+//! | [`TopologyFailure::NoProjectedCurves`] | `SM_ERR` |
+//! | [`TopologyFailure::NoPlaneProjection`] | `SM_ERR` |
+//! | [`TopologyFailure::ConstructorNotOpen`] | `SM_ERR` |
+//! | [`TopologyFailure::ConstructorStillOpen`] | `SM_ERR` |
+//! | [`TopologyFailure::EdgeCurveAlreadySet`] | `SM_ERR` |
+//! | [`TopologyFailure::NoFootOnCurve`] | `SM_ERR` |
+//! | [`TopologyFailure::LoopMatesDisagree`] | `SM_ERR` |
+//! | [`TopologyFailure::OwnerListBroken`] | `SM_ERR` |
+//! | [`TopologyFailure::OwnerListOverCount`] | `SM_ERR` |
+//! | [`TopologyFailure::NothingToLink`] | `SM_ERR` |
+//! | [`TopologyFailure::NotOnOwnerList`] | `SM_ERR` |
 //!
 //! A named cause keeps the status of the phrase it replaced, unless its site overrides it
 //! through `with_status`.
@@ -376,6 +393,107 @@ pub enum TopologyFailure {
     /// The edge use has no UV trim curve and making one failed; the error of the fetch that tried
     /// is kept as the cause.
     UvTrimCurveNotMade,
+    /// The caller gave no file contents to read. [`ErrorKind::InvalidInput`].
+    NoDataGiven,
+    /// The caller gave no curve. [`ErrorKind::InvalidInput`].
+    NoCurveGiven,
+    /// The caller gave no surface. [`ErrorKind::InvalidInput`].
+    NoSurfaceGiven,
+    /// The part to read into already holds curves, surfaces, Boolean tree nodes or B-reps.
+    /// [`ErrorKind::InvalidInput`].
+    PartNotEmpty,
+    /// The caller asked for more curve output slots than fit below `SM_BIG_ULONG` entries
+    /// (or than the platform can index). [`ErrorKind::InvalidInput`].
+    TooManyOutputSlots {
+        /// The slots asked for.
+        asked: u64,
+        /// A number of slots below this fits.
+        fits_below: u64,
+    },
+    /// Memory for an output array could not be allocated. Class `failed`.
+    AllocationFailed,
+    /// The projection of the curve onto the B-rep along the direction gives no curves: the
+    /// curve's sweep along it misses the faces, or meets them only in pieces the trim drops
+    /// as degenerate. Class `failed`.
+    NoProjectedCurves,
+    /// The curve is of a kind with no plane projection here (a Hermite, projected, iso,
+    /// offset, conic, in-volume or composite curve). [`ErrorKind::Unsupported`].
+    NoPlaneProjection,
+    /// A B-rep constructor call (`call`, the upstream name) needs `part` open, and it is
+    /// not: the caller's call order. [`ErrorKind::InvalidInput`].
+    ConstructorNotOpen {
+        /// The constructor call, by its upstream name (`EndBrep`, `StartEdge`, ...).
+        call: &'static str,
+        /// What the call works in.
+        part: ConstructorPart,
+    },
+    /// A B-rep constructor call (`call`, the upstream name) needs `part` closed, and it is
+    /// still open: the caller's call order. [`ErrorKind::InvalidInput`].
+    ConstructorStillOpen {
+        /// The constructor call, by its upstream name.
+        call: &'static str,
+        /// What is still open.
+        part: ConstructorPart,
+    },
+    /// The edge already has its curve, so a second `SetEdgeCurve` for it sets nothing.
+    /// [`ErrorKind::InvalidInput`].
+    EdgeCurveAlreadySet,
+    /// An edge limit point drops onto no point of the edge's curve, even at a hundred
+    /// times the edge's tolerance. Class `failed`.
+    NoFootOnCurve,
+    /// An edge use's clockwise neighbour's mate is not its mate's counter-clockwise
+    /// neighbour: the caller's `StartEdge` orientations or joined edges run against their
+    /// loops. [`ErrorKind::InvalidInput`].
+    LoopMatesDisagree,
+    /// An owner's list of members is not a closed ring: a link is null, or a successor does
+    /// not point back. [`ErrorKind::InvalidInput`], as every broken list the owner walks.
+    OwnerListBroken,
+    /// An owner's list holds more members than its count `list_size`.
+    /// [`ErrorKind::InvalidInput`].
+    OwnerListOverCount {
+        /// The owner's recorded member count.
+        list_size: u64,
+    },
+    /// The object to link, or the member to link it after, was not given.
+    /// [`ErrorKind::InvalidInput`].
+    NothingToLink,
+    /// The object to remove is not on this owner's list. [`ErrorKind::InvalidInput`].
+    NotOnOwnerList,
+}
+
+/// What a B-rep constructor call works in ([`TopologyFailure::ConstructorNotOpen`],
+/// [`TopologyFailure::ConstructorStillOpen`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ConstructorPart {
+    /// The B-rep (`StartBrep`).
+    Brep,
+    /// A region (`StartRegion`).
+    Region,
+    /// A shell (`StartShell`).
+    Shell,
+    /// A face (`StartFace`).
+    Face,
+    /// A loop (`StartLoop`).
+    Loop,
+    /// An edge and its edge use (`StartEdge`).
+    Edge,
+    /// The open edge's curve (`SetEdgeCurve`).
+    EdgeCurve,
+}
+
+impl core::fmt::Display for ConstructorPart {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::Brep => "B-rep",
+            Self::Region => "region",
+            Self::Shell => "shell",
+            Self::Face => "face",
+            Self::Loop => "loop",
+            Self::Edge => "edge",
+            Self::EdgeCurve => "edge curve",
+        })
+    }
 }
 
 impl TopologyFailure {
@@ -432,7 +550,18 @@ impl TopologyFailure {
             | Self::ZeroSurfaceTangent
             | Self::RayHitsAtStart
             | Self::TrimBoundaryNotBuilt
-            | Self::SeamSplitFailed => SM_ERR,
+            | Self::SeamSplitFailed
+            | Self::NoProjectedCurves
+            | Self::NoPlaneProjection
+            | Self::ConstructorNotOpen { .. }
+            | Self::ConstructorStillOpen { .. }
+            | Self::EdgeCurveAlreadySet
+            | Self::NoFootOnCurve
+            | Self::LoopMatesDisagree
+            | Self::OwnerListBroken
+            | Self::OwnerListOverCount { .. }
+            | Self::NothingToLink
+            | Self::NotOnOwnerList => SM_ERR,
             Self::Missing(_)
             | Self::RadialFaceWithoutSurface
             | Self::RadialRimWithoutEdge
@@ -446,15 +575,21 @@ impl TopologyFailure {
             | Self::EdgeUseNotOnFace
             | Self::FaceUseWithoutShell
             | Self::ShellHasNoFaceUses
-            | Self::UvTrimCurveNotMade => SM_ERR_NULL_POINTER,
+            | Self::UvTrimCurveNotMade
+            | Self::NoSurfaceGiven => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_)
             | Self::NoBrepGiven
             | Self::EdgeUseNotInLoop
             | Self::NewPrimaryNotOnEdge
             | Self::NotFourEdgeUses { .. }
-            | Self::ZeroLengthVector => SM_ERR_INVALID_INPUT,
+            | Self::ZeroLengthVector
+            | Self::NoDataGiven
+            | Self::NoCurveGiven
+            | Self::PartNotEmpty => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) | Self::GatheredBothSides => SM_ERR_ASSERT_FAILURE,
-            Self::OutOfMemory(_) => SM_ERR_OUT_OF_MEMORY,
+            Self::OutOfMemory(_) | Self::TooManyOutputSlots { .. } | Self::AllocationFailed => {
+                SM_ERR_OUT_OF_MEMORY
+            }
             Self::DropFailed { status } => *status,
         }
     }
@@ -500,7 +635,20 @@ impl TopologyFailure {
             | Self::VertexUseNotOnFace
             | Self::EdgeUseNotOnFace
             | Self::FaceUseWithoutShell
-            | Self::ShellHasNoFaceUses => ErrorKind::InvalidInput,
+            | Self::ShellHasNoFaceUses
+            | Self::NoDataGiven
+            | Self::NoCurveGiven
+            | Self::NoSurfaceGiven
+            | Self::PartNotEmpty
+            | Self::TooManyOutputSlots { .. }
+            | Self::ConstructorNotOpen { .. }
+            | Self::ConstructorStillOpen { .. }
+            | Self::EdgeCurveAlreadySet
+            | Self::LoopMatesDisagree
+            | Self::OwnerListBroken
+            | Self::OwnerListOverCount { .. }
+            | Self::NothingToLink
+            | Self::NotOnOwnerList => ErrorKind::InvalidInput,
             Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
             | Self::FaceWithoutEdges
@@ -509,8 +657,12 @@ impl TopologyFailure {
             | Self::InnerLoopsOnBothSides
             | Self::LaminaEdgeIsStrut
             | Self::RadialSweepNeedsCones
-            | Self::TooManyTangentFaces => ErrorKind::Unsupported,
-            Self::CurveNotApproximated => ErrorKind::Failed,
+            | Self::TooManyTangentFaces
+            | Self::NoPlaneProjection => ErrorKind::Unsupported,
+            Self::CurveNotApproximated
+            | Self::AllocationFailed
+            | Self::NoProjectedCurves
+            | Self::NoFootOnCurve => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -664,6 +816,51 @@ impl core::fmt::Display for TopologyFailure {
             Self::UvTrimCurveNotMade => {
                 f.write_str("the edge use's UV trim curve could not be made")
             }
+            Self::NoDataGiven => f.write_str("no file contents were given"),
+            Self::NoCurveGiven => f.write_str("no curve was given"),
+            Self::NoSurfaceGiven => f.write_str("no surface was given"),
+            Self::PartNotEmpty => f.write_str("the part to read into is not empty"),
+            Self::TooManyOutputSlots { asked, fits_below } => write!(
+                f,
+                "{asked} curve output slots were asked for; fewer than {fits_below} fit"
+            ),
+            Self::AllocationFailed => f.write_str("memory for the output could not be allocated"),
+            Self::NoProjectedCurves => {
+                f.write_str("the curve's projection onto the B-rep gives no curves")
+            }
+            Self::NoPlaneProjection => f.write_str("the curve kind has no plane projection"),
+            Self::ConstructorNotOpen {
+                call,
+                part: ConstructorPart::EdgeCurve,
+            } => write!(
+                f,
+                "the B-rep constructor's {call}: the edge has no curve yet"
+            ),
+            Self::ConstructorNotOpen { call, part } => {
+                write!(f, "the B-rep constructor's {call}: no {part} is open")
+            }
+            Self::ConstructorStillOpen { call, part } => {
+                write!(f, "the B-rep constructor's {call}: a {part} is still open")
+            }
+            Self::EdgeCurveAlreadySet => f.write_str("the edge already has its curve"),
+            Self::NoFootOnCurve => {
+                f.write_str("the limit point does not drop onto the edge's curve")
+            }
+            Self::LoopMatesDisagree => f.write_str(
+                "an edge use's clockwise neighbour's mate is not its mate's counter-clockwise \
+                 neighbour",
+            ),
+            Self::OwnerListBroken => {
+                f.write_str("the owner's list of members is not a closed ring")
+            }
+            Self::OwnerListOverCount { list_size } => {
+                write!(
+                    f,
+                    "the owner's list holds more than its {list_size} members"
+                )
+            }
+            Self::NothingToLink => f.write_str("an object to link is missing"),
+            Self::NotOnOwnerList => f.write_str("the object is not on this list"),
         }
     }
 }
@@ -974,6 +1171,75 @@ mod tests {
         }
     }
 
+    /// The named causes of the B-rep constructor, the file and projection wrappers and the
+    /// owner lists keep the status of the phrase each replaced, and have their class.
+    #[test]
+    fn the_construction_causes_keep_their_status_and_have_their_class() {
+        use ConstructorPart as P;
+        use ErrorKind as K;
+        use TopologyFailure as T;
+        let op = "topology::op";
+        let slots = T::TooManyOutputSlots {
+            asked: 9,
+            fits_below: 3,
+        };
+        let not_open = T::ConstructorNotOpen {
+            call: "EndShell",
+            part: P::Shell,
+        };
+        let still_open = T::ConstructorStillOpen {
+            call: "EndShell",
+            part: P::Face,
+        };
+        let cases = [
+            (T::NoDataGiven, SM_ERR_INVALID_INPUT, K::InvalidInput),
+            (T::NoCurveGiven, SM_ERR_INVALID_INPUT, K::InvalidInput),
+            (T::NoSurfaceGiven, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (T::PartNotEmpty, SM_ERR_INVALID_INPUT, K::InvalidInput),
+            (slots, SM_ERR_OUT_OF_MEMORY, K::InvalidInput),
+            (T::AllocationFailed, SM_ERR_OUT_OF_MEMORY, K::Failed),
+            (T::NoProjectedCurves, SM_ERR, K::Failed),
+            (T::NoPlaneProjection, SM_ERR, K::Unsupported),
+            (not_open, SM_ERR, K::InvalidInput),
+            (still_open, SM_ERR, K::InvalidInput),
+            (T::EdgeCurveAlreadySet, SM_ERR, K::InvalidInput),
+            (T::NoFootOnCurve, SM_ERR, K::Failed),
+            (T::LoopMatesDisagree, SM_ERR, K::InvalidInput),
+            (T::OwnerListBroken, SM_ERR, K::InvalidInput),
+            (
+                T::OwnerListOverCount { list_size: 2 },
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (T::NothingToLink, SM_ERR, K::InvalidInput),
+            (T::NotOnOwnerList, SM_ERR, K::InvalidInput),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::topology(op, failure);
+            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.topology_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+        }
+        assert_eq!(
+            SolidError::topology(op, not_open).to_string(),
+            "topology::op: the B-rep constructor's EndShell: no shell is open"
+        );
+        assert_eq!(
+            SolidError::topology(op, still_open).to_string(),
+            "topology::op: the B-rep constructor's EndShell: a face is still open"
+        );
+        let curve = T::ConstructorNotOpen {
+            call: "SetLimits",
+            part: P::EdgeCurve,
+        };
+        assert_eq!(
+            SolidError::topology(op, curve).to_string(),
+            "topology::op: the B-rep constructor's SetLimits: the edge has no curve yet"
+        );
+    }
+
     /// The topology routines describe their failures: their library code builds no bare
     /// `Upstream` status, except the file listed (with the bare sites it may still hold).
     #[test]
@@ -1269,8 +1535,6 @@ mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/topology/api_files.rs", 9),
-            ("solidcore/src/topology/api_projection.rs", 7),
             ("solidcore/src/topology/brep/cutting.rs", 11),
             ("solidcore/src/topology/brep/local_operation.rs", 5),
             ("solidcore/src/topology/brep/mirror.rs", 2),
@@ -1289,13 +1553,11 @@ mod tests {
             ("solidcore/src/topology/brep/validation/pointers.rs", 2),
             ("solidcore/src/topology/brep/vertex_fans.rs", 6),
             ("solidcore/src/topology/brep_cache.rs", 17),
-            ("solidcore/src/topology/brep_constructor.rs", 24),
             ("solidcore/src/topology/brep_data.rs", 5),
             ("solidcore/src/topology/brep_data_write.rs", 5),
             ("solidcore/src/topology/database_io.rs", 3),
             ("solidcore/src/topology/geometry_write.rs", 2),
             ("solidcore/src/topology/part_file.rs", 1),
-            ("solidcore/src/topology/proto_topology/p1/owning_topology.rs", 6),
             ("solidcore/src/topology/proto_topology/p1/proto.rs", 16),
             ("solidcore/src/topology/proto_topology/p2.rs", 8),
             ("solidcore/src/topology/proto_topology/p3.rs", 6),
