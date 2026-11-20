@@ -212,6 +212,12 @@ impl Harness {
         self.frame_with_pen(events, None);
     }
 
+    /// One frame with these keys held (Shift, Ctrl, Alt) while `events` come in.
+    pub fn frame_with_modifiers(&mut self, mut events: Vec<egui::Event>, modifiers: egui::Modifiers) {
+        events.insert(0, egui::Event::ModifiersChanged(modifiers));
+        self.frame_with(events);
+    }
+
     /// One frame with a release identified as a pen tip by the platform.
     pub fn frame_with_pen(&mut self, events: Vec<egui::Event>, pen_release: Option<egui::Pos2>) {
         self.frame_with_taps(events, crate::pencil::PlatformTaps { pen_release, ..Default::default() });
