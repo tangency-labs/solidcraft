@@ -18,7 +18,7 @@ use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list,
 use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
     BendTableFormat, BendTableParams, BendTableResult, ConvertParams, DxfFile, ExportDxfParams, ExportDxfResult, FlangeParams, FlatCircle,
-    FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HemParams, LibraryRule, LibrarySource, ListedRule, ManageRulesParams,
+    FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HemParams, JogParams, LibraryRule, LibrarySource, ListedRule, ManageRulesParams,
     ManageRulesResult, MeasureBodyParams, PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleLibraryParams, RuleLibraryResult,
     RuleReply, RulesParams, RulesResult, SheetBodyMeasure, UnfoldParams,
 };
@@ -29,6 +29,7 @@ const FLANGE_CONTRACT: TypedContract<FlangeParams> = TypedContract::new();
 const PERFORATE_CONTRACT: TypedContract<PerforateParams> = TypedContract::new();
 const HEM_CONTRACT: TypedContract<HemParams> = TypedContract::new();
 const FOLD_CONTRACT: TypedContract<FoldParams> = TypedContract::new();
+const JOG_CONTRACT: TypedContract<JogParams> = TypedContract::new();
 const UNFOLD_CONTRACT: TypedContract<UnfoldParams> = TypedContract::new();
 const CONVERT_CONTRACT: TypedContract<ConvertParams> = TypedContract::new();
 const RECOGNIZE_CONTRACT: TypedContract<RecognizeParams> = TypedContract::new();
@@ -101,12 +102,17 @@ pub static COMMANDS: &[CommandSpec] = &[
          stays?: left|right (the side of the line as drawn that stays, seen from the sheet's surface) or fixed?: [x,y,z] on the sheet, on that side \
          (default: the side with more of the sheet joined to it; decided once, as the fold is made, and kept); flip? (fold the other way); body?",
     ),
-    CommandSpec::new("sheet.jog", "Jog", jog).at("SHEET METAL", "CREATE").icon("jog").params(
+    CommandSpec::new("sheet.jog", "Jog", crate::checked!("sheet.jog", jog))
+        .at("SHEET METAL", "CREATE")
+        .icon("jog")
+        .contract(&JOG_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
         "line: sketch + curve (a sketch line across a flat panel; followed when the sketch changes) or points: [[x,y,z], [x,y,z]]; \
          offset: expr (the height of the step); measure?: outside|inside|faces (what the offset is measured between: outer face to outer face, \
          inner face to inner face, or a face to the same face; default outside); angle? (default 90 deg, both bends); radius? (default: rule); \
          position?: start|middle|end (where the line sits in the jog, from the line toward the side that moves; default start); \
-         stays?: left|right (the side of the line as drawn that stays, seen from the sheet's surface) or fixed?: [x,y,z] on that side \
+         stays?: left|right (the side of the line as drawn that stays, seen from the sheet's surface) or fixed?: [x,y,z] on the sheet, on that side \
          (default: the side with more of the sheet joined to it; decided once, as the jog is made, and kept); flip? (step the other way); body? - two bends and a straight wall \
          in one feature; an offset too small for the bends is refused with the smallest that fits",
     ),
@@ -619,6 +625,16 @@ pub(crate) fn fold_position(t: &str) -> Option<String> {
     Some(t.to_ascii_lowercase()).filter(|t| matches!(t.as_str(), "centerline" | "start" | "end" | "mould" | "mold"))
 }
 
+/// A jog's `measure` (in any case), lower-cased: outside, inside or faces.
+pub(crate) fn jog_measure(t: &str) -> Option<String> {
+    Some(t.to_ascii_lowercase()).filter(|t| matches!(t.as_str(), "outside" | "inside" | "faces"))
+}
+
+/// A jog's `position` (in any case), lower-cased: start, middle or end.
+pub(crate) fn jog_position(t: &str) -> Option<String> {
+    Some(t.to_ascii_lowercase()).filter(|t| matches!(t.as_str(), "start" | "middle" | "end"))
+}
+
 /// A fold's `stays` (in any case), lower-cased: left or right.
 pub(crate) fn fold_stays(t: &str) -> Option<String> {
     Some(t.to_ascii_lowercase()).filter(|t| matches!(t.as_str(), "left" | "right"))
@@ -822,20 +838,21 @@ fn jog(s: &mut Session, p: &Value) -> Result<Value> {
     let (sketch, curve, a, b) = bend_line(s, p, cmd)?;
     let offset = req_expr(cmd, p, "offset")?;
     check_expr(s, &offset, Kind::Length, cmd, "offset")?;
-    let measure = str_(p, "measure").unwrap_or("outside").to_ascii_lowercase();
-    if !matches!(measure.as_str(), "outside" | "inside" | "faces") {
-        return Err(bad(cmd, "`measure` must be outside, inside or faces"));
-    }
+    // A value that is not one of the words, or not text at all, is refused, never read as the default.
+    let measure = match p.get("measure") {
+        None | Some(Value::Null) => "outside".to_string(),
+        Some(v) => v.as_str().and_then(jog_measure).ok_or_else(|| bad(cmd, "`measure` must be outside, inside or faces"))?,
+    };
     let angle = expr(p, "angle").unwrap_or_else(|| "90 deg".into());
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let radius = expr(p, "radius");
     if let Some(r) = &radius {
         check_expr(s, r, Kind::Length, cmd, "radius")?;
     }
-    let position = str_(p, "position").unwrap_or("start").to_ascii_lowercase();
-    if !matches!(position.as_str(), "start" | "middle" | "end") {
-        return Err(bad(cmd, "`position` must be start, middle or end"));
-    }
+    let position = match p.get("position") {
+        None | Some(Value::Null) => "start".to_string(),
+        Some(v) => v.as_str().and_then(jog_position).ok_or_else(|| bad(cmd, "`position` must be start, middle or end"))?,
+    };
     // As for a fold: a side given says which side stays, and `fixed` is then ignored.
     let stays = stays_param(p, cmd)?;
     let fixed = match p.get("fixed") {

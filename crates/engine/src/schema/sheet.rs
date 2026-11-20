@@ -234,6 +234,22 @@ word!(
     ["centerline", "start", "end", "mould", "mold"]
 );
 word!(
+    /// A jog's `measure` (read by `sheet::jog_measure`).
+    JogMeasure,
+    crate::cmd::jog_measure,
+    "must be outside, inside or faces",
+    "outside (outer face to outer face), inside (inner face to inner face) or faces (a face to the same face), in any case.",
+    ["outside", "inside", "faces"]
+);
+word!(
+    /// A jog's `position` (read by `sheet::jog_position`).
+    JogPosition,
+    crate::cmd::jog_position,
+    "must be start, middle or end",
+    "start, middle or end of the jog, from the line toward the side that moves, in any case.",
+    ["start", "middle", "end"]
+);
+word!(
     /// A fold's `stays` (read by `sheet::fold_stays`).
     FoldStays,
     crate::cmd::fold_stays,
@@ -560,6 +576,59 @@ pub struct FoldParams {
     #[serde(default)]
     pub stays: Option<FoldStays>,
     /// Fold the other way. Default: false.
+    #[serde(default)]
+    pub flip: Option<bool>,
+    /// The sheet metal body. Default: the sheet with an edge nearest the line's middle.
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Jog a sheet: an offset step across a flat panel, two bends and a straight wall in one feature,
+/// along a sketch line (followed when the sketch changes) or two points. The bend zones come out
+/// of the sheet, so the flat pattern keeps its size. An offset too small for the two bends is
+/// refused with the smallest that fits. `participants` changes nothing.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct JogParams {
+    /// The jog line's two ends, instead of `sketch` and `curve`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FoldPoints")]
+    pub points: Option<FoldPoints>,
+    /// The sketch holding the jog line, by id or name. Required unless `points` is given;
+    /// ignored then.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+    /// The jog line: a line of `sketch`, by id. Required unless `points` is given; ignored then.
+    #[serde(default)]
+    pub curve: Option<String>,
+    /// The height of the step, measured as `measure` says.
+    pub offset: LengthExpr,
+    /// What the offset is measured between. Default: outside.
+    #[serde(default)]
+    pub measure: Option<JogMeasure>,
+    /// The angle of both bends. Default: 90 deg.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    /// The inner radius of both bends. Default: the sheet's rule's.
+    #[serde(default)]
+    pub radius: Option<LengthExpr>,
+    /// Where the line sits in the jog, from the line toward the side that moves. Default: start.
+    #[serde(default)]
+    pub position: Option<JogPosition>,
+    /// A point on the side that stays, on the sheet. The jog is made with the side it lies on,
+    /// kept in `stays`; a point off the sheet is refused. Ignored where `stays` is given.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FixedPoint")]
+    pub fixed: Option<FixedPoint>,
+    /// The side of the jog line that stays put: left or right of the line as drawn, seen from the
+    /// sheet's surface. Decided once, as the jog is made, and kept with it. Default: the side
+    /// `fixed` lies on, else the side with more of the sheet joined to it.
+    #[serde(default)]
+    pub stays: Option<FoldStays>,
+    /// Step the other way. Default: false.
     #[serde(default)]
     pub flip: Option<bool>,
     /// The sheet metal body. Default: the sheet with an edge nearest the line's middle.

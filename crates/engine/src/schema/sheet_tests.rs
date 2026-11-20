@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use super::{
     BendTableFormatParam, BendTableParams, BendTableResult, ConvertParams, DxfCurvesParam, DxfLayersParam, DxfNoteHeight, DxfTextParam,
     ExportDxfParams, ExportDxfResult, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam, FlatPatternParams, FlatPatternResult,
-    FoldParams, FoldPoints, FoldPosition, FoldStays, HeightFromParam, HemParams, MaterialSide, MeasureBodyParams, PathFlangeParams, PerforateParams,
+    FoldParams, FoldPoints, FoldPosition, FoldStays, HeightFromParam, HemParams, JogMeasure, JogParams, JogPosition, MaterialSide, MeasureBodyParams, PathFlangeParams, PerforateParams,
     PerforationPattern, RecognizeParams, ReliefShapeParam, SheetEdgePoint, SheetPoints, ThenSteps, UnfoldParams,
 };
 use crate::Session;
@@ -72,6 +72,10 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<FoldParams>(),
         &keys(&["angle", "body", "curve", "fixed", "flip", "points", "position", "radius", "sketch", "stays"]),
+    );
+    assert_keys(
+        input_schema_for::<JogParams>(),
+        &keys(&["angle", "body", "curve", "fixed", "flip", "measure", "offset", "points", "position", "radius", "sketch", "stays"]),
     );
     assert_keys(input_schema_for::<UnfoldParams>(), &keys(&["body"]));
     assert_keys(input_schema_for::<ConvertParams>(), &keys(&["bends", "body", "direction", "engrave", "face", "faces", "rule", "skip"]));
@@ -200,6 +204,8 @@ fn the_value_types_match_the_readers() {
     );
     words(&["outer", " Inner ", "TANGENT"], &[json!("sharp"), json!(""), json!(5)], &|v| parse::<HeightFromParam>(v).is_some());
     words(&["centerline", "Start", "END", "mould", "Mold"], &[json!("center"), json!("side"), json!(null)], &|v| parse::<FoldPosition>(v).is_some());
+    words(&["outside", "Inside", "FACES"], &[json!("across"), json!(" inside"), json!(""), json!(42), json!(null)], &|v| parse::<JogMeasure>(v).is_some());
+    words(&["start", "Middle", "END"], &[json!("centerline"), json!(" end"), json!(""), json!(1), json!(null)], &|v| parse::<JogPosition>(v).is_some());
     words(&["left", "Right", "LEFT"], &[json!("up"), json!(" left"), json!(""), json!(5), json!(null)], &|v| parse::<FoldStays>(v).is_some());
     words(&["notch", " Round ", "rectangular", "TEAR"], &[json!("oval"), json!(""), json!(5)], &|v| parse::<ReliefShapeParam>(v).is_some());
     words(&["inside", "Outside", "INSIDE"], &[json!("both"), json!(""), json!(5)], &|v| parse::<MaterialSide>(v).is_some());
@@ -289,6 +295,10 @@ fn strict_keeps_todays_errors() {
         ("sheet.fold", json!({"points": [[0, 0, 0], [10, 0, 0]], "fixed": [1, 2]})),
         ("sheet.fold", json!({"points": [[0, 0, 0], [10, 0, 0]], "fixed": null})),
         ("sheet.fold", json!({"sketch": true, "curve": "l1"})),
+        ("sheet.jog", json!({"points": [[0, 0, 0], [10, 0, 0]], "offset": 10, "measure": "across"})),
+        ("sheet.jog", json!({"points": [[0, 0, 0], [10, 0, 0]], "offset": 10, "measure": 42})),
+        ("sheet.jog", json!({"points": [[0, 0, 0], [10, 0, 0]], "offset": 10, "position": "centerline"})),
+        ("sheet.jog", json!({"points": [[0, 0, 0], [10, 0, 0]], "offset": 10, "position": 1})),
         ("sheet.convert", json!({"body": "Nothing", "face": [0, 0, 0]})),
         ("sheet.path_flange", json!({"edge": [1, 2], "sketch": "Path", "curves": ["p1"]})),
         ("sheet.path_flange", json!({"edge": null, "sketch": "Path", "curves": ["p1"]})),
@@ -427,6 +437,13 @@ fn replies_match_the_output_schema() {
     ] {
         check(ok(&mut s, id, p));
     }
+    let mut s = warn();
+    check(ok(
+        &mut s,
+        "sheet.jog",
+        json!({"points": [[50, 0, 2.5], [50, 60, 2.5]], "offset": 20, "measure": "Inside", "angle": "90 deg", "radius": 2,
+               "position": "Middle", "fixed": [90, 30, 2.5], "flip": false, "name": "Step"}),
+    ));
     let mut s = warn();
     for (id, p) in [
         ("sketch.create", json!({"plane": "XY", "offset": 2.5, "name": "FoldLine"})),

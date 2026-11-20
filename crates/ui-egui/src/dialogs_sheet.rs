@@ -1273,6 +1273,11 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
     k.fill_simple_params(&mut p);
     if let Value::Object(m) = &mut p {
         for (k, v) in extra {
+            // A sketch line picked in an edited fold or jog replaces the two points it was made
+            // from: the engine reads `points` before `sketch` and `curve`.
+            if k == "points" && m.contains_key("curve") {
+                continue;
+            }
             m.entry(k.clone()).or_insert_with(|| v.clone());
         }
     }

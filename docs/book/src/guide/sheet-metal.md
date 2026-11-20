@@ -45,8 +45,9 @@ outer face, the default), `inside` (inner face to inner face) or `faces` (a face
 face). `angle` (default 90 deg) turns both bends, `position` puts the line at the `start`,
 `middle` or `end` of the whole jog, from the line toward the side that moves, and `flip` steps
 the other way. Which side stays is decided once, as the jog is made, the way a fold decides it
-(`stays`: `left` or `right` of the line as drawn, or `fixed` on that side, else the side with
-more of the sheet joined to it), and kept. The two bends are cut out of the sheet like a fold, so the flat pattern keeps its
+(`stays`: `left` or `right` of the line as drawn, or `fixed`, a point on the sheet on that
+side, else the side with more of the sheet joined to it), and kept: only the side is stored, not
+the point. A `fixed` point off the sheet is refused. The two bends are cut out of the sheet like a fold, so the flat pattern keeps its
 size and the bend table lists one bend up and one down. An offset too small for the two bends is
 refused with the smallest that fits.
 
