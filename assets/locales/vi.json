@@ -5347,7 +5347,6 @@
   "sketch_panel.plane_offset": "{plane}, dời một khoảng {distance}",
   "sketch_panel.plane_origin": "Mặt phẳng {plane}",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "Gắn vào một mặt phẳng của thân khối tấm kim loại; phác thảo sẽ đi theo tấm đó khi tấm thay đổi.",
   "sketch_panel.text_hint": "Sửa văn bản và vị trí của nó, rồi nhấn OK.",
   "sketch_panel.use_plane": "Dùng mặt phẳng {plane}",
   "sketch_text.align_center": "Căn giữa",

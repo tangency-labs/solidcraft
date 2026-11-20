@@ -435,6 +435,47 @@ impl SharedTris {
         out
     }
 
+    /// An indexed mesh whose facets are lit by their own normals. Reuse its existing vertex
+    /// sharing. Vertices referenced only by discarded facets cannot enlarge its draw bounds.
+    pub fn from_flat_indexed(positions: &[Vec3], triangles: &[[u32; 3]]) -> Option<SharedTris> {
+        let mut remap = Vec::new();
+        remap.try_reserve_exact(positions.len()).ok()?;
+        remap.resize(positions.len(), u32::MAX);
+        let source = triangles.as_flattened();
+        let mut used = 0;
+        for &index in source {
+            let slot = remap.get_mut(index as usize)?;
+            if *slot == u32::MAX {
+                *slot = 0;
+                used += 1;
+            }
+        }
+
+        let mut out = SharedTris { flat: true, ..Default::default() };
+        out.vertices.try_reserve_exact(SHARED_SIZE.checked_mul(used)?).ok()?;
+        out.indices.try_reserve_exact(source.len()).ok()?;
+        let mut lo = [f32::INFINITY; 3];
+        let mut hi = [f32::NEG_INFINITY; 3];
+        for (p, index) in positions.iter().zip(&mut remap).filter(|(_, i)| **i != u32::MAX) {
+            *index = u32::try_from(out.vertices.len() / SHARED_SIZE).ok()?;
+            let p = p.to_f32();
+            for k in 0..3 {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+            for v in p.iter().chain(&[0.0f32; 3]) {
+                out.vertices.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        if used == positions.len() {
+            out.indices.extend_from_slice(source);
+        } else {
+            out.indices.extend(source.iter().map(|&i| remap[i as usize]));
+        }
+        out.bounds = [lo, hi];
+        Some(out)
+    }
+
     /// A simplified copy of a mesh ([`solidcore_tess::simplify::Level`]): its vertices already
     /// shared, its triangles lit flat (each fragment with its triangle's own normal).
     pub fn from_level(level: &solidcore_tess::simplify::Level) -> SharedTris {
@@ -739,6 +780,10 @@ pub struct GpuScene {
     /// Hovered faces of opaque bodies in their own palette slots (the model's colour and
     /// finish for each face): lit over the model like a whole hovered body, tinted by the hover.
     pub hover_faces: Vec<u8>,
+    /// An opaque imported mesh's single display face, tinted using the model's indexed buffers.
+    pub hover_face_instanced: Vec<InstancedMesh>,
+    /// Selected imported mesh faces using the model's indexed buffers and the selection colour.
+    pub selected_face_instanced: Vec<InstancedMesh>,
     /// Whole highlighted bodies the model builds in its blocks but does not draw opaque (faded
     /// context, see-through): every one of their vertices drawn again, in this scene's palette,
     /// whose entries for their faces hold the highlight colour. No triangle is copied.
@@ -2194,6 +2239,8 @@ struct Batches {
     open_tris: Option<Batch>,
     /// [`GpuScene::hover_faces`].
     hover_faces: Option<Batch>,
+    hover_face_instanced: Vec<InstancedDraw>,
+    selected_face_instanced: Vec<InstancedDraw>,
     ground_ao: Option<Batch>,
     ground_input: Option<GroundAo>,
     pbr: Option<Batch>,
@@ -2276,8 +2323,8 @@ impl Batches {
     /// scene shares with `donor` (another scene drawn in the same frame) instead of uploading and
     /// evaluating them again: a dragged component's bodies move between the model scene and the
     /// moving layer. `uniform` is the one the scene's palette is bound with (the layer has its
-    /// own). The donor gives them up only when the upload succeeded. The scene's lit instanced
-    /// edges are drawn from `edges_from`'s segment buffer (the model's) where it holds them.
+    /// own). The donor gives them up only when the upload succeeded. Instanced hover faces and
+    /// lit edges can also share the model's triangle and segment buffers.
     fn take_sharing(
         &mut self,
         device: &wgpu::Device,
@@ -2289,7 +2336,7 @@ impl Batches {
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
         oit_available: bool,
         donor: Option<&mut Batches>,
-        edges_from: Option<&edges::Edges>,
+        model: Option<&Batches>,
     ) -> Result<(), String> {
         if self.key == Some(key) {
             return Ok(());
@@ -2298,7 +2345,7 @@ impl Batches {
         let _ = take_upload_failure();
         let mut next = self.clone();
         let mut taken = donor.as_deref().cloned();
-        next.upload_scene(device, queue, uniform, bgl, key, &sc, tess, oit_available, taken.as_mut(), edges_from);
+        next.upload_scene(device, queue, uniform, bgl, key, &sc, tess, oit_available, taken.as_mut(), model);
         match take_upload_failure() {
             None => {
                 next.upload_failed = false;
@@ -2334,7 +2381,7 @@ impl Batches {
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
         oit_available: bool,
         mut donor: Option<&mut Batches>,
-        edges_from: Option<&edges::Edges>,
+        model: Option<&Batches>,
     ) {
         {
             self.uploads = UploadStats::default();
@@ -2373,7 +2420,7 @@ impl Batches {
             };
             let parts = edges::Part::of_draws(&self.instanced);
             self.edges = shared_edges(&parts, self.edges.as_ref());
-            let lit_from = self.edges.as_ref().or(edges_from);
+            let lit_from = self.edges.as_ref().or_else(|| model.and_then(|scene| scene.edges.as_ref()));
             let lit_parts = edges::Part::of_meshes(&sc.lit_instanced_edges);
             self.lit_shared_edges = shared_edges(&lit_parts, lit_from);
             let lit_hidden_parts = edges::Part::of_meshes(&sc.lit_instanced_hidden);
@@ -2394,6 +2441,16 @@ impl Batches {
             self.lit_edges = sc.lit_edges.clone();
             self.hover_instanced = self.instanced(device, &sc.hover_instanced, donor.as_deref(), arena.as_deref());
             self.selected_instanced = self.instanced(device, &sc.selected_instanced, donor.as_deref(), arena.as_deref());
+            self.hover_face_instanced = if sc.hover_face_instanced.is_empty() {
+                Vec::new()
+            } else {
+                self.instanced(device, &sc.hover_face_instanced, model, arena.as_deref())
+            };
+            self.selected_face_instanced = if sc.selected_face_instanced.is_empty() {
+                Vec::new()
+            } else {
+                self.instanced(device, &sc.selected_face_instanced, model, arena.as_deref())
+            };
             let mut kept = std::mem::take(&mut self.blocks);
             let mut order = Vec::with_capacity(sc.blocks.len());
             let mut geometry = 0;
@@ -2514,7 +2571,15 @@ impl Batches {
             let mut levels = Vec::with_capacity(1 + m.levels.len());
             for (i, (tris, error)) in std::iter::once((&m.tris, 0.0f32)).chain(m.levels.iter().map(|(t, e)| (t, *e))).enumerate() {
                 let key = Arc::as_ptr(tris) as usize;
-                let shared = || donor?.instanced_tris.get(&key).filter(|(b, _)| Arc::ptr_eq(b, tris)).cloned();
+                let shared = || {
+                    let scene = donor?;
+                    scene.instanced_tris.get(&key).filter(|(b, _)| Arc::ptr_eq(b, tris)).cloned().or_else(|| {
+                        // An arena draw holds the uploaded mesh in its level, and may have no
+                        // entry in the standalone buffer cache.
+                        let level = scene.instanced.iter().flat_map(|draw| &draw.levels).find(|level| Arc::ptr_eq(&level.src, tris))?;
+                        Some((tris.clone(), level.tris.clone()))
+                    })
+                };
                 let in_arena = arena.and_then(|a| a.place(tris));
                 let gpu = match in_arena {
                     Some(g) => (tris.clone(), Arc::new(g)),
@@ -2871,6 +2936,8 @@ pub struct Renderer {
     tri_hl_selected: wgpu::RenderPipeline,
     /// The same for bodies the model builds on the CPU, from its blocks' triangle buffers.
     tri_hl_hover_built: wgpu::RenderPipeline,
+    tri_hl_hover_instanced: wgpu::RenderPipeline,
+    tri_hl_hover_instanced_flat: wgpu::RenderPipeline,
     tri_hl_selected_built: wgpu::RenderPipeline,
     /// The same for bodies drawn as placements of shared triangles (the placement's colour is
     /// the highlight's), smooth and flat.
@@ -3800,6 +3867,8 @@ impl Renderer {
             (
                 solid("sc_tris_hl_hover", "fs_hl_hover", None, highlight_depth(t.depth), TriSource::Planned),
                 solid("sc_tris_hl_hover_built", "fs_hl_hover", None, highlight_depth(t.depth), TriSource::Built),
+                solid("sc_tris_hl_hover_instanced", "fs_hl_hover", None, highlight_depth(t.depth), TriSource::Instanced),
+                solid("sc_tris_hl_hover_instanced_flat", "fs_hl_hover", None, highlight_depth(t.depth), TriSource::InstancedFlat),
             )
         };
         let selected = || {
@@ -3913,7 +3982,7 @@ impl Renderer {
             let (tri, tri_marks, tri_planned, planned_marks, tri_instanced, instanced_marks) = tris.join();
             let (tri_cap, planned_cap, instanced_cap) = caps.join();
             let (tri_instanced_flat, flat_marks) = flat.join();
-            let (tri_hl_hover, tri_hl_hover_built) = hover.join();
+            let (tri_hl_hover, tri_hl_hover_built, tri_hl_hover_instanced, tri_hl_hover_instanced_flat) = hover.join();
             let (tri_hl_selected, tri_hl_selected_built) = selected.join();
             let (
                 tri_hl,
@@ -4046,6 +4115,8 @@ impl Renderer {
                 tri_hl_hover,
                 tri_hl_selected,
                 tri_hl_hover_built,
+                tri_hl_hover_instanced,
+                tri_hl_hover_instanced_flat,
                 tri_hl_selected_built,
                 tri_hl_instanced,
                 tri_hl_instanced_flat,
@@ -4613,7 +4684,7 @@ impl Renderer {
         // The highlight evaluates plans of its own where the model has none to draw again (in
         // Wireframe, a whole lit body's faces).
         let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
-        // Its lit instanced edges are drawn from the model's segment buffer, not uploaded again.
+        // Lit edges and a mesh body's highlighted face reuse the model's buffers.
         uploads.push(res.highlight.take_sharing(
             device,
             queue,
@@ -4624,7 +4695,7 @@ impl Renderer {
             tess,
             oit,
             None,
-            res.model.edges.as_ref(),
+            Some(&res.model),
         ));
         uploads.push(res.preview.take(device, queue, &res.uniform, &res.uniform_bgl, cb.pv_key, &cb.pv_slot, None, oit));
         // A refused scene leaves the previous picture; a capture must not pass it off as the new one.
@@ -5044,10 +5115,12 @@ impl Renderer {
                 block.draw(pass, TriClass::Opaque, tally);
             }
         }
+        tinted_instanced(pass, &res.tri_hl_instanced, &res.tri_hl_instanced_flat, &h.selected_face_instanced);
         tris(pass, &res.tri_hl, &h.tris);
         // Hovered faces of opaque bodies: their own colour and finish, tinted as a whole hovered
         // body is.
         tris(pass, &res.tri_hl_hover_built, &h.hover_faces);
+        tinted_instanced(pass, &res.tri_hl_hover_instanced, &res.tri_hl_hover_instanced_flat, &h.hover_face_instanced);
         // Hidden edges before the visible ones, so a visible edge is drawn over them. An edge
         // within a pixel of a nearer face's outline (a face seen edge on beside it) is hidden
         // under part of its own width; drawn after, its light hidden copy covered the visible
@@ -5836,6 +5909,16 @@ mod tests {
             assert_eq!(*q, flat.positions[k].to_f32());
             assert!((n[2] - 1.0).abs() < 1e-6, "{n:?}");
         }
+        // Canonical indexed imports already share vertices. Keep triangle order and lighting
+        // and exclude a vertex left unused by a discarded facet, even if it is far away.
+        let source = [p[2], Vec3::new(100.0, 100.0, 100.0), p[0], p[3], p[1]];
+        let indexed = SharedTris::from_flat_indexed(&source, &[[2, 4, 0], [2, 0, 3]]).unwrap();
+        assert!(indexed.flat);
+        assert_eq!(indexed.vertices.len() / SHARED_SIZE, 4);
+        assert_eq!(indexed.indices, [1, 3, 0, 1, 0, 2]);
+        assert_eq!(indexed.bounds, shared.bounds);
+        assert_eq!(indexed.corners().flatten().collect::<Vec<_>>(), corners);
+        assert!(SharedTris::from_flat_indexed(&source, &[[2, 4, 5]]).is_none());
         // Smooth: the same corners with different normals stay apart.
         let mut smooth = flat.clone();
         smooth.normals = vec![Vec3::Z, Vec3::Z, Vec3::new(0.0, 0.6, 0.8), Vec3::Z, Vec3::X, Vec3::new(0.0, 0.6, 0.8)];
@@ -6888,6 +6971,74 @@ mod glass_tests {
         scene.tri([5.0, -5.0, 0.0], [0.0, 0.0, 1.0], red);
         scene.tri([0.0, 5.0, 0.0], [0.0, 0.0, 1.0], red);
         scene
+    }
+
+    #[test]
+    fn selected_mesh_face_draws_as_the_copied_triangles_and_uploads_no_geometry() {
+        let (_, device, queue) = match crate::open_headless(crate::test_env::policy()) {
+            Ok(opened) => opened,
+            Err(error) if crate::test_env::skip_unless_required(crate::test_env::required(), &error) => return,
+            Err(error) => panic!("required GPU unavailable: {error}"),
+        };
+        let target = GpuTarget {
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            depth: Some(crate::depth_format(&device, true)),
+            samples: 1,
+            tess: false,
+            oit: false,
+            edges: false,
+        };
+        let mut renderer = Renderer::new(&device, target, None);
+        for flat in [false, true] {
+            let mesh = solidcore_tess::Mesh {
+                positions: vec![Vec3::new(-8.0, -8.0, 0.0), Vec3::new(8.0, -8.0, 0.0), Vec3::new(0.0, 8.0, 0.0)],
+                normals: if flat { vec![Vec3::Z; 3] } else { vec![Vec3::Z, Vec3::new(0.6, 0.0, 0.8), Vec3::new(-0.6, 0.0, 0.8)] },
+                triangles: vec![[0, 1, 2]],
+                ..Default::default()
+            };
+            let mut instance = InstancedMesh {
+                key: 1,
+                tris: Arc::new(SharedTris::new(&mesh)),
+                instances: Vec::new(),
+                look: InstanceLook::Opaque,
+                levels: Vec::new(),
+                closed: false,
+                edges: None,
+            };
+            let rows = [[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+            let mut scene = GpuScene::default();
+            instance.place(rows, scene.color([210, 120, 80, 255]));
+            scene.instanced.push(instance.clone());
+            let mut frame = test_frame(scene, 1.0);
+            frame.key += u64::from(flat);
+            frame.clip[0] = [1.0, 0.0, 0.0, 0.0];
+            frame.hl_key = 10 + 3 * u64::from(flat);
+            frame.hl_slot = Arc::new(Mutex::new(Some(GpuScene::default())));
+            let unselected = render_frame(&mut renderer, &device, &queue, &frame, true);
+
+            let mut copied = GpuScene::default();
+            let color = copied.color([76, 127, 203, 255]);
+            for (p, n) in mesh.positions.iter().zip(&mesh.normals) {
+                copied.tri((*p + Vec3::X).to_f32(), n.to_f32(), color);
+            }
+            frame.hl_key += 1;
+            frame.hl_slot = Arc::new(Mutex::new(Some(copied)));
+            let expected = render_frame(&mut renderer, &device, &queue, &frame, true);
+            assert_ne!(unselected, expected, "the selected face visibly tints the model");
+
+            let mut shared = GpuScene::default();
+            instance.instances.clear();
+            instance.place(rows, shared.color([76, 127, 203, 255]));
+            shared.selected_face_instanced.push(instance);
+            frame.hl_key += 1;
+            frame.hl_slot = Arc::new(Mutex::new(Some(shared)));
+            let actual = render_frame(&mut renderer, &device, &queue, &frame, true);
+            assert_eq!(renderer.highlight_uploads().geometry, 0);
+            assert_eq!(renderer.highlight_uploads().placements, INSTANCE_SIZE as u64);
+            assert_eq!(actual.len(), expected.len());
+            let error = actual.iter().zip(&expected).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or_default();
+            assert!(error <= 1, "shared and copied feedback match for flat={flat}, max channel difference {error}");
+        }
     }
 
     #[test]

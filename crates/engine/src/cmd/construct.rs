@@ -398,7 +398,7 @@ fn point_along(s: &mut Session, p: &Value) -> Result<Value> {
 fn plane_mid(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "construct.plane.midplane";
     let (a, b) = (geo(s, p.get("a"), cmd, "a")?, geo(s, p.get("b"), cmd, "b")?);
-    plane(s, p, PlaneRef::Midplane { a: Box::new(a), b: Box::new(b) })
+    plane(s, p, PlaneRef::Midplane { a: Box::new(a), b: Box::new(b), old_frame: false })
 }
 
 fn plane_edges(s: &mut Session, p: &Value) -> Result<Value> {

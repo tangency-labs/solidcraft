@@ -5347,7 +5347,6 @@
   "sketch_panel.plane_offset": "{plane}，偏移 {distance}",
   "sketch_panel.plane_origin": "{plane} 平面",
   "sketch_panel.redefine_title": "{command}：{name}",
-  "sketch_panel.sheet_attachment": "附着到钣金实体的平面上；钣金变化时会跟随该面板。",
   "sketch_panel.text_hint": "编辑文字及其位置，然后按“确定”。",
   "sketch_panel.use_plane": "使用 {plane} 平面",
   "sketch_text.align_center": "居中",

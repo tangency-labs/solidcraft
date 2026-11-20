@@ -237,6 +237,15 @@ fn show_views(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet:
     }
 }
 
+/// View `id` of the open drawing as the browser calls it, for anything that names a view to the
+/// person at the screen: one name for a view everywhere.
+pub(crate) fn name_of(app: &SolveApp, id: u64) -> Option<String> {
+    let drawing = app.session.drawing("drawing.inspect").ok()?;
+    let view = drawing.view(id)?;
+    let number = drawing.views.iter().filter(|other| other.sheet == view.sheet).position(|other| other.id == id)? + 1;
+    Some(view_name(app, drawing, view, number))
+}
+
 fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> String {
     if let Some(label) = &view.label {
         return label.name.clone();

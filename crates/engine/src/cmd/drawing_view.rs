@@ -224,9 +224,6 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
     let request: SnapshotParams = crate::schema::read(CMD, p)?;
     let settings = request.settings();
     let basis = settings.validate().map_err(|e| bad(CMD, e.to_string()))?;
-    if let Some(why) = crate::drawing_view::not_drawable(settings.visual_style, settings.reference_style) {
-        return Err(bad(CMD, why));
-    }
     if !(request.sheet.dpi.is_finite() && DPI_RANGE.contains(&request.sheet.dpi)) {
         return Err(bad(CMD, format!("sheet.dpi is a number from {} to {}", DPI_RANGE.start(), DPI_RANGE.end())));
     }

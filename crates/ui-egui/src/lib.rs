@@ -16,6 +16,7 @@ pub mod ai_connect;
 pub use solidcraft_ui_kit::app_bar;
 pub use solidcraft_ui_kit::blur;
 pub mod bom_panel;
+pub mod broken_view_preview;
 pub mod browser;
 pub mod browser_canvas;
 mod browser_defects;
@@ -24,6 +25,7 @@ pub mod browser_search;
 #[cfg(test)]
 mod browser_search_tests;
 pub mod canvas;
+mod card_resize;
 pub mod cli_link;
 #[cfg(test)]
 mod colour_tokens_tests;
@@ -34,6 +36,7 @@ pub mod context_menu;
 pub mod control;
 pub mod control_job;
 mod control_joint_drive;
+mod control_joint_pose;
 mod control_params;
 pub mod control_switch;
 pub mod crash_ui;
@@ -42,7 +45,6 @@ pub mod delete;
 pub mod design_properties;
 pub mod design_tab_prefs;
 pub mod design_view_ui;
-pub mod design_views;
 mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
@@ -60,6 +62,7 @@ pub mod dialogs_move;
 pub mod dialogs_part_size;
 pub mod dialogs_parts;
 pub mod dialogs_plastic;
+pub mod dialogs_rotate_member;
 pub mod dialogs_save_mesh;
 pub mod dialogs_sheet;
 pub mod dialogs_surface;
@@ -812,6 +815,9 @@ pub struct SolveApp {
     pub status: Option<(String, f64, bool)>,
     /// The status message offers Undo (a click on it undoes the last step), as after an automatic stand-up.
     pub status_undo: bool,
+    /// The status message is a refused JSON save of a design with binary data in it, and offers
+    /// Save as .sc, so that data is never left out.
+    pub status_save_sc: bool,
     pub quit_requested: bool,
     /// Autosave into the recovery folder (the desktop app turns it on).
     pub autosave: Option<recovery_ui::Autosaves>,
@@ -1121,6 +1127,7 @@ impl SolveApp {
             last_escape: None,
             status: None,
             status_undo: false,
+            status_save_sc: false,
             quit_requested: false,
             autosave: None,
             locks: None,
@@ -3267,6 +3274,7 @@ impl SolveApp {
         self.messages.push(&text, error, at);
         self.status = Some((text, at, error));
         self.status_undo = false;
+        self.status_save_sc = false;
     }
 
     /// Tell the user when the open design came from a newer SolidCraft: the notice on the status

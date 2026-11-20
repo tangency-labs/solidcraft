@@ -1438,6 +1438,20 @@ fn look_part(mesh: &solidcraft_engine::geom::Mesh, group: &[u32], look: u32) -> 
 /// triangles: a large imported mesh. Smaller ones are drawn so only when placed more than once.
 pub(crate) const INSTANCE_ALONE: usize = 50_000;
 
+/// Pack a complete imported mesh from its indexed geometry when the facets supply their own
+/// normals. B-reps, authored normals and subsets for individual looks use the shared vertex weld.
+fn build_shared_tris(
+    mesh: &solidcraft_engine::geom::Mesh,
+    body: Option<&solidcraft_engine::doc::ModelBody>,
+) -> std::sync::Arc<crate::gpu::SharedTris> {
+    let tris = body
+        .and_then(solidcraft_engine::doc::ModelBody::flat_mesh_in_place)
+        .filter(|(_, triangles)| triangles.len() == mesh.triangles.len())
+        .and_then(|(positions, triangles)| crate::gpu::SharedTris::from_flat_indexed(positions, triangles))
+        .unwrap_or_else(|| crate::gpu::SharedTris::new(mesh));
+    std::sync::Arc::new(tris)
+}
+
 /// Shared vertices made ahead, off the window thread ([`warm_shared_tris`]), by mesh address
 /// (the mesh held, so its address stays its own), until a scene takes them.
 static WARMED: std::sync::Mutex<Vec<(std::sync::Arc<solidcraft_engine::geom::Mesh>, std::sync::Arc<crate::gpu::SharedTris>)>> =
@@ -1446,14 +1460,13 @@ static WARMED: std::sync::Mutex<Vec<(std::sync::Arc<solidcraft_engine::geom::Mes
 const MAX_WARMED: usize = 8;
 
 /// Make a large mesh's shared vertices ahead of its first scene, on the caller's thread (the
-/// background mesher, after a file is opened or inserted): welding a scanned part takes a
-/// noticeable part of a second, which the window thread would otherwise spend on the first frame
-/// that shows it.
-pub(crate) fn warm_shared_tris(mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>) {
+/// background mesher, after a file is opened or inserted), to keep packing geometry off the
+/// first frame that shows it.
+pub(crate) fn warm_shared_tris(mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>, body: &solidcraft_engine::doc::ModelBody) {
     if mesh.triangles.len() < INSTANCE_ALONE || WARMED.lock().map_or(true, |w| w.iter().any(|(m, _)| std::sync::Arc::ptr_eq(m, mesh))) {
         return;
     }
-    let tris = std::sync::Arc::new(crate::gpu::SharedTris::new(mesh));
+    let tris = build_shared_tris(mesh, Some(body));
     if let Ok(mut warmed) = WARMED.lock() {
         if warmed.len() >= MAX_WARMED {
             warmed.remove(0);
@@ -1499,7 +1512,12 @@ impl WarmedParts {
 /// design is open: a placement that finds the part being made waits for it, and one that finds
 /// it taken makes nothing. The map is locked only to find or claim the part's slot, never while
 /// a part is made.
-pub(crate) fn warm_part(parts: &WarmedParts, mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>, edges: bool) {
+pub(crate) fn warm_part(
+    parts: &WarmedParts,
+    mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>,
+    edges: bool,
+    body: Option<&solidcraft_engine::doc::ModelBody>,
+) {
     let key = std::sync::Arc::as_ptr(mesh) as usize;
     let once = {
         let Ok(mut p) = parts.0.lock() else { return };
@@ -1515,7 +1533,7 @@ pub(crate) fn warm_part(parts: &WarmedParts, mesh: &std::sync::Arc<solidcraft_en
             }
         }
     };
-    once.get_or_init(|| (std::sync::Arc::new(crate::gpu::SharedTris::new(mesh)), edges.then(|| make_shared_edges(mesh))));
+    once.get_or_init(|| (build_shared_tris(mesh, body), edges.then(|| make_shared_edges(mesh))));
 }
 
 /// `mesh`'s part made ahead, if the design being opened has it made, taken: the scenes keep it
@@ -1964,7 +1982,7 @@ impl Instances {
         if !lod_eligible && matches!(look, crate::gpu::InstanceLook::Glass | crate::gpu::InstanceLook::Faded) && !oit {
             return None;
         }
-        self.add_placement(&mesh, &m, true, b.is_closed(), col, edge, look, true)?;
+        self.add_placement(&mesh, &m, true, b.is_closed(), col, edge, look, true, Some(b))?;
         Some((mesh, m))
     }
 
@@ -2009,7 +2027,7 @@ impl Instances {
         for (part, (col, look)) in parts.iter().zip(looks) {
             if !part.triangles.is_empty() {
                 // Levels of detail would merge triangles across faces of different looks.
-                self.add_placement(part, &m, false, closed, *col, edge, *look, false)?;
+                self.add_placement(part, &m, false, closed, *col, edge, *look, false, None)?;
             }
         }
         Some((mesh, m))
@@ -2030,6 +2048,7 @@ impl Instances {
         edge: (crate::gpu::PaletteIndex, crate::gpu::PaletteIndex),
         look: crate::gpu::InstanceLook,
         shared_edges_too: bool,
+        body: Option<&solidcraft_engine::doc::ModelBody>,
     ) -> Option<()> {
         let mesh = mesh.clone();
         let wants_levels = levels;
@@ -2046,7 +2065,7 @@ impl Instances {
                     None => (
                         match (self.kept.get(&key).filter(|(k, _)| std::sync::Arc::ptr_eq(k, &mesh)), &warmed) {
                             (Some((_, t)), _) | (None, Some((_, t, _))) => t.clone(),
-                            (None, None) => taken_shared_tris(&mesh).unwrap_or_else(|| std::sync::Arc::new(crate::gpu::SharedTris::new(&mesh))),
+                            (None, None) => taken_shared_tris(&mesh).unwrap_or_else(|| build_shared_tris(&mesh, body)),
                         },
                         if levels { self.lods.levels(&mesh).map(|l| l.as_ref().clone()).unwrap_or_default() } else { Vec::new() },
                     ),
@@ -4378,12 +4397,15 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         }
         // In the part's own frame, as for faces; its points are moved back to where it stands.
         let (m, place) = placed(b);
+        if m.display_only_edges && !measuring_mesh_edges(app) {
+            continue;
+        }
         let Some((lo, ld)) = local_ray(&place, o, d) else { continue };
         let moved = !solidcraft_engine::doc::is_identity(&place);
         let at = |p: Vec3| if moved { solidcraft_engine::doc::apply_point(&place, p) } else { p };
         // Only the segments that can come near the cursor, from the index, in the order a scan
         // of every edge would meet them, so ties go the same way.
-        let near = crate::pick_index::segments_near(app.viewport.pick_index.of(&m).as_deref(), &m, lo, ld, reach);
+        let near = crate::pick_index::segments_near(app.viewport.pick_index.for_edges(&m).as_deref(), &m, lo, ld, reach);
         let mut last_edge = None;
         for (ei, si) in near {
             let Some(e) = m.edges.get(ei) else { continue };
@@ -5525,8 +5547,8 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     // Whole-body highlights redraw the model scene's own blocks: they must be the scene's
     // current ones (their keys and the bodies' ranges in them).
     scene_key(app).hash(&mut h);
-    // And the mode the model draws bodies in: from their plans on the GPU, or built here.
-    app.viewport.gpu.is_some_and(|g| g.tess).hash(&mut h);
+    // Highlight reuse depends on a GPU scene and on whether it uses tessellation plans.
+    app.viewport.gpu.map(|g| g.tess).hash(&mut h);
     app.session.active_component.hash(&mut h);
     app.session.active_occurrence_path.hash(&mut h);
     app.ui.visual_style.hash(&mut h);
@@ -5630,6 +5652,8 @@ struct HoverBlock {
     selected_blocks: Vec<crate::gpu::BlockTris>,
     /// Hovered faces of opaque bodies, in their own slots.
     hover_faces: Vec<u8>,
+    hover_face_instanced: Vec<crate::gpu::InstancedMesh>,
+    selected_face_instanced: Vec<crate::gpu::InstancedMesh>,
     /// Bodies the model draws as placements of shared triangles: the same placements with the
     /// highlight colour.
     hover_instanced: Vec<crate::gpu::InstancedMesh>,
@@ -6212,6 +6236,8 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         sc.hover_blocks = cached.hover_blocks;
         sc.selected_blocks = cached.selected_blocks;
         sc.hover_faces = cached.hover_faces;
+        sc.hover_face_instanced = cached.hover_face_instanced;
+        sc.selected_face_instanced = cached.selected_face_instanced;
         sc.recoloured = cached.recoloured;
         sc.lit_edges = cached.lit_edges;
         sc.lit_instanced_edges = cached.lit_instanced_edges;
@@ -6225,6 +6251,8 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     let (hover_edge, selected_edge) =
         (EdgeColours::new(&mut feedback, t.hover_edge, t.hover_edge_halo), EdgeColours::new(&mut feedback, t.sel_edge, t.sel_edge_rim));
     let mut hover_instances = HighlightInstances::default();
+    let mut hover_face_instances = HighlightInstances::default();
+    let mut selected_face_instances = HighlightInstances::default();
     let mut lit_shared = EdgeHighlights::default();
     let mut lit_shared_hidden = EdgeHighlights::default();
     let mut selected_instances = HighlightInstances::default();
@@ -6259,6 +6287,15 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     // looking each one up along the world's bodies made Select All on an assembly of thousands
     // of bodies quadratic (millions of name comparisons on every hover change).
     let mut by_name = BodiesByName::new(&st);
+    // A solid instance fill uses the theme's selection colour. Keep the blended path for
+    // translucent themes, and the list's drawing order for multiple face or body fills
+    // and for projected sketch fills. Render's live image uses its own feedback pass.
+    let reuse_selected_face = !product
+        && app.viewport.gpu.is_some()
+        && app.ui.visual_style != 2
+        && t.sel_face.a() == 255
+        && !projected
+        && sel.iter().filter(|x| matches!(x, Sel::Face { .. } | Sel::Body { .. })).take(2).count() == 1;
     for x in &sel {
         match x {
             Sel::Face { body, index, .. } => {
@@ -6266,6 +6303,20 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 // Lit, not flat: an imported mesh (STL, OBJ) is one face, and a flat fill would
                 // paint the whole part as a single silhouette.
                 if let Some(b) = by_name.get(body).filter(|_| app.body_visible(body) && !replaced(body)) {
+                    // The only face of an imported mesh covers all its triangles and has no
+                    // pickable outline. Preserve authored normals in the copied fill: the
+                    // instanced flat shader uses the geometric normal even on a triangle with
+                    // identical authored normals tilted away from the geometric normal.
+                    if reuse_selected_face
+                        && *index == 0
+                        && b.body.triangle_corner_normals().is_some_and(|normals| normals.is_empty())
+                        && carry(b).is_none()
+                        && gpu_lit(b)
+                        && highlight_opaque(app, b, &active_bodies)
+                        && selected_face_instances.add(app, b, feedback.color(c4(t.sel_face)))
+                    {
+                        continue;
+                    }
                     let m = shown(b);
                     if outlines && has_pickable_outline(&m) {
                         for (ei, e) in m.edges.iter().enumerate() {
@@ -6539,12 +6590,19 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 let patch = m.surface_patch(*index);
                 let face_selected = |fi: usize| items.iter().any(|x| matches!(x, Sel::Face { body: b, index: i, .. } if b == body && *i == fi));
                 let selected = face_selected(*index);
-                if !(outlines && has_pickable_outline(&m)) {
+                // An imported mesh has one display face. Tint its existing instance using the
+                // face's palette slot so hovering can reuse its triangles.
+                let own = highlight_opaque(app, b, &active_bodies).then(|| body_slots.slots(&b.name)).flatten();
+                let draw_fill = !(outlines && has_pickable_outline(&m));
+                let reused = draw_fill
+                    && *index == 0
+                    && !selected
+                    && b.body.is_mesh()
+                    && carry(b).is_none()
+                    && gpu_lit(b)
+                    && own.is_some_and(|slots| hover_face_instances.add(app, b, slots.face(*index)));
+                if draw_fill && !reused {
                     let lit = shown(b);
-                    // A face of an opaque body is drawn in the model's own slot for it: it keeps its
-                    // colour and finish (a machined bore in a painted body), tinted like a whole
-                    // hovered body.
-                    let own = highlight_opaque(app, b, &active_bodies).then(|| body_slots.slots(&b.name)).flatten();
                     // Otherwise it is lit in the colour the model draws it in: its own look, else the
                     // component's colour when colouring by component, else the body's.
                     let resolved = resolve_appearance(app, b);
@@ -6608,6 +6666,8 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         _ => {}
     }
     feedback.hover_instanced = hover_instances.finish();
+    feedback.hover_face_instanced = hover_face_instances.finish();
+    feedback.selected_face_instanced = selected_face_instances.finish();
     feedback.selected_instanced = selected_instances.finish();
     feedback.lit_instanced_edges = lit_shared.meshes;
     feedback.lit_instanced_hidden = lit_shared_hidden.meshes;
@@ -6625,6 +6685,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         sc.hover_blocks.append(&mut feedback.hover_blocks);
         sc.selected_blocks.append(&mut feedback.selected_blocks);
         sc.hover_faces.append(&mut feedback.hover_faces);
+        sc.hover_face_instanced.append(&mut feedback.hover_face_instanced);
         sc.recoloured.append(&mut feedback.recoloured);
         sc.lit_edges.append(&mut feedback.lit_edges);
         sc.lit_instanced_edges.append(&mut feedback.lit_instanced_edges);
@@ -6650,6 +6711,8 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         let (hover_planned, selected_planned) = (feedback.hover_planned, feedback.selected_planned);
         let (hover_blocks, selected_blocks) = (feedback.hover_blocks, feedback.selected_blocks);
         let hover_faces = feedback.hover_faces;
+        let hover_face_instanced = feedback.hover_face_instanced;
+        let selected_face_instanced = feedback.selected_face_instanced;
         let (hover_instanced, selected_instanced) = (feedback.hover_instanced, feedback.selected_instanced);
         let recoloured = feedback.recoloured;
         let lit_edges = feedback.lit_edges;
@@ -6667,6 +6730,8 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 hover_blocks: hover_blocks.clone(),
                 selected_blocks: selected_blocks.clone(),
                 hover_faces: hover_faces.clone(),
+                hover_face_instanced: hover_face_instanced.clone(),
+                selected_face_instanced: selected_face_instanced.clone(),
                 hover_instanced: hover_instanced.clone(),
                 selected_instanced: selected_instanced.clone(),
                 recoloured: recoloured.clone(),
@@ -6682,6 +6747,8 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         sc.hover_blocks = hover_blocks;
         sc.selected_blocks = selected_blocks;
         sc.hover_faces = hover_faces;
+        sc.hover_face_instanced = hover_face_instanced;
+        sc.selected_face_instanced = selected_face_instanced;
         sc.hover_instanced = hover_instanced;
         sc.selected_instanced = selected_instanced;
         sc.recoloured = recoloured;
@@ -8061,10 +8128,14 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
         let shown_ms = crate::now_ms() - at;
         if shown_ms < STATUS_TOAST_MS {
             let undo = app.status_undo;
+            // A JSON save refused for its binary data offers to save the design as a container.
+            let save_sc = app.status_save_sc && !undo;
             // An error offers Report…: the report dialog, filled in with it (when tickets work here).
-            let report = error && !undo && crate::issue_report::ticket::enabled(app);
+            let report = error && !undo && !save_sc && crate::issue_report::ticket::enabled(app);
             let actions = if undo {
                 vec![(solidcraft_ui_text::tr_label("Undo"), ToastKind::Secondary)]
+            } else if save_sc {
+                vec![(solidcraft_ui_text::tr("document.save_as_sc"), ToastKind::Primary)]
             } else if report {
                 vec![(solidcraft_ui_text::tr("report.report_action"), ToastKind::Secondary)]
             } else {
@@ -8085,6 +8156,12 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
                     app.status_undo = false;
                     let _ = app.run("edit.undo", json!({}));
                 }
+                if save_sc && toast.clicked == Some(0) {
+                    app.status = None;
+                    app.status_save_sc = false;
+                    let name = app.session.save_as_name();
+                    crate::toolbar::save_as_named(app, &name, solidcraft_engine::io::DESIGN_EXT);
+                }
                 if report && toast.clicked == Some(0) {
                     app.status = None;
                     let dialog = app.dialog.clone();
@@ -8102,6 +8179,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
                 if toast.closed {
                     app.status = None;
                     app.status_undo = false;
+                    app.status_save_sc = false;
                 }
             }
             // One frame when it is due to go, not a frame every half second while it shows.
@@ -12511,10 +12589,14 @@ mod tests {
     }
 
     fn single_reference_grid(n: u32) -> SolveApp {
+        reference_grids(n, &[("Grid", None)])
+    }
+
+    fn reference_grids(n: u32, grids: &[(&str, Option<Vec3>)]) -> SolveApp {
         use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
         let mut doc = Document::default();
-        let positions = (0..=n).flat_map(|y| (0..=n).flat_map(move |x| [f64::from(x), f64::from(y), 0.0])).collect();
-        let triangles = (0..n)
+        let positions: std::sync::Arc<[f64]> = (0..=n).flat_map(|y| (0..=n).flat_map(move |x| [f64::from(x), f64::from(y), 0.0])).collect();
+        let triangles: std::sync::Arc<[u32]> = (0..n)
             .flat_map(|y| {
                 (0..n).flat_map(move |x| {
                     let a = y * (n + 1) + x;
@@ -12522,8 +12604,17 @@ mod tests {
                 })
             })
             .collect();
-        let meshes = vec![MeshData { name: "Grid".into(), positions, triangles, color: None, corner_normals: Default::default() }];
-        doc.add_feature(FeatureKind::MeshImport { file: "grid.stl".into(), meshes }, Some("Grid")).unwrap();
+        let meshes = grids
+            .iter()
+            .map(|&(name, normal)| MeshData {
+                name: name.into(),
+                positions: positions.clone(),
+                triangles: triangles.clone(),
+                color: None,
+                corner_normals: normal.map_or_else(Default::default, |n| [n.x, n.y, n.z].repeat(triangles.len()).into()),
+            })
+            .collect();
+        doc.add_feature(FeatureKind::MeshImport { file: "grid.obj".into(), meshes }, Some("Grid")).unwrap();
         let mut app = SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
         app.ui.ground_shadow = false;
         app.ui.visual_style = 1;
@@ -12553,6 +12644,61 @@ mod tests {
         assert!(publish_levels(&mut app));
         assert_eq!(app.viewport.scenes_built, 1, "filled in, not built again");
         assert!(!published(&app).instanced[0].levels.is_empty());
+    }
+
+    #[test]
+    fn hovering_an_imported_mesh_face_reuses_its_model_triangles() {
+        let mut app = single_reference_grid(2);
+        let model = build_scene(&app);
+        app.viewport.hover = Some(Hit::Face { body: "Grid".into(), index: 0, point: Vec3::ZERO });
+        let feedback = build_highlight(&app);
+        assert!(feedback.hover_faces.is_empty(), "the face's triangles are not copied");
+        assert_eq!(feedback.hover_face_instanced.len(), 1);
+        assert!(std::sync::Arc::ptr_eq(&feedback.hover_face_instanced[0].tris, &model.instanced[0].tris));
+        assert_eq!(feedback.hover_face_instanced[0].count(), 1);
+    }
+
+    #[test]
+    fn selecting_an_imported_mesh_face_reuses_its_model_triangles() {
+        let mut app = single_reference_grid(2);
+        let model = build_scene(&app);
+        app.session.selection = vec![Sel::Face { body: "Grid".into(), index: 0, point: Vec3::ZERO }];
+        // The second build reads the cached highlight.
+        for _ in 0..2 {
+            let feedback = build_highlight(&app);
+            let [selected] = &feedback.selected_face_instanced[..] else { panic!("one selected mesh placement") };
+            assert!(std::sync::Arc::ptr_eq(&selected.tris, &model.instanced[0].tris));
+            assert_eq!(selected.count(), 1);
+            let color = u32::from_le_bytes(selected.instances[48..52].try_into().unwrap());
+            assert_eq!(feedback.palette.entries()[color as usize], c4(Tokens::get().sel_face));
+            assert!(feedback.blocks.iter().all(|b| b.bytes.vertices.is_empty()), "the selected face's triangles are not copied");
+        }
+        app.ui.visual_style = 2;
+        let feedback = build_highlight(&app);
+        assert!(feedback.selected_face_instanced.is_empty(), "wireframe has no shaded model placement to reuse");
+        let copied: usize = feedback.blocks.iter().map(|b| b.bytes.vertices.len()).sum();
+        assert_eq!(copied, model.instanced[0].tris.indices.len() * crate::gpu::TRI_SIZE);
+    }
+
+    #[test]
+    fn selecting_an_imported_mesh_face_keeps_copied_feedback_for_authored_normals_and_multiple_faces() {
+        let mut app = reference_grids(2, &[("Grid", None), ("Angled", Some(Vec3::new(0.6, 0.0, 0.8)))]);
+        let model = build_scene(&app);
+        assert_eq!(model.instanced.len(), 2);
+        assert!(model.instanced.iter().all(|mesh| mesh.tris.flat), "the flat shader would use the geometric normal");
+        let bytes_per_face = model.instanced[0].tris.indices.len() * crate::gpu::TRI_SIZE;
+        for selected in [&["Angled"][..], &["Grid", "Angled"][..]] {
+            app.session.selection = selected.iter().map(|&body| Sel::Face { body: body.into(), index: 0, point: Vec3::ZERO }).collect();
+            let feedback = build_highlight(&app);
+            assert!(feedback.selected_face_instanced.is_empty(), "selection of {selected:?} keeps the copied fill");
+            let copied: usize = feedback.blocks.iter().map(|b| b.bytes.vertices.len()).sum();
+            assert_eq!(copied, selected.len() * bytes_per_face);
+            if selected.len() == 1 {
+                let vertices = &feedback.blocks[0].bytes.vertices;
+                let normal = [12, 16, 20].map(|at| f32::from_le_bytes(vertices[at..at + 4].try_into().unwrap()));
+                assert_eq!(normal, [0.6, 0.0, 0.8]);
+            }
+        }
     }
 
     #[test]
@@ -12599,11 +12745,14 @@ mod tests {
         let mut app = SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
         app.viewport.gpu =
             Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false });
-        let (mesh, _) = crate::open_meshing::session_world(&app.session).bodies[0].mesh_in_place();
+        let world = crate::open_meshing::session_world(&app.session);
+        let body = &world.bodies[0];
+        let (mesh, _) = body.mesh_in_place();
         assert!(mesh.triangles.len() >= INSTANCE_ALONE);
-        warm_shared_tris(&mesh);
+        warm_shared_tris(&mesh, body);
         let warmed = WARMED.lock().unwrap().iter().find(|(m, _)| std::sync::Arc::ptr_eq(m, &mesh)).map(|(_, t)| t.clone()).unwrap();
         assert_eq!(warmed.vertices.len() / crate::gpu::SHARED_SIZE, 161 * 161, "the grid's corners shared");
+        assert_eq!(warmed.indices.as_slice(), body.flat_mesh_in_place().unwrap().1.as_flattened());
         let scene = build_scene(&app);
         assert_eq!(scene.instanced.len(), 1, "a large mesh alone is drawn from shared vertices");
         assert!(std::sync::Arc::ptr_eq(&scene.instanced[0].tris, &warmed), "the ones made ahead");
@@ -12640,7 +12789,7 @@ mod tests {
         assert!(parts.ready().is_empty(), "taken by the scene");
         // Another placement reaching the part after a scene took it makes none again.
         let (mesh, _, _) = &warmed[0];
-        warm_part(&parts, mesh, true);
+        warm_part(&parts, mesh, true, None);
         assert!(parts.ready().is_empty(), "made once while the design is open");
         let again = build_scene(&app);
         assert!(again.instanced.iter().filter_map(|m| m.edges.as_ref()).all(|e| std::sync::Arc::ptr_eq(e, edges)), "and kept");

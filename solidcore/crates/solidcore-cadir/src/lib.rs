@@ -294,8 +294,9 @@ impl<'a> Model<'a> {
         // Each read is charged to the file's face budget, as the first one was: a region read
         // again costs what it reads again, so refused regions cannot read past the budget.
         for _ in 0..MAX_LEFT_OUT_ROUNDS {
-            let Some(face) =
-                named_face(&why).filter(|f| of_region.contains(f) && !skip.contains(f))
+            let Some(face) = self
+                .named(&why)
+                .filter(|f| of_region.contains(f) && !skip.contains(f))
             else {
                 break;
             };
@@ -319,6 +320,20 @@ impl<'a> Model<'a> {
             }
         }
         Err(refusal)
+    }
+
+    /// The face a refusal names: by its model index (`face #12`, as the assembly stage names a
+    /// face) or by its id in the model (`face step:data:face#81405-…`, as this reader names one).
+    fn named(&self, message: &str) -> Option<u64> {
+        if let Some(f) = named_face(message) {
+            return Some(f);
+        }
+        message.match_indices("face ").find_map(|(at, m)| {
+            let rest = message.get(at + m.len()..)?;
+            // A model id has colons in it: the id is the word, less the colon after it.
+            let id = rest.split_whitespace().next()?.trim_end_matches(':');
+            self.faces.get(id).map(|(i, _)| *i as u64)
+        })
     }
 
     /// The model indices of region `id`'s faces (what a refusal names a face by).
