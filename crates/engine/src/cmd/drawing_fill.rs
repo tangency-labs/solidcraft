@@ -79,7 +79,8 @@ fn paint_reading(paint: &FillPaint) -> contract::Paint {
 
 fn admit_paint(drawing: &Drawing, id: u64, region: Region2, cmd: &str) -> Result<()> {
     let fill = drawing.sheet_fill(id).ok_or_else(|| bad(cmd, "the fill disappeared before paint admission"))?;
-    let sheet = drawing.sheet_sketch(fill.sketch).ok_or_else(|| bad(cmd, "the owning sheet sketch disappeared"))?.sheet;
+    let record = drawing.sheet_sketch(fill.sketch).ok_or_else(|| bad(cmd, "the owning sheet sketch disappeared"))?;
+    let sheet = drawing.sketch_sheet(record).ok_or_else(|| bad(cmd, "the owning sheet sketch's owner disappeared"))?;
     let resolved = ResolvedSketchFill {
         drawing: drawing.id,
         sheet,
@@ -194,7 +195,8 @@ fn readings(s: &Session, selected: Option<u64>, cmd: &str) -> Result<Value> {
             }
             Err(reason) => (contract::Status::Failed, Some(reason.clone())),
         };
-        let sheet = drawing.sheet_sketch(fill.sketch).ok_or_else(|| bad(cmd, "the owning sketch disappeared"))?.sheet;
+        let record = drawing.sheet_sketch(fill.sketch).ok_or_else(|| bad(cmd, "the owning sketch disappeared"))?;
+        let sheet = drawing.sketch_sheet(record).ok_or_else(|| bad(cmd, "the owning sketch's owner disappeared"))?;
         fills.push(contract::Reading {
             fill: ids::encode(fill.id),
             sheet: ids::encode(sheet),

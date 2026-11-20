@@ -5,6 +5,7 @@
 //! commands here, apart from the design's own, each marked `// design-only:`.
 
 use serde_json::Value;
+use solidcraft_doc::drawing::Owner;
 use solidcraft_doc::{Document, FeatureKind};
 use solidcraft_sketch::Sketch;
 
@@ -97,7 +98,7 @@ pub(super) fn sheet_target(s: &Session, p: &Value, cmd: &str) -> Result<std::syn
         return Err(bad(cmd, "the edited sketch or sheet id is missing or ambiguous"));
     }
     let record = owner.sheet_sketch(entry.sketch).ok_or_else(|| bad(cmd, "the edited sheet sketch no longer exists"))?;
-    if record.sheet != entry.sheet {
+    if record.owner != Owner::Sheet(entry.sheet) {
         return Err(bad(cmd, "the edited sketch's owning sheet changed"));
     }
     if let Some(given) = p.get("sketch").filter(|value| !value.is_null()) {

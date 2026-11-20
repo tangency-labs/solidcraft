@@ -64,6 +64,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore_record::Vec3;
+use solidcraft_doc::drawing::Owner;
 use solidcraft_doc::{Document, Model, ModelState};
 
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
@@ -1432,7 +1433,7 @@ impl Session {
                     .doc
                     .drawing(entry.drawing)
                     .and_then(|drawing| drawing.sheet_sketch(entry.sketch))
-                    .is_none_or(|record| record.sheet != entry.sheet)
+                    .is_none_or(|record| record.owner != Owner::Sheet(entry.sheet))
         }) {
             self.active_sheet_sketch = None;
         }
@@ -2637,7 +2638,7 @@ impl Session {
             .filter(|entry| !self.model_focus && self.open_drawing == Some(entry.drawing))
         {
             let current = self.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
-            if let Some(after) = current.filter(|record| record.sheet == entry.sheet) {
+            if let Some(after) = current.filter(|record| record.owner == Owner::Sheet(entry.sheet)) {
                 let previous = before.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
                 out.insert("created".into(), cmd::sketch_created(previous.map(|record| &record.sketch), &after.sketch));
             }
