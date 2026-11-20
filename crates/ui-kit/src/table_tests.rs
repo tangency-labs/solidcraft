@@ -410,3 +410,35 @@ fn a_frozen_column_stays_in_view_while_the_table_scrolls_sideways() {
         assert!(clip.left() >= name.right(), "a scrolled cell is clipped beside the frozen one: {clip:?} vs {name:?}");
     }
 }
+
+/// A frozen column wider than half the visible table stops being frozen, so the other columns
+/// can still be scrolled into view.
+#[test]
+fn a_frozen_column_too_wide_for_the_view_scrolls_with_the_rest() {
+    let ctx = crate::test_support::context();
+    let columns = [Column::new("Name", 1.0).flex().min_content_width(300.0).frozen(), Column::new("Wide A", 1.0).flex().min_content_width(400.0)];
+    let draw = |scroll: bool| {
+        harness::frame(&ctx, vec![], |ui| {
+            ui.set_width(360.0);
+            ui.style_mut().scroll_animation = egui::style::ScrollAnimation::none();
+            table_custom(ui, "too_wide", &columns, "Empty", |ui, table| {
+                table.headers(ui, |_, _| false);
+                table.row(ui, "row", false, |row| {
+                    row.cell(|ui| crate::text(ui, "Default", crate::Text::Cell));
+                    row.cell(|ui| {
+                        if scroll {
+                            ui.scroll_to_rect(ui.max_rect(), Some(egui::Align::Max));
+                        }
+                    });
+                });
+            });
+        });
+    };
+    draw(false);
+    draw(false);
+    let name = registry::rect_of("dialog:table:too_wide:row:cell:Name").unwrap();
+    draw(true);
+    draw(false);
+    draw(false);
+    assert!(registry::rect_of("dialog:table:too_wide:row:cell:Name").unwrap().left() < name.left() - 100.0, "the name column scrolled away");
+}

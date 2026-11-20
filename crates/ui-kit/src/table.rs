@@ -180,9 +180,12 @@ fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
 }
 
 impl Table<'_> {
-    /// How many leading columns are frozen.
+    /// How many leading columns are frozen. None while they would take more than half of the
+    /// visible width: the other columns must keep room to be seen as the table scrolls.
     fn frozen_count(&self) -> usize {
-        self.columns.iter().take_while(|c| c.frozen).count()
+        let frozen = self.columns.iter().take_while(|c| c.frozen).count();
+        let width = self.widths.iter().take(frozen).sum::<f32>() + Tokens::get().space_8 * frozen as f32;
+        if width > self.view_width * 0.5 { 0 } else { frozen }
     }
 
     /// The cell of column `index` that starts at `left` in the scrolled content: a frozen one
@@ -281,7 +284,8 @@ impl Table<'_> {
             None
         };
         if let Some(chosen) = chosen {
-            let count = self.columns.len().min(64);
+            // Bounded, with room for a configuration table's most columns.
+            let count = self.columns.len().min(1024);
             ui.ctx().data_mut(|m| {
                 let mut stored: Vec<Option<f32>> = m.get_persisted(key).unwrap_or_default();
                 stored.resize(count, None);
