@@ -561,7 +561,7 @@ fn polynomial_piece(
 /// enclosed is the curve evaluated. (`NurbsCurve::of` rebuilds them from the Euclidean
 /// points, which rounds: a stored `x w = 3` with `w = 10` comes back as `3.0000000000000004`.)
 /// `None` when the degree, knots and points do not agree or a weight is not positive.
-fn stored_nurbs(c: &BSplineCurve) -> Option<NurbsCurve> {
+pub(super) fn stored_nurbs(c: &BSplineCurve) -> Option<NurbsCurve> {
     use crate::nurbs::math::{NOW, NOZ};
     let (knots, mult) = c.knots(None).ok()?;
     let p = c.degree().ok()?;

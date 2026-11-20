@@ -32,6 +32,9 @@
 //! end circles of a line skew to the axis too, which sweeps a hyperboloid of one sheet. A
 //! skew line is refused here (a described failure, `SM_ERR` status) before any edit, so
 //! the caller gives it its surface of revolution.
+//! Not upstream (WR-18515): [`PrimitiveCreation::create_linear_sweep`] without end caps
+//! stitches its walls in the first pass only ([`stitch_open`]); upstream's second pass
+//! squeezed out a profile edge shorter than twenty times the first pass's tolerance.
 //! Not upstream (WR-565, tangency-labs/solidcore#1477, opt-in
 //! `Kernel::fixes.linear_sweep_arc_is_cylinder`; SolidCraft change, tangency-labs/smlib
 //! 12918e9): [`PrimitiveCreation::create_linear_sweep`] makes a circular arc short of a
@@ -330,6 +333,25 @@ fn stitch_faces_of(
         Some(outside) => stitch_and_orient_one_solid(k, b, &options, identity, outside),
         None => stitch_and_orient_with_identity(k, b, &options, identity),
     }
+}
+
+/// Stitches the walls of an uncapped sweep, whose lamina edges are the profile's two
+/// copies by construction, in the first pass only
+/// ([`stitch_and_orient_open`](crate::topology::brep::p5::stitch_and_orient_open)): the
+/// walls meet at the profile's shared curve ends, and the second pass would squeeze out
+/// a profile edge shorter than its tolerance, leaving the wall's loop open. Not upstream
+/// (WR-18515).
+fn stitch_open(k: &mut Kernel, b: &mut Brep) -> Result<()> {
+    use crate::query::brep::BrepIdentity;
+    use crate::topology::brep::p5::{stitch_and_orient_open, StitchAndOrientOptions};
+    let keys = |object| {
+        crate::topology::brep::p2::caller_cache_key(&crate::topology::loopuse::notify_ref, object)
+    };
+    let identity = Some(BrepIdentity {
+        keys: &keys,
+        ..BrepIdentity::default()
+    });
+    stitch_and_orient_open(k, b, &StitchAndOrientOptions::default(), identity)
 }
 
 /// `CreatePlanarFaceWith3DCurves`; `None` when the curves bound no face.
@@ -1512,8 +1534,11 @@ impl PrimitiveCreation {
                     end_curves.push(copy);
                 }
                 planar_faces(k, brep, self.region(), &end_curves, brep.tolerance())?;
+                stitch(k, brep)?;
+            } else {
+                // the profile's two copies stay open: the walls are a sheet
+                stitch_open(k, brep)?;
             }
-            stitch(k, brep)?;
             brep.set_editing_enabled(false);
             Ok(())
         })();

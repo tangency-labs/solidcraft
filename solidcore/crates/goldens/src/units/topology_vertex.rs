@@ -1018,8 +1018,8 @@ fn own_brep(i: &Inputs) -> Result<crate::own_builder::RustBrep<OwnBrep>, Harness
 /// A Rust B-rep, the inexactly held face surface subclass and its entity counts.
 type OwnBrep = (Brep, Option<i64>, [usize; 10]);
 
-/// What a `Gaps` case computes, for the convex hull certificate of #17856's WR-57 vertex
-/// row (`wr57_replay`): the B-rep the case builds, the vertex, the largest gap it holds and
+/// What a `Gaps` case computes, for the convex hull certificate of the vertex row
+/// `surf_sphere150_rebuild_v3_gaps` (`refit::replay::vertex_gap`): the B-rep the case builds, the vertex, the largest gap it holds and
 /// every gap it lists, made as [`run_rust`] makes them (on [`crate::runner_kernel`]s).
 ///
 /// # Panics

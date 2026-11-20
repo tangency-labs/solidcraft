@@ -57,7 +57,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&OPEN_CONTRACT)
         .output(output_schema_for::<OpenResult>)
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.pcd/.xyz/.pts/.asc point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); reader?: solidcraft|cadmpeg for a STEP, FreeCAD or Rhino file (see file.insert_step); geometry?: meshes|exact for an OpenUSD file (see file.insert_mesh); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
+        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.pcd/.e57/.xyz/.pts/.asc point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); reader?: solidcraft|cadmpeg for a STEP, FreeCAD or Rhino file (see file.insert_step); geometry?: meshes|exact for an OpenUSD file (see file.insert_mesh); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", crate::checked!("file.insert_step", insert_step))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -695,7 +695,7 @@ fn add_mesh(
     // A mesh file is read up to the limit for STEP and import files, which Preferences raise
     // (#17446, #14548).
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let (mut mf, plan, looks) = if gltf {
+    let (mut mf, plan, looks, mut prepared) = if gltf {
         let dir = std::path::Path::new(path).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
         let mut load =
             |name: &str| solidcraft_io::limits::read(&dir.join(name).to_string_lossy(), solidcraft_io::limits::Kind::Step).map_err(|e| e.to_string());
@@ -703,25 +703,33 @@ fn add_mesh(
         if !import::mesh_plan_fits(&g.plan) {
             g.flatten();
         }
-        (g.feature, Some(g.plan), g.looks)
+        (g.feature, Some(g.plan), g.looks, None)
     } else if usd {
         let (mut g, y_up) = solidcraft_io::read_usd(&bytes, path).map_err(err)?;
         file_y_up = y_up;
         if !import::mesh_plan_fits(&g.plan) {
             g.flatten();
         }
-        (g.feature, Some(g.plan), g.looks)
+        (g.feature, Some(g.plan), g.looks, None)
     } else {
-        (solidcraft_io::mesh_import_feature_in(&bytes, path, unit.map_or(1.0, |(_, mm)| mm)).map_err(err)?, None, Vec::new())
+        let (feature, prepared) = solidcraft_io::mesh_import_feature_in_prepared(&bytes, path, unit.map_or(1.0, |(_, mm)| mm)).map_err(err)?;
+        (feature, None, Vec::new(), prepared)
     };
+    drop(bytes);
     if let Some(angle) = crease_angle
         && let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = &mut mf.kind
     {
+        if angle != 0.0 || meshes.iter().any(|mesh| !mesh.corner_normals.is_empty()) {
+            // Smoothing or removing authored normals changes the input to the evaluator.
+            prepared = None;
+        }
         for mesh in meshes {
             if angle == 0.0 {
                 // Keep the original flat display path, including its normalization
                 // and storage behavior, when the caller opts out of imported shading.
-                mesh.corner_normals = Default::default();
+                if !mesh.corner_normals.is_empty() {
+                    mesh.corner_normals = Default::default();
+                }
             } else {
                 mesh.generate_crease_normals(angle).map_err(|e| bad("file.insert_mesh", e.to_string()))?;
             }
@@ -731,7 +739,7 @@ fn add_mesh(
     let cname = import::component_name(path, name);
     let tree = match &plan {
         Some(p) if !p.places.is_empty() => import::Tree::Mesh(p),
-        _ => import::Tree::Flat,
+        _ => import::Tree::Flat(prepared),
     };
     let (id, placed) = import::add_in_component(s, mf.kind, &fname, mf.body_names, &[], &cname, tree)?;
     let bodies = created_bodies(s, id);
@@ -1104,7 +1112,7 @@ fn add_kicad(s: &mut Session, path: &str, name: Option<&str>, options: &solidcra
     let feature = imported.feature;
     let feature_name = name.filter(|n| !n.trim().is_empty()).unwrap_or(&feature.name).to_string();
     let component_name = import::component_name(path, name);
-    let tree = if imported.plan.places.is_empty() { import::Tree::Flat } else { import::Tree::Mesh(&imported.plan) };
+    let tree = if imported.plan.places.is_empty() { import::Tree::Flat(None) } else { import::Tree::Mesh(&imported.plan) };
     // A board hides none of its own bodies; its layers are all wanted.
     let (id, placed) = import::add_in_component(s, feature.kind, &feature_name, feature.body_names, &[], &component_name, tree)?;
     // The board stands at the origin: its lower-left outline corner goes to X = Y = 0, not to the
@@ -1944,7 +1952,7 @@ fn write_bytes(
         // as covering an earlier version instead of the chain being destroyed.
         if format != "container" {
             match format {
-                "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
+                "json" => solidcraft_io::write_design(&s.design_at(Some(path))).map_err(|e| EngineError::Other(format!("{path}: {e}")))?,
                 _ => return Err(bad("file.save", "format must be container or json")),
             }
         } else {
@@ -1955,7 +1963,7 @@ fn write_bytes(
     } else {
         match format {
             "container" => s.design_container_at(Some(path), compression, preview, cache)?,
-            "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
+            "json" => solidcraft_io::write_design(&s.design_at(Some(path))).map_err(|e| EngineError::Other(format!("{path}: {e}")))?,
             _ => return Err(bad("file.save", "format must be container or json")),
         }
     };
@@ -2515,7 +2523,7 @@ fn export_to(
         if !bodies.is_empty() {
             return Err(bad(cmd, "design JSON exports the complete document; omit bodies"));
         }
-        solidcraft_io::write_design(&s.design())
+        solidcraft_io::write_design(&s.design()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?
     } else if format == Format::Step && bodies.is_empty() && !s.doc.occurrences.is_empty() {
         solidcraft_io::step_assembly(&s.doc, &s.doc.painted(&s.model.state()), &name)?
     } else {
@@ -2779,10 +2787,11 @@ fn shown_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState,
     let (vals, _) = doc.param_values();
     let mut decals = Vec::new();
     for c in doc.canvases.iter().filter(|c| c.visible) {
-        let Some(image) = c.bytes() else {
+        let image = c.bytes().to_vec();
+        if image.is_empty() {
             warnings.push(format!("decal `{}`: its image is damaged: left out", c.name));
             continue;
-        };
+        }
         let corners = match doc.canvas_corners(&vals, c, st) {
             Ok(corners) => corners,
             Err(e) => {
@@ -4903,7 +4912,7 @@ mod tests {
         // version before #1710): Save As names the design after the new file, while a plain
         // Save to the file it has leaves the name alone.
         let odd = dir.join("renamed.solidcraft");
-        std::fs::write(&odd, solidcraft_io::write_design(&Document::new("Sample Plate"))).unwrap();
+        std::fs::write(&odd, solidcraft_io::write_design(&Document::new("Sample Plate")).unwrap()).unwrap();
         let mut s = Session::default();
         s.execute("doc.open", &json!({"path":odd})).unwrap();
         assert_eq!(s.doc.name, "Sample Plate");
@@ -4919,7 +4928,7 @@ mod tests {
         let dir = name_dir("open");
         for (stored, file) in [("Untitled", "hinge.solidcraft"), ("", "spacer.json")] {
             let path = dir.join(file);
-            let bytes = solidcraft_io::write_design(&Document::new(stored));
+            let bytes = solidcraft_io::write_design(&Document::new(stored)).unwrap();
             std::fs::write(&path, bytes).unwrap();
             let mut s = Session::default();
             let r = s.execute("doc.open", &json!({"path":path})).unwrap();

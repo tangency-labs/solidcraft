@@ -557,7 +557,7 @@ fn qualify_at(named: Vec<Named>, adjacent: &[(usize, usize)], centres: Option<&d
 }
 
 /// Whether `stem` names a face by its index alone (`F7:face:12`, `Body1:face:3`).
-fn named_by_index(stem: &str) -> bool {
+pub(crate) fn named_by_index(stem: &str) -> bool {
     stem.rsplit_once(":face:").is_some_and(|(_, index)| !index.is_empty() && index.bytes().all(|c| c.is_ascii_digit()))
 }
 

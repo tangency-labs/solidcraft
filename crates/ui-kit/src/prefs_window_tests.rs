@@ -175,9 +175,16 @@ fn the_window_switches_page_searches_and_highlights_and_cancel_restores_the_snap
 
     frame(&ctx, &mut fake, key(egui::Key::Enter));
     assert_eq!((fake.window.section, fake.window.filter.as_str()), (0, ""), "Enter opens the match's page and leaves search");
+    let first_draw = settings_search::current_reveal(&ctx).map(|r| r.until);
     frame(&ctx, &mut fake, Vec::new());
     assert_eq!(fake.drawn, ["alpha"]);
     assert!(registry::handle_at("test:revealed").is_some(), "the opened row is outlined");
+    // The outline's time starts when the row first draws, and later frames keep it.
+    let first_draw = first_draw.filter(|t| !t.is_nan()).or_else(|| settings_search::current_reveal(&ctx).map(|r| r.until));
+    frame(&ctx, &mut fake, Vec::new());
+    assert!(first_draw.is_some_and(|t| !t.is_nan()), "the row's first draw starts the outline's time");
+    assert_eq!(fake.window.reveal.as_ref().map(|r| r.until), first_draw, "the window keeps the time the row's first draw set");
+    assert_eq!(settings_search::current_reveal(&ctx).map(|r| r.until), first_draw);
 
     fake.values.grid = true;
     frame(&ctx, &mut fake, Vec::new());
@@ -401,7 +408,7 @@ fn kit_prefs_ids_are_in_ui_text_for_english() {
     walk(&src, &mut ids, &mut files);
     assert!(files > 0 && !ids.0.is_empty(), "the kit's sources name prefs ids to check");
     let english: serde_json::Map<String, serde_json::Value> =
-        serde_json::from_str(include_str!("../../ui-text/locales/en.json")).expect("the English catalogue is a JSON object");
+        serde_json::from_str(solidcraft_ui_text::SHARED_ENGLISH).expect("the English catalogue is a JSON object");
     let missing: Vec<&String> = ids.0.iter().filter(|id| !english.contains_key(id.as_str())).collect();
     assert!(missing.is_empty(), "not in crates/ui-text/locales/en.json: {missing:?}");
 }

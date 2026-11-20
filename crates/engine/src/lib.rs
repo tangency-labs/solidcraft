@@ -98,6 +98,10 @@ pub enum EngineError {
     BadParams { cmd: String, msg: String },
     #[error("{0}")]
     Other(String),
+    /// A feature that failed with a kernel call's error: its error, as [`EngineError::Other`]
+    /// words it, and the call's stable code ([`solidcraft_kernel::failure`]).
+    #[error("{}", .0.error)]
+    Feature(Box<FeatureFailure>),
     #[error("plugin: {0}")]
     Plugin(#[from] craft_plugin::HostError),
     /// A plugin failed while it ran or was refused before it ran: named, with its file.
@@ -149,10 +153,32 @@ impl EngineError {
             _ => None,
         }
     }
-    /// The error a failed feature's result reports: internal when the kernel caught a panic.
+    /// The error a failed feature's result reports: internal when the kernel caught a panic,
+    /// with the kernel call's code when the result has one.
     pub(crate) fn of_feature(r: &solidcraft_doc::FeatureResult, error: String) -> EngineError {
-        if r.internal { EngineError::Internal(String::new(), error) } else { EngineError::Other(error) }
+        match &r.error_code {
+            _ if r.internal => EngineError::Internal(String::new(), error),
+            Some(code) => EngineError::Feature(Box::new(FeatureFailure { error, code: code.clone() })),
+            None => EngineError::Other(error),
+        }
     }
+    /// The stable code of the kernel call this error was made from, when it was made from one: a
+    /// failed feature's ([`EngineError::Feature`]).
+    pub fn error_code(&self) -> Option<&solidcraft_kernel::ErrorCode> {
+        match self {
+            EngineError::Feature(f) => Some(&f.code),
+            _ => None,
+        }
+    }
+}
+
+/// A feature that failed with a kernel call's error ([`EngineError::Feature`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FeatureFailure {
+    /// The feature's error, as its result words it.
+    pub error: String,
+    /// The kernel call's stable code.
+    pub code: solidcraft_kernel::ErrorCode,
 }
 impl From<solidcraft_io::IoError> for EngineError {
     fn from(e: solidcraft_io::IoError) -> Self {
@@ -726,6 +752,11 @@ pub struct Session {
     /// not a move of the design's, so the placements the design reports and Capture Position
     /// keeps leave it out ([`Session::uncaptured_moves`]).
     pub exploded: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    /// The design as a configuration row last put it or took it in (`config.activate`,
+    /// `config.update_from_design`), with the session's document id: what
+    /// `config.update_from_design` compares the design with to name the changes the table has no
+    /// column for. The session's only, never saved.
+    pub(crate) config_baseline: Option<(String, Arc<Document>)>,
     /// Stops the work computing off the window thread for this design, shared with its copies.
     stop: solidcraft_kernel::Stop,
     /// A copy of a design ([`Session::scratch`]), sharing its token.
@@ -994,6 +1025,42 @@ pub enum CombPick {
     Face { at: Vec3, count: usize },
 }
 
+/// What a view shows of its design besides the camera: the section cut and the analyses. View
+/// state only (not saved, not an undo step), so each view of a design keeps its own and they differ
+/// while the design stays one. [`Session::inspect`] reads it and [`Session::set_inspect`] shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InspectState {
+    pub section: SectionState,
+    pub analysis: Option<SurfaceAnalysis>,
+    pub continuity: Vec<ContinuitySeam>,
+    pub isocurves: Vec<IsoPick>,
+    pub comb: Option<CombView>,
+}
+
+impl Session {
+    /// What the session shows now: the section and the analyses.
+    pub fn inspect(&self) -> InspectState {
+        InspectState {
+            section: self.section_state(),
+            analysis: self.analysis,
+            continuity: self.continuity.clone(),
+            isocurves: self.isocurves.clone(),
+            comb: self.comb.clone(),
+        }
+    }
+
+    /// Show `state` in place of what is shown now.
+    pub fn set_inspect(&mut self, state: InspectState) {
+        // Restore a passive view snapshot without publishing another display edit.
+        let SectionState { planes, hidden, hatch, folder } = state.section;
+        (self.section, self.section_hidden, self.section_hatch, self.section_folder) = (planes, hidden, hatch, folder);
+        self.analysis = state.analysis;
+        self.continuity = state.continuity;
+        self.isocurves = state.isocurves;
+        self.comb = state.comb;
+    }
+}
+
 impl SurfaceAnalysis {
     /// How a picture shades the faces for this analysis.
     pub fn mode(self) -> solidcraft_viewport::AnalysisMode {
@@ -1133,6 +1200,7 @@ impl Session {
             active_occurrence_path: None,
             pending_moves: Default::default(),
             exploded: Default::default(),
+            config_baseline: None,
             world_cache: Default::default(),
             joints_settled: None,
             occurrence_visibility_cache: Default::default(),
@@ -2685,6 +2753,8 @@ impl Session {
         let Some(c) = self.checkpoints.drain(i..).next() else { return Err(missing()) };
         let before = Snapshot::of(self, "");
         self.doc = c.doc;
+        // A row put on the design after the checkpoint is gone with it.
+        self.config_baseline = None;
         self.active_sketch = c.active_sketch;
         self.active_sheet_sketch = c.active_sheet_sketch;
         self.open_drawing = c.open_drawing;
@@ -2766,6 +2836,7 @@ impl Session {
             active_occurrence_path: self.active_occurrence_path.clone(),
             pending_moves: self.pending_moves.clone(),
             exploded: self.exploded.clone(),
+            config_baseline: self.config_baseline.clone(),
             world_cache: std::sync::Mutex::new(self.world_cache.lock().ok().and_then(|cache| cache.clone())),
             joints_settled: self.joints_settled.clone(),
             // Read again by the copy: handing it these references measured more peak memory on a
@@ -3109,6 +3180,7 @@ impl Session {
         self.active_occurrence_path = computed.active_occurrence_path;
         self.pending_moves = computed.pending_moves;
         self.exploded = computed.exploded;
+        self.config_baseline = computed.config_baseline;
         // Joints the computation hid (an import's rigid group) stay hidden.
         for j in computed.visibility.hidden_joints {
             if !self.visibility.hidden_joints.contains(&j) {

@@ -4440,7 +4440,6 @@
   "sketch_panel.plane_offset": "{plane}, {distance} 오프셋",
   "sketch_panel.plane_origin": "{plane} 평면",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "판금 바디의 평평한 면에 부착되어 있으며 판금이 변경되면 해당 패널을 따릅니다.",
   "sketch_panel.text_hint": "텍스트와 배치를 편집한 다음 확인을 누르세요.",
   "sketch_panel.use_plane": "{plane} 평면 사용",
   "sketch_text.align_center": "가운데",

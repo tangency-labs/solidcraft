@@ -73,8 +73,8 @@ pub(super) fn container_kind<R: Read + Seek>(reader: &mut PackageReader<R>) -> R
 
 /// The drawing as a container: the same bytes for the same drawing.
 pub fn write_drawing_container(drawing: &Drawing) -> Result<Vec<u8>> {
-    let text = drawing.to_json()?;
     let mut writer = PackageWriter::new();
+    let text = record(&mut writer, drawing)?;
     writer.part(DRAWING_PART, text.as_bytes(), true)?;
     let container = json!({"format": VERSION, "content": DRAWING_CONTENT});
     writer.part("container.json", &serde_json::to_vec(&container).map_err(invalid)?, false)?;
@@ -116,15 +116,47 @@ fn read_container<R: Read + Seek>(source: R) -> Result<Drawing> {
         return Err(invalid("a drawing container also holds a design's document.json"));
     }
     let bytes = reader.limited_part(DRAWING_PART, MAX_DRAWING_BYTES)?;
-    let text = std::str::from_utf8(&bytes).map_err(invalid)?;
-    Ok(Drawing::from_json(text)?)
+    open_record(&mut reader, &bytes)
+}
+
+/// A drawing's record for a container, its image files written as the container's parts it names:
+/// never as text.
+fn record(writer: &mut PackageWriter, d: &Drawing) -> Result<String> {
+    let (text, parts) = solidcraft_doc::blob::collecting_parts(|| d.to_json());
+    let text = text.map_err(|e| invalid(format!("{} not saved: {e}", d.label())))?;
+    for (name, bytes) in parts {
+        let extension = name.rsplit_once('.').map_or("", |(_, extension)| extension);
+        let written = writer.blob(&bytes, extension, false)?;
+        if written.as_str() != Some(name.as_str()) {
+            return Err(invalid(format!("{} not saved: its image part is named {written}, not {name}", d.label())));
+        }
+    }
+    Ok(text)
+}
+
+/// Reads a drawing's record from a container, its image files from the parts it names, as bytes.
+fn open_record<R: Read + Seek>(reader: &mut PackageReader<R>, bytes: &[u8]) -> Result<Drawing> {
+    if bytes.len() > MAX_DRAWING_BYTES {
+        return Err(invalid(format!("drawing too large (at most {} MiB)", MAX_DRAWING_BYTES >> 20)));
+    }
+    let value: Value = serde_json::from_slice(bytes).map_err(|e| invalid(format!("not a SolidCraft drawing: {e}")))?;
+    let mut parts = std::collections::BTreeMap::new();
+    for image in value.get("images").and_then(Value::as_array).into_iter().flatten() {
+        let (Some(name), Some(format)) = (image.get("part").and_then(Value::as_str), image.get("format").and_then(Value::as_str)) else { continue };
+        if !matches!(format, "png" | "jpeg") || parts.contains_key(name) {
+            continue;
+        }
+        let blob = reader.limited_blob(image, "part", format, drawing::image::MAX_IMAGE_BYTES)?;
+        parts.insert(name.to_string(), solidcraft_doc::blob::Blob::from(blob));
+    }
+    Ok(solidcraft_doc::blob::with_parts(parts, || Drawing::from_value(value))?)
 }
 
 /// Write each of the design's drawings to its entry.
 pub(super) fn write(writer: &mut PackageWriter, doc: &Document) -> Result<()> {
     drawing::check_in_design(&doc.drawings)?;
     for d in &doc.drawings {
-        let text = d.to_json().map_err(|e| invalid(format!("{} not saved: {e}", d.label())))?;
+        let text = record(writer, d)?;
         writer.part(&format!("{FOLDER}{}.json", ids::encode(d.id)), text.as_bytes(), true)?;
     }
     Ok(())
@@ -139,7 +171,7 @@ pub(super) fn read<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Vec<
         let id = name.strip_prefix(FOLDER).and_then(|n| n.strip_suffix(".json")).and_then(ids::decode);
         let id = id.ok_or_else(|| invalid(format!("`{name}` is not a drawing's entry")))?;
         let bytes = reader.limited_part(&name, MAX_DRAWING_BYTES)?;
-        let d = Drawing::from_json(std::str::from_utf8(&bytes).map_err(invalid)?).map_err(|e| invalid(format!("`{name}`: {e}")))?;
+        let d = open_record(reader, &bytes).map_err(|e| invalid(format!("`{name}`: {e}")))?;
         if d.id != id {
             return Err(invalid(format!("`{name}` holds the drawing {}", ids::encode(d.id))));
         }
