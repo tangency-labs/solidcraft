@@ -393,8 +393,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 });
             }
-            // A newer release: its Update button stays before the right cluster, and the
-            // organization's Managed by badge left of it and of the link pills.
+            // Transient Update and Managed by controls follow the saved End items.
             let _ = draw_bar_offers(app, ui, &out);
             let tabs_end = out.tabs_end;
             // Narrow title bars can fit only part of the tab strip. Its hit regions must not
@@ -402,9 +401,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let tabs_rect = Rect::from_min_max(pos2(out.tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));
             let mut tabs_ui = ui.new_child(egui::UiBuilder::new().max_rect(tabs_rect));
             tabs_ui.set_clip_rect(tabs_rect.intersect(ui.clip_rect()));
-            let bar_context_click = ui.input(|i| i.pointer.secondary_clicked()) && ui.rect_contains_pointer(content);
             app_bar::paint_motion(&mut tabs_ui, "tabs", tabs_rect, |ui| {
-                ui.add_enabled_ui(!bar_context_click && !customizing, |ui| {
+                ui.add_enabled_ui(!customizing, |ui| {
                     if customizing {
                         ui.set_opacity(0.55);
                     }

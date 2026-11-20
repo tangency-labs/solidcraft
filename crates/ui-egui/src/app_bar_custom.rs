@@ -353,6 +353,7 @@ pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, out: &ap
 }
 pub(crate) fn menu(app: &mut SolveApp, ui: &egui::Ui, content: Rect, out: &app_bar::BarOut) {
     if ui.input(|i| i.pointer.secondary_clicked())
+        && !app_bar::tab_context_click_claimed(ui.ctx())
         && ui.rect_contains_pointer(content)
         && let Some(p) = ui.input(|i| i.pointer.interact_pos())
     {

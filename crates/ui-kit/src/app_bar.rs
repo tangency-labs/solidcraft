@@ -996,10 +996,12 @@ pub fn paint_brand(painter: &Painter, content: Rect, mark: &dyn Fn(&Painter, Pos
     let left = content.left();
     let y = content.center().y;
     mark(painter, pos2(left + 20.0, y));
-    name.map_or(left + 32.0, |name| {
-        let t = Tokens::get();
-        painter.text(pos2(left + 36.0, y), Align2::LEFT_CENTER, name, crate::type_face::semibold(t.font_heading), t.app_bar_text).right()
-    })
+    name.map_or(left + 32.0, |name| paint_brand_name(painter, pos2(left + 36.0, y), name))
+}
+
+fn paint_brand_name(painter: &Painter, at: Pos2, name: &str) -> f32 {
+    let t = Tokens::get();
+    painter.text(at, Align2::LEFT_CENTER, name, crate::type_face::semibold(t.font_heading), t.app_bar_text).right()
 }
 
 /// Draws the bar in `bar`, its controls within `content` (the title bar's room between the
@@ -1071,8 +1073,11 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         if editing_active(ui.ctx()) {
             painter.set_opacity(0.55);
         }
-        let brand = Rect::from_min_max(pos2(r.left() + geometry.mark - 20.0, r.top()), r.right_bottom());
-        paint_brand(&painter, brand, data.mark, geometry.name_visible.then_some(data.name));
+        // Paint at the measured logo/name positions, rather than legacy brand offsets.
+        (data.mark)(&painter, pos2(r.left() + geometry.mark, r.center().y));
+        if geometry.name_visible {
+            paint_brand_name(&painter, pos2(r.left() + geometry.name, r.center().y), data.name);
+        }
     }
     let leading = geometry.leading.map(|span| rect(span, ITEM_HEIGHT));
     // Home.
@@ -1780,6 +1785,19 @@ pub fn tab_tip(name: &str, place: &str, cut: bool) -> String {
     if cut { format!("{name}\n{place}") } else { place.to_string() }
 }
 
+/// Native design/view menus own their context click, including repeated layout passes.
+/// Outer application-bar menus must not replace it with the bar editor's menu.
+pub fn tab_context_click_claimed(ctx: &egui::Context) -> bool {
+    let key = egui::Id::unique(("sc_tab_context_click", ctx.viewport_id()));
+    ctx.data(|d| d.get_temp::<u64>(key)) == Some(ctx.cumulative_frame_nr())
+}
+
+fn claim_tab_context_click(ctx: &egui::Context) {
+    let key = egui::Id::unique(("sc_tab_context_click", ctx.viewport_id()));
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| d.insert_temp(key, frame));
+}
+
 /// Tabs are rounded chips on the bar; the selected one has the stronger fill.
 pub fn tab_shape(painter: &Painter, t: &Tokens, r: Rect, active: bool, hovered: bool) {
     let fill = if active {
@@ -2150,6 +2168,7 @@ fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str, menu: &mut Opti
             ViewState::Normal => {}
         }
         if resp.secondary_clicked() {
+            claim_tab_context_click(ui.ctx());
             *menu = Some((k, resp.rect));
         } else if resp.clicked() {
             chosen = Some(k);
@@ -2176,6 +2195,7 @@ fn plus_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, icon: f32, pen: 
     let resp = resp.backing_on_hover_text(strip.view_text.new_view);
     let at = pos2(rect.left(), pen.below);
     if resp.secondary_clicked() {
+        claim_tab_context_click(ui.ctx());
         pen.popup = Some((Popup::Plus, at, rect, ui.ctx().cumulative_frame_nr()));
     } else if resp.clicked() {
         if strip.plus_menu.is_empty() {
@@ -2361,6 +2381,7 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
     } else if resp.middle_clicked() {
         pen.actions.push(TabAction::CloseView(k));
     } else if resp.secondary_clicked() {
+        claim_tab_context_click(ui.ctx());
         pen.popup = Some((Popup::View(k), pos2(vr.left(), pen.below), vr, ui.ctx().cumulative_frame_nr()));
     } else if resp.clicked() && !dragged {
         resp.request_focus();
@@ -3002,6 +3023,7 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
             crate::icons::paint_ink(ui.painter(), br, "shield", badge.ink(&t));
         }
         if !strip.pop_out && resp.secondary_clicked() {
+            claim_tab_context_click(ui.ctx());
             menu = Some((i, ui.ctx().pointer_interact_pos().unwrap_or(tr.left_bottom())));
         }
         // A middle click closes the tab, as in a web browser.
