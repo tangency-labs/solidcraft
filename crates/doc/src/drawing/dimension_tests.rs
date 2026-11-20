@@ -33,11 +33,19 @@ fn measured() -> (Drawing, [u64; 3]) {
     let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
     let mut d = Drawing::new("Box", "en", "Sheet 1", a3, None, &BTreeSet::new(), &mut id_source).unwrap();
     let source = d.allocate_id(&mut id_source).unwrap();
-    d.sources.push(Source { id: source });
+    d.sources.push(Source { id: source, path: None });
     let (view, sheet) = (d.allocate_id(&mut id_source).unwrap(), d.sheets[0].id);
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let settings = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
-    d.add_views([Arc::new(View { id: view, sheet, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0 })]);
+    d.add_views([Arc::new(View {
+        id: view,
+        sheet,
+        kind,
+        place: ViewPlace::At([150.0, 150.0]),
+        settings,
+        reference_shown_percent: 0.0,
+        label: None,
+    })]);
     let kinds = [
         DimensionKind::Linear {
             a: corner(&["F1:front|F1:bottom", "F1:front|F1:left"]),
@@ -689,4 +697,21 @@ fn faces_lie_on_one_cone_by_its_apex_axis_and_half_angle() {
     assert!(!a.same(&cone(Vec3::ZERO, Vec3::Z, 0.5 + 1e-3), 1e-6), "another half-angle");
     assert!(!a.same(&cone(Vec3::new(1e-3, 0.0, 0.0), Vec3::Z, 0.5), 1e-6), "another apex");
     assert!(!a.same(&Curved::Sphere(Sphere { center: Vec3::ZERO, radius: 1.0 }), 1e-6));
+}
+
+/// A text is read as a template: `{value}` the measured number, doubled braces a brace each, and a
+/// text written with [`text_literal`] comes back as its own characters, which is how an older
+/// drawing's text is carried over.
+#[test]
+fn a_text_template_fills_its_value_and_keeps_literal_braces() {
+    assert_eq!(text_shown("2× {value} THRU", Some("Ø6.00")), "2× Ø6.00 THRU");
+    assert_eq!(text_shown("{value}", Some("6.00")), "6.00");
+    assert_eq!(text_shown("{value} / {value}", Some("6")), "6 / 6");
+    assert_eq!(text_shown("2× {value}", None), "2× ?", "nothing measured to show");
+    assert!(text_shows_value("TYP {value}") && !text_shows_value("SEE NOTE") && !text_shows_value("{{value}}"));
+    for old in ["SEE NOTE", "{value}", "a {b} c", "}{", "{{x}}", "Ø6 {THRU"] {
+        let kept = text_literal(old);
+        assert_eq!(text_shown(&kept, Some("9")), old, "an older text shows what it showed");
+        assert!(!text_shows_value(&kept), "{old}: and stays words");
+    }
 }

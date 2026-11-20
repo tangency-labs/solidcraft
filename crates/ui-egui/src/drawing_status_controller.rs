@@ -69,6 +69,18 @@ impl DrawingStatusController {
         true
     }
 
+    /// Apply a synchronous batch once, retaining generation and request checks.
+    pub fn accept_inspections(&mut self, generation: u64, results: BTreeMap<String, Result<Value, String>>) -> bool {
+        if generation != self.generation || results.keys().any(|id| !self.requested.contains(id)) {
+            return false;
+        }
+        self.inspections.extend(results);
+        if let Some(attention) = self.attention.take() {
+            self.attention = Some(attention.with_inspections(&self.inspections));
+        }
+        true
+    }
+
     /// No snapshot is shown after invalidation until the fresh status arrives.
     pub fn snapshot(&self) -> Option<&DrawingAttention> {
         self.attention.as_ref()

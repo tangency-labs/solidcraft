@@ -69,12 +69,10 @@ use solidcore_record::{Region2, Seg2, Vec2};
 pub mod annotate;
 pub mod clip;
 pub mod cubic_pieces;
-pub mod flatten;
 pub mod grid;
 pub mod line;
 pub mod text;
 
-pub use flatten::flatten;
 pub use grid::{FillRule, Grid, GridDashes, GridGroup, GridItem, GridPath, GridPoint, GridReport, OnGrid, Piece};
 use text::{Font, TextRun};
 
@@ -156,6 +154,16 @@ pub enum ObjectKind {
     Dimension,
     /// A note's text, with its leader when it points at the model.
     Note,
+    /// A view's label: its letter, name and scale, above the view unless moved (#13044).
+    ViewLabel,
+    /// A balloon's circle and number, with its leader to the part it numbers.
+    Balloon,
+    /// A revision tag's triangle and the revision in it, on the sheet.
+    RevisionTag,
+    /// A sheet-owned sketch's printable curves.
+    Sketch,
+    /// A drawing-owned sketch fill, solid or expanded hatch marks.
+    Fill,
 }
 
 impl ObjectKind {
@@ -172,6 +180,11 @@ impl ObjectKind {
             ObjectKind::View => "VIEW",
             ObjectKind::Dimension => "DIMENSION",
             ObjectKind::Note => "NOTE",
+            ObjectKind::ViewLabel => "VIEW_LABEL",
+            ObjectKind::Balloon => "BALLOON",
+            ObjectKind::RevisionTag => "REVISION_TAG",
+            ObjectKind::Sketch => "SKETCH",
+            ObjectKind::Fill => "FILL",
         }
     }
 
@@ -185,12 +198,14 @@ impl ObjectKind {
             ObjectKind::SheetBorder | ObjectKind::DrawingBorder => 0,
             ObjectKind::SheetImage => 1,
             ObjectKind::View => 2,
-            ObjectKind::Dimension => 3,
+            ObjectKind::Dimension | ObjectKind::ViewLabel | ObjectKind::Balloon => 3,
             ObjectKind::Note => match of {
                 DrawnFor::View => 3,
                 DrawnFor::Sheet => 5,
             },
             ObjectKind::PartsList | ObjectKind::RevisionTable => 4,
+            ObjectKind::Fill => 4,
+            ObjectKind::Sketch | ObjectKind::RevisionTag => 5,
             ObjectKind::TitleBlock => 6,
         }
     }
@@ -328,6 +343,16 @@ impl Budget {
     }
 }
 
+/// A stroke's path by the module's notes: at least one piece, each piece's numbers checked, each
+/// starting where the one before ends, and the last ending where the first starts when `closed`.
+/// A record that keeps a path to draw later checks it here, so the scene it makes then is valid.
+pub fn check_path(path: &[Seg2], closed: bool) -> Result<()> {
+    require(!path.is_empty(), "a stroke has at least one piece")?;
+    pieces(path)?;
+    require(path.iter().zip(path.iter().skip(1)).all(|(a, b)| meet(a, b)), "a stroke's pieces meet end to start")?;
+    require(!closed || path.last().zip(path.first()).is_some_and(|(a, b)| meet(a, b)), "a closed stroke ends where it starts")
+}
+
 fn pieces(segs: &[Seg2]) -> Result<()> {
     segs.iter().try_for_each(|s| s.check(MAX_COORDINATE_MM).map_err(Invalid))
 }
@@ -425,12 +450,7 @@ impl Scene {
             match item {
                 Item::Stroke { path, closed, width_mm, pattern } => {
                     require(*width_mm > 0.0 && *width_mm <= MAX_LINE_MM, "a line is above 0 and at most 10 mm wide")?;
-                    require(!path.is_empty(), "a stroke has at least one piece")?;
-                    pieces(path)?;
-                    require(path.iter().zip(path.iter().skip(1)).all(|(a, b)| meet(a, b)), "a stroke's pieces meet end to start")?;
-                    if *closed {
-                        require(path.last().zip(path.first()).is_some_and(|(a, b)| meet(a, b)), "a closed stroke ends where it starts")?;
-                    }
+                    check_path(path, *closed)?;
                     if let Some(dashes) = pattern {
                         dashes.check(path)?;
                     }

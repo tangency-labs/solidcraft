@@ -39,7 +39,7 @@
 //! [`crate::surface::ball_patch::BallPatch`] (`SmBallPatch`): the rational patch carrying
 //! its sphere as its definition (its own type, exact offset and database IO). The patch
 //! and its loop are kept in [`BallCorner`] from the edge geometry until the patch takes them.
-//! With `Kernel::fixes.fillet_round_as_definition` the patch also keeps its corner
+//! The patch also keeps its corner
 //! definition (#2357, not the fork's): its sphere and its loop, certified on it
 //! ([`crate::surface::procedural_blend::corner::BallDefinition`]). The fork's
 //! `SmFilletExecutive::IsSetBackVertex` is the caller's `set_back` argument (WR-697). No
@@ -53,10 +53,12 @@ use crate::blend::fillet_corner::p3::{CornerPatchEnv, FilletCorner};
 use crate::blend::fillet_custom_solver::{offset_local_point_solve, offset_natural_uv_domain};
 use crate::blend::fillet_exact::{BlendQuadric, QuadricKind};
 use crate::blend::fillet_geom::p1::{FilletBrep, FilletEdgeType, FilletSolverId};
+use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverType, FilletSurfaceGeneratorType};
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
+use crate::geom::krawczyk::{contraction, k_operator};
 use crate::intersect::surface_intersector::p1::SrfIndex;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
@@ -266,6 +268,32 @@ impl BallImplicit {
         (d, abs)
     }
 
+    /// `Value` over a box, in rounded intervals: `c + Σ_i (2 b_i x_i + Σ_j x_i a_ij x_j)`,
+    /// the terms in [`Self::value`]'s order.
+    fn value_over(&self, x: &[Ivl; 3]) -> Ivl {
+        let mut d = Ivl::from(self.c);
+        for ((bi, row), xi) in self.b.iter().zip(self.a.iter()).zip(x.iter()) {
+            d = d + Ivl::from(2.0 * bi) * *xi;
+            for (aij, xj) in row.iter().zip(x.iter()) {
+                d = d + *xi * Ivl::from(*aij) * *xj;
+            }
+        }
+        d
+    }
+
+    /// `Gradient` over a box, in rounded intervals: `2 (A x + b)`, exact as an enclosure for
+    /// the affine gradient (component `j`: `2 (Σ_l a_jl x_l + b_j)`).
+    fn gradient_over(&self, x: &[Ivl; 3]) -> [Ivl; 3] {
+        core::array::from_fn(|j| {
+            let row = self.a.get(j).copied().unwrap_or([f64::NAN; 3]);
+            let mut g = Ivl::from(self.b.get(j).copied().unwrap_or(f64::NAN));
+            for (ajl, xl) in row.iter().zip(x.iter()) {
+                g = g + Ivl::from(*ajl) * *xl;
+            }
+            Ivl::from(2.0) * g
+        })
+    }
+
     /// `Gradient`: `2 (A x + b)`.
     fn gradient(&self, x: &[f64; 3]) -> [f64; 3] {
         let [x0, x1, x2] = *x;
@@ -313,9 +341,11 @@ fn ball_inverse(m: &[[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
 /// quadrics' implicit equations vanish: Newton's method from the origin, then Krawczyk's
 /// test on the box of half-width `half` about the iterate, which proves it holds exactly
 /// one root (the gradients are affine, so the Jacobian over the box is the iterate's plus
-/// `2 A` times the box, exactly). Rounding is bounded by the sum of the terms' magnitudes.
-/// The iterate, and whether it is proved (`false` where Newton fails or the test does not
-/// prove the box). Bounded: at most 50 Newton steps.
+/// `2 A` times the box, exactly), through the crate's one Krawczyk operator in rounded
+/// intervals (`geom::krawczyk`, tangency-labs/solidcraft#15140; the fork bounds the rounding
+/// by the terms' magnitudes in floating point instead). The iterate, and whether it is
+/// proved (`false` where Newton fails or the test does not prove the box). Bounded: at most
+/// 50 Newton steps.
 fn ball_certified_root(f: &[BallImplicit; 3], half: f64) -> ([f64; 3], bool) {
     let mut x = [0.0; 3];
     let mut fx = [0.0; 3];
@@ -340,54 +370,30 @@ fn ball_certified_root(f: &[BallImplicit; 3], half: f64) -> ([f64; 3], bool) {
             break;
         }
     }
-    // Krawczyk: K = x - Y f(x) + (I - Y J(X)) (X - x) inside X proves exactly one root in X.
-    // With J(X) = J(x) + dJ, |dJ_mk| <= 2 half sum_l |A_m,kl|, component i of K - x is within
-    // |(Y f)_i| + half sum_k ( |(I - Y J(x))_ik| + sum_m |Y_im| |dJ_mk| ), each term padded for
-    // rounding (f by its terms' magnitudes).
-    let mut bound = [0.0; 3];
-    for (((fi, bi), ji), fq) in fx
-        .iter_mut()
-        .zip(bound.iter_mut())
-        .zip(jac.iter_mut())
-        .zip(f.iter())
-    {
-        (*fi, *bi) = fq.value(&x);
+    // Krawczyk's test on ball's own box X = x ± half, through the crate's one operator
+    // (#15140): Y the inverse of F′ at the iterate, F(x) and F′(X) in rounded intervals
+    // (the gradients are affine, so F′(X) = 2 (A_i X + b_i) exactly as intervals), and
+    // K = x − Y F(x) + (I − Y F′(X)) (X − x) strictly inside X proves exactly one root in X
+    for (ji, fq) in jac.iter_mut().zip(f.iter()) {
         *ji = fq.gradient(&x);
     }
     let Some(y) = ball_inverse(&jac) else {
         return (x, false);
     };
-    let eps = 16.0 * f64::EPSILON;
-    let mut spread = [[0.0; 3]; 3];
-    for (sm, fq) in spread.iter_mut().zip(f.iter()) {
-        for (smk, ak) in sm.iter_mut().zip(fq.a.iter()) {
-            let [a0, a1, a2] = *ak;
-            *smk = 2.0 * half * (a0.abs() + a1.abs() + a2.abs());
-        }
-    }
-    for i in 0..3 {
-        let mut rad = 0.0;
-        for k in 0..3 {
-            let (fk, bk) = (
-                fx.get(k).copied().unwrap_or(0.0),
-                bound.get(k).copied().unwrap_or(0.0),
-            );
-            rad += at3(&y, i, k).abs() * (fk.abs() + eps * bk);
-            let mut iyj = if i == k { 1.0 } else { 0.0 };
-            let mut scale = 1.0;
-            for m in 0..3 {
-                iyj -= at3(&y, i, m) * at3(&jac, m, k);
-                scale += (at3(&y, i, m) * at3(&jac, m, k)).abs();
-                rad += at3(&y, i, m).abs() * at3(&spread, m, k) * half;
-            }
-            rad += (iyj.abs() + eps * scale) * half;
-        }
-        // !(rad < half), NaN included
-        if rad.partial_cmp(&half) != Some(std::cmp::Ordering::Less) {
-            return (x, false);
-        }
-    }
-    (x, true)
+    let xi = x.map(Ivl::from);
+    let xb = x.map(|m| Ivl::new(m - half, m + half));
+    let at_x: [Ivl; 3] = core::array::from_fn(|i| {
+        f.get(i)
+            .map_or_else(|| Ivl::from(f64::NAN), |q| q.value_over(&xi))
+    });
+    let over: [[Ivl; 3]; 3] = core::array::from_fn(|i| {
+        f.get(i)
+            .map_or_else(|| [Ivl::from(f64::NAN); 3], |q| q.gradient_over(&xb))
+    });
+    let (c, _) = contraction(&y, &over);
+    let k = k_operator(&x, &y, &at_x, &c, &xb);
+    let inside = k.iter().zip(&xb).all(|(a, b)| a.lo > b.lo && a.hi < b.hi);
+    (x, inside)
 }
 
 /// `GetSurface(rail)->GetOffsetDistance()` of a solver, absolute (`NER` on none).
@@ -755,6 +761,7 @@ fn ball_centre(
             let bx = crate::query::face::p1::calculate_bounding_box(k, target, face, false)?;
             size = max(size, (bx.max - bx.min).length());
         }
+        k.work_counters.add_ball_certified_root();
         let (root, proved) = ball_certified_root(&f, 1e-12 * max(size, 1.0));
         if !proved {
             return Err(err());
@@ -945,6 +952,96 @@ fn sum(da: f64, a: &BallPoly, db: f64, b: &BallPoly) -> Result<BallPoly> {
     Ok(p)
 }
 
+/// The far side of the ball's triangle `dirs` (unit directions from the ball's centre) as
+/// [`ball_triangle_patch`] takes it with the pole at `pole`: the frame of the sphere's
+/// stereographic projection from the pole's antipode (`e3` towards that antipode), and in
+/// its plane the far side's ends `a` (of contact `pole + 1`) and `b` (of `pole + 2`), the
+/// centre `o` and radius `r` of the circle the far side's great circle projects to, the
+/// ends' unit directions from `o` (`ua`, `ub`) with their cosine, and where the far side's
+/// middle lies along the bisector of those directions (`middle`).
+struct FarSide {
+    e1: Vec3,
+    e2: Vec3,
+    e3: Vec3,
+    a: [f64; 2],
+    b: [f64; 2],
+    o: [f64; 2],
+    r: f64,
+    ua: [f64; 2],
+    ub: [f64; 2],
+    cos: f64,
+    middle: f64,
+}
+
+impl FarSide {
+    /// Whether the far side's image is one rational quadratic arc: the arc from `a` to `b`
+    /// through the middle's image, under a half turn (its middle control point is where
+    /// the tangents at its ends cross, its weight the cosine of half its angle). A triangle
+    /// with a side so long that no pole makes it one is not one patch: the ball's triangle
+    /// at a corner sharper than a regular tetrahedron's (three faces whose normals stand
+    /// arccos(-1/3) apart) is the first.
+    fn is_one_arc(&self) -> bool {
+        1.0 + self.cos > EFF_ZERO_SQRT && self.middle > 0.0
+    }
+}
+
+/// The far side of the triangle `dirs` from the pole at `pole` ([`FarSide`]); `None` where
+/// it has no image to judge: a contact lies at the pole's antipode, or the far side runs
+/// through the pole (no triangle).
+///
+/// # Errors
+///
+/// Those of the unit vectors.
+fn far_side(dirs: &[Vec3; 3], pole: usize) -> Result<Option<FarSide>> {
+    let (Some(&d_pole), Some(&d_from), Some(&d_to)) = (
+        dirs.get(pole),
+        dirs.get((pole + 1) % 3),
+        dirs.get((pole + 2) % 3),
+    ) else {
+        return Ok(None);
+    };
+    let e3 = -d_pole;
+    let e1 = (d_from - e3 * d_from.dot(e3)).unitize()?;
+    let e2 = e3.cross(e1);
+    // the projection: p -> (p.e1, p.e2) / (1 - p.e3)
+    let mid = (d_from + d_to).unitize()?;
+    let mut out = [[0.0; 2]; 3];
+    for (p, o) in [d_from, d_to, mid].iter().zip(out.iter_mut()) {
+        let den = 1.0 - p.dot(e3);
+        if den <= EFF_ZERO {
+            return Ok(None);
+        }
+        *o = [p.dot(e1) / den, p.dot(e2) / den];
+    }
+    let [a, b, m] = out;
+    // the third side's great circle (normal m) projects to the circle about -(m1, m2) / m3,
+    // of radius^2 1 + (m1^2 + m2^2) / m3^2
+    let sm = d_from.cross(d_to).unitize()?;
+    let m3 = sm.dot(e3);
+    if m3.abs() <= EFF_ZERO {
+        return Ok(None); // the third side runs through the pole: no triangle
+    }
+    let o = [-sm.dot(e1) / m3, -sm.dot(e2) / m3];
+    let r = (1.0 + (o[0] * o[0] + o[1] * o[1])).sqrt();
+    let ua = [(a[0] - o[0]) / r, (a[1] - o[1]) / r];
+    let ub = [(b[0] - o[0]) / r, (b[1] - o[1]) / r];
+    let cos = ua[0] * ub[0] + ua[1] * ub[1];
+    let middle = (m[0] - o[0]) * (ua[0] + ub[0]) + (m[1] - o[1]) * (ua[1] + ub[1]);
+    Ok(Some(FarSide {
+        e1,
+        e2,
+        e3,
+        a,
+        b,
+        o,
+        r,
+        ua,
+        ub,
+        cos,
+        middle,
+    }))
+}
+
 /// `sm_BallTrianglePatch` (the fork's a6243fa): the ball's triangle between the
 /// contacts as one rational patch of degree `(4, 2)` on the sphere about `centre`
 /// (`dirs` the unit contact directions), the pole at contact `pole`: `t = 0` the pole,
@@ -968,45 +1065,25 @@ pub(crate) fn ball_triangle_patch(
     };
     let mut from = (pole + 1) % 3;
     let mut to = (pole + 2) % 3;
-    let (Some(&d_pole), Some(&d_from), Some(&d_to)) =
-        (dirs.get(pole), dirs.get(from), dirs.get(to))
-    else {
-        return Err(err());
-    };
-    let e3 = -d_pole;
-    let e1 = (d_from - e3 * d_from.dot(e3)).unitize()?;
-    let e2 = e3.cross(e1);
-    // the projection: p -> (p.e1, p.e2) / (1 - p.e3)
-    let mid = (d_from + d_to).unitize()?;
-    let mut out = [[0.0; 2]; 3];
-    for (p, o) in [d_from, d_to, mid].iter().zip(out.iter_mut()) {
-        let den = 1.0 - p.dot(e3);
-        if den <= EFF_ZERO {
-            return Err(err());
-        }
-        *o = [p.dot(e1) / den, p.dot(e2) / den];
-    }
-    let [a, b, m] = out;
-    // the third side's great circle (normal m) projects to the circle about -(m1, m2) / m3,
-    // of radius^2 1 + (m1^2 + m2^2) / m3^2
-    let sm = d_from.cross(d_to).unitize()?;
-    let m3 = sm.dot(e3);
-    if m3.abs() <= EFF_ZERO {
-        return Err(err()); // the third side runs through the pole: no triangle
-    }
-    let o = [-sm.dot(e1) / m3, -sm.dot(e2) / m3];
-    let r = (1.0 + (o[0] * o[0] + o[1] * o[1])).sqrt();
-    let ua = [(a[0] - o[0]) / r, (a[1] - o[1]) / r];
-    let ub = [(b[0] - o[0]) / r, (b[1] - o[1]) / r];
-    let cos = ua[0] * ub[0] + ua[1] * ub[1];
     // the arc from A to B through the middle's image, less than a half turn: its middle
     // control point where the tangents at A and B cross, its weight the cosine of half its
     // angle
-    if 1.0 + cos <= EFF_ZERO_SQRT
-        || (m[0] - o[0]) * (ua[0] + ub[0]) + (m[1] - o[1]) * (ua[1] + ub[1]) <= 0.0
-    {
+    let Some(far) = far_side(dirs, pole)?.filter(FarSide::is_one_arc) else {
         return Err(err());
-    }
+    };
+    let FarSide {
+        e1,
+        e2,
+        e3,
+        a,
+        b,
+        o,
+        r,
+        ua,
+        ub,
+        cos,
+        ..
+    } = far;
     let w = (0.5 * (1.0 + cos)).sqrt();
     let d = [
         o[0] + r * (ua[0] + ub[0]) / (1.0 + cos),
@@ -1127,15 +1204,37 @@ pub fn ball_corner_edge_geom(
     for &contact in &contacts {
         dirs.push((contact - centre).unitize()?);
     }
-    let mut ball = BallCorner::default();
+    // the triangles, each with the pole first, and the corner's vertex at each of its
+    // corners (none at a fan's centre)
+    let mut triangles: Vec<([Vec3; 3], [Option<usize>; 3])> = Vec::new();
     for kk in 1..n.saturating_sub(1) {
-        // the triangle (0, k, k + 1): the pole at contact 0, its normal turned as the face's
+        // the triangle (0, k, k + 1): the pole at contact 0
         let (Some(&d0), Some(&dk), Some(&dk1)) = (dirs.first(), dirs.get(kk), dirs.get(kk + 1))
         else {
             return Err(err());
         };
-        let tri = [d0, dk, dk1];
-        let index = [0, kk, kk + 1];
+        triangles.push(([d0, dk, dk1], [Some(0), Some(kk), Some(kk + 1)]));
+    }
+    // Not the fork's (SolidCraft #19583): three contacts whose triangle is not one patch (a
+    // side too long, at a corner as sharp as a regular tetrahedron's or sharper) are fanned
+    // about the point of the ball equally far from the three, which faces the vertex: the
+    // three triangles (centre, i, i + 1), on the same sphere, each far side a shorter arc
+    if let ([first], [d0, d1, d2]) = (triangles.as_slice(), dirs.as_slice()) {
+        if far_side(&first.0, 0)?.is_some_and(|far| !far.is_one_arc()) {
+            let mut mid = (*d1 - *d0).cross(*d2 - *d0).unitize()?;
+            if mid.dot(*d0) < 0.0 {
+                mid = -mid;
+            }
+            let fan = [(*d0, *d1, 0, 1), (*d1, *d2, 1, 2), (*d2, *d0, 2, 0)];
+            triangles = fan
+                .iter()
+                .map(|&(a, b, i, j)| ([mid, a, b], [None, Some(i), Some(j)]))
+                .collect();
+        }
+    }
+    let mut ball = BallCorner::default();
+    for (tri, index) in triangles {
+        // the pole first, its normal turned as the face's
         let pole = 0;
         let mut from = 0;
         let mut to = 0;
@@ -1168,13 +1267,14 @@ pub fn ball_corner_edge_geom(
             Point2::new(lo.x, lo.y),
         ];
         for (&uv, at) in corners_uv.iter().zip([from, to, pole]) {
-            let at_vertex = *index.get(at).ok_or_else(err)?;
-            let v = *corner.vertices.get(at_vertex).ok_or_else(err)?;
-            if surface
-                .evaluate_point(k, uv)?
-                .distance(pseudo.vertex_point(v)?)
-                > tol
-            {
+            // a contact is the corner's vertex; a fan's centre is its point of the sphere
+            let want = match *index.get(at).ok_or_else(err)? {
+                Some(at_vertex) => {
+                    pseudo.vertex_point(*corner.vertices.get(at_vertex).ok_or_else(err)?)?
+                }
+                None => centre + *tri.get(at).ok_or_else(err)? * radius,
+            };
+            if surface.evaluate_point(k, uv)?.distance(want) > tol {
                 return Err(err());
             }
         }
@@ -1186,16 +1286,14 @@ pub fn ball_corner_edge_geom(
         // each patch keeps its definition (#2357): the ball's sphere and the patch's own loop,
         // certified on it
         let mut surface = surface;
-        if k.fixes.fillet_round_as_definition {
-            let boundary = trims
-                .curves_3d
-                .iter()
-                .map(|c| nurbs_curve(c).cloned())
-                .collect::<Result<_>>()?;
-            let definition = CornerDefinition::ball(centre, radius, boundary)?;
-            definition.recertify(k, &surface)?;
-            surface.set_corner_definition(definition);
-        }
+        let boundary = trims
+            .curves_3d
+            .iter()
+            .map(|c| nurbs_curve(c).cloned())
+            .collect::<Result<_>>()?;
+        let definition = CornerDefinition::ball(centre, radius, boundary)?;
+        definition.recertify(k, &surface)?;
+        surface.set_corner_definition(definition);
         ball.curves_3d.extend(trims.curves_3d);
         ball.uv_curves
             .extend(trims.uv_curves.iter().cloned().map(Curve::from));
@@ -1293,6 +1391,49 @@ pub fn create_ball_patch(
 mod tests {
     use super::*;
 
+    /// A sphere of centre `c` and radius `r`, as `x . x + 2 b . x + c` ([`BallImplicit`]).
+    fn sphere(c: [f64; 3], r: f64) -> BallImplicit {
+        BallImplicit {
+            a: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            b: [-c[0], -c[1], -c[2]],
+            c: c[0] * c[0] + c[1] * c[1] + c[2] * c[2] - r * r,
+        }
+    }
+
+    /// #15140: three spheres of radius 1 centred at `p + e_i`, which meet at `p` (near the
+    /// origin, where Newton starts) and at `p + (2/3)(1, 1, 1)`: the ball's centre is proved
+    /// through the crate's Krawczyk operator on the box `x ± half`, and that box holds the
+    /// exact meeting point `p`.
+    #[test]
+    fn three_spheres_meeting_near_the_origin_are_proved_at_their_point() {
+        let p = [1e-4, -2e-4, 3e-4];
+        let f = [
+            sphere([p[0] + 1.0, p[1], p[2]], 1.0),
+            sphere([p[0], p[1] + 1.0, p[2]], 1.0),
+            sphere([p[0], p[1], p[2] + 1.0], 1.0),
+        ];
+        let half = 1e-12;
+        let (x, proved) = ball_certified_root(&f, half);
+        assert!(proved, "not proved at {x:?}");
+        for (xi, pi) in x.iter().zip(&p) {
+            assert!((xi - pi).abs() <= half, "{x:?} against {p:?}");
+        }
+    }
+
+    /// #15140: two of the spheres tangent at `p` (one inside the other, both normal to z
+    /// there), so the three gradients at the meeting are dependent: no ball centre is proved.
+    #[test]
+    fn spheres_tangent_at_their_meeting_are_refused() {
+        let p = [1e-4, -2e-4, 3e-4];
+        let f = [
+            sphere([p[0], p[1], p[2] + 1.0], 1.0),
+            sphere([p[0], p[1], p[2] + 2.0], 2.0),
+            sphere([p[0] + 1.0, p[1], p[2]], 1.0),
+        ];
+        let (x, proved) = ball_certified_root(&f, 1e-12);
+        assert!(!proved, "proved at {x:?}");
+    }
+
     /// Three planes through one line meet in no single point: a typed `Failed`, with the
     /// `SM_ERR` status the bare status had.
     #[test]
@@ -1317,6 +1458,77 @@ mod tests {
         assert_eq!(choose(4, 2), 6.0);
         assert_eq!(choose(2, 0), 1.0);
         assert_eq!(choose(3, 3), 1.0);
+    }
+
+    /// Three unit directions each `angle` from the other two, about +z.
+    fn equal_sides(angle: f64) -> [Vec3; 3] {
+        let z = ((1.0 + 2.0 * angle.cos()) / 3.0).sqrt();
+        let r = (1.0 - z * z).sqrt();
+        [0.0_f64, 120.0, 240.0].map(|a| {
+            let a = a.to_radians();
+            Vec3::new(r * a.cos(), r * a.sin(), z)
+        })
+    }
+
+    /// One patch holds a triangle only while its far side's image is under a half turn. That
+    /// image is a half turn where its ends and its circle's centre are in line: with the
+    /// projection from `-p` and the far side from `f` to `t`,
+    /// `((f + p) x (t + p)) . (f x t) = 0`. For three directions with one cosine `c` between
+    /// them that is `(1 - c)(1 + 3 c) = 0`: `c = -1/3`, the corner of a regular tetrahedron
+    /// (its faces' normals stand arccos(-1/3) = 109.47 degrees apart). Under that angle
+    /// the triangle is one patch from any pole; over it, from none.
+    #[test]
+    fn a_triangle_is_one_patch_up_to_a_regular_tetrahedrons_corner() {
+        let limit = (-1.0_f64 / 3.0).acos();
+        for (angle, one) in [
+            (90.0_f64.to_radians(), true),
+            (limit - 1e-3, true),
+            (limit + 1e-3, false),
+            (116.0_f64.to_radians(), false),
+        ] {
+            let dirs = equal_sides(angle);
+            for pole in 0..3 {
+                assert_eq!(
+                    far_side(&dirs, pole).unwrap().unwrap().is_one_arc(),
+                    one,
+                    "{angle} {pole}"
+                );
+                let patch = ball_triangle_patch(Point3::ZERO, 1.0, &dirs, pole, false);
+                assert_eq!(patch.is_ok(), one, "{angle} {pole}");
+            }
+        }
+    }
+
+    /// A triangle too large for one patch, fanned about the point equally far from its three
+    /// corners (+z for equal sides): each of the three triangles (centre, i, i + 1) is one
+    /// patch, on the sphere, its corners the centre and the two contacts.
+    #[test]
+    fn a_large_triangle_fans_into_three_patches_on_the_sphere() {
+        let k = Kernel::default();
+        let dirs = equal_sides(116.0_f64.to_radians());
+        let c = Point3::new(1.0, 2.0, 3.0);
+        let mid = Vec3::new(0.0, 0.0, 1.0);
+        for i in 0..3 {
+            let tri = [mid, dirs[i], dirs[(i + 1) % 3]];
+            assert!(far_side(&tri, 0).unwrap().unwrap().is_one_arc());
+            let (net, from, to) = ball_triangle_patch(c, 2.0, &tri, 0, false).unwrap();
+            assert_eq!((from, to), (1, 2));
+            let s = Surface::from(net);
+            let dom = s.natural_uv_domain_with_nurb(&k).unwrap();
+            for a in 0..=8 {
+                for b in 0..=8 {
+                    let p = s
+                        .evaluate_point(&k, dom.evaluate(f64::from(a) / 8.0, f64::from(b) / 8.0))
+                        .unwrap();
+                    assert!(((p - c).length() - 2.0).abs() < 1e-13);
+                }
+            }
+            let (lo, hi) = (dom.min(), dom.max());
+            let at = |u: f64, v: f64| s.evaluate_point(&k, Point2::new(u, v)).unwrap();
+            assert!((at(lo.x, lo.y) - (c + mid * 2.0)).length() < 1e-13);
+            assert!((at(lo.x, hi.y) - (c + tri[1] * 2.0)).length() < 1e-13);
+            assert!((at(hi.x, hi.y) - (c + tri[2] * 2.0)).length() < 1e-13);
+        }
     }
 
     /// The octant of the unit sphere (contacts +x, +y, +z, pole at +x): every net point's

@@ -12,7 +12,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde_json::Value;
-use solidcraft_doc::drawing::view::ViewKind;
 use solidcraft_doc::drawing::{Drawing, Excluded, OnSheet, Sheet, SheetComponent};
 use solidcraft_doc::ids;
 use solidcraft_geom::drawing_sheet::{Orientation, SheetSize};
@@ -73,7 +72,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<SheetsResult>)
         .params(
             "sheet: id or name (a drawing keeps at least one); contents?: delete, to delete the views on it, their dimensions and \
-             balloons, and the images on it, with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
+             balloons, and the images and sheet sketches and fills on it, with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
         ),
 ];
 
@@ -111,6 +110,8 @@ fn listed(on: &OnSheet) -> String {
         kind("revision tag", &on.tags),
         kind("table", &on.tables),
         kind("note", &on.notes),
+        kind("sheet sketch", &on.sketches),
+        kind("sheet fill", &on.fills),
     ]
     .into_iter()
     .flatten()
@@ -170,15 +171,8 @@ fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<Vec<String>> {
         Some(Value::Null) => sheet.line_group = None,
         Some(group) => sheet.line_group = Some(super::drawing::line_group(cmd, group)?),
     }
-    match p.get("documents") {
-        None => {}
-        Some(Value::Null) => sheet.documents = None,
-        Some(documents) => {
-            let source = str_(documents, "source").and_then(ids::decode).ok_or_else(|| bad(cmd, "`documents.source` must be a source's id"))?;
-            let component =
-                documents.get("component").map_or(Some(0), Value::as_u64).ok_or_else(|| bad(cmd, "`documents.component` must be a component id"))?;
-            sheet.documents = Some(SheetComponent { source, component });
-        }
+    if let Some(documents) = documents(cmd, p)? {
+        sheet.documents = documents;
     }
     if let Some(excluded) = p.get("excluded") {
         // An object of the two flags: anything else (a mistyped key) would change nothing unseen.
@@ -194,8 +188,30 @@ fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<Vec<String>> {
     Ok(lost)
 }
 
+/// `p`'s `documents`: `None` when not given, else the component the sheet documents, or none.
+fn documents(cmd: &str, p: &Value) -> Result<Option<Option<SheetComponent>>> {
+    let Some(documents) = p.get("documents").filter(|documents| !documents.is_null()) else {
+        return Ok(p.get("documents").map(|_| None));
+    };
+    let source = str_(documents, "source").and_then(ids::decode).ok_or_else(|| bad(cmd, "`documents.source` must be a source's id"))?;
+    let component =
+        documents.get("component").map_or(Some(0), Value::as_u64).ok_or_else(|| bad(cmd, "`documents.component` must be a component id"))?;
+    Ok(Some(Some(SheetComponent { source, component })))
+}
+
+/// Refuses `p`'s `documents` when its design can't be read ([`Session::drawn`]): the sheet's title
+/// block would read another design's fields.
+fn check_documents(s: &Session, cmd: &str, p: &Value) -> Result<()> {
+    if let Some(Some(documents)) = documents(cmd, p)? {
+        let source = documents.source;
+        s.drawn(s.drawing(cmd)?, source).map_err(|why| bad(cmd, format!("it documents source {}: {why}", ids::encode(source))))?;
+    }
+    Ok(())
+}
+
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.sheet.add";
+    check_documents(s, cmd, p)?;
     let record = s.drawing(cmd)?.clone();
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(cmd, e.to_string()))?;
     s.edit_drawing(cmd, |d| {
@@ -213,6 +229,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.sheet.set";
+    check_documents(s, cmd, p)?;
     let (id, room, lost) = s.edit_drawing(cmd, |d| {
         let at = sheet_at(cmd, d, p, "sheet")?;
         let sheet = Arc::make_mut(d.sheets.get_mut(at).ok_or_else(|| bad(cmd, "no such sheet"))?);
@@ -269,30 +286,34 @@ pub(super) fn contents_delete(cmd: &str, p: &Value, what: &str) -> Result<bool> 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.sheet.delete";
     let with_contents = contents_delete(cmd, p, "the sheet goes with everything on it")?;
+    let editing = s.active_sheet_sketch.clone();
     s.edit_drawing(cmd, |d| {
         let at = sheet_at(cmd, d, p, "sheet")?;
         if d.sheets.len() <= 1 {
             return Err(bad(cmd, "a drawing keeps at least one sheet"));
         }
         let Some(sheet) = d.sheets.get(at).cloned() else { return Ok(()) };
+        if editing.as_ref().is_some_and(|entry| entry.drawing == d.id && entry.sheet == sheet.id) {
+            return Err(bad(cmd, "finish or cancel the sheet sketch before deleting its sheet"));
+        }
         let on = d.on_sheet(sheet.id);
         if !on.is_empty() && !with_contents {
             let what = listed(&on);
             return Err(bad(cmd, format!("sheet `{}` has {what} on it: give `\"contents\": \"delete\"` to delete them with it", sheet.name)));
         }
-        // Nothing on another sheet goes with it: a view there projected from one of its views would
+        // Nothing on another sheet goes with it: a view there projected or cut from one of its views would
         // be left without its parent.
         let elsewhere: Vec<u64> = d
             .views
             .iter()
-            .filter(|v| v.sheet != sheet.id && matches!(v.kind, ViewKind::Projected { parent, .. } if on.views.binary_search(&parent).is_ok()))
+            .filter(|v| v.sheet != sheet.id && v.kind.parent().is_some_and(|parent| on.views.binary_search(&parent).is_ok()))
             .map(|v| v.id)
             .collect();
         if !elsewhere.is_empty() {
             let views = named(&elsewhere);
             return Err(bad(
                 cmd,
-                format!("sheet `{}`'s views have views projected from them on other sheets ({views}): move or delete those first", sheet.name),
+                format!("sheet `{}`'s views have views projected or cut from them on other sheets ({views}): move or delete those first", sheet.name),
             ));
         }
         d.remove_sheet(sheet.id);

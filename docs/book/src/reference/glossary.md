@@ -40,6 +40,23 @@ Number measuring optical dispersion as `(nd - 1) / (nF - nC)` at the Fraunhofer 
 - **In SolidCraft:** Glass `model.dispersion.abbe_number`; larger values give less chromatic dispersion.
 - **For translators:** an optical material quantity, not a sample or photon count.
 
+### airfoil
+
+The cross-section shape of a wing, blade or fin, published as points along its outline with the
+chord running from 0 to 1.
+
+A file of those points (`.dat`, in the Selig or the Lednicer layout) is inserted into a sketch as
+one fit point spline through every point, scaled to the chord. The *chord* is the straight line
+from the leading edge (the nose) to the trailing edge; the *trailing edge* is open when the file's
+first and last point are apart, and a line then closes the profile.
+
+- **In SolidCraft:** `sketch.insert_airfoil`; its `chord`, `pivot`, `flip` and `format` keys; the
+  reply's `trailing_edge`, `te_gap`, `deviation` and `bulge`.
+- **Don't use:** profile (a sketch's closed region), section (a loft's or a view's), wing shape.
+- **Elsewhere:** aerofoil (UK), airfoil section, foil.
+- **For translators:** the aerodynamic shape, not a sketch profile and not a loft section; UK
+  English says aerofoil.
+
 ### appearance
 
 How a body, face or component looks on screen and in renders.
@@ -505,6 +522,21 @@ are kept, not deleted.
 - **For translators:** "history" is the undo history, not the timeline. French had three names
   for this marker while English did.
 
+### section plane
+
+A plane of a Section Analysis; the view hides what lies beyond any section plane.
+
+One section plane hides its normal's side, and the view keeps what every plane keeps: two square
+to each other keep a quarter, three an eighth. A section has at most six.
+
+- **In SolidCraft:** `inspect.section` (`plane`, `add`, `replace`, `remove`, `hide`, `show`, `folder`, `clear`); the
+  `section_plane` of a `view.pick` hit on a cut face; the viewport menu's Section View, Edit Section View
+  and Turn Off Section View; the Analysis folder's Section 1, Section 2 rows.
+- **Don't use:** cutting plane, clip plane, section view (for the plane).
+- **Elsewhere:** section plane, cutting plane, clipping plane.
+- **For translators:** a view-only cut that changes no geometry, not a Split Body or a Plane
+  feature.
+
 ### settings profile
 
 A named set of input and interface preferences that can be switched, exported and imported as
@@ -554,6 +586,20 @@ a standard size.
 - **Don't use:** library part, part (on its own), content.
 - **Elsewhere:** standard part, library part, fastener, catalogue part.
 - **For translators:** see *Words with more than one meaning*, "part".
+
+### standard steel size
+
+A named steel section from a published standard, such as the channel `RSC 203x89` or the hollow
+section `SHS 100x100x5`, that a frame member can be made of without typing its dimensions.
+
+Its frame profile carries the standard's dimensions; a taper flange channel's flanges slope by its
+flange slope.
+
+- **In SolidCraft:** `frame.profile.list` (`sizes`), `profile: {"size": …}` in `frame.member`,
+  `frame.profile.properties` and `frame.profile.insert`; a channel's `flange_slope`.
+- **Don't use:** catalogue profile, library profile (for the size).
+- **Elsewhere:** standard section, section size, section designation.
+- **For translators:** a steel section's size by name, not a dimension and not a standard part.
 
 ### thin-film interference
 
@@ -643,6 +689,9 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
 | | a minimum distance field | clearance | the Interference and plastic rules dialogs |
+| | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
+| Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
+| | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |
 | | a hem that lies flat on the sheet | flat hem | the Hem dialog's type |
 | Round | a round relief or corner shape | round (shape) | relief shapes, plastic rests, ruled surface corners |

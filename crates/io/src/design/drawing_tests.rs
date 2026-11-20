@@ -20,7 +20,7 @@ fn plate() -> Document {
         let taken: BTreeSet<u64> = doc.drawings.iter().map(|d| d.id).collect();
         let mut d = Drawing::new(name, "en-GB", "Sheet 1", a3, Some(DrawingBorderProfile::iso()), &taken, &mut ids).unwrap();
         let id = d.allocate_id(&mut ids).unwrap();
-        d.sources.push(Source { id });
+        d.sources.push(Source { id, path: None });
         doc.drawings.push(Arc::new(d));
     }
     doc
@@ -75,10 +75,10 @@ fn a_designs_drawings_round_trip_through_both_forms_byte_for_byte() {
     for part in ["document.json", "container.json"] {
         assert_eq!(inside[part], without[part], "{part} is the same with drawings or without");
     }
-    let json = write_design(&doc);
+    let json = write_design(&doc).unwrap();
     let read = read_design(&json).unwrap();
     assert_eq!(read.drawings, doc.drawings);
-    assert_eq!(write_design(&read), json, "the plain form too");
+    assert_eq!(write_design(&read).unwrap(), json, "the plain form too");
 }
 
 /// An image on a sheet travels in its drawing's record through both forms, and an entry whose file
@@ -100,7 +100,7 @@ fn an_image_on_a_sheet_round_trips_and_a_lying_one_is_refused() {
     let read = read_design(&bytes).unwrap();
     assert_eq!(read.drawings, doc.drawings);
     assert_eq!(write_design_container(&read).unwrap(), bytes, "save, open, save: the same bytes");
-    let json = write_design(&doc);
+    let json = write_design(&doc).unwrap();
     assert_eq!(read_design(&json).unwrap().drawings, doc.drawings, "the plain form too");
 
     let mut inside = parts(&bytes);
@@ -196,7 +196,7 @@ fn drawing() -> Drawing {
     let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
     let mut d = Drawing::new("Plate assembly", "en-GB", "Assembly", a3, Some(DrawingBorderProfile::iso()), &BTreeSet::new(), &mut ids).unwrap();
     let id = d.allocate_id(&mut ids).unwrap();
-    d.sources.push(Source { id });
+    d.sources.push(Source { id, path: None });
     d
 }
 
@@ -240,7 +240,7 @@ fn file_kind_tells_designs_and_drawings_apart() {
     let d = drawing();
     let cases = [
         (design, FileKind::Design),
-        (write_design(&doc), FileKind::Design),
+        (write_design(&doc).unwrap(), FileKind::Design),
         (write_drawing_container(&d).unwrap(), FileKind::Drawing),
         (d.to_json().unwrap().into_bytes(), FileKind::Drawing),
         (b"{\"format\": \"solidcraft-drawing/1\"}".to_vec(), FileKind::Drawing),
@@ -260,7 +260,7 @@ fn a_design_is_never_read_as_a_drawing_nor_a_drawing_as_a_design() {
         assert!(error(read_design(&bytes)).contains("is a SolidCraft drawing, not a design"));
     }
     let doc = Document::new("Plate");
-    for bytes in [write_design_container(&doc).unwrap(), write_design(&doc)] {
+    for bytes in [write_design_container(&doc).unwrap(), write_design(&doc).unwrap()] {
         assert!(error(read_drawing(&bytes)).contains("is a SolidCraft design, not a drawing"));
     }
 }
@@ -314,4 +314,124 @@ fn drawing_files_open_from_disk_in_either_form() {
     }
     assert!(error(read_drawing_file(dir.to_str().unwrap())).contains("not a regular file"));
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// W38a acceptance through the real design container, not only Drawing JSON.
+fn design_with_sheet_sketches() -> Document {
+    use solidcore_record::Vec2;
+    use solidcraft_doc::drawing::{SheetSketch, Units};
+    use solidcraft_doc::sketch::{ConstraintKind, PointExprs, Sketch};
+
+    let mut doc = plate();
+    let mut ids = IdSource::seeded(7082);
+    let shared_id = doc.drawings[0].allocate_id(&mut ids).unwrap();
+    for (i, drawing) in doc.drawings.iter_mut().enumerate() {
+        let d = Arc::make_mut(drawing);
+        let mut sketch = Sketch::new();
+        let inset = 15.0 + i as f64;
+        for (name, xy) in [("p0", (inset, 10.0)), ("p1", (inset + 40.0, 10.0)), ("p2", (inset + 40.0, 30.0)), ("p3", (inset, 30.0))] {
+            sketch.add_point(Vec2::new(xy.0, xy.1), Some(name)).unwrap();
+        }
+        for j in 0..4 {
+            sketch.add_line_pts(j + 1, (j + 1) % 4 + 1, Some(&format!("l{j}"))).unwrap();
+        }
+        sketch.add_constraint(ConstraintKind::Length { l: 0, value: 40.0 }, Some("Width".into())).unwrap();
+        sketch.points[1].exprs = Some(Box::new(PointExprs { x: Some("Inset + 5 mm".into()), y: None }));
+        d.units = Units::Fixed { unit: "in".into() };
+        // Identical sketch ids in different drawings are legal: the namespace
+        // is drawing-local, just as the curve/point ids are sketch-local.
+        d.sketches.push(Arc::new(SheetSketch { id: shared_id, sheet: d.sheets[0].id, name: format!("Outline {i}"), sketch }));
+        d.validate().unwrap();
+    }
+    doc
+}
+
+#[test]
+fn sheet_sketches_round_trip_through_real_container_and_plain_design() {
+    let source = design_with_sheet_sketches();
+    let container_bytes = write_design_container(&source).unwrap();
+    let plain_bytes = write_design(&source).unwrap();
+    for bytes in [&container_bytes, &plain_bytes] {
+        let reopened = read_design(bytes).unwrap();
+        assert_eq!(reopened.drawings, source.drawings);
+        for (i, d) in reopened.drawings.iter().enumerate() {
+            let record = &d.sketches[0];
+            assert_eq!(record.sheet, d.sheets[0].id);
+            assert_eq!(record.name, format!("Outline {i}"));
+            assert_eq!(record.sketch.points[1].pos.x, 15.0 + i as f64);
+            assert_eq!(record.sketch.points[2].pos.x - record.sketch.points[1].pos.x, 40.0);
+            assert_eq!(record.sketch.points[3].pos.y - record.sketch.points[2].pos.y, 20.0);
+            assert_eq!(record.sketch.points[1].exprs.as_ref().unwrap().x.as_deref(), Some("Inset + 5 mm"));
+            assert_eq!(record.sketch.constraints[0].param.as_deref(), Some("Width"));
+            assert_eq!(d.sheet_sketch(record.id).unwrap().name, format!("Outline {i}"));
+        }
+        assert_eq!(write_design_container(&reopened).unwrap(), container_bytes);
+        assert_eq!(write_design(&reopened).unwrap(), plain_bytes);
+    }
+    let entries = parts(&container_bytes);
+    for d in &source.drawings {
+        assert_eq!(entries[&entry(d.id)], d.to_json().unwrap().as_bytes());
+    }
+}
+
+#[test]
+fn a_sheet_sketch_change_does_not_rewrite_model_or_another_drawings_entry() {
+    let source = design_with_sheet_sketches();
+    let before = parts(&write_design_container(&source).unwrap());
+    let mut changed = source.clone();
+    let drawing = Arc::make_mut(&mut changed.drawings[0]);
+    let sketch = Arc::make_mut(&mut drawing.sketches[0]);
+    sketch.name = "Revised outline".into();
+    sketch.sketch.points[1].exprs.as_mut().unwrap().x = Some("Inset + 6 mm".into());
+    drawing.validate().unwrap();
+    let after = parts(&write_design_container(&changed).unwrap());
+    assert_eq!(before.keys().collect::<Vec<_>>(), after.keys().collect::<Vec<_>>());
+    let own_entry = entry(source.drawings[0].id);
+    for (name, bytes) in &before {
+        if *name == own_entry {
+            assert_ne!(bytes, &after[name]);
+        } else {
+            assert_eq!(bytes, &after[name], "a sketch edit rewrote {name}");
+        }
+    }
+    assert_eq!(after["document.json"], before["document.json"]);
+    assert_eq!(after["container.json"], before["container.json"]);
+    let reopened = read_design(&write_design_container(&changed).unwrap()).unwrap();
+    assert_eq!(reopened.drawings, changed.drawings);
+    assert_eq!(source.drawings[0].sketches[0].name, "Outline 0", "copy-on-write changed the original");
+}
+
+#[test]
+fn a_bad_sheet_sketch_refuses_the_whole_container_without_owner_fallback() {
+    let source = design_with_sheet_sketches();
+    let original = write_design_container(&source).unwrap();
+    let good_parts = parts(&original);
+    let own_entry = entry(source.drawings[0].id);
+    let good: Value = serde_json::from_slice(&good_parts[&own_entry]).unwrap();
+    let foreign_sheet = source.drawings[1].sheets[0].id;
+    for (pointer, value) in [
+        ("/sketches/0/sheet", json!(ids::encode(foreign_sheet))),
+        ("/sketches/0/id", json!(ids::encode(source.drawings[0].id))),
+        ("/sketches/0/sketch/curves/0/a", json!(99_999)),
+        ("/sketches/0/sketch/points/1/id", json!("origin")),
+        ("/sketches/0/sketch/points/1/pos/0", json!(1e100)),
+        ("/sketches/0/sketch/links", json!([null])),
+    ] {
+        let mut record = good.clone();
+        if pointer == "/sketches/0/sketch/links" {
+            // Empty links are omitted on write; a hostile file can add them.
+            record["sketches"][0]["sketch"]["links"] = value;
+        } else {
+            *record.pointer_mut(pointer).unwrap() = value;
+        }
+        let mut corrupt = good_parts.clone();
+        corrupt.insert(own_entry.clone(), serde_json::to_vec(&record).unwrap());
+        let error = read_design(&container(&corrupt)).unwrap_err().to_string();
+        assert!(error.contains(&own_entry), "missing drawing context for {pointer}: {error}");
+        let mut inline: Value = serde_json::from_slice(&write_design(&source).unwrap()).unwrap();
+        inline["drawings"][0] = record;
+        assert!(read_design(&serde_json::to_vec(&inline).unwrap()).is_err(), "plain JSON accepted {pointer}");
+    }
+    assert_eq!(read_design(&original).unwrap().drawings, source.drawings);
+    assert_eq!(parts(&original), good_parts, "hostile-input checks changed their source");
 }

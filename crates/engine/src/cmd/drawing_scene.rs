@@ -1,5 +1,5 @@
 //! `drawing.scene` (#4890 W10): one sheet of the open drawing as one paper scene, drawn at once
-//! ([`crate::drawing_scene::build`]): its drawing border, each image on it, then each view on it by id, then
+//! ([`crate::drawing_scene::build`]): its drawing border, each image on it, then each view and sheet sketch on it by id, then
 //! its title block. The sheet page draws the same scene through the provider, and the drawing export
 //! (A7) writes it.
 //!
@@ -15,11 +15,11 @@ use serde_json::Value;
 use solidcraft_doc::ids;
 
 use super::CommandSpec;
-use crate::drawing_scene::{CMD, DimensionState, NoteState};
+use crate::drawing_scene::{BalloonState, CMD, DimensionState, NoteState, TableState};
 use crate::schema::drawing_scene::{
     DimensionStatusResult, DrawingStatusParams, DrawingStatusResult, DrawingUpdateParams, DrawingUpdateResult, HitResult, LineHitResult,
-    SheetHitParams, SheetHitResult, SheetLineParams, SheetLineResult, SheetPaperScene, SheetSceneDimension, SheetSceneNote, SheetSceneParams,
-    SheetSceneResult, ViewStatusResult,
+    SheetHitParams, SheetHitResult, SheetLineParams, SheetLineResult, SheetPaperScene, SheetSceneBalloon, SheetSceneDimension, SheetSceneNote,
+    SheetSceneParams, SheetSceneResult, SheetSceneTable, SheetSceneTag, ViewStatusResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -41,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(STATUS, "Drawing Status
     .doc_only()
     .contract(&STATUS_CONTRACT)
     .output(output_schema_for::<DrawingStatusResult>)
-    .params("→ {views: [{view, sheet, status: current|out_of_date|placeholder|failed, reason?}], dimensions: [{dimension, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, why?, out_of_date?: true when its sheet shows it as it last was, or not at all}], waiting: how many views are out of date, held?: true when a deferred drawing's views or dimensions out of date wait for drawing.update}. current: drawn, from the model and with the settings the view has now. A dimension's status is its reading from the model now; out_of_date says the sheet doesn't show that yet: its view is out of date, or it was read from another model or record than it has now (as drawing.scene's out_of_date lists it). Balloons aren't listed: drawing.balloon.inspect reads each one. Read-only: nothing is drawn, and each body a dimension names is read once for the call."),
+    .params("→ {views: [{view, sheet, status: current|out_of_date|placeholder|failed, reason?}], dimensions: [{dimension, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, why?, out_of_date?: true when its sheet shows it as it last was, or not at all}], waiting: how many views are out of date, held?: true when a deferred drawing's views or dimensions out of date wait for drawing.update}. current: drawn, from the model and with the settings the view has now. current, out_of_date and waiting say what the sheet page shows: the page draws the views one at a time. drawing.scene and an export of an automatic drawing draw every view from the model at once and don't change them, so without a sheet page (the CLI, MCP) views can stay out_of_date while scenes and exports show them whole.A dimension's status is its reading from the model now; out_of_date says the sheet doesn't show that yet: its view is out of date, or it was read from another model or record than it has now (as drawing.scene's out_of_date lists it). Balloons aren't listed: drawing.balloon.inspect reads each one. Read-only: nothing is drawn, and each body a dimension names is read once for the call."),
     CommandSpec::new(UPDATE, "Update Drawing", crate::checked!("drawing.update", update))
     .icon("update")
     .in_drawing()
@@ -49,7 +49,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(STATUS, "Drawing Status
     .doc_only()
     .contract(&UPDATE_CONTRACT)
     .output(output_schema_for::<DrawingUpdateResult>)
-    .params("→ {waiting}: a deferred drawing's views may draw from the model as it is now, until that moves on; waiting: how many are out of date until they are drawn. Nothing is drawn here: the sheet page draws them, as drawing.scene or an export of their sheet does. A drawing that isn't deferred follows the model already."),
+    .params("→ {waiting}: a deferred drawing's views may draw from the model as it is now, until that moves on; waiting: how many are out of date until they are drawn. Nothing is drawn here: the sheet page draws them, and for a deferred drawing so do drawing.scene and an export of their sheet. A drawing that isn't deferred follows the model already: its scenes and exports draw from the model at once, and waiting counts only what the sheet page hasn't drawn yet."),
     CommandSpec::new(HIT, "What Is Under a Point", crate::checked!("drawing.scene.hit", hit))
     .icon("inspect")
     .in_drawing()
@@ -73,7 +73,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(STATUS, "Drawing Status
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<SheetSceneResult>)
-    .params("sheet: id or name → {sheet, scene: {size_mm, groups: [{object, kind: drawing_border|sheet_image|view|dimension|note|title_block, items: [{kind: stroke, path, closed, width_mm} or {kind: fill, region} or {kind: picture, source, rect: {min, max}, opacity} or {kind: text, font, scale, origin, angle, slant, glyphs, text, clusters, rtl}]}], fonts?: [the fonts its text names, by id, with their glyphs and never their bytes]} in paint order: the sheet's drawing border (object: the sheet), then each image on it by id (object and source: the placement), then each view on it by id (object: the view; its hidden lines dashed, under its visible ones), then the dimensions and notes of those views by view and id (object: the dimension or note; lines, arrowheads and text, set in the drawing's font and language, in paper millimetres at any scale; a note's fields read as its sheet's title block's do, its leader to where it points now), then the notes on the sheet by id, then its title block's lines (object: the sheet), views: [{view, status: drawn|placeholder|failed, reason?, stats?}], objects: [{object, kind, bounds_mm: {min, max}, boundary_mm?}], where the border, each view, each dimension and each note sit on paper (what draws nothing and has no boundary isn't one), dimensions: [{dimension, view, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, drawn, why?}], notes?: [{note, view?: none on the sheet, status, drawn, why?}]}. A view with nothing to measure, or one that can't be drawn yet, is left out and says why, and so is a dimension that isn't found again or whose view isn't drawn; one whose text the drawing's font can't set keeps its lines and says why. A note whose reference is lost keeps its text, with no leader. Read-only; a view of another configuration evaluates a copy of the design; the design is unchanged. A deferred drawing draws only what drawing.update allows; out_of_date lists the views, dimensions and notes it shows as they last were.")];
+    .params("sheet: id or name → {sheet, scene: {size_mm, groups: [{object, kind: drawing_border|sheet_image|view|dimension|note|balloon|parts_list|revision_table|sketch|title_block, items: [{kind: stroke, path, closed, width_mm} or {kind: fill, region} or {kind: picture, source, rect: {min, max}, opacity} or {kind: text, font, scale, origin, angle, slant, glyphs, text, clusters, rtl}]}], fonts?: [the fonts its text names, by id, with their glyphs and never their bytes]} in paint order: the sheet's drawing border (object: the sheet), then each image on it by id (object and source: the placement), then each view on it by id (object: the view; its hidden lines dashed, under its visible ones), then the dimensions, notes and balloons of those views by view and id (object: the dimension, note or balloon; lines, arrowheads and text, set in the drawing's font and language, in paper millimetres at any scale; a note's fields read as its sheet's title block's do, its leader to where it points now; a balloon's circle round its number in its parts list, its leader to its edge's middle), then its parts lists and revision tables by id (object: the table; its lines and its words, where its place puts it), then the notes on the sheet by id, then each sheet sketch by id, then its title block's lines (object: the sheet), views: [{view, status: drawn|placeholder|failed, reason?, stats?}], objects: [{object, kind, bounds_mm: {min, max}, boundary_mm?}], where the border, each view, each dimension, each note and each table sit on paper (what draws nothing and has no boundary isn't one), dimensions: [{dimension, view, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, drawn, why?}], notes?: [{note, view?: none on the sheet, status, drawn, why?}], balloons?: [{balloon, view, status, row_status: ok|no_list|not_found|reference|no_row|unread, item?, drawn, why?}], tables: [{table, status: ok|failed, drawn, why?}], sketches: [{sketch, status: drawn|empty|failed, reason?}]}. A table that can't be read or laid out says why, and the rest of the sheet still draws; one with a word the drawing's fonts can't set leaves that word off and says why. A view with nothing to measure, or one that can't be drawn yet, is left out and says why, and so is a dimension that isn't found again or whose view isn't drawn; one whose text the drawing's font can't set keeps its lines and says why. A note whose reference is lost keeps its text, with no leader, and a lost balloon keeps its circle and number; one with no row keeps an empty circle and says why. Read-only; a view of another configuration evaluates a copy of the design; the design is unchanged. A deferred drawing draws only what drawing.update allows; out_of_date lists the views, dimensions, notes, balloons and sketches it shows as they last were.")];
 
 fn status(s: &mut Session, p: &Value) -> Result<Value> {
     let _: DrawingStatusParams = crate::schema::read(STATUS, p)?;
@@ -166,16 +166,49 @@ pub(super) fn note_results(states: Vec<NoteState>) -> Vec<SheetSceneNote> {
     states.into_iter().map(one).collect()
 }
 
+/// Each balloon of a scene in the words of a reply.
+pub(super) fn balloon_results(states: Vec<BalloonState>) -> Vec<SheetSceneBalloon> {
+    let one = |state: BalloonState| {
+        let (status, why, _) = super::drawing_dimension::status_words(state.status);
+        SheetSceneBalloon {
+            balloon: ids::encode(state.balloon),
+            view: ids::encode(state.view),
+            status,
+            row_status: super::drawing_balloon::row_word(&state.row),
+            item: state.row.item().map(str::to_string),
+            drawn: state.drawn,
+            why: why.or(state.why),
+        }
+    };
+    states.into_iter().map(one).collect()
+}
+
+/// Each table of a scene in the words of a reply.
+pub(super) fn table_results(states: Vec<TableState>) -> Vec<SheetSceneTable> {
+    let one = |state: TableState| SheetSceneTable {
+        table: ids::encode(state.table),
+        status: if state.failed { "failed" } else { "ok" },
+        drawn: state.drawn,
+        why: state.why,
+    };
+    states.into_iter().map(one).collect()
+}
+
 fn scene(s: &mut Session, p: &Value) -> Result<Value> {
     let request: SheetSceneParams = crate::schema::read(CMD, p)?;
     let d = s.drawing(CMD)?.clone();
     let sheet = crate::drawing_scene::sheet_id(&d, &request.sheet, CMD)?;
     let built = crate::drawing_scene::as_shown(s, &d, sheet)?;
-    let out_of_date = built.out_of_date.iter().map(|id| ids::encode(*id)).collect();
+    let out_of_date = built.out_of_date.iter().map(|(id, _)| ids::encode(*id)).collect();
     let views = built.views.into_iter().map(Into::into).collect();
     let objects = built.objects.into_iter().map(Into::into).collect();
     let dimensions = dimension_results(built.dimensions);
     let notes = note_results(built.notes);
+    let balloons = balloon_results(built.balloons);
+    let tables = table_results(built.tables);
+    let tags = built.tags.into_iter().map(|t| SheetSceneTag { tag: ids::encode(t.tag), drawn: t.drawn, why: t.why }).collect();
+    let sketches = built.sketches.into_iter().map(Into::into).collect();
+    let fills = built.fills.into_iter().map(Into::into).collect();
     let reply = SheetSceneResult {
         sheet: ids::encode(sheet),
         scene: SheetPaperScene(built.scene),
@@ -183,7 +216,12 @@ fn scene(s: &mut Session, p: &Value) -> Result<Value> {
         objects,
         dimensions,
         notes,
+        balloons,
+        tables,
+        tags,
         out_of_date,
+        sketches,
+        fills,
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))

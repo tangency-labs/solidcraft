@@ -14,9 +14,24 @@ fn valid_slot(slot: &str) -> bool {
     matches!(slot, "a" | "b" | "edge" | "face") || slot.parse::<usize>().is_ok_and(|n| n.to_string() == slot)
 }
 
+fn contains_path_key(value: &Value) -> bool {
+    match value {
+        Value::Object(obj) => obj.contains_key("path") || obj.values().any(contains_path_key),
+        Value::Array(items) => items.iter().any(contains_path_key),
+        _ => false,
+    }
+}
+
+pub fn slot_payload(slot: &str) -> Value {
+    match slot.parse::<u64>() {
+        Ok(point) => json!(point),
+        Err(_) => json!(slot),
+    }
+}
+
 fn valid_pick(pick: &Value) -> bool {
     let Some(obj) = pick.as_object() else { return false };
-    obj.len() == 1 && ["edge", "corner", "face"].iter().any(|k| obj.contains_key(*k)) && !pick.to_string().contains("\"path\"")
+    obj.len() == 1 && ["edge", "corner", "face"].iter().any(|k| obj.contains_key(*k)) && !contains_path_key(pick)
 }
 
 /// Prepare a repair request, but never issue a mutating command.
@@ -41,7 +56,7 @@ pub fn confirm(session: &mut Session, selection: &RepairSelection, confirmed: bo
             "drawing.dimension.repair",
             &json!({
                 "dimension": selection.dimension,
-                "slot": selection.slot,
+                "slot": slot_payload(&selection.slot),
                 "pick": selection.pick,
             }),
         )
@@ -67,6 +82,13 @@ mod tests {
         assert!(prepare("d", "lost", "edge", json!({})).is_err());
         assert!(prepare("d", "lost", "edge", json!({"edge":{},"face":{}})).is_err());
         assert!(prepare("d", "lost", "edge", json!({"edge":{"path":[1]}})).is_err());
+    }
+    #[test]
+    fn path_values_are_allowed_and_numeric_slots_are_numbers() {
+        assert!(prepare("d", "lost", "edge", json!({"edge":{"body":"path","index":0}})).is_ok());
+        assert!(prepare("d", "lost", "edge", json!({"edge":{"path":[1]}})).is_err());
+        assert_eq!(slot_payload("0"), json!(0));
+        assert_eq!(slot_payload("edge"), json!("edge"));
     }
     #[test]
     fn confirmation_is_required_before_any_engine_call() {

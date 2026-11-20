@@ -15,7 +15,7 @@
 
 use solidcore::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
 use solidcore::eval::Frame;
-use solidcore::kernel::Kernel;
+use solidcore::kernel::{Kernel, Tolerances};
 use solidcore::primitive::api_trim_ops::create_planar_faces;
 use solidcore::primitive::primitive_creation::Boolean2d;
 use solidcore::prism::{extrude, measure, profile as kp, read, sheet};
@@ -24,10 +24,12 @@ use solidcore_convert as convert;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
 
 pub use solidcore::prism::measure::Interval;
-pub use solidcore::prism::profile::ProfileRefusal;
+pub use solidcore::prism::placement::LoopPlacement;
+pub use solidcore::prism::profile::{tapered_flange_ends, ProfileRefusal};
 
+use crate::body::Contract;
 use crate::body::{finish, Body, Expect};
-use crate::boolean::{union_all, BooleanOp};
+use crate::boolean::{union_all_with, BooleanOp};
 use crate::order::{self, Order};
 use crate::session::{read_body, run, run_on, Answer};
 use crate::{Error, Result};
@@ -43,8 +45,8 @@ pub const EXTRUDE_TOLERANCE: f64 = 1e-7;
 struct Out<T>(std::result::Result<T, Error>);
 
 impl<T> Answer for Out<T> {
-    fn refusal(&self) -> Option<String> {
-        self.0.as_ref().err().map(ToString::to_string)
+    fn refusal(&self) -> Option<Error> {
+        self.0.as_ref().err().cloned()
     }
 }
 
@@ -61,11 +63,12 @@ fn op2(op: BooleanOp) -> Boolean2d {
     }
 }
 
-/// `a` op `b` (the kernel's 2D boolean); `None` when nothing is left.
+/// `a` op `b` (the kernel's 2D boolean); `None` when nothing is left: no result assigned, or a
+/// result with no faces (two disjoint operands intersected).
 fn combine(k: &mut Kernel, a: Brep, b: Brep, op: BooleanOp) -> solidcore::Result<Option<Brep>> {
     Ok(match boolean_2d(k, a, b, op2(op))? {
-        Boolean2dOutcome::Result(r) => Some(r),
-        Boolean2dOutcome::Unassigned { .. } => None,
+        Boolean2dOutcome::Result(r) if !r.face_list().is_empty() => Some(r),
+        Boolean2dOutcome::Result(_) | Boolean2dOutcome::Unassigned { .. } => None,
     })
 }
 
@@ -145,12 +148,14 @@ fn sheet_of(
     })
 }
 
-/// The profile check's refusal as the call's.
+/// The profile check's refusal as the call's, at the zone tolerance of the session's kernel,
+/// which builds the profile: the kernel's default, since ops offers no way to change its
+/// tolerances ([`crate::session`]), so the check accepts exactly the arcs the build makes.
 fn checked<'a>(
     regions: impl Iterator<Item = &'a kp::Region2>,
     tol: f64,
 ) -> std::result::Result<(), Error> {
-    kp::check_regions(regions, tol).map_err(Error::Profile)
+    kp::check_regions(regions, tol, Tolerances::default().zone_tol_3d).map_err(Error::Profile)
 }
 
 /// The boolean of planar regions bounded by lines, circular arcs and free-form segments, exact:
@@ -246,7 +251,10 @@ pub fn extrude_planar_regions(
         }
         Ok(Out(Ok(solids)))
     })?;
-    union_all(pieces.0?.into_iter().map(Body::new).collect())
+    union_all_with(
+        pieces.0?.into_iter().map(Body::new).collect(),
+        Contract::Proved,
+    )
 }
 
 /// A uniform prism along a plane's normal, as [`prism_section`] proves it.
@@ -258,7 +266,7 @@ pub struct PrismSection {
     pub hi: f64,
     /// Its section, exact: lines and arcs, the outer loop counter-clockwise, the holes clockwise.
     pub region: Region2,
-    /// How far the levels may be off the body's caps.
+    /// How far the levels and section may be off the body's caps, including frame conversion.
     pub tolerance: f64,
     /// An enclosure of its volume.
     pub volume: Interval,
@@ -295,7 +303,7 @@ pub fn prism_equivalent(a: &Body, b: &Body) -> Result<Option<bool>> {
         });
     }
     run_on("prism_equivalent", &[("a", a), ("b", b)], |k| {
-        let (ga, gb) = (a.lock(), b.lock());
+        let (ga, gb) = Body::lock_pair(a, b);
         Ok(measure::equivalent(k, &ga, &gb))
     })
 }
@@ -387,9 +395,133 @@ pub fn region_area(region: &Region2) -> Result<kp::Area> {
         .map_err(|_| Error::Profile(ProfileRefusal::FreeForm))
 }
 
+/// The section loop a closed chain of nodes samples ([`solidcore::prism::fit::fit_loop`]): a
+/// full circle where the nodes are one within `tolerance`, else the polygon of their corners,
+/// each straight run joined within three times `epsilon`. For a mesh's cap boundary, which the
+/// caller certifies against the mesh afterwards.
+///
+/// # Errors
+/// [`Error::Status`] (input refused) past the straight-run join's work bound.
+pub fn fitted_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Result<Loop2> {
+    let points: Vec<_> = points.iter().map(|p| convert::vec2(*p)).collect();
+    Ok(
+        match solidcore::prism::fit::fit_loop(&points, tolerance, epsilon)
+            .map_err(crate::error::status)?
+        {
+            solidcore::prism::fit::FittedLoop::Circle { center, radius } => {
+                Loop2::circle(convert::record_vec2(center), radius)
+            }
+            solidcore::prism::fit::FittedLoop::Polygon(corners) => Loop2::polygon(
+                &corners
+                    .into_iter()
+                    .map(convert::record_vec2)
+                    .collect::<Vec<_>>(),
+            ),
+        },
+    )
+}
+
 /// Whether `lp` holds `p` by the even–odd rule, decided exactly ([`kp::Loop2::holds`]): `None`
 /// when `p` is on the loop or within rounding of it.
 #[must_use]
 pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
     convert::loop2(lp).holds(convert::vec2(p))
+}
+
+/// Counter-clockwise angle between two planar rays, in radians modulo one turn.
+/// Equal rays give zero. Nonfinite and zero rays have no angle.
+#[must_use]
+pub fn counterclockwise_sweep(center: Vec2, start: Vec2, end: Vec2) -> Option<f64> {
+    kp::counterclockwise_sweep(
+        convert::vec2(center),
+        convert::vec2(start),
+        convert::vec2(end),
+    )
+}
+
+/// The directed parameter interval of a recognized ellipse arc, in the input plane.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EllipseArc {
+    /// The centre in the input plane.
+    pub center: Vec2,
+    /// The directed major semiaxis.
+    pub major: Vec2,
+    /// The positive minor-to-major axis ratio.
+    pub ratio: f64,
+    /// The starting parameter in radians.
+    pub start: f64,
+    /// The ending parameter in radians, retaining direction.
+    pub end: f64,
+}
+
+/// Recognize the supporting ellipse of the given rational quadratic, or refuse.
+pub fn conic_ellipse(a: Vec2, apex: Vec2, b: Vec2, w: f64) -> Option<EllipseArc> {
+    let arc = solidcore::prism::recognition::conic_ellipse(
+        convert::vec2(a),
+        convert::vec2(apex),
+        convert::vec2(b),
+        w,
+    )?;
+    Some(EllipseArc {
+        center: convert::record_vec2(arc.center),
+        major: convert::record_vec2(arc.major),
+        ratio: arc.ratio,
+        start: arc.start,
+        end: arc.end,
+    })
+}
+
+/// Whether a piece of a planar curve within the reading tolerance of its chord is read as the
+/// arc it is proved on before that line ([`read::arc_before_line`]): `spans` its Bézier spans
+/// (`[x w, y w, w]` in the plane), `zone` the model's zone tolerance
+/// ([`crate::sweep::zone_tolerance`]).
+#[must_use]
+pub fn arc_before_line(spans: &[Vec<[f64; 3]>], zone: f64) -> bool {
+    read::arc_before_line(spans, zone)
+}
+
+/// Recognize one directed turn of arcs with the same stored support.
+pub fn loop_circle(lp: &Loop2) -> Option<(Vec2, f64)> {
+    if lp.segs.len() > 200_000 {
+        return None;
+    }
+    let (center, radius) = solidcore::prism::recognition::loop_circle(&convert::loop2(lp))?;
+    Some((convert::record_vec2(center), radius))
+}
+
+/// Recognize one ellipse turn without changing any input control point.
+pub fn loop_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
+    if lp.segs.len() > 200_000 {
+        return None;
+    }
+    let (center, major, ratio) = solidcore::prism::recognition::loop_ellipse(&convert::loop2(lp))?;
+    Some((
+        convert::record_vec2(center),
+        convert::record_vec2(major),
+        ratio,
+    ))
+}
+
+/// Read the signed single winding of ordered points already admitted on one round wall.
+pub fn certified_round_wall_turn(points: &[Vec2], center: Vec2) -> Option<f64> {
+    if points.len() > 200_000 {
+        return None;
+    }
+    solidcore::prism::recognition::certified_round_wall_turn(
+        &points
+            .iter()
+            .copied()
+            .map(convert::vec2)
+            .collect::<Vec<_>>(),
+        convert::vec2(center),
+    )
+}
+
+/// Where `lp` lies against `other` (both in one plane's coordinates), loops within `tol` of each
+/// other counting as meeting ([`kp::Loop2::placement`]): clear inside,
+/// clear outside, along it everywhere, or meeting it in places only. `None` for loops of other
+/// than lines and arcs, or a placement the kernel cannot decide.
+#[must_use]
+pub fn loop_placement(lp: &Loop2, other: &Loop2, tol: f64) -> Option<LoopPlacement> {
+    convert::loop2(lp).placement(&convert::loop2(other), tol)
 }

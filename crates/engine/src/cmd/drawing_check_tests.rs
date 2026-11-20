@@ -182,6 +182,53 @@ fn a_held_view_and_its_dimension_are_out_of_date() {
     assert_eq!(of_kind(&reply, "out_of_date"), expected, "{reply}");
 }
 
+/// A deferred drawing whose model moved on lists a sketch drawn on its sheet and a fill of it as out
+/// of date, each by its own kind, beside the view: a held drawing solves no sketch and paints no fill
+/// again, so the sheet shows them as they last were.
+#[test]
+fn a_held_sheets_sketch_and_fill_are_out_of_date_by_their_kinds() {
+    let (mut s, _) = plate();
+    let (sheet, view) = drawn(&mut s);
+    let sketch = run(&mut s, "drawing.sketch.create", json!({"owner": ids::encode(sheet)}))["sketch"].clone();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [15, 10], "p1": [55, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let boundary = run(&mut s, "drawing.fill.profiles", json!({"sketch": sketch}))["fill_profiles"]["boundaries"][0].clone();
+    let filled = run(&mut s, "drawing.sketch.fill", json!({"sketch": sketch, "boundary": boundary, "paint": {"kind": "solid"}}));
+    let fill = filled["fills"][0]["fill"].clone();
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    assert!(of_kind(&checked(&mut s, json!({})), "out_of_date").is_empty());
+    with_model_changed(&mut s, |s| {
+        run(s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new"}));
+    });
+    let reply = checked(&mut s, json!({}));
+    let mut expected = vec![named("fill", &fill), named("sketch", &sketch), named("view", &json!(ids::encode(view)))];
+    expected.sort();
+    assert_eq!(of_kind(&reply, "out_of_date"), expected, "{reply}");
+}
+
+/// A deferred drawing whose model moved on lists a note on its view as out of date, as a note, beside
+/// the view and its dimension, each by the kind the sheet listed it as; a note on the sheet reads no
+/// model, so it is never listed.
+#[test]
+fn a_held_views_note_is_out_of_date_as_a_note() {
+    let (mut s, _) = plate();
+    let (sheet, view) = drawn(&mut s);
+    let width = length(&mut s, view, [50.0, 0.0, 0.0]);
+    let note = note_on(&mut s, view, [50.0, 0.0, 8.0]);
+    run(&mut s, "drawing.note.add", json!({"anchor": {"sheet": ids::encode(sheet)}, "at": [20, 20], "content": "General"}));
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    assert!(of_kind(&checked(&mut s, json!({})), "out_of_date").is_empty());
+    with_model_changed(&mut s, |s| {
+        run(s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new"}));
+    });
+    let reply = checked(&mut s, json!({}));
+    let mut expected = vec![named("dimension", &width), named("note", &note), named("view", &json!(ids::encode(view)))];
+    expected.sort();
+    assert_eq!(of_kind(&reply, "out_of_date"), expected, "{reply}");
+}
+
 /// A deferred drawing is checked as its sheet shows the model: a bar added since it was drawn neither
 /// pushes the held view off its sheet nor is drawn by it, until the drawing is updated.
 #[test]
@@ -260,10 +307,10 @@ fn each_status_gives_its_kind() {
         assert_eq!(finding.as_ref().map(|f| f.kind), kind, "{status:?}");
         assert!(finding.is_none_or(|f| !f.why.is_empty() && f.sheet == ids::encode(7) && f.object == dimension), "{status:?}");
     }
-    let failed = ViewState { view: 9, status: ViewStatus::Failed("too many lines".into()), stats: None, why: None };
+    let failed = ViewState { view: 9, status: ViewStatus::Failed("too many lines".into()), stats: None, why: None, label: None, hatches: Vec::new() };
     let finding = view_finding(7, &failed).unwrap();
     assert_eq!((finding.kind, finding.why.as_str(), finding.object), (FindingKind::Failed, "too many lines", object_of(CheckedKind::View, 9)));
-    assert!(view_finding(7, &ViewState { view: 9, status: ViewStatus::Drawn, stats: None, why: None }).is_none());
+    assert!(view_finding(7, &ViewState { view: 9, status: ViewStatus::Drawn, stats: None, why: None, label: None, hatches: Vec::new() }).is_none());
 }
 
 /// A note on the chamfer's edge is lost with it; a note on the sheet reads no model.
@@ -321,6 +368,75 @@ fn a_parts_list_row_without_a_balloon_is_listed() {
     assert_eq!((rows(&reply), of_kind(&reply, "lost")), (vec![row], vec![named("balloon", &balloon)]), "{reply}");
 }
 
+/// A balloon moved off the paper is outside the sheet, as a dimension or a note is: a balloon is one
+/// of the sheet's objects since balloons came to the sheet. One on the paper isn't listed.
+#[test]
+fn a_balloon_off_the_paper_is_listed() {
+    let (mut s, view, _, at) = assembly();
+    let edge = json!({"point": [5, 0, 0], "path": [at]});
+    let balloon = run(&mut s, "drawing.balloon.add", json!({"view": view, "edge": edge, "at": [80, 20]}))["balloon"].clone();
+    assert!(of_kind(&checked(&mut s, json!({})), "outside_sheet").is_empty());
+    run(&mut s, "drawing.balloon.edit", json!({"balloon": balloon, "set": {"at": [1000, 20]}}));
+    let reply = checked(&mut s, json!({}));
+    assert_eq!(of_kind(&reply, "outside_sheet"), [named("balloon", &balloon)], "{reply}");
+}
+
+/// A deferred drawing whose model moved on lists its view's balloon as out of date, as a balloon, as
+/// it does a held view's dimension.
+#[test]
+fn a_held_views_balloon_is_out_of_date_as_a_balloon() {
+    let (mut s, view, _, at) = assembly();
+    let edge = json!({"point": [5, 0, 0], "path": [at]});
+    let balloon = run(&mut s, "drawing.balloon.add", json!({"view": view, "edge": edge, "at": [80, 20]}))["balloon"].clone();
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    assert!(of_kind(&checked(&mut s, json!({})), "out_of_date").is_empty());
+    with_model_changed(&mut s, |s| {
+        run(s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new"}));
+    });
+    let reply = checked(&mut s, json!({}));
+    let mut expected = vec![named("balloon", &balloon), named("view", &view)];
+    expected.sort();
+    assert_eq!(of_kind(&reply, "out_of_date"), expected, "{reply}");
+}
+
+/// A deferred drawing whose model moved on lists what its held view shows as out of date only: a
+/// balloon and a note on an edge a fillet takes away are not lost while the sheet shows them as they
+/// last were, as a dimension there is read as the sheet shows it, its typed text included. Once the
+/// drawing is updated, the balloon and the note are lost, and nothing is out of date.
+#[test]
+fn a_held_views_balloon_and_note_are_out_of_date_not_lost() {
+    let (mut s, view, _, at) = assembly();
+    let edge = json!({"point": [5, 0, 0], "path": [at]});
+    let balloon = run(&mut s, "drawing.balloon.add", json!({"view": view, "edge": edge, "at": [80, 20]}))["balloon"].clone();
+    let anchor = json!({"edge": {"view": view, "edge": edge}});
+    let note = run(&mut s, "drawing.note.add", json!({"anchor": anchor, "at": [60, 40], "content": "Note"}))["note"].clone();
+    let top = json!({"length": {"edge": {"point": [5, 0, 40], "path": [at]}}});
+    let typed = run(&mut s, "drawing.dimension.add", json!({"view": view, "kind": top}))["dimension"].clone();
+    run(&mut s, "drawing.dimension.edit", json!({"dimension": typed, "set": {"override_text": "SEE NOTE"}}));
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    let before = checked(&mut s, json!({}));
+    assert_eq!((of_kind(&before, "out_of_date"), of_kind(&before, "lost")), (vec![], vec![]), "{before}");
+    with_model_changed(&mut s, |s| {
+        run(s, "component.activate", json!({"component": "Bolt"}));
+        run(s, "solid.fillet", json!({"edges": [[5, 0, 0]], "radius": 2, "body": "Shank"}));
+        run(s, "component.activate", json!({"component": "root"}));
+    });
+    let on_the_edge = |reply: &Value| found(reply).into_iter().filter(|(_, what, _)| what == "balloon" || what == "note").collect::<Vec<_>>();
+    let listed = |kind: &str| [named("balloon", &balloon), named("note", &note)].map(|(what, id)| (kind.to_string(), what, id)).to_vec();
+    let held = checked(&mut s, json!({}));
+    assert_eq!(on_the_edge(&held), listed("out_of_date"), "each once, as out of date: {held}");
+    let mut expected = vec![named("balloon", &balloon), named("dimension", &typed), named("note", &note), named("view", &view)];
+    expected.sort();
+    assert_eq!(of_kind(&held, "out_of_date"), expected, "{held}");
+    assert_eq!(of_kind(&held, "overridden"), [named("dimension", &typed)], "the dimension as the sheet shows it: {held}");
+    run(&mut s, "drawing.update", json!({}));
+    let now = checked(&mut s, json!({}));
+    assert!(of_kind(&now, "out_of_date").is_empty(), "{now}");
+    assert_eq!(on_the_edge(&now), listed("lost"), "{now}");
+}
+
 /// A view moved off its sheet's drawing space, a note on it with it, and an image off the paper, are outside the sheet;
 /// `sheet` narrows the check to one sheet, by id or name, a lost note in a view included.
 #[test]
@@ -353,17 +469,23 @@ fn what_leaves_the_sheet_is_listed_one_sheet_at_a_time() {
     assert!(s.execute(CHECK, &json!({"sheet": "Nowhere"})).is_err());
 }
 
-/// A dimension whose line is moved off the paper is outside the sheet, as a table would be: the
-/// check reads them from the sheet's objects, where images aren't.
+/// A dimension whose line is moved off the paper is outside the sheet, as a table is, whatever it
+/// lists: the check reads them from the sheet's objects, where images aren't.
 #[test]
 fn a_dimension_off_the_paper_is_listed() {
     let (mut s, _) = plate();
-    let (_, view) = drawn(&mut s);
+    let (sheet, view) = drawn(&mut s);
     let dimension = length(&mut s, view, [50.0, 0.0, 8.0]);
     assert!(of_kind(&checked(&mut s, json!({})), "outside_sheet").is_empty());
     run(&mut s, "drawing.dimension.edit", json!({"dimension": dimension, "set": {"offset_mm": 1000}}));
     let reply = checked(&mut s, json!({}));
     assert_eq!(of_kind(&reply, "outside_sheet"), [named("dimension", &dimension)], "{reply}");
+    for kind in ["parts_list", "revision"] {
+        let set = json!({"place": {"at": [-500, 100]}});
+        let table = run(&mut s, "drawing.table.add", json!({"sheet": ids::encode(sheet), "kind": kind, "set": set}))["table"].clone();
+        let reply = checked(&mut s, json!({}));
+        assert!(of_kind(&reply, "outside_sheet").contains(&named("table", &table)), "{kind}: {reply}");
+    }
 }
 
 /// The check changes nothing: the design and the undo steps are as they were. Its answer is the

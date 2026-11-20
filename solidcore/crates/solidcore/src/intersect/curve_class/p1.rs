@@ -159,6 +159,8 @@ use crate::kernel::Kernel;
 use crate::math::{max2, Point2, Point3, Vec2, Vec3, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
+use crate::nurbs::math::gamma;
+use crate::surface::normal_cone::intersection_reach;
 use crate::surface::surface::p1::map_to_2d_on_curve;
 use crate::surface::surface::p2::surface_cache;
 use crate::surface::surface::Surface;
@@ -588,6 +590,96 @@ pub struct CurveClassification<O> {
     pub(super) allocated: bool,
     /// `m_bIgnoreTangency`.
     pub(super) ignore_tangency: bool,
+    /// Not upstream: how far across itself the classified curve is known, which decides
+    /// where it meets a seam or a pole (docs/booleans.md, "Seams and poles"). `None` until
+    /// it is set or first read ([`CurveClassification::source_reach_in`]).
+    pub(super) source_reach: Option<SourceReach>,
+    /// Not upstream: whether the face named here has a seam edge (an edge with the face
+    /// on both sides, [`crate::topology::edge::face_on_both_sides`]), as found once by
+    /// [`crate::query::face::p2::curve_on_classify_mut_with_seams`] for its run. Read only
+    /// while it names the classification's face; `None` makes every vertex and edge
+    /// test for itself.
+    pub(super) seam_hint: Option<(O, bool)>,
+}
+
+/// Not upstream: how far across itself a classified curve is known (docs/booleans.md,
+/// "Seams and poles"). A seam or a pole bounds no material and adds no tolerance of its
+/// own: the curve meets it where the curve's own uncertainty region does.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum SourceReach {
+    /// A curve as given (an edge's curve): known to its own tolerance.
+    #[default]
+    Own,
+    /// An intersection curve of two surfaces, known to this distance: its tolerance over
+    /// the sine of an enclosed lower bound of the angle between the two surfaces along it
+    /// (`surface::normal_cone::intersection_reach`).
+    Across(f64),
+    /// An intersection curve with no proved reach: its surfaces are tangent somewhere
+    /// along it, or of a kind without a bound. Across itself it may lie anywhere within
+    /// the band a boundary edge would have.
+    Unbounded,
+    /// The seam curve of the face it is classified on (`HasSeamProblem`'s): checked
+    /// against the face's edges within both tolerances, as upstream does, with no region.
+    Boundary,
+}
+
+impl SourceReach {
+    /// The distance across the curve within which it meets a seam or a pole: its own
+    /// tolerance `own`, its proved reach where that is larger, and never more than
+    /// `summed`, the band of both tolerances a boundary of material has (the seam edge
+    /// that then stands for the curve holds it within that).
+    #[must_use]
+    pub fn contact_tolerance(self, own: f64, summed: f64) -> f64 {
+        match self {
+            Self::Own => own.min(summed),
+            Self::Across(reach) if reach.is_finite() => reach.max(own).min(summed),
+            Self::Across(_) | Self::Unbounded | Self::Boundary => summed,
+        }
+    }
+
+    /// Whether a point contact is held to the curve's region ([`in_reach_region`]): every
+    /// curve but the face's own seam curve.
+    #[must_use]
+    pub fn has_region(self) -> bool {
+        self != Self::Boundary
+    }
+}
+
+/// Not upstream: whether `point` lies in the uncertainty region of `curve` about its point
+/// at the parameter `at` (docs/booleans.md, "Seams and poles"): the surfaces' angle
+/// leaves the curve unsure across itself, not along itself, so the region reaches `across`
+/// across the curve's tangent there and `own` along it. A point is outside only where
+/// that is proved: each distance is taken less the rounding of the difference it is read
+/// from. Where the curve has no tangent the region is the ball of `own`.
+///
+/// # Errors
+///
+/// Those of the curve's evaluation.
+pub fn in_reach_region(
+    k: &Kernel,
+    curve: &Curve,
+    at: f64,
+    point: Vec3,
+    own: f64,
+    across: f64,
+) -> Result<bool> {
+    let values = curve.evaluate(k, at, 1, true, false)?;
+    let (Some(&on_curve), Some(&tangent)) = (values.first(), values.get(1)) else {
+        return Err(SolidError::intersect_missing(
+            OP_CC,
+            "the curve's point and tangent",
+        ));
+    };
+    let w = point - on_curve;
+    let rounding = gamma(8) * (point.length() + on_curve.length());
+    let distance = w.length();
+    let speed = tangent.length();
+    if !(speed.is_finite() && speed > 0.0) {
+        return Ok(distance - rounding <= own);
+    }
+    let along = (w.dot(tangent) / speed).abs();
+    let off = (distance * distance - along * along).max(0.0).sqrt();
+    Ok(along - rounding <= own && off - rounding <= across)
 }
 
 /// How `SetPointClassParameters` reaches the classifications' objects: read-only, or
@@ -652,6 +744,8 @@ impl<O: ClassObject> CurveClassification<O> {
             doing_cross_hatch: false,
             doing_fillets: false,
             ok_to_set_tolerance: true,
+            source_reach: None,
+            seam_hint: None,
             tgt_loops_only: false,
             tgt_loops: Vec::new(),
             other_classification: None,
@@ -716,6 +810,11 @@ impl<O: ClassObject> CurveClassification<O> {
             doing_cross_hatch: self.doing_cross_hatch,
             doing_fillets: self.doing_fillets,
             ok_to_set_tolerance: self.ok_to_set_tolerance,
+            source_reach: self.source_reach,
+            seam_hint: self
+                .seam_hint
+                .map(|(h, s)| f(h).map(|h| (h, s)))
+                .transpose()?,
             tgt_loops_only: self.tgt_loops_only,
             tgt_loops,
             other_classification: self.other_classification.map(&mut *f).transpose()?,
@@ -960,6 +1059,67 @@ impl<O: ClassObject> CurveClassification<O> {
     /// `SetOKToSetTolerance`.
     pub fn set_ok_to_set_tolerance(&mut self, ok_to_set_tolerance: bool) {
         self.ok_to_set_tolerance = ok_to_set_tolerance;
+    }
+
+    /// Not upstream: how far across itself the classified curve is known, once set or
+    /// read (see the field).
+    #[must_use]
+    pub const fn source_reach(&self) -> Option<SourceReach> {
+        self.source_reach
+    }
+
+    /// Not upstream: the seam hint (see the field).
+    #[must_use]
+    pub const fn seam_hint(&self) -> Option<(O, bool)> {
+        self.seam_hint
+    }
+
+    /// Not upstream: sets the seam hint (see the field).
+    pub fn set_seam_hint(&mut self, hint: Option<(O, bool)>) {
+        self.seam_hint = hint;
+    }
+
+    /// Not upstream: whether the classification's face is known to have no seam edge, so
+    /// that none of its edges is a seam and none of its vertices a pole (a pole's edges
+    /// are all seams of the face).
+    #[must_use]
+    pub fn face_known_seam_free(&self) -> bool {
+        matches!(self.seam_hint, Some((h, false)) if self.face == Some(h))
+    }
+
+    /// Not upstream: sets how far across itself the classified curve is known.
+    pub fn set_source_reach(&mut self, source_reach: SourceReach) {
+        self.source_reach = Some(source_reach);
+    }
+
+    /// Not upstream: how far across itself the classified curve `working` is known
+    /// (docs/booleans.md, "Seams and poles"): what was set; else, for the intersection
+    /// curve of the classification's two surfaces (`SetIntersectData`), its tolerance over
+    /// the sine of the least angle between them along it, enclosed
+    /// ([`intersection_reach`]), unbounded where none is proved; else the curve's own
+    /// tolerance.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's cancellation.
+    pub fn source_reach_in(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        working: &Curve,
+    ) -> Result<SourceReach> {
+        if let Some(reach) = self.source_reach {
+            return Ok(reach);
+        }
+        let (Some(s1), Some(s2)) = (self.surface1, self.surface2) else {
+            return Ok(SourceReach::Own);
+        };
+        let (Some(s1), Some(s2)) = (geometry.surface(s1), geometry.surface(s2)) else {
+            return Ok(SourceReach::Unbounded);
+        };
+        let tolerance = xsect_tol3d(k, src_zone_tol_3d_of(k, Some(self)));
+        let reach = intersection_reach(k, working, &self.interval(), s1, s2, tolerance)?;
+        Ok(reach.map_or(SourceReach::Unbounded, SourceReach::Across))
     }
 
     /// Sets the fillet data (`SetFilletData`; upstream default `bDoingFillets = TRUE`).

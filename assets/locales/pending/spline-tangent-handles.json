@@ -1,9 +1,0 @@
-{
-  "ar": {"cmd.sketch_spline_handles": "إضافة مقابض المماس", "cmd.sketch_spline_reset_handles": "إعادة تعيين مقابض المماس"},
-  "de": {"cmd.sketch_spline_handles": "Tangentengriffe hinzufügen", "cmd.sketch_spline_reset_handles": "Tangentengriffe zurücksetzen"},
-  "en": {"cmd.sketch_spline_handles": "Add Tangent Handles", "cmd.sketch_spline_reset_handles": "Reset Tangent Handles"},
-  "he": {"cmd.sketch_spline_handles": "הוסף ידיות משיק", "cmd.sketch_spline_reset_handles": "אפס ידיות משיק"},
-  "ja": {"cmd.sketch_spline_handles": "接線ハンドルを追加", "cmd.sketch_spline_reset_handles": "接線ハンドルをリセット"},
-  "vi": {"cmd.sketch_spline_handles": "Thêm tay nắm tiếp tuyến", "cmd.sketch_spline_reset_handles": "Đặt lại tay nắm tiếp tuyến"},
-  "zh": {"cmd.sketch_spline_handles": "添加切线控制柄", "cmd.sketch_spline_reset_handles": "重置切线控制柄"}
-}

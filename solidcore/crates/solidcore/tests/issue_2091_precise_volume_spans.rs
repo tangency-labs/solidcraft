@@ -1,7 +1,7 @@
 //! #2091 (WR-670): each iso-u integral of `SmODEAreaIFEO` runs knot span by knot span
 //! (WR-494), but every piece's last point was evaluated in the knot span above it (upstream's
 //! `bVFromLeft = TRUE`). Where the surface's derivatives jump at a v knot (a G2 but
-//! not C2 section, merged into one face under `geometric_g2_continuity`), the integrand
+//! not C2 section, merged into one face by the geometric G2 test), the integrand
 //! jumped at each piece's end and the Runge-Kutta steps shrank toward every knot; at the
 //! C0 double knot of #1435's multi-span patch they underflowed at accuracies 1e-9 and
 //! tighter. Each piece's end is now evaluated from the piece's own span (the one-sided
@@ -64,13 +64,11 @@ fn section(z: f64) -> Vec<Curve> {
 }
 
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.geometric_g2_continuity = true;
-    k
+    Kernel::default()
 }
 
 /// The capped prism lofted between the two sections: one side face across all six
-/// spans under `geometric_g2_continuity`.
+/// spans.
 fn prism(k: &mut Kernel) -> Brep {
     let curves: Vec<Curve> = section(0.0).into_iter().chain(section(HEIGHT)).collect();
     let refs: Vec<_> = curves.iter().map(Some).collect();
@@ -548,6 +546,182 @@ fn a_long_face_costs_linearly_in_its_knot_spans() {
     );
 }
 
+/// Each property group's error against `reference` (indexed by `layout`), over the
+/// largest reference value of the group: area, volume, then the moment groups.
+fn group_errors(
+    p: &solidcore::mass::integrator::properties::PreciseProperties,
+    reference: &[f64],
+    layout: &PrecisePropertyLayout,
+) -> Vec<f64> {
+    let r = |i: usize| reference[i];
+    let mut groups = vec![(vec![p.area], vec![r(layout.area)])];
+    groups.push((vec![p.volume], vec![r(layout.volume)]));
+    let moments = |m: &[Vec3], idx: &[usize]| {
+        let got: Vec<f64> = m.iter().flat_map(|v| [v.x, v.y, v.z]).collect();
+        let want: Vec<f64> = idx
+            .iter()
+            .flat_map(|&i| [r(i), r(i + 1), r(i + 2)])
+            .collect();
+        (got, want)
+    };
+    for range in [0..1, 1..4, 4..5, 5..8] {
+        groups.push(moments(&p.moments[range.clone()], &layout.moments[range]));
+    }
+    groups
+        .iter()
+        .map(|(got, want)| {
+            let size = want.iter().fold(0.0_f64, |m, w| m.max(w.abs()));
+            got.iter()
+                .zip(want.iter())
+                .fold(0.0_f64, |m, (g, w)| m.max((g - w).abs()))
+                / size
+        })
+        .collect()
+}
+
+/// #14460: a face whose trims cross fewer knot lines than banding needs keeps one iso-u
+/// base, so each trim sample's iso-u line runs the face's height in v, span by span (a
+/// thread's run-out cylinder, whose iso-u lines are quarter turns). Its trim pieces were
+/// integrated by nested Runge-Kutta, at least 144 iso-curve evaluations a piece and many
+/// steps a line: this 8-span strip cost 964,934 evaluations at accuracy 1e-9, with errors
+/// up to 3.5e-12 against an independent Gauss-Legendre quadrature. With nested 7-point
+/// Gauss-Kronrod, as the bands are, it costs 534,807, and every error is below 3e-15.
+#[test]
+fn an_unbanded_long_face_integrates_its_trim_pieces_by_gauss_kronrod() {
+    let k = Kernel::default();
+    let origin = Vec3::new(0.3, -0.2, -1.0);
+    let layout = PrecisePropertyLayout::new(PPF_ALL);
+    let n = 8_usize;
+    let surface = long_strip(n);
+    let reference = strip_reference(&k, &surface, n, origin, &layout, 16);
+    let check = strip_reference(&k, &surface, n, origin, &layout, 24);
+    for (r, c) in reference.iter().zip(check.iter()) {
+        assert!((r - c).abs() <= 1e-13 * r.abs().max(1.0), "{r} vs {c}");
+    }
+    let face_box = Extent3d::from_points(
+        Point3::new(-1.0, -1.0, -1.0),
+        Point3::new(2.0, n as f64 + 1.0, 1.0),
+    );
+    let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, n as f64);
+    for accuracy in [1e-9, 1e-11] {
+        k.work_counters.reset();
+        let p = boundary_properties(
+            &k,
+            &surface,
+            &strip_trims(n),
+            &domain,
+            &face_box,
+            OrientType::Opposite,
+            accuracy,
+            origin,
+            0.5 * n as f64 / 10.0,
+            0.0,
+            PPF_ALL,
+        )
+        .unwrap();
+        let evaluations = k.work_counters.mass_iso_evaluations();
+        let errors = group_errors(&p, &reference, &layout);
+        eprintln!("accuracy {accuracy:e}: {evaluations} iso evaluations, errors {errors:?}");
+        for (gi, err) in errors.iter().enumerate() {
+            assert!(
+                *err <= 1e-13,
+                "accuracy {accuracy:e}, group {gi}: {err:e} off"
+            );
+        }
+        if accuracy == 1e-9 {
+            assert!(evaluations <= 700_000, "{evaluations} iso evaluations");
+        }
+    }
+}
+
+/// A trim along the trims' lowest v, the base of every iso-u integral, adds nothing: each
+/// of its points' iso-u integrals runs from the base to itself. It evaluates nothing
+/// either; before, each of its trim samples took the inner quadrature's seven samples of
+/// that zero-width line, at least 49 iso evaluations a piece.
+#[test]
+fn a_trim_along_the_base_evaluates_no_iso_line() {
+    let k = Kernel::default();
+    let n = 1_usize;
+    let surface = long_strip(n);
+    let base_trim = strip_trims(n).into_iter().next().unwrap();
+    let face_box = Extent3d::from_points(Point3::new(-1.0, -1.0, -1.0), Point3::new(2.0, 2.0, 1.0));
+    let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, n as f64);
+    k.work_counters.reset();
+    let p = boundary_properties(
+        &k,
+        &surface,
+        &[base_trim],
+        &domain,
+        &face_box,
+        OrientType::Opposite,
+        1e-9,
+        Vec3::new(0.3, -0.2, -1.0),
+        0.05,
+        0.0,
+        PPF_ALL,
+    )
+    .unwrap();
+    assert_eq!(k.work_counters.mass_iso_evaluations(), 0);
+    assert_eq!(p.area, 0.0, "{p:?}");
+    assert_eq!(p.volume, 0.0, "{p:?}");
+}
+
+/// A non-finite accuracy is refused, typed, before any integration: a NaN one passed
+/// every quadrature piece's error test (`estimate > NaN` is false), so a trimmed face's
+/// properties came back unchecked, and an infinite one holds no piece to any accuracy.
+#[test]
+fn a_non_finite_accuracy_is_refused() {
+    let k = Kernel::default();
+    let n = 2_usize;
+    let surface = long_strip(n);
+    let trims = strip_trims(n);
+    let face_box = Extent3d::from_points(
+        Point3::new(-1.0, -1.0, -1.0),
+        Point3::new(2.0, n as f64 + 1.0, 1.0),
+    );
+    let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, n as f64);
+    for accuracy in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let r = boundary_properties(
+            &k,
+            &surface,
+            &trims,
+            &domain,
+            &face_box,
+            OrientType::Opposite,
+            accuracy,
+            Vec3::new(0.3, -0.2, -1.0),
+            0.5 * n as f64 / 10.0,
+            0.0,
+            PPF_ALL,
+        );
+        assert!(
+            matches!(r, Err(solidcore::SolidError::InvalidInput { .. })),
+            "accuracy {accuracy}: {r:?}"
+        );
+    }
+    let mut k = Kernel::default();
+    let mut b = solidcore::topology::brep::p3::new_brep(&mut k, tol::USE_DEFAULT, tol::USE_DEFAULT)
+        .unwrap();
+    let f = create_face_from_surface(&mut k, &mut b, &multispan_surface()).unwrap();
+    for accuracy in [f64::NAN, f64::INFINITY] {
+        let r = face_properties(
+            &k,
+            &mut b,
+            f,
+            OrientType::Opposite,
+            accuracy,
+            Point3::new(0.0, 0.0, 0.0),
+            1.0,
+            0.0,
+            PPF_ALL,
+        );
+        assert!(
+            matches!(r, Err(solidcore::SolidError::InvalidInput { .. })),
+            "face_properties, accuracy {accuracy}: {r:?}"
+        );
+    }
+}
+
 /// A bicubic patch `[0, n]²` with `n` unit knot spans each way, wavy, as a G2 corner patch
 /// is a dense spline grid in both directions.
 fn dense_grid(n: usize) -> Surface {
@@ -630,7 +804,8 @@ fn grid_reference(
 /// integral has a cell per band and u knot span, each integrated along u and, at each u
 /// sample, along v. With nested Runge-Kutta steps (two of six samples each at the least)
 /// this grid cost 826 iso-curve evaluations a cell at the app's accuracy 1e-8; with
-/// nested 7-point Gauss-Kronrod (49 a cell when no piece is halved) it costs 321. Every
+/// nested 7-point Gauss-Kronrod (49 a cell when no piece is halved) it costs 321, and 258
+/// with its trim pieces integrated the same way. Every
 /// property still holds its accuracy against an independent tensor Gauss-Legendre
 /// quadrature, more tightly than before.
 #[test]
@@ -708,4 +883,109 @@ fn a_dense_grid_face_costs_few_evaluations_per_cell() {
         );
     }
     assert!(per_cell[0] <= 450.0, "iso evaluations a cell {per_cell:?}");
+}
+
+/// A latitude-longitude rectangle on a sphere about the origin, between longitudes `lon` and
+/// latitudes `lat` (degrees), as the sphere and its four trims (iso lines of its NURBS
+/// parameters, run counter-clockwise in them), with its domain.
+fn sphere_rectangle(
+    k: &Kernel,
+    r: f64,
+    lon: (f64, f64),
+    lat: (f64, f64),
+) -> (Surface, Vec<Curve>, Extent2d) {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::geom::vector2d::Point2;
+    use solidcore::surface::sphere::Sphere;
+    let frame = Axis2Placement::new(
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, 1.0),
+        Vec3::new(1.0, 0.0, 0.0),
+    );
+    let surface = Surface::from(Sphere::create_canonical(k, &frame, r).unwrap());
+    let at = |u: f64, v: f64| {
+        let p = surface
+            .convert_uv_from_step_to_nurbs(k, Point2::new(u, v))
+            .unwrap();
+        (p.x, p.y)
+    };
+    let corners = [
+        at(lon.0, lat.0),
+        at(lon.1, lat.0),
+        at(lon.1, lat.1),
+        at(lon.0, lat.1),
+    ];
+    let line = |a: (f64, f64), b: (f64, f64)| {
+        Curve::from(
+            solidcore::primitive::api_curves::create_line_segment(
+                Point3::new(a.0, a.1, 0.0),
+                Point3::new(b.0, b.1, 0.0),
+            )
+            .unwrap(),
+        )
+    };
+    let trims = (0..4)
+        .map(|i| line(corners[i], corners[(i + 1) % 4]))
+        .collect();
+    let domain = surface.natural_uv_domain_with_nurb(k).unwrap();
+    (surface, trims, domain)
+}
+
+/// A sphere face's precise properties, integrated along its trims: at each trim point an
+/// iso-u integral up the sphere's rational form, a smooth integrand that is no polynomial.
+/// A latitude-longitude rectangle's area is `r² Δλ (sin φ₁ − sin φ₀)`, and its volume
+/// component, `∫ x nₓ dA` (x = r cos φ cos λ, nₓ = x / r, dA = r² cos φ dφ dλ), is
+/// `r³ [Δλ/2 + (sin 2λ₁ − sin 2λ₀)/4] [sin φ − sin³φ / 3]` from φ₀ to φ₁, both held to the
+/// accuracy asked (their sign is the face's orientation); and the iso-curve evaluations it
+/// costs are bounded.
+#[test]
+fn a_sphere_faces_trim_integrals_cost_few_evaluations() {
+    let k = Kernel::default();
+    let r = 2.0;
+    let (lon, lat) = ((20.0_f64, 110.0_f64), (-30.0_f64, 50.0_f64));
+    let (surface, trims, domain) = sphere_rectangle(&k, r, lon, lat);
+    let area = r
+        * r
+        * (lon.1 - lon.0).to_radians()
+        * (lat.1.to_radians().sin() - lat.0.to_radians().sin());
+    let face_box = Extent3d::from_points(Point3::new(-r, -r, -r), Point3::new(r, r, r));
+    let accuracy = 1e-8;
+    k.work_counters.reset();
+    let p = boundary_properties(
+        &k,
+        &surface,
+        &trims,
+        &domain,
+        &face_box,
+        OrientType::Same,
+        accuracy,
+        Point3::new(0.0, 0.0, 0.0),
+        area,
+        0.0,
+        PPF_ALL,
+    )
+    .unwrap();
+    let evaluations = k.work_counters.mass_iso_evaluations();
+    eprintln!(
+        "area {} vs {area}, volume {}, {evaluations} iso evaluations",
+        p.area, p.volume
+    );
+    assert!(
+        (p.area.abs() - area).abs() <= accuracy * area,
+        "{} vs {area}",
+        p.area
+    );
+    let (l0, l1) = (lon.0.to_radians(), lon.1.to_radians());
+    let g = |phi: f64| phi.to_radians().sin() - phi.to_radians().sin().powi(3) / 3.0;
+    let volume = r.powi(3)
+        * ((l1 - l0) / 2.0 + ((2.0 * l1).sin() - (2.0 * l0).sin()) / 4.0)
+        * (g(lat.1) - g(lat.0));
+    assert!(
+        (p.volume.abs() - volume).abs() <= accuracy * volume,
+        "{} vs {volume}",
+        p.volume
+    );
+    // each trim point's iso line by the 15-point rule: 3 780 (the 7-point rule took 19 404,
+    // upstream's Runge-Kutta pair 23 244)
+    assert!(evaluations <= 8_000, "{evaluations} iso evaluations");
 }

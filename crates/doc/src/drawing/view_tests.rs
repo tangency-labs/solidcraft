@@ -10,6 +10,7 @@ use solidcraft_geom::drawing_view::NamedView;
 use solidcraft_geom::paper::line::LineGroup;
 
 use super::*;
+use crate::drawing::cutting_line::{ArrowSide, CuttingLine, SectionKind};
 use crate::drawing::{Excluded, Sheet, Source};
 use crate::drawing_view::{Exploded, JointPose, OccurrencePaths, Pose, StudyStep, ViewConfiguration};
 use crate::format::DRAWING;
@@ -24,7 +25,7 @@ fn front() -> (Drawing, IdSource, u64) {
     let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
     let mut d = Drawing::new("Plate", "en", "Sheet 1", a3, None, &BTreeSet::new(), &mut id_source).unwrap();
     let source = d.allocate_id(&mut id_source).unwrap();
-    d.sources.push(Source { id: source });
+    d.sources.push(Source { id: source, path: None });
     let front = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let id = add(&mut d, &mut id_source, front, ViewPlace::At([150.0, 150.0]), scaled("1:2"));
     (d, id_source, id)
@@ -34,7 +35,7 @@ fn front() -> (Drawing, IdSource, u64) {
 fn add(d: &mut Drawing, id_source: &mut IdSource, kind: ViewKind, place: ViewPlace, settings: ViewOverrides) -> u64 {
     let id = d.allocate_id(id_source).unwrap();
     let sheet = d.sheets[0].id;
-    d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
+    d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, label: None })]);
     id
 }
 
@@ -714,4 +715,619 @@ fn a_views_centre_is_its_point_or_lined_up_with_its_parent() {
         assert_eq!(d.view_centre(id).unwrap_err().to_string(), format!("base view {} isn't placed at a point", ids::encode(front)));
     }
     assert_eq!(d.view_centre(99).unwrap_err().to_string(), format!("the drawing has no view {}", ids::encode(99)));
+}
+
+/// View `id`'s letter, if it has one.
+fn letter(d: &Drawing, id: u64) -> Option<String> {
+    d.view(id)?.label.as_ref().map(|label| label.letter.clone())
+}
+
+/// A view placed apart from its projection place gets the first letter no view holds, I, O and Q
+/// skipped; one lined up with its parent or a base view gets none. A freed letter comes back while
+/// letters are reused, never once they aren't, and the letters given are counted either way.
+#[test]
+fn a_view_placed_apart_gets_the_first_free_letter() {
+    let (mut d, mut id_source, [front, right, top]) = three();
+    for id in [front, right, top] {
+        d.give_letter(id).unwrap();
+    }
+    assert_eq!([front, right, top].map(|id| letter(&d, id)), [None, None, Some("A".into())]);
+    let label = d.view(top).unwrap().label.clone().unwrap();
+    assert_eq!((label.words.as_str(), label.scale_words.as_str(), label.shown, label.offset), ("VIEW", "SCALE", true, None));
+    let mut apart = |d: &mut Drawing| {
+        let id = add(d, &mut id_source, projected(front, ProjectedSide::Below), ViewPlace::At([150.0, 40.0]), ViewOverrides::default());
+        d.give_letter(id).unwrap();
+        id
+    };
+    let more: Vec<u64> = (0..8).map(|_| apart(&mut d)).collect();
+    let given: Vec<String> = more.iter().filter_map(|id| letter(&d, *id)).collect();
+    assert_eq!(given, ["B", "C", "D", "E", "F", "G", "H", "J"], "I is skipped");
+    assert_eq!(d.view_letters, ViewLetters { reuse: true, given: 9 });
+    // A letter already there stays; a view freed of its letter's holder gives it back.
+    d.give_letter(top).unwrap();
+    assert_eq!(letter(&d, top).as_deref(), Some("A"));
+    d.views.retain(|v| v.id != top);
+    let again = apart(&mut d);
+    assert_eq!(letter(&d, again).as_deref(), Some("A"), "a freed letter comes back");
+    d.views.retain(|v| v.id != more[0]);
+    d.view_letters.reuse = false;
+    let past = apart(&mut d);
+    assert_eq!(letter(&d, past).as_deref(), Some("K"), "never again once letters aren't reused: B stays free");
+    assert_eq!(d.view_letters.given, 10);
+    d.validate().unwrap();
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened.view_letters, d.view_letters, "saved");
+}
+
+/// A view's label reads `VIEW` and its letter, its name, then its scale when it isn't its sheet's,
+/// each part as typed and only when shown; a view in its projection place, or one whose label is
+/// hidden, draws none and keeps its letter.
+#[test]
+fn a_views_label_reads_its_shown_parts() {
+    let (mut d, _, [front, right, top]) = three();
+    d.give_letter(top).unwrap();
+    assert_eq!(d.label_text(top).as_deref(), Some("VIEW A"));
+    assert_eq!((d.label_text(front), d.label_text(right)), (None, None), "no label");
+    view_mut(&mut d, top).settings.scale = Some("2:1".parse().unwrap());
+    assert_eq!(d.label_text(top).as_deref(), Some("VIEW A\nSCALE 2:1"), "the sheet's scale is its base view's, 1:2");
+    let label = view_mut(&mut d, top).label.as_mut().unwrap();
+    label.words = String::new();
+    label.name = "BRACKET END".into();
+    label.scale_words = "ECHELLE".into();
+    assert_eq!(d.label_text(top).as_deref(), Some("A\nBRACKET END\nECHELLE 2:1"));
+    let label = view_mut(&mut d, top).label.as_mut().unwrap();
+    (label.show_letter, label.show_scale) = (false, false);
+    assert_eq!(d.label_text(top).as_deref(), Some("BRACKET END"));
+    view_mut(&mut d, top).label.as_mut().unwrap().name.clear();
+    assert_eq!(d.label_text(top), None, "nothing shown");
+    view_mut(&mut d, top).label.as_mut().unwrap().show_letter = true;
+    view_mut(&mut d, top).label.as_mut().unwrap().shown = false;
+    assert_eq!((d.label_text(top), letter(&d, top).as_deref()), (None, Some("A")), "hidden, its letter kept");
+    view_mut(&mut d, top).label.as_mut().unwrap().shown = true;
+    view_mut(&mut d, top).place = ViewPlace::Aligned(320.0);
+    assert_eq!((d.label_text(top), letter(&d, top).as_deref()), (None, Some("A")), "back in its projection place");
+}
+
+/// A label's letter is one to three capitals, its words one line each, and its offset a point on
+/// paper; a letter two views hold opens (a hand edit), and giving one of them a letter gives it
+/// another.
+#[test]
+fn a_label_keeps_the_records_rules_and_a_doubled_letter_opens() {
+    let (mut d, mut id_source, [front, _, top]) = three();
+    d.give_letter(top).unwrap();
+    let at = |v: &mut Value| v["views"].as_array_mut().unwrap().iter_mut().find(|v| v["label"].is_object()).unwrap()["label"].take();
+    let with = |d: &Drawing, key: &str, value: Value| {
+        refused(d, |v| {
+            let mut label = at(v);
+            label[key] = value;
+            let views = v["views"].as_array_mut().unwrap();
+            views.iter_mut().find(|v| v["label"].is_null() && v["place"]["at"].is_array() && v["kind"]["projected"].is_object()).unwrap()["label"] =
+                label;
+        })
+    };
+    assert_eq!(with(&d, "letter", json!("B")), "read");
+    for (key, value) in [("letter", json!("a")), ("letter", json!("ABCD")), ("letter", json!("")), ("letter", json!("A1"))] {
+        assert!(with(&d, key, value.clone()).contains("its letter is one to three capital letters A to Z"), "{key}: {value}");
+    }
+    assert!(with(&d, "name", json!("two\nlines")).contains("a label is one line"));
+    assert!(with(&d, "words", json!("x".repeat(5000))).contains("a label is one line"));
+    for offset in [json!([1e9, 0.0]), json!([0.0, -6000.0])] {
+        assert!(with(&d, "offset", offset.clone()).contains("its label's offset is at most 5000 mm"), "{offset}");
+    }
+    let twin = add(&mut d, &mut id_source, projected(front, ProjectedSide::Below), ViewPlace::At([150.0, 40.0]), ViewOverrides::default());
+    view_mut(&mut d, twin).label = d.view(top).unwrap().label.clone();
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(letter(&reopened, twin).as_deref(), Some("A"), "a doubled letter opens");
+    d.give_letter(twin).unwrap();
+    assert_eq!((letter(&d, top).as_deref(), letter(&d, twin).as_deref()), (Some("A"), Some("B")), "the copy takes the next");
+}
+
+/// [`three`], with a view lined up to the right of the right view (centre (450, 150)) and one lined up
+/// below the front view (centre (150, 60)): the drawing, its id source, and the front, right, top,
+/// back and below views' ids.
+fn lined() -> (Drawing, IdSource, [u64; 5]) {
+    let (mut d, mut id_source, [front, right, top]) = three();
+    let back = add(&mut d, &mut id_source, projected(right, ProjectedSide::Right), ViewPlace::Aligned(450.0), ViewOverrides::default());
+    let below = add(&mut d, &mut id_source, projected(front, ProjectedSide::Below), ViewPlace::Aligned(60.0), ViewOverrides::default());
+    d.validate().unwrap();
+    (d, id_source, [front, right, top, back, below])
+}
+
+/// `first`, then `rest` in id order: how a move lists the views it moved.
+fn then_by_id<T>(first: (u64, T), mut rest: Vec<(u64, T)>) -> Vec<(u64, T)> {
+    rest.sort_unstable_by_key(|(id, _)| *id);
+    std::iter::once(first).chain(rest).collect()
+}
+
+/// `first`, then `rest` in id order, as ids alone.
+fn ids_then_by_id(first: u64, rest: &[u64]) -> Vec<u64> {
+    then_by_id((first, ()), rest.iter().map(|id| (*id, ())).collect()).into_iter().map(|(id, _)| id).collect()
+}
+
+/// The views lined up with a view are found down its line, through others and in id order; a view
+/// placed apart ends the line, and so does what is lined up with it. All are still projected from it.
+#[test]
+fn the_views_lined_up_with_a_view_are_found_down_its_line() {
+    let (mut d, mut id_source, [front, right, top, back, below]) = lined();
+    let beside_top = add(&mut d, &mut id_source, projected(top, ProjectedSide::Right), ViewPlace::Aligned(450.0), ViewOverrides::default());
+    d.validate().unwrap();
+    let mut in_order = vec![right, back, below];
+    in_order.sort_unstable();
+    assert_eq!(d.lined_up_with(front), in_order);
+    assert_eq!(d.lined_up_with(right), [back]);
+    assert_eq!(d.lined_up_with(top), [beside_top]);
+    assert_eq!(d.lined_up_with(back), Vec::<u64>::new());
+    assert_eq!(d.lined_up_with(99), Vec::<u64>::new());
+    let all = d.with_projected(&BTreeSet::from([front]));
+    assert_eq!(all, BTreeSet::from([front, right, top, back, below, beside_top]), "placed apart or not");
+}
+
+/// A view moved on its sheet goes where it is dragged, and the views lined up with it follow by the
+/// record's rule with their records as they were: the answer is it, then those whose centres changed.
+/// A view placed apart stays.
+#[test]
+fn a_moved_view_takes_its_line_up_and_says_which_views_moved() {
+    let (mut d, _, [front, right, top, back, below]) = lined();
+    let records = |d: &Drawing| [right, top, back, below].map(|id| d.view(id).unwrap().place);
+    let before = records(&d);
+    let moved = d.move_view(front, Vec2::new(170.0, 155.0), false).unwrap();
+    assert_eq!(moved, ids_then_by_id(front, &[right, back, below]));
+    assert_eq!(d.view(front).unwrap().place, ViewPlace::At([170.0, 155.0]));
+    let centres = |d: &Drawing| [front, right, top, back, below].map(|id| d.view_centre(id).unwrap());
+    let at = |x, y| Vec2::new(x, y);
+    assert_eq!(centres(&d), [at(170.0, 155.0), at(320.0, 155.0), at(320.0, 250.0), at(450.0, 155.0), at(170.0, 60.0)]);
+    assert_eq!(records(&d), before, "they follow by the rule, not by a write");
+    // Across only: the views to its right keep their centres, so only the one below it moved.
+    assert_eq!(d.move_view(front, Vec2::new(180.0, 155.0), false).unwrap(), [front, below]);
+    assert_eq!(d.view_centre(below).unwrap(), at(180.0, 60.0));
+}
+
+/// A view lined up with its parent takes only its free axis, and with `break_alignment` is placed apart
+/// where it was dragged, its own line-up following; a view placed at a point takes both axes either
+/// way. A move to where it is changes nothing, and an unknown view is refused and changes nothing.
+#[test]
+fn a_lined_up_view_keeps_to_its_line_unless_broken() {
+    let (mut d, _, [front, right, top, back, below]) = lined();
+    let at = |x, y| Vec2::new(x, y);
+    assert_eq!(d.move_view(right, at(340.0, 999.0), false).unwrap(), [right], "the view beside it keeps its centre");
+    assert_eq!((d.view(right).unwrap().place, d.view_centre(right).unwrap()), (ViewPlace::Aligned(340.0), at(340.0, 150.0)));
+    assert_eq!(letter(&d, right), None, "moved along its line, it needs no letter");
+    assert_eq!(d.move_view(below, at(999.0, 40.0), false).unwrap(), [below]);
+    assert_eq!((d.view(below).unwrap().place, d.view_centre(below).unwrap()), (ViewPlace::Aligned(40.0), at(150.0, 40.0)));
+    assert_eq!(d.move_view(right, at(340.0, 90.0), true).unwrap(), [right, back]);
+    assert_eq!(d.view(right).unwrap().place, ViewPlace::At([340.0, 90.0]));
+    assert!(letter(&d, right).is_some(), "placed apart, it is given its letter by the move itself");
+    assert_eq!((d.view_centre(back).unwrap(), d.view_centre(front).unwrap()), (at(450.0, 90.0), at(150.0, 150.0)), "its parent stays");
+    assert_eq!(d.move_view(top, at(330.0, 260.0), true).unwrap(), [top]);
+    assert_eq!(d.view(top).unwrap().place, ViewPlace::At([330.0, 260.0]));
+    let before = d.clone();
+    assert_eq!(d.move_view(front, at(150.0, 150.0), false).unwrap(), [front]);
+    assert_eq!(d, before, "where it is: nothing changes");
+    assert_eq!(d.move_view(99, at(1.0, 1.0), false).unwrap_err().to_string(), format!("unknown view {}", ids::encode(99)));
+    assert_eq!(d, before);
+}
+
+/// A view placed apart at a point takes the views lined up with it, each moved along its free axis as
+/// it moved, so they keep their places beside it; a view placed apart from it isn't one of them.
+#[test]
+fn a_view_placed_apart_takes_its_line_up_beside_it() {
+    let (d, _, [front, right, _, back, below]) = lined();
+    let aligned = |id, along| (id, ViewPlace::Aligned(along));
+    let moved = vec![aligned(right, 270.0), aligned(back, 400.0), aligned(below, 30.0)];
+    assert_eq!(d.places_beside(front, Vec2::new(100.0, 120.0)).unwrap(), then_by_id((front, ViewPlace::At([100.0, 120.0])), moved));
+    assert_eq!(d.places_beside(right, Vec2::new(200.0, 100.0)).unwrap(), [(right, ViewPlace::At([200.0, 100.0])), aligned(back, 330.0)]);
+    assert!(d.places_beside(99, Vec2::new(1.0, 1.0)).is_err());
+}
+
+/// A full cutting line, horizontal at height 5, its arrows to its right.
+fn cutting() -> CuttingLine {
+    CuttingLine::new(SectionKind::Full, vec![Vec2::new(-30.0, 5.0), Vec2::new(30.0, 5.0)], ArrowSide::Right).unwrap()
+}
+
+/// A section view of `parent`, cut along [`cutting`].
+fn section(parent: u64) -> ViewKind {
+    ViewKind::Section { parent, line: cutting() }
+}
+
+/// A section view of a projected view resolves through its chain: its basis is its line's turn of its
+/// parent's, its cut is that line in its parent's plane, its settings follow its parents; a view
+/// projected from it isn't cut. It saves its line in its kind and reads back the same bytes; it is
+/// taken with its parent, needs and gets its letter.
+#[test]
+fn a_section_view_resolves_saves_and_goes_with_its_parent() {
+    let (mut d, mut id_source, [front, right, top]) = three();
+    let cut = add(&mut d, &mut id_source, section(right), ViewPlace::At([320.0, 60.0]), ViewOverrides::default());
+    let beyond = add(&mut d, &mut id_source, projected(cut, ProjectedSide::Right), ViewPlace::At([400.0, 60.0]), ViewOverrides::default());
+    d.validate().unwrap();
+    let line = cutting();
+    let right_basis = d.resolve_view(right).unwrap().basis;
+    let resolved = d.resolve_view(cut).unwrap();
+    assert_eq!(resolved.basis, line.basis(&right_basis).unwrap());
+    assert_eq!(resolved.cut, Some(Cut { line: line.clone(), parent: right_basis }));
+    assert_eq!(resolved.scale, Setting { value: "1:2".parse().unwrap(), set_by: SetBy::Parent(front) });
+    assert_eq!(resolved.visual_style, Setting { value: VisualStyle::VisibleHidden, set_by: SetBy::Parent(right) });
+    let after = d.resolve_view(beyond).unwrap();
+    assert_eq!((after.cut, after.basis), (None, projected_basis(&resolved.basis, ProjectedSide::Right, Projection::Third).unwrap()));
+    assert_eq!(d.resolve_view(top).unwrap().cut, None);
+    // Saved in its kind, the same bytes again.
+    let v = file(&d);
+    let saved = v["views"].as_array().unwrap().iter().find(|view| view["id"] == json!(ids::encode(cut))).unwrap();
+    assert_eq!(saved["kind"]["section"]["parent"], json!(ids::encode(right)));
+    assert_eq!(saved["kind"]["section"]["line"], serde_json::to_value(&line).unwrap());
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+    // Taken with its parent and its parent's parents; it takes what is projected from it.
+    let set = |ids: &[u64]| ids.iter().copied().collect::<BTreeSet<u64>>();
+    assert_eq!(d.with_projected(&set(&[front])), set(&[front, right, top, cut, beyond]));
+    assert_eq!(d.with_projected(&set(&[cut])), set(&[cut, beyond]));
+    assert_eq!(d.view(cut).unwrap().kind.parent(), Some(right));
+    assert_eq!(d.view(front).unwrap().kind.parent(), None);
+    // It needs its letter wherever it is, and gets the next one.
+    d.give_letter(top).unwrap();
+    d.give_letter(cut).unwrap();
+    assert!(d.view(cut).unwrap().needs_letter());
+    assert_eq!((letter(&d, top).as_deref(), letter(&d, cut).as_deref()), (Some("A"), Some("B")));
+    d.validate().unwrap();
+}
+
+/// A section view keeps its rules on reading: placed at a point, a line that keeps the cutting line's
+/// rules, a parent the drawing has, no unknown field.
+#[test]
+fn a_section_views_rules_are_kept_on_reading() {
+    let (mut d, mut id_source, [front, ..]) = three();
+    let cut = add(&mut d, &mut id_source, section(front), ViewPlace::At([150.0, 60.0]), ViewOverrides::default());
+    d.validate().unwrap();
+    let at = file(&d)["views"].as_array().unwrap().iter().position(|view| view["id"] == json!(ids::encode(cut))).unwrap();
+    let named = |why: &str| format!("damaged drawing: view {}: {why}", ids::encode(cut));
+    assert_eq!(
+        refused(&d, |v| v["views"][at]["place"] = json!({"aligned": 40.0})),
+        named("a section view is placed at a point: it has no side to line up on")
+    );
+    let why = refused(&d, |v| v["views"][at]["kind"]["section"]["line"]["points"] = json!([[0.0, 0.0], [0.0, 0.0]]));
+    assert!(why.contains("a cutting line's points are at least 0.000001 mm apart"), "{why}");
+    let why = refused(&d, |v| v["views"][at]["kind"]["section"]["line"]["kind"] = json!("half"));
+    assert!(why.contains("a half section's cutting line has 3 points"), "{why}");
+    let gone = ids::encode(99);
+    assert_eq!(
+        refused(&d, |v| v["views"][at]["kind"]["section"]["parent"] = json!(gone)),
+        named(&format!("its parent {gone} isn't one of the drawing's views"))
+    );
+    assert_ne!(refused(&d, |v| v["views"][at]["kind"]["section"]["side"] = json!("right")), "read");
+    assert_eq!(refused(&d, |_| {}), "read");
+}
+
+fn pictorial(parent: u64, diagonal: Diagonal) -> ViewKind {
+    ViewKind::Pictorial { parent, diagonal }
+}
+
+/// The three views and a pictorial view above right of the front view, placed apart.
+fn four() -> (Drawing, IdSource, [u64; 4]) {
+    let (mut d, mut id_source, [front, right, top]) = three();
+    let iso = add(&mut d, &mut id_source, pictorial(front, Diagonal::AboveRight), ViewPlace::At([60.0, 250.0]), ViewOverrides::default());
+    d.validate().unwrap();
+    (d, id_source, [front, right, top, iso])
+}
+
+/// A pictorial view saves its parent and its diagonal and its point, and reads back as saved, the
+/// same bytes. It resolves to the named isometric view above right of the front view in third
+/// angle (the corner between the top and right views), and in first angle the same saved view
+/// looks from the opposite corner; its scale follows its parent. It is found down its parent's
+/// chains, and its centre is its own point, which stays where it is when the parent moves.
+#[test]
+fn a_pictorial_view_saves_its_parent_and_diagonal_and_resolves_isometric() {
+    let (mut d, _, [front, _, _, iso]) = four();
+    let [front_id, iso_id] = [front, iso].map(ids::encode);
+    let saved = file(&d)["views"].as_array().unwrap().iter().find(|v| v["id"] == json!(iso_id)).cloned().unwrap();
+    assert_eq!(saved["kind"], json!({"pictorial": {"parent": front_id, "diagonal": "above_right"}}));
+    assert_eq!(saved["place"], json!({"at": [60.0, 250.0]}));
+    assert_eq!(saved.get("settings"), None);
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+
+    let resolved = d.resolve_view(iso).unwrap();
+    assert_eq!(resolved.basis, NamedView::IsoFrontRight.basis());
+    assert_eq!((resolved.scale.value.to_string(), resolved.scale.set_by), ("1:2".to_string(), SetBy::Parent(front)));
+    d.projection = Projection::First;
+    let first = d.resolve_view(iso).unwrap().basis;
+    assert_eq!(first, pictorial_basis(&NamedView::Front.basis(), (1.0, 1.0), Projection::First).unwrap());
+    assert_ne!(first, NamedView::IsoFrontRight.basis());
+    d.projection = Projection::Third;
+
+    let set = |ids: &[u64]| ids.iter().copied().collect::<BTreeSet<u64>>();
+    assert!(d.with_projected(&set(&[front])).contains(&iso));
+    assert_eq!(d.with_projected(&set(&[iso])), set(&[iso]));
+    assert_eq!(d.view_centre(iso).unwrap(), Vec2::new(60.0, 250.0));
+    view_mut(&mut d, front).place = ViewPlace::At([100.0, 100.0]);
+    assert_eq!(d.view_centre(iso).unwrap(), Vec2::new(60.0, 250.0));
+}
+
+/// The record's rules for a pictorial view: it is placed at a point, its parent is one of the
+/// drawing's views, and no view, projected, section or pictorial, is made from a pictorial view yet.
+#[test]
+fn a_pictorial_views_rules_are_kept() {
+    let (d, mut id_source, [front, _, _, iso]) = four();
+    let why = |d: &Drawing| d.validate().unwrap_err().to_string();
+    let mut lined_up = d.clone();
+    view_mut(&mut lined_up, iso).place = ViewPlace::Aligned(60.0);
+    assert_eq!(why(&lined_up), format!("view {}: a pictorial view is placed at a point: it isn't lined up with its parent", ids::encode(iso)));
+    assert_eq!(lined_up.view_centre(iso).unwrap_err().to_string(), format!("pictorial view {} isn't placed at a point", ids::encode(iso)));
+    let mut orphan = d.clone();
+    view_mut(&mut orphan, iso).kind = pictorial(99, Diagonal::BelowLeft);
+    assert_eq!(why(&orphan), format!("view {}: its parent {} isn't one of the drawing's views", ids::encode(iso), ids::encode(99)));
+    for kind in [projected(iso, ProjectedSide::Right), section(iso), pictorial(iso, Diagonal::AboveLeft)] {
+        let mut from_iso = d.clone();
+        let child = add(&mut from_iso, &mut id_source, kind, ViewPlace::At([10.0, 10.0]), ViewOverrides::default());
+        assert_eq!(why(&from_iso), format!("view {}: not supported yet: a view projected from a pictorial view", ids::encode(child)));
+        assert_eq!(from_iso.can_project_from(iso).unwrap_err().to_string(), "not supported yet: a view projected from a pictorial view");
+    }
+    assert!(d.can_project_from(front).is_ok());
+    assert_eq!(d.can_project_from(99).unwrap_err().to_string(), format!("the drawing has no view {}", ids::encode(99)));
+}
+
+/// A pictorial view counts in its chain: one past the deepest is refused as a projected view is,
+/// and its parent then has no room for one.
+#[test]
+fn a_pictorial_view_is_at_most_its_chains_depth() {
+    let (mut d, mut id_source, front) = front();
+    let mut last = front;
+    for _ in 2..MAX_VIEW_DEPTH {
+        last = add(&mut d, &mut id_source, projected(last, ProjectedSide::Right), ViewPlace::At([10.0, 10.0]), ViewOverrides::default());
+    }
+    let mut room = d.clone();
+    add(&mut room, &mut id_source, pictorial(last, Diagonal::AboveRight), ViewPlace::At([10.0, 10.0]), ViewOverrides::default());
+    room.validate().unwrap();
+    let deepest = add(&mut d, &mut id_source, projected(last, ProjectedSide::Right), ViewPlace::At([10.0, 10.0]), ViewOverrides::default());
+    assert_eq!(d.can_project_from(deepest).unwrap_err().to_string(), format!("a chain of views is at most {MAX_VIEW_DEPTH} views"));
+    let past = add(&mut d, &mut id_source, pictorial(deepest, Diagonal::AboveRight), ViewPlace::At([10.0, 10.0]), ViewOverrides::default());
+    assert_eq!(d.validate().unwrap_err().to_string(), format!("view {}: a chain of views is at most {MAX_VIEW_DEPTH} views", ids::encode(past)));
+}
+
+/// An offset from the parent's centre gives the nearest of eight directions: a side within 22.5°
+/// of its axis (a lined-up view wins the tie on the 22.5° line), else the diagonal of its signs;
+/// nothing on the centre or for an offset not finite.
+#[test]
+fn an_offset_picks_the_nearest_of_eight_directions() {
+    use Diagonal::{AboveLeft, AboveRight, BelowLeft, BelowRight};
+    use ProjectedSide::{Above, Below, Left, Right};
+    let side = |s| Some(Beside::Side(s));
+    let diagonal = |d| Some(Beside::Diagonal(d));
+    let tie = std::f64::consts::SQRT_2 - 1.0;
+    for ((dx, dy), want) in [
+        ((80.0, 0.0), side(Right)),
+        ((-80.0, 0.0), side(Left)),
+        ((0.0, 80.0), side(Above)),
+        ((0.0, -80.0), side(Below)),
+        ((80.0, 80.0), diagonal(AboveRight)),
+        ((-80.0, 80.0), diagonal(AboveLeft)),
+        ((80.0, -80.0), diagonal(BelowRight)),
+        ((-80.0, -80.0), diagonal(BelowLeft)),
+        ((80.0, 33.0), side(Right)),
+        ((80.0, 34.0), diagonal(AboveRight)),
+        ((33.0, 80.0), side(Above)),
+        ((34.0, 80.0), diagonal(AboveRight)),
+        ((-33.0, -80.0), side(Below)),
+        ((1.0, tie), side(Right)),
+        ((tie, -1.0), side(Below)),
+        ((1e-300, 0.0), side(Right)),
+        ((0.0, 0.0), None),
+        ((-0.0, 0.0), None),
+        ((f64::NAN, 1.0), None),
+        ((1.0, f64::INFINITY), None),
+    ] {
+        assert_eq!(Beside::of_offset(Vec2::new(dx, dy)), want, "({dx}, {dy})");
+    }
+}
+
+/// The eight names read and write as plain words, sides and diagonals alike, and each kind of
+/// view is named for what it is; other words are refused.
+#[test]
+fn beside_reads_and_writes_the_eight_names() {
+    let names: Vec<Value> = Diagonal::ALL.iter().map(|d| serde_json::to_value(Beside::Diagonal(*d)).unwrap()).collect();
+    assert_eq!(names, [json!("above_right"), json!("above_left"), json!("below_right"), json!("below_left")]);
+    for side in ProjectedSide::ALL {
+        let written = serde_json::to_value(Beside::Side(side)).unwrap();
+        assert_eq!(serde_json::from_value::<Beside>(written).unwrap(), Beside::Side(side));
+    }
+    assert_eq!(serde_json::from_value::<Beside>(json!("below_left")).unwrap(), Beside::Diagonal(Diagonal::BelowLeft));
+    for bad in [json!("top"), json!("aboveright"), json!("above-right"), json!(1)] {
+        assert!(serde_json::from_value::<Beside>(bad.clone()).is_err(), "{bad}");
+    }
+    let (d, _, [front, right, _, iso]) = four();
+    let named = |id: u64| d.view(id).map(|v| (v.kind.name(), v.kind.beside())).unwrap();
+    assert_eq!(named(front), ("base", None));
+    assert_eq!(named(right), ("projected", Some(Beside::Side(ProjectedSide::Right))));
+    assert_eq!(named(iso), ("pictorial", Some(Beside::Diagonal(Diagonal::AboveRight))));
+}
+
+fn auxiliary(parent: u64, toward: [f64; 2]) -> ViewKind {
+    ViewKind::Auxiliary { parent, toward }
+}
+
+/// The three views and an auxiliary view of the front view toward (0.6, 0.8), placed apart.
+fn with_auxiliary() -> (Drawing, IdSource, [u64; 4]) {
+    let (mut d, mut id_source, [front, right, top]) = three();
+    let aux = add(&mut d, &mut id_source, auxiliary(front, [0.6, 0.8]), ViewPlace::At([260.0, 230.0]), ViewOverrides::default());
+    d.validate().unwrap();
+    (d, id_source, [front, right, top, aux])
+}
+
+/// An auxiliary view saves its parent, its side and its point, and reads back as saved, the same
+/// bytes. It resolves to its parent folded toward its side: from that side in third angle, from the
+/// side away in first, and toward a side it is that side's projected view. Its scale follows its
+/// parent, it is found down its parent's chains, its centre is its own point, and it names itself
+/// with no place of the eight. An auxiliary view of an auxiliary view resolves down its chain.
+#[test]
+fn an_auxiliary_view_saves_its_side_and_resolves_folded() {
+    let (mut d, mut id_source, [front, _, _, aux]) = with_auxiliary();
+    let [front_id, aux_id] = [front, aux].map(ids::encode);
+    let saved = file(&d)["views"].as_array().unwrap().iter().find(|v| v["id"] == json!(aux_id)).cloned().unwrap();
+    assert_eq!(saved["kind"], json!({"auxiliary": {"parent": front_id, "toward": [0.6, 0.8]}}));
+    assert_eq!((saved["place"].clone(), saved.get("settings")), (json!({"at": [260.0, 230.0]}), None));
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+
+    let front_basis = NamedView::Front.basis();
+    let resolved = d.resolve_view(aux).unwrap();
+    assert_eq!(resolved.basis, auxiliary_basis(&front_basis, Vec2::new(0.6, 0.8), Projection::Third).unwrap());
+    assert_eq!((resolved.scale.value.to_string(), resolved.scale.set_by), ("1:2".to_string(), SetBy::Parent(front)));
+    d.projection = Projection::First;
+    let first = d.resolve_view(aux).unwrap().basis;
+    assert_eq!(first, auxiliary_basis(&front_basis, Vec2::new(0.6, 0.8), Projection::First).unwrap());
+    assert_ne!(first, resolved.basis);
+    d.projection = Projection::Third;
+    view_mut(&mut d, aux).kind = auxiliary(front, [1.0, 0.0]);
+    assert_eq!(d.resolve_view(aux).unwrap().basis, NamedView::Right.basis(), "toward the right, the right view");
+    view_mut(&mut d, aux).kind = auxiliary(front, [0.6, 0.8]);
+
+    let set = |ids: &[u64]| ids.iter().copied().collect::<BTreeSet<u64>>();
+    assert!(d.with_projected(&set(&[front])).contains(&aux));
+    assert_eq!(d.view_centre(aux).unwrap(), Vec2::new(260.0, 230.0));
+    view_mut(&mut d, front).place = ViewPlace::At([100.0, 100.0]);
+    assert_eq!(d.view_centre(aux).unwrap(), Vec2::new(260.0, 230.0), "placed apart, it stays");
+    assert_eq!(d.view(aux).map(|v| (v.kind.name(), v.kind.beside(), v.kind.parent())), Some(("auxiliary", None, Some(front))));
+
+    let second = add(&mut d, &mut id_source, auxiliary(aux, [0.0, -1.0]), ViewPlace::At([300.0, 100.0]), ViewOverrides::default());
+    d.validate().unwrap();
+    let folded_twice = auxiliary_basis(&resolved.basis, Vec2::new(0.0, -1.0), Projection::Third).unwrap();
+    assert_eq!(d.resolve_view(second).unwrap().basis, folded_twice);
+}
+
+/// The record's rules for an auxiliary view: it is placed at a point; its side is a direction of
+/// about unit length (each number finite and at most 1 either way, one at least 0.5), in the file as
+/// in an edit; its parent is one of the drawing's views and not a pictorial view; and it counts in
+/// its chain, which is at most [`MAX_VIEW_DEPTH`] views.
+#[test]
+fn an_auxiliary_views_rules_are_kept() {
+    let (d, mut id_source, [front, _, _, aux]) = with_auxiliary();
+    let why = |d: &Drawing| d.validate().unwrap_err().to_string();
+    let mut lined_up = d.clone();
+    view_mut(&mut lined_up, aux).place = ViewPlace::Aligned(60.0);
+    assert_eq!(why(&lined_up), format!("view {}: an auxiliary view is placed at a point: it isn't lined up with its parent", ids::encode(aux)));
+    assert_eq!(lined_up.view_centre(aux).unwrap_err().to_string(), format!("auxiliary view {} isn't placed at a point", ids::encode(aux)));
+    let rule = "an auxiliary view's toward is a direction of about unit length: each number at most 1 either way, one at least 0.5";
+    for toward in [[0.0, 0.0], [0.4, 0.4], [1.5, 0.0], [0.6, -1.000_001], [f64::NAN, 1.0], [1.0, f64::INFINITY], [-0.499, 0.0]] {
+        let mut bad = d.clone();
+        view_mut(&mut bad, aux).kind = auxiliary(front, toward);
+        assert_eq!(why(&bad), format!("view {}: {rule}", ids::encode(aux)), "{toward:?}");
+    }
+    for toward in [[0.5, 0.0], [-1.0, 1.0], [0.0, -0.5], [-0.0, 1.0]] {
+        let mut good = d.clone();
+        view_mut(&mut good, aux).kind = auxiliary(front, toward);
+        good.validate().unwrap();
+    }
+    let read = refused(&d, |v| {
+        let views = v["views"].as_array_mut().unwrap();
+        let saved = views.iter_mut().find(|view| view["id"] == json!(ids::encode(aux))).unwrap();
+        saved["kind"]["auxiliary"]["toward"] = json!([2.0, 0.0]);
+    });
+    assert!(read.contains(rule), "{read}");
+    let mut orphan = d.clone();
+    view_mut(&mut orphan, aux).kind = auxiliary(99, [1.0, 0.0]);
+    assert_eq!(why(&orphan), format!("view {}: its parent {} isn't one of the drawing's views", ids::encode(aux), ids::encode(99)));
+    let mut from_iso = d.clone();
+    let iso = add(&mut from_iso, &mut id_source, pictorial(front, Diagonal::AboveRight), ViewPlace::At([60.0, 250.0]), ViewOverrides::default());
+    let child = add(&mut from_iso, &mut id_source, auxiliary(iso, [1.0, 0.0]), ViewPlace::At([10.0, 10.0]), ViewOverrides::default());
+    assert_eq!(why(&from_iso), format!("view {}: not supported yet: a view projected from a pictorial view", ids::encode(child)));
+
+    let (mut deep, mut id_source, front) = self::front();
+    let mut last = front;
+    for _ in 1..MAX_VIEW_DEPTH {
+        last = add(&mut deep, &mut id_source, auxiliary(last, [0.0, 1.0]), ViewPlace::At([10.0, 10.0]), ViewOverrides::default());
+    }
+    deep.validate().unwrap();
+    assert_eq!(deep.can_project_from(last).unwrap_err().to_string(), format!("a chain of views is at most {MAX_VIEW_DEPTH} views"));
+    let past = add(&mut deep, &mut id_source, auxiliary(last, [0.0, 1.0]), ViewPlace::At([10.0, 10.0]), ViewOverrides::default());
+    assert_eq!(deep.validate().unwrap_err().to_string(), format!("view {}: a chain of views is at most {MAX_VIEW_DEPTH} views", ids::encode(past)));
+}
+/// A drawing with a flat pattern view of body `Plate` at 1:1, placed at (300, 150) and turned
+/// `turn`, beside the front view, and the flat view's id.
+fn flat(turn: QuarterTurn) -> (Drawing, IdSource, u64) {
+    let (mut d, mut id_source, _) = front();
+    let source = d.sources[0].id;
+    let kind = ViewKind::Flat { source, body: "Plate".into(), turn };
+    let id = add(&mut d, &mut id_source, kind, ViewPlace::At([300.0, 150.0]), scaled("1:1"));
+    d.validate().unwrap();
+    (d, id_source, id)
+}
+
+/// A flat pattern view saves its source, its body and its quarter turn, in degrees, and reads back as
+/// saved. It resolves to its turn's basis with its body and turn, a base view to none, and its centre
+/// is its place.
+#[test]
+fn a_flat_view_saves_its_body_and_turn_and_resolves_to_its_basis() {
+    let (d, _, id) = flat(QuarterTurn::Quarter);
+    let v = file(&d);
+    let saved = v["views"].as_array().unwrap().iter().find(|view| view["id"] == json!(ids::encode(id))).unwrap();
+    let source = ids::encode(d.sources[0].id);
+    assert_eq!(saved["kind"], json!({"flat": {"source": source, "body": "Plate", "turn": 90}}));
+    assert_eq!(Drawing::from_json(&d.to_json().unwrap()).unwrap(), d);
+    let resolved = d.resolve_view(id).unwrap();
+    assert_eq!(resolved.basis, QuarterTurn::Quarter.basis());
+    assert_eq!(resolved.flat, Some(FlatOf { body: "Plate".into(), turn: QuarterTurn::Quarter }));
+    let base = d.views.iter().find(|v| matches!(v.kind, ViewKind::Base { .. })).unwrap().id;
+    assert_eq!(d.resolve_view(base).unwrap().flat, None);
+    assert_eq!(d.view_centre(id).unwrap(), Vec2::new(300.0, 150.0));
+}
+
+/// A flat view's rules, saved or made: its body is 1 to 255 bytes with no control characters, its turn
+/// a quarter turn, it has a scale and is placed at a point, and no view of any kind is made from it yet.
+#[test]
+fn a_flat_view_keeps_its_rules() {
+    let (d, mut id_source, id) = flat(QuarterTurn::None);
+    let at = file(&d)["views"].as_array().unwrap().iter().position(|view| view["id"] == json!(ids::encode(id))).unwrap();
+    let edits: [(fn(&mut Value), &str); 6] = [
+        (|view| view["kind"]["flat"]["body"] = json!(""), "body is 1 to 255 bytes"),
+        (|view| view["kind"]["flat"]["body"] = json!("Pl\u{7}ate"), "no control characters"),
+        (|view| view["kind"]["flat"]["body"] = json!("x".repeat(256)), "body is 1 to 255 bytes"),
+        (|view| view["kind"]["flat"]["turn"] = json!(45), "0, 90, 180 or 270"),
+        (|view| view["settings"] = json!({}), "a flat pattern view has a scale"),
+        (|view| view["place"] = json!({"aligned": 10.0}), "a flat pattern view is placed at a point"),
+    ];
+    for (edit, why) in edits {
+        let error = refused(&d, |v| edit(&mut v["views"][at]));
+        assert!(error.contains(why), "{why}: {error}");
+    }
+    let refusal = "not supported yet: a view made from a flat pattern view";
+    assert_eq!(d.can_project_from(id).unwrap_err().to_string(), refusal);
+    let at = ViewPlace::At([450.0, 150.0]);
+    let kinds = [
+        (projected(id, ProjectedSide::Right), ViewPlace::Aligned(450.0)),
+        (section(id), at),
+        (pictorial(id, Diagonal::AboveRight), at),
+        (auxiliary(id, [1.0, 0.0]), at),
+    ];
+    for (kind, place) in kinds {
+        let mut made_from = d.clone();
+        add(&mut made_from, &mut id_source, kind, place, ViewOverrides::default());
+        let error = made_from.validate().unwrap_err().to_string();
+        assert!(error.contains(refusal), "{error}");
+    }
+}
+
+/// A flat pattern turned in quarter turns maps its points exactly: the corner (100, 0) of a flat
+/// lands at (100, 0), (0, 100), (-100, 0) and (0, -100), turned anticlockwise on paper, with no
+/// rounding, and each basis is orthonormal.
+#[test]
+fn a_quarter_turn_maps_a_flat_exactly() {
+    let want = [Vec2::new(100.0, 0.0), Vec2::new(0.0, 100.0), Vec2::new(-100.0, 0.0), Vec2::new(0.0, -100.0)];
+    for (turn, want) in QuarterTurn::ALL.into_iter().zip(want) {
+        let basis = turn.basis();
+        solidcraft_geom::section::validate_plane(&basis).unwrap();
+        assert_eq!(basis.to_local(Vec3::new(100.0, 0.0, 0.0)), want, "{turn:?}");
+    }
+}
+
+/// A turn is saved as its degrees, and read only as 0, 90, 180 or 270.
+#[test]
+fn a_quarter_turn_is_saved_as_its_degrees() {
+    for (turn, degrees) in QuarterTurn::ALL.into_iter().zip([0, 90, 180, 270]) {
+        assert_eq!(serde_json::to_value(turn).unwrap(), json!(degrees));
+        assert_eq!(serde_json::from_value::<QuarterTurn>(json!(degrees)).unwrap(), turn);
+    }
+    for bad in [json!(45), json!(-90), json!(360), json!("90"), json!(90.5), json!(null)] {
+        assert!(serde_json::from_value::<QuarterTurn>(bad.clone()).is_err(), "{bad}");
+    }
 }

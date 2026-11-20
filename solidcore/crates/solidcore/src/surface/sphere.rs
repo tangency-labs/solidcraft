@@ -34,6 +34,7 @@
 //! | [`Sphere::intersect_with_cone`]              | `IntersectWithCone`                          |
 //! | [`Sphere::create_trimmed_circle_segments`]   | `CreateTrimmedCircleSegments`                |
 //! | [`Sphere::is_nurb_surface_sphere`]           | `IsNurbSurfaceSphere`                        |
+//! | [`Sphere::fitted_nurb_surface_sphere`]       | `IsNurbSurfaceSphere` as upstream returns it (the fitted circles' NURB) |
 //! | [`Sphere::rebuild_step_from_nurb_parameters`] | `RebuildSTEPFromNURBParameters`             |
 //! | [`Sphere::is_closed`], [`Sphere::is_closed_u`], [`Sphere::is_closed_v`] | `IsClosed`, `IsClosedU`, `IsClosedV` |
 //! | [`Sphere::step_inversion`]                   | `STEPInversion`                              |
@@ -74,8 +75,7 @@
 //!   `STEPInversion` returns `SM_ERR` after setting its outputs (a point off the
 //!   sphere); that is [`SphereStepInversion::on_surface`] `false`, not an error, so the
 //!   outputs stay available to the callers that ignore the status.
-//!   With [`UpstreamFixes::analytic_inversion_answers_apart`](crate::kernel::UpstreamFixes::analytic_inversion_answers_apart)
-//!   (WR-662, the SolidCraft fork's tangency-labs/smlib dfc7cb6) the intersections pass
+//!   As the SolidCraft fork's tangency-labs/smlib dfc7cb6 (WR-662), the intersections pass
 //!   on an inversion that did not answer ([`SphereStepInversion::answered`]), and
 //!   `Surface::step_inversion` returns a point off the sphere as
 //!   `SM_ERR_NOT_WITHIN_TOLERANCE`.
@@ -106,10 +106,12 @@
 //!   point a whole radius from them. A circle whose cap lies within the tolerance is
 //!   still a touch for a B-rep at that tolerance: `FaceIntersect` makes it one
 //!   (`topology::face::p3`). No input-driven recursion.
-//! - **Opt-in fix** ([`UpstreamFixes::found_torus_sphere_keep_tested_nurb`](crate::kernel::UpstreamFixes::found_torus_sphere_keep_tested_nurb),
-//!   WR-493, the SolidCraft fork's tangency-labs/smlib@7ea6a96): `IsNurbSurfaceSphere`
-//!   tests the half meridian within `180 + 360 * SM_EFF_ZERO` degrees and the sphere it
-//!   finds keeps the tested NURB (`SetFromGwNurb`). Off by default (upstream).
+//! - **Found spheres keep the tested NURB** (WR-493, the SolidCraft fork's
+//!   tangency-labs/smlib@7ea6a96): the sphere `IsNurbSurfaceSphere` finds keeps the
+//!   tested NURB (`SetFromGwNurb`), its sweep interval the polar curve's.
+//!   Upstream keeps the NURB made from the fitted circles. The fork also widens the
+//!   half-meridian test to `180 + 360 * SM_EFF_ZERO` degrees; that is not taken, since
+//!   the angles' rounding (far spheres, below) already covers it and no more.
 //! - **Far spheres** (#3131, by default): `IsNurbSurfaceSphere` and
 //!   `RebuildSTEPFromNURBParameters` add to their fixed half-meridian tolerances, and
 //!   `IsNurbSurfaceSphere` to its generator's STEP interval test, the angles' rounding at
@@ -714,6 +716,19 @@ impl Sphere {
     /// circle; those of the conversions.
     pub fn convert_uv_from_nurbs_to_step(&self, k: &Kernel, nurbs_uv: Point2) -> Result<Point2> {
         convert_uv_from_nurbs_to_step(&self.base, k, nurbs_uv)
+    }
+
+    /// [`Self::convert_uv_from_nurbs_to_step`] with the polar converters' exactness.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::convert_uv_from_nurbs_to_step`].
+    pub(crate) fn convert_uv_from_nurbs_to_step_exact(
+        &self,
+        k: &Kernel,
+        nurbs_uv: Point2,
+    ) -> Result<(Point2, bool)> {
+        convert_uv_from_nurbs_to_step_exact(&self.base, k, nurbs_uv)
     }
 
     // ---- STEP evaluation ------------------------------------------------------------
@@ -1431,7 +1446,6 @@ impl Sphere {
                         LocationType::Interior
                     } else {
                         other.inversion_location(
-                            k,
                             &other.base.anal_uv_domain,
                             test_point,
                             EFF_ZERO,
@@ -1514,7 +1528,7 @@ impl Sphere {
             let is_contained = if sphere_closed_u && sphere_closed_v {
                 true
             } else {
-                self.inversion_location(k, &anal_domain, test_point, EFF_ZERO)?
+                self.inversion_location(&anal_domain, test_point, EFF_ZERO)?
                     != LocationType::Exterior
             };
 
@@ -1688,7 +1702,7 @@ impl Sphere {
                 }
 
                 // Test the point. Tol loosened [B661]
-                self.inversion_location(k, &anal_domain, test_point, EFF_ZERO_PARAM)?
+                self.inversion_location(&anal_domain, test_point, EFF_ZERO_PARAM)?
                     != LocationType::Exterior
             };
 
@@ -1757,7 +1771,7 @@ impl Sphere {
                 // classify nonDegenerate circular arc branch: check arc midPoint to
                 // see if arc is inside or outside
                 // project the point into Spherical position Coordinates
-                let loc = self.inversion_location(k, &anal_domain, mid_arc_point, tol_3d)?;
+                let loc = self.inversion_location(&anal_domain, mid_arc_point, tol_3d)?;
 
                 // when test point is on Surface and within domain boundaries
                 if loc != LocationType::Exterior {
@@ -1810,7 +1824,7 @@ impl Sphere {
             // Actually, check all circle-circle intersections.  There will be some
             // outside of the surface patch.
             // get spherical coordinates for ArcPoint
-            let loc = self.inversion_location(k, &anal_domain, arc_point, tol_3d)?;
+            let loc = self.inversion_location(&anal_domain, arc_point, tol_3d)?;
 
             // skip points not within sphere boundaries
             if loc == LocationType::Exterior {
@@ -2022,7 +2036,7 @@ impl Sphere {
 
                     // get UV point for Sphere
                     let location =
-                        self.inversion_location(k, &self.base.anal_uv_domain, point, scaled_zero)?;
+                        self.inversion_location(&self.base.anal_uv_domain, point, scaled_zero)?;
 
                     // add degenerate curve to output
                     if location != LocationType::Exterior {
@@ -2051,12 +2065,9 @@ impl Sphere {
     /// domain of `test` (through [`Self::reparameterize`]). `None` when `test` is not
     /// a sphere.
     ///
-    /// With the opt-in
-    /// [`UpstreamFixes::found_torus_sphere_keep_tested_nurb`](crate::kernel::UpstreamFixes::found_torus_sphere_keep_tested_nurb)
-    /// (WR-493) the half turn is tested within `180 + 360 * SM_EFF_ZERO` degrees and the
+    /// The half turn is tested within `180 + SM_EFF_ZERO` degrees, as upstream, and the
     /// sphere then keeps a copy of `test`'s NURB, its analytic data rebuilt from it
-    /// (`SetFromGwNurb`); by default `180 + SM_EFF_ZERO` and the NURB made from the
-    /// fitted circles, as upstream. Not upstream: in both modes the half-meridian test, and
+    /// (`SetFromGwNurb`; WR-493: upstream keeps the NURB made from the fitted circles). Not upstream: the half-meridian test, and
     /// the test of the generator's STEP interval against the sphere's (within `SM_EFF_ZERO`
     /// upstream), also allow the angles' rounding at the points' size,
     /// [`meridian_rounding`] of the corner points' size and the circle's radius: `4
@@ -2085,6 +2096,35 @@ impl Sphere {
     ///
     /// As [`Self::is_nurb_surface_sphere`].
     pub(crate) fn is_nurb_surface_sphere_on(
+        k: &Kernel,
+        test: &BSplineSurface,
+        tolerance_scale: f64,
+        this: Option<&Surface>,
+    ) -> Result<Option<Self>> {
+        Self::keep_tested_nurb_on(k, test, tolerance_scale, this)
+    }
+
+    /// The sphere `IsNurbSurfaceSphere` fits to `test` as upstream returns it: its NURB
+    /// the one made from the fitted circles (reparameterised to `test`'s NURB domain),
+    /// ~1e-11 off `test`'s, where [`Self::is_nurb_surface_sphere`] keeps `test`'s own
+    /// (WR-493). Public only for the goldens' replays of rows against the fitted NURB
+    /// (hidden from the docs); the kernel itself does not call it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::is_nurb_surface_sphere`].
+    #[doc(hidden)]
+    pub fn fitted_nurb_surface_sphere(
+        k: &Kernel,
+        test: &BSplineSurface,
+        tolerance_scale: f64,
+    ) -> Result<Option<Self>> {
+        Self::fit_on(k, test, tolerance_scale, None)
+    }
+
+    /// [`Self::fitted_nurb_surface_sphere`] with `this` evaluating the corners (as
+    /// [`Self::is_nurb_surface_sphere_on`]).
+    fn fit_on(
         k: &Kernel,
         test: &BSplineSurface,
         tolerance_scale: f64,
@@ -2133,13 +2173,10 @@ impl Sphere {
         // see if we have a U or a V oriented sphere
         let angles_u = iso_u.angles.unwrap_or(Extent1d::new());
         let angles_v = iso_v.angles.unwrap_or(Extent1d::new());
-        // not upstream (WR-493, opt-in; tangency-labs/smlib@7ea6a96): the half-meridian
-        // tolerance compensates for degrees, as RebuildSTEPFromNURBParameters [B279]
-        let half_meridian_tol = if k.fixes.found_torus_sphere_keep_tested_nurb {
-            360.0 * EFF_ZERO
-        } else {
-            EFF_ZERO
-        };
+        // upstream's half-meridian tolerance. The fork (WR-493, tangency-labs/smlib@7ea6a96)
+        // widens it to `360 * SM_EFF_ZERO` degrees; the angles' rounding below already
+        // covers what that compensated for, and no more (`far_sphere_recognised`).
+        let half_meridian_tol = EFF_ZERO;
         // not upstream: the angles' rounding at the points' size (`meridian_rounding`)
         let corners = min_pnt.max_dimension().max(max_pnt.max_dimension());
         let (p, q) = (test.degree(SurfParamType::U), test.degree(SurfParamType::V));
@@ -2294,24 +2331,37 @@ impl Sphere {
             Err(_) => return Ok(None), // [B414]
             Ok(()) => {}
         }
+        Ok(Some(sphere))
+    }
 
-        // not upstream (WR-493, opt-in; tangency-labs/smlib@7ea6a96): the sphere keeps
-        // the NURB tested (SetFromGwNurb, whose rebuild's status is ignored)
-        if k.fixes.found_torus_sphere_keep_tested_nurb {
-            let nurb = test
-                .gw_nurb()
-                .ok_or_else(|| SolidError::surface_missing(OP_NURB_SPHERE, "the tested NURB"))?;
-            sphere.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
-            sphere.base.base.nurb_is_borrowed = false;
-            ignore_status(sphere.rebuild_step_from_nurb_parameters(k))?;
-            // (not in the fork) the rebuild takes the sweep interval from one iso circle
-            // and the polar curve from another; they differ beyond the check's 1e-12 on a
-            // small sphere. The interval is the polar curve's (#2073).
-            if let Some(ivl) = sphere.base.polar_curve().map(Ellipse::step_interval) {
-                let d = sphere.base.anal_uv_domain;
-                sphere.base.anal_uv_domain =
-                    Extent2d::from_bounds(ivl.min(), d.min().y, ivl.max(), d.max().y);
-            }
+    /// [`Self::fitted_nurb_surface_sphere`] of `test` as `this` evaluates its corners
+    /// ([`Self::is_nurb_surface_sphere_on`]), then the sphere keeps a copy of `test`'s NURB.
+    fn keep_tested_nurb_on(
+        k: &Kernel,
+        test: &BSplineSurface,
+        tolerance_scale: f64,
+        this: Option<&Surface>,
+    ) -> Result<Option<Self>> {
+        let Some(mut sphere) = Self::fit_on(k, test, tolerance_scale, this)? else {
+            return Ok(None);
+        };
+        // not upstream (WR-493; tangency-labs/smlib@7ea6a96): the sphere keeps the NURB
+        // tested (SetFromGwNurb, whose rebuild's status is ignored). (`test` has a NURB:
+        // without one its degrees are 0 and the fit returned `None`; the error is kept
+        // for a NURB-less surface all the same.)
+        let nurb = test
+            .gw_nurb()
+            .ok_or_else(|| SolidError::surface_missing(OP_NURB_SPHERE, "the tested NURB"))?;
+        sphere.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
+        sphere.base.base.nurb_is_borrowed = false;
+        ignore_status(sphere.rebuild_step_from_nurb_parameters(k))?;
+        // (not in the fork) the rebuild takes the sweep interval from one iso circle and
+        // the polar curve from another; they differ beyond the check's 1e-12 on a small
+        // sphere. The interval is the polar curve's.
+        if let Some(ivl) = sphere.base.polar_curve().map(Ellipse::step_interval) {
+            let d = sphere.base.anal_uv_domain;
+            sphere.base.anal_uv_domain =
+                Extent2d::from_bounds(ivl.min(), d.min().y, ivl.max(), d.max().y);
         }
 
         // (Notify(SM_NO_COPY) copies the test surface's attributes: not modelled)
@@ -2601,23 +2651,21 @@ impl Sphere {
     // ---- point inversion ------------------------------------------------------------
 
     /// The location [`Self::step_inversion`] gives `point`, read by an intersection
-    /// that ignores the status upstream. With
-    /// [`UpstreamFixes::analytic_inversion_answers_apart`](crate::kernel::UpstreamFixes::analytic_inversion_answers_apart)
-    /// an inversion that did not answer (`!STEPInversionAnswered`) is passed on
-    /// (`SER`, tangency-labs/smlib dfc7cb6) instead of reading its exterior location.
+    /// that ignores the status upstream. An inversion that did not answer
+    /// (`!STEPInversionAnswered`) is passed on (`SER`, the SolidCraft fork's
+    /// tangency-labs/smlib dfc7cb6, WR-662) instead of reading its exterior location.
     ///
     /// # Errors
     ///
-    /// `SM_ERR` with the fix for the centre of a sphere no larger than `tol`.
+    /// `SM_ERR` for the centre of a sphere no larger than `tol`.
     pub(crate) fn inversion_location(
         &self,
-        k: &Kernel,
         anal_domain: &Extent2d,
         point: Point3,
         tol: f64,
     ) -> Result<LocationType> {
         let inv = self.step_inversion(anal_domain, point, tol, None);
-        if k.fixes.analytic_inversion_answers_apart && !inv.answered {
+        if !inv.answered {
             return Err(SolidError::surface_failed(
                 OP_SPHERE_STEP_INV,
                 "the point is the centre of a sphere within the tolerance and has no parameters",
@@ -3026,6 +3074,16 @@ fn convert_uv_from_nurbs_to_step(
     k: &Kernel,
     nurbs_uv: Point2,
 ) -> Result<Point2> {
+    Ok(convert_uv_from_nurbs_to_step_exact(base, k, nurbs_uv)?.0)
+}
+
+/// [`convert_uv_from_nurbs_to_step`] with the polar converters' exactness: `false` where
+/// the sweep or generator angle is not a closed form's.
+fn convert_uv_from_nurbs_to_step_exact(
+    base: &SurfOfRevolution,
+    k: &Kernel,
+    nurbs_uv: Point2,
+) -> Result<(Point2, bool)> {
     // m_bSwapUV - Nurb and STEP parameters are swapped
     let nurb_uv = if base.swap_uv {
         Point2::new(nurbs_uv.y, nurbs_uv.x)
@@ -3038,14 +3096,14 @@ fn convert_uv_from_nurbs_to_step(
         OP_CONVERT,
         "polar converter has no curve",
     ))?;
-    let (step_x, _exact) = base
+    let (step_x, exact_x) = base
         .polar
         .convert_to_polar_parameter(k, polar_curve, nurb_uv.x)?;
 
     // convert genCurve NurbParam to PolarParam
     let circle = gen_circle(base.gen_curve.as_ref(), OP_CONVERT)?;
-    let polar_param = circle.convert_t_from_nurbs_to_step(k, nurb_uv.y)?;
-    Ok(Point2::new(step_x, polar_param))
+    let (polar_param, exact_y) = circle.convert_t_from_nurbs_to_step_exact(k, nurb_uv.y)?;
+    Ok((Point2::new(step_x, polar_param), exact_x && exact_y))
 }
 
 /// Not upstream: the rounding, in degrees, of the length of the half meridian (or of a
@@ -3428,35 +3486,29 @@ mod tests {
 
     /// fork dfc7cb6 (`SmSphere::CreateTrimmedCircleSegments` and the other intersection
     /// callers, `if(!SmSurface::STEPInversionAnswered(eInv)) { SER(eInv) ; }`): the
-    /// centre of a sphere no larger than the tolerance does not answer. Upstream reads
-    /// its exterior location; the fork returns the failure.
+    /// centre of a sphere no larger than the tolerance does not answer, and the failure
+    /// is returned (upstream read its exterior location).
     #[test]
     fn inversion_location_passes_on_a_failed_inversion() {
-        for apart in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.analytic_inversion_answers_apart = apart;
-            let s = canonical(&k, 1e-6);
-            let d = s.base.anal_uv_domain;
-            let r = s.inversion_location(&k, &d, frame().origin(), 1e-3);
-            if apart {
-                let e = r.unwrap_err();
-                assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
-                assert_eq!(e.operation(), OP_SPHERE_STEP_INV);
-                assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
-                assert!(e.surface_failure().is_some(), "{e:?}");
-            } else {
-                assert_eq!(r.unwrap(), LocationType::Exterior);
-            }
-            // an off-sphere answer reads its location for either setting
-            let big = canonical(&k, 2.0);
-            let off = frame().origin() + 3.0 * frame().z_axis();
-            assert_eq!(
-                big.inversion_location(&k, &big.base.anal_uv_domain, off, 1e-9)
-                    .unwrap(),
-                big.step_inversion(&big.base.anal_uv_domain, off, 1e-9, None)
-                    .location
-            );
-        }
+        let k = Kernel::default();
+        let s = canonical(&k, 1e-6);
+        let d = s.base.anal_uv_domain;
+        let e = s
+            .inversion_location(&d, frame().origin(), 1e-3)
+            .unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.operation(), OP_SPHERE_STEP_INV);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert!(e.surface_failure().is_some(), "{e:?}");
+        // an off-sphere answer reads its location
+        let big = canonical(&k, 2.0);
+        let off = frame().origin() + 3.0 * frame().z_axis();
+        assert_eq!(
+            big.inversion_location(&big.base.anal_uv_domain, off, 1e-9)
+                .unwrap(),
+            big.step_inversion(&big.base.anal_uv_domain, off, 1e-9, None)
+                .location
+        );
     }
 
     #[test]
@@ -3509,12 +3561,11 @@ mod tests {
         }
     }
 
-    /// tangency-labs/smlib@7ea6a96 (WR-493): with `found_torus_sphere_keep_tested_nurb`
-    /// the sphere found in a NURB keeps exactly that NURB.
+    /// tangency-labs/smlib@7ea6a96 (WR-493): the sphere found in a NURB keeps exactly
+    /// that NURB (upstream keeps the one made from the fitted circles, ~1e-11 off).
     #[test]
     fn wr493_sphere_found_in_its_nurb_keeps_it() {
-        let mut k = Kernel::default();
-        k.fixes.found_torus_sphere_keep_tested_nurb = true;
+        let k = Kernel::default();
         for radius in [2.0, -2.0, 1e-3, 500.0] {
             let s = canonical(&k, radius);
             let nurbs = BSplineSurface::from_gw_nurb(s.base().base().gw_nurb().unwrap());

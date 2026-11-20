@@ -91,9 +91,7 @@ use solidcore::SolidError;
 
 /// The section generator and rounds (and chamfers) as their definitions.
 fn definition_kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = true;
-    k
+    Kernel::default()
 }
 
 /// A cylinder of radius 5 and height 10 on the origin, its top rim chamfered by `size`:
@@ -244,7 +242,9 @@ fn assert_builds(d: f64) {
 /// status 1001).
 #[test]
 fn issue_2546_chamfers_just_short_of_the_rounds_build_at_the_closed_form() {
-    for d in [4.99, 4.999, 4.9995] {
+    // 4.9998 and 4.9999 too since the rounds are fitted as finely as their edges are
+    // known (the part resolves 4e-5, not 1.6e-4)
+    for d in [4.99, 4.999, 4.9995, 4.9998, 4.9999] {
         assert_builds(d);
     }
     // and exactly as wide as the rounds, the cones' apexes on the rounds' axes
@@ -252,8 +252,10 @@ fn issue_2546_chamfers_just_short_of_the_rounds_build_at_the_closed_form() {
 }
 
 /// The blend's approximation tolerance on this part (its solvers' `approx_tol_3d`): two
-/// of them are the resolution within which a rail's two end vertices are one.
-const APPROX_TOL: f64 = 1.6e-4;
+/// of them are the resolution within which a rail's two end vertices are one. Four times the
+/// B-rep's 1e-5, as the rounds' edges lie on their faces (1.6e-4, four times their stored
+/// tolerance, before a round was fitted as finely as its edge is known).
+const APPROX_TOL: f64 = 4.0e-5;
 
 /// #2546 (WR-739): closer to the rounds' radius, the bottom face's corner arcs (the cone
 /// chamfers' rails there, radius 5 - d over a quarter turn, their ends sqrt(2) (5 - d)
@@ -264,7 +266,7 @@ const APPROX_TOL: f64 = 1.6e-4;
 #[test]
 fn issue_2546_chamfers_within_the_resolution_of_the_rounds_are_refused_naming_the_limit() {
     let limit = 5.0 - 2.0 * APPROX_TOL / std::f64::consts::SQRT_2;
-    for d in [4.9998, 4.9999, 4.999999, limit + 1e-7] {
+    for d in [4.99995, 4.99999, 4.999999, limit + 1e-7] {
         let (_, _, r) = chamfered_rounded_cube(d);
         let err = r.unwrap_err();
         let text = err.to_string();
@@ -289,14 +291,14 @@ fn issue_2546_chamfers_within_the_resolution_of_the_rounds_are_refused_naming_th
     let bottom = edges_where(&k, &cube, |m| m.z.abs() < 1e-6);
     let comment = {
         let mut s = FilletSession::new(&mut k, &mut cube).unwrap();
-        s.prepare_constant_radius_edges(&mut k, &bottom, 4.9999, 0, 1, 1.0)
+        s.prepare_constant_radius_edges(&mut k, &bottom, 4.99999, 0, 1, 1.0)
             .unwrap();
         assert!(s.do_fillet(&mut k).is_err());
         s.error_info().comment.clone()
     };
     assert!(
         comment.contains(
-            "The part resolves the rail below 4.999774, and at exactly 5 it closes to a point"
+            "The part resolves the rail below 4.999943, and at exactly 5 it closes to a point"
         ),
         "{comment}"
     );

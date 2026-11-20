@@ -117,6 +117,11 @@ impl PlacedMesh {
 
     /// The definition's display plan mesh at quality `q` (shared by every placement of it) and
     /// this placement.
+    /// The definition's plan meshes, by display quality (made or not yet).
+    pub(super) fn plan_mesh_cells(&self) -> &Arc<[OnceLock<Option<Arc<Mesh>>>; 4]> {
+        &self.plan_meshes
+    }
+
     pub(super) fn source_plan_mesh(&self, q: crate::display_quality::DisplayQuality, name: &str) -> Option<(Arc<Mesh>, crate::Mat)> {
         let cell = self.plan_meshes.get(q.index())?;
         let source = cell
@@ -156,6 +161,16 @@ fn same_triangles(a: &Body, b: &Body) -> bool {
 }
 
 impl ModelBody {
+    /// Indexed geometry underlying `mesh_in_place` for a mesh body without authored shading
+    /// normals. A rigid occurrence uses the definition's triangles in the definition's frame.
+    pub fn flat_mesh_in_place(&self) -> Option<(&[Vec3], &[[u32; 3]])> {
+        let body = self.mesh_placement.as_deref().map_or(&self.body, |placed| &placed.body);
+        if !body.triangle_corner_normals()?.is_empty() {
+            return None;
+        }
+        body.triangle_mesh()
+    }
+
     /// Keep the meshes `old` holds when this body is the same shape: a feature evaluated again
     /// that gives the same solids (an import, from its shared file) doesn't mesh them again.
     pub(super) fn keep_meshes_of(&mut self, old: &ModelBody) {
@@ -165,6 +180,19 @@ impl ModelBody {
             self.gpu_plan = old.gpu_plan.clone();
             self.plan_mesh = old.plan_mesh.clone();
             self.opposite_hand = old.opposite_hand.clone();
+        }
+    }
+
+    /// Draw this body, which is `old` moved by `transform` (a body moved to another component),
+    /// from `old`'s triangles and display plans: the very ones for the identity, moved for
+    /// another rigid motion. Moving a pattern of bodies then meshes none of them again.
+    pub(crate) fn drawn_as_moved(&mut self, old: &ModelBody, transform: &crate::Mat) {
+        if crate::is_identity(transform) && same_triangles(&self.body, &old.body) {
+            self.keep_meshes_of(old);
+            self.mesh_placement = old.mesh_placement.clone();
+            self.mirrored_mesh = old.mirrored_mesh.clone();
+        } else {
+            self.mesh_placement = PlacedMesh::new(old, transform).map(Arc::new);
         }
     }
 }
@@ -419,7 +447,9 @@ mod tests {
         for p in &placed {
             let (mesh, m) = p.mesh_in_place();
             assert!(Arc::ptr_eq(&mesh, &own), "the definition's mesh, not a copy");
+            assert!(!p.mesh_bounds_made());
             let bounds = p.mesh_bounds();
+            assert!(p.mesh_bounds_made() && p.clone().mesh_bounds_made(), "worked out once, shared by its clones");
             let tilted = Plane { origin: Vec3::new(1., 2., 3.), x: Vec3::new(0.6, 0.8, 0.), y: Vec3::Z };
             let seen = p.mesh_bounds_in(&tilted);
             assert!(p.cached_mesh().is_none(), "no moved copy is made");

@@ -19,7 +19,7 @@
 //! is a slice by a one-face sheet on the tool surface turned over (`SwapUV`), as the capi
 //! makes it; an edge is picked as the nearest within 0.1 of a point; the rounds are
 //! [`fillet_edges`] (circular, constant radius, then `StitchAndOrient`), on the kernel
-//! SolidCraft runs (every fix on but `geometric_g2_continuity`).
+//! SolidCraft runs (every fix on).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -61,14 +61,12 @@ use solidcore::{Brep, Kernel};
 /// `TWIST_TAN`: tan 30 degrees.
 const TWIST_TAN: f64 = 0.577_350_269_189_625_76;
 
-/// The kernel SolidCraft runs: every fix on but `geometric_g2_continuity`.
+/// The kernel SolidCraft runs: every fix on.
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -385,8 +383,11 @@ fn round_on_a_round(k: &mut Kernel) -> Outcome {
 /// The spans are not the fork's 45 since #13984: each proved feet's box is tightened before
 /// the Taylor solve (32 spans), a halved span's halves start from its finest proved level
 /// (31), the arc's rows over a piece are bounded by Taylor models too (#14405: 30), and so
-/// are the feet over a piece (#14405: 29), so more spans certify unhalved; the net stays
-/// at 0.36 of its bound (0.37 sampled at 1281 sections along s).
+/// are the feet over a piece (#14405: 29), and the offset point is enclosed as one
+/// expansion (#16652: 27), so more spans certify unhalved; the net is at 0.31 of its bound
+/// at 27 spans (0.36 at 29, 0.37 sampled at 1281 sections along s). 34 spans since the round
+/// is fitted as finely as its edge is known: its net certifies to that tolerance in more
+/// spans; the net stays at 0.33 of its bound.
 #[test]
 fn round_on_a_definition_is_its_definition() {
     let mut k = solidcraft_kernel();
@@ -404,7 +405,7 @@ fn round_on_a_definition_is_its_definition() {
     );
     assert!(o.sound, "{o:?}");
     assert!(
-        o.graded == 1 && o.spans == 29 && o.circle <= 1e-11 && o.net <= 1.0,
+        o.graded == 1 && o.spans == 34 && o.circle <= 1e-11 && o.net <= 1.0,
         "{o:?}"
     );
     assert!(

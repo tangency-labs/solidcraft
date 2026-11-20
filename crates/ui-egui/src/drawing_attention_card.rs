@@ -66,10 +66,10 @@ fn reason(d: &DimensionItem) -> String {
     if let Some(error) = &d.inspect_error {
         return fmt("ui.issue15776_attention.inspection_failed", &[("error", error)]);
     }
-    if let Some(why) = &d.why {
-        if !why.trim().is_empty() {
-            return why.clone();
-        }
+    if let Some(why) = &d.why
+        && !why.trim().is_empty()
+    {
+        return why.clone();
     }
     if d.out_of_date {
         return tr("ui.issue15776_attention.changed");

@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::doc::point_cloud::{COORDINATES, ColorBy, Filter, Keep, MAX_FILTERS, Names, PLAIN, PointCloud, UNITS, byte, label_color};
 use solidcraft_engine::view::POINT_CLOUDS_FOLDER;
 
-use super::{Actions, Row, draw_row, is_open, panel_pos, rows_start_open, toggle, toggle_folder};
+use super::{Actions, Row, Rows, Spec, is_open, node_row, rows_start_open, toggle, toggle_folder};
 use crate::SolveApp;
 use crate::context_menu::Target;
 use crate::ui_kit;
@@ -205,7 +205,7 @@ fn legend(ui: &mut egui::Ui, c: &PointCloud, names: &Names) -> Option<i32> {
     clicked
 }
 
-pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
+pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &mut Actions) {
     let clouds: Vec<(u64, String, bool)> = app.session.doc.point_clouds.iter().map(|c| (c.id, c.name.clone(), c.visible)).collect();
     if clouds.is_empty() {
         return;
@@ -216,10 +216,10 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
     let open = is_open(app, key, start_open);
     // The folder's eye is its own: each cloud keeps its eye while the folder hides them all.
     let shown = !app.session.folder_hidden(POINT_CLOUDS_FOLDER);
-    let r = draw_row(
-        ui,
-        ui.scope_id().with(key),
-        &Row { depth, fold: Some(open), eye: Some(shown), icon: "folder", label: "Point Clouds", dim: !shown, ..Default::default() },
+    let r = node_row(
+        rows,
+        Spec { key, ..Default::default() },
+        Row { depth, fold: Some(open), eye: Some(shown), icon: "folder", label: "Point Clouds", dim: !shown, ..Default::default() },
     );
     if r.fold || r.clicked {
         toggle(app, key, start_open);
@@ -231,10 +231,11 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
         return;
     }
     for (id, name, visible) in clouds {
-        let r = draw_row(
-            ui,
-            ui.scope_id().with(("point_cloud", id)),
-            &Row { depth: depth + 1, eye: Some(visible), icon: "point", label: &name, name: true, dim: !visible || !shown, ..Default::default() },
+        let cloud_key = format!("point_cloud:{id}");
+        let r = node_row(
+            rows,
+            Spec { key: &cloud_key, ..Default::default() },
+            Row { depth: depth + 1, eye: Some(visible), icon: "point", label: &name, name: true, dim: !visible || !shown, ..Default::default() },
         );
         if r.eye {
             let _ = app.run("pointcloud.edit", json!({ "cloud": id, "visible": !visible }));
@@ -296,7 +297,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         _ => Paint::One,
     };
     let changes_of = c.colored_property().filter(|n| c.complex.integer(n)).map(str::to_string);
-    let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx).unwrap_or_else(|| (egui::Align2::LEFT_TOP, panel_pos(app)));
+    let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx);
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_point_cloud_panel"), "point", &title)
         .placed(pivot, at)
         .fields()

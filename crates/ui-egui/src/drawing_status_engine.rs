@@ -15,10 +15,12 @@ pub fn refresh(session: &mut Session, controller: &mut DrawingStatusController) 
     // delayed inspection results, but this path needs no unreachable error.
     controller.accept_status(generation, status);
     let request = controller.pending_inspections();
+    let mut results = std::collections::BTreeMap::new();
     for dimension in request.inspect_ids {
         let result = session.execute("drawing.dimension.inspect", &json!({"dimension": dimension})).map_err(|error| error.to_string());
-        controller.accept_inspection(request.generation, &dimension, result);
+        results.insert(dimension, result);
     }
+    controller.accept_inspections(request.generation, results);
     Ok(())
 }
 
