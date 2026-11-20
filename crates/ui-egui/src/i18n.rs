@@ -671,6 +671,7 @@ mod tests {
             curves: vec![curve.into()],
             points: Vec::new(),
             name: "F2:side:l1".into(),
+            from: Vec::new(),
         };
         let lost_error = |n: usize| {
             let links = [("j1", "Tray", "l1"), ("j2", "Cover", "l2"), ("j3", "Tray", "l3"), ("j4", "Tray", "l4")];

@@ -250,6 +250,7 @@ fn a_lost_projection_is_labelled_by_its_kind_and_its_curves_or_points() {
         curves: curves.iter().map(|c| c.to_string()).collect(),
         points: points.iter().map(|p| p.to_string()).collect(),
         name: "shared:top".into(),
+        from: Vec::new(),
     };
     assert_eq!(lost(&["l1", "l2", "l3", "l4", "a1", "a2"], &["p1"]).label(), "projected face of Source (curves l1, l2, l3, l4, …)");
     assert_eq!(lost(&["l1", "l2", "l3", "l4"], &[]).label(), "projected face of Source (curves l1, l2, l3, l4)");
@@ -278,6 +279,48 @@ fn a_lost_projection_is_labelled_by_its_kind_and_its_curves_or_points() {
         let text = error.in_feature("Outline").to_string();
         assert_eq!(crate::lost_projection_parts(&text).map(|t| (t.feature, t.count)), Some(("Outline", 1)), "{text}");
     }
+}
+
+/// A lost projection names the features that made its face, edge or vertex, in timeline order and
+/// each once, so the user knows which edit to look at (#5048); a feature no longer in the design
+/// is left out, and the message still reads back.
+#[test]
+fn a_lost_projection_names_the_features_that_made_it() {
+    let lost = |curves: &[&str], points: &[&str], from: &[&str]| crate::LostProjection {
+        link: "j1".into(),
+        what: "projected vertex of Body1".into(),
+        curves: curves.iter().map(|c| c.to_string()).collect(),
+        points: points.iter().map(|p| p.to_string()).collect(),
+        name: String::new(),
+        from: from.iter().map(|f| f.to_string()).collect(),
+    };
+    let made = ["Extrude5", "Mirror2", "Revolve2"];
+    assert_eq!(lost(&[], &["p1"], &made).label(), "projected vertex of Body1 (point p1; made by Extrude5, Mirror2, Revolve2)");
+    assert_eq!(lost(&["l1", "l2"], &[], &made[..1]).label(), "projected vertex of Body1 (curves l1, l2; made by Extrude5)");
+    assert_eq!(lost(&[], &[], &made[..1]).label(), "projected vertex of Body1 (made by Extrude5)");
+
+    let mut doc = Document::default();
+    let ids: Vec<u64> = made
+        .iter()
+        .map(|name| doc.add_feature(crate::FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::default() }, Some(name)).unwrap())
+        .collect();
+    let [a, b, c] = ids[..] else { panic!("{ids:?}") };
+    let mut initial = ModelState::default();
+    initial.bodies.push(named_box("Source", 20., 10.));
+    let plane = Plane::XY.offset(20.);
+    let source = LinkSource::Face { body: "Source".into(), at: Vec3::new(1., 1., 10.) };
+    let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &initial, &plane, LinkKind::Project, &source).unwrap();
+    let mut sketch = Sketch::default();
+    sketch.add_link(LinkKind::Project, source, &resolved.geom).unwrap();
+    // Text order b, c, a, a again and a feature that is gone: timeline order, each once.
+    sketch.links[0].face_name = Some(format!("F{b}:blend(F{c}:side:l1|F{a}:top)@F{a}.2#[F999:top]"));
+    let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &ModelState::default(), &plane, &mut sketch).unwrap_err();
+    let crate::DocError::LostProjections { links, .. } = &error else { panic!("{error}") };
+    assert_eq!(links[0].from, made);
+    let text = error.in_feature("Outline").to_string();
+    let listed = "projected face of Source (curves l1, l2, l3, l4; made by Extrude5, Mirror2, Revolve2)";
+    assert_eq!(text, format!("Outline: {listed} is lost; delete the projection or project it again"));
+    assert_eq!(crate::lost_projection_parts(&text), Some(crate::LostProjectionsText { feature: "Outline", count: 1, listed, more: 0 }));
 }
 
 #[test]

@@ -1380,7 +1380,7 @@ fn refresh_links_in(
                 }
             });
             let Some((index, p)) = found else {
-                lost_by_name.push(lose_named(sk, l, name, lost_names, &mut warn));
+                lost_by_name.push(lose_named(doc, sk, l, name, lost_names, &mut warn));
                 continue;
             };
             *at = p;
@@ -1391,7 +1391,7 @@ fn refresh_links_in(
         let mut named_edge = None;
         if let (Some(name), LinkSource::Edge { body, at }) = (&l.edge_name, &source) {
             let Some((body, hit)) = locate_named_edge(st, l.kind, body, name, *at) else {
-                lost_by_name.push(lose_named(sk, l, name, lost_names, &mut warn));
+                lost_by_name.push(lose_named(doc, sk, l, name, lost_names, &mut warn));
                 continue;
             };
             warn.extend(hit.note(name).map(|note| format!("projected {note}")));
@@ -1402,7 +1402,7 @@ fn refresh_links_in(
         let mut named_vertex = None;
         if let (Some(name), LinkSource::Vertex { body, at }) = (&l.vertex_name, &source) {
             let Some((body, hit)) = locate_named_vertex(st, l.kind, body, name, *at) else {
-                lost_by_name.push(lose_named(sk, l, name, lost_names, &mut warn));
+                lost_by_name.push(lose_named(doc, sk, l, name, lost_names, &mut warn));
                 continue;
             };
             warn.extend(hit.note(name).map(|note| format!("projected {note}")));
@@ -1501,7 +1501,7 @@ fn refresh_links_in(
 
 /// A link whose face or edge `name` finds nothing, keeping its geometry. The sketch fails naming
 /// every such link; or, built to be shown, the link is marked lost and gets a warning.
-fn lose_named(sk: &mut Sketch, l: &Link, name: &str, lost_names: LostNames, warn: &mut Vec<String>) -> crate::LostProjection {
+fn lose_named(doc: &Document, sk: &mut Sketch, l: &Link, name: &str, lost_names: LostNames, warn: &mut Vec<String>) -> crate::LostProjection {
     let what = match l.kind {
         LinkKind::Intersect => format!("intersected {}", l.source.describe()),
         LinkKind::Include => format!("included {}", l.source.describe()),
@@ -1513,12 +1513,23 @@ fn lose_named(sk: &mut Sketch, l: &Link, name: &str, lost_names: LostNames, warn
         curves: sk.link_curves(&l.id).into_iter().filter_map(|i| sk.curves.get(i)).map(|c| c.id.clone()).collect(),
         points: sk.link_points(&l.id).into_iter().filter_map(|i| sk.points.get(i)).map(|p| p.id.clone()).collect(),
         name: name.to_string(),
+        from: features_named_in(doc, name),
     };
     if lost_names == LostNames::Mark {
         sk.set_link_lost(&l.id, true);
         warn.push(lost.warning());
     }
     lost
+}
+
+/// The names of the design's features that a face, edge or vertex name `name` refers to, each
+/// once, in timeline order. Nothing for a name that does not read, or that names no feature
+/// (`Body1:face:3`); a feature no longer in the design is left out.
+fn features_named_in(doc: &Document, name: &str) -> Vec<String> {
+    use crate::persistent_name::EdgeName;
+    let Ok(read) = EdgeName::parse(name) else { return Vec::new() };
+    let ids: std::collections::BTreeSet<u64> = read.faces.iter().flat_map(|f| f.features()).map(|f| f.0).collect();
+    doc.features.iter().filter(|f| ids.contains(&f.id)).map(|f| f.name.clone()).collect()
 }
 
 // ---------------------------------------------------------------------------------------------
