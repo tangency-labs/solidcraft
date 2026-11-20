@@ -212,6 +212,26 @@ themselves; to show words instead, list the options as `oneOf`, each `{"const": 
 ]}
 ```
 
+### Font fields
+
+Mark a string property with `"x-solidcraft-font": true` to offer installed font families in the
+entry dialog:
+
+```json
+"font": {"type": "string", "title": "Font", "x-solidcraft-font": true,
+         "default": "Liberation Sans"}
+```
+
+Open the dropdown and type part of a name to filter it, ignoring case. Up/Down and Enter, or a
+click, choose a match. The plugin receives the full family name. The list includes the built-in
+Liberation Sans and usable installed families discovered by sketch text, cached after a background
+scan. Plugins need no folder grant to offer or use installed family names.
+
+The annotation must be `true` on a string property. It is a dialog hint: over MCP and scripts the
+value is still an ordinary string, and input checking accepts unknown names. The operation that
+uses the font reports an unknown font as usual. Other declared string constraints still apply.
+Use an ordinary `enum` or `oneOf` dropdown for a fixed list of names.
+
 ### Selection fields
 
 A field can take geometry picked in the viewport, with the same pick control as Extrude's

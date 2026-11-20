@@ -459,6 +459,8 @@ pub struct SearchOption<'a> {
 }
 
 /// Searchable dropdown with an optional custom-value action and loading message.
+/// Focuses the search box on opening. Up/Down highlight a match; Enter chooses it (or the
+/// current family when unfiltered, else the first match before an arrow is used). Esc closes only the popup.
 /// Returns a chosen value; callers keep domain-specific validation and discovery.
 /// Tokens: control_height, space_24, font_label and scope control tokens.
 pub fn searchable_dropdown(
@@ -501,13 +503,42 @@ fn searchable_dropdown_with(
     } else {
         combo.icon(dropdown_arrow)
     };
+    let state = ui.make_persistent_id(egui::IdSalt::new(id)).with("search_keyboard");
     let popup = super::container::show_combo(ui, ui.make_persistent_id(egui::IdSalt::new(id)), combo, |ui| {
+        // The popup keeps focus in its editor while arrows move the highlighted result.
+        // Consume Enter before TextEdit can give it to an enclosing dialog's primary action.
+        let search_id = state.with("editor");
+        let focused = ui.memory(|memory| memory.has_focus(search_id));
+        let (up, down, enter, escape) = if focused {
+            ui.input_mut(|input| {
+                (
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+                )
+            })
+        } else {
+            (false, false, false, false)
+        };
+        if escape {
+            ui.close();
+        }
         let search = ui.add(
             text_input(egui::TextEdit::singleline(filter))
-                .id_salt(format!("{id}_search"))
+                .id(search_id)
+                .char_limit(1024)
                 .hint_text(solidcraft_ui_text::tr_label("Search"))
                 .desired_width(f32::INFINITY),
         );
+        if !ui.data(|data| data.get_temp::<bool>(state.with("focused"))).unwrap_or(false) {
+            if search.has_focus() {
+                ui.data_mut(|data| data.insert_temp(state.with("focused"), true));
+            } else {
+                search.request_focus();
+                ui.ctx().request_repaint();
+            }
+        }
         // Preferences types into its own search only while no field has the keyboard.
         if search.has_focus() {
             super::settings_search::note_key_sink(ui.ctx());
@@ -516,21 +547,42 @@ fn searchable_dropdown_with(
         if let Some(custom) = custom {
             let response = ui.selectable_label(false, custom);
             solidcraft_ui_registry::publish_handle(&format!("dialog:{row} file"), response.rect.center());
-            if response.clicked() {
+            if response.clicked() || enter {
                 chosen = Some(filter.trim().to_owned());
                 ui.close();
             }
             return;
         }
         let query = filter.to_lowercase();
+        let visible: Vec<_> = options.iter().filter(|o| o.label.to_lowercase().contains(&query)).collect();
+        let cursor_id = state.with("cursor");
+        let initial = if query.is_empty() { visible.iter().position(|option| option.label == current) } else { None };
+        let mut cursor = ui.data(|data| data.get_temp::<Option<usize>>(cursor_id)).unwrap_or(initial);
+        if search.changed() || cursor.is_some_and(|index| index >= visible.len()) {
+            cursor = initial;
+        }
+        if down && !visible.is_empty() {
+            cursor = Some(cursor.map_or(0, |index| (index + 1).min(visible.len().saturating_sub(1))));
+        }
+        if up && !visible.is_empty() {
+            cursor = Some(cursor.map_or(visible.len().saturating_sub(1), |index| index.saturating_sub(1)));
+        }
+        if enter && let Some(option) = visible.get(cursor.unwrap_or(0)) {
+            chosen = Some(option.value.to_owned());
+            ui.close();
+        }
+        ui.data_mut(|data| data.insert_temp(cursor_id, cursor));
         egui::ScrollArea::vertical()
             .id_salt(format!("{id}_list"))
             .max_height(Tokens::get().space_24 * 10.0)
             .min_scrolled_height(Tokens::get().space_24 * 10.0)
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for option in options.iter().filter(|o| o.label.to_lowercase().contains(&query)) {
-                    let response = ui.selectable_label(current == option.label, option.label);
+                for (index, option) in visible.iter().enumerate() {
+                    let response = ui.selectable_label(cursor.map_or(current == option.label, |cursor| cursor == index), option.label);
+                    if (up || down) && cursor == Some(index) {
+                        response.scroll_to_me(Some(egui::Align::Center));
+                    }
                     if let Some(handle) = option.handle {
                         solidcraft_ui_registry::publish_handle(handle, response.rect.center());
                     }
@@ -547,6 +599,12 @@ fn searchable_dropdown_with(
     let response = popup.response;
     if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         response.request_focus();
+    }
+    if !egui::ComboBox::is_open(ui.ctx(), response.id) {
+        ui.data_mut(|data| {
+            data.remove::<bool>(state.with("focused"));
+            data.remove::<Option<usize>>(state.with("cursor"));
+        });
     }
     publish(ui, &response, egui::Role::ComboBox);
     chosen

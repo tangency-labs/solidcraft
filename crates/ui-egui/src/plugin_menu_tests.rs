@@ -41,6 +41,114 @@ fn each_schema_type_becomes_its_field_with_limits_labels_and_defaults() {
 }
 
 #[test]
+fn font_fields_send_full_names_and_keep_string_constraints() {
+    let schema = json!({"type":"object","required":["font"],"properties":{
+        "font":{"type":"string","title":"Font","x-solidcraft-font":true,"default":"Liberation Sans","minLength":3,"maxLength":100}
+    }});
+    let mut fields = form(&schema).expect("font field drawn");
+    assert!(fields[0].0.font);
+    assert_eq!(params(&fields), Ok(json!({"font":"Liberation Sans"})));
+    fields[0].1 = Input::Text("Unknown family".into());
+    assert_eq!(params(&fields), Ok(json!({"font":"Unknown family"})));
+    fields[0].1 = Input::Text("a".into());
+    assert!(params(&fields).is_err());
+    for property in [json!({"type":"number","x-solidcraft-font":true}), json!({"type":"string","x-solidcraft-font":false})] {
+        assert!(form(&json!({"properties":{"font":property}})).is_none());
+    }
+}
+
+/// Real plugin window meshes, rasterised using the same fixture as other dialog evidence.
+#[test]
+fn font_dialog_filters_picks_with_keyboard_and_click_and_renders() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let mut make = entry("make", "edit", json!([]));
+    make.input_schema = json!({"type":"object","required":["font"],"properties":{
+        "font":{"type":"string","title":"Font","x-solidcraft-font":true,"default":"Liberation Sans"}
+    }});
+    app.plugin_menu.listed = vec![listed("lettering", vec![make])];
+    app.plugin_menu.loaded = true;
+    open_entry(&mut app, 0, 0);
+    let ctx = crate::fonts::test_context();
+    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
+    let screen = std::cell::Cell::new(bounds);
+    let mut textures = Default::default();
+    let mut draw = |app: &mut SolveApp, events: Vec<egui::Event>, shot: Option<&str>| {
+        crate::scenario::clear_handles();
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen.get()), focused: true, events, ..Default::default() }, |ui| {
+            show(app, ui.ctx());
+        });
+        ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+        output.textures_delta.clear();
+        if let Some(name) = shot {
+            let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/plugin-font-field");
+            std::fs::create_dir_all(&dir).unwrap();
+            let image = ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+            assert_eq!(image.dimensions(), (1280, 720));
+            image.save(dir.join(name)).unwrap();
+        }
+    };
+    for _ in 0..4 {
+        draw(&mut app, vec![], None);
+    }
+    assert!(app.plugin_menu.dialog().unwrap().ready(&app).is_ok());
+    draw(&mut app, vec![], Some("closed.png"));
+    let click = |at, pressed| {
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+        ]
+    };
+    let at = crate::scenario::handle_at("plugin_dialog:field:font").unwrap();
+    for pressed in [true, false] {
+        draw(&mut app, click(at, pressed), None);
+    }
+    for _ in 0..3 {
+        draw(&mut app, vec![], None);
+    }
+    draw(&mut app, vec![egui::Event::Text("lIbErAtIoN".into())], None);
+    draw(&mut app, vec![], Some("filtered.png"));
+    assert!(crate::scenario::handle_at("plugin_dialog:font:font:Liberation Sans").is_some(), "partial, case-insensitive match");
+    let key = |key| vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }];
+    draw(&mut app, key(egui::Key::ArrowDown), None);
+    draw(&mut app, key(egui::Key::Enter), None);
+    draw(&mut app, vec![], None);
+    assert_eq!(app.plugin_menu.dialog().unwrap().ready(&app), Ok(json!({"font":"Liberation Sans"})));
+    assert_eq!(app.plugin_menu.dialogs.len(), 1, "Enter chooses the font without running or closing the dialog");
+    assert!(app.control_held.is_empty() && app.plugin_menu.dialog().unwrap().running.is_none());
+    app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap()[0].1 = Input::Text("Unknown family".into());
+    for pressed in [true, false] {
+        draw(&mut app, click(at, pressed), None);
+    }
+    for _ in 0..3 {
+        draw(&mut app, vec![], None);
+    }
+    let choice = crate::scenario::handle_at("plugin_dialog:font:font:Liberation Sans").unwrap();
+    for pressed in [true, false] {
+        draw(&mut app, click(choice, pressed), None);
+    }
+    assert_eq!(app.plugin_menu.dialog().unwrap().ready(&app), Ok(json!({"font":"Liberation Sans"})));
+    draw(&mut app, vec![], None);
+    for pressed in [true, false] {
+        draw(&mut app, click(at, pressed), None);
+    }
+    for _ in 0..3 {
+        draw(&mut app, vec![], None);
+    }
+    draw(&mut app, key(egui::Key::Escape), None);
+    draw(&mut app, vec![], None);
+    assert_eq!(app.plugin_menu.dialogs.len(), 1, "Escape closes the font list only");
+    draw(&mut app, key(egui::Key::Escape), None);
+    assert!(app.plugin_menu.dialogs.is_empty(), "the next Escape cancels the dialog");
+    let small = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
+    screen.set(small);
+    open_entry(&mut app, 0, 0);
+    for _ in 0..4 {
+        draw(&mut app, vec![], None);
+    }
+    assert!(small.contains_rect(crate::scenario::rect_of("dialog:control:Font *").unwrap()), "the font control fits a small window");
+}
+
+#[test]
 fn choice_options_show_their_titles_and_send_their_values() {
     let schema = json!({"type":"object","properties":{"up":{"type":"string","title":"Up axis","default":"as_is","oneOf":[
         {"const":"as_is","title":"As in the file"},{"const":"stand_up","title":"Stand up (Y-up to Z-up)","description":"Turns the design"},{"const":"raw"}

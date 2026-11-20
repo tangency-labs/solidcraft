@@ -9,6 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+craft-plugin = { workspace = true }
 solidcraft-viewport-egui = { workspace = true }
 solidcraft-viewport-gpu = { workspace = true }
 solidcraft-viewport = { workspace = true }

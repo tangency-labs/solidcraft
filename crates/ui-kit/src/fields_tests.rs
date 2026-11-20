@@ -325,6 +325,97 @@ fn searchable_dropdown_filters_selects_and_accepts_custom_values() {
 }
 
 #[test]
+fn searchable_dropdown_keyboard_picks_the_filtered_full_value() {
+    let ctx = crate::test_support::context();
+    let mut filter = String::new();
+    let mut picked = None;
+    let options = [
+        SearchOption { value: "Celtic Gaelige", label: "Celtic Gaelige", handle: Some("font:gaelige") },
+        SearchOption { value: "CelticHand", label: "CelticHand", handle: Some("font:hand") },
+        SearchOption { value: "Liberation Sans", label: "Liberation Sans", handle: Some("font:liberation") },
+    ];
+    let mut draw = |ui: &mut Ui| {
+        row(ui, "Font", |ui| {
+            if let Some(value) = searchable_dropdown(ui, "keyboard_fonts", "", &mut filter, &options, None, None) {
+                picked = Some(value);
+            }
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let at = registry::handle_at("dialog:Font").unwrap();
+    frame(&ctx, pointer(at, true), &mut draw);
+    frame(&ctx, pointer(at, false), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    frame(&ctx, vec![egui::Event::Text("cElTiC".into())], &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(registry::handle_at("font:liberation").is_none());
+    for key in [egui::Key::ArrowDown, egui::Key::ArrowDown, egui::Key::ArrowUp, egui::Key::ArrowDown, egui::Key::Enter] {
+        frame(&ctx, vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }], &mut draw);
+        frame(&ctx, vec![], &mut draw);
+    }
+    assert_eq!(picked.as_deref(), Some("CelticHand"));
+}
+
+#[test]
+fn searchable_dropdown_keyboard_starts_at_the_current_family() {
+    let ctx = crate::test_support::context();
+    let mut filter = String::new();
+    let picked = std::cell::RefCell::new(Vec::new());
+    let options = [SearchOption { value: "one", label: "One", handle: None }, SearchOption { value: "two", label: "Two", handle: None }];
+    let mut draw = |ui: &mut Ui| {
+        row(ui, "Font", |ui| {
+            if let Some(value) = searchable_dropdown(ui, "current_font", "Two", &mut filter, &options, None, None) {
+                picked.borrow_mut().push(value);
+            }
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    for keys in [vec![egui::Key::Enter], vec![egui::Key::ArrowUp, egui::Key::Enter]] {
+        let at = registry::handle_at("dialog:Font").unwrap();
+        frame(&ctx, pointer(at, true), &mut draw);
+        frame(&ctx, pointer(at, false), &mut draw);
+        frame(&ctx, vec![], &mut draw);
+        for pressed in keys {
+            frame(&ctx, key(pressed), &mut draw);
+            frame(&ctx, vec![], &mut draw);
+        }
+    }
+    assert_eq!(*picked.borrow(), ["two", "one"], "Enter picks the highlighted current family; Up moves from that family");
+}
+
+#[test]
+fn searchable_dropdown_empty_match_keeps_enter_and_escape_in_the_popup() {
+    let ctx = crate::test_support::context();
+    let mut filter = String::new();
+    let mut picked = None;
+    let options = [SearchOption { value: "Liberation Sans", label: "Liberation Sans", handle: None }];
+    let escaped = std::cell::Cell::new(false);
+    let mut draw = |ui: &mut Ui| {
+        row(ui, "Font", |ui| {
+            if let Some(value) = searchable_dropdown(ui, "empty_fonts", "", &mut filter, &options, None, None) {
+                picked = Some(value);
+            }
+        });
+        escaped.set(ui.input(|input| input.key_pressed(egui::Key::Escape)));
+    };
+    frame(&ctx, vec![], &mut draw);
+    let at = registry::handle_at("dialog:Font").unwrap();
+    frame(&ctx, pointer(at, true), &mut draw);
+    frame(&ctx, pointer(at, false), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    frame(&ctx, vec![egui::Event::Text("no such family".into())], &mut draw);
+    frame(&ctx, key(egui::Key::ArrowDown), &mut draw);
+    frame(&ctx, key(egui::Key::Enter), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(registry::handle_at("dialog:Font search").is_some());
+    frame(&ctx, key(egui::Key::Escape), &mut draw);
+    assert!(!escaped.get(), "Esc must not also cancel the containing dialog");
+    frame(&ctx, vec![], &mut draw);
+    assert!(registry::handle_at("dialog:Font search").is_none());
+    assert!(picked.is_none());
+}
+
+#[test]
 fn search_picker_filters_focuses_picks_and_takes_custom_values() {
     let ctx = crate::test_support::context();
     let picked = std::cell::RefCell::new(Vec::new());

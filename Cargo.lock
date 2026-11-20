@@ -6406,6 +6406,7 @@ dependencies = [
  "thiserror 2.0.21",
  "ttf-parser",
  "unicode-bidi",
+ "winreg",
 ]
 
 [[package]]
@@ -6448,6 +6449,7 @@ name = "solidcraft-ui-egui"
 version = "0.45.0"
 dependencies = [
  "arboard",
+ "craft-plugin",
  "egui",
  "egui-wgpu",
  "image",

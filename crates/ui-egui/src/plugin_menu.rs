@@ -82,6 +82,8 @@ pub(crate) struct Field {
     pub(crate) tip: Option<String>,
     pub(crate) required: bool,
     pub(crate) kind: Kind,
+    /// Installed-family picker for an otherwise ordinary string.
+    pub(crate) font: bool,
     /// A choice's pictures, one package image path (`x-solidcraft-icon`) per option in order;
     /// empty unless every option names one.
     pub(crate) images: Vec<String>,
@@ -195,6 +197,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
     let p = property.as_object()?;
     // Only keywords the dialog draws or checks before Run turns on; any other constraint
     // (`pattern`, `const`, `items`, `oneOf`, ...) would let an invalid value through.
+    let font = craft_plugin::font_field(property).ok()?;
     let kind = p.get("type")?.as_str()?;
     if kind == "array" {
         return selection_field(key, p, required);
@@ -206,7 +209,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         ("boolean", false) => &[],
         // A list of values, or of `{"const": value, "title": shown}` options; not both.
         ("string", true) if p.contains_key("enum") != p.contains_key("oneOf") => &["enum", "oneOf"],
-        ("string", false) => &["minLength", "maxLength", "format"],
+        ("string", false) => &["minLength", "maxLength", "format", craft_plugin::FONT_KEY],
         _ => return None,
     };
     const ANNOTATIONS: &[&str] = &["type", "title", "description", "default", "unit", "x-unit", "units", "examples", "$comment", "deprecated"];
@@ -285,7 +288,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         _ => return None,
     };
     let label = text("title").unwrap_or_else(|| key.to_owned());
-    Some((Field { key: key.to_owned(), label, tip: text("description"), required, kind, images }, input))
+    Some((Field { key: key.to_owned(), label, tip: text("description"), required, kind, font, images }, input))
 }
 
 /// An array property as a selection field: one annotated with [`SELECTION_KEY`]
@@ -329,7 +332,7 @@ fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<
     let (title, tip) = (text("title")?, text("description")?);
     let kind = Kind::Selection { accept, min: min.unwrap_or(0), max, names };
     Some((
-        Field { key: key.to_owned(), label: title.unwrap_or_else(|| key.to_owned()), tip, required, kind, images: Vec::new() },
+        Field { key: key.to_owned(), label: title.unwrap_or_else(|| key.to_owned()), tip, required, kind, font: false, images: Vec::new() },
         Input::Selection(Vec::new()),
     ))
 }
@@ -1337,6 +1340,7 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, images: &std::collections::BTree
             *chosen = if lead { index.checked_sub(1) } else { Some(index) };
             response
         }
+        (Kind::Text { .. }, Input::Text(text)) if field.font => ui_kit::row(ui, &label, |ui| font_field_row(ui, field, text)),
         (Kind::Text { .. }, Input::Text(text)) => {
             let hint = if field.required { app.tr("ui.plugin_dialog_required_hint") } else { "" };
             ui_kit::row(ui, &label, |ui| ui_kit::text_field_reserving(ui, text, hint, 0.0).1)
@@ -1347,6 +1351,41 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, images: &std::collections::BTree
     if let Some(tip) = &field.tip {
         response.backing_on_hover_text(tip);
     }
+}
+
+/// Same background discovery and process cache as sketch text. The built-in name is a real
+/// plugin value, even on the web or before the installed list arrives.
+fn font_field_row(ui: &mut egui::Ui, field: &Field, text: &mut String) -> egui::Response {
+    let families = crate::sketch_text::families(ui.ctx());
+    let builtin = solidcraft_engine::sketch::DEFAULT_FONT_FAMILY;
+    let handles: Vec<String> = std::iter::once(builtin)
+        .chain(families.iter().flat_map(|f| f.iter().map(String::as_str)))
+        .map(|name| format!("plugin_dialog:font:{}:{name}", field.key))
+        .collect();
+    let options: Vec<_> = std::iter::once(builtin)
+        .chain(families.iter().flat_map(|f| f.iter().map(String::as_str)))
+        .zip(&handles)
+        .map(|(name, handle)| ui_kit::SearchOption { value: name, label: name, handle: Some(handle) })
+        .collect();
+    let id = format!("plugin_font_{}", field.key);
+    let state = ui.make_persistent_id(egui::IdSalt::new(&id)).with("filter");
+    let mut filter = ui.data(|data| data.get_temp::<String>(state)).unwrap_or_default();
+    let current = if text.is_empty() { solidcraft_ui_text::tr("ui.plugin_dialog_choose") } else { text.as_str() };
+    if let Some(chosen) = ui_kit::searchable_dropdown(
+        ui,
+        &id,
+        current,
+        &mut filter,
+        &options,
+        None,
+        families.is_none().then(|| solidcraft_ui_text::tr("sketch_text.loading_fonts")),
+    ) {
+        *text = chosen;
+        filter.clear();
+    }
+    ui.data_mut(|data| data.insert_temp(state, filter));
+    // The kit publishes the whole control, including the dropdown arrow.
+    ui.response()
 }
 
 #[cfg(test)]
