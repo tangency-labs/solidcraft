@@ -1992,7 +1992,11 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                             ui.set_width(row_w);
                             // Up and Down move the keyboard focus through the enabled rows (from none
                             // focused: the first or the last), instead of egui's own spatial move.
-                            let (down, up) = ui.input(|i| (i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::ArrowUp)));
+                            let (down, up) = if app.viewport.context_menu.is_some() {
+                                (false, false)
+                            } else {
+                                ui.input(|i| (i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::ArrowUp)))
+                            };
                             if down || up {
                                 let enabled: Vec<&str> = cmds.iter().filter(|c| can_start(app, c)).map(|c| c.id).collect();
                                 let focused = ui.ctx().memory(|m| m.focused());
@@ -4519,6 +4523,8 @@ mod dropdown_tests {
                 h.frames(4);
                 assert!(h.app.viewport.context_menu.is_some(), "grid {grid}: the right-click opens the command's menu");
                 assert!(crate::scenario::rect_of("toolbar_dropdown").is_some(), "grid {grid}: drop-down stays open while context menu is open");
+                h.step(&json!({"move":[5, 5]})).unwrap();
+                h.frames(2);
                 assert!(crate::scenario::handle_at("dropdown_hot:solid.box").is_some(), "grid {grid}: right-clicked command stays highlighted");
                 h.step(&json!({"widget": item})).unwrap_or_else(|e| panic!("grid {grid}: {item}: {e}"));
                 h.frames(4);
