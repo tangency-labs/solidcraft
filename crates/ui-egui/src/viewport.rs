@@ -10339,7 +10339,7 @@ pub(crate) fn show_host_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Re
     }
     refresh_layout(app, ui.ctx());
     if crate::navigation_bar_view::canvas_caps(app).orbit {
-        axis_view(app, ui, rect);
+        axis_view(app, ui, rect, true);
         if !crate::render_workspace::active(app) {
             crate::view_angles::show(app, ui, rect);
         }
@@ -10351,7 +10351,7 @@ pub(crate) fn show_host_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Re
 pub(crate) fn show_card_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     refresh_layout(app, ui.ctx());
     if crate::navigation_bar_view::canvas_caps(app).orbit {
-        axis_view(app, ui, rect);
+        axis_view(app, ui, rect, false);
     }
     crate::navigation_bar_view::show(app, ui, rect);
 }
@@ -10480,7 +10480,7 @@ pub(crate) fn view_gizmo_at(app: &SolveApp, p: Pos2) -> bool {
     })
 }
 
-pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, focused_view: bool) {
     if !compass_enabled(app) {
         return;
     }
@@ -10488,11 +10488,11 @@ pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let shown = crate::view_gizmo::shown(app);
     match shown.style {
         crate::prefs::NavigatorStyle::Custom if shown.shape.is_some() => body_gizmo::show(app, ui, rect, shown),
-        crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => signed_axis_view(app, ui, rect),
+        crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => signed_axis_view(app, ui, rect, focused_view),
     }
 }
 
-fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, focused_view: bool) {
     if !axis_rect(app, rect).is_positive() || !axis_rect(app, rect).is_finite() {
         app.viewport.axis_drag = None;
         crate::scenario::publish_count("axis_view_highlights", 0.0);
@@ -10508,9 +10508,9 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         orbiting,
         snap_hint: !app.preferences.free_orbit,
         home_label: solidcraft_ui_text::tr_label("Home view").to_owned(),
-        turn_around_label: app.preferences.navigator_turn_around.then(|| app.tr("ui.navigator_turn_around").to_owned()),
+        turn_around_label: (focused_view && app.preferences.navigator_turn_around).then(|| app.tr("ui.navigator_turn_around").to_owned()),
     };
-    // The compass returns a tip or Home; its drag came from `axis_view_orbit` above.
+    // The compass returns a view action; its drag came from `axis_view_orbit` above.
     match crate::view_compass::show(ui, &compass) {
         Some(crate::view_compass::ViewAction::Snap { direction, .. }) => {
             let d = Vec3::from(direction);

@@ -925,6 +925,43 @@ fn turn_around_clicks_compose_with_the_animation_target_and_keep_fitting_and_loc
 }
 
 #[test]
+fn turn_around_is_only_offered_to_the_focused_tiled_view() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width":1600,"height":1100}));
+    h.call("ui.prefs", json!({"navigator_style":"axes","navigator_turn_around":true,"navigator_fit":false,"look_at_anim":true}));
+    let first = h.app.docs.views.active().id;
+    assert_eq!(crate::documents::view_layout(&mut h.app, solidcraft_views::Preset::SideBySide), 2);
+    let other = h.app.docs.views.tiles().unwrap().views().into_iter().find(|id| *id != first).unwrap();
+    for focused in [first, other] {
+        if h.app.docs.views.active().id != focused {
+            assert!(crate::documents::focus_view(&mut h.app, focused));
+        }
+        h.frames(2);
+        assert_eq!(h.app.viewport.cards.len(), 1);
+        assert_eq!(crate::scenario::handles("axis_view:home").len(), 2, "both views draw their compass");
+        let chips = crate::scenario::handles("axis_view:turn_around");
+        assert_eq!(chips.len(), 1, "only the focused view offers the animated turn");
+        let at = chips[0].1;
+        assert!(h.app.viewport.rect.unwrap().contains(at));
+        assert!(h.app.viewport.cards.iter().all(|(_, rect)| !rect.contains(at)));
+        let unfocused = if focused == first { other } else { first };
+        let untouched = h.app.docs.views.get(unfocused).unwrap().spec.unwrap().camera;
+        let before = h.app.cam;
+        for pressed in [true, false] {
+            h.frame_with(crate::test_support::pointer(at, pressed));
+        }
+        let animation = h.app.cam_anim.expect("the focused view retains its turn animation");
+        assert!(animation.is_screen_up_turn());
+        assert!(animation.to.back().dist(-before.back()) < 1e-9);
+        h.settle();
+        assert!(h.app.cam.back().dist(-before.back()) < 1e-9);
+        assert!(h.app.cam.basis().1.dist(before.basis().1) < 1e-9);
+        assert_eq!(h.app.docs.views.get(unfocused).unwrap().spec.unwrap().camera, untouched);
+    }
+}
+
+#[test]
 fn immediate_standard_view_cancels_fit_before_the_measured_frame() {
     for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
