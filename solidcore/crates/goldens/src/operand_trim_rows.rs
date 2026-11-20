@@ -1009,15 +1009,23 @@ mod local_operation {
     /// module docs say; none farther. The rows were recorded before the kept-trim cover
     /// (#19295), which can raise these reads' edge tolerances. Each case runs with any
     /// such raise put back, so the certificate is of the copy's moves alone (the cover's
-    /// are proved by `tolsub`'s replay).
+    /// are proved by `tolsub`'s replay). They were recorded before the WR-493 retirement
+    /// too (found spheres keep the file NURB they tested), which moves `fc0000`'s
+    /// `record[539]` by one unit in the last place: each case also runs with the found
+    /// spheres' fitted NURB put back ([`crate::refit::with_fitted_spheres`]). (That move is
+    /// inside the goldens' comparator: the unit's committed lines are main's.)
     #[test]
     fn local_operation_rows_are_certified() {
+        use crate::refit::with_fitted_spheres;
+        use crate::tolsub::with_trim_cover_put_back;
         let (mut closer, mut equal) = (0, 0);
         for row in ROWS {
             let case = crate::case::regression_case(&Runner, row.case);
-            let out = crate::tolsub::with_trim_cover_put_back(|| Runner.run_rust(&case).unwrap());
-            let (_, mut bodies) =
-                crate::tolsub::with_trim_cover_put_back(|| result_breps(&case).unwrap());
+            let (out, _) = with_fitted_spheres(|| {
+                with_trim_cover_put_back(|| Runner.run_rust(&case).unwrap())
+            });
+            let ((_, mut bodies), _) =
+                with_fitted_spheres(|| with_trim_cover_put_back(|| result_breps(&case).unwrap()));
             let (_, b) = &mut bodies[0];
             for c in certify_row(row.case, &out, b, row.main, row.new, row.moved) {
                 match c {

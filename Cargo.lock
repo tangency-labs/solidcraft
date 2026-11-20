@@ -6170,6 +6170,7 @@ version = "0.45.0"
 dependencies = [
  "craft-plugin",
  "craft-plugin-wasm",
+ "flate2",
  "image",
  "log",
  "png",

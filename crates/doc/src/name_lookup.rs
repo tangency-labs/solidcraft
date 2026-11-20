@@ -665,7 +665,9 @@ fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3
 /// another extrude's footprint names the walls it joins differently, and can leave two faces of
 /// that stem). The candidates are the edges between faces answering to the name's two faces: each
 /// exactly (see [`exactly`]) or, for a face named with its qualifier, by its stem where that face
-/// too is named with a qualifier (another one: a face whole again is not it), at least one
+/// too is named with a qualifier (another one: a face whole again is not it) or where the name's
+/// qualifier lists only faces named by their index and the face borders such a face that is not
+/// verified (those tell no piece apart now, so the piece has no qualifier), at least one
 /// side of them by a qualifier that is not that face's own (a piece of the named face split since
 /// is not a renamed face: the edge split with it and the name asks again). Of those, the one edge
 /// whose exact curve the reference's point `near` lies on (within the pick reach, as
@@ -674,6 +676,20 @@ fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3
 fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3) -> Option<usize> {
     if b.body.is_mesh() || !near.is_finite() {
         return None;
+    }
+    // The faces that border a face named only by its index and not verified (a sphere's): such a
+    // neighbour tells no piece apart, so a piece only it bounds is named without a qualifier.
+    let mut beside_index = vec![false; faces.faces.len()];
+    let by_index = |g: usize| !faces.verified(g) && faces.faces.get(g).is_some_and(|n| crate::history_names::named_by_index(strip_piece(n)));
+    for fs in &m.edge_faces {
+        let [a, b] = fs.as_slice() else { continue };
+        for (p, q) in [(*a as usize, *b as usize), (*b as usize, *a as usize)] {
+            if by_index(q)
+                && let Some(slot) = beside_index.get_mut(p)
+            {
+                *slot = true;
+            }
+        }
     }
     // How face `f` answers to face name `x`: `Some(true)` by a qualifier that is not its own.
     let side = |f: usize, x: &str| -> Option<bool> {
@@ -684,7 +700,11 @@ fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: V
         }
         // By its stem only where the face is still named after its neighbours, others than the name's:
         // a face whole again is not one the name told apart by a face it never touches (#11731).
-        (level == Match::Stem && qualified(x) && faces.faces.get(f).is_some_and(|n| qualified(n))).then_some(true)
+        // A name told apart only by faces named by their index may name a piece that has no
+        // qualifier now, where the face still borders such an unverified face: those no longer
+        // tell pieces apart (#19455).
+        let unqualified_piece = || told_apart_by_index_only(x) && beside_index.get(f).copied().unwrap_or(false);
+        (level == Match::Stem && qualified(x) && faces.faces.get(f).is_some_and(|n| qualified(n) || unqualified_piece())).then_some(true)
     };
     let mut cands: Vec<usize> = Vec::new();
     for (i, fs) in m.edge_faces.iter().enumerate() {
@@ -719,6 +739,15 @@ fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: V
 /// Whether face name `x` names its face with the faces around it (`F2:top#[F4:side:l1]`).
 fn qualified(x: &str) -> bool {
     crate::piece_names::piece_parts(x).is_some_and(|(_, around)| !around.is_empty())
+}
+
+/// Whether face name `x` is told apart only by faces named by their index
+/// (`F5:side:l1#[F2:face:6,F3:face:7]`, a sphere's faces). Names saved before unverified faces
+/// named by their index stopped telling pieces apart hold them; the piece they named can be named
+/// without them now.
+fn told_apart_by_index_only(x: &str) -> bool {
+    crate::piece_names::piece_parts(x)
+        .is_some_and(|(_, around)| !around.is_empty() && around.iter().all(|a| crate::history_names::named_by_index(strip_piece(a))))
 }
 
 /// The point of face `face` of a mesh nearest `p`, and how far it is.

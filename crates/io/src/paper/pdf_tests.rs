@@ -1015,3 +1015,84 @@ fn a_page_lists_no_layer_for_a_kind_it_only_has_pictures_of() {
     assert!(objects[2].1.contains(&view) && objects[2].1.contains(&image), "{}", objects[2].1);
     assert!(objects[4].1.contains(&view) && !objects[4].1.contains(&image), "{}", objects[4].1);
 }
+
+// Text and pictures (#4890 P2): what a drawing's PDF needs beyond its lines.
+
+/// A text run is its glyph outlines, filled nonzero (`f`), as SVG fills them: one closed path for
+/// each of its loops. It is painted, so it has its kind's layer.
+#[test]
+fn text_is_its_outlines_filled_nonzero() {
+    use solidcraft_sketch::{TextStyle, paper_text};
+    let (runs, fonts) = paper_text("Ø12 ±0.1", None, "", p(20.0, 30.0), 3.5, 0.0, &TextStyle::default()).unwrap().unwrap();
+    let loops: usize = runs.iter().map(|r| r.outlines(&fonts[0]).count()).sum();
+    let count = runs.len();
+    let sheet = Scene {
+        fonts,
+        ..Scene::new(p(210.0, 297.0), vec![Group { object: 1, kind: ObjectKind::Note, items: runs.into_iter().map(Item::Text).collect() }])
+    };
+    let bytes = pdf(&sheet, &NONE);
+    let page = content(&bytes);
+    let ops = ops(&page);
+    assert!(loops > 0);
+    assert_eq!(ops.iter().filter(|(op, _)| op == "m").count(), loops, "{page}");
+    assert_eq!(ops.iter().filter(|(op, _)| op == "h").count(), loops, "{page}");
+    assert_eq!(ops.iter().filter(|(op, _)| op == "f").count(), count, "{page}");
+    assert!(!ops.iter().any(|(op, _)| op == "f*"), "nonzero, not even-odd: {page}");
+    assert!(text(&bytes).contains(ObjectKind::Note.layer()), "the note's layer");
+}
+
+/// Given pixels, a picture is an image XObject drawn into its rectangle on the lines' grid: its
+/// RGB deflated, its alpha a soft mask when not every pixel is opaque, an opacity below 1 as an
+/// ExtGState, and a clip cut with `W n`. The pixels read back are the ones given. 254 dpi: 10
+/// pixels a millimetre.
+#[test]
+fn pictures_are_embedded_when_their_pixels_are_given() {
+    use crate::paper::png::tests::Provider;
+    use solidcraft_geom::Aabb2;
+    use solidcraft_geom::paper::{Clip, Picture};
+    let picture = |source, min: Vec2, max: Vec2, opacity| Item::Picture(Picture { source, rect: Aabb2 { min, max }, opacity });
+    let sheet = Scene {
+        clips: vec![(2, Clip::Circle { center: p(110.0, 20.0), radius: 5.0 })],
+        ..Scene::new(
+            p(420.0, 297.0),
+            vec![
+                Group { object: 1, kind: ObjectKind::View, items: vec![picture(1, p(10.0, 10.0), p(30.0, 30.0), 1.0)] },
+                Group { object: 2, kind: ObjectKind::View, items: vec![picture(2, p(100.0, 10.0), p(120.0, 30.0), 0.5)] },
+            ],
+        )
+    };
+    let prepared = [sheet.prepare().unwrap()];
+    let provider = Provider::default();
+    let pages: [&dyn Pictures; 1] = [&provider];
+    let (bytes, _) = paper_pdf_pages_with(&prepared, &NONE, Some(PdfPictures { pages: &pages, dpi: 254.0 })).unwrap();
+    let file = text(&bytes);
+    let page = content(&bytes);
+    assert_eq!(page.matches(" Do").count(), 2, "{page}");
+    // The opaque red square: 20 mm a side at its corner; no mask.
+    assert!(page.contains("q\n20 0 0 20 10 10 cm\n/Im0 Do\nQ\n"), "{page}");
+    // The half-alpha blue one inside a circle, at half opacity.
+    assert!(page.contains("W n\n/GS1 gs\n"), "{page}");
+    let images: Vec<_> = objects(&bytes).into_iter().filter(|(_, t)| t.contains("/Subtype /Image")).collect();
+    assert_eq!(images.len(), 3, "two pictures and the second's soft mask");
+    assert_eq!(images.iter().filter(|(_, t)| t.contains("/SMask")).count(), 1, "only the second has an alpha");
+    assert!(file.contains("/ca 0.5"), "its opacity");
+    // Every stream, inflated as bytes.
+    let start = b">>\nstream\n";
+    let mut streams = Vec::new();
+    let mut from = 0;
+    while let Some(at) = bytes[from..].windows(start.len()).position(|w| w == start).map(|at| from + at + start.len()) {
+        let mut out = Vec::new();
+        flate2::read::ZlibDecoder::new(&bytes[at..]).read_to_end(&mut out).unwrap();
+        streams.push(out);
+        from = at;
+    }
+    let red = streams.iter().find(|s| s.len() == 200 * 200 * 3).unwrap();
+    assert!(red.chunks(3).all(|px| px == [255, 0, 0]), "the pixels read back");
+    // Without pixels they are passed over, and the page is as before.
+    let plain = paper_pdf_pages(&prepared, &NONE).unwrap().0;
+    assert!(!text(&plain).contains("/Subtype /Image"));
+    // A source for each page, at a resolution a picture may have.
+    let none: [&dyn Pictures; 0] = [];
+    assert!(paper_pdf_pages_with(&prepared, &NONE, Some(PdfPictures { pages: &none, dpi: 254.0 })).is_err());
+    assert!(paper_pdf_pages_with(&prepared, &NONE, Some(PdfPictures { pages: &pages, dpi: 5000.0 })).is_err());
+}

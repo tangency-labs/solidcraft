@@ -308,6 +308,7 @@ fn room_reason(r: NoRoomReason) -> Option<RoomReason> {
         NoRoomReason::OffsetCollapses => R::OffsetCollapses,
         NoRoomReason::CornersTakeWholeEdge => R::CornersTakeWholeEdge,
         NoRoomReason::OverflowKeepsNothing => R::OverflowKeepsNothing,
+        NoRoomReason::EndPassesOverEndFace => R::EndPassesOverEndFace,
         NoRoomReason::RoundIntoMaterial | NoRoomReason::RailRunsPastFaceIntoMaterial => {
             R::RunsIntoMaterial
         }
@@ -362,8 +363,14 @@ pub enum Refusal {
     },
     /// [`Error::NoRoom`]: larger than its faces allow, unsized.
     NoRoom,
-    /// [`Error::CornerUnsupported`]: a vertex no corner kind handles.
-    CornerUnsupported,
+    /// [`Error::CornerUnsupported`]: a vertex no corner kind handles, with the kernel's reason
+    /// and the vertex's point where its session notes them.
+    CornerUnsupported {
+        /// The kernel's reason.
+        why: Option<String>,
+        /// The vertex's point.
+        at: Option<[f64; 3]>,
+    },
 }
 
 impl From<Refusal> for Error {
@@ -394,7 +401,7 @@ impl From<Refusal> for Error {
                 builds,
             },
             Refusal::NoRoom => Error::NoRoom,
-            Refusal::CornerUnsupported => Error::CornerUnsupported,
+            Refusal::CornerUnsupported { why, at } => Error::CornerUnsupported { why, at },
         }
     }
 }
@@ -647,7 +654,21 @@ fn blend_failure_unsized(
     corner: bool,
 ) -> std::result::Result<Refusal, SolidError> {
     if corner || info.code == FilletErrorType::CornerUnsupported as i32 {
-        Ok(Refusal::CornerUnsupported)
+        // the reason and the point are the session's note of the vertex; a later step's note
+        // over it (`corner` alone) is not the vertex's
+        let noted_here = info.code == FilletErrorType::CornerUnsupported as i32;
+        Ok(Refusal::CornerUnsupported {
+            why: if noted_here {
+                noted(info).map(str::to_owned)
+            } else {
+                None
+            },
+            at: if noted_here {
+                info.location.map(|p| [p.x, p.y, p.z])
+            } else {
+                None
+            },
+        })
     } else if info.code != FilletErrorType::NoRoom as i32 {
         Err(e)
     } else {
