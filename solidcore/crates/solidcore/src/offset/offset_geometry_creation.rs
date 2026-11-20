@@ -8383,6 +8383,66 @@ mod tests {
         }
     }
 
+    /// When one of the three curves can lose only some copies of the joint knot, all three
+    /// lose exactly that many: a cubic that already had a simple knot at the cut loses 2
+    /// of its 3 copies, the rejoined cubic without one would lose all 3, and all three end
+    /// with one copy left. The 3D curve's bound is its two copies' tolerance, rounded up.
+    #[test]
+    fn a_joint_knot_is_reduced_in_all_three_curves_to_the_fewest_removable() {
+        let k = Kernel::default();
+        let pw = [
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(1.0, 2.0, 0.5, NOW),
+            CPoint::new(2.0, 3.0, -0.5, NOW),
+            CPoint::new(3.0, 3.0, -1.0, NOW),
+            CPoint::new(4.0, 1.0, 2.0, NOW),
+            CPoint::new(6.0, 0.0, 1.0, NOW),
+        ];
+        let u = [0.0, 0.0, 0.0, 0.0, 1.0, 1.7, 2.5, 2.5, 2.5, 2.5];
+        let whole = BSplineCurve::from_data(3, 5, 9, 3, &pw, &u).unwrap();
+        let mut head = Curve::from(whole.clone_exact());
+        let tail = head.create_by_split_curve(&k, 1.7).unwrap();
+        let piece = |c: &Curve| match c.kind() {
+            CurveKind::BSpline(b) => b.clone_exact(),
+            _ => panic!("not a B-spline"),
+        };
+        let mut segments = [piece(&head), piece(&tail)];
+        let (had_knot, breaks) =
+            BSplineCurve::create_by_joining_with_breaks(&mut segments, Some(&[true, true]))
+                .unwrap();
+        assert_eq!(breaks[1], 1.7);
+        let joined_at = (vec![0.0, 1.0, 1.7, 2.5], vec![4, 1, 3, 4]);
+        assert_eq!(had_knot.knots(None).unwrap(), joined_at);
+        let mut alone = had_knot.clone_exact();
+        assert_eq!(
+            remove_joint_copies(&mut alone, 1.7, usize::MAX).unwrap().0,
+            2
+        );
+        let (smooth, at) = rejoined_cubic(0.0, 1.7, 0.0);
+        assert_eq!(smooth.knots(None).unwrap(), joined_at);
+        let tol = joint_knot_tolerance(&had_knot).unwrap();
+        for first in 0..3 {
+            let mut joined: [(BSplineCurve, f64); 3] = core::array::from_fn(|i| {
+                if i == first {
+                    (had_knot.clone_exact(), at)
+                } else {
+                    (smooth.clone_exact(), at)
+                }
+            });
+            let bound = remove_exact_joint_knot_together(&mut joined).unwrap();
+            if first == 0 {
+                assert_eq!(bound, (Ivl::from(2.0) * Ivl::from(tol)).hi);
+            }
+            for (curve, _) in &joined {
+                assert_eq!(
+                    curve.knots(None).unwrap(),
+                    (vec![0.0, 1.0, 1.7, 2.5], vec![4, 1, 1, 4]),
+                    "{first}"
+                );
+            }
+        }
+    }
+
     /// The joint-knot decision depends on the curve's shape, not on where it lies. The
     /// cubic rejoined at 1.7, moved 1000 out along every axis, loses its knot as at the
     /// origin, within the same bound. With a kink of 1e-10 at the joint it keeps its knot,

@@ -1677,6 +1677,69 @@ fn below_continuity(knots: &[f64], p: usize, x: f64, continuity: usize) -> bool 
     p.checked_sub(m).is_none_or(|c| c < continuity)
 }
 
+/// Pieces of a parameter range: `(from, to, span)`, as [`knot_cuts`] returns them.
+pub(crate) type KnotPieces = Vec<(f64, f64, usize)>;
+
+/// The pieces of `[lo, hi]` when it crosses exactly one knot line `x` below `continuity`
+/// ([`below_continuity`]) and its part on one side of the line (the shorter; the upper on
+/// a tie) is at most `limit` wide: the other side's pieces ([`knot_cuts`]), then that
+/// side's polynomial continued over the short part, the line treated as an end of the
+/// net. Returns the pieces, the short part's width and whether it is the lower part (the
+/// first piece; else the last). The continued polynomial `S~` at a parameter `W` of the
+/// short part lies within the first partials' size times the width of its value at `x`,
+/// the limit of the surface from the kept side (a point of the surface's closure), so
+/// `|C - S~(W)|` plus that slack bounds `C`'s distance to the surface; a caller that takes
+/// point values from the surface's own piece `S` over the short part adds `sup |S - S~|`
+/// there too (`NetSurface::partials`). (#18219: a trim along a face's boundary that is a
+/// C^0 join of an extended net crosses the join by rounding at every depth.) `None` when
+/// the box crosses no such line or more than one, or the short part is wider than `limit`.
+pub(crate) fn past_one_low_line(
+    knots: &[f64],
+    p: usize,
+    n: usize,
+    lo: f64,
+    hi: f64,
+    continuity: usize,
+    limit: f64,
+) -> Option<(KnotPieces, f64, bool)> {
+    let mut prev = f64::NAN;
+    let mut line: Option<f64> = None;
+    for &x in knots {
+        if x > lo && x < hi && x != prev && below_continuity(knots, p, x, continuity) {
+            if line.is_some() {
+                return None;
+            }
+            line = Some(x);
+        }
+        prev = x;
+    }
+    let x = line?;
+    let (below, above) = (x - lo, hi - x);
+    if below < above {
+        if !matches!(
+            below.partial_cmp(&limit),
+            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+        ) {
+            return None;
+        }
+        let mut cuts = knot_cuts(knots, p, n, x, hi, continuity).ok()?;
+        let kept = cuts.first()?.2;
+        cuts.insert(0, (lo, x, kept));
+        Some((cuts, below, true))
+    } else {
+        if !matches!(
+            above.partial_cmp(&limit),
+            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+        ) {
+            return None;
+        }
+        let mut cuts = knot_cuts(knots, p, n, lo, x, continuity).ok()?;
+        let kept = cuts.last()?.2;
+        cuts.push((x, hi, kept));
+        Some((cuts, above, false))
+    }
+}
+
 /// Whether `[lo, hi]` crosses a knot line of `knots` (strictly inside it) below
 /// `continuity` ([`below_continuity`]), the lines [`knot_cuts`] refuses, visited as it
 /// visits them.
