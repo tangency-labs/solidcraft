@@ -1609,6 +1609,9 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if nf.kind.clone().profile_sels_mut() != f.kind.clone().profile_sels_mut() {
         super::features::stable_profiles(s, &mut nf.kind, false)?;
     }
+    if nf.kind.constructor_profile_sketch() != f.kind.constructor_profile_sketch() {
+        nf.profile_frame = super::features::cross_component_profile_frame_for(s, nf.component, &nf.kind);
+    }
     // A body Pattern's copy names move with the bodies they copy (#12114). Names the edit gives
     // are in the order the copies are made, as they always were: they are read that way, not
     // moved by source, and stored source by source once the pattern has run. A pattern of several
@@ -2679,6 +2682,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         slot.suppressed = old.suppressed;
         if let Some((names, _)) = cap_names {
             slot.body_names = names;
+        }
+        if old.kind.constructor_profile_sketch() != new.kind.constructor_profile_sketch() {
+            slot.profile_frame = new.profile_frame;
         }
         slot.kind = new.kind;
         slot.edge_refs = new.edge_refs;
