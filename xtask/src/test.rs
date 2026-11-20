@@ -63,8 +63,9 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>
     if !side.is_empty() {
         batches.push(side.into_iter().map(|(label, c)| (label, c, None)).collect());
     }
+    let graded_args = graded_args(test_args);
     for b in &bins {
-        batches.push(vec![(b.label.clone(), binary_command(b, test_args, split), Some(b.id.clone()))]);
+        batches.push(vec![(b.label.clone(), binary_command(b, &graded_args, split), Some(b.id.clone()))]);
     }
     let jobs = limit.unwrap_or(batches.len()).min(batches.len());
     let split_note = split.map_or(String::new(), |t| format!("; {t} test threads and matrix workers per binary unless overridden"));
@@ -93,6 +94,18 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>
     );
     println!("test: {} binaries in {:.1}s", bins.len(), start.elapsed().as_secs_f64());
     if failed.is_empty() { Ok(()) } else { Err(format!("failed: {}", failed.join(", "))) }
+}
+
+/// The arguments a graded binary gets: the caller's, with `--format pretty` added unless the
+/// caller chose a format. The grader reads passing tests from pretty's `test <name> ... ok`
+/// lines, and an explicit `--format pretty` outranks `-q`/`--quiet` (terse output names only
+/// failures), so a known-failing test that passes is still reported as fixed.
+fn graded_args<'a>(test_args: &[&'a str]) -> Vec<&'a str> {
+    let mut args = test_args.to_vec();
+    if !test_args.iter().any(|a| *a == "--format" || a.starts_with("--format=")) {
+        args.extend(["--format", "pretty"]);
+    }
+    args
 }
 
 /// An absent limit preserves the existing unbounded default; invalid input fails before the test build.
@@ -199,13 +212,15 @@ fn finish_graded(mut c: Command, id: &str, allowed: &Allowed) -> Result<String, 
 /// fails.
 fn grade(id: &str, success: bool, stdout: &str, allowed: &Allowed) -> Result<String, String> {
     let summary = stdout.lines().rev().find(|l| l.starts_with("test result:")).map(|l| l.trim_start_matches("test result: ").to_string());
-    let outcomes = outcomes(stdout);
     let full = |name: &str| format!("{id}::{name}");
-    let fixed: Vec<String> = outcomes.iter().filter(|(n, failed)| !failed && allowed.known.contains(&full(n))).map(|(n, _)| full(n)).collect();
-    let failed: Vec<String> = outcomes.iter().filter(|(_, failed)| *failed).map(|(n, _)| full(n)).collect();
+    let failed: Vec<String> = failures(stdout).iter().map(|n| full(n)).collect();
+    let fixed: Vec<String> = passes(stdout).iter().map(|n| full(n)).filter(|t| allowed.known.contains(t) && !failed.contains(t)).collect();
     let mut problems = Vec::new();
     if !success && (summary.is_none() || failed.is_empty()) {
         problems.push("the binary failed without a test failing (a crash or abort)".to_string());
+    }
+    if let Some(n) = summary.as_deref().and_then(failed_count).filter(|n| *n != failed.len()) {
+        problems.push(format!("libtest counted {n} failed but its failures list names {}", failed.len()));
     }
     for test in &failed {
         if !allowed.known.contains(test) && !allowed.quarantined.contains(test) {
@@ -229,19 +244,45 @@ fn grade(id: &str, success: bool, stdout: &str, allowed: &Allowed) -> Result<Str
     })
 }
 
-/// Each test libtest reported, `test <name> ... ok` or `... FAILED`, as (name, failed).
-/// Ignored tests did not run and are left out.
-fn outcomes(stdout: &str) -> Vec<(String, bool)> {
+/// The tests libtest names in its closing `failures:` list, just above `test result:`. The
+/// list is the only record that survives `--nocapture` (a test's own output can land between
+/// `test <name> ... ` and its `FAILED`) and that captured output cannot imitate (it is printed
+/// in the first `failures:` section, above this one).
+fn failures(stdout: &str) -> Vec<String> {
+    let lines: Vec<&str> = stdout.lines().collect();
+    let Some(end) = lines.iter().rposition(|l| l.starts_with("test result:")) else { return Vec::new() };
+    let mut i = end;
+    while i > 0 && lines[i - 1].trim().is_empty() {
+        i -= 1;
+    }
+    let mut names = Vec::new();
+    while i > 0 && lines[i - 1].starts_with("    ") {
+        i -= 1;
+        names.push(lines[i].trim().to_string());
+    }
+    if i == 0 || lines[i - 1] != "failures:" {
+        return Vec::new();
+    }
+    names.reverse();
+    names
+}
+
+/// The failed count in a `test result:` summary (`FAILED. 2 passed; 1 failed; …`).
+fn failed_count(summary: &str) -> Option<usize> {
+    summary.split(';').find_map(|part| part.trim().strip_suffix(" failed")?.parse().ok())
+}
+
+/// The tests that passed, from pretty output's `test <name> ... ok` lines above the first
+/// `failures:` section, so captured output is never read. A pass whose line a test's own
+/// output split (`--nocapture`) is missed, which can only hide a fix, never a failure.
+fn passes(stdout: &str) -> Vec<String> {
     stdout
         .lines()
+        .take_while(|line| *line != "failures:")
         .filter_map(|line| {
-            let (name, result) = line.strip_prefix("test ")?.rsplit_once(" ... ")?;
+            let name = line.strip_prefix("test ")?.strip_suffix(" ... ok")?;
             let name = name.strip_suffix(" - should panic").unwrap_or(name);
-            match result.trim() {
-                "ok" => Some((name.to_string(), false)),
-                "FAILED" => Some((name.to_string(), true)),
-                _ => None,
-            }
+            (!name.contains(" ... ")).then(|| name.to_string())
         })
         .collect()
 }
@@ -308,8 +349,8 @@ pub fn doc_tests(cargo_args: &[&str], test_args: &[&str]) -> (String, Command) {
 #[cfg(test)]
 mod tests {
     use super::{
-        Allowed, TEST_STACK, TestBin, binary_command, binary_id, budget_env, grade, job_limit, outcomes, package_name, run_bounded, stack_env,
-        thread_split,
+        Allowed, TEST_STACK, TestBin, binary_command, binary_id, budget_env, failed_count, failures, grade, graded_args, job_limit, package_name,
+        passes, run_bounded, stack_env, thread_split,
     };
     use std::ffi::OsStr;
     use std::path::Path;
@@ -463,27 +504,92 @@ mod tests {
         assert_eq!(package_name("path+file:///w/apps/solidcraft-cli#0.45.0"), "solidcraft-cli");
     }
 
+    /// libtest's pretty output for `results`, (name, passed), with each failure's captured
+    /// output and the closing list, as Rust 1.99 prints it.
+    fn pretty(results: &[(&str, bool)]) -> String {
+        let mut out = format!("\nrunning {} tests\n", results.len());
+        for (name, ok) in results {
+            out += &format!("test {name} ... {}\n", if *ok { "ok" } else { "FAILED" });
+        }
+        let failed: Vec<&str> = results.iter().filter(|(_, ok)| !ok).map(|(n, _)| *n).collect();
+        if !failed.is_empty() {
+            out += "\nfailures:\n\n";
+            for name in &failed {
+                out += &format!("---- {name} stdout ----\n\nthread '{name}' panicked at t.rs:1:1:\nboom\n\n");
+            }
+            out += "\nfailures:\n";
+            for name in &failed {
+                out += &format!("    {name}\n");
+            }
+        }
+        let verdict = if failed.is_empty() { "ok" } else { "FAILED" };
+        out + &format!(
+            "\ntest result: {verdict}. {} passed; {} failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n",
+            results.len() - failed.len(),
+            failed.len()
+        )
+    }
+
     #[test]
-    fn libtest_lines_give_each_test_that_ran() {
-        let out = "running 4 tests\ntest a::x ... ok\ntest a::y - should panic ... ok\ntest a::z ... FAILED\ntest a::w ... ignored\n\ntest result: FAILED. 2 passed; 1 failed";
-        assert_eq!(outcomes(out), [("a::x".to_string(), false), ("a::y".to_string(), false), ("a::z".to_string(), true)]);
+    fn libtest_output_gives_failures_and_passes() {
+        let out = pretty(&[("a::x", true), ("a::y - should panic", true), ("a::z", false)]);
+        assert_eq!(failures(&out), ["a::z"]);
+        assert_eq!(passes(&out), ["a::x", "a::y"]);
+        assert_eq!(failed_count("FAILED. 2 passed; 1 failed; 0 ignored"), Some(1));
+        assert_eq!(failures("running 1 test\ntest a::x ... ok\n\ntest result: ok. 1 passed; 0 failed\n"), Vec::<String>::new());
     }
 
     #[test]
     fn listed_failures_pass_the_gate_and_others_do_not() {
-        let end = "\ntest result: FAILED. 1 passed; 2 failed";
-        let both = format!("test a::ok ... ok\ntest a::known ... FAILED\ntest a::flaky ... FAILED{end}");
-        assert_eq!(grade("pkg", false, &both, &allowed()).unwrap(), "FAILED. 1 passed; 2 failed; 1 known failing, 1 quarantined failed");
-        let new = format!("test a::known ... FAILED\ntest a::new ... FAILED{end}");
+        let both = pretty(&[("a::ok", true), ("a::known", false), ("a::flaky", false)]);
+        assert_eq!(
+            grade("pkg", false, &both, &allowed()).unwrap(),
+            "FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s; 1 known failing, 1 quarantined failed"
+        );
+        let new = pretty(&[("a::known", false), ("a::new", false)]);
         assert!(grade("pkg", false, &new, &allowed()).unwrap_err().contains("REGRESSION, failed and not on the known-failing list: pkg::a::new"));
         // The same names in another binary are not listed.
         assert!(grade("other", false, &both, &allowed()).is_err());
     }
 
+    /// `--nocapture --test-threads=1`, as Rust 1.99 prints it: a test's output lands between its
+    /// name and its result, so only the closing list names every failure.
+    #[test]
+    fn a_failure_hidden_by_its_own_output_is_still_graded() {
+        let out = "\nrunning 3 tests\ntest a::known ... FAILED\ntest a::new ... \nthread 'a::new' panicked at t.rs:2:47:\nboom\nhalf a lineFAILED\n\
+                   test a::ok ... ok\n\nfailures:\n\nfailures:\n    a::known\n    a::new\n\n\
+                   test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n";
+        assert!(grade("pkg", false, out, &allowed()).unwrap_err().contains("REGRESSION, failed and not on the known-failing list: pkg::a::new"));
+    }
+
+    /// A failing test whose captured output looks like a result line invents no failure.
+    #[test]
+    fn captured_output_is_not_read_as_results() {
+        let out = pretty(&[("a::known", false)]).replace("boom\n", "boom\ntest a::other ... FAILED\ntest a::known ... ok\n");
+        assert_eq!(
+            grade("pkg", false, &out, &allowed()).unwrap(),
+            "FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s; 1 known failing"
+        );
+    }
+
+    #[test]
+    fn a_failures_list_that_disagrees_with_the_count_fails_the_gate() {
+        let out = pretty(&[("a::known", false)]).replace("1 failed", "2 failed");
+        assert!(grade("pkg", false, &out, &allowed()).unwrap_err().contains("libtest counted 2 failed but its failures list names 1"));
+    }
+
+    /// `-q` prints dots for passes, so the grader asks for pretty output unless a format was chosen.
+    #[test]
+    fn graded_binaries_get_pretty_output() {
+        assert_eq!(graded_args(&["-q"]), ["-q", "--format", "pretty"]);
+        assert_eq!(graded_args(&["--format", "terse"]), ["--format", "terse"]);
+        assert_eq!(graded_args(&["--format=json"]), ["--format=json"]);
+    }
+
     #[test]
     fn a_known_failure_that_passes_must_leave_the_list() {
-        let out = "test a::known ... ok\ntest a::flaky ... ok\n\ntest result: ok. 2 passed";
-        let err = grade("pkg", true, out, &allowed()).unwrap_err();
+        let out = pretty(&[("a::known", true), ("a::flaky", true)]);
+        let err = grade("pkg", true, &out, &allowed()).unwrap_err();
         assert!(err.contains("FIXED, remove it from tests/KNOWN_FAILING_TESTS: pkg::a::known"), "{err}");
         assert!(!err.contains("flaky"), "a quarantined test that passes is not an error: {err}");
     }
@@ -492,7 +598,10 @@ mod tests {
     fn a_crash_fails_even_when_every_failed_test_is_listed() {
         assert!(grade("pkg", false, "test a::known ... FAILED\n", &allowed()).unwrap_err().contains("crash"));
         assert!(grade("pkg", false, "running 3 tests\n", &allowed()).unwrap_err().contains("crash"));
-        assert_eq!(grade("pkg", true, "test a::ok ... ok\n\ntest result: ok. 1 passed", &allowed()).unwrap(), "ok. 1 passed");
+        assert_eq!(
+            grade("pkg", true, &pretty(&[("a::ok", true)]), &allowed()).unwrap(),
+            "ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+        );
     }
 
     #[test]

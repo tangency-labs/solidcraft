@@ -161,10 +161,7 @@ fn a_contour_flanges_first_leg_names_its_rims_as_the_others_do() {
         let made = run(&mut s, "sketch.create", json!({"plane": {"face": [p.x, p.y, p.z], "body": body, "index": hit.face, "path": []}}));
         let id = made["sketch"].as_u64().unwrap();
         let status = s.placed_document().sketch_face_attachment(id, &s.model);
-        assert!(
-            matches!(status, solidcraft_doc::FaceAttachmentStatus::Healthy { .. } | solidcraft_doc::FaceAttachmentStatus::Sheet { .. }),
-            "{name}: {status:?}"
-        );
+        assert!(matches!(status, solidcraft_doc::FaceAttachmentStatus::Healthy { .. }), "{name}: {status:?}");
         run(&mut s, "sketch.finish", json!({}));
     }
 }

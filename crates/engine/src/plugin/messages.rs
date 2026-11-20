@@ -128,7 +128,8 @@ pub(crate) fn named(plugin: &str, file: Option<&str>) -> impl Fn(crate::EngineEr
         crate::EngineError::Plugin(error) => {
             crate::EngineError::PluginFailed(Box::new(PluginFailure { plugin: plugin.into(), file: file.map(String::from), error }))
         }
-        crate::EngineError::Other(text) => {
+        e @ (crate::EngineError::Other(_) | crate::EngineError::Feature(_)) => {
+            let text = e.to_string();
             let text = text.strip_prefix("plugin: ").unwrap_or(&text);
             match file {
                 Some(file) => crate::EngineError::Other(say("plugin_error.failed_file", &[("plugin", plugin), ("file", file), ("reason", text)])),

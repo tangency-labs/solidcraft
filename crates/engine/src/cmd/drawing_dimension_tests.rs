@@ -1344,8 +1344,8 @@ fn a_read_stays_out_of_the_document() {
     let _ = std::fs::remove_file(&path);
     assert!(matches!(opened.design(), std::borrow::Cow::Borrowed(_)), "nothing read: nothing to copy");
     assert_eq!(opened.doc.drawing(drawing).unwrap().dimension(dimension).unwrap().last_good, Some(80.0));
-    let bytes = solidcraft_io::write_design(&opened.design());
-    assert_eq!(solidcraft_io::write_design(&solidcraft_io::read_design(&bytes).unwrap()), bytes, "save, open, save: the same bytes");
+    let bytes = solidcraft_io::write_design(&opened.design()).unwrap();
+    assert_eq!(solidcraft_io::write_design(&solidcraft_io::read_design(&bytes).unwrap()).unwrap(), bytes, "save, open, save: the same bytes");
 }
 
 /// A saved value is only ever what it last read: measured now, a dimension reads the model and has
@@ -1418,7 +1418,7 @@ fn background_saves_and_autosaves_keep_the_last_good_value() {
 fn opening_a_design_starts_with_no_last_good_values() {
     let (mut s, _, _) = read_once();
     let path = std::env::temp_dir().join(format!("solidcraft-last-good-open-{}.json", std::process::id()));
-    std::fs::write(&path, solidcraft_io::write_design(&s.doc)).unwrap();
+    std::fs::write(&path, solidcraft_io::write_design(&s.doc).unwrap()).unwrap();
     run(&mut s, "doc.open", json!({"path": path}));
     let _ = std::fs::remove_file(&path);
     assert!(s.dimension_values.is_empty());
@@ -2272,7 +2272,7 @@ fn a_dimension_not_drawn_has_no_layout_and_says_why() {
 
     let (mut s, view) = front_view();
     let added = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"visual_style": "shaded_visible"}}));
+    crate::drawing_scene::tests::not_drawable_yet(&mut s, view);
     let shaded = run(&mut s, INSPECT, json!({"dimension": added["dimension"]}));
     assert!(shaded.get("layout").is_none(), "{shaded}");
     assert_eq!((&shaded["layout_why"], &scene_why(&mut s, &added)), (&not_drawn, &not_drawn), "{shaded}");
@@ -2501,6 +2501,57 @@ fn holed_front_view() -> (Session, u64) {
     (s, view)
 }
 
+/// A dimension's text is a template: `{value}` is its measured number, so the words round it are
+/// kept and the number follows the model. A text without it is shown instead of the number, as it
+/// always was; `{{` and `}}` are a brace each; a brace alone, or another name in braces, is refused.
+#[test]
+fn a_dimensions_text_with_value_in_it_follows_the_model() {
+    let (mut s, view) = holed_front_view();
+    let hole = json!({"body": "Box", "index": round_index(&s, [40.0, 0.0, 15.0], 6.0)});
+    let id = add(&mut s, view, json!({"radial": {"edge": hole}}))["dimension"].clone();
+    let steps = s.undo.len();
+    assert_eq!(edit(&mut s, &id, json!({"override_text": "2× {value} THRU"}))["changed"], json!(["override_text"]));
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    let read = run(&mut s, INSPECT, json!({"dimension": id}));
+    assert_eq!(
+        (read["status"].as_str(), read["text"].as_str()),
+        (Some("ok"), Some("2× Ø12.00 THRU")),
+        "it measures, so it is not typed over: {read}"
+    );
+    assert_eq!(read["measured_text"], "Ø12.00", "what it reads with no text of its own: {read}");
+    assert_eq!(read["record"]["override_text"], "2× {value} THRU", "the template is what is saved");
+
+    // The hole made larger: the number follows, the words stay.
+    let drawing = s.drawing("test").unwrap().id;
+    run(&mut s, "drawing.close", json!({}));
+    let cut = s.doc.features.last().unwrap().id;
+    run(&mut s, "timeline.edit", json!({"feature": cut.to_string(), "set": {"radius": 8}}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let read = run(&mut s, INSPECT, json!({"dimension": id}));
+    assert_eq!(read["text"], "2× Ø16.00 THRU", "{read}");
+    edit(&mut s, &id, json!({"decimals": 1}));
+    assert_eq!(run(&mut s, INSPECT, json!({"dimension": id}))["text"], "2× Ø16.0 THRU", "its decimals are the number's");
+
+    // Words alone hide the number; doubled braces are braces.
+    edit(&mut s, &id, json!({"override_text": "SEE NOTE"}));
+    let read = run(&mut s, INSPECT, json!({"dimension": id}));
+    assert_eq!((read["status"].as_str(), read["text"].as_str()), (Some("overridden"), Some("SEE NOTE")), "{read}");
+    edit(&mut s, &id, json!({"override_text": "{{value}} = {value}"}));
+    assert_eq!(run(&mut s, INSPECT, json!({"dimension": id}))["text"], "{value} = Ø16.0");
+
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    for (text, why) in [
+        ("2× {value", "a `{` on its own"),
+        ("{value}}", "a `}` on its own"),
+        ("{count}× {value}", "`{count}` is not something a dimension's text can show"),
+    ] {
+        let p = json!({"dimension": id, "set": {"override_text": text}});
+        let e = s.execute(EDIT, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"));
+        assert!(e.contains(why), "{text}: {e}");
+    }
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before, "a refused text changes nothing");
+}
+
 /// A dimension's line dragged through a point of its sheet (`line_through_mm`, in paper mm from the
 /// sheet's lower-left corner) passes through it, where inspect's layout and so the sheet draw it. The
 /// top front edge's length (the edge at y 165 from x 160 to 240, its line 10 above it at 175) through
@@ -2646,7 +2697,7 @@ fn a_drag_that_cant_place_is_refused_and_changes_nothing() {
             (&length, json!({"line_through_mm": [0, 1e8]}), "on paper"),
         ],
     );
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"visual_style": "shaded_visible"}}));
+    crate::drawing_scene::tests::not_drawable_yet(&mut s, view);
     refuses(&mut s, &[(&length, json!({"line_through_mm": [200, 190]}), "its view isn't drawn")]);
 
     let (mut s, drawing, dimension) = read_once();

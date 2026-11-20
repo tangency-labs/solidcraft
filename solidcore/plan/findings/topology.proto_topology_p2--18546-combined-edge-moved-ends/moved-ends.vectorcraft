@@ -1,0 +1,4435 @@
+{
+  "format": "vectorcraft",
+  "version": 4,
+  "generator": "VectorCraft 0.24.1",
+  "pdfCompatible": true,
+  "pdf": {
+    "mime": "application/pdf",
+    "blob": [
+      0,
+      19469
+    ]
+  },
+  "document": {
+    "version": 3,
+    "title": "combine-proto-edge",
+    "units": "Points",
+    "rulers": "artboard",
+    "color_mode": "Rgb",
+    "artboards": [
+      {
+        "id": 1,
+        "name": "Artboard 1",
+        "rect": {
+          "x0": 0.0,
+          "y0": 0.0,
+          "x1": 1020.0,
+          "y1": 400.0
+        },
+        "show_center_mark": false,
+        "show_cross_hairs": false
+      }
+    ],
+    "layers": [
+      {
+        "id": 1,
+        "name": "Layer 1",
+        "kind": {
+          "type": "layer",
+          "color": {
+            "Preset": 0
+          },
+          "template": false,
+          "printable": true,
+          "children": [
+            {
+              "id": 2,
+              "name": "background",
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 1.0,
+                        "g": 1.0,
+                        "b": 1.0
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            0.0,
+                            0.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            1020.0,
+                            0.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            1020.0,
+                            400.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            0.0,
+                            400.0
+                          ]
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "rectangle",
+                  "w": 1020.0,
+                  "h": 400.0,
+                  "radii": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0
+                  ]
+                }
+              }
+            },
+            {
+              "id": 3,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  20.0,
+                  50.0
+                ],
+                "runs": [
+                  {
+                    "text": "1  After the split",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Bold",
+                      "size": 20.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 4,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  20.0,
+                  74.0
+                ],
+                "runs": [
+                  {
+                    "text": "the overlap runs the other way",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 5,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.12156863,
+                        "g": 0.43529412,
+                        "b": 0.69803923
+                      }
+                    },
+                    "width": 3.0,
+                    "cap": "Round"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            90.0,
+                            195.0
+                          ],
+                          "out": [
+                            143.33333333333331,
+                            158.33333333333334
+                          ]
+                        },
+                        {
+                          "p": [
+                            248.0,
+                            195.0
+                          ],
+                          "in": [
+                            196.0,
+                            158.33333333333334
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 6,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.12156863,
+                        "g": 0.43529412,
+                        "b": 0.69803923
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            249.63,
+                            196.15
+                          ]
+                        },
+                        {
+                          "p": [
+                            234.74,
+                            192.99
+                          ]
+                        },
+                        {
+                          "p": [
+                            241.65,
+                            183.18
+                          ]
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 7,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  157.0,
+                  160.0
+                ],
+                "runs": [
+                  {
+                    "text": "PE1",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 8,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.33333334,
+                        "g": 0.33333334,
+                        "b": 0.33333334
+                      }
+                    },
+                    "width": 2.0,
+                    "cap": "Round"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            250.0,
+                            205.0
+                          ],
+                          "out": [
+                            196.66666666666669,
+                            241.66666666666666
+                          ]
+                        },
+                        {
+                          "p": [
+                            92.0,
+                            205.0
+                          ],
+                          "in": [
+                            144.0,
+                            241.66666666666666
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 9,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.33333334,
+                        "g": 0.33333334,
+                        "b": 0.33333334
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            90.37,
+                            203.85
+                          ]
+                        },
+                        {
+                          "p": [
+                            105.26,
+                            207.01
+                          ]
+                        },
+                        {
+                          "p": [
+                            98.35,
+                            216.82
+                          ]
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 10,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  157.0,
+                  252.0
+                ],
+                "runs": [
+                  {
+                    "text": "PE2",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 11,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.0,
+                        "g": 0.0,
+                        "b": 0.0
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            73.0,
+                            200.0
+                          ],
+                          "in": [
+                            73.0,
+                            203.86599324881556
+                          ],
+                          "out": [
+                            73.0,
+                            196.13400675118444
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            80.0,
+                            193.0
+                          ],
+                          "in": [
+                            76.13400675118444,
+                            193.0
+                          ],
+                          "out": [
+                            83.86599324881556,
+                            193.0
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            87.0,
+                            200.0
+                          ],
+                          "in": [
+                            87.0,
+                            196.13400675118444
+                          ],
+                          "out": [
+                            87.0,
+                            203.86599324881556
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            80.0,
+                            207.0
+                          ],
+                          "in": [
+                            83.86599324881556,
+                            207.0
+                          ],
+                          "out": [
+                            76.13400675118444,
+                            207.0
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 14.0,
+                  "h": 14.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    73.0,
+                    193.0
+                  ]
+                }
+              }
+            },
+            {
+              "id": 12,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  56.0,
+                  205.0
+                ],
+                "runs": [
+                  {
+                    "text": "A",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 13,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.0,
+                        "g": 0.0,
+                        "b": 0.0
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            253.0,
+                            200.0
+                          ],
+                          "in": [
+                            253.0,
+                            203.86599324881556
+                          ],
+                          "out": [
+                            253.0,
+                            196.13400675118444
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            260.0,
+                            193.0
+                          ],
+                          "in": [
+                            256.1340067511845,
+                            193.0
+                          ],
+                          "out": [
+                            263.8659932488155,
+                            193.0
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            267.0,
+                            200.0
+                          ],
+                          "in": [
+                            267.0,
+                            196.13400675118444
+                          ],
+                          "out": [
+                            267.0,
+                            203.86599324881556
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            260.0,
+                            207.0
+                          ],
+                          "in": [
+                            263.8659932488155,
+                            207.0
+                          ],
+                          "out": [
+                            256.1340067511845,
+                            207.0
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 14.0,
+                  "h": 14.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    253.0,
+                    193.0
+                  ]
+                }
+              }
+            },
+            {
+              "id": 14,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  274.0,
+                  205.0
+                ],
+                "runs": [
+                  {
+                    "text": "B",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 15,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  20.0,
+                  300.0
+                ],
+                "runs": [
+                  {
+                    "text": "A lists PE1, PE2",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 16,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  20.0,
+                  320.0
+                ],
+                "runs": [
+                  {
+                    "text": "B lists PE1, PE2",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 17,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.6,
+                        "g": 0.6,
+                        "b": 0.6
+                      }
+                    },
+                    "width": 1.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            335.0,
+                            30.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            335.0,
+                            380.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 335.0,
+                    "y": 30.0
+                  },
+                  "b": {
+                    "x": 335.0,
+                    "y": 380.0
+                  }
+                }
+              }
+            },
+            {
+              "id": 18,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  360.0,
+                  50.0
+                ],
+                "runs": [
+                  {
+                    "text": "2  Combined, upstream",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Bold",
+                      "size": 20.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 19,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  360.0,
+                  74.0
+                ],
+                "runs": [
+                  {
+                    "text": "PE2's ends moved onto PE1's",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 20,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.12156863,
+                        "g": 0.43529412,
+                        "b": 0.69803923
+                      }
+                    },
+                    "width": 3.0,
+                    "cap": "Round"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            430.0,
+                            195.0
+                          ],
+                          "out": [
+                            483.3333333333333,
+                            158.33333333333334
+                          ]
+                        },
+                        {
+                          "p": [
+                            588.0,
+                            195.0
+                          ],
+                          "in": [
+                            536.0,
+                            158.33333333333334
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 21,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.12156863,
+                        "g": 0.43529412,
+                        "b": 0.69803923
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            589.63,
+                            196.15
+                          ]
+                        },
+                        {
+                          "p": [
+                            574.74,
+                            192.99
+                          ]
+                        },
+                        {
+                          "p": [
+                            581.65,
+                            183.18
+                          ]
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 22,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  497.0,
+                  160.0
+                ],
+                "runs": [
+                  {
+                    "text": "PE1",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 23,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.6,
+                        "g": 0.6,
+                        "b": 0.6
+                      }
+                    },
+                    "width": 1.5,
+                    "dash": {
+                      "pattern": [
+                        5.0,
+                        4.0
+                      ],
+                      "offset": 0.0,
+                      "align_corners": false
+                    }
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            590.0,
+                            205.0
+                          ],
+                          "out": [
+                            536.6666666666666,
+                            241.66666666666666
+                          ]
+                        },
+                        {
+                          "p": [
+                            430.0,
+                            205.0
+                          ],
+                          "in": [
+                            483.3333333333333,
+                            241.66666666666666
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 24,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  460.0,
+                  252.0
+                ],
+                "runs": [
+                  {
+                    "text": "PE2 (merged)",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 25,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.0,
+                        "g": 0.0,
+                        "b": 0.0
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            413.0,
+                            200.0
+                          ],
+                          "in": [
+                            413.0,
+                            203.86599324881556
+                          ],
+                          "out": [
+                            413.0,
+                            196.13400675118444
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            420.0,
+                            193.0
+                          ],
+                          "in": [
+                            416.1340067511845,
+                            193.0
+                          ],
+                          "out": [
+                            423.8659932488155,
+                            193.0
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            427.0,
+                            200.0
+                          ],
+                          "in": [
+                            427.0,
+                            196.13400675118444
+                          ],
+                          "out": [
+                            427.0,
+                            203.86599324881556
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            420.0,
+                            207.0
+                          ],
+                          "in": [
+                            423.8659932488155,
+                            207.0
+                          ],
+                          "out": [
+                            416.1340067511845,
+                            207.0
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 14.0,
+                  "h": 14.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    413.0,
+                    193.0
+                  ]
+                }
+              }
+            },
+            {
+              "id": 26,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  396.0,
+                  205.0
+                ],
+                "runs": [
+                  {
+                    "text": "A",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 27,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.0,
+                        "g": 0.0,
+                        "b": 0.0
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            593.0,
+                            200.0
+                          ],
+                          "in": [
+                            593.0,
+                            203.86599324881556
+                          ],
+                          "out": [
+                            593.0,
+                            196.13400675118444
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            600.0,
+                            193.0
+                          ],
+                          "in": [
+                            596.1340067511844,
+                            193.0
+                          ],
+                          "out": [
+                            603.8659932488156,
+                            193.0
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            607.0,
+                            200.0
+                          ],
+                          "in": [
+                            607.0,
+                            196.13400675118444
+                          ],
+                          "out": [
+                            607.0,
+                            203.86599324881556
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            600.0,
+                            207.0
+                          ],
+                          "in": [
+                            603.8659932488156,
+                            207.0
+                          ],
+                          "out": [
+                            596.1340067511844,
+                            207.0
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 14.0,
+                  "h": 14.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    593.0,
+                    193.0
+                  ]
+                }
+              }
+            },
+            {
+              "id": 28,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  614.0,
+                  205.0
+                ],
+                "runs": [
+                  {
+                    "text": "B",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 29,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  360.0,
+                  300.0
+                ],
+                "runs": [
+                  {
+                    "text": "A lists PE1, PE1",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 30,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  360.0,
+                  320.0
+                ],
+                "runs": [
+                  {
+                    "text": "B lists PE1, PE1",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 31,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  360.0,
+                  348.0
+                ],
+                "runs": [
+                  {
+                    "text": "PE2: start A, end B",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 32,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  360.0,
+                  366.0
+                ],
+                "runs": [
+                  {
+                    "text": "removing PE2 at A: not listed",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 33,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.6,
+                        "g": 0.6,
+                        "b": 0.6
+                      }
+                    },
+                    "width": 1.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            675.0,
+                            30.0
+                          ]
+                        },
+                        {
+                          "p": [
+                            675.0,
+                            380.0
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "line",
+                  "a": {
+                    "x": 675.0,
+                    "y": 30.0
+                  },
+                  "b": {
+                    "x": 675.0,
+                    "y": 380.0
+                  }
+                }
+              }
+            },
+            {
+              "id": 34,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  700.0,
+                  50.0
+                ],
+                "runs": [
+                  {
+                    "text": "3  Combined, this change",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Bold",
+                      "size": 20.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 36,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.12156863,
+                        "g": 0.43529412,
+                        "b": 0.69803923
+                      }
+                    },
+                    "width": 3.0,
+                    "cap": "Round"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            770.0,
+                            195.0
+                          ],
+                          "out": [
+                            823.3333333333334,
+                            158.33333333333334
+                          ]
+                        },
+                        {
+                          "p": [
+                            928.0,
+                            195.0
+                          ],
+                          "in": [
+                            876.0,
+                            158.33333333333334
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 37,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.12156863,
+                        "g": 0.43529412,
+                        "b": 0.69803923
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            929.63,
+                            196.15
+                          ]
+                        },
+                        {
+                          "p": [
+                            914.74,
+                            192.99
+                          ]
+                        },
+                        {
+                          "p": [
+                            921.65,
+                            183.18
+                          ]
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 38,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  837.0,
+                  160.0
+                ],
+                "runs": [
+                  {
+                    "text": "PE1",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 40,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  800.0,
+                  252.0
+                ],
+                "runs": [
+                  {
+                    "text": "PE2 (merged)",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 41,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.0,
+                        "g": 0.0,
+                        "b": 0.0
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            753.0,
+                            200.0
+                          ],
+                          "in": [
+                            753.0,
+                            203.86599324881556
+                          ],
+                          "out": [
+                            753.0,
+                            196.13400675118444
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            760.0,
+                            193.0
+                          ],
+                          "in": [
+                            756.1340067511844,
+                            193.0
+                          ],
+                          "out": [
+                            763.8659932488156,
+                            193.0
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            767.0,
+                            200.0
+                          ],
+                          "in": [
+                            767.0,
+                            196.13400675118444
+                          ],
+                          "out": [
+                            767.0,
+                            203.86599324881556
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            760.0,
+                            207.0
+                          ],
+                          "in": [
+                            763.8659932488156,
+                            207.0
+                          ],
+                          "out": [
+                            756.1340067511844,
+                            207.0
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 14.0,
+                  "h": 14.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    753.0,
+                    193.0
+                  ]
+                }
+              }
+            },
+            {
+              "id": 42,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  736.0,
+                  205.0
+                ],
+                "runs": [
+                  {
+                    "text": "A",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 43,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.0,
+                        "g": 0.0,
+                        "b": 0.0
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            933.0,
+                            200.0
+                          ],
+                          "in": [
+                            933.0,
+                            203.86599324881556
+                          ],
+                          "out": [
+                            933.0,
+                            196.13400675118444
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            940.0,
+                            193.0
+                          ],
+                          "in": [
+                            936.1340067511844,
+                            193.0
+                          ],
+                          "out": [
+                            943.8659932488156,
+                            193.0
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            947.0,
+                            200.0
+                          ],
+                          "in": [
+                            947.0,
+                            196.13400675118444
+                          ],
+                          "out": [
+                            947.0,
+                            203.86599324881556
+                          ],
+                          "kind": "Smooth"
+                        },
+                        {
+                          "p": [
+                            940.0,
+                            207.0
+                          ],
+                          "in": [
+                            943.8659932488156,
+                            207.0
+                          ],
+                          "out": [
+                            936.1340067511844,
+                            207.0
+                          ],
+                          "kind": "Smooth"
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                },
+                "live": {
+                  "shape": "ellipse",
+                  "w": 14.0,
+                  "h": 14.0,
+                  "pie": [
+                    0.0,
+                    360.0
+                  ],
+                  "xf": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    933.0,
+                    193.0
+                  ]
+                }
+              }
+            },
+            {
+              "id": 44,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  954.0,
+                  205.0
+                ],
+                "runs": [
+                  {
+                    "text": "B",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 49,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  700.0,
+                  74.0
+                ],
+                "runs": [
+                  {
+                    "text": "PE2 runs B to A: no end moves",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 50,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "none"
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.33333334,
+                        "g": 0.33333334,
+                        "b": 0.33333334
+                      }
+                    },
+                    "width": 2.0,
+                    "cap": "Round"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            930.0,
+                            205.0
+                          ],
+                          "out": [
+                            876.6666666666666,
+                            241.66666666666666
+                          ]
+                        },
+                        {
+                          "p": [
+                            772.0,
+                            205.0
+                          ],
+                          "in": [
+                            824.0,
+                            241.66666666666666
+                          ]
+                        }
+                      ],
+                      "closed": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 51,
+              "appearance": {
+                "items": [
+                  {
+                    "kind": "fill",
+                    "paint": {
+                      "type": "solid",
+                      "color": {
+                        "model": "rgb",
+                        "r": 0.33333334,
+                        "g": 0.33333334,
+                        "b": 0.33333334
+                      }
+                    }
+                  },
+                  {
+                    "kind": "stroke",
+                    "paint": {
+                      "type": "none"
+                    },
+                    "width": 0.0
+                  }
+                ]
+              },
+              "kind": {
+                "type": "path",
+                "path": {
+                  "subpaths": [
+                    {
+                      "anchors": [
+                        {
+                          "p": [
+                            770.37,
+                            203.85
+                          ]
+                        },
+                        {
+                          "p": [
+                            785.26,
+                            207.01
+                          ]
+                        },
+                        {
+                          "p": [
+                            778.35,
+                            216.82
+                          ]
+                        }
+                      ],
+                      "closed": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": 52,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  700.0,
+                  300.0
+                ],
+                "runs": [
+                  {
+                    "text": "A lists PE1, PE2",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 53,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  700.0,
+                  320.0
+                ],
+                "runs": [
+                  {
+                    "text": "B lists PE1, PE2",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 14.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 54,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  700.0,
+                  348.0
+                ],
+                "runs": [
+                  {
+                    "text": "PE2: start B, end A",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            },
+            {
+              "id": 55,
+              "kind": {
+                "type": "text",
+                "kind": {
+                  "kind": "point"
+                },
+                "xf": [
+                  1.0,
+                  0.0,
+                  0.0,
+                  1.0,
+                  700.0,
+                  366.0
+                ],
+                "runs": [
+                  {
+                    "text": "removing PE2 at B and A: done",
+                    "style": {
+                      "font_family": "Helvetica",
+                      "font_style": "Regular",
+                      "size": 12.0,
+                      "tracking": 0.0,
+                      "baseline_shift": 0.0,
+                      "h_scale": 100.0,
+                      "v_scale": 100.0,
+                      "rotation": 0.0,
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "model": "rgb",
+                          "r": 0.0,
+                          "g": 0.0,
+                          "b": 0.0
+                        }
+                      },
+                      "stroke": {
+                        "type": "none"
+                      },
+                      "stroke_width": 0.0,
+                      "underline": false,
+                      "strikethrough": false,
+                      "all_caps": false
+                    }
+                  }
+                ],
+                "para": {
+                  "justify": "Left",
+                  "justify_auto": true,
+                  "left_indent": 0.0,
+                  "right_indent": 0.0,
+                  "first_line_indent": 0.0,
+                  "space_before": 0.0,
+                  "space_after": 0.0,
+                  "hyphenate": false,
+                  "mojikumi": "lineEndHalf",
+                  "burasagari": "standard"
+                }
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "swatches": [
+      {
+        "name": "[None]",
+        "paint": {
+          "type": "none"
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "White",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 1.0,
+            "g": 1.0,
+            "b": 1.0
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Black",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.0,
+            "g": 0.0,
+            "b": 0.0
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Red",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.92941177,
+            "g": 0.10980392,
+            "b": 0.14117648
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Orange Red",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.94509804,
+            "g": 0.3529412,
+            "b": 0.14117648
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Orange",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.96862745,
+            "g": 0.5764706,
+            "b": 0.11764706
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Amber",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.9843137,
+            "g": 0.6901961,
+            "b": 0.23137255
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Yellow",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.9882353,
+            "g": 0.93333334,
+            "b": 0.12941177
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Yellow Green",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.8509804,
+            "g": 0.8784314,
+            "b": 0.12941177
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Lime",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.54901963,
+            "g": 0.7764706,
+            "b": 0.24705882
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Green",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.22352941,
+            "g": 0.70980394,
+            "b": 0.2901961
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Emerald",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.0,
+            "g": 0.57254905,
+            "b": 0.27058825
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Teal",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.0,
+            "g": 0.40784314,
+            "b": 0.21568628
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Aqua",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.13333334,
+            "g": 0.70980394,
+            "b": 0.4509804
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Cyan Green",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.0,
+            "g": 0.6627451,
+            "b": 0.6156863
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Cyan",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.16078432,
+            "g": 0.67058825,
+            "b": 0.8862745
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Azure",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.0,
+            "g": 0.44313726,
+            "b": 0.7372549
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Blue",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.18039216,
+            "g": 0.19215687,
+            "b": 0.57254905
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Indigo",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.105882354,
+            "g": 0.078431375,
+            "b": 0.39215687
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Violet",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.4,
+            "g": 0.1764706,
+            "b": 0.5686275
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Purple",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.5764706,
+            "g": 0.15294118,
+            "b": 0.56078434
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Magenta",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.61960787,
+            "g": 0.0,
+            "b": 0.3647059
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Rose",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.83137256,
+            "g": 0.078431375,
+            "b": 0.3529412
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Pink",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.92941177,
+            "g": 0.11764706,
+            "b": 0.4745098
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Brown",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.78039217,
+            "g": 0.69803923,
+            "b": 0.6
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Tan",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.6,
+            "g": 0.5254902,
+            "b": 0.45882353
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Coffee",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.4509804,
+            "g": 0.3882353,
+            "b": 0.34117648
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Chocolate",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.3254902,
+            "g": 0.2784314,
+            "b": 0.25490198
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Sand",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.7764706,
+            "g": 0.6117647,
+            "b": 0.42745098
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Copper",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.6509804,
+            "g": 0.4862745,
+            "b": 0.32156864
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Rust",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.54901963,
+            "g": 0.38431373,
+            "b": 0.22352941
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Walnut",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.45882353,
+            "g": 0.29803923,
+            "b": 0.14117648
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Espresso",
+        "paint": {
+          "type": "solid",
+          "color": {
+            "model": "rgb",
+            "r": 0.3764706,
+            "g": 0.21960784,
+            "b": 0.07450981
+          }
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "White, Black",
+        "paint": {
+          "type": "gradient",
+          "gradient": {
+            "kind": "Linear",
+            "stops": [
+              {
+                "offset": 0.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 1.0,
+                  "g": 1.0,
+                  "b": 1.0
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              },
+              {
+                "offset": 1.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.0,
+                  "g": 0.0,
+                  "b": 0.0
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              }
+            ]
+          },
+          "angle": 0.0
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Radial White, Black",
+        "paint": {
+          "type": "gradient",
+          "gradient": {
+            "kind": "Radial",
+            "stops": [
+              {
+                "offset": 0.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 1.0,
+                  "g": 1.0,
+                  "b": 1.0
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              },
+              {
+                "offset": 1.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.0,
+                  "g": 0.0,
+                  "b": 0.0
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              }
+            ]
+          },
+          "angle": 0.0
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Sunset",
+        "paint": {
+          "type": "gradient",
+          "gradient": {
+            "kind": "Linear",
+            "stops": [
+              {
+                "offset": 0.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.9843137,
+                  "g": 0.6901961,
+                  "b": 0.23137255
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              },
+              {
+                "offset": 1.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.83137256,
+                  "g": 0.078431375,
+                  "b": 0.3529412
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              }
+            ]
+          },
+          "angle": 0.0
+        },
+        "global": false,
+        "spot": false
+      },
+      {
+        "name": "Ocean",
+        "paint": {
+          "type": "gradient",
+          "gradient": {
+            "kind": "Linear",
+            "stops": [
+              {
+                "offset": 0.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.16078432,
+                  "g": 0.67058825,
+                  "b": 0.8862745
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              },
+              {
+                "offset": 1.0,
+                "color": {
+                  "model": "rgb",
+                  "r": 0.18039216,
+                  "g": 0.19215687,
+                  "b": 0.57254905
+                },
+                "opacity": 1.0,
+                "midpoint": 0.5
+              }
+            ]
+          },
+          "angle": 0.0
+        },
+        "global": false,
+        "spot": false
+      }
+    ],
+    "swatch_groups": [
+      {
+        "name": "Grays",
+        "swatches": [
+          {
+            "name": "K=90",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.9
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=80",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.8
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=70",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.7
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=60",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.6
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=50",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.5
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=40",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.4
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=30",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.3
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=20",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.2
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "K=10",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "gray",
+                "k": 0.1
+              }
+            },
+            "global": false,
+            "spot": false
+          }
+        ]
+      },
+      {
+        "name": "Brights",
+        "swatches": [
+          {
+            "name": "Bright Red",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "rgb",
+                "r": 1.0,
+                "g": 0.11372549,
+                "b": 0.14509805
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "Bright Yellow",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "rgb",
+                "r": 1.0,
+                "g": 0.9019608,
+                "b": 0.0
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "Bright Green",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "rgb",
+                "r": 0.0,
+                "g": 0.9019608,
+                "b": 0.4627451
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "Bright Blue",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "rgb",
+                "r": 0.16078432,
+                "g": 0.4745098,
+                "b": 1.0
+              }
+            },
+            "global": false,
+            "spot": false
+          },
+          {
+            "name": "Bright Violet",
+            "paint": {
+              "type": "solid",
+              "color": {
+                "model": "rgb",
+                "r": 0.8352941,
+                "g": 0.0,
+                "b": 0.9764706
+              }
+            },
+            "global": false,
+            "spot": false
+          }
+        ]
+      }
+    ],
+    "graphic_styles": [
+      {
+        "name": "Default Graphic Style",
+        "appearance": {
+          "items": [
+            {
+              "kind": "fill",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 1.0,
+                  "g": 1.0,
+                  "b": 1.0
+                }
+              }
+            },
+            {
+              "kind": "stroke",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.0,
+                  "g": 0.0,
+                  "b": 0.0
+                }
+              },
+              "width": 1.0
+            }
+          ]
+        },
+        "id": 1,
+        "unit_box": true
+      },
+      {
+        "name": "Black Outline",
+        "appearance": {
+          "items": [
+            {
+              "kind": "fill",
+              "paint": {
+                "type": "none"
+              }
+            },
+            {
+              "kind": "stroke",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.0,
+                  "g": 0.0,
+                  "b": 0.0
+                }
+              },
+              "width": 1.0
+            }
+          ]
+        },
+        "id": 2,
+        "unit_box": true
+      },
+      {
+        "name": "Heavy Ink",
+        "appearance": {
+          "items": [
+            {
+              "kind": "fill",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.105882354,
+                  "g": 0.078431375,
+                  "b": 0.39215687
+                }
+              }
+            },
+            {
+              "kind": "stroke",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.0,
+                  "g": 0.0,
+                  "b": 0.0
+                }
+              },
+              "width": 4.0
+            }
+          ]
+        },
+        "id": 3,
+        "unit_box": true
+      },
+      {
+        "name": "Sunshine",
+        "appearance": {
+          "items": [
+            {
+              "kind": "fill",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.9843137,
+                  "g": 0.6901961,
+                  "b": 0.23137255
+                }
+              }
+            },
+            {
+              "kind": "stroke",
+              "paint": {
+                "type": "solid",
+                "color": {
+                  "model": "rgb",
+                  "r": 0.94509804,
+                  "g": 0.3529412,
+                  "b": 0.14117648
+                }
+              },
+              "width": 2.0
+            }
+          ]
+        },
+        "id": 4,
+        "unit_box": true
+      }
+    ],
+    "symbols": [],
+    "guides": [],
+    "grid": {
+      "spacing": 72.0,
+      "subdivisions": 8
+    },
+    "raster_effects_ppi": 72.0,
+    "images": {},
+    "next_id": 56,
+    "setup": {
+      "bleed": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "outlineImages": false,
+      "highlightSubstitutedFonts": true,
+      "highlightSubstitutedGlyphs": false,
+      "gridSize": "medium",
+      "gridColors": [
+        {
+          "model": "rgb",
+          "r": 1.0,
+          "g": 1.0,
+          "b": 1.0
+        },
+        {
+          "model": "rgb",
+          "r": 0.8,
+          "g": 0.8,
+          "b": 0.8
+        }
+      ],
+      "simulatePaper": false,
+      "flattenerPreset": null,
+      "discardWhiteOverprint": true,
+      "language": "English: USA",
+      "quotes": {
+        "double": [
+          "‚Äú",
+          "‚Äù"
+        ],
+        "single": [
+          "‚Äò",
+          "‚Äô"
+        ]
+      },
+      "typographersQuotes": true,
+      "superscript": {
+        "size": 58.3,
+        "position": 33.3
+      },
+      "subscript": {
+        "size": 58.3,
+        "position": 33.3
+      },
+      "smallCapsSize": 70.0,
+      "exportText": "editable",
+      "background": "white"
+    },
+    "metadata": {
+      "author": "",
+      "authorTitle": "",
+      "description": "",
+      "keywords": [],
+      "rating": 0,
+      "copyrightStatus": "unknown",
+      "copyrightNotice": "",
+      "copyrightUrl": "",
+      "created": 1795126065,
+      "modified": null
+    }
+  },
+  "images": {}
+}
+ VCBLOBS %PDF-1.7
+%ÄÄÄÄ
+
+1 0 obj
+<</Type/Pages/Count 1/Kids[9 0 R]>>
+endobj
+2 0 obj
+<</ProcSet[/PDF/Text/ImageC/ImageB]/Font<</f0 3 0 R/f1 6 0 R>>>>
+endobj
+3 0 obj
+<</Type/Font/Subtype/Type0/BaseFont/HBCALY+SourceSans3-Bold/Encoding/Identity-H/DescendantFonts[4 0 R]/ToUnicode 11 0 R>>
+endobj
+4 0 obj
+<</Type/Font/Subtype/CIDFontType2/BaseFont/HBCALY+SourceSans3-Bold/CIDSystemInfo<</Registry(Adobe)/Ordering(Identity)/Supplement 0>>/FontDescriptor 5 0 R/DW 0/CIDToGIDMap/Identity/W[0 0 690 1 1 528 2 2 200 3 3 573 4 4 688 5 5 518 6 6 398 7 7 383 8 8 571 9 9 443 10 10 573 11 11 286 12 12 276 13 13 528 14 14 582 15 15 555 16 16 857 17 17 573 18 18 572 19 19 573 20 20 300 21 21 568 22 22 527 23 23 528 24 24 467 25 25 534]>>
+endobj
+5 0 obj
+<</Type/FontDescriptor/FontName/HBCALY+SourceSans3-Bold/Flags 131076/FontBBox[-83 -211 797 723]/ItalicAngle 0/Ascent 1000/Descent -326/CapHeight 660/StemV 168.6/CIDSet 10 0 R/FontFile2 12 0 R>>
+endobj
+6 0 obj
+<</Type/Font/Subtype/Type0/BaseFont/GVXPXE+SourceSans3-Regular/Encoding/Identity-H/DescendantFonts[7 0 R]/ToUnicode 14 0 R>>
+endobj
+7 0 obj
+<</Type/Font/Subtype/CIDFontType2/BaseFont/GVXPXE+SourceSans3-Regular/CIDSystemInfo<</Registry(Adobe)/Ordering(Identity)/Supplement 0>>/FontDescriptor 8 0 R/DW 0/CIDToGIDMap/Identity/W[0 0 653 1 1 338 2 2 544 3 3 496 4 4 200 5 5 542 6 6 467 7 7 347 8 8 255 9 9 504 10 10 555 11 11 544 12 12 547 13 13 419 14 14 719 15 15 467 16 16 566 17 17 527 18 19 497 20 20 544 21 21 588 22 22 246 23 24 249 25 25 555 26 26 829 27 27 303 28 28 504 29 29 303 30 30 249]>>
+endobj
+8 0 obj
+<</Type/FontDescriptor/FontName/GVXPXE+SourceSans3-Regular/Flags 131076/FontBBox[-55 -224 753 732]/ItalicAngle 0/Ascent 1000/Descent -326/CapHeight 660/StemV 95.4/CIDSet 13 0 R/FontFile2 15 0 R>>
+endobj
+9 0 obj
+<</Type/Page/Resources 2 0 R/MediaBox[0 0 1020 400]/BleedBox[0 0 1020 400]/TrimBox[0 0 1020 400]/Parent 1 0 R/Contents 16 0 R>>
+endobj
+10 0 obj
+<</Length 12/Filter/FlateDecode>>
+stream
+xú˚ˇˇˇ 	ÎÓ
+endstream
+endobj
+11 0 obj
+<</Length 468/Type/CMap/Filter/FlateDecode/WMode 0>>
+stream
+xúmìMo£0ÜÔ¸äŸÉ•Ùê≈ÜÑ¥Q©%A‚–5’ˆLÏIäldÃ!ˇ~eèI´’ =3Ø=Ûz˚ıvò?*sƒy˛õ√;f¥ÁÂs”'åÌå;‘ÓQ°ö≤√zk‰Ä zWÎ÷%å’Z^FÖìÊí'<∑˙[‡k@9Œt	c≠ª‡fÄ–‘
+µk›¯]¬ÿ¥CkÙD¬ÿ^´“tæπ!IcHﬂ¨ëtpjµ≤±}›Dd†ZÈ"Ö∑Ïö>,>\á]≠OrR©±èJ ÄÙœÌ‡Ïf°±;Px¢Ã´Uh[}ÜŸ‘Ïè‰aÏ˚˙&Åá(jæ©7ˇ“ti4|ãFó æC◊„ÈÁ≥QjQÖCﬂH¥ç>c≤·úÛ-l™™™∂æ‚?˘lIÀé'˘’ÿ [ÿpûãm†,P∆âÚ@ãò[*
+ŒWä,)≤$*≠2¢QTﬁìÚûËÅr9—#Q¨˘D í®$z ⁄QØ±¬û∫ãªT§¨	ú;"ÚX–:Aã=y,®OA3™.»ﬂä¸	ÚW–iÚóSu˝E"≈*å ûµÜøs∑ÈÀ—Z‘.\π0j?◊V„ÌÓˆ¶˜´¬.˝Ùˇxz≠˛Z1
+endstream
+endobj
+12 0 obj
+<</Length 6376/Filter/FlateDecode>>
+stream
+xú≠z{p[ŸyﬂÔú˚ $AºHÇ/x	Ä$.¿¯íHä  í‚KI= ≠v°«Jµ)Jª´zÔ⁄kÓ⁄}(q6v¶ô∂I¶ô±;T› n÷£d2âw‚d:]O‚∂”â;”G˛»öTn2-Ÿ9˜^@§kßjƒÛ›Û˝Œ9ﬂ˚;ÄJº]À∑6îìﬁŒØ ¯=Ät]∏~qm©≥Úã ˘k† ~ÒÍùÏ[8TˇP´]Z-¨ˇ’ßˇhi–È“j°‚G“7Åñs Z/≠m‹Ó#bhy¿ı´ÎÀÖDÕëü-è Y+‹æN~\˝@’ (◊
+k´èˇ≥Pg˘ÍııõdwÙÌ \∏~cı˙_¸∆›o 
+@$¸C¸¸~wpá÷ ¥qÔ1æéØc[ÙCÄ<ˆé—èˆì'{è˜éÍXù∑˜ò~LÌ=ﬁ;¡πÙùóqX&ËÔì-¸çpÜ~B÷ÒËÈ¸Ä÷ìˆóÒa≤U^”I÷ÀÎˆ…¬œ+IC?’œ∆\‡ÎÒ√Ω	¸xÔHyø∫Ú~+‘ï˜˚[Ma8ïœ) ÃTÕœ0yÒlñı˙Y[.AŸ>ïe4X¯ÆV,/´K˛@Ä!«êR”; HÂìQF4¶‰/D’‘Äà2ASVÓní)ÊJ)˘|≤H›©d1(§Mùº≠0ª h*UXabÊˆ•4ïO≤¿jcÄœÓTyH≤Qa4•&w\ƒï 'UÜLv5∑„%e¢∆ÑÛ§≤¸<ÊM•LÄ_YQÿ√Cgw⁄à#5æ<Œ‰ÒlÄ	¡‹¬+ŸÄogñ…d,ëÛ+lêSÉπúR4–Ö÷ñ…Ã'Öuq~G>Ãdï ˆvAa∂L6ÔWò¬y6Nıs™?ÔœÁr9?£AfO-3,df88¿Ï)ˇ;ƒ©C3Ö5XÊàñrπïBéëH.gjêSVò7•&sQ&i ∏¬ƒ`aEañT&À,jíY’§?»1íè2Y77" J—≤îT8ì´Î7ƒÁøYE~|ôIÖYS ∂≤ÕH§ÿ%ôöœÊ3˛¬B.´Ê9Ö%≥åD¸‹.¶(Qf—XE*≤j∏Ÿ™±
+5©*j≤¿Ë“Fñ…3KGîUh
+ó∂*µ¸@ƒí¬w`â|éCÚi]Zõ∂SQÖ‘x≤#PúJÌ` Ÿç]HDeH11òW∆∑’w™nl¯πCò‚gâ≤¡òTi„«Kñ≥÷Lñ/NºhQè5yﬂaá0û…¸j ◊à≤j≠HÈ8[)§£¨Fc$Ø(¨:5Õ7PXµöÃ±˛¥êUXçÓ/ß¶∞›( À€jÅ9Sye;Ø0ßöT£¨Võ9ô-ä+È\+s¨™∑£Ã•ÕÃggçI ◊ \˙º[+¢6u*[¨≠M1RH2gÑß£¡d±öˇ™°¡$#^UaB0ì-rÛ11ò‹ﬁV¯±5ïëBâˆ|æÑıô´NM≤ö‘dû—ÉŒzâãÄKM3íb8∫C—ΩÂ—P?ôeµjRgUjí9TVëO*˘_WG‡Ñ…dí[¿≠&)›÷˚ ‚o…EôW+¬â2üV$|¨”äîèıZQ‡cÉV˘Ë◊äµ¢Ã«&≠h·„!≠hÂc≥V¨‡cDSKˆgr~ÊdVUbåº ≥% ¥}Loô˘Ü¡åÓcÜ ÃS—¿™#/’ìë¬wUπû˚ıhE(ë(k—äÑè™V§|l’äÉZQ‰cH+J|kEôèmZ—¬«v≠hÂcáV¨‡cLSÜıÄÌ‘î<´À+)ïë<èâO¬èŸ.çuFXgGîukä2©ºƒõjaPÂÖ˝s~Æ}O…≈≈*yúGÎÓ(Jƒ3ûÌ ÈZ∆˜ôÁeò^MÈ”%Ô”`b∆ü?ìë»e·Û˛[Ω/ßè™É≈^‚·∫ˆk ∞2˘˘RÖ¡(–bæ·(¸yPFRÀÉQvX+RxÉJLô‰%Å—‡‘ˆˆ§:©îÏíüW]5π3Hà«›eG4/Û©I&ô‘aE;í¨2Y›é©ä2º=eCaJÃÿè…j≤ÑVXû◊îƒ|ˆæ®HäˇæírI^im)e[’W®y&ßûM◊<ØvFWS˘ïI©¬J&ÀƒT¡œ§TûW∫g◊TEabHù(˙UfKMéeKÈß‰ï¢5UNÂπ3§`ÅIœÌ ƒ"»ÖÇ˘≥í>=+e√%[(ä¬§êiux0 F ,f”˘Í$?î{ÒhŸÑ\√“'≥1eXË˝÷úT∏\¶+òdRpjˇ›≈p‚ã¢›Ùñ C~tü$©íªÚ¸ÇÛ¨ %'4Uâq+N0_*õÒ/‰≤ p.VÏ"ÓHîç‡.¯3∏…Æ˝º)çâ|ﬁÅiçE∂eò«ÿˆ‡À°LN≈XW$ ∆uïy|ÜÀò]M™Û Uïa%¶ö˚OhEõLññ¸=CzÚ*äπNºé´É˛¿æx	‰L9'µ"éDJV9¶1	püqAMm &ò“<F⁄ÔÄg∏+∆˙;¢l˙%Û3ZƒÌbQ6´±√Q6«≠8Æ*1eb[-î¨u\„ÕÊ"QvB€&"Qñ—v@81ØÌ}fA€!˙Ã"«LF¢Ï$«p‚«p‚4«p‚åv@*eYÌ>ø:E¢,ß›'∆‹YÌ>1Ê^·8¬©sßSØrúNΩ∆q:uûü9â≤<?ì~&'ñ¯ôúXÊòcë([·N¨r'.p'.Ír•#QvIóãSóuπ8ı∫.ßÆËrqÍ™.ß÷tπ8uMóãSÎZ√e^◊üX"eo‰X$ np£ÎO…Hî›‘äƒƒl$«lÍbbniEåîw›“üÙ∑íØ∏cê˛¶V$&‡-É‰Ä∑íÓjE-Ô˜èÙ'˛É‰wí√I+À…_4HxW+b¥ºﬂ{˙ìˇíAr¯óí√ﬂ◊äƒ|≈ 9`€ 9‡mßRøŸ2Ÿø#Ra<´¸Å\.a÷U&¥fnóöu2 ]¢ø®F-<ËOƒ=nW≠≥∆b°ô PA	°g@)9/B…	† !â 8%Ÿâ;Œ`<V-ÒÅ’'Ñâ”í°µªø˝[·v±Ω]ÏP>j~Û¸y2˜˝ïœÆæ2∑¥ÙœÌ˛ÛÔ~o˜´‰Ê˜xø'ò »°o¡é≈ÔH¸úŸ÷î…&@((¡;†tcN Äòóà(nä«˝	(°ÔÅÄºwÄìK8 ÿaw∫ùNŸ—â˜≈ùj_ˇ@‹˜Lloıkπ∫µE÷_±5∫?{≤∫˜3Ä¶Ëá®ÄëDõL@ 6∏B6Ê$ëR∫Iè€l6ßÕÈt÷Î;ª,Òp(VeYp≈]jXµ¸Øö™~áhØˇŸã?¸ç∂?n#”√√›◊‚ΩkªÔ—?€¯Ê7A‡‹{Lì~fò'ìM¯ÌD$"PÅ@h!®ƒjëfE"êˇã∏∂7glΩQåÕU»ŒKD∫Ê`±Xó*m‘jÌµ˜'b	%"}ß¥‚ ∏íÿlù∆Ër	7 Z§#®:ùNW0‰¥[õ#‹§}Ω˝˝ÒØœ
+©-≤«à{‚’„ˆ∆{˙|≤¨∂Ñ˙˙TÁŸ©©÷L™π∑∆Ôh∞˚˝Áõ[[jìΩﬁÊs¥û;ÒÎ‰Óö‹–w∫◊._ï§@Ë–ªÔﬁ¸„é†,^ëÌØü˛d˜ã EÎﬁcÚﬂ…»hF*ëh$íÿD®DgA JDº(@(@ÓŒAíh¡B(}ã∑Z¸ı>oMï•Ÿ⁄,
+êâlux#§E∂ƒ{CBK(d™·ı∏eK¿Îç˜p—â≥i¿∆Bá&o$SWá&_ãât˜«ˆÈéÅæÆ‡yÚA8éÔ^Ÿ\òﬂΩív+èh ŸÜ&=û« Úè…‘‚ä·ûjÅP8+©@È¨ç`⁄ü®∂êÚ¨0k˙±î¢@∞5'Aÿé˚^GûÖr∑ƒ»%Ï jQluJé˙H‹˜≈˜;ƒ‚ªm˝≥!O£≠—·©iqìGgz∫%ÈÆ ¥˜Ï˛ÑÀÍ‹˚)YßÔ√áDbD&Dpâx$aVœ:ë"úá lq≥bâõ˘-'®≠qÿ+mVIÑè¯,oD“Ω›7lú;ëû-;ΩŒu∏Úı”?Xì?˙ËÊuEÒ¢ï+bÿçÇ~7râ*Åw*≥3LÕd> ∑Ê ¶%Ji…´AyíŒvæƒ1™Ån’’jTg‹c—≠‰q™Œ^”N˜,ç3=ÛS˜öî∆∂:˙Ò∑rıë+ØÓ˛ê˙€Í}ªExˆìﬂ$O¬@¢◊GZ'R"‹ã≥Z •wÁ@
+b…DçóUFàÑ$á7‚k	Öxxı˜ıÜ¬1⁄◊ª?y‹^üÅüv_mI5nSGÇóOıümı˜745F;g.ŸC≠ã~èœUﬂPÌh;?≠6.∏kºNo]µk‚hÍUÆ<∆ˆéQ/y·|˝TîúÑä‹î<“ö∏7ÕH≥Q‘xkN&Çpá]¿:I2≠˙<&óp{‹@Cù˚êÁ\p[ùVG}ƒWéCè[/aü«≈ïV[,Øó«d”T¯Ï•·Û˝ pÉt"‘:“·n{@ˇuwÉ˙ïõßnè˙ÎO¸S“:1˚•Ëü‘VÒ∏ÿ˚)©•£”ﬂqË˝ÅáÉõ7BÒπ•˜á∑p‹`s:ópË—ZM™E√}Œ∏≥•?ò∫Á¥âπ÷¨<;K[>˚q]-!W%∞∑á ˇç~JC∞†€zÃ Ú?Ëó—àﬁD∑ùÄT
+—ìö∏ı6xÚ
+ÁÕº–à∆ˆ`XO⁄æ£¥œà¬pπ
+…<@„û`ÊÓdw{À@›\¨ê}≠od˘p˝ê˜kØLæ˝∫÷ŸnòÌÌÌ9;r¯⁄ïAAzõÀ€{LcÙ#¯yåVJÍÌT†ÇûÃ∫,oÚÙŸ£>OMUÖ~‚Á1*=-áf`Ú»4,D
+ãû<ı’Ö—ï¿Ò˙UõäúõçxßO⁄guÌÍØœ˜®9_]¸µ±ïÎÕæ3Øô5õZ»T√èh¢c_ﬁ^ÊLú5∫~ßø¬¬ù#îC7HXO#Oàwt=ù^ΩñN_ç∆b—X4jŸ\X‹ŸX\ÿŸöKåÕŒé%Êåö"4ë'‡\¬n®•é
+"5”¿+QDÅ √›jë≥Ë6ËÒœπ§@	∫ÃÃ%¯á˘‘Z’’⁄Í¨p4Ì/æäã•<Ú∏oûËÓs¶ª33˜öî`ˇ’I%ö£ë∂ñÓR≈È⁄-öÉûÀè©WØâÕ¯wf7±Ihj§¢$à¬¨ˇ¿À›§	îﬁ‚9lˆEû√(ﬁy¢IxB6M§YÎy1x Êó¡Á1π\¬ÁıVÎiˆ6WŸ≠YÇõ∏y´ïZBa’¢ñÔSèÅåRM¢˝Ê=±)›2úÌ>üıü÷⁄›mˆÄ“G?˛÷lC”—7fO›ΩΩØ& #O‡∆|¬&ºOîºÍ“c‹(n˚{Ñ^“ûÎ/Í•
+∂ØG‹∂â \πIêG£á¢zEòˇΩà~|ﬂî§íj#©ÛQQ™!≈Yˇs≥Ç(>Á≥}u·%>+µ<Ax°œJl^}û«püy‹ºMπèR]Â∞[e∏àÀjVG≥Ñ˘˝ô_rz˙˙J›ÍoŒ≠ùÔm¨óÔ›∂â¥.\Îä∏’˛N˚wÊ7è6÷Õ˛Óg©Óı∂ª˛Oj´RìS„zΩåÌ%¿∑Q_¬M¶Ù"`«[”‘QÒÖ˚˚√--¸Ó®wHè[û=4xÑPë™˝˝°ûﬁsp‹=å¥Öb”c∑A0º˜ò¸y7.F¥Ÿ	%NJg˝•ë“íç]!DøQaIîLÀ&|Ê¨(n,©‘9ú5’UÔn‚ñüÌN”@>?uÔê“Úﬁª])4O€ØºJzwˇ≤ØΩ°â€≠j†Ëÿ{L~Dû†*ﬁ5ƒq:°áöÏ≤(Øô—ÁÑß9]BÃÀÜQ∫Ñ≤çOY∫≥~YèøÅ†Aı´∑≥⁄fE=©∑î==⁄◊É<˚¸≠7ÄÔß3Ôﬁ£≠mÕâ`oÁï#Á/\ò∞‘á\«áõÌgF3g™ïê◊ìojΩvs˜∆’õ^◊I[[ìèßÅwÔ1˘K˙e¥c:1YOD©éb°©‰W(i(Ù˜© I⁄0ÆRÂ€fìﬂÎÊ>∞ h'ÌñgØS!µØ‘!J:∏e^[x©˘?skj∫i¢≠s∞qz¸t¢-‘2phZ[:≤tg >09v≈ﬁ”ˆjck∏µ±›{©3j8äº≤ÿ=·kÊé-F∏¸˝„cÚ•ﬁÍ„ΩµÓ@oΩ˚Loı∫ıﬁ⁄@^‹[ı÷™ﬂê'ﬁ;v+õjw(ﬁﬁƒhww¯HÛI≥´5’ΩRY≈˚Y‡ï∆ ¥ÏEıæ⁄â!Lì∫Ñ]uPQûêiÖƒ+†#ìMhïDÜ(…‚eø•ö-íTQ@E≈[svbµ¢`#¿Ù™¬C´øºKy…/≤:ê…r£Ï_]2=J∑^∫6—]^f'VÅ´üªæ‚x.óK®#√›]È±·ÈëÈÅæÆ°Ó°épã“P_ÁÛ∫—I:FÑÑ˙zy…‚n˝Ò91Ô¶a›ÊUUÿw…–/¨!ïﬂ^ıjw‰µ¡Ió_©kh?ÚZü¯Œ¢ª7;–‘\€“û9WHø=›75Ö√Ì=âp0^∞˚G>m‘Ü€DG[≥øßF¨MGÜO¥ŸØà¡¡©V[µ◊U;îäœ«»'ÌmmmmÌª˜ZÎ}5ÇPWﬂÿ≤˜mzãÙST"\îW“<πí”≥Ç_o1O`ëPI*á7RîëvÓ+ò¡X,å≈Ë·UÌ‡ˇKÔW¯yıÊK%wÏ&·WR˛ëé‡‡Èƒùc˜»£]˝¸;"Ç„ƒE÷‹|æz¯ß∞≈ß2s¯∂>ŒOmˆˆÓZ◊Ñˇ
+¬sÿ¸nˇ´›Ô÷è>{{W≥ÆÈ;Ìˇi§;»–L‡ Ÿ˚epR≠‰k#_Äìaå¸xË∆»!å7ht1A´ê√Á—a}1:àaZçZ/˘≠‘ã`Ô€ƒ≠Î~Ô„}<$g	£2ù•ﬂ†èÑ¨·wÑø{≈[‚üKK“∑‰£Ú%˘˚ñAÀ7,?±˛'Îì
+n).}#˛	ÏXA(é·]|¿üVŸ¡?¯ó@ƒ
+ Íˆ‰4A>4i
++~«§$ÒoLZD+ô¥Ñ,qõ¥Ö\5iæNJ˚Xa£-&]Å:™ôt%zh⁄§ÇBoôtz•Ø„w°†]ËA
+∆∞Çu,a
+⁄p	ÿ¿uA':˘˜N∞Ö
+eLÀX«:—
+∂p∏X≈M¨‚na+P0Åu\√Gk¸•ãX«&n`´J˝˛'(XD◊p
+‚HbW±Ç8bËBz0Ñ1§ëƒ	XWZG¥º ¿û@„üsÜR∆ü÷%øâÀ∫Ã ÅS/a∫ﬁ◊p
+∫”ˇwak(‡
+Vuƒ¨‚∂~FbË◊?OŒÉ≤]÷Â*@¡nËV_’O∏Å+P∞éœ¯Î≤.+∑?:Ök∫7Î/b˝…ÿÛV–âu‹–w2÷pöÎµ©˚È.ÎËÿæ32(`W° ç3±øxúl‡Æc'q…‘Ôi\pÌ/`[∫éO-póuãpk⁄SWLâK˙.b
+≥PpBﬂˇ⁄ÅùgÏ¿#ıYóº®ÏìÏ‡πO˝q\∆U∞Ñ´:Ái‹soM`Û:ΩÅ#Pû±ŒM,Î∂Ωé›∫\Ü´àÈæ∏àNú¿füë‰Á€hEØ-a≥ÏwC;ÓoûmcXÑÇ),*ız¥ÛÁ),Í9É)úƒ1ú¿)ú‘ü«Ùoíç·8NbJœn›(H·é#≠Øò“iÉ7°G‰q‰†`S:ÜÔΩj⁄«œãÎ∫Ù7uŸç(ºå5\◊mŒ%Á˙/bU◊ÔÔaÃ]KkoÍkñqt$˜.∑ El¢ÄãfTpÃ¨È∂,≈∆”|1"Çsç\z øàuΩŒ›–séÔ™‡éôÀ<Zôåå›¯º˚ˇä≥«Ó˝z^¯Ω∆F˝eV@+·}ÍŒ`ß±àòÖ!, ÉqÃc’»"/&0M¸Öp·¸ÜeÛ⁄ÂÆxˇ¥kÊ~∞ê-Úµ#∆ü◊ØaI&*w◊^ùÔC:Ù˜∂ıó≈÷%ÎiyZ>b’,≠bÖÕd˝3˘KÙM˘u˘úòìr\j£:´&9VŸÚPyÿ¯∞Ó°ÁaÌ√™áïâä*PŸQD}r¨âÁ˛qÊwy∑M[…˚ÛYñx?ÀüW“≈6˛¸¿
+cÈúøÊSﬂ≥æ"&ﬁ_>YbüÑ˚C˘]∫!Ø»YqVñcRàVTu< {Ô1Ò´EäÙ}iEF:‡ˇÈ6ﬂ6
+endstream
+endobj
+13 0 obj
+<</Length 13/Filter/FlateDecode>>
+stream
+xú˚ˇˇˇˇ ∑Ω
+endstream
+endobj
+14 0 obj
+<</Length 484/Type/CMap/Filter/FlateDecode/WMode 0>>
+stream
+xúmìMo‚0ÜÔ˘≥áHÙ¿∆N¯hB¢@$˝P©vœ!ÿHƒéÁ¿ø_ŸØ°’jIÙx∆ÛŒkO“ÔáÒZô#èãüÇ>∏7É≠yºy©∫$M∑¶Z÷ÓïY±∫E˚u÷‘=;⁄Ï∑{›∏$M˜∫æäo9ˇKyÊs£øºmÜﬁô6I”œ∆]xA#,PËâˆäµk‹ïƒCí¶øÿˆç—íIöÓ¥⁄ò÷7◊'Y‘†Ï›ö˙¿éNçV6*——Î&2'’‘.Rx◊m’ÖÕákÔ∏›Îì°YjËb&Qˆ¡Á¶wˆJ£–ÿ)>!Úf€Füitkˆ[0t›Ö}ì$¬*kæô7ˇZµLY4|_ç.I~-}^;é≤ﬂ/F›@¢≈⁄(Óª™f[È3'K!ÑX—≤,ÀrÂˇâ€éß˙OeC∫\—Rà˘d(4{†)h(†)b%hÜ*3–îÉëπ=Å$hçÃXÛı6»‹Å∂à†h*AOÅ§? !¶®)·oÇö˛
+®K¯+–ßÑøIå¡ﬂ$∆‡o‡/á#	9zë—ŒS¬ﬂlÇøß+£ø∏˛Ú® ≈:\bº-ù~jÔÛS÷≤vah√∞¯…h4ﬂßø3ùﬂû€‹˛@OoÂ_∞˘#
+endstream
+endobj
+15 0 obj
+<</Length 6521/Filter/FlateDecode>>
+stream
+xú≠zp[ŸuﬁwÔ˚@$A Iê‚RƒH¸ìDë  ˛H¸É@J¥Z	IQ Íœı∑õµ]Kªﬁ–ﬁéíI3ggíq=Mù∂≥TºV‚N¢:u*∑â”LRØ›z∑Ó4£x&û÷VU«€ZdÁæG+≠7i¿Ôy˜ûsÓ9ﬂ9Áû˚ Ç ∞„”ê–9mÖ˛˙/¯◊ È<syÈ¬È˚-Ä¸®(_:ÛÃÖóﬁ*
+∏˛‡Ïb~!ıø¯†›–{ˆÏbﬁˆXy–~†ÂÏÖï{ˇÃ≤hqx„¸•˘¸â»±†Â- £Ú7.ì˜+ﬂ Z˛
+ ªòø∞x∑“[d@=~˘“ïï/æ70Ñr .^^^º¸Ó[Ø~˝GÄ(¯á¯≈Qåbî™ ≠ﬁxå#8Ç$íÙ@Q˙÷∆cÚh„ÒF«÷⁄∆c˙Ä<‹xº1%VÈ_ÎS¬¢àJ'Ëüêœ"ù†In·ˇlÌ!v®*v⁄xº…øü|nS&Anm m≥Ö˛·ñ5Ùç˝Z1àA!èˇ¥1Éˇ∂ëÿ‘ßoÍì$Ω§èH:„8í…26qá'∏:{<√ª}º-õ;√Vèd8‰œ
++ÊÁµ”>øü#Àë–ík H‰‚aNtŒrg¬úÍö_Ûáπ§≥Öªí€ÉxÇª,óã®;/§ßâπåókú&˘.ßn¨QJπ8˜/6¯≈ÏZÖáƒß	-æÊ"ÆD.Æq§2ãŸµ"8√\÷π‚ûDFÏ«kâ"Éè-0~?≈Â‡Òµ6‚HåÃèpu$„ÁR õ~!„◊¸æ’„©T∆œcY„˝ÇÍœfY¡‰Œ/∂T∆_|bºS¨w
+Œ˚©;√VWÛåó•29„L¨ï	™WPΩ9_.õÕ˙8Úƒ<G:√1!ò˝º<·õ‡ªµk"Ø
+ÛÇ„ûÇ”ŸÏB>ÀI(õ-zêeº&°≈≥aÆËlÑq9ê_`‹íHe∏Eãs´˜˘˝YNraÆps)ƒ
+ñ”q&Öª>”|Òõ€r#Û\i˜3nM∞U∂ I®–©∏<ú…•|˘t6£e˝Y∆c≥NB>ÅK—î0∑Ë‹ñ≠Åöa∂Í‹¶≈5∆°≈Ûúû>√…<'9nisõŒÑµâ˘{2N3°Å«rY¡íK÷ñÈk∂
+$F‚Ì˛Õƒ±Î;©‹‘BBGÇÀÅY’Ú"®ÿâÄpÊ„±M¿∏–ÚIs«sƒyK*#Ñcœ™˘Ø≈Ô: !ç§2~üÊœ∂˚√ºR/P:¬Ú…0Ø“9…1∆+áÑ∆+µxñWâßtÜÒ*#^NùÒ*vO∆¸™ñÁŒDé≠Êwjq-Ã´ıâπLA^Hf[∏cQªÊ.}‚pfb÷úÙ˘≥-‹eÃªı™G2ÖÍÍ'˘8wÜD…qà*≈Ø*àsR£1.RôÇÄèÀÅ¯Í*€Vµ˚5NÚ%⁄gÆ0f≤º21∆´c9NwÎ9!, .-…IÇcpçbDÀ££ :2ó·’Zúç
+-Œ∑Â‚,˜’⁄Z'\à«„∑Á$_p[C¸s!_s6ÃkÙ<°0˜Í"∆ZΩ@≈Xß$1÷ÎYå>Ω†à±A/®bl‘1Ó“V16ÈõC∫V¬ü´πâπå∆"úº(™%Ãımã5õãü0√€ÉõãÀÊ"”¡+Cœıìì¸WLWÖü€˝ÛÎ∞Pò7Î"FM/P1∂ËIåΩ ã1®1∂ÍUåmz¡"∆›z¡*∆vΩ`cDgF¬vË,«ks,°qí9ëE9€©ÛéÔhÛ=:ccÏ9—‘Ú˝ö8ÿ?í√'ºÔ*Ö∏P°éàå„{⁄
+Òåd:≥Üó—m<èß[g=ÜÂ=:ä<#ﬁìì–3mÛ®˘]£/'µ˛B7Ò_{u6¿∆ûc?G"ﬂÊ}zƒ;Ê˝?èïìƒ|òÔ’5ac‚H‡4ppuuL”Ú,s⁄'N]-æ÷Oà«›Ê˚téÓ’‚\p9`∞ ÁˆDhq5¢16∞⁄Ê˚w≤±à©è´ZºƒÕxNú)±√ôª2SòÔÆTÍ≥qq“ñ%ÿ™fHh£9Æ&û.◊ú8ÌÃÆ$'rW˘ÖTÜÀâºè+âú8Èûñ…kåq9®çÊ˚}/KåäéUñ0v…±gm¢ôg™ö»â`(Å<W>§ïÀAaD@!r≈ìtkØlòî∞`åq%XƒBËÛõKºÃX’∆ƒ¶"äÉõ
+gL§9Ê26†˘ç~[úd¬Æb(∏‡J‡‡ˆªãƒge{1ZöH˘°mñ$J· âŒ”.óB”5(éro"ìÚ•≥6êç:â;Ê√;V”æ‘é’¯3e?J"°Û}°è⁄0©Û˝°U∆Dé≠ˆ?üï´âÔÖ˘à·≤»œ†â|ûókq”uë†`≠ø®T/î…ÅxI‰Ôò“cˇPY,|ÁÿÄ÷ÔÛoÀ∂hÁò^¿æP	ïqΩÄ˝!øàô0¥ËÕ&uèYˆkÓäﬁˆ0?Ùú˘	Ω ‚vÒæˆ0ü‘˘ﬁˆ0ü(éh,¬FWµ|	≠i]$4ü
+Ö˘åæåÜ¬<•ØÅ‚∞æFåô¥æFåôY¡3
+Û9¡#à#ÇGGè éÈw$Baû—Ôä´S(Ã≥˙]bŒ◊ÔsÓ¡GuB‘ãÇœ†N
+>É:%ˆ	ÖyNÏ)àºÿSß≈ûÇò<„°0_<ÇX<Ç8#x±dÿïÖ˘Y√.Aù3Ï‘/v	Í%√.Aù7Ï‘√.A]4Ï‘%ΩÄÅÕ ^6ûx,Êü0…·Pò/–çßx(ÃØËR‰Y1I¡s’‡!Eûkz6µ^7ûâ&)$nö§`Y/ê"√+&)~—$√´zÉõ˙>i<Ïü2I¡˛iìÏˇH/ê"√gLR0‹2I¡p[/`hSﬂk∆ì¡˛∫I
+ˆœö§`C/ê"√/ô§`X5I¡9}Õn‹lπÍ[ì©4í—¸>6qÎ"óZR7JÕ:YÄˆ–_Ö*QzcQè€UÌ¨≤X®D&H“(!Ù(%ßdB(ô*ä	íSQΩ°®”Ô¯[[5K_¥ØOÛJ}≠ƒi…íÔ≠ﬂ!‰`∑‹€+ÔâˇM¸Êß>E2ü§ø˙‰¸æ€KKﬂ8y˝˙˙õ∞ﬁEæı µKFÈg‡≈πXôõ®ƒC†“…	Æ•2±FH“ îB°ßdBÈı)®*N[
+¶}bùJØ=o=ÛTW9 Ìe6´EUdxâ◊Í®	yõÉ=N≠ßØ/Íâz4ßª&⁄’€ÁU’øô>0>Y6rÎñø›—P·tuÿ≤IŸ†Ú÷[âı«˙≈≤ØÃ.lN‰]˙ nDb!óLã∞]õÇ$ë<yuJë)•WÈ4 7‹ö´≈©:ÍCQg‘cÈÌçv’xúö≥;®5´g:-iS]SciΩ3∞?@|}¡ﬂëq˝O»Ó‰`0∞˛[∆óo<&ˇû<ÇâX¨ë(Ú.B:	Y!ÚíJ )Izu
+äBÛBÈ+t⁄f%’ykúïVfcä±H≥™Z¢›A©9ÏÈ6mr´M	R∂kÔnÀì¡–KÉCã˝'Á)]ˇö˙‚Ì@›.6CﬁnåuèZ∏íöY¸≈≥é⁄ÚÙú€Ÿ[”`⁄ŸxL~D°>ÑcÌ€ê!î"/õ!rVx=U>ßœfA%©T5!eÀ"aí⁄⁄’€c@Âq◊ê ˝KCCK˚Œùööúû.XN•óñ”©ÂÅ‰“Ï‹Ÿ≥s≥K (»ø#·Ä?∂K%dí‡˙îDJ¡q¿QÁîµ°®u’‘x£ΩΩ}Æ®Ùµ∑èú∞{Ì≤›[v‚ø$◊ÿ2Æi„-ƒΩ^/¸3s‡$y'æ9¡m©L¨º™Lí$J&má|‹.Êlƒúßìæ	Ó˙ﬂNñl6k*´Ü …4V&ítUö.™¨Åòei¬πµÍzé‹ÛD≤Ÿl¨ÄŒñß‚®È) àvy-¡bn&-RÌx{£∑⁄Ó™lJ‘ëáôHoŸ®$uÆ?0qÿ¯[|á>@Zc-J&A»5±ÚíeõUëQA*‰RıE7´ÓÀë›Èä2Ÿ¢⁄´m{ªÈ¬ì_sU2hEt„1)êG®G ˇ*VQAm⁄Âu®äLƒ	!Ä™!4J_ùRâ,#/)‘<L∏∂÷!IWãLJÒ 1A{æéè z|æ@C†∆S]e∑°û‘[ä>v˜ˆuõ0∂ñJæU3“πØßÇz‹5_?êæÛVu®≠˝P#kûﬂóM%-RÀåWãiÈ‹ÓÆÚÒxzŒŸ‘´±Í~o€Ö÷øΩØqwí5›≤±k”Dç•7¢‰ˇíGpÅ·ﬂƒ*%¢`W#ï'°≤T®äR ëe√õW¶T"I77ì ofà¢3‰ôåÆüØÌc(†π=n¿WÁf\Åß’QÚñ≤œ®z≠9ÿÍı∏JµoÒ‘‘àdÙœÑNûﬁ™ø9—LØÃÏijÒ˛)Ω€ﬂ–ˆŸO§ØÓ™?Ú%¢.OÕ7≥çØë£è…∑»C∏ÒÊ;ŒrJ	)Ç„í!Fi‡¥º3qº≈%YæjÆÔÃôgJ>WH8Ì$®™¨pîâJp∑˙t%8£f~|j|6‘‹ﬂ,‹mû,œøH∫◊ﬂM∂ÜHvΩ~≤≠sÎ¸yó<ÇøÙéK2ZP—'HR)D•.TÚ…åŒáöT…ßgI>WH¯‰¯P{+Ep[{KZ$mz≥øëá£⁄ŒˆF–∞Òò‹"è∞›±=µD¢u≤$âNBíJ’G»f” hÙ’∏≠*vì›ä	ckü—∑z∫É¡÷ÌÈ61èª∆ªãäî˙ÛûìÕA6ÓÏd]-Ò›ŸôtC∞Æœ	ÌGBªg ˛Œ˙ÜpSùﬂ[Ê–z⁄ˆœ4’vTª€¸ÕUéñ>Ω5ﬁf‹Y ˙UÚ~qÊ5T©í2I	-gúÆ ¸;ÎÍLd∂wóm}FìÇAtãÙõü=:f≠Pek•u¸¯A[ïE∂VX∆R∑^∂UXeK•mò<\ˇkºµ5Ó'u€®z"7'B°§˝g¬∂Úç£Á’£3Æ*ì%B%B'Eœªn‡xZ‡xS‡X„)∑[qhm·(r±oG3¨†«´À´´ùª{+Ìtdﬁ^góÌÓ≤c©Ø:;F˛\ïcÍ˛p˘Îıˇ’4ﬁÏgƒÒ‰QÁd«jßw`á°X$cñ À8@‹Ïä}ÿ]]Q;Ïø*z±≥ÿ˚5ÕÈ4√™i«øvË‚‡ÎÁœü>:{ÏËIzßÂ»¯“¬˙œ»¯ËXüY«Úæ±_GLÖ$SiIxlÓYVN©DQÆ*"<vÿù‚cq¯ƒe÷„óAèﬂsúºº˛›> {Ëù—oç˝è1S˜@æJ?ârÃ~E˜·…	ÓKebı î‡”†teJ4<9ßYæ*µC	}‰µ+fÂî£‹Èvö˘—uj=ΩΩ}‚Ü8Û++˙p˝–Ì$˘vè’[ı‰èì  ‰ﬂ“U¯∞')∑SäB≈ùAX'*sEú8“©bs‡ÉØ-–jÙıûAZ<Fã≠»≠™‚ı¥Â^8–ñlà¥Ωp {f‰∆t}›˝Æìø|-⁄7f·pÔ“‹‡ÀØß®l‡@!¥ëﬁÅNSïÄlæ3ú5Ã(eeeŒ2ß”iVÄÀm5s]rE]Z´f˘Mﬂh™fUr%˚œÔü|?;¯?á»•ÖÖæ{˜^X?NÔ<π¸‡$#áZË8Q{cΩ6¢à;Ö"SeIYõ—%ßTB»U2h˛F_}≠ªNT˘-ÔVNâNb4©îY[)ˆGâ≈Ω{:«á.˙d~Ó–‘‘‚Úëì/]¶wÿËæËT•lüäëõ˚∫ˆv>y<?∞HX£Ô– DˇS¡^”±qåeT£1V/8ÇÉ∆I‡*¶[Ç‘QÚ∂ˆˆ∂™Õöqe0Éìpá:	Ui≠÷R«£ø”Èj#çæ¶Óp,/tß»€¯Át
+º#J “1 nóîÛ˝ôˆ≈ú€9rä2ìçïP†TKo»’⁄µXÊ´§åTEﬁ˛Ì'~€år«∆cÚ]˙¿∏Y|#VUF‚≠°≤B'´àL&JWJØ=’Ïëó‘}‘ˇìqç29’ıÁh˚äDGÚz‹§xµ®¨pî[U∏à´ÙŒgæTx[E±ôW±æ£Gà&Ò”.Óœ˜µ2y6ië&ÎbM{wµGÀ_ª9sepW˝Ï◊ûÙÔmÿ=íXovÃˆõﬂÏƒÙ«‰¸¯çòç’ñI≤$óöqçya,ˆ´Eë∂ﬂÂ≈´ƒu„NIÚ"nØÓ‡p}Ñ¸Gâ
+™Ãˆ£UkÆñßÕ—∏≠7{wthÀÊ(5õıUßıâÉi=“õLÎΩI£eÔ—wwó⁄ˆƒ˙oÛ ElÙ{p@Ω´ÇtÖº∆˚õxáΩ˜€É££É—}{˜Ó„ãÔ›æ˝˛BÌ©˜ñóﬂ)*!º¡»…#ta”$+8®¨T©M)›{ÌDÖ¨®Ú9X,%gçÎHëT€)ÿlWß â’ä|>µô~›;•KôCO¡ËÜœïu˝Ï¸˜€TÑMãuG	∆íC”±È}˝—¡Ó¡p{K≥ØæÆ∂∆ç.“Âÿz∑Ë	nå∏äˆU<€ö[£≈≥^⁄ˆ
+]ºRã˚µ¡ÛìÏÂ†ø∫ÆŸU€⁄5∑«›‚¯Ú¢≥∂3’’⁄Ï®Ï9y‰»¿≈…ˆ°–¿Åﬁ—πh«\Öø™æv‚˚…°¶Ω5≤Ω≠°)‚ê›…PœtªEí´:˝—…›NªœÌ›’w <ŸA
+C====CÎo6◊À≤´›”1k'∏ë¬{≈‹±π”⁄+Ã˜9è[ÕyÂ≈¨©]xˇˆÌ˜ N›·ç«∏G˛mE@ŒUå∞@Óësº'$Ù<XÜı1ØqÚ“““¢¿NÏ“&†&TØ÷iZ]≠¶ïkæFMkÙiÜùﬂ§á–GﬂÅ≠u!)ﬁí-i$8º]aAE“πMimSSmmS=‘XWªkWm]cÈ‹¿ó»CH®+æ¢”R˜2ædÁs‘u¶”‰°˘≠Éê$«Ãw∏Î…© Åˇã$æE√˜'ˆæaåáÆ>˘¬˙w≠ó§?0¥–‚ﬂªàÔÜ~∞˛˚Äı◊ü|a}üıí°i˚ßôæâ,I£ñ2§…è∆ÄÓBÑ¸ …HciÚSDii 0A5§…?E˝3‘
+⁄ã„¥«…è1C~å e7¯„¯	í¯ ¯ )Bát i“aË
+ìÒÜçÿ¯&~b†2é/‚{§õtìk‰K¥ç••ó•øí…_î§Ù*ï∑îÔ©LÕ®ø£~E˝ÔóÂÀ÷›÷1€òm—v›ˆ∂oÿ˛k´f|ÂXÇ„∏ç7¸iE9ƒ◊ò‚Àü/ä;©ly/A‘„ÛEö¢ˇ¨HK«ÔiyèÇ~V§U…\ë∂‡◊»ÀE⁄ä2ZU§m®•ıE⁄é.⁄U§£E∫› m|]ËD¢`∆.·4¡–Ü≥X¡
+.c:–ÅÎ∆O˘MûÊq	–Å›–¡pÁ∞Ç≥`HcW∞àe\√"¿0äK∏à0L#èbVãY\¬U,cã¨n˚fë«E\C‘–∑Ñ´8è<ñEùËAˆcIƒ1É˝;§K≤QÑüí5%f«é^¡9√6∂CÔY\¬ä·ﬂE\√Dåùÿè»„%,g∞àÜΩ]à†◊‡¯xñÏÙˆú·i+X60^4ˆY∆K`∏Ñ3OEÁúa±@[<¡E{ÎY¨ o<ô:/b∏ÑeCì)#h·›U#*À8gpG∂ÌëBﬁ∞ï!â∆ãº?+Vpó±à9ú-˙∑ï¬˚3X¡u√«-Œ„úÅà¿ÃÙFÏ∫P¥∏‰Ô,b3Ü˛ã;4OÓ– ÚÚÈ8ób…∂Y∂sﬂ≠x\CÁåàù∆yce+ÀE¥F1å√ΩÇ}`O°sÛ∂ó±b†+l8èàã%t`£ò| íüè—Ç1öQ;ç´õq7ΩÒµ5åY0ƒ,´C‹x>àYëc8à9åcG0g<#ç4Ü1ç9ƒà!;É¥¯ü Ã`IC‚†Aõk£FFN#Ü	4xÑÓ≈">fƒDu\6¨øbÿnf·9\¿esaπãÜá˜3ú)j-…^1dÊqgN]Åä®Ω<ñäY!xñq¡¿≤î[ıbfÑX5kik}	óåSmŸ®9°ï·f±ñE∂ö6ôªÚ1¢˘{ÂåxÉ2>ﬂB◊3ˇ˛¥¿1L`“»‚fêƒ,28å£8éà¢nx–Ç &Qâ2å!;°çpäw-W/ûÎåvä/?&Ó·A:S ‰g91ˇ‚rñxÃ˛OÍÖèÙ¿Üvc∆Ωj˝åºl=m=™R˜YuKãl++.˝ä˙:}Y˝ıÑúí„jTi£∆RU|ÿﬁ|ü›o∏_{ﬂsø˙~≈}{ÃÉˆˆÍ‚√vƒ>Ù#OtŸd°Öºq8√codƒÛB≤–&ûÔYaN ôıZ≈‘Ô[?"«ﬁòü+-àOÃ˝yı6]Q‘å<)®%HmÌ˜»∆k\~≥@ëº´,®HäóˇoÖNÔ
+endstream
+endobj
+16 0 obj
+<</Length 1243/Filter/FlateDecode>>
+stream
+xú›XKè7æ˚WX:%©˜µ@ ∑¶æ%πtoQxƒêø_Pèë4÷¨Ω∆lëmÇDôí»OÚ~Ñüe–àˇû„O@»"úí :'®#¬i˜˜Ó∏˚}˜µn≈ ƒΩd·¸∏˚ı áÛ/Gî_«ˆ\Ñ√”«ü>!‚'D #/Fµ',:zOæ»&èv°Ô‚¯ÁB+˝˙-˛ˇ%Õëä„±¨€>ºﬂ˝v∏ÙàÌÿ#‚óxîŒC‘≈∂Ω.™∂äj‡Gg˜ºﬁ¸8/tÆ€@ÓöΩÆ_Cvæëd“ª9∞p"&cΩUÄìVÜÉ&úl®+¯|Ç˜(	?≠&%Äå/R∞Õkuv‹{˘Xá…∆≠'ísYÈ…i†¿Sp÷4Y‰’D>>∑˙ÉóÄå÷+oÈgbÜ1è˘.òØ!°PJØàﬁgdŸ»+°v≤÷Z±ì≤DZ7OÅ£Ís»^9¯¸'ÂÄQM>ûäfbånBÇ?)LvÚ,è≠ˆ
+¨§˝6∞™+∞Ê¿)`îdËÚç+.H@AÅópU ^Mﬁö“¨õµΩ¯Ñ¢êù≥∂Í2:ŸAÜá∫Ø<∆Éìv∂··cS¸ø ëàﬁ˛π¡6 ëäOl“(Æ≤-∞Mˆ¶ŸäÄ»	Ç$%≠¢-Œ 	É≤súçgg-≥
+«óı>ÃF†Ü€„¨§U›!N%ÍºÁπê—úB	˚2‰qëÑoåhFâØª\1?ò+MÍ±Û?) ÄíçÇ^≤HZ ﬁMKŒcRBôtê∫pÏ.$Ñ’"J
+ È˜/{ì´jÉn¡™÷‹X≥q
+!Úär/»8ƒ."p'çπºû4*úÕ\íééX)È(æÖÂµ]È(Ìi^anæ÷ÍÌHãVÖµhüXãnxäQ-k1~÷b|œZåÎYãÒ=kÈıÂUáˇíµto0Mæ4†?#¸&öbT§)-K©6s*-∏ TKi⁄å1,‚∑DËYÆ/™“M|."Zôà¶RÅE*5US≠¿öK÷\+∞ÊZÅEN8II´hK≠ï=R.;«Ÿxv÷¶’
+¨¬´Û
+
+"øLQfX,8ÿh≥	.œW$DNH$)˘Vı≈kŸ'aQ˜óÁdCZQÏ†aic>"…˚íqgﬁ#Y˜≈∂E’vñÙ^1u_›37X…rÁKØÜeπÆ2ÎÃAﬂ◊ˇhR·ú˛Feøª»b^∏◊ÚÒ∑&”Æ¿±Äˆ¯L‰Ü ªÃÎ/*y÷e“Öiux/mæ˘W•≠]áÍÿEÊL∂@V*Fm7o;2Ê\!cû[hÿów-º‹s±@=‹s±^¿≈ºzu.ÊÒ¿ç‹‹ùiÓœòñ∏π?·lÀ
+\”°9±Ç$ÂæÀ¨2sè¢ÓÁõ.E±g¿
+úzuéTAC§‚[P-A4Çn—∫¢!rB#I…∑™/^À>	ç∫úè6‰jç`6ÊH1[n¸Å˚í>˚Çõ<ˇiz• Ω§jﬂÙ}ﬁÆáÚ∑÷ì$“Â«ôÁˆ≥Ãπ-z»ŒıMdÁ˚&≤s}π◊‰Vâî7»¶«=1qÊÌ±Èu_~D6mÓb”z’«7Œ¶MØ˘<√k®z}7ØÜ≈øòj
+endstream
+endobj
+17 0 obj
+<</Title(combine-proto-edge)/Creator(VectorCraft)/Producer(VectorCraft)/ModDate(D:20261119220745Z)/CreationDate(D:20261119220745Z)>>
+endobj
+18 0 obj
+<</Length 1068/Type/Metadata/Subtype/XML>>
+stream
+<?xpacket begin="Ôªø" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="xmp-writer"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"  xmlns:xmp="http://ns.adobe.com/xap/1.0/"  xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/"  xmlns:xmpTPg="http://ns.adobe.com/xap/1.0/t/pg/"  xmlns:pdf="http://ns.adobe.com/pdf/1.3/" ><dc:title><rdf:Alt><rdf:li xml:lang="x-default">combine-proto-edge</rdf:li></rdf:Alt></dc:title><xmp:CreatorTool>VectorCraft</xmp:CreatorTool><pdf:Producer>VectorCraft</pdf:Producer><xmp:ModifyDate>2026-11-19T22:07:45+00:00</xmp:ModifyDate><xmp:CreateDate>2026-11-19T22:07:45+00:00</xmp:CreateDate><xmpTPg:NPages>1</xmpTPg:NPages><dc:format>application/pdf</dc:format><xmpMM:InstanceID>pMo7Se+1fOmdqBJMlTtXgw==</xmpMM:InstanceID><xmpMM:DocumentID>pMo7Se+1fOmdqBJMlTtXgw==</xmpMM:DocumentID><xmpMM:RenditionClass>default</xmpMM:RenditionClass><pdf:PDFVersion>1.7</pdf:PDFVersion></rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="r"?>
+endstream
+endobj
+19 0 obj
+<</ViewerPreferences<</DisplayDocTitle true>>/Type/Catalog/Pages 1 0 R/Metadata 18 0 R>>
+endobj
+xref
+0 20
+0000000000 65535 f
+0000000016 00000 n
+0000000067 00000 n
+0000000147 00000 n
+0000000284 00000 n
+0000000724 00000 n
+0000000933 00000 n
+0000001073 00000 n
+0000001546 00000 n
+0000001757 00000 n
+0000001900 00000 n
+0000001980 00000 n
+0000002535 00000 n
+0000008981 00000 n
+0000009062 00000 n
+0000009633 00000 n
+0000016224 00000 n
+0000017537 00000 n
+0000017686 00000 n
+0000018831 00000 n
+trailer
+<</Size 20/Root 19 0 R/Info 17 0 R/ID[(pMo7Se+1fOmdqBJMlTtXgw==)(pMo7Se+1fOmdqBJMlTtXgw==)]>>
+startxref
+18936
+%%EOF

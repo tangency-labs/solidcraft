@@ -26,7 +26,7 @@ pub(crate) struct PlyCloud {
     pub bad_faces: usize,
     /// Edges and faces in the file, left out because its vertices were thinned.
     pub cells_left_out: u64,
-    /// Points left out before thinning because they have no position (PCD).
+    /// Points left out before thinning because they have no position (PCD, E57).
     pub skipped: u64,
 }
 
