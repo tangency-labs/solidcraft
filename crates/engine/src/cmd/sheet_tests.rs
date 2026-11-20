@@ -7571,6 +7571,31 @@ fn perforation_outline_on_a_folded_sheet_stays_in_its_panel() {
     assert!(refused.is_err_and(|e| e.to_string().contains("must lie on a face of the sheet")));
 }
 
+/// #19631: an outline that lies clear of the sheet holds no holes, and the perforation says so instead of making none
+/// in silence: when it is made and when an edit moves the outline off the sheet. An outline on the sheet stays silent.
+#[test]
+fn perforation_outline_off_the_sheet_says_it_holds_no_holes() {
+    let mut s = Session::default();
+    sheet_with_a_field_outline(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Vent"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [200, 10], "p1": [240, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let params = |sketch: &str| json!({"diameter": "4", "pitch": "7", "sketch": sketch});
+    let made = run(&mut s, "sheet.perforate", params("Vent"));
+    assert!(made["warning"].as_str().is_some_and(|w| w.contains("outline") && w.contains("holds no holes")), "{made}");
+    assert_eq!(flat(&mut s)["perforations"][0]["count"].as_u64(), Some(0), "an outline off the sheet holds no holes");
+    // The same field on an outline over the sheet: holes, and nothing to say.
+    let edit = |s: &mut Session, sketch: &str| {
+        run(s, "timeline.redefine", json!({"feature": made["feature"], "command": "sheet.perforate", "params": params(sketch)}));
+    };
+    edit(&mut s, "Field");
+    assert!(flat(&mut s)["perforations"][0]["count"].as_u64().is_some_and(|n| n > 0));
+    assert!(last_warning(&s).is_empty(), "{}", last_warning(&s));
+    // Moved off the sheet again by an edit, it warns again.
+    edit(&mut s, "Vent");
+    assert!(last_warning(&s).contains("holds no holes"), "{}", last_warning(&s));
+}
+
 /// #732: a mirrored copy's bounded field is the mirror image of its source's.
 #[test]
 fn a_mirrored_sheet_copy_mirrors_its_perforation_outline() {
@@ -9664,4 +9689,45 @@ fn a_cut_passing_a_hair_off_a_flange_corner_builds() {
         }
     }
     assert!(failed.is_empty(), "{failed:?}");
+}
+
+/// #18576: a 1.5 mm sheet with a closed spline outline and a 0.72 mm square notch cut into its
+/// edge folds 90° about a line away from the notch. v0.43.0 refused the half-depth notch ("an
+/// edge not read exactly in the plane"). With no notch, a half-depth one or one through the
+/// sheet, the fold is one sound body and adds the same bend volume to the flat sheet, so the
+/// notch is kept as cut.
+#[test]
+fn a_spline_sheet_with_a_notch_at_its_edge_folds() {
+    let sheet = |notch: Option<f64>, fold: bool| {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name": "Rule", "thickness": 1.5, "k_factor": 0.44, "bend_radius": 1.5, "active": true}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SheetOutline"}));
+        let points = [[30.0, 0.0], [22.7, 15.1], [0.0, 18.0], [-22.7, 15.1], [-30.0, 0.0], [-19.7, -13.1], [0.0, -22.0], [19.7, -13.1]];
+        run(&mut s, "sketch.spline.fit_point", json!({"points": points, "periodic": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "SheetOutline", "type": "base", "body_name": "Base"}));
+        if let Some(depth) = notch {
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Notch", "offset": 1.5}));
+            run(&mut s, "sketch.rectangle.center", json!({"center": [0, 18], "corner": [0.36, 18.36]}));
+            run(&mut s, "sketch.finish", json!({}));
+            let cut = json!({"sketch": "Notch", "distance": depth, "direction": "negative", "operation": "cut", "targets": ["Base"]});
+            run(&mut s, "solid.extrude", cut);
+        }
+        if fold {
+            run(&mut s, "sheet.fold", json!({"points": [[12, -1, 1.5], [12, 1, 1.5]], "angle": "90 deg", "fixed": [-12, 0, 1.5]}));
+        }
+        let state = s.world_state().unwrap();
+        assert_eq!(state.bodies.len(), 1, "{notch:?} fold {fold}");
+        assert!(state.bodies[0].body.validity().is_empty(), "{notch:?} fold {fold}: {:?}", state.bodies[0].body.validity());
+        drop(state);
+        volume(&mut s)
+    };
+    let bend = sheet(None, true) - sheet(None, false);
+    assert!(bend > 1.0, "the bend adds material: {bend}");
+    for depth in [0.75, 1.5] {
+        let flat = sheet(Some(depth), false);
+        assert!(flat < sheet(None, false) - 0.1, "the notch is cut: {flat}");
+        let folded = sheet(Some(depth), true);
+        assert!((folded - flat - bend).abs() < 1e-3, "depth {depth}: the fold adds {} not {bend}", folded - flat);
+    }
 }

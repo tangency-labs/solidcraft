@@ -341,7 +341,18 @@ fn what_it_cant_write_is_refused() {
     for (p, why) in [
         (json!({"sheet": id, "format": "dxf"}), "not supported yet: DXF"),
         (json!({"sheet": id, "format": "dxf", "path": folder.path("sheet.dxf")}), "not supported yet: DXF"),
-        (json!({"sheet": id, "format": "pdf"}), "format"),
+        (json!({"sheet": id, "format": "pdf", "paper": "blueprint"}), "a pdf is on white paper"),
+        (json!({"sheet": id, "format": "pdf", "dpi": 300}), "`dpi` and `colour` are for png only"),
+        (json!({"sheet": id, "format": "pdf", "path": folder.path("sheet.svg")}), "path must be a .pdf file"),
+        (json!({"sheet": id, "format": "pdf", "sheets": [id]}), "give `sheet` or `sheets`, not both"),
+        (json!({"format": "pdf", "sheets": []}), "`sheets` names at least one sheet"),
+        (json!({"format": "pdf", "sheets": [id, id]}), "twice"),
+        (json!({"format": "pdf", "sheets": ["Sheet 9"]}), "no sheet `Sheet 9`"),
+        (json!({"format": "pdf", "sheets": id}), "sheets"),
+        (json!({"format": "pdf", "sheets": [5]}), "sheets"),
+        (json!({"sheets": [id]}), "`sheets` is for pdf only"),
+        (json!({"format": "png", "sheets": [id]}), "`sheets` is for pdf only"),
+        (json!({"format": "cdr"}), "format"),
         (json!({"sheet": id, "path": folder.path("sheet.png")}), "path must be a .svg file"),
         (json!({"sheet": id, "format": "png", "path": folder.path("sheet.svg")}), "path must be a .png file"),
         (json!({"sheet": id, "format": "png", "path": folder.path("sheet")}), "path must be a .png file"),
@@ -592,4 +603,133 @@ fn the_milestone_plate_exports_the_same_after_it_is_saved_and_opened() {
         let read = run(&mut opened, "drawing.dimension.inspect", json!({"dimension": dimension}));
         assert_eq!((&read["value"], &read["text"], &read["status"]), (&value, &text, &json!("ok")), "{read}");
     }
+}
+
+/// A PDF read back: each page's MediaBox in points and its content stream, inflated, in page order.
+fn pdf_pages(bytes: &[u8]) -> Vec<([f64; 4], String)> {
+    use std::io::Read;
+    // ASCII only, byte for byte, so its offsets are the file's.
+    let text: String = bytes.iter().map(|&b| if b.is_ascii() { b as char } else { '?' }).collect();
+    // Each object's number and where its text starts and ends.
+    let mut objects = std::collections::BTreeMap::new();
+    let mut from = 0;
+    while let Some(at) = text[from..].find(" 0 obj").map(|at| from + at) {
+        let number: usize = text[..at].rsplit(|c: char| !c.is_ascii_digit()).next().unwrap().parse().unwrap();
+        let end = at + text[at..].find("endobj").unwrap();
+        objects.insert(number, (at, end));
+        from = end;
+    }
+    let object = |n: usize| &text[objects[&n].0..objects[&n].1];
+    let stream = |n: usize| {
+        let (at, end) = objects[&n];
+        let start = at + text[at..end].find("stream\n").unwrap() + 7;
+        let stop = start + text[start..end].find("endstream").unwrap();
+        let mut out = String::new();
+        flate2::read::ZlibDecoder::new(&bytes[start..stop]).read_to_string(&mut out).unwrap();
+        out
+    };
+    let reference = |dict: &str, key: &str| -> usize {
+        let at = dict.find(key).unwrap() + key.len();
+        dict[at..].split_whitespace().next().unwrap().parse().unwrap()
+    };
+    let tree = objects.keys().copied().find(|n| object(*n).contains("/Type /Pages")).unwrap();
+    let kids = object(tree);
+    let kids = &kids[kids.find("/Kids [").unwrap() + 7..];
+    let kids: Vec<usize> = kids[..kids.find(']').unwrap()].split(" 0 R").filter_map(|k| k.trim().parse().ok()).collect();
+    assert!(object(tree).contains(&format!("/Count {}", kids.len())), "{}", object(tree));
+    kids.into_iter()
+        .map(|page| {
+            let dict = object(page);
+            assert!(dict.contains("/Type /Page"), "{dict}");
+            let media = &dict[dict.find("/MediaBox [").unwrap() + 11..];
+            let media: Vec<f64> = media[..media.find(']').unwrap()].split_whitespace().map(|n| n.parse().unwrap()).collect();
+            ([media[0], media[1], media[2], media[3]], stream(reference(dict, "/Contents ")))
+        })
+        .collect()
+}
+
+/// A sheet's PDF, read back: one page, its MediaBox the sheet's paper in points, its lines vector
+/// paths (moves, lines and strokes, no picture), its title block's text filled outlines. The same
+/// bytes twice, by id or by name, and written to a path.
+#[test]
+fn a_sheet_exports_as_a_vector_pdf_at_its_paper_size() {
+    let (mut s, sheet, _) = front_and_top();
+    let block = serde_json::to_value(solidcraft_geom::title_block::default_block()).unwrap();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": block}));
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "pdf"}));
+    let schema = output_schema_for::<ExportResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    assert_eq!((&reply["format"], &reply["pages"]), (&json!("pdf"), &json!([ids::encode(sheet)])), "{reply}");
+    let bytes = base64_decode(reply["data"].as_str().unwrap()).unwrap();
+    assert!(bytes.starts_with(b"%PDF-"), "a PDF");
+    assert_eq!(reply["bytes"].as_u64(), Some(bytes.len() as u64));
+    let pages = pdf_pages(&bytes);
+    assert_eq!(pages.len(), 1);
+    let size = s.drawing("test").unwrap().sheets[0].sheet.size_mm().unwrap();
+    let size = [size.x, size.y];
+    let points = |mm: f64| mm * 72.0 / 25.4;
+    let ([x0, y0, x1, y1], content) = &pages[0];
+    assert_eq!([*x0, *y0], [0.0, 0.0]);
+    assert!((x1 - points(size[0])).abs() < 1e-3 && (y1 - points(size[1])).abs() < 1e-3, "{:?} for {size:?} mm", pages[0].0);
+    // Millimetres scaled to points once, so the page's numbers are the sheet's.
+    assert!(content.starts_with(&format!("q {:.9} 0 0 {:.9} 0 0 cm", 72.0 / 25.4, 72.0 / 25.4)), "{content}");
+    let ops: Vec<&str> = content.split_whitespace().filter(|t| t.chars().all(|c| c.is_ascii_alphabetic() || c == '*')).collect();
+    for op in ["m", "l", "S", "f"] {
+        assert!(ops.contains(&op), "{op} in {content}");
+    }
+    assert!(ops.iter().filter(|op| **op == "f").count() > 12, "each title block label and value filled");
+    assert!(!content.contains(" Do"), "lines only: no picture");
+    let name = s.drawing("test").unwrap().sheets[0].name.clone();
+    assert_eq!(run(&mut s, CMD, json!({"sheet": name, "format": "pdf"}))["data"], reply["data"], "the same bytes by name");
+    let folder = Folder::new("drawing-export-pdf");
+    let path = folder.path("Sheet 1.PDF");
+    let written = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "pdf", "path": path}));
+    assert_eq!((written["path"].as_str(), written.get("data")), (Some(path.as_str()), None), "{written}");
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+}
+
+/// A whole drawing's PDF: one page per sheet in the drawing's order, or in the order `sheets`
+/// gives, each page its own sheet's size; a page with views draws their lines and an empty one
+/// draws its border only.
+#[test]
+fn a_drawing_exports_as_one_pdf_page_per_sheet() {
+    let (mut s, first, _) = front_and_top();
+    let added = run(&mut s, "drawing.sheet.add", json!({"size": {"standard": "a4"}, "orientation": "portrait"}));
+    let second = ids::decode(added["sheet"].as_str().unwrap()).unwrap();
+    let all = run(&mut s, CMD, json!({"format": "pdf"}));
+    assert_eq!(all["pages"], json!([ids::encode(first), ids::encode(second)]), "{all}");
+    let pages = pdf_pages(&base64_decode(all["data"].as_str().unwrap()).unwrap());
+    assert_eq!(pages.len(), 2);
+    let d = s.drawing("test").unwrap().clone();
+    for ((media, _), sheet) in pages.iter().zip(&d.sheets) {
+        let size = sheet.sheet.size_mm().unwrap();
+        let [w, h] = [size.x, size.y];
+        assert!((media[2] - w * 72.0 / 25.4).abs() < 1e-3 && (media[3] - h * 72.0 / 25.4).abs() < 1e-3, "{media:?} for {w} x {h} mm");
+    }
+    assert_eq!(pages[1].0.map(|n| (n * 25.4 / 72.0).round()), [0.0, 0.0, 210.0, 297.0], "the second sheet's own size");
+    assert_ne!(pages[0].0, pages[1].0, "a page the second sheet's size after the first sheet's");
+    let strokes = |content: &str| content.split_whitespace().filter(|t| *t == "S" || *t == "s").count();
+    assert!(strokes(&pages[0].1) > strokes(&pages[1].1), "the views' lines on the first page only");
+    // Chosen sheets, in the order given.
+    let chosen = run(&mut s, CMD, json!({"format": "pdf", "sheets": [ids::encode(second), d.sheets[0].name]}));
+    assert_eq!(chosen["pages"], json!([ids::encode(second), ids::encode(first)]), "{chosen}");
+    let reversed = pdf_pages(&base64_decode(chosen["data"].as_str().unwrap()).unwrap());
+    assert_eq!((reversed[0].0, reversed[1].0), (pages[1].0, pages[0].0));
+    // Each sheet's views are reported, the first page's first.
+    assert_eq!(chosen["views"].as_array().map(Vec::len), all["views"].as_array().map(Vec::len));
+}
+
+/// A shaded view's picture is in its sheet's PDF as an image XObject drawn on the page, the same
+/// bytes twice.
+#[test]
+fn a_shaded_view_is_embedded_in_the_pdf() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": "shaded"}}));
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "pdf"}));
+    let bytes = base64_decode(reply["data"].as_str().unwrap()).unwrap();
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(text.contains("/Subtype /Image"), "an image XObject");
+    let pages = pdf_pages(&bytes);
+    assert_eq!(pages[0].1.matches(" Do").count(), 2, "the front view's picture, and the top view's, which follows it");
+    assert_eq!(run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "pdf"}))["data"], reply["data"], "the same bytes twice");
 }

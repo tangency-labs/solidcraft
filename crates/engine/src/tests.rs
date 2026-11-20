@@ -1170,6 +1170,7 @@ fn hostile_params_never_panic() {
         "distance",
         "profiles",
         "direction",
+        "parallel_to",
         "distance2",
         "start_offset",
         "operation",
@@ -1320,7 +1321,12 @@ fn hostile_params_never_panic() {
                                         || id == "timeline.export_script"
                                         || matches!(
                                             id,
-                                            "file.export_3mf" | "file.export_obj" | "file.export_step" | "file.export_stl" | "file.export_urdf"
+                                            "file.export_3mf"
+                                                | "file.export_obj"
+                                                | "file.export_sdf"
+                                                | "file.export_step"
+                                                | "file.export_stl"
+                                                | "file.export_urdf"
                                         ))
                                 {
                                     continue; // parameter, script and export files: covered by their own tests (no stray files)
@@ -7711,4 +7717,56 @@ fn head_counterbore_is_the_head_plus_the_default_gap() {
     assert_eq!(cmd::head_counterbore("socket_head_cap_screw", "M4"), Some((8.0, 4.5)), "the family name parts.insert takes");
     assert_eq!(cmd::head_counterbore("ISO 7380-1", "M2"), None, "ISO 7380-1 has no M2");
     assert_eq!(cmd::head_counterbore("DIN 912", "M4"), None);
+}
+
+/// Rounding the flat face of a half torus (Ø60 centre circle, Ø16 tube, cut at Z = 0) with 0.8 mm
+/// where a Ø1.9 notch is cut 4 mm into the outer rim, its side 0.00002 mm clear of the torus's
+/// seam: 0.43.0 failed with status 1001, "Fillet Surface Computation Failure" (#18565). The
+/// issue's two picks take the inner rim and the outer rim's arc (the notch's arc meets that at a
+/// corner, so it is not in its tangent chain); a third pick on the notch's arc rounds the whole
+/// outer loop. Each builds one valid solid with the corners of the picked edges rounded away and
+/// the volume of the half torus less the notch and the rounds (Pappus on the corner between the
+/// flat face and the tube; the notch's own round about 0.41 mm³ more).
+#[test]
+fn a_notched_half_torus_rounds_its_flat_face_loops() {
+    let (cx, cy): (f64, f64) = (37.9881251185, 0.949921038509);
+    // The notch's innermost point on the flat face, 0.95 in from the rim along its centre's ray.
+    let a = cy.atan2(cx);
+    let notch_in = cx.hypot(cy) - 0.95;
+    let at = |s: f64, a: f64, z: f64| solidcore_record::Vec3::new(s * a.cos(), s * a.sin(), z);
+    let rims = [[-20.6732376573, -7.52444315316, 0.0], [-35.7083195899, -12.9967654464, 0.0]];
+    let notch_arc = [notch_in * a.cos(), notch_in * a.sin(), 0.0];
+    for (with_notch, want) in [(false, 18885.45), (true, 18885.04)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.torus", json!({"major": 30, "minor": 8, "operation": "new", "body_name": "Base"}));
+        let cut = json!({"length": 78, "width": 78, "height": 9, "corner": [-39, -39, -9], "operation": "cut", "targets": ["Base"]});
+        run(&mut s, "solid.box", cut);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "NotchSketch1"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [cx, cy], "diameter": 1.9}));
+        run(&mut s, "sketch.finish", json!({}));
+        let notch = json!({"sketch": "NotchSketch1", "distance": 4, "direction": "positive", "operation": "cut", "targets": ["Base"]});
+        run(&mut s, "solid.extrude", notch);
+        let mut edges = rims.to_vec();
+        if with_notch {
+            edges.push(notch_arc);
+        }
+        run(&mut s, "solid.fillet", json!({"edges": edges, "radius": 0.8, "body": "Base"}));
+        let bodies = &s.model.state().bodies;
+        assert_eq!(bodies.len(), 1);
+        let body = &bodies[0].body;
+        let bad = body.validity();
+        assert!(bad.is_empty() && body.shell_count() == 1, "notch {with_notch}: {bad:?}, {} shells", body.shell_count());
+        let class = |p| body.classify_point(p).unwrap();
+        use solidcraft_kernel::PointClass::{Inside, Outside};
+        for (what, p) in [("inner rim", at(22.1, PI, 0.1)), ("outer rim", at(37.9, PI, 0.1))] {
+            assert_eq!(class(p), Outside, "notch {with_notch}: the {what}'s corner is rounded away");
+        }
+        let notch_corner = if with_notch { Outside } else { Inside };
+        assert_eq!(class(at(notch_in - 0.1, a, 0.1)), notch_corner, "notch {with_notch}: the notch's corner");
+        for (what, p) in [("the tube", at(30.0, PI, 4.0)), ("beside the notch's corner", at(notch_in - 0.6, a, 0.9))] {
+            assert_eq!(class(p), Inside, "notch {with_notch}: {what} is material");
+        }
+        let v = volume(&mut s);
+        assert!((v - want).abs() < 0.2, "notch {with_notch}: volume {v}, want {want}");
+    }
 }

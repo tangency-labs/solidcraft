@@ -42,6 +42,9 @@ pub struct ParamsDialog {
     /// parameter had before the first, and the one the design listed right after the last, read
     /// before anything else can change it. Cancel and Escape put the first back.
     applied: std::collections::BTreeMap<String, (String, String)>,
+    /// Expressions applied and still computing off the window thread, by parameter name: their
+    /// rows show them until the change is in.
+    pub(crate) applying: std::collections::BTreeMap<String, String>,
     /// Comments being edited, by parameter name.
     pub comments: std::collections::BTreeMap<String, String>,
     /// A parameter being renamed: (old name, new name).
@@ -250,6 +253,18 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let Some(mut d) = app.params.take() else { return };
     forget_refused_add(app, &mut d);
+    if !d.applying.is_empty() && app.computing_since().is_none() && app.deferred_queue.is_empty() {
+        // A live edit computed off the window thread (#6777) is in now; what the design lists for
+        // it is what Cancel later checks is still there (#15377), as `apply_grid` read it too early.
+        let listed = rows(app);
+        for name in std::mem::take(&mut d.applying).into_keys() {
+            if let Some(entry) = d.applied.get_mut(&name)
+                && let Some(now) = listed.iter().find(|l| l.name == name)
+            {
+                entry.1 = now.expression.clone();
+            }
+        }
+    }
     d.sort = ctx.data_mut(|m| m.get_persisted(sort_id())).unwrap_or_default();
     let sort = d.sort;
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
@@ -661,9 +676,10 @@ impl ParamGrid<'_> {
         self.rows.get(row).copied()
     }
 
-    /// The expression a row shows: an edit held for Apply or being typed, else the design's.
+    /// The expression a row shows: an edit held for Apply or being typed, else one still being
+    /// applied, else the design's.
     fn expression<'r>(&'r self, r: &'r Row) -> &'r str {
-        self.d.editing.get(&r.name).map_or(r.expression.as_str(), String::as_str)
+        self.d.editing.get(&r.name).or_else(|| self.d.applying.get(&r.name)).map_or(r.expression.as_str(), String::as_str)
     }
 
     /// What the cell being typed in holds until its edit commits: the draft it had before (an edit
@@ -1057,7 +1073,11 @@ fn apply_grid(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, row
         d.error = held_error;
         return;
     }
-    match run_as_one(app, &all) {
+    let ran = match all.as_slice() {
+        [("parameters.change", params)] => change(app, d, params.clone()),
+        _ => run_as_one(app, &all),
+    };
+    match ran {
         Ok(()) => {
             d.error = held_error;
             // Listed once, right after the edit, before anything else can change it (#15377).
@@ -1082,6 +1102,25 @@ fn apply_grid(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, row
             ui_kit::Grid::refuse(ctx, grid_state(d, salt), &error);
         }
     }
+}
+
+/// Run a `parameters.change` as the timeline's commands run (#6777): a rebuild that takes a while
+/// computes off the window thread, which goes on drawing meanwhile, and its rows show the
+/// expressions being applied until the change is in.
+fn change(app: &mut SolveApp, d: &mut ParamsDialog, params: Value) -> Result<(), String> {
+    let applying: Vec<(String, String)> = match (params.get("name").and_then(Value::as_str), params.get("expression").and_then(Value::as_str)) {
+        (Some(name), Some(expression)) => vec![(name.to_owned(), expression.to_owned())],
+        _ => params
+            .get("changes")
+            .and_then(Value::as_object)
+            .map(|changes| changes.iter().filter_map(|(name, e)| Some((name.clone(), e.as_str()?.to_owned()))).collect())
+            .unwrap_or_default(),
+    };
+    app.run_heavy("parameters.change", params)?;
+    if app.computing_since().is_some() || !app.deferred_queue.is_empty() {
+        d.applying.extend(applying);
+    }
+    Ok(())
 }
 
 /// Run `steps` as one gesture: all of them or none, and one undo step for all. A refused step
@@ -1159,7 +1198,7 @@ fn apply_held(app: &mut SolveApp, d: &mut ParamsDialog, rows: &[Row]) -> bool {
         Some((name, expression)) if changes.len() == 1 => json!({"name": name, "expression": expression}),
         Some(_) => json!({"changes": changes}),
     };
-    d.error = app.run("parameters.change", params).err();
+    d.error = change(app, d, params).err();
     if d.error.is_some() {
         return false;
     }
@@ -1173,6 +1212,8 @@ fn apply_held(app: &mut SolveApp, d: &mut ParamsDialog, rows: &[Row]) -> bool {
 /// `parameters.change`, so the design rebuilds once and one undo (or redo) covers them. A
 /// parameter changed since by something else (an agent, an undo) or gone (renamed, deleted) is
 /// left as it is. False, with the error shown, when the put-back is refused; what to put back is kept for the next try.
+/// An edit still computing off the window thread (#6777) is not in the design yet: its put-back
+/// waits its turn behind it.
 fn revert_applied(app: &mut SolveApp, d: &mut ParamsDialog) -> bool {
     if d.applied.is_empty() {
         return true;
@@ -1183,11 +1224,12 @@ fn revert_applied(app: &mut SolveApp, d: &mut ParamsDialog) -> bool {
         .iter()
         .filter_map(|(name, (before, listed))| {
             let current = &now.iter().find(|r| r.name == *name)?.expression;
-            (listed == current && current != before).then(|| (name.clone(), json!(before)))
+            (d.applying.contains_key(name) || (listed == current && current != before)).then(|| (name.clone(), json!(before)))
         })
         .collect();
     if !changes.is_empty() {
-        d.error = app.run("parameters.change", json!({"changes": changes})).err();
+        let params = json!({"changes": changes});
+        d.error = if d.applying.is_empty() { app.run("parameters.change", params) } else { app.run_heavy("parameters.change", params) }.err();
         if d.error.is_some() {
             return false;
         }

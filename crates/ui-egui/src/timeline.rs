@@ -96,7 +96,7 @@ pub(crate) fn history_folder_items(app: &SolveApp) -> Vec<Item> {
                 _ => format!("timeline_{}", control.id()),
             };
             let effect = transport_effect(app, control);
-            Item::action("ui.historyTransport", control.label(playing, play_labels()), &icon)
+            Item::action("ui.historyTransport", control.label(playing, play_labels(app)), &icon)
                 .with(json!({ "control": control.id() }))
                 .on(effect.is_ok())
                 .off_because(effect.err().flatten())
@@ -295,6 +295,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Pipe { .. } => "pipe",
         FeatureKind::FrameEndCap { .. } => "end_cap",
         FeatureKind::FrameMember { .. } => "frame_member",
+        FeatureKind::FrameMemberTurn { .. } => "rotate_member",
         FeatureKind::Emboss { .. } => "emboss",
         FeatureKind::ReplaceFace { .. } => "replace_face",
         FeatureKind::Align { .. } => "align",
@@ -955,10 +956,17 @@ fn playback_ready(app: &SolveApp) -> Result<(), String> {
         return Err(solidcraft_ui_text::tr("ui.history_play_finish_action").into());
     }
     let n = app.session.doc.features.len();
-    if app.session.doc.marker.unwrap_or(n) >= n {
+    if app.session.doc.marker.unwrap_or(n) >= n && !play_starts_over(app) {
         return Err(solidcraft_ui_text::tr("ui.history_play_roll_back").into());
     }
     Ok(())
+}
+
+/// Whether Play History starts over: the marker is at the end of a History that has features
+/// (#10798).
+fn play_starts_over(app: &SolveApp) -> bool {
+    let n = app.session.doc.features.len();
+    n > 0 && app.session.doc.marker.unwrap_or(n) >= n
 }
 
 pub(crate) fn request_playback(app: &mut SolveApp, action: PlaybackAction) -> Result<(), String> {
@@ -970,6 +978,14 @@ pub(crate) fn request_playback(app: &mut SolveApp, action: PlaybackAction) -> Re
         return Ok(());
     }
     playback_ready(app)?;
+    if play_starts_over(app) {
+        // Back to the start first, shown like any step; the next step shows the first feature
+        // (#10798).
+        let revision = app.session.revision;
+        app.run_heavy("timeline.roll_to", json!({"position": 0}))?;
+        app.timeline_playback = Some(Playback { revision, position: 0, waiting: true, next_at: 0.0 });
+        return Ok(());
+    }
     let n = app.session.doc.features.len();
     let position = app.session.doc.marker.unwrap_or(n);
     app.timeline_playback = Some(Playback { revision: app.session.revision, position, waiting: false, next_at: 0.0 });
@@ -1183,9 +1199,11 @@ impl BarResults {
     }
 }
 
-/// The History Play control's names: SolidCraft's commands that play and stop History.
-pub(crate) fn play_labels() -> crate::ui_kit::PlayLabels<'static> {
-    crate::ui_kit::PlayLabels { play: solidcraft_ui_text::tr("cmd.timeline_play"), stop: solidcraft_ui_text::tr("cmd.timeline_stop") }
+/// The History Play control's names: SolidCraft's commands that play and stop History, and
+/// "Play from the start" while Play starts over (#10798).
+pub(crate) fn play_labels(app: &SolveApp) -> crate::ui_kit::PlayLabels<'static> {
+    let play = if play_starts_over(app) { "ui.history_play_from_start" } else { "cmd.timeline_play" };
+    crate::ui_kit::PlayLabels { play: solidcraft_ui_text::tr(play), stop: solidcraft_ui_text::tr("cmd.timeline_stop") }
 }
 
 /// The bar as SolidCraft describes it; the strip sets the marker's slot and the step count.
@@ -1859,10 +1877,12 @@ mod tests {
                 .collect()
         };
         let state = |pairs: [(&str, bool); 5]| pairs.map(|(c, on)| (c.to_owned(), on)).to_vec();
-        // At the end: only the steps back are on, and Play has nothing left to play.
-        assert_eq!(enabled(&h), state([("first", true), ("back", true), ("play", false), ("forward", false), ("last", false)]));
-        let play = crate::context_menu::items(&h.app, &folder).into_iter().find(|i| i.id == "ui.historyTransport" && i.label == "Play History");
-        assert_eq!(play.and_then(|i| i.tip).as_deref(), Some(solidcraft_ui_text::tr("ui.history_play_roll_back")), "Play says why it is off");
+        // At the end: only the steps back are on, and Play plays from the start (#10798).
+        assert_eq!(enabled(&h), state([("first", true), ("back", true), ("play", true), ("forward", false), ("last", false)]));
+        let play = |h: &Harness| {
+            crate::context_menu::items(&h.app, &folder).into_iter().find(|i| i.id == "ui.historyTransport" && i.icon == "timeline_play")
+        };
+        assert_eq!(play(&h).map(|i| i.label).as_deref(), Some(solidcraft_ui_text::tr("ui.history_play_from_start")));
         // The bar's controls menu follows a separator.
         let items = crate::context_menu::items(&h.app, &folder);
         assert!(items.iter().any(|i| i.is_sep()) && items.iter().any(|i| i.id == "ui.historyPlayButton"));
@@ -2027,17 +2047,49 @@ mod tests {
         assert_eq!(h.app.session.model.state().bodies.len(), 1);
     }
 
+    /// Play with the marker at the end goes back to the start, shows the design before its first
+    /// feature, then plays every feature at the usual pace (#10798).
     #[test]
-    fn playback_at_the_end_or_in_an_empty_design_leaves_history_unchanged() {
-        for mut h in [Harness::new(), two_boxes(false)] {
-            h.frames(2);
-            let revision = h.app.session.revision;
-            h.app.start("timeline.play");
-            h.frames(2);
-            h.frames(60);
-            assert_eq!(h.app.session.revision, revision);
-            assert!(h.app.timeline_playback.is_none());
-        }
+    fn playback_at_the_end_starts_over_from_the_first_feature() {
+        let mut h = two_boxes(false);
+        assert_eq!(h.app.session.doc.marker, None);
+        assert_eq!(super::play_labels(&h.app).play, solidcraft_ui_text::tr("ui.history_play_from_start"));
+        h.app.start("timeline.play");
+        h.frames(2);
+        assert_eq!(h.app.session.doc.marker, Some(0), "back to the start first");
+        assert_eq!(h.app.session.model.state().bodies.len(), 0);
+        assert!(h.app.timeline_playback.is_some());
+        assert_eq!(super::play_labels(&h.app).play, solidcraft_ui_text::tr("cmd.timeline_play"), "away from the end, Play is Play History again");
+        h.frames(10);
+        assert_eq!(h.app.session.doc.marker, Some(0), "leave time to see the start");
+        h.frames(40);
+        assert_eq!(h.app.session.doc.marker, Some(1));
+        assert_eq!(h.app.session.model.state().bodies.len(), 1);
+        h.frames(60);
+        assert_eq!(h.app.session.doc.marker, None, "played to the end");
+        assert_eq!(h.app.session.model.state().bodies.len(), 2);
+        assert!(h.app.timeline_playback.is_none());
+
+        // Escape stops a playback that started over where it is.
+        h.app.start("timeline.play");
+        h.frames(2);
+        assert_eq!(h.app.session.doc.marker, Some(0));
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(80);
+        assert!(h.app.timeline_playback.is_none());
+        assert_eq!(h.app.session.doc.marker, Some(0), "stopped at the start");
+    }
+
+    #[test]
+    fn playback_in_an_empty_design_leaves_history_unchanged() {
+        let mut h = Harness::new();
+        h.frames(2);
+        let revision = h.app.session.revision;
+        h.app.start("timeline.play");
+        h.frames(2);
+        h.frames(60);
+        assert_eq!(h.app.session.revision, revision);
+        assert!(h.app.timeline_playback.is_none());
     }
 
     #[test]

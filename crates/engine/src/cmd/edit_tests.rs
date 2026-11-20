@@ -2705,3 +2705,21 @@ fn select_edge_loop_takes_the_rim_of_a_pocket_from_one_edge() {
         assert_eq!(s.selection, selected, "{params}");
     }
 }
+
+/// #19632: `solid.hole` takes length expressions as `position`, but the stored hole keeps them in
+/// `at` and `position` is the evaluated point, so editing `position` with an expression failed
+/// with "expected f64". The edit takes it as the creation command does and the hole follows it.
+#[test]
+fn a_hole_position_edited_with_an_expression_follows_it() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "p", "expression": "20 mm"}));
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10}));
+    run(&mut s, "solid.hole", json!({"position": ["p", "20", "10"], "diameter": "6 mm", "name": "H"}));
+    let reply = run(&mut s, "timeline.edit", json!({"feature": "H", "set": {"position": ["p + 10 mm", "20", "10"]}}));
+    assert_eq!(reply["recomputed"].as_u64(), Some(1), "{reply}");
+    let hole = serde_json::to_value(s.doc.find_feature("H").unwrap()).unwrap();
+    assert_eq!(hole["at"][0], "p + 10 mm", "the expression is stored in `at`: {hole}");
+    assert_eq!(hole["position"][0], 20.0, "`position` keeps the point the hole was made at: {hole}");
+    let id = s.doc.find_feature("H").unwrap().id;
+    assert_eq!(s.model.result(id).and_then(|r| r.error.clone()), None, "the hole rebuilds");
+}

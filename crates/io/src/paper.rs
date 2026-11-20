@@ -12,7 +12,7 @@ mod pdf;
 mod png;
 mod svg;
 
-pub use pdf::{PdfOptions, PdfReport, paper_pdf, paper_pdf_pages};
+pub use pdf::{PdfOptions, PdfPictures, PdfReport, paper_pdf, paper_pdf_pages, paper_pdf_pages_with};
 pub use png::{DPI, MAX_PICTURE_DPI, MAX_POINTS, PICTURE_DPI, PngColour, PngOptions, PngReport, paper_png};
 pub use svg::{SvgReport, paper_svg, paper_svg_on};
 

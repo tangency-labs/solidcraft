@@ -266,6 +266,10 @@ pub enum ChamferClass {
     Declined(&'static str),
     /// The event's configuration, but the corner type does not exist there.
     Refused(ChamferRefusal),
+    /// The event's configuration (straight edges, distinct planes, constant widths) at a
+    /// vertex of three, but for chamfers of both convexities: no corner builds their mitre
+    /// yet.
+    MixedConvexity,
 }
 
 // ---- the closed forms ------------------------------------------------------------------
@@ -631,7 +635,9 @@ fn unsupported(why: String) -> ChamferClass {
 /// event, and of type `kind`. It is where every edge is a straight line and every face a
 /// plane, the faces distinct, the chamfers of one convexity, each of constant width
 /// (a constant ball or a constant chord), and at three chamfers the faces' normals
-/// independent; else it declines, naming why, and the corner is the pinned one. The event
+/// independent; else it declines, naming why, and the corner is the pinned one. Three
+/// chamfers that are otherwise the event's but for their convexities are
+/// [`ChamferClass::MixedConvexity`], which the session refuses where the corner is a bevel. The event
 /// is refused where its type does not exist: a mitre point outside the corner (with the
 /// too wide chamfer's fit), a mitre of four or more chamfers, a facet whose crossings are
 /// not in one plane or that would cut the chamfers; and it is refused where the chamfer
@@ -666,10 +672,11 @@ pub fn classify_chamfer(
     }
     let v = vertex::point(b, vertex)?;
 
-    // the edges: straight lines leaving V, of one convexity
+    // the edges: straight lines leaving V
     let mut t = Vec::new();
     let mut edges = Vec::new();
     let mut concave0 = None;
+    let mut mixed = false;
     for &eu in all_eus {
         let e = eu1::edge(b, eu)?.ok_or_else(nul)?;
         let curve = edge::curve(b, e)?.ok_or_else(nul)?;
@@ -693,11 +700,7 @@ pub fn classify_chamfer(
             dir = -dir;
         }
         let concave = is_concave_edge(k, b, e)?;
-        if concave0.is_some_and(|c| c != concave) {
-            return Ok(ChamferClass::Declined(
-                "chamfers of both convexities meet at the vertex",
-            ));
-        }
+        mixed |= concave0.is_some_and(|c| c != concave);
         concave0 = Some(concave);
         t.push(dir);
         edges.push(e);
@@ -771,6 +774,14 @@ pub fn classify_chamfer(
                     next: offset(1 - rail.min(1))?,
                 }
             }
+        });
+    }
+    // every other test of the configuration has passed: only the convexities differ
+    if mixed {
+        return Ok(if n == 3 {
+            ChamferClass::MixedConvexity
+        } else {
+            ChamferClass::Declined("chamfers of both convexities meet at the vertex")
         });
     }
     let planes = match chamfer_planes(&t, &widths) {

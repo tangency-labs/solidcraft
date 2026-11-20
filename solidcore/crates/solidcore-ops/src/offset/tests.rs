@@ -442,6 +442,33 @@ fn half_a_cylinders_side_moves_out_over_a_step() {
     moved_to(&b, &[[50.0, 0.0, 75.0]], 4.0, v, [5, 7, 4]);
 }
 
+/// [`half_a_cylinders_side_moves_out_over_a_step`] with only the upper band split along its
+/// rulings by the plane x = 0 and the whole lower band moved out 4: where such a ruling
+/// meets the circle at z = 50, the two kept upper pieces are one surface sharing a straight
+/// edge, and the third surface at the vertex is the move's own cylinder (a quadric, not a
+/// plane). Every two of the three coaxial cylinders are parallel, so they meet in no one
+/// point and the annulus at z = 50 closes the step, as the hinge's knuckle (a barrel piece
+/// beside the coaxial piece it was split from, plus a straight kept edge) needs.
+/// V = 2500 pi 50 + 2916 pi 50 = 850743.291, with the split's 9 faces, 17 edges and 10
+/// vertices (the same split body as `three_cylinder_faces_at_a_corner_move_out_over_a_step`,
+/// the whole lower band moved instead of the three upper pieces).
+#[test]
+fn a_cylinders_whole_band_moves_out_beside_its_split_kept_halves() {
+    all_fixes();
+    let halves = split_at_height(
+        &make_cylinder([0.0; 3], 50.0, 100.0).unwrap(),
+        [50.0, 0.0, 25.0],
+        50.0,
+    );
+    let b = split_by_plane(
+        &halves,
+        [-50.0, 0.0, 75.0],
+        ([0.0; 3], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+    );
+    let v = PI * 2500.0 * 50.0 + PI * 2916.0 * 50.0;
+    moved_to(&b, &[[50.0, 0.0, 25.0]], 4.0, v, [9, 17, 10]);
+}
+
 /// Both halves of that side moved out 4 together: one cylinder r 54, V = 2916 pi 100, with
 /// the split's 4 faces, 5 edges and 3 vertices.
 #[test]
@@ -1948,6 +1975,39 @@ mod drafts {
         let small = big - h * TAN_TENTH;
         let v = PI * h * (big * big + big * small + small * small) / 3.0;
         assert!(rel(volume(&c), v) < 1e-9, "{} {v}", volume(&c));
+    }
+
+    /// Acid-6's needle: R = 0.5, h = 1000, neutral at z = -1600, theta = 0.02 degrees.
+    /// r(z) = R - (z + 1600) tan(theta), so the frustum volume is
+    /// `pi h (R^2 + R r_top + r_top^2) / 3` = 364.684642297274456 mm^3;
+    /// `r_top` = 0.150934135423594902 mm.
+    #[test]
+    fn a_long_thin_cylinder_drafts_to_a_frustum() {
+        all_fixes();
+        let base = [0.0, 0.0, -1600.0];
+        let c = make_cylinder(base, 0.5, 1000.0).unwrap();
+        let o = order(&c);
+        // 0.02 pi / 180 and tan(0.02 pi / 180), rounded to doubles.
+        let angle = 0.000_349_065_850_398_865_93;
+        let slope = 0.000_349_065_864_576_405_1;
+        draft(&c, &o, &[curved(&c, &o)], base, Z, Z, angle).unwrap();
+        let small = 0.5 - 1000.0 * slope;
+        let want = PI * 1000.0 * (0.25 + 0.5 * small + small * small) / 3.0;
+        let got = volume(&c);
+        assert!(rel(got, want) < 1e-9, "{got} {want}");
+        assert!(c.is_manifold_solid().unwrap());
+        assert_eq!(c.check(crate::CheckLevel::All).unwrap().failures, 0);
+        assert_eq!(c.counts().unwrap(), [3, 3, 2]);
+        // At z = -601 the radius is about 0.1513; at -1599 it is about 0.4997.
+        for (point, class) in [
+            ([0.0, 0.0, -601.0], crate::PointClass::Inside),
+            ([0.2, 0.0, -601.0], crate::PointClass::Outside),
+            ([0.2, 0.0, -1599.0], crate::PointClass::Inside),
+            ([0.0, 0.0, -1601.0], crate::PointClass::Outside),
+            ([0.0, 0.0, -599.0], crate::PointClass::Outside),
+        ] {
+            assert_eq!(c.classify_point(point).unwrap(), class, "{point:?}");
+        }
     }
 
     /// A cone r 10 at its base to 8 at its top, 20 tall, drafted 5 degrees about its base turns
