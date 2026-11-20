@@ -3551,7 +3551,10 @@ const KEEP_COVERED_PIECES: usize = 64;
 /// The raise is to the whole bound, however far past the tolerance: a tolerance below the
 /// trim's real distance is invalid, one above it only loose. Past the tolerance the bound is
 /// the whole bisection's (to its piece and depth limits), so a loose enclosure is tightened
-/// as far as it goes before the edge is raised to it.
+/// as far as it goes before the edge is raised to it. The tolerance is set to the bound
+/// itself, the tightest the proof gives, as `trim_raise_distance` raises a refit trim past
+/// upstream's (where upstream's own `SetUVTrimCurve` allowance, twice a reported distance,
+/// stays only while it covers the proved one).
 ///
 /// A trim the edit left as it was (its geometry the same, bit for bit) at a tolerance not
 /// lowered is not bounded at all: it is covered after the edit exactly where it was before.

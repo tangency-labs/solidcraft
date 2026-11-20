@@ -903,10 +903,11 @@ pub trait OffsetBrep<O>: ProtoGeometry<O> {
     /// (`topology::edgeuse::p1::set_uv_trim_curve`, deleting the old curve). Not upstream
     /// (#18009): where `max_dist` raises the tolerance (it is below `2 * max_dist`) and `B`,
     /// the new trim's proved distance from the edge curve, is enclosed, the edge tolerance is
-    /// raised for `B` instead of `max_dist`: always where `B` is at least `max_dist` (refined
-    /// first where it is past twice it), and where it is below only if every other UV trim of
-    /// the edge is enclosed within the lowered tolerance `max(tolerance, 2 * B)`; otherwise
-    /// for `max_dist`, as upstream (`topology::edgeuse::p3::trim_raise_distance`).
+    /// raised to `B` where `B` is past `2 * max_dist` (the bound being the whole bisection's
+    /// wherever it is above half the tolerance), and for `B` where it is below `max_dist` only
+    /// if every other UV trim of the edge is enclosed within the lowered tolerance
+    /// `max(tolerance, 2 * B)`; otherwise for `max_dist`, as upstream
+    /// (`topology::edgeuse::p3::trim_raise_distance`).
     fn edgeuse_set_uv_trim_curve(
         &mut self,
         k: &Kernel,

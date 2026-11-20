@@ -1,6 +1,7 @@
 //! The certificate of the goldens rows whose only change under the lazy UV trim's raise
-//! (`topology::edgeuse::p3::trim_raise_distance`) is a lower tolerance: for each moved edge
-//! or vertex tolerance `n` (it was `o`), `g <= B <= n < o`.
+//! (`topology::edgeuse::p3::trim_raise_distance`) and the corner fix's cover
+//! (`topology::face::p2`) is a moved tolerance: for each moved edge or vertex tolerance `n`
+//! (it was `o`), `g <= B <= n`, with `n < o` or the raise certified as below.
 //!
 //! [`ROWS`] holds, one line per case, the moved output values (unit, case, `[key, index, o,
 //! n]`, the mechanical diff of the two goldens) and the moved entities (`[body, "e"|"v",
@@ -30,8 +31,9 @@
 //! So every lowered tolerance still covers what it is the tolerance for, and it is lower than
 //! before: a tighter tolerance that is still valid.
 //!
-//! A raised tolerance (`n > o`, the corner fix's `keep_trim_covered` in
-//! `topology::face::p2`) must cover the same way, and the old one must not have: for an edge
+//! A raised tolerance (`n > o`: the corner fix's `keep_trim_covered` in
+//! `topology::face::p2`, or `trim_raise_distance` raising a refit trim's edge to a proved
+//! bound past twice upstream's distance) must cover the same way, and the old one must not have: for an edge
 //! one of its trims' `B` exceeds `o` (the raise was needed for the enclosure; `B` is an upper
 //! bound, so this argues rather than proves that `o` was short), for a vertex `o` does not
 //! cover an edge end that `n` does.
@@ -48,9 +50,8 @@ use solidcore::topology::{edge, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 use crate::case::repo_root;
 use crate::CaseContext;
 
-/// The moved values of each case whose moved values are all tolerances (below 0.05,
-/// positive; lowered, or raised to cover a trim a corner fix moved) and whose output
-/// changed nowhere else.
+/// The moved values of each case whose moved values are all tolerances (positive; lowered,
+/// or raised to cover a trim's proved bound) and whose output changed nowhere else.
 const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 
 /// The moved edges (and vertices) this certificate does not certify yet, one per line: unit,
