@@ -812,8 +812,8 @@ mod tests {
         h.app.home.open = false;
         h.app.ui.show_browser = false;
         h.app.ui.show_timeline = false;
-        h.app.preferences.navigator_style = crate::prefs::NavigatorStyle::Axes;
-        h.app.preferences.orbit_cursor_wrap = false;
+        h.app.preferences.navigation.navigator_style = crate::prefs::NavigatorStyle::Axes;
+        h.app.preferences.navigation.orbit_cursor_wrap = false;
         let ground = h.app.docs.views.active().id;
         assert_eq!(crate::documents::view_layout(&mut h.app, solidcraft_views::Preset::SideBySide), 2);
         h.frames(4);
