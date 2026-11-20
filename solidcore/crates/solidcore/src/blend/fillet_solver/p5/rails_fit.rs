@@ -261,15 +261,19 @@ fn rail_jet(
 /// it: the face ends there in its side edge (the edge before or after the filleted edge
 /// in the face's loop), and the rail leaves across that side edge or through one of its
 /// vertices; or the face goes on past the end, and the rail stays on it to the end's cross
-/// section and beyond (the edge point nearest where it leaves is an end).
+/// section and beyond (the edge point nearest where it leaves is an end). A terminal
+/// run beyond a side face's smooth continuation is cut by that End's global merge too,
+/// certified by the same three-edge junction as the corner construction.
+#[allow(clippy::too_many_arguments)] // the rail query and its end-corner certificates
 fn leaves_past_an_end(
     solver: &FilletSolver,
     k: &Kernel,
-    target: &Brep,
+    target: &mut Brep,
     face: FaceId,
     rail: &Curve,
     rail_param: f64,
     leave: &PointClassification<FilletClassObject>,
+    continuation_ends: &[crate::topology::VertexId],
 ) -> Result<bool> {
     let fil_edge = filleted_edge(solver, target)?;
     // `NER(pEdgeCurve)` before either test
@@ -278,6 +282,63 @@ fn leaves_past_an_end(
     // Across or through the face's side edge at an end.
     if !side_edge_ends(target, fil_edge, face, leave)?.is_empty() {
         return Ok(true);
+    }
+
+    // A terminal run may cross the certified smooth continuation of an end face.
+    let leave_edge = match (leave.point_class(), leave.object()) {
+        (PointClassType::Edge, Some(o)) => match o.target_entity()? {
+            EntityRef::Edge(e) => Some(e),
+            _ => None,
+        },
+        _ => None,
+    };
+    for use_ in edge::edgeuses(target, fil_edge, None, None)? {
+        if eu::face(target, use_)? != Some(face) || !eu::is_loop_edgeuse(target, use_)? {
+            continue;
+        }
+        for next in [
+            eu::cw_edgeuse(target, use_)?,
+            eu::ccw_edgeuse(target, use_)?,
+        ] {
+            let Some(side_use) = next else {
+                continue;
+            };
+            let Some(side) = eu::edge(target, side_use)? else {
+                continue;
+            };
+            if side == fil_edge {
+                continue;
+            }
+            if let Some(crossed) = leave_edge {
+                let side_ends = [
+                    edge::start_vertex(target, side)?,
+                    edge::end_vertex(target, side)?,
+                ];
+                for near in [
+                    edge::start_vertex(target, fil_edge)?,
+                    edge::end_vertex(target, fil_edge)?,
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if continuation_ends.contains(&near)
+                        && side_ends.contains(&Some(near))
+                        && crate::blend::blend_corner::end::end_face_continuation_edge(
+                            k,
+                            target,
+                            side_use,
+                            Some(near),
+                            face,
+                            solver.tangency_tolerance,
+                        )? == Some(crossed)
+                    {
+                        // The end face continues smoothly beyond this side edge.
+                        // Its End construction trims this terminal run at that continuation.
+                        return Ok(true);
+                    }
+                }
+            }
+        }
     }
 
     // On or beyond the cross section at an end.
@@ -638,6 +699,23 @@ impl FilletSolver {
                     .ok_or_else(|| SolidError::blend_missing(OP, "the rail's primary edge use"))?;
                 let mate = eu::mate(fillets.brep(), primary)?
                     .ok_or_else(|| SolidError::blend_missing(OP, "the rail edge use's mate"))?;
+                let mut continuation_ends = Vec::new();
+                for vertex in [
+                    edge::start_vertex(fillets.brep(), rail)?,
+                    edge::end_vertex(fillets.brep(), rail)?,
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if let Some(id) = fillets.fillet_vertex(vertex)?.fillet_corner() {
+                        let corner = context.corners().corner(id)?;
+                        if corner.is_end_on_end_face() {
+                            if let Some(vertex) = corner.filleted_vertex() {
+                                continuation_ends.push(vertex);
+                            }
+                        }
+                    }
+                }
                 let mut cc = CurveClassification::new(k);
                 cc.reset(
                     k,
@@ -698,20 +776,24 @@ impl FilletSolver {
                     };
                     // this run leaves past one end and comes back past the other
                     let mut wraps = false;
-                    let past_end = |point: &PointClassification<FilletClassObject>, d: f64| {
-                        leaves_past_an_end(solver.solver(), k, target, face, &curve, d, point)
-                    };
                     if j == 0 || j_last + 1 == n {
-                        if past_end(leave, d_leave)?
-                            || past_closed_corner(
-                                solver.solver(),
-                                k,
-                                target,
-                                &curve,
-                                d_leave,
-                                j == 0,
-                            )?
-                        {
+                        if leaves_past_an_end(
+                            solver.solver(),
+                            k,
+                            target,
+                            face,
+                            &curve,
+                            d_leave,
+                            leave,
+                            &continuation_ends,
+                        )? || past_closed_corner(
+                            solver.solver(),
+                            k,
+                            target,
+                            &curve,
+                            d_leave,
+                            j == 0,
+                        )? {
                             continue;
                         }
                     } else if let Some(end) = run_end_past(

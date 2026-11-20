@@ -94,7 +94,12 @@ fn gathered_both_sides(e: &SolidError) -> bool {
 fn ignore<T>(result: Result<T>) -> Result<Option<T>> {
     match result {
         Ok(value) => Ok(Some(value)),
-        Err(error) if error.is_unported_or_cancelled() => Err(error),
+        Err(error)
+            if error.is_unported_or_cancelled()
+                || matches!(error.root_cause(), SolidError::ExtendRefused { .. }) =>
+        {
+            Err(error)
+        }
         Err(_) => Ok(None),
     }
 }

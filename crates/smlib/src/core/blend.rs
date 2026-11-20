@@ -47,6 +47,11 @@ type Out<T> = std::result::Result<T, Error>;
 /// its reason, a blend failed with the kernel's statement of why); a rejected input with solidcore's
 /// reason ([`Error::Rejected`]); the rest as solidcore's text.
 pub(super) fn status(e: SolidError) -> Error {
+    // An exact-extension refusal carries its geometric limit, including through a
+    // stage failure. Keep that reason rather than replacing it with the stage's status.
+    if matches!(e.root_cause(), SolidError::ExtendRefused { .. }) {
+        return Error::Solidcore(e.root_cause().to_string());
+    }
     if let Some(failed) = solidcore_ops::blend::failure(&e) {
         return Error::Refused(failed);
     }
@@ -235,6 +240,7 @@ fn failed(call: &'static str, body: &Body, e: Error) -> Error {
 /// status, the blend refusals and failures ops types carried as they are ([`Error::Refused`]),
 /// and every other error as any solidcore-ops call's ([`super::call::error`]).
 fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
+    log::debug!("blend failure in {call}: {e:?}; detail: {detail:?}");
     use solidcore_ops::Error as Ops;
     match e {
         Ops::Status(code) => Error::Status(code),
@@ -645,6 +651,23 @@ pub(crate) fn fillet_variable(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extension_refusals_report_their_reason_and_limit_through_stage_failures() {
+        use solidcore::error::{Failure, Reason};
+        use solidcore::surface::extend::ExtendRefusal;
+
+        for wrapped in [false, true] {
+            let refusal = SolidError::ExtendRefused { operation: "surface::extend", refusal: ExtendRefusal::NotExact, distance: Some(1.0) };
+            let error = if wrapped {
+                Failure::new("blend::corner", Reason::Failed("corner topology failed")).caused_by(refusal).into_error()
+            } else {
+                refusal
+            };
+            let Error::Solidcore(message) = status(error) else { panic!("extension refusal lost its reason") };
+            assert_eq!(message, "surface::extend: extension refused (NotExact); the largest size that works is 1");
+        }
+    }
 
     /// A B-spline method's failure passes on as the status it stands for, as the `Upstream` it
     /// replaced did; a cancellation or unported call a B-spline method passes through is not one.
