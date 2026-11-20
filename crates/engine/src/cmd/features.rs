@@ -332,7 +332,8 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
         (point, normal)
     } else {
         if p.get("face").is_none() {
-            started_on = feature_sketch(s, p, "Extrude").ok().and_then(|sketch| face_body_reached(s, sketch).ok().flatten());
+            started_on =
+                feature_sketch(s, p, "Extrude").ok().and_then(|sketch| face_body_reached(s, sketch).ok().flatten()).filter(|b| s.body_visible(b));
         }
         extrude_base(s, p)?
     };
@@ -1140,7 +1141,7 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
         // Store the resolved target so recomputes and reopening keep the same scope.
         targets.extend(match face_body {
             Some(body) => Some(body),
-            None => face_body_reached(s, sketch)?,
+            None => shown_face_body(s, sketch, cmd)?,
         });
     } else if let Some(parts) = cut_scope(s, &p, operation, sketch, face_body, cmd)? {
         p.to_mut()["participants"] = json!(parts);
@@ -1320,15 +1321,26 @@ fn sketch_face_body(s: &Session, sketch: u64) -> Option<String> {
     active_scope(s, &st).into_iter().find(|b| b.name == anchor.target.body).map(|b| b.name.clone())
 }
 
+/// [`face_body_reached`] as a Join's default target, refused when that body or its placement is
+/// hidden: a hidden body is left alone (#1988, #14476).
+fn shown_face_body(s: &Session, sketch: u64, cmd: &str) -> Result<Option<String>> {
+    match face_body_reached(s, sketch)? {
+        Some(body) if !s.body_visible(&body) => Err(bad(cmd, NO_VISIBLE_JOIN)),
+        reached => Ok(reached),
+    }
+}
+
+const NO_VISIBLE_JOIN: &str = "no visible body to join; show a body, choose explicit targets, or use New Body";
+
 /// The bodies a Join named none for: the body whose face a profile sketch is on (the first
 /// sketch that is on one), as for an extrude, also in a component inside the active one, moved
-/// or turned (#5679; refused as [`face_body_reached`] says). Explicit `targets` or
+/// or turned (#5679; refused as [`shown_face_body`] says). Explicit `targets` or
 /// `participants` keep theirs.
 fn face_join_targets(s: &Session, p: &Value, operation: Operation, sketches: &[u64], cmd: &str) -> Result<Vec<BodyName>> {
     let mut targets = string_list(cmd, p, "targets")?;
     if operation == Operation::Join && targets.is_empty() && string_list(cmd, p, "participants")?.is_empty() {
         for sketch in sketches {
-            if let Some(body) = face_body_reached(s, *sketch)? {
+            if let Some(body) = shown_face_body(s, *sketch, cmd)? {
                 targets.push(body);
                 break;
             }
@@ -4469,7 +4481,7 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
             // Empty targets mean automatic scope, not "no bodies". Never fall back to that
             // scope when every candidate is hidden; an explicit target can still choose one.
             if targets.is_empty() {
-                return Err(bad(cmd, "no visible body to join; show a body, choose explicit targets, or use New Body"));
+                return Err(bad(cmd, NO_VISIBLE_JOIN));
             }
         }
     }
