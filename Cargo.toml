@@ -222,6 +222,7 @@ egui = { path = "vendor/egui/crates/egui" }
 egui-wgpu = { path = "vendor/egui/crates/egui-wgpu" }
 egui-winit = { path = "vendor/egui/crates/egui-winit" }
 egui_glow = { path = "vendor/egui/crates/egui_glow" }
+egui_system_font_provider = { path = "vendor/egui/crates/egui_system_font_provider" }
 emath = { path = "vendor/egui/crates/emath" }
 epaint = { path = "vendor/egui/crates/epaint" }
 epaint_default_fonts = { path = "vendor/egui/crates/epaint_default_fonts" }
