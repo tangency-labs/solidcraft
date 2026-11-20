@@ -1766,6 +1766,8 @@ impl SolveApp {
         // A grant taken back here that the shared store still holds is not taken back: say so.
         let r = match r {
             Ok(v) if matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove" | "plugin.revoke") => {
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::plugin_effects::forget(self);
                 let saved = plugins::persist_grants(self);
                 plugin_slots::invalidate(self);
                 saved.map(|()| v)
@@ -4320,6 +4322,7 @@ impl SolveApp {
         let mut report_input = None;
         issue_report::CadInput::block(self, ui, &mut report_input);
         semantic_content::begin(self, ui.ctx());
+        crate::icons::set_wave(ui.ctx(), crate::plugin_effects::wave_set(self));
         self.cad_ui(ui, &mut report_input);
         semantic_content::finalize(self, ui.ctx());
         #[cfg(not(target_arch = "wasm32"))]

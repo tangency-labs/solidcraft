@@ -55,7 +55,7 @@ pub struct WaveSet {
 /// Set by the host each frame. Asks for about 30 fps while the wave shows.
 pub fn set_wave(ctx: &egui::Context, set: WaveSet) {
     ctx.data_mut(|d| d.insert_temp(egui::Id::unique(WAVE_FLAGS), set));
-    if set.on && (set.icons || set.blocks || set.panels) {
+    if set.on {
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
 }

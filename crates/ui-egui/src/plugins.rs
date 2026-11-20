@@ -423,8 +423,6 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context, wait: bool) {
                 app.preferences.disabled_plugins.remove(id);
                 app.session.disabled_plugins.remove(id);
             }
-            #[cfg(not(target_arch = "wasm32"))]
-            crate::plugin_effects::forget(app);
             persist_grants(app)?;
         }
         if let PackageAction::Describe { path } = &job.action {
