@@ -1625,12 +1625,13 @@ fn a_copied_untargeted_join_in_a_turned_and_lifted_part_joins_the_part() {
 const BOSS_ROUND: f64 = (4.0 - PI) / 4.0 * 5.0;
 
 /// [`part_and_mirror_plane`] with an untargeted Boss and BossRound, 1 mm rounds of its two
-/// upright edges at x 26 (x −26 where it is shown), mirrored by Mirror across x = −10 with Boss.
-fn mirrored_untargeted_boss_and_its_rounds() -> Session {
+/// upright edges at x 26 (x −26 where it is shown), mirrored by Mirror across x = −10 with Boss,
+/// the two picked in the order of `features`.
+fn mirrored_untargeted_boss_and_its_rounds(features: [&str; 2]) -> Session {
     let mut s = part_with_a_boss(&[]);
     run(&mut s, "solid.fillet", json!({"edges": [[26, 10, 12.5], [26, 5, 12.5]], "radius": 1, "name": "BossRound"}));
     place_the_part(&mut s);
-    let r = run(&mut s, "solid.mirror", json!({"features": ["Boss", "BossRound"], "plane": "MirrorPlane", "name": "Mirror"}));
+    let r = run(&mut s, "solid.mirror", json!({"features": features, "plane": "MirrorPlane", "name": "Mirror"}));
     assert!(r["warning"].is_null(), "{r}");
     s
 }
@@ -1640,7 +1641,7 @@ fn mirrored_untargeted_boss_and_its_rounds() -> Session {
 /// about x 5, y −9 and y −6, as the boss has about x −25.
 #[test]
 fn a_mirrored_untargeted_join_and_its_rounds_in_a_turned_part_land_together() {
-    let mut s = mirrored_untargeted_boss_and_its_rounds();
+    let mut s = mirrored_untargeted_boss_and_its_rounds(["Boss", "BossRound"]);
     let v = pockets(&mut s, "Base").0;
     let axes = round_axes(&mut s, "Base", 1.0);
     assert_eq!(s.model.state().bodies.len(), 1);
@@ -1650,18 +1651,21 @@ fn a_mirrored_untargeted_join_and_its_rounds_in_a_turned_part_land_together() {
 }
 
 /// #19451: a root mirror across XZ of that mirror makes every copy of its copies: a third boss at
-/// x 0..6, y 5..10, its rounds about x 5, y 6 and y 9.
+/// x 0..6, y 5..10, its rounds about x 5, y 6 and y 9. It copies them in timeline order, whatever
+/// order they were picked in: picked first, the round's copy found no edge of the boss's copy.
 #[test]
 fn a_mirror_of_a_mirrored_untargeted_join_and_its_rounds_lands_every_copy() {
-    let mut s = mirrored_untargeted_boss_and_its_rounds();
-    let r = run(&mut s, "solid.mirror", json!({"features": ["Mirror"], "plane": "XZ"}));
-    assert!(r["warning"].is_null(), "{r}");
-    let v = pockets(&mut s, "Base").0;
-    let axes = round_axes(&mut s, "Base", 1.0);
-    assert_eq!(s.model.state().bodies.len(), 1);
-    assert!(rel(v, 16000.0 + 3.0 * 150.0 - ROUND - 6.0 * BOSS_ROUND) < 1e-9, "{v}");
-    let want = [[-25.0, -9.0], [-25.0, -6.0], [5.0, -9.0], [5.0, -6.0], [5.0, 6.0], [5.0, 9.0]];
-    assert!(axes.len() == 6 && axes.iter().zip(want).all(|(a, w)| near2(*a, w)), "{axes:?}");
+    for features in [["Boss", "BossRound"], ["BossRound", "Boss"]] {
+        let mut s = mirrored_untargeted_boss_and_its_rounds(features);
+        let r = s.execute("solid.mirror", &json!({"features": ["Mirror"], "plane": "XZ"}));
+        assert!(r.as_ref().is_ok_and(|r| r["warning"].is_null()), "{features:?}: {r:?}");
+        let v = pockets(&mut s, "Base").0;
+        let axes = round_axes(&mut s, "Base", 1.0);
+        assert_eq!(s.model.state().bodies.len(), 1);
+        assert!(rel(v, 16000.0 + 3.0 * 150.0 - ROUND - 6.0 * BOSS_ROUND) < 1e-9, "{features:?}: {v}");
+        let want = [[-25.0, -9.0], [-25.0, -6.0], [5.0, -9.0], [5.0, -6.0], [5.0, 6.0], [5.0, 9.0]];
+        assert!(axes.len() == 6 && axes.iter().zip(want).all(|(a, w)| near2(*a, w)), "{features:?}: {axes:?}");
+    }
 }
 
 /// The same mirror made in the part, across x = −10 where it is shown (its own x = 10), copies
