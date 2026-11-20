@@ -706,6 +706,17 @@ pub(crate) fn split_move(s: &Session, params: &Value) -> crate::Result<Option<Ve
             if let Some(name) = given.filter(|_| k > 0) {
                 p["name"] = Value::String(format!("{name} ({})", k + 1));
             }
+            // A carried construction is moved once, by the first move: the later moves leave it,
+            // or one built on a body they move would follow that body a second time.
+            if k > 0
+                && let Some(o) = p.as_object_mut()
+                && let Some(carried) = o.remove("carry")
+                && let Some(carried) = carried.as_array().filter(|c| !c.is_empty())
+            {
+                let mut leave = o.get("leave").and_then(Value::as_array).cloned().unwrap_or_default();
+                leave.extend(carried.iter().filter(|c| !leave.contains(c)).cloned().collect::<Vec<_>>());
+                o.insert("leave".into(), Value::Array(leave));
+            }
             map_local(s, &world, "solid.move", &p).unwrap_or(p)
         })
         .collect();

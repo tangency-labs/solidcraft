@@ -2401,3 +2401,95 @@ fn a_faces_own_edges_and_rims_keep_its_points() {
         assert!(matches!(h.app.viewport.woken.item, Some(Sel::Face { .. })) && woken_has(&h, corner), "{edge:?}: {:?}", h.app.viewport.woken);
     }
 }
+
+/// Keep Axes With Body: a box with an upright Center Pole (an axis held by two fixed points)
+/// through its middle, and a second box apart from it.
+mod keep_axes {
+    use serde_json::json;
+
+    use crate::scenario::Harness;
+
+    fn box_with_pole() -> (Harness, u64) {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0]})).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [40, 40, 0], "operation": "new_body"})).unwrap();
+        h.app.run("construct.axis.two_points", json!({"a": {"point": [10, 10, 0]}, "b": {"point": [10, 10, 10]}, "name": "Center Pole"})).unwrap();
+        h.settle();
+        let pole = h.app.session.doc.features.last().unwrap().id;
+        (h, pole)
+    }
+
+    /// Where the pole stands: its line's point at z = 0.
+    fn pole_foot(h: &Harness) -> (f64, f64) {
+        let st = h.app.session.model.state();
+        let c = st.construct.last().expect("a pole");
+        let solidcraft_engine::doc::construct::ConstructGeom::Axis { origin, dir } = c.geom else { panic!("not an axis") };
+        let t = -origin.z / dir.z;
+        (origin.x + t * dir.x, origin.y + t * dir.y)
+    }
+
+    /// Move Body1 30 mm along X with the Move window, Keep Axes With Body set to `keep`.
+    fn move_body1(h: &mut Harness, keep: Option<bool>) {
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": "Body1"}]})).unwrap();
+        h.app.start("solid.move");
+        let d = h.app.dialog.as_mut().unwrap();
+        if let crate::dialogs::Kind::Move { x, .. } = &mut d.kind {
+            *x = "30 mm".into();
+        }
+        if let Some(keep) = keep {
+            d.extra.insert("keep_axes".into(), json!(keep));
+        }
+        let d = h.app.dialog.take().unwrap();
+        let p = crate::dialogs_move::params(&h.app, &d).unwrap();
+        h.app.run("solid.move", p).unwrap();
+        h.settle();
+    }
+
+    #[test]
+    fn moving_a_body_takes_its_center_pole_along_only_when_ticked() {
+        for (keep, foot) in [(Some(true), 40.0), (Some(false), 10.0), (None, 10.0)] {
+            let (mut h, _) = box_with_pole();
+            move_body1(&mut h, keep);
+            let (x, y) = pole_foot(&h);
+            assert!((x - foot).abs() < 1e-6 && (y - 10.0).abs() < 1e-6, "keep {keep:?}: the pole stands at ({x}, {y})");
+        }
+    }
+
+    /// The option starts unticked, so an ordinary Move moves what it always did.
+    #[test]
+    fn the_option_starts_unticked() {
+        let (mut h, _) = box_with_pole();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": "Body1"}]})).unwrap();
+        h.app.start("solid.move");
+        assert!(!crate::dialogs_move::keeps_axes(&h.app, h.app.dialog.as_ref().unwrap()));
+    }
+
+    /// Editing a Move keeps the constructions it was saved with while its bodies and the option
+    /// stay as they were, rather than working them out again.
+    #[test]
+    fn an_edited_move_keeps_the_poles_it_carried() {
+        let (mut h, pole) = box_with_pole();
+        move_body1(&mut h, Some(true));
+        let mv = h.app.session.doc.features.last().unwrap().id;
+        let d = crate::dialogs::for_feature(&h.app, mv, None).unwrap();
+        assert!(crate::dialogs_move::keeps_axes(&h.app, &d));
+        let p = crate::dialogs_move::params(&h.app, &d).unwrap();
+        assert_eq!(p["carry"], json!([pole]), "{p}");
+    }
+
+    /// A pole that misses the moved body stays, ticked or not.
+    #[test]
+    fn a_pole_away_from_the_moved_body_stays() {
+        let (mut h, _) = box_with_pole();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": "Body2"}]})).unwrap();
+        h.app.start("solid.move");
+        let d = h.app.dialog.as_mut().unwrap();
+        if let crate::dialogs::Kind::Move { x, .. } = &mut d.kind {
+            *x = "30 mm".into();
+        }
+        d.extra.insert("keep_axes".into(), json!(true));
+        let d = h.app.dialog.take().unwrap();
+        let p = crate::dialogs_move::params(&h.app, &d).unwrap();
+        assert!(p.get("carry").is_none(), "{p}");
+    }
+}
