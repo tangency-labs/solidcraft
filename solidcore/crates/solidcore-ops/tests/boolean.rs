@@ -3200,6 +3200,46 @@ fn a_ring_turned_about_an_axis_within_tolerance_of_a_balls_centre_joins_it() {
     }
 }
 
+/// #17468: a round tube (a circle of radius 0.75 at distance 9.525 from z, in the yz plane,
+/// turned a quarter about -z) capped at its start by a ball of the tube's radius, joined
+/// through their records as SolidCraft hands them on. The ball's centre is `d` off the tube's
+/// centre circle along y, as a centre typed to six decimals leaves it (3.6e-7 in the issue's
+/// design). The ball's poles, the ends of its seam, lie on the tube's start circle. With `d`
+/// from 1e-8 to 1e-6, within tolerance, the join was refused ("Face Near missing Seam", face
+/// test 36); at 0 and 1e-9 it joined. Every offset is one valid solid: the tube's torus face,
+/// its end disc and the ball's outer half (3 faces); the end circle, the torus's seam and the
+/// start circle in three pieces between its seam vertex and the poles (5 edges); and those
+/// three vertices with the end circle's (4). Its volume is the quarter tube's, π²r²R/2 by
+/// Pappus, and the half ball's, 2πr³/3: the ball's other half lies in the tube but for a
+/// crescent where it pokes past the tube's wall, of volume below 2e-9 for |d| <= 1e-6.
+#[test]
+fn a_ball_joined_onto_a_tubes_end_within_tolerance_of_its_centre_circle_is_valid() {
+    all_fixes();
+    let (big, r, z) = (9.525, 0.75, 13.25);
+    let profile = [Curve::Arc {
+        center: [0.0, big, z],
+        axis: [1.0, 0.0, 0.0],
+        reference: [0.0, 1.0, 0.0],
+        radius: r,
+        start: 0.0,
+        end: TAU,
+    }];
+    let want = PI * PI * r * r * big / 2.0 + 2.0 * PI * r * r * r / 3.0;
+    for d in [0.0, 1e-9, 1e-8, 1e-7, 3.6e-7, 1e-6, -1e-7] {
+        let tube = revolve(&profile, [0.0; 3], [0.0, 0.0, -1.0], TAU / 4.0, true).unwrap();
+        let ball = make_sphere([0.0, big + d, z], r).unwrap();
+        let res = boolean(round_tripped(&tube), round_tripped(&ball), BooleanOp::Union)
+            .unwrap_or_else(|e| panic!("d {d}: {e:?}"))
+            .unwrap();
+        let report = res.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "d {d}: {}", report.text);
+        assert_eq!(res.solid_count().unwrap(), 1, "d {d}");
+        assert_eq!(res.counts().unwrap(), [3, 5, 4], "d {d}");
+        let v = volume(&res);
+        assert!((v - want).abs() <= 1e-9 * want, "d {d}: {v} vs {want}");
+    }
+}
+
 /// `b` as a record whose tolerances (the body's, every edge's and vertex's) are all
 /// `tolerance`, as a file read at that tolerance gives it.
 fn read_at(b: &Body, tolerance: f64) -> Body {
