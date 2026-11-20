@@ -863,7 +863,7 @@ mod tests {
     #[test]
     fn calibrate_maths_and_validation() {
         let mut s = Session::default();
-        let r = s.execute("canvas.insert", &json!({"data": png(200, 100), "plane": "XY", "width": 100})).unwrap();
+        let r = s.execute("canvas.insert", &json!({"path": png(200, 100), "plane": "XY", "width": 100})).unwrap();
         let id = r["canvas"].as_u64().unwrap();
         let orig_c = s.doc.canvases[0].clone();
 
