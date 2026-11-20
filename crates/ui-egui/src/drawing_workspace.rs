@@ -12,6 +12,7 @@ use crate::ui_kit::{self, Container, Edge, Surface};
 use solidcraft_theme::Tokens;
 
 pub(crate) mod browser;
+pub(crate) mod detail;
 pub(crate) mod dimension;
 pub(crate) mod export;
 mod first_sheet;
@@ -31,6 +32,7 @@ pub struct State {
     placement: Option<placement::Placement>,
     note: Option<note::Draft>,
     view_edit: Option<panels::ViewEdit>,
+    detail: Option<detail::Draft>,
     export: Option<export::ExportForm>,
     dimension: Option<dimension::Draft>,
     dimension_hover: Option<dimension::Hover>,
@@ -82,6 +84,7 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
         app.drawing_workspace.placement = None;
         app.drawing_workspace.note = None;
         app.drawing_workspace.view_edit = None;
+        app.drawing_workspace.detail = None;
         app.drawing_workspace.dimension = None;
         app.drawing_workspace.dimension_hover = None;
         app.drawing_workspace.dimension_edit = None;
@@ -148,6 +151,10 @@ pub fn reset_document(app: &mut SolveApp) {
 
 pub(crate) fn placing_view(app: &SolveApp) -> bool {
     app.drawing_workspace.placement.is_some()
+}
+
+pub(crate) fn placing_detail(app: &SolveApp) -> bool {
+    app.drawing_workspace.options == Some(Tool::Detail)
 }
 
 pub(crate) fn placing_note(app: &SolveApp) -> bool {
@@ -1048,6 +1055,10 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
         note::editor(app, ui, selected);
     } else if let Some(Tool::Edit(view)) = app.drawing_workspace.options {
         if panels::view_editor(app, ui, view) {
+            close_panel(app);
+        }
+    } else if app.drawing_workspace.options == Some(Tool::Detail) {
+        if detail::panel(app, ui) {
             close_panel(app);
         }
     } else if app.drawing_workspace.options == Some(Tool::Export) {

@@ -61,6 +61,7 @@ pub const DOCUMENTED: &[&str] = &[
     "document.units",
     "drawing.export",
     "drawing.table.edit",
+    "drawing.view.detail",
     "edit.checkpoint",
     "edit.restore_checkpoint",
     "explode.create",
