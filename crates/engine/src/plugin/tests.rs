@@ -695,6 +695,28 @@ mod native {
     }
 
     #[test]
+    fn plugin_run_omits_hidden_keys_and_refuses_unavailable_choices() {
+        // Return the JSON argument received by the actual Wasm entry, using its canonical result area.
+        let f = Fixture::new("i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
+        let mut m = manifest();
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{
+        "type":"object","required":["shelves"],"properties":{
+            "storage":{"type":"string","enum":["shelves","drawers"]},
+            "shelves":{"type":"integer","x-solidcraft-visible-when":{"field":"storage","eq":"shelves"}},
+            "size":{"type":"string","oneOf":[{"const":"small","x-solidcraft-when":{"field":"storage","eq":"shelves"}},{"const":"large"}]}
+        }}}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        let approval = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
+        let args = |params: Value| json!({"path":f.path(),"approval":approval,"entry":"make","params":params});
+        let output = s.execute("plugin.run", &args(json!({"storage":"drawers","shelves":"ignored","size":"large"}))).unwrap();
+        assert_eq!(output["result"], json!({"storage":"drawers","size":"large"}));
+        let error = s.execute("plugin.run", &args(json!({"storage":"drawers","size":"small"}))).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "params.size"));
+        assert!(s.undo.is_empty(), "a read entry changes no design");
+    }
+
+    #[test]
     fn declared_entry_inputs_are_discoverable_and_namespaced_calls_share_approval() {
         let f = Fixture::new("call $box");
         let mut m = manifest();
