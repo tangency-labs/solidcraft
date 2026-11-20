@@ -65,6 +65,7 @@ mod chart;
 mod flat;
 mod fold;
 pub mod hermite;
+mod holes;
 mod layout;
 pub(crate) mod plane;
 mod refusal;
@@ -74,6 +75,7 @@ mod sheet;
 
 pub use flat::{Development, EdgeFrom, FlatPanel, Mismatch, Trim, Zone};
 pub use fold::{fold, Bent, Fold};
+pub use holes::{note_beside, same_circle, Circle};
 pub use layout::{crossings, curve_through, develop};
 pub use refusal::{JointRefusal, PanelRefusal, Refusal, RuleRefusal};
 pub use rigid::{Rigid2, Rigid3};
