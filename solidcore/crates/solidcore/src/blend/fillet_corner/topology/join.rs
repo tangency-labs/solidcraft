@@ -132,40 +132,57 @@ pub(crate) fn tangent_cliff_join(
     use crate::surface::surface::SurfaceKind;
     use crate::topology::edge;
 
-    let [first, second] = selected else {
-        return Ok(None);
+    // The corner stores one outgoing use per distinct edge. A closed spine
+    // supplies both end tangents and may have its surface seam at the contact.
+    let (first, second, closed) = match selected {
+        [first, second] if ring.len() == 4 => (first, second, false),
+        [edge] if (3..=4).contains(&ring.len()) => (edge, edge, true),
+        _ => return Ok(None),
     };
-    if ring.len() != 4 {
-        return Ok(None);
-    }
     let (Some(a), Some(b)) = (eu1::edge(target, *first)?, eu1::edge(target, *second)?) else {
         return Ok(None);
     };
-    if a == b
+    if (closed && !edge::is_closed(target, a)?)
+        || (!closed && a == b)
         || !edge_bounds_material(target, a)?
-        || !edge_bounds_material(target, b)?
         || !is_concave_edge(k, target, a)?
-        || !is_concave_edge(k, target, b)?
+        || (!closed && (!edge_bounds_material(target, b)? || !is_concave_edge(k, target, b)?))
         || !test_g1_continuity(k, target, Some(vertex), Some(a), Some(b), angle_tol_deg)?.0
     {
         return Ok(None);
     }
+    if closed {
+        let supports = faces_of(target, *first)?;
+        for &eu in ring {
+            let adjacent = faces_of(target, eu)?;
+            if !adjacent
+                .iter()
+                .flatten()
+                .any(|face| supports.contains(&Some(*face)))
+            {
+                return Ok(None);
+            }
+        }
+    }
     let (sides, between) = join_sides(target, selected, ring)?;
+    let same_support = |others: &[EdgeuseId], faces: [Option<FaceId>; 2]| -> Result<bool> {
+        let [Some(f0), Some(f1)] = faces else {
+            return Ok(false);
+        };
+        if f0 != f1 {
+            return Ok(false);
+        }
+        match others {
+            [] => Ok(true),
+            [seam] if closed => Ok(faces_of(target, *seam)? == [Some(f0); 2]),
+            _ => Ok(false),
+        }
+    };
     let (rim_uses, rim_support) = match &between {
-        [before, after]
-            if before.len() == 2
-                && after.is_empty()
-                && sides[1][0].is_some()
-                && sides[1][0] == sides[1][1] =>
-        {
+        [before, after] if before.len() == 2 && same_support(after, sides[1])? => {
             (before, &sides[0])
         }
-        [before, after]
-            if after.len() == 2
-                && before.is_empty()
-                && sides[0][0].is_some()
-                && sides[0][0] == sides[0][1] =>
-        {
+        [before, after] if after.len() == 2 && same_support(before, sides[0])? => {
             (after, &sides[1])
         }
         _ => return Ok(None),

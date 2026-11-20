@@ -23,7 +23,7 @@ use crate::error::{EntityRef, Result};
 use crate::geom::attribute::{ids, Attribute, AttributeValue, Behavior, TagData};
 use crate::kernel::Kernel;
 use crate::topology::brep::p1;
-use crate::topology::FaceId;
+use crate::topology::{Brep, FaceId};
 
 impl FilletSession<'_> {
     /// The kind of the intermediate body's face on `geom`'s surface.
@@ -106,6 +106,34 @@ impl FilletSession<'_> {
                 .key;
             self.objects.attributes.add_attribute(key, handle)?;
             self.objects.blend_face_marks.push(handle);
+        }
+        Ok(())
+    }
+
+    /// Each strip made by dividing a marked intermediate face has the same
+    /// blend kind. The edits on the detached sheet use its own attributes;
+    /// the session's temporary marks must follow those faces separately.
+    pub(super) fn copy_divided_blend_face_mark(
+        &mut self,
+        sheet: &Brep,
+        from: FaceId,
+        copies: &[FaceId],
+    ) -> Result<()> {
+        let Some(serial) = sheet.notify_serial() else {
+            return Ok(());
+        };
+        let key = |face| crate::topology::brep::p3::topology_ref(serial, EntityRef::Face(face)).key;
+        let source = key(from);
+        let attributes = &mut self.objects.attributes;
+        let Some(mark) = attributes.find_attribute(source, ids::FILLET_BLEND_FACE) else {
+            return Ok(());
+        };
+        for &face in copies {
+            let target = key(face);
+            attributes.copy(mark, source, target)?;
+            if let Some(copied) = attributes.find_attribute(target, ids::FILLET_BLEND_FACE) {
+                self.objects.blend_face_marks.push(copied);
+            }
         }
         Ok(())
     }

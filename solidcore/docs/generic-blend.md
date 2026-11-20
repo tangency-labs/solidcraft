@@ -421,8 +421,10 @@ For concave overflow the added material ends flush with the continued cliff face
 original cliff edge, the default of T-FLEX on Parasolid [52]. A concave chamfer can touch a sharp
 rim tangentially where its planar support ends. Its strips share their section on the continued
 support. Where a rail crosses that rim into free space, the continued wall cuts the strip at the
-crease. The crease and the crossed rim edges bound the extension of the wall. The Roll-over's
-second pass (§3.2) also trims its added material at the crease.
+crease. The crease and the crossed rim edges bound the extension of the wall. A closed strip
+is divided at an interior section before cutting it at the tangent rim, so the two creases
+keep their separate parameters at the seam. The pieces are sewn together on the same surface.
+The Roll-over's second pass (§3.2) also trims its added material at the crease.
 
 ### 3.5 Refusals name the size that fits
 

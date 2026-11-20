@@ -78,6 +78,7 @@ use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE};
 use crate::nurbs::b_spline_curve::{BSplineCurve, ControlPointForm};
+use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::iges::clamp_curve;
 use crate::nurbs::knots::Side;
@@ -1867,6 +1868,61 @@ impl FilletSession<'_> {
         trimmed
     }
 
+    /// The two creases that touch at the seam of a closed strip end on different
+    /// parameter sides. Cut it at an interior section first so the following
+    /// face splits retain both arcs of the closed contact rail at the seam.
+    fn divide_closed_cliff_strips(
+        &mut self,
+        k: &mut Kernel,
+        sheet: &mut Brep,
+        solvers: &[FilletObject],
+        round_of: &mut BTreeMap<FaceId, usize>,
+        tol: f64,
+    ) -> Result<BTreeSet<FaceId>> {
+        let mut divided = BTreeSet::new();
+        if self.executive.continued_cliffs.is_empty() {
+            return Ok(divided);
+        }
+        for (face, index) in round_of.clone() {
+            let Some(solver) = solvers.get(index) else {
+                continue;
+            };
+            if !self.executive.continued_cliffs.contains_key(solver) {
+                continue;
+            }
+            let domain = face::p2::uv_domain(sheet, face)?;
+            let surface = face::p2::surface(sheet, face)?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the cliff blend's surface"))?;
+            if !surface.is_periodic(k, &domain, SurfParamType::U)? {
+                continue;
+            }
+            let section = surface
+                .create_iso_parametric_curve(
+                    k,
+                    SurfParamType::U,
+                    domain.evaluate(0.5, 0.5).x,
+                    tol,
+                    Some(&domain),
+                    false,
+                )?
+                .curve;
+            let (extra, _) = with_kernel_callbacks(k, sheet, |k, b, env| {
+                merge_curves(k, b, env, face, tol, vec![section], None)
+            })?;
+            if extra.is_empty() {
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the closed cliff blend does not divide at its interior section",
+                ));
+            }
+            self.copy_divided_blend_face_mark(sheet, face, &extra)?;
+            divided.insert(face);
+            divided.extend(extra.iter().copied());
+            round_of.extend(extra.into_iter().map(|part| (part, index)));
+        }
+        Ok(divided)
+    }
+
     /// The fork's `TrimAtCreases` from its tolerances on: `sheet` (the open ends cut)
     /// trimmed and sewn into the target. A refusal is written to `note`.
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one fork routine
@@ -1940,6 +1996,8 @@ impl FilletSession<'_> {
                 }
             }
         }
+        let divided =
+            self.divide_closed_cliff_strips(k, &mut sheet, solvers, &mut round_of, tol)?;
         let mut kept_rounds: BTreeSet<usize> = BTreeSet::new();
         // #18646: each kept piece of a round's face, with its round
         let mut piece_round: BTreeMap<FaceId, usize> = BTreeMap::new();
@@ -2144,6 +2202,9 @@ impl FilletSession<'_> {
                     merge_curves(k, b, env, s, tol, pieces, intersection)
                 })?
                 .0;
+            }
+            if divided.contains(&s) {
+                self.copy_divided_blend_face_mark(&sheet, s, &new_faces)?;
             }
             // keep the pieces inside the target
             let mut all = vec![s];

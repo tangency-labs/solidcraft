@@ -205,7 +205,7 @@ impl BlendCorner {
     /// itself (`solver_eus`, the corner's `m_pSolverEUs`).
     #[must_use]
     pub fn is_closed_join(self, solver_eus: Option<&[EdgeuseId]>) -> bool {
-        self.event == BlendCornerEvent::Join && solver_eus.is_some_and(|eus| eus.len() == 1)
+        self.is_join() && solver_eus.is_some_and(|eus| eus.len() == 1)
     }
 
     /// Not the fork's (#2349): a Turn of one closed blended edge meeting itself at an

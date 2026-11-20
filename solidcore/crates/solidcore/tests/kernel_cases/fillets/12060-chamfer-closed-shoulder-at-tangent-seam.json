@@ -1,0 +1,77 @@
+{
+  "case": "12060-chamfer-closed-shoulder-at-tangent-seam",
+  "area": "fillets",
+  "sources": [
+    "tangency-labs/solidcraft#12060"
+  ],
+  "what": "A 17 mm high cylindrical boss of radius R = 3 mm shares the top of a 12 x 12 x 9 mm plate spanning -9 <= x <= 3 and |y| <= 6. Its only tangent wall is x = R, exactly at the cylinder seam, so the shoulder is one closed edge. The equal-distance 0.75 mm chamfer must run around the complete shoulder and terminate flush with that wall.",
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  3.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  3.0,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "index": 13
+            }
+          ],
+          "points": [
+            [
+              2.1213203435596424,
+              2.1213203435596424,
+              0.0
+            ]
+          ],
+          "tolerance": 1e-09
+        },
+        "kind": "chamfer",
+        "sizes": [
+          0.75
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "records": "12060-chamfer-closed-shoulder-at-tangent-seam.bodies.json.gz",
+  "result": [
+    {
+      "made": "b2"
+    }
+  ],
+  "expected": {
+    "body_count": 1,
+    "method": "For 0 <= z <= d = 0.75, the radius is r = R + d - z and one circular cap lies outside the wall x = R. A full cone adds pi*d^2*(R + d/3). A cone clipped on both sides would add F(R+d) - F(R) - pi*R^2*d, where F(r) = (2/3)(2*R*r*q + r^3*asin(R/r) - R^3*ln((r + q)/R)) and q = sqrt(r^2 - R^2). Removing just one of the two equal caps gives the mean of those additions, 5.06835651679739 mm^3. The initial box and post enclose 12*12*9 + 17*pi*R^2.",
+    "source": "analytic",
+    "tolerance": {
+      "abs_mm": 1e-05
+    },
+    "volume_mm3": 1781.7320325160358
+  },
+  "expressible": true,
+  "operation_expressible": true
+}
