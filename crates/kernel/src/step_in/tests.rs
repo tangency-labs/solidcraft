@@ -1716,6 +1716,28 @@ fn hand_written_assembly() {
     assert!((root.children[1].transform[3][0] - 100.0).abs() < 1e-9);
 }
 
+/// Writers disagree on the order of a placement's two items: the part's own origin first (the
+/// fixture), the assembly's placement first though the part's representation comes first
+/// (HOOPS Exchange), or both items listed in the assembly. Each places the part the same way,
+/// with each item read in the units of the representation that lists it.
+#[test]
+fn assembly_placement_items_in_any_order() {
+    let usual = two_instance_assembly();
+    let expected = step_import(&usual).unwrap().tree[0].children[1].transform;
+    for items in ["#84,#65", "#81,#84"] {
+        let t = usual.replace("ITEM_DEFINED_TRANSFORMATION('','',#65,#84)", &format!("ITEM_DEFINED_TRANSFORMATION('','',{items})"));
+        assert_ne!(t, usual);
+        let imp = step_import(&t).unwrap();
+        assert!(imp.warnings.is_empty(), "{items}: {:?}", imp.warnings);
+        let got = imp.tree[0].children[1].transform;
+        for (a, b) in got.iter().flatten().zip(expected.iter().flatten()) {
+            assert!((a - b).abs() < 1e-9, "{items}: {got:?} instead of {expected:?}");
+        }
+        let m = measure(&imp.bodies[1].body).unwrap();
+        assert!(m.bbox.min.dist(Vec3::new(90.0, 0.0, 0.0)) < 1e-6, "{items}: {:?}", m.bbox);
+    }
+}
+
 /// The cube part (in cm) placed `n` times in a millimetre assembly, each instance moved along X
 /// and turned about Z.
 fn instanced_assembly(n: u64) -> String {
