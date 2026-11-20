@@ -547,6 +547,11 @@ impl RuntimeManifest {
             if !entry.input_schema.is_object() || entry.input_schema.get("type").and_then(Value::as_str) != Some("object") {
                 return Err(invalid(&field, "entry inputs must be an object schema"));
             }
+            if let Some(order) = entry.input_schema.get("x-solidcraft-field-order")
+                && order.as_str() != Some("declared")
+            {
+                return Err(invalid(format!("{field}.x-solidcraft-field-order"), "must be \"declared\" when present"));
+            }
             validate_list_inputs(&entry.input_schema, &field)?;
             conditions::validate_conditions(&entry.input_schema)?;
             if entry.slots.len() > 16

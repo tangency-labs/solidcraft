@@ -228,7 +228,8 @@ fn set_input(fields: &mut [(Field, Input)], key: &str, input: Input) {
 #[test]
 fn dialog_preserves_declared_property_order_when_visibility_changes() {
     let command: solidcraft_engine::plugin::Entry = serde_json::from_str(
-        r#"{"name":"make","input_schema":{"type":"object","required":["alpha","extra","zeta"],"properties":{
+        r#"{"name":"make","input_schema":{
+            "type":"object","x-solidcraft-field-order":"declared","required":["alpha","extra","zeta"],"properties":{
             "zeta":{"type":"number","default":1},
             "extra":{"type":"number","default":2,"x-solidcraft-visible-when":{"field":"mode","eq":true}},
             "mode":{"type":"boolean","default":false},
@@ -269,7 +270,7 @@ fn dialog_preserves_declared_property_order_when_visibility_changes() {
 fn unrecorded_dialog_fields_keep_required_then_alphabetical_order() {
     for order in [None, Some(vec!["zeta".to_owned(), "missing".to_owned()])] {
         let mut command = entry("make", "edit", json!([]));
-        command.input_schema = json!({"type":"object","required":["z_required","a_required"],"properties":{
+        command.input_schema = json!({"type":"object","x-solidcraft-field-order":"declared","required":["z_required","a_required"],"properties":{
             "zeta":{"type":"number","default":1},
             "z_required":{"type":"number","default":2},
             "alpha":{"type":"number","default":3},
@@ -286,6 +287,47 @@ fn unrecorded_dialog_fields_keep_required_then_alphabetical_order() {
         let keys: Vec<&str> = fields.iter().map(|(field, _)| field.key.as_str()).collect();
         let expected = if order.is_some() { ["zeta", "z_required", "a_required", "alpha"] } else { ["z_required", "a_required", "alpha", "zeta"] };
         assert_eq!(keys, expected, "unrecorded keys retain their existing order, and stale recorded keys are ignored");
+    }
+}
+
+#[test]
+fn dialog_field_order_and_initial_picks_require_explicit_opt_in() {
+    let command: solidcraft_engine::plugin::Entry = serde_json::from_str(
+        r#"{"name":"make","input_schema":{"type":"object","required":["a_pick","z_pick","b_required"],"properties":{
+            "zeta":{"type":"number","default":1},
+            "z_pick":{"type":"array","x-solidcraft-selection":{"version":1,"accept":["body"]}},
+            "a_pick":{"type":"array","x-solidcraft-selection":{"version":1,"accept":["body"]}},
+            "alpha":{"type":"number","default":2},
+            "b_required":{"type":"number","default":3}
+        }}}"#,
+    )
+    .unwrap();
+    for declared in [false, true] {
+        let mut command = command.clone();
+        assert_eq!(command.input_property_order[""], ["zeta", "z_pick", "a_pick", "alpha", "b_required"]);
+        if declared {
+            command.input_schema["x-solidcraft-field-order"] = json!("declared");
+        }
+        let mut h = crate::scenario::Harness::new();
+        let picked = Sel::Body { name: "Part".into() };
+        h.app.session.selection.push(picked.clone());
+        h.app.plugin_menu.listed = vec![listed("ordered", vec![command])];
+        h.app.plugin_menu.loaded = true;
+        open_entry(&mut h.app, 0, 0);
+        let fields = h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap();
+        let keys: Vec<&str> = fields.iter().map(|(field, _)| field.key.as_str()).collect();
+        let expected = if declared {
+            ["zeta", "z_pick", "a_pick", "alpha", "b_required"]
+        } else {
+            ["a_pick", "z_pick", "b_required", "alpha", "zeta"]
+        };
+        assert_eq!(keys, expected, "recording declaration order alone does not opt in");
+        let first = if declared { "z_pick" } else { "a_pick" };
+        for key in ["a_pick", "z_pick"] {
+            let input = &fields.iter().find(|(field, _)| field.key == key).unwrap().1;
+            let picks = if key == first { vec![picked.clone()] } else { Vec::new() };
+            assert_eq!(input, &Input::Selection(picks), "only the first selection field receives existing viewport picks");
+        }
     }
 }
 

@@ -201,14 +201,19 @@ The shared dialog draws the entry's input schema and supplies the package's cont
 Installing, enabling or discovering a plugin never runs an entry. Installation grants do not replace
 execution consent or the manifest-and-component identity checked by `plugin.run`.
 
-Dialog fields follow the order of `input_schema.properties` in the manifest, including optional
-fields. The `required` array controls validation, not field order. Fields hidden by
-`x-solidcraft-visible-when` return to their declared positions when shown again; the remaining
-fields keep their relative order. The host records declaration order separately as
-`input_property_order` on loaded entries (a map from schema JSON Pointer paths to property-name
-lists, with `""` for the root). This metadata survives entry round trips; plugin authors only need
-to order the properties in their schema. For fields without recorded order, the dialog keeps its
-existing order: required fields in `required` array order, then optional fields alphabetically.
+The default is unchanged: dialog fields show required fields in `required` array order, then
+optional fields alphabetically. To use the order of `input_schema.properties` in the manifest, set
+`"x-solidcraft-field-order": "declared"` on the root `input_schema` object. Any other value for
+this annotation is invalid. With this opt-in, required and optional fields follow declaration
+order. Fields hidden by `x-solidcraft-visible-when` return to their declared positions when shown
+again; the remaining fields keep their relative order. Field ordering also determines which
+visible, enabled selection field receives the current viewport picks when the dialog opens.
+
+The host records declaration order separately as `input_property_order` on loaded entries (a map
+from schema JSON Pointer paths to property-name lists, with `""` for the root). This metadata
+survives entry round trips; plugin authors only need to order their schema properties and set the
+root annotation. Fields without recorded order keep the default required-first, then alphabetical
+order, even when the annotation is present.
 
 A string with a fixed set of values becomes a dropdown. With `enum` the dropdown shows the values
 themselves; to show words instead, list the options as `oneOf`, each `{"const": value, "title": shown}`

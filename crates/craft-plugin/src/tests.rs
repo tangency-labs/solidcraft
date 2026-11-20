@@ -42,7 +42,7 @@ fn declared_inputs_effects_and_slots_are_readable() {
 fn declared_property_order_survives_manifest_and_entry_round_trips() {
     let bytes = br#"{"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{
         "module":"plugin.wasm","commands":[],"entries":[{"name":"make","input_schema":{
-            "type":"object","required":["alpha","zeta"],"properties":{
+            "type":"object","x-solidcraft-field-order":"declared","required":["alpha","zeta"],"properties":{
                 "zeta":{"type":"number","default":1.5},
                 "extra":{"type":"number","default":2,"x-solidcraft-visible-when":{"field":"mode","eq":true}},
                 "mode":{"type":"boolean","default":false},
@@ -81,6 +81,23 @@ fn schema_properties_must_be_objects_even_in_nested_inputs() {
         let mut value = manifest();
         value["runtime"]["entries"] = json!([{"name":"make","input_schema":schema}]);
         assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with(".properties")));
+    }
+}
+
+#[test]
+fn field_order_annotation_only_accepts_declared() {
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object"}}]);
+    assert!(parse(&value).is_ok(), "the annotation is optional");
+    value["runtime"]["entries"][0]["input_schema"]["x-solidcraft-field-order"] = json!("declared");
+    assert!(parse(&value).is_ok(), "declared order is an explicit opt-in");
+    for order in [json!("alphabetical"), json!("Declared"), json!(""), json!(true), json!(3), Value::Null, json!(["declared"]), json!({})] {
+        value["runtime"]["entries"][0]["input_schema"]["x-solidcraft-field-order"] = order.clone();
+        assert!(
+            matches!(parse(&value), Err(HostError::InvalidManifest { field, reason })
+                if field == "runtime.entries.make.input_schema.x-solidcraft-field-order" && reason.contains("\"declared\"")),
+            "invalid field-order annotation: {order}"
+        );
     }
 }
 
