@@ -149,7 +149,6 @@ fn a_sketch_modify_key_outside_a_sketch_opens_no_sketch() {
         assert!(h.app.session.active_sketch.is_none(), "{key}");
         assert!(tool(&h).is_none(), "{key}");
     }
-    // Offset works on a face sketch's projected edges, so its key still starts a sketch.
     let mut h = Harness::new();
     assert!(crate::keymap::commands_for(&h.app, "O").contains(&"sketch.offset"));
     press(&mut h, "O");
