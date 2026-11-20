@@ -309,6 +309,53 @@ fn a_join_to_objects_on_both_sides_joins_both_bodies() {
     }
 }
 
+/// The second side's To Object ends on a level, so it takes a plane parallel to the sketch, a vertex
+/// or a point; a curved or slanted face is refused, not flattened (#18691). A pin 10 mm above a
+/// plate's middle goes down: the flank of a horizontal cylinder and the slope of a wedge are
+/// refused with the reason, the plate's top face is not.
+#[test]
+fn the_second_side_refuses_a_to_object_that_is_curved_or_slanted() {
+    let cases: Vec<(&str, Box<dyn Fn(&mut Session)>, serde_json::Value)> = vec![
+        (
+            "a cylinder's flank",
+            Box::new(|s: &mut Session| {
+                run(s, "sketch.create", json!({"plane":"YZ","name":"Round"}));
+                run(s, "sketch.circle.center", json!({"center":[0,-30],"radius":10}));
+                run(s, "sketch.finish", json!({}));
+                run(s, "solid.extrude", json!({"sketch":"Round","distance":40,"direction":"symmetric","name":"Target","body_name":"Target"}));
+            }),
+            json!([0, 0, -20]),
+        ),
+        (
+            "a slanted plane",
+            Box::new(|s: &mut Session| {
+                // An XZ sketch's y runs along -Z: the wedge is at Z -40 up to a slope from -30 to -20.
+                run(s, "sketch.create", json!({"plane":"XZ","name":"Wedge"}));
+                run(s, "sketch.line", json!({"points": [[-20,40],[20,40],[20,20],[-20,30]], "closed": true}));
+                run(s, "sketch.finish", json!({}));
+                run(s, "solid.extrude", json!({"sketch":"Wedge","distance":30,"direction":"symmetric","name":"Target","body_name":"Target"}));
+            }),
+            json!([0, 0, -25]),
+        ),
+    ];
+    for (what, build, pick) in cases {
+        let mut s = Session::default();
+        build(&mut s);
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{what} target: {:?}", s.model.results);
+        run(&mut s, "construct.plane.offset", json!({"base":"XY","offset":10,"name":"Above"}));
+        run(&mut s, "sketch.create", json!({"plane":"Above","name":"Pin"}));
+        run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":2}));
+        run(&mut s, "sketch.finish", json!({}));
+        let refused = s.execute("solid.extrude", &json!({"sketch":"Pin","distance":"5 mm","to2":pick,"operation":"new","name":"Pin"}));
+        let mut errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+        errors.extend(refused.err().map(|e| e.to_string()));
+        assert!(
+            errors.iter().any(|e| e.contains("not supported yet") && e.contains("second side")),
+            "{what}: want a typed refusal naming the second side, got {errors:?}"
+        );
+    }
+}
+
 /// Through all keeps the side a saved negative distance points to (#10415): switching an inward
 /// cut to Through All must not turn it to the plane's positive side. A 40 mm cube round the
 /// origin, and an r5 hole sketched 10 mm above its middle: positive reaches 10 mm up to the
