@@ -1955,7 +1955,7 @@ impl Assembly<'_> {
                     eval.point(q).is_some_and(|s| s.dist(p) <= self.tol)
                 };
                 let candidates: Vec<f64> = match &edge.curve {
-                    BCurve::Spline { knots, .. } | BCurve::RationalSpline { knots, .. } => knots.iter().copied().collect(),
+                    BCurve::Spline { knots, .. } | BCurve::RationalSpline { knots, .. } => knots.to_vec(),
                     BCurve::Circle { .. } => {
                         let first = (lo / FRAC_PI_2).floor() as i64;
                         let last = (hi / FRAC_PI_2).ceil() as i64;

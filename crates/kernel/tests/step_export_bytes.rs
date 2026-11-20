@@ -58,10 +58,20 @@ const NO_READ_BACK: &[&str] = &["tests/step-regressions/thread_crest_band.step"]
 /// (fixture, digest of its export) as written before the move, plus new fixtures; the torus-ring spline
 /// is now an exact torus (#16297), and an edge on a rational spline that is exactly a circular arc
 /// is written as that circle (#17929).
+/// Entries whose export's bytes differ only on macOS's math functions, beside the pinned values
+/// above: the reader's seam split now lands on the edge's own knot, and the pcurves made beside it
+/// carry macOS libm's rounding for this one fixture. When #15405 (one pure-Rust libm) lands, macOS
+/// writes Linux's bytes and this set should go, as #19284 expects of the engine's export set.
+#[cfg(target_os = "macos")]
+#[rustfmt::skip]
+const DIGESTS_MACOS: &[(&str, &str)] = &[
+    ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "710ec80508bae43a"),
+];
+
 #[rustfmt::skip]
 const DIGESTS: &[(&str, &str)] = &[
     ("solidcore/crates/solidcore-step/tests/fixtures/closed-spline-cylinder.step", "2b7d457b87394f2c"),
-    ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "710ec80508bae43a"),
+    ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "5545d4ee93431803"),
     ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "ef5f1b70be16e528"),
     ("tests/kernel-cases/import/1721-closed-bspline-tube-face/input.step", "30a183e14f3b58b3"),
     ("tests/kernel-cases/import/2043-outer-bound-opposing-surface-sense/input.step", "d8c5f6b3ce4ea3cf"),
@@ -187,7 +197,13 @@ fn step_export_keeps_its_bytes_and_reads_back() {
         }
         return;
     }
-    let expected: Vec<(String, String)> = DIGESTS.iter().map(|(n, d)| ((*n).to_string(), (*d).to_string())).collect();
+    let mut expected: Vec<(String, String)> = DIGESTS.iter().map(|(n, d)| ((*n).to_string(), (*d).to_string())).collect();
+    #[cfg(target_os = "macos")]
+    for (n, d) in DIGESTS_MACOS {
+        if let Some(entry) = expected.iter_mut().find(|(m, _)| m == n) {
+            entry.1 = (*d).to_string();
+        }
+    }
     assert_eq!(table, expected, "the export's bytes changed");
     assert!(failures.is_empty(), "round trips: {failures:#?}");
 }
