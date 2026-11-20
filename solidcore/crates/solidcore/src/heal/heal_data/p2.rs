@@ -78,6 +78,17 @@
 //!   `topology.brep_p1`) are wired; [`SolidError::Unported`] from their own unported
 //!   callees propagates. `Cache_DegenFaces` defers where `IsDegenerate` does
 //!   (`SmCurveClassification`).
+//! - **`Fix_TolSizes` edge tolerances** (not upstream): an edge's new tolerance is at
+//!   least the gap gain times its edge/face gap. Upstream's `gain * gap - def` is under
+//!   gaps below ten times the default, leaving a fixed edge the check's edge/face test
+//!   (`SmBrep` Test #4) fails.
+//! - **`Fix_TolSizes` edge tolerances at the check's limit** (not upstream): where that cover
+//!   of the sampled gap reaches the limit the pointer check refuses an edge past
+//!   (`LARGE_SMALL_SIZE_RATIO` times the body's tolerance, `SmBrep` Test #59), the edge takes
+//!   the certified bound of its edge/face gap instead ([`certified_edge_face_gap`]), when that
+//!   bound is under the limit. The gap gain is a margin over 20 samples; an enclosure needs
+//!   none. Upstream gave an imported edge whose gap is under the limit a tolerance the check
+//!   refuses.
 //! - No recursion; no allocation from caller counts beyond the target lists given.
 
 use crate::error::{Result, SolidError};
@@ -89,9 +100,9 @@ use crate::geom::hash_table::{
 use crate::geom::tol::{
     approx_tol_3d, brep_calc_edge_zone_tol_3d, brep_calc_face_zone_tol_3d,
     brep_calc_vertex_zone_tol_3d, brep_model_size_estimate, calc_edge_zone_tol_3d,
-    calc_vertex_zone_tol_3d, context_model_size_estimate, context_zone_tol_3d,
+    calc_vertex_zone_tol_3d, context_model_size_estimate, context_zone_tol_3d, gap_gain,
     set_brep_model_size_estimate, size_estimate_to_zone_tol_3d, zone_tol3d, SmallTopoType,
-    USE_DEFAULT,
+    LARGE_SMALL_SIZE_RATIO, USE_DEFAULT,
 };
 use crate::heal::face_props::{
     FaceProps, HealerOpType, LoopObject, MixedLinkType, PropStage, Tri, TriedLinkType,
@@ -3111,6 +3122,43 @@ impl<O: LoopObject> HealData<O> {
                 b,
                 Some(max_face_tol),
             );
+            // not upstream: `gain * gap - def` is under an edge/face gap below ten times the
+            // default, so a fixed edge failed the check's edge/face test (gap over the edge
+            // tolerance, SmBrep Test #4). The tolerance covers the gap with the gap gain.
+            let zone_tol_3d = if max_edge_face_gap_3d_length > zone_tol_3d {
+                zone_tol3d(k, gap_gain(k) * max_edge_face_gap_3d_length)
+            } else {
+                zone_tol_3d
+            };
+            // not upstream: the gain is a margin over a sampled gap. Where it takes the edge to
+            // the limit the pointer check refuses (Test #59), the certified bound of the gap
+            // needs no margin; the edge keeps the formula's other terms and takes that bound
+            // when the result is under the limit (validity-and-tolerances.md §8: a tolerance
+            // grows to a bound, not a sample). A gap whose bound is past the limit is left to
+            // the check, as before.
+            let limit = LARGE_SMALL_SIZE_RATIO * b.tolerance();
+            let zone_tol_3d = if zone_tol_3d >= limit {
+                match certified_edge_face_gap(k, b, bad_tol_edge, limit / 100.0)? {
+                    Some(bound) => {
+                        let covered = zone_tol3d(
+                            k,
+                            bound
+                                .max(max_edge_face_gap_3d_length)
+                                .max(gap_gain(k) * max_edge_edge_gap_3d_length / 2.0)
+                                .max(max_face_tol)
+                                .max(b.tolerance()),
+                        );
+                        if covered < limit {
+                            covered
+                        } else {
+                            zone_tol_3d
+                        }
+                    }
+                    None => zone_tol_3d,
+                }
+            } else {
+                zone_tol_3d
+            };
             if p.orig_zone_tol_3d == UNDEF_DOUBLE {
                 let t = edge::tolerance(b, bad_tol_edge)?;
                 self.edge_props.props_mut(id)?.orig_zone_tol_3d = t;
@@ -3449,6 +3497,38 @@ impl<O: LoopObject> HealData<O> {
 /// An unsized voxel model (`SetSize(0, 0, 0, NULL, 0)`).
 fn empty_voxels() -> ObjsInVoxels<VertexPropsId> {
     ObjsInVoxels::default()
+}
+
+/// The certified bound of edge `e`'s edge/face gap: the largest, over the faces `e` bounds, of
+/// [`curve_face_gap_bound`] on the edge's trimmed B-spline form (a line's B-spline part), with
+/// `floor` the bound's scale. `None` when the edge has no such form or a face's gap is not
+/// enclosed.
+///
+/// # Errors
+///
+/// Those of [`edge::create_trimmed_nurbs_curve`] and [`curve_face_gap_bound`] (a dangling face,
+/// the kernel's unported and cancelled statuses).
+fn certified_edge_face_gap(k: &Kernel, b: &Brep, e: EdgeId, floor: f64) -> Result<Option<f64>> {
+    use crate::curve::curve::CurveKind;
+    use crate::query::curve_surface_gap::curve_face_gap_bound;
+
+    let Some(trimmed) = edge::create_trimmed_nurbs_curve(k, b, e)? else {
+        return Ok(None);
+    };
+    let spline = match trimmed.kind() {
+        CurveKind::BSpline(s) => s,
+        CurveKind::Line(l) => &l.base,
+        _ => return Ok(None),
+    };
+    let range = trimmed.natural_interval();
+    let mut most: Option<f64> = None;
+    for f in edge::faces(b, e, None)? {
+        match curve_face_gap_bound(k, b, f, spline, [range.min(), range.max()], floor)? {
+            Some(g) => most = Some(most.map_or(g, |m| m.max(g))),
+            None => return Ok(None),
+        }
+    }
+    Ok(most)
 }
 
 #[cfg(test)]

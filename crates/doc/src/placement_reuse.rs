@@ -95,7 +95,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
         | FeatureKind::Cylinder { base: _, axis: _, radius: _, height: _, operation: Operation::NewBody, references: _ }
         | FeatureKind::Sphere { center: _, radius: _, operation: Operation::NewBody }
         | FeatureKind::Torus { center: _, major: _, minor: _, operation: Operation::NewBody }
-        | FeatureKind::Import { file: _, step: _, components: _, skip: _ }
+        | FeatureKind::Import { file: _, step: _, components: _, skip: _, records: _ }
         | FeatureKind::MeshImport { file: _, meshes: _ } => true,
         FeatureKind::Sketch { plane, sketch } => sketch.links.is_empty() && sketch.wires.is_empty() && local_plane(plane, 0),
         FeatureKind::Extrude { sketch, profiles: _, extent, operation: Operation::NewBody, targets: _, thin: _ } => {
@@ -113,7 +113,9 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 from,
                 corner: _,
                 to_body_apart: _,
+                from_level: _,
                 picked_placements: _,
+                one_sided_direction: _,
             } = extent;
             to.is_none() && from.is_none() && !through_all && components.get(&sketch.0) == Some(&f.component)
         }
@@ -140,6 +142,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         components,
         occurrences: _,
         assembly: _,
+        // Drawings draw the model; they feed none of it.
+        drawings: _,
         sheet,
         plastic,
         parts,
@@ -257,9 +261,16 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
                     })
             }
             (
-                FeatureKind::Import { file: a, step, components, skip },
-                FeatureKind::Import { file: b, step: other, components: other_components, skip: other_skip },
-            ) => a == b && Arc::ptr_eq(step, other) && components == other_components && skip == other_skip,
+                FeatureKind::Import { file: a, step, components, skip, records },
+                FeatureKind::Import { file: b, step: other, components: other_components, skip: other_skip, records: other_records },
+            ) => {
+                let same_records = match (records, other_records) {
+                    (Some(r), Some(o)) => Arc::ptr_eq(r, o),
+                    (None, None) => true,
+                    _ => false,
+                };
+                a == b && Arc::ptr_eq(step, other) && components == other_components && skip == other_skip && same_records
+            }
             (a, b) => a == b,
         }
 }

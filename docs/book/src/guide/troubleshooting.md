@@ -21,6 +21,20 @@ Setting `SOLIDCRAFT_SAFE_MODE=1` does the same. From 0.10.2, if two launches in 
 before the window opens, the next one starts in safe mode by itself. `SOLIDCRAFT_RENDERER=cpu`
 uses only the software renderer and keeps your settings.
 
+## Safe graphics mode
+
+If a launch stops before it is up, or the graphics device is lost (the driver was reset), the
+next launch starts in safe graphics mode: your graphics card and settings, but drawn the plain way
+early versions did. The graphics API is the one wgpu picks by itself (no Direct3D 12 first, no
+retries), with no anti-aliasing, ambient occlusion, blur behind panels, studio shading or GPU
+path tracer. The view says "Started in safe graphics mode"; **Try full graphics** goes back to
+full graphics at the next start and offers a restart.
+
+The launch after a single failure tries full graphics again. If two full-graphics launches in a
+row fail, safe graphics mode stays on until you click **Try full graphics**. A full-graphics
+launch that runs a minute without losing its device clears the failures. To try it yourself, tick
+Preferences › Graphics › **Start in safe graphics mode**; it applies to the next launch only.
+
 ## A design won't open or hangs while opening
 
 - **A design that stopped the app while it was being reopened is skipped once.** If SolidCraft
@@ -139,10 +153,16 @@ old Intel Vulkan driver, `igvk64.dll`, did). Windows' Event Viewer names the dri
 
 SolidCraft on Windows starts Vulkan first and loads no other graphics API when Vulkan has a
 graphics card. Direct3D 12 and then OpenGL are tried only on a computer without one (older Intel
-graphics, virtual machines, Remote Desktop). A Vulkan device that fails to start falls back to
-Direct3D 12, then to software rendering. From 0.11.1 until this change Direct3D 12 came first;
-before 0.11.1 the app started Vulkan, Direct3D 12 and OpenGL together. If the Vulkan driver
-crashes the app while it starts, choose **Direct3D 12** below.
+graphics, virtual machines, Remote Desktop), each only with a graphics card, and software
+rendering only after both. A Vulkan device that fails to start falls back to Direct3D 12, then to
+software rendering, and later launches of that version go straight to the API that worked. From 0.11.1 until this change Direct3D 12 came first;
+before 0.11.1 the app started Vulkan, Direct3D 12 and OpenGL together.
+
+If a graphics driver crashes the app while it starts a graphics API, the next launch knows
+which API it was and skips it on this computer, going on in the same order. Safe mode and
+software rendering leave it out too, so that driver is not loaded again (unless every API has
+crashed, when all are tried again). A new SolidCraft version tries it once more. Choosing the API in **Preferences > Graphics > Graphics
+API**, or setting `WGPU_BACKEND`, still starts it. This works the same on every system.
 
 Choose **Preferences > Graphics > Graphics API** to select an API for the next start.
 The page shows the current API separately from the saved choice. **Automatic** keeps

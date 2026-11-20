@@ -10,6 +10,7 @@
 pub mod approximate;
 pub mod assert_valid;
 pub mod exact_pieces;
+pub mod fold_certificate;
 pub mod p1;
 pub mod p10;
 pub mod p11;
@@ -21,6 +22,8 @@ pub mod p6;
 pub mod p7;
 pub mod p8;
 pub mod p9;
+#[cfg(feature = "wr57-replay")]
+pub mod replay;
 
 pub use p1::StepSurface;
 pub use p2::{

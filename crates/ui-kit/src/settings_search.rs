@@ -47,6 +47,8 @@ struct NavStore {
 pub struct Reveal {
     pub page: usize,
     pub label: String,
+    /// When the outline ends, in milliseconds on egui's input clock (`InputState::time`). NaN
+    /// until the row is first drawn, which starts the outline's time.
     pub until: f64,
     /// What the outlined row's name starts with: `{prefix}:revealed`.
     pub prefix: String,
@@ -742,14 +744,17 @@ fn strip_mark(c: char) -> char {
 
 fn english_hit(query: &str, shown: &str) -> bool {
     use std::cell::RefCell;
+    type Map = HashMap<String, Vec<String>>;
     thread_local! {
-        static MAP: RefCell<(String, HashMap<String, Vec<String>>)> = RefCell::new((String::new(), HashMap::new()));
+        // (language, shown text -> English sources, English text -> shown text in the language)
+        static MAP: RefCell<(String, Map, Map)> = RefCell::new((String::new(), Map::new(), Map::new()));
     }
     MAP.with(|slot| {
         let lang = solidcraft_ui_text::language().to_string();
         let mut slot = slot.borrow_mut();
         if slot.0 != lang {
-            let mut map: HashMap<String, Vec<String>> = HashMap::new();
+            let mut map = Map::new();
+            let mut translated = Map::new();
             let locale = solidcraft_ui_text::Locale::for_language(&lang);
             solidcraft_ui_text::each_english_message(|id, english| {
                 if english.contains('{') {
@@ -758,12 +763,21 @@ fn english_hit(query: &str, shown: &str) -> bool {
                 let shown = locale.text(id);
                 if shown != english {
                     map.entry(shown.to_string()).or_default().push(english.to_string());
+                    translated.entry(english.to_lowercase()).or_default().push(shown.to_string());
                 }
             });
-            *slot = (lang, map);
+            *slot = (lang, map, translated);
         }
+        let translated = &slot.2;
         slot.1.get(shown).is_some_and(|lines| {
-            lines.iter().any(|english| setting_score(query, english) > 0 || keywords(english).iter().any(|word| setting_score(query, word) > 0))
+            lines.iter().any(|english| {
+                setting_score(query, english) > 0
+                    || keywords(english).iter().any(|word| {
+                        setting_score(query, word) > 0
+                            // The old label of a renamed setting, as the language wrote it.
+                            || translated.get(&word.to_lowercase()).is_some_and(|legacy| legacy.iter().any(|text| setting_score(query, text) > 0))
+                    })
+            })
         })
     })
 }
@@ -862,21 +876,44 @@ pub fn set_reveal(ctx: &Context, reveal: Option<Reveal>) {
     });
 }
 
+/// The reveal the context holds: the window's copy, with the outline's time once its row drew.
+pub fn current_reveal(ctx: &Context) -> Option<Reveal> {
+    ctx.data(|data| data.get_temp::<Reveal>(Id::unique(REVEAL_ID)))
+}
+
 pub fn reveal_for(page: usize, label: &str, prefix: &str) -> Reveal {
-    Reveal { page, label: label.to_string(), until: now_ms() + REVEAL_MS, prefix: prefix.to_string() }
+    Reveal { page, label: label.to_string(), until: f64::NAN, prefix: prefix.to_string() }
 }
 
 impl Reveal {
-    /// Whether the outline's time is up, on the same clock that set [`Reveal::until`].
-    pub fn expired(&self) -> bool {
-        now_ms() > self.until
+    /// Start the outline's time at `now_ms` on egui's input clock, if it hasn't started.
+    pub fn start(&mut self, now_ms: f64) {
+        if self.until.is_nan() {
+            self.until = now_ms + REVEAL_MS;
+        }
+    }
+
+    /// Whether the outline's time is up at `now_ms` on egui's input clock. One whose time has not
+    /// started (NaN) is not.
+    pub fn expired(&self, now_ms: f64) -> bool {
+        now_ms > self.until
     }
 }
 
 /// Scroll the opened setting into view and outline it until [`Reveal::until`].
 pub fn follow(ui: &Ui, label: &str, rect: Rect) {
-    let Some(reveal) = ui.data(|data| data.get_temp::<Reveal>(Id::unique(REVEAL_ID))) else { return };
-    if reveal.expired() || fold(label) != fold(&reveal.label) {
+    let Some(mut reveal) = ui.data(|data| data.get_temp::<Reveal>(Id::unique(REVEAL_ID))) else { return };
+    if fold(label) != fold(&reveal.label) {
+        return;
+    }
+    // egui's clock, not the wall's: a slow frame (a loaded machine, a test's harness) still shows
+    // the outline for its frames, and the outline's time starts when the row first draws.
+    let now = ui.input(|i| i.time) * 1000.0;
+    if reveal.until.is_nan() {
+        reveal.start(now);
+        ui.data_mut(|data| data.insert_temp(Id::unique(REVEAL_ID), reveal.clone()));
+    }
+    if reveal.expired(now) {
         return;
     }
     let page = with(ui, |state| state.page_index);
@@ -889,12 +926,6 @@ pub fn follow(ui: &Ui, label: &str, rect: Rect) {
     solidcraft_ui_registry::publish_handle(&format!("{}:revealed", reveal.prefix), rect.center());
 }
 
-/// Wall clock in milliseconds, for how long a reveal stays outlined.
-fn now_ms() -> f64 {
-    use web_time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64() * 1000.0).unwrap_or(0.0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -902,6 +933,17 @@ mod tests {
     /// Two pages of a host's settings window.
     const PAGE_LAYOUT: usize = 2;
     const PAGE_GRAPHICS: usize = 3;
+
+    /// A renamed setting is still found by its old label in the user's language, not only in English.
+    #[test]
+    fn search_finds_a_renamed_setting_by_its_old_localized_label() {
+        // The kit's own test catalog holds the setting's current and former labels.
+        crate::test_support::install_catalog();
+        let _language = solidcraft_ui_text::scope("de");
+        let label = solidcraft_ui_text::tr("prefs.sketch.state_icons");
+        assert!(matches_text("Skizzensymbole", &[label]), "{label} is the former Skizzensymbole in der Farbe ihres Zustands");
+        assert!(!matches_text("Qqqq", &[label]));
+    }
 
     /// The search field and its empty result name the window they search (#8318): "Search
     /// settings" under a "Preferences" title read as two names for one window.

@@ -427,7 +427,7 @@ pub(crate) fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
             let name = match plane.as_ref() {
                 solidcraft_engine::doc::PlaneRef::Origin { name } => Some(name.clone()),
                 solidcraft_engine::doc::PlaneRef::Datum { datum } => Some(datum.key()),
-                solidcraft_engine::doc::PlaneRef::Construction { feature } => {
+                solidcraft_engine::doc::PlaneRef::Construction { feature, .. } => {
                     let id = feature.0;
                     s.doc
                         .feature(id)
@@ -2135,7 +2135,11 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
     // Any feature, when components are placed away from their frames: the preview must show
     // the world the viewport shows.
     let moves = cmds.iter().all(|(c, _)| MOVES.contains(&c.as_str()));
-    if cmds.is_empty() || !(moves || solidcraft_engine::frames::placed(s)) {
+    let was_placed = moves || solidcraft_engine::frames::placed(s);
+    // A plugin's run can make a component and move it, in a design that has none placed yet:
+    // only its result says so, and that is where the component has to show.
+    let plugin = cmds.iter().any(|(c, _)| c == "plugin.run");
+    if cmds.is_empty() || !(was_placed || plugin) {
         return None;
     }
     let preview = match s.preview_visible_world(cmds) {
@@ -2151,22 +2155,32 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
         .map(|(_, r)| r.clone());
     // A constraint's reply: how free its part is with the constraint the preview shows.
     let placed = cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.")).map(|(_, r)| r.clone());
-    let (before, after) = (preview.before, preview.after);
     // A moved component looks like itself (no new surface), with its old place as the ghost.
-    let colors = Colors { added: colors.body, new_body: colors.body, ..colors };
+    // A plugin can both move and make bodies: the builder distinguishes them per body.
+    let colors = if was_placed && !plugin { Colors { added: colors.body, new_body: colors.body, ..colors } } else { colors };
+    Some(build_world_preview(preview, colors).map(|mut built| {
+        built.stopped = stopped;
+        built.placed = placed;
+        built
+    }))
+}
+
+/// Draw a placed model before and after an assembly edit using the common preview scene.
+pub(crate) fn build_world_preview(preview: solidcraft_engine::Preview, colors: Colors) -> Result<Built, String> {
+    let (before, after) = (preview.before, preview.after);
     let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::preview::build(&before, &after, colors)));
-    Some(match built {
+    match built {
         Ok(mut b) => {
             if !colors.ghost {
                 b.scene.ghost.clear();
             }
             b.bounds = after.bodies.iter().fold(Aabb3::EMPTY, |acc, x| acc.union(&x.mesh().bounds()));
-            b.stopped = stopped;
-            b.placed = placed;
+            // The joints the preview posed: what a reader of the pose sees the preview show.
+            b.joints = preview.joints;
             Ok(b)
         }
         Err(_) => Err("the preview failed".into()),
-    })
+    }
 }
 
 /// What a drive that stopped short of the asked values says: where the joint got to and why
@@ -2402,7 +2416,8 @@ fn grouped(app: &SolveApp, count: usize) -> bool {
 fn joints_open(app: &SolveApp, count: usize, run: JointRun) -> bool {
     !grouped(app, count)
         || match run {
-            JointRun::Loose => crate::browser::is_open(app, &run.key(), false),
+            // The History's own fold: a Browser search filters the Browser's rows, not these.
+            JointRun::Loose => crate::browser::fold_open(app, &run.key(), false),
             // Folder ids are numbered in each design: its choice stays with the design, as the
             // folder's own fold does.
             JointRun::Folder { .. } => crate::history_folds::is_open(app, &run.key(), false),
@@ -2411,7 +2426,7 @@ fn joints_open(app: &SolveApp, count: usize, run: JointRun) -> bool {
 
 fn toggle_joints(app: &mut SolveApp, run: JointRun) {
     match run {
-        JointRun::Loose => crate::browser::toggle(app, &run.key(), false),
+        JointRun::Loose => crate::browser::toggle_fold(app, &run.key(), false),
         JointRun::Folder { .. } => {
             let open = crate::history_folds::is_open(app, &run.key(), false);
             crate::history_folds::set_open(app, &run.key(), !open);
@@ -2635,9 +2650,14 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
 /// edits, drives, suppresses or deletes). Returns the joint whose row is under the pointer.
 pub fn browser_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Rows<'_>, depth: usize) -> Option<u64> {
     use crate::browser::{Row, Spec, is_open, node_row, toggle};
-    let joints: Vec<(u64, String, JointKind, bool)> =
+    let mut joints: Vec<(u64, String, JointKind, bool)> =
         app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
     app.tree.picked_joints.retain(|p| joints.iter().any(|j| j.0 == *p));
+    // A search keeps the joints that match (the folder's eye stays the folder's own).
+    let searching = app.tree.search.on();
+    if let Some(hits) = app.tree.search.hits() {
+        joints.retain(|j| hits.joint(j.0));
+    }
     if joints.is_empty() {
         return None;
     }
@@ -2651,7 +2671,15 @@ pub fn browser_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Row
     let r = node_row(
         rows,
         Spec { key, ..Default::default() },
-        Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label: "Joints", dim: !folder_shown, ..Default::default() },
+        Row {
+            depth,
+            fold: Some(open),
+            eye: Some(folder_shown),
+            icon: "folder",
+            label: "Joints",
+            dim: !folder_shown || searching,
+            ..Default::default()
+        },
     );
     if r.eye {
         crate::browser::toggle_folder(app, key);
@@ -2667,6 +2695,7 @@ pub fn browser_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Row
         let visible = app.session.joint_visible(id);
         let selected = app.tree.picked_joints.contains(&id);
         let joint_key = format!("joint:{id}");
+        let emphasis = app.tree.search.hits().and_then(|h| h.span(&name));
         let r = node_row(
             rows,
             Spec { key: &joint_key, ..Default::default() },
@@ -2679,6 +2708,7 @@ pub fn browser_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Row
                 rename: true,
                 selected,
                 dim: suppressed || !visible || !folder_shown,
+                emphasis,
                 ..Default::default()
             },
         );
@@ -2867,6 +2897,10 @@ pub fn pick_joint(app: &mut SolveApp, id: u64, add: bool) {
 /// Returns the joint whose row is under the pointer.
 pub fn component_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Rows<'_>, path: &[u64], key: &str, depth: usize) -> Option<u64> {
     use crate::browser::{Row, Spec, is_open, node_row, toggle};
+    // A search lists the joints it finds in the root folder.
+    if app.tree.search.on() {
+        return None;
+    }
     let joints = placement_joints(&app.session.doc, path);
     if joints.is_empty() {
         return None;

@@ -39,7 +39,11 @@
 //! check that refuses builds a typed cause with its numbers ([`BSplineFailure::EndsApart`],
 //! ...); a stage that fails with no reason the kernel names is a
 //! [`BSplineFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping
-//! the error of the call it made as its cause where it has one.
+//! the error of the call it made as its cause where it has one. That is the form not yet
+//! reviewed: a stage reviewed as the kernel's fault is a [`BSplineFailure::Defect`] with its
+//! reason, of the same class and status. [`BSplineFailure::Failed`] and
+//! [`BSplineFailure::Missing`] are sites not yet converted (the conversion guide:
+//! `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. A failure of a routine that has the data (a degree, an
 //! index, a parameter and its domain) carries it; the others are unit variants, and the
@@ -187,8 +191,17 @@ pub enum BSplineFailure {
     /// A stage of the method failed with no reason the kernel names: a defect
     /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
     /// reports (for the goldens only), where it was built, and the error of the call it made
-    /// where it has one.
+    /// where it has one. The form not yet reviewed: new code builds
+    /// [`BSplineFailure::Defect`], a named cause or a refusal instead.
     StageFailed,
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
 }
 
 impl BSplineFailure {
@@ -202,11 +215,12 @@ impl BSplineFailure {
     }
 
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::StageFailed`] for
-    /// [`BSplineFailure::StageFailed`], a defect; the kind of its status otherwise.
+    /// [`BSplineFailure::StageFailed`] and [`BSplineFailure::Defect`], a defect; the kind of
+    /// its status otherwise.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
-            Self::StageFailed => ErrorKind::StageFailed,
+            Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -238,6 +252,7 @@ impl core::fmt::Display for BSplineFailure {
                 "the ends to join are {distance} apart, farther than the tolerance {tolerance}"
             ),
             Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
+            Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
         }
     }
 }
@@ -453,6 +468,33 @@ mod tests {
         }
     }
 
+    /// A reviewed defect is of class 127 with the stage failure's status, and says why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why = "the knot vector the insertion just built does not rise, which insertion keeps";
+        let defect = BSplineFailure::Defect { why };
+        let e = SolidError::b_spline("nurbs::op", defect);
+        super::super::tests::assert_defect(
+            &e,
+            &SolidError::b_spline("nurbs::op", BSplineFailure::StageFailed),
+            "nurbs::op",
+            SM_ERR,
+            &format!("nurbs::op: stage_failed: {why}"),
+        );
+        assert_eq!(e.nurbs_failure(), Some(&NurbsFailure::BSpline(defect)));
+        assert_eq!(nlib_number(&e), None);
+        let missing = Failure::new("nurbs::op", NurbsFailure::BSpline(defect))
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error();
+        super::super::tests::assert_defect(
+            &missing,
+            &SolidError::b_spline("nurbs::op", BSplineFailure::Missing("x")),
+            "nurbs::op",
+            SM_ERR_NULL_POINTER,
+            &format!("nurbs::op: stage_failed: {why}"),
+        );
+    }
+
     /// The NURBS routines describe their failures: their library code builds no bare
     /// `Upstream` status, except the files listed (with the bare sites each may still hold)
     /// whose conversion waits on other open work.
@@ -461,6 +503,39 @@ mod tests {
         assert_eq!(
             super::super::query::tests::bare_statuses_in("nurbs", 60),
             [("nurbs/b_spline_curve/p1.rs".to_owned(), 23)]
+        );
+    }
+
+    /// The sites that build a B-spline phrase cause only fall:
+    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
+    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
+    /// files' counts here, and a file at 0 loses its line (the conversion guide:
+    /// `docs/failure-codes-and-reproduction.md` §6).
+    #[test]
+    fn the_bspline_phrase_cause_sites_only_shrink() {
+        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
+        const PHRASES: Scan = Scan {
+            builders: &[
+                Builder::Variant("BSplineFailure", "Failed"),
+                Builder::Variant("BSplineFailure", "Missing"),
+            ],
+            wrappers: Wrappers::Phrase,
+        };
+        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
+        const PINNED: &[(&str, usize)] = &[
+            ("solidcore/src/nurbs/b_spline_curve/p2.rs", 6),
+            ("solidcore/src/nurbs/b_spline_curve_n_lib.rs", 14),
+            ("solidcore/src/nurbs/b_spline_surface/p1.rs", 2),
+            ("solidcore/src/nurbs/b_spline_surface/p2.rs", 16),
+            ("solidcore/src/nurbs/b_spline_surface_n_lib/approx.rs", 3),
+            ("solidcore/src/nurbs/b_spline_surface_n_lib/p1.rs", 7),
+            ("solidcore/src/nurbs/b_spline_surface_n_lib/p2.rs", 33),
+            ("solidcore/src/nurbs/nurbs_crv.rs", 2),
+        ];
+        assert_pinned(
+            "B-spline phrase-cause sites",
+            &crate_sites(&PHRASES),
+            PINNED,
         );
     }
 }

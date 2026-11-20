@@ -157,34 +157,13 @@ fn assert_host_legacy_windows_closed(h: &Harness) {
 }
 
 #[test]
-fn host_retains_one_legacy_move_editor_and_the_pending_capture_question() {
+fn host_retains_the_pending_capture_question() {
     let (mut h, _, occurrence) = crate::test_support::component_box();
     h.app.home.open = false;
     h.app.preferences.language = "en".into();
     h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[10,0,0],"capture":false})).unwrap();
     h.settle();
     let pending = h.app.session.pending_moves.clone();
-    h.app.tree.occurrence_move = Some(crate::browser::OccMove::new(occurrence));
-    h.frames(3);
-    let baseline = h.app.tree.occurrence_move.as_ref().unwrap().baseline;
-    assert!(baseline.is_some());
-    assert_panel_host_preserves_design(&mut h, |h| {
-        crate::panel_runtime::enable_host_specimen(&mut h.app, "tabs").unwrap();
-        h.frames(4);
-        let draft = h.app.tree.occurrence_move.as_ref().unwrap();
-        assert_eq!(draft.baseline, baseline);
-        assert!(draft.had_pending);
-        assert_eq!(draft.translate, [0.0; 3]);
-        assert_eq!(crate::scenario::handles("occurrence-move:distance:0").len(), 1);
-        assert_host_legacy_window(h, rect_of("dialog:window").unwrap());
-        assert_eq!(h.app.session.pending_moves, pending);
-    });
-    // Cancel must restore the opening baseline, including the earlier pending move.
-    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
-    h.frames(2);
-    assert!(h.app.tree.occurrence_move.is_none());
-    assert_eq!(h.app.session.pending_moves, pending);
-    assert_host_legacy_windows_closed(&h);
     assert_panel_host_preserves_design(&mut h, |h| {
         h.app.start("sketch.create");
         h.frames(3);
@@ -1932,6 +1911,56 @@ fn title_bar_pills_open_their_pages_and_the_x_turns_off_only_that_pill() {
     h.call("ui.prefs", json!({"show_donate_button": true, "show_discord_button": true}));
     h.settle();
     assert!(rect_of("titlebar:kofi").is_some() && rect_of("titlebar:discord").is_some());
+}
+
+/// #10260: an organization's policy shows "Managed by {name}" in the bar, Preferences and About;
+/// a computer without one shows none of it.
+#[test]
+fn an_organizations_policy_says_managed_by_in_the_bar_preferences_and_about() {
+    let _language = solidcraft_ui_text::scope("en");
+    let mut h = Harness::new();
+    h.app.preferences.language = "en".into();
+    h.call("ui.resize", json!({"width":1280,"height":720}));
+    h.app.home.open = false;
+    h.settle();
+    assert!(rect_of("titlebar:managed").is_none(), "no policy, no badge");
+    h.app.help.about = true;
+    h.frames(3);
+    assert!(rect_of("about:managed").is_none());
+    assert!(!crate::help::diagnostics(&h.app).contains("Policy"));
+    h.app.help.about = false;
+
+    h.app.policy = crate::policy::Policy::from_json(r#"{"OrganizationName": "ACME"}"#);
+    h.settle();
+    let badge = rect_of("titlebar:managed").expect("the bar says it is managed");
+    let report = rect_of("titlebar:report").unwrap();
+    assert!(badge.right() <= report.left(), "{badge:?} {report:?}");
+    let (donate, discord) = (rect_of("titlebar:kofi").unwrap(), rect_of("titlebar:discord").unwrap());
+    assert!(badge.right() < donate.left() && badge.right() < discord.left(), "the badge sits left of the link pills: {badge:?} {donate:?}");
+    assert!(h.widget("Managed by ACME").is_some(), "a wide bar names the organization");
+    assert!(!h.app.prefs_window.shell.open);
+    h.step(&json!({"click":{"handle":"titlebar:managed"}})).unwrap();
+    h.settle();
+    assert!(h.app.prefs_window.shell.open, "the badge opens Preferences");
+    assert!(rect_of("prefs:managed").is_some(), "Preferences says it too");
+    h.app.prefs_window.shell.open = false;
+    h.app.help.about = true;
+    h.frames(3);
+    assert!(rect_of("about:managed").is_some(), "and About");
+    let diagnostics = crate::help::diagnostics(&h.app);
+    assert!(diagnostics.ends_with("Policy: managed; locks nothing"), "{diagnostics}");
+    assert!(!diagnostics.contains("ACME"), "a bug report does not carry the organization's name");
+    h.app.help.about = false;
+
+    // A narrow bar keeps the badge clear of the controls, down to the briefcase alone.
+    for width in [900.0, 700.0] {
+        h.call("ui.resize", json!({"width": width, "height": 600}));
+        h.settle();
+        if let Some(badge) = rect_of("titlebar:managed") {
+            let report = rect_of("titlebar:report").unwrap();
+            assert!(badge.right() <= report.left() && badge.right() <= width, "{width}: {badge:?} {report:?}");
+        }
+    }
 }
 
 #[test]
