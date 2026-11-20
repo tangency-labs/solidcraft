@@ -1802,6 +1802,20 @@ fn a_copied_untargeted_join_after_a_copied_body_joins_the_part() {
     assert!(rel(v, 16000.0 + 2.0 * 150.0) < 1e-9 && tops.len() == 2 && tops.iter().zip(want).all(|((_, at), w)| near(*at, w)), "{v} {tops:?}");
 }
 
+/// #19451: a root mirror of a round in a part placed turned and lifted rounds the image of its
+/// edge on the body there, a root body: Twin, at x 20..60 where Base's image across x = 15 is,
+/// is rounded at its upright edge at x 60, y −20.
+#[test]
+fn a_mirrored_round_in_a_turned_part_rounds_a_root_body_at_its_image() {
+    let mut s = part_with_a_boss_and_a_round();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [20, -20, 20], "operation": "new", "body_name": "Twin"}));
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Round"], "plane": {"origin": [15, 0, 0], "normal": [1, 0, 0]}}));
+    assert!(r["warning"].is_null(), "{r}");
+    let v = pockets(&mut s, "Twin").0;
+    let axes = round_axes(&mut s, "Twin", 2.0);
+    assert!(rel(v, 16000.0 - ROUND) < 1e-9 && axes.len() == 1 && near2(axes[0], [58.0, -18.0]), "{v} {axes:?}");
+}
+
 /// #19451: a root mirror of a hole placed at a point picked on B's top, kept in BoxB's frame,
 /// drills the world image of the hole: bores ending at x 2 and x 8, y 7.5, z 25. The copy was
 /// drilled at the image in BoxB's own frame, x −12 where it is shown.
