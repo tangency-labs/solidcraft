@@ -498,8 +498,16 @@ fn read_session(
     }
     let bytes = solidcraft_engine::io::limits::read(path, solidcraft_engine::io::limits::Kind::Design).map_err(|e| format!("{path}: {e}"))?;
     if solidcraft_engine::io::is_design_container(&bytes) {
-        let doc = solidcraft_engine::io::read_design(&bytes).map_err(|e| format!("{path}: {e}"))?;
-        let mut session = Session::opened_at_validating(doc, None, Some(path), validation);
+        // As Open (and `bench-open`) reads it: with the model the file keeps, so a design saved
+        // with its model is not evaluated again (a 226-feature design took two minutes to open
+        // for a one-line export). The model is taken only when every feature's fingerprint
+        // matches; otherwise the timeline is evaluated as before.
+        let (doc, saved) =
+            solidcraft_engine::io::read_design_file(path, None::<fn(solidcraft_engine::io::DesignPreview)>).map_err(|e| format!("{path}: {e}"))?;
+        // A file with provenance is evaluated from its timeline, never from a cache the signature
+        // does not cover (as `doc.open`).
+        let saved = if solidcraft_engine::io::has_design_provenance(path) { None } else { saved };
+        let mut session = Session::opened_at_validating(doc, saved.as_ref(), Some(path), validation);
         session.param_check = check;
         return Ok(session);
     }
@@ -1368,4 +1376,44 @@ pub(crate) fn cmd_bench_open(args: &[String]) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+/// `read_session` is private to this binary, so its tests live here rather than in `tests/`
+/// (`tests/model_cache.rs` covers the same through the engine's `doc.open`).
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use serde_json::json;
+    use solidcraft_engine::Session;
+
+    use super::read_session;
+
+    /// A file removed when the test ends, failed or not.
+    struct Temp(std::path::PathBuf);
+
+    impl Drop for Temp {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    /// `run`, `eval` and `snapshot` open a design saved with its model from that model, as Open
+    /// does, instead of evaluating its timeline again; the design is the one saved.
+    #[test]
+    fn a_design_saved_with_its_model_is_opened_without_evaluating() {
+        let path = Temp(std::env::temp_dir().join(format!("solidcraft-read-session-{}.solidcraft", std::process::id())));
+        let mut built = Session::default();
+        built.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+        built.execute("solid.fillet", &json!({"edges": [[10, 20, 15]], "radius": 2})).unwrap();
+        built.execute("file.save_as", &json!({"path": path.0.to_string_lossy()})).unwrap();
+        let bytes = std::fs::read(&path.0).unwrap();
+        assert!(solidcraft_engine::io::read_design_geometry(&bytes).is_some(), "the save keeps the model");
+        let s = read_session(&path.0.to_string_lossy(), solidcraft_engine::schema::ParamCheck::Off, solidcraft_engine::kernel::Validation::default())
+            .unwrap();
+        assert_eq!(s.model.last_recomputed, 0, "opened from the model the file keeps");
+        let volume =
+            |s: &Session| s.world_state().unwrap().bodies.iter().map(|b| solidcraft_engine::kernel::measure(&b.body).unwrap().volume).sum::<f64>();
+        assert_eq!(volume(&s).to_bits(), volume(&built).to_bits());
+        assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    }
 }
