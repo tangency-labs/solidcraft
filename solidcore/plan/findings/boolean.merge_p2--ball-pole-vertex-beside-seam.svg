@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="820" height="440" viewBox="0 0 820 440">
+  <title>ball-pole-vertex</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="820" height="440" fill="#ffffff"/>
+    <path id="face_before" data-name="face before" d="M90 250 C90 332.843 157.157 400 240 400 C322.843 400 390 332.843 390 250 Z" fill="#f0f0f0"/>
+    <path id="face_after" data-name="face after" d="M500 250 C500 332.843 567.157 400 650 400 C732.843 400 800 332.843 800 250 Z" fill="#f0f0f0"/>
+    <circle id="tol_before" data-name="tol before" cx="200" cy="250" r="55" fill="#dce9f5" opacity="0.8"/>
+    <circle id="tol_after" data-name="tol after" cx="650" cy="250" r="95" fill="#dce9f5" opacity="0.8"/>
+    <line id="seam_before" data-name="seam before" x1="240" y1="250" x2="240" y2="105" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line id="seam_after" data-name="seam after" x1="650" y1="250" x2="650" y2="105" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line id="edge_in_before" data-name="edge in before" x1="40" y1="250" x2="200" y2="250" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="edge_out_before" data-name="edge out before" x1="200" y1="250" x2="390" y2="250" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="edge_in_after" data-name="edge in after" x1="450" y1="250" x2="650" y2="250" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="edge_out_after" data-name="edge out after" x1="650" y1="250" x2="800" y2="250" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <circle id="E_before" data-name="E before" cx="160" cy="250" r="5" fill="#555555"/>
+    <circle id="P_before" data-name="P before" cx="240" cy="250" r="5" fill="#ffffff" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <circle id="M_before" data-name="M before" cx="200" cy="250" r="7" fill="#000000"/>
+    <circle id="E_after" data-name="E after" cx="570" cy="250" r="5" fill="#555555"/>
+    <circle id="vertex_after" data-name="vertex after" cx="650" cy="250" r="7" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 20 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" fill="#000000"><tspan x="0" y="0">Before</tspan></text>
+    <text transform="matrix(1 0 0 1 430 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" fill="#000000"><tspan x="0" y="0">After this change</tspan></text>
+    <text transform="matrix(1 0 0 1 248 120)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">seam of the ball&apos;s surface</tspan></text>
+    <text transform="matrix(1 0 0 1 658 120)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">seam of the ball&apos;s surface</tspan></text>
+    <text transform="matrix(1 0 0 1 155 236)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">E</tspan></text>
+    <text transform="matrix(1 0 0 1 194 280)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">M</tspan></text>
+    <text transform="matrix(1 0 0 1 247 238)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">P</tspan></text>
+    <text transform="matrix(1 0 0 1 565 236)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">E</tspan></text>
+    <text transform="matrix(1 0 0 1 657 238)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">P</tspan></text>
+    <text transform="matrix(1 0 0 1 20 318)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">E: top of the tube&apos;s start circle</tspan><tspan x="0" y="14.4">P: the ball&apos;s pole, where its seam ends</tspan><tspan x="0" y="28.8">M: the vertex the imprint put halfway</tspan><tspan x="0" y="43.2">The edge from the right runs over P and</tspan><tspan x="0" y="57.6">ends past it, at M: face test 36</tspan></text>
+    <text transform="matrix(1 0 0 1 430 370)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">The vertex moves to P; its tolerance</tspan><tspan x="0" y="14.4">grows by the move and still holds E.</tspan><tspan x="0" y="28.8">Both edges end where the seam ends.</tspan></text>
+    <text transform="matrix(1 0 0 1 20 418)" x="0" y="9.5" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="9.5" fill="#555555"><tspan x="0" y="9.5">Seen from above the ball&apos;s pole (+z), +y to the right; gaps of 5e-8 mm drawn enlarged. Line: the copied face&apos;s boundary; half disc: the kept half of the ball; round patch: the vertex&apos;s tolerance.</tspan></text>
+  </g>
+</svg>
