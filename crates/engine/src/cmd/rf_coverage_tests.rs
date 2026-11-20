@@ -44,7 +44,7 @@ fn two_rooms_give_the_expected_signal_and_stats() {
     );
     // Four concrete walls and the guessed drywall partition.
     assert_eq!(out["walls"]["bodies"], 5, "{out}");
-    assert_eq!(out["walls"]["materials"], json!({"Concrete": 4, "drywall (guessed)": 1}));
+    assert_eq!(out["walls"]["materials"], json!({"Concrete": 4, "guessed by thickness": 1}));
     let near = out["points"][0]["rssi_dbm"]["5"].as_f64().unwrap();
     let next = out["points"][1]["rssi_dbm"]["5"].as_f64().unwrap();
     assert!((near - free(1.0)).abs() < 0.06, "{near}");
@@ -90,7 +90,7 @@ fn a_concrete_partition_costs_more_and_thick_walls_without_material_are_concrete
     wall(&mut s, "East", [8090.0, 0.0, 0.0], [150.0, 3000.0, 2500.0]);
     wall(&mut s, "Partition", [4000.0, 0.0, 0.0], [200.0, 3000.0, 2500.0]);
     let concrete = run(&mut s, "inspect.rf_coverage", p);
-    assert_eq!(concrete["walls"]["materials"], json!({"concrete (guessed)": 5}));
+    assert_eq!(concrete["walls"]["materials"], json!({"guessed by thickness": 5}));
     for (band, extra) in [("2.4", 12.0 - 3.0), ("5", 20.0 - 4.0), ("6", 24.0 - 5.0)] {
         let a = drywall["points"][0]["rssi_dbm"][band].as_f64().unwrap();
         let b = concrete["points"][0]["rssi_dbm"][band].as_f64().unwrap();
@@ -107,7 +107,7 @@ fn scope_hidden_bodies_regions_devices_and_png() {
     run(&mut s, "solid.sphere", json!({"body_name": "Planter", "center": [6000, 2000, 1000], "radius": 300}));
     let out = run(&mut s, "inspect.rf_coverage", json!({"emitters": ap()}));
     assert_eq!(out["walls"]["bodies"], 6, "{out}");
-    assert_eq!(out["walls"]["materials"]["concrete (guessed)"], 1);
+    assert_eq!(out["walls"]["materials"]["guessed by thickness"], 2);
     let out = run(&mut s, "inspect.rf_coverage", json!({"emitters": ap(), "exclude": ["Planter"]}));
     assert_eq!(out["walls"]["bodies"], 5);
     let out = run(&mut s, "inspect.rf_coverage", json!({"emitters": ap(), "bodies": ["Partition"]}));

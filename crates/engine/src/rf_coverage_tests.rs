@@ -154,3 +154,18 @@ fn hostile_inputs_never_panic() {
     assert!(stats(&[f32::NAN], &[Cell::Floor]).is_none());
     assert_eq!(colour(f64::NAN), [120, 120, 130]);
 }
+
+#[test]
+fn one_body_of_thin_and_thick_walls_is_guessed_where_each_path_crosses() {
+    // One region: a 90 mm partition (x 0…90) joined to a 200 mm wall (y 3000…3200), an L.
+    let l = vec![[0.0, 0.0], [90.0, 0.0], [90.0, 3000.0], [4000.0, 3000.0], [4000.0, 3200.0], [0.0, 3200.0]];
+    let region = WallRegion::new(vec![l], 0, "Walls".into()).unwrap().guessed(0, 1, solidcraft_doc::rf::CONCRETE_FROM_MM);
+    assert!((region.thickness_at([45.0, 1000.0]) - 90.0).abs() < 1e-9);
+    let walls = WallMap::new(vec![region], vec![preset("drywall"), preset("concrete")]);
+    let mut scratch = Scratch::default();
+    // Square through the partition, and slanting through it: drywall either way.
+    assert_eq!(walls.path_loss([-1000.0, 1000.0], [1000.0, 1000.0], Band::G5, &mut scratch), 4.0);
+    assert_eq!(walls.path_loss([-1000.0, 500.0], [1000.0, 1800.0], Band::G5, &mut scratch), 4.0);
+    // Through the thick wall: concrete.
+    assert_eq!(walls.path_loss([2000.0, 2000.0], [2500.0, 4000.0], Band::G5, &mut scratch), 20.0);
+}

@@ -54,6 +54,9 @@ pub struct WallRegion {
     pub rings: Vec<Vec<[f64; 2]>>,
     /// Index into [`WallMap::materials`].
     pub material: usize,
+    /// For a region whose material is guessed: the material where the wall is at least this
+    /// thick (mm), by [`WallRegion::thickness_at`]; `material` is used where it is thinner.
+    pub thick: Option<(usize, f64)>,
     /// The body it was cut from.
     pub body: String,
     /// The box round it: [min x, min y, max x, max y].
@@ -67,7 +70,42 @@ impl WallRegion {
         for p in rings.iter().flatten() {
             bounds = [bounds[0].min(p[0]), bounds[1].min(p[1]), bounds[2].max(p[0]), bounds[3].max(p[1])];
         }
-        (!rings.is_empty()).then_some(WallRegion { rings, material, body, bounds })
+        (!rings.is_empty()).then_some(WallRegion { rings, material, thick: None, body, bounds })
+    }
+
+    /// The region with its material guessed from its thickness where a path crosses it:
+    /// `thin` below `from` mm, `thick` from there on.
+    pub fn guessed(mut self, thin: usize, thick: usize, from: f64) -> WallRegion {
+        self.material = thin;
+        self.thick = Some((thick, from));
+        self
+    }
+
+    /// The wall's thickness at `p`, a point inside it: twice the distance to its nearest edge. A
+    /// path crossing a straight wall at any angle has the middle of its crossing on the wall's
+    /// centre line, so this is the wall's width there.
+    pub fn thickness_at(&self, p: [f64; 2]) -> f64 {
+        let mut nearest = f64::INFINITY;
+        for (a, b) in self.edges() {
+            let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
+            let len2 = ex * ex + ey * ey;
+            let t = if len2 > 0.0 { (((p[0] - a[0]) * ex + (p[1] - a[1]) * ey) / len2).clamp(0.0, 1.0) } else { 0.0 };
+            let (dx, dy) = (a[0] + ex * t - p[0], a[1] + ey * t - p[1]);
+            nearest = nearest.min(dx * dx + dy * dy);
+        }
+        2.0 * nearest.sqrt()
+    }
+
+    /// The material of the crossing from `t0` to `t1` along `a`→`b`.
+    fn material_along(&self, a: [f64; 2], b: [f64; 2], t0: f64, t1: f64) -> usize {
+        match self.thick {
+            Some((thick, from)) => {
+                let t = 0.5 * (t0 + t1);
+                let mid = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+                if self.thickness_at(mid) >= from { thick } else { self.material }
+            }
+            None => self.material,
+        }
     }
 
     fn edges(&self) -> impl Iterator<Item = ([f64; 2], [f64; 2])> + '_ {
@@ -159,7 +197,8 @@ impl WallMap {
     /// The map of `regions` made of `materials`. Regions naming a material that isn't there are
     /// left out.
     pub fn new(regions: Vec<WallRegion>, materials: Vec<(String, RfLoss)>) -> WallMap {
-        let regions: Vec<WallRegion> = regions.into_iter().filter(|r| r.material < materials.len()).collect();
+        let regions: Vec<WallRegion> =
+            regions.into_iter().filter(|r| r.material < materials.len() && r.thick.is_none_or(|(m, _)| m < materials.len())).collect();
         let mut map = WallMap { regions, materials, buckets: Buckets::default() };
         map.index();
         map
@@ -255,9 +294,10 @@ impl WallMap {
             }
             scratch.spans.clear();
             region.inside_along(a, b, &mut scratch.spans);
-            let loss = self.materials.get(region.material).map(|(_, l)| l.at(band)).unwrap_or(0.0);
             for &(t0, t1) in &scratch.spans {
-                scratch.events.push(Span { t0, t1, material: region.material, loss });
+                let material = region.material_along(a, b, t0, t1);
+                let loss = self.materials.get(material).map(|(_, l)| l.at(band)).unwrap_or(0.0);
+                scratch.events.push(Span { t0, t1, material, loss });
             }
         }
         scratch.near = near;

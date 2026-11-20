@@ -7,8 +7,9 @@
 //!   faces, a mesh body by its own triangles. Curved outlines are followed to within
 //!   [`FLATTEN_MM`].
 //! - **Each region gets a loss.** Its body's material's RF loss (`material.create`'s `rf`), a
-//!   built-in material's default, or a guess from the region's thickness (twice its inradius):
-//!   drywall below [`solidcraft_doc::rf::CONCRETE_FROM_MM`], concrete from there.
+//!   built-in material's default, or a guess from the wall's thickness where each path crosses
+//!   it ([`WallRegion::thickness_at`]): drywall below [`CONCRETE_FROM_MM`], concrete from there.
+//!   One body may hold a whole floor's walls, thin and thick.
 //! - **The model** is [`crate::rf_coverage`]'s. The walls are kept ([`WallCache`]) while the
 //!   model, the slice height and the bodies taken stay the same, so moving an emitter only traces
 //!   the paths again.
@@ -18,8 +19,8 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use serde_json::Value;
-use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
-use solidcraft_doc::rf::{Band, RfLoss, builtin_rf_loss, heuristic_loss};
+use solidcore_record::{Plane, Region2, Vec3};
+use solidcraft_doc::rf::{Band, CONCRETE_FROM_MM, RfLoss, builtin_rf_loss, heuristic_loss};
 use solidcraft_doc::{ModelBody, ModelState};
 use solidcraft_geom::prelude::*;
 
@@ -297,8 +298,9 @@ fn rf_coverage(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut materials: BTreeMap<String, usize> = BTreeMap::new();
     for r in &walls.regions {
-        if let Some((name, _)) = walls.materials.get(r.material) {
-            *materials.entry(name.clone()).or_default() += 1;
+        let name = if r.thick.is_some() { Some("guessed by thickness".to_string()) } else { walls.materials.get(r.material).map(|(n, _)| n.clone()) };
+        if let Some(name) = name {
+            *materials.entry(name).or_default() += 1;
         }
     }
     let grid_values = params.grid.unwrap_or(false).then(|| {
@@ -540,34 +542,22 @@ fn slice_walls(s: &Session, world: &ModelState, slice: f64, scope: &Scope) -> Re
             if edges > crate::rf_coverage::MAX_EDGES {
                 return Err(bad(CMD, "the slice has too many wall edges: name the walls with `bodies` or `components`"));
             }
-            let material = match &own {
-                Some((name, loss)) => index(name.clone(), *loss, &mut materials),
+            let region = match &own {
+                Some((name, loss)) => WallRegion::new(rings, index(name.clone(), *loss, &mut materials), body.name.clone()),
                 None => {
-                    let (id, loss) = heuristic_loss(thickness(&rings));
-                    index(format!("{id} (guessed)"), loss, &mut materials)
+                    let (thin, thin_loss) = heuristic_loss(0.0);
+                    let (thick, thick_loss) = heuristic_loss(CONCRETE_FROM_MM);
+                    let thin = index(format!("{thin} (guessed)"), thin_loss, &mut materials);
+                    let thick = index(format!("{thick} (guessed)"), thick_loss, &mut materials);
+                    WallRegion::new(rings, thin, body.name.clone()).map(|r| r.guessed(thin, thick, CONCRETE_FROM_MM))
                 }
             };
-            if let Some(r) = WallRegion::new(rings, material, body.name.clone()) {
+            if let Some(r) = region {
                 regions.push(r);
             }
         }
     }
     Ok((WallMap::new(regions, materials), report))
-}
-
-/// A region's thickness: twice the radius of the largest circle inside it, which is a wall's
-/// width for a long straight wall.
-fn thickness(rings: &[Vec<[f64; 2]>]) -> f64 {
-    let loops: Vec<Loop2> = rings.iter().map(|r| Loop2::polygon(&r.iter().map(|p| Vec2::new(p[0], p[1])).collect::<Vec<_>>())).collect();
-    region_of(loops).map_or(0.0, |r| 2.0 * r.inradius(FLATTEN_MM))
-}
-
-/// Rings as a region: the largest is the outline, the others holes.
-fn region_of(mut rings: Vec<Loop2>) -> Option<Region2> {
-    let area = |ring: &Loop2| ring.signed_area().abs();
-    let outline = rings.iter().enumerate().max_by(|(_, a), (_, b)| area(a).total_cmp(&area(b))).map(|(at, _)| at)?;
-    let outer = rings.remove(outline).ccw();
-    Some(Region2 { outer, holes: rings.into_iter().map(|h| h.ccw().reversed()).collect() })
 }
 
 /// `region` followed by straight sides, as rings of world x, y.
