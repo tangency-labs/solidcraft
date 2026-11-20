@@ -1543,6 +1543,11 @@ preference_settings! {
     /// Leave the commands the ribbon shows as buttons (pinned ones) out of its panel drop-downs,
     /// which then list only the rest (#4739).
     ribbon_menus_skip_pinned: bool = false, PAGE_LAYOUT;
+    /// Ribbon panels add more commands as galleries of small icons beside their large buttons,
+    /// three rows high (#6165). Off by default: the standard ribbon.
+    ribbon_small_icons: bool = false, PAGE_LAYOUT;
+    /// Ribbon tooltips show a tool's description where it has one. On by default, as before.
+    ribbon_help: bool = true, PAGE_LAYOUT;
     /// Interface scale (1 = 100 %).
     ui_scale: f32 = 1.0, PAGE_APPEARANCE, accept(0.5..=2.5);
     /// Interface font: an installed font family (or a font file), or empty for the built-in one
@@ -7282,6 +7287,8 @@ mod tests {
             ("construct_menu_groups", json!(false), PAGE_LAYOUT),
             ("ribbon_menus_follow_hover", json!(true), PAGE_LAYOUT),
             ("ribbon_menus_skip_pinned", json!(true), PAGE_LAYOUT),
+            ("ribbon_small_icons", json!(true), PAGE_LAYOUT),
+            ("ribbon_help", json!(false), PAGE_LAYOUT),
             ("history_sketches", json!("under_feature"), PAGE_LAYOUT),
             ("history_play_button", json!(false), PAGE_LAYOUT),
             ("history_folder_kind_icon", json!(true), PAGE_LAYOUT),

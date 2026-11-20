@@ -36,24 +36,49 @@ pub struct ButtonSize {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PanelSize {
     pub buttons: Vec<ButtonSize>,
+    /// The last button is the panel's gallery of small cells.
+    pub gallery: bool,
 }
 
-/// Where [`fit`] put a panel: its first buttons and their individual fitted widths.
+/// Where [`fit`] put a panel: how many of its buttons show and their individual fitted widths.
+/// A panel with a gallery keeps it while it hands its large buttons to the drop-down, so `shown`
+/// then counts the first `shown - 1` large buttons and the gallery.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plan {
     pub fit: Fit,
     pub shown: usize,
     pub widths: Vec<f32>,
+    pub gallery: bool,
 }
 
 impl Plan {
     /// Every button at its full width.
     pub fn full(panel: &PanelSize) -> Self {
-        Self { fit: Fit::Buttons, shown: panel.buttons.len(), widths: panel.buttons.iter().map(|b| b.width).collect() }
+        Self { fit: Fit::Buttons, shown: panel.buttons.len(), widths: panel.buttons.iter().map(|b| b.width).collect(), gallery: panel.gallery }
     }
 
     fn more() -> Self {
-        Self { fit: Fit::More, shown: 0, widths: Vec::new() }
+        Self { fit: Fit::More, shown: 0, widths: Vec::new(), gallery: false }
+    }
+
+    /// The gallery is on the toolbar: with at least one large button, or on its own.
+    pub fn gallery_shown(&self) -> bool {
+        self.gallery && self.fit == Fit::Buttons && (self.shown >= 2 || self.widths.len() == 1)
+    }
+
+    /// The widths of the buttons on the toolbar, in order (the gallery last).
+    pub fn visible(&self) -> Vec<f32> {
+        if self.fit != Fit::Buttons {
+            return Vec::new();
+        }
+        let mut out: Vec<f32> = self.widths.iter().copied().take(self.shown).collect();
+        if self.gallery_shown()
+            && self.shown < self.widths.len()
+            && let (Some(slot), Some(gallery)) = (out.last_mut(), self.widths.last())
+        {
+            *slot = *gallery;
+        }
+        out
     }
 
     /// The panel's width on the toolbar (0 in the » menu).
@@ -61,7 +86,7 @@ impl Plan {
         match self.fit {
             Fit::More => 0.0,
             Fit::Collapsed => COLLAPSED_WIDTH,
-            Fit::Buttons => panel_width(self.widths.get(..self.shown).unwrap_or_default()),
+            Fit::Buttons => panel_width(&self.visible()),
         }
     }
 }
@@ -96,8 +121,9 @@ pub const MORE_ROOM: f32 = 40.0;
 
 /// Fit panels into `room`, giving up as little as it takes, one small step at a time:
 /// 1. buttons narrow from their measured label widths to their minimum, wrapping and truncating;
-/// 2. panels hand their last buttons to their drop-down one at a time, the panel showing the
-///    most buttons first (the rightmost of equals), down to one button (collapsed);
+/// 2. panels hand their last large buttons to their drop-down one at a time, the panel showing
+///    the most buttons first (the rightmost of equals), keeping their galleries and one large
+///    button beside them; then the galleries go, then panels collapse to one button;
 /// 3. the last panels go into the » menu, and any room that frees goes back to buttons.
 ///
 /// Each removal frees at most one button (or the fixed-width constraint gallery), so the toolbar
@@ -144,13 +170,11 @@ fn shrink(panels: &[PanelSize], room: f32) -> Option<Vec<Plan>> {
         }
     }
     // 2. One button at a time into the drop-downs: from the panel showing the most (the
-    // rightmost of equals), down to one button each.
+    // rightmost of equals), down to one button each. Galleries stay while any large button can go.
     while used(&plans) > room {
-        let pick = plans
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| p.fit == Fit::Buttons && (p.shown > 1 || p.width() > COLLAPSED_WIDTH))
-            .max_by(|(i, a), (j, b)| a.shown.cmp(&b.shown).then(i.cmp(j)));
+        let candidates = || plans.iter().enumerate().filter(|(_, p)| p.fit == Fit::Buttons && (p.shown > 1 || p.width() > COLLAPSED_WIDTH));
+        let most = |(i, a): &(usize, &Plan), (j, b): &(usize, &Plan)| a.shown.cmp(&b.shown).then(i.cmp(j));
+        let pick = candidates().filter(|(_, p)| !p.gallery_shown() || p.shown > 2).max_by(most).or_else(|| candidates().max_by(most));
         let (i, _) = pick?;
         if let Some(p) = plans.get_mut(i) {
             p.shown = p.shown.saturating_sub(1).max(1);
@@ -169,6 +193,45 @@ pub const GALLERY_WIDTH: f32 = 82.0;
 /// least six without.
 pub fn gallery_columns(labels: bool, cells: usize) -> usize {
     if labels { cells.div_ceil(2).max(3) } else { cells.max(6) }
+}
+
+/// Rows of the small-icon ribbon's galleries under labelled buttons, filled column by column.
+pub const SMALL_ICON_ROWS: usize = 3;
+
+/// The width of a gallery of `cells` cells. The standard ribbon's has two rows of at least three
+/// with labels (one row of at least six without); `small_icons` galleries are three rows high
+/// (one without labels) and only as wide as their cells.
+pub fn gallery_width(cells: usize, labels: bool, small_icons: bool) -> f32 {
+    if small_icons {
+        let rows = if labels { SMALL_ICON_ROWS } else { 1 };
+        cells.div_ceil(rows).max(1) as f32 * 26.0 - 2.0
+    } else if labels {
+        GALLERY_WIDTH + gallery_columns(true, cells).saturating_sub(3) as f32 * 27.0
+    } else {
+        gallery_columns(false, cells) as f32 * 27.0
+    }
+}
+
+/// Cell `index` of a gallery whose top left corner is `at` (the group's top).
+pub fn gallery_cell(at: Pos2, index: usize, labels: bool, small_icons: bool) -> Rect {
+    let (column, line, offset, step) = if small_icons {
+        let rows = if labels { SMALL_ICON_ROWS } else { 1 };
+        (index / rows, index % rows, if labels { 3.0 } else { 10.0 }, vec2(26.0, 21.0))
+    } else if !labels {
+        (index, 0, 6.0, vec2(27.0, 23.0))
+    } else if index < 6 {
+        // The default six keep their 3 x 2 places; pinned ones fill further columns top to bottom.
+        (index % 3, index / 3, 6.0, vec2(27.0, 23.0))
+    } else {
+        (3 + (index - 6) / 2, (index - 6) % 2, 6.0, vec2(27.0, 23.0))
+    };
+    Rect::from_min_size(at + vec2(column as f32 * step.x, offset + line as f32 * step.y), vec2(24.0, 20.0))
+}
+
+/// The label row under a group's buttons; the small-icon ribbon's is lower, leaving room for
+/// three rows of cells.
+pub fn section_height(small_icons: bool) -> f32 {
+    if small_icons { 16.0 } else { SECTION_HEIGHT }
 }
 
 /// Choose at most two lines at spaces or after `/`, then truncate each line at
@@ -383,6 +446,8 @@ pub struct Row<'a> {
     pub groups: Vec<Group<'a>>,
     /// Buttons carry their labels (taller buttons, wider cells).
     pub labels: bool,
+    /// Galleries are three rows of small icons, filled column by column, over a lower label row.
+    pub small_icons: bool,
     /// The active tab's accent: pressed buttons, open and running labels.
     pub accent: TabAccent,
     /// The last group leaves the mode (Finish): room is always kept for it, it never collapses,
@@ -605,14 +670,6 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
     let h = &row.handles;
     let button_height = if labels { BUTTON_HEIGHT } else { ICON_BUTTON_HEIGHT };
     let group_height = if labels { GROUP_HEIGHT } else { ICON_GROUP_HEIGHT };
-    // Pinned constraints join the grid, which widens a column at a time beyond its default six.
-    let gallery_width = |cells: usize| {
-        if labels {
-            GALLERY_WIDTH + gallery_columns(true, cells).saturating_sub(3) as f32 * 27.0
-        } else {
-            gallery_columns(false, cells) as f32 * 27.0
-        }
-    };
     let (top, right) = (rect.top(), rect.right());
     let mut px = rect.left();
     let sizes: Vec<PanelSize> = row
@@ -621,10 +678,11 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
         .map(|g| {
             let mut buttons: Vec<ButtonSize> = g.buttons.iter().map(|b| b.size).collect();
             if !g.cells.is_empty() {
-                let width = gallery_width(g.cells.len());
+                // Pinned constraints join the gallery, which widens a column at a time.
+                let width = gallery_width(g.cells.len(), labels, row.small_icons);
                 buttons.push(ButtonSize { width, min_width: width });
             }
-            PanelSize { buttons }
+            PanelSize { buttons, gallery: !g.cells.is_empty() }
         })
         .collect();
     // The exit group follows the last group and always keeps its room, so it stays reachable at
@@ -661,9 +719,11 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             px = right - exit_width;
             painter.line_segment([pos2(px, top), pos2(px, rect.bottom() - 1.0)], t.tertiary_border(t.border));
         }
-        let button_widths = &plan.widths;
-        let drawn = if collapsed { 0 } else { plan.shown.min(button_widths.len()) };
-        let cells = !collapsed && drawn > group.buttons.len();
+        let button_widths = plan.visible();
+        let drawn = if collapsed { 0 } else { button_widths.len() };
+        // The gallery keeps its place while large buttons go to the drop-down.
+        let cells = !collapsed && plan.gallery_shown();
+        let large_drawn = drawn.saturating_sub(usize::from(cells));
         // Buttons narrower than the group's minimum width (a one-button group) are centred.
         let buttons_width = button_widths.iter().take(drawn).sum::<f32>() + drawn.saturating_sub(1) as f32 * BUTTON_GAP;
         let inset = if drawn == 0 { 0.0 } else { ((width - 8.0 - buttons_width) / 2.0).max(0.0).floor() };
@@ -699,7 +759,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             }
         }
         let mut button_x = bx;
-        for (bi, (b, button_width)) in group.buttons.iter().zip(button_widths.iter().copied()).take(drawn).enumerate() {
+        for (bi, (b, button_width)) in group.buttons.iter().zip(button_widths.iter().copied()).take(large_drawn).enumerate() {
             let whole = Rect::from_min_size(pos2(button_x, top + 2.0), vec2(button_width, button_height));
             button_x += button_width + BUTTON_GAP;
             let mut br = whole;
@@ -803,15 +863,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                 t.toolbar.lerp_to_gamma(t.border, 0.5),
             );
             for (index, c) in group.cells.iter().enumerate() {
-                // The default six keep their 3 x 2 places; pinned ones fill further columns top to bottom.
-                let (column, line) = if !labels {
-                    (index, 0)
-                } else if index < 6 {
-                    (index % 3, index / 3)
-                } else {
-                    (3 + (index - 6) / 2, (index - 6) % 2)
-                };
-                let cell = Rect::from_min_size(pos2(button_x + column as f32 * 27.0, top + 6.0 + line as f32 * 23.0), vec2(24.0, 20.0));
+                let cell = gallery_cell(pos2(button_x, top), index, labels, row.small_icons);
                 let resp = ui.interact(cell, ui.scope_id().with(("cmd", c.id)), Sense::click_and_drag());
                 let (fill, stroke) = if c.pressed {
                     if accent.color == t.accent {
@@ -853,8 +905,8 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
         // card's bottom edge, so the highlight is CARD_INSET from the card's bottom edge (and
         // from its left edge in the first group): its corner is concentric with the card's.
         let lr = Rect::from_min_size(
-            pos2(px + CARD_INSET, top + group_height - SECTION_HEIGHT - (CARD_INSET - 1.0)),
-            vec2((width - 2.0 * CARD_INSET).max(0.0), SECTION_HEIGHT),
+            pos2(px + CARD_INSET, top + group_height - section_height(row.small_icons) - (CARD_INSET - 1.0)),
+            vec2((width - 2.0 * CARD_INSET).max(0.0), section_height(row.small_icons)),
         );
         let lresp = ui.interact(lr, ui.scope_id().with(("panel", group.key)), Sense::click());
         solidcraft_ui_registry::publish_handle(&handle(h.section, group.key), lr.center());
@@ -863,7 +915,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
         let drawn_ids: Vec<&str> = group
             .buttons
             .iter()
-            .take(drawn)
+            .take(large_drawn)
             .flat_map(|b| if b.covers.is_empty() { vec![b.id] } else { b.covers.to_vec() })
             .chain(group.cells.iter().filter(|_| cells).map(|c| c.id))
             .collect();
@@ -914,7 +966,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             label_response: lresp,
             collapsed,
             trimmed,
-            buttons: drawn.min(group.buttons.len()),
+            buttons: large_drawn,
             cells,
             slots,
             hot: group.enabled && !exit && (hot || collapsed_hovered),

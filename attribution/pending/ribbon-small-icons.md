@@ -1,0 +1,1 @@
+| assets/locales/pending/ribbon-small-icons.json | SolidCraft contributors | Original small-icon ribbon labels (Show Large/Small, Ribbon: Standard/Small icons, tooltip descriptions) and translations | MIT OR Apache-2.0 |
