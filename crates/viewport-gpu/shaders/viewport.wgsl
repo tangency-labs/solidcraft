@@ -908,8 +908,9 @@ fn finishes() -> bool {
 }
 
 // The studio finished faces are lit by (`Environment` in environment.rs): model-viewer's neutral
-// room, as is, at model-viewer's exposure for it (`STUDIO_EXPOSURE`), prefiltered for image-based
-// lighting (split-sum). Mip k of the specular map
+// room, as is, at exposure 1, prefiltered for image-based lighting (split-sum). The room lights a
+// face about as unit white light (0.92 toward the eye, 0.98 to the sides), so PBR Neutral shows a
+// face in its assigned colour; model-viewer's 1.3 made every face 1.2 to 1.9 times it (#19994). Mip k of the specular map
 // is the studio through a GGX lobe of perceptual roughness k / (mips - 1); the diffuse map is its
 // cosine-weighted irradiance / π; the DFG table is the GGX environment BRDF's scale and bias.
 @group(0) @binding(3) var studio_specular: texture_2d<f32>;
@@ -918,8 +919,6 @@ fn finishes() -> bool {
 @group(0) @binding(6) var studio_dfg: texture_2d<f32>;
 /// The specular map's mips (`SPECULAR_LEVELS`; WebGL2 cannot ask a texture for its count).
 const STUDIO_MIPS: f32 = 6.0;
-/// model-viewer's exposure for its neutral room under Khronos PBR Neutral (`COMMERCE_EXPOSURE`).
-const STUDIO_EXPOSURE: f32 = 1.3;
 
 /// Where the direction `d` (in the studio's frame, y up) lands on its equirectangular maps.
 fn studio_uv(d: vec3<f32>) -> vec2<f32> {
@@ -994,7 +993,7 @@ fn finished(i: TOut, n: vec3<f32>, visibility: f32, base: vec4<f32>) -> vec4<f32
     // Khronos pbr.frag: a dielectric (F0 0.04, glTF's IOR 1.5) and a metal, mixed by metallic.
     let dielectric = mix(diffuse, specular, ibl_ggx_fresnel(nv, roughness, vec3<f32>(0.04)));
     let metal = specular * ibl_ggx_fresnel(nv, roughness, albedo);
-    let mapped = pbr_neutral(mix(dielectric, metal, metallic) * STUDIO_EXPOSURE);
+    let mapped = pbr_neutral(mix(dielectric, metal, metallic));
     if (u.back.w > 0.5) { return vec4<f32>(mapped, base.a); }
     return vec4<f32>(srgb_encode(mapped), base.a);
 }
