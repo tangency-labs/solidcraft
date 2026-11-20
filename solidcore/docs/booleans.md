@@ -364,6 +364,47 @@ entities within tolerance are one, and a decision across that band has to be mad
 every later step. The port's strip rule is one such decision; a general one for curved faces within
 tolerance is open.
 
+**The coincidence rule.** Whether two places are one (a point on a side of a surface's
+domain, a curve along an edge, two points one vertex) is decided by one tolerance:
+`coincidence_tol_3d` (`geom/tol.rs`), the larger of the contact tolerance (`contact_tol_3d`, §6)
+and the two objects' zone tolerances, read by `within_coincidence_tol` at the tolerance or a
+rounding of the copies past it (`γ_32` of the coordinates' size, as `within_contact_tol` reads a
+contact). A zone tolerance is how far an object's stored geometry may stand from what it stands
+for, so a place within it of an object is on the object by the object's own statement; two
+places farther apart than both tolerances are on neither by either, and nothing makes them one.
+Upstream reads such places at the intersection tolerance, the two zone tolerances' sum, twice
+the zone tolerance where they are equal: one place up to 2e-5 at the default 1e-5, where the
+contact rule (§6) takes circles overlapping by more than 1e-5 for two crossings, two places.
+In that band, a groove more than 1e-5 and up to 2e-5 deep cut into a block face (a 50 mm
+block less a box reaching `depth` past its face, 10 wide) comes out as the block unchanged,
+and a boss overhanging a cut ball's rim by as much is dropped by the union.
+
+The sites move to the rule one at a time (§10, "The coincidence rule in migration"). Reading it:
+- the side test of an edge use (`is_edgeuse_side_in_surface`, `topology/edgeuse/p2.rs`; the
+  check's Loop test 2): a sample of the edge, dropped onto the surface, lies on a non-periodic
+  side of the surface's domain within the coincidence tolerance of the surface with itself
+  (its zone tolerance, at least the contact tolerance), where upstream took twice the zone
+  tolerance. A notch twice the zone tolerance deep has edges, where its walls meet the
+  faces across it, that leave the side square to it; at the intersection tolerance every
+  point of them lay on it, across the side's direction, and the check refused the body
+  (`solidcore-ops` `heal.rs`, `a_block_notched_twice_the_tolerance_deep_is_valid`).
+
+Still on the intersection tolerance:
+- an intersection curve along an edge (`edge_solutions`, `intersect/curve_class/p9.rs`): a
+  curve the intersector finds within the two zone tolerances' sum of an edge, all along it,
+  runs along the edge, so the groove's floor is taken for the block's edge and the groove is
+  lost;
+- two points one proto vertex (`find_proto_vertex_within` and `DeclaredContact::overlaps`,
+  `proto_topology/p1/proto.rs`; "One point or two" below): the sum of the two tolerances, so
+  the groove's corners, `depth` apart, are one vertex;
+- an interval of a curve along an edge (`classify_edge_interval`,
+  `intersect/curve_class/p3.rs`): the boss over the rim;
+- the check's Surface test 6 (an open surface's opposite domain sides partially coincident:
+  a notch's wall more than 1e-5 and under 2e-5 wide fails it) and the healer that reads an imported body (`Body::from_record`
+  untrusted), whose healing changes the topology of a block notched more than 1e-5 and under
+  2e-5 deep, so the import is refused;
+- the side test's own degenerate edge (a sample box under twice the zone tolerance).
+
 **One point or two.** A proto vertex holds the points the two operands' intersections give for one
 place. Each point is known to its tolerance (a proto vertex's, or the one a proto vertex made of
 the point would get: the largest of its deviation, the intersector's tolerance and its objects' zone
@@ -846,6 +887,15 @@ A reviewer can check each of these on a change to the boolean.
 - A curve the marching intersection traces inside a lens of two circles in contact, from the
   touch to a crossing along both edges (a boss 5e-8 past a rim at a zone tolerance of 1e-7),
   is kept as a curve; the contact makes it no event (§6).
+- The coincidence rule in migration (§5, "The coincidence rule"): the side test of an edge use
+  reads `coincidence_tol_3d`; the intersection curve along an edge (`edge_solutions`), the
+  proto vertices' combined tolerance (`find_proto_vertex_within`,
+  `DeclaredContact::overlaps`), the interval along an edge (`classify_edge_interval`), the
+  check's Surface test 6 and the import healer still read the intersection tolerance. Until
+  they move, a groove more than 1e-5 and up to 2e-5 deep (at the default 1e-5) is lost by the
+  difference and a boss overhanging a rim by as much is dropped by the union. The intersection curve, the
+  proto vertices and the side test together restore the groove; the interval along an edge
+  restores the boss.
 
 ## 11. If you're stuck
 
