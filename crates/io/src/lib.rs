@@ -1982,6 +1982,32 @@ mod tests {
     }
 
     #[test]
+    fn step_names_in_mixed_encodings() {
+        // SolidWorks writes a solid's name as raw GBK bytes and some other strings as raw UTF-8 in
+        // the same file, sometimes cut off inside a character (#19750). Each string is read in its
+        // own encoding.
+        let (_, m) = model();
+        let step = export(&m.state(), &[], Format::Step, "t").unwrap();
+        // `step` with the first string of the first `entity` replaced by `with`.
+        let with_name = |step: &[u8], entity: &str, with: &[u8]| {
+            let open = format!("{entity}('");
+            let start = step.windows(open.len()).position(|w| w == open.as_bytes()).unwrap() + open.len();
+            let end = start + step[start..].iter().position(|b| *b == b'\'').unwrap();
+            [&step[..start], with, &step[end..]].concat()
+        };
+        let solid = with_name(&step, "MANIFOLD_SOLID_BREP", &encoding_rs::GBK.encode("切除-拉伸3").0);
+        assert_eq!(step_import_feature(&solid, "t.step").unwrap().body_names, ["切除-拉伸3"], "GBK alone");
+        for (case, other) in [("a UTF-8 string", "未".as_bytes()), ("a cut-off UTF-8 string", b"\xe6\x9c".as_slice())] {
+            let bytes = with_name(&solid, "PRODUCT_DEFINITION", other);
+            assert_eq!(step_import_feature(&bytes, "t.step").unwrap().body_names, ["切除-拉伸3"], "GBK with {case}");
+        }
+        // The UTF-8 string reads as UTF-8 beside the GBK one.
+        let bytes = with_name(&with_name(&solid, "PRODUCT_DEFINITION", "未".as_bytes()), "MANIFOLD_SOLID_BREP", "外壳 1".as_bytes());
+        let bytes = with_name(&bytes, "PRODUCT", &encoding_rs::GBK.encode("切除-拉伸3").0);
+        assert_eq!(step_import_feature(&bytes, "t.step").unwrap().body_names, ["外壳 1"], "UTF-8 beside GBK");
+    }
+
+    #[test]
     fn step_and_design() {
         let (doc, m) = model();
         let s = String::from_utf8(export(&m.state(), &[], Format::Step, "t").unwrap()).unwrap();
