@@ -1719,6 +1719,8 @@ fn lm_compute(
         }
         #[cfg(feature = "solver-profiling")]
         profiling::count(|c| c.outer_iterations = c.outer_iterations.saturating_add(1));
+        #[cfg(test)]
+        lm_work::add(n);
         #[cfg(feature = "solver-profiling")]
         let (_, j, _) = local_system(sk, lay, blocks, x, col, n);
         // Normal equations of this component.
@@ -1897,6 +1899,44 @@ pub(crate) mod lm_vars {
     /// The LM runs since the last call.
     pub(crate) fn runs() -> usize {
         RUNS.with(|c| c.replace(0))
+    }
+}
+
+/// The variables LM worked on, summed over its outer iterations on this thread, for tests that
+/// measure the work one solve spends.
+#[cfg(test)]
+pub(crate) mod lm_work {
+    use std::cell::Cell;
+
+    thread_local! {
+        static WORK: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub(super) fn add(n: usize) {
+        WORK.with(|c| c.set(c.get() + n));
+    }
+
+    /// The work since the last call.
+    pub(crate) fn take() -> usize {
+        WORK.with(|c| c.replace(0))
+    }
+}
+
+/// A test's override of the value edit's dense LM work allowance (#17905).
+#[cfg(test)]
+pub(crate) mod edit_work_override {
+    use std::cell::Cell;
+
+    thread_local! {
+        static OVERRIDE: Cell<Option<usize>> = const { Cell::new(None) };
+    }
+
+    pub(crate) fn set(work: Option<usize>) {
+        OVERRIDE.with(|c| c.set(work));
+    }
+
+    pub(super) fn get() -> Option<usize> {
+        OVERRIDE.with(|c| c.get())
     }
 }
 
