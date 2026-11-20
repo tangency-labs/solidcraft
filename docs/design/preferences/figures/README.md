@@ -92,6 +92,7 @@ token each literal maps to.
 | `orbit-centre` | 120x64 | Prefs2_Navigation | Orbit around card "View centre" |
 | `orbit-cursor` | 120x64 | Prefs2_Navigation | Orbit around card "Under the cursor" |
 | `navigator-axes` | 120x64 | Prefs2_Navigation | View navigator card "Axes, signed" |
+| `navigator-cube` | 120x64 | Prefs2_Navigation | View navigator card "Cube, compact" |
 | `sketch-guides` | 120x64 | Prefs2_Sketch | Sketch > Snapping and guides figure |
 | `sketch-exit-previous` | 120x64 | Prefs2_Sketch | "When a sketch ends" card "Return to the view before" (before / sketch / after trio) |
 | `sketch-exit-keep` | 120x64 | Prefs2_Sketch | "When a sketch ends" card "Keep" (default) |

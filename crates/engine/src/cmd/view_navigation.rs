@@ -104,7 +104,7 @@ CommandSpec::new("view.navigation_bar", "Navigation Bar", crate::checked!("view.
 CommandSpec::new("view.navigator", "Custom View Navigator", crate::checked!("view.navigator", navigator))
     .icon("nav_settings").noundo().doc_only()
     .contract(&NAVIGATOR_CONTRACT).output(output_schema_for::<NavigatorParams>)
-    .params("style?: axes|custom; body?: body name|null; texture?: themed|modeled; arrows?, home?: bool → the navigator as set; the app's view navigator, never saved in the design; never opens a dialog (a toolbar start opens the Custom View Navigator panel)"),
+    .params("style?: axes|cube|custom; body?: body name|null; texture?: themed|modeled; arrows?, home?: bool → the navigator as set; the app's view navigator, never saved in the design; never opens a dialog (a toolbar start opens the Custom View Navigator panel)"),
 CommandSpec::new("view.ribbon_tabs_only", "Ribbon Tabs Only", crate::checked!("view.ribbon_tabs_only", ribbon_tabs_only))
     .icon("chevron").noundo().doc_only().contract(&RIBBON_TABS_ONLY_CONTRACT).output(output_schema_for::<RibbonTabsOnly>)
     .params("on?: bool (omitted: switch) → on?; fold the ribbon to its tab row, a tab click shows its panels over the view (window setting)"),
@@ -185,7 +185,7 @@ CommandSpec::new("view.previous_tab", "Previous Tab", crate::checked!("view.prev
     .icon("chevron_right").noundo().doc_only().key("Ctrl+Shift+Tab").contract(&TAB_STEP_CONTRACT).output(output_schema_for::<TabStep>)
     .params("no parameters → step: -1; the window shows the design tab to the left of the shown one (before the first, the last); never edits the design or opens a dialog")];
 
-const STANDARD_PARAMS: &str = "camera?: Camera (default: current session camera or home view) → camera; turns to that standard view as the axes navigator does, keeping target, distance and projection";
+const STANDARD_PARAMS: &str = "camera?: Camera (default: current session camera or home view) → camera; turns to that standard view as the navigator does, keeping target, distance and projection";
 
 /// The standard view a `view.front` … `view.isometric` command turns to.
 pub fn standard_view(id: &str) -> Option<StandardView> {

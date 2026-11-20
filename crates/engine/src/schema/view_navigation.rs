@@ -360,7 +360,7 @@ pub struct RenderFrame {
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NavigatorParams {
-    /// The navigator: signed axes, or a custom body (the signed axes until a body is
+    /// The navigator: signed axes, the cube, or a custom body (the signed axes until a body is
     /// chosen). Default: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub style: Option<NavigatorStyle>,
@@ -388,6 +388,7 @@ pub struct NavigatorParams {
 #[serde(rename_all = "snake_case")]
 pub enum NavigatorStyle {
     Axes,
+    Cube,
     Custom,
 }
 

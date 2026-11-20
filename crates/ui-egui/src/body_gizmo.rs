@@ -420,7 +420,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: cra
         }
     }
     if shown.arrows {
-        navigator_controls::arrows(app, ui, &painter, c, scale, active, t);
+        navigator_controls::arrows(app, ui, &painter, c, scale, active, false, t);
     }
     if shown.home {
         navigator_controls::home(app, ui, &painter, c, scale, active, t);

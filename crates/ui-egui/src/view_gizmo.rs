@@ -1,5 +1,5 @@
 //! The custom view navigator: a body of the user's choice drawn in place of the signed axes
-//! (`viewport::body_gizmo` draws it). A right-click on any view navigator offers Axes and
+//! (`viewport::body_gizmo` draws it). A right-click on any view navigator offers Axes, Cube and
 //! Custom ([`menu_items`]); Custom opens the Custom View Navigator panel, a feature panel with OK
 //! and Cancel ([`start`], [`rows`], [`run_dialog`]): the body is picked in the view, then its
 //! texture (the colours, or the body's own) and whether the rotation arrows and
@@ -344,7 +344,7 @@ fn snapshot(name: &str, mesh: &Mesh, colour: Option<[u8; 3]>, faces: &BTreeMap<u
     }))
 }
 
-/// The menu a right-click on the view navigator opens: Axes and Custom, the current one
+/// The menu a right-click on the view navigator opens: Axes, Cube and Custom, the current one
 /// marked. Custom opens the Custom View Navigator panel, which sets it on OK.
 pub(crate) fn menu_items(app: &SolveApp) -> Vec<Item> {
     NavigatorStyle::ALL
@@ -352,6 +352,7 @@ pub(crate) fn menu_items(app: &SolveApp) -> Vec<Item> {
         .map(|style| {
             let (label, icon) = match style {
                 NavigatorStyle::Axes => (app.tr("prefs.axes"), "origin"),
+                NavigatorStyle::Cube => (solidcraft_ui_text::tr_label("Cube"), "box"),
                 NavigatorStyle::Custom => (solidcraft_ui_text::tr_label("Custom"), "body"),
             };
             act("ui.navigatorStyle", label, icon).with(json!({ "style": style })).key(if app.preferences.navigator_style == style {
@@ -363,7 +364,7 @@ pub(crate) fn menu_items(app: &SolveApp) -> Vec<Item> {
         .collect()
 }
 
-/// A menu pick: Axes at once; Custom opens its panel, as the toolbar would.
+/// A menu pick: Axes and Cube at once; Custom opens its panel, as the toolbar would.
 pub(crate) fn pick_style(app: &mut SolveApp, style: NavigatorStyle) {
     if style == NavigatorStyle::Custom {
         app.start("view.navigator");
@@ -737,13 +738,13 @@ mod tests {
     }
 
     #[test]
-    fn a_right_click_anywhere_on_the_navigator_offers_axes_and_custom() {
+    fn a_right_click_anywhere_on_the_navigator_offers_axes_cube_and_custom() {
         use crate::context_menu::{Target, items};
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10})).unwrap();
         h.frames(2);
         let design = h.app.session.doc.to_json();
-        for (from, pick, to) in [("axes", "Axes", NavigatorStyle::Axes)] {
+        for (from, pick, to) in [("axes", "Cube", NavigatorStyle::Cube), ("cube", "Axes", NavigatorStyle::Axes)] {
             h.call("ui.prefs", json!({"navigator_style": from}));
             h.frames(2);
             let outer = crate::scenario::rect_of("axis_view:outer").expect("the navigator is shown");
@@ -758,12 +759,12 @@ mod tests {
             }
             let rows = items(&h.app, &Target::ViewGizmo);
             let labels: Vec<_> = rows.iter().map(|r| r.label.as_str()).collect();
-            assert_eq!(labels, ["Axes", "Custom"], "just the two types");
+            assert_eq!(labels, ["Axes", "Cube", "Custom"], "just the three types");
             let current: Vec<_> = rows.iter().filter(|i| i.shortcut == "current").collect();
             assert_eq!(current.len(), 1);
             assert_eq!(current[0].params.as_ref().map(|p| p["style"].clone()), Some(json!(from)));
             assert_eq!(h.call("ui.menuPick", json!({"item": pick}))["ok"], true, "{pick}");
-            assert_eq!(h.app.preferences.navigator_style, to, "Axes applies at once");
+            assert_eq!(h.app.preferences.navigator_style, to, "Axes and Cube apply at once");
             assert!(h.app.dialog.is_none());
         }
         assert_eq!(h.app.session.doc.to_json(), design);

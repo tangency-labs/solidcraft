@@ -1,0 +1,74 @@
+[
+  {"call":"ui.prefs","params":{"navigator_style":"cube"}},
+  {
+    "note": "Cube top/bottom face clicks preserve the nearest square heading in each up frame."
+  },
+  {
+    "camera": {
+      "yaw": -2.356194490192345,
+      "pitch": 0.6154797086703874
+    }
+  },
+  {
+    "click": {
+      "handle": "navigation_cube:top"
+    }
+  },
+  {
+    "expect": {
+      "camera": {
+        "yaw_deg": -90,
+        "pitch_deg": 90
+      }
+    }
+  },
+  {
+    "camera": {
+      "yaw": 2.9670597283903604,
+      "pitch": -0.6
+    }
+  },
+  {
+    "click": {
+      "handle": "navigation_cube:bottom"
+    }
+  },
+  {
+    "expect": {
+      "camera": {
+        "yaw_deg": 180,
+        "pitch_deg": -90
+      }
+    }
+  },
+  {
+    "call": "ui.prefs",
+    "params": {
+      "up_axis": "y"
+    }
+  },
+  {
+    "camera": {
+      "yaw": -1.3962634015954636,
+      "pitch": 0.6
+    }
+  },
+  {
+    "click": {
+      "handle": "navigation_cube:top"
+    }
+  },
+  {
+    "expect": {
+      "camera": {
+        "yaw_deg": -90,
+        "pitch_deg": 90,
+        "back": [
+          0,
+          1,
+          0
+        ]
+      }
+    }
+  }
+]

@@ -363,6 +363,10 @@ pub fn paint_navigation_axes(p: &Painter, rect: Rect, axes: &[NavigatorAxis]) {
     }
 }
 
+pub fn paint_navigation_cube(p: &Painter, rect: Rect) {
+    paint_with_tokens(p, rect, &super::preferences_figure_data::NAVIGATOR_CUBE, None, None, &Tokens::get(), Palette::Navigator);
+}
+
 /// A generic body (a hexagonal prism) in the navigator palette: the user's own body stands in its place.
 pub fn paint_navigation_custom(p: &Painter, rect: Rect) {
     let Some((p, scale)) = navigation_canvas(p, rect) else { return };

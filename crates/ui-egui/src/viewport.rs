@@ -53,6 +53,9 @@ mod body_gizmo;
 #[path = "navigator_controls.rs"]
 mod navigator_controls;
 
+#[path = "navigation_cube.rs"]
+mod navigation_cube;
+
 #[path = "viewport_drag_layer.rs"]
 mod drag_layer;
 
@@ -4988,6 +4991,7 @@ pub(crate) fn section_clip(
 pub(crate) fn axis_view_size(style: crate::prefs::NavigatorStyle) -> f32 {
     match style {
         crate::prefs::NavigatorStyle::Axes => 116.0,
+        crate::prefs::NavigatorStyle::Cube => navigation_cube::SIZE,
         crate::prefs::NavigatorStyle::Custom => navigator_controls::SIZE,
     }
 }
@@ -9629,6 +9633,9 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
         let shown = crate::view_gizmo::shown(app);
         match shown.style {
             crate::prefs::NavigatorStyle::Custom if shown.shape.is_some() => body_gizmo::drag_origin(app, rect, p),
+            crate::prefs::NavigatorStyle::Cube => {
+                navigation_cube::drag_origin(app, axis_center(app, rect), p, axis_rect(app, rect).width() / navigation_cube::DESIGN_SIZE)
+            }
             crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => axis_rect(app, rect).contains(p),
         }
     });
@@ -9678,6 +9685,7 @@ pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let shown = crate::view_gizmo::shown(app);
     match shown.style {
         crate::prefs::NavigatorStyle::Custom if shown.shape.is_some() => body_gizmo::show(app, ui, rect, shown),
+        crate::prefs::NavigatorStyle::Cube => navigation_cube::show(app, ui, rect),
         crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => signed_axis_view(app, ui, rect),
     }
 }

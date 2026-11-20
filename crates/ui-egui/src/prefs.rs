@@ -548,16 +548,19 @@ pub enum NavigatorStyle {
     /// Also what a navigator this version doesn't know reads as (`lenient`).
     #[default]
     Axes,
+    /// The cube, with a face, a corner and an arrow for every standard view (#19749).
+    Cube,
     /// A body of the user's choice ([`crate::view_gizmo`]); the signed axes until one is chosen.
     Custom,
 }
 
 impl NavigatorStyle {
-    pub const ALL: [Self; 2] = [Self::Axes, Self::Custom];
+    pub const ALL: [Self; 3] = [Self::Axes, Self::Cube, Self::Custom];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Axes => "Signed axes",
+            Self::Cube => "Cube",
             Self::Custom => "Custom",
         }
     }
@@ -1175,7 +1178,7 @@ preference_settings! {
     show_donate_button: bool = true, PAGE_GENERAL => check_id("prefs.show_donate_button");
     /// The Discord button at the status bar's right end; the × on it turns it off.
     show_discord_button: bool = true, PAGE_GENERAL => check_id("prefs.show_discord_button");
-    /// View orientation widget: original signed axes (default) or a custom body.
+    /// View orientation widget: original signed axes (default), the cube or a custom body.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// The custom view gizmo's colours: the theme's (themed) or the body's own (modeled).
     navigator_texture: NavigatorTexture = NavigatorTexture::default(), PAGE_NAVIGATION;
@@ -10974,8 +10977,8 @@ mod tests {
 
     #[test]
     fn an_unknown_navigator_style_loads_as_axes_and_is_refused_by_commands() {
-        // The second value is what an older version saved for the style that is gone.
-        for old in ["zigzag", "cube"] {
+        // A style this version doesn't know reads as the axes navigator.
+        for old in ["zigzag", "dodecahedron"] {
             let saved = json!({"navigator_style": old, "length_decimals": 4});
             let p = super::lenient(&saved);
             assert_eq!(p.navigator_style, NavigatorStyle::Axes, "{old} reads as the axes navigator");
@@ -11017,8 +11020,12 @@ mod tests {
         let nav = h.app.preferences.nav.clone();
         h.call("ui.prefs", json!({"open":"Navigation"}));
         super::reveal_preference(&mut h, "prefs:navigator");
+        let cube = crate::scenario::rect_of("prefs:navigator:Cube").unwrap().center();
         let custom = crate::scenario::rect_of("prefs:navigator:Custom").unwrap().center();
         assert!(crate::scenario::rect_of("prefs:navigator:Signed axes").is_some());
+        h.call("ui.click", json!({"x":cube.x,"y":cube.y}));
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Cube);
+        assert!(crate::scenario::handle_at("navigation_cube:front").is_some(), "the cube is drawn");
         h.call("ui.click", json!({"x":custom.x,"y":custom.y}));
         assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
         assert_eq!(h.app.preferences.nav, nav);
@@ -14274,6 +14281,7 @@ mod settings_search_tests {
                 ("Origin", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:Origin"),
                 ("View navigator", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
                 ("Axes", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
+                ("Cube", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Cube"),
                 ("Turntable", crate::prefs::PAGE_NAVIGATION, "prefs:turntable"),
                 ("Wheel zoom speed", crate::prefs::PAGE_NAVIGATION, "prefs:wheel_zoom_speed"),
                 ("Zoom with two-finger scroll while holding", crate::prefs::PAGE_NAVIGATION, "prefs:trackpad_zoom_modifier"),
@@ -14285,7 +14293,8 @@ mod settings_search_tests {
                 h.app.prefs_window.shell.filter = query.into();
                 h.frames(5);
                 let (_, _, hits) = nav(&h.ctx);
-                let matching: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == page).collect();
+                let matching: Vec<_> =
+                    hits.iter().enumerate().filter(|(_, hit)| hit.page == page && (query != "Cube" || hit.label == "Cube")).collect();
                 assert_eq!(matching.len(), 1, "{theme}: {query} has one indexed setting");
                 set_cursor(&h.ctx, matching[0].0);
                 h.frames(2);

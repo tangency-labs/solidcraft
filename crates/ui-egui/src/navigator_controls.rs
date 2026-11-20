@@ -23,7 +23,7 @@ pub(super) fn navigate(app: &mut SolveApp, action: Option<&str>, dir: Option<Vec
     let _ = app.run("view.navigate", params);
 }
 
-fn control(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect, action: &str, tooltip: &str) -> bool {
+pub(super) fn control(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect, action: &str, tooltip: &str) -> bool {
     crate::scenario::publish_handle(&format!("navigator:control:{action}"), bounds.center());
     let response = ui.interact(bounds, ui.scope_id().with(("navigator", action)), Sense::click()).backing_on_hover_text(tooltip);
     let hover = response.hovered();
@@ -77,10 +77,11 @@ pub(super) fn home(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     }
 }
 
-/// The four orbit arrows and the two roll arrows around a gizmo centred at `c`: painted while the gizmo is `active`.
+/// The four orbit arrows and the two roll arrows around a gizmo centred at `c`: nearer and larger
+/// while the gizmo has a face square on (the cube), painted while the gizmo is `active`.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, c: Pos2, scale: f32, active: bool, t: Tokens) {
-    let (distance, button_size) = (74.0, 16.0);
+pub(super) fn arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, c: Pos2, scale: f32, active: bool, square_on: bool, t: Tokens) {
+    let (distance, button_size) = if square_on { (54.0, 20.0) } else { (74.0, 16.0) };
     for (action, offset, direction, tooltip) in [
         ("left", vec2(-distance, 0.0), vec2(1.0, 0.0), "Orbit left 90°"),
         ("right", vec2(distance, 0.0), vec2(-1.0, 0.0), "Orbit right 90°"),

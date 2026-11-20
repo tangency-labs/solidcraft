@@ -3446,7 +3446,7 @@ fn render_preview_navigates_like_the_modelling_viewport_in_every_preset() {
 /// view controls all work in the Render workspace, framing the product scene.
 #[test]
 fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
-    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Custom] {
+    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
         let mut h = Harness::new();
         h.app.preferences.navigator_style = style;
         h.app.preferences.look_at_anim = false;
@@ -3489,8 +3489,11 @@ fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
         // The navigator's Home control.
         off(&mut h);
         let handle = match style {
+            crate::prefs::NavigatorStyle::Axes => "axis_view:home",
+            // The cube draws its own Home button.
+            crate::prefs::NavigatorStyle::Cube => "navigator:control:home",
             // Custom draws the signed axes until a body is chosen.
-            crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => "axis_view:home",
+            crate::prefs::NavigatorStyle::Custom => "axis_view:home",
         };
         h.step(&json!({"click":{"handle":handle}})).unwrap();
         h.settle();

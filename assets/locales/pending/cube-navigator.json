@@ -1,0 +1,126 @@
+{
+  "ar": {
+    "Cube": "مكعب",
+    "prefs.navigation.cube_compact": "المكعب"
+  },
+  "bg": {
+    "Cube": "Cube"
+  },
+  "bs": {
+    "Cube": "Kocka"
+  },
+  "ca": {
+    "Cube": "Cub",
+    "prefs.navigation.cube_compact": "Cub"
+  },
+  "cs": {
+    "Cube": "Krychle",
+    "prefs.navigation.cube_compact": "Krychle"
+  },
+  "da": {
+    "Cube": "Terning"
+  },
+  "de": {
+    "Cube": "Würfel",
+    "prefs.navigation.cube_compact": "Würfel"
+  },
+  "en": {
+    "Cube": "Cube",
+    "prefs.navigation.cube_compact": "Cube"
+  },
+  "es": {
+    "Cube": "Cubo",
+    "prefs.navigation.cube_compact": "Cubo"
+  },
+  "fi": {
+    "Cube": "Kuutio",
+    "prefs.navigation.cube_compact": "Kuutio"
+  },
+  "fr": {
+    "Cube": "Cube",
+    "prefs.navigation.cube_compact": "Cube"
+  },
+  "gl": {
+    "Cube": "Cubo"
+  },
+  "he": {
+    "Cube": "קובייה",
+    "prefs.navigation.cube_compact": "קובייה"
+  },
+  "hr": {
+    "Cube": "Kocka"
+  },
+  "hu": {
+    "Cube": "Kocka"
+  },
+  "id": {
+    "Cube": "Kubus"
+  },
+  "it": {
+    "Cube": "Cubo",
+    "prefs.navigation.cube_compact": "Cubo"
+  },
+  "ja": {
+    "Cube": "キューブ",
+    "prefs.navigation.cube_compact": "キューブ"
+  },
+  "ka": {
+    "Cube": "კუბი"
+  },
+  "ko": {
+    "Cube": "큐브",
+    "prefs.navigation.cube_compact": "큐브"
+  },
+  "lv": {
+    "Cube": "Kubs",
+    "prefs.navigation.cube_compact": "Kubs"
+  },
+  "ms": {
+    "Cube": "Kubus"
+  },
+  "nb": {
+    "Cube": "Kube"
+  },
+  "nl": {
+    "Cube": "Kubus"
+  },
+  "pl": {
+    "Cube": "Sześcian",
+    "prefs.navigation.cube_compact": "Kostka"
+  },
+  "pt-BR": {
+    "Cube": "Cubo",
+    "prefs.navigation.cube_compact": "Cubo"
+  },
+  "ro": {
+    "Cube": "Cub"
+  },
+  "ru": {
+    "Cube": "Куб"
+  },
+  "sr": {
+    "Cube": "Коцка"
+  },
+  "sv": {
+    "Cube": "Kub"
+  },
+  "tr": {
+    "Cube": "Küp"
+  },
+  "uk": {
+    "Cube": "Куб",
+    "prefs.navigation.cube_compact": "Куб"
+  },
+  "vi": {
+    "Cube": "Khối lập phương",
+    "prefs.navigation.cube_compact": "Khối lập phương"
+  },
+  "zh": {
+    "Cube": "立方体",
+    "prefs.navigation.cube_compact": "立方体"
+  },
+  "zh-TW": {
+    "Cube": "立方體",
+    "prefs.navigation.cube_compact": "立方體"
+  }
+}
