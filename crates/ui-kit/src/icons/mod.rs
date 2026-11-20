@@ -15,8 +15,8 @@ pub mod glyphs;
 mod svg;
 
 pub use svg::{
-    Doc, IconData, IconExtension, IconSet, Look, MAX_ACCENTS, MAX_ROLES, PLACEHOLDER, Palette, Resolved, audit, render, render_tinted,
-    set_theme_palette, theme_palette, theme_palette_state,
+    Doc, IconData, IconExtension, IconSet, Look, MAX_ACCENTS, MAX_ADDED, MAX_ADDED_BYTES, MAX_ROLES, PLACEHOLDER, Palette, Resolved, audit, render,
+    render_tinted, set_theme_palette, theme_palette, theme_palette_state,
 };
 
 static INSTALLED: OnceLock<&'static IconSet> = OnceLock::new();
@@ -48,6 +48,11 @@ pub fn resolve(name: &str) -> Resolved {
 /// [`IconSet::doc_for`] in the installed set.
 pub fn doc_for(master: &str, px: u32) -> Option<&'static Doc> {
     installed().doc_for(master, px)
+}
+
+/// [`IconSet::add`] to the installed set.
+pub fn add(name: &str, src: &str) -> Result<(), String> {
+    installed().add(name, src)
 }
 
 /// [`IconSet::accent_index`] in the installed set.

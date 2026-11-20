@@ -1742,6 +1742,15 @@ impl IntersectorBrep<H> for Two {
             &vertexuse_ref,
         )
     }
+    fn vertex_update_edge_intervals(&mut self, k: &Kernel, vertex: H) -> solidcore::Result<()> {
+        if vertex.kind != K_VERTEX {
+            return Err(invalid("not a vertex handle"));
+        }
+        let b = self.brep_m(vertex)?;
+        with_edit_env(b, |b, env| {
+            solidcore::topology::brep::p1::update_vertex_edge_intervals(k, b, env, vid(vertex))
+        })
+    }
     fn set_topology_tolerance(
         &mut self,
         _k: &Kernel,

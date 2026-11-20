@@ -270,7 +270,7 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => Some(
             str_(p, "body_name")
                 .map(str::trim)
-                .filter(|n| !n.is_empty() && n.len() <= 128)
+                .filter(|n| !n.is_empty() && n.chars().count() <= 128)
                 .ok_or_else(|| bad(cmd, "`body_name` must be 1…128 characters"))?
                 .to_string(),
         ),
@@ -328,7 +328,7 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Object(m)) if m.len() <= frame::MAX_MEMBERS => m
             .iter()
             .map(|(line, v)| {
-                let name = v.as_str().map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128);
+                let name = v.as_str().map(str::trim).filter(|n| !n.is_empty() && n.chars().count() <= 128);
                 name.map(|n| (line.clone(), n.to_string()))
                     .ok_or_else(|| bad(cmd, format!("`names`: the name of line `{line}` must be 1…128 characters")))
             })
