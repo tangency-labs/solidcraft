@@ -2691,6 +2691,8 @@ impl Session {
         let Some(c) = self.checkpoints.drain(i..).next() else { return Err(missing()) };
         let before = Snapshot::of(self, "");
         self.doc = c.doc;
+        // A row put on the design after the checkpoint is gone with it.
+        self.config_baseline = None;
         self.active_sketch = c.active_sketch;
         self.active_sheet_sketch = c.active_sheet_sketch;
         self.open_drawing = c.open_drawing;
@@ -3116,6 +3118,7 @@ impl Session {
         self.active_occurrence_path = computed.active_occurrence_path;
         self.pending_moves = computed.pending_moves;
         self.exploded = computed.exploded;
+        self.config_baseline = computed.config_baseline;
         // Joints the computation hid (an import's rigid group) stay hidden.
         for j in computed.visibility.hidden_joints {
             if !self.visibility.hidden_joints.contains(&j) {

@@ -629,8 +629,9 @@ fn update_from_design(s: &mut Session, p: &Value) -> Result<Value> {
 /// design was opened or saved): each as the column key that would hold it.
 fn not_captured(s: &Session) -> Vec<String> {
     // Before any row was put on the design in this session: the design as it was opened or last saved.
+    // A row put on the design and undone since (another active row) falls back the same way.
     let baseline = match &s.config_baseline {
-        Some((id, baseline)) if *id == s.document_id => baseline,
+        Some((id, baseline)) if *id == s.document_id && baseline.configs.active == s.doc.configs.active => baseline,
         _ => &s.saved,
     };
     let columns = &s.doc.configs.columns;
@@ -642,9 +643,28 @@ fn not_captured(s: &Session) -> Vec<String> {
             out.push(format!("suppress:{}", feature.name));
         }
     }
-    let before: BTreeMap<String, String> = baseline.all_param_exprs().into_iter().map(|(name, expr, _)| (name, expr)).collect();
-    for (name, expr, _) in s.doc.all_param_exprs() {
-        if !columns.contains(&Column::Param(name.clone())) && before.get(&name).is_some_and(|old| *old != expr) {
+    // Parameters, numeric and text: a changed one, and a user parameter added since. A new
+    // feature's own inputs come with the feature and aren't listed.
+    let before: BTreeMap<String, String> = baseline
+        .all_param_exprs()
+        .into_iter()
+        .map(|(name, expr, _)| (name, expr))
+        .chain(baseline.text_params.iter().map(|p| (p.name.clone(), p.text.clone())))
+        .collect();
+    let user: std::collections::BTreeSet<&str> =
+        s.doc.params.iter().map(|p| p.name.as_str()).chain(s.doc.text_params.iter().map(|p| p.name.as_str())).collect();
+    let now = s
+        .doc
+        .all_param_exprs()
+        .into_iter()
+        .map(|(name, expr, _)| (name, expr))
+        .chain(s.doc.text_params.iter().map(|p| (p.name.clone(), p.text.clone())));
+    for (name, expr) in now {
+        let changed = match before.get(&name) {
+            Some(old) => *old != expr,
+            None => user.contains(name.as_str()),
+        };
+        if changed && !columns.contains(&Column::Param(name.clone())) {
             out.push(format!("param:{name}"));
         }
     }
@@ -1415,6 +1435,9 @@ mod tests {
         let reply = run(&mut s, "config.update_from_design", json!({}));
         assert_eq!(reply["updated"], json!([]));
         assert_eq!(reply["not_captured"], json!(["param:base"]), "base has no column");
+        run(&mut s, "parameters.add", json!({"name":"spare","expression":"5 mm"}));
+        let reply = run(&mut s, "config.update_from_design", json!({}));
+        assert_eq!(reply["not_captured"], json!(["param:spare"]), "a parameter added since is listed too");
         assert_eq!(s.doc.configs.rows[0].cells[0], "base * 3");
 
         // A row by name that isn't active takes the design's values and becomes the active row.

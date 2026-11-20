@@ -164,7 +164,7 @@ pub(super) fn configurations_rows(
                                             .filter_map(Value::as_str)
                                             .map(str::to_owned)
                                             .collect();
-                                        rule_editor.not_captured = (!missed.is_empty()).then(|| (app.session.revision, missed));
+                                        rule_editor.not_captured = (!missed.is_empty()).then_some((app.session.revision, missed));
                                     }
                                     Err(e) => *error = Some(e),
                                 }
