@@ -130,7 +130,7 @@ pub(crate) fn remember_strip_order(app: &mut SolveApp) {
         return;
     }
     let available: Vec<_> = available_strip_views(app).map(|(window, view)| (window, view.id)).collect();
-    let tab = app.docs.current_tab();
+    let tab = app.docs.active_tab();
     app.view_windows.strip_order.retain(|tab, _| app.docs.tab_open(*tab));
     let order = app.view_windows.strip_order.entry(tab).or_default();
     order.retain(|id| available.iter().any(|(_, available)| available == id));

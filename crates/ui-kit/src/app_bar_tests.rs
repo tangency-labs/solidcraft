@@ -428,6 +428,7 @@ impl TabsRig {
             },
             view_menu: &VIEW_MENU,
             view_right_row: "vright",
+            view_rename_row: "vrename",
             view_rename: self.rename.map(|k| (k, TabRename { text: &mut text, focused: &mut focused, max: 8 })),
             plus_menu: if self.plus { &PLUS_MENU } else { &[] },
             layout_menu: &[],

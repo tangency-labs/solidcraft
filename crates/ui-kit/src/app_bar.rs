@@ -791,6 +791,8 @@ pub struct TabStrip<'a> {
     pub view_menu: &'a [TabMenuRow<'a>],
     /// The id of the row of `view_menu` that closes the views to the right: off for the last view.
     pub view_right_row: &'a str,
+    /// The id of the row of `view_menu` that renames the view: F2 and a double click act as it.
+    pub view_rename_row: &'a str,
     /// A view's name being edited in its sub-tab: its place in the design and the text.
     pub view_rename: Option<(usize, TabRename<'a>)>,
     pub plus_menu: &'a [TabMenuRow<'a>],
@@ -1181,7 +1183,11 @@ fn clear_view_width(ui: &egui::Ui, view: &ViewTab, label: f32, stage: CollapseSt
     if stage >= CollapseStage::Icons && !view.active && view.to_window.is_none() && !editing {
         return 28.0;
     }
-    let badge = if view.to_window.is_some() { 21.0 + text_width(ui, &window_badge(view, stage), crate::type_face::semibold(11.0)) } else { 0.0 };
+    let badge = if view.to_window.is_some() {
+        21.0 + text_width(ui, &window_badge(view, stage), crate::type_face::semibold(Tokens::get().font_small))
+    } else {
+        0.0
+    };
     let dot = if view.state == ViewState::SourceChanged { 12.0 } else { 0.0 };
     (28.0 + label.min(VIEW_LABEL_MAX) + dot + badge + 20.0).max(72.0)
 }
@@ -1215,7 +1221,7 @@ fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed
     });
     let mut stage = None;
     let (kind, width) = if strip.clear_view_tabs && (strip.views_as_tabs || strip.pop_out) {
-        more_w = 28.0 + text_width(ui, &n.saturating_sub(1).to_string(), crate::type_face::semibold(11.5));
+        more_w = 28.0 + text_width(ui, &n.saturating_sub(1).to_string(), crate::type_face::semibold(t.font_caption));
         let width_at = |k: usize, density: CollapseStage| {
             tab.views
                 .get(k)
@@ -1834,7 +1840,7 @@ fn draw_clear_view(
             let badge_ink = t.app_bar_text.gamma_multiply(0.70);
             paint_view_glyph(&painter, mark, "window", badge_ink);
             solidcraft_ui_registry::publish_target(&format!("{}{k}:window", strip.handles.view), mark);
-            painter.text(pos2(mark.right() + 4.0, rect.center().y), Align2::LEFT_CENTER, badge, crate::type_face::semibold(11.0), badge_ink);
+            painter.text(pos2(mark.right() + 4.0, rect.center().y), Align2::LEFT_CENTER, badge, crate::type_face::semibold(t.font_small), badge_ink);
         }
     }
     if look == ViewLook::Ground {
@@ -1866,7 +1872,7 @@ fn draw_clear_view(
     }
     let key = |key| response.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key));
     if !remote && (response.double_clicked() || key(egui::Key::F2)) {
-        pen.actions.push(TabAction::ViewMenu { view: k, id: "view.rename".into() });
+        pen.actions.push(TabAction::ViewMenu { view: k, id: strip.view_rename_row.into() });
     } else if !remote && key(egui::Key::Space) {
         pen.actions.push(TabAction::LiftView { view: k, origin: rect });
     } else if !remote && (response.middle_clicked() || key(egui::Key::Delete)) {

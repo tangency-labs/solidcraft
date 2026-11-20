@@ -2730,6 +2730,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             },
             view_menu: &view_menu,
             view_right_row: crate::design_view_ui::VIEW_CLOSE_RIGHT,
+            view_rename_row: crate::design_view_ui::VIEW_RENAME,
             view_rename: view_edit
                 .as_mut()
                 .zip(view_place)
