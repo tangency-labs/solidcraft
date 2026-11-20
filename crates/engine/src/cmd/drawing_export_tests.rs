@@ -1,0 +1,563 @@
+use serde_json::{Value, json};
+use solidcraft_doc::MAX_PLACEMENT_DEPTH;
+use solidcraft_doc::canvas::base64_decode;
+use solidcraft_geom::paper::NoPictures;
+use solidcraft_io::paper::{PngColour, paper_png};
+
+use super::*;
+use crate::drawing_scene::tests::{front_and_top, nest};
+use crate::schema::output_schema_for;
+use crate::schema::tests::conforms;
+use crate::tests::Folder;
+
+fn run(s: &mut Session, id: &str, p: Value) -> Value {
+    s.execute(id, &p).unwrap()
+}
+
+fn refused(s: &mut Session, p: Value) -> String {
+    s.execute(CMD, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"))
+}
+
+/// The scene of sheet `sheet` of the drawing open, built at once.
+fn sheet_scene(s: &Session, sheet: u64) -> solidcraft_geom::paper::Scene {
+    let d = s.drawing("test").unwrap().clone();
+    crate::drawing_scene::build(s, &d, sheet).unwrap().scene
+}
+
+/// The SVG of sheet `sheet` of the drawing open, written straight from its built scene.
+fn scene_svg(s: &Session, sheet: u64) -> Vec<u8> {
+    solidcraft_io::paper::paper_svg(&sheet_scene(s, sheet).prepare().unwrap(), &NoPictures, DEFAULT_DPI).unwrap().0
+}
+
+/// The PNG of sheet `sheet` of the drawing open, written straight from its built scene.
+fn scene_png(s: &Session, sheet: u64, options: PngOptions) -> Vec<u8> {
+    let mut png = Vec::new();
+    paper_png(&sheet_scene(s, sheet).prepare().unwrap(), options, &NoPictures, &mut png).unwrap();
+    png
+}
+
+fn sheet_sketch(s: &mut Session, sheet: u64, commands: &[(&str, Value)]) -> u64 {
+    let made = run(s, "drawing.sketch.create", json!({"owner": ids::encode(sheet)}));
+    for (command, params) in commands {
+        run(s, command, params.clone());
+    }
+    run(s, "sketch.finish", json!({}));
+    ids::decode(made["sketch"].as_str().unwrap()).unwrap()
+}
+
+/// A sheet exports as its scene's SVG, byte for byte, by id or by name: the reply holds it, with
+/// its size and each view's status, as its schema says. Nothing changes and no model is evaluated.
+#[test]
+fn a_sheet_exports_as_its_scenes_svg() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let (doc, evaluations) = (s.doc.clone(), s.evaluations);
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    let schema = output_schema_for::<ExportResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    let svg = scene_svg(&s, sheet);
+    assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(svg.as_slice()));
+    assert_eq!((&reply["format"], reply["bytes"].as_u64(), reply.get("path")), (&json!("svg"), Some(svg.len() as u64), None), "{reply}");
+    // Each view on the sheet, in id order, as drawing.scene lists them.
+    let views: Vec<_> = reply["views"].as_array().unwrap().iter().map(|v| (v["view"].clone(), v["status"].clone())).collect();
+    let mut in_order = [front, top];
+    in_order.sort_unstable();
+    assert_eq!(views, in_order.map(|v| (json!(ids::encode(v)), json!("drawn"))));
+    let name = s.drawing("test").unwrap().sheets[0].name.clone();
+    assert_eq!(run(&mut s, CMD, json!({"sheet": name, "format": "svg"}))["svg"], reply["svg"]);
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc) && s.evaluations == evaluations);
+    // The sheet named, not the first: a second sheet, with no views, exports as its own scene.
+    let added = run(&mut s, "drawing.sheet.add", json!({}));
+    let second = ids::decode(added["sheet"].as_str().unwrap()).unwrap();
+    let other = run(&mut s, CMD, json!({"sheet": ids::encode(second)}));
+    assert_eq!((&other["sheet"], other["views"].as_array().map(Vec::len)), (&json!(ids::encode(second)), Some(0)), "{other}");
+    assert_eq!(other["svg"].as_str().map(str::as_bytes), Some(scene_svg(&s, second).as_slice()));
+    assert_ne!(other["svg"], reply["svg"]);
+}
+
+/// A sheet with the built-in title block exports its labels and values as text: in SVG one path of
+/// filled outlines for each run of the scene, and in PNG its pixels (#4890 B3).
+#[test]
+fn a_title_blocks_text_is_written_as_filled_outlines() {
+    let (mut s, sheet, _) = front_and_top();
+    let block = serde_json::to_value(solidcraft_geom::title_block::default_block()).unwrap();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": block}));
+    let scene = sheet_scene(&s, sheet);
+    let runs = scene.groups.iter().flat_map(|g| &g.items).filter(|item| matches!(item, solidcraft_geom::paper::Item::Text(_))).count();
+    let svg = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}))["svg"].as_str().unwrap().to_string();
+    assert!(runs > 12, "each label and value: {runs}");
+    assert_eq!(svg.matches("<path fill=\"#000\" stroke=\"none\" d=\"M").count(), runs);
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "format": "png", "dpi": 50}));
+    assert_eq!(reply["data"].as_str().and_then(base64_decode), Some(scene_png(&s, sheet, PngOptions { dpi: 50.0, colour: PngColour::Grey })));
+}
+
+/// With a path the file holds the same SVG and the reply names it instead.
+#[test]
+fn a_path_gets_the_svg_written_to_it() {
+    let (mut s, sheet, _) = front_and_top();
+    let folder = Folder::new("drawing-export");
+    let path = folder.path("Sheet 1.SVG");
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "path": path}));
+    let written = std::fs::read(&path).unwrap();
+    assert_eq!(written, scene_svg(&s, sheet));
+    assert_eq!(
+        (reply["path"].as_str(), reply.get("svg"), reply["bytes"].as_u64()),
+        (Some(path.as_str()), None, Some(written.len() as u64)),
+        "{reply}"
+    );
+}
+
+/// A PNG export stopped part way (the window's background export, cancelled once its first band is
+/// drawn) is refused and writes no file: the file is written only once the whole sheet is drawn.
+#[test]
+fn a_cancelled_png_export_writes_no_file() {
+    /// Cancels as soon as the sheet PNG has reported a band, so nothing before it is stopped.
+    #[derive(Default)]
+    struct AfterABand(std::sync::atomic::AtomicBool);
+    impl solidcraft_kernel::watch::Watch for AfterABand {
+        fn cancelled(&self) -> bool {
+            self.0.load(std::sync::atomic::Ordering::Relaxed)
+        }
+        fn progress(&self, stage: &'static str, _: usize, _: usize) {
+            if stage == "sheet_png" {
+                self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    }
+    let (mut s, sheet, _) = front_and_top();
+    let folder = Folder::new("drawing-export-cancelled");
+    let path = folder.path("sheet.png");
+    // A3 at 300 dpi draws in 5 bands.
+    let p = json!({"sheet": ids::encode(sheet), "format": "png", "path": path});
+    let watch = std::sync::Arc::new(AfterABand::default());
+    let why = solidcraft_kernel::watch::watching(watch.clone(), || s.execute(CMD, &p)).unwrap_err().to_string();
+    assert!(why.contains("the sheet PNG: cancelled") && watch.0.load(std::sync::atomic::Ordering::Relaxed), "{why}");
+    assert!(!std::path::Path::new(&path).exists());
+    run(&mut s, CMD, p);
+    assert!(std::path::Path::new(&path).exists(), "unwatched, it is written");
+}
+
+/// A view drawing hidden lines exports with the rest of its sheet, dashed: a style that used to
+/// refuse the whole sheet. The top view is projected from the front one, so it follows its style:
+/// 4 dashes for the pocket seen from the front, 3 from above (its fourth edge is on the outline).
+#[test]
+fn a_view_with_hidden_lines_exports_dashed() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [30, 40, 5], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert!(!String::from_utf8(scene_svg(&s, sheet)).unwrap().contains("stroke-dasharray"));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": "visible_hidden"}}));
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    let statuses: Vec<_> = reply["views"].as_array().unwrap().iter().map(|v| v["status"].clone()).collect();
+    assert_eq!(statuses, [json!("drawn"), json!("drawn")], "{reply}");
+    let svg = reply["svg"].as_str().unwrap();
+    assert_eq!(svg.matches("stroke-dasharray=\"3 0.75\"").count(), 7, "{svg}");
+    assert_eq!(svg.as_bytes(), scene_svg(&s, sheet).as_slice());
+}
+
+/// A view that failed stops the export, and the refusal names it with why; a placeholder draws
+/// nothing and is exported all the same.
+#[test]
+fn a_failed_view_is_named_and_nothing_is_written() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let folder = Folder::new("drawing-export-failed");
+    let path = folder.path("sheet.svg");
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}}));
+    let why = refused(&mut s, json!({"sheet": ids::encode(sheet), "path": path}));
+    assert!(why.contains(&format!("views on the sheet failed: {} (not supported yet: shaded views with lines", ids::encode(top))), "{why}");
+    assert!(!why.contains(&ids::encode(front)) && !std::path::Path::new(&path).exists(), "{why}");
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "visible"}}));
+    for level in 0..=MAX_PLACEMENT_DEPTH as u64 + 1 {
+        nest(&mut s, level);
+    }
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    let statuses: Vec<_> = reply["views"].as_array().unwrap().iter().map(|v| v["status"].clone()).collect();
+    assert_eq!(statuses, [json!("placeholder"), json!("placeholder")], "{reply}");
+    assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(scene_svg(&s, sheet).as_slice()));
+}
+
+/// A view of a configuration row is exported as the row builds it (#13048): nothing has drawn it before
+/// the export, so its copy is made for the export, on an automatic drawing and on a deferred one. A
+/// view of a row the design no longer has, and the view that follows it, are placeholders that say
+/// why, and the sheet is written all the same.
+#[test]
+fn a_view_of_a_configuration_row_exports_as_the_row_builds_it() {
+    let (mut s, sheet, [front, _], _) = crate::drawing_scene::tests::configured_front_and_top();
+    let wide = |shown: &crate::drawing_scene::SheetScene| shown.objects.iter().find(|o| o.object == front).map(|o| o.bounds_mm.size().x);
+    let statuses = |reply: &Value| reply["views"].as_array().unwrap().iter().map(|v| (v["status"].clone(), v["reason"].clone())).collect::<Vec<_>>();
+    let drawn = vec![(json!("drawn"), Value::Null); 2];
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"configuration": "Long"}}));
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(statuses(&reply), drawn, "{reply}");
+    assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(scene_svg(&s, sheet).as_slice()));
+    let d = s.drawing("test").unwrap().clone();
+    assert!(wide(&crate::drawing_scene::build(&s, &d, sheet).unwrap()).is_some_and(|w| (w - 60.0).abs() < 1e-6));
+    // Deferred and updated: the export draws it from the model as its update left it.
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(statuses(&reply), drawn, "{reply}");
+    let d = s.drawing("test").unwrap().clone();
+    assert!(wide(&crate::drawing_scene::as_shown(&mut s, &d, sheet).unwrap()).is_some_and(|w| (w - 60.0).abs() < 1e-6));
+    // Its row deleted.
+    run(&mut s, "drawing.set", json!({"updates": "automatic"}));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "config.row", json!({"name": "Long", "delete": true}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    let why = json!("the configuration it draws is no longer in the design");
+    assert_eq!(statuses(&reply), vec![(json!("placeholder"), why); 2], "{reply}");
+    assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(scene_svg(&s, sheet).as_slice()));
+}
+
+/// A sheet exports as its scene's PNG, byte for byte: in the reply as base64 data, grey at the
+/// sheet's own dpi when nothing says (300 for a new sheet, so A3 is 4961 x 3508 pixels: 420 and
+/// 297 mm at 300 / 25.4 a millimetre, rounded; then 50 once the sheet says so), and at each colour
+/// and a chosen dpi; with a path (its extension in any case) the file holds it
+/// and the reply names it instead. The reply's shape is the SVG's, as its schema says.
+#[test]
+fn a_sheet_exports_as_its_scenes_png() {
+    let (mut s, sheet, _) = front_and_top();
+    let id = ids::encode(sheet);
+    let schema = output_schema_for::<ExportResult>();
+    let reply = run(&mut s, CMD, json!({"sheet": id, "format": "png"}));
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    let png = scene_png(&s, sheet, PngOptions::default());
+    assert_eq!(reply["data"].as_str().and_then(base64_decode), Some(png.clone()));
+    assert_eq!((reply["bytes"].as_u64(), &reply["report"]["pixels"]), (Some(png.len() as u64), &json!([4961, 3508])), "{reply}");
+    assert_eq!((reply.get("svg"), reply.get("path"), &reply["format"]), (None, None, &json!("png")));
+    run(&mut s, "drawing.sheet.set", json!({"sheet": id, "dpi": 50}));
+    let reply = run(&mut s, CMD, json!({"sheet": id, "format": "png"}));
+    let png = scene_png(&s, sheet, PngOptions { dpi: 50.0, colour: PngColour::Grey });
+    assert_eq!(reply["data"].as_str().and_then(base64_decode), Some(png), "the sheet's own dpi");
+    for (colour, as_written) in
+        [("grey", PngColour::Grey), ("black_white", PngColour::BlackWhite), ("rgb", PngColour::Rgb), ("transparent", PngColour::Transparent)]
+    {
+        let reply = run(&mut s, CMD, json!({"sheet": id, "format": "png", "dpi": 25, "colour": colour}));
+        let png = scene_png(&s, sheet, PngOptions { dpi: 25.0, colour: as_written });
+        assert_eq!(reply["data"].as_str().and_then(base64_decode), Some(png), "{colour}");
+        assert_eq!(reply["report"]["pixels"], json!([414, 293]), "{colour}");
+    }
+    let folder = Folder::new("drawing-export-png");
+    let path = folder.path("Sheet 1.PNG");
+    let reply = run(&mut s, CMD, json!({"sheet": id, "format": "png", "path": path, "dpi": 2400.0 / 32.0}));
+    let written = std::fs::read(&path).unwrap();
+    assert_eq!(written, scene_png(&s, sheet, PngOptions { dpi: 75.0, colour: PngColour::Grey }));
+    assert_eq!((reply["path"].as_str(), reply.get("data"), reply["bytes"].as_u64()), (Some(path.as_str()), None, Some(written.len() as u64)));
+}
+
+/// `paper` reaches both writers, and white is what no `paper` is, byte for byte. A blue paper's PNG
+/// is rgb, asked or not; any other colour is refused by name, in place of being ignored.
+#[test]
+fn a_sheet_exports_on_its_paper() {
+    let (mut s, sheet, _) = front_and_top();
+    let id = ids::encode(sheet);
+    let data = |reply: Value| reply["data"].as_str().and_then(base64_decode).unwrap();
+    let plain = scene_svg(&s, sheet);
+    let reply = run(&mut s, CMD, json!({"sheet": id, "paper": "white"}));
+    assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(plain.as_slice()));
+    for colour in [json!({}), json!({"colour": "rgb"}), json!({"colour": "grey"}), json!({"colour": "black_white"}), json!({"colour": "transparent"})]
+    {
+        let mut asked = json!({"sheet": id, "format": "png", "dpi": 25});
+        asked.as_object_mut().unwrap().extend(colour.as_object().unwrap().clone());
+        let mut white = asked.clone();
+        white["paper"] = json!("white");
+        assert_eq!(data(run(&mut s, CMD, white)), data(run(&mut s, CMD, asked)), "{colour}");
+    }
+    for (name, paper, hex) in [("blueprint", PaperColour::Blueprint, "#123A76"), ("prussian_blue", PaperColour::PrussianBlue, "#003153")] {
+        let reply = run(&mut s, CMD, json!({"sheet": id, "paper": name}));
+        let text = reply["svg"].as_str().unwrap();
+        assert!(text.contains(&format!("fill=\"{hex}\"")) && text.contains("stroke=\"#E2EEFC\"") && !text.contains("#000"), "{name}");
+        let png = scene_png(&s, sheet, PngOptions { dpi: 25.0, colour: PngColour::On(paper) });
+        assert_eq!(data(run(&mut s, CMD, json!({"sheet": id, "format": "png", "dpi": 25, "paper": name}))), png, "{name}");
+        assert_eq!(data(run(&mut s, CMD, json!({"sheet": id, "format": "png", "dpi": 25, "paper": name, "colour": "rgb"}))), png, "{name}");
+        for colour in ["grey", "black_white", "transparent"] {
+            let why = refused(&mut s, json!({"sheet": id, "format": "png", "paper": name, "colour": colour}));
+            assert!(why.contains("a blue `paper` is rgb") && why.contains(colour), "{name}, {colour}: {why}");
+        }
+        assert!(refused(&mut s, json!({"sheet": id, "format": "dxf", "paper": name})).contains("not supported yet: DXF"), "{name}");
+    }
+    assert!(refused(&mut s, json!({"sheet": id, "paper": "cyan"})).contains("paper"));
+    assert!(refused(&mut s, json!({"sheet": id, "paper": null})).contains("paper"));
+}
+
+/// A document held for the reply takes up to its limit and is refused past it, naming the way out.
+#[test]
+fn a_reply_holds_a_document_up_to_its_limit() {
+    let (s, sheet, _) = front_and_top();
+    let options = PngOptions { dpi: 25.0, colour: PngColour::Grey };
+    let png = scene_png(&s, sheet, options);
+    let mut exact = Held { bytes: Vec::new(), limit: png.len() };
+    paper_png(&sheet_scene(&s, sheet).prepare().unwrap(), options, &NoPictures, &mut exact).unwrap();
+    assert_eq!(exact.bytes, png);
+    let mut short = Held { bytes: Vec::new(), limit: png.len() - 1 };
+    let why = paper_png(&sheet_scene(&s, sheet).prepare().unwrap(), options, &NoPictures, &mut short).unwrap_err().to_string();
+    assert!(why.contains("for the reply: give a path"), "{why}");
+}
+
+/// DXF isn't supported yet; a path without the format's extension, a dpi outside 25 to 2400, a dpi
+/// or colour on an SVG, an unknown colour, an unknown sheet, an unknown key and no drawing open are
+/// refused, and nothing is written.
+#[test]
+fn what_it_cant_write_is_refused() {
+    let (mut s, sheet, _) = front_and_top();
+    let folder = Folder::new("drawing-export-refused");
+    let id = ids::encode(sheet);
+    let long = format!("{}.svg", "a".repeat(MAX_PATH_BYTES));
+    for (p, why) in [
+        (json!({"sheet": id, "format": "dxf"}), "not supported yet: DXF"),
+        (json!({"sheet": id, "format": "dxf", "path": folder.path("sheet.dxf")}), "not supported yet: DXF"),
+        (json!({"sheet": id, "format": "pdf"}), "format"),
+        (json!({"sheet": id, "path": folder.path("sheet.png")}), "path must be a .svg file"),
+        (json!({"sheet": id, "format": "png", "path": folder.path("sheet.svg")}), "path must be a .png file"),
+        (json!({"sheet": id, "format": "png", "path": folder.path("sheet")}), "path must be a .png file"),
+        (json!({"sheet": id, "format": "png", "dpi": 24.999}), "`dpi` is 25 to 2400"),
+        (json!({"sheet": id, "format": "png", "dpi": 2400.001}), "`dpi` is 25 to 2400"),
+        (json!({"sheet": id, "format": "png", "dpi": 0}), "`dpi` is 25 to 2400"),
+        (json!({"sheet": id, "format": "png", "dpi": -300}), "`dpi` is 25 to 2400"),
+        (json!({"sheet": id, "format": "png", "dpi": 1e308}), "`dpi` is 25 to 2400"),
+        (json!({"sheet": id, "format": "png", "dpi": null}), "dpi"),
+        (json!({"sheet": id, "format": "png", "dpi": "300"}), "dpi"),
+        (json!({"sheet": id, "format": "png", "colour": "cmyk"}), "colour"),
+        (json!({"sheet": id, "format": "png", "colour": null}), "colour"),
+        (json!({"sheet": id, "colour": "grey"}), "`dpi` and `colour` are for png only"),
+        (json!({"sheet": id, "path": folder.path("sheet")}), "path must be a .svg file"),
+        (json!({"sheet": id, "path": " "}), "path must be a .svg file"),
+        (json!({"sheet": id, "path": long}), "path must be a .svg file"),
+        (json!({"sheet": id, "path": null}), "path"),
+        (json!({"sheet": "Sheet 9"}), "no sheet `Sheet 9`"),
+        (json!({"sheet": 5}), "sheet"),
+        (json!({}), "sheet"),
+        (json!({"sheet": id, "dpi": 300}), "`dpi` and `colour` are for png only"),
+        (json!({"sheet": id, "format": "png", "scale": 2}), "scale"),
+    ] {
+        let message = refused(&mut s, p.clone());
+        assert!(message.contains(why), "{p}: {message}");
+    }
+    assert_eq!(std::fs::read_dir(&folder.0).unwrap().count(), 0);
+    run(&mut s, "drawing.close", json!({}));
+    assert!(refused(&mut s, json!({"sheet": id})).contains("open a drawing first"));
+}
+
+/// A sheet with shaded views exports their pictures as `<image>`s, the same bytes twice, and draws
+/// them in a PNG. A picture past the grid's limit is refused and nothing is written.
+#[test]
+fn a_shaded_view_exports_its_picture() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let png = |s: &mut Session| run(s, CMD, json!({"sheet": ids::encode(sheet), "format": "png", "dpi": 25}))["data"].clone();
+    let lines_only = png(&mut s);
+    let plain = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}))["svg"].as_str().unwrap().to_owned();
+    assert!(!plain.contains("<image"), "lines only: {}", plain.len());
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": "shaded"}}));
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    let svg = reply["svg"].as_str().unwrap();
+    assert_eq!(svg.matches("<image").count(), 2, "the front view's, and the top view's, which follows it: {reply}");
+    assert_eq!(run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}))["svg"], reply["svg"], "the same bytes twice");
+    assert_ne!(png(&mut s), lines_only, "the PNG draws the pictures too");
+    let folder = Folder::new("drawing-export-picture");
+    let path = folder.path("sheet.svg");
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "100:1"}}));
+    let why = refused(&mut s, json!({"sheet": ids::encode(sheet), "path": path}));
+    assert!(why.contains("over the limit"), "{why}");
+    assert!(!std::path::Path::new(&path).exists(), "{why}");
+}
+
+/// A picture has no key of its own to go stale: each export draws it again, so a change of the part's
+/// colour alone changes the file, and going back gives the first one again.
+#[test]
+fn a_shaded_views_picture_follows_the_parts_colour() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": "shaded"}}));
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    let coloured = |s: &mut Session, color: &str| {
+        run(s, "drawing.close", json!({}));
+        run(s, "appearance.assign", json!({"bodies": ["Block"], "color": color}));
+        run(s, "drawing.open", drawing.clone());
+        run(s, CMD, json!({"sheet": ids::encode(sheet)}))["svg"].as_str().unwrap().to_owned()
+    };
+    let red = coloured(&mut s, "#ff0000");
+    assert_ne!(red, coloured(&mut s, "#0000ff"), "the colour shows in the picture");
+    assert_eq!(red, coloured(&mut s, "#ff0000"));
+}
+
+#[test]
+fn sheet_sketch_statuses_and_supported_strokes_reach_the_export() {
+    let (mut s, sheet, _) = front_and_top();
+    let sketch = sheet_sketch(
+        &mut s,
+        sheet,
+        &[
+            ("sketch.line", json!({"points": [[15,10],[55,10]], "infer": false})),
+            ("sketch.circle.center", json!({"center": [80,30], "radius": 5})),
+            ("sketch.spline.fit_point", json!({"points": [[100,10],[102,12],[104,10]], "connect": false})),
+            ("sketch.conic", json!({"start": [120,10], "end": [140,10], "apex": [130,30], "rho": 0.5, "connect": false})),
+        ],
+    );
+    let (doc, model, evaluations, undo, redo) = (s.doc.clone(), s.model.state(), s.evaluations, s.undo.len(), s.redo.len());
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    let expected = json!([{"sketch": ids::encode(sketch), "status": "drawn"}]);
+    assert_eq!(scene["sketches"], expected);
+    let scene_schema = output_schema_for::<crate::schema::drawing_scene::SheetSceneResult>();
+    assert!(conforms(scene_schema.as_value(), scene_schema.as_value(), &scene), "{scene}");
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    let export_schema = output_schema_for::<ExportResult>();
+    assert!(conforms(export_schema.as_value(), export_schema.as_value(), &reply), "{reply}");
+    assert_eq!(reply["sketches"], expected);
+    assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(scene_svg(&s, sheet).as_slice()));
+    assert!(reply["svg"].as_str().unwrap().contains("data-kind=\"sketch\""));
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc) && std::sync::Arc::ptr_eq(&model, &s.model.state()));
+    assert_eq!((s.evaluations, s.undo.len(), s.redo.len()), (evaluations, undo, redo));
+}
+
+#[test]
+fn failed_sheet_sketches_are_named_before_any_file_is_written() {
+    let (mut s, sheet, [_, top]) = front_and_top();
+    s.doc_mut().add_user_param("Inset", "20 mm", Some("mm"), None).unwrap();
+    let good = sheet_sketch(&mut s, sheet, &[("sketch.line", json!({"points": [[15,10],[55,10]], "infer": false}))]);
+    let made = run(&mut s, "drawing.sketch.create", json!({"owner": ids::encode(sheet)}));
+    let bad = made["sketch"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.line", json!({"points": [["Inset", "30"], ["Inset + 40", "30"]], "infer": false}));
+    run(&mut s, "sketch.finish", json!({}));
+    // The stored sketch is admissible, but its source can later become unresolved. Exercise
+    // the exporter guard with that source failure; unsupported centerlines are refused on entry.
+    s.doc_mut().params.iter_mut().find(|param| param.name == "Inset").unwrap().expr = "Missing + 1 mm".into();
+    s.drawing("test").unwrap().validate().unwrap();
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    assert!(scene["views"].as_array().unwrap().iter().all(|view| view["status"] == "drawn"), "{scene}");
+    let statuses = scene["sketches"].as_array().unwrap();
+    assert_eq!(statuses.len(), 2);
+    assert!(statuses.iter().any(|s| s["sketch"] == ids::encode(good) && s["status"] == "drawn"));
+    let failed = statuses.iter().find(|s| s["sketch"] == bad).unwrap();
+    assert_eq!(failed["status"], "failed");
+    assert!(failed["reason"].as_str().unwrap().contains("Inset"));
+    let schema = output_schema_for::<crate::schema::drawing_scene::SheetSceneResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &scene), "{scene}");
+    let mut extra = scene.clone();
+    extra["sketches"][0]["unexpected"] = json!(true);
+    assert!(!conforms(schema.as_value(), schema.as_value(), &extra), "{extra}");
+    let mut wrong_status = scene.clone();
+    wrong_status["sketches"][0]["status"] = json!("placeholder");
+    assert!(!conforms(schema.as_value(), schema.as_value(), &wrong_status), "{wrong_status}");
+    let folder = Folder::new("drawing-export-sketch-failed");
+    let missing = folder.path("new.svg");
+    let existing = folder.path("existing.svg");
+    std::fs::write(&existing, b"existing drawing bytes").unwrap();
+    let (doc, evaluations, undo, redo) = (s.doc.clone(), s.evaluations, s.undo.len(), s.redo.len());
+    for path in [&missing, &existing] {
+        let why = refused(&mut s, json!({"sheet": ids::encode(sheet), "path": path}));
+        assert!(why.contains(&format!("sketches on the sheet failed: {bad} (")) && why.contains("Inset"), "{why}");
+        assert!(!why.contains(&ids::encode(good)), "{why}");
+    }
+    assert!(!std::path::Path::new(&missing).exists());
+    assert_eq!(std::fs::read(&existing).unwrap(), b"existing drawing bytes");
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+    assert_eq!((s.evaluations, s.undo.len(), s.redo.len()), (evaluations, undo, redo));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}}));
+    let why = refused(&mut s, json!({"sheet": ids::encode(sheet), "path": missing}));
+    assert!(why.contains(&format!("views on the sheet failed: {} (", ids::encode(top))), "{why}");
+    assert!(why.contains(&format!("sketches on the sheet failed: {bad} (")), "{why}");
+    assert!(!std::path::Path::new(&missing).exists());
+}
+
+#[test]
+fn exact_sheet_freeforms_match_the_scene_schema_and_export_via_shared_grid() {
+    let (mut s, sheet, _) = front_and_top();
+    let sketch = sheet_sketch(
+        &mut s,
+        sheet,
+        &[
+            ("sketch.line", json!({"points": [[15,10],[55,10]], "infer": false})),
+            ("sketch.circle.center", json!({"center": [80,30], "radius": 5})),
+            ("sketch.ellipse", json!({"center": [110,30], "major": [120,30], "minor_radius": 5})),
+            ("sketch.spline.fit_point", json!({"points": [[140,10],[142,12],[144,10]], "connect": false})),
+            ("sketch.conic", json!({"start": [160,10], "end": [180,10], "apex": [170,30], "rho": 0.4, "connect": false})),
+            ("sketch.spline.control_point_5", json!({"points": [[200,10],[210,30],[220,35],[230,35],[240,30],[250,10]], "connect": false})),
+        ],
+    );
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    let schema = output_schema_for::<crate::schema::drawing_scene::SheetSceneResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &scene), "{scene}");
+    assert_eq!(scene["sketches"], json!([{"sketch": ids::encode(sketch), "status": "drawn"}]));
+    let group = scene["scene"]["groups"].as_array().unwrap().iter().find(|g| g["object"] == sketch).unwrap();
+    assert_eq!(group["items"].as_array().unwrap().len(), 6, "every authored printable curve stays in the scene");
+    let types: std::collections::BTreeSet<&str> = group["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|item| item["path"].as_array().unwrap())
+        .map(|segment| segment["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(types, ["arc", "bezier", "conic", "cubic", "line"].into_iter().collect::<std::collections::BTreeSet<_>>());
+    // A3b now admits these exact primitives through the one shared export grid.
+    // The scene still owns every original curve; the command must write that scene.
+    let folder = Folder::new("drawing-export-exact-supported");
+    let missing = folder.path("new.svg");
+    let existing = folder.path("existing.svg");
+    std::fs::write(&existing, b"existing exact drawing").unwrap();
+    let (doc, model, evaluations, undo, redo) = (s.doc.clone(), s.model.state(), s.evaluations, s.undo.len(), s.redo.len());
+    let expected = scene_svg(&s, sheet);
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(reply["svg"].as_str().map(str::as_bytes), Some(expected.as_slice()));
+    assert_eq!(reply["sketches"], scene["sketches"]);
+    let svg_text = std::str::from_utf8(&expected).unwrap();
+    let sketch_svg = svg_text.split(&format!("<g data-object=\"{sketch}\" data-kind=\"sketch\">")).nth(1).unwrap().split("</g>").next().unwrap();
+    assert_eq!(sketch_svg.matches("<path ").count(), 6, "all six original curves reach the file");
+    assert!(sketch_svg.contains('C'), "freeforms are written as shared-grid cubic paths");
+    for path in [&missing, &existing] {
+        let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet), "path": path}));
+        assert_eq!(reply["bytes"].as_u64(), Some(expected.len() as u64));
+        assert_eq!(reply["sketches"], scene["sketches"]);
+        assert_eq!(std::fs::read(path).unwrap(), expected, "new and existing destinations receive the complete same scene");
+    }
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc) && std::sync::Arc::ptr_eq(&model, &s.model.state()));
+    assert_eq!((s.evaluations, s.undo.len(), s.redo.len()), (evaluations, undo, redo));
+}
+
+/// The drawing milestone's plate (acceptance case 84, #4894) by commands alone: modelled from its
+/// parameters, a top view at 1:2 and the views projected below and right of it, its length, width
+/// and first bore dimensioned. Saved with the design and opened again, the sheet exports the same
+/// SVG, byte for byte, and each dimension reads the same.
+#[test]
+fn the_milestone_plate_exports_the_same_after_it_is_saved_and_opened() {
+    let mut s = Session::default();
+    let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/drawing_m2.json")).unwrap();
+    let made = s.run_script(&script).unwrap();
+    let size = |reply: &Value| {
+        let b = &reply["boundary_mm"];
+        [0, 1].map(|i| b["max"][i].as_f64().unwrap() - b["min"][i].as_f64().unwrap())
+    };
+    let top = made.last().unwrap();
+    let below = run(&mut s, "drawing.view.projected", json!({"parent": top["view"], "side": "below"}));
+    let right = run(&mut s, "drawing.view.projected", json!({"parent": top["view"], "side": "right"}));
+    // 100 x 80 x 20 at half size: the top shows length by width, below it length by thickness,
+    // right of it thickness by width.
+    for (view, expected) in [(top, [50.0, 40.0]), (&below, [50.0, 10.0]), (&right, [10.0, 40.0])] {
+        let [w, h] = size(view);
+        assert!((w - expected[0]).abs() < 1e-6 && (h - expected[1]).abs() < 1e-6, "{view}");
+    }
+    // The first bore's rim, by a point on it.
+    let mut dimensions = Vec::new();
+    for (kind, value) in [
+        (json!({"length": {"edge": [50, 0, 20]}}), 100.0),
+        (json!({"length": {"edge": [0, 40, 20]}}), 80.0),
+        (json!({"radial": {"edge": [25, 20, 20]}}), 10.0),
+    ] {
+        let added = run(&mut s, "drawing.dimension.add", json!({"view": top["view"], "kind": kind}));
+        assert!((added["value"].as_f64().unwrap() - value).abs() < 1e-9, "{added}");
+        dimensions.push((added["dimension"].clone(), added["value"].clone(), added["text"].clone()));
+    }
+    let svg = run(&mut s, CMD, json!({"sheet": "Sheet 1"}))["svg"].clone();
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    let folder = Folder::new("drawing-m2-plate");
+    run(&mut s, "file.save", json!({"path": folder.path("plate.solidcraft")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("plate.solidcraft")}));
+    run(&mut opened, "drawing.open", json!({"drawing": drawing}));
+    assert_eq!(run(&mut opened, CMD, json!({"sheet": "Sheet 1"}))["svg"], svg);
+    for (dimension, value, text) in dimensions {
+        let read = run(&mut opened, "drawing.dimension.inspect", json!({"dimension": dimension}));
+        assert_eq!((&read["value"], &read["text"], &read["status"]), (&value, &text, &json!("ok")), "{read}");
+    }
+}

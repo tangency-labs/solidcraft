@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_view_move": "Move View"
+  },
+  "ar": {
+    "cmd.drawing_view_move": "نقل المسقط"
+  },
+  "de": {
+    "cmd.drawing_view_move": "Ansicht verschieben"
+  },
+  "he": {
+    "cmd.drawing_view_move": "העברת מבט"
+  },
+  "ja": {
+    "cmd.drawing_view_move": "ビューを移動"
+  },
+  "ko": {
+    "cmd.drawing_view_move": "뷰 이동"
+  },
+  "vi": {
+    "cmd.drawing_view_move": "Chuyển hình chiếu"
+  },
+  "zh": {
+    "cmd.drawing_view_move": "移动视图"
+  }
+}

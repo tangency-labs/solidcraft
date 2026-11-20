@@ -128,6 +128,11 @@
 //!   deletions on before its error. Upstream's `SER` returned before setting the flag, so
 //!   `SmMerge::MarkCommon` kept the squeezed vertex as a loop end and `FixGaps` read it once
 //!   deleted (#1036's coincident skins).
+//! - **Not upstream (#17118).** `SetRelationships` relates a vertex once per proto vertex. When
+//!   a second definition of the proto vertex gives the vertex another image in the other
+//!   B-rep, within the tolerance and with no edge between the two images, the second image
+//!   is combined into the first (`combine_images_of_one_vertex`). Upstream's `Relate` failed
+//!   there and its status was dropped, leaving the second image without a mate.
 //! - **Recursion.** None.
 
 use crate::curve::curve::p2::{Curve, CurveKind};
@@ -1884,14 +1889,19 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// ([`TopologyIntersector::mate_stands_beside`]), so a refusal `Relate` passes on is a
     /// conflict between edges at different places only.
     ///
+    /// Not upstream (#17118): two definitions of one proto vertex that give one vertex
+    /// of a B-rep two different vertices of the other make those two one vertex
+    /// ([`TopologyIntersector::combine_images_of_one_vertex`]) instead of relating the
+    /// shared vertex twice.
+    ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] without a manager or for deleted definitions;
-    /// any error of `Relate`.
+    /// any error of `Relate`; those of the vertex combination.
     pub fn set_relationships(
         &mut self,
-        k: &Kernel,
-        brep: &mut impl IntersectorBrep<O>,
+        k: &mut Kernel,
+        brep: &mut impl IntersectorBrepP2<O>,
     ) -> Result<()> {
         let mgr = self
             .proto_topo_mgr
@@ -1899,21 +1909,40 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             .ok_or(invalid(OP_SET_RELS, "no proto topology manager"))?;
 
         // (the manager is not changed by Relate: collect the pairs first)
-        let mut pairs: Vec<(Option<O>, Option<O>)> = Vec::new();
+        let mut vertex_pairs: Vec<(Option<ProtoVertexId>, Option<O>, Option<O>)> = Vec::new();
         for vd in mgr.all_vertex_definitions()? {
             let d = mgr
                 .vertex_def(vd)
                 .ok_or(invalid(OP_SET_RELS, "vertex definition is deleted"))?;
-            pairs.push((d.final_vertex(1), d.final_vertex(2)));
+            vertex_pairs.push((d.proto_vertex(), d.final_vertex(1), d.final_vertex(2)));
         }
+        let mut edge_pairs: Vec<(Option<O>, Option<O>)> = Vec::new();
         for ed in mgr.all_edge_definitions()? {
             let d = mgr
                 .edge_def(ed)
                 .ok_or(invalid(OP_SET_RELS, "edge definition is deleted"))?;
-            pairs.push((d.final_edge(1), d.final_edge(2)));
+            edge_pairs.push((d.final_edge(1), d.final_edge(2)));
         }
 
-        for (t1, t2) in pairs {
+        // the vertex pairs related here, with their proto vertex
+        let mut related: Vec<(O, O, ProtoVertexId)> = Vec::new();
+        for (pv, t1, t2) in vertex_pairs {
+            let (Some(v1), Some(v2)) = (t1, t2) else {
+                // WARN: Brep Topology not set.
+                continue;
+            };
+            if let Some(pv) = pv {
+                if self.combine_images_of_one_vertex(k, brep, pv, v1, v2, &related)? {
+                    continue;
+                }
+            }
+            let r = self.relate(k, brep, t1, t2);
+            if let (Ok(()), Some(pv)) = (&r, pv) {
+                related.push((v1, v2, pv));
+            }
+            r?;
+        }
+        for (t1, t2) in edge_pairs {
             let (Some(e1), Some(e2)) = (t1, t2) else {
                 // WARN: Brep Topology not set.
                 continue;
@@ -2019,6 +2048,102 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
         }
         Ok(false)
+    }
+
+    /// Not upstream (#17118): whether the vertex pair `v1`, `v2` of a definition at the
+    /// proto vertex `pv` was made one with a pair already `related` at `pv`, and if so
+    /// makes it one. A proto vertex stands for one point. When one of its definitions
+    /// related `v1` to a vertex `w2` and another now gives `v1` the vertex `v2` of the
+    /// same B-rep as `w2`, both are images of the one vertex `v1`: `v2` is combined into
+    /// `w2` (`CombineCoincidentVertices`), and the same the other way round. Relating
+    /// `v1` twice would break the one-to-one mate maps, and upstream's dropped status
+    /// left `v2` without a mate, so the faces at it were classified across the gap.
+    ///
+    /// This happens where a face of one operand runs within the tolerance of two faces of
+    /// the other that are not adjacent there, such as the two faces of a wedge near its
+    /// knife edge, so that the operand is thinner than the tolerance there: a vertex
+    /// lying on that stretch is on both faces, and each face pair through it imprints its
+    /// own vertex. The pair is combined only when each of the two relations would hold on
+    /// its own (each vertex within the larger tolerance of it and `v1`, the distance a
+    /// relation accepts once `Relate` gives both the larger tolerance), and when the two
+    /// vertices share no edge, so the combination deletes no edge and no relation.
+    /// Otherwise nothing changes and `Relate` refuses the pair as before.
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology reads, of `CombineCoincidentVertices` and of `Relate`;
+    /// [`SolidError::InvalidInput`] without both B-reps.
+    fn combine_images_of_one_vertex(
+        &mut self,
+        k: &mut Kernel,
+        brep: &mut impl IntersectorBrepP2<O>,
+        pv: ProtoVertexId,
+        v1: O,
+        v2: O,
+        related: &[(O, O, ProtoVertexId)],
+    ) -> Result<bool> {
+        let earlier_mate_of_v1 = related
+            .iter()
+            .find(|&&(a, b, p)| p == pv && a == v1 && b != v2)
+            .map(|&(_, b, _)| b);
+        let earlier_mate_of_v2 = related
+            .iter()
+            .find(|&&(a, b, p)| p == pv && b == v2 && a != v1)
+            .map(|&(a, _, _)| a);
+        // (survivor, vertex to delete, their B-rep, the vertex both are images of)
+        let (survivor, deleted, body, shared) = match (earlier_mate_of_v2, earlier_mate_of_v1) {
+            (None, Some(w2)) if self.brep_mate(Some(v2)).is_none() => {
+                let other = self.other.ok_or(invalid(OP_SET_RELS, "no other B-rep"))?;
+                (w2, v2, other, v1)
+            }
+            (Some(w1), None) if self.other_mate(Some(v1)).is_none() => {
+                let this = self.brep.ok_or(invalid(OP_SET_RELS, "no B-rep"))?;
+                (w1, v1, this, v2)
+            }
+            _ => return Ok(false),
+        };
+
+        // each relation would hold on its own
+        let at = brep.vertex_point(shared)?;
+        let shared_tol = tol_of(brep, shared)?;
+        for v in [survivor, deleted] {
+            let apart = at.distance(brep.vertex_point(v)?);
+            let tol = max2(shared_tol, tol_of(brep, v)?);
+            // (a NaN distance is no evidence of one point)
+            if apart.partial_cmp(&tol) == Some(core::cmp::Ordering::Greater) || apart.is_nan() {
+                return Ok(false);
+            }
+        }
+
+        // a common edge would be squeezed away, with any relation it has
+        let survivor_edges = brep.vertex_edges(survivor)?;
+        if brep
+            .vertex_edges(deleted)?
+            .iter()
+            .any(|e| survivor_edges.contains(e))
+        {
+            return Ok(false);
+        }
+
+        if brep
+            .brep_combine_coincident_vertices(k, body, survivor, deleted)?
+            .is_some()
+        {
+            // (only a common edge is ever deleted, and there is none)
+            return Err(SolidError::boolean_stage_failed(
+                OP_SET_RELS,
+                BooleanStage::Relate,
+                "combining two images of one vertex deleted an edge",
+            ));
+        }
+
+        // the survivor's relation again: both vertices get the larger tolerance
+        if body == self.other.ok_or(invalid(OP_SET_RELS, "no other B-rep"))? {
+            self.relate(k, brep, Some(shared), Some(survivor))?;
+        } else {
+            self.relate(k, brep, Some(survivor), Some(shared))?;
+        }
+        Ok(true)
     }
 
     // ---- the classification-pair fix-ups ------------------------------------------------

@@ -36,4 +36,4 @@ L0 `geom` -> L1 `sketch`, `kernel`, `render` -> L2 `doc` -> L3 `io` -> L4 `engin
 - A new module's `mod` line goes into the existing sorted group, not a new group at the end (`cargo fmt` keeps each group sorted).
 
 ## Roadmap
-`ROADMAP.md` tracks milestones; update it when a milestone task lands.
+`docs/roadmap-detail.md` tracks milestones; update it as their tasks land.

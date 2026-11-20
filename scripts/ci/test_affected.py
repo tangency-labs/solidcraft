@@ -136,8 +136,8 @@ class RealWorkspace(unittest.TestCase):
     def test_unmapped_test_data_selects_full(self):
         self.assertEqual(affected.select(self.meta, ["tests/tools/x.json"]), (True, []))
 
-    def test_vendored_egui_wgpu_selects_the_ui_and_apps_not_the_kernel(self):
-        full, pk = affected.select(self.meta, ["vendor/egui-wgpu/src/winit.rs"])
+    def test_vendored_egui_selects_the_ui_and_apps_not_the_kernel(self):
+        full, pk = affected.select(self.meta, ["vendor/egui/crates/egui-wgpu/src/winit.rs"])
         self.assertFalse(full)
         self.assertIn("solidcraft-ui-egui", pk)
         self.assertIn("solidcraft", pk)

@@ -294,6 +294,9 @@ pub struct ExportResult {
     /// With `lay_on_print_faces` only: the bodies that were written laid on their print face.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub print_faces: Vec<String>,
+    /// Bodies that could not be meshed and were skipped in the export (#18780).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<String>,
     /// STL, OBJ and 3MF: a warning for each face the mesh path left short of its smallest angle
     /// or chord tolerance (and each edge whose sampling stopped off it), led by its body's name.
     /// With `lay_on_print_faces`, also one for each body that has a print face but was written

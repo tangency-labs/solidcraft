@@ -82,7 +82,7 @@ fn to_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             cur = seg.end();
         }
     }
-    let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| format!("{} sketch", canvas.name));
+    let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| s.doc.free_sketch_name(&format!("{} sketch", canvas.name)));
     let r = super::sketch::create_sketch_with_plane(s, &json!({ "name": name }), canvas.plane.clone(), None)?;
     // `sketch.create` always reports the id of the sketch it made.
     let id = r.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "could not start a sketch on the canvas"))?;

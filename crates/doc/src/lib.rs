@@ -10,6 +10,7 @@ pub mod appearance_pack;
 mod assembly;
 mod body_transfer;
 mod body_transfer_sheet;
+pub mod bom;
 mod browser_tree;
 pub mod newer_file;
 pub mod pbr_appearance;
@@ -27,6 +28,7 @@ pub mod display_quality;
 pub mod display_units;
 mod document;
 pub mod drawing;
+pub mod drawing_view;
 pub mod end_cap;
 mod eval;
 pub mod expr;
@@ -95,18 +97,19 @@ pub mod tolerance;
 
 pub use assembly::{
     BomType, ExpressedAt, ExpressedMove, ExpressedShift, IDENTITY, MAX_EXPRESSED_MOVES, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence,
-    WorldNames, apply_point, apply_vector, capture_sketch_plane_placement, is_identity, is_placement, map_point_expr, map_vector_expr, mat_inverse,
-    mat_mul, reframe_plane_placements, rigid,
+    WorldNames, apply_point, apply_vector, capture_sketch_plane_placement, is_identity, is_placement, map_plane, map_point_expr, map_vector_expr,
+    mat_inverse, mat_mul, mat_volume_scale, reframe_plane_placements, rigid,
 };
 pub use document::*;
 pub use eval::cell_grid::{MAX_CUT_CELLS, SLOW_CUT_CELLS};
 pub use eval::{
-    EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch, ThreadInfo,
-    blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state, hole_direction_at,
-    hole_on_surface, hole_start, import_body_names, join_pieces_added, map_wire, metric_thread_sizes, object_height, parse_metric_thread,
-    pattern_matrices, revolve_extent, revolve_extent_for_handle, revolve_extent_with_convention, select_profiles, sketch_hole_direction,
-    sketch_line_plane, state_in_frame, state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance,
-    with_placed_copies, world_state, world_state_reusing,
+    EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PendingChecks, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch,
+    ThreadInfo, blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state,
+    from_slope_height, hole_direction_at, hole_on_surface, hole_start, import_body_names, join_pieces_added, keep_one_sided_direction, map_wire,
+    metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices, revolve_extent, revolve_extent_for_handle,
+    revolve_extent_with_convention, same_extrude_from_face, select_profiles, sketch_hole_direction, sketch_line_plane, state_in_frame,
+    state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance, with_placed_copies, world_state,
+    world_state_reusing,
 };
 pub use eval::{EvalCache, KeptResults};
 pub use expr::Expr;

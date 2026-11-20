@@ -8,6 +8,8 @@
 //! certified: the leans are for a preference between the two faces, not a decision at a
 //! tolerance.
 //!
+//! [`wedge_at_middle`] is the angle between those two normals, evaluated the same way.
+//!
 //! [`widest_wedge_bound`] is enclosed, not evaluated: an upper bound on the wedge between an
 //! edge's faces anywhere along it, by interval enclosures of the faces' normals along their
 //! trim curves, branch and bound over the edge's parameter. No recursion: the pieces are a
@@ -79,6 +81,25 @@ pub fn faces_along(k: &Kernel, b: &mut Brep, e: EdgeId, dir: Vec3) -> Result<[(F
     let (f0, n0) = outward(k, b, u0, t)?;
     let (f1, n1) = outward(k, b, u1, t)?;
     Ok([(f0, n0.dot(dir)), (f1, n1.dot(dir))])
+}
+
+/// The wedge between the two faces of `e` at the middle of its interval: the angle, in radians
+/// from 0 to pi, between their outward unit normals there (the normals [`faces_along`] leans,
+/// at the binormal points of the edge's blend edge use and its radial mate). Evaluated, not
+/// certified, as [`faces_along`]: for telling whether edges share a wedge, not for a decision
+/// at a tolerance.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for an edge without a blend edge use or its mate (not between
+/// two faces), or a face whose normal vanishes there; the evaluators' errors.
+pub fn wedge_at_middle(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> {
+    let u0 =
+        edge::blend_edgeuse(k, b, e)?.ok_or_else(|| invalid("the edge has no blend edge use"))?;
+    let u1 = eu1::radial(b, u0)?.ok_or_else(|| invalid("the edge lies on one face only"))?;
+    let t = b.edge(e)?.interval.evaluate(0.5);
+    let (_, n0) = outward(k, b, u0, t)?;
+    let (_, n1) = outward(k, b, u1, t)?;
+    Ok(n0.dot(n1).clamp(-1.0, 1.0).acos())
 }
 
 /// An upper bound on the widest wedge along an edge ([`widest_wedge_bound`]).
@@ -353,6 +374,17 @@ mod tests {
         );
         assert_ne!(leans[0].0, leans[1].0);
         assert!(faces_along(&k, &mut b, e, Vec3::new(f64::NAN, 0.0, 0.0)).is_err());
+    }
+
+    /// The faces of every edge of a box meet square: the wedge at its middle is a right angle.
+    #[test]
+    fn the_wedge_at_a_box_edge_s_middle_is_a_right_angle() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Vec3::new(0.0, 0.0, 0.0), 1.0, 2.0, 3.0).unwrap();
+        for e in b.edge_list().to_vec() {
+            let w = wedge_at_middle(&k, &mut b, e).unwrap();
+            assert!((w - std::f64::consts::FRAC_PI_2).abs() < 1e-12, "{w}");
+        }
     }
 
     /// A box edge's faces meet square all along it: the bound is a right angle, from above,

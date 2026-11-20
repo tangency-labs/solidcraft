@@ -39,6 +39,18 @@ fn authored_library_search_is_bounded_and_concepts_are_not_runtime_presets() {
     assert_eq!(s.execute("render.library.list", &json!({"kind":"surfaces","query":"SURF-001"})).unwrap()["total"], 1);
 }
 
+/// A target search may be a whole body name a rename gives: a hundred CJK characters are 300
+/// bytes, under `MAX_BODY_NAME_BYTES`; a longer query is refused.
+#[test]
+fn a_target_search_takes_a_whole_long_body_name() {
+    let mut s = Session::default();
+    let long = "中".repeat(100);
+    s.execute("solid.box", &json!({"length":20,"width":15,"height":10,"body_name":long})).unwrap();
+    let targets = s.execute("render.library.targets", &json!({"query":long})).unwrap();
+    assert_eq!(targets["items"][0]["name"], json!(long));
+    assert!(s.execute("render.library.targets", &json!({"query":"x".repeat(513)})).is_err());
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn custom_surface_fixture() -> (Session, std::path::PathBuf, Vec<u8>, Value) {
     let mut s = Session::default();

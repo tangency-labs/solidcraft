@@ -348,7 +348,6 @@ fn a_setback_asked_that_does_not_fit_or_stops_short_is_refused() {
     let run = |setback: f64| -> (Result<(), SolidError>, VertexId) {
         let mut k = kernel(|f| {
             f.fillet_exact_round_classes = false;
-            f.face_swap_uv_transposes_trims = false;
         });
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
         let edges: Vec<EdgeId> = at.iter().map(|&p| pick(&k, &b, p)).collect();
@@ -490,7 +489,6 @@ fn an_n_by_n_setback_that_overlaps_names_the_open_bound_less_the_margin() {
     let run = |setback: f64| -> (Result<(), SolidError>, VertexId, f64) {
         let mut k = kernel(|f| {
             f.fillet_exact_round_classes = false;
-            f.face_swap_uv_transposes_trims = false;
         });
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
         let edges: Vec<EdgeId> = at.iter().map(|&p| pick(&k, &b, p)).collect();

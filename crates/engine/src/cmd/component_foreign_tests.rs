@@ -185,6 +185,23 @@ fn an_end_cap_on_a_member_outside_its_component_is_refused_saying_what() {
     assert_eq!(s.doc.to_json(), saved);
 }
 
+#[test]
+fn construction_plane_with_an_external_face_is_refused_when_pasted_into_another_design() {
+    let mut source = design("Source");
+    run(&mut source, "solid.box", json!({"length":2,"width":2,"height":2,"body_name":"Cube"}));
+    let (_, at) = created(&mut source, "Planes");
+    run(&mut source, "construct.plane.offset", json!({"base":{"face":[1,1,2]},"offset":2,"name":"Above"}));
+
+    let mut s = design("Destination");
+    s.foreign_copy = copied(&source, vec![at]);
+    let before = s.doc.to_json();
+    let undo = s.undo.len();
+    let error = s.execute("component.paste_from_design", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("uses exact face attachment to Cube"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+    assert_eq!(s.undo.len(), undo);
+}
+
 /// A component that bodies were moved into (a body transfer, as Create Components from Bodies
 /// makes) pastes into another design, which has none of the components the transfer names.
 #[test]

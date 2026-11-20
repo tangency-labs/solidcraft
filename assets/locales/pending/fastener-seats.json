@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.parts_seats": "Resolve Fastener Seats"
+  },
+  "ar": {
+    "cmd.parts_seats": "تحديد مواضع تثبيت المثبتات"
+  },
+  "de": {
+    "cmd.parts_seats": "Sitze für Verbindungselemente bestimmen"
+  },
+  "he": {
+    "cmd.parts_seats": "איתור מושבים למחברים"
+  },
+  "ja": {
+    "cmd.parts_seats": "締結部品の座面を特定"
+  },
+  "ko": {
+    "cmd.parts_seats": "체결 부품 안착 위치 찾기"
+  },
+  "vi": {
+    "cmd.parts_seats": "Xác định vị trí lắp chi tiết ghép"
+  },
+  "zh": {
+    "cmd.parts_seats": "确定紧固件座面"
+  }
+}

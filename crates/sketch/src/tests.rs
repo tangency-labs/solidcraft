@@ -1287,6 +1287,67 @@ fn a_source_without_a_body_name_names_its_kind_alone() {
     assert_eq!(LinkSource::Face { body: "Body1".into(), at }.describe(), "face of Body1");
 }
 
+/// A view edge is saved with the drawing edge reference's keys, its path only when it has one, and
+/// reads back the same.
+#[test]
+fn a_view_edge_saves_as_the_drawings_edge_reference() {
+    let edge = |path: Vec<u64>| LinkSource::ViewEdge { body: "Body1".into(), origin_feature: 3, name: "F3:e#2".into(), path };
+    let own = serde_json::to_value(edge(Vec::new())).unwrap();
+    assert_eq!(own, serde_json::json!({ "type": "view_edge", "body": "Body1", "origin_feature": 3, "name": "F3:e#2" }));
+    let placed = serde_json::to_value(edge(vec![7, 9])).unwrap();
+    assert_eq!(placed["path"], serde_json::json!([7, 9]));
+    for source in [edge(Vec::new()), edge(vec![7, 9])] {
+        let back: LinkSource = serde_json::from_value(serde_json::to_value(&source).unwrap()).unwrap();
+        assert_eq!(back, source);
+    }
+    assert_eq!(edge(Vec::new()).describe(), "edge of Body1");
+    assert_eq!(edge(Vec::new()).bodies(), ["Body1"]);
+    let unnamed = LinkSource::ViewEdge { body: String::new(), origin_feature: 3, name: "F3:e#2".into(), path: Vec::new() };
+    assert_eq!(unnamed.describe(), "edge");
+}
+
+/// A boundary segment becomes the link geometry of the same curve: an arc runs counter-clockwise
+/// whichever way it was swept, a conic keeps its shape, and a Bézier past the largest degree is
+/// none.
+#[test]
+fn a_boundary_segment_becomes_the_same_link_curve() {
+    use std::f64::consts::TAU;
+    let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-12;
+    let c = v(1.0, 1.0);
+    assert_eq!(LinkGeom::from_seg(&Seg2::Line { a: v(0.0, 0.0), b: v(4.0, 0.0) }), Some(LinkGeom::Line(v(0.0, 0.0), v(4.0, 0.0))));
+    for sweep in [TAU, -TAU] {
+        assert_eq!(LinkGeom::from_seg(&Seg2::Arc { center: c, radius: 2.0, start: 0.3, sweep }), Some(LinkGeom::Circle(c, 2.0)));
+    }
+    // The quarter from (3, 1) to (1, 3), swept either way.
+    for (start, sweep) in [(0.0, FRAC_PI_2), (FRAC_PI_2, -FRAC_PI_2)] {
+        match LinkGeom::from_seg(&Seg2::Arc { center: c, radius: 2.0, start, sweep }) {
+            Some(LinkGeom::Arc { c: centre, a, b }) => {
+                assert_eq!(centre, c);
+                assert!(near(a, v(3.0, 1.0)) && near(b, v(1.0, 3.0)), "{start} {sweep}: {a:?} {b:?}");
+            }
+            other => panic!("{start} {sweep}: {other:?}"),
+        }
+    }
+    let (a, apex, b) = (v(0.0, 0.0), v(1.0, 1.0), v(2.0, 0.0));
+    for (w, rho) in [(1.0, 0.5), (3.0, 0.75)] {
+        assert_eq!(LinkGeom::from_seg(&Seg2::Conic { a, apex, b, w }), Some(LinkGeom::Conic { a, apex, b, rho }));
+    }
+    let pts = [v(0.0, 0.0), v(1.0, 2.0), v(3.0, 2.0), v(4.0, 0.0)];
+    assert_eq!(
+        LinkGeom::from_seg(&Seg2::Cubic { p0: pts[0], p1: pts[1], p2: pts[2], p3: pts[3] }),
+        Some(LinkGeom::Spline { pts: pts.to_vec(), control: true, degree: 3, periodic: false, nurbs: None })
+    );
+    let mut p = [Vec2::ZERO; solidcore_record::MAX_BEZIER_CTRL];
+    for (i, q) in p.iter_mut().enumerate() {
+        *q = v(i as f64, (i % 2) as f64);
+    }
+    assert_eq!(
+        LinkGeom::from_seg(&Seg2::Bezier { n: 4, p }),
+        Some(LinkGeom::Spline { pts: p[..=4].to_vec(), control: true, degree: 4, periodic: false, nurbs: None })
+    );
+    assert_eq!(LinkGeom::from_seg(&Seg2::Bezier { n: solidcore_record::MAX_BEZIER_CTRL as u8, p }), None);
+}
+
 /// Many independent constrained rectangles solve quickly (per-component work).
 #[test]
 fn large_sketch_solves_fast() {
@@ -2385,6 +2446,58 @@ fn spline_handle_preview_matches_the_stored_handles() {
     assert!(sk.spline_handle_preview(control).is_none(), "a control point spline has no tangent handles");
 }
 
+/// #18208: a circle, two lines from its centre out through it, and a control point spline that
+/// starts and ends on the circle where the lines cross it, leaving it almost along it. The
+/// spline's first end lies on the circle 3e-5 from where a line crosses it: both meet the circle,
+/// at points of their own, and the circle's inside is the two sectors between the lines, not one
+/// undivided disc.
+#[test]
+fn a_spline_ending_where_two_lines_cross_a_circle_does_not_stop_the_cut() {
+    let mut sk = Sketch::new();
+    let r = 2.08;
+    sk.add_circle(v(0.0, 0.0), r, None, Some("c1")).unwrap();
+    let cv = [
+        (-1.727760430510585, 1.1581208460545203),
+        (-1.7704551754195035, 1.094427793845791),
+        (-1.8602686108707067, 0.9619954455824853),
+        (-2.0082668311785956, 0.7482309290893508),
+        (-2.219918047810436, 0.42227985400531376),
+        (-2.4408969965995033, -0.09621730104241367),
+        (-2.5360940677424186, -0.7532678214689044),
+        (-2.4340454808767036, -1.5175745701115857),
+        (-2.0845665468250067, -2.3055516872134776),
+        (-1.4616201843226249, -3.0142984576608765),
+        (-0.5691438973918427, -3.545842586159598),
+        (0.5535051037034185, -3.8351698654996227),
+        (1.8252405439979082, -3.876806028057485),
+        (3.1374196092359834, -3.7063066966936202),
+        (4.367267459489966, -3.3826441317751934),
+        (5.391205060448057, -2.970995008891002),
+        (6.098209331164398, -2.525713439011632),
+        (6.403442080233015, -2.0733146725545795),
+        (6.262610660565516, -1.5949276792607097),
+        (5.661213970461664, -1.0413092615229984),
+        (4.604324454961728, -0.3477302113751667),
+        (3.406490096727586, 0.37153166754270006),
+        (2.3171321631198345, 1.02664386274606),
+        (1.5071019575283753, 1.5177797574350105),
+        (1.0811389357099106, 1.7769464262380543),
+    ];
+    let pts: Vec<usize> = cv.iter().map(|&(x, y)| sk.add_point(v(x, y), None).unwrap()).collect();
+    sk.add_curve(CurveKind::Spline { pts, control: true, degree: 5, periodic: false, nurbs: None, handles: Vec::new() }, Some("s1")).unwrap();
+    sk.add_line(v(0.0, 0.0), v(-2.3016510816076967, 1.5428434089881773), None, None, Some("l1")).unwrap();
+    sk.add_line(v(0.0, 0.0), v(1.440261156344587, 2.367194814046595), None, None, Some("l2")).unwrap();
+    let areas: Vec<f64> = find_profiles(&sk).iter().map(|p| p.area).collect();
+    // The two sectors and the band between the circle and the spline.
+    assert_eq!(areas.len(), 3, "{areas:?}");
+    // The sectors' areas in mm² as the issue reports them for the circle and the two lines alone
+    // (87.5° and the rest of the disc of radius 2.08, given to four decimals). On main the disc
+    // stays whole, one profile of 13.5918.
+    for want in [3.3029, 10.2889] {
+        assert!(areas.iter().any(|a| (a - want).abs() < 1e-4), "no sector of {want}: {areas:?}");
+    }
+}
+
 /// A band of rounded caps over the top of a ring (two arcs of radius 15 tangent to the ring's
 /// sides, joined by a line). On the left the cap's arc and the ring's corner arc leave the ring's
 /// side along one tangent, apart only by the solver's round-off; on the right the cap's arc ends
@@ -2550,4 +2663,31 @@ fn circle_touching_two_caps_corner_closes_the_regions_there() {
             assert!(p.region.outer.is_closed(1e-6), "e {e} tilt {tilt}: {:?}", p.outer_curves);
         }
     }
+}
+
+#[test]
+fn mirror_axis_does_not_drift_when_dimensioning_mirrored_geometry() {
+    use ConstraintKind::*;
+    let mut sk = Sketch::new();
+    // axis vertical at x = 50, from (50,0) to (50,100)
+    let axis = sk.add_line(v(50.0, 0.0), v(50.0, 100.0), None, None, None).unwrap();
+    // primary point p left of axis
+    let p = sk.add_point(v(25.0, 25.0), None).unwrap();
+    // mirror point q right of axis
+    let q = sk.add_point(v(75.0, 25.0), None).unwrap();
+    sk.add_constraint(Symmetric { p, q, l: axis }, None).unwrap();
+    // fix axis orientation vertical
+    sk.add_constraint(Vertical { l: axis }, None).unwrap();
+    // dimension p to axis = 25 (distance)
+    sk.add_constraint(PointLineDistance { p, l: axis, value: 25.0 }, None).unwrap();
+    let before_axis = line_pts(&sk, axis);
+    // a "corner" point T
+    let t = sk.add_point(v(50.0, 100.0), None).unwrap();
+    // dimension p to T = 10
+    sk.add_constraint(Distance { p, q: t, value: 10.0 }, None).unwrap();
+    let _ = solve(&mut sk);
+    let after_axis = line_pts(&sk, axis);
+    // axis endpoints should not move
+    assert!((before_axis.0 - after_axis.0).len() < 1e-6, "axis moved");
+    assert!((before_axis.1 - after_axis.1).len() < 1e-6, "axis moved");
 }

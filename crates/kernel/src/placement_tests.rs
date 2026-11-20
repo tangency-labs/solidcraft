@@ -266,3 +266,78 @@ fn a_rounded_body_moves_exactly_as_the_kernel_moves_it() {
     }
     assert!(kinds.contains(&"exact") && kinds.contains(&"procedural"), "{kinds:?}");
 }
+
+/// A body placed by a rigid motion keeps its part's record until its own geometry is read: its
+/// counts, history and face sources come from the part's, and nothing is moved for them. Read,
+/// its record is the one an eager move makes. Placed again (a part in a placed subassembly), it
+/// moves by both motions at once. A motion orthonormal only to the looser bound is moved now, as
+/// before. Moving every placement of a large assembly placed a hundred times took tens of
+/// gigabytes.
+#[test]
+fn a_placed_body_is_moved_only_when_its_geometry_is_read() {
+    let source = periodic_cylinder();
+    let (c, s) = (0.6f64.cos(), 0.6f64.sin());
+    let turn = [[c, s, 0.0, 0.0], [-s, c, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [5.0, -3.0, 2.0, 1.0]];
+    let shift = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [100.0, 0.0, 0.0, 1.0]];
+    let eager = |m: &[[f64; 4]; 4]| {
+        solidcraft_geom::brep::placement::moved(source.record(), &solidcraft_geom::brep::placement::Rigid::of_matrix(m).unwrap()).unwrap()
+    };
+    let placed = transform_matrix(&source, turn).unwrap();
+    assert!(placed.record.pending(), "placed without moving its record");
+    assert_eq!((placed.face_count(), placed.edge_count(), placed.vertex_count()), (source.face_count(), source.edge_count(), source.vertex_count()));
+    assert_eq!(placed.history(), Some(&<crate::history::History as BodyHistory>::identity(&source)));
+    assert!(placed.record.pending(), "counts and history read the part's record");
+    // Its outline (which frames the view while a design opens) is the part's, moved: it holds
+    // the moved body and does not move the record.
+    let outline = placed.outline_bounds();
+    assert!(placed.record.pending(), "the outline does not move the record");
+    for v in &eager(&turn).vertices {
+        let p = Vec3::from(v.point);
+        assert!(p.x >= outline.min.x - 1e-9 && p.x <= outline.max.x + 1e-9 && p.y >= outline.min.y - 1e-9 && p.y <= outline.max.y + 1e-9);
+    }
+    // Every placement of the part shares one history (a move keeps every face and edge).
+    let elsewhere = transform_matrix(&source, shift).unwrap();
+    assert!(std::sync::Arc::ptr_eq(placed.history.as_ref().unwrap(), elsewhere.history.as_ref().unwrap()), "one history for every placement");
+    // An imported part's face sources hold no plane: its placements share them, unmoved.
+    let imported = |face: usize| Some(crate::FaceSource::Imported { item: 1, face: face as u64, payload_sha256: None, producer: None });
+    let tagged = source.clone().with_face_sources(Some(std::sync::Arc::new((0..source.face_count()).map(imported).collect())));
+    let (a, b) = (transform_matrix(&tagged, turn).unwrap(), transform_matrix(&tagged, shift).unwrap());
+    assert!(std::sync::Arc::ptr_eq(a.face_sources.as_ref().unwrap(), b.face_sources.as_ref().unwrap()), "imported sources shared");
+    // Placed again: both motions at once, still not moved.
+    let twice = transform_matrix(&placed, shift).unwrap();
+    assert!(twice.record.pending() && placed.record.pending());
+    // Read: exactly the eager move's record.
+    let made = crate::lazy_moves_made();
+    let eager = |m: &[[f64; 4]; 4]| {
+        solidcraft_geom::brep::placement::moved(source.record(), &solidcraft_geom::brep::placement::Rigid::of_matrix(m).unwrap()).unwrap()
+    };
+    assert_eq!(*placed.record(), eager(&turn));
+    assert_topology(&source, &placed, turn);
+    let both: [[f64; 4]; 4] = std::array::from_fn(|i| std::array::from_fn(|j| (0..4).map(|k| turn[i][k] * shift[k][j]).sum()));
+    for v in &twice.record().vertices {
+        assert!(source.record().vertices.iter().any(|s| Vec3::from(v.point).dist(moved(both, s.point)) < 1e-9), "moved by both motions");
+    }
+    assert!(crate::lazy_moves_made() >= made + 2, "each moved once it was read");
+    let volume = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume;
+    assert!((volume(&twice) - volume(&source)).abs() < 1e-3 * volume(&source));
+    // Orthonormal only to the looser bound (an imported assembly's rotations are, written to
+    // a dozen digits): a part with no blend by its definition is still placed lazily, and reads
+    // as the eager move; a rounded part is moved now, as before.
+    let near = [[1.0 + 1e-12, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [1.0, 0.0, 0.0, 1.0]];
+    let later = transform_matrix(&source, near).unwrap();
+    assert!(later.record.pending(), "a part with no blend is placed lazily by a near-rigid motion");
+    assert_eq!(*later.record(), eager(&near));
+    let rounded = rounded_bodies().into_iter().find(|(_, b)| !blend_kinds(b).is_empty()).map(|(_, b)| b).unwrap();
+    let now = transform_matrix(&rounded, near).unwrap();
+    assert!(!now.record.pending(), "a blend moves with its net only by an exact motion: moved now");
+    assert!(transform_matrix(&rounded, shift).unwrap().record.pending(), "and lazily by an exact one");
+    // A copy that shows its part's display (an assembly's instance) keeps showing it when it is
+    // placed again, placed by both motions, and is meshed from it without moving its record.
+    let copy = source.clone().with_display_share(&crate::DisplayShare::new(source.clone()), turn);
+    let again = transform_matrix(&copy, shift).unwrap();
+    assert!(again.record.pending(), "a copy sharing its part's display is placed lazily");
+    let (_, shown) = again.display_share().expect("still shares its part's display");
+    assert_eq!(shown, both);
+    let _ = again.mesh(&crate::MeshTolerance::chord(1e-2)).unwrap();
+    assert!(again.record.pending(), "meshed from the part's display");
+}

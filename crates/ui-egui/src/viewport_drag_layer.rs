@@ -84,7 +84,7 @@ fn drawable(app: &SolveApp) -> bool {
 /// No section, analysis or isocurve is shown (their outlines, colours and curves follow the
 /// bodies' places, which a layer moves on the GPU alone).
 fn plain(app: &SolveApp) -> bool {
-    app.session.analysis.is_none() && app.session.continuity.is_empty() && app.session.isocurves.is_empty() && super::section_plane(app).is_none()
+    app.session.analysis.is_none() && app.session.continuity.is_empty() && app.session.isocurves.is_empty() && super::section_planes(app).is_empty()
 }
 
 /// Whether a preview may have the renderer's one moving layer for the bodies it moves: the

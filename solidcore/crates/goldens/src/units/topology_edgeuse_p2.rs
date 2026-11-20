@@ -173,6 +173,20 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
     }))
 }
 
+/// The scene a case's op runs on: the B-rep exactly as the Rust side builds it, and the
+/// selected edge use, before the op; `None` when the build fails or selects no edge use.
+/// For certificate tests that must check a premise on the replayed model rather than on a
+/// dump of it (`tests/issue_18325_moved_rows.rs`).
+///
+/// # Errors
+///
+/// A case that does not parse, or the build's harness error.
+pub fn scene(case: &Case) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
+    Ok(setup(&case.parse::<Inputs>()?)?
+        .ok()
+        .map(|s| (s.brep, s.eu)))
+}
+
 /// A 2D curve as a [`CrvIn`] (`None` for a non-B-spline or one without NURB data).
 fn crv_in(c: &SmCurve) -> Option<CrvIn> {
     let CurveKind::BSpline(b) = c.kind() else {

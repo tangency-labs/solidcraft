@@ -108,6 +108,8 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 });
             });
         });
+        let touch = setting::touchscreen_navigation(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.touchscreen.help"));
+        crate::scenario::publish_target("prefs:touchscreen_navigation", touch.rect);
         if app.preferences.nav == "maya" {
             let axis = setting::maya_horizontal_zoom(app, ui).backing_on_hover_text(app.tr("nav.maya_horizontal_zoom.help"));
             crate::scenario::publish_target("prefs:maya_horizontal_zoom", axis.rect);

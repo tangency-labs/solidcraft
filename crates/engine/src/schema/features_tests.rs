@@ -18,6 +18,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<MoveParams>(),
         &[
+            "about",
             "angle",
             "axis",
             "bodies",
@@ -148,6 +149,7 @@ fn schemas_and_the_key_check_agree() {
             "body_name",
             "body_names",
             "corner",
+            "edge_radii",
             "edges",
             "fit",
             "knots",
@@ -875,6 +877,7 @@ fn fillet_replies_match_its_output_schema() {
     assert!(reduced.get("radius_applied").is_some_and(Value::is_number) && reduced.get("radii_applied").is_some_and(Value::is_array), "{reduced}");
     run(json!({"edges": [[20, 0, 10]], "radius": 1, "type": "chord"}));
     run(json!({"edges": [{"body": "B", "index": 0}], "radius": 0.5, "tangent_chain": false}));
+    run(json!({"edges": [[20, 0, 10], [20, 30, 10]], "radius": 1, "edge_radii": [1, "2 mm"], "tangent_chain": false}));
     run(json!({"edges": [[20, 0, 10]], "radius": 1, "type": "curvature"}));
     // Variable and spline radii: solidcore fails a variable round on a box edge at this pin (status
     // 1001, as `variable_radius_on_a_box_edge`), so their forms are checked against the contract.

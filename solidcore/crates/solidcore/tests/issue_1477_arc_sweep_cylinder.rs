@@ -24,7 +24,10 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point2;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
+use solidcore::nurbs::crv_basic::Curve as NurbCurve;
+use solidcore::nurbs::math::CPoint;
 use solidcore::surface::cone::Cone;
+use solidcore::surface::implicit::AnalyticSupport;
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p1;
@@ -404,5 +407,201 @@ fn issue_1477_a_whole_circle_keeps_upstream_cylinder() {
             step.u_interval().min(),
             step.u_interval().max()
         );
+    }
+}
+
+/// The placement and radius of the B-rep's only cylinder.
+fn the_cylinder(b: &Brep) -> (Axis2Placement, f64) {
+    let found: Vec<_> = b
+        .face_list()
+        .iter()
+        .filter_map(
+            |&f| match AnalyticSupport::of(b.face(f).unwrap().surface.as_ref().unwrap()) {
+                Some(AnalyticSupport::Cylinder { placement, radius }) => Some((placement, radius)),
+                _ => None,
+            },
+        )
+        .collect();
+    let [one] = found.as_slice() else {
+        panic!("one cylinder: {:?}", kinds(b));
+    };
+    *one
+}
+
+/// Review r2 of SolidCraft #17462: a short arc that really lies in a plane tilted by `tilt`
+/// about its chord stays within the arc zero of the plane square to the sweep, but the
+/// circle squared to the sweep keeps the fit's radius about the projected centre and so
+/// misses it by about `r tilt² / 2` across: 4.4e-5 for r 88, 4.4e-3 (and no manifold
+/// solid) at a tilt of 1e-2. A short `distance` lets the caller's `distance * tilt` check
+/// pass. These keep the fit's frame, as upstream: the profile is on the cylinder's base
+/// edge.
+#[test]
+fn issue_17462_a_short_arc_tilted_about_its_chord_stays_on_its_cylinder() {
+    for (r, span, tilt, distance) in [
+        (88.0, 0.005, 1e-3_f64, 0.005),
+        (1000.0, 0.05, 2e-4, 0.04),
+        (88.0, 0.005, 1e-2, 0.0005),
+        (50.0, 10.0, 2e-7, 5.0),
+    ] {
+        let case = format!("r {r} span {span} tilt {tilt:e} distance {distance}");
+        let mut k = Kernel::default();
+        k.fixes.linear_sweep_arc_is_cylinder = true;
+        let (s, c) = (tilt.sin(), tilt.cos());
+        let frame = Axis2Placement::new(Vec3::ZERO, Vec3::new(c, 0.0, -s), Vec3::Y);
+        let arc = circle(&k, &frame, r, 0.0, span);
+        let ends = arc.ends(&k).unwrap();
+        let chord = seg(ends.end, ends.start);
+        let b = create_linear_sweep(&mut k, &[Some(&arc), Some(&chord)], Vec3::Z, distance, true)
+            .unwrap();
+        assert!(
+            is_manifold_solid(&b).unwrap(),
+            "{case}: not a manifold solid"
+        );
+        let (placement, radius) = the_cylinder(&b);
+        let axis = placement.z_axis();
+        for i in 0..=8 {
+            let u = (span * f64::from(i) / 8.0).to_radians();
+            let p = frame.x_axis() * (r * u.cos()) + frame.y_axis() * (r * u.sin());
+            let off = (p - placement.origin()).cross(axis).length() - radius;
+            assert!(
+                off.abs() < 1e-9,
+                "{case}: {p:?} is {off:e} off the cylinder"
+            );
+            let along = (p - placement.origin()).dot(axis);
+            assert!(
+                along.abs() < 1e-9,
+                "{case}: {p:?} is {along:e} off the base edge's plane"
+            );
+        }
+    }
+}
+
+/// The cubic Bezier of a 0.005 degree arc of radius 88.3 about (-8.19, 145.98) at z = -53,
+/// its two inner control points an ulp or two off that plane, as a profile placed there by
+/// a transform holds them (SolidCraft #17462: 0.008 mm of a spline).
+fn short_arc() -> Curve {
+    let (cx, cy, r) = (-8.185_840_780_2, 145.979_194_294, 88.295_980_686);
+    let (a0, sweep) = (-1.4235_f64, 0.005_f64.to_radians());
+    let on = |a: f64| (cx + r * a.cos(), cy + r * a.sin());
+    let tangent = |a: f64| (-a.sin(), a.cos());
+    let h = 4.0 / 3.0 * (sweep / 4.0).tan() * r;
+    let (p0, p3) = (on(a0), on(a0 + sweep));
+    let (t0, t3) = (tangent(a0), tangent(a0 + sweep));
+    let points = [
+        (p0.0, p0.1, -53.0),
+        (p0.0 + h * t0.0, p0.1 + h * t0.1, -53.000_000_000_000_01),
+        (p3.0 - h * t3.0, p3.1 - h * t3.1, -52.999_999_999_999_99),
+        (p3.0, p3.1, -53.0),
+    ]
+    .into_iter()
+    .map(|(x, y, z)| CPoint::from_point(Vec3::new(x, y, z)))
+    .collect();
+    let nurb = NurbCurve::new(points, 3, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap();
+    Curve::from(BSplineCurve::from_nurb(nurb, 3, false))
+}
+
+/// SolidCraft #17462: a very short arc fitted from a planar curve has an ill-conditioned
+/// frame, its normal 5e-8 rad off the plane's. The sweep accepted it (53 mm times that is
+/// under the B-rep tolerance) and built the cylinder on that normal, so the wall leaned
+/// across the sweep, its far edge 2.6e-6 mm off the swept curve. A profile whose control
+/// points lie in a plane square to the sweep now gets a cylinder about the sweep direction,
+/// with the profile on its base edge.
+#[test]
+fn issue_17462_a_very_short_arc_swept_square_is_a_cylinder_about_the_sweep_direction() {
+    let mut k = Kernel::default();
+    k.fixes.linear_sweep_arc_is_cylinder = true;
+    let arc = short_arc();
+    // The case needs the fit's normal off the sweep: it is what the sweep corrects.
+    // (the sweep's zero, `1000 SM_EFF_ZERO (1 + the ends' largest coordinate)`)
+    let (frame, ..) = arc
+        .is_arc(&k, 8, 1e-9 * (1.0 + 146.0))
+        .unwrap()
+        .expect("an arc");
+    let normal = frame.z_axis();
+    assert!(
+        normal.x != 0.0 || normal.y != 0.0,
+        "the fitted normal is exact: {normal:?}"
+    );
+    assert!(normal.x.hypot(normal.y) < 1e-6, "{normal:?}");
+
+    let ends = arc.ends(&k).unwrap();
+    let chord = seg(ends.end, ends.start);
+    let b = create_linear_sweep(
+        &mut k,
+        &[Some(&arc), Some(&chord)],
+        Vec3::new(0.0, 0.0, 1.0),
+        53.0,
+        true,
+    )
+    .unwrap();
+    assert!(is_manifold_solid(&b).unwrap(), "not a manifold solid");
+    let (placement, radius) = the_cylinder(&b);
+    let axis = placement.z_axis();
+    assert!(
+        axis.x == 0.0 && axis.y == 0.0 && axis.z.abs() == 1.0,
+        "{axis:?}"
+    );
+    // The profile is the cylinder's base edge and its translate the far edge: on the
+    // cylinder radially, and axially at 0 and 53 along it.
+    for p in [ends.start, ends.end] {
+        for (p, v) in [(p, 0.0), (p + Vec3::new(0.0, 0.0, 53.0), 53.0)] {
+            let off = (p - placement.origin()).cross(axis).length() - radius;
+            assert!(off.abs() < 1e-9, "{p:?} is {off:e} off the cylinder");
+            let along = (p - placement.origin()).dot(axis).abs() - v;
+            assert!(
+                along.abs() < 1e-9,
+                "{p:?} is {along:e} off the edge's plane"
+            );
+        }
+    }
+}
+
+/// Review of SolidCraft #17462: a profile that really leans across the sweep, by more than
+/// the arc zero over the curve (up to `2 r` times the tilt), keeps the fit's frame: squaring
+/// it moved the cylinder off its own profile, 1e-2 mm off for a whole circle of radius 50
+/// swept 0.01 at a tilt of 1e-4, and the body was not manifold. The circle lies in z = 0
+/// and the sweep leans by `tilt` towards +x; `distance * tilt` is within the tolerance, so
+/// the wall is a cylinder, which must keep the profile on its base edge.
+#[test]
+fn issue_17462_a_profile_tilted_across_the_sweep_stays_on_its_cylinder() {
+    for (whole, tilt, distance, r) in [
+        (true, 1e-4, 0.01, 50.0),
+        (false, 1e-4, 0.01, 50.0),
+        (true, 1e-7, 5.0, 100.0),
+        (false, 1e-7, 5.0, 100.0),
+    ] {
+        let case = format!("whole {whole} tilt {tilt:e} distance {distance} r {r}");
+        let mut k = Kernel::default();
+        k.fixes.linear_sweep_arc_is_cylinder = true;
+        let frame = Axis2Placement::new(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let end = if whole { 360.0 } else { 180.0 };
+        let arc = circle(&k, &frame, r, 0.0, end);
+        let mut profile = vec![arc];
+        if !whole {
+            profile.push(seg(Vec3::new(-r, 0.0, 0.0), Vec3::new(r, 0.0, 0.0)));
+        }
+        let refs: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+        let b =
+            create_linear_sweep(&mut k, &refs, Vec3::new(tilt, 0.0, 1.0), distance, true).unwrap();
+        assert!(
+            is_manifold_solid(&b).unwrap(),
+            "{case}: not a manifold solid"
+        );
+        let (placement, radius) = the_cylinder(&b);
+        let axis = placement.z_axis();
+        for i in 0..=36 {
+            let a = (end * f64::from(i) / 36.0).to_radians();
+            let p = Vec3::new(r * a.cos(), r * a.sin(), 0.0);
+            let along = (p - placement.origin()).dot(axis);
+            assert!(
+                along.abs() < 1e-9,
+                "{case}: {p:?} is {along:e} off the base edge's plane"
+            );
+            let off = (p - placement.origin()).cross(axis).length() - radius;
+            assert!(
+                off.abs() < 1e-9,
+                "{case}: {p:?} is {off:e} off the cylinder"
+            );
+        }
     }
 }

@@ -1134,6 +1134,16 @@ impl FilletCorner {
                                     BlendCornerEvent::Join,
                                     BlendEnd::OnEndFace,
                                 ))
+                            } else if p1::check_nx1_degeneracy(k, b, vertex, eu0)? {
+                                // Not upstream (#16654): two edges of one pair of faces meet
+                                // at an angle only where those faces touch tangentially (two
+                                // tubes of one radius), and both blends shrink to the vertex
+                                // there: the blend corner's Turn, its mitre the vertex
+                                Some(blend_corner(
+                                    FilletCornerKind::NByTwo,
+                                    BlendCornerEvent::Turn,
+                                    BlendEnd::OnEndFace,
+                                ))
                             } else {
                                 None // MSG: Corner Case Not Implemented
                             }
@@ -2290,15 +2300,8 @@ impl FilletCorner {
                 .ok_or_else(|| invalid(OP_TOPO, "side edge without curve"))?;
 
             // fork 66b02de passes these on (SER)
-            let pass_on = k.fixes.fillet_statuses_pass_on;
-            let pnt1 = unchecked_point(crate::error::passed_on(
-                side_edge_curve.evaluate_point(k, edge_param1),
-                pass_on,
-            )?)?;
-            let pnt2 = unchecked_point(crate::error::passed_on(
-                side_edge_curve.evaluate_point(k, edge_param2),
-                pass_on,
-            )?)?;
+            let pnt1 = side_edge_curve.evaluate_point(k, edge_param1)?;
+            let pnt2 = side_edge_curve.evaluate_point(k, edge_param2)?;
 
             let dist = pnt1.distance(pnt2);
 
@@ -2494,17 +2497,6 @@ impl FilletCorner {
 
         // all done
         Ok(())
-    }
-}
-
-/// An evaluation whose status upstream ignores (`EvaluatePoint` without `SER`): a
-/// failure leaves the default-constructed point ([`Point3::UNDEF`]); an unported
-/// evaluator still propagates.
-pub(super) fn unchecked_point(r: Result<Point3>) -> Result<Point3> {
-    match r {
-        Ok(p) => Ok(p),
-        Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Ok(Point3::UNDEF),
     }
 }
 

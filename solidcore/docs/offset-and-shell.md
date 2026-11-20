@@ -359,8 +359,10 @@ B-rep tolerance (`configured_executive`, `p2.rs`), the offset body is allocated 
 within it, and the shell's boolean runs at it. Edge and vertex tolerances only grow from
 there: an offset edge takes at least its source edge's tolerance, and each of its ends its source
 vertex's (`keep_source_tolerances`, `p1.rs`; an offset end stands for each original end it lies
-on in UV, within the tolerance the uses were matched with, so the split end of a piece stands for
-none). An offset never makes a body tolerance of its own.
+on in UV, within `MapEdgeuses`'s base UV tolerance `EFF_ZERO_SQRT * (1 + |uv|)` and never the
+scaled one that matched a piece's middle, so a split end of a piece stands for none unless it
+lies within that base tolerance of an original end, where it is that end's point). An offset
+never makes a body tolerance of its own.
 
 ## 8. Invariants
 

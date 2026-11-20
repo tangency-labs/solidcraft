@@ -261,7 +261,17 @@ fn hermite_pieces(label: &BSurface, curve: &BCurve, [a, b]: [f64; 2], tol: f64) 
         }
         // A piece over a boundary of the form's quarters is cut at the boundary, any other in half.
         let mid = match verdict {
-            Verdict::Kink(boundary) if (p.theta < boundary) != (q.theta < boundary) => crossing(&ax, &c, [p, q], boundary)?,
+            // The cut lands a rounding to one side of its boundary, so the piece up to it may
+            // still be judged to hold the boundary (where the angle's rate is enclosed too widely
+            // to give its range from its ends). A boundary a piece ends on is not inside it:
+            // cutting there again gives the same piece, so such a piece is halved like any other.
+            Verdict::Kink(boundary)
+                if (p.theta < boundary) != (q.theta < boundary)
+                    && (p.theta - boundary).abs() > KINK_SLACK
+                    && (q.theta - boundary).abs() > KINK_SLACK =>
+            {
+                crossing(&ax, &c, [p, q], boundary)?
+            }
             _ => {
                 let at = p.t + 0.5 * h;
                 let guess = hermite([p.theta, q.theta], [h * p.d_theta, h * q.d_theta], 0.5);
@@ -694,6 +704,71 @@ mod tests {
         assert!((start[0] - 4.5).abs() < 1e-12 && (start[1] - 1.4).abs() < 1e-12, "{start:?}");
         let outer = solidcore_ops::pcurve::eval(&pcs[0][0], 0.0).unwrap();
         assert!(outer[0].abs() < 1e-12, "{outer:?}");
+    }
+
+    /// A frame that lies along no coordinate axis, as a part's holes do: its origin and its
+    /// x, y and z axes.
+    fn oblique() -> [Vec3; 4] {
+        let z = Vec3::new(-0.384, 0.923, 0.02).normalized().unwrap();
+        let x = Vec3::new(0.3, 0.1, 1.0).cross(z).normalized().unwrap();
+        [Vec3::new(141.1, 21.6, 20.6), x, z.cross(x), z]
+    }
+
+    /// A helix as CAD systems write one: rational quadratic arcs of a sixth of a turn each (a
+    /// circle's arc seen along the axis, the height rising evenly through the control points),
+    /// `spans` of them over the parameter 0 to 1, about the z axis of `frame`.
+    fn helix([o, x, y, z]: [Vec3; 4], radius: f64, pitch: f64, spans: usize) -> BCurve {
+        let step = TAU / 6.0;
+        let weight = (0.5 * step).cos();
+        let at = |turn: f64, r: f64, w: f64| {
+            let p = o + x * (r * turn.cos()) + y * (r * turn.sin()) + z * (pitch * turn / TAU);
+            [w * p.x, w * p.y, w * p.z, w]
+        };
+        let mut knots = vec![0.0; 3];
+        let mut homogeneous = vec![at(0.0, radius, 1.0)];
+        for i in 0..spans {
+            let start = step * i as f64;
+            homogeneous.push(at(start + 0.5 * step, radius / weight, weight));
+            homogeneous.push(at(start + step, radius, 1.0));
+            let knot = if i + 1 == spans { 1.0 } else { (i + 1) as f64 / spans as f64 };
+            knots.extend([knot, knot]);
+        }
+        knots.push(1.0);
+        BCurve::RationalSpline { knots, homogeneous }
+    }
+
+    /// A thread's helix on its cylinder, over most of its eleven turns. A piece that holds a
+    /// boundary of the form's quarters is cut there, and the cut lands a rounding to one side of
+    /// the boundary. Where the enclosure of the angle's rate over the piece up to the cut is too
+    /// wide to say the angle runs one way (it is, about an axis along no coordinate axis), that
+    /// piece was judged to hold the boundary again and cut at the same place, thirty times, and
+    /// the face was refused ("takes more than 4000 pieces"). It is halved instead, and the
+    /// pcurve is made.
+    #[test]
+    fn a_piece_cut_at_a_quarter_boundary_is_not_cut_there_again() {
+        let (radius, pitch, spans) = (4.2, 1.25, 66);
+        let frame = oblique();
+        let [o, x, y, z] = frame;
+        let label = BSurface::Cylinder { frame: solidcore_record::brep::Frame { origin: o.into(), x_axis: x.into(), y_axis: y.into() }, radius };
+        let curve = helix(frame, radius, pitch, spans);
+        let on = CurveEval::new(&curve).unwrap();
+        // The angle the helix is at, counting its turns, and its height.
+        let place = |t: f64| {
+            let d = on.point(t).unwrap() - o;
+            assert!((d.dot(x).hypot(d.dot(y)) - radius).abs() < 1e-9, "off the cylinder at {t}");
+            let about = spans as f64 / 6.0 * TAU * t;
+            let angle = d.dot(y).atan2(d.dot(x));
+            (angle + TAU * ((about - angle) / TAU).round(), d.dot(z))
+        };
+        for interval in [[0.0176, 0.7958], [0.0855, 0.877], [0.0, 1.0]] {
+            let pc = pcurve(&label, &curve, interval, 0.02).unwrap_or_else(|e| panic!("{interval:?}: {e}"));
+            let [a, b] = pc.interval().unwrap();
+            let (start, end) = (solidcore_ops::pcurve::eval(&pc, a).unwrap(), solidcore_ops::pcurve::eval(&pc, b).unwrap());
+            let ((from, low), (to, high)) = (place(interval[0]), place(interval[1]));
+            // It runs the turns the helix does, and rises as it does.
+            assert!(((end[0] - start[0]) - (form::param(to) - form::param(from))).abs() < 1e-9, "{interval:?}: {start:?} to {end:?}");
+            assert!(((end[1] - start[1]) - (high - low)).abs() < 1e-9, "{interval:?}: {start:?} to {end:?}");
+        }
     }
 
     /// The same hole low in the strip is on its first turn.

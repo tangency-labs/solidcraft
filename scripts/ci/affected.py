@@ -55,12 +55,14 @@ TEST_DATA = {
     "tests/oracle/": ("apps/solidcraft-cli/", "xtask/"),
     "tests/action_matrix/": ("apps/solidcraft-cli/", "crates/engine/", "xtask/"),
 }
-# Vendored crates.io patches (vendor/<crate>/) and the dependency names through which workspace
-# packages reach them: egui-wgpu directly or through eframe. A vendored tree no entry names, such
+# Vendored crates.io patches (vendor/<tree>/) and the dependency names through which workspace
+# packages reach them: egui's tree (vendor/egui/, git subtree) through any of its crates. A vendored tree no entry names, such
 # as the kernel in `solidcore/`, selects the full workspace: a kernel change reaches every
 # package, so a change to it is not narrowed to the packages that depend on one crate.
+EGUI_CRATES = ("ecolor", "eframe", "egui", "egui-wgpu", "egui-winit", "egui_glow", "emath", "epaint",
+               "epaint_default_fonts")
 VENDOR_USES = {
-    "egui-wgpu": lambda dep: dep in ("egui-wgpu", "eframe"),
+    "egui": lambda dep: dep in EGUI_CRATES,
 }
 
 

@@ -43,7 +43,7 @@ if that happens; recording is cancelled if the app loses focus.
 | Ctrl+Z | Undo | Ctrl+Y | Redo |
 | Ctrl+N | New Design | Ctrl+O | Open |
 | Ctrl+S | Save | Delete | Delete the selection |
-| Ctrl+Shift+S | Save As | | |
+| Ctrl+Shift+S | Save As | Ctrl+A | Select All |
 | Ctrl+1 | Front View | Ctrl+2 | Back View |
 | Ctrl+3 | Left View | Ctrl+4 | Right View |
 | Ctrl+5 | Top View | Ctrl+6 | Bottom View |
@@ -118,6 +118,7 @@ While drawing or dragging a sketch point:
 |---|---|
 | Ctrl/Cmd or Alt/Option (default) | suppress auto-snap for that gesture |
 | Shift | prefer a line midpoint when targeting (skips a curve-curve crossing) |
+| Shift, while drawing a Two-Point or Center Rectangle | make the rectangle a square: the second corner moves to the larger of the two distances, and the sketch gets an Equal constraint between two sides, so one dimension defines it; off by default, turn it on in Preferences › Sketch |
 
 Change the snap-suppress chord in Preferences › Sketch. Selection still uses Shift and
 Ctrl/Cmd to add or toggle (Preferences › Selection can make Shift add-only).

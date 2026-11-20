@@ -55,3 +55,21 @@ fn a_box_face_cannot_be_deleted() {
     assert!(e.contains("Delete Face"), "{e}");
     assert_eq!(s.doc.features.len(), n);
 }
+
+/// Deleting the round on a cylinder's top edge gives the plain cylinder back: the cylinder's
+/// side extends up to the top plane to close the gap. Delete Face refuses it today because only
+/// planar neighbours extend ([T-40](https://tickets.solidcraft.io/t/40), #14938); a chamfer on
+/// the same edge is refused the same way.
+#[test]
+fn delete_a_round_on_a_cylinder_edge() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Post"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 0, 20]], "radius": 2}));
+    let full = std::f64::consts::PI * 10.0 * 10.0 * 20.0;
+    assert!(volume(&mut s, "Post") < full - 1.0);
+    // A point on the round: 45° round its section circle, centred 8 mm out at height 18.
+    let h = 2.0 * std::f64::consts::FRAC_1_SQRT_2;
+    let r = run(&mut s, "face.delete", json!({"faces": [[8.0 + h, 0, 18.0 + h]]}));
+    assert!(r["feature"].is_u64(), "{r}");
+    assert!((volume(&mut s, "Post") - full).abs() < 1e-3 * full, "{} vs {full}", volume(&mut s, "Post"));
+}

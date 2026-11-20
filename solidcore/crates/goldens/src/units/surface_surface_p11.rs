@@ -1024,4 +1024,89 @@ mod tests {
         eprintln!("gen0483: injective xy margin {}; z difference <= {upper:e}; old near-hit gap {old_gap:e}", dx_du.min(dy_dv)-off_diagonal);
     }
 
+    /// Main's `data` of `gen0258` (merge base ada55bdad): per curve its deviation, `3`, its
+    /// interval and its points at 0, 1/4, .., 1 of it.
+    const MAIN_GEN0258: &str = "
+[0.0, 3.0, 0.0, 1.0, -0.07512394115245234, -0.004610070336162646, 0.0, -0.06634120978028771,
+0.2610324907522801, 0.0, -0.06507151199981648, 0.4990004834863616, 0.0,
+-0.07131484781103867, 0.7092939078660819, 0.0, -0.08507121721395428, 0.8919127638914413,
+0.0, 0.0, 3.0, 0.0, 0.07837022252998035, -0.07512394115245234, -0.004610070336162646, 0.0,
+-0.05656254839072772, -0.0034084895347269123, 0.0, -0.03785365957171108,
+-0.002260319638593604, 0.0, -0.018997274695402442, -0.0011655606477627212, 0.0,
+6.606238198203496e-06, -0.00012421256223426442, 0.0, 0.0, 3.0, 0.07837022252998035,
+0.08077652189092824, 6.606238198203496e-06, -0.00012421256223426442, 0.0,
+0.0005924401642769245, -9.308389187306464e-05, 0.0, 0.001178413142459125,
+-6.200557471362089e-05, 0.0, 0.0017645251727448049, -3.097761075593318e-05, 0.0,
+0.002350776255133964, -1.5043305143236374e-18, 0.0, 0.0, 3.0, 0.08077652189092824,
+0.8203603013688167, 0.0023507762551339753, -1.951563910473908e-18, 0.0, 0.18912613111137497,
+0.00713499698165699, 0.0, 0.3890371794822135, 0.009513329308875988, 0.0, 0.6020839213676492,
+0.007134996981656992, 0.0, 0.8282663567676826, -2.168404344971009e-18, 0.0]";
+
+    /// gen0258, a plane and a Bezier patch in the plane `z = 0`, tolerance 9.94e-4 (WR-455's
+    /// contact move, tangency-labs/solidcraft#17404): main's pieces 3 and 4 of one boundary
+    /// curve of the patch, over `[0.07837, 0.08078]` and `[0.08078, 0.82036]`, are now one
+    /// piece over `[0.07837, 0.82036]`: main split them at a contact with the plane's
+    /// boundary that is now reported at that boundary's end. PROVEN: the new piece stays
+    /// within 1e-7 of that boundary curve of the patch over its whole interval
+    /// (`curves_stay_within`, certified, no samples), and main's two intervals tile it
+    /// exactly. Main's recorded points are that boundary curve's at their parameters within
+    /// 1e-12 (MEASURED: main's curves are gone, only their record is left), and both rows
+    /// keep the deviation 0. The first two pieces are main's, exactly (PROVEN). Class: equal.
+    #[test]
+    fn wr455_gen0258_split_boundary_piece_is_one_piece() {
+        use solidcore::curve::curve::p8::curves_stay_within;
+        use solidcore::geom::extent1d::Extent1d;
+        let case = crate::case::regression_case(&Runner, "gen0258");
+        let i: Inputs = case.parse().unwrap();
+        assert_eq!(i.op, 1);
+        let main: Vec<f64> = serde_json::from_str(MAIN_GEN0258).unwrap();
+        let now = run_rust_isb(&i).unwrap();
+        assert_eq!(now.ints["curves"], [3]);
+        let now = &now.values["data"];
+        assert_eq!(now.get(..38).unwrap(), main.get(..38).unwrap(), "the first two pieces");
+
+        let k = Kernel::default();
+        let (a, b) = (surface(&k, &i.a).unwrap(), surface(&k, &i.b).unwrap());
+        let found = a
+            .intersect_surface_boundaries(&k, &domain(i.a.domain), &b, &domain(i.b.domain), i.tol)
+            .unwrap();
+        assert_eq!(found.curves_3d.len(), 3);
+        let piece = found.curves_3d.get(2).unwrap();
+        let ivl = piece.natural_interval();
+        // main's pieces 3 and 4: [lo, mid] and [mid, hi]
+        let (lo, mid, hi) = (main[40], main[41], main[60]);
+        assert_eq!(main[59], mid);
+        assert_eq!([ivl.min(), ivl.max()], [lo, hi]);
+        assert_eq!(found.deviations.get(2).copied(), Some(0.0));
+        assert!(main[38] == 0.0 && main[57] == 0.0, "main's deviations");
+
+        // the patch's boundary curve the piece is cut from
+        let tight = 1e-7;
+        let mut bdry = Vec::new();
+        for dir in [SurfParamType::U, SurfParamType::V] {
+            let (c0, c1) = b.create_iso_boundaries(&k, dir, i.tol).unwrap().unwrap();
+            bdry.extend([c0, c1]);
+        }
+        let from = bdry
+            .iter()
+            .find(|c| {
+                let n = c.natural_interval();
+                n.min() <= lo
+                    && hi <= n.max()
+                    && curves_stay_within(&k, piece, c, [lo, lo], [hi, hi], tight).unwrap()
+            })
+            .expect("gen0258: the piece is not a boundary curve of the patch within 1e-7");
+
+        // main's recorded points of pieces 3 and 4 are that curve's
+        for (at, [s, e]) in [(42, [lo, mid]), (61, [mid, hi])] {
+            let span = Extent1d::from_min_max(s, e);
+            for j in 0..=4 {
+                let t = span.evaluate(f64::from(j) / 4.0);
+                let p = from.evaluate_point(&k, t).unwrap();
+                let q = main.get(at + 3 * j as usize..at + 3 * j as usize + 3).unwrap();
+                let d = p.distance(Vec3::new(q[0], q[1], q[2]));
+                assert!(d <= 1e-12, "gen0258: main's point {j} at {t} is {d:e} off");
+            }
+        }
+    }
 }

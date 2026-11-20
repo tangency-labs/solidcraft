@@ -20,6 +20,10 @@
 //! give the teeth of a comb: a curve's curvature vector `κ N`, and a surface's normal curvature along one of its parameter lines
 //! times its normal, `(n · S_tt / |S_t|²) n`.
 //!
+//! The two faces need not be in one body: [`continuity_on`] and [`continuity_over`] take each
+//! face use in its own B-rep and the curve to measure along, for the seam where two separate
+//! sheets meet (one sheet's edge over the part the other's runs with it).
+//!
 //! What is not proved: the drops find the nearest point of each surface from the given guess
 //! (a gap is never smaller than the true one only where the drop found the nearest foot), and
 //! the values are evaluated in floating point with no bound on their error.
@@ -336,17 +340,38 @@ pub fn continuity_at(
     t: f64,
     guess: [Option<Point2>; 2],
 ) -> Result<Option<ContinuityAt>> {
+    let [fa, fb] = faceuses;
+    continuity_on(k, edge_curve(b, e)?, t, [(b, fa), (b, fb)], guess)
+}
+
+/// Edge `e`'s curve.
+fn edge_curve(b: &Brep, e: EdgeId) -> Result<&Curve> {
+    b.edge(e)?
+        .curve
+        .as_ref()
+        .ok_or_else(|| SolidError::invalid_input(OP, "edge without a curve"))
+}
+
+/// [`continuity_at`] at parameter `t` of `curve`, between two face uses each in its own B-rep
+/// (`sides`: face a's, then face b's): the seam where two separate sheets meet along a curve
+/// of one of them, measured as an edge between two faces of one body is.
+///
+/// # Errors
+///
+/// As [`continuity_at`], for each side in its own B-rep.
+pub fn continuity_on(
+    k: &Kernel,
+    curve: &Curve,
+    t: f64,
+    sides: [(&Brep, FaceuseId); 2],
+    guess: [Option<Point2>; 2],
+) -> Result<Option<ContinuityAt>> {
     if !t.is_finite() {
         return Err(SolidError::invalid_input(
             OP,
             "an edge parameter that is not finite",
         ));
     }
-    let curve = b
-        .edge(e)?
-        .curve
-        .as_ref()
-        .ok_or_else(|| SolidError::invalid_input(OP, "edge without a curve"))?;
     let d = curve.evaluate(k, t, 1, true, false)?;
     let (Some(&point), Some(&d1)) = (d.first(), d.get(1)) else {
         return Err(SolidError::query_failed(
@@ -359,9 +384,9 @@ pub fn continuity_at(
         return Ok(None);
     }
     let tangent = d1 * (1.0 / speed);
-    let mut sides = Vec::with_capacity(2);
+    let mut feet = Vec::with_capacity(2);
     let mut jets = Vec::with_capacity(2);
-    for (&fu, g) in faceuses.iter().zip(guess) {
+    for (&(b, fu), g) in sides.iter().zip(guess) {
         let f = b
             .faceuse(fu)?
             .face
@@ -381,11 +406,11 @@ pub fn continuity_at(
         let Some(jet) = normal_section(&d, one.normal, across * (1.0 / len)) else {
             return Ok(None);
         };
-        sides.push(one);
+        feet.push(one);
         jets.push(jet.values());
     }
     let (Some(a), Some(bb), Some(ja), Some(jb)) =
-        (sides.first(), sides.get(1), jets.first(), jets.get(1))
+        (feet.first(), feet.get(1), jets.first(), jets.get(1))
     else {
         return Err(SolidError::query_failed(
             OP,
@@ -533,11 +558,49 @@ pub fn continuity_along(
     faceuses: [FaceuseId; 2],
     stations: usize,
 ) -> Result<Vec<ContinuityStation>> {
+    let [fa, fb] = faceuses;
     let interval = b.edge(e)?.interval;
+    continuity_over(
+        k,
+        edge_curve(b, e)?,
+        interval,
+        [0.0, 1.0],
+        [(b, fa), (b, fb)],
+        stations,
+    )
+}
+
+/// [`continuity_on`] at `stations` even steps over the part `part` of `interval` (fractions of
+/// it, `[start, end]`; `[0, 1]` is the whole), its ends included, each station's drops
+/// starting from the last one's feet; each station's [`ContinuityStation::edge_fraction`] is
+/// its fraction of `interval`. The seam of two separate sheets over the part of one's edge
+/// where the other's runs with it ([`Curve::proved_overlap`]). Stations that say nothing are
+/// left out.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a part not finite; those of [`continuity_on`].
+pub fn continuity_over(
+    k: &Kernel,
+    curve: &Curve,
+    interval: Extent1d,
+    part: [f64; 2],
+    sides: [(&Brep, FaceuseId); 2],
+    stations: usize,
+) -> Result<Vec<ContinuityStation>> {
+    let [f0, f1] = part;
+    if !(f0.is_finite() && f1.is_finite()) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a part of an edge that is not finite",
+        ));
+    }
     let mut out = Vec::new();
     let mut guess: [Option<Point2>; 2] = [None, None];
-    for f in fractions(stations, false) {
-        let Some(m) = continuity_at(k, b, e, faceuses, interval.evaluate(f), guess)? else {
+    for step in fractions(stations, false) {
+        // the whole interval's fractions exactly as they are: `0 + 1 * step` is `step`
+        let f = f0 + (f1 - f0) * step;
+        let Some(m) = continuity_on(k, curve, interval.evaluate(f), sides, guess)? else {
             continue;
         };
         guess = [Some(m.uv[0]), Some(m.uv[1])];

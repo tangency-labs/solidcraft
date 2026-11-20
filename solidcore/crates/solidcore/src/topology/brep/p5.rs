@@ -2556,17 +2556,21 @@ pub fn remove_topological_with_notifications(
             if b.edge(edge).is_err() {
                 continue;
             }
-            // IsTopological can expand a surface even when this edge is on the
-            // keep list. Do not move the keep-list test before this call.
+            // Not upstream (#17616): an edge on the keep list stays, so it is not tested.
+            // IsTopological's coverage test expands the covering face's surface in place
+            // and drops that face's UV trims, leaving its UV domain on the old
+            // parameterisation; only the merge below sets the domain anew. Upstream tests
+            // first, and the face of a kept edge keeps the expanded surface under its old
+            // domain: on two bends of one cylinder its trims dropped off the domain.
+            if keep_edges.is_some_and(|keep| keep.contains(&edge)) {
+                continue;
+            }
             let Some(topological) =
                 crate::error::ignored(crate::topology::edge::is_topological(k, b, edge, 1.0))?
             else {
                 continue;
             };
             if !topological.is_topological {
-                continue;
-            }
-            if keep_edges.is_some_and(|keep| keep.contains(&edge)) {
                 continue;
             }
             let keep = topological.surf_to_keep.ok_or_else(|| {

@@ -90,7 +90,7 @@ use crate::surface::surface::p2::PLANE_TYPE;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::torus::Torus;
 use crate::topology::edgeuse::p1 as eu;
-use crate::topology::{Brep, EdgeId};
+use crate::topology::{Brep, EdgeId, FaceId};
 
 mod past_end;
 pub mod rational;
@@ -1868,7 +1868,9 @@ pub fn chord_implicit(blend: &ExactBlend) -> Option<crate::surface::implicit::Im
 /// middle `sagitta` off the chord, away from the edge (to the offsets' line's side) for a
 /// positive sagitta and towards it for a negative one: radius `R = (c^2 / 4 + h^2) / (2 |h|)`.
 /// The chord's plane for a sagitta of 0. `None` where [`chord_implicit`] has none or the
-/// offsets' line lies on the chord.
+/// offsets' line lies on the chord. The offsets' line lies on the edge's side of the chord
+/// only where both offsets are positive (no obtuse toe: `ChamferDefinition::offsets`), which
+/// every exact chord's definition requires (`ExactRound::chord`).
 #[must_use]
 pub fn arc_section_implicit(
     blend: &ExactBlend,
@@ -1990,6 +1992,18 @@ pub struct CollapsedOffset {
 /// middle edge of an arc's tangent chain) and no round ends there. Judged where the
 /// collapsed axis crosses that plane (or lies in it): the centre is there if that point lies
 /// on the other face's offset, within the solver's tolerance.
+///
+/// Not the fork's (#18190): an end where the edge ends on a side face it crosses (not tangent
+/// to it, [`side_faces_crossed`]) is where the round ends in that face. Where the other face's
+/// offset is a plane, sphere, cylinder or cone, the ball touches that face at one point, the
+/// foot of its fixed centre ([`fixed_centre`]), and every section of the round runs to it.
+/// Where that side face holds the touch point, the round's end runs down to it on the other
+/// face's edge with the side face: its rail on the other face is that one point on the face's
+/// boundary, and it takes the whole of the face there, so the zone is open at that end. A
+/// notch's floor rounded at the notch's radius, its edge ending on a curved side through the
+/// notch's axis, is that (before, judged by the plane square to the edge, which holds the
+/// axis, it was built and the intersection of the round with the side failed). Where the side
+/// face misses the touch point the end is judged by the plane square to the edge, as before.
 ///
 /// An end at a vertex of one of `joined` (the session's other blended edges) is where the
 /// chain runs on into the next round: the Join places that
@@ -2135,10 +2149,9 @@ pub fn ball_zone_open_at_an_end(
         if end_runs_on(b, e, v, tol, joined)? {
             continue;
         }
-        let closes = if let Some((off, _)) = focal {
-            // (solidcore #2652) the focal curve read again at the end's own foot: there it
-            // crosses the plane square to the edge (the face's normal there is square to the
-            // edge), or (along it) lies in it
+        // the collapsed offset as it is at this end: (solidcore #2652) a focal curve read again
+        // at the end's own foot
+        let here = if let Some((off, _)) = focal {
             let surface = ops
                 .solver()
                 .surface(c)?
@@ -2153,9 +2166,36 @@ pub fn ball_zone_open_at_an_end(
             let Some(at_end) = focal_offset(k, base, dropped.result_uv, off, tol)? else {
                 return Ok(None);
             };
-            at_end.kind == QuadricKind::Point
-                || at_end.dir.dot(along).abs() <= EFF_ZERO_SQRT
-                || other.distance(at_end.point) <= approx
+            at_end
+        } else {
+            axis
+        };
+        // (#18190) the edge ends on a side face it crosses, which holds the ball's one touch
+        // point on the other face: the round ends in that face, its end running down to the
+        // touch point on the other face's edge with it, so its rail on the other face is that
+        // one point on the face's boundary and it takes the whole of the face there
+        // (a face not judged, its drop failing, is not taken to hold it)
+        let side_holds_touch = match (touches_at_one_point(&other), faces.get(usize::from(c == 0)))
+        {
+            (true, Some(other_face)) => {
+                let crossed = side_faces_crossed(k, b, e, v, along, tol)?.unwrap_or_default();
+                match fixed_centre(&here, &other, v).and_then(|centre| other_face.foot(centre)) {
+                    Some(touch) if !crossed.is_empty() => {
+                        faces_hold(k, b, &crossed, touch, approx)? == Some(true)
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        };
+        let closes = if side_holds_touch {
+            false
+        } else if focal.is_some() {
+            // (solidcore #2652) the focal curve at the end crosses the plane square to the
+            // edge (the face's normal there is square to the edge), or (along it) lies in it
+            here.kind == QuadricKind::Point
+                || here.dir.dot(along).abs() <= EFF_ZERO_SQRT
+                || other.distance(here.point) <= approx
         } else if axis.kind == QuadricKind::Point {
             (axis.point - v).dot(along).abs() <= approx
         } else {
@@ -2176,6 +2216,151 @@ pub fn ball_zone_open_at_an_end(
         }
     }
     Ok(None)
+}
+
+/// Not the fork's (#18190): whether a ball touching a face whose offset is `other` (not
+/// collapsed: a plane, sphere, cylinder or cone) touches it at one point, the foot of its
+/// centre, and its centre on a collapsed offset is found in closed form ([`fixed_centre`]).
+fn touches_at_one_point(other: &BlendQuadric) -> bool {
+    matches!(
+        other.kind,
+        QuadricKind::Plane | QuadricKind::Sphere | QuadricKind::Cylinder | QuadricKind::Cone
+    )
+}
+
+/// Not the fork's (#18190): the fixed centre of a ball whose offset of one face is
+/// `collapsed` (a point, or a line: an axis) and of the other `other` (a plane, sphere,
+/// cylinder or cone): that point, or where the line crosses `other`, from `other`'s implicit
+/// form `x.A.x + 2 b.x + c = 0` along the line (a quadratic, linear for a plane); of two
+/// crossings, the one nearest `near` (the end of the edge judged). `None` where they do not
+/// cross.
+fn fixed_centre(collapsed: &BlendQuadric, other: &BlendQuadric, near: Point3) -> Option<Point3> {
+    match collapsed.kind {
+        QuadricKind::Point => Some(collapsed.point),
+        QuadricKind::Line => {
+            // in a frame at the line's point, so `other`'s implicit constant is read from its
+            // own place relative to the line, not from a world origin far away
+            let (p, d) = (collapsed.point, collapsed.dir);
+            let mut local = *other;
+            local.point = other.point - p;
+            let (a, b, c) = local.implicit();
+            let times = |x: Vec3| {
+                let [r0, r1, r2] = a;
+                Vec3::new(
+                    r0[0] * x.x + r0[1] * x.y + r0[2] * x.z,
+                    r1[0] * x.x + r1[1] * x.y + r1[2] * x.z,
+                    r2[0] * x.x + r2[1] * x.y + r2[2] * x.z,
+                )
+            };
+            // qa t^2 + 2 qb t + qc = 0 for x = t d (the line's point at the frame's origin)
+            let qa = d.dot(times(d));
+            let qb = b[0] * d.x + b[1] * d.y + b[2] * d.z;
+            let qc = c;
+            let roots = if qa == 0.0 {
+                if qb == 0.0 {
+                    return None;
+                }
+                [-qc / (2.0 * qb); 2]
+            } else {
+                let disc = qb * qb - qa * qc;
+                if disc < 0.0 {
+                    return None;
+                }
+                let s = disc.sqrt();
+                [(-qb - s) / qa, (-qb + s) / qa]
+            };
+            roots
+                .into_iter()
+                .map(|t| p + d * t)
+                .min_by(|x, y| x.distance(near).total_cmp(&y.distance(near)))
+        }
+        _ => None,
+    }
+}
+
+/// Not the fork's (#18190): the faces at the edge `e`'s end `at` (its vertex) other than the
+/// edge's own, that the edge crosses there (`along`, its unit tangent, not square to the
+/// face's normal at `at`: the face is not tangent to the edge, as it is at a smooth end): an
+/// edge ends on such a face, and a round along it ends in that face, not in the plane square
+/// to the edge. `None` where the end's point does not drop onto one of them (not judged).
+///
+/// # Errors
+///
+/// Those of the topology lookups, the drops and the evaluations.
+fn side_faces_crossed(
+    k: &Kernel,
+    b: &Brep,
+    e: EdgeId,
+    at: Point3,
+    along: Vec3,
+    tol: f64,
+) -> Result<Option<Vec<FaceId>>> {
+    use crate::surface::surface::p4::NoObject;
+    use crate::surface::surface::p5::DropPointOptions;
+    use crate::topology::{edge, vertex};
+    let own = edge::faces(b, e, None)?;
+    let (start, end) = edge::start_end_vertices(b, e)?;
+    let mut crossed = Vec::new();
+    for v in [start, end].into_iter().flatten() {
+        if vertex::point(b, v)?.distance(at) > tol {
+            continue;
+        }
+        for f in vertex::faces(b, v)? {
+            if own.contains(&f) || crossed.contains(&f) {
+                continue;
+            }
+            let Some(surface) = b.face(f)?.surface.as_ref() else {
+                return Ok(None);
+            };
+            let domain = surface.natural_uv_domain_with_nurb(k)?;
+            let dropped =
+                surface.drop_point::<NoObject>(k, at, &domain, &DropPointOptions::default())?;
+            if !dropped.success {
+                return Ok(None);
+            }
+            let (_, n) = point_and_normal(k, surface, dropped.result_uv)?;
+            if n.dot(along).abs() > EFF_ZERO_SQRT {
+                crossed.push(f);
+            }
+        }
+    }
+    Ok(Some(crossed))
+}
+
+/// Not the fork's (#18190): whether every face of `faces` holds `point` (its surface passes
+/// within `tol` of it); `None` where the point does not drop onto one (not judged).
+///
+/// # Errors
+///
+/// Those of the topology lookups, the drops and the evaluations.
+fn faces_hold(
+    k: &Kernel,
+    b: &Brep,
+    faces: &[FaceId],
+    point: Point3,
+    tol: f64,
+) -> Result<Option<bool>> {
+    use crate::surface::surface::p4::NoObject;
+    use crate::surface::surface::p5::DropPointOptions;
+    for &f in faces {
+        let Some(surface) = b.face(f)?.surface.as_ref() else {
+            return Ok(None);
+        };
+        let domain = surface.natural_uv_domain_with_nurb(k)?;
+        let dropped =
+            surface.drop_point::<NoObject>(k, point, &domain, &DropPointOptions::default())?;
+        if !dropped.success {
+            return Ok(None);
+        }
+        // accepted only within `tol`: a distance that is not a number holds nothing
+        let distance = surface
+            .evaluate_point(k, dropped.result_uv)?
+            .distance(point);
+        if !(distance.is_finite() && distance <= tol) {
+            return Ok(Some(false));
+        }
+    }
+    Ok(Some(true))
 }
 
 /// Not the fork's (#16768): whether a round's definition is a rolling ball's of one radius
@@ -3025,14 +3210,12 @@ pub fn calc_exact_fillet_geom(
             None => ops.solver().first_fillet_geom()?,
         };
         pseudo.geom_mut(g)?.exact_class = true;
-        if k.fixes.fillet_round_as_definition {
-            keep_definition(ops, k, pseudo, blend, fillet_geom)?;
-        }
+        keep_definition(ops, k, pseudo, blend, fillet_geom)?;
     }
     Ok(built)
 }
 
-/// Not the fork (#2485, with `fillet_round_as_definition`): the round just built by its
+/// Not the fork (#2485): the round just built by its
 /// exact class keeps its definition on its surface ([`ExactRound`]): its supports (the
 /// faces the class was read off), the ball's radius, the ball's circle as its section and
 /// the centre line as its leader. Its net is its exact surface, re-certified at once

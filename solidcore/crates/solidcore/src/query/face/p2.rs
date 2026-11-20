@@ -163,7 +163,7 @@ use crate::intersect::curve_class::p2::ResetOptions;
 use crate::intersect::curve_class::p5::ClassGeometryMut;
 use crate::intersect::curve_class::p9::{
     BoundaryEdge, BoundaryEdgeuse, BoundaryFace, BoundaryLoop, BoundaryVertex,
-    IntersectEdgesOptions,
+    IntersectEdgesOptions, SeamEnds,
 };
 use crate::intersect::point_class::{
     ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
@@ -1703,7 +1703,34 @@ fn boundary_edge<O: ClassObject>(
         interval: record.interval,
         zone_tol_3d: record.tolerance,
         face_gap,
+        seam: seam_ends(objects.brep(), edge, face)?,
     })
+}
+
+/// Not upstream: for a seam of `face` (the face on both sides of `edge`), its two ends
+/// that bound material: a vertex that is no pole of the face
+/// ([`crate::topology::vertex::inside_face`]), with its point and tolerance
+/// (docs/booleans.md, "Seams and poles"). `None` for an edge that is no seam.
+fn seam_ends(b: &Brep, edge: EdgeId, face: FaceId) -> Result<Option<SeamEnds>> {
+    if !crate::topology::edge::face_on_both_sides(b, edge, face)? {
+        return Ok(None);
+    }
+    let first = crate::topology::edge::vertex(b, edge)?;
+    let second = match first {
+        Some(v) => crate::topology::edge::other_vertex(b, edge, Some(v))?,
+        None => None,
+    };
+    let mut ends = [None, None];
+    for (slot, v) in ends.iter_mut().zip([first, second]) {
+        let Some(v) = v else { continue };
+        if !crate::topology::vertex::inside_face(b, v, face)? {
+            *slot = Some((
+                b.vertex(v)?.point,
+                crate::topology::vertex::tolerance(b, v)?,
+            ));
+        }
+    }
+    Ok(Some(ends))
 }
 
 /// The caller's classification objects `inner` over a private copy `snapshot` of the

@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_title_block_logo": "Title Block Logo"
+  },
+  "ar": {
+    "cmd.drawing_title_block_logo": "شعار كتلة العنوان"
+  },
+  "de": {
+    "cmd.drawing_title_block_logo": "Schriftfeld-Logo"
+  },
+  "he": {
+    "cmd.drawing_title_block_logo": "לוגו בטבלת הכותרת"
+  },
+  "ja": {
+    "cmd.drawing_title_block_logo": "表題欄のロゴ"
+  },
+  "ko": {
+    "cmd.drawing_title_block_logo": "표제란 로고"
+  },
+  "vi": {
+    "cmd.drawing_title_block_logo": "Biểu trưng khung tên"
+  },
+  "zh": {
+    "cmd.drawing_title_block_logo": "标题栏徽标"
+  }
+}

@@ -719,6 +719,23 @@ fn edit_rule(s: &mut Session, p: Value) -> Value {
     run(s, "assembly.constraint.edit", p)
 }
 
+/// A constraint's new name over 128 characters is refused by the constraint command, in its own
+/// name, and changes nothing.
+#[test]
+fn a_constraints_new_long_name_is_refused_in_the_commands_name() {
+    let mut s = plate_and_block();
+    let doc = s.doc.clone();
+    let error = s.execute("assembly.constraint.edit", &json!({"constraint": "Mate1", "name": "ł".repeat(129)})).unwrap_err().to_string();
+    assert!(error.contains("assembly.constraint.edit") && error.contains("at most 128 characters"), "{error}");
+    assert_eq!(s.doc, doc);
+    // With a new rule and a turn over in the same edit, the joint keeps its sides, rule and name.
+    let before = s.doc.assembly.joints.iter().find(|j| j.name == "Mate1").cloned();
+    let p = json!({"constraint": "Mate1", "type": "flush", "flip": true, "name": "ł".repeat(129)});
+    assert!(s.execute("assembly.constraint.edit", &p).is_err());
+    assert_eq!(s.doc.assembly.joints.iter().find(|j| j.name == "Mate1").cloned(), before);
+    assert_eq!(s.doc, doc);
+}
+
 /// One constraint changed from Mate to Distance to Flush: each rule places the block where its
 /// numbers say, the gap carries over to the next rule, and the joint is the kind its rule needs.
 #[test]

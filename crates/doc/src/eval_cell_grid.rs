@@ -143,7 +143,7 @@ pub(crate) fn tools(
     for cell in &plan.cells {
         let pieces = solidcore_ops::cell_grid::cell_regions(cell).map_err(|e| DocError::Invalid(e.to_string()))?;
         for region in &pieces {
-            tools.extend(centered_extrude(&ss.plane, region, lo, hi, None, None, false)?);
+            tools.extend(centered_extrude(&ss.plane, region, lo, hi, None, None, false, None)?);
         }
     }
     // The cells lie apart by the web, so the kernel's own check of their boxes (which a

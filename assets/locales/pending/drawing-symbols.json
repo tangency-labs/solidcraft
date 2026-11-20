@@ -1,0 +1,42 @@
+{
+  "en": {
+    "cmd.drawing_symbol_define": "Define Symbol",
+    "cmd.drawing_symbol_delete": "Delete Symbol",
+    "cmd.drawing_symbol_edit": "Edit Symbol"
+  },
+  "ar": {
+    "cmd.drawing_symbol_define": "تعريف رمز",
+    "cmd.drawing_symbol_delete": "حذف الرمز",
+    "cmd.drawing_symbol_edit": "تحرير الرمز"
+  },
+  "de": {
+    "cmd.drawing_symbol_define": "Symbol definieren",
+    "cmd.drawing_symbol_delete": "Symbol löschen",
+    "cmd.drawing_symbol_edit": "Symbol bearbeiten"
+  },
+  "he": {
+    "cmd.drawing_symbol_define": "הגדרת סמל",
+    "cmd.drawing_symbol_delete": "מחיקת סמל",
+    "cmd.drawing_symbol_edit": "עריכת סמל"
+  },
+  "ja": {
+    "cmd.drawing_symbol_define": "記号を定義",
+    "cmd.drawing_symbol_delete": "記号を削除",
+    "cmd.drawing_symbol_edit": "記号を編集"
+  },
+  "ko": {
+    "cmd.drawing_symbol_define": "기호 정의",
+    "cmd.drawing_symbol_delete": "기호 삭제",
+    "cmd.drawing_symbol_edit": "기호 편집"
+  },
+  "vi": {
+    "cmd.drawing_symbol_define": "Định nghĩa ký hiệu",
+    "cmd.drawing_symbol_delete": "Xóa ký hiệu",
+    "cmd.drawing_symbol_edit": "Sửa ký hiệu"
+  },
+  "zh": {
+    "cmd.drawing_symbol_define": "定义符号",
+    "cmd.drawing_symbol_delete": "删除符号",
+    "cmd.drawing_symbol_edit": "编辑符号"
+  }
+}

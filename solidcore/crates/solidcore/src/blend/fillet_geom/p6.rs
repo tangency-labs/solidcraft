@@ -189,13 +189,12 @@ pub(crate) fn corner_of<'c>(
         .ok_or_else(|| invalid(op, "fillet corner id not in the corner table"))
 }
 
-/// `SM_CAST_PTR(SmBSplineCurve, pCopy)` after an ignored `Copy`: the copy when it is a
-/// B-spline curve, else `NULL`. Every caller's `Copy` is one fork 9b7cd48 passes on
-/// (SER): with `fillet_statuses_pass_on` its error is returned.
+/// `SM_CAST_PTR(SmBSplineCurve, pCopy)` after a `Copy`: the copy when it is a
+/// B-spline curve, else `NULL`. Upstream ignores the `Copy` status; fork 9b7cd48 passes
+/// it on (SER) and so does this (WR-661).
 fn copy_as_b_spline(k: &Kernel, curve: &Curve) -> Result<Option<Curve>> {
     // fork 9b7cd48 passes this on (SER)
-    let copy = crate::error::passed_on(curve.copy(k), k.fixes.fillet_statuses_pass_on)?;
-    Ok(ignored(copy)?.filter(|c| c.is_kind_of(BSPLINE_CURVE_TYPE)))
+    Ok(Some(curve.copy(k)?).filter(|c| c.is_kind_of(BSPLINE_CURVE_TYPE)))
 }
 
 /// The `SmBSplineCurve` a curve of a B-spline class is (`SM_CAST_PTR(SmBSplineCurve, ..)`):
@@ -268,18 +267,17 @@ fn drop_param(
     }
 }
 
-/// `SM_CAST_PTR(SmBSplineSurface, pCopy)` after an ignored `Copy`: the copy when it
-/// `IsKindOf(SmBSplineSurface_TYPE)`, else `NULL`. Its one caller's `Copy` is one fork
-/// 9b7cd48 passes on (SER): with `fillet_statuses_pass_on` its error is returned.
+/// `SM_CAST_PTR(SmBSplineSurface, pCopy)` after a `Copy`: the copy when it
+/// `IsKindOf(SmBSplineSurface_TYPE)`, else `NULL`. Upstream ignores the `Copy` status;
+/// fork 9b7cd48 passes it on (SER) and so does this (WR-661).
 fn copy_as_b_spline_surface(k: &Kernel, surface: &Surface) -> Result<Option<Surface>> {
     // fork 9b7cd48 passes this on (SER)
-    match ignored(crate::error::passed_on(
-        surface.copy(k),
-        k.fixes.fillet_statuses_pass_on,
-    )?)? {
-        Some(s) if s.is_kind_of(B_SPLINE_SURFACE_TYPE)? => Ok(Some(s)),
-        _ => Ok(None),
-    }
+    let s = surface.copy(k)?;
+    Ok(if s.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
+        Some(s)
+    } else {
+        None
+    })
 }
 
 /// `sm_MoveTSP(rTsectPnts, lFrom, lTo)`: when the points at `from` and `to` are out of
@@ -1904,19 +1902,14 @@ impl FilletBrep {
 
             // when given an OffsetSurface to copy - copy it
             if let Some(off) = other_off_surf {
-                // SmOffsetSurface::Copy(); a failed copy leaves the slot unchanged; fork
-                // 9b7cd48 passes this on (SER)
-                if let Some(surface) = ignored(crate::error::passed_on(
-                    off.surface.copy(k),
-                    k.fixes.fillet_statuses_pass_on,
-                )?)? {
-                    let new_off = OffsetSurface {
-                        surface,
-                        base_id: off.base_id,
-                    };
-                    if let Some(slot) = self.geom_mut(g)?.off_surfs.get_mut(i) {
-                        *slot = Some(new_off);
-                    }
+                // SmOffsetSurface::Copy(); upstream ignores a failed copy (the slot is
+                // left unchanged); fork 9b7cd48 passes it on (SER), as does this
+                let new_off = OffsetSurface {
+                    surface: off.surface.copy(k)?,
+                    base_id: off.base_id,
+                };
+                if let Some(slot) = self.geom_mut(g)?.off_surfs.get_mut(i) {
+                    *slot = Some(new_off);
                 }
             }
 

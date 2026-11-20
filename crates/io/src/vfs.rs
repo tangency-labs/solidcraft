@@ -59,6 +59,13 @@ mod imp {
             std::path::Path::new(path).exists()
         }
     }
+    /// The path with links and `.`/`..` resolved, for telling whether two paths name one file.
+    /// It opens the path: on Windows a network path connects to its host, so a path a design
+    /// names goes through [`design_path_refusal`] first. No agent scope applies (it reads nothing).
+    pub fn canonicalize(path: &str) -> Result<std::path::PathBuf> {
+        touched();
+        std::fs::canonicalize(path)
+    }
     /// Whether the path names a regular file the caller may access.
     pub fn is_file(path: &str) -> bool {
         check(path).is_ok() && {

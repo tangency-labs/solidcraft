@@ -2787,7 +2787,9 @@ impl OffsetExecutive {
                             required(self.offset_brep.as_mut())?,
                             offset,
                             offset_edge,
-                            uv_tol * scale,
+                            // Ends pair at the base tolerance: `scale` only finds a
+                            // piece's middle, never moves an end (#18010).
+                            uv_tol,
                         )?;
                         if let Some(slot) = original_uses.get_mut(slot) {
                             *slot = None;
@@ -2838,9 +2840,12 @@ impl OffsetExecutive {
 /// (Not upstream, WR-671.) Raises `offset_edge` of `result` to the tolerance of the
 /// original edge it was matched to, and each of its vertices to the tolerance of the
 /// original vertex it stands for. `original_use` and `offset_use` are the edge uses
-/// `MapEdgeuses` matched within `uv_tol` in UV (their midpoints, or the offset use's
-/// midpoint dropped onto the original's UV curve where curves were split), so they may
-/// run either way, and the offset use may be a piece of the original.
+/// `MapEdgeuses` matched in UV (their midpoints, or the offset use's midpoint dropped onto
+/// the original's UV curve where curves were split, within `uv_tol` times a scale of 1 to
+/// 1000), so they may run either way, and the offset use may be a piece of the original.
+/// `uv_tol` is the unscaled base, `MapEdgeuses`'s tolerance for one UV point standing for
+/// another (`EFF_ZERO_SQRT * (1 + |uv|)`): the scale makes room for a piece's middle lying
+/// away from the original's, and an end that stands for an original end lies on it.
 ///
 /// The edge is raised whatever its ends do: it lies along the original's image. An end
 /// of an edge use is its UV point at normalized 0 (its vertex use's vertex) or 1 (its
@@ -2849,8 +2854,9 @@ impl OffsetExecutive {
 /// whatever its own frame, takes the face's UV curves too), so an offset end that stands
 /// for an original end lies on it in UV, whichever way the uses run and however the new
 /// surface carries them in space. Each offset end takes the tolerance of each original
-/// end within `uv_tol` of it, the tolerance the uses were matched with. An end near none
-/// is a vertex the original does not have (a piece's split end) and takes nothing. An end
+/// end within `uv_tol` of it. An end near none is a vertex the original does not have (a
+/// piece's split end) and takes nothing; pairing at the scaled tolerance gave a split end
+/// within it of an original end that end's tolerance (#18010). An end
 /// near both (one vertex closing the edge, or an edge shorter than `uv_tol`) takes the
 /// larger. An end takes only its own vertex's tolerance otherwise: taking the larger of
 /// the two ends' grew a thin vertex to its edge's other end's tolerance, one edge further
@@ -5760,6 +5766,109 @@ mod tests {
             assert_eq!(vertex::tolerance(&result, ring).unwrap(), 1e-3, "{u:?}");
             assert_eq!(vertex::tolerance(&result, split).unwrap(), 5e-4, "{u:?}");
         }
+    }
+
+    /// `MapEdgeuses` pairs ends at its base UV tolerance, not at the scaled one it matched
+    /// the uses with (tangency-labs/solidcraft#18010). A box's edge, start loosened to 2e-4,
+    /// end to 1e-4, the edge to 5e-5, is split in the copy 40 base tolerances before its
+    /// end: the long piece, met first round the face, has its middle 20 base tolerances from
+    /// the edge's, so scales 1 and 10 miss it and it matches at 100, which the split end is
+    /// also within. The split end, farther from the end in space than the end's tolerance,
+    /// takes only the edge's tolerance; the piece's start still takes the start's.
+    #[test]
+    fn a_piece_matched_at_a_scaled_tolerance_pairs_ends_at_the_base_one() {
+        let mut k = Kernel::default();
+        let mut original = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            10.0,
+            10.0,
+        )
+        .unwrap();
+        let e = original.edges().ids().next().unwrap();
+        let u = edge::edgeuses(&original, e, None, None).unwrap()[0];
+        let start = use_vertex(&original, u).unwrap();
+        let end = use_vertex(&original, eu::mate(&original, u).unwrap().unwrap()).unwrap();
+        vertex::set_tolerance(&mut original, start, 2e-4, true, true).unwrap();
+        vertex::set_tolerance(&mut original, end, 1e-4, true, true).unwrap();
+        original.edge_mut(e).unwrap().tolerance = 5e-5;
+        let uv = |k: &Kernel, b: &Brep, w: EdgeuseId, t: f64| {
+            eu3::normalized_evaluate_read_only(k, b, w, t, true, false)
+                .unwrap()
+                .point
+        };
+        let base = uv_tol_at(&k, &original, u);
+        let (uv_start, uv_end) = (uv(&k, &original, u, 0.0), uv(&k, &original, u, 1.0));
+        let mut result = original.clone_standing_for_self().unwrap();
+        for v in result.vertices().ids().collect::<Vec<_>>() {
+            result.vertex_mut(v).unwrap().tolerance = 1e-5;
+        }
+        for x in result.edges().ids().collect::<Vec<_>>() {
+            result.edge_mut(x).unwrap().tolerance = 1e-5;
+        }
+        result.set_editing_enabled(true);
+        let interval = edge::interval(&result, e).unwrap();
+        let frac = 40.0 * base / uv_start.distance(uv_end);
+        // the edge's parameter runs with its use's (from its start) or against it
+        let forward = uv(&k, &result, u, 0.0).distance(uv_start) < base;
+        let at = interval.evaluate(if forward { 1.0 - frac } else { frac });
+        let (a, z, split) =
+            crate::heal::stitch::p1::make_vertex_split_edge(&mut k, &mut result, e, at).unwrap();
+        let split = split.unwrap();
+        let on = eu::faceuse(&original, u).unwrap();
+        let use_on = |b: &Brep, piece: EdgeId| {
+            edge::edgeuses(b, piece, None, None)
+                .unwrap()
+                .into_iter()
+                .find(|&w| eu::faceuse(b, w).unwrap() == on)
+                .unwrap()
+        };
+        let long = [a.unwrap(), z.unwrap()]
+            .into_iter()
+            .max_by(|&p, &q| {
+                let len = |x| {
+                    uv(&k, &result, use_on(&result, x), 0.0).distance(uv(
+                        &k,
+                        &result,
+                        use_on(&result, x),
+                        1.0,
+                    ))
+                };
+                len(p).total_cmp(&len(q))
+            })
+            .unwrap();
+        let long_use = use_on(&result, long);
+        // the split end lies between the base and the scaled tolerance of the end in UV, and
+        // farther from it in space than the end's tolerance
+        let split_point = vertex::point(&result, split).unwrap();
+        let split_end_uv = [
+            uv(&k, &result, long_use, 0.0),
+            uv(&k, &result, long_use, 1.0),
+        ]
+        .into_iter()
+        .min_by(|p, q| p.distance(uv_end).total_cmp(&q.distance(uv_end)))
+        .unwrap();
+        let off = split_end_uv.distance(uv_end);
+        assert!(off > base && off < 100.0 * base, "{off} {base}");
+        let end_point = vertex::point(&original, end).unwrap();
+        assert!(split_point.distance(end_point) > 1e-4);
+        // the long piece's middle misses scales 1 and 10
+        let piece_tol = uv_tol_at(&k, &result, long_use);
+        let mid_off = uv(&k, &result, long_use, 0.5).distance(uv(&k, &original, u, 0.5));
+        assert!(mid_off > 10.0 * piece_tol && mid_off < 100.0 * piece_tol);
+        let face = eu::face(&original, u).unwrap().unwrap();
+        let mut executive = executive();
+        executive.set_offset_brep(result);
+        face_env(|env, offset_key_of| {
+            executive.map_edgeuses(&k, &mut original, on.unwrap(), face, env, offset_key_of)
+        })
+        .unwrap();
+        let result = executive.required_offset_brep().unwrap();
+        assert_eq!(edge::tolerance(result, long).unwrap(), 5e-5);
+        assert_eq!(vertex::tolerance(result, start).unwrap(), 2e-4);
+        // only the edge's, which raising an edge gives its ends
+        assert_eq!(vertex::tolerance(result, split).unwrap(), 5e-5);
     }
 
     /// A matched use whose UV curve stops at its middle (a cubic with control points

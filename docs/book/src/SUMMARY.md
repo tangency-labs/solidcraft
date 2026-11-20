@@ -35,6 +35,7 @@
   - [Local scalar libraries](dev/local-libraries.md)
 - [The command engine](dev/commands.md)
   - [Command schemas](dev/schemas.md)
+- [Writing a plugin](dev/plugins.md)
 - [The kernel boundary](dev/kernel.md)
 - [Persistent naming](dev/naming.md)
 - [Test harnesses](dev/testing.md)

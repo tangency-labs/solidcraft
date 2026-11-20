@@ -134,6 +134,10 @@ Windows) still gets the startup step. Windows can also keep its own dumps of eve
   restarts the journal from the autosaved design. A clean exit deletes it. The journal file
   is locked while its app runs, so at the next start, a journal nobody holds belongs to an
   app that died.
+- **After an update:** a journal of another version whose app had started up, was between
+  commands and left no native crash record is only logged, not reported: an update or an
+  installer closing the app ends it that way. A journal that stopped recording at its size
+  limit is still reported.
 - **A panic** captures its backtrace only the first time its signature is seen. The
   signature is the place plus the message, with numbers ignored.
 - **Limits:**

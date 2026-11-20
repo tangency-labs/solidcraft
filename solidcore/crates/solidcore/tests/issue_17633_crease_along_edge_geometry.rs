@@ -32,8 +32,6 @@ use solidcore::{Brep, Kernel};
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_overflow_trim_at_creases = true;
-    k.fixes.fillet_overflow_crease_along_edge = true;
     k
 }
 

@@ -123,4 +123,27 @@ mod tests {
             assert!((dist - 1.5).abs() < 0.03, "{dist} at {p:?}");
         }
     }
+
+    /// A line swept round a closed 3D spline (eight fit points round a circle of radius 25, up and
+    /// down by 4 in turn) is one face, closed round the path on its seam. Offset by 1 it stays one
+    /// face closed on its seam, not a loop with a gap where the path's ends meet (#18117).
+    #[test]
+    fn a_wall_swept_round_a_closed_spline_keeps_its_seam() {
+        use crate::{PathPiece, PointPath, SweepControl};
+        use solidcore_record::{Plane, Seg2, Vec2};
+        let fit: Vec<Vec3> = (0..=8)
+            .map(|i| {
+                let t = std::f64::consts::TAU * (i % 8) as f64 / 8.0;
+                Vec3::new(25.0 * t.cos(), 25.0 * t.sin(), if i % 2 == 0 { 10.0 } else { 6.0 })
+            })
+            .collect();
+        let path = PointPath { pieces: vec![PathPiece::Spline { fit, reversed: false }] };
+        let plane = Plane { origin: Vec3::new(0.0, 0.0, 10.0), x: Vec3::X, y: Vec3::Y };
+        let line = vec![Seg2::Line { a: Vec2::new(25.0, 0.0), b: Vec2::new(31.0, 0.0) }];
+        let wall = crate::surfaces::sweep_sheet_point_path_with(&plane, &[line], &path, &SweepControl::default()).unwrap();
+        assert!(wall.face_count() == 1 && edges(&wall) == 3, "{} faces, {} edges", wall.face_count(), edges(&wall));
+        let out = offset_surface(&wall, &[0], 1.0, 0.01).unwrap();
+        assert!(out.is_surface() && out.face_count() == 1, "{} faces", out.face_count());
+        assert_eq!(edges(&out), 3, "the offset closes on its seam");
+    }
 }

@@ -17,6 +17,7 @@ use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::primitive::api_primitives as api;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
 use solidcore::topology::Brep;
 use solidcore::Kernel;
 use std::f64::consts::PI;
@@ -1440,4 +1441,233 @@ fn a_slot_across_a_hole_tangent_to_its_face_cuts() {
         (got - want).abs() <= VOLUME_REL_TOL * want,
         "volume {got} vs {want}"
     );
+}
+
+// ---- a box face beside a sphere's seam or past its poles --------------------------------
+
+/// The band within which two entities of the default tolerance (1e-5 each) touch.
+const BAND: f64 = 2e-5;
+
+/// Faces, edges and vertices of a B-rep.
+fn counts(b: &Brep) -> [usize; 3] {
+    [
+        solidcore::topology::brep::p1::faces(b, None).unwrap().len(),
+        solidcore::topology::brep::p1::edges(b, None).unwrap().len(),
+        solidcore::topology::brep::p1::vertices(b, None)
+            .unwrap()
+            .len(),
+    ]
+}
+
+/// The volume of the unit sphere about the origin within the half space y <= -delta and
+/// |z| <= `hz`: the circle segments of the slices z, integrated by Simpson's rule (smooth
+/// for `hz` < 1; 20000 panels).
+fn unit_sphere_half_space_slab(delta: f64, hz: f64) -> f64 {
+    let segment = |z: f64| {
+        let rho = (1.0 - z * z).sqrt();
+        rho * rho * (delta / rho).acos() - delta * (rho * rho - delta * delta).sqrt()
+    };
+    let n = 20_000_u32;
+    let h = 2.0 * hz / f64::from(n);
+    (0..=n)
+        .map(|i| {
+            let w = if i == 0 || i == n {
+                1.0
+            } else if i % 2 == 1 {
+                4.0
+            } else {
+                2.0
+            };
+            w * segment(-hz + f64::from(i) * h)
+        })
+        .sum::<f64>()
+        * h
+        / 3.0
+}
+
+/// The boolean `op` of the unit sphere about the origin and the box from `lo` with sides
+/// `size`, the box turned `turn` degrees about z: the result, its volume and its counts.
+fn unit_sphere_and_box(
+    op: Op,
+    lo: Point3,
+    size: [f64; 3],
+    turn: f64,
+    accuracy: f64,
+) -> Result<(Kernel, Brep, f64), String> {
+    let mut k = Kernel::default();
+    let a = api::create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0).unwrap();
+    let mut b = api::create_box(&mut k, lo, size[0], size[1], size[2]).unwrap();
+    if turn != 0.0 {
+        api_rotate(
+            &mut k,
+            Some(TransformObject::Brep(&mut b)),
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            turn,
+        )
+        .unwrap();
+    }
+    let result = match op {
+        Op::Union => boolean_union(&mut k, a, b),
+        Op::Intersection => boolean_intersection(&mut k, a, b),
+        Op::Difference => boolean_difference(&mut k, a, b),
+    };
+    let mut brep = result.map_err(|e| e.to_string())?;
+    let store = AttributeStore::new();
+    let key_of = |_| ObjectKey(0);
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &key_of,
+    };
+    let v = brep_volume(&k, &mut brep, accuracy, &attrs).map_err(|e| e.to_string())?;
+    Ok((k, brep, v))
+}
+
+/// A unit sphere and a box whose face y = -delta runs parallel to the sphere's seam (the
+/// half plane y = 0, x > 0), at 0, 0.5, 0.51, 0.99, 1.01 and 3 times the 2e-5 band from
+/// it, the box between z = -1/2 and 1/2 so that the face stays away from the poles; and
+/// the same box turned a quarter turn about z, its face then across the sphere from the
+/// seam. A seam bounds no material (docs/booleans.md, "Seams and poles"): the circle the
+/// face cuts meets it only within the circle's own reach, its tolerance of 1e-5 over the
+/// sine of the angle at which the face cuts the sphere (a right angle here; the enclosed
+/// reach is 1.0002e-5). Within the 2e-5 band the circle was classified on the seam edge:
+/// the seam became the circle's edge, and a slab between the seam plane and the face went
+/// with the wrong side. Beyond the reach (0.51 bands and more) both placements now give
+/// the same volumes, within 1e-6 of the exact ones (measured: 4.7e-7 at most, the two
+/// placements equal to 1e-9) and the same counts. Within it (on the seam, and at half a
+/// band: 1e-5, the tolerance itself) the circle is the seam's middle piece, one edge
+/// more, and the volume is the exact one to the slab between the two (1.9 `delta`).
+/// Level2 is clean but for face test 36 within the band (below).
+#[test]
+fn a_box_face_beside_a_spheres_seam_does_not_touch_it() {
+    let hz = 0.5;
+    let sphere = 4.0 / 3.0 * PI;
+    let mut failures = Vec::new();
+    for f in [0.0, 0.5, 0.51, 0.99, 1.01, 3.0] {
+        let delta = f * BAND;
+        // within the circle's reach the seam stands for it, and the slab between the seam
+        // plane and the face (its area below 2) may go with either side
+        let within_reach = f <= 0.5;
+        let slab = if within_reach { 2.0 * delta } else { 0.0 };
+        let common = unit_sphere_half_space_slab(delta, hz);
+        let block = 4.0 * (2.0 - delta) * 2.0 * hz;
+        for (op, name, want) in [
+            (Op::Union, "union", sphere + block - common),
+            (Op::Intersection, "intersection", common),
+            (Op::Difference, "difference", sphere - common),
+        ] {
+            let mut volumes = Vec::new();
+            for turn in [0.0, -90.0] {
+                let case = format!("{f} bands, turned {turn}, {name}");
+                let lo = Point3::new(-2.0, -2.0, -hz);
+                let (mut k, mut brep, v) =
+                    match unit_sphere_and_box(op, lo, [4.0, 2.0 - delta, 2.0 * hz], turn, 1e-9) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            failures.push(format!("{case}: {e}"));
+                            continue;
+                        }
+                    };
+                let rel = (v - want).abs() / want;
+                // Written to accept: a NaN volume fails.
+                if rel.is_nan() || rel > 1e-6 + slab / want {
+                    failures.push(format!("{case}: volume {v:e} vs {want:e} (rel {rel:.2e})"));
+                }
+                volumes.push(v);
+                let on_seam = within_reach && turn == 0.0;
+                let want_counts = match op {
+                    Op::Union if on_seam => [8, 20, 14],
+                    Op::Union => [8, 19, 14],
+                    Op::Intersection => [4, 6, 4],
+                    Op::Difference if on_seam => [4, 8, 6],
+                    Op::Difference => [4, 7, 6],
+                };
+                let got = counts(&brep);
+                if got != want_counts {
+                    failures.push(format!("{case}: counts {got:?} vs {want_counts:?}"));
+                }
+                // Face test 36 still takes an edge within the summed tolerances of a seam
+                // for a seam it nearly misses (`HasSeamProblem`), so a face edge beside the
+                // seam within the band reports it; nothing else may fail.
+                let beside = turn == 0.0 && f > 0.0 && f < 1.0;
+                let check = check_brep(&mut k, &mut brep, CheckLevel::Level2).unwrap();
+                let lines = check.lines();
+                let others: Vec<_> = lines
+                    .iter()
+                    .filter(|l| !(beside && l.contains("SmFace::Test #36")))
+                    .collect();
+                if !others.is_empty() {
+                    failures.push(format!("{case}: Level2 {lines:?}"));
+                }
+            }
+            if let [a, b] = volumes[..] {
+                let apart = (a - b).abs() / want;
+                if apart.is_nan() || apart > 1e-9 + slab / want {
+                    failures.push(format!(
+                        "{f} bands, {name}: the two placements give {a:e} and {b:e}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A unit sphere and a box reaching past it below its face y = -delta, the face parallel
+/// to the sphere's seam plane and passing its two poles at 0.51, 0.99, 1.01 and 3 times the
+/// 2e-5 band; and the same turned a quarter turn about z, away from the seam. A pole bounds
+/// no material: the circle meets it only within its own reach, 1.0002e-5 for this right
+/// angle (docs/booleans.md, "Seams and poles"; at half a band, the tolerance itself, the
+/// circle is within reach and goes through the pole). Both placements give the same
+/// counts, the same volumes to 1e-6
+/// (measured 1e-8; the volumes integrated to 1e-7) and the exact cap's within 3e-6
+/// (measured 1.8e-6: the circle's UV trim turns sharply about the pole). Before, within the band the circle's top was taken for
+/// the pole and its seam half for the seam: 7.6e-6 and 1.5e-5 of the intersection off,
+/// broken pointers at Level2. Level2 is not asserted: the trims about the pole report a 2D
+/// cusp (`SmBSplineCurve` test 13) and, within 1.01 bands, a trim crossing the period
+/// (`SmEdgeuse` test 7), turned or not.
+#[test]
+fn a_box_face_past_a_spheres_poles_does_not_touch_them() {
+    let sphere = 4.0 / 3.0 * PI;
+    let mut failures = Vec::new();
+    for f in [0.51, 0.99, 1.01, 3.0] {
+        let delta = f * BAND;
+        let h = 1.0 - delta;
+        let common = PI * h * h * (3.0 - h) / 3.0;
+        let block = 4.0 * (2.0 - delta) * 4.0;
+        for (op, name, want) in [
+            (Op::Union, "union", sphere + block - common),
+            (Op::Intersection, "intersection", common),
+            (Op::Difference, "difference", sphere - common),
+        ] {
+            let mut seen = Vec::new();
+            for turn in [0.0, -90.0] {
+                let case = format!("{f} bands, turned {turn}, {name}");
+                let lo = Point3::new(-2.0, -2.0, -2.0);
+                let (_, brep, v) =
+                    match unit_sphere_and_box(op, lo, [4.0, 2.0 - delta, 4.0], turn, 1e-7) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            failures.push(format!("{case}: {e}"));
+                            continue;
+                        }
+                    };
+                let rel = (v - want).abs() / want;
+                // Written to accept: a NaN volume fails.
+                if rel.is_nan() || rel > 3e-6 {
+                    failures.push(format!("{case}: volume {v:e} vs {want:e} (rel {rel:.2e})"));
+                }
+                seen.push((v, counts(&brep)));
+            }
+            if let [(a, ca), (b, cb)] = seen[..] {
+                let apart = (a - b).abs() / want;
+                if apart.is_nan() || apart > 1e-6 || ca != cb {
+                    failures.push(format!(
+                        "{f} bands, {name}: the two placements give {a:e} {ca:?} and {b:e} {cb:?}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
 }

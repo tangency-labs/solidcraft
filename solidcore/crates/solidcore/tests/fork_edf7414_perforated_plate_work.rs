@@ -31,9 +31,12 @@
 use std::f64::consts::PI;
 use std::time::Instant;
 
-use solidcore::boolean::api_brep::{boolean_2d, boolean_lists, Boolean2d, Boolean2dOutcome};
+use solidcore::boolean::api_brep::{
+    boolean as boolean_3d, boolean_2d, boolean_lists, boolean_union, Boolean2d, Boolean2dOutcome,
+};
 use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::Ellipse;
+use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_area, brep_volume_default};
@@ -42,6 +45,8 @@ use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::primitive::api_trim_ops::create_planar_faces;
 use solidcore::topology::brep::p1;
+use solidcore::topology::brep::p2::is_manifold_solid;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::{Brep, Kernel};
 
 const RADIUS: f64 = 2.0;
@@ -439,4 +444,61 @@ fn plate_cut_marks_one_face_for_each_face_it_deletes() {
 fn plate_cut_solves_no_proto_vertex_that_has_proto_edges() {
     let solves = (plate_cut_counts(5).1, plate_cut_counts(10).1);
     assert_eq!(solves, (0, 0));
+}
+
+// ---- the plate as a solid, cut a group of holes at a time ---------------------------------
+
+/// The solid version, as SolidCraft cuts a pattern of holes: a 2 mm plate with `n` x `n`
+/// holes r 0.5 on a 2.54 mm pitch, cut as cylinders a group of 8 at a time, one group after
+/// another, then checked. Returns the drops of the plate's vertices onto the curves the cuts
+/// classify on its faces.
+///
+/// A vertex can only meet a curve within the drop's tolerance, and a hole's circles lie far
+/// from the vertices of the holes cut before: only the 2 drops of each hole's own cut are
+/// solved, 32 and 72 for 16 and 36 holes, where every curve used to be dropped onto every
+/// vertex in the plate, 352 and 1528, growing with the square of the holes. The plate keeps
+/// one cylinder face per hole and checks clean either way.
+fn solid_plate_vertex_drops(n: u32) -> u64 {
+    const HOLE: f64 = 0.5;
+    const STEP: f64 = 2.54;
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    k.memoize_curve_caches = true; // the count is the shortcut's, whatever `curve-memo-off` says
+    let w = STEP * f64::from(n + 1);
+    let mut plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), w, w, 2.0).unwrap();
+    let holes: Vec<Brep> = (0..n * n)
+        .map(|i| {
+            let (x, y) = (STEP * f64::from(i % n + 1), STEP * f64::from(i / n + 1));
+            create_cylinder(&mut k, Point3::new(x, y, -1.0), HOLE, 4.0).unwrap()
+        })
+        .collect();
+    k.work_counters.reset();
+    let mut holes = holes.into_iter();
+    loop {
+        let group: Vec<Brep> = holes.by_ref().take(8).collect();
+        let mut group = group.into_iter();
+        let Some(first) = group.next() else { break };
+        let tool = group.fold(first, |a, b| boolean_union(&mut k, a, b).unwrap());
+        plate = boolean_3d(&mut k, plate, tool, BooleanOperation::Difference)
+            .unwrap()
+            .result;
+    }
+    plate.use_arena_naming().unwrap();
+    let lines = check_brep(&mut k, &mut plate, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(is_manifold_solid(&plate).unwrap());
+    assert_eq!(plate.face_list().len(), 6 + (n * n) as usize);
+    let drops = k.work_counters.vertex_drops();
+    println!("solid plate with {} holes: {drops} vertex drops", n * n);
+    drops
+}
+
+#[test]
+fn a_solid_plate_cut_a_group_at_a_time_drops_only_its_own_vertices() {
+    assert_eq!(solid_plate_vertex_drops(4), 32);
+    assert_eq!(solid_plate_vertex_drops(6), 72);
 }

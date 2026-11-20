@@ -21,6 +21,20 @@ Setting `SOLIDCRAFT_SAFE_MODE=1` does the same. From 0.10.2, if two launches in 
 before the window opens, the next one starts in safe mode by itself. `SOLIDCRAFT_RENDERER=cpu`
 uses only the software renderer and keeps your settings.
 
+## Safe graphics mode
+
+If a launch stops before it is up, or the graphics device is lost (the driver was reset), the
+next launch starts in safe graphics mode: your graphics card and settings, but drawn the plain way
+early versions did. The graphics API is the one wgpu picks by itself (no Direct3D 12 first, no
+retries), with no anti-aliasing, ambient occlusion, blur behind panels, studio shading or GPU
+path tracer. The view says "Started in safe graphics mode"; **Try full graphics** goes back to
+full graphics at the next start and offers a restart.
+
+The launch after a single failure tries full graphics again. If two full-graphics launches in a
+row fail, safe graphics mode stays on until you click **Try full graphics**. A full-graphics
+launch that runs a minute without losing its device clears the failures. To try it yourself, tick
+Preferences › Graphics › **Start in safe graphics mode**; it applies to the next launch only.
+
 ## A design won't open or hangs while opening
 
 - **A design that stopped the app while it was being reopened is skipped once.** If SolidCraft

@@ -1473,6 +1473,13 @@ pub fn srf_srf_intersection_with_context(
                 c3: &mut Vec<Curve>,
                 u1: &mut Vec<Option<Curve>>,
                 u2: &mut Vec<Option<Curve>>| {
+        // A surface of extrusion lying in the plane answers its coincident patch's
+        // boundary; that is no section curve, so this search goes on to the paths
+        // below as it did when the special case asked for more.
+        let r = r.filter(|(_, xs)| {
+            !xs.curve_types
+                .contains(&crate::surface::surface::p2::TsectCurveType::RegionBoundary)
+        });
         if let Some((_, xs)) = r {
             c3.extend(xs.curves_3d);
             if swap {
@@ -1648,11 +1655,12 @@ pub fn srf_srf_intersection_with_context(
 
     // general surf/surf intersector
     if curves_3d.is_empty() {
-        let xs = if let Some((context, handles)) = context {
+        let mut context = context;
+        let xs = if let Some((context, handles)) = context.as_mut() {
             surf1.global_surface_intersect_with_context(
                 k,
-                handles,
-                context,
+                *handles,
+                &mut **context,
                 &domain1,
                 surf2,
                 &domain2,
@@ -1670,6 +1678,37 @@ pub fn srf_srf_intersection_with_context(
                 Some(ssi_tol),
                 Some(angle_tol),
             )?
+        };
+        // The plane / extrusion dispatch answers an extrusion lying in the plane with
+        // its coincident region's boundary, no section curve (as for the special cases
+        // above): the general intersection, as that dispatch ran when the special case
+        // asked for more (with its tolerance: the plane's dispatch passes it on, the
+        // extrusion's converts it).
+        let plane_extrusion = match (surf1.kind(), surf2.kind()) {
+            (SurfaceKind::Plane(_), SurfaceKind::SurfOfExtrusion(_)) => Some(Some(ssi_tol)),
+            (SurfaceKind::SurfOfExtrusion(_), SurfaceKind::Plane(_)) => {
+                Some(Some(approx_tol3d(k, ssi_tol)))
+            }
+            _ => None,
+        };
+        let region = xs
+            .curve_types
+            .contains(&crate::surface::surface::p2::TsectCurveType::RegionBoundary);
+        let xs = match plane_extrusion {
+            Some(tol) if region => crate::surface::surface::p2::base_global_surface_intersect_in(
+                k,
+                surf1,
+                &domain1,
+                surf2,
+                &domain2,
+                [true, true],
+                tol,
+                Some(angle_tol),
+                context.map(|(solver, handles)| {
+                    crate::surface::surface::p1::SurfaceIntersectContext { solver, handles }
+                }),
+            )?,
+            _ => xs,
         };
         curves_3d.extend(xs.curves_3d);
         surface1_uv_curves.extend(xs.surface1_uv_curves);
@@ -2659,11 +2698,8 @@ impl FilletBrep {
         if let Some(g1) = fillet_geom1 {
             // its status is ignored upstream (lRailIndex stays 0); fork 9b7cd48 passes
             // this on (SER)
-            let rail_index = ignore_status(crate::error::passed_on(
-                self.rail_index_of_side_eu_resolved(g1, side_eu1, target, &|id| solvers.solver(id)),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?
-            .unwrap_or(0);
+            let rail_index = self
+                .rail_index_of_side_eu_resolved(g1, side_eu1, target, &|id| solvers.solver(id))?;
 
             // Not upstream (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): a rail rolled over a smooth far
             // edge of its solver's face, the whole length, lies on the face beyond, which the
@@ -3018,16 +3054,12 @@ impl FilletBrep {
             // its status is ignored upstream; fork 9b7cd48 passes this on (SER)
             let other_rail_index =
                 // upstream dereferences a NULL side edge use there
-                ignore_status(crate::error::passed_on(
-                    match side_eu2 {
+                match side_eu2 {
                         Some(eu) => self.rail_index_of_side_eu_resolved(g2, eu, target, &|id| {
                             solvers.solver(id)
                         }),
                         None => Err(SolidError::blend_missing(OP, "the second side edge use")),
-                    },
-                    k.fixes.fillet_statuses_pass_on,
-                )?)?
-                .unwrap_or(0);
+                }?;
             let side_eu2 = side_eu2
                 .ok_or_else(|| SolidError::blend_missing(OP, "the second side edge use"))?;
 
@@ -3253,12 +3285,7 @@ impl FilletBrep {
                     // its status is ignored upstream (the point is then whatever the
                     // call left; here the previous value); fork 9b7cd48 passes this on
                     // (SER)
-                    if let Some(uv) = ignore_status(crate::error::passed_on(
-                        vertexuse_unit::compute_uv_point(k, target, vu, true),
-                        k.fixes.fillet_statuses_pass_on,
-                    )?)? {
-                        *slot = uv;
-                    }
+                    *slot = vertexuse_unit::compute_uv_point(k, target, vu, true)?;
                     break;
                 }
             }
@@ -4191,10 +4218,7 @@ impl FilletBrep {
         } else {
             let mut uv = new_curve;
             // its status is ignored upstream; fork 9b7cd48 passes this on (SER)
-            ignore_status(crate::error::passed_on(
-                uv.convert_to_2d(),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            uv.convert_to_2d()?;
             uv_curve = Some(Curve::from(uv));
             curve_3d = None;
         }
@@ -4467,6 +4491,114 @@ mod tests {
         domain.set_min_max_coords(0.0, 0.0, 360.0, 40.0).unwrap();
         cylinder.adjust_step_uv_domain(k, &domain).unwrap();
         Surface::from(cylinder)
+    }
+
+    /// The ends of a curve.
+    fn curve_ends(k: &Kernel, c: &Curve) -> (Point3, Point3) {
+        let ivl = c.natural_interval();
+        (
+            c.evaluate_point(k, ivl.min()).unwrap(),
+            c.evaluate_point(k, ivl.max()).unwrap(),
+        )
+    }
+
+    /// Review r2 M3 of #18352: an extrusion lying in a plane reaches the general
+    /// intersector here (no end points: neither tracer runs), whose plane / extrusion
+    /// dispatch answers the coincident region's boundary. The intersection keeps the
+    /// general intersection's answer instead, in both orders, as before that
+    /// dispatch answered the region.
+    #[test]
+    fn plane_and_extrusion_in_it_keep_the_general_intersection() {
+        use crate::geom::vector2d::Vec2;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::surface::plane::Plane;
+        use crate::surface::surf_of_extrusion::SurfOfExtrusion;
+        use crate::surface::surface::p1::SurfaceIntersectContext;
+        use crate::surface::surface::p2::{base_global_surface_intersect_in, TsectCurveType};
+        use crate::surface::surface::p4::NoObject;
+        let k = Kernel::default();
+        let pw = vec![
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(1.0, 0.0, 0.0, NOW),
+            CPoint::new(2.0, 0.0, 1.0, NOW),
+        ];
+        let nurb = NurbCurve::new(pw, 1, vec![0.0, 0.0, 1.0, 2.0, 2.0]).unwrap();
+        let gen = Curve::from(BSplineCurve::from_nurb(nurb, 3, false));
+        let ext = Surface::from(SurfOfExtrusion::create_canonical(&k, gen, Vec3::Y).unwrap());
+        let dom = Extent2d::from_bounds(-5.0, -5.0, 5.0, 5.0);
+        let mut plane = Plane::new(Point3::ZERO, Vec3::X, Vec3::Y, Vec2::new(1.0, 1.0), &dom);
+        plane.make_nurb().unwrap();
+        let plane = Surface::from(plane);
+        let (tol, ang) = (1e-6, 0.1);
+        for (s1, s2) in [(&plane, &ext), (&ext, &plane)] {
+            let d1 = s1.natural_uv_domain_with_nurb(&k).unwrap();
+            let d2 = s2.natural_uv_domain_with_nurb(&k).unwrap();
+            // the dispatch the general intersector reaches answers the region
+            let dispatched = s1
+                .global_surface_intersect(&k, &d1, s2, &d2, [true, true], Some(tol), Some(ang))
+                .unwrap();
+            assert!(dispatched
+                .curve_types
+                .contains(&TsectCurveType::RegionBoundary));
+            // the general intersection, as the dispatch ran before
+            let tol_in = match s1.kind() {
+                SurfaceKind::Plane(_) => tol,
+                _ => approx_tol3d(&k, tol),
+            };
+            let general = base_global_surface_intersect_in::<NoObject>(
+                &k,
+                s1,
+                &d1,
+                s2,
+                &d2,
+                [true, true],
+                Some(tol_in),
+                Some(ang),
+                None::<SurfaceIntersectContext<'_, NoObject>>,
+            )
+            .unwrap();
+            assert!(!general
+                .curve_types
+                .contains(&TsectCurveType::RegionBoundary));
+            assert!(!general.curves_3d.is_empty());
+            let got = srf_srf_intersection_with_context(
+                &k,
+                None,
+                None,
+                None,
+                None,
+                s1,
+                s2,
+                tol,
+                ang,
+                // nearest the origin: the region's directrix x = 0 there, which the
+                // general intersection does not hold
+                SrfSrfOptions {
+                    ref_point: Some(Point3::ZERO),
+                    ..SrfSrfOptions::default()
+                },
+                None,
+            );
+            let wanted: Vec<_> = general
+                .curves_3d
+                .iter()
+                .map(|c| curve_ends(&k, c))
+                .collect();
+            match got.ok().and_then(|g| g.curve_3d) {
+                Some(c) => {
+                    let (a, b) = curve_ends(&k, &c);
+                    assert!(
+                        wanted
+                            .iter()
+                            .any(|&(p, q)| (a.distance(p) <= 1e-9 && b.distance(q) <= 1e-9)
+                                || (a.distance(q) <= 1e-9 && b.distance(p) <= 1e-9)),
+                        "{a:?}-{b:?} not among {wanted:?}"
+                    );
+                }
+                None => panic!("no curve: {wanted:?}"),
+            }
+        }
     }
 
     /// The point at `deg` degrees on the cylinder's circle at height 5.

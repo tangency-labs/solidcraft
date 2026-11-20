@@ -1218,10 +1218,23 @@ fn box_distance(bbox: &Extent3d, p: Vec3) -> f64 {
 /// as reaching).
 const CLEARANCE_BOXES: usize = 512;
 
+/// A box that provably holds `surface` over `cell`, or `None` when none is known: a plane's is
+/// that of the cell's corners ([`plane_cell_box`]), any other surface's the box of its own piece
+/// over the cell ([`Surface::certified_bounding_box`]).
+fn surface_cell_box(k: &Kernel, surface: &Surface, cell: &Extent2d) -> Result<Option<Extent3d>> {
+    Ok(match surface.kind() {
+        SurfaceKind::Plane(_) => plane_cell_box(k, surface, cell)?,
+        _ => exclusion_probe(surface.certified_bounding_box(k, cell))?.flatten(),
+    }
+    .filter(Extent3d::is_defined))
+}
+
 /// Whether every point of `surface` over `domain` is at least `radius` from `point`, proven by
-/// bounding boxes: a cell whose box (grown by the zone) is that far away is clear, any other is
-/// split in four. Running out of boxes, a failed box or a domain that cannot be split proves
-/// nothing, so the answer is false.
+/// bounding boxes. The surface's own box comes first; it is the whole control net's, whatever
+/// the domain ([`Surface::calculate_bounding_box`]), so where it is not clear the proof goes on
+/// cell by cell from `domain`: a cell whose box ([`surface_cell_box`], grown by the zone) is
+/// `radius` away is clear, any other is split in four. Running out of boxes, a cell with no box
+/// or a domain that cannot be split proves nothing, so the answer is false.
 fn surface_clears(
     k: &Kernel,
     surface: &Surface,
@@ -1231,23 +1244,32 @@ fn surface_clears(
     radius: f64,
 ) -> Result<bool> {
     let zone = tol::zone_tol3d(k, face_tolerance);
+    let clear = |mut bounds: Extent3d| {
+        bounds.expand_absolute(zone);
+        box_distance(&bounds, point) >= radius
+    };
+    let Some(whole) =
+        exclusion_probe(surface.calculate_bounding_box(k, domain, [true, false, false], true))?
+            .and_then(|boxes| boxes.normal_box)
+            .filter(Extent3d::is_defined)
+    else {
+        return Ok(false);
+    };
+    if clear(whole) {
+        return Ok(true);
+    }
     let mut cells = vec![*domain];
-    let mut asked = 0_usize;
+    let mut asked = 1_usize;
     while let Some(cell) = cells.pop() {
         k.check_cancelled("topology::brep::validation::vertex_exclusion")?;
         if asked >= CLEARANCE_BOXES {
             return Ok(false);
         }
         asked += 1;
-        let Some(mut cell_box) =
-            exclusion_probe(surface.calculate_bounding_box(k, &cell, [true, false, false], true))?
-                .and_then(|boxes| boxes.normal_box)
-                .filter(Extent3d::is_defined)
-        else {
+        let Some(cell_box) = surface_cell_box(k, surface, &cell)? else {
             return Ok(false);
         };
-        cell_box.expand_absolute(zone);
-        if box_distance(&cell_box, point) >= radius {
+        if clear(cell_box) {
             continue;
         }
         let (lo, hi) = (cell.min(), cell.max());
@@ -2701,6 +2723,86 @@ mod issue_891_tests {
         assert_eq!(curve.certified_bounding_box(&k, &interval).unwrap(), None);
         let far = Vec3::new(100.0, 100.0, 100.0);
         assert!(!curve_clears(&k, &curve, &interval, 1e-5, far, 0.1).unwrap());
+    }
+
+    /// The wall of a cylinder of radius 2 from z = 0 to 3, and its top rim with its interval.
+    fn cylinder_wall_and_top_rim(k: &mut Kernel) -> (Surface, Extent2d, Curve, Extent1d) {
+        let b = crate::primitive::api_primitives::create_cylinder(k, Vec3::ZERO, 2.0, 3.0).unwrap();
+        let wall = b
+            .face_list()
+            .iter()
+            .map(|&f| b.face(f).unwrap())
+            .find(|face| !matches!(face.surface.as_ref().unwrap().kind(), SurfaceKind::Plane(_)))
+            .unwrap();
+        let surface = wall
+            .surface
+            .as_ref()
+            .unwrap()
+            .clone_for_evaluation()
+            .unwrap();
+        let rim = b
+            .edge_list()
+            .iter()
+            .map(|&e| b.edge(e).unwrap())
+            .find(|edge| {
+                let curve = edge.curve.as_ref().unwrap();
+                matches!(curve.kind(), CurveKind::Ellipse(_))
+                    && curve.evaluate_point(k, edge.interval.min()).unwrap().z == 3.0
+            })
+            .unwrap();
+        (
+            surface,
+            wall.uv_domain,
+            rim.curve.clone().unwrap(),
+            rim.interval,
+        )
+    }
+
+    /// A point on a cylinder's axis lies inside the box of the wall's control net, 2 from the
+    /// wall: the proof by boxes reaches the answer by splitting the wall, clear for a ball of
+    /// radius 1, not clear for one of 2.1 (which does reach it).
+    #[test]
+    fn a_ball_on_the_axis_of_a_round_wall_is_proved_clear_of_the_wall() {
+        let mut k = Kernel::default();
+        let (wall, domain, _, _) = cylinder_wall_and_top_rim(&mut k);
+        let on_axis = Vec3::new(0.0, 0.0, 1.5);
+        let whole = wall
+            .calculate_bounding_box(&k, &domain, [true, false, false], true)
+            .unwrap()
+            .normal_box
+            .unwrap();
+        assert_eq!(box_distance(&whole, on_axis), 0.0);
+        assert!(surface_clears(&k, &wall, &domain, 1e-5, on_axis, 1.0).unwrap());
+        assert!(!surface_clears(&k, &wall, &domain, 1e-5, on_axis, 2.1).unwrap());
+    }
+
+    /// The same for a circle: its centre is a corner of the box of each quarter's control
+    /// points, 2 from the circle. A ball there of radius 1.9 is clear of the rim, one of 2.1 is
+    /// not.
+    #[test]
+    fn a_ball_at_the_centre_of_a_rim_is_proved_clear_of_the_rim() {
+        let mut k = Kernel::default();
+        let (_, _, rim, interval) = cylinder_wall_and_top_rim(&mut k);
+        let centre = Vec3::new(0.0, 0.0, 3.0);
+        let whole = rim.certified_bounding_box(&k, &interval).unwrap().unwrap();
+        assert_eq!(box_distance(&whole, centre), 0.0);
+        assert!(curve_clears(&k, &rim, &interval, 1e-5, centre, 1.9).unwrap());
+        assert!(!curve_clears(&k, &rim, &interval, 1e-5, centre, 2.1).unwrap());
+    }
+
+    /// A surface kind with no certified box of a cell (here an offset surface, which is not its
+    /// base's control net) is proved clear by its own box or not at all.
+    #[test]
+    fn a_surface_without_a_cell_box_is_clear_only_by_its_whole_box() {
+        let mut k = Kernel::default();
+        let (wall, domain, _, _) = cylinder_wall_and_top_rim(&mut k);
+        let offset =
+            crate::surface::surface::p1::base_create_offset_surface(&k, &wall, 0.5).unwrap();
+        assert_eq!(offset.certified_bounding_box(&k, &domain).unwrap(), None);
+        let on_axis = Vec3::new(0.0, 0.0, 1.5);
+        assert!(!surface_clears(&k, &offset, &domain, 1e-5, on_axis, 1.0).unwrap());
+        let far = Vec3::new(100.0, 100.0, 100.0);
+        assert!(surface_clears(&k, &offset, &domain, 1e-5, far, 1.0).unwrap());
     }
 
     /// WR-446 (`plan/upstream-issues/WR-446--brepconstructor-endshell-validatepointers-makes-uv-trim-curves.md`):

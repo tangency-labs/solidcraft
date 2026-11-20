@@ -578,11 +578,14 @@ impl Curve {
     /// A box that provably holds every point of the curve over `interval`, or `None` when
     /// none is known (not upstream; for clearance proofs, where a sampled box proves
     /// nothing). The B-spline and conic boxes come from the control points of the spans
-    /// covered, a line's from its ends, a Hermite curve's from its Bezier polygon (over
-    /// the whole curve), a composite's from its segments' certified boxes (none when a
-    /// segment has none). A curve on a surface or a tangent-field curve has none: its box is
-    /// its approximation's, whose gap from the curve is measured at sample points. Every other
-    /// kind would fall back to [`calculate_bounding_box_base`], which samples, so it has none.
+    /// covered, cut down to the box of the control points of the piece over `interval`
+    /// alone where that piece is certain ([`Curve::piece_hull_points`]), so they shrink
+    /// with the interval inside a span too; a line's from its ends, a Hermite curve's
+    /// from its Bezier polygon (over the whole curve), a composite's from its segments'
+    /// certified boxes (none when a segment has none). A curve on a surface or a
+    /// tangent-field curve has none: its box is its approximation's, whose gap from the
+    /// curve is measured at sample points. Every other kind would fall back to
+    /// [`calculate_bounding_box_base`], which samples, so it has none.
     ///
     /// # Errors
     ///
@@ -597,7 +600,7 @@ impl Curve {
             pseudo: false,
             polar: false,
         };
-        Ok(match self.kind() {
+        let spans = match self.kind() {
             CurveKind::BSpline(c) => c.calculate_bounding_box(interval, req)?.normal,
             CurveKind::Hyperbola(c) => c.base().calculate_bounding_box(interval, req)?.normal,
             CurveKind::Ellipse(c) => c.base().calculate_bounding_box(interval, req)?.normal,
@@ -613,7 +616,26 @@ impl Curve {
             // measured at sample points; every other kind: the base class's sampled box
             _ => None,
         }
-        .filter(Extent3d::is_defined))
+        .filter(Extent3d::is_defined);
+        // The spans' box stops shrinking once `interval` lies in one span. The curve over
+        // `interval` is in the box of its own piece too, so in what the two share.
+        let piece = match self.kind() {
+            CurveKind::BSpline(_)
+            | CurveKind::Hyperbola(_)
+            | CurveKind::Ellipse(_)
+            | CurveKind::Parabola(_) => self.piece_hull_points(interval).and_then(|points| {
+                let slack = points.iter().fold(0.0_f64, |m, &(_, e)| m.max(e));
+                let mut bounds =
+                    crate::nurbs::nurbs_crv::points_box(points.iter().map(|&(p, _)| p))?;
+                bounds.expand_absolute(slack);
+                Some(bounds)
+            }),
+            _ => None,
+        };
+        Ok(match (spans, piece) {
+            (Some(spans), Some(piece)) => Some(spans.intersect(&piece).unwrap_or(spans)),
+            (spans, _) => spans,
+        })
     }
 
     /// `IsPlanar`: [`PseudoBox::is_planar`] of the pseudo box of the curve over its
@@ -2560,6 +2582,58 @@ mod tests {
         let c = Curve::from(BSplineCurve::new(3));
         let on = Kernel::default();
         assert!(!c.is_planar(&on, EFF_ZERO).unwrap().is_planar);
+    }
+
+    /// The certified box of a circle (as a B-spline and as the circle kind) over an interval
+    /// inside one quarter is the box of the piece over that interval: it holds the piece,
+    /// stays out of the quarter's far corner, and shrinks with the interval. Over the whole
+    /// curve it is the spans' box, bit for bit.
+    #[test]
+    fn a_certified_box_shrinks_with_its_interval_inside_a_span() {
+        use crate::curve::ellipse::Ellipse;
+        use crate::geom::axis2_placement::Axis2Placement;
+
+        let k = Kernel::default();
+        let frame = Axis2Placement::IDENTITY;
+        let circle = Ellipse::create_canonical_circle(&k, &frame, 2.0, None, None).unwrap();
+        for c in [circle_of_radius_two(0.0, 360.0), Curve::from(circle)] {
+            let natural = c.natural_interval();
+            let req = BoundingBoxRequest {
+                normal: true,
+                pseudo: false,
+                polar: false,
+            };
+            let spans = c.b_spline_base().unwrap();
+            let whole = c.certified_bounding_box(&k, &natural).unwrap().unwrap();
+            let before = spans.calculate_bounding_box(&natural, req).unwrap().normal;
+            assert_eq!(Some(whole), before);
+            assert!(whole.contains_point(Vec3::new(2.0, 2.0, 0.0), 0.0));
+
+            // from 9 to 18 degrees, inside the first quarter
+            let quarter = natural.length() / 4.0;
+            let (lo, hi) = (natural.min() + 0.1 * quarter, natural.min() + 0.2 * quarter);
+            let mut cell = Extent1d::from_min_max(lo, hi);
+            let in_span = spans.calculate_bounding_box(&cell, req).unwrap().normal;
+            assert!(in_span
+                .unwrap()
+                .contains_point(Vec3::new(2.0, 2.0, 0.0), 0.0));
+            let mut last = f64::INFINITY;
+            for _ in 0..12 {
+                let bx = c.certified_bounding_box(&k, &cell).unwrap().unwrap();
+                for i in 0..=8 {
+                    let t = cell.min() + cell.length() * f64::from(i) / 8.0;
+                    let p = c.evaluate_point(&k, t).unwrap();
+                    assert!(bx.contains_point(p, 1e-13), "cell {cell:?} p={p:?}");
+                }
+                assert!(bx.is_contained_by(&whole, 0.0), "cell {cell:?}");
+                assert!(!bx.contains_point(Vec3::new(2.0, 2.0, 0.0), 1.0));
+                let size = bx.size().length();
+                assert!(size < 0.75 * last, "cell {cell:?}: {size} after {last}");
+                last = size;
+                cell = Extent1d::from_min_max(cell.min(), 0.5 * (cell.min() + cell.max()));
+            }
+            assert!(last < 1e-3, "{last}");
+        }
     }
 
     #[test]

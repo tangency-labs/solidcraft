@@ -375,6 +375,8 @@ fn resolve_uncached(
             source = LinkSource::Vertex { body: name, at: v };
             vec![LinkGeom::Point(plane.to_local(v))]
         }
+        // A drawing view's sketch resolves its view edges itself, on the state its view draws.
+        LinkSource::ViewEdge { .. } => return Err(DocError::Invalid("a view edge is projected only in its drawing view's sketch".into())),
         LinkSource::SketchCurve { sketch, curve } => {
             let ss = st.sketch(*sketch).ok_or_else(|| lost(&format!("sketch {sketch}")))?;
             let ci = ss.sketch.curve_index(curve).ok_or_else(|| lost(&format!("sketch curve {curve}")))?;
@@ -743,7 +745,7 @@ fn exact_edges(body: &crate::ModelBody, plane: &Plane, edges: &[usize]) -> Vec<O
     use crate::kernel::PlanarPiece;
     let free_form = |p: &PlanarPiece| matches!(p, PlanarPiece::Spline(_) | PlanarPiece::Seg(Seg2::Cubic { .. } | Seg2::Bezier { .. }));
     let link = |p: &PlanarPiece| match p {
-        PlanarPiece::Seg(s) => link_geom(s),
+        PlanarPiece::Seg(s) => LinkGeom::from_seg(s),
         PlanarPiece::Spline(s) => link_spline(s),
     };
     let mut mesh = None;
@@ -1113,23 +1115,6 @@ fn at_vertices(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, e: usize, g:
             *c = mid + across * (*c - mid).dot(across);
         }
     }
-}
-
-/// A boundary segment as the link geometry that is the same curve.
-fn link_geom(s: &Seg2) -> Option<LinkGeom> {
-    Some(match *s {
-        Seg2::Line { a, b } => LinkGeom::Line(a, b),
-        Seg2::Arc { center, radius, sweep, .. } if sweep.abs() >= std::f64::consts::TAU - 1e-9 => LinkGeom::Circle(center, radius),
-        Seg2::Arc { center, radius, start, sweep } => {
-            let at = |t: f64| center + Vec2::new(t.cos(), t.sin()) * radius;
-            // Counter-clockwise from `a` to `b`.
-            let (a, b) = if sweep > 0. { (at(start), at(start + sweep)) } else { (at(start + sweep), at(start)) };
-            LinkGeom::Arc { c: center, a, b }
-        }
-        Seg2::Conic { a, apex, b, w } => LinkGeom::Conic { a, apex, b, rho: w / (1. + w) },
-        Seg2::Cubic { p0, p1, p2, p3 } => LinkGeom::Spline { pts: vec![p0, p1, p2, p3], control: true, degree: 3, periodic: false, nurbs: None },
-        Seg2::Bezier { n, p } => LinkGeom::Spline { pts: p.get(..=usize::from(n))?.to_vec(), control: true, degree: n, periodic: false, nurbs: None },
-    })
 }
 
 /// The persistent name of the edge an `Edge` reference resolved to, for its link to keep and

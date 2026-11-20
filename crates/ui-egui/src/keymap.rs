@@ -501,7 +501,16 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
             }
             return;
         }
-        app.start(variant_for_key(app, id));
+        let resolved = variant_for_key(app, id);
+        if app.preferences.shortcut_again_ends_tool {
+            if repeat {
+                return;
+            }
+            if crate::toolbar::end_running_command(app, resolved) {
+                return;
+            }
+        }
+        app.start(resolved);
     } else if let Some(id) = sketch_tool_for(app, key) {
         let then = variant_for_key(app, id);
         app.start("sketch.create");
@@ -1209,6 +1218,24 @@ mod tests {
         assert!(crate::agent_chat::assistant_tip(&h.app, crate::agent_chat::AssistantMark::Ready).contains("(J)"));
         bind(&mut h.app, "ui.assistant", "", false).unwrap();
         assert!(!crate::agent_chat::assistant_tip(&h.app, crate::agent_chat::AssistantMark::Ready).contains("(J)"));
+    }
+
+    /// #18233: Ctrl+A (Cmd+A) is Select All in the view, but a focused text field keeps its own.
+    #[test]
+    fn ctrl_a_selects_all_except_in_a_text_field() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10})).unwrap();
+        assert_eq!(command_for(&h.app, "Ctrl+A"), Some("select.all"));
+        h.call("ui.palette", json!({}));
+        h.frames(3);
+        h.app.session.selection.clear();
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        assert!(h.app.session.selection.is_empty(), "the palette's field selects its own text");
+        h.call("ui.palette", json!({"open": false}));
+        h.frames(2);
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Body { name: "Block".into() }]);
     }
 
     fn app() -> SolveApp {
