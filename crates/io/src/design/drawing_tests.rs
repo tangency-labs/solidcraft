@@ -75,10 +75,10 @@ fn a_designs_drawings_round_trip_through_both_forms_byte_for_byte() {
     for part in ["document.json", "container.json"] {
         assert_eq!(inside[part], without[part], "{part} is the same with drawings or without");
     }
-    let json = write_design(&doc);
+    let json = write_design(&doc).unwrap();
     let read = read_design(&json).unwrap();
     assert_eq!(read.drawings, doc.drawings);
-    assert_eq!(write_design(&read), json, "the plain form too");
+    assert_eq!(write_design(&read).unwrap(), json, "the plain form too");
 }
 
 /// An image on a sheet travels in its drawing's record through both forms, and an entry whose file
@@ -100,7 +100,7 @@ fn an_image_on_a_sheet_round_trips_and_a_lying_one_is_refused() {
     let read = read_design(&bytes).unwrap();
     assert_eq!(read.drawings, doc.drawings);
     assert_eq!(write_design_container(&read).unwrap(), bytes, "save, open, save: the same bytes");
-    let json = write_design(&doc);
+    let json = write_design(&doc).unwrap();
     assert_eq!(read_design(&json).unwrap().drawings, doc.drawings, "the plain form too");
 
     let mut inside = parts(&bytes);
@@ -240,7 +240,7 @@ fn file_kind_tells_designs_and_drawings_apart() {
     let d = drawing();
     let cases = [
         (design, FileKind::Design),
-        (write_design(&doc), FileKind::Design),
+        (write_design(&doc).unwrap(), FileKind::Design),
         (write_drawing_container(&d).unwrap(), FileKind::Drawing),
         (d.to_json().unwrap().into_bytes(), FileKind::Drawing),
         (b"{\"format\": \"solidcraft-drawing/1\"}".to_vec(), FileKind::Drawing),
@@ -260,7 +260,7 @@ fn a_design_is_never_read_as_a_drawing_nor_a_drawing_as_a_design() {
         assert!(error(read_design(&bytes)).contains("is a SolidCraft drawing, not a design"));
     }
     let doc = Document::new("Plate");
-    for bytes in [write_design_container(&doc).unwrap(), write_design(&doc)] {
+    for bytes in [write_design_container(&doc).unwrap(), write_design(&doc).unwrap()] {
         assert!(error(read_drawing(&bytes)).contains("is a SolidCraft design, not a drawing"));
     }
 }
@@ -350,7 +350,7 @@ fn design_with_sheet_sketches() -> Document {
 fn sheet_sketches_round_trip_through_real_container_and_plain_design() {
     let source = design_with_sheet_sketches();
     let container_bytes = write_design_container(&source).unwrap();
-    let plain_bytes = write_design(&source);
+    let plain_bytes = write_design(&source).unwrap();
     for bytes in [&container_bytes, &plain_bytes] {
         let reopened = read_design(bytes).unwrap();
         assert_eq!(reopened.drawings, source.drawings);
@@ -366,7 +366,7 @@ fn sheet_sketches_round_trip_through_real_container_and_plain_design() {
             assert_eq!(d.sheet_sketch(record.id).unwrap().name, format!("Outline {i}"));
         }
         assert_eq!(write_design_container(&reopened).unwrap(), container_bytes);
-        assert_eq!(write_design(&reopened), plain_bytes);
+        assert_eq!(write_design(&reopened).unwrap(), plain_bytes);
     }
     let entries = parts(&container_bytes);
     for d in &source.drawings {
@@ -428,7 +428,7 @@ fn a_bad_sheet_sketch_refuses_the_whole_container_without_owner_fallback() {
         corrupt.insert(own_entry.clone(), serde_json::to_vec(&record).unwrap());
         let error = read_design(&container(&corrupt)).unwrap_err().to_string();
         assert!(error.contains(&own_entry), "missing drawing context for {pointer}: {error}");
-        let mut inline: Value = serde_json::from_slice(&write_design(&source)).unwrap();
+        let mut inline: Value = serde_json::from_slice(&write_design(&source).unwrap()).unwrap();
         inline["drawings"][0] = record;
         assert!(read_design(&serde_json::to_vec(&inline).unwrap()).is_err(), "plain JSON accepted {pointer}");
     }

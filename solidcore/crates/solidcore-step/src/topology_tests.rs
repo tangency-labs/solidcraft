@@ -3231,6 +3231,67 @@ fn a_projected_pcurve_past_the_quarter_line_a_face_form_ends_on_stays_in_the_fac
     solidcore_ops::record_check::agreement(b).unwrap();
 }
 
+/// A wedge of a cylinder (radius 10 mm, 5 mm high) from -120 to 180 degrees about +z, in a file
+/// of uncertainty 0.02 mm, whose corner at the top of its 180 degree side lies 0.008 mm outside
+/// the cylinder, 1e-4 mm below the top and 1e-4 rad round past the side. The cylinder face is
+/// its NURBS form, a turn from -180 degrees, and ends on the form's seam at that side; the drop
+/// of the corner onto it stops on the face's bound and crosses the seam, a turn from the
+/// corner's trims. The corner's point on the face is the one on the trims' side: the trims
+/// closed onto it at the corner (the 1e-4 mm gap there) stay in the face's domain
+/// (`SmBrep::ValidatePointers` tests 70 to 72, "Edge endpoints within face domain"), the corner
+/// classifies on the face (`SmFace` test 12), and the kernel's check of the healed body finds
+/// only the corner's gap off the cylinder.
+#[test]
+fn a_corner_off_a_face_where_it_ends_on_its_seam_is_on_the_face_and_its_trims_in_its_domain() {
+    let (r, h): (f64, f64) = (10.0, 5.0);
+    let (from, to) = ((-120f64).to_radians(), 180f64.to_radians());
+    let (off, below, past) = (0.008, 1e-4, 1e-4);
+    let mut w = W::default();
+    let v = |w: &mut W, p: V| (w.vertex(p), p);
+    let on = |a: f64, rr: f64, z: f64| [rr * a.cos(), rr * a.sin(), z];
+    let (a0, a1) = (v(&mut w, [0.0; 3]), v(&mut w, [0.0, 0.0, h]));
+    let (p0, p1) = (v(&mut w, on(from, r, 0.0)), v(&mut w, on(from, r, h)));
+    let (q0, q1) = (v(&mut w, on(to, r, 0.0)), v(&mut w, on(to + past, r + off, h - below)));
+    let edge = |w: &mut W, a: (u64, V), b: (u64, V)| w.line_edge(a, b, true, len3(sub3(b.1, a.1)));
+    let (axis, e_p, e_q) = (edge(&mut w, a0, a1), edge(&mut w, p0, p1), edge(&mut w, q0, q1));
+    let (r_pb, r_qb, r_pt, r_qt) = (edge(&mut w, a0, p0), edge(&mut w, a0, q0), edge(&mut w, a1, p1), edge(&mut w, a1, q1));
+    let arc = |w: &mut W, a: (u64, V), b: (u64, V), z: f64| {
+        let c = w.circle([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        w.add(format!("EDGE_CURVE('',#{},#{},#{c},.T.)", a.0, b.0))
+    };
+    let (arc_b, arc_t) = (arc(&mut w, p0, q0, 0.0), arc(&mut w, p1, q1, h));
+    let ax = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let cyl = w.add(format!("CYLINDRICAL_SURFACE('',#{ax},{})", real(r)));
+    let face = |w: &mut W, uses: &[(u64, bool)], surface: u64, same_sense: bool| {
+        let oes: Vec<u64> = uses.iter().map(|&(e, f)| w.oe(e, f)).collect();
+        let b = w.bound(&oes, true, true);
+        w.face(&[b], surface, same_sense)
+    };
+    let (bottom, top) = (w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]), w.plane([0.0, 0.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]));
+    let side_q = w.plane([0.0; 3], [-to.sin(), to.cos(), 0.0], [to.cos(), to.sin(), 0.0]);
+    let side_p = w.plane([0.0; 3], [from.sin(), -from.cos(), 0.0], [from.cos(), from.sin(), 0.0]);
+    let faces = [
+        face(&mut w, &[(e_q, true), (arc_t, false), (e_p, false), (arc_b, true)], cyl, true),
+        face(&mut w, &[(r_qb, true), (arc_b, false), (r_pb, false)], bottom, false),
+        face(&mut w, &[(r_pt, true), (arc_t, true), (r_qt, false)], top, true),
+        face(&mut w, &[(axis, true), (r_qt, true), (e_q, false), (r_qb, false)], side_q, true),
+        face(&mut w, &[(r_pb, true), (e_p, true), (r_pt, false), (axis, false)], side_p, true),
+    ];
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('wedge',#{shell})"));
+    let kernel = Projected(std::sync::atomic::AtomicUsize::new(0));
+    let read = read_solids_with(&w.file_with_uncertainty(&[solid], 2e-2), &kernel);
+    assert!(read.failures.is_empty(), "{:?}", read.failures);
+    let b = &read.solids[0].brep;
+    assert_eq!(counts(b), [2, 1, 5, 9, 6]);
+    let (body, _) = solidcore_ops::body::Body::from_record(b, false).unwrap();
+    let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
+    for line in report.text.lines() {
+        assert!(line.contains("Bad Gap: Vertex/Face gap"), "{report}");
+    }
+    body.check_solid().unwrap();
+}
+
 /// A disc (radius 30 mm, 18 mm high) with a flat cut off its side, its cylinder face going 330
 /// degrees about +z from 30.02 degrees to 360.02, in a file of uncertainty 0.02 mm (as Onshape
 /// writes): the face ends 0.0105 mm past its frame's x axis, within the uncertainty, so its form

@@ -251,13 +251,16 @@ impl Touching {
     }
 }
 
-/// What a cell grid does with its cells. Only `cut` is built so far.
+/// What a cell grid does with its cells.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CellGridMode {
     /// Cut the cells out of the targets.
     #[default]
     Cut,
+    /// Add the cells as material standing on the sketch plane, joined to the targets. A design
+    /// with this mode is written with the next format number.
+    Raised,
 }
 
 /// The smallest cell size and web of a cell grid, in mm.
@@ -1566,7 +1569,8 @@ pub enum FeatureKind {
     },
     /// A cell grid (#14044): the cells of one shape that fill the closed profiles of a sketch (an
     /// outer loop is the field, a loop inside it a keep-out), cut from the targets `depth` deep
-    /// (or through all) along the sketch normal. The cells are planned by solidcore
+    /// (or through all) along the sketch normal, or with `mode: raised` standing `depth` high
+    /// from the sketch plane and joined to the targets. The cells are planned by solidcore
     /// (`solidcore_ops::cell_grid`) and cut in one boolean.
     CellGrid {
         /// Feature id of the sketch.
@@ -3904,11 +3908,12 @@ pub struct Document {
     /// each in its own entry.
     #[serde(skip_deserializing, skip_serializing_if = "Vec::is_empty")]
     pub drawings: Vec<std::sync::Arc<crate::drawing::Drawing>>,
-    /// Plugin data, by `<plugin-id>/<path>`, base64: kept and saved back untouched, plugin or no
-    /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design.
-    /// Shared, so an edit that copies the design does not copy a plugin's large files.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty", deserialize_with = "crate::plugin_data::deserialize")]
-    pub plugin_data: std::collections::BTreeMap<String, std::sync::Arc<str>>,
+    /// Plugin data, by `<plugin-id>/<path>`, as bytes: kept and saved back untouched, plugin or no
+    /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design;
+    /// a plain JSON design can't hold it ([`Document::binary_data`]). Shared, so an edit that
+    /// copies the design does not copy a plugin's large files.
+    #[serde(default, skip_serializing, deserialize_with = "crate::plugin_data::deserialize")]
+    pub plugin_data: std::collections::BTreeMap<String, crate::blob::Blob>,
 }
 
 /// The browser's view of a design: items and folders hidden or shown, sketch profiles and
@@ -4692,6 +4697,16 @@ impl Document {
         }
         Ok(d)
     }
+    /// What this design holds that a plain JSON design can't carry: binary data, which only a
+    /// container keeps, as parts of their own. Empty when the design saves as JSON whole.
+    pub fn binary_data(&self) -> Vec<&'static str> {
+        let mut kinds = Vec::new();
+        if !self.plugin_data.is_empty() {
+            kinds.push("plugin files");
+        }
+        kinds
+    }
+
     pub fn to_json(&self) -> String {
         if self.newer_file.is_some() {
             let mut value = serde_json::to_value(self).unwrap_or_default();

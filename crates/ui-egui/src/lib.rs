@@ -815,6 +815,9 @@ pub struct SolveApp {
     pub status: Option<(String, f64, bool)>,
     /// The status message offers Undo (a click on it undoes the last step), as after an automatic stand-up.
     pub status_undo: bool,
+    /// The status message is a refused JSON save of a design with binary data in it, and offers
+    /// Save as .sc, so that data is never left out.
+    pub status_save_sc: bool,
     pub quit_requested: bool,
     /// Autosave into the recovery folder (the desktop app turns it on).
     pub autosave: Option<recovery_ui::Autosaves>,
@@ -1124,6 +1127,7 @@ impl SolveApp {
             last_escape: None,
             status: None,
             status_undo: false,
+            status_save_sc: false,
             quit_requested: false,
             autosave: None,
             locks: None,
@@ -3270,6 +3274,7 @@ impl SolveApp {
         self.messages.push(&text, error, at);
         self.status = Some((text, at, error));
         self.status_undo = false;
+        self.status_save_sc = false;
     }
 
     /// Tell the user when the open design came from a newer SolidCraft: the notice on the status

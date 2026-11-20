@@ -12,6 +12,11 @@
 //! | [`QueryFailure::Failed`]       | `SM_ERR`                 |
 //! | [`QueryFailure::Missing`]      | `SM_ERR_NULL_POINTER`    |
 //! | [`QueryFailure::InvalidValue`] | `SM_ERR_INVALID_INPUT`   |
+//! | [`QueryFailure::Defect`]       | `SM_ERR` (or the site's, through `with_status`) |
+//!
+//! [`QueryFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
+//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
+//! not yet converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. A failure says in a phrase what went wrong; the failure's
 //! `operation` path says which routine. A failure names an entity only where the site
@@ -35,13 +40,21 @@ pub enum QueryFailure {
     /// `SM_ERR_INVALID_INPUT` as a status here, so its kind is
     /// [`ErrorKind::InvalidInput`].
     InvalidValue(&'static str),
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
 }
 
 impl QueryFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) => SM_ERR,
+            Self::Failed(_) | Self::Defect { .. } => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
         }
@@ -50,9 +63,13 @@ impl QueryFailure {
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::Missing`] for
     /// [`QueryFailure::Missing`], [`ErrorKind::InvalidInput`] for
     /// [`QueryFailure::InvalidValue`], [`ErrorKind::Failed`] otherwise.
+    /// [`QueryFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
-        ErrorKind::of_status(self.comparison_status())
+        match self {
+            Self::Defect { .. } => ErrorKind::StageFailed,
+            _ => ErrorKind::of_status(self.comparison_status()),
+        }
     }
 }
 
@@ -61,6 +78,7 @@ impl core::fmt::Display for QueryFailure {
         match self {
             Self::Failed(what) | Self::InvalidValue(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
         }
     }
 }
@@ -174,5 +192,80 @@ pub(super) mod tests {
     /// read. Kept for the ratchets that call it; the scan is [`super::super::bare_scan`].
     pub(in crate::error) fn bare_statuses_in(area: &str, least: usize) -> Vec<(String, usize)> {
         super::super::bare_scan::bare_statuses_in(area, least)
+    }
+
+    /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
+    /// and says why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why = "the face's cache was built just before and has no loops, which a built cache always has";
+        let defect = QueryFailure::Defect { why };
+        let op = "query::op";
+        super::super::tests::assert_defect(
+            &SolidError::query(op, defect),
+            &SolidError::query(op, QueryFailure::Failed("x")),
+            op,
+            SM_ERR,
+            &format!("{op}: stage_failed: {why}"),
+        );
+        let missing = Failure::new(op, defect)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error();
+        super::super::tests::assert_defect(
+            &missing,
+            &SolidError::query(op, QueryFailure::Missing("x")),
+            op,
+            SM_ERR_NULL_POINTER,
+            &format!("{op}: stage_failed: {why}"),
+        );
+        assert_eq!(missing.query_failure(), Some(&defect));
+    }
+
+    /// The sites that build a query phrase cause only fall:
+    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
+    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
+    /// files' counts here, and a file at 0 loses its line (the conversion guide:
+    /// `docs/failure-codes-and-reproduction.md` §6).
+    #[test]
+    fn the_query_phrase_cause_sites_only_shrink() {
+        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
+        const PHRASES: Scan = Scan {
+            builders: &[
+                Builder::Variant("QueryFailure", "Failed"),
+                Builder::Variant("QueryFailure", "Missing"),
+                Builder::Variant("QueryFailure", "InvalidValue"),
+                Builder::Method("query_failed", Some(1)),
+                Builder::Method("query_missing", Some(1)),
+                Builder::Method("query_invalid_value", Some(1)),
+            ],
+            wrappers: Wrappers::Phrase,
+        };
+        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
+        const PINNED: &[(&str, usize)] = &[
+            ("solidcore/src/curve/plane_of.rs", 1),
+            ("solidcore/src/nurbs/crv_deviation.rs", 12),
+            ("solidcore/src/nurbs/srf_deviation.rs", 3),
+            ("solidcore/src/query/api_queries.rs", 36),
+            ("solidcore/src/query/brep.rs", 2),
+            ("solidcore/src/query/brep/ray.rs", 2),
+            ("solidcore/src/query/brep/ray/live.rs", 4),
+            ("solidcore/src/query/contact.rs", 3),
+            ("solidcore/src/query/continuity.rs", 5),
+            ("solidcore/src/query/curve.rs", 1),
+            ("solidcore/src/query/deviation.rs", 2),
+            ("solidcore/src/query/distance_bound.rs", 4),
+            ("solidcore/src/query/edge.rs", 10),
+            ("solidcore/src/query/face/p1.rs", 2),
+            ("solidcore/src/query/face/p2.rs", 19),
+            ("solidcore/src/query/face/p3.rs", 2),
+            ("solidcore/src/query/face/p4.rs", 2),
+            ("solidcore/src/query/face_surface.rs", 2),
+            ("solidcore/src/query/normal.rs", 2),
+            ("solidcore/src/query/poly.rs", 13),
+            ("solidcore/src/query/poly/copy.rs", 11),
+            ("solidcore/src/query/poly_properties.rs", 2),
+            ("solidcore/src/query/tess.rs", 6),
+        ];
+        assert_pinned("query phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

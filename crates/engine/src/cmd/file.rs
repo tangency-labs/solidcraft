@@ -1952,7 +1952,7 @@ fn write_bytes(
         // as covering an earlier version instead of the chain being destroyed.
         if format != "container" {
             match format {
-                "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
+                "json" => solidcraft_io::write_design(&s.design_at(Some(path))).map_err(|e| EngineError::Other(format!("{path}: {e}")))?,
                 _ => return Err(bad("file.save", "format must be container or json")),
             }
         } else {
@@ -1963,7 +1963,7 @@ fn write_bytes(
     } else {
         match format {
             "container" => s.design_container_at(Some(path), compression, preview, cache)?,
-            "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
+            "json" => solidcraft_io::write_design(&s.design_at(Some(path))).map_err(|e| EngineError::Other(format!("{path}: {e}")))?,
             _ => return Err(bad("file.save", "format must be container or json")),
         }
     };
@@ -2523,7 +2523,7 @@ fn export_to(
         if !bodies.is_empty() {
             return Err(bad(cmd, "design JSON exports the complete document; omit bodies"));
         }
-        solidcraft_io::write_design(&s.design())
+        solidcraft_io::write_design(&s.design()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?
     } else if format == Format::Step && bodies.is_empty() && !s.doc.occurrences.is_empty() {
         solidcraft_io::step_assembly(&s.doc, &s.doc.painted(&s.model.state()), &name)?
     } else {
@@ -4911,7 +4911,7 @@ mod tests {
         // version before #1710): Save As names the design after the new file, while a plain
         // Save to the file it has leaves the name alone.
         let odd = dir.join("renamed.solidcraft");
-        std::fs::write(&odd, solidcraft_io::write_design(&Document::new("Sample Plate"))).unwrap();
+        std::fs::write(&odd, solidcraft_io::write_design(&Document::new("Sample Plate")).unwrap()).unwrap();
         let mut s = Session::default();
         s.execute("doc.open", &json!({"path":odd})).unwrap();
         assert_eq!(s.doc.name, "Sample Plate");
@@ -4927,7 +4927,7 @@ mod tests {
         let dir = name_dir("open");
         for (stored, file) in [("Untitled", "hinge.solidcraft"), ("", "spacer.json")] {
             let path = dir.join(file);
-            let bytes = solidcraft_io::write_design(&Document::new(stored));
+            let bytes = solidcraft_io::write_design(&Document::new(stored)).unwrap();
             std::fs::write(&path, bytes).unwrap();
             let mut s = Session::default();
             let r = s.execute("doc.open", &json!({"path":path})).unwrap();

@@ -1344,8 +1344,8 @@ fn a_read_stays_out_of_the_document() {
     let _ = std::fs::remove_file(&path);
     assert!(matches!(opened.design(), std::borrow::Cow::Borrowed(_)), "nothing read: nothing to copy");
     assert_eq!(opened.doc.drawing(drawing).unwrap().dimension(dimension).unwrap().last_good, Some(80.0));
-    let bytes = solidcraft_io::write_design(&opened.design());
-    assert_eq!(solidcraft_io::write_design(&solidcraft_io::read_design(&bytes).unwrap()), bytes, "save, open, save: the same bytes");
+    let bytes = solidcraft_io::write_design(&opened.design()).unwrap();
+    assert_eq!(solidcraft_io::write_design(&solidcraft_io::read_design(&bytes).unwrap()).unwrap(), bytes, "save, open, save: the same bytes");
 }
 
 /// A saved value is only ever what it last read: measured now, a dimension reads the model and has
@@ -1418,7 +1418,7 @@ fn background_saves_and_autosaves_keep_the_last_good_value() {
 fn opening_a_design_starts_with_no_last_good_values() {
     let (mut s, _, _) = read_once();
     let path = std::env::temp_dir().join(format!("solidcraft-last-good-open-{}.json", std::process::id()));
-    std::fs::write(&path, solidcraft_io::write_design(&s.doc)).unwrap();
+    std::fs::write(&path, solidcraft_io::write_design(&s.doc).unwrap()).unwrap();
     run(&mut s, "doc.open", json!({"path": path}));
     let _ = std::fs::remove_file(&path);
     assert!(s.dimension_values.is_empty());
@@ -2272,7 +2272,7 @@ fn a_dimension_not_drawn_has_no_layout_and_says_why() {
 
     let (mut s, view) = front_view();
     let added = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"visual_style": "shaded_visible"}}));
+    crate::drawing_scene::tests::not_drawable_yet(&mut s, view);
     let shaded = run(&mut s, INSPECT, json!({"dimension": added["dimension"]}));
     assert!(shaded.get("layout").is_none(), "{shaded}");
     assert_eq!((&shaded["layout_why"], &scene_why(&mut s, &added)), (&not_drawn, &not_drawn), "{shaded}");
@@ -2697,7 +2697,7 @@ fn a_drag_that_cant_place_is_refused_and_changes_nothing() {
             (&length, json!({"line_through_mm": [0, 1e8]}), "on paper"),
         ],
     );
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"visual_style": "shaded_visible"}}));
+    crate::drawing_scene::tests::not_drawable_yet(&mut s, view);
     refuses(&mut s, &[(&length, json!({"line_through_mm": [200, 190]}), "its view isn't drawn")]);
 
     let (mut s, drawing, dimension) = read_once();

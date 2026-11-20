@@ -60,6 +60,8 @@ pub struct DocSlot {
     pub(crate) tab: u64,
     /// The views of the design (its sub-tabs), kept while another design is shown.
     views: ViewSet,
+    /// What each of its views shows besides the camera ([`ViewInspect`]), kept while another design is shown.
+    inspect: ViewInspect,
     /// Opened behind the shown design: framed when it is first shown.
     fit: bool,
 }
@@ -175,6 +177,7 @@ impl DocSlot {
             jobs: Default::default(),
             tab: next_tab(),
             views: ViewSet::new(),
+            inspect: ViewInspect::new(),
             fit: false,
         }
     }
@@ -214,6 +217,8 @@ pub struct Documents {
     active_tab: u64,
     /// The shown design's views ([`DocSlot::views`] for the others); see [`apply_view`].
     pub(crate) views: ViewSet,
+    /// What each of the shown design's views shows besides the camera ([`DocSlot::inspect`] for the others).
+    pub(crate) inspect: ViewInspect,
     /// A view's name being typed in its sub-tab ([`view_rename_start`]).
     pub(crate) view_rename: Option<ViewRename>,
 }
@@ -488,6 +493,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         jobs: app.swap_jobs(slot.jobs),
         tab: std::mem::replace(&mut app.docs.active_tab, slot.tab),
         views: std::mem::replace(&mut app.docs.views, slot.views),
+        inspect: std::mem::replace(&mut app.docs.inspect, slot.inspect),
         fit: false,
     };
     crate::browser::restore_reveals(app, slot.reveals);
@@ -678,6 +684,10 @@ fn change_views<T>(app: &mut SolveApp, change: impl FnOnce(&mut ViewSet) -> T) -
     result
 }
 
+/// The section and analyses each view of a design shows, by view id: a view that was never left
+/// has none and shows what the design shows now.
+pub(crate) type ViewInspect = std::collections::HashMap<u64, solidcraft_engine::InspectState>;
+
 /// Keep how the shown Model view looks at the design (its camera) with that view, so it comes back
 /// as it was left: two Model views of one design are two angles, not one.
 fn keep_look(app: &mut SolveApp) {
@@ -685,6 +695,7 @@ fn keep_look(app: &mut SolveApp) {
     if active.kind == ViewKind::Model {
         let id = active.id;
         app.docs.views.set_spec(id, solidcraft_viewport::ViewSpec::new(app.cam));
+        app.docs.inspect.insert(id, app.session.inspect());
     }
 }
 
@@ -696,6 +707,11 @@ fn show_look(app: &mut SolveApp, view: &DesignView) {
     {
         app.cam = spec.camera;
         app.cam_anim = None;
+    }
+    if view.kind == ViewKind::Model
+        && let Some(state) = app.docs.inspect.get(&view.id)
+    {
+        app.session.set_inspect(state.clone());
     }
 }
 
@@ -1095,7 +1111,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
 pub fn export(app: &mut SolveApp) -> Result<Value, String> {
     let revision = app.session.design_revision();
     let design = app.session.design();
-    let text = String::from_utf8(solidcraft_engine::io::write_design(&design)).map_err(|e| e.to_string())?;
+    let text = String::from_utf8(solidcraft_engine::io::write_design(&design).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     Ok(json!({"name": design.name, "revision": revision, "dirty": app.session.is_dirty(), "format": "json", "text": text}))
 }
 
@@ -3786,6 +3802,25 @@ mod tests {
         assert_eq!(h.app.cam.yaw, 1.5);
         assert!(view_activate(&mut h.app, copy));
         assert_eq!(h.app.cam.yaw, -0.5);
+    }
+
+    /// Each Model view keeps its own section and analysis too, so one design can be inspected two
+    /// ways at once; the design itself is the same.
+    #[test]
+    fn model_views_keep_their_own_analysis() {
+        use solidcraft_engine::SurfaceAnalysis;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let first = h.app.docs.views.active().id;
+        let second = view_open(&mut h.app, ViewKind::Model, None, false);
+        h.app.session.analysis = Some(SurfaceAnalysis::Zebra { stripes: 8.0 });
+        assert!(view_activate(&mut h.app, first));
+        assert_eq!(h.app.session.analysis, None, "the first view never had the analysis");
+        h.app.session.analysis = Some(SurfaceAnalysis::Environment);
+        assert!(view_activate(&mut h.app, second));
+        assert_eq!(h.app.session.analysis, Some(SurfaceAnalysis::Zebra { stripes: 8.0 }));
+        assert!(view_activate(&mut h.app, first));
+        assert_eq!(h.app.session.analysis, Some(SurfaceAnalysis::Environment));
     }
 
     /// The Layout page's "Design tabs" choices govern the views: a kind kept out of sub-tabs is
