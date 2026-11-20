@@ -96,7 +96,7 @@ The command surface exposes management without opening dialogs:
 | `plugin.check` | `{path}`: a package folder or `.zip` | `{ok, id, name, version, kind, approval, entries, problems: [{severity, field, problem, fix}]}`; installs nothing |
 | `plugin.install` | `{path, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?, input_folder?}}` | Package description and installation status, including declared `entry_points` |
 | `plugin.list` | `{}` | `{plugins: [{manifest, commands, disabled}]}` |
-| `plugin.remove` | `{id, remove_user_data: false}` | `{id, removed: true}` |
+| `plugin.remove` | `{id, remove_user_data?: bool}` (default: false) | `{id, removed: true}` |
 | `plugin.grants` | `{}` | `{grants: [{id, status, package_hash, command_groups, folders, memory_mib?, input_folder?}]}` |
 | `plugin.revoke` | `{id}` | `{id, revoked}` |
 | `plugin.tools` | `{name?}` | `{tools: [{name, kind, plugin, entry, plugin_name, plugin_version, description, effect, extensions, input_schema, approval?}]}`: every installed, enabled plugin's entries as tools for agents (below); `approval` only for the one tool `name` asks for |
@@ -137,7 +137,7 @@ solidcraft-cli --keep-plugin-approvals run import.json                          
   record that does not read, or holds more than an installation could approve, is ignored.
 - **Listing and revoking.** `plugin.grants` lists every record with its `status`: `current`, `changed`
   (install and approve again), `not_installed` or `unreadable`. `plugin.revoke {id}` deletes a plugin's
-  record and keeps the plugin installed; `plugin.remove {id, remove_user_data: false}` deletes both. Both are commands, so the
+  record and keeps the plugin installed; `plugin.remove {id}` deletes both. Both are commands, so the
   same calls work from `solidcraft-cli exec`, a `run` script, MCP and the desktop app's control channel:
 
   ```sh
@@ -666,7 +666,15 @@ consume the compact map's budget. A refused write leaves the previous data intac
 
 `set` and `remove` are refused from `read` entries, like design-storage writes. Changes are
 staged while the entry runs and published when the host commits it. Guest failures discard
-staged settings. As with existing granted file writes, a later file-publication error may report
+staged settings. The host remembers the loaded file's SHA-256 hash (including whether it was
+absent) and checks it again under a per-plugin file lock before replacing the map. If the file
+changed, or another run holds the lock, commit refuses with the structured host error
+`{"kind":"user_storage_conflict", "plugin":"gears"}`. No settings or design changes from that
+transaction are published. Retry the whole plugin call to load the latest settings and apply its
+changes again; even changes to different keys require a retry. A read without staged changes
+can still succeed after another run commits. The lock is released on close or process exit;
+the separate `<plugin-id>.lock` file stays beside the JSON file so simultaneous processes use
+the same lock. As with existing granted file writes, a later file-publication error may report
 failure after settings have committed. A user-settings write **does not edit the design or add
 an undo step**. Undoing a modelling operation does not undo the user's settings. A settings-only entry declares `edit`, since it
 writes, but its successful run leaves the design unchanged.
@@ -680,9 +688,12 @@ another plugin. Desktop, scripts, MCP and CLI plugin calls use the same folder:
 `--plugins-dir` changes installed packages, not the settings folder.
 
 Removing a plugin in Preferences offers to remove its saved user settings too; the box starts
-unchecked (keep). Scripts and MCP must choose explicitly:
-`plugin.remove {"id":"gears", "remove_user_data":false}` keeps settings for reinstallation;
-`remove_user_data:true` deletes that plugin's settings. These programmatic calls never prompt.
+unchecked (keep). Scripts and MCP may omit `remove_user_data`:
+`plugin.remove {"id":"gears"}` and `plugin.remove {"id":"gears", "remove_user_data":false}`
+keep settings for reinstallation; `remove_user_data:true` deletes that plugin's settings.
+Deleting settings also requires the caller's file scope to allow the settings record; otherwise
+removal refuses with typed `permission_denied` before changing the package, grants or settings.
+These programmatic calls never prompt.
 Revoking approvals or disabling the plugin keeps its settings.
 
 ### Design storage (`storage@0.1`)

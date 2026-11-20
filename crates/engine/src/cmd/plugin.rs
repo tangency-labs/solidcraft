@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("List inspected and installed plugin manifests, namespaced entries, declared effects and input schemas; no plugin code runs"),
     CommandSpec::new("plugin.remove", "Remove Plugin", checked!("plugin.remove", remove)).icon("delete").noundo().doc_only()
         .contract(&TypedContract::<RemoveParams>::new()).output(output_schema_for::<RemoveResult>)
-        .params("id: installed plugin id, remove_user_data: required bool (false keeps per-user settings, true deletes them too); removes its folder and stored grants without executing code or prompting"),
+        .params("id: installed plugin id, remove_user_data: optional bool (omitted or false keeps per-user settings, true deletes them too); removes its folder and stored grants without executing code or prompting"),
     CommandSpec::new("plugin.revoke", "Revoke Plugin Approvals", checked!("plugin.revoke", revoke)).icon("delete").noundo().doc_only()
         .contract(&TypedContract::<RevokeParams>::new()).output(output_schema_for::<RevokeResult>)
         .params("id: plugin id; takes back everything approved for it and keeps it installed: it runs with nothing granted until it is installed again with approvals"),

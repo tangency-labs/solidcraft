@@ -63,6 +63,11 @@ fn wit_error(error: HostError) -> PluginError {
         HostError::LimitExceeded { limit } => PluginError::LimitExceeded(limit),
         HostError::InvalidManifest { field, reason } => PluginError::InvalidManifest(types::FieldFailure { field, reason }),
         HostError::InvalidInput { field, reason } => PluginError::InvalidInput(types::FieldFailure { field, reason }),
+        // Commit conflicts normally return directly to the caller after guest execution. Keep
+        // the frozen WIT error set when a host also reports one during a guest import.
+        error @ HostError::UserStorageConflict { .. } => {
+            PluginError::CommandFailed(types::CommandFailure { command: "user-storage.commit".into(), reason: error.to_string() })
+        }
         HostError::Trap { reason } => PluginError::Trap(reason),
         HostError::Cancelled => PluginError::Cancelled,
         HostError::UnsupportedCapability { reason, .. } => PluginError::InvalidManifest(types::FieldFailure { field: "capabilities".into(), reason }),

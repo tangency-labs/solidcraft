@@ -88,6 +88,10 @@ pub enum HostError {
     InvalidManifest { field: String, reason: String },
     #[error("invalid input {field}: {reason}")]
     InvalidInput { field: String, reason: String },
+    /// Another run changed this plugin's user settings or is committing them. Retry the run
+    /// from freshly loaded settings; the refused transaction published nothing.
+    #[error("user settings for {plugin} changed or are being written; retry the plugin run")]
+    UserStorageConflict { plugin: String },
     #[error("plugin trap: {reason}")]
     Trap { reason: String },
     #[error("plugin cancelled")]

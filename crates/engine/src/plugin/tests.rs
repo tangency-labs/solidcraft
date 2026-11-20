@@ -1832,13 +1832,41 @@ mod install_zip {
         let settings = s.plugin_state.user_settings_dir.clone().unwrap();
         user_storage::save(&settings, "sample", &BTreeMap::from([("hinge".into(), json!(42))])).unwrap();
         user_storage::save(&settings, "other", &BTreeMap::from([("keep".into(), json!(true))])).unwrap();
-        for remove_user_data in [false, true] {
+        for params in [json!({"id":"sample"}), json!({"id":"sample", "remove_user_data":false}), json!({"id":"sample", "remove_user_data":true})] {
             std::fs::create_dir_all(root.join("plugins/sample")).unwrap();
-            assert!(s.execute("plugin.remove", &json!({"id":"sample"})).is_err(), "scripts choose explicitly");
-            s.execute("plugin.remove", &json!({"id":"sample", "remove_user_data":remove_user_data})).unwrap();
-            assert_eq!(user_storage::load(&settings, "sample").unwrap().is_empty(), remove_user_data);
+            assert_eq!(s.execute("plugin.remove", &params).unwrap()["removed"], true);
+            assert!(!root.join("plugins/sample").exists());
+            assert_eq!(user_storage::load(&settings, "sample").unwrap().is_empty(), params["remove_user_data"] == true);
             assert_eq!(user_storage::load(&settings, "other").unwrap()["keep"], true);
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn uninstall_refuses_user_data_outside_the_callers_scope_before_removing_anything() {
+        let (mut s, root) = session("user-data-removal-scope");
+        let plugins = root.join("plugins");
+        let settings = root.join("settings");
+        s.plugin_state.user_settings_dir = Some(settings.clone());
+        std::fs::create_dir_all(plugins.join("sample")).unwrap();
+        let saved = BTreeMap::from([("hinge".into(), json!(42))]);
+        user_storage::save(&settings, "sample", &saved).unwrap();
+        s.plugin_state.grants.insert("sample".into(), Grants::default());
+        s.plugin_state.persist_stored().unwrap();
+        let record = plugins.join(".grants/sample.json");
+        let approval = std::fs::read(&record).unwrap();
+        let scope = solidcraft_io::vfs::PathScope::new([plugins.join("sample"), plugins.join(".grants")]);
+        solidcraft_io::vfs::scoped(Some(scope), || {
+            let error = s.execute("plugin.remove", &json!({"id":"sample", "remove_user_data":true})).unwrap_err();
+            assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { .. })), "{error}");
+            assert!(plugins.join("sample").is_dir());
+            assert_eq!(std::fs::read(&record).unwrap(), approval);
+            assert!(s.plugin_state.grants.contains_key("sample"));
+            // The same caller can remove the package and its grants while retaining settings.
+            assert_eq!(s.execute("plugin.remove", &json!({"id":"sample"})).unwrap()["removed"], true);
+        });
+        assert!(!record.exists() && !plugins.join("sample").exists());
+        assert_eq!(user_storage::load(&settings, "sample").unwrap(), saved);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -2204,6 +2232,72 @@ fn user_storage_persists_across_sessions_and_designs_and_is_private_and_undo_fre
     host.begin_transaction().unwrap();
     assert!(matches!(host.user_storage_list(), Err(HostError::PermissionDenied { .. })));
     assert!(user_storage::load(&root, "../other").is_err());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn user_storage_stale_commits_conflict_without_losing_keys_and_can_be_retried() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-user-storage-conflict-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    for initial in [None, Some(BTreeMap::from([("existing".into(), json!(0))]))] {
+        if let Some(data) = &initial {
+            user_storage::save(&root, "gears", data).unwrap();
+        }
+        let mut first = user_storage_host(&root, "gears");
+        let mut second = user_storage_host(&root, "gears");
+        let mut reader = user_storage_host(&root, "gears");
+        first.begin_transaction().unwrap();
+        second.begin_transaction().unwrap();
+        reader.begin_transaction().unwrap();
+        assert_eq!(reader.user_storage_get("first").unwrap(), None);
+        first.user_storage_set("first", &json!(1)).unwrap();
+        second.user_storage_set("second", &json!(2)).unwrap();
+        let original = second.session.doc.clone();
+        second.transaction.as_mut().unwrap().doc_mut().name = "Uncommitted".into();
+        first.commit_transaction().unwrap();
+        reader.commit_transaction().unwrap();
+        let committed = user_storage::load(&root, "gears").unwrap();
+        let error = second.commit_transaction().unwrap_err();
+        assert_eq!(error, HostError::UserStorageConflict { plugin: "gears".into() });
+        assert_eq!(serde_json::to_value(&error).unwrap(), json!({"kind":"user_storage_conflict", "plugin":"gears"}));
+        let message = PluginFailure { plugin: "Gears".into(), file: None, error }.text();
+        assert!(message.starts_with("Gears:"), "{message}");
+        assert!(message.contains("Retry the plugin run"), "{message}");
+        assert!(std::sync::Arc::ptr_eq(&original, &second.session.doc));
+        assert_eq!(user_storage::load(&root, "gears").unwrap(), committed);
+        assert!(second.session.undo.is_empty() && second.session.doc.plugin_data.is_empty());
+        second.rollback_transaction().unwrap();
+        second.begin_transaction().unwrap();
+        assert_eq!(second.user_storage_get("first").unwrap(), Some(json!(1)));
+        second.user_storage_set("second", &json!(2)).unwrap();
+        second.commit_transaction().unwrap();
+        let mut expected = initial.unwrap_or_default();
+        expected.extend([("first".into(), json!(1)), ("second".into(), json!(2))]);
+        assert_eq!(user_storage::load(&root, "gears").unwrap(), expected);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+}
+
+#[test]
+fn user_storage_serialises_publication_and_refuses_a_deleted_snapshot() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-user-storage-lock-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    user_storage::save(&root, "gears", &BTreeMap::from([("existing".into(), json!(0))])).unwrap();
+    let mut host = user_storage_host(&root, "gears");
+    host.begin_transaction().unwrap();
+    host.user_storage_set("new", &json!(1)).unwrap();
+    let lock = std::fs::OpenOptions::new().read(true).write(true).open(root.join("plugin-user-data/gears.lock")).unwrap();
+    lock.try_lock().unwrap();
+    let conflict = HostError::UserStorageConflict { plugin: "gears".into() };
+    assert_eq!(host.commit_transaction().unwrap_err(), conflict);
+    assert_eq!(user_storage::save(&root, "gears", &BTreeMap::new()).unwrap_err(), conflict);
+    assert_eq!(user_storage::remove(&root, "gears").unwrap_err(), conflict);
+    assert_eq!(user_storage::load(&root, "gears").unwrap(), BTreeMap::from([("existing".into(), json!(0))]));
+    drop(lock);
+    user_storage::remove(&root, "gears").unwrap();
+    assert_eq!(host.commit_transaction().unwrap_err(), conflict, "a stale run must not resurrect removed settings");
+    assert!(user_storage::load(&root, "gears").unwrap().is_empty());
+    host.rollback_transaction().unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
 

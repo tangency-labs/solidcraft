@@ -286,7 +286,8 @@ pub struct InstallResult {
 #[serde(deny_unknown_fields)]
 pub struct RemoveParams {
     pub id: String,
-    /// Remove this plugin's per-user settings too. Required for scripts; the UI defaults to false.
+    /// Remove this plugin's per-user settings too. Omitted or false keeps them.
+    #[serde(default)]
     pub remove_user_data: bool,
 }
 #[derive(Debug, Serialize, JsonSchema)]
