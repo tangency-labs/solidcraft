@@ -7185,7 +7185,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             Some(slot) => {
                 painter.add(egui_wgpu::Callback::new_paint_callback(paint, solidcraft_viewport_egui::TileCallback(slot, frame)));
             }
-            None => { painter.add(egui_wgpu::Callback::new_paint_callback(rect, ViewportCallback(frame))); },
+            None => {
+                painter.add(egui_wgpu::Callback::new_paint_callback(rect, ViewportCallback(frame)));
+            }
         }
 
         // The graphics card had no memory for the view's frame (#7296): say once why it looks
