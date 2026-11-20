@@ -1311,8 +1311,8 @@ mod native {
         zero["name"] = json!("zero");
         let manifest = json!({"id":"frames","name":"Frames","version":"0.1.0","capabilities":["commands@0.1"],"runtime":{
             "module":"plugin.wasm",
-            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail"), entry("place", "Place"), entry("move", "Move"), entry("both", "Both"), fit, sketch, zero],
-            "commands":["solid.box", "view.fit", "view.home", "component.create", "occurrence.move", "sketch.create", "sketch.rectangle.two_point", "sketch.finish"]}});
+            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail"), entry("place", "Place"), entry("move", "Move"), entry("both", "Both"), fit, sketch, zero, entry("consumed", "Consumed")],
+            "commands":["solid.box", "view.fit", "view.home", "component.create", "occurrence.move", "sketch.create", "sketch.rectangle.two_point", "sketch.finish", "sketch.line", "solid.extrude"]}});
         std::fs::write(dir.join("plugin.json"), manifest.to_string()).unwrap();
         root
     }
@@ -1595,6 +1595,91 @@ mod native {
         assert!(h.app.preview.active, "the solid preview is ready: {:?}", h.app.preview.error);
         assert_eq!(h.app.preview.bounds.max.z.round(), 10.0, "the field change produces a solid");
         assert!(same_camera(&moved, &h.app.cam), "a later solid leaves the user's camera alone");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_unchanged_visible_sketch_is_included_in_the_first_plugin_preview_fit() {
+        let root = view_package("preview-unchanged-sketch-fit");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[100,20],"p1":[120,30]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let sketch = h.app.session.world_state().unwrap().sketches[0].feature;
+        assert!(solidcraft_engine::view::sketch_shown(&h.app.session, sketch));
+        h.app.plugin_menu.loaded = true;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        let fit = h.app.plugin_menu.listed[0].entries.iter().position(|e| e.name == "fit").unwrap();
+        h.app.cam.set_view(solidcraft_viewport::StandardView::Top);
+        h.app.cam.distance = 800.0;
+        let parked = h.app.cam;
+        let (doc, undo) = (h.app.session.doc.clone(), h.app.session.undo.len());
+        open_entry(&mut h.app, 0, fit);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the preview is ready: {:?}", h.app.preview.error);
+        assert!(h.app.preview.sketches.is_empty(), "the existing sketch is unchanged by the run");
+        // The new box spans (0,0,0)..(20,10,3); the shown rectangle extends to (120,30,0).
+        let bounds = solidcraft_engine::geom::Aabb3 { min: solidcore_record::Vec3::ZERO, max: solidcore_record::Vec3::new(120.0, 30.0, 3.0) };
+        assert_eq!(h.app.preview.bounds, bounds, "framing includes the unchanged shown sketch");
+        let expected = h.app.fitted_bounds(parked, &bounds);
+        assert!(same_camera(&expected, &h.app.cam), "the first preview fits all shown geometry");
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
+        assert_eq!(h.app.session.undo.len(), undo);
+
+        h.app.cam = parked;
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        h.frames(2);
+        assert!(solidcraft_engine::view::sketch_shown(&h.app.session, sketch));
+        assert_eq!(solidcraft_engine::view::bounds(&h.app.session).unwrap(), bounds);
+        // The bounds above are the preview's; the dialog has closed, so Fit has the whole viewport.
+        let committed = h.app.fitted_bounds(parked, &bounds);
+        assert!(same_camera(&committed, &h.app.cam), "preview and committed Fit frame the same geometry");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_sketch_a_plugin_consumes_does_not_widen_its_first_preview_fit() {
+        let root = view_package("preview-consumed-sketch-fit");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.plugin_menu.loaded = true;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        let entry = h.app.plugin_menu.listed[0].entries.iter().position(|e| e.name == "consumed").unwrap();
+        h.app.cam.set_view(solidcraft_viewport::StandardView::Top);
+        h.app.cam.distance = 800.0;
+        let parked = h.app.cam;
+        open_entry(&mut h.app, 0, entry);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the preview is ready: {:?}", h.app.preview.error);
+        assert_eq!(h.app.preview.sketches.len(), 1, "the run changed the distant sketch's geometry");
+        assert_eq!(
+            solidcraft_engine::view::sketch_bounds(&h.app.preview.sketches[0].sketch).max.x,
+            120.0,
+            "the sketch itself extends past the solid"
+        );
+        // The rectangle extrudes to (0,0,0)..(10,10,10). Its sketch also has a construction
+        // line ending at (120,30), which must not enlarge Fit once the sketch is consumed.
+        let bounds =
+            solidcraft_engine::geom::Aabb3 { min: solidcore_record::Vec3::new(0.0, 0.0, 0.0), max: solidcore_record::Vec3::new(10.0, 10.0, 10.0) };
+        assert_eq!(h.app.preview.bounds, bounds, "only the shown box contributes to framing");
+        let expected = h.app.fitted_bounds(parked, &bounds);
+        assert!(same_camera(&expected, &h.app.cam), "the first preview fits only shown geometry");
+        assert!(h.app.plugin_menu.dialogs[0].preview_drawn);
+        assert!(h.app.session.doc.features.is_empty(), "the run is still only previewed");
+
+        h.app.cam = parked;
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        h.frames(2);
+        let sketch = h.app.session.world_state().unwrap().sketches[0].feature;
+        assert!(solidcraft_engine::view::sketch_consumed(&h.app.session, sketch), "the extrusion consumes the sketch");
+        assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, sketch), "the consumed sketch is hidden");
+        assert_eq!(solidcraft_engine::view::bounds(&h.app.session).unwrap(), bounds);
+        // The bounds above are the preview's; the dialog has closed, so Fit has the whole viewport.
+        let committed = h.app.fitted_bounds(parked, &bounds);
+        assert!(same_camera(&committed, &h.app.cam), "preview and committed Fit frame the same geometry");
         let _ = std::fs::remove_dir_all(root);
     }
 
