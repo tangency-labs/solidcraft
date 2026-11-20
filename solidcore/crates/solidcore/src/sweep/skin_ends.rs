@@ -584,6 +584,30 @@ mod tests {
     }
 
     #[test]
+    fn a_strip_point_that_overflows_is_refused() {
+        // The derivative is finite, the moved point is not: sections near the lowest z, each
+        // row 1e150 long along x over the parameter step 1e-155 (speed 1e305), weight 10
+        // (a derivative of 1e306), and the start's strip moved that far below -1.79e308.
+        let low = -1.79e308;
+        let mut cs = vec![line(low, 0.0), line(low, 1e150)];
+        let ts = [0.0, 1e-155];
+        let ends = [
+            Some(EndTangent {
+                direction: UP,
+                weight: 10.0,
+            }),
+            None,
+        ];
+        let e = skin_with_end_tangents(&mut cs, ends, 3, 0.0, Direction::U, Some(&ts), None)
+            .unwrap_err();
+        assert!(
+            matches!(e, SolidError::InvalidInput { reason, .. }
+                if reason == "an end derivative that is not a finite number"),
+            "{e:?}"
+        );
+    }
+
+    #[test]
     fn hostile_end_conditions_are_refused() {
         let cs = || vec![line(0.0, 0.0), line(4.0, 0.0)];
         let run = |ends, dir, params: Option<&[f64]>| {
