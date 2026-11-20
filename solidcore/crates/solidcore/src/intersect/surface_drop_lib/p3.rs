@@ -1668,7 +1668,7 @@ impl Surface {
                         if let Some(b) = move_bound.as_mut() {
                             b.budget = approx_tol_3d - max_approx_dev;
                         }
-                        ignore_status(add_to_curve_bounded(
+                        let added = add_to_curve_bounded(
                             k,
                             this,
                             &s_uv_domain,
@@ -1682,13 +1682,19 @@ impl Surface {
                             &mut out.uv_curves,
                             &mut fix_bc_change,
                             move_bound.as_ref(),
-                        ))?;
+                        );
+                        // the fix-up's refusal, kept as the cause of the drop's stop (rule 6)
+                        let refusal = added.as_ref().err().cloned();
+                        ignore_status(added)?;
                         if let Some(b) = move_bound.as_ref() {
                             if b.refused() {
-                                return Err(SolidError::intersect(
-                                    OP_REFUSED,
-                                    IntersectFailure::BoundaryFixRefused,
-                                ));
+                                let stop =
+                                    Failure::new(OP_REFUSED, IntersectFailure::BoundaryFixRefused);
+                                return Err(match refusal {
+                                    Some(cause) => stop.caused_by(cause),
+                                    None => stop,
+                                }
+                                .into_error());
                             }
                             max_approx_dev += b.spent();
                         }

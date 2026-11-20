@@ -870,7 +870,12 @@ mod tests {
     fn a_nan_control_point_is_refused() {
         let b = plane(1.0, 1.0, 1e-5);
         let mut p = poly(0, (0.45, f64::NAN), (0.5, 0.0), (0.55, 0.3));
-        assert!(bounded(&mut p, &[0.0, 1.0, 2.0], &DOM, &b).is_err());
+        let e = bounded(&mut p, &[0.0, 1.0, 2.0], &DOM, &b).unwrap_err();
+        assert_eq!(e.intersect_failure(), Some(&IntersectFailure::NotFinite));
+        assert_eq!(
+            crate::error::upstream_status(&e),
+            Some(crate::error::SM_ERR)
+        );
         assert!(b.refused());
     }
 
@@ -895,7 +900,18 @@ mod tests {
             assert!(b.spent() > 0.0);
             let small = plane(100.0, 100.0, 1e-6);
             let mut p = poly(side, (0.45, -1e-5), (0.5, 1e-7), (0.55, 5e-6));
-            assert!(bounded(&mut p, &[0.0, 1.0, 2.0], &DOM, &small).is_err());
+            let e = bounded(&mut p, &[0.0, 1.0, 2.0], &DOM, &small).unwrap_err();
+            assert_eq!(
+                e.intersect_failure(),
+                Some(&IntersectFailure::MoveNotProved {
+                    budget: small.budget
+                }),
+                "side {side}"
+            );
+            assert_eq!(
+                crate::error::upstream_status(&e),
+                Some(crate::error::SM_ERR)
+            );
             assert!(small.refused(), "side {side}");
         }
     }
@@ -1004,7 +1020,12 @@ mod tests {
         let b = plane(1.0, 1.0, 1e-5);
         let mut p = poly(0, (0.4, 0.2), (0.5, 0.25), (0.6, 0.2));
         let dom = Extent2d::from_bounds(0.0, f64::NAN, 1.0, 1.0);
-        assert!(bounded(&mut p, &[0.0, 1.0, 2.0], &dom, &b).is_err());
+        let e = bounded(&mut p, &[0.0, 1.0, 2.0], &dom, &b).unwrap_err();
+        assert_eq!(e.intersect_failure(), Some(&IntersectFailure::EmptyDomain));
+        assert_eq!(
+            crate::error::upstream_status(&e),
+            Some(crate::error::SM_ERR)
+        );
         assert!(b.refused());
     }
 
