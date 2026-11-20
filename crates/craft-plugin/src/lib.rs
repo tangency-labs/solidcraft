@@ -209,6 +209,29 @@ pub struct FileGrant {
     pub write: bool,
 }
 
+/// Folder access ordered for install-review prefill, from no access through read to write.
+/// Write includes requests with both flags. This comparison never authorizes file operations:
+/// runtime checks still use the grant's exact `read` and `write` flags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FileAccess {
+    None,
+    Read,
+    Write,
+}
+
+impl FileGrant {
+    /// The highest requested or granted access, only for comparing review starting values.
+    pub fn access(&self) -> FileAccess {
+        if self.write {
+            FileAccess::Write
+        } else if self.read {
+            FileAccess::Read
+        } else {
+            FileAccess::None
+        }
+    }
+}
+
 /// A runtime brackets a whole plugin call in one transaction. Guest failures roll it back.
 /// The app must retain its original state until commit, including its undo history.
 /// Granted file writes are staged until the guest succeeds and the app commits; rollback

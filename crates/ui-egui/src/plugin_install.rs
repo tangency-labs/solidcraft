@@ -48,13 +48,12 @@ pub(crate) fn review(app: &mut SolveApp, path: String) {
     }
 }
 
-/// A checked package from the install command; updates can start with the stored named folders.
+/// A checked package; updates reuse named folders only for the same or lower access.
 pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
     let permissions = plugin.get("permissions");
     let stored = plugin
         .get("replaces")
         .and_then(Value::as_str)
-        .filter(|_| app.preferences.plugin_update_prefill_folders)
         .and_then(|_| plugin.get("id").and_then(Value::as_str))
         .and_then(|id| app.session.plugin_state.grants.get(id));
     let grants = solidcraft_engine::plugin::Grants {
@@ -66,16 +65,19 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
             .into_iter()
             .flatten()
             .map(|folder| {
-                let name = text(folder, "name");
-                solidcraft_engine::plugin::FileGrant {
-                    folder: stored
-                        .and_then(|grants| grants.folders.iter().find(|grant| grant.name == name))
-                        .map(|grant| grant.folder.clone())
-                        .unwrap_or_default(),
-                    name,
+                let mut grant = solidcraft_engine::plugin::FileGrant {
+                    name: text(folder, "name"),
+                    folder: Default::default(),
                     read: folder.get("read").and_then(Value::as_bool).unwrap_or(false),
                     write: folder.get("write").and_then(Value::as_bool).unwrap_or(false),
+                };
+                if let Some(previous) = stored
+                    .and_then(|grants| grants.folders.iter().find(|previous| previous.name == grant.name))
+                    .filter(|previous| grant.access() <= previous.access())
+                {
+                    grant.folder = previous.folder.clone();
                 }
+                grant
             })
             .collect(),
         memory_mib: memory_request(&plugin, app.preferences.plugin_max_memory_mib),
@@ -376,7 +378,11 @@ mod tests {
     }
 
     fn install_folder_package(h: &mut crate::scenario::Harness, folder: &std::path::Path) {
-        review_folder_package(h, "0.1.0", json!([{"name":"exports","write":true}]));
+        install_folder_package_with_access(h, folder, false, true);
+    }
+
+    fn install_folder_package_with_access(h: &mut crate::scenario::Harness, folder: &std::path::Path, read: bool, write: bool) {
+        review_folder_package(h, "0.1.0", json!([{"name":"exports","read":read,"write":write}]));
         let mut ask = h.app.plugin_install.ask.take().unwrap();
         ask.grants.folders[0].folder = folder.to_path_buf();
         install_now(&mut h.app, &ask);
@@ -404,25 +410,59 @@ mod tests {
     }
 
     #[test]
-    fn plugin_install_update_starts_empty_when_prefill_is_off() {
+    fn plugin_install_update_read_to_read_prefills() {
         let mut h = crate::scenario::Harness::new();
-        let old_folder = h.dir.join("Old exports");
-        std::fs::create_dir(&old_folder).unwrap();
-        install_folder_package(&mut h, &old_folder);
+        let folder = h.dir.join("Read inputs");
+        std::fs::create_dir(&folder).unwrap();
+        install_folder_package_with_access(&mut h, &folder, true, false);
         let approved = h.app.session.plugin_state.grants.clone();
-        crate::prefs::set(&mut h.app, &json!({"plugin_update_prefill_folders":false})).unwrap();
-        review_folder_package(&mut h, "0.2.0", json!([{"name":"source","read":true},{"name":"exports","write":true}]));
+        review_folder_package(&mut h, "0.2.0", json!([{"name":"exports","read":true}]));
         let ask = h.app.plugin_install.ask.as_ref().unwrap();
-        assert!(ask.grants.folders.iter().all(|grant| grant.folder.as_os_str().is_empty()));
-        assert!(!crate::plugins::valid_grants(&ask.grants));
-        assert_eq!(h.app.session.plugin_state.grants, approved, "review does not change the installed version's grants");
-        assert_eq!(h.app.preferences.plugin_grants, approved);
+        assert_eq!(ask.grants.folders[0].folder, folder);
+        assert!(ask.grants.folders[0].read && !ask.grants.folders[0].write);
+        assert_eq!(h.app.session.plugin_state.grants, approved);
+        assert_eq!(h.app.preferences.plugin_grants, approved, "prefill does not approve an update");
+    }
+
+    #[test]
+    fn plugin_install_update_write_to_read_prefills() {
+        for read in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            let folder = h.dir.join("Write exports");
+            std::fs::create_dir(&folder).unwrap();
+            install_folder_package_with_access(&mut h, &folder, read, true);
+            let approved = h.app.session.plugin_state.grants.clone();
+            review_folder_package(&mut h, "0.2.0", json!([{"name":"exports","read":true}]));
+            let ask = h.app.plugin_install.ask.as_ref().unwrap();
+            assert_eq!(ask.grants.folders[0].folder, folder);
+            assert!(ask.grants.folders[0].read && !ask.grants.folders[0].write, "the new package gets only the requested access");
+            assert_eq!(h.app.session.plugin_state.grants, approved);
+            assert_eq!(h.app.preferences.plugin_grants, approved);
+        }
+    }
+
+    #[test]
+    fn plugin_install_update_read_to_write_starts_empty() {
+        let mut h = crate::scenario::Harness::new();
+        let folder = h.dir.join("Read inputs");
+        std::fs::create_dir(&folder).unwrap();
+        install_folder_package_with_access(&mut h, &folder, true, false);
+        let approved = h.app.session.plugin_state.grants.clone();
+        for read in [false, true] {
+            review_folder_package(&mut h, "0.2.0", json!([{"name":"exports","read":read,"write":true}]));
+            let ask = h.app.plugin_install.ask.as_ref().unwrap();
+            assert!(ask.grants.folders[0].folder.as_os_str().is_empty(), "new write access requires choosing the folder again");
+            assert_eq!(ask.grants.folders[0].read, read);
+            assert!(ask.grants.folders[0].write);
+            assert!(!crate::plugins::valid_grants(&ask.grants));
+            assert_eq!(h.app.session.plugin_state.grants, approved);
+            assert_eq!(h.app.preferences.plugin_grants, approved, "review cannot raise the stored grant's access");
+        }
     }
 
     #[test]
     fn plugin_install_update_prefills_stored_folder_by_name() {
         let mut h = crate::scenario::Harness::new();
-        assert_eq!(serde_json::to_value(&h.app.preferences).unwrap()["plugin_update_prefill_folders"], true);
         let old_folder = h.dir.join("Old exports");
         let chosen = h.dir.join("New exports");
         std::fs::create_dir(&old_folder).unwrap();
