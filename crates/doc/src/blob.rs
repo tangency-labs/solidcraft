@@ -75,6 +75,64 @@ impl<'de> Deserialize<'de> for Blob {
     }
 }
 
+thread_local! {
+    static READING: std::cell::RefCell<std::collections::BTreeMap<String, Blob>> = std::cell::RefCell::default();
+    static WRITING: std::cell::RefCell<Option<Vec<(String, Blob)>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `read` (a record of a container being read) with the container's parts it names, by name:
+/// a record that names a part takes its bytes from here, as they are.
+pub fn with_parts<T>(parts: std::collections::BTreeMap<String, Blob>, read: impl FnOnce() -> T) -> T {
+    struct Clear;
+    impl Drop for Clear {
+        fn drop(&mut self) {
+            READING.with(|held| held.borrow_mut().clear());
+        }
+    }
+    READING.with(|held| *held.borrow_mut() = parts);
+    let _clear = Clear;
+    read()
+}
+
+/// The bytes of the part `name`, while a container's record is read ([`with_parts`]).
+pub(crate) fn part(name: &str) -> Option<Blob> {
+    READING.with(|held| held.borrow().get(name).cloned())
+}
+
+/// Runs `write` (a record being written into a container) and answers what it wrote with the parts
+/// it names: their names, `blobs/<sha256>.<extension>`, and bytes, for the container to write.
+pub fn collecting_parts<T>(write: impl FnOnce() -> T) -> (T, Vec<(String, Blob)>) {
+    struct Stop;
+    impl Drop for Stop {
+        fn drop(&mut self) {
+            WRITING.with(|held| *held.borrow_mut() = None);
+        }
+    }
+    WRITING.with(|held| *held.borrow_mut() = Some(Vec::new()));
+    let stop = Stop;
+    let written = write();
+    let parts = WRITING.with(|held| held.borrow_mut().take()).unwrap_or_default();
+    drop(stop);
+    (written, parts)
+}
+
+/// The part name for `blob`, recorded for the container, while one is written
+/// ([`collecting_parts`]); `None` otherwise, when the bytes have nowhere to go.
+pub(crate) fn add_part(blob: &Blob, extension: &str) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    WRITING.with(|held| {
+        let mut held = held.borrow_mut();
+        let parts = held.as_mut()?;
+        let digest = Sha256::digest(blob.as_bytes());
+        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        let name = format!("blobs/{hex}.{extension}");
+        if !parts.iter().any(|(known, _)| *known == name) {
+            parts.push((name.clone(), blob.clone()));
+        }
+        Some(name)
+    })
+}
+
 /// An older design's base64 text, as [`Blob`]'s own reading, except that text which is not base64
 /// reads as no bytes: a damaged image never stops the design opening.
 pub fn lenient<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Blob, D::Error> {
