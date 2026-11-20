@@ -187,6 +187,18 @@ pub fn scene(case: &Case) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
         .map(|s| (s.brep, s.eu)))
 }
 
+/// The case's B-rep after its op ran, and the selected edge use: what the case's row
+/// reports (`None` where the setup stops). For the WR-493 trim certificate (`refit::replay`).
+#[cfg(test)]
+pub(crate) fn after_op(case: &Case) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
+    let i = case.parse::<Inputs>()?;
+    let Ok(mut s) = setup(&i)? else {
+        return Ok(None);
+    };
+    run_rust_op(&i.op, &mut s.brep, s.eu)?.map_err(|e| harness(format!("rust: {e}")))?;
+    Ok(Some((s.brep, s.eu)))
+}
+
 /// A 2D curve as a [`CrvIn`] (`None` for a non-B-spline or one without NURB data).
 fn crv_in(c: &SmCurve) -> Option<CrvIn> {
     let CurveKind::BSpline(b) = c.kind() else {

@@ -111,3 +111,43 @@ fn issue18543_the_top_loop_of_a_cylinder_with_a_notch_in_its_rim_is_rounded() {
         assert!(taken > 0.5 * full && taken < 1.2 * full, "d {d} h {h} r {r}: took {taken} of about {full}");
     }
 }
+
+/// A 2 thick wall, 30 x 2 x 10: past 1 mm its two top edges' rounds overlap on the 2 wide top.
+fn wall() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name":"top_radius", "expression":"0.5 mm"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY", "name":"Wall"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0], "p1":[30,2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":"10 mm", "body_name":"Wall"}));
+    s
+}
+
+/// #17926: a fillet the kernel refuses fails with the kernel call's stable code beside its
+/// error, a kernel kind (not one the operations library decided). The same failure, from a new
+/// fillet or from an existing one whose parameter changed, has the same code, in the command's
+/// error and in the timeline's result; a fillet that builds has none.
+#[test]
+fn a_refused_fillet_carries_the_kernel_calls_code() {
+    let mut s = wall();
+    let edges = json!([[15, 0, 10], [15, 2, 10]]);
+    let e = s.execute("solid.fillet", &json!({"edges":edges, "radius":"1.5 mm"})).unwrap_err();
+    let code = e.error_code().cloned().unwrap_or_else(|| panic!("no code: {e}"));
+    assert_ne!(code.kind, 0, "{code}");
+    assert_eq!(code.call, "blend", "{code}");
+
+    let out = run(&mut s, "solid.fillet", json!({"edges":edges, "radius":"top_radius"}));
+    let id = out["feature"].as_u64().unwrap();
+    let inspected = run(&mut s, "timeline.inspect", json!({"feature":id}));
+    assert!(inspected["error"].is_null() && inspected.get("error_code").is_none(), "{inspected}");
+    s.execute("parameters.change", &json!({"name":"top_radius", "expression":"1.8 mm"})).ok();
+    let inspected = run(&mut s, "timeline.inspect", json!({"feature":id}));
+    assert!(inspected["error"].is_string(), "{inspected}");
+    let timeline_code = &inspected["error_code"];
+    assert_eq!(timeline_code["call"], code.call.as_str(), "{inspected}");
+    assert_eq!(timeline_code["kind"], code.kind, "{inspected}");
+    assert_eq!(timeline_code["operation"], code.operation.as_str(), "{inspected}");
+    let doc = run(&mut s, "document.inspect", json!({"timeline":"summary"}));
+    let row = doc["timeline"].as_array().unwrap().iter().find(|r| r["id"] == id).cloned().unwrap();
+    assert_eq!(&row["error_code"], timeline_code, "{row}");
+}

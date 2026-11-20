@@ -385,7 +385,9 @@ fn round_on_a_round(k: &mut Kernel) -> Outcome {
 /// (31), the arc's rows over a piece are bounded by Taylor models too (#14405: 30), and so
 /// are the feet over a piece (#14405: 29), and the offset point is enclosed as one
 /// expansion (#16652: 27), so more spans certify unhalved; the net is at 0.31 of its bound
-/// at 27 spans (0.36 at 29, 0.37 sampled at 1281 sections along s).
+/// at 27 spans (0.36 at 29, 0.37 sampled at 1281 sections along s). 34 spans since the round
+/// is fitted as finely as its edge is known: its net certifies to that tolerance in more
+/// spans; the net stays at 0.33 of its bound.
 #[test]
 fn round_on_a_definition_is_its_definition() {
     let mut k = solidcraft_kernel();
@@ -403,7 +405,7 @@ fn round_on_a_definition_is_its_definition() {
     );
     assert!(o.sound, "{o:?}");
     assert!(
-        o.graded == 1 && o.spans == 27 && o.circle <= 1e-11 && o.net <= 1.0,
+        o.graded == 1 && o.spans == 34 && o.circle <= 1e-11 && o.net <= 1.0,
         "{o:?}"
     );
     assert!(

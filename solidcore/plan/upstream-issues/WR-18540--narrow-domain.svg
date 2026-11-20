@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="900" height="420" viewBox="0 0 900 420">
+  <title>WR-18540--narrow-domain</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="900" height="420" fill="#ffffff"/>
+    <rect id="domain" x="80" y="180" width="680" height="100" fill="#f0f0f0" stroke="#555555" stroke-miterlimit="10"/>
+    <polygon id="band_U-min" data-name="band U-min" points="80,166 760,166 760,280 80,280" fill="#dce9f5" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4" opacity="0.55"/>
+    <polygon id="band_U-max" data-name="band U-max" points="80,180 760,180 760,294 80,294" fill="#dce9f5" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4" opacity="0.55"/>
+    <polygon id="triangle" points="80,280 488,180 760,280" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 20 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica-Bold, sans-serif" font-size="20" fill="#000000"><tspan x="0" y="0">Loop test 2 on a sliver triangle whose plane&apos;s domain is narrower than the side band</tspan></text>
+    <text transform="matrix(1 0 0 1 20 72)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">Domain 0.0088 across; each band reaches 2 × 0.005 = 0.01 from its side, so every point of every edge lies in both.</tspan></text>
+    <line x1="300" y1="306" x2="300" y2="284" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 160 340)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">now: each point lies on the nearer side; the long edge runs along U-max the right way and passes, the short ones cross from side to side.</tspan></text>
+    <text transform="matrix(1 0 0 1 770 176)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">band of the U-min side</tspan></text>
+    <text transform="matrix(1 0 0 1 770 296)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">band of the U-max side</tspan></text>
+    <text transform="matrix(1 0 0 1 160 318)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">main: every edge is held to U-min, the side tested first; this edge, which runs along U-max, then goes the wrong way and fails (&quot;Bad Loop Orient&quot;).</tspan></text>
+    <line id="arrow_long" data-name="arrow long" x1="370" y1="280" x2="460" y2="280" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <polygon id="head_long" data-name="head long" points="460,272 476,280 460,288" fill="#1f6fb2"/>
+    <line id="arrow_a" data-name="arrow a" x1="300" y1="226" x2="254" y2="237" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <polygon id="head_a" data-name="head a" points="258,229 240,241 261,245" fill="#1f6fb2"/>
+    <line id="arrow_b" data-name="arrow b" x1="680" y1="251" x2="640" y2="236" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <polygon id="head_b" data-name="head b" points="637,245 626,231 645,229" fill="#1f6fb2"/>
+    <line id="v_axis" data-name="v axis" x1="30" y1="140" x2="70" y2="140" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <polygon points="66,135 76,140 66,145" fill="#999999"/>
+    <line id="u_axis" data-name="u axis" x1="30" y1="140" x2="30" y2="180" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <polygon points="25,176 30,186 35,176" fill="#999999"/>
+    <text transform="matrix(1 0 0 1 80 145)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">v</tspan></text>
+    <text transform="matrix(1 0 0 1 26 204)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">u</tspan></text>
+  </g>
+</svg>

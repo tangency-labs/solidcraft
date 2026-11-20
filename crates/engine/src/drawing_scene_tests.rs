@@ -30,6 +30,22 @@ pub(crate) fn front_and_top() -> (Session, u64, [u64; 2]) {
     front_and_top_of(s)
 }
 
+/// Makes view `view` one the sheet can't draw yet: shaded, in a position of its own (a joint the
+/// design needn't have), which `not_drawable_apart` refuses before any joint is read. Written into
+/// the drawing as the file holds it: no command makes it.
+pub(crate) fn not_drawable_yet(s: &mut Session, view: u64) {
+    use solidcraft_doc::drawing_view::{JointPose, Pose};
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let record = d.views.iter_mut().find(|v| v.id == view).unwrap();
+    let settings = &mut Arc::make_mut(record).settings;
+    settings.visual_style = Some(solidcraft_render::VisualStyle::Shaded);
+    settings.pose = Some(Pose::Joints(vec![JointPose { joint: 1, values: vec![0.0] }].into()));
+    s.doc_mut().put_drawing(Arc::new(d));
+}
+
+/// The reason [`not_drawable_yet`] gives.
+pub(crate) const NOT_DRAWABLE_YET: &str = "not supported yet: a shaded view in a position of its own";
+
 /// The flat pattern view's plate (#13030): rule `T2` (2 mm thick, K-factor 0.5, inner radius 1 mm),
 /// a 100 x 60 mm base flange named `Plate` on XY, a 20 mm flange bent up along its edge y = 0, and a
 /// drawing of it, open.
@@ -653,16 +669,15 @@ fn a_sheets_view_dashes_each_parts_hidden_lines_by_its_own_style() {
 fn a_view_that_cant_be_drawn_leaves_out_only_itself() {
     let (mut s, sheet, [front, top]) = front_and_top();
     let status = |s: &Session, id: u64| built(s, sheet).views.into_iter().find(|v| v.view == id).map(|v| v.status);
-    let why = "not supported yet: shaded views with lines need the view's exact lines (W06)";
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}}));
-    assert_eq!((status(&s, front), status(&s, top)), (Some(Status::Drawn), Some(Status::Failed(why.into()))));
+    not_drawable_yet(&mut s, top);
+    assert_eq!((status(&s, front), status(&s, top)), (Some(Status::Drawn), Some(Status::Failed(NOT_DRAWABLE_YET.into()))));
     let objects: Vec<u64> = built(&s, sheet).scene.groups.iter().map(|g| g.object).collect();
     assert_eq!(objects, [sheet, sheet, sheet, front]);
     let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
     let schema = output_schema_for::<SheetSceneResult>();
     assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
     let failed = reply["views"].as_array().unwrap().iter().find(|v| v["view"] == ids::encode(top)).unwrap().clone();
-    assert_eq!((&failed["status"], failed["reason"].as_str().map(|r| r.contains("exact lines"))), (&json!("failed"), Some(true)), "{reply}");
+    assert_eq!((&failed["status"], failed["reason"].as_str()), (&json!("failed"), Some(NOT_DRAWABLE_YET)), "{reply}");
     // Past the walk limit the front view has nothing to measure.
     for level in 0..=MAX_PLACEMENT_DEPTH as u64 + 1 {
         nest(&mut s, level);
@@ -2455,16 +2470,16 @@ fn status_says_which_views_are_out_of_date() {
 #[test]
 fn status_says_why_a_view_has_no_lines() {
     let (mut s, sheet, [front, top]) = front_and_top();
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}}));
+    not_drawable_yet(&mut s, top);
     settled(&mut s, sheet);
     let (reply, words) = status_of(&mut s);
     assert_eq!((words[&front].as_str(), words[&top].as_str()), ("current", "failed"), "{reply}");
     let failed = reply["views"].as_array().unwrap().iter().find(|v| v["status"] == "failed").unwrap();
-    assert!(failed["reason"].as_str().unwrap().contains("exact lines"), "{reply}");
+    assert!(failed["reason"].as_str().unwrap().contains(NOT_DRAWABLE_YET), "{reply}");
     assert_eq!(failed["sheet"], json!(ids::encode(sheet)), "{reply}");
 
     run(&mut s, "drawing.sheet.add", json!({"name": "Other"}));
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": null}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": null, "pose": null}}));
     run(&mut s, "drawing.view.move_to_sheet", json!({"view": ids::encode(top), "sheet": "Other", "break_alignment": true}));
     settled(&mut s, sheet);
     let (reply, words) = status_of(&mut s);
@@ -2846,7 +2861,7 @@ fn delete_hole(s: &mut Session, drawing: &str) {
 fn a_lost_dimension_leaves_the_sheet_drawn_and_is_listed() {
     let (mut s, sheet, [front, top]) = front_and_top();
     let on_top = top_edge(&mut s, top);
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}}));
+    not_drawable_yet(&mut s, top);
     let view_failed = settled(&mut s, sheet);
     let held = view_failed.dimensions.iter().find(|d| d.dimension == on_top).unwrap();
     assert!(!held.drawn && held.why.as_deref() == Some("its view isn't drawn"), "{held:?}");
@@ -3174,7 +3189,7 @@ fn hit_says_what_is_under_a_point_of_a_sheet() {
     assert_eq!(nothing["hit"], Value::Null);
     assert_eq!(s.evaluations, evaluations);
 
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}}));
+    not_drawable_yet(&mut s, top);
     assert_eq!(ask(&mut s, [150.0, 220.0], 0.0)["hit"]["object"], json!(ids::encode(top)), "a view that can't be drawn");
     let default_band = run(&mut s, "drawing.scene.hit", json!({"sheet": sheet_id, "point_mm": [150.0, 150.0]}));
     assert_eq!(default_band["hit"]["object"], json!(ids::encode(front)));
@@ -3302,7 +3317,7 @@ fn a_press_names_the_line_under_it() {
     assert_eq!(line_under(&mut s, sheet, [160.0, 155.2], 0.5)["view"], json!(ids::encode(front)));
     assert_eq!(s.drawing_scenes.projections, projections, "nor does a move");
 
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}}));
+    not_drawable_yet(&mut s, top);
     assert_eq!(line_under(&mut s, sheet, [160.0, 220.0], 40.0), Value::Null);
     for band in [json!(-1.0), json!("wide"), Value::Null] {
         assert!(s.execute("drawing.scene.line", &json!({"sheet": ids::encode(sheet), "point_mm": [0.0, 0.0], "band_mm": band})).is_err(), "{band}");
@@ -5357,4 +5372,133 @@ fn only_the_drawing_closed_last_keeps_its_pictures_pixels() {
     extract(&mut s, second).unwrap();
     run(&mut s, "drawing.close", json!({}));
     assert_eq!(pixels(&s), Some(0), "its lines are kept, its pixels aren't");
+}
+
+/// Shaded with its edges, a view draws its picture and over it the exact lines its line style
+/// draws: visible edges for shaded with visible edges, and the dashed hidden ones too for shaded
+/// with hidden edges. Shaded alone draws the picture and none of the model's lines.
+#[test]
+fn a_view_shaded_with_its_edges_draws_its_lines_over_its_picture() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let drawing = s.open_drawing.unwrap();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [30, 40, 5], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let mut drawn = |style: &str| {
+        run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": style}}));
+        let scene = settled(&mut s, sheet).scene;
+        let ours = scene.groups.iter().find(|g| g.object == front).unwrap().items.clone();
+        let pictures = ours.iter().filter(|item| matches!(item, Item::Picture(_))).count();
+        let solid = ours.iter().filter(|item| matches!(item, Item::Stroke { pattern: None, .. })).count();
+        let dashed = ours.iter().filter(|item| matches!(item, Item::Stroke { pattern: Some(_), .. })).count();
+        let first = matches!(ours.first(), Some(Item::Picture(_)));
+        (pictures, solid, dashed, first)
+    };
+    let (visible, hidden) = (drawn("visible"), drawn("visible_hidden"));
+    assert!(visible.1 > 0 && visible.2 == 0 && hidden.2 > 0, "{visible:?} {hidden:?}");
+    assert_eq!(drawn("shaded"), (1, 0, 0, true), "the picture only");
+    assert_eq!(drawn("shaded_visible"), (1, visible.1, 0, true), "the picture, then the visible edges over it");
+    assert_eq!(drawn("shaded_visible_hidden"), (1, hidden.1, hidden.2, true), "and the hidden edges");
+}
+
+/// A detail view of the block's front view (#4816): a circle of 10 mm round the front's top right
+/// corner, (100, 20) on its plane, at twice the front's 1:2. Its lines are the corner's two edges,
+/// cut to its window, a circle of 10 mm on paper round its centre; the front shows the region as a
+/// thin circle of 5 mm round where it draws the corner, (175, 155), with the detail's letter, and the
+/// detail's label reads DETAIL and its letter. The same in the file a sheet exports.
+#[test]
+fn a_detail_view_draws_its_region_cut_to_its_window_and_its_mark_on_the_parent() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let made = run(
+        &mut s,
+        "drawing.view.detail",
+        json!({"parent": ids::encode(front), "boundary": {"circle": {"centre": [100.0, 20.0], "radius": 10.0}}, "place": {"at": [300.0, 100.0]}}),
+    );
+    let detail = ids::decode(made["view"].as_str().unwrap()).unwrap();
+    assert_eq!((made["scale"]["text"].as_str(), made["letter"].as_str()), (Some("1:1"), Some("A")), "{made}");
+    let d = s.drawing("test").unwrap().clone();
+    assert_eq!(d.label_text(detail).as_deref(), Some("DETAIL A\nSCALE 1:1"));
+    let scene = built(&s, sheet);
+    let status = scene.views.iter().find(|v| v.view == detail).map(|v| v.status.clone());
+    assert_eq!(status, Some(Status::Drawn));
+    // The detail's lines: inside its window, round (300, 100), the corner's two edges meeting there.
+    let ours: Vec<&Item> = scene.scene.groups.iter().filter(|g| g.object == detail && g.kind == ObjectKind::View).flat_map(|g| &g.items).collect();
+    let points: Vec<Vec2> = ours
+        .iter()
+        .flat_map(|item| match item {
+            Item::Stroke { path, .. } => path.iter().flat_map(|seg| [seg.start(), seg.end()]).collect::<Vec<_>>(),
+            _ => Vec::new(),
+        })
+        .collect();
+    assert!(!points.is_empty(), "the corner's edges are drawn");
+    let centre = Vec2::new(300.0, 100.0);
+    assert!(points.iter().all(|p| (*p - centre).len() <= 10.0 + 1e-6), "inside the window: {points:?}");
+    assert!(points.iter().any(|p| (*p - centre).len() < 1e-6), "the corner sits on the detail's centre: {points:?}");
+    // The mark on the parent: a closed thin circle of 5 mm round (175, 155).
+    let mark =
+        scene.scene.groups.iter().find(|g| {
+            g.object == detail && g.kind == ObjectKind::ViewLabel && g.items.iter().any(|i| matches!(i, Item::Stroke { closed: true, .. }))
+        });
+    let circle = mark.and_then(|g| {
+        g.items.iter().find_map(|i| match i {
+            Item::Stroke { path, closed: true, width_mm, .. } => Some((path.clone(), *width_mm)),
+            _ => None,
+        })
+    });
+    let (path, width_mm) = circle.expect("the outline on the parent");
+    assert_eq!(width_mm, LineKind::Thin.width_mm(LineGroup::DEFAULT));
+    for seg in &path {
+        let Seg2::Arc { center, radius, .. } = seg else { panic!("a circle: {path:?}") };
+        assert!((*center - Vec2::new(175.0, 155.0)).len() < 1e-9 && (radius - 5.0).abs() < 1e-9, "{seg:?}");
+    }
+    assert!(mark.is_some_and(|g| g.items.iter().any(|i| matches!(i, Item::Text(_)))), "with the letter");
+}
+
+/// A detail view's region is given on the sheet as well as on the parent's plane, and both make the
+/// same view; what isn't a region, a detail of a detail and a shaded detail are refused, or fail.
+#[test]
+fn a_detail_views_region_and_what_it_refuses() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let on_plane = run(
+        &mut s,
+        "drawing.view.detail",
+        json!({"parent": ids::encode(front), "boundary": {"rectangle": {"min": [80.0, 10.0], "max": [100.0, 20.0]}}}),
+    );
+    let on_sheet = run(
+        &mut s,
+        "drawing.view.detail",
+        json!({"parent": ids::encode(front), "boundary_mm": {"rectangle": {"min": [165.0, 150.0], "max": [175.0, 155.0]}}}),
+    );
+    let d = s.drawing("test").unwrap().clone();
+    let kind = |reply: &Value| d.view(ids::decode(reply["view"].as_str().unwrap()).unwrap()).unwrap().kind.clone();
+    let (ViewKind::Detail { boundary: a, .. }, ViewKind::Detail { boundary: b, .. }) = (kind(&on_plane), kind(&on_sheet)) else { panic!("details") };
+    let (ga, gb) = (a.geometry().unwrap().shape().bounds(), b.geometry().unwrap().shape().bounds());
+    assert!((ga.min - gb.min).len() < 1e-9 && (ga.max - gb.max).len() < 1e-9, "{a:?} {b:?}");
+    let first = ids::decode(on_plane["view"].as_str().unwrap()).unwrap();
+    let line = json!({"kind": "full", "points": [[50.0, -10.0], [50.0, 70.0]], "arrows": "right"});
+    let made = run(&mut s, "drawing.view.section", json!({"parent": ids::encode(front), "line": line, "place": {"at": [300.0, 60.0]}}));
+    let section = ids::decode(made["view"].as_str().unwrap()).unwrap();
+    for (p, why) in [
+        (json!({"parent": ids::encode(front)}), "`boundary` or `boundary_mm` is needed"),
+        (json!({"parent": ids::encode(front), "boundary": {"circle": {"centre": [0, 0], "radius": 0}}}), "radius"),
+        (
+            json!({"parent": ids::encode(front), "boundary": {"circle": {"centre": [0, 0], "radius": 1}}, "boundary_mm": {"circle": {"centre": [0, 0], "radius": 1}}}),
+            "not both",
+        ),
+        (
+            json!({"parent": ids::encode(first), "boundary": {"circle": {"centre": [90, 15], "radius": 2}}}),
+            "not supported yet: a view made from a detail view",
+        ),
+        (json!({"parent": ids::encode(front), "boundary": {"square": {}}}), "boundary"),
+        (
+            json!({"parent": ids::encode(section), "boundary": {"circle": {"centre": [50, 10], "radius": 2}}}),
+            "not supported yet: a detail of a section view",
+        ),
+    ] {
+        let message = s.execute("drawing.view.detail", &p).unwrap_err().to_string();
+        assert!(message.contains(why), "{p}: {message}");
+    }
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(first), "set": {"visual_style": "shaded"}}));
+    let status = built(&s, sheet).views.into_iter().find(|v| v.view == first).map(|v| v.status);
+    assert_eq!(status, Some(Status::Failed("not supported yet: a shaded detail view".into())));
 }

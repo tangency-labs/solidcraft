@@ -32,6 +32,10 @@ impl ParsedDxf {
         if text.starts_with("AutoCAD Binary DXF") {
             return Err(IoError::Invalid("binary DXF is not supported; save as ASCII DXF".into()));
         }
+        // A DWG renamed or picked as a drawing would otherwise read as "no ENTITIES section".
+        if crate::is_dwg(text.as_bytes()) {
+            return Err(IoError::Invalid("this is a DWG file, not a DXF: save the drawing as ASCII DXF and insert that".into()));
+        }
         Ok(parse_pairs(text))
     }
 }
@@ -1818,6 +1822,16 @@ mod tests {
         let selfref = "0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\nA\n0\nINSERT\n2\nA\n0\nLINE\n10\n0\n20\n0\n11\n1\n21\n0\n0\nENDBLK\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nINSERT\n2\nA\n0\nENDSEC\n0\nEOF\n";
         assert_eq!(read_dxf(selfref).unwrap().len(), 16);
         assert!(read_dxf("AutoCAD Binary DXF\r\n").is_err());
+    }
+
+    /// A DWG handed to Insert DXF says it is a DWG, not that it lacks an ENTITIES section (#19131).
+    #[test]
+    fn dwg_says_it_is_a_dwg() {
+        let dwg = "AC1018\0\0\0\0\0\u{fffd}\u{fffd}";
+        for e in [read_dxf(dwg).unwrap_err(), read_dxf_file(dwg).unwrap_err()] {
+            let e = e.to_string();
+            assert!(e.contains("DWG") && e.contains("ASCII DXF"), "{e}");
+        }
     }
 
     /// Bounds on the geometry that comes out do not see a block that emits none: six

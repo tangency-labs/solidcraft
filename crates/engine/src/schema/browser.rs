@@ -1640,13 +1640,11 @@ pub enum FlipAxis {
 }
 
 /// How a redefined sketch is attached to its plane: `exact_face` (to a face of a body, which it
-/// follows), `sheet_face` (to a face of a sheet part) or `fixed` (where it is: an origin,
-/// construction or explicit plane).
+/// follows) or `fixed` (where it is: an origin, construction or explicit plane).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RedefineAttachment {
     ExactFace,
-    SheetFace,
     Fixed,
 }
 

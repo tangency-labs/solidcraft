@@ -155,7 +155,7 @@ mod tests {
         let saved = s.doc.to_json();
         assert_eq!(s.doc.features, geometry);
         assert_eq!(s.doc.materials, physical);
-        let reopened = solidcraft_doc::Document::from_json(&saved).unwrap();
+        let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
         assert_eq!(reopened.render, s.doc.render);
         let scene = crate::product_scene::extract(&s).unwrap();
         assert_eq!(resolve(&s, &scene, &s.doc.render.setups["Studio"].optics, "check").unwrap().len(), 1);
@@ -210,7 +210,7 @@ mod tests {
             s.doc.render.setups["CPU glass"].optics.iter().next().unwrap().optics.boundary,
             solidcraft_doc::render_optics::OpticalBoundary::ClosedMesh
         );
-        let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
         assert_eq!(reopened.render, s.doc.render);
         s.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(*s.doc, *before);

@@ -1,4 +1,4 @@
-//! MCP tool arguments checked against an entry's declared input schema before
+//! Plugin arguments checked against an entry's declared input schema before
 //! plugin code runs: declared types, required fields, fixed values and ranges. Object schemas
 //! default to accepting only declared properties unless they use unsupported schema composition;
 //! `oneOf`/`anyOf` options do not implicitly close the object they constrain. The schema is the
@@ -14,8 +14,74 @@ const MAX_STEPS: usize = 100_000;
 
 /// `Ok` when `value` fits `schema`; otherwise the first field that does not, and why.
 pub fn check_input(schema: &Value, value: &Value) -> Result<()> {
+    crate::conditions::validate_conditions(schema)?;
     let mut steps = 0;
-    check(schema, value, "params", 0, &mut steps, true)
+    check(schema, value, "params", 0, &mut steps, true, true)
+}
+
+/// Validate and omit hidden fields before passing input to plugin code.
+pub fn prepare_input(schema: &Value, value: &Value) -> Result<Value> {
+    check_input(schema, value)?;
+    // Select against the original input, before any scope removes keys. Load validation proves
+    // conditional branches unambiguous; ordinary scalar choice filters remain field rules.
+    fn scopes<'a>(schema: &'a Value, value: &Value, depth: usize, steps: &mut usize, out: &mut Vec<&'a Value>) -> Result<()> {
+        *steps += 1;
+        if depth > MAX_DEPTH || *steps > MAX_STEPS {
+            return Err(bad("params", "is nested too deeply to check"));
+        }
+        out.push(schema);
+        for key in ["oneOf", "anyOf"] {
+            if let Some(options) = schema.get(key).and_then(Value::as_array) {
+                for option in options.iter().take(256) {
+                    if check(option, value, "params", depth + 1, steps, false, true).is_ok() {
+                        scopes(option, value, depth + 1, steps, out)?;
+                        break;
+                    }
+                    if *steps > MAX_STEPS {
+                        return Err(bad("params", "is nested too deeply to check"));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    fn visible(schemas: &[&Value], value: &Value, depth: usize, steps: &mut usize) -> Result<Value> {
+        *steps += 1;
+        if depth > MAX_DEPTH || *steps > MAX_STEPS {
+            return Err(bad("params", "is nested too deeply to check"));
+        }
+        let mut applicable = Vec::new();
+        for schema in schemas {
+            scopes(schema, value, depth, steps, &mut applicable)?;
+        }
+        if let Some(object) = value.as_object() {
+            let conditions = applicable.iter().map(|s| crate::conditions::InputConditions::parse(s)).collect::<Result<Vec<_>>>()?;
+            let controls: Vec<_> = conditions.iter().map(|c| c.visible_values(object)).collect();
+            let mut out = Map::new();
+            for (key, value) in object {
+                if conditions.iter().zip(&controls).any(|(c, values)| c.fields.get(key).is_some_and(|f| !f.visible(values))) {
+                    continue;
+                }
+                let properties: Vec<_> = applicable
+                    .iter()
+                    .filter_map(|s| s.get("properties").and_then(|p| p.get(key)).or_else(|| s.get("additionalProperties")))
+                    .collect();
+                out.insert(key.clone(), visible(&properties, value, depth + 1, steps)?);
+            }
+            return Ok(Value::Object(out));
+        }
+        if let Some(values) = value.as_array() {
+            let items: Vec<_> = applicable.iter().filter_map(|s| s.get("items")).collect();
+            return values.iter().map(|v| visible(&items, v, depth + 1, steps)).collect::<Result<Vec<_>>>().map(Value::Array);
+        }
+        Ok(value.clone())
+    }
+    visible(&[schema], value, 0, &mut 0)
+}
+
+// The base schema constraints, without conditions (used to validate condition literals).
+pub(crate) fn check_value(schema: &Value, value: &Value) -> Result<()> {
+    check(schema, value, "value", 0, &mut 0, true, false)
 }
 
 /// The schema as a tool lists it, with the same default-closed object rules as [`check_input`].
@@ -103,7 +169,7 @@ fn count(schema: &Map<String, Value>, key: &str) -> Option<usize> {
     schema.get(key).and_then(Value::as_u64).map(|n| usize::try_from(n).unwrap_or(usize::MAX))
 }
 
-fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut usize, closed: bool) -> Result<()> {
+fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut usize, closed: bool, conditional: bool) -> Result<()> {
     *steps += 1;
     if depth > MAX_DEPTH || *steps > MAX_STEPS {
         return Err(bad(field, "is nested too deeply to check"));
@@ -121,12 +187,12 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
         _ => {}
     }
     if let Some(constant) = schema.get("const")
-        && constant != value
+        && !crate::conditions::scalar_equal(constant, value)
     {
         return Err(bad(field, format!("must be {}", shown(constant))));
     }
     if let Some(Value::Array(options)) = schema.get("enum")
-        && !options.contains(value)
+        && !options.iter().any(|option| crate::conditions::scalar_equal(option, value))
     {
         let names: Vec<String> = options.iter().take(12).map(shown).collect();
         return Err(bad(field, format!("must be one of {}", names.join(", "))));
@@ -137,7 +203,7 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
         {
             let mut matched = false;
             for option in options.iter().take(256) {
-                if check(option, value, field, depth + 1, steps, false).is_ok() {
+                if check(option, value, field, depth + 1, steps, false, conditional).is_ok() {
                     matched = true;
                     break;
                 }
@@ -193,14 +259,17 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
         }
         if let Some(item) = schema.get("items") {
             for (i, value) in items.iter().enumerate() {
-                check(item, value, &format!("{field}[{i}]"), depth + 1, steps, true)?;
+                check(item, value, &format!("{field}[{i}]"), depth + 1, steps, true, conditional)?;
             }
         }
     }
     if let Some(object) = value.as_object() {
+        let properties = schema.get("properties").and_then(Value::as_object);
+        let conditions = if conditional { crate::conditions::InputConditions::from_properties(properties)? } else { Default::default() };
+        let controls = conditions.visible_values(object);
         if let Some(Value::Array(required)) = schema.get("required") {
             for name in required.iter().filter_map(Value::as_str) {
-                if !object.contains_key(name) {
+                if !object.contains_key(name) && conditions.fields.get(name).is_none_or(|f| f.visible(&controls)) {
                     return Err(bad(&format!("{field}.{name}"), "is required"));
                 }
             }
@@ -210,13 +279,26 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
         // An object schema that says nothing about other fields declares exactly its properties.
         let declared = defaults_closed(schema, closed) && (properties.is_some() || schema.get("type").and_then(Value::as_str) == Some("object"));
         for (name, value) in object {
+            if conditions.fields.get(name).is_some_and(|f| !f.visible(&controls)) {
+                continue;
+            }
             let field = format!("{field}.{name}");
             match (properties.and_then(|p| p.get(name)), additional) {
-                (Some(property), _) => check(property, value, &field, depth + 1, steps, true)?,
+                (Some(property), _) => {
+                    if let (Some(rules), Some(options)) = (conditions.fields.get(name), property.get("oneOf").and_then(Value::as_array))
+                        && rules.has_choice_filter()
+                        && options.iter().take(256).enumerate().all(|(i, option)| {
+                            !rules.option_available(i, &controls) || check(option, value, &field, depth + 1, steps, false, conditional).is_err()
+                        })
+                    {
+                        return Err(bad(&field, "is not an available choice"));
+                    }
+                    check(property, value, &field, depth + 1, steps, true, conditional)?;
+                }
                 (None, Some(Value::Bool(false))) => return Err(bad(&field, "is not an input of this entry")),
                 // Declared properties and nothing said about others: as strict as an app command.
                 (None, None) if declared => return Err(bad(&field, "is not an input of this entry")),
-                (None, Some(extra @ Value::Object(_))) => check(extra, value, &field, depth + 1, steps, true)?,
+                (None, Some(extra @ Value::Object(_))) => check(extra, value, &field, depth + 1, steps, true, conditional)?,
                 (None, _) => {}
             }
         }

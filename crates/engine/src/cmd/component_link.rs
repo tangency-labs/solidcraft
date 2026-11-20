@@ -254,11 +254,14 @@ fn remember_read(
 /// The bytes of the design at `file`, which must not be the design saved at `own`.
 fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
     let shown = file.display().to_string();
-    if own.is_some_and(|o| same_file(Path::new(o), file)) {
+    // A network location only when its server is allowed, a device never: judged from the text
+    // before anything is asked of the disk (on Windows, resolving or reading `\\host\share\x`
+    // connects to the host), so a refused path skips the self-link check, which resolves it, and
+    // `read_linked_file` says why it is refused.
+    let reachable = solidcraft_io::vfs::design_path_refusal(&shown, own).is_none();
+    if reachable && own.is_some_and(|o| same_file(Path::new(o), file)) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
     }
-    // A network location only when its server is allowed, a device never: judged from the text
-    // before anything is read (on Windows, reading `\\host\share\x` connects to the host).
     read_linked_file(file, own).map_err(|e| EngineError::Other(e.reason))
 }
 
@@ -1422,7 +1425,7 @@ mod tests {
         drop(autosaver);
         let entry = crate::recovery::orphans(&recovery).pop().unwrap();
         // Older autosaves hold paths relative to the design, not the recovery folder.
-        std::fs::write(recovery.join(format!("{}.solidcraft", entry.id)), solidcraft_io::write_design(&s.design())).unwrap();
+        std::fs::write(recovery.join(format!("{}.solidcraft", entry.id)), solidcraft_io::write_design(&s.design()).unwrap()).unwrap();
         let mut recovered = Session::default();
         run(&mut recovered, "doc.recover", json!({"dir": recovery, "id": entry.id}));
         assert_eq!(run(&mut recovered, "component.links", json!({}))["links"][0]["found"], true);
