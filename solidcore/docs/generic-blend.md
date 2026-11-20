@@ -428,11 +428,15 @@ requires the Join section-gap bound `2 o tan(a/2)` to be below the body's inters
 where `o` is the solver's largest absolute support offset and `a` the tangent-plane angle. The
 angular budget is also capped by the solver's angle tolerance.
 
-Concave overflow hanging over a cliff is designed to keep the cliff edge instead: the added
-material is trimmed flush with the cliff faces continued, so it never passes the cliff, the
-default of T-FLEX on Parasolid [52]. The Roll-over's trim (§3.2) provides this for its identified
-corner event; other concave hanging-cliff overflows remain refused. Convex overflow still moves
-the sharp edge.
+For concave overflow the added material ends flush with the continued cliff face, keeping the
+original cliff edge, the default of T-FLEX on Parasolid [52]. A concave chamfer can touch a sharp
+rim tangentially where its planar support ends. Its strips share their section on the continued
+support. Where a rail crosses that rim into free space, the continued wall cuts the strip at the
+crease. The crease and the crossed rim edges bound the extension of the wall. A closed strip
+is divided at an interior section before cutting it at the tangent rim, so the two creases
+keep their separate parameters at the seam. The pieces are sewn together on the same surface.
+The Roll-over's second pass (§3.2) also trims its added material at the crease.
+Other concave hanging-cliff overflows remain refused. Convex overflow still moves the sharp edge.
 
 ### 3.5 Refusals name the size that fits
 
@@ -519,8 +523,8 @@ given.
 - **Mitre creases are graded G0.**
 - **Ball corners are one rational patch on the sphere**, box corners included.
 - **Overflow keeps the blend and moves the sharp edge**, matching the constant-radius overflow mode
-  common CAD practice offers; keeping the edge is a future option. Concave overflow is designed to
-  keep the cliff edge (§3.4; the Roll-over build provides it).
+  common CAD practice offers. A concave chamfer running past a tangent rim keeps the cliff edge
+  and ends flush with its continued wall (§3.4).
 - **A convex and a concave round meeting with the other edges sharp are designed to roll over,
   convex first** (§3.2; the Roll-over build provides it, and until it lands the corner is refused with
   `CornerUnsupported`, `session/trim_at_creases.rs`).

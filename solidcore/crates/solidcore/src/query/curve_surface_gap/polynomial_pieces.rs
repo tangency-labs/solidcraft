@@ -34,7 +34,7 @@
 //! the cell holding `W(t)`, so the largest of the cells' bounds (each cell's polynomial
 //! taken over the whole piece) bounds it. Past the net's end (a box a ulp out on a seam or
 //! boundary) the end cell's polynomial is continued, plus the slack `NetSurface::partials`
-//! adds there, as [`super::piece`] does. A piece whose values reach into more than
+//! adds there, as [`super::piece_bound`] does. A piece whose values reach into more than
 //! [`MAX_CELLS`] cells, run too far past the net, or whose `D` is not proved positive is
 //! bisected.
 //!

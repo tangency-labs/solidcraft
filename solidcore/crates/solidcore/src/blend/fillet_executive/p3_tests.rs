@@ -171,6 +171,7 @@ impl ExecutiveAccess<Handle> for Access {
             boundaries_into_material: false,
             left_across: Vec::new(),
             return_across: Vec::new(),
+            continued_cliffs: Vec::new(),
             wraps_past_both_ends: false,
         })
     }
@@ -759,6 +760,7 @@ fn state() -> FilletExecutive<Handle> {
         self_intersection_handler: None,
         mark_corner_patches: false,
         cliff_overflow: false,
+        continued_cliffs: BTreeMap::new(),
         open_ends: Vec::new(),
         overflow_first: false,
         classify_only: false,

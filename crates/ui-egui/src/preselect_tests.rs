@@ -4309,6 +4309,31 @@ fn model_bounds_are_kept_until_the_model_changes() {
     assert!((far.max.x - 505.0).abs() < 1e-6, "a new sketch grows the box: {far:?}");
 }
 
+/// What the refinement reads of each body whatever the view (its id, whether it may be refined,
+/// the ids of every body) is taken once per model, not each time the view rests: the same
+/// state gives the same record, and a new body makes a new one with it.
+#[test]
+fn the_refinements_record_of_the_bodies_is_kept_until_the_model_changes() {
+    let mut app = boxed();
+    let record = |app: &SolveApp| {
+        let st = crate::open_meshing::shown_world(app);
+        let bounds = crate::viewport::body_bounds(app, &st);
+        (st.clone(), crate::viewport::lod_bodies(app, &st, &bounds))
+    };
+    let (st, one) = record(&app);
+    assert_eq!(one.bodies.len(), 1);
+    assert_eq!(one.bodies[0], (crate::display_lod::body_id(&st.bodies[0]).0, true), "a solid may be refined");
+    assert!(one.live.contains(&one.bodies[0].0));
+    assert!(std::sync::Arc::ptr_eq(&one, &record(&app).1), "the same state gives the same record");
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0], "operation": "new"})).unwrap();
+    let (st, two) = record(&app);
+    assert_eq!(two.bodies.len(), 2, "a new body makes a new record");
+    for (b, (id, refined)) in st.bodies.iter().zip(&two.bodies) {
+        assert_eq!(*id, crate::display_lod::body_id(b).0);
+        assert!(*refined && two.live.contains(id));
+    }
+}
+
 /// #2747: the Revolve window takes a planar body face as its profile, as the engine already
 /// does: the box's front face (on Y = 0, from the Z axis to X = 40) turned about Z is a
 /// Ø80 × 20 cylinder.

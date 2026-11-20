@@ -83,6 +83,15 @@ pub trait RailClassificationContext {
         face: crate::topology::FaceId,
         class: &mut CurveClassification<FilletClassObject>,
     ) -> Result<()>;
+    /// The planar cliff closing this rim at the blend's joined endpoint.
+    fn continued_cliff(
+        &self,
+        _vertex: crate::topology::VertexId,
+        _rim: EdgeId,
+    ) -> Option<crate::topology::FaceId> {
+        None
+    }
+
     /// Actual corner kind.
     ///
     /// # Errors

@@ -812,6 +812,75 @@ pub(crate) fn display_mesh_at(b: &solidcraft_kernel::Body, quality: MeshQuality)
     Ok(b.mesh(&solidcraft_kernel::MeshTolerance::chord(quality.chord(b.size())))?)
 }
 
+/// The export's warning for a closed body whose welded mesh is not a clean closed surface: the
+/// sides used by one triangle only (a hole) and those used by more than two (non-manifold, as
+/// slicers report them: a defect, or parts of the body touching along an edge), with a vertex
+/// of the first such side, so a mesh a slicer would refuse or repair is never written silently.
+/// `as_f32`: the file stores its coordinates as `f32` (STL, plain 3MF), so vertices that round
+/// to the same point are one, as a reader sees them. `None` when every side is used twice.
+/// Open surfaces are not asked (their edges are meant to be used once).
+pub(crate) fn unsealed_note(positions: &[Vec3], triangles: &[[u32; 3]], as_f32: bool) -> Option<String> {
+    use std::collections::HashMap;
+    // The vertex each index is in the file: itself, or the first with the same f32 point.
+    let canon: Vec<u32> = if as_f32 {
+        let mut first: HashMap<[u32; 3], u32> = HashMap::with_capacity(positions.len());
+        positions
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let key = [p.x as f32, p.y as f32, p.z as f32].map(|c| (c + 0.0).to_bits());
+                *first.entry(key).or_insert(u32::try_from(i).unwrap_or(u32::MAX))
+            })
+            .collect()
+    } else {
+        (0..positions.len()).map(|i| u32::try_from(i).unwrap_or(u32::MAX)).collect()
+    };
+    let at = |i: u32| canon.get(i as usize).copied().unwrap_or(i);
+    let mut uses: HashMap<(u32, u32), u32> = HashMap::with_capacity(triangles.len() * 3 / 2);
+    for t in triangles {
+        let t = t.map(at);
+        if t[0] == t[1] || t[1] == t[2] || t[2] == t[0] {
+            continue;
+        }
+        for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+            *uses.entry((a.min(b), a.max(b))).or_insert(0) += 1;
+        }
+    }
+    let (mut over, mut once, mut first) = (0usize, 0usize, None::<(u32, u32)>);
+    for (&side, &n) in &uses {
+        if n == 2 {
+            continue;
+        }
+        if n > 2 {
+            over += 1
+        } else {
+            once += 1
+        }
+        // the lowest side, so the place named is the same from one run to the next
+        if first.is_none_or(|f| side < f) {
+            first = Some(side);
+        }
+    }
+    let p = positions.get(first?.0 as usize)?;
+    // (to the micrometre, a hair below zero reading 0)
+    let um = |v: f64| (v * 1e6).round() / 1e6 + 0.0;
+    let sides = |n: usize| if n == 1 { "1 side".to_string() } else { format!("{n} sides") };
+    let mut what = Vec::new();
+    if once > 0 {
+        what.push(format!("{} used by one triangle only (a hole)", sides(once)));
+    }
+    if over > 0 {
+        what.push(format!("{} used by more than two triangles (non-manifold: a defect, or parts touching along an edge)", sides(over)));
+    }
+    Some(format!(
+        "the mesh written is not a clean closed surface: {}; a vertex of the first is at ({}, {}, {}). Slicers will report or repair it",
+        what.join("; "),
+        um(p.x),
+        um(p.y),
+        um(p.z)
+    ))
+}
+
 /// Distance within which an exported mesh's vertices are welded (STL, 3MF and OBJ alike).
 fn weld_eps(b: &solidcraft_kernel::Body) -> f64 {
     weld_distance(b.size())
@@ -1372,8 +1441,11 @@ pub fn export_with_parts_noted(
             // Each body welded on its own (as for 3MF), so shared vertices are written identically
             // and the file is closed where faces meet.
             let (items, notes) = per_placed_body(&sel, |b, body| {
-                let (m, n) = body_mesh(b, body, quality)?;
+                let (m, mut n) = body_mesh(b, body, quality)?;
                 let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(&b.body));
+                if !b.body.is_surface() && !b.body.is_mesh() {
+                    n.extend(unsealed_note(&positions, &triangles, true).map(|note| format!("{}: {note}", b.name)));
+                }
                 Ok((Mesh { positions, triangles, ..Mesh::default() }, n))
             })?;
             let meshes: Vec<Mesh> = items.into_iter().map(|(_, m)| m).collect();
@@ -1420,7 +1492,7 @@ const EXPORT_THREADS: usize = 16;
 /// A body as a 3MF mesh: welded watertight (T-junctions split), coloured, and with `tagged`
 /// each triangle keeps the B-rep face it came from.
 fn mesh_object(b: &solidcraft_doc::ModelBody, body: &Placed, tagged: bool, quality: MeshQuality) -> Result<(MeshObject, Vec<String>)> {
-    let (m, notes) = body_mesh(b, body, quality)?;
+    let (m, mut notes) = body_mesh(b, body, quality)?;
     let eps = weld_eps(&b.body);
     // Faces with colours of their own tag their triangles.
     let paint = b.body.paint();
@@ -1434,6 +1506,9 @@ fn mesh_object(b: &solidcraft_doc::ModelBody, body: &Placed, tagged: bool, quali
     // and its colour and face follow from it.
     let n = u32::try_from(m.triangles.len()).map_err(|_| IoError::Invalid("mesh too large".into()))?;
     let (positions, triangles, origin) = threemf::weld_tagged(&m.positions, &m.triangles, &(0..n).collect::<Vec<_>>(), eps);
+    if !b.body.is_surface() && !b.body.is_mesh() {
+        notes.extend(unsealed_note(&positions, &triangles, !tagged).map(|note| format!("{}: {note}", b.name)));
+    }
     let face_of = |t: &u32| m.tri_face.get(*t as usize).copied().unwrap_or(0);
     let tri_looks =
         if looks.is_empty() { Vec::new() } else { origin.iter().map(|t| by_face.get(&(face_of(t) as usize)).copied().unwrap_or(0)).collect() };
@@ -2248,6 +2323,63 @@ mod tests {
         assert!(notes[0].starts_with("face 3: smallest angle 18.50°, short of the 25° asked"), "{}", notes[0]);
         assert!(!notes[1].contains("short"), "{}", notes[1]);
         assert!(notes[1].contains("face 7") && notes[1].contains("reached") && notes[1].contains("27.25°"), "{}", notes[1]);
+    }
+
+    /// A closed mesh has no unsealed note; one missing a triangle (a hole) or with a fin on a side
+    /// (three triangles on it) has one, counting each kind and naming where. Two vertices that
+    /// round to one f32 point are one in a file that stores f32 (they would seal a side there).
+    #[test]
+    fn an_unsealed_mesh_is_noted_and_a_closed_one_is_not() {
+        let p =
+            vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 1.0, 1.0)];
+        let tetra = vec![[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]];
+        assert_eq!(unsealed_note(&p, &tetra, false), None);
+        let note = unsealed_note(&p, &tetra[..3], false).unwrap();
+        assert!(note.contains("3 sides used by one triangle only (a hole)") && !note.contains("more than two"), "{note}");
+        let mut fin = tetra.clone();
+        fin.push([1, 2, 4]);
+        let note = unsealed_note(&p, &fin, false).unwrap();
+        assert!(note.contains("1 side used by more than two triangles") && note.contains("2 sides used by one triangle only"), "{note}");
+        // vertex 5 is vertex 3 moved less than an f32 step: one point in an f32 file
+        let mut q = p.clone();
+        q.push(Vec3::new(0.0, 0.0, 1.0 + 1e-12));
+        let split = vec![[0, 2, 1], [0, 1, 3], [1, 2, 5], [2, 0, 5]];
+        assert!(unsealed_note(&q, &split, false).is_some());
+        assert_eq!(unsealed_note(&q, &split, true), None);
+    }
+
+    /// Closed bodies with curved faces (a cylinder's seam, a sphere's poles) and a box export as
+    /// STL and 3MF with no unsealed note: no false alarm where faces are meshed apart.
+    #[test]
+    fn closed_bodies_export_with_no_unsealed_note() {
+        let mut doc = Document::new("t");
+        let mut add = |kind| {
+            doc.add_feature(kind, None).unwrap();
+        };
+        add(FeatureKind::Box {
+            corner: point_expr(Vec3::ZERO),
+            length: "10".into(),
+            width: "20".into(),
+            height: "30".into(),
+            operation: Operation::NewBody,
+            centred: false,
+        });
+        add(FeatureKind::Cylinder {
+            base: point_expr(Vec3::new(40.0, 0.0, 0.0)),
+            axis: solidcraft_doc::Dir(Vec3::Z),
+            radius: "6".into(),
+            height: "15".into(),
+            operation: Operation::NewBody,
+            references: Vec::new(),
+        });
+        add(FeatureKind::Sphere { center: point_expr(Vec3::new(80.0, 0.0, 0.0)), radius: "7".into(), operation: Operation::NewBody });
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        assert_eq!(m.state().bodies.len(), 3);
+        for format in [Format::StlBinary, Format::ThreeMf, Format::ThreeMfTagged] {
+            let (_, notes) = export_with_parts_noted(&m.state(), &[], &[], format, "t", &Metadata::default(), MeshQuality::Standard, None).unwrap();
+            assert!(notes.iter().all(|n| !n.contains("clean closed surface")), "{format:?}: {notes:?}");
+        }
     }
 
     /// A 10 × 20 × 30 box exported as STL has no triangle sharper than the mesh export's smallest

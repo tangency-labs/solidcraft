@@ -28,11 +28,11 @@
 //! nearest-edge search of `sm_InsideMaterial` keeps the first of equally near edges, in
 //! the face's edge order, as the fork's strict `<` does. There is no recursion.
 
-use super::{RailClassificationContext, OP};
+use super::{OP, RailClassificationContext};
 use crate::blend::fillet_classification::FilletClassObject;
 use crate::blend::fillet_geom::p1::{FilletBrep, FilletGeomType};
 use crate::blend::fillet_solver::p1::{
-    test_manifold_tangent_rollover_at, FilletSolver, FilletSolverOps,
+    FilletSolver, FilletSolverOps, test_manifold_tangent_rollover_at,
 };
 use crate::curve::curve::Curve;
 use crate::error::blend::{BlendFailure, CrossingInput};
@@ -43,11 +43,11 @@ use crate::intersect::curve_class::p1::CurveClassification;
 use crate::intersect::curve_class::p2::ResetOptions;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
-use crate::math::Point3;
 use crate::math::BIG_DOUBLE;
+use crate::math::Point3;
 use crate::topology::edgeuse::p2 as eu2;
 use crate::topology::face::p4 as face_p4;
-use crate::topology::{edge, edgeuse::p1 as eu, Brep, EdgeId, FaceId};
+use crate::topology::{Brep, EdgeId, FaceId, edge, edgeuse::p1 as eu};
 
 /// What [`FilletSolver::rails_fit_their_faces_judged_with_ops`] finds of a solver's rails
 /// (the fork's `RailsFitTheirFaces(rbFit, rbRollsOver, rbIntoMaterial)`).
@@ -73,6 +73,8 @@ pub struct RailsFit {
     /// The classified return boundary of each judged off-face run between two on-face
     /// stretches. Kept separate so the corner Roll-over retains its exit-only contract.
     pub return_across: Vec<Option<EdgeId>>,
+    /// Rail crossings handed to a planar cliff joined to the next blend span.
+    pub continued_cliffs: Vec<(EdgeId, FaceId)>,
     /// Not the fork's (tangency-labs/solidcore#2175): a closed rail leaves its face past
     /// one end of the filleted edge and comes back onto it past the other, round the far
     /// side of the rail. An open edge's face is smaller than the blend beyond both ends;
@@ -118,7 +120,7 @@ pub fn is_knife_edge(
                 SolidError::Unported { .. } | SolidError::Cancelled { .. }
             ) || e.is_not_certified() =>
         {
-            return Err(e)
+            return Err(e);
         }
         Err(_) => return Ok(false),
     };
@@ -299,6 +301,39 @@ fn rail_jet(
         return Err(SolidError::blend_missing(OP, "the rail's tangent"));
     };
     Ok((point, heading))
+}
+
+/// Whether the run off the support leaves through the rim of the planar cliff
+/// of a neighboring span, on the cliff's outward side. The joined corner does
+/// not cut off that interval: the cliff trims the full continuous blend.
+fn continued_cliff_crossing(
+    solver: &FilletSolver,
+    k: &Kernel,
+    target: &Brep,
+    context: &impl RailClassificationContext,
+    rail: &Curve,
+    at: &PointClassification<FilletClassObject>,
+    outside_param: f64,
+) -> Result<Option<(EdgeId, FaceId)>> {
+    let (PointClassType::Edge, Some(object)) = (at.point_class(), at.object()) else {
+        return Ok(None);
+    };
+    let EntityRef::Edge(rim) = object.target_entity()? else {
+        return Ok(None);
+    };
+    let source = filleted_edge(solver, target)?;
+    let (first, last) = edge::start_end_vertices(target, source)?;
+    for end in [first, last].into_iter().flatten() {
+        let Some(wall) = context.continued_cliff(end, rim) else {
+            continue;
+        };
+        let (origin, normal) = crate::blend::fillet_overflow::outward_plane(k, target, wall)?;
+        let point = rail.evaluate_point(k, outside_param)?;
+        if (point - origin).dot(normal) > solver.approx_tol_3d {
+            return Ok(Some((rim, wall)));
+        }
+    }
+    Ok(None)
 }
 
 /// `SmFilletSolver::LeavesPastAnEnd`: whether a rail that leaves the face it rolls on at
@@ -648,6 +683,7 @@ impl FilletSolver {
         let mut boundaries_into_material = judge_material;
         let mut left_across = Vec::new();
         let mut return_across = Vec::new();
+        let mut continued_cliffs = Vec::new();
         let mut wraps_past_both_ends = false;
         // the filleted edge (a rail that leaves its face across it is not leaving past a cliff)
         let filleted = match solver.solver().edgeuse(0)? {
@@ -666,6 +702,7 @@ impl FilletSolver {
                     boundaries_into_material: false,
                     left_across: Vec::new(),
                     return_across: Vec::new(),
+                    continued_cliffs: Vec::new(),
                     wraps_past_both_ends: false,
                 });
             }
@@ -754,6 +791,18 @@ impl FilletSolver {
                         leaves_past_an_end(solver.solver(), k, target, face, &curve, d, point)
                     };
                     if j == 0 || j_last + 1 == n {
+                        if let Some((rim, wall)) = continued_cliff_crossing(
+                            solver.solver(),
+                            k,
+                            target,
+                            context,
+                            &curve,
+                            leave,
+                            ivl.interval.evaluate(0.5),
+                        )? {
+                            continued_cliffs.push((rim, wall));
+                            continue;
+                        }
                         if past_end(leave, d_leave)?
                             || past_closed_corner(
                                 solver.solver(),
@@ -926,6 +975,7 @@ impl FilletSolver {
             boundaries_into_material,
             left_across,
             return_across,
+            continued_cliffs,
             wraps_past_both_ends,
         })
     }
