@@ -8752,6 +8752,74 @@ mod tests {
         assert_eq!(variable.constant_offsets().unwrap(), None);
     }
 
+    /// The band check past an end of a band's own edge (#18563) on a rail that runs on along
+    /// an arc: the band beside the run-on lies between the rail and the end's side however far
+    /// the arc turns. The rail is the circle of radius 10 about the origin in z = 0, the
+    /// edge's end lies at radius 11 at 0 degrees and its other end at -30 degrees, so the band
+    /// is 1 wide and runs on from 0 to 150 degrees. Past a quarter turn the end's direction
+    /// points into the arc, where the band is not.
+    #[test]
+    fn a_band_past_its_edges_end_follows_its_rail_round_an_arc() {
+        use crate::geom::global_solver::SolverOperation;
+        let k = Kernel::default();
+        let at = |rho: f64, degrees: f64| {
+            let a = degrees.to_radians();
+            Point3::new(rho * a.cos(), rho * a.sin(), 0.0)
+        };
+        let rail = Curve::from(
+            crate::curve::ellipse::Ellipse::new_circle(
+                &k,
+                Point3::ZERO,
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+                crate::geom::extent1d::Extent1d::from_min_max(-60.0, 150.0),
+                10.0,
+                &crate::curve::ellipse::p2::EllipseOptions {
+                    dim: 3,
+                    ..crate::curve::ellipse::p2::EllipseOptions::default()
+                },
+            )
+            .unwrap(),
+        );
+        let ivl = rail.natural_interval();
+        let judge = |sample: Point3| {
+            let foot = rail
+                .drop_point(
+                    &k,
+                    &ivl,
+                    sample,
+                    None,
+                    crate::math::BIG_DOUBLE,
+                    None,
+                    SolverOperation::Minimize,
+                )
+                .unwrap();
+            assert!(foot.success);
+            let r = rail.evaluate_point(&k, foot.parameter).unwrap();
+            inside_band_past_run_end(
+                &k,
+                &rail,
+                &ivl,
+                PastRunEnd {
+                    end: at(11.0, 0.0),
+                    other_end: at(11.0, -30.0),
+                    sample,
+                    on_rail: (foot.parameter, r),
+                    kept: [ivl.min(), ivl.max()],
+                },
+                1e-6,
+                1e-5,
+            )
+            .unwrap()
+        };
+        for degrees in [30.0, 120.0] {
+            assert!(judge(at(10.5, degrees)), "outside the arc at {degrees}");
+            assert!(!judge(at(9.5, degrees)), "inside the arc at {degrees}");
+        }
+        // on the edge's side of the end there is no run-on
+        assert!(!judge(at(10.5, -20.0)));
+    }
+
     /// An empty edge list is a typed refusal of the value, with the status of the bare
     /// `SM_ERR_INVALID_INPUT` it replaced (#13790), for every prepare that checks it.
     #[test]
