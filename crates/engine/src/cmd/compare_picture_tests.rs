@@ -96,7 +96,17 @@ fn a_matching_picture_scores_high_with_flat_edges() {
             assert!(near(e, 0.0, 0.6), "edge {e:?}");
         }
     }
-    assert!(!out["overlay_png"].as_str().unwrap().is_empty());
+    assert!(out.get("overlay").is_none(), "no overlay unless asked for");
+    // Asked for, the overlay is a PNG file; the reply names it and never holds the picture.
+    let overlay = std::env::temp_dir().join(format!("solidcraft-compare-picture-{}-overlay.png", std::process::id())).to_string_lossy().into_owned();
+    let out = run(&mut s, "inspect.compare_picture", json!({"reference": path, "view": "front", "overlay": overlay}));
+    assert_eq!(out["overlay"], json!(overlay));
+    assert!(std::fs::read(&overlay).unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
+    assert!(out.get("overlay_png").is_none());
+    std::fs::remove_file(&overlay).unwrap();
+    for bad in [json!(true), json!("overlay.jpg"), json!(3)] {
+        assert!(s.execute("inspect.compare_picture", &json!({"reference": path, "view": "front", "overlay": bad})).is_err(), "{bad}");
+    }
 }
 
 #[test]
@@ -381,7 +391,7 @@ fn hostile_and_empty_references_fail_cleanly() {
     assert!(s.execute("inspect.compare_picture", &json!({"reference": path, "fit": "diagonal"})).is_err());
     // overlay: false leaves the PNG out.
     let out = run(&mut s, "inspect.compare_picture", json!({"reference": path, "view": "front", "overlay": false}));
-    assert!(out.get("overlay_png").is_none());
+    assert!(out.get("overlay").is_none() && out.get("overlay_png").is_none());
 }
 
 /// Reviewer re-test case: a 60 x 60 opaque PNG with a white 40 x 40 square and a single
