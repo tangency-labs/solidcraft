@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Convex hull collision</title>
+  <path d="M8.62 18.5L20.31 25.25L20.31 52.25L8.62 45.5Z" fill="#b8c3cf"/>
+  <path d="M43.69 11.75L20.31 25.25L20.31 52.25L43.69 38.75Z" fill="#8e9faf"/>
+  <path d="M32 5L43.69 11.75L20.31 25.25L8.62 18.5Z" fill="#e2e8ef"/>
+  <path d="M32 5L43.69 11.75L43.69 38.75L20.31 52.25L8.62 45.5L8.62 18.5Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.62 18.5L20.31 25.25L43.69 11.75" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20.31 25.25L20.31 52.25" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20.31 42.12L32 48.88L32 59L20.31 52.25Z" fill="#b8c3cf"/>
+  <path d="M55.38 35.38L32 48.88L32 59L55.38 45.5Z" fill="#8e9faf"/>
+  <path d="M43.69 28.62L55.38 35.38L32 48.88L20.31 42.12Z" fill="#e2e8ef"/>
+  <path d="M43.69 28.62L55.38 35.38L55.38 45.5L32 59L20.31 52.25L20.31 42.12Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20.31 42.12L32 48.88L55.38 35.38" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 48.88L32 59" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20.31 25.25L32 48.88L20.31 42.12Z" fill="#b9ddf8"/>
+  <path d="M43.69 11.75L55.38 35.38L32 48.88L20.31 25.25Z" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3 4"/>
+  <path d="M20.31 25.25L32 48.88L20.31 42.12Z" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3 4"/>
+</svg>
