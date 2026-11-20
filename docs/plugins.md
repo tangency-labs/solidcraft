@@ -223,7 +223,9 @@ entry calls without adding the capability. A plugin that needs populated forms d
 `params` is JSON with the target entry's normal input schema, including the selection objects
 returned by selection fields. The target must be a command entry of the same plugin.
 At most eight forms may be requested in one run; parameters are limited to 1 MiB.
-The host opens requested forms only after a successful interactive run. Preview discards them.
+The host opens requested forms only after a successful interactive run, on the design tab that
+ran the entry. If another tab is active when the reply arrives, the reply waits until the original
+tab is active again. Preview discards form requests.
 A failed or cancelled run discards every request.
 
 The application opening path is `plugin_menu::open_form(app, plugin_id, entry, params)`.
@@ -415,11 +417,12 @@ key is the argument the plugin receives. The design follows the
   picks and the hover highlight work as in the native tools. One tool picks at a time: while a
   native tool is open, clicking a plugin field says to finish or cancel it first (a sketch tool too).
   Escape and Cancel close the dialog and stop the picking.
-- **References stay true.** The picks belong to the design they were made on. Any change to the
-  design while the dialog is open (an edit, an undo) clears them and the dialog says so; turning
+- **References stay true.** In ordinary plugin forms, picks belong to the design they were made on.
+  Any change to the design while the dialog is open (an edit, an undo) clears them and the dialog says so; turning
   the view or changing the selection does not. Picking runs no plugin code; Run sends the picks
   through the same `plugin.run` request. Programs calling `plugin.run` pass the same references
-  themselves; nothing fills them from the selection.
+  themselves; nothing fills them from the selection. Populated forms for editing stored operations
+  retain stale picks and validate them beside their fields, so they can be corrected.
 
 ### Seating a custom fastener
 
@@ -462,10 +465,13 @@ relative path to an `.svg` file inside the package:
 
 ### Preview
 
-A command entry that edits the design is previewed the way native tools are: while its dialog's
-fields make parameters, the host runs the entry on a scratch copy of the design and draws what
-it would change in the viewport (new material tinted, removed material as a see-through ghost).
-The dialog has a **Preview** box, on when it opens; with it off, nothing runs until Run.
+In an ordinary plugin form, a command entry that edits the design is previewed the way native
+tools are: while its fields make parameters, the host runs the entry on a scratch copy of the
+design and draws what it would change in the viewport (new material tinted, removed material
+as a see-through ghost).
+An ordinary plugin form has a **Preview** box, on when it opens; with it off, nothing runs until Run.
+A populated form for editing a stored operation starts with Preview off and retains stale picks
+for field validation. Nothing runs until Apply or an explicit Preview request.
 
 - The preview is a dry run of the same `plugin.run`: the plugin's code is unchanged and declares
   nothing new. It runs on a scratch session that is thrown away, so the design, the undo history

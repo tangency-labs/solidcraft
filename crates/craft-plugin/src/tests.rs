@@ -26,6 +26,27 @@ fn conditional_selection_items_keep_shared_pick_objects() {
 }
 
 #[test]
+fn selection_alternatives_preserve_strict_schema_parity() {
+    for alternative in ["oneOf", "anyOf"] {
+        for (key, annotated, selection) in [("targets", false, true), ("faces", true, true), ("records", false, false)] {
+            let mut property = json!({alternative:[{"type":"array","items":{"type":"object"}}]});
+            if annotated {
+                property["x-solidcraft-selection"] = json!({"version":1,"accept":["face"]});
+            }
+            let schema = json!({"type":"object","properties":{key:property}});
+            let value = json!({key:[{"type":"face","body":"Box","index":0,"point":[0,0,0]}]});
+            assert_eq!(check_input(&schema, &value).is_ok(), selection, "{key}/{alternative}");
+            if selection {
+                assert_eq!(prepare_input(&schema, &value).unwrap(), value);
+            }
+            let strict = strict_input_schema(&schema);
+            assert_eq!(check_input(&strict, &value).is_ok(), selection, "{key}/{alternative}: {strict}");
+            assert_eq!(strict["properties"][key][alternative][0]["items"].get("additionalProperties").is_none(), selection);
+        }
+    }
+}
+
+#[test]
 fn forms_capability_is_additive_and_versioned() {
     let mut value = manifest();
     value["capabilities"] = json!(["commands@0.1", "forms@0.1"]);

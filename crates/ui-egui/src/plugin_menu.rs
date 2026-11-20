@@ -889,6 +889,10 @@ pub(crate) struct EntryDialog {
     pub(crate) preview: bool,
     pub(crate) form_guard: Option<solidcraft_engine::schema::plugin::FormGuard>,
     pub(crate) changed: bool,
+    /// A stale Apply finished revalidation; only then ask the person to Apply again.
+    revalidated: bool,
+    /// Field keys in the current viewport picker, independent of changes to raw inputs.
+    picker_fields: Vec<String>,
     prefill_extra: Option<Value>,
     validation: std::sync::Mutex<Validation>,
     #[cfg(test)]
@@ -899,6 +903,8 @@ pub(crate) struct EntryDialog {
 pub(crate) struct Running {
     reply: std::sync::mpsc::Receiver<Value>,
     ticket: std::sync::Arc<solidcraft_control::Ticket>,
+    /// A successful reply waits here while another design tab is active.
+    received: Option<Value>,
 }
 
 /// Open the dialog of entry `e` of listed plugin `p`.
@@ -945,6 +951,8 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         preview: true,
         form_guard: None,
         changed: false,
+        revalidated: false,
+        picker_fields: Vec::new(),
         prefill_extra: None,
         validation: Default::default(),
         #[cfg(test)]
@@ -1078,6 +1086,9 @@ fn input_value(field: &Field, input: &Input) -> Option<Value> {
     match input {
         Input::Raw(text) => Some(serde_json::from_str(text).unwrap_or_else(|_| json!(text))),
         Input::Selection(picks) => {
+            if picks.is_empty() && !field.required && !field.prefilled {
+                return None;
+            }
             let names = matches!(field.kind, Kind::Selection { names: true, .. });
             Some(Value::Array(
                 picks
@@ -1148,10 +1159,11 @@ impl Validation {
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => return None,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    let failed = (!running.progress.is_cancelled()).then(|| running.key.clone());
+                    let failed = !running.progress.is_cancelled();
                     self.running = None;
-                    if let Some(key) = failed {
-                        self.cached = Some(CachedValidation { key, errors: validation_failed() });
+                    if failed {
+                        // Infrastructure failures are transient; the next check retries.
+                        return Some(validation_failed());
                     }
                 }
             }
@@ -1177,11 +1189,8 @@ impl Validation {
                 self.running = Some(Checking { key, progress, reply });
                 None
             }
-            None => {
-                let errors = validation_failed();
-                self.cached = Some(CachedValidation { key, errors: errors.clone() });
-                Some(errors)
-            }
+            // A worker that could not start must not poison the field-error cache.
+            None => Some(validation_failed()),
         }
     }
 }
@@ -1276,8 +1285,12 @@ fn selection_input(field: &Field, picks: &[Sel]) -> SelInput {
 /// design `doc`.
 fn take_picks(dialog: &mut EntryDialog, picker: &crate::dialogs::Dialog, doc: &Arc<solidcraft_engine::doc::Document>) {
     let mut changed = false;
-    for (input, picks) in picker.inputs.iter().zip(dialog.selection_picks_mut()) {
-        if *picks != input.items {
+    for (field, value) in dialog.fields.iter_mut().flatten() {
+        if let Input::Selection(picks) = value
+            && let Some(index) = dialog.picker_fields.iter().position(|key| key == &field.key)
+            && let Some(input) = picker.inputs.get(index)
+            && *picks != input.items
+        {
             picks.clone_from(&input.items);
             changed = true;
         }
@@ -1312,7 +1325,7 @@ fn start_picking_listed(app: &mut SolveApp, id: u64, field: usize, listed: bool)
     if let Some(d) = app.dialog.take() {
         keep_picks(app, &d);
     }
-    let Some(dialog) = app.plugin_menu.dialogs.iter().find(|d| d.id == id) else { return false };
+    let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id) else { return false };
     if dialog.session != app.session.uid || dialog.running.is_some() {
         return false;
     }
@@ -1398,7 +1411,8 @@ impl EntryDialog {
     }
 
     /// The selection fields as the inputs of a pick dialog, in field order, with their picks.
-    pub(crate) fn selection_inputs(&self) -> Vec<SelInput> {
+    pub(crate) fn selection_inputs(&mut self) -> Vec<SelInput> {
+        self.picker_fields = self.selection_keys();
         let Some(fields) = &self.fields else { return Vec::new() };
         fields
             .iter()
@@ -1407,6 +1421,10 @@ impl EntryDialog {
                 _ => None,
             })
             .collect()
+    }
+
+    fn selection_keys(&self) -> Vec<String> {
+        self.fields.iter().flatten().filter(|(_, input)| matches!(input, Input::Selection(_))).map(|(field, _)| field.key.clone()).collect()
     }
 
     /// The selection fields' picks, in field order.
@@ -1533,7 +1551,8 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
     app.plugin_menu.pending.push((req.serial, app.session.uid));
     app.control_held.push_back(req);
     if let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id) {
-        dialog.running = Some(Running { reply, ticket });
+        dialog.running = Some(Running { reply, ticket, received: None });
+        dialog.revalidated = false;
         dialog.error = None;
         dialog.result = None;
     }
@@ -1546,6 +1565,9 @@ pub(crate) fn check_dispatch(app: &mut SolveApp, req: &solidcraft_control::Contr
     let Some(at) = app.plugin_menu.pending.iter().position(|(serial, _)| *serial == req.serial) else { return Ok(()) };
     let (_, session) = app.plugin_menu.pending[at];
     if session == app.session.uid {
+        // Resolve the lazy design revision before the worker copies this session, so
+        // validation and the unchanged live design share the same revision token.
+        app.session.design_revision();
         Ok(())
     } else {
         app.plugin_menu.pending.remove(at);
@@ -1565,26 +1587,37 @@ pub(crate) fn poll(app: &mut SolveApp) {
 fn poll_dialog(app: &mut SolveApp, id: u64) {
     let Some(at) = app.plugin_menu.dialogs.iter().position(|d| d.id == id) else { return };
     let dialog = &mut app.plugin_menu.dialogs[at];
-    let Some(running) = &dialog.running else { return };
-    let reply = match running.reply.try_recv() {
-        Ok(reply) => reply,
-        Err(std::sync::mpsc::TryRecvError::Empty) => return,
-        Err(std::sync::mpsc::TryRecvError::Disconnected) => json!({"ok":false,"error":solidcraft_ui_text::tr("ui.plugin_no_result")}),
+    let Some(running) = &mut dialog.running else { return };
+    let reply = match running.received.take() {
+        Some(reply) => reply,
+        None => match running.reply.try_recv() {
+            Ok(reply) => reply,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => json!({"ok":false,"error":solidcraft_ui_text::tr("ui.plugin_no_result")}),
+        },
     };
-    dialog.running = None;
     if reply["ok"] != true {
+        dialog.running = None;
         let error = reply["error"].as_str().unwrap_or_default();
         let error = error.strip_prefix("plugin: ").unwrap_or(error);
         dialog.error = Some(solidcraft_ui_text::format("ui.plugin_dialog_failed", &[("error", error)]));
         return;
     }
+    // A successful entry can request forms containing picks from its own design. Hold
+    // both those requests and validation replies until that same session is active.
+    if dialog.session != app.session.uid {
+        running.received = Some(reply);
+        return;
+    }
+    dialog.running = None;
     if let Some(validation) = reply.pointer("/result/form_validation") {
-        if validation.get("revision").and_then(Value::as_u64).is_some()
+        if let Some(revision) = validation.get("revision").and_then(Value::as_u64)
             && let Some(guard) = &mut dialog.form_guard
         {
-            guard.revision = app.session.design_revision();
+            guard.revision = revision;
         }
-        dialog.changed |= validation.get("changed") == Some(&Value::Bool(true));
+        dialog.revalidated = validation.get("changed") == Some(&Value::Bool(true));
+        dialog.changed |= dialog.revalidated;
         return;
     }
     if dialog.read {
@@ -1671,14 +1704,19 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     if let Some(guard) = &dialog.form_guard
         && dialog.session == app.session.uid
     {
-        dialog.changed |= guard.document_id != app.session.document_id || guard.revision != app.session.design_revision();
+        let changed = guard.document_id != app.session.document_id || guard.revision != app.session.design_revision();
+        dialog.changed |= changed;
+        if changed {
+            dialog.revalidated = false;
+        }
     }
     if let Some(fields) = &mut dialog.fields {
         refresh_conditions(fields);
     }
     let ready = dialog.ready(app);
     let running = dialog.running.is_some();
-    if running || dialog.validation.lock().ok().is_some_and(|v| v.running.is_some()) {
+    if dialog.running.as_ref().is_some_and(|running| running.received.is_none()) || dialog.validation.lock().ok().is_some_and(|v| v.running.is_some())
+    {
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
     // Just the command's own title ("Gears"): no plugin or menu name after it.
@@ -1699,8 +1737,16 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
         .fields()
         .actions(&run_label, &close_label, None)
         .show(ctx, ready.is_ok() && !running, |ui| body(app, ui, dialog, ready.as_ref().err(), &mut picker, &mut claim));
-    if let Some(picker) = picker {
+    if let Some(mut picker) = picker {
         take_picks(dialog, &picker, &app.session.doc.clone());
+        if dialog.picker_fields != dialog.selection_keys() {
+            let active = dialog.picker_fields.get(picker.active).cloned();
+            let listed = picker.listed.and_then(|i| dialog.picker_fields.get(i)).cloned();
+            picker.inputs = dialog.selection_inputs();
+            picker.active = active.and_then(|key| dialog.picker_fields.iter().position(|k| k == &key)).unwrap_or(usize::MAX);
+            picker.listed = listed.and_then(|key| dialog.picker_fields.iter().position(|k| k == &key));
+            picker.list_hover = None;
+        }
         app.dialog = Some(picker);
     }
     for (handle, key) in [("plugin_dialog:run", "dialog:ok"), ("plugin_dialog:cancel", "dialog:cancel")] {
@@ -1758,21 +1804,27 @@ fn body(
                 let mut picks = 0;
                 for (field, input) in fields.iter_mut() {
                     let pick_index = picks;
-                    if matches!(input, Input::Selection(_)) {
-                        picks += 1;
-                    }
                     if !field.visible {
+                        if matches!(input, Input::Selection(_)) {
+                            picks += 1;
+                        }
                         continue;
                     }
                     let before = input.clone();
                     ui.add_enabled_ui(field.enabled, |ui| {
                         if let Input::Selection(items) = input {
-                            selection_row(app, ui, id, pick_index, field, items, picker, claim);
+                            let slot = picker.as_ref().and_then(|_| dialog.picker_fields.iter().position(|key| key == &field.key));
+                            let mut idle = None;
+                            let (index, target) = if let Some(index) = slot { (index, &mut *picker) } else { (pick_index, &mut idle) };
+                            selection_row(app, ui, id, index, field, items, target, claim);
                         } else {
                             field_row(app, ui, &plugin.images, field, input);
                         }
                     });
                     field.edited |= *input != before;
+                    if matches!(input, Input::Selection(_)) {
+                        picks += 1;
+                    }
                     if let Some(error) = field_errors.get(&field.key) {
                         ui_kit::status_line(ui, error, ui_kit::StatusTone::Error);
                     }
@@ -1794,17 +1846,18 @@ fn body(
         }
     }
     if dialog.changed {
-        ui_kit::status_line(ui, app.tr("ui.plugin_edit_changed"), ui_kit::StatusTone::Warning);
+        let key = if dialog.revalidated { "ui.plugin_edit_revalidated" } else { "ui.plugin_edit_changed" };
+        ui_kit::status_line(ui, app.tr(key), ui_kit::StatusTone::Warning);
     }
     if dialog.picks_cleared {
         ui_kit::status_line(ui, app.tr("ui.plugin_dialog_picks_cleared"), ui_kit::StatusTone::Warning);
     }
-    if dialog.running.is_some() {
+    if dialog.running.as_ref().is_some_and(|running| running.received.is_none()) {
         ui_kit::status_line(ui, app.tr("ui.plugin_dialog_running"), ui_kit::StatusTone::Dim);
     } else if let Some(error) = &dialog.error {
         ui_kit::status_line(ui, error, ui_kit::StatusTone::Error);
     } else if let Some(why) = why_not
-        && dialog.fields.as_ref().is_some_and(|f| !f.is_empty())
+        && dialog.fields.is_some()
         && shown(app, plugin)
         && !other_design
         && missing.is_empty()

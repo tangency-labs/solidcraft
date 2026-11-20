@@ -143,6 +143,21 @@ fn form_component() -> Vec<u8> {
 }
 
 #[test]
+fn form_import_accepts_patch_capability_versions() {
+    let bytes = form_component();
+    let mut m = manifest();
+    m.capabilities.push("forms@0.1.0".into());
+    let mut app = App { interactive: true, ..Default::default() };
+    assert_eq!(run(&mut app, &m, &bytes, "make", &json!({})).unwrap(), json!({}));
+    assert_eq!(app.forms, vec![("make".into(), json!({}))]);
+    let _ = m.capabilities.pop();
+    assert!(matches!(run(&mut app, &m, &bytes, "make", &json!({})), Err(HostError::PermissionDenied { .. })));
+    m.capabilities.push("forms@0.2".into());
+    assert!(matches!(craft_plugin::check_capabilities(&m.capabilities, "Test host"), Err(HostError::UnsupportedCapability { .. })));
+    assert!(run(&mut app, &m, &bytes, "make", &json!({})).is_err());
+}
+
+#[test]
 fn additive_form_import_links_and_only_interactive_calls_can_open() {
     let bytes = form_component();
     let mut m = manifest();

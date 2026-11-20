@@ -125,7 +125,8 @@ pub const WIT_0_1: &str = include_str!("../wit-0.1/plugin.wit");
 /// The highest data format number a plugin may declare (`runtime.data_format`).
 pub const MAX_DATA_FORMAT: u32 = 1_000_000;
 
-fn capability_version(text: &str) -> Option<(u32, u32)> {
+/// Parse a capability version as major/minor, accepting an optional numeric patch.
+pub fn capability_version(text: &str) -> Option<(u32, u32)> {
     let mut parts = text.split('.');
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next()?.parse().ok()?;

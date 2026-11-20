@@ -20,6 +20,14 @@ fn checked_prefill(app: &SolveApp) {
     }
 }
 
+/// Inspect UI shapes without uploading textures; clear those deltas before any assertion
+/// can unwind, as required by the egui test backend.
+fn form_frame(ctx: &egui::Context, paint: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
+    let mut output = ctx.run_ui(Default::default(), paint);
+    output.textures_delta.clear();
+    output
+}
+
 fn gear_schema() -> Value {
     json!({"type":"object","required":["module","teeth"],"properties":{
         "module":{"type":"number","title":"Module","description":"Tooth size","unit":"mm","exclusiveMinimum":0,"maximum":50,"default":2},
@@ -122,6 +130,186 @@ fn prefilled_validation_runs_off_thread_and_discards_changed_inputs() {
     assert!(progress.is_cancelled(), "Cancel stops in-flight validation");
     release.send(()).unwrap();
     assert_eq!(h.app.session.doc, before, "Cancel commits no validation work");
+}
+
+#[test]
+fn preflight_omits_absent_optional_selections_but_keeps_explicit_empty_values() {
+    let mut h = box_and_pick_plugin();
+    let schema = &mut h.app.plugin_menu.listed[0].entries[0].input_schema;
+    schema["required"] = json!([]);
+    schema["properties"]["edges"]["minItems"] = json!(1);
+    open_form(&mut h.app, "inserts", "seats", &json!({"depth":2})).unwrap();
+    checked_prefill(&h.app);
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    assert!(dialog.ready(&h.app).is_ok(), "{:?}", dialog.field_errors(&h.app));
+    assert!(dialog.ready(&h.app).unwrap().get("edges").is_none());
+    h.app.plugin_menu.dialogs.clear();
+    crate::dialogs::cancel(&mut h.app);
+    open_form(&mut h.app, "inserts", "seats", &json!({"depth":2,"edges":[]})).unwrap();
+    checked_prefill(&h.app);
+    assert!(h.app.plugin_menu.dialog().unwrap().field_errors(&h.app).contains_key("edges"));
+}
+
+#[test]
+fn validation_worker_disconnect_retries_and_field_errors_stay_cached() {
+    let mut h = box_and_pick_plugin();
+    open_form(&mut h.app, "inserts", "seats", &json!({"depth":2})).unwrap();
+    checked_prefill(&h.app);
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    let key = dialog.validation.lock().unwrap().cached.as_ref().unwrap().key.clone();
+    let (sender, reply) = std::sync::mpsc::channel();
+    drop(sender);
+    {
+        let mut validation = dialog.validation.lock().unwrap();
+        validation.cached = None;
+        validation.running = Some(Checking { key: key.clone(), progress: Default::default(), reply });
+    }
+    assert_eq!(dialog.field_errors(&h.app)["params"], h.app.tr("ui.plugin_start_failed"));
+    checked_prefill(&h.app);
+    assert!(!dialog.field_errors(&h.app).contains_key("params"), "a stopped worker must be retryable without editing inputs");
+    let errors = [("edges".into(), solidcraft_engine::schema::plugin::FormFieldError::MissingPick)].into();
+    dialog.validation.lock().unwrap().cached = Some(CachedValidation { key, errors });
+    assert!(dialog.field_errors(&h.app).contains_key("edges"));
+    assert!(dialog.validation.lock().unwrap().running.is_none(), "actual field errors stay cached");
+}
+
+fn deliver_form_reply(app: &mut SolveApp, value: Value) {
+    let (request, reply) = solidcraft_control::ControlRequest::new("engine.execute", json!({}));
+    request.reply.send(value).unwrap();
+    app.plugin_menu.dialogs.last_mut().unwrap().running = Some(Running { reply, ticket: request.ticket, received: None });
+}
+
+#[test]
+fn validation_reply_records_the_checked_revision() {
+    let mut h = box_and_pick_plugin();
+    open_form(&mut h.app, "inserts", "seats", &json!({"depth":2})).unwrap();
+    let revision = h.app.session.design_revision();
+    h.app.run("solid.box", json!({"length":1,"width":1,"height":1})).unwrap();
+    assert_ne!(revision, h.app.session.design_revision());
+    deliver_form_reply(&mut h.app, json!({"ok":true,"result":{"form_validation":{"revision":revision,"changed":true}}}));
+    poll(&mut h.app);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().form_guard.as_ref().unwrap().revision, revision);
+}
+
+#[test]
+fn completed_form_replies_wait_for_the_originating_session() {
+    for kind in ["read", "edit", "validation"] {
+        let mut h = box_and_pick_plugin();
+        open_form(&mut h.app, "inserts", "seats", &json!({"depth":2})).unwrap();
+        let session = h.app.session.uid;
+        let revision = h.app.session.design_revision();
+        h.app.plugin_menu.dialogs.last_mut().unwrap().read = kind == "read";
+        let value = if kind == "validation" {
+            json!({"ok":true,"result":{"form_validation":{"revision":revision,"changed":true}}})
+        } else {
+            json!({"ok":true,"result":{"result":{},"forms":[{"plugin":"inserts","entry":"seats","params":{"depth":7}}]}})
+        };
+        deliver_form_reply(&mut h.app, value);
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        let other = h.app.session.doc.clone();
+        poll(&mut h.app);
+        assert_eq!(h.app.plugin_menu.dialogs.len(), 1, "{kind}: no forms on the other tab");
+        let dialog = h.app.plugin_menu.dialog().unwrap();
+        assert_eq!(dialog.session, session);
+        assert!(dialog.running.is_some(), "{kind}: keep the reply until its design is active");
+        assert_eq!(dialog.form_guard.as_ref().unwrap().revision, revision);
+        assert_eq!(h.app.session.doc, other);
+        crate::documents::switch(&mut h.app, 0);
+        poll(&mut h.app);
+        let dialog = h.app.plugin_menu.dialog().unwrap();
+        assert!(dialog.running.is_none());
+        assert_eq!(dialog.session, session);
+        if kind != "validation" {
+            assert_eq!(dialog.fields.as_ref().unwrap().iter().find(|(field, _)| field.key == "depth").unwrap().1, Input::Number(7.0));
+        }
+    }
+}
+
+#[test]
+fn corrected_raw_selection_preserves_picker_field_identity() {
+    let mut h = box_and_pick_plugin();
+    h.app.plugin_menu.listed[0].entries[0].input_schema["properties"]["edges"]["minItems"] = json!(0);
+    let name = h.app.session.model.state().bodies.first().unwrap().name.clone();
+    let body = json!({"type":"body","name":name});
+    open_form(&mut h.app, "inserts", "seats", &json!({"edges":"malformed","body":[body]})).unwrap();
+    let mut dialog = h.app.plugin_menu.dialogs.pop().unwrap();
+    let picker = h.app.dialog.as_ref().unwrap();
+    assert_eq!(picker.inputs.len(), 1);
+    let fields = dialog.fields.as_mut().unwrap();
+    let (field, input) = fields.iter_mut().find(|(f, _)| f.key == "edges").unwrap();
+    *input = stored_input(field, &json!([])).unwrap();
+    take_picks(&mut dialog, picker, &h.app.session.doc);
+    let values = params(dialog.fields.as_ref().unwrap()).unwrap();
+    assert_eq!(values["edges"], json!([]));
+    assert_eq!(values["body"], json!([body]));
+    h.app.dialog.as_mut().unwrap().listed = Some(0);
+    h.app.plugin_menu.dialogs.push(dialog);
+    h.frames(2);
+    let picker = h.app.dialog.as_ref().unwrap();
+    assert!(picker.inputs[0].items.is_empty());
+    assert_eq!(picker.inputs[1].items, vec![Sel::Body { name }]);
+    assert_eq!(picker.active, 1, "the active Body field follows its key");
+    assert_eq!(picker.listed, Some(1), "the open pick list follows its field too");
+}
+
+#[test]
+fn design_change_notice_only_requests_another_apply_after_stale_reply() {
+    let mut h = box_and_pick_plugin();
+    h.app.plugin_menu.listed[0].entries[0].input_schema["properties"]["edges"]["minItems"] = json!(0);
+    open_form(&mut h.app, "inserts", "seats", &json!({"depth":2})).unwrap();
+    h.app.run("solid.box", json!({"length":1,"width":1,"height":1})).unwrap();
+    let mut dialog = h.app.plugin_menu.dialogs.pop().unwrap();
+    let (release, wait) = std::sync::mpsc::channel();
+    dialog.validation_gate = Some(Arc::new(std::sync::Mutex::new(wait)));
+    let mut output = None;
+    for _ in 0..3 {
+        output = Some(form_frame(&h.ctx, |ui| {
+            show_dialog(&mut h.app, ui.ctx(), &mut dialog);
+        }));
+    }
+    let output = output.unwrap();
+    let immediate = "The design changed. Review the inputs against the current design.";
+    assert!(crate::test_support::text_shapes(&output).any(|t| t.galley.text() == immediate));
+    assert!(crate::test_support::text_shapes(&output).any(|t| t.galley.text() == h.app.tr("ui.plugin_edit_checking")));
+    assert!(!crate::test_support::text_shapes(&output).any(|t| t.galley.text() == h.app.tr("ui.plugin_edit_revalidated")));
+    dialog.validation_gate = None;
+    release.send(()).unwrap();
+    h.app.plugin_menu.dialogs.push(dialog);
+    checked_prefill(&h.app);
+    let revision = h.app.session.design_revision();
+    deliver_form_reply(&mut h.app, json!({"ok":true,"result":{"form_validation":{"revision":revision,"changed":true}}}));
+    poll(&mut h.app);
+    let mut dialog = h.app.plugin_menu.dialogs.pop().unwrap();
+    let output = form_frame(&h.ctx, |ui| {
+        show_dialog(&mut h.app, ui.ctx(), &mut dialog);
+    });
+    assert!(crate::test_support::text_shapes(&output).any(|t| t.galley.text() == h.app.tr("ui.plugin_edit_revalidated")));
+    let id = dialog.id;
+    h.app.plugin_menu.dialogs.push(dialog);
+    run_dialog(&mut h.app, id).unwrap();
+    let mut dialog = h.app.plugin_menu.dialogs.pop().unwrap();
+    let output = form_frame(&h.ctx, |ui| {
+        show_dialog(&mut h.app, ui.ctx(), &mut dialog);
+    });
+    assert!(!crate::test_support::text_shapes(&output).any(|t| t.galley.text() == h.app.tr("ui.plugin_edit_revalidated")));
+}
+
+#[test]
+fn empty_forms_draw_checking_and_worker_failure_status() {
+    let mut h = crate::scenario::Harness::new();
+    let mut command = entry("empty", "edit", json!([]));
+    command.input_schema = json!({"type":"object","properties":{}});
+    h.app.plugin_menu.listed = vec![listed("empty", vec![command])];
+    h.app.plugin_menu.loaded = true;
+    open_form(&mut h.app, "empty", "empty", &json!({})).unwrap();
+    let mut dialog = h.app.plugin_menu.dialogs.pop().unwrap();
+    for key in ["ui.plugin_edit_checking", "ui.plugin_start_failed"] {
+        let why = h.app.tr(key).to_owned();
+        let output = form_frame(&h.ctx, |ui| {
+            body(&h.app, ui, &mut dialog, Some(&why), &mut None, &mut None);
+        });
+        assert!(crate::test_support::text_shapes(&output).any(|t| t.galley.text() == why), "{key} must be visible without fields");
+    }
 }
 
 #[test]
@@ -1174,6 +1362,8 @@ mod native {
         settle(&mut h);
         assert_eq!(h.app.session.doc, newer, "stale Apply does not run");
         assert!(h.app.plugin_menu.dialog().unwrap().changed);
+        let checked_revision = h.app.plugin_menu.dialog().unwrap().form_guard.as_ref().unwrap().revision;
+        assert_eq!(checked_revision, h.app.session.design_revision(), "validation and the live design share one revision");
         let undo = h.app.session.undo.len();
         run(&mut h.app).unwrap();
         settle(&mut h);

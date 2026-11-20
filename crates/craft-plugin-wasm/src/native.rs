@@ -720,8 +720,19 @@ pub(super) fn run<H: PluginHost + 'static>(
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
-    let (mut state, outcome) =
-        execute(host, runtime, entry, params, compiled, commands, folders, manifest.capabilities.iter().any(|c| c == "forms@0.1"));
+    let (mut state, outcome) = execute(
+        host,
+        runtime,
+        entry,
+        params,
+        compiled,
+        commands,
+        folders,
+        manifest
+            .capabilities
+            .iter()
+            .any(|c| c.split_once('@').is_some_and(|(name, version)| name == "forms" && craft_plugin::capability_version(version) == Some((0, 1)))),
+    );
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => state.publish_writes().map(|()| value),
