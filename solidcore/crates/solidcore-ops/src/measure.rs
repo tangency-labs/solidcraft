@@ -515,30 +515,21 @@ impl Body {
         Ok((lo, hi))
     }
 
-    /// How far the body reaches along the normal `x × y` of the plane through `origin` with axes
-    /// `x` and `y`, measured from that plane: the least and the greatest level of its points,
-    /// `[low, high]`. A copy of the body is moved rigidly into the plane's own frame (`x`, `y`
-    /// and the normal become X, Y and Z) and its exact box ([`Body::bounds`]) read there, so
-    /// the span is the body's own, not the shadow of its world box. The body is unchanged.
+    /// How far the body reaches along the normal of the plane through `origin` with axes `x`
+    /// and `y` (`x × y` made unit), measured from that plane: the least and the greatest level
+    /// of its points, `[low, high]`. A copy of the body is moved rigidly into the plane's own
+    /// frame ([`solidcore::Transform::into_plane_frame`]: the normal becomes Z) and its exact box
+    /// read there ([`Body::bounds`]'s), so the span is the body's own, not the shadow of its
+    /// world box. The body is unchanged.
     ///
     /// # Errors
-    /// [`Error::Argument`] for an entry that is not finite or axes that are not of unit length
-    /// and square to each other (to 1e-9); those of [`Body::bounds`].
+    /// [`Error::Argument`] for an entry that is not finite, an axis of no length or axes along
+    /// one line (the kernel's refusal); [`Error::Status`] `SM_ERR_INVALID_INPUT` for no box;
+    /// the kernel's error.
     pub fn levels_along(&self, origin: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Result<[f64; 2]> {
-        let (o, x, y) = (point(origin)?, point(x)?, point(y)?);
-        let n = x.cross(y);
-        let unit = |v: Vec3| (v.dot(v) - 1.0).abs() <= 1e-9;
-        if !(unit(x) && unit(y) && x.dot(y).abs() <= 1e-9) {
-            return Err(Error::Argument);
-        }
-        // Rows 0-2 the images of the world X, Y and Z, row 3 the translation
-        // ([`Body::transform`]'s convention): world to plane coordinates.
-        let to_plane = [
-            [x.x, y.x, n.x, 0.0],
-            [x.y, y.y, n.y, 0.0],
-            [x.z, y.z, n.z, 0.0],
-            [-x.dot(o), -y.dot(o), -n.dot(o), 1.0],
-        ];
+        let to_plane = solidcore::Transform::into_plane_frame(point(origin)?, point(x)?, point(y)?)
+            .map_err(|_| Error::Argument)?
+            .m;
         let span = measure_body("levels_along", self, |k, b| {
             transform_matrix(k, b, &to_plane, true)?;
             brep_bounding_box(k, b, true)
@@ -1995,7 +1986,7 @@ pub(crate) mod tests {
 
     /// A box's reach along a plane's normal, from the plane: away from the origin, and on a
     /// plane whose normal is not a world axis's direction (its world box would overstate it).
-    /// The box itself does not move; axes that are not a rigid frame are refused.
+    /// The box itself does not move; axes that make no plane are refused.
     #[test]
     fn levels_along_a_plane_are_the_bodys_own() {
         all_fixes();
@@ -2020,8 +2011,8 @@ pub(crate) mod tests {
             "{min:?} {max:?}"
         );
         for (x, y) in [
-            ([2.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
-            ([1.0, 0.0, 0.0], [s, s, 0.0]),
+            ([0.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+            ([1.0, 0.0, 0.0], [-2.0, 0.0, 0.0]),
             ([f64::NAN, 0.0, 0.0], [0.0, 1.0, 0.0]),
         ] {
             assert_eq!(b.levels_along([0.0; 3], x, y), Err(Error::Argument));
