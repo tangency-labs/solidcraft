@@ -1140,7 +1140,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `navigator_arrows` (default true: the custom view navigator has orbit and roll arrows around its body; also `view.navigator {arrows}`)
 - `navigator_fit` (default false: a view chosen on a view navigator also looks at the middle of the model from the one distance that fits its bounding sphere in the free part of the view, at `home_fit_size`; Home and an opened design use the same zoom and centre while it is on, so views chosen after them only turn; #10091)
 - `navigator_home` (default true: the custom view navigator has a Home button beside it; also `view.navigator {home}`)
-- `navigator_style` (`axes` (default), `custom`: the body chosen with `view.navigator`, the signed axes until one is chosen; a value this version doesn't know loads as `axes`)
+- `navigator_style` (`axes` (default), `custom`: the body chosen with `view.navigator`, the signed axes until one is chosen; `mecha`: the built-in mechanical hand with camera controls; a value this version doesn't know loads as `axes`)
 - `navigator_texture` (`themed` (default): the custom view navigator in the theme's navigator colours; `modeled`: in its body's own appearance and edge colour)
 - `offer_stand_up`
 - `orbit_around` (`view_centre` (default: what Pan moves and Fit frames), `origin` (the world origin stays still on screen), `cursor` (the model point under the pointer when the drag began); the older `orbit_cursor` boolean still sets `cursor` when true)
@@ -1316,12 +1316,12 @@ channel; see [mcp.md](mcp.md).
 {"id":5,"method":"ui.screenshot","params":{"path":"/tmp/part.png"}}
 ```
 
-Preferences → Navigation → View navigator offers **Signed axes** (the default) and **Custom**; a
-right-click anywhere on the navigator offers the same two. This choice is saved independently of
-the mouse preset. The control channel selects it with `ui.prefs {"navigator_style":"axes"}` or
-`"custom"`. A saved style this version doesn't know loads as signed axes; `ui.prefs` and
-`view.navigator` refuse one with an error. Existing settings without this field keep signed
-axes. Signed-axis tips choose principal views; clicking an aligned tip again reverses the view.
+Preferences → Navigation → View navigator offers **Signed axes** (the default), **Custom** and
+**Mecha hand**; a right-click anywhere on the navigator offers the same choices. This choice is
+saved independently of the mouse preset. The control channel selects it with
+`ui.prefs {"navigator_style":"axes"}`, `"custom"` or `"mecha"`. A saved style this version doesn't
+know loads as signed axes; `ui.prefs` and `view.navigator` refuse one with an error. Existing
+settings without this field keep signed axes. Signed-axis tips choose principal views; clicking an aligned tip again reverses the view.
 
 Custom draws a body in place of the signed axes; a click on one of its faces looks straight at it,
 and with `navigator_fit` on it also frames the model. Picking Custom from the navigator's menu
@@ -1331,11 +1331,24 @@ view's edge colour) and whether the rotation arrows and Home button go around it
 previews the panel's choices while it is open. OK runs `view.navigator`, which scripts and
 `engine.execute` run too without opening anything:
 `{"style": "custom", "body": "Body1", "texture": "modeled", "arrows": true, "home": false}` (any
-subset; `"body": null` goes back to the signed axes) returns the whole navigator. A body over
-10,000 triangles is refused, and so is a long or flat one: measured across the axes and the
+subset; `"body": null` clears the saved body, so Custom falls back to signed axes) returns the whole
+navigator. A body over 10,000 triangles is refused, and so is a long or flat one: measured across the axes and the
 diagonals, its thinnest width must be at least a fifth of its widest. The body is kept as a
 snapshot with the preferences and in settings profiles (`settings.profile.*`, as `view_gizmo`), so
 it stays across runs and designs and travels with an exported profile.
+
+Mecha hand is a built-in mechanical hand with pink nails, selected with
+`view.navigator {"style":"mecha"}` or the preference above. Choosing it keeps any saved custom body
+available. Dragging the hand orbits through the shared navigation path; scrolling over it zooms.
+The compact navigator has **ISO**, which selects an isometric orientation, and **Fit**, which
+frames the model without changing its orientation. Hovering or keyboard focus reveals six
+standard view buttons, quarter-turn roll buttons and the current camera angles. Clicking the
+hand or its camera-controls button keeps those controls open for touch and keyboard use.
+
+The angle readout uses degrees: **AZ** follows the existing camera yaw convention, **EL** is
+pitch, and **R** is roll about the viewing axis. Clicking the readout opens the existing exact-angle
+editor. Standard view buttons follow the configured up axis and the existing `navigator_fit`
+preference. The hand is only a navigator: it is not added to the design or its undo history.
 
 Hold Shift during an orbit gesture to snap to the nearest standard or diagonal view. This applies to
 right-drag, the Orbit navigation tool, and dragging either view navigator. Under the default preset,

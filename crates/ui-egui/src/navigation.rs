@@ -788,7 +788,8 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     // The axis view handles its own clicks; the model underneath must not see them.
     let axes = if caps.orbit { axis_rect(app, input_rect) } else { Rect::NOTHING };
     // So is the View angles readout under it (#6032).
-    let readout = crate::view_angles::readout_rect(ui.ctx(), input_rect).filter(|_| caps.orbit && app.preferences.show_view_angles);
+    let readout = crate::view_angles::readout_rect(ui.ctx(), input_rect)
+        .filter(|_| caps.orbit && (app.preferences.show_view_angles || crate::view_gizmo::style(app) == crate::prefs::NavigatorStyle::Mecha));
     // Floating windows and menus own input over the model, including wheel navigation. egui's
     // hit test also counts the model as under the pointer a few points past its own edge and
     // inside a window's or a list's edge (#678), so the pointer must be in the viewport too,
@@ -820,6 +821,11 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
                     && !readout.is_some_and(|r| r.contains(p))
                     && ui.ctx().layer_id_at(p).is_some_and(crate::ui_kit::container::is_canvas)
             }));
+    // The optional hand accepts wheel and pinch zoom through this same input path. Its
+    // buttons and angle editor keep their input, and a window above it still owns the pointer.
+    let mecha_zoom =
+        caps.orbit && ui.is_enabled() && ui.rect_contains_pointer(input_rect) && hover.is_some_and(|p| crate::viewport::mecha_zoom_at(app, p));
+    let zoom_inside = wheel_inside || mecha_zoom;
     app.viewport.mouse = hover.filter(|_| inside);
     // Sketch snap suppression is set once in `viewport::show` from preferences.
     middle_double_click(app, ui, inside);
@@ -898,11 +904,12 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     // Pinch-to-zoom (trackpad): direct manipulation, never smoothed.
     let pinch = if touch.active { 1.0 } else { ui.input(|i| pinch_factor(i, options, page_height, zoom_modifier)) };
     let h = rect.height().max(1.0) as f64;
-    if wheel_inside && pinch != 1.0 {
+    if zoom_inside && pinch != 1.0 {
         app.viewport.orbit_free = None;
         // Spread zooms in: the camera distance shrinks by the pinch factor.
         let f = f64::from(pinch).powf(-crate::prefs::zoom_sign(app));
-        let anchor = zoom_anchor(app, rect, hover, caps.orbit);
+        // The hand is an overlay, not the model point below its screen position.
+        let anchor = if mecha_zoom { None } else { zoom_anchor(app, rect, hover, caps.orbit) };
         if app.preferences.nav == crate::prefs::TOUCHPAD_NAV {
             let mut params = json!({"motion":"zoom", "factor":f.clamp(0.05,20.0)});
             if let Some(anchor) = anchor {
@@ -914,10 +921,11 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
             zoom_in_view(app, f, anchor);
         }
     }
-    if wheel_inside && scroll.is_finite() && scroll != 0.0 {
+    if zoom_inside && scroll.is_finite() && scroll != 0.0 {
         app.viewport.orbit_free = None;
         let f = (-scroll as f64 * 0.0015 * f64::from(app.preferences.wheel_zoom_speed) * crate::prefs::zoom_sign(app)).exp();
-        let anchor = zoom_anchor(app, rect, hover, caps.orbit);
+        // The hand is an overlay, not the model point below its screen position.
+        let anchor = if mecha_zoom { None } else { zoom_anchor(app, rect, hover, caps.orbit) };
         if app.preferences.nav == crate::prefs::TOUCHPAD_NAV {
             let mut params = json!({"motion":"zoom", "factor":f.clamp(0.05,20.0)});
             if let Some(anchor) = anchor {

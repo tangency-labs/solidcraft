@@ -353,6 +353,7 @@ pub(crate) fn menu_items(app: &SolveApp) -> Vec<Item> {
             let (label, icon) = match style {
                 NavigatorStyle::Axes => (app.tr("prefs.axes"), "origin"),
                 NavigatorStyle::Custom => (solidcraft_ui_text::tr_label("Custom"), "body"),
+                NavigatorStyle::Mecha => (app.tr("prefs.navigation.mecha"), "orbit"),
             };
             act("ui.navigatorStyle", label, icon).with(json!({ "style": style })).key(if app.preferences.navigator_style == style {
                 "current"
@@ -567,6 +568,13 @@ pub(crate) fn shown(app: &SolveApp) -> Shown {
             arrows: form.arrows,
             home: form.home,
         },
+        _ if p.navigator_style == NavigatorStyle::Mecha => Shown {
+            style: NavigatorStyle::Mecha,
+            shape: crate::mecha_navigator::shape(app.cam.up),
+            texture: NavigatorTexture::Modeled,
+            arrows: false,
+            home: false,
+        },
         _ => Shown {
             style: p.navigator_style,
             shape: app.view_gizmo.shape.clone(),
@@ -737,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    fn a_right_click_anywhere_on_the_navigator_offers_axes_and_custom() {
+    fn a_right_click_anywhere_on_the_navigator_offers_all_styles() {
         use crate::context_menu::{Target, items};
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10})).unwrap();
@@ -758,7 +766,7 @@ mod tests {
             }
             let rows = items(&h.app, &Target::ViewGizmo);
             let labels: Vec<_> = rows.iter().map(|r| r.label.as_str()).collect();
-            assert_eq!(labels, ["Axes", "Custom"], "just the two types");
+            assert_eq!(labels, ["Axes", "Custom", "Mecha hand"], "all navigator styles are available");
             let current: Vec<_> = rows.iter().filter(|i| i.shortcut == "current").collect();
             assert_eq!(current.len(), 1);
             assert_eq!(current[0].params.as_ref().map(|p| p["style"].clone()), Some(json!(from)));

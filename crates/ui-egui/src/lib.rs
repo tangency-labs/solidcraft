@@ -143,6 +143,7 @@ mod material_editor;
 
 #[cfg(test)]
 mod measurement_ui_tests;
+mod mecha_navigator;
 #[cfg(test)]
 mod menu_tests;
 pub(crate) mod mesh_lod;

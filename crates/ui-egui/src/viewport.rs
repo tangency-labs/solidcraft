@@ -50,6 +50,9 @@ mod refine_wait_tests;
 #[path = "body_gizmo.rs"]
 mod body_gizmo;
 
+#[path = "mecha_controls.rs"]
+mod mecha_controls;
+
 #[path = "navigator_controls.rs"]
 mod navigator_controls;
 
@@ -352,6 +355,10 @@ pub struct ViewportState {
     /// The centre the gizmo drag last warped the cursor to, until the pointer next lands near
     /// it (steps measured before that echo would jump the view by the whole warp distance).
     pub(crate) axis_warp: Option<Pos2>,
+    /// Mecha controls can remain open after a touch or keyboard activation.
+    pub(crate) mecha_pinned: bool,
+    pub(crate) mecha_expanded: bool,
+    pub(crate) mecha_focused: bool,
     /// Unsnapped camera while Shift-orbit previews a standard or diagonal view.
     pub orbit_free: Option<Camera>,
     pub build_ms: f64,
@@ -5019,6 +5026,7 @@ pub(crate) fn axis_view_size(style: crate::prefs::NavigatorStyle) -> f32 {
     match style {
         crate::prefs::NavigatorStyle::Axes => 116.0,
         crate::prefs::NavigatorStyle::Custom => navigator_controls::SIZE,
+        crate::prefs::NavigatorStyle::Mecha => mecha_controls::SIZE,
     }
 }
 // Keep command panels anchored independently of the navigator's display size.
@@ -9704,6 +9712,7 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
         let shown = crate::view_gizmo::shown(app);
         match shown.style {
             crate::prefs::NavigatorStyle::Custom if shown.shape.is_some() => body_gizmo::drag_origin(app, rect, p),
+            crate::prefs::NavigatorStyle::Mecha => mecha_controls::hand_rect(axis_rect(app, rect)).contains(p),
             crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => axis_rect(app, rect).contains(p),
         }
     });
@@ -9715,7 +9724,23 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
         app.cancel_view_animation();
         // The widget has no model point under the cursor, but an explicit origin pivot still applies.
         let around_origin = app.preferences.orbit_around == crate::prefs::OrbitAround::Origin;
+        let before = app.cam;
         orbit_drag(app, rect, dx, dy, None, snap, around_origin);
+        if ["yaw", "pitch", "roll"].into_iter().any(|axis| crate::view_angles::locked_angle(app, axis)) {
+            // Keep the displayed turn and its accumulated unsnapped turn on the same locked
+            // axes. After constraining the turn, the chosen origin must still stay in place.
+            let keep = |camera| {
+                let mut camera = crate::view_angles::keep_locked(app, before, camera);
+                if around_origin {
+                    camera.place(Vec3::ZERO, before.frame_coords(Vec3::ZERO));
+                }
+                camera
+            };
+            let camera = keep(app.cam);
+            let free = app.viewport.orbit_free.map(keep);
+            app.cam = camera;
+            app.viewport.orbit_free = free;
+        }
     }
     orbit.orbiting
 }
@@ -9752,9 +9777,31 @@ pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     gizmo_menu(app, ui, rect);
     let shown = crate::view_gizmo::shown(app);
     match shown.style {
+        crate::prefs::NavigatorStyle::Mecha => {
+            if let Some(shape) = shown.shape {
+                mecha_controls::show(app, ui, rect, &shape);
+            } else {
+                signed_axis_view(app, ui, rect);
+            }
+        }
         crate::prefs::NavigatorStyle::Custom if shown.shape.is_some() => body_gizmo::show(app, ui, rect, shown),
         crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => signed_axis_view(app, ui, rect),
     }
+}
+
+/// Reuse the navigator rasterizer for the built-in hand and its preference preview.
+pub(crate) fn paint_navigator_preview(painter: &egui::Painter, rect: Rect, shape: &crate::view_gizmo::Shape, camera: &Camera) {
+    body_gizmo::paint_preview(painter, rect, shape, camera);
+}
+
+/// Wheel ownership in the shared navigation handler, restricted to the hand.
+pub(crate) fn mecha_zoom_at(app: &SolveApp, point: Pos2) -> bool {
+    app.preferences.navigator_style == crate::prefs::NavigatorStyle::Mecha
+        && !matches!(app.dialog.as_ref().map(|dialog| &dialog.kind), Some(crate::dialogs::Kind::ViewNavigator(_)))
+        && app.viewport.rect.is_some_and(|viewport| {
+            let outer = axis_rect(app, viewport);
+            outer.is_positive() && outer.is_finite() && mecha_controls::hand_rect(outer).contains(point) && !crate::shell::covered(app, point)
+        })
 }
 
 fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {

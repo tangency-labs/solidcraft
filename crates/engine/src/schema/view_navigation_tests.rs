@@ -349,6 +349,7 @@ fn navigator_checks_and_echoes_its_settings_and_refuses_a_missing_body() {
     for (params, echo) in [
         (json!({}), json!({})),
         (Value::Null, json!({})),
+        (json!({"style": "mecha"}), json!({"style": "mecha"})),
         (
             json!({"style": "custom", "body": body, "texture": "modeled", "arrows": true, "home": false}),
             json!({"style": "custom", "body": body, "texture": "modeled", "arrows": true, "home": false}),

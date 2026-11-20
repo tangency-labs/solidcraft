@@ -360,8 +360,8 @@ pub struct RenderFrame {
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NavigatorParams {
-    /// The navigator: signed axes, or a custom body (the signed axes until a body is
-    /// chosen). Default: unchanged.
+    /// The navigator: signed axes, an original Mecha hand, or a custom body (the signed axes
+    /// until a body is chosen). Default: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub style: Option<NavigatorStyle>,
     /// A body of the open design for the custom navigator to draw; the app keeps a snapshot of
@@ -389,6 +389,7 @@ pub struct NavigatorParams {
 pub enum NavigatorStyle {
     Axes,
     Custom,
+    Mecha,
 }
 
 /// How the custom view navigator colours its body.
