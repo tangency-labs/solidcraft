@@ -3807,6 +3807,13 @@ pub fn is_counted_body_name(name: &str) -> bool {
 /// The document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
+    /// Persistent identity shared by every saved state of this design.
+    #[serde(default = "crate::ids::new_document_id", deserialize_with = "crate::ids::deserialize_document_id")]
+    pub document_id: String,
+    /// Committed history state. Saving and opening preserve it; new edits allocate
+    /// from the process-wide revision source outside all undo snapshots.
+    #[serde(default = "crate::ids::new_design_revision", deserialize_with = "crate::ids::deserialize_design_revision")]
+    pub revision: String,
     /// Set when a newer SolidCraft saved the file this came from: what to tell the user, and what
     /// this build couldn't read and keeps for the next save ([`crate::newer_file`]).
     #[serde(skip)]
@@ -4197,6 +4204,8 @@ impl Document {
 
     pub fn new(name: &str) -> Self {
         Document {
+            document_id: crate::ids::new_document_id(),
+            revision: crate::ids::new_design_revision(),
             newer_file: None,
             render: Default::default(),
             format: default_format(),
@@ -4334,6 +4343,7 @@ impl Document {
         }
         let (old, new) = rename?;
         let mut expected = previous.clone();
+        expected.revision.clone_from(&self.revision);
         let bodies = std::collections::BTreeMap::from([(old.clone(), new.clone())]);
         for (f, g) in expected.features.iter_mut().zip(&self.features) {
             f.body_names.clone_from(&g.body_names);
@@ -4361,6 +4371,7 @@ impl Document {
             return None;
         }
         let mut expected = previous.clone();
+        expected.revision.clone_from(&self.revision);
         expected.feature_mut(b.id)?.name.clone_from(&b.name);
         (expected == *self).then_some(b.id)
     }
@@ -4373,6 +4384,7 @@ impl Document {
             return false;
         }
         let mut normalized = previous.clone();
+        normalized.revision.clone_from(&self.revision);
         normalized.render = self.render.clone();
         *self == normalized
     }
@@ -4398,6 +4410,7 @@ impl Document {
             return None;
         }
         let mut out = self.clone();
+        out.revision.clone_from(&other.revision);
         out.metadata.clone_from(&other.metadata);
         out.assembly.item_numbers.clone_from(&other.assembly.item_numbers);
         out.drawings.clone_from(&other.drawings);
@@ -4420,6 +4433,7 @@ impl Document {
             return false;
         }
         let mut normalized = previous.clone();
+        normalized.revision.clone_from(&self.revision);
         normalized.appearances = self.appearances.clone();
         *self == normalized
     }
@@ -4434,6 +4448,7 @@ impl Document {
             return false;
         }
         let mut normalized = previous.clone();
+        normalized.revision.clone_from(&self.revision);
         normalized.drawings = self.drawings.clone();
         *self == normalized
     }

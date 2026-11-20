@@ -87,8 +87,28 @@ fn transfer(s: &mut Session, p: &Value, moving: bool) -> Result<Value> {
     let doc = solidcraft_io::read_design(&original)?;
     let mut moved = std::borrow::Cow::Borrowed(&doc);
     super::design_link::filed(&mut moved, Some(path), destination);
+    if !moving {
+        let copied = moved.to_mut();
+        copied.document_id = solidcraft_doc::ids::new_document_id();
+        copied.revision = solidcraft_doc::ids::new_design_revision();
+    }
     let contents = if let std::borrow::Cow::Owned(doc) = moved {
-        if destination.to_lowercase().ends_with(".json") { solidcraft_io::write_design(&doc)? } else { solidcraft_io::write_design_container(&doc)? }
+        if destination.to_lowercase().ends_with(".json") {
+            solidcraft_io::write_design(&doc)?
+        } else {
+            // Retain existing optional data without evaluating or meshing. Signed
+            // files never supply an excluded model cache to the new unsigned copy.
+            let mut reader = if moving { None } else { solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&original)).ok() };
+            let geometry = reader.as_mut().filter(|reader| !reader.has_provenance()).and_then(|reader| reader.geometry());
+            let thumbnail = reader.as_mut().and_then(|reader| reader.thumbnail());
+            solidcraft_io::write_design_container_with_thumbnail(
+                &doc,
+                solidcraft_io::DesignCompression::Fast,
+                None,
+                geometry.as_ref(),
+                thumbnail.as_deref(),
+            )?
+        }
     } else {
         original.clone()
     };
@@ -201,15 +221,42 @@ mod tests {
         let undo = s.undo.len();
         s.execute("file.copy", &json!({"path":original,"destination":copy})).unwrap();
         assert_eq!(std::fs::read(&original).unwrap(), bytes);
-        assert_eq!(std::fs::read(&copy).unwrap(), bytes);
+        let copied_bytes = std::fs::read(&copy).unwrap();
+        let source_doc = solidcraft_io::read_design(&bytes).unwrap();
+        let mut copied_doc = solidcraft_io::read_design(&copied_bytes).unwrap();
+        assert_ne!(copied_doc.document_id, source_doc.document_id, "Copy creates a distinct design");
+        assert_ne!(copied_doc.revision, source_doc.revision);
+        copied_doc.document_id.clone_from(&source_doc.document_id);
+        copied_doc.revision.clone_from(&source_doc.revision);
+        assert_eq!(copied_doc, source_doc, "Copy retains the complete design content");
         assert!(s.execute("file.move", &json!({"path":original,"destination":copy})).is_err());
         assert!(original.exists());
         s.execute("file.move", &json!({"path":copy,"destination":renamed})).unwrap();
         assert!(!copy.exists());
-        assert_eq!(std::fs::read(&renamed).unwrap(), bytes);
+        assert_eq!(std::fs::read(&renamed).unwrap(), copied_bytes, "Move preserves identity and revision");
         assert_eq!(s.doc.to_json(), before);
         assert_eq!(s.undo.len(), undo);
         assert!(s.is_dirty());
+    }
+
+    #[test]
+    fn library_copy_keeps_model_cache_with_a_fresh_design_identity() {
+        let f = Fixture::new();
+        let source = f.0.join("Source.sc");
+        let destination = f.0.join("Copy.sc");
+        let mut original = session();
+        original.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        let source_bytes = original.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
+        std::fs::write(&source, &source_bytes).unwrap();
+        session().execute("file.copy", &json!({"path": source, "destination": destination})).unwrap();
+        assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
+        let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(std::fs::read(&destination).unwrap())).unwrap();
+        let saved = reader.geometry().unwrap();
+        let copied = reader.read_document().unwrap();
+        assert_ne!(copied.document_id, original.doc.document_id);
+        assert_ne!(copied.revision, original.doc.revision);
+        let reopened = Session::opened(copied, Some(&saved));
+        assert_eq!(reopened.model.last_recomputed, 0, "the saved model remains adoptable");
     }
 
     #[test]

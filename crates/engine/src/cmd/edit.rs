@@ -382,7 +382,11 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
         // A sheet sketch being edited stays as it is: the model's steps never end or start one.
         None => Snapshot { doc: drawings_from(snap.doc, &s.doc), active_sheet_sketch: s.active_sheet_sketch.clone(), ..snap },
     };
+    let restored = snap.doc.clone();
     snap.doc = Session::refreshed_sheet_fill_history_document(&s.doc, &snap.doc, snap.part, cmd)?;
+    if !Arc::ptr_eq(&restored, &snap.doc) {
+        Arc::make_mut(&mut snap.doc).revision = solidcraft_doc::ids::new_design_revision();
+    }
     let same = Arc::ptr_eq(&s.doc, &snap.doc);
     let moved = s.active_sketch != snap.active_sketch || s.pending_moves != snap.pending_moves;
     // Undoing a hide (or a show) leaves the document alone: the model needs no evaluating, and
@@ -413,7 +417,10 @@ fn drawing_from(doc: &Arc<Document>, step: &Document, id: u64) -> Arc<Document> 
     if let Some(then) = step.drawing(id)
         && !doc.drawing(id).is_some_and(|now| Arc::ptr_eq(then, now))
     {
-        Arc::make_mut(&mut doc).put_drawing(then.clone());
+        let doc = Arc::make_mut(&mut doc);
+        doc.put_drawing(then.clone());
+        // This drawing combined with the current model is a new whole-design state.
+        doc.revision = solidcraft_doc::ids::new_design_revision();
     }
     doc
 }
@@ -429,7 +436,10 @@ fn drawings_from(mut step: Arc<Document>, now: &Document) -> Arc<Document> {
             }
         }
         drawing::sort(&mut drawings);
-        Arc::make_mut(&mut step).drawings = drawings;
+        let step = Arc::make_mut(&mut step);
+        step.drawings = drawings;
+        // Keeping drawings edited since the model snapshot creates a composite state.
+        step.revision = solidcraft_doc::ids::new_design_revision();
     }
     step
 }

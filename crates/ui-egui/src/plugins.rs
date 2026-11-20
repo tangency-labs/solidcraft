@@ -741,6 +741,13 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
         ui.add_space(t.space_12);
         ui.label(RichText::new(approved).size(t.font_small).color(t.text_dim));
     });
+    if let Some(error) = app.session.plugin_state.listener_failures.get(&plugin.id) {
+        let text = solidcraft_ui_text::format("prefs.plugin_listener_failed", &[("error", error)]);
+        ui.horizontal_wrapped(|ui| {
+            ui.add_space(t.space_12);
+            ui.label(RichText::new(text).size(t.font_small).color(t.text_dim));
+        });
+    }
     crate::scenario::publish_target(&format!("prefs:plugin:{}:folder", plugin.id), folder.rect);
     crate::scenario::publish_target(&format!("prefs:plugin:{}", plugin.id), check.rect);
     if folder.clicked()
@@ -805,11 +812,15 @@ mod tests {
     }
 
     fn capture_page(app: &mut SolveApp, dir: &Path, name: &str) {
+        capture_page_sized(app, dir, name, egui::vec2(1280.0, 720.0));
+    }
+
+    fn capture_page_sized(app: &mut SolveApp, dir: &Path, name: &str, size: egui::Vec2) {
         let Ok(output_dir) = std::env::var("SOLIDCRAFT_PLUGINS_EVIDENCE") else { return };
         let ctx = crate::fonts::test_context();
         let mut textures = std::collections::HashMap::new();
         for frame in 0..6 {
-            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
+            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
             let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(frame as f64 / 60.0), ..Default::default() }, |ui| {
                 crate::ui_kit::scope(ui, |ui| page_in_dir(app, ui, Some(dir)))
             });
@@ -829,6 +840,36 @@ mod tests {
         for name in ["plugin.json", "plugin.wasm"] {
             std::fs::copy(path.join(name), target.join(name)).unwrap();
         }
+    }
+
+    #[test]
+    fn design_notifications_report_handler_failure_in_plugin_preferences() {
+        fn has_text(shape: &egui::Shape, expected: &str) -> bool {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| has_text(shape, expected)),
+                egui::Shape::Text(text) => text.galley.job.text.contains(expected),
+                _ => false,
+            }
+        }
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("installed");
+        let path = package(&h, "workshop-helper");
+        hand_install(&path, &root, "workshop-helper");
+        h.app.session.plugin_state.listener_failures.insert("workshop-helper".into(), "read entries cannot edit the design".into());
+        for size in [egui::vec2(1280.0, 720.0), egui::vec2(640.0, 480.0)] {
+            let ctx = crate::fonts::test_context();
+            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
+                crate::ui_kit::scope(ui, |ui| page_in_dir(&mut h.app, ui, Some(&root)))
+            });
+            output.textures_delta.clear();
+            assert!(
+                output.shapes.iter().any(|shape| has_text(&shape.shape, "read entries cannot edit the design")),
+                "diagnostic remains visible at {size:?}"
+            );
+        }
+        capture_page(&mut h.app, &root, "plugin-design-listener-failure.png");
+        capture_page_sized(&mut h.app, &root, "plugin-design-listener-failure-small.png", egui::vec2(640.0, 480.0));
     }
 
     #[test]

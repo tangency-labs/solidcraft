@@ -852,7 +852,13 @@ impl SolveApp {
                         } else {
                             self.session.redo = redo;
                         }
-                        replies.map_err(|_| self.tr("ui.plugin_context_changed").to_string())
+                        replies.map_err(|error| {
+                            if matches!(error.host_error(), Some(solidcraft_engine::plugin::HostError::StaleRevision { .. })) {
+                                error.to_string()
+                            } else {
+                                self.tr("ui.plugin_context_changed").to_string()
+                            }
+                        })
                     })
                     .and_then(|replies| replies.into_iter().last().map(|(_, reply)| reply).ok_or_else(|| self.tr("ui.plugin_no_result").to_string()))
             };

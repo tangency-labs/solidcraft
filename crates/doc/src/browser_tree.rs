@@ -91,6 +91,7 @@ impl Document {
             return false;
         }
         let mut normalized = previous.clone();
+        normalized.revision.clone_from(&self.revision);
         normalized.browser_groups.clone_from(&self.browser_groups);
         normalized.browser_order.clone_from(&self.browser_order);
         normalized.next_id = self.next_id;

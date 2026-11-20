@@ -575,7 +575,11 @@ fn open_step(
     // (the default on keeps the keys written before it).
     let key = solidcraft_io::ImportCache::key(&bytes, path, &import_key_options(&options));
     let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
-    if let Some((doc, saved, mut reply)) = cache.and_then(|cache| cache.read(&key)) {
+    if let Some((mut doc, saved, mut reply)) = cache.and_then(|cache| cache.read(&key)) {
+        // The cache holds an import template. Every fresh import starts its own
+        // design; geometry fingerprints deliberately exclude this metadata.
+        doc.document_id = solidcraft_doc::ids::new_document_id();
+        doc.revision = solidcraft_doc::ids::new_design_revision();
         let mut fresh = Session::opened_validating(doc, Some(&saved), validation);
         // An import is still an unsaved design, with the same dirty state as a cold import.
         fresh.saved = std::sync::Arc::new(Document::new(&stem));
@@ -1752,6 +1756,7 @@ fn saved_name(name: &str, old_path: Option<&str>, path: &str, user_named: bool) 
 /// Rename the design, and the undo and redo states that still carry the old name, so undo
 /// does not bring the default name back and leave the design looking changed.
 fn rename_design(s: &mut Session, from: &str, to: &str) {
+    let token_current = s.design_token_is_current();
     // A prepared world is keyed by the document's Arc. Changing only its name
     // must not make an opted-in save lose warm geometry and display caches.
     // Retag only a cache that already matches: cold or stale placements stay so.
@@ -1784,6 +1789,9 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
         && let Some(cache) = cache.as_mut()
     {
         cache.doc = std::sync::Arc::clone(&s.doc);
+    }
+    if token_current {
+        s.follow_design_token();
     }
 }
 
@@ -2185,6 +2193,7 @@ impl Session {
         if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) {
             session.pin_rolled_back_body_names();
         }
+        session.follow_design_token();
         session.saved = session.doc.clone();
         session
     }
@@ -3603,7 +3612,7 @@ mod tests {
             }
             let (mut first, cold) = open_step(&path, &json!({}), Some(&cache), solidcraft_kernel::Validation::default()).unwrap();
             assert_eq!(cold["import_reused"], false);
-            let before = first.doc.to_json();
+            let before = (*first.doc).clone();
             let bounds = crate::view::bounds(&first).unwrap();
             assert!(first.is_dirty());
             assert!((solidcraft_kernel::measure_mass(&first.model.state().bodies[0].body).unwrap().volume - 2000.0).abs() < 1e-6);
@@ -3612,7 +3621,12 @@ mod tests {
             assert_eq!(hit["import_reused"], true);
             assert_eq!(hit["content_sha256"], cold["content_sha256"]);
             assert_eq!(hit["warnings"], cold["warnings"]);
-            assert_eq!(reopened.doc.to_json(), before, "subsequent edits never enter the cache");
+            assert_ne!(reopened.doc.document_id, before.document_id, "a cached import starts a distinct design");
+            assert_ne!(reopened.doc.revision, before.revision);
+            let mut normalized = (*reopened.doc).clone();
+            normalized.document_id.clone_from(&before.document_id);
+            normalized.revision.clone_from(&before.revision);
+            assert_eq!(normalized, before, "subsequent edits never enter the cache");
             assert_eq!(reopened.model.last_recomputed, 0, "cache hit adopts the model without importing");
             assert!(reopened.is_dirty());
             assert_eq!(crate::view::bounds(&reopened).unwrap(), bounds);
