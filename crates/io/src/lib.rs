@@ -294,33 +294,77 @@ pub struct StepFeature {
     pub import: std::sync::Arc<solidcraft_kernel::StepImport>,
 }
 
-/// Bytes the encoding detector sees at most: the lines with 8-bit bytes, which in a STEP or IGES
-/// file are the names and descriptions.
+/// Bytes the encoding detector sees at most: the strings that are not UTF-8, which in a STEP or
+/// IGES file are names and descriptions.
 const ENCODING_SAMPLE_BYTES: usize = 64 << 10;
 
 /// STEP or IGES bytes as text. UTF-8 stays as it is. Some exporters write names in the system's
 /// legacy encoding instead of Part 21 escapes (GBK from Chinese vendors, Shift_JIS from Japanese
-/// ones): that encoding is detected from the lines holding 8-bit bytes and the file decoded with
-/// it, so a name reads `圆角` rather than U+FFFD noise (#2344). The syntax itself is ASCII in every
-/// such encoding.
+/// ones), so a name reads `圆角` rather than U+FFFD noise (#2344). SolidWorks also mixes raw GBK
+/// and raw UTF-8 strings in one file (#19750), so each string is decoded on its own
+/// ([`step_pieces`]): UTF-8 stays UTF-8, and the other strings are decoded in the legacy encoding
+/// detected from them alone. The syntax itself is ASCII in every such encoding.
+///
+/// A short string in a double-byte encoding is often valid UTF-8 by chance: 930 of the 6763
+/// GB2312 hanzi are (a byte C2 to DF, then a byte 80 to BF). Such chance UTF-8 seldom holds a
+/// three-byte character, and the CJK characters in common use are three bytes long in UTF-8. So
+/// beside a double-byte encoding, a string counts as UTF-8 only with a three-byte character.
 fn step_text(bytes: &[u8]) -> String {
     if let Ok(text) = std::str::from_utf8(bytes) {
         return text.to_owned();
     }
     let mut detector = chardetng::EncodingDetector::new();
     let mut fed = 0;
-    for line in bytes.split(|b| *b == b'\n').filter(|line| !line.is_ascii()) {
+    for piece in step_pieces(bytes).filter(|piece| std::str::from_utf8(piece).is_err()) {
         if fed >= ENCODING_SAMPLE_BYTES {
             break;
         }
-        let line = line.get(..line.len().min(ENCODING_SAMPLE_BYTES - fed)).unwrap_or_default();
-        detector.feed(line, false);
+        let piece = piece.get(..piece.len().min(ENCODING_SAMPLE_BYTES - fed)).unwrap_or_default();
+        detector.feed(piece, false);
         detector.feed(b"\n", false);
-        fed += line.len() + 1;
+        fed += piece.len() + 1;
     }
     detector.feed(&[], true);
     let encoding = detector.guess(None, false);
-    encoding.decode_without_bom_handling(bytes).0.into_owned()
+    let reads_as_utf8 = |utf8: &str| encoding.is_single_byte() || utf8.is_ascii() || utf8.chars().any(|c| c.len_utf8() == 3);
+    let mut text = String::with_capacity(bytes.len());
+    for piece in step_pieces(bytes) {
+        match std::str::from_utf8(piece) {
+            Ok(utf8) if reads_as_utf8(utf8) => text.push_str(utf8),
+            _ => text.push_str(&encoding.decode_without_bom_handling(piece).0),
+        }
+    }
+    text
+}
+
+/// `bytes` cut so that each quoted string (with its quotes) and each `/* */` comment is a piece
+/// of its own; the pieces put together are `bytes`. A `''` inside a string is a quote, and an
+/// unclosed string or comment runs to the end. No byte of a GBK, GB18030, Big5, Shift_JIS, EUC or
+/// UTF-8 character outside ASCII is `'`, `/` or `*`, so the cuts fall between characters.
+fn step_pieces(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
+    let mut rest = bytes;
+    std::iter::from_fn(move || {
+        let find =
+            |from: usize, pattern: &[u8]| rest.get(from..)?.windows(pattern.len()).position(|w| w == pattern).map(|at| from + at + pattern.len());
+        let end = match rest {
+            [] => return None,
+            [b'\'', ..] => {
+                let mut at = 1;
+                loop {
+                    match find(at, b"'") {
+                        Some(next) if rest.get(next) == Some(&b'\'') => at = next + 1,
+                        Some(next) => break next,
+                        None => break rest.len(),
+                    }
+                }
+            }
+            [b'/', b'*', ..] => find(2, b"*/").unwrap_or(rest.len()),
+            _ => (1..rest.len()).find(|&at| rest.get(at) == Some(&b'\'') || rest.get(at..at + 2) == Some(b"/*")).unwrap_or(rest.len()),
+        };
+        let (piece, after) = rest.split_at_checked(end).unwrap_or((rest, &[]));
+        rest = after;
+        Some(piece)
+    })
 }
 
 /// Read STEP bytes (`file` is the source file name) into an Import base feature. The file is
@@ -2005,6 +2049,17 @@ mod tests {
         let bytes = with_name(&with_name(&solid, "PRODUCT_DEFINITION", "未".as_bytes()), "MANIFOLD_SOLID_BREP", "外壳 1".as_bytes());
         let bytes = with_name(&bytes, "PRODUCT", &encoding_rs::GBK.encode("切除-拉伸3").0);
         assert_eq!(step_import_feature(&bytes, "t.step").unwrap().body_names, ["外壳 1"], "UTF-8 beside GBK");
+        // 某 in GBK is C4 B3, which is also valid UTF-8 (ĳ): beside other GBK strings it stays 某.
+        let bytes = with_name(
+            &with_name(&step, "PRODUCT", &encoding_rs::GBK.encode("切除-拉伸3").0),
+            "MANIFOLD_SOLID_BREP",
+            &encoding_rs::GBK.encode("某").0,
+        );
+        assert_eq!(step_import_feature(&bytes, "t.step").unwrap().body_names, ["某"], "a GBK name that is also UTF-8");
+        // Strings and comments are pieces of their own; a doubled quote stays inside its string.
+        let text: &[u8] = b"#1=A('it''s',/* a 'note' */'x');'open";
+        let pieces: Vec<&[u8]> = step_pieces(text).collect();
+        assert_eq!(pieces, [&b"#1=A("[..], b"'it''s'", b",", b"/* a 'note' */", b"'x'", b");", b"'open"]);
     }
 
     #[test]
