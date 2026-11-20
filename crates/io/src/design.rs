@@ -61,6 +61,7 @@ fn max_expanded() -> usize {
 const MESH_MAGIC: &[u8; 8] = b"SCMESH01";
 const SHADED_MESH_MAGIC: &[u8; 8] = b"SCMESH02";
 const POINTS_MAGIC: &[u8; 8] = b"SCPNTS01";
+const COMPLEX_MAGIC: &[u8; 8] = b"SCCPLX01";
 const MAX_PREVIEW_BYTES: usize = 8 << 20;
 const MAX_PREVIEW_TRIANGLES: usize = 100_000;
 
@@ -305,7 +306,13 @@ fn write_container(
         cloud.check().map_err(invalid)?;
         let blob = writer.blob(&encode_cloud(cloud)?, "points", compression == DesignCompression::Compact)?;
         let mut value = replace(cloud, fields([("points", json!("")), ("colors", json!(""))])).map_err(invalid)?;
-        value.as_object_mut().ok_or_else(|| invalid("point cloud metadata"))?.insert("points_blob".into(), blob);
+        let record = value.as_object_mut().ok_or_else(|| invalid("point cloud metadata"))?;
+        record.insert("points_blob".into(), blob);
+        // Its segments, triangles and properties' numbers are a part of their own; the record keeps
+        // their shape with empty numbers.
+        if let Some(complex) = encode_complex(&cloud.complex)? {
+            record.insert("complex_blob".into(), writer.blob(&complex, "complex", compression == DesignCompression::Compact)?);
+        }
         clouds.push(value);
     }
     let mut replacements = fields([("features", Value::Array(features)), ("canvases", Value::Array(canvases)), ("drawings", Value::Null)]);
@@ -506,6 +513,66 @@ fn encode_cloud(cloud: &solidcraft_doc::point_cloud::PointCloud) -> Result<Vec<u
         bytes.extend_from_slice(&cloud.colors.0);
     }
     Ok(bytes)
+}
+
+/// A cloud's segments, triangles and properties' numbers, `None` when it has none: the magic, then
+/// the segment and triangle index counts, the property count and each property's value count (u64
+/// each, little-endian), then the indices (u32) and each property's values (f32) in order.
+fn encode_complex(complex: &solidcraft_doc::point_cloud::Complex) -> Result<Option<Vec<u8>>> {
+    let (segments, triangles) = (&complex.segments.0, &complex.triangles.0);
+    if segments.is_empty() && triangles.is_empty() && complex.columns.iter().all(|c| c.values.0.is_empty()) {
+        return Ok(None);
+    }
+    let words = complex.columns.iter().fold(segments.len().saturating_add(triangles.len()), |n, c| n.saturating_add(c.values.0.len()));
+    let header = 8 * (4 + complex.columns.len());
+    let size = words.checked_mul(4).and_then(|b| b.checked_add(header)).filter(|&b| b <= crate::limits::max_design_bytes());
+    let mut bytes = Vec::with_capacity(size.ok_or_else(|| invalid("point cloud too large"))?);
+    bytes.extend_from_slice(COMPLEX_MAGIC);
+    for n in [segments.len(), triangles.len(), complex.columns.len()].into_iter().chain(complex.columns.iter().map(|c| c.values.0.len())) {
+        bytes.extend_from_slice(&(n as u64).to_le_bytes());
+    }
+    for i in segments.iter().chain(triangles.iter()) {
+        bytes.extend_from_slice(&i.to_le_bytes());
+    }
+    for v in complex.columns.iter().flat_map(|c| c.values.0.iter()) {
+        bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    Ok(Some(bytes))
+}
+
+/// Fills `complex`, read from its record with empty numbers, from its part ([`encode_complex`]).
+/// What the numbers mean is checked with the points ([`decode_cloud`]).
+fn decode_complex(bytes: &[u8], complex: &mut solidcraft_doc::point_cloud::Complex) -> Result<()> {
+    use solidcraft_doc::point_cloud::{Floats, Indices, MAX_CELLS, MAX_COLUMNS, MAX_POINTS};
+    if bytes.get(..8) != Some(COMPLEX_MAGIC.as_slice()) {
+        return Err(invalid("unsupported point cloud complex blob version"));
+    }
+    let mut at = 8;
+    let mut word = || -> Result<usize> {
+        let array: [u8; 8] = bytes.get(at..at + 8).ok_or_else(|| invalid("truncated point cloud complex"))?.try_into().map_err(invalid)?;
+        at += 8;
+        usize::try_from(u64::from_le_bytes(array)).map_err(invalid)
+    };
+    let (segments, triangles, columns) = (word()?, word()?, word()?);
+    if segments > 2 * MAX_CELLS || triangles > 3 * MAX_CELLS || columns > MAX_COLUMNS || columns != complex.columns.len() {
+        return Err(invalid("invalid point cloud complex"));
+    }
+    let mut counts = Vec::with_capacity(columns);
+    for _ in 0..columns {
+        counts.push(word()?.min(MAX_POINTS.max(MAX_CELLS) + 1));
+    }
+    let words = counts.iter().fold(segments + triangles, |n, c| n + c);
+    if bytes.len() != at + words * 4 {
+        return Err(invalid("invalid point cloud complex lengths"));
+    }
+    let mut values = bytes[at..].as_chunks::<4>().0.iter();
+    let mut take = |n: usize| values.by_ref().take(n).copied().collect::<Vec<[u8; 4]>>();
+    complex.segments = Indices(take(segments).into_iter().map(u32::from_le_bytes).collect());
+    complex.triangles = Indices(take(triangles).into_iter().map(u32::from_le_bytes).collect());
+    for (column, n) in complex.columns.iter_mut().zip(counts) {
+        column.values = Floats(take(n).into_iter().map(f32::from_le_bytes).collect());
+    }
+    Ok(())
 }
 
 /// Each point cloud's `complex` (segments, triangles and properties), taken out of the metadata
@@ -1065,7 +1132,11 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     }
     for (index, complex) in complexes {
         if let Some(cloud) = doc.point_clouds.get_mut(index) {
+            // A record with a part has empty numbers; an older one has them inline, base64.
             cloud.complex = serde::Deserialize::deserialize(&complex).map_err(invalid)?;
+            if let Some(record) = metadata.get("point_clouds").and_then(|v| v.get(index)).filter(|v| v.get("complex_blob").is_some()) {
+                decode_complex(reader.blob(record, "complex_blob", "complex")?, &mut cloud.complex)?;
+            }
         }
         if let Some(cloud) = metadata.get_mut("point_clouds").and_then(|v| v.get_mut(index)).and_then(Value::as_object_mut) {
             cloud.insert("complex".into(), complex);
@@ -1872,14 +1943,14 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn opening_adopts_the_model_with_large_point_cloud_metadata() {
+    fn opening_adopts_the_model_with_a_large_point_clouds_properties() {
         use solidcore_record::Vec3;
         use solidcraft_doc::point_cloud::{ColorBy, Colors, Column, Complex, Floats, On, PointCloud, Points};
 
         let mut doc = Document::new("With a scan");
         doc.add_feature(FeatureKind::MeshImport { file: "reference.obj".into(), meshes: vec![mesh()] }, None).unwrap();
-        // Three packed f32 columns put over 16 MiB of base64 in the metadata, even though the
-        // point coordinates themselves live in a separate binary part.
+        // Three f32 columns of 1.1 million points were over 16 MiB of base64 in the metadata; their
+        // numbers are a binary part of their own now, beside the points, and the metadata small.
         let count = 1_100_000;
         let values = Floats(vec![1.0; count].into());
         let id = doc.allocate_id().unwrap();
@@ -1917,8 +1988,7 @@ mod tests {
         {
             let mut reader = DesignContainerReader::new(Cursor::new(&bytes)).unwrap();
             assert!(reader.has_model_cache(), "the cache was written");
-            assert!(reader.reader.document(max_design()).unwrap().len() > 16 << 20);
-            assert!(reader.preview().is_none(), "the standalone preview has a smaller metadata budget");
+            assert!(reader.reader.document(max_design()).unwrap().len() < 64 << 10, "no numbers in the metadata");
         }
 
         let dir = tempfile::tempdir().unwrap();
@@ -2704,6 +2774,25 @@ mod tests {
         // This build reads its own file whole.
         let file = write_design_container(&doc).unwrap();
         assert_eq!(crate::read_design(&file).unwrap().point_clouds, doc.point_clouds);
+        // Its segments, triangles and properties are a part of their own, never base64 text in the
+        // metadata, which keeps their shape with empty numbers.
+        let saved: Value = serde_json::from_slice(&parts(&file)["document.json"]).unwrap();
+        let record = &saved["point_clouds"][0];
+        assert!(record["complex_blob"].as_str().is_some_and(|name| name.ends_with(".complex")), "{record}");
+        assert_eq!((record["complex"]["segments"].clone(), record["complex"]["columns"][0]["values"].clone()), (json!(""), json!("")));
+        assert_eq!(record["complex"]["columns"][0]["name"], "nz");
+        // An older file kept them inline, base64: it opens the same.
+        let mut older = parts(&file);
+        let mut metadata = saved.clone();
+        let b64 = |words: Vec<[u8; 4]>| json!(solidcraft_doc::canvas::base64_encode(&words.concat()));
+        metadata["point_clouds"][0].as_object_mut().unwrap().remove("complex_blob");
+        metadata["point_clouds"][0]["complex"]["segments"] = b64(vec![0u32.to_le_bytes(), 1u32.to_le_bytes()]);
+        metadata["point_clouds"][0]["complex"]["triangles"] = b64([0u32, 1, 2].map(u32::to_le_bytes).to_vec());
+        metadata["point_clouds"][0]["complex"]["columns"][0]["values"] = b64([1.0f32; 3].map(f32::to_le_bytes).to_vec());
+        older.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
+        assert_eq!(crate::read_design(&package(&older)).unwrap().point_clouds, doc.point_clouds);
+        // A plain JSON design can't hold the points: saving one is refused, naming them.
+        assert!(crate::write_design(&doc).unwrap_err().to_string().contains("point clouds"));
 
         let newer = solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1);
         for complex in [json!("future curvature"), json!("columns this build can't read")] {

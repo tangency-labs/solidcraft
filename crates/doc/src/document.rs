@@ -4704,6 +4704,9 @@ impl Document {
         if self.canvases.iter().any(|c| !c.data.is_empty()) {
             kinds.push("images");
         }
+        if self.point_clouds.iter().any(|c| !c.points.is_empty()) {
+            kinds.push("point clouds");
+        }
         if !self.plugin_data.is_empty() {
             kinds.push("plugin files");
         }
