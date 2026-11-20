@@ -30,7 +30,7 @@ impl ReviewWindow {
         self.reviewed = None;
         let result = (|| {
             if self.input.len() > MAX_BYTES {
-                return Err(tr("ui.material_review.limit").to_string());
+                return Err(tr(msg!("ui.material_review.limit")).to_string());
             }
             let value: Value = serde_json::from_str(&self.input).map_err(|e| e.to_string())?;
             let report = app.run("material.properties.validate", json!({"card":value}))?;
@@ -57,7 +57,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let side = crate::frame::Side::Right;
     let (_, docked) = crate::shell::floating_editor_anchor(app, ctx);
-    let title = tr("ui.material_review.title");
+    let title = tr(msg!("ui.material_review.title"));
     let moved = crate::frame::dock_offset(ctx, "material_card_review");
     let drag_bounds = crate::shell::tool_drag_rect(app, viewport);
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
@@ -85,11 +85,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             false,
             true,
             |ui| {
-                ui_kit::text(ui, tr("ui.material_review.scope"), ui_kit::Text::Hint("manage"));
-                ui_kit::text(ui, tr("ui.material_review.input"), ui_kit::Text::Report("material_input_label", false));
+                ui_kit::text(ui, tr(msg!("ui.material_review.scope")), ui_kit::Text::Hint("manage"));
+                ui_kit::text(ui, tr(msg!("ui.material_review.input")), ui_kit::Text::Report("material_input_label", false));
                 let response = ui_kit::text_area(
                     ui,
-                    tr("ui.material_review.input"),
+                    tr(msg!("ui.material_review.input")),
                     egui::Id::unique("sc_material_card_input"),
                     &mut window.input,
                     5,
@@ -100,7 +100,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     window.reviewed = None;
                     window.error = None;
                 }
-                if ui_kit::button(ui, tr("ui.material_review.review"), ui_kit::Button::Normal).clicked() {
+                if ui_kit::button(ui, tr(msg!("ui.material_review.review")), ui_kit::Button::Normal).clicked() {
                     window.review(app);
                 }
                 if let Some(error) = &window.error {
@@ -120,7 +120,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 fn value(ui: &mut egui::Ui, field: &str, value: Option<String>, unit: &str) {
-    let value = value.unwrap_or_else(|| tr("ui.material_review.unknown").to_string());
+    let value = value.unwrap_or_else(|| tr(msg!("ui.material_review.unknown")).to_string());
     ui_kit::text(ui, &format!("{field}: {value} {unit}"), ui_kit::Text::Report(field, false));
 }
 
@@ -131,9 +131,9 @@ fn numbers(ui: &mut egui::Ui, field: &str, values: &[f64], unit: &str) {
 /// Review a saved card inside the existing physical-material assignment panel.
 /// Reading properties never changes the assigned density or the candidate reviewer.
 pub(crate) fn show_saved_material(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, name: &str) {
-    value(ui, tr("Density"), doc.material_density(name).map(|density| density.to_string()), "g/cm³");
+    value(ui, tr(msg!("Density")), doc.material_density(name).map(|density| density.to_string()), "g/cm³");
     let Some(record) = doc.user_material(name).and_then(|material| material.physical_card.as_ref()) else {
-        value(ui, tr("ui.material_review.properties"), None, "");
+        value(ui, tr(msg!("ui.material_review.properties")), None, "");
         return;
     };
     show_record(ui, record);
@@ -141,7 +141,7 @@ pub(crate) fn show_saved_material(ui: &mut egui::Ui, doc: &solidcraft_engine::do
 
 /// Read-only card preview shared by the saved-material panel and library picker.
 pub(crate) fn show_record(ui: &mut egui::Ui, record: &solidcraft_engine::doc::physical_material::ValidatedCard) {
-    ui_kit::section(ui, "saved_physical_card", tr("ui.material_review.properties"), false, |ui| {
+    ui_kit::section(ui, "saved_physical_card", tr(msg!("ui.material_review.properties")), false, |ui| {
         let card = record.card();
         match card.validate() {
             Ok(report) => show_card(ui, card, &json!({"validation":report})),
@@ -158,11 +158,11 @@ fn show_card(ui: &mut egui::Ui, card: &MaterialCard, report: &Value) {
     // Schema identifiers are inert metadata, not translated source claims or assigned body axes.
     let family = serde_json::to_value(card.family).unwrap_or(Value::Null);
     value(ui, "family", family.as_str().map(str::to_string), "");
-    ui_kit::text(ui, tr("ui.material_review.properties"), ui_kit::Text::Report("properties", false));
+    ui_kit::text(ui, tr(msg!("ui.material_review.properties")), ui_kit::Text::Report("properties", false));
     for &kind in KINDS {
         let label = format!("ui.material_review.{kind}");
         let Some(property) = card.properties.iter().find(|p| p.data.kind() == kind) else {
-            ui_kit::text(ui, &format!("{}: {}", tr(&label), tr("ui.material_review.unknown")), ui_kit::Text::Report(kind, false));
+            ui_kit::text(ui, &format!("{}: {}", tr(&label), tr(msg!("ui.material_review.unknown"))), ui_kit::Text::Report(kind, false));
             continue;
         };
         ui_kit::section(ui, kind, tr(&label), true, |ui| {
@@ -173,19 +173,24 @@ fn show_card(ui: &mut egui::Ui, card: &MaterialCard, report: &Value) {
             {
                 let axes = if axes == "wood_lrt" { "wood_lrt (1=L, 2=R, 3=T)".to_string() } else { axes };
                 value(ui, "axes", Some(axes), "");
-                ui_kit::text(ui, tr("ui.material_review.axes"), ui_kit::Text::Report("axes", false));
+                ui_kit::text(ui, tr(msg!("ui.material_review.axes")), ui_kit::Text::Report("axes", false));
             }
-            ui_kit::text(ui, tr("ui.material_review.conditions"), ui_kit::Text::Report("conditions", false));
+            ui_kit::text(ui, tr(msg!("ui.material_review.conditions")), ui_kit::Text::Report("conditions", false));
             let c = &property.conditions;
             value(ui, "temperature_k", c.temperature_k.map(|v| v.to_string()), "K");
             value(ui, "state", c.state.clone(), "");
             if card.family == Family::Wood || c.moisture_dry_basis_kg_kg.is_some() {
-                value(ui, "moisture_dry_basis_kg_kg", c.moisture_dry_basis_kg_kg.map(|v| v.to_string()), tr("ui.material_review.moisture_unit"));
+                value(
+                    ui,
+                    "moisture_dry_basis_kg_kg",
+                    c.moisture_dry_basis_kg_kg.map(|v| v.to_string()),
+                    tr(msg!("ui.material_review.moisture_unit")),
+                );
             }
             if card.family == Family::Polymer || c.strain_rate_per_s.is_some() {
                 value(ui, "strain_rate_per_s", c.strain_rate_per_s.map(|v| v.to_string()), "s⁻¹");
             }
-            ui_kit::text(ui, tr("ui.material_review.source"), ui_kit::Text::Report("source", false));
+            ui_kit::text(ui, tr(msg!("ui.material_review.source")), ui_kit::Text::Report("source", false));
             if let Some(source) = card.sources.iter().find(|s| s.id == property.source_id) {
                 ui_kit::text(ui, &source.title, ui_kit::Text::Report("source_title", false));
                 value(ui, "source_id", Some(source.id.clone()), "");
@@ -196,12 +201,12 @@ fn show_card(ui: &mut egui::Ui, card: &MaterialCard, report: &Value) {
         });
     }
     if let Some(moduli) = report.get("validation").and_then(|v| v.get("isotropic_moduli")).filter(|v| v.is_object()) {
-        ui_kit::text(ui, tr("ui.material_review.derived"), ui_kit::Text::Report("derived", false));
+        ui_kit::text(ui, tr(msg!("ui.material_review.derived")), ui_kit::Text::Report("derived", false));
         for field in ["shear_pa", "bulk_pa"] {
             value(ui, field, moduli.get(field).and_then(Value::as_f64).map(|v| format!("{v:e}")), "Pa");
         }
     }
-    ui_kit::text(ui, tr("ui.material_review.claims"), ui_kit::Text::Note("claims"));
+    ui_kit::text(ui, tr(msg!("ui.material_review.claims")), ui_kit::Text::Note("claims"));
 }
 
 fn show_data(ui: &mut egui::Ui, data: &PropertyData) {

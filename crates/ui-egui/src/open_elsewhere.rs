@@ -121,7 +121,7 @@ pub(crate) fn check_open(app: &mut SolveApp, request: Request) -> Option<Request
 /// question is under way instead.
 pub(crate) fn check_save(app: &mut SolveApp) -> bool {
     if app.session.read_only {
-        app.set_status(solidcraft_ui_text::tr("document.read_only_save"), false);
+        app.set_status(solidcraft_ui_text::tr(msg!("document.read_only_save")), false);
         crate::toolbar::save_copy(app);
         return false;
     }
@@ -149,17 +149,14 @@ fn show_lock_prompt(app: &mut SolveApp, ctx: &egui::Context) {
     let name = file_name(&prompt.request.path);
     let lock = &prompt.lock;
     let who = if lock.user.is_empty() { lock.host.clone() } else { format!("{} ({})", lock.host, lock.user) };
-    let title = solidcraft_ui_text::format("document.open_elsewhere", &[("name", &name)]);
-    let detail = solidcraft_ui_text::format(
-        "document.open_elsewhere_detail",
-        &[("name", &name), ("who", &who), ("when", &crate::recovery_ui::ago(lock.opened)), ("app", &lock.app)],
-    );
+    let title = msg!("document.open_elsewhere", name = &name).tr();
+    let detail = msg!("document.open_elsewhere_detail", name = &name, who = &who, when = &crate::recovery_ui::ago(lock.opened), app = &lock.app).tr();
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_open_elsewhere"), "status_warning", &title)
         .tone(ui_kit::Tone::Warning)
         .actions(
-            solidcraft_ui_text::tr("document.open_read_only"),
-            solidcraft_ui_text::tr("ui.cancel"),
-            Some(solidcraft_ui_text::tr("document.open_anyway")),
+            solidcraft_ui_text::tr(msg!("document.open_read_only")),
+            solidcraft_ui_text::tr(msg!("ui.cancel")),
+            Some(solidcraft_ui_text::tr(msg!("document.open_anyway"))),
         )
         .selected(ui_kit::Action::Ok)
         .show(ctx, true, |ui| {
@@ -226,14 +223,14 @@ fn show_disk_prompt(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let name = app.session.path.as_deref().map(file_name).unwrap_or_default();
-    let title = solidcraft_ui_text::format("document.changed_on_disk", &[("name", &name)]);
-    let detail = solidcraft_ui_text::format("document.changed_on_disk_detail", &[("name", &name)]);
+    let title = msg!("document.changed_on_disk", name = &name).tr();
+    let detail = msg!("document.changed_on_disk_detail", name = &name).tr();
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_changed_on_disk"), "status_warning", &title)
         .tone(ui_kit::Tone::Warning)
         .actions(
-            solidcraft_ui_text::tr("document.save_copy"),
-            solidcraft_ui_text::tr("ui.cancel"),
-            Some(solidcraft_ui_text::tr("document.overwrite")),
+            solidcraft_ui_text::tr(msg!("document.save_copy")),
+            solidcraft_ui_text::tr(msg!("ui.cancel")),
+            Some(solidcraft_ui_text::tr(msg!("document.overwrite"))),
         )
         .selected(ui_kit::Action::Ok)
         .show(ctx, true, |ui| {

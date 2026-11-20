@@ -226,7 +226,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
             k.length = Some(i);
         });
     }
-    text_row(ui, "Name", &mut k.name, solidcraft_ui_text::tr("parts.automatic_name"));
+    text_row(ui, "Name", &mut k.name, solidcraft_ui_text::tr(msg!("parts.automatic_name")));
     // The part, and its table values.
     let key = (k.family, k.size, k.length);
     let tex_id = egui::Id::unique("sc_part_picture");
@@ -268,7 +268,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
     }
     if inputs.first().is_some_and(|i| i.items.is_empty()) {
         ui.vertical(|ui| {
-            crate::ui_kit::text(ui, solidcraft_ui_text::tr("parts.placement_hint"), crate::ui_kit::Text::Note("parts_placement"));
+            crate::ui_kit::text(ui, solidcraft_ui_text::tr(msg!("parts.placement_hint")), crate::ui_kit::Text::Note("parts_placement"));
         });
     }
     false

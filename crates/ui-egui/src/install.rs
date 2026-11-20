@@ -88,10 +88,10 @@ pub fn start(app: &mut SolveApp, offer: Offer) {
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(steps) = app.install_steps else { return };
     let (lines, after) = steps.messages();
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_install_steps"), "web", solidcraft_ui_text::tr("install.title"))
-        .actions("", solidcraft_ui_text::tr("install.done"), None)
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_install_steps"), "web", solidcraft_ui_text::tr(msg!("install.title")))
+        .actions("", solidcraft_ui_text::tr(msg!("install.done")), None)
         .show(ctx, true, |ui| {
-            ui_kit::text(ui, solidcraft_ui_text::tr("install.steps_intro"), ui_kit::Text::Report("intro", false));
+            ui_kit::text(ui, solidcraft_ui_text::tr(msg!("install.steps_intro")), ui_kit::Text::Report("intro", false));
             for (i, id) in lines.iter().enumerate() {
                 ui_kit::text(ui, &format!("{}. {}", i + 1, solidcraft_ui_text::tr(id)), ui_kit::Text::Report(&format!("step:{i}"), false));
             }

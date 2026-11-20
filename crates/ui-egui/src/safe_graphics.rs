@@ -58,10 +58,12 @@ pub(crate) fn line(app: &SolveApp) -> Option<Line> {
 /// The line's text and its one button (none when the host cannot restart).
 pub(crate) fn line_text(app: &SolveApp, line: Line) -> (&'static str, Option<&'static str>) {
     match line {
-        Line::Started => (solidcraft_ui_text::tr("graphics.safe_mode_started"), Some(solidcraft_ui_text::tr("graphics.safe_mode_try_full"))),
+        Line::Started => {
+            (solidcraft_ui_text::tr(msg!("graphics.safe_mode_started")), Some(solidcraft_ui_text::tr(msg!("graphics.safe_mode_try_full"))))
+        }
         Line::FullNext => (
-            solidcraft_ui_text::tr("graphics.safe_mode_full_next"),
-            app.services.graphics_restart.is_some().then(|| solidcraft_ui_text::tr("graphics.safe_mode_restart")),
+            solidcraft_ui_text::tr(msg!("graphics.safe_mode_full_next")),
+            app.services.graphics_restart.is_some().then(|| solidcraft_ui_text::tr(msg!("graphics.safe_mode_restart"))),
         ),
     }
 }
@@ -104,7 +106,7 @@ pub fn set_next_launch(app: &mut SolveApp, on: bool) -> Result<(), String> {
 
 /// Change the record in `graphics.json`, keeping every other setting and field as they were.
 fn edit(app: &SolveApp, change: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>)) -> Result<(), String> {
-    let path = app.services.graphics_path.as_deref().ok_or_else(|| app.tr("prefs.graphics_api_unavailable").to_string())?;
+    let path = app.services.graphics_path.as_deref().ok_or_else(|| app.tr(msg!("prefs.graphics_api_unavailable")).to_string())?;
     let path = std::path::Path::new(path);
     let mut graphics = crate::prefs::read_graphics_settings(path)?;
     let Some(object) = graphics.as_object_mut() else { return Err("graphics settings must be a JSON object".into()) };

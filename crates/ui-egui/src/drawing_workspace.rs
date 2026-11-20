@@ -465,7 +465,7 @@ fn sheet_settings_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
     let Ok(drawing) = app.session.drawing("drawing.inspect").cloned() else { return };
     if drawing.sheets.len() > 1 && !sheets_visible(app) && app.preferences.drawing_sheets_visibility != "legacy" {
         let active_name = drawing.sheets.iter().find(|sheet| sheet.id == active).map_or("", |sheet| sheet.name.as_str());
-        let label = app.tr("ui.drawing_sheets.active").to_string();
+        let label = app.tr(msg!("ui.drawing_sheets.active")).to_string();
         ui_kit::row(ui, &label, |ui| {
             ui_kit::dropdown_menu(ui, "drawing_active_sheet", active_name, |ui| {
                 for sheet in &drawing.sheets {
@@ -477,7 +477,7 @@ fn sheet_settings_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
     }
-    if !sheets_visible(app) && ui_kit::button(ui, app.tr("ui.drawing_sheets.add"), ui_kit::Button::Normal).clicked() {
+    if !sheets_visible(app) && ui_kit::button(ui, app.tr(msg!("ui.drawing_sheets.add")), ui_kit::Button::Normal).clicked() {
         open_add_sheet(app);
     }
 }
@@ -580,7 +580,7 @@ fn sheet_card(
         select_sheet(app, sheet.id);
     }
 
-    let menu_button = ui_kit::icon_button_at(ui, menu, "dots", app.tr("ui.drawing_sheets.actions"));
+    let menu_button = ui_kit::icon_button_at(ui, menu, "dots", app.tr(msg!("ui.drawing_sheets.actions")));
     crate::scenario::publish_target(&format!("drawing:sheets:menu:{key}"), menu_button.rect);
     if menu_button.clicked() {
         let owner = (app.session.uid, drawing.id, sheet.id);
@@ -624,14 +624,14 @@ fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 use ui_kit::Item;
                 ui_kit::Menu::heading(ui, &sheet.name);
                 let items = [
-                    Item::action("settings", app.tr("cmd.drawing_sheet_set"), "settings"),
+                    Item::action("settings", app.tr(msg!("cmd.drawing_sheet_set")), "settings"),
                     Item::action("rename", app.tr_label("Rename"), "rename"),
-                    Item::action("duplicate", app.tr("ui.drawing_sheets.duplicate"), "copy")
-                        .off_because(Some(app.tr("ui.drawing_first.unavailable").into())),
-                    Item::action("add", app.tr("ui.drawing_sheets.add"), "plus"),
+                    Item::action("duplicate", app.tr(msg!("ui.drawing_sheets.duplicate")), "copy")
+                        .off_because(Some(app.tr(msg!("ui.drawing_first.unavailable")).into())),
+                    Item::action("add", app.tr(msg!("ui.drawing_sheets.add")), "plus"),
                     Item::sep(),
-                    Item::action("delete", app.tr("cmd.drawing_sheet_delete"), "delete")
-                        .off_because((drawing.sheets.len() <= 1).then(|| app.tr("ui.drawing_sheets.last_sheet").into())),
+                    Item::action("delete", app.tr(msg!("cmd.drawing_sheet_delete")), "delete")
+                        .off_because((drawing.sheets.len() <= 1).then(|| app.tr(msg!("ui.drawing_sheets.last_sheet")).into())),
                 ];
                 let enabled = items.each_ref().map(|item| item.enabled && !item.is_sep());
                 let keyboard_pick = ui_kit::Menu::navigate(ctx, &enabled, &mut menu.keyboard_row)
@@ -900,11 +900,11 @@ fn show_delete_sheet(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let Some(sheet) = drawing.sheets.iter().find(|sheet| sheet.id == sheet_id) else { return };
-    let label = app.tr("cmd.drawing_sheet_delete");
-    let message = solidcraft_ui_text::format("ui.drawing_sheets.delete_confirm", &[("name", &sheet.name)]);
+    let label = app.tr(msg!("cmd.drawing_sheet_delete"));
+    let message = msg!("ui.drawing_sheets.delete_confirm", name = &sheet.name).tr();
     let (closed, answer) = ui_kit::Confirm::new(egui::Id::unique(("drawing_delete_sheet", pending)), "delete", label)
         .tone(ui_kit::Tone::Danger)
-        .actions(label, app.tr("ui.cancel"), None)
+        .actions(label, app.tr(msg!("ui.cancel")), None)
         .show(ctx, true, |ui| {
             ui.label(message);
         });
@@ -997,7 +997,7 @@ fn floating_panel(app: &mut SolveApp, ui: &mut egui::Ui, left: bool, width: f32)
 }
 
 fn panel_title(app: &SolveApp) -> &'static str {
-    app.drawing_workspace.options.map_or_else(|| solidcraft_ui_text::tr("cmd.drawing_sheet_set"), Tool::title)
+    app.drawing_workspace.options.map_or_else(|| solidcraft_ui_text::tr(msg!("cmd.drawing_sheet_set")), Tool::title)
 }
 
 pub(crate) fn inspector_visible(app: &SolveApp) -> bool {

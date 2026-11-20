@@ -37,11 +37,11 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx);
     let (picks, straighten, name) = (m.picks_points(), m.straighten, c.id);
     let (ok, cancel) = if straighten {
-        (solidcraft_ui_text::tr("ui.straighten"), solidcraft_ui_text::tr("ui.cancel"))
+        (solidcraft_ui_text::tr(msg!("ui.straighten")), solidcraft_ui_text::tr(msg!("ui.cancel")))
     } else if picks {
-        (solidcraft_ui_text::tr_label("Calibrate"), solidcraft_ui_text::tr("ui.cancel"))
+        (solidcraft_ui_text::tr_label("Calibrate"), solidcraft_ui_text::tr(msg!("ui.cancel")))
     } else {
-        ("", solidcraft_ui_text::tr("ui.close"))
+        ("", solidcraft_ui_text::tr(msg!("ui.close")))
     };
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_canvas_panel"), "canvas", &title)
         .placed(pivot, at)
@@ -61,16 +61,16 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 if straighten {
                     let options = [
-                        solidcraft_ui_text::tr("browser.straighten_horizontal"),
-                        solidcraft_ui_text::tr("browser.straighten_vertical"),
-                        solidcraft_ui_text::tr("ui.angle"),
+                        solidcraft_ui_text::tr(msg!("browser.straighten_horizontal")),
+                        solidcraft_ui_text::tr(msg!("browser.straighten_vertical")),
+                        solidcraft_ui_text::tr(msg!("ui.angle")),
                     ];
                     let targets = ["straighten:horizontal", "straighten:vertical", "straighten:angle"];
-                    ui_kit::row(ui, solidcraft_ui_text::tr("browser.straighten_angle"), |ui| {
+                    ui_kit::row(ui, solidcraft_ui_text::tr(msg!("browser.straighten_angle")), |ui| {
                         ui_kit::segmented(ui, &mut m.direction, &options, ui_kit::Segments { targets: &targets, ..Default::default() })
                     });
                     if m.direction == 2 {
-                        ui_kit::row(ui, solidcraft_ui_text::tr("ui.angle"), |ui| ui_kit::angle_field(ui, &mut m.angle));
+                        ui_kit::row(ui, solidcraft_ui_text::tr(msg!("ui.angle")), |ui| ui_kit::angle_field(ui, &mut m.angle));
                         if !m.angle.is_finite() {
                             m.angle = 0.0;
                         }
@@ -81,11 +81,11 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     m.distance = m.distance.clamp(0.001, 1e6);
                 }
             } else if c.anchor.is_some() {
-                if ui_kit::checkbox_row(ui, "canvas_follow_frame", solidcraft_ui_text::tr("browser.canvas_follow_frame"), true) {
+                if ui_kit::checkbox_row(ui, "canvas_follow_frame", solidcraft_ui_text::tr(msg!("browser.canvas_follow_frame")), true) {
                     follow = Some(false);
                 }
                 // Its sketch's points place, turn and size it: only its look is edited here.
-                ui_kit::text(ui, solidcraft_ui_text::tr("browser.canvas_anchored"), ui_kit::Text::Note("canvas_anchored"));
+                ui_kit::text(ui, solidcraft_ui_text::tr(msg!("browser.canvas_anchored")), ui_kit::Text::Note("canvas_anchored"));
                 let (mut op, mut flip) = (c.opacity, c.flip);
                 let mut changed =
                     ui_kit::row(ui, solidcraft_ui_text::tr_label("Opacity"), |ui| ui_kit::slider(ui, &mut op, 0.0..=1.0, Default::default()))
@@ -98,7 +98,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     edit = Some(json!({ "canvas": name, "opacity": op, "flip": flip }));
                 }
             } else {
-                if ui_kit::checkbox_row(ui, "canvas_follow_frame", solidcraft_ui_text::tr("browser.canvas_follow_frame"), false) {
+                if ui_kit::checkbox_row(ui, "canvas_follow_frame", solidcraft_ui_text::tr(msg!("browser.canvas_follow_frame")), false) {
                     follow = Some(true);
                 }
                 let (mut x, mut y, mut w, mut ang, mut op, mut flip) = (c.center.x, c.center.y, c.width, c.angle.to_degrees(), c.opacity, c.flip);

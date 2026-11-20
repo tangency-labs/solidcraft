@@ -80,39 +80,39 @@ pub(super) fn busy(app: &SolveApp) -> bool {
 /// scene preparation, device discovery, resource IO or rendering during painting.
 pub(super) fn action_ready(app: &SolveApp, id: &str) -> Result<(), String> {
     if app.file_load_holds() || app.file_picker.is_some() || inspector::confirmation_open(app) {
-        return Err(app.tr("render.ribbon_finish_dialog").into());
+        return Err(app.tr(msg!("render.ribbon_finish_dialog")).into());
     }
     match id {
         "render.batch" => {
             if app.session.doc.render.setups.is_empty() {
-                return Err(app.tr("render.batch_empty").into());
+                return Err(app.tr(msg!("render.batch_empty")).into());
             }
             if app.session.doc.render.setups.len() > 32 {
-                return Err(app.tr("render.batch_limit").into());
+                return Err(app.tr(msg!("render.batch_limit")).into());
             }
             if busy(app) {
-                return Err(app.tr("render.ribbon_job_active").into());
+                return Err(app.tr(msg!("render.ribbon_job_active")).into());
             }
             super::image_params(app).map(|_| ())
         }
-        "render.compare" if app.render_workspace.view.retained.is_empty() => Err(app.tr("render.ribbon_no_result").into()),
+        "render.compare" if app.render_workspace.view.retained.is_empty() => Err(app.tr(msg!("render.ribbon_no_result")).into()),
         "render.preflight" | "render.start" => {
             if super::prepare::busy(app) || (id == "render.start" && busy(app)) {
-                return Err(app.tr("render.ribbon_job_active").into());
+                return Err(app.tr(msg!("render.ribbon_job_active")).into());
             }
             super::image_params(app).map(|_| ())
         }
         "render.result.regrade" => {
             if busy(app) {
-                return Err(app.tr("render.ribbon_job_active").into());
+                return Err(app.tr(msg!("render.ribbon_job_active")).into());
             }
             if !studio::linear_export_available(app) {
-                return Err(app.tr("render.linear_unavailable").into());
+                return Err(app.tr(msg!("render.linear_unavailable")).into());
             }
             presentation(app).validate().map_err(|error| error.to_string())
         }
-        "render.cancel" if !busy(app) => Err(app.tr("render.ribbon_no_active_job").into()),
-        "render.result.close" if !super::result_active(app) => Err(app.tr("render.ribbon_no_result").into()),
+        "render.cancel" if !busy(app) => Err(app.tr(msg!("render.ribbon_no_active_job")).into()),
+        "render.result.close" if !super::result_active(app) => Err(app.tr(msg!("render.ribbon_no_result")).into()),
         "render.export" | "render.result.copy" => {
             let completed = app
                 .render_workspace
@@ -121,22 +121,22 @@ pub(super) fn action_ready(app: &SolveApp, id: &str) -> Result<(), String> {
                 .and_then(|id| app.session.render_job_handle(id).ok())
                 .and_then(|handle| handle.frame().ok().flatten());
             if completed.is_none() {
-                return Err(app.tr("render.ribbon_no_result").into());
+                return Err(app.tr(msg!("render.ribbon_no_result")).into());
             }
             if id == "render.export" && app.render_workspace.view.studio.export_exr && !studio::linear_export_available(app) {
-                return Err(app.tr("render.linear_unavailable").into());
+                return Err(app.tr(msg!("render.linear_unavailable")).into());
             }
             if id == "render.export" && app.render_workspace.view.studio.export_denoise_mask && !super::quality::mask_available(app) {
-                return Err(app.tr("render.denoise_mask_unavailable").into());
+                return Err(app.tr(msg!("render.denoise_mask_unavailable")).into());
             }
             if id == "render.result.copy" && super::quality::mask_active(app) {
-                return Err(app.tr("render.denoise_mask_copy_help").into());
+                return Err(app.tr(msg!("render.denoise_mask_copy_help")).into());
             }
             Ok(())
         }
         "render.settings.set" => setups::snapshot(app).map(|_| ()),
         "render.settings.apply" if !app.session.doc.render.setups.contains_key(&app.render_workspace.view.name) => {
-            Err(app.tr("render.ribbon_no_saved_camera").into())
+            Err(app.tr(msg!("render.ribbon_no_saved_camera")).into())
         }
         _ => Ok(()),
     }
@@ -167,7 +167,7 @@ pub(super) fn perform_job(app: &mut SolveApp, id: &str) -> Result<(), String> {
         let params = match id {
             "render.batch" => json!({"request":super::image_params(app)?}),
             "render.result.regrade" => {
-                let source = app.render_workspace.view.completed.ok_or_else(|| app.tr("render.ribbon_no_result").to_string())?;
+                let source = app.render_workspace.view.completed.ok_or_else(|| app.tr(msg!("render.ribbon_no_result")).to_string())?;
                 json!({"job":source,"presentation":presentation(app)})
             }
             _ => super::image_params(app)?,
@@ -202,10 +202,10 @@ pub(super) fn perform_job(app: &mut SolveApp, id: &str) -> Result<(), String> {
             };
             cpu::record_checked(app, &request, &reply);
             inspector::record_check(app, &request, &reply);
-            app.set_status(app.tr("render.image_supported").to_string(), false);
+            app.set_status(app.tr(msg!("render.image_supported")).to_string(), false);
         }
         "render.result.copy" => {
-            let job = app.render_workspace.view.completed.ok_or_else(|| app.tr("render.ribbon_no_result").to_string())?;
+            let job = app.render_workspace.view.completed.ok_or_else(|| app.tr(msg!("render.ribbon_no_result")).to_string())?;
             app.run(id, json!({"job":job}))?;
         }
         "render.cancel" => {
@@ -220,11 +220,11 @@ pub(super) fn perform_job(app: &mut SolveApp, id: &str) -> Result<(), String> {
                 .render_queue_state()
                 .job
                 .or(app.render_workspace.view.job)
-                .ok_or_else(|| app.tr("render.ribbon_no_active_job").to_string())?;
+                .ok_or_else(|| app.tr(msg!("render.ribbon_no_active_job")).to_string())?;
             app.run(id, json!({"job":job}))?;
         }
         "render.export" => {
-            let job = app.render_workspace.view.completed.ok_or_else(|| app.tr("render.ribbon_no_result").to_string())?;
+            let job = app.render_workspace.view.completed.ok_or_else(|| app.tr(msg!("render.ribbon_no_result")).to_string())?;
             let overwrite = app.render_workspace.view.overwrite;
             if app.render_workspace.view.studio.export_denoise_mask {
                 super::export_denoise_mask(app, job, overwrite);
@@ -234,7 +234,7 @@ pub(super) fn perform_job(app: &mut SolveApp, id: &str) -> Result<(), String> {
                 super::export_image(app, job, overwrite);
             }
         }
-        _ => return Err(solidcraft_ui_text::tr("render.error_job_action").into()),
+        _ => return Err(solidcraft_ui_text::tr(msg!("render.error_job_action")).into()),
     }
     Ok(())
 }
@@ -260,7 +260,7 @@ pub(super) fn submit_deferred(app: &mut SolveApp, pending: PendingFinal) -> Resu
     // A command or automation may have submitted an original-session job while the
     // live job drained. Never preempt it or bypass normal final-job priority.
     if busy(app) {
-        return Err(app.tr("render.ribbon_job_active").into());
+        return Err(app.tr(msg!("render.ribbon_job_active")).into());
     }
     if !std::sync::Weak::ptr_eq(&pending.document, &std::sync::Arc::downgrade(&app.session.doc))
         || pending.revision != app.session.revision
@@ -269,7 +269,7 @@ pub(super) fn submit_deferred(app: &mut SolveApp, pending: PendingFinal) -> Resu
         || pending.shot != app.render_workspace.view.name
         || pending.visual != final_visual(app)
     {
-        return Err(app.tr("render.live.final_changed").into());
+        return Err(app.tr(msg!("render.live.final_changed")).into());
     }
     let id = pending.action.as_str();
     match id {
@@ -289,11 +289,11 @@ pub(super) fn submit_deferred(app: &mut SolveApp, pending: PendingFinal) -> Resu
         "render.result.regrade" => {
             let reply = app.run(id, pending.params)?;
             let job = serde_json::from_value(reply["job"].clone())
-                .map_err(|error| solidcraft_ui_text::format("render.error_regrade_identity", &[("error", &error.to_string())]))?;
+                .map_err(|error| msg!("render.error_regrade_identity", error = &error.to_string()).tr())?;
             app.render_workspace.view.job = Some(job);
         }
 
-        _ => return Err(solidcraft_ui_text::tr("render.error_job_action").into()),
+        _ => return Err(solidcraft_ui_text::tr(msg!("render.error_job_action")).into()),
     }
     Ok(())
 }
@@ -301,8 +301,7 @@ pub(super) fn submit_deferred(app: &mut SolveApp, pending: PendingFinal) -> Resu
 /// The explicit Render click follows its newly minted real-session job. The
 /// asynchronous preparation path reuses this after the same command post-hooks.
 pub(super) fn follow_started(app: &mut SolveApp, reply: &serde_json::Value) -> Result<(), String> {
-    let job = serde_json::from_value(reply["job"].clone())
-        .map_err(|e| solidcraft_ui_text::format("render.error_job_identity", &[("error", &e.to_string())]))?;
+    let job = serde_json::from_value(reply["job"].clone()).map_err(|e| msg!("render.error_job_identity", error = &e.to_string()).tr())?;
     app.render_workspace.view.job = Some(job);
     app.render_workspace.view.job_shot = Some(app.render_workspace.view.name.clone());
     // An explicit UI Render action must show the image being computed. Otherwise
@@ -441,7 +440,7 @@ fn navigate(app: &mut SolveApp, id: &str) -> Result<(), String> {
             library::review_selected_quality(app)?;
         }
         "render.status" | "render.backends" => focus(app, RenderSelection::Check, None),
-        _ => return Err(solidcraft_ui_text::tr("render.error_interactive_command").into()),
+        _ => return Err(solidcraft_ui_text::tr(msg!("render.error_interactive_command")).into()),
     }
     Ok(())
 }

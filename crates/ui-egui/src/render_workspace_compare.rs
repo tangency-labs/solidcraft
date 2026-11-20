@@ -64,7 +64,7 @@ pub(super) fn start_default(app: &mut SolveApp) -> Result<(), String> {
             .retained
             .iter()
             .position(|result| Some(result.frame.job) == app.render_workspace.view.completed)
-            .ok_or_else(|| app.tr("render.ribbon_no_result").to_string())?;
+            .ok_or_else(|| app.tr(msg!("render.ribbon_no_result")).to_string())?;
         app.run("render.compare", json!({"left":"live","right":index}))?;
     }
     Ok(())
@@ -75,10 +75,8 @@ pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     if results.is_empty() {
         return;
     }
-    let mut labels = vec![app.tr("render.compare_live").to_owned()];
-    labels.extend(
-        results.iter().map(|result| solidcraft_ui_text::format("render.compare_render", &[("number", &result.frame.job.serial.to_string())])),
-    );
+    let mut labels = vec![app.tr(msg!("render.compare_live")).to_owned()];
+    labels.extend(results.iter().map(|result| msg!("render.compare_render", number = &result.frame.job.serial.to_string()).tr()));
     let mut targets = vec!["render:compare:live".to_string()];
     targets.extend(results.iter().enumerate().map(|(index, _)| format!("render:compare:result:{index}")));
     let choices: Vec<_> = std::iter::once(None).chain(results.iter().map(|result| Some(result.frame.job))).collect();
@@ -118,7 +116,7 @@ pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     if let Some(view) = app.render_workspace.view.compare.clone() {
-        let swap = ui_kit::compact_icon_label_button(ui, app.tr("render.compare_swap"), "compare", true);
+        let swap = ui_kit::compact_icon_label_button(ui, app.tr(msg!("render.compare_swap")), "compare", true);
         crate::scenario::publish_target("render:compare:swap", swap.rect);
         if swap.clicked()
             && let (Some(left), Some(right)) = (side_value(app, view.right), side_value(app, view.left))
@@ -170,15 +168,14 @@ fn texture(app: &mut SolveApp, ctx: &egui::Context, job: JobId) -> Result<egui::
 
 fn label(app: &SolveApp, side: Option<JobId>) -> String {
     side.and_then(|job| app.render_workspace.view.retained.iter().find(|result| result.frame.job == job)).map_or_else(
-        || app.tr("render.compare_live_preview").to_owned(),
+        || app.tr(msg!("render.compare_live_preview")).to_owned(),
         |result| {
-            solidcraft_ui_text::format(
+            msg!(
                 "render.compare_side",
-                &[
-                    ("number", &result.frame.job.serial.to_string()),
-                    ("shot", result.shot.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr("render.results_unnamed"))),
-                ],
+                number = &result.frame.job.serial.to_string(),
+                shot = result.shot.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr("render.results_unnamed"))
             )
+            .tr()
         },
     )
 }
@@ -188,17 +185,16 @@ pub(super) fn summary(app: &SolveApp, ui: &mut egui::Ui) {
     let Some(reference) = app.render_workspace.view.retained.iter().find(|result| result.frame.job == view.reference) else { return };
     let stale = app.render_workspace.view.retained.iter().any(|result| [view.left, view.right].contains(&Some(result.frame.job)) && result.stale);
     ui_kit::completion_text(ui, app.tr(if stale { "render.image_stale" } else { "render.result_current" }), !stale);
-    let summary = solidcraft_ui_text::format(
+    let summary = msg!(
         "render.compare_summary",
-        &[
-            ("shot", reference.shot.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr("render.results_unnamed"))),
-            ("width", &reference.frame.width.to_string()),
-            ("height", &reference.frame.height.to_string()),
-            ("seconds", &format!("{:.0}", reference.seconds)),
-            ("renderer", reference.frame.executor.as_str()),
-            ("revision", &reference.frame.scene_generation.to_string()),
-        ],
-    );
+        shot = reference.shot.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr("render.results_unnamed")),
+        width = &reference.frame.width.to_string(),
+        height = &reference.frame.height.to_string(),
+        seconds = &format!("{:.0}", reference.seconds),
+        renderer = reference.frame.executor.as_str(),
+        revision = &reference.frame.scene_generation.to_string()
+    )
+    .tr();
     ui_kit::text(ui, &summary, ui_kit::Text::Inline);
 }
 
@@ -227,7 +223,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let size = [reference.frame.width, reference.frame.height];
     // Reserve the divider before navigation; captured drags cannot reach any camera path.
     let mut position = view.position;
-    let divider = ui_kit::comparison_divider(ui, canvas, &mut position, app.tr("render.compare_divider"));
+    let divider = ui_kit::comparison_divider(ui, canvas, &mut position, app.tr(msg!("render.compare_divider")));
     let captured = divider.dragged() || divider.is_pointer_button_down_on() || divider.drag_stopped();
     if let Some(view) = &mut app.render_workspace.view.compare {
         view.dragging = divider.is_pointer_button_down_on() || divider.dragged();

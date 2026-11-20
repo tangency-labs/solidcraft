@@ -9,7 +9,7 @@
 
 use serde_json::Value;
 use solidcraft_engine::plugin::{LossReport, LossSeverity};
-use solidcraft_ui_text::{format, tr};
+use solidcraft_ui_text::tr;
 
 use crate::{SolveApp, ui_kit};
 
@@ -31,9 +31,9 @@ pub(crate) fn offer(app: &mut SolveApp, result: &Value) {
     let plugin = text("plugin");
     app.set_status(
         if report.summary.is_empty() {
-            format("import_report.opened", &[("name", &text("name")), ("plugin", &plugin)])
+            msg!("import_report.opened", name = &text("name"), plugin = &plugin).tr()
         } else {
-            format("import_report.opened_summary", &[("name", &text("name")), ("plugin", &plugin), ("summary", &report.summary)])
+            msg!("import_report.opened_summary", name = &text("name"), plugin = &plugin, summary = &report.summary).tr()
         },
         false,
     );
@@ -113,7 +113,7 @@ fn elements(list: &[Value], depth: usize, bounds: Bounds, budget: &mut usize) ->
         .filter_map(|(i, value)| node(element_label(value, i), value, depth, bounds, budget).map(folded))
         .collect();
     if list.len() > bounds.list {
-        out.push(Node::leaf(format("import_report.more", &[("count", &(list.len() - bounds.list).to_string())]), String::new()));
+        out.push(Node::leaf(msg!("import_report.more", count = &(list.len() - bounds.list).to_string()).tr(), String::new()));
     }
     out
 }
@@ -135,7 +135,7 @@ fn node(label: String, value: &Value, depth: usize, bounds: Bounds, budget: &mut
             Node::leaf(label, clip_to(&joined, bounds.text))
         }
         Value::Array(list) => {
-            let label = format("import_report.group", &[("title", &label), ("count", &list.len().to_string())]);
+            let label = msg!("import_report.group", title = &label, count = &list.len().to_string()).tr();
             Node { label, value: String::new(), children: elements(list, depth + 1, bounds, budget), open: false }
         }
         Value::Object(map) => {
@@ -211,23 +211,23 @@ fn outline_text(nodes: &[Node], depth: usize, out: &mut Vec<String>) {
 /// The whole report as plain text, for the clipboard or a `.txt` file: the heading, the summary,
 /// the lines, every item with its code, then all of the importer's details.
 pub(crate) fn report_text(shown: &Shown) -> String {
-    let mut out = vec![tr("import_report.title").to_string(), format("import_report.heading", &[("name", &shown.design), ("plugin", &shown.plugin)])];
+    let mut out = vec![tr(msg!("import_report.title")).to_string(), msg!("import_report.heading", name = &shown.design, plugin = &shown.plugin).tr()];
     if !shown.report.summary.is_empty() {
         out.push(shown.report.summary.clone());
     }
     out.push(String::new());
     if shown.report.items.is_empty() {
-        out.push(tr("import_report.nothing_lost").to_string());
+        out.push(tr(msg!("import_report.nothing_lost")).to_string());
     } else {
         out.extend(lines(&shown.report).into_iter().map(|(_, line)| line));
         out.push(String::new());
-        out.push(tr("import_report.details").to_string());
+        out.push(tr(msg!("import_report.details")).to_string());
         out.extend(detail_lines(&shown.report).into_iter().map(|line| std::format!("  {line}")));
     }
     let details = outline(&shown.report.details, ALL);
     if !details.is_empty() {
         out.push(String::new());
-        out.push(tr("import_report.importer_details").to_string());
+        out.push(tr(msg!("import_report.importer_details")).to_string());
         outline_text(&details, 1, &mut out);
     }
     out.push(String::new());
@@ -245,7 +245,7 @@ fn save(app: &mut SolveApp) {
     let Some(shown) = app.import_report.as_ref() else { return };
     let (text, json) = (report_text(shown), report_json(shown));
     let stem: String = shown.design.chars().map(|c| if c.is_control() || matches!(c, '/' | '\\' | ':') { '_' } else { c }).collect();
-    let name = format("import_report.file_name", &[("name", stem.trim())]);
+    let name = msg!("import_report.file_name", name = stem.trim()).tr();
     app.pick_save(&std::format!("{name}.txt"), &["txt", "json"], move |app, path| {
         let Some(path) = path else { return };
         let as_json = std::path::Path::new(&path).extension().is_some_and(|e| e.eq_ignore_ascii_case("json"));
@@ -253,8 +253,8 @@ fn save(app: &mut SolveApp) {
         let written = if as_json { json } else { Ok(text) }
             .and_then(|body| solidcraft_engine::io::vfs::write(&path, body.as_bytes()).map_err(|e| e.to_string()));
         match written {
-            Ok(()) => app.set_status(format("import_report.saved", &[("path", &path)]), false),
-            Err(error) => app.set_status(format("import_report.save_failed", &[("error", &error)]), true),
+            Ok(()) => app.set_status(msg!("import_report.saved", path = &path).tr(), false),
+            Err(error) => app.set_status(msg!("import_report.save_failed", error = &error).tr(), true),
         }
     });
 }
@@ -308,7 +308,7 @@ pub(crate) fn lines(report: &LossReport) -> Vec<(LossSeverity, String)> {
             }
         }
         for (title, count) in titled {
-            let what = if count == 1 { title.to_string() } else { format("import_report.group", &[("title", title), ("count", &count.to_string())]) };
+            let what = if count == 1 { title.to_string() } else { msg!("import_report.group", title = title, count = &count.to_string()).tr() };
             lines.push((severity, std::format!("{label}: {what}")));
         }
         for item in untitled {
@@ -339,9 +339,9 @@ pub(crate) fn detail_lines(report: &LossReport) -> Vec<String> {
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(shown) = app.import_report.as_ref().filter(|shown| shown.open) else { return };
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
-    let title = tr("import_report.title").to_string();
-    let ok = tr("import_report.ok").to_string();
-    let heading = format("import_report.heading", &[("name", &shown.design), ("plugin", &shown.plugin)]);
+    let title = tr(msg!("import_report.title")).to_string();
+    let ok = tr(msg!("import_report.ok")).to_string();
+    let heading = msg!("import_report.heading", name = &shown.design, plugin = &shown.plugin).tr();
     let counts = ORDER.map(|severity| (severity, shown.report.items.iter().filter(|i| i.severity == severity).count()));
     let (mut copy, mut save_it) = (false, false);
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_import_report"), "import", &title)
@@ -353,7 +353,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::text(ui, &shown.report.summary, ui_kit::Text::Report("import_report_summary", false));
             }
             if shown.report.items.is_empty() {
-                ui_kit::text(ui, tr("import_report.nothing_lost"), ui_kit::Text::Hint("import_report_nothing"));
+                ui_kit::text(ui, tr(msg!("import_report.nothing_lost")), ui_kit::Text::Hint("import_report_nothing"));
             } else {
                 let tally: Vec<String> =
                     counts.iter().filter(|(_, n)| *n > 0).map(|(severity, n)| std::format!("{} {n}", tr(severity_label(*severity)))).collect();
@@ -367,13 +367,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     // The importer's own data: how it checked what it made, feature by feature.
                     if !shown.outline.is_empty() {
-                        ui_kit::section(ui, "import_report_importer", tr("import_report.importer_details"), true, |ui| {
+                        ui_kit::section(ui, "import_report_importer", tr(msg!("import_report.importer_details")), true, |ui| {
                             draw_outline(ui, &shown.outline);
                         });
                     }
                     // The plugin's own wording and codes, for a bug report, folded away.
                     if !shown.report.items.is_empty() {
-                        ui_kit::section(ui, "import_report_details", tr("import_report.show_details"), false, |ui| {
+                        ui_kit::section(ui, "import_report_details", tr(msg!("import_report.show_details")), false, |ui| {
                             for (i, line) in detail_lines(&shown.report).iter().enumerate() {
                                 ui.push_id(("detail", i), |ui| ui_kit::text(ui, line, ui_kit::Text::Note("import_report_detail")));
                             }
@@ -382,13 +382,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
             }
             ui.horizontal(|ui| {
-                copy = ui_kit::icon_label_button(ui, tr("import_report.copy"), "copy", true, false).clicked();
-                save_it = ui_kit::icon_label_button(ui, tr("import_report.save"), "export_tray", true, false).clicked();
+                copy = ui_kit::icon_label_button(ui, tr(msg!("import_report.copy")), "copy", true, false).clicked();
+                save_it = ui_kit::icon_label_button(ui, tr(msg!("import_report.save")), "export_tray", true, false).clicked();
             });
         });
     if copy {
         ctx.copy_text(report_text(shown));
-        app.set_status(tr("import_report.copied").to_string(), false);
+        app.set_status(tr(msg!("import_report.copied")).to_string(), false);
     }
     if save_it {
         save(app);

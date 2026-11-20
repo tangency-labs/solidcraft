@@ -17,7 +17,7 @@ fn specimen(id: &str, readout: bool) -> crate::ui_kit::Details {
     use crate::ui_kit::{DetailFinding, DetailKey, DetailSetting, DetailValue, Details};
     let t = solidcraft_theme::Tokens::get();
     let tr = |id| solidcraft_ui_text::tr(id).to_owned();
-    let mut description = Details { caption: Some(tr("ui.details_fixture_caption")), ..Default::default() };
+    let mut description = Details { caption: Some(tr(msg!("ui.details_fixture_caption"))), ..Default::default() };
     description.key = t
         .analysis
         .draft
@@ -39,52 +39,45 @@ fn specimen(id: &str, readout: bool) -> crate::ui_kit::Details {
     description.settings = vec![
         DetailSetting {
             id: "axis".into(),
-            label: tr("ui.details_pull"),
+            label: tr(msg!("ui.details_pull")),
             value: DetailValue::Axis { value: [0.0, 0.0, 1.0], current: "Z".into() },
             enabled: true,
         },
-        DetailSetting { id: "angle".into(), label: tr("ui.details_angle"), value: DetailValue::Angle(1.0), enabled: true },
+        DetailSetting { id: "angle".into(), label: tr(msg!("ui.details_angle")), value: DetailValue::Angle(1.0), enabled: true },
         DetailSetting {
             id: "slider".into(),
-            label: tr("ui.details_stripes"),
+            label: tr(msg!("ui.details_stripes")),
             value: DetailValue::Slider { value: 14.5, min: 1.0, max: 200.0 },
             enabled: true,
         },
-        DetailSetting { id: "check".into(), label: tr("ui.details_hatch"), value: DetailValue::Check(true), enabled: true },
+        DetailSetting { id: "check".into(), label: tr(msg!("ui.details_hatch")), value: DetailValue::Check(true), enabled: true },
     ];
     if readout {
-        description.readout = (0..9).map(|index| (tr("ui.details_fixture_readout"), format!("{index}.00 mm"))).collect();
+        description.readout = (0..9).map(|index| (tr(msg!("ui.details_fixture_readout")), format!("{index}.00 mm"))).collect();
     } else {
-        description.findings_title = tr("ui.details_fixture");
+        description.findings_title = tr(msg!("ui.details_fixture"));
         description.findings = (0..9)
             .map(|index| DetailFinding {
                 id: format!("specimen_{index}"),
-                label: tr("ui.details_fixture_problem"),
+                label: tr(msg!("ui.details_fixture_problem")),
                 value: format!("{index}.00 mm"),
                 warning: true,
                 target: true,
             })
             .collect();
     }
-    description.actions.push(("copy".into(), tr("ui.details_copy_list")));
+    description.actions.push(("copy".into(), tr(msg!("ui.details_copy_list"))));
     description
 }
 
 /// Presets are bounded, named specimens rather than arbitrary user-provided widget state.
 pub(crate) fn control(app: &mut crate::SolveApp, params: &Value) -> Result<Value, String> {
     let preset = params.get("preset").and_then(Value::as_str).ok_or("missing `preset`")?;
-    let zebra = || item("zebra", StatusKind::Mode, "Zebra", solidcraft_ui_text::format("ui.viewport_status_stripes", &[("count", "12")]), false);
+    let zebra = || item("zebra", StatusKind::Mode, "Zebra", msg!("ui.viewport_status_stripes", count = "12").tr(), false);
     let section = || item("section", StatusKind::Mode, "Section", "Z 20 mm".into(), false);
     let result = || item("radius", StatusKind::Result, "ui.viewport_status_minimum_radius", "0.8 mm".into(), false);
-    let attention = || {
-        item(
-            "interference",
-            StatusKind::Attention,
-            "cmd.inspect_interference",
-            solidcraft_ui_text::format("ui.viewport_status_pairs", &[("count", "3")]),
-            false,
-        )
-    };
+    let attention =
+        || item("interference", StatusKind::Attention, "cmd.inspect_interference", msg!("ui.viewport_status_pairs", count = "3").tr(), false);
     let items = match preset {
         "off" => Vec::new(),
         "mode" => vec![zebra()],

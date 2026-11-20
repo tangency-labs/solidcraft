@@ -176,11 +176,11 @@ impl Strip {
         let position = (index + 1).to_string();
         let blocked = slot.window != drag.window && drag.window == 0 && app.docs.views.len() == 1;
         let label = if blocked {
-            app.tr("multi_window.last_view").to_owned()
+            app.tr(msg!("multi_window.last_view")).to_owned()
         } else if slot.window == drag.window {
-            solidcraft_ui_text::format("multi_window.drag_reorder", &[("n", &position)])
+            msg!("multi_window.drag_reorder", n = &position).tr()
         } else {
-            solidcraft_ui_text::format("multi_window.drag_move", &[("window", &self.name), ("n", &position)])
+            msg!("multi_window.drag_move", window = &self.name, n = &position).tr()
         };
         Target::Strip { slot, label, blocked }
     }
@@ -236,7 +236,7 @@ pub(crate) fn record_canvas(app: &mut SolveApp, ctx: &Context) {
             if drag.source_is_last {
                 for target in &mut targets {
                     target.blocked = true;
-                    target.label = app.tr("multi_window.last_view").to_owned();
+                    target.label = app.tr(msg!("multi_window.last_view")).to_owned();
                 }
             }
             (drag.view.id, targets)
@@ -343,11 +343,11 @@ fn take_target(app: &SolveApp, ctx: &Context, drag: &Drag, pointer: Pos2) -> Opt
 
 fn window_target(app: &SolveApp, drag: &Drag, point: Option<Pos2>, display: Option<usize>, snap: bool) -> Option<Target> {
     let mut window = crate::view_windows::drag_window(app, drag.source, point, display, snap)?;
-    window.label = solidcraft_ui_text::format("multi_window.drag_new", &[("display", &window.label)]);
+    window.label = msg!("multi_window.drag_new", display = &window.label).tr();
     let refusal = if drag.window == 0 && app.docs.views.len() == 1 {
-        Some(app.tr("multi_window.last_view"))
+        Some(app.tr(msg!("multi_window.last_view")))
     } else if !crate::view_windows::can_create(app) {
-        Some(app.tr("multi_window.too_many"))
+        Some(app.tr(msg!("multi_window.too_many")))
     } else {
         None
     };

@@ -22,7 +22,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, dashed: &mut bool, tolerance: &mu
             *dashed = value;
         }
     }
-    crate::ui_kit::text(ui, app.tr("dxf.zero"), crate::ui_kit::Text::Note("zero"));
+    crate::ui_kit::text(ui, app.tr(msg!("dxf.zero")), crate::ui_kit::Text::Note("zero"));
     for (value, key, label) in [(false, "zero_target", "dxf.zero_target"), (true, "zero_origin", "dxf.zero_origin")] {
         let r = crate::ui_kit::list_picker(ui, key, app.tr(label), *zero_origin == value);
         crate::scenario::publish_handle(&format!("dialog:dxf:{key}"), r.rect.center());
@@ -30,7 +30,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, dashed: &mut bool, tolerance: &mu
             *zero_origin = value;
         }
     }
-    crate::ui_kit::text(ui, app.tr("dxf.zero_help"), crate::ui_kit::Text::Note("zero help"));
+    crate::ui_kit::text(ui, app.tr(msg!("dxf.zero_help")), crate::ui_kit::Text::Note("zero help"));
     form_row(ui, "dxf.tolerance", |ui| {
         let r = crate::ui_kit::bounded_length_field(ui, tolerance, &app.session.doc.units, 8, 0.0001..=1.0, 0.001);
         crate::scenario::publish_handle("dialog:dxf:tolerance", r.rect.center());

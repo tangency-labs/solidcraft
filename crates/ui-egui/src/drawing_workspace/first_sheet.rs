@@ -33,7 +33,7 @@ enum Choice {
     Template,
 }
 
-fn tr(key: &str) -> &str {
+fn tr<'a>(key: impl solidcraft_ui_text::Key<'a>) -> &'a str {
     solidcraft_ui_text::tr(key)
 }
 
@@ -59,11 +59,11 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect) {
             egui::ScrollArea::vertical().id_salt("drawing_first_sheet").min_scrolled_height(0.0).show(ui, |ui| {
                 ui.set_width((width - t.space_24 * 2.0).max(0.0));
                 ui.vertical_centered(|ui| {
-                    ui.label(RichText::new(tr("ui.drawing_first.title")).size(t.font_page_heading).semibold().color(t.form_ink));
+                    ui.label(RichText::new(tr(msg!("ui.drawing_first.title"))).size(t.font_page_heading).semibold().color(t.form_ink));
                     let subtitle = if app.session.doc.features.is_empty() {
-                        tr("ui.drawing_first.empty_model").to_owned()
+                        tr(msg!("ui.drawing_first.empty_model")).to_owned()
                     } else {
-                        solidcraft_ui_text::format("ui.drawing_first.subtitle", &[("name", &app.session.doc.name)])
+                        msg!("ui.drawing_first.subtitle", name = &app.session.doc.name).tr()
                     };
                     ui.label(RichText::new(subtitle).size(t.font_heading).color(t.form_dim));
                 });
@@ -80,7 +80,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect) {
                 if enabled && let Some(Sheet { size: SheetSize::Standard(size), .. }) = blank.paper.selected() {
                     ui.add_space(t.space_12);
                     let paper = super::panels::size_caption(size);
-                    let defaults = solidcraft_ui_text::format("ui.drawing_first.defaults", &[("paper", &paper)]);
+                    let defaults = msg!("ui.drawing_first.defaults", paper = &paper).tr();
                     ui.vertical_centered(|ui| ui.label(RichText::new(defaults).size(t.font_caption).color(t.form_dim)));
                 }
                 match chosen {
@@ -118,7 +118,7 @@ fn card(ui: &mut egui::Ui, choice: Choice, enabled: bool, picker: bool) -> Optio
             let id = format!("drawing:first:{target}");
             let button = ui_kit::wide_form_button(ui, tr(action), matches!(choice, Choice::Standard), enabled);
             crate::scenario::publish_target(&id, button.rect);
-            button.backing_on_disabled_hover_text(tr("ui.drawing_first.unavailable")).clicked().then_some(choice)
+            button.backing_on_disabled_hover_text(tr(msg!("ui.drawing_first.unavailable"))).clicked().then_some(choice)
         })
         .inner
 }
@@ -170,21 +170,21 @@ pub(super) fn show_picker(app: &mut SolveApp, ctx: &egui::Context) {
     if !super::active(app) || app.session.open_drawing.is_some() {
         return;
     }
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_drawing_first_sheet"), "new", tr("ui.drawing_first.choose_sheet"))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_drawing_first_sheet"), "new", tr(msg!("ui.drawing_first.choose_sheet")))
         .cards(2.5)
         .fields()
-        .actions(tr("cmd.drawing_create"), tr("ui.cancel"), None)
+        .actions(tr(msg!("cmd.drawing_create")), tr(msg!("ui.cancel")), None)
         .show(ctx, can_create(app) && panels::valid_sheet_name(&form.name) && form.paper.selected().is_some(), |ui| {
             panels::sheet_columns(ui, &mut form.paper, |fields, paper| {
                 panels::paper_preview(fields, paper, true, form.title_block == 0);
-                ui_kit::text_row(fields, tr("ui.drawing_panel.name"), &mut form.name, "Sheet 1");
+                ui_kit::text_row(fields, tr(msg!("ui.drawing_panel.name")), &mut form.name, "Sheet 1");
                 panels::paper_border(fields, paper, Some(&DrawingBorderProfile::iso()));
                 ui_kit::choice_row(
                     fields,
-                    tr("ui.drawing_panel.title_block"),
+                    tr(msg!("ui.drawing_panel.title_block")),
                     "drawing_first_title_block",
                     &mut form.title_block,
-                    &[tr("ui.drawing_panel.built_in"), tr("ui.drawing_panel.none")],
+                    &[tr(msg!("ui.drawing_panel.built_in")), tr(msg!("ui.drawing_panel.none"))],
                 );
             });
         });

@@ -239,9 +239,9 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
             text: &suggestion.text,
             kind: match suggestion.kind.as_str() {
                 "parameter" => solidcraft_ui_text::tr_label("Parameter"),
-                "function" => solidcraft_ui_text::tr("ui.function"),
+                "function" => solidcraft_ui_text::tr(msg!("ui.function")),
                 "unit" => solidcraft_ui_text::tr_label("Unit"),
-                "constant" => solidcraft_ui_text::tr("ui.constant"),
+                "constant" => solidcraft_ui_text::tr(msg!("ui.constant")),
                 _ => &suggestion.kind,
             },
             detail: &suggestion.detail,

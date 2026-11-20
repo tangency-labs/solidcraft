@@ -29,18 +29,15 @@ pub(super) fn sample_presets(ui: &mut egui::Ui, samples: &mut u32, range: std::o
 
 pub(super) fn legacy_samples_note(_app: &SolveApp, ui: &mut egui::Ui, samples: u32) {
     if samples > MAX_UI_SAMPLES {
-        let message = solidcraft_ui_text::format(
-            "render.quality_legacy_samples",
-            &[("samples", &samples.to_string()), ("maximum", &MAX_UI_SAMPLES.to_string())],
-        );
+        let message = msg!("render.quality_legacy_samples", samples = &samples.to_string(), maximum = &MAX_UI_SAMPLES.to_string()).tr();
         ui_kit::text(ui, &message, ui_kit::Text::Note("render.quality_legacy_samples"));
     }
 }
 
 pub(super) fn supersampling_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let available = app.render_workspace.view.method != super::ImageMethod::Raster;
-    let label = app.tr("render.supersampling").to_string();
-    let labels = [app.tr("render.supersampling_off").to_string(), app.tr("render.supersampling_x2").to_string()];
+    let label = app.tr(msg!("render.supersampling")).to_string();
+    let labels = [app.tr(msg!("render.supersampling_off")).to_string(), app.tr(msg!("render.supersampling_x2")).to_string()];
     let before = app.render_workspace.view.studio.supersampling;
     let mut selected = usize::from(before == 2);
     ui.add_enabled_ui(available, |ui| {
@@ -64,15 +61,14 @@ pub(super) fn supersampling_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::text(ui, app.tr(key), ui_kit::Text::Note(key));
     if available && app.render_workspace.view.studio.supersampling == 2 {
         let draft = &app.render_workspace.view.draft;
-        let message = solidcraft_ui_text::format(
+        let message = msg!(
             "render.supersampling_dimensions",
-            &[
-                ("width", &u64::from(draft.width).saturating_mul(2).to_string()),
-                ("height", &u64::from(draft.height).saturating_mul(2).to_string()),
-                ("output_width", &draft.width.to_string()),
-                ("output_height", &draft.height.to_string()),
-            ],
-        );
+            width = &u64::from(draft.width).saturating_mul(2).to_string(),
+            height = &u64::from(draft.height).saturating_mul(2).to_string(),
+            output_width = &draft.width.to_string(),
+            output_height = &draft.height.to_string()
+        )
+        .tr();
         ui_kit::text(ui, &message, ui_kit::Text::Note("render.supersampling_dimensions"));
     }
 }
@@ -85,11 +81,11 @@ pub(super) fn cpu_threads_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         _ => 2,
     };
     let labels = [
-        app.tr("render.cpu_threads_auto").to_string(),
-        app.tr("render.cpu_threads_single").to_string(),
-        app.tr("render.cpu_threads_custom").to_string(),
+        app.tr(msg!("render.cpu_threads_auto")).to_string(),
+        app.tr(msg!("render.cpu_threads_single")).to_string(),
+        app.tr(msg!("render.cpu_threads_custom")).to_string(),
     ];
-    let label = app.tr("render.cpu_threads").to_string();
+    let label = app.tr(msg!("render.cpu_threads")).to_string();
     ui.add_enabled_ui(!cfg!(target_arch = "wasm32"), |ui| {
         let response = ui_kit::row(ui, &label, |ui| {
             let response = ui.scope(|ui| {
@@ -140,19 +136,19 @@ pub(super) fn denoise_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.render_workspace.view.studio.denoise_settings,
         app.render_workspace.view.studio.denoise_diagnostics,
     );
-    let label = app.tr("render.studio_denoise").to_string();
+    let label = app.tr(msg!("render.studio_denoise")).to_string();
     let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise);
     publish_target("render:denoise-enable", response.rect);
     publish_target("render:gpu-denoise", response.rect);
     let enabled = app.render_workspace.view.studio.denoise;
     ui.add_enabled_ui(enabled, |ui| {
-        let label = app.tr("render.denoise_passes").to_string();
+        let label = app.tr(msg!("render.denoise_passes")).to_string();
         ui_kit::row(ui, &label, |ui| {
             let response = ui_kit::number_field_preserving(ui, &mut app.render_workspace.view.studio.denoise_settings.passes, 1..=3, 1.0, "");
             publish_target("render:denoise-passes", response.rect);
             response
         });
-        let label = app.tr("render.denoise_strength").to_string();
+        let label = app.tr(msg!("render.denoise_strength")).to_string();
         ui_kit::row(ui, &label, |ui| {
             let response = ui_kit::slider(
                 ui,
@@ -163,20 +159,20 @@ pub(super) fn denoise_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             publish_target("render:denoise-strength", response.rect);
             response
         });
-        let label = app.tr("render.denoise_firefly").to_string();
+        let label = app.tr(msg!("render.denoise_firefly")).to_string();
         let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise_settings.firefly_suppression);
         publish_target("render:denoise-firefly", response.rect);
-        let label = app.tr("render.denoise_optical_filter").to_string();
+        let label = app.tr(msg!("render.denoise_optical_filter")).to_string();
         let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise_settings.optical_filter);
         publish_target("render:denoise-optical-filter", response.rect);
-        response.backing_on_hover_text(app.tr("render.denoise_optical_filter_help"));
+        response.backing_on_hover_text(app.tr(msg!("render.denoise_optical_filter_help")));
     });
-    ui_kit::text(ui, app.tr("render.denoise_settings_help"), ui_kit::Text::Note("render.denoise_settings_help"));
-    let label = app.tr("render.denoise_diagnostics_enable").to_string();
+    ui_kit::text(ui, app.tr(msg!("render.denoise_settings_help")), ui_kit::Text::Note("render.denoise_settings_help"));
+    let label = app.tr(msg!("render.denoise_diagnostics_enable")).to_string();
     let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise_diagnostics);
     publish_target("render:denoise-diagnostics", response.rect);
     if app.render_workspace.view.studio.denoise_diagnostics {
-        ui_kit::text(ui, app.tr("render.denoise_diagnostics_help"), ui_kit::Text::Note("render.denoise_diagnostics_help"));
+        ui_kit::text(ui, app.tr(msg!("render.denoise_diagnostics_help")), ui_kit::Text::Note("render.denoise_diagnostics_help"));
     }
     let after = &app.render_workspace.view.studio;
     app.render_workspace.view.dirty |= before != (after.denoise, after.denoise_settings, after.denoise_diagnostics);
@@ -220,8 +216,8 @@ pub(super) fn mask_available(app: &SolveApp) -> bool {
 pub(super) fn mask_view_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let available = mask_available(app);
     let mut selected = usize::from(mask_active(app));
-    let labels = [app.tr("render.denoise_view_image").to_string(), app.tr("render.denoise_view_mask").to_string()];
-    let reason = app.tr("render.denoise_mask_unavailable").to_string();
+    let labels = [app.tr(msg!("render.denoise_view_image")).to_string(), app.tr(msg!("render.denoise_view_mask")).to_string()];
+    let reason = app.tr(msg!("render.denoise_mask_unavailable")).to_string();
     // The comparison strip also has unlabelled segments in this result panel.
     // egui's sibling layout UIs share their stable scope, so isolate this group
     // before the kit derives its per-segment persistent interaction IDs.
@@ -258,20 +254,15 @@ pub(super) fn diagnostics(app: &mut SolveApp, ui: &mut egui::Ui) {
         .and_then(|handle| handle.status().ok())
         .and_then(|status| status.denoise_diagnostics);
     let Some(report) = report else {
-        ui_kit::text(ui, app.tr("render.denoise_mask_unavailable"), ui_kit::Text::Note("render.denoise_mask_unavailable"));
+        ui_kit::text(ui, app.tr(msg!("render.denoise_mask_unavailable")), ui_kit::Text::Note("render.denoise_mask_unavailable"));
         return;
     };
-    let grid = solidcraft_ui_text::format(
-        "render.denoise_diagnostics_grid",
-        &[("width", &report.width.to_string()), ("height", &report.height.to_string())],
-    );
+    let grid = msg!("render.denoise_diagnostics_grid", width = &report.width.to_string(), height = &report.height.to_string()).tr();
     ui_kit::text(ui, &grid, ui_kit::Text::Note("render.denoise_diagnostics_grid"));
     let eligible: u64 = DenoiseGuideClass::ALL.iter().filter(|class| class.eligible()).map(|&class| report.pixels(class)).sum();
     let total: u64 = report.counts.iter().sum();
-    let summary = solidcraft_ui_text::format(
-        "render.denoise_diagnostics_counts",
-        &[("eligible", &eligible.to_string()), ("skipped", &total.saturating_sub(eligible).to_string())],
-    );
+    let summary =
+        msg!("render.denoise_diagnostics_counts", eligible = &eligible.to_string(), skipped = &total.saturating_sub(eligible).to_string()).tr();
     ui_kit::text(ui, &summary, ui_kit::Text::Inline);
     let t = solidcraft_theme::Tokens::get();
     for &class in DenoiseGuideClass::ALL {
@@ -288,7 +279,7 @@ pub(super) fn diagnostics(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
     }
     mask_view_controls(app, ui);
-    let export = ui_kit::button(ui, app.tr("render.denoise_export_mask"), ui_kit::Button::Enabled(mask_available(app)));
+    let export = ui_kit::button(ui, app.tr(msg!("render.denoise_export_mask")), ui_kit::Button::Enabled(mask_available(app)));
     crate::scenario::publish_target("render:denoise-export-mask", export.rect);
     if export.clicked() {
         app.render_workspace.view.studio.export_denoise_mask = true;

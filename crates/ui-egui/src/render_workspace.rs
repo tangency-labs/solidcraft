@@ -247,11 +247,11 @@ impl PathHost {
         // that may spend minutes compiling or warming up its pipelines.
         *self = match std::thread::Builder::new().name("gpu-path-setup".into()).spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(create))
-                .unwrap_or_else(|_| Err(solidcraft_ui_text::tr("render.error_setup_panicked").into()));
+                .unwrap_or_else(|_| Err(solidcraft_ui_text::tr(msg!("render.error_setup_panicked")).into()));
             let _ = tx.send(result);
         }) {
             Ok(_) => Self::Preparing(rx, std::time::Instant::now()),
-            Err(e) => Self::failed(solidcraft_ui_text::format("render.error_setup_worker", &[("error", &e.to_string())])),
+            Err(e) => Self::failed(msg!("render.error_setup_worker", error = &e.to_string()).tr()),
         };
     }
 
@@ -270,7 +270,7 @@ impl PathHost {
             Ok(Ok(host)) => Self::Ready(host),
             Ok(Err(error)) => Self::failed(error),
             Err(std::sync::mpsc::TryRecvError::Empty) => return None,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => Self::failed(solidcraft_ui_text::tr("render.error_setup_stopped").into()),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Self::failed(solidcraft_ui_text::tr(msg!("render.error_setup_stopped")).into()),
         };
         matches!(self, Self::Ready(_)).then_some(took)
     }
@@ -322,7 +322,7 @@ fn mmss(d: std::time::Duration) -> String {
 fn setup_progress(ui: &mut egui::Ui, app: &SolveApp, started: std::time::Instant) {
     let elapsed = started.elapsed();
     let expected = app.render_workspace.setup_key.as_ref().and_then(|k| app.render_workspace.setup_seconds.get(k)).copied();
-    ui.label(app.tr("render.gpu_path_preparing"));
+    ui.label(app.tr(msg!("render.gpu_path_preparing")));
     match expected.map(|s| std::time::Duration::from_secs_f64(s.max(1.0))) {
         Some(expected) if elapsed < expected.mul_f64(1.5) => {
             let fraction = (elapsed.as_secs_f32() / expected.as_secs_f32()).min(0.99);
@@ -337,7 +337,7 @@ fn setup_progress(ui: &mut egui::Ui, app: &SolveApp, started: std::time::Instant
                 ui.label(mmss(elapsed));
             });
             if expected.is_none() {
-                ui.small(app.tr("render.gpu_path_first_setup"));
+                ui.small(app.tr(msg!("render.gpu_path_first_setup")));
             }
         }
     }
@@ -643,7 +643,7 @@ impl State {
         // A driver that takes the process down while it compiles (#9236) is beyond any error
         // scope or unwind guard; the marker is how the next launch learns of it.
         if self.setup_crashed() {
-            self.path_host = PathHost::failed(solidcraft_ui_text::tr("render.gpu_path_crashed").into());
+            self.path_host = PathHost::failed(solidcraft_ui_text::tr(msg!("render.gpu_path_crashed")).into());
             return;
         }
         let Some(create) = self.pending_setup.take() else {
@@ -728,7 +728,7 @@ fn write_marker(path: &std::path::Path, key: &str) {
 pub(crate) fn retry_crashed_setup(app: &mut SolveApp, ui: &mut egui::Ui) {
     #[cfg(not(target_arch = "wasm32"))]
     if app.render_workspace.setup_crashed() {
-        let response = crate::ui_kit::button(ui, app.tr("render.gpu_path_retry"), crate::ui_kit::Button::Normal);
+        let response = crate::ui_kit::button(ui, app.tr(msg!("render.gpu_path_retry")), crate::ui_kit::Button::Normal);
         crate::scenario::publish_target("render:gpu-path-retry", response.rect);
         if response.clicked() {
             app.render_workspace.retry_crashed_setup();
@@ -821,14 +821,14 @@ pub(crate) fn inspect_state(app: &SolveApp) -> serde_json::Value {
 
 pub fn host_executor(max_dimension: u32, depth: bool, samples: u32) -> Result<ExecutorDescriptor, String> {
     if !matches!(samples, 1 | 2 | 4 | 8 | 16) {
-        return Err(solidcraft_ui_text::tr("render.error_gpu_samples").into());
+        return Err(solidcraft_ui_text::tr(msg!("render.error_gpu_samples")).into());
     }
     Ok(ExecutorDescriptor {
         id: ExecutorId::new("gpu-viewport").map_err(|e| e.to_string())?,
         availability: if depth && max_dimension > 0 {
             Availability::Available
         } else {
-            Availability::Unavailable { reason: solidcraft_ui_text::tr("render.error_preview_device").into() }
+            Availability::Unavailable { reason: solidcraft_ui_text::tr(msg!("render.error_preview_device")).into() }
         },
         profiles: vec![RenderProfile {
             mode: RenderMode::Preview,
@@ -1028,14 +1028,14 @@ pub(crate) fn entry_open(app: &SolveApp) -> bool {
 pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
     if render {
         if !entry_open(app) {
-            return Err(solidcraft_ui_text::tr("render.error_finish_operation").into());
+            return Err(solidcraft_ui_text::tr(msg!("render.error_finish_operation")).into());
         }
         app.run("render.scene", json!({}))?;
         // A look-only Inspect tool ends as Esc ends it; Isocurve's curves stay on (#14993).
         if app.tool.is_some() {
             crate::tools::finish(app);
             if app.tool.is_some() {
-                return Err(solidcraft_ui_text::tr("render.error_finish_operation").into());
+                return Err(solidcraft_ui_text::tr(msg!("render.error_finish_operation")).into());
             }
         }
         let entering = !active(app);
@@ -1232,20 +1232,19 @@ pub(crate) fn output_child_summary(app: &SolveApp, kind: &str) -> String {
     match kind {
         "sampling" => format!(
             "{} · {} spp",
-            app.tr("render.quality_custom"),
+            app.tr(msg!("render.quality_custom")),
             if view.method == ImageMethod::GpuRaytrace {
                 view.samples
             } else {
                 view.raytrace.progressive.map_or(u32::from(view.raytrace.primary_samples), |p| p.samples_per_pixel)
             }
         ),
-        "effects" => solidcraft_ui_text::format(
+        "effects" => msg!(
             "render.children.look_summary",
-            &[
-                ("tone", if view.studio.tone_map == solidcraft_engine::render::job::ToneMap::AcesFitted { "ACES" } else { "Reinhard" }),
-                ("count", &view.studio.finishing.looks.len().to_string()),
-            ],
-        ),
+            tone = if view.studio.tone_map == solidcraft_engine::render::job::ToneMap::AcesFitted { "ACES" } else { "Reinhard" },
+            count = &view.studio.finishing.looks.len().to_string()
+        )
+        .tr(),
         "check" => inspector::check_summary(app),
         _ => String::new(),
     }
@@ -1331,8 +1330,12 @@ pub(crate) fn browser_mode(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     if app.render_workspace.view.search_objects {
         let mut query = app.render_workspace.view.object_query.clone();
         crate::ui_kit::scope(ui, |ui| {
-            let response =
-                crate::ui_kit::search_field(ui, ui.scope_id().with("render:tree:query"), &mut query, solidcraft_ui_text::tr("render.tree_search"));
+            let response = crate::ui_kit::search_field(
+                ui,
+                ui.scope_id().with("render:tree:query"),
+                &mut query,
+                solidcraft_ui_text::tr(msg!("render.tree_search")),
+            );
             crate::panel_runtime::register_content_focus(ui.ctx(), &response);
             if response.changed() {
                 let _ = app.run("view.render_browser", json!({"query":query}));
@@ -1346,10 +1349,10 @@ fn image_host(app: &SolveApp, method: ImageMethod) -> Result<&ImageHost, String>
     apply_memory_policy(app);
     if method == ImageMethod::GpuRaytrace {
         let host = match &app.render_workspace.path_host {
-            PathHost::NotStarted => return Err(app.tr("render.gpu_path_not_started").to_string()),
-            PathHost::Preparing(..) => return Err(app.tr("render.gpu_path_preparing").to_string()),
+            PathHost::NotStarted => return Err(app.tr(msg!("render.gpu_path_not_started")).to_string()),
+            PathHost::Preparing(..) => return Err(app.tr(msg!("render.gpu_path_preparing")).to_string()),
             PathHost::Failed(error) => {
-                return Err(format!("{}: {error}", app.tr("render.gpu_path_failed")));
+                return Err(format!("{}: {error}", app.tr(msg!("render.gpu_path_failed"))));
             }
             PathHost::Ready(host) => host,
         };
@@ -1357,11 +1360,11 @@ fn image_host(app: &SolveApp, method: ImageMethod) -> Result<&ImageHost, String>
         if !host.is_available()
             || !descriptor.profiles.iter().any(|profile| profile.features.contains(&solidcraft_engine::render::RenderFeature::Progressive))
         {
-            return Err(app.tr("render.gpu_unavailable").to_string());
+            return Err(app.tr(msg!("render.gpu_unavailable")).to_string());
         }
         return Ok(host);
     }
-    let host = app.session.render_job_host().ok_or_else(|| app.tr("render.image_host_missing").to_string())?;
+    let host = app.session.render_job_host().ok_or_else(|| app.tr(msg!("render.image_host_missing")).to_string())?;
     host.validate_integrator(if method == ImageMethod::CpuRaytrace { Integrator::Raytrace } else { Integrator::Raster })
         .map_err(|error| error.to_string())?;
     Ok(host)
@@ -1373,7 +1376,7 @@ fn image_params(app: &SolveApp) -> Result<serde_json::Value, String> {
     let view = &app.render_workspace.view;
     image_host(app, view.method)?;
     if app.session.model.is_stale() {
-        return Err(app.tr("render.image_scene_stale").to_string());
+        return Err(app.tr(msg!("render.image_scene_stale")).to_string());
     }
     image_request(app)
 }
@@ -1392,7 +1395,7 @@ fn raw_image_request(app: &SolveApp) -> Result<serde_json::Value, String> {
     // Temporary bindings and unsaved HDR captures use the runtime API. Embedded HDRs
     // still resolve by their document resource ID when a temporary binding is present.
     if !view.draft.surfaces.is_empty() {
-        return Err(app.tr("render.saved_maps_runtime_conflict").to_string());
+        return Err(app.tr(msg!("render.saved_maps_runtime_conflict")).to_string());
     }
     let mut settings = RenderSetup { camera: app.cam, job: None, ..view.draft.clone() };
     materials::overlay_coats(app, &mut settings)?;
@@ -1429,18 +1432,18 @@ fn celestial_switch_active(app: &SolveApp) -> bool {
 /// Failure restores the full draft; navigation and saved camera stay untouched.
 fn switch_celestial_method(app: &mut SolveApp, method: ImageMethod, enable_indirect: bool) -> Result<(), String> {
     if setups::has_unportable_bindings(app) {
-        return Err(app.tr("render.setup_runtime_unsupported").into());
+        return Err(app.tr(msg!("render.setup_runtime_unsupported")).into());
     }
     let before = setups::draft(app)?;
     let before_render = std::sync::Arc::downgrade(&app.session.doc.render);
     let previous = app.render_workspace.view.clone();
     if previous.studio.transmission_samples != 1 {
-        return Err(app.tr("render.cpu_celestial_unportable").into());
+        return Err(app.tr(msg!("render.cpu_celestial_unportable")).into());
     }
     let mut next = previous.clone();
     if method == ImageMethod::CpuRaytrace {
         if enable_indirect {
-            let depth = u8::try_from(next.max_depth).map_err(|_| app.tr("render.cpu_celestial_switch").to_string())?;
+            let depth = u8::try_from(next.max_depth).map_err(|_| app.tr(msg!("render.cpu_celestial_switch")).to_string())?;
             let path = solidcraft_engine::render::job::CpuPathOptions { max_depth: depth };
             path.validate().map_err(|error| error.to_string())?;
             next.raytrace.path = Some(path);
@@ -1451,13 +1454,13 @@ fn switch_celestial_method(app: &mut SolveApp, method: ImageMethod, enable_indir
         }
         if next.raytrace.path.is_none() {
             if next.studio.volume.is_some_and(|volume| volume.active()) {
-                return Err(app.tr("render.cpu_volume_path_required").into());
+                return Err(app.tr(msg!("render.cpu_volume_path_required")).into());
             }
             if next.studio.caustics.is_some() {
-                return Err(app.tr("render.caustics_path_required").into());
+                return Err(app.tr(msg!("render.caustics_path_required")).into());
             }
             if celestial_switch_active(app) {
-                return Err(app.tr("render.cpu_celestial_switch").into());
+                return Err(app.tr(msg!("render.cpu_celestial_switch")).into());
             }
         }
         next.cpu.environment = match previous.studio.environment {
@@ -1467,7 +1470,7 @@ fn switch_celestial_method(app: &mut SolveApp, method: ImageMethod, enable_indir
                 let ambient = if previous.studio.lighting_enabled { previous.studio.ambient } else { [0.0; 3] };
                 let intensity = ambient.into_iter().fold(0.0_f64, f64::max);
                 if intensity > 64.0 {
-                    return Err(app.tr("render.cpu_environment_bounds").into());
+                    return Err(app.tr(msg!("render.cpu_environment_bounds")).into());
                 }
                 next.cpu.color = if intensity > 0.0 { ambient.map(|value| value / intensity) } else { [1.0; 3] };
                 next.cpu.intensity = intensity;
@@ -1476,7 +1479,7 @@ fn switch_celestial_method(app: &mut SolveApp, method: ImageMethod, enable_indir
         };
         if previous.studio.environment != studio::Environment::None {
             if previous.studio.environment == studio::Environment::Hdr && previous.studio.assume_linear_srgb {
-                return Err(app.tr("render.environment.primaries_gpu").into());
+                return Err(app.tr(msg!("render.environment.primaries_gpu")).into());
             }
             next.cpu.gradient = previous.studio.gradient;
             next.cpu.rotation_rad = previous.studio.rotation_rad;
@@ -1502,7 +1505,7 @@ fn switch_celestial_method(app: &mut SolveApp, method: ImageMethod, enable_indir
             next.studio.assume_linear_srgb = false;
         }
     } else {
-        return Err(app.tr("render.output_raytrace_only").into());
+        return Err(app.tr(msg!("render.output_raytrace_only")).into());
     }
     light::celestial_method(app, &mut next, method)?;
     next.method = method;
@@ -1559,13 +1562,13 @@ fn select_image_method(app: &mut SolveApp, method: ImageMethod) {
 
 #[cfg(test)]
 fn method_selector(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui.label(app.tr("render.image_method"));
+    ui.label(app.tr(msg!("render.image_method")));
     method_dropdown(app, ui);
     if image_host(app, app.render_workspace.view.method).is_err() {
-        crate::ui_kit::text(ui, app.tr("render.setup_offline_help"), crate::ui_kit::Text::Note("render.setup_offline_help"));
+        crate::ui_kit::text(ui, app.tr(msg!("render.setup_offline_help")), crate::ui_kit::Text::Note("render.setup_offline_help"));
     }
     if app.render_workspace.view.method != ImageMethod::Raster {
-        crate::ui_kit::text(ui, app.tr("render.preview_image_settings_help"), crate::ui_kit::Text::Note("render.preview_image_settings_help"));
+        crate::ui_kit::text(ui, app.tr(msg!("render.preview_image_settings_help")), crate::ui_kit::Text::Note("render.preview_image_settings_help"));
     }
 }
 
@@ -1637,7 +1640,7 @@ fn cpu_sampling_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     }
     ui.add_enabled_ui(!progressive, |ui| {
-        crate::ui_kit::text(ui, app.tr("render.children.edge_samples"), crate::ui_kit::Text::Inline);
+        crate::ui_kit::text(ui, app.tr(msg!("render.children.edge_samples")), crate::ui_kit::Text::Inline);
         let samples = app.render_workspace.view.raytrace.primary_samples;
         let aa = crate::ui_kit::dropdown_menu(ui, "render_cpu_samples", &format!("{samples}×"), |ui| {
             for count in [1, 4, 16] {
@@ -1651,13 +1654,13 @@ fn cpu_sampling_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
         crate::scenario::publish_handle("render:aa", aa.rect.center());
-        ui.small(app.tr("render.cpu_aa_help"));
+        ui.small(app.tr(msg!("render.cpu_aa_help")));
     });
 }
 
 #[cfg(test)]
 fn cpu_lighting_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui.label(app.tr("render.cpu_lighting"));
+    ui.label(app.tr(msg!("render.cpu_lighting")));
     let presets = [
         (LightingPreset::Neutral, "render.cpu_neutral"),
         (LightingPreset::WarmCool, "render.cpu_warm_cool"),
@@ -1680,7 +1683,7 @@ fn cpu_lighting_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     });
-    let shadows = app.tr("render.cpu_shadows").to_string();
+    let shadows = app.tr(msg!("render.cpu_shadows")).to_string();
     crate::ui_kit::checkbox(ui, &shadows, &mut app.render_workspace.view.raytrace.shadows);
 }
 
@@ -1692,34 +1695,38 @@ fn image_method_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     cpu_sampling_controls(app, ui);
     cpu_lighting_controls(app, ui);
-    ui.label(app.tr("render.image_exposure"));
-    let exposure_help = app.tr("render.cpu_exposure_help").to_string();
+    ui.label(app.tr(msg!("render.image_exposure")));
+    let exposure_help = app.tr(msg!("render.cpu_exposure_help")).to_string();
     crate::ui_kit::number_field(ui, &mut app.render_workspace.view.draft.exposure_ev, -32.0..=32.0, 0.1, " EV").backing_on_hover_text(exposure_help);
     cpu::controls(app, ui);
 }
 
 #[cfg(test)]
 fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui.heading(app.tr("render.image_title"));
-    let preview = app.tr("render.result_preview").to_string();
-    let result = app.tr("render.result_title").to_string();
+    ui.heading(app.tr(msg!("render.image_title")));
+    let preview = app.tr(msg!("render.result_preview")).to_string();
+    let result = app.tr(msg!("render.result_title")).to_string();
     let mut selected = usize::from(app.render_workspace.view.result);
     if crate::ui_kit::segmented(ui, &mut selected, &[&preview, &result], crate::ui_kit::Segments { compact: true, ..Default::default() }) {
         let _ = app.run("render.result.view", json!({"view":if selected == 1 {"image"} else {"model"}}));
     }
     if app.render_workspace.view.result {
         ui.horizontal(|ui| {
-            if crate::ui_kit::button(ui, app.tr("render.result_fit"), crate::ui_kit::Button::Normal).clicked() {
+            if crate::ui_kit::button(ui, app.tr(msg!("render.result_fit")), crate::ui_kit::Button::Normal).clicked() {
                 let _ = app.run("render.result.view", json!({"view":"fit"}));
             }
-            if crate::ui_kit::button(ui, solidcraft_ui_text::tr("render.result_actual_size"), crate::ui_kit::Button::Enabled(!reduced_display(app)))
-                .backing_on_hover_text(app.tr("render.result_actual_help"))
-                .clicked()
+            if crate::ui_kit::button(
+                ui,
+                solidcraft_ui_text::tr(msg!("render.result_actual_size")),
+                crate::ui_kit::Button::Enabled(!reduced_display(app)),
+            )
+            .backing_on_hover_text(app.tr(msg!("render.result_actual_help")))
+            .clicked()
             {
                 let _ = app.run("render.result.view", json!({"view":"actual"}));
             }
         });
-        ui.small(app.tr("render.result_navigation"));
+        ui.small(app.tr(msg!("render.result_navigation")));
     }
     image_method_controls(app, ui);
     ui.small(app.tr(match app.render_workspace.view.method {
@@ -1734,11 +1741,11 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         ImageMethod::Raster => 4096,
     };
     ui.horizontal(|ui| {
-        ui.label(app.tr("render.image_width"));
+        ui.label(app.tr(msg!("render.image_width")));
         if crate::ui_kit::number_field(ui, &mut app.render_workspace.view.draft.width, 1..=side, 1.0, "").changed() {
             app.render_workspace.view.dirty = true;
         }
-        ui.label(app.tr("render.image_height"));
+        ui.label(app.tr(msg!("render.image_height")));
         if crate::ui_kit::number_field(ui, &mut app.render_workspace.view.draft.height, 1..=side, 1.0, "").changed() {
             app.render_workspace.view.dirty = true;
         }
@@ -1754,7 +1761,7 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             "render.image_too_large"
         };
         ui.small(app.tr(limit));
-        if crate::ui_kit::button(ui, format!("{} {w} × {h}", app.tr("render.image_use_largest")), crate::ui_kit::Button::Normal).clicked() {
+        if crate::ui_kit::button(ui, format!("{} {w} × {h}", app.tr(msg!("render.image_use_largest"))), crate::ui_kit::Button::Normal).clicked() {
             app.render_workspace.view.draft.width = u32::try_from(w).unwrap_or(1);
             app.render_workspace.view.draft.height = u32::try_from(h).unwrap_or(1);
             app.render_workspace.view.dirty = true;
@@ -1763,14 +1770,14 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     match &app.render_workspace.path_host {
         PathHost::Preparing(_, started) => setup_progress(ui, app, *started),
         PathHost::Failed(error) => {
-            ui.add(egui::Label::new(format!("{}: {error}", app.tr("render.gpu_path_failed"))).wrap());
+            ui.add(egui::Label::new(format!("{}: {error}", app.tr(msg!("render.gpu_path_failed")))).wrap());
             retry_crashed_setup(app, ui);
             backend_recovery(app, ui);
         }
         _ => {}
     }
     if app.render_workspace.view.method == ImageMethod::GpuRaytrace {
-        ui.label(app.tr("render.image_samples"));
+        ui.label(app.tr(msg!("render.image_samples")));
         // New selections stop at 128; requests from elsewhere keep any count.
         let samples = &mut app.render_workspace.view.samples;
         let mut exponent = (*samples).max(1).ilog2().min(MAX_SAMPLES_EXPONENT);
@@ -1778,9 +1785,9 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         if crate::ui_kit::slider(ui, &mut exponent, 0..=MAX_SAMPLES_EXPONENT, slider).changed() {
             *samples = 1 << exponent.min(MAX_SAMPLES_EXPONENT);
         }
-        let title = app.tr("render.image_advanced").to_string();
+        let title = app.tr(msg!("render.image_advanced")).to_string();
         crate::ui_kit::section(ui, "render_gpu_advanced", &title, false, |ui| {
-            ui.label(app.tr("render.gpu_depth"));
+            ui.label(app.tr(msg!("render.gpu_depth")));
             crate::ui_kit::number_field(
                 ui,
                 &mut app.render_workspace.view.max_depth,
@@ -1788,18 +1795,18 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                 1.0,
                 "",
             );
-            ui.label(app.tr("render.gpu_seed"));
+            ui.label(app.tr(msg!("render.gpu_seed")));
             crate::ui_kit::number_field(ui, &mut app.render_workspace.view.seed, 0..=u32::MAX, 1.0, "");
-            ui.label(app.tr("render.image_exposure"));
+            ui.label(app.tr(msg!("render.image_exposure")));
             crate::ui_kit::number_field(ui, &mut app.render_workspace.view.draft.exposure_ev, -32.0..=32.0, 0.1, " EV");
-            ui.small(app.tr("render.gpu_options_help"));
+            ui.small(app.tr(msg!("render.gpu_options_help")));
             studio::controls(app, ui);
             studio::backdrop_controls(app, ui);
         });
     }
     library::controls(app, ui);
     materials::controls(app, ui);
-    let transparent_label = app.tr("render.image_transparent").to_string();
+    let transparent_label = app.tr(msg!("render.image_transparent")).to_string();
     crate::ui_kit::checkbox(ui, &transparent_label, &mut app.render_workspace.view.transparent);
 }
 
@@ -1828,17 +1835,17 @@ fn backend_recovery(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     }
     if can_restart_with_vulkan(app) {
-        ui.add(egui::Label::new(app.tr("render.graphics_api_vulkan_required")).wrap());
-        let response = crate::ui_kit::button(ui, app.tr("render.graphics_api_restart_vulkan"), crate::ui_kit::Button::Normal);
+        ui.add(egui::Label::new(app.tr(msg!("render.graphics_api_vulkan_required"))).wrap());
+        let response = crate::ui_kit::button(ui, app.tr(msg!("render.graphics_api_restart_vulkan")), crate::ui_kit::Button::Normal);
         crate::scenario::publish_target("render:restart_vulkan", response.rect);
         if response.clicked()
             && let Err(reason) = restart_with_vulkan(app)
         {
             app.set_status(reason, true);
         }
-        ui.add(egui::Label::new(app.tr("render.graphics_api_restart_warning")).wrap());
+        ui.add(egui::Label::new(app.tr(msg!("render.graphics_api_restart_warning"))).wrap());
     }
-    let response = crate::ui_kit::button(ui, app.tr("render.graphics_api_settings"), crate::ui_kit::Button::Normal);
+    let response = crate::ui_kit::button(ui, app.tr(msg!("render.graphics_api_settings")), crate::ui_kit::Button::Normal);
     crate::scenario::publish_target("render:graphics_settings", response.rect);
     if response.clicked()
         && let Err(reason) = crate::prefs::control(app, &serde_json::json!({"open":"Graphics"}))
@@ -1869,7 +1876,7 @@ fn job_controls(app: &mut SolveApp, ui: &mut egui::Ui, compact: bool) {
     if let Some(job) = app.render_workspace.view.job {
         match app.session.execute("render.status", &json!({"job":job})) {
             Ok(status) => {
-                let phase = status["progress"]["phase"].as_str().unwrap_or(solidcraft_ui_text::tr("render.property_unknown"));
+                let phase = status["progress"]["phase"].as_str().unwrap_or(solidcraft_ui_text::tr(msg!("render.property_unknown")));
                 busy = matches!(phase, "queued" | "preparing" | "running" | "encoding" | "cancelling");
                 state = Some(status);
             }
@@ -1883,7 +1890,7 @@ fn job_controls(app: &mut SolveApp, ui: &mut egui::Ui, compact: bool) {
     ui.horizontal_wrapped(|ui| {
         let check = crate::ui_kit::button(
             ui,
-            app.tr("cmd.render_preflight"),
+            app.tr(msg!("cmd.render_preflight")),
             crate::ui_kit::Button::Enabled(ribbon::action_ready(app, "render.preflight").is_ok()),
         );
         crate::scenario::publish_target("render:check", check.rect);
@@ -1894,7 +1901,7 @@ fn job_controls(app: &mut SolveApp, ui: &mut egui::Ui, compact: bool) {
         }
         let start = crate::ui_kit::button(
             ui,
-            app.tr("render.image_start"),
+            app.tr(msg!("render.image_start")),
             crate::ui_kit::Button::Enabled(ribbon::action_ready(app, "render.start").is_ok()),
         );
         crate::scenario::publish_target("render:start", start.rect);
@@ -1944,7 +1951,7 @@ fn job_controls(app: &mut SolveApp, ui: &mut egui::Ui, compact: bool) {
     ui.horizontal_wrapped(|ui| {
         let cancel = crate::ui_kit::button(
             ui,
-            app.tr("cmd.render_cancel"),
+            app.tr(msg!("cmd.render_cancel")),
             crate::ui_kit::Button::Enabled(ribbon::action_ready(app, "render.cancel").is_ok()),
         );
         crate::scenario::publish_target("render:cancel", cancel.rect);
@@ -1955,7 +1962,7 @@ fn job_controls(app: &mut SolveApp, ui: &mut egui::Ui, compact: bool) {
         }
         let export = crate::ui_kit::button(
             ui,
-            app.tr("render.image_export"),
+            app.tr(msg!("render.image_export")),
             crate::ui_kit::Button::Enabled(ribbon::action_ready(app, "render.export").is_ok()),
         );
         crate::scenario::publish_target("render:export", export.rect);
@@ -1966,7 +1973,7 @@ fn job_controls(app: &mut SolveApp, ui: &mut egui::Ui, compact: bool) {
         }
     });
     if !compact {
-        let label = app.tr("render.image_overwrite").to_string();
+        let label = app.tr(msg!("render.image_overwrite")).to_string();
         crate::ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.overwrite);
     }
 }
@@ -1978,13 +1985,13 @@ fn completed_image(app: &mut SolveApp, ui: &mut egui::Ui) {
     cache_render_images(app, ui.ctx());
     if let Some(display) = displayed_image(app) {
         if display.preview.is_some() {
-            ui.small(app.tr("render.result_provisional"));
+            ui.small(app.tr(msg!("render.result_provisional")));
         }
         match display.image {
             Ok(texture) => {
                 if ui
                     .add(egui::Image::new(texture).max_size(egui::vec2(ui.available_width(), 240.0)).shrink_to_fit().sense(Sense::click()))
-                    .backing_on_hover_text(app.tr("render.result_open"))
+                    .backing_on_hover_text(app.tr(msg!("render.result_open")))
                     .clicked()
                 {
                     let _ = app.run("render.result.view", json!({"view":"image"}));
@@ -2009,7 +2016,7 @@ fn cache_completed_image(app: &mut SolveApp, ctx: &egui::Context) {
         app.render_workspace.image_info = None;
         let result = (|| -> Result<egui::TextureHandle, String> {
             let handle = app.session.render_job_handle(job).map_err(|e| e.to_string())?;
-            let frame = handle.frame().map_err(|e| e.to_string())?.ok_or(solidcraft_ui_text::tr("render.error_no_completed_image"))?;
+            let frame = handle.frame().map_err(|e| e.to_string())?.ok_or(solidcraft_ui_text::tr(msg!("render.error_no_completed_image")))?;
             if let Some((_, cached)) = app.render_workspace.comparison_images.iter().find(|(id, _)| *id == job) {
                 let texture = cached.clone()?;
                 app.render_workspace.image_info = Some(frame.info.clone());
@@ -2045,9 +2052,9 @@ fn cache_denoise_mask(app: &mut SolveApp, ctx: &egui::Context) {
     app.render_workspace.denoise_mask_info = None;
     let result = (|| -> Result<egui::TextureHandle, String> {
         let handle = app.session.render_job_handle(job).map_err(|error| error.to_string())?;
-        let frame = handle.frame().map_err(|error| error.to_string())?.ok_or(solidcraft_ui_text::tr("render.error_no_completed_image"))?;
-        let png = frame.denoise_mask_png().ok_or(solidcraft_ui_text::tr("render.denoise_mask_unavailable"))?;
-        let mask = frame.denoise_mask_info().ok_or(solidcraft_ui_text::tr("render.denoise_mask_unavailable"))?;
+        let frame = handle.frame().map_err(|error| error.to_string())?.ok_or(solidcraft_ui_text::tr(msg!("render.error_no_completed_image")))?;
+        let png = frame.denoise_mask_png().ok_or(solidcraft_ui_text::tr(msg!("render.denoise_mask_unavailable")))?;
+        let mask = frame.denoise_mask_info().ok_or(solidcraft_ui_text::tr(msg!("render.denoise_mask_unavailable")))?;
         let captured = handle.status().map_err(|error| error.to_string())?;
         let budget = if frame.info.executor.as_str() == "gpu-path" {
             solidcraft_engine::render::job::GPU_PATH_LIMITS
@@ -2099,8 +2106,10 @@ fn captured_adaptive_preview(
             .adaptive
             .as_deref()
             .map(|adaptive| {
-                let maximum =
-                    options.progressive.ok_or_else(|| solidcraft_ui_text::tr("render.error_provisional_identity").to_string())?.samples_per_pixel;
+                let maximum = options
+                    .progressive
+                    .ok_or_else(|| solidcraft_ui_text::tr(msg!("render.error_provisional_identity")).to_string())?
+                    .samples_per_pixel;
                 AdaptivePreview::captured(*adaptive, maximum, completed).map_err(|error| error.to_string())
             })
             .transpose()
@@ -2123,22 +2132,22 @@ fn cache_preview_frame(app: &mut SolveApp, ctx: &egui::Context, info: &PreviewIn
     }
     let result = (|| -> Result<egui::TextureHandle, String> {
         if info.frame_sequence == 0 || info.samples_per_pixel == 0 {
-            return Err(solidcraft_ui_text::tr("render.error_provisional_identity").into());
+            return Err(solidcraft_ui_text::tr(msg!("render.error_provisional_identity")).into());
         }
         let handle = app.session.render_job_handle(info.frame.job).map_err(|e| e.to_string())?;
         let captured = handle.status().map_err(|e| e.to_string())?;
         if (info.frame.width, info.frame.height) != (captured.request.width, captured.request.height) {
-            return Err(solidcraft_ui_text::tr("render.error_checkpoint_dimensions").into());
+            return Err(solidcraft_ui_text::tr(msg!("render.error_checkpoint_dimensions")).into());
         }
         if info.frame.executor != captured.resolved.executor || info.frame.scene_generation != captured.scene_generation {
-            return Err(solidcraft_ui_text::tr("render.error_provisional_identity").into());
+            return Err(solidcraft_ui_text::tr(msg!("render.error_provisional_identity")).into());
         }
         let limits = if info.frame.executor.as_str() == "gpu-path" {
             let target = captured.options.preview_target().map_err(|e| e.to_string())?;
             let adaptive =
                 solidcraft_engine::render::job::adaptive::AdaptivePreview::at(captured.options, info.samples_per_pixel).map_err(|e| e.to_string())?;
             if info.samples_per_pixel >= target || info.adaptive != adaptive {
-                return Err(solidcraft_ui_text::tr("render.error_provisional_identity").into());
+                return Err(solidcraft_ui_text::tr(msg!("render.error_provisional_identity")).into());
             }
             solidcraft_engine::render::job::GPU_PATH_LIMITS
         } else {
@@ -2147,7 +2156,7 @@ fn cache_preview_frame(app: &mut SolveApp, ctx: &egui::Context, info: &PreviewIn
                 && info.samples_per_pixel
                     >= captured.request.raytrace.as_ref().map_or(Ok(0), RaytraceOptions::preview_target).map_err(|e| e.to_string())?;
             if exceeds_target || info.adaptive != adaptive {
-                return Err(solidcraft_ui_text::tr("render.error_provisional_identity").into());
+                return Err(solidcraft_ui_text::tr(msg!("render.error_provisional_identity")).into());
             }
             let options = solidcraft_engine::render::job::CpuProgressiveOptions { samples_per_pixel: info.samples_per_pixel, seed: 0 };
             let scale = captured.request.raytrace.as_ref().map_or(1, |options| options.supersampling);
@@ -2301,14 +2310,14 @@ fn captured_image_limits(request: &solidcraft_engine::render::job::ImageRequest)
 /// full resolution. Avoid asking a viewport device for an unsupported texture.
 fn display_dimensions(width: u32, height: u32, max_texture_side: usize) -> Result<(u32, u32), String> {
     if width == 0 || height == 0 || max_texture_side == 0 {
-        return Err(solidcraft_ui_text::tr("render.error_display_dimensions").into());
+        return Err(solidcraft_ui_text::tr(msg!("render.error_display_dimensions")).into());
     }
     let max_side = max_texture_side.min(8192) as u64;
     let display = RenderLimits { max_dimension: max_side, max_pixels: 16_777_216, max_scratch_bytes: 512 * 1024 * 1024 };
-    let (w, h) = display.fit(u64::from(width), u64::from(height), None).ok_or(solidcraft_ui_text::tr("render.error_display_fit"))?;
+    let (w, h) = display.fit(u64::from(width), u64::from(height), None).ok_or(solidcraft_ui_text::tr(msg!("render.error_display_fit")))?;
     Ok((
-        u32::try_from(w).map_err(|_| solidcraft_ui_text::tr("render.error_display_width"))?,
-        u32::try_from(h).map_err(|_| solidcraft_ui_text::tr("render.error_display_height"))?,
+        u32::try_from(w).map_err(|_| solidcraft_ui_text::tr(msg!("render.error_display_width")))?,
+        u32::try_from(h).map_err(|_| solidcraft_ui_text::tr(msg!("render.error_display_height")))?,
     ))
 }
 
@@ -2331,18 +2340,19 @@ fn decode_render_image_filtered(
 ) -> Result<egui::ColorImage, String> {
     let size = (u64::from(width), u64::from(height));
     if budget.fit(size.0, size.1, None) != Some(size) {
-        return Err(solidcraft_ui_text::tr("render.error_image_profile").into());
+        return Err(solidcraft_ui_text::tr(msg!("render.error_image_profile")).into());
     }
     let display_size = display_dimensions(width, height, max_texture_side)?;
     let mut reader = image::ImageReader::with_format(std::io::Cursor::new(png), image::ImageFormat::Png);
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(width);
     limits.max_image_height = Some(height);
-    limits.max_alloc = Some(size.0.checked_mul(size.1).and_then(|n| n.checked_mul(16)).ok_or(solidcraft_ui_text::tr("render.error_decode_budget"))?);
+    limits.max_alloc =
+        Some(size.0.checked_mul(size.1).and_then(|n| n.checked_mul(16)).ok_or(solidcraft_ui_text::tr(msg!("render.error_decode_budget")))?);
     reader.limits(limits);
     let image = reader.decode().map_err(|e| e.to_string())?.to_rgba8();
     if image.dimensions() != (width, height) {
-        return Err(solidcraft_ui_text::tr("render.error_image_dimensions").into());
+        return Err(solidcraft_ui_text::tr(msg!("render.error_image_dimensions")).into());
     }
     let image = if display_size != (width, height) { image::imageops::resize(&image, display_size.0, display_size.1, filter) } else { image };
     Ok(egui::ColorImage::from_rgba_unmultiplied([display_size.0 as usize, display_size.1 as usize], image.as_raw()))
@@ -2429,7 +2439,8 @@ fn result_action_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let results = app.render_workspace.view.retained.clone();
     if !results.is_empty() {
         let selected = results.iter().position(|result| Some(result.frame.job) == app.render_workspace.view.completed);
-        let label = selected.and_then(|index| results.get(index)).map(result_label).unwrap_or_else(|| app.tr("render.results_choose").to_string());
+        let label =
+            selected.and_then(|index| results.get(index)).map(result_label).unwrap_or_else(|| app.tr(msg!("render.results_choose")).to_string());
         let mut chosen = None;
         let t = Tokens::get();
         let width = (ui.available_width() - t.control_height - ui.spacing().item_spacing.x).max(t.control_height);
@@ -2451,7 +2462,7 @@ fn result_action_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             let _ = app.run("render.result.select", json!({"index":index}));
         }
         let discard = ui.add_enabled(selected.is_some(), |ui: &mut egui::Ui| {
-            crate::ui_kit::StageBar::icon_action(ui, "delete", app.tr("cmd.render.result.discard"))
+            crate::ui_kit::StageBar::icon_action(ui, "delete", app.tr(msg!("cmd.render.result.discard")))
         });
         crate::scenario::publish_target("render:result-discard", discard.rect);
         if discard.clicked()
@@ -2470,7 +2481,7 @@ fn result_action_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     quality::mask_view_controls(app, ui);
-    let copy = result_action_button(ui, app.tr("render.output_copy"), ribbon::action_ready(app, "render.result.copy").is_ok());
+    let copy = result_action_button(ui, app.tr(msg!("render.output_copy")), ribbon::action_ready(app, "render.result.copy").is_ok());
     crate::scenario::publish_target("render:result-copy", copy.rect);
     if copy.clicked() {
         app.start("render.result.copy");
@@ -2480,7 +2491,7 @@ fn result_action_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     if export.clicked() {
         app.start("render.export");
     }
-    let close = crate::ui_kit::StageBar::icon_action(ui, "close", app.tr("cmd.render_result_close"));
+    let close = crate::ui_kit::StageBar::icon_action(ui, "close", app.tr(msg!("cmd.render_result_close")));
     crate::scenario::publish_target("render:result-close", close.rect);
     if close.clicked() {
         app.start("render.result.close");
@@ -2488,12 +2499,10 @@ fn result_action_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 fn result_label(result: &solidcraft_engine::render_jobs::RetainedResult) -> String {
-    let name = result.shot.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr("render.results_unnamed"));
-    let label = solidcraft_ui_text::format(
-        "render.results_label",
-        &[("number", &result.frame.job.serial.to_string()), ("shot", name), ("seconds", &format!("{:.0}", result.seconds))],
-    );
-    if result.stale { solidcraft_ui_text::format("render.results_stale_label", &[("result", &label)]) } else { label }
+    let name = result.shot.as_deref().unwrap_or_else(|| solidcraft_ui_text::tr(msg!("render.results_unnamed")));
+    let label =
+        msg!("render.results_label", number = &result.frame.job.serial.to_string(), shot = name, seconds = &format!("{:.0}", result.seconds)).tr();
+    if result.stale { msg!("render.results_stale_label", result = &label).tr() } else { label }
 }
 
 fn result_header(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -2528,27 +2537,27 @@ fn result_header(app: &mut SolveApp, ui: &mut egui::Ui) {
         let message = if let Some(adaptive) = preview.adaptive {
             format!(
                 "{} · {} · {} {}",
-                app.tr("render.result_provisional"),
+                app.tr(msg!("render.result_provisional")),
                 adaptive_preview_label(app, adaptive),
-                app.tr("render.result_sequence"),
+                app.tr(msg!("render.result_sequence")),
                 preview.frame_sequence
             )
         } else {
             format!(
                 "{} · {} / {} {} · {} {}",
-                app.tr("render.result_provisional"),
+                app.tr(msg!("render.result_provisional")),
                 preview.samples_per_pixel,
                 target,
-                app.tr("render.cpu_progressive_spp"),
-                app.tr("render.result_sequence"),
+                app.tr(msg!("render.cpu_progressive_spp")),
+                app.tr(msg!("render.result_sequence")),
                 preview.frame_sequence
             )
         };
         ui.colored_label(t.warning, message);
         if preview.adaptive.is_some() {
-            ui.small(app.tr("render.adaptive.preview_help"));
+            ui.small(app.tr(msg!("render.adaptive.preview_help")));
         }
-        ui.small(app.tr("render.result_provisional_help"));
+        ui.small(app.tr(msg!("render.result_provisional_help")));
     }
     if let Some(display) = displayed_image(app)
         && let Err(error) = display.image
@@ -2559,21 +2568,21 @@ fn result_header(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui.strong(format!("{} × {} px · PNG · {}", info.width, info.height, info.executor.as_str()));
         ui.label(format!(
             "{} {}:{}:{} · {} {}",
-            app.tr("render.result_job"),
+            app.tr(msg!("render.result_job")),
             info.job.session,
             info.job.serial,
             info.job.generation,
-            app.tr("render.result_capture"),
+            app.tr(msg!("render.result_capture")),
             info.scene_generation
         ));
     });
     if reduced_display(app) {
-        ui.colored_label(t.warning, app.tr("render.result_reduced_display"));
+        ui.colored_label(t.warning, app.tr(msg!("render.result_reduced_display")));
     }
     let stale = info.scene_generation != app.session.revision;
     ui.colored_label(if stale { t.warning } else { t.text_dim }, app.tr(if stale { "render.image_stale" } else { "render.result_current" }));
     if app.render_workspace.view.job.is_some_and(|job| job != info.job) {
-        ui.small(app.tr("render.result_retained"));
+        ui.small(app.tr(msg!("render.result_retained")));
     }
 }
 
@@ -2727,8 +2736,8 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
         let cached = if quality::mask_active(app) { &app.render_workspace.denoise_mask_image } else { &app.render_workspace.image };
         let message = match cached {
             Some((_, Err(error))) => error.clone(),
-            _ if ribbon::busy(app) => app.tr("render.state_in_progress").to_string(),
-            _ => app.tr("render.result_empty").to_string(),
+            _ if ribbon::busy(app) => app.tr(msg!("render.state_in_progress")).to_string(),
+            _ => app.tr(msg!("render.result_empty")).to_string(),
         };
         let unavailable = app
             .render_workspace
@@ -2858,7 +2867,7 @@ impl State {
                             Err(_) => false,
                         };
                         if !uploaded {
-                            let error = solidcraft_ui_text::tr("render.error_upload_slot").to_string();
+                            let error = solidcraft_ui_text::tr(msg!("render.error_upload_slot")).to_string();
                             self.scene = None;
                             self.key = None;
                             self.preview_upload_bytes = None;
@@ -2909,8 +2918,12 @@ fn preview_error(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, error:
             ui,
             |ui| {
                 crate::ui_kit::text(ui, error, crate::ui_kit::Text::Error("render.preview_failure"));
-                crate::ui_kit::text(ui, app.tr("render.preview_unavailable_help"), crate::ui_kit::Text::Note("render.preview_unavailable_help"));
-                let retry = crate::ui_kit::button(ui, app.tr("render.preview_retry"), crate::ui_kit::Button::Normal);
+                crate::ui_kit::text(
+                    ui,
+                    app.tr(msg!("render.preview_unavailable_help")),
+                    crate::ui_kit::Text::Note("render.preview_unavailable_help"),
+                );
+                let retry = crate::ui_kit::button(ui, app.tr(msg!("render.preview_retry")), crate::ui_kit::Button::Normal);
                 crate::scenario::publish_target("render:preview-retry", retry.rect);
                 if retry.clicked() {
                     invalidate_scene(app);
@@ -2927,7 +2940,7 @@ fn export_image(app: &mut SolveApp, job: solidcraft_engine::render::job::JobId, 
     app.pick_save("render.png", &["png"], move |app, path| {
         let Some(path) = path else { return };
         if !Arc::ptr_eq(&origin, &app.session.doc) {
-            app.set_status(solidcraft_ui_text::tr("render.error_export_document"), true);
+            app.set_status(solidcraft_ui_text::tr(msg!("render.error_export_document")), true);
             return;
         }
         let _ = app.run("render.export", json!({"job":job,"path":path,"overwrite":overwrite}));
@@ -2942,7 +2955,7 @@ fn export_linear_image(app: &mut SolveApp, job: solidcraft_engine::render::job::
             return;
         };
         if !Arc::ptr_eq(&origin, &app.session.doc) {
-            app.set_status(solidcraft_ui_text::tr("render.error_export_document"), true);
+            app.set_status(solidcraft_ui_text::tr(msg!("render.error_export_document")), true);
             return;
         }
         let _ = app.run("render.export", json!({"job":job,"path":path,"overwrite":overwrite,"format":"exr"}));
@@ -2955,7 +2968,7 @@ fn export_denoise_mask(app: &mut SolveApp, job: solidcraft_engine::render::job::
     app.pick_save("render-denoise-mask.png", &["png"], move |app, path| {
         let Some(path) = path else { return };
         if !Arc::ptr_eq(&origin, &app.session.doc) {
-            app.set_status(solidcraft_ui_text::tr("render.error_export_document"), true);
+            app.set_status(solidcraft_ui_text::tr(msg!("render.error_export_document")), true);
             return;
         }
         let _ = app.run("render.export", json!({"job":job,"path":path,"overwrite":overwrite,"format":"denoise_mask"}));
@@ -2974,34 +2987,34 @@ struct PreviewUploadPlan {
 }
 impl PreviewUploadPlan {
     fn bytes(self) -> Result<usize, String> {
-        self.block_bytes()?.checked_add(self.instanced).ok_or_else(|| solidcraft_ui_text::tr("render.error_geometry_size").into())
+        self.block_bytes()?.checked_add(self.instanced).ok_or_else(|| solidcraft_ui_text::tr(msg!("render.error_geometry_size")).into())
     }
     /// The bytes built into blocks (everything not instanced).
     fn block_bytes(self) -> Result<usize, String> {
         self.pbr
             .checked_add(self.tris)
             .and_then(|n| n.checked_add(self.glass))
-            .ok_or_else(|| solidcraft_ui_text::tr("render.error_geometry_size").into())
+            .ok_or_else(|| solidcraft_ui_text::tr(msg!("render.error_geometry_size")).into())
     }
     /// One more instanced body, and its shared mesh's `triangles` the first time it is placed.
     fn add_instanced(&mut self, triangles: Option<usize>, limit: usize) -> Result<(), String> {
         let shared = triangles
             .map_or(Some(0), |t| t.checked_mul(3 * (crate::gpu::SHARED_SIZE + 4)))
-            .ok_or(solidcraft_ui_text::tr("render.error_geometry_size"))?;
+            .ok_or(solidcraft_ui_text::tr(msg!("render.error_geometry_size")))?;
         self.instanced = self
             .instanced
             .checked_add(shared)
             .and_then(|n| n.checked_add(crate::gpu::INSTANCE_SIZE))
-            .ok_or(solidcraft_ui_text::tr("render.error_geometry_size"))?;
+            .ok_or(solidcraft_ui_text::tr(msg!("render.error_geometry_size")))?;
         if self.bytes()? > limit {
-            return Err(solidcraft_ui_text::format("render.error_vertex_envelope", &[("limit", &(limit / (1024 * 1024)).to_string())]));
+            return Err(msg!("render.error_vertex_envelope", limit = &(limit / (1024 * 1024)).to_string()).tr());
         }
         Ok(())
     }
     fn add(&mut self, pbr: bool, glass: bool, triangles: usize, limit: usize) -> Result<(), String> {
         // PBR triangles are built triangles too; their materials are in the palette.
         let stride = crate::gpu::TRI_SIZE;
-        let bytes = triangles.checked_mul(3).and_then(|n| n.checked_mul(stride)).ok_or(solidcraft_ui_text::tr("render.error_geometry_size"))?;
+        let bytes = triangles.checked_mul(3).and_then(|n| n.checked_mul(stride)).ok_or(solidcraft_ui_text::tr(msg!("render.error_geometry_size")))?;
         let count = if pbr {
             &mut self.pbr
         } else if glass {
@@ -3009,7 +3022,7 @@ impl PreviewUploadPlan {
         } else {
             &mut self.tris
         };
-        *count = count.checked_add(bytes).ok_or(solidcraft_ui_text::tr("render.error_geometry_size"))?;
+        *count = count.checked_add(bytes).ok_or(solidcraft_ui_text::tr(msg!("render.error_geometry_size")))?;
         admit_geometry(self.bytes()? as u64, limit as u64)
     }
 }
@@ -3058,28 +3071,28 @@ fn preview_upload_plan_with(
     limit: usize,
 ) -> Result<PreviewUploadPlan, String> {
     if scene.meshes.len() > solidcraft_engine::render::job::MAX_CPU_BODIES {
-        return Err(solidcraft_ui_text::tr("render.error_body_bound").into());
+        return Err(solidcraft_ui_text::tr(msg!("render.error_body_bound")).into());
     }
     let mut plan = PreviewUploadPlan::default();
     let mut shared = std::collections::HashSet::new();
     for (i, body) in scene.meshes.iter().enumerate() {
         plan.source_triangles =
-            plan.source_triangles.checked_add(body.mesh.triangles.len()).ok_or(solidcraft_ui_text::tr("render.error_triangle_count"))?;
+            plan.source_triangles.checked_add(body.mesh.triangles.len()).ok_or(solidcraft_ui_text::tr(msg!("render.error_triangle_count")))?;
         if plan.source_triangles > solidcraft_engine::render::job::MAX_CPU_TRIANGLES {
-            return Err(solidcraft_ui_text::tr("render.error_triangle_bound").into());
+            return Err(solidcraft_ui_text::tr(msg!("render.error_triangle_bound")).into());
         }
         if body.faces.len() > 262_144 {
-            return Err(solidcraft_ui_text::tr("render.error_face_cap").into());
+            return Err(solidcraft_ui_text::tr(msg!("render.error_face_cap")).into());
         }
         if !body.opacity.is_finite()
             || !(0.0..=1.0).contains(&body.opacity)
             || body.faces.iter().any(|face| !face.opacity.is_finite() || !(0.0..=1.0).contains(&face.opacity))
         {
-            return Err(solidcraft_ui_text::tr("render.error_opacity").into());
+            return Err(solidcraft_ui_text::tr(msg!("render.error_opacity")).into());
         }
         let looks: std::collections::BTreeMap<_, _> = body.faces.iter().map(|face| (face.face, face)).collect();
         if looks.len() != body.faces.len() {
-            return Err(solidcraft_ui_text::tr("render.error_duplicate_face").into());
+            return Err(solidcraft_ui_text::tr(msg!("render.error_duplicate_face")).into());
         }
         if instanced.get(i).copied().unwrap_or(false)
             && let Some(Some((source, _))) = placements.get(i)
@@ -3094,7 +3107,7 @@ fn preview_upload_plan_with(
                 (face.opacity, face.surface.is_some() && face.transmission.is_none())
             });
             if pbr && opacity != 1.0 {
-                return Err(solidcraft_ui_text::tr("render.error_pbr_opacity").into());
+                return Err(solidcraft_ui_text::tr(msg!("render.error_pbr_opacity")).into());
             }
             if opacity > 0.0 {
                 plan.add(pbr, opacity < 0.999, 1, usize::MAX)?;
@@ -3165,7 +3178,7 @@ fn shared_tris(mesh: &Arc<solidcraft_engine::geom::Mesh>) -> Result<Arc<crate::g
         _ => false,
     };
     if !mesh.triangles.iter().all(|t| t.iter().all(|&i| finite(i))) {
-        return Err(solidcraft_ui_text::tr("render.error_product_triangle").into());
+        return Err(solidcraft_ui_text::tr(msg!("render.error_product_triangle")).into());
     }
     Ok(Arc::new(crate::gpu::SharedTris::new(mesh)))
 }
@@ -3361,18 +3374,18 @@ pub fn gpu_scene_cached(
                         for (k, i) in triangle.iter().enumerate() {
                             let (Some(position), Some(normal)) = (b.body.mesh.positions.get(*i as usize), b.body.mesh.normals.get(*i as usize))
                             else {
-                                return Err(solidcraft_ui_text::tr("render.error_product_triangle").into());
+                                return Err(solidcraft_ui_text::tr(msg!("render.error_product_triangle")).into());
                             };
                             // PBR shades with unit normals; plain colours keep the mesh's.
                             let normal = if class == TriClass::Pbr {
                                 solidcraft_viewport::surface::unit_direction(*normal)
-                                    .map_err(|_| solidcraft_ui_text::tr("render.error_surface_normals").to_string())?
+                                    .map_err(|_| solidcraft_ui_text::tr(msg!("render.error_surface_normals")).to_string())?
                             } else {
                                 *normal
                             };
                             let (position, normal) = (position.to_f32(), normal.to_f32());
                             if !position.iter().chain(&normal).all(|v| v.is_finite()) {
-                                return Err(solidcraft_ui_text::tr("render.error_product_triangle").into());
+                                return Err(solidcraft_ui_text::tr(msg!("render.error_product_triangle")).into());
                             }
                             (p[k], n[k]) = (position, normal);
                         }
@@ -3426,7 +3439,7 @@ pub fn gpu_scene_cached(
         });
         let rows = [0, 1, 2].map(|r| [m[0][r] as f32, m[1][r] as f32, m[2][r] as f32, m[3][r] as f32]);
         if !rows.iter().flatten().all(|v| v.is_finite()) {
-            return Err(solidcraft_ui_text::tr("render.error_product_placement").into());
+            return Err(solidcraft_ui_text::tr(msg!("render.error_product_placement")).into());
         }
         if let Some(mesh) = gpu.instanced.get_mut(at) {
             mesh.place(rows, b.slots.body);
@@ -3435,7 +3448,7 @@ pub fn gpu_scene_cached(
     }
     cache.shared.retain(|k, _| shared_used.contains(k));
     if block_bytes != plan.block_bytes()? {
-        return Err(solidcraft_ui_text::tr("render.error_vertex_packing").into());
+        return Err(solidcraft_ui_text::tr(msg!("render.error_vertex_packing")).into());
     }
     let mut materials = cache.materials.clone();
     materials.truncate(cache.arena.entries().len());
@@ -3692,7 +3705,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
     }
     let result = (|| -> Result<(), String> {
         if app.viewport.gpu.is_none() {
-            return Err(solidcraft_ui_text::tr("render.error_gpu_preview").into());
+            return Err(solidcraft_ui_text::tr(msg!("render.error_gpu_preview")).into());
         }
         let ppp = ui.ctx().pixels_per_point();
         let setup = &app.render_workspace.view.draft;
@@ -3701,7 +3714,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
                 || setup.environment_rotation != 0.0
                 || setup.environment_intensity != 1.0)
         {
-            return Err(solidcraft_ui_text::tr("render.error_fixed_preview").into());
+            return Err(solidcraft_ui_text::tr(msg!("render.error_fixed_preview")).into());
         }
         // A 4K or 5K viewport is past the preview's pixel budget: draw it smaller and filter it
         // up into the viewport rather than refusing the frame.
@@ -3719,7 +3732,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
         };
         solidcraft_engine::render::resolve_request(&[app.session.render_backend()], &request).map_err(|e| e.to_string())?;
         if app.session.model.is_stale() {
-            return Err(solidcraft_ui_text::tr("render.error_finish_gesture").into());
+            return Err(solidcraft_ui_text::tr(msg!("render.error_finish_gesture")).into());
         }
         let (doc, world, visibility) = preview_signature(app);
         let budget = preferred_geometry_budget(app.render_workspace.geometry_budget, app.preferences.render_previous_geometry_budget);
@@ -3735,15 +3748,15 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
         if app.render_workspace.key != previous_key {
             ui.ctx().request_repaint();
         }
-        let scene = app.render_workspace.scene.as_ref().ok_or(solidcraft_ui_text::tr("render.error_no_scene"))?;
+        let scene = app.render_workspace.scene.as_ref().ok_or(solidcraft_ui_text::tr(msg!("render.error_no_scene")))?;
         if let Some(error) = app.render_workspace.upload_error.lock().ok().and_then(|e| e.clone()) {
             return Err(upload_refusal(app.render_workspace.preview_upload_bytes.unwrap_or(0) as u64, &error));
         }
         request.features = scene.required_features();
         solidcraft_engine::render::resolve_request(&[app.session.render_backend()], &request).map_err(|e| e.to_string())?;
-        let key = app.render_workspace.key.ok_or(solidcraft_ui_text::tr("render.error_no_geometry"))?;
+        let key = app.render_workspace.key.ok_or(solidcraft_ui_text::tr(msg!("render.error_no_geometry")))?;
         if scene.bounds.is_empty() {
-            return Err(solidcraft_ui_text::tr("render.error_visible_solid").into());
+            return Err(solidcraft_ui_text::tr(msg!("render.error_visible_solid")).into());
         }
         let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(camera.target);
         let eye = camera.eye();
@@ -3886,7 +3899,7 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
             let width = reply["width"].as_u64().and_then(|v| u32::try_from(v).ok()).ok_or("invalid output width")?;
             let height = reply["height"].as_u64().and_then(|v| u32::try_from(v).ok()).ok_or("invalid output height")?;
             if cpu::size_selection_limits(app).fit(u64::from(width), u64::from(height), None) != Some((u64::from(width), u64::from(height))) {
-                return Err(app.tr("render.output_over_budget").into());
+                return Err(app.tr(msg!("render.output_over_budget")).into());
             }
             app.render_workspace.view.inspector.resolution.custom = reply["custom"].as_bool().unwrap_or(false);
             app.render_workspace.view.draft.width = width;
@@ -3896,13 +3909,13 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
         "render.result.view" | "render.result.close" => {
             let view = reply["view"].as_str().ok_or("invalid result view")?;
             if view == "actual" && reduced_display(app) {
-                return Err(app.tr("render.result_reduced_display").into());
+                return Err(app.tr(msg!("render.result_reduced_display")).into());
             }
             let mask_job = if view == "denoise_mask" {
                 let job = serde_json::from_value(reply["job"].clone()).map_err(|error| format!("invalid guide mask job identity: {error}"))?;
                 sync_results(app);
                 if app.render_workspace.view.completed != Some(job) {
-                    return Err(app.tr("render.error_provisional_identity").to_string());
+                    return Err(app.tr(msg!("render.error_provisional_identity")).to_string());
                 }
                 Some(job)
             } else {
@@ -3937,7 +3950,7 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
         }
         "render.result.copy" => {
             if quality::mask_active(app) {
-                return Err(app.tr("render.denoise_mask_copy_help").to_string());
+                return Err(app.tr(msg!("render.denoise_mask_copy_help")).to_string());
             }
             let job = serde_json::from_value(reply["frame"]["job"].clone()).map_err(|e| e.to_string())?;
             let frame = app
@@ -3946,7 +3959,7 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
                 .map_err(|e| e.to_string())?
                 .frame()
                 .map_err(|e| e.to_string())?
-                .ok_or_else(|| app.tr("render.ribbon_no_result").to_string())?;
+                .ok_or_else(|| app.tr(msg!("render.ribbon_no_result")).to_string())?;
             let image = decode_render_image(frame.png(), frame.info.width, frame.info.height, RenderLimits::default(), 4096)?;
             app.render_workspace.clipboard_image = Some(image);
         }
@@ -3968,18 +3981,21 @@ pub(crate) fn show_shader_preparation(app: &mut SolveApp, ctx: &egui::Context) -
         return false;
     }
     let mut cancel = false;
-    crate::ui_kit::Window::new(egui::Id::unique("render_shader_preparation"), "", app.tr("render.image_preparing")).show_passive_body(ctx, |ui| {
-        let warning = ui.label(app.tr("render.gpu_job_shader_wait"));
-        crate::scenario::publish_rect("render:shader-preparation:warning", warning.rect);
-        ui.horizontal(|ui| {
-            let spinner = ui.spinner();
-            crate::scenario::publish_rect("render:shader-preparation:spinner", spinner.rect);
-            ui.label(mmss(handle.elapsed()));
-        });
-        let button = crate::ui_kit::button(ui, app.tr("cmd.render_cancel"), crate::ui_kit::Button::Normal);
-        crate::scenario::publish_target("render:shader-preparation:cancel", button.rect);
-        cancel = button.clicked();
-    });
+    crate::ui_kit::Window::new(egui::Id::unique("render_shader_preparation"), "", app.tr(msg!("render.image_preparing"))).show_passive_body(
+        ctx,
+        |ui| {
+            let warning = ui.label(app.tr(msg!("render.gpu_job_shader_wait")));
+            crate::scenario::publish_rect("render:shader-preparation:warning", warning.rect);
+            ui.horizontal(|ui| {
+                let spinner = ui.spinner();
+                crate::scenario::publish_rect("render:shader-preparation:spinner", spinner.rect);
+                ui.label(mmss(handle.elapsed()));
+            });
+            let button = crate::ui_kit::button(ui, app.tr(msg!("cmd.render_cancel")), crate::ui_kit::Button::Normal);
+            crate::scenario::publish_target("render:shader-preparation:cancel", button.rect);
+            cancel = button.clicked();
+        },
+    );
     if cancel && let Err(error) = app.run("render.cancel", json!({"job": handle.id()})) {
         app.set_status(error, true);
     }
@@ -3993,8 +4009,8 @@ pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) ->
         return true;
     }
     if live::final_pending(app) {
-        crate::ui_kit::text(ui, app.tr("render.live.final_waiting"), crate::ui_kit::Text::Inline);
-        let cancel = crate::ui_kit::button(ui, app.tr("cmd.render_cancel"), crate::ui_kit::Button::Normal);
+        crate::ui_kit::text(ui, app.tr(msg!("render.live.final_waiting")), crate::ui_kit::Text::Inline);
+        let cancel = crate::ui_kit::button(ui, app.tr(msg!("cmd.render_cancel")), crate::ui_kit::Button::Normal);
         crate::scenario::publish_target("render:progress-cancel", cancel.rect);
         if cancel.clicked() {
             app.start("render.cancel");

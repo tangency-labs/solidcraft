@@ -83,7 +83,7 @@ pub(crate) fn stage_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             && !crate::render_workspace::result_active(app)
             && !crate::render_workspace::comparison_active(app)
         {
-            let settings = ui_kit::StageBar::icon_action(ui, "settings", app.tr("render.live.source_settings_help"));
+            let settings = ui_kit::StageBar::icon_action(ui, "settings", app.tr(msg!("render.live.source_settings_help")));
             crate::scenario::publish_target("render:preview:settings", settings.rect);
             if settings.clicked() {
                 let _ = app.run("view.render_select", serde_json::json!({"kind":"output"}));
@@ -98,14 +98,14 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
     use crate::render_workspace::Stage;
     match app.render_workspace.view.stage {
         Stage::Look => {
-            ui_kit::StageBar::caption(ui, app.tr("render.pick_label"));
+            ui_kit::StageBar::caption(ui, app.tr(msg!("render.pick_label")));
             let modes = ["body", "face", "component"];
             let mut selected = modes.iter().position(|mode| *mode == app.pick_mode()).unwrap_or(0);
             let pick = ui.add_enabled_ui(!crate::render_workspace::result_active(app), |ui| {
                 if ui_kit::segmented(
                     ui,
                     &mut selected,
-                    &[app.tr("render.pick_body"), app.tr("render.pick_face"), app.tr("render.pick_component")],
+                    &[app.tr(msg!("render.pick_body")), app.tr(msg!("render.pick_face")), app.tr(msg!("render.pick_component"))],
                     ui_kit::Segments {
                         targets: &["render:pick:body", "render:pick:face", "render:pick:component"],
                         icons: &["body", "surface", "component"],
@@ -120,7 +120,7 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
             crate::scenario::publish_target("render:pick", pick.response.rect);
-            pick.response.backing_on_hover_text(app.tr("render.pick_help"));
+            pick.response.backing_on_hover_text(app.tr(msg!("render.pick_help")));
             ui_kit::StageBar::tool_gap(ui);
             for (id, label, icon) in
                 [("appearance.paint", "render.paint_label", "appearance"), ("appearance.pick_up", "render.pick_up_label", "select")]
@@ -149,15 +149,15 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let note = ui_kit::StageBar::note_bounded(ui, &label, available).backing_on_hover_text(format!("{label}\n\n{}", app.tr(help)));
                 crate::scenario::publish_rect("render:preview_note", note.rect);
             }
-            if ui_kit::StageBar::icon_action(ui, "camera", app.tr("render.preview_image_settings_help")).clicked() {
+            if ui_kit::StageBar::icon_action(ui, "camera", app.tr(msg!("render.preview_image_settings_help"))).clicked() {
                 app.start("render.settings.get");
             }
         }
         Stage::Light => {
             // Light geometry is authored in world coordinates, including the implicit studio.
             // This describes the existing rig; it is not an editable coordinate-frame setting.
-            let note = ui_kit::StageBar::note_bounded(ui, app.tr("render.light_space_world"), ui.available_width())
-                .backing_on_hover_text(app.tr("render.light_space_world_help"));
+            let note = ui_kit::StageBar::note_bounded(ui, app.tr(msg!("render.light_space_world")), ui.available_width())
+                .backing_on_hover_text(app.tr(msg!("render.light_space_world_help")));
             crate::scenario::publish_rect("render:light_space_note", note.rect);
         }
         Stage::Frame => {
@@ -165,7 +165,7 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
             if ui_kit::segmented(
                 ui,
                 &mut projection,
-                &[app.tr("render.perspective"), app.tr("render.stage_orthographic")],
+                &[app.tr(msg!("render.perspective")), app.tr(msg!("render.stage_orthographic"))],
                 ui_kit::Segments { intrinsic: true, ..Default::default() },
             ) && let Err(error) = crate::render_workspace::stage_projection(app, projection == 0)
             {
@@ -173,7 +173,7 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             if let Some(command) = solidcraft_engine::find_command("render.settings.set") {
                 let info = crate::render_workspace::interactive_command_info(app, command);
-                let response = ui_kit::compact_icon_label_button(ui, app.tr("render.shots_save"), command.icon, info.enabled);
+                let response = ui_kit::compact_icon_label_button(ui, app.tr(msg!("render.shots_save")), command.icon, info.enabled);
                 crate::scenario::publish_target("render:stage:save_shot", response.rect);
                 if response.clicked() {
                     app.start(command.id);
@@ -243,7 +243,7 @@ fn focus_exit(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let position = bounds.left_top() + vec2(tokens.space_8, 0.0);
     let chip = Container::navigation_card(ui.ctx(), egui::Id::unique(ID), position, egui::Align2::LEFT_TOP, |ui| {
-        let response = ui_kit::choice_chip(ui, ID, app.tr("render.exit_focus"), false);
+        let response = ui_kit::choice_chip(ui, ID, app.tr(msg!("render.exit_focus")), false);
         crate::scenario::publish_target(ID, response.rect);
         if response.clicked() {
             let _ = app.run("view.render_focus", serde_json::json!({"on":false}));

@@ -48,7 +48,7 @@ fn kind_label(kind: &str) -> &'static str {
 fn report_time(r: &Summary) -> String {
     let time = r.time.replace('T', " ");
     let time = time.trim_end_matches('Z');
-    if r.kind == "unclean_exit" { solidcraft_ui_text::format("crash.detected_time", &[("time", time)]) } else { format!("{time} UTC") }
+    if r.kind == "unclean_exit" { msg!("crash.detected_time", time = time).tr() } else { format!("{time} UTC") }
 }
 
 fn report_heading(r: &Summary) -> String {
@@ -67,7 +67,7 @@ pub fn announce(app: &mut SolveApp, fresh: &[Summary]) {
     app.crashes.open = true;
     app.crashes.refresh();
     let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
-    app.set_status(locale.text("crash.previous_session"), true);
+    app.set_status(locale.text(msg!("crash.previous_session")), true);
 }
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
@@ -78,15 +78,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut delete: Option<Option<String>> = None;
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_crash_reports"), "bug_report", solidcraft_ui_text::tr_label("Crash Reports"))
         .cards(2.0)
-        .actions("", solidcraft_ui_text::tr("ui.close"), None)
+        .actions("", solidcraft_ui_text::tr(msg!("ui.close")), None)
         .show(ctx, true, |ui| {
             ui.spacing_mut().item_spacing.y = solidcraft_theme::Tokens::get().space_10;
-            let intro = ui_kit::text(ui, solidcraft_ui_text::tr("crash.intro"), ui_kit::Text::Hint("intro"));
+            let intro = ui_kit::text(ui, solidcraft_ui_text::tr(msg!("crash.intro")), ui_kit::Text::Hint("intro"));
             crate::scenario::publish_rect("dialog:note:intro", intro.rect);
             if let Some(d) = app.crashes.dir.clone() {
                 // A long path is cut short (hover shows it all): it must not widen the card.
                 ui_kit::path_chip(ui, &d, |ui| {
-                    if ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("crash.copy_folder"), "copy", true, false).clicked() {
+                    if ui_kit::icon_label_button(ui, solidcraft_ui_text::tr(msg!("crash.copy_folder")), "copy", true, false).clicked() {
                         ctx.copy_text(d.clone());
                     }
                 });
@@ -112,20 +112,22 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 ui.spacing_mut().item_spacing.y = solidcraft_theme::Tokens::get().space_6;
                                 ui.add_space(solidcraft_theme::Tokens::get().space_10);
                                 ui_kit::report_header(ui, kind_label(&r.kind), r.count, &report_time(r), &title, |ui| {
-                                    if ui_kit::bin_button(ui, solidcraft_ui_text::tr("ui.delete")).clicked() {
+                                    if ui_kit::bin_button(ui, solidcraft_ui_text::tr(msg!("ui.delete"))).clicked() {
                                         delete = Some(Some(r.id.clone()));
                                     }
-                                    ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("crash.copy_path"), "copy", true, false)
+                                    ui_kit::icon_label_button(ui, solidcraft_ui_text::tr(msg!("crash.copy_path")), "copy", true, false)
                                         .clicked()
                                         .then(|| ctx.copy_text(r.path.clone()));
-                                    if ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("crash.report"), "bug_report", true, false).clicked() {
+                                    if ui_kit::icon_label_button(ui, solidcraft_ui_text::tr(msg!("crash.report")), "bug_report", true, false)
+                                        .clicked()
+                                    {
                                         report = Some(r.id.clone());
                                     }
                                 });
                                 let mut detail = r.command.clone().unwrap_or_default();
                                 if r.replayable {
                                     let sep = if detail.is_empty() { "" } else { " · " };
-                                    detail = format!("{detail}{sep}{}", solidcraft_ui_text::tr("crash.replayable"));
+                                    detail = format!("{detail}{sep}{}", solidcraft_ui_text::tr(msg!("crash.replayable")));
                                 }
                                 if !detail.is_empty() {
                                     ui_kit::text(ui, &detail, ui_kit::Text::MonoNote(&format!("detail:{}", r.id)));
@@ -134,7 +136,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 if r.kind == "unclean_exit" {
                                     ui_kit::text(
                                         ui,
-                                        solidcraft_ui_text::tr("crash.unclean_explanation"),
+                                        solidcraft_ui_text::tr(msg!("crash.unclean_explanation")),
                                         ui_kit::Text::Note(&format!("unclean:{}", r.id)),
                                     );
                                 }
@@ -167,7 +169,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         && let Some(dir) = app.crashes.dir_path()
     {
         let n = crash::clear(&dir, which.as_deref());
-        app.crashes.note = solidcraft_ui_text::format("crash.deleted", &[("count", &n.to_string())]);
+        app.crashes.note = msg!("crash.deleted", count = &n.to_string()).tr();
         app.crashes.refresh();
     }
 }

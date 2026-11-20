@@ -55,10 +55,7 @@ pub(crate) fn degrees(value: f64, decimals: u8) -> String {
 pub(crate) fn lines(app: &SolveApp) -> (String, String) {
     let a = app.cam.view_angles();
     let d = app.preferences.angle_decimals;
-    let angles = solidcraft_ui_text::format(
-        "ui.view_angles_readout",
-        &[("pitch", &degrees(a.pitch, d)), ("yaw", &degrees(a.yaw, d)), ("roll", &degrees(a.roll, d))],
-    );
+    let angles = msg!("ui.view_angles_readout", pitch = &degrees(a.pitch, d), yaw = &degrees(a.yaw, d), roll = &degrees(a.roll, d)).tr();
     let projection = if app.perspective_view() { "ui.view_angles_persp" } else { "ui.view_angles_ortho" };
     (angles, solidcraft_ui_text::tr(projection).to_string())
 }
@@ -155,7 +152,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    let response = response.backing_on_hover_text(solidcraft_ui_text::tr("ui.view_angles_help"));
+    let response = response.backing_on_hover_text(solidcraft_ui_text::tr(msg!("ui.view_angles_help")));
     if response.clicked() {
         draft = if draft.is_some() { None } else { Some(app.cam.view_angles()) };
     }
@@ -173,7 +170,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         let frame = Container::popup_frame(ui.style());
         Container::show_backing(ui, frame, |ui| {
             ui.set_width(260.0);
-            ui.label(egui::RichText::new(solidcraft_ui_text::tr("ui.view_angles")).semibold().color(t.text).size(t.font_caption));
+            ui.label(egui::RichText::new(solidcraft_ui_text::tr(msg!("ui.view_angles"))).semibold().color(t.text).size(t.font_caption));
             for (id, axis) in [("ui.view_angles_pitch", "pitch"), ("ui.view_angles_yaw", "yaw"), ("ui.view_angles_roll", "roll")] {
                 let locked = locked_angle(app, axis);
                 let axis_name = solidcraft_ui_text::tr(id);
@@ -187,7 +184,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                     ui.horizontal(|ui| {
                         ui.add_enabled_ui(!locked, |ui| ui_kit::angle_field(ui, &mut value));
                         let zero = ui_kit::button(ui, "0°", ui_kit::Button::Enabled(!locked))
-                            .backing_on_hover_text(solidcraft_ui_text::format("ui.view_angles_zero", &[("axis", axis_name)]));
+                            .backing_on_hover_text(msg!("ui.view_angles_zero", axis = axis_name).tr());
                         zeroed = zero.clicked();
                         crate::scenario::publish_target(&format!("view_angles:zero:{axis}"), zero.rect);
                         let mut lock = locked;
@@ -213,7 +210,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                     apply(app, typed);
                 }
             }
-            ui_kit::text(ui, solidcraft_ui_text::tr("ui.view_angles_convention"), ui_kit::Text::Hint("view_angles"));
+            ui_kit::text(ui, solidcraft_ui_text::tr(msg!("ui.view_angles_convention")), ui_kit::Text::Hint("view_angles"));
             applied = ui_kit::primary_button(ui, "Apply").clicked();
         });
     });

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use egui::{ColorImage, Id, Ui, vec2};
 use serde_json::{Value, json};
-use solidcraft_ui_text::{format, tr};
+use solidcraft_ui_text::tr;
 
 use super::Draft;
 use crate::tickets::{self, Outcome, api, payload};
@@ -411,7 +411,7 @@ fn template(label: &str, failing: &payload::Failing) -> String {
             s.push_str(&format!("**Settings:** {}\n", key.join(", ")));
         }
     }
-    s.push_str(&format!("\n{}\n", tr("report.trying_to_do")));
+    s.push_str(&format!("\n{}\n", tr(msg!("report.trying_to_do"))));
     s
 }
 
@@ -512,16 +512,16 @@ fn model_box(ticket: &mut TicketDraft, ui: &mut Ui) {
         return;
     };
     check(ui, "report.design", &mut ticket.ticks.design);
-    note(ui, "report.design_note", tr("report.design_note"));
-    note(ui, "report.design_file", &format("report.design_file", &[("name", &name), ("size", &payload::size_text(bytes.len()))]));
+    note(ui, "report.design_note", tr(msg!("report.design_note")));
+    note(ui, "report.design_file", &msg!("report.design_file", name = &name, size = &payload::size_text(bytes.len())).tr());
     if let Some(id) = ticket.evidence.design_from {
         note(ui, "report.design_from", tr(id));
     }
     if !ticket.ticks.design {
         if ticket.from_failure {
-            ui_kit::text(ui, tr("report.design_warning"), ui_kit::Text::Error("report.design_warning"));
+            ui_kit::text(ui, tr(msg!("report.design_warning")), ui_kit::Text::Error("report.design_warning"));
         } else {
-            note(ui, "report.design_hint", tr("report.design_hint"));
+            note(ui, "report.design_hint", tr(msg!("report.design_hint")));
         }
     }
 }
@@ -538,30 +538,30 @@ fn attachments(app: &SolveApp, draft: &mut Draft, ticket: &mut TicketDraft, ui: 
     } else if !draft.note.is_empty() {
         note(ui, "report.screenshot_state", &draft.note);
     }
-    let r = ui_kit::button(ui, tr("report.retake"), ui_kit::Button::Enabled(app.tickets.sending.is_none()));
+    let r = ui_kit::button(ui, tr(msg!("report.retake")), ui_kit::Button::Enabled(app.tickets.sending.is_none()));
     crate::scenario::publish_target("report:retake", r.rect);
     retake |= r.clicked();
 
     let ev = &ticket.evidence;
     check(ui, "report.log", &mut ticket.ticks.log);
     if ev.log.is_empty() {
-        note(ui, "report.log_note", tr("report.log_empty"));
+        note(ui, "report.log_note", tr(msg!("report.log_empty")));
     } else {
-        note(ui, "report.log_note", &format("report.log_note", &[("count", &ev.log.len().to_string())]));
-        shown(ui, "report-log", tr("report.log_show"), &ev.log.join("\n"));
+        note(ui, "report.log_note", &msg!("report.log_note", count = &ev.log.len().to_string()).tr());
+        shown(ui, "report-log", tr(msg!("report.log_show")), &ev.log.join("\n"));
     }
 
     check(ui, "report.system", &mut ticket.ticks.system);
-    note(ui, "report.system_note", tr("report.system_note"));
-    shown(ui, "report-system", tr("report.system_show"), &ev.system);
+    note(ui, "report.system_note", tr(msg!("report.system_note")));
+    shown(ui, "report-system", tr(msg!("report.system_show")), &ev.system);
 
     check(ui, "report.repro", &mut ticket.ticks.repro);
-    note(ui, "report.repro_note", tr("report.repro_note"));
-    shown(ui, "report-repro", tr("report.repro_show"), &payload::repro_text(ev, ticket.ticks.design && ev.design.is_some()));
+    note(ui, "report.repro_note", tr(msg!("report.repro_note")));
+    shown(ui, "report-repro", tr(msg!("report.repro_show")), &payload::repro_text(ev, ticket.ticks.design && ev.design.is_some()));
 
     if ev.crash.is_some() {
         check(ui, "report.crash", &mut ticket.ticks.crash);
-        note(ui, "report.crash_note", tr("report.crash_note"));
+        note(ui, "report.crash_note", tr(msg!("report.crash_note")));
     }
     retake
 }
@@ -574,7 +574,7 @@ pub fn title_or_default(title: &str, description: &str) -> String {
     }
     let first = description.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("**")).unwrap_or_default();
     let first = first.trim_start_matches('#').trim();
-    if first.is_empty() { tr("report.default_title").to_string() } else { readable(first, 120) }
+    if first.is_empty() { tr(msg!("report.default_title")).to_string() } else { readable(first, 120) }
 }
 
 /// The form as it goes: the question the description ends with dropped when it was left
@@ -603,7 +603,7 @@ pub fn readable(text: &str, max: usize) -> String {
 /// The description without the "What were you trying to do?" line it started with, when nothing
 /// was written after it.
 pub fn without_unanswered(description: &str) -> String {
-    let question = tr("report.trying_to_do").trim();
+    let question = tr(msg!("report.trying_to_do")).trim();
     let trimmed = description.trim_end();
     match trimmed.rsplit_once('\n') {
         Some((before, last)) if last.trim() == question => format!("{}\n", before.trim_end()),
@@ -641,7 +641,7 @@ fn link_with_copy(ui: &mut Ui, url: &str) {
     let shown = url.split('#').next().unwrap_or(url).trim_start_matches("https://");
     let r = ui.hyperlink_to(shown, url);
     crate::scenario::publish_target("report:link", r.rect);
-    let r = ui_kit::button(ui, tr("report.copy_link"), ui_kit::Button::Normal);
+    let r = ui_kit::button(ui, tr(msg!("report.copy_link")), ui_kit::Button::Normal);
     crate::scenario::publish_target("report:copy_link", r.rect);
     if r.clicked() {
         ui.ctx().copy_text(url.to_string());
@@ -656,11 +656,11 @@ fn after_send(app: &mut SolveApp, ui: &mut Ui, id: u64, phase: Phase) {
         Phase::Sending { done, total } => {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui_kit::text(ui, tr("report.sending_title"), ui_kit::Text::Heading("report.sending_title"));
+                ui_kit::text(ui, tr(msg!("report.sending_title")), ui_kit::Text::Heading("report.sending_title"));
             });
-            note(ui, "report.sending", &format("report.sending", &[("done", &payload::size_text(done)), ("total", &payload::size_text(total))]));
+            note(ui, "report.sending", &msg!("report.sending", done = &payload::size_text(done), total = &payload::size_text(total)).tr());
             ui_kit::progress(ui, "report-progress", done as f32 / total as f32);
-            let r = ui_kit::button(ui, tr("report.cancel_send"), ui_kit::Button::Normal);
+            let r = ui_kit::button(ui, tr(msg!("report.cancel_send")), ui_kit::Button::Normal);
             crate::scenario::publish_target("report:cancel_send", r.rect);
             if r.clicked() {
                 tickets::cancel(app);
@@ -668,28 +668,28 @@ fn after_send(app: &mut SolveApp, ui: &mut Ui, id: u64, phase: Phase) {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
         }
         Phase::Opened(url) => {
-            ui_kit::text(ui, tr("report.thanks"), ui_kit::Text::Heading("report.thanks"));
-            note(ui, "report.opened", tr("report.opened"));
+            ui_kit::text(ui, tr(msg!("report.thanks")), ui_kit::Text::Heading("report.thanks"));
+            note(ui, "report.opened", tr(msg!("report.opened")));
             link_with_copy(ui, &url);
-            let r = ui_kit::button(ui, tr("report.open_again"), ui_kit::Button::Normal);
+            let r = ui_kit::button(ui, tr(msg!("report.open_again")), ui_kit::Button::Normal);
             crate::scenario::publish_target("report:open_again", r.rect);
             if r.clicked() {
                 ui.ctx().open_url(egui::OpenUrl::new_tab(url));
             }
         }
         Phase::Error { why, kept } => {
-            ui_kit::text(ui, tr("report.error_title"), ui_kit::Text::Heading("report.error_title"));
+            ui_kit::text(ui, tr(msg!("report.error_title")), ui_kit::Text::Heading("report.error_title"));
             ui_kit::text(ui, &why, ui_kit::Text::Error("report.error"));
             if kept {
-                note(ui, "report.kept", tr("report.kept"));
+                note(ui, "report.kept", tr(msg!("report.kept")));
             }
             ui.horizontal_wrapped(|ui| {
-                let r = ui_kit::button(ui, tr("report.retry"), ui_kit::Button::Normal);
+                let r = ui_kit::button(ui, tr(msg!("report.retry")), ui_kit::Button::Normal);
                 crate::scenario::publish_target("report:retry", r.rect);
                 if r.clicked() {
                     tickets::retry(app, id);
                 }
-                let r = ui_kit::button(ui, tr("report.copy_details"), ui_kit::Button::Normal);
+                let r = ui_kit::button(ui, tr(msg!("report.copy_details")), ui_kit::Button::Normal);
                 crate::scenario::publish_target("report:copy_details", r.rect);
                 if r.clicked() {
                     ui.ctx().copy_text(format!(
@@ -718,13 +718,13 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     let current = phase(app, ticket.id);
     let on_form = matches!(current, Phase::Form);
     // Once sent (or sending), the form makes way for how it goes: Send is gone until it closes.
-    let ok = if on_form { tr("report.send") } else { "" };
-    let (closed, action) = ui_kit::Window::new(Id::unique("sc_issue_report"), "bug_report", tr("report.title"))
+    let ok = if on_form { tr(msg!("report.send")) } else { "" };
+    let (closed, action) = ui_kit::Window::new(Id::unique("sc_issue_report"), "bug_report", tr(msg!("report.title")))
         .cards(cards)
         .placed(egui::Align2::CENTER_TOP, egui::pos2(screen.center().x, screen.top() + t.space_16))
         .fields()
         .keep_open_on_escape()
-        .actions(ok, tr("report.close"), None)
+        .actions(ok, tr(msg!("report.close")), None)
         .show(ctx, on_form && app.tickets.sending.is_none(), |ui| {
             if !on_form {
                 after_send(app, ui, ticket.id, current);
@@ -739,9 +739,9 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                     .min_scrolled_height(scroll)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        ui_kit::row(ui, tr("report.type"), |ui| {
+                        ui_kit::row(ui, tr(msg!("report.type")), |ui| {
                             let mut kind = payload::Kind::ALL.iter().position(|k| *k == ticket.form.kind).unwrap_or(0);
-                            let labels = [tr("report.type_bug"), tr("report.type_feature"), tr("report.type_question")];
+                            let labels = [tr(msg!("report.type_bug")), tr(msg!("report.type_feature")), tr(msg!("report.type_question"))];
                             if ui_kit::segmented(
                                 ui,
                                 &mut kind,
@@ -759,7 +759,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                             ui,
                             Id::unique("ticket_report_title"),
                             &mut ticket.form.title,
-                            tr("report.summary_hint"),
+                            tr(msg!("report.summary_hint")),
                             false,
                             payload::MAX_TITLE,
                         );
@@ -767,7 +767,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                         heading(ui, "report.description");
                         let r = ui_kit::text_area(
                             ui,
-                            tr("report.description"),
+                            tr(msg!("report.description")),
                             Id::unique("ticket_report_body"),
                             &mut ticket.form.description,
                             5,
@@ -783,7 +783,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                         ui_kit::divider(ui, "report-attach");
                         retake = attachments(app, draft, &mut ticket, ui);
                         ui_kit::divider(ui, "report-other");
-                        let r = ui.link(tr("report.github_instead"));
+                        let r = ui.link(tr(msg!("report.github_instead")));
                         crate::scenario::publish_target("report:github", r.rect);
                         github = r.clicked();
                     });

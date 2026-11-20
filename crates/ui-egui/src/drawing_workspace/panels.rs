@@ -56,19 +56,19 @@ impl Tool {
 
     pub(super) fn title(self) -> &'static str {
         match self {
-            Self::Base => tr("ui.drawing_panel.base"),
-            Self::Projected => tr("ui.drawing_panel.projected"),
-            Self::Edit(_) => tr("ui.drawing_panel.edit"),
-            Self::Dimension(_) => tr("ui.drawing_panel.dimension"),
-            Self::Note(_) => tr("ui.drawing_panel.note"),
-            Self::PartsList(_) => tr("ui.drawing_panel.parts_list"),
-            Self::Export => tr("ui.drawing_export.title"),
-            Self::Detail => tr("ui.drawing_detail.title"),
+            Self::Base => tr(msg!("ui.drawing_panel.base")),
+            Self::Projected => tr(msg!("ui.drawing_panel.projected")),
+            Self::Edit(_) => tr(msg!("ui.drawing_panel.edit")),
+            Self::Dimension(_) => tr(msg!("ui.drawing_panel.dimension")),
+            Self::Note(_) => tr(msg!("ui.drawing_panel.note")),
+            Self::PartsList(_) => tr(msg!("ui.drawing_panel.parts_list")),
+            Self::Export => tr(msg!("ui.drawing_export.title")),
+            Self::Detail => tr(msg!("ui.drawing_detail.title")),
         }
     }
 }
 
-fn tr(id: &'static str) -> &'static str {
+fn tr(id: impl solidcraft_ui_text::Key<'static>) -> &'static str {
     solidcraft_ui_text::tr(id)
 }
 
@@ -87,7 +87,7 @@ fn segments(ui: &mut egui::Ui, label: &str, mut selected: usize, options: &[&str
 }
 
 pub(super) fn pending(ui: &mut egui::Ui, label: &str) {
-    ui_kit::button(ui, label, ui_kit::Button::Enabled(false)).backing_on_disabled_hover_text(tr("ui.drawing_panel.planned"));
+    ui_kit::button(ui, label, ui_kit::Button::Enabled(false)).backing_on_disabled_hover_text(tr(msg!("ui.drawing_panel.planned")));
 }
 
 fn caption(ui: &mut egui::Ui, id: &'static str) {
@@ -98,7 +98,7 @@ pub(super) fn finish_placement(ui: &mut egui::Ui) -> bool {
     ui.separator();
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui_kit::button(ui, tr("ui.drawing_panel.finish"), Button::Normal).clicked()
+            ui_kit::button(ui, tr(msg!("ui.drawing_panel.finish")), Button::Normal).clicked()
         })
         .inner
     })
@@ -111,11 +111,11 @@ pub(super) fn footer(ui: &mut egui::Ui, tool: Tool) -> bool {
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if matches!(tool, Tool::Base | Tool::Projected) {
-                pending(ui, tr("ui.drawing_panel.finish"));
+                pending(ui, tr(msg!("ui.drawing_panel.finish")));
             } else {
-                pending(ui, tr("ui.heading_ok"));
-                pending(ui, tr("ui.apply"));
-                close = ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
+                pending(ui, tr(msg!("ui.heading_ok")));
+                pending(ui, tr(msg!("ui.apply")));
+                close = ui_kit::button(ui, tr(msg!("ui.cancel")), Button::Normal).clicked();
             }
         });
     });
@@ -137,22 +137,27 @@ pub(super) fn tool_body(app: &SolveApp, ui: &mut egui::Ui, tool: Tool) {
 }
 
 fn base_view(ui: &mut egui::Ui, source: &str, projected: bool) {
-    ui_kit::section_heading(ui, tr("ui.drawing_panel.orientation"));
+    ui_kit::section_heading(ui, tr(msg!("ui.drawing_panel.orientation")));
     ui.add_enabled_ui(false, |ui| {
         if projected {
-            choice(ui, tr("ui.drawing_panel.parent"), 0, &[tr("ui.drawing_panel.none")]);
-            choice(ui, tr("ui.drawing_panel.direction"), 0, &[tr("ui.right"), tr("ui.top"), tr("ui.drawing_panel.left"), tr("ui.bottom")]);
+            choice(ui, tr(msg!("ui.drawing_panel.parent")), 0, &[tr(msg!("ui.drawing_panel.none"))]);
+            choice(
+                ui,
+                tr(msg!("ui.drawing_panel.direction")),
+                0,
+                &[tr(msg!("ui.right")), tr(msg!("ui.top")), tr(msg!("ui.drawing_panel.left")), tr(msg!("ui.bottom"))],
+            );
         } else {
             caption(ui, "ui.drawing_panel.face_pick");
             ui.horizontal_wrapped(|ui| {
                 for (index, label) in [
-                    tr("ui.front"),
-                    tr("ui.top"),
-                    tr("ui.right"),
-                    tr("ui.drawing_panel.left"),
-                    tr("ui.bottom"),
-                    tr("ui.back"),
-                    tr("ui.drawing_panel.iso"),
+                    tr(msg!("ui.front")),
+                    tr(msg!("ui.top")),
+                    tr(msg!("ui.right")),
+                    tr(msg!("ui.drawing_panel.left")),
+                    tr(msg!("ui.bottom")),
+                    tr(msg!("ui.back")),
+                    tr(msg!("ui.drawing_panel.iso")),
                 ]
                 .into_iter()
                 .enumerate()
@@ -160,26 +165,26 @@ fn base_view(ui: &mut egui::Ui, source: &str, projected: bool) {
                     ui_kit::button(ui, label, if index == 0 { Button::SmallSelected } else { Button::Small });
                 }
             });
-            choice(ui, tr("ui.drawing_panel.saved_view"), 0, &[tr("ui.drawing_panel.none")]);
+            choice(ui, tr(msg!("ui.drawing_panel.saved_view")), 0, &[tr(msg!("ui.drawing_panel.none"))]);
         }
-        ui_kit::section_heading(ui, tr("ui.drawing_panel.view"));
-        choice(ui, tr("ui.drawing_panel.model"), 0, &[source]);
+        ui_kit::section_heading(ui, tr(msg!("ui.drawing_panel.view")));
+        choice(ui, tr(msg!("ui.drawing_panel.model")), 0, &[source]);
         scale(ui, None);
-        visual_style(ui, tr("ui.drawing_panel.visual_style"), VisualStyle::VisibleHidden);
+        visual_style(ui, tr(msg!("ui.drawing_panel.visual_style")), VisualStyle::VisibleHidden);
     });
     if !projected {
-        pending(ui, tr("ui.drawing_panel.standard_views"));
+        pending(ui, tr(msg!("ui.drawing_panel.standard_views")));
     }
 }
 
 fn scale(ui: &mut egui::Ui, scale: Option<String>) {
-    let auto = tr("ui.drawing_panel.auto_fit");
+    let auto = tr(msg!("ui.drawing_panel.auto_fit"));
     let presets = [auto, "1:4", "1:2", "1:1", "2:1", "4:1"];
     let shown = scale.as_deref().unwrap_or(auto);
     if let Some(index) = presets.iter().position(|preset| *preset == shown) {
-        choice(ui, tr("ui.scale"), index, &presets);
+        choice(ui, tr(msg!("ui.scale")), index, &presets);
     } else {
-        choice(ui, tr("ui.scale"), 0, &[shown]);
+        choice(ui, tr(msg!("ui.scale")), 0, &[shown]);
     }
 }
 
@@ -212,10 +217,9 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
         .and_then(|id| available.iter().position(|view| *view == id))
         .unwrap_or_default();
     if selected.is_none() && available.len() > 1 {
-        let labels: Vec<_> =
-            (1..=available.len()).map(|number| solidcraft_ui_text::format("ui.drawing_browser_view", &[("number", &number.to_string())])).collect();
+        let labels: Vec<_> = (1..=available.len()).map(|number| msg!("ui.drawing_browser_view", number = &number.to_string()).tr()).collect();
         let labels: Vec<_> = labels.iter().map(String::as_str).collect();
-        ui_kit::choice_row(ui, tr("ui.drawing_panel.view"), "drawing:edit:view", &mut index, &labels);
+        ui_kit::choice_row(ui, tr(msg!("ui.drawing_panel.view")), "drawing:edit:view", &mut index, &labels);
     }
     let selected = selected.or_else(|| available.get(index).copied());
     let resolved = drawing.and_then(|drawing| {
@@ -226,34 +230,34 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
         drawing.resolve_view(view.id).ok().map(|settings| (view.id, settings.scale.value, settings.visual_style.value))
     });
     let Some((view, scale, style)) = resolved else {
-        return ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
+        return ui_kit::button(ui, tr(msg!("ui.cancel")), Button::Normal).clicked();
     };
     let mut edit =
         app.drawing_workspace.view_edit.take().filter(|edit| edit.view == view).unwrap_or_else(|| ViewEdit { view, scale: scale.to_string(), style });
     let styles = VisualStyle::ALL;
     let labels = [
-        tr("ui.drawing_panel.visible"),
-        tr("ui.drawing_panel.hidden"),
-        tr("ui.drawing_panel.shaded"),
-        tr("ui.drawing_panel.shaded_visible"),
-        tr("ui.drawing_panel.shaded_hidden"),
+        tr(msg!("ui.drawing_panel.visible")),
+        tr(msg!("ui.drawing_panel.hidden")),
+        tr(msg!("ui.drawing_panel.shaded")),
+        tr(msg!("ui.drawing_panel.shaded_visible")),
+        tr(msg!("ui.drawing_panel.shaded_hidden")),
     ];
     let mut index = styles.iter().position(|candidate| *candidate == edit.style).unwrap_or_default();
     let (cancel, apply, ok) = super::inset(ui, |ui| {
-        ui_kit::section_heading(ui, tr("ui.drawing_panel.display"));
-        let row = ui_kit::choice_row(ui, tr("ui.drawing_panel.visual_style"), "drawing:edit:style", &mut index, &labels);
+        ui_kit::section_heading(ui, tr(msg!("ui.drawing_panel.display")));
+        let row = ui_kit::choice_row(ui, tr(msg!("ui.drawing_panel.visual_style")), "drawing:edit:style", &mut index, &labels);
         crate::scenario::publish_handle("drawing:edit:style", row.rect.right_center() - egui::vec2(12.0, 0.0));
         if let Some(value) = styles.get(index) {
             edit.style = *value;
         }
-        ui_kit::section_heading(ui, tr("ui.scale"));
-        ui_kit::text_row(ui, tr("ui.scale"), &mut edit.scale, "1:1");
+        ui_kit::section_heading(ui, tr(msg!("ui.scale")));
+        ui_kit::text_row(ui, tr(msg!("ui.scale")), &mut edit.scale, "1:1");
         let valid = edit.scale.trim().parse::<Scale>().is_ok();
         ui.separator();
         ui.horizontal(|ui| {
-            let cancel = ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
-            let apply = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr("ui.apply"), Button::Normal)).inner.clicked();
-            let ok = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr("ui.heading_ok"), Button::Normal)).inner.clicked();
+            let cancel = ui_kit::button(ui, tr(msg!("ui.cancel")), Button::Normal).clicked();
+            let apply = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr(msg!("ui.apply")), Button::Normal)).inner.clicked();
+            let ok = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr(msg!("ui.heading_ok")), Button::Normal)).inner.clicked();
             (cancel, apply, ok)
         })
         .inner
@@ -309,7 +313,7 @@ pub(super) fn dimension_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: 
         Some((kind, item.offset_mm, usize::from(item.decimals), item.override_text.clone().unwrap_or_default()))
     });
     let Some((kind, offset, decimals, text)) = placed else {
-        return super::inset(ui, |ui| ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked());
+        return super::inset(ui, |ui| ui_kit::button(ui, tr(msg!("ui.cancel")), Button::Normal).clicked());
     };
     let mut edit = app.drawing_workspace.dimension_edit.take().filter(|edit| edit.dimension == selected).unwrap_or_else(|| DimensionEdit {
         dimension: selected,
@@ -321,23 +325,23 @@ pub(super) fn dimension_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: 
         ui.add_enabled_ui(false, |ui| {
             segments(
                 ui,
-                tr("ui.drawing_panel.type"),
+                tr(msg!("ui.drawing_panel.type")),
                 kind,
-                &[tr("ui.drawing_panel.linear"), tr("ui.drawing_panel.length"), tr("ui.drawing_panel.angle")],
+                &[tr(msg!("ui.drawing_panel.linear")), tr(msg!("ui.drawing_panel.length")), tr(msg!("ui.drawing_panel.angle"))],
             );
         });
-        ui_kit::section_heading(ui, tr("ui.drawing_panel.layout"));
-        ui_kit::text_row(ui, tr("ui.drawing_panel.offset"), &mut edit.offset, "mm");
+        ui_kit::section_heading(ui, tr(msg!("ui.drawing_panel.layout")));
+        ui_kit::text_row(ui, tr(msg!("ui.drawing_panel.offset")), &mut edit.offset, "mm");
         let labels = ["0", "1", "2", "3", "4", "5", "6"];
         edit.decimals = edit.decimals.min(labels.len() - 1);
-        ui_kit::choice_row(ui, tr("ui.drawing_panel.decimals"), "drawing:dimension:decimals", &mut edit.decimals, &labels);
-        ui_kit::text_row(ui, tr("ui.drawing_panel.text"), &mut edit.text, solidcraft_engine::doc::drawing::dimension::VALUE_TOKEN);
+        ui_kit::choice_row(ui, tr(msg!("ui.drawing_panel.decimals")), "drawing:dimension:decimals", &mut edit.decimals, &labels);
+        ui_kit::text_row(ui, tr(msg!("ui.drawing_panel.text")), &mut edit.text, solidcraft_engine::doc::drawing::dimension::VALUE_TOKEN);
         let valid = offset_mm(&edit.offset).is_some();
         ui.separator();
         ui.horizontal(|ui| {
-            let cancel = ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
-            let apply = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr("ui.apply"), Button::Normal)).inner.clicked();
-            let ok = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr("ui.heading_ok"), Button::Normal)).inner.clicked();
+            let cancel = ui_kit::button(ui, tr(msg!("ui.cancel")), Button::Normal).clicked();
+            let apply = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr(msg!("ui.apply")), Button::Normal)).inner.clicked();
+            let ok = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr(msg!("ui.heading_ok")), Button::Normal)).inner.clicked();
             (cancel, apply, ok)
         })
         .inner
@@ -383,28 +387,28 @@ fn dimension(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, s
     ui.add_enabled_ui(false, |ui| {
         segments(
             ui,
-            tr("ui.drawing_panel.type"),
+            tr(msg!("ui.drawing_panel.type")),
             kind,
-            &[tr("ui.drawing_panel.linear"), tr("ui.drawing_panel.length"), tr("ui.drawing_panel.angle")],
+            &[tr(msg!("ui.drawing_panel.linear")), tr(msg!("ui.drawing_panel.length")), tr(msg!("ui.drawing_panel.angle"))],
         );
-        ui_kit::section_heading(ui, tr("ui.drawing_panel.references"));
+        ui_kit::section_heading(ui, tr(msg!("ui.drawing_panel.references")));
         caption(ui, "ui.drawing_panel.pick_references");
-        ui_kit::section_heading(ui, tr("ui.drawing_panel.layout"));
-        text(ui, tr("ui.drawing_panel.offset"), &format!("{} mm", selected.map_or(0.0, |item| item.offset_mm)));
-        let decimals = [tr("ui.drawing_panel.default"), "0", "1", "2", "3", "4", "5", "6"];
+        ui_kit::section_heading(ui, tr(msg!("ui.drawing_panel.layout")));
+        text(ui, tr(msg!("ui.drawing_panel.offset")), &format!("{} mm", selected.map_or(0.0, |item| item.offset_mm)));
+        let decimals = [tr(msg!("ui.drawing_panel.default")), "0", "1", "2", "3", "4", "5", "6"];
         let precision = selected.map_or(0, |item| usize::from(item.decimals).saturating_add(1).min(decimals.len() - 1));
-        choice(ui, tr("ui.drawing_panel.decimals"), precision, &decimals);
+        choice(ui, tr(msg!("ui.drawing_panel.decimals")), precision, &decimals);
         text(
             ui,
-            tr("ui.drawing_panel.text"),
+            tr(msg!("ui.drawing_panel.text")),
             selected.and_then(|item| item.override_text.as_deref()).unwrap_or(solidcraft_engine::doc::drawing::dimension::VALUE_TOKEN),
         );
     });
     if let Some(drawing) = drawing {
-        ui_kit::section_heading(ui, tr("ui.drawing_panel.dimensions"));
+        ui_kit::section_heading(ui, tr(msg!("ui.drawing_panel.dimensions")));
         for item in drawing.dimensions.iter().filter(|item| drawing.view(item.view).is_some_and(|view| Some(view.sheet) == sheet)) {
             if let Some(value) = item.override_text.as_deref() {
-                ui.label(format!("{value} · ⓘ {}", tr("ui.drawing_panel.overridden")));
+                ui.label(format!("{value} · ⓘ {}", tr(msg!("ui.drawing_panel.overridden"))));
             } else if let Some(value) = item.last_good {
                 ui.label(format!("{value:.precision$}", precision = usize::from(item.decimals)));
             }
@@ -438,18 +442,18 @@ fn parts_list(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, 
     });
     let table = stored.map(|stored| &stored.table).or(fallback.as_ref());
     ui.add_enabled_ui(false, |ui| {
-        choice(ui, tr("ui.drawing_panel.model"), 0, &[source]);
+        choice(ui, tr(msg!("ui.drawing_panel.model")), 0, &[source]);
         segments(
             ui,
-            tr("ui.drawing_panel.heading"),
+            tr(msg!("ui.drawing_panel.heading")),
             usize::from(table.is_some_and(|table| table.heading == Heading::Bottom)),
-            &[tr("ui.top"), tr("ui.bottom")],
+            &[tr(msg!("ui.top")), tr(msg!("ui.bottom"))],
         );
-        text(ui, tr("ui.drawing_panel.row_height"), &format!("{} mm", table.map_or(7.0, |table| table.row_height_mm)));
-        ui_kit::section_heading(ui, tr("ui.drawing_panel.columns"));
+        text(ui, tr(msg!("ui.drawing_panel.row_height")), &format!("{} mm", table.map_or(7.0, |table| table.row_height_mm)));
+        ui_kit::section_heading(ui, tr(msg!("ui.drawing_panel.columns")));
         if let Some(table) = table {
             for column in &table.columns {
-                let mut width = column.width_mm.map_or_else(|| tr("ui.drawing_panel.auto").to_owned(), |value| format!("{value} mm"));
+                let mut width = column.width_mm.map_or_else(|| tr(msg!("ui.drawing_panel.auto")).to_owned(), |value| format!("{value} mm"));
                 ui_kit::row(ui, &column.heading, |ui| {
                     ui.horizontal(|ui| {
                         let mut printed = column.printed;
@@ -460,8 +464,8 @@ fn parts_list(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, 
             }
         }
     });
-    ui_kit::section_heading(ui, tr("ui.drawing_panel.items"));
-    pending(ui, tr("ui.drawing_panel.renumber"));
+    ui_kit::section_heading(ui, tr(msg!("ui.drawing_panel.items")));
+    pending(ui, tr(msg!("ui.drawing_panel.renumber")));
 }
 
 #[derive(Clone)]
@@ -481,9 +485,9 @@ pub(super) fn valid_sheet_name(name: &str) -> bool {
 
 fn size_name(size: PaperSize) -> String {
     match size {
-        PaperSize::AnsiB => tr("ui.drawing_first.tabloid").to_owned(),
-        PaperSize::Letter => tr("ui.drawing_panel.letter").to_owned(),
-        PaperSize::Legal => tr("ui.drawing_panel.legal").to_owned(),
+        PaperSize::AnsiB => tr(msg!("ui.drawing_first.tabloid")).to_owned(),
+        PaperSize::Letter => tr(msg!("ui.drawing_panel.letter")).to_owned(),
+        PaperSize::Legal => tr(msg!("ui.drawing_panel.legal")).to_owned(),
         other => format!("{other:?}"),
     }
 }
@@ -515,10 +519,10 @@ pub(super) fn add_window(app: &mut SolveApp, ctx: &egui::Context, mut form: AddS
     let default_name =
         (drawing.sheets.len() + 1..).map(|n| format!("Sheet {n}")).find(|name| drawing.sheets.iter().all(|sheet| sheet.name != *name))?;
     let ready = valid_sheet_name(&form.name) && form.paper.selected().is_some();
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_drawing_add_sheet"), "plus", tr("ui.drawing_sheets.add"))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_drawing_add_sheet"), "plus", tr(msg!("ui.drawing_sheets.add")))
         .cards(2.5)
         .fields()
-        .actions(tr("ui.drawing_sheets.add"), tr("ui.cancel"), None)
+        .actions(tr(msg!("ui.drawing_sheets.add")), tr(msg!("ui.cancel")), None)
         .show(ctx, ready, |ui| {
             sheet_columns(ui, &mut form.paper, |fields, paper| {
                 let block = match form.title_block {
@@ -527,16 +531,16 @@ pub(super) fn add_window(app: &mut SolveApp, ctx: &egui::Context, mut form: AddS
                     _ => false,
                 };
                 paper_preview(fields, paper, after.border.is_some(), block);
-                ui_kit::text_row(fields, tr("ui.drawing_panel.name"), &mut form.name, &default_name);
+                ui_kit::text_row(fields, tr(msg!("ui.drawing_panel.name")), &mut form.name, &default_name);
                 paper_border(fields, paper, after.border.as_ref());
-                let choices = [tr("ui.drawing_panel.inherit"), tr("ui.drawing_panel.built_in"), tr("ui.drawing_panel.none")];
+                let choices = [tr(msg!("ui.drawing_panel.inherit")), tr(msg!("ui.drawing_panel.built_in")), tr(msg!("ui.drawing_panel.none"))];
                 let inherited = match &after.title_block {
                     Some(block) if *block == *STANDARD_TITLE_BLOCK => choices[1],
                     Some(_) => choices[0],
                     None => choices[2],
                 };
                 let current = [inherited, choices[1], choices[2]].get(form.title_block).copied().unwrap_or(inherited);
-                ui_kit::row(fields, tr("ui.drawing_panel.title_block"), |ui| {
+                ui_kit::row(fields, tr(msg!("ui.drawing_panel.title_block")), |ui| {
                     ui_kit::dropdown_menu(ui, "drawing_add_sheet_block", current, |ui| {
                         for (index, label) in choices.into_iter().enumerate() {
                             if ui_kit::list_picker(ui, &format!("drawing_add_sheet_block_{index}"), label, form.title_block == index).clicked() {
@@ -548,7 +552,7 @@ pub(super) fn add_window(app: &mut SolveApp, ctx: &egui::Context, mut form: AddS
                 });
                 let names = drawing.sheets.iter().map(|sheet| tr("ui.drawing_first.after_named").replace("{name}", &sheet.name)).collect::<Vec<_>>();
                 let names = names.iter().map(String::as_str).collect::<Vec<_>>();
-                ui_kit::choice_row(fields, tr("ui.drawing_first.position"), "drawing_add_sheet_after", &mut form.after, &names);
+                ui_kit::choice_row(fields, tr(msg!("ui.drawing_first.position")), "drawing_add_sheet_after", &mut form.after, &names);
             });
         });
     if closed || action == ui_kit::Action::Cancel {
@@ -614,9 +618,9 @@ impl PaperChoice {
     }
 
     fn show(&mut self, ui: &mut egui::Ui) {
-        ui_kit::section_heading(ui, tr("ui.drawing_panel.paper_size"));
+        ui_kit::section_heading(ui, tr(msg!("ui.drawing_panel.paper_size")));
         let mut labels = SIZES.iter().map(|&size| size_name(size)).collect::<Vec<_>>();
-        labels.push(tr("ui.graphics_custom").to_owned());
+        labels.push(tr(msg!("ui.graphics_custom")).to_owned());
         let mut ids = SIZES.iter().map(|size| format!("drawing:paper-size:{size:?}")).collect::<Vec<_>>();
         ids.push("drawing:paper-size:custom".into());
         let mut captions = Vec::with_capacity(labels.len());
@@ -634,7 +638,7 @@ impl PaperChoice {
                     });
                     long / short
                 } else {
-                    captions.push(tr("ui.drawing_first.any_size").to_owned());
+                    captions.push(tr(msg!("ui.drawing_first.any_size")).to_owned());
                     1.0
                 };
                 ui_kit::AspectTile { id, label, aspect, selected: self.size == index }
@@ -644,11 +648,11 @@ impl PaperChoice {
             self.size = index;
         }
         ui.add_space(Tokens::get().space_16);
-        ui_kit::section_heading(ui, tr("ui.orientation"));
+        ui_kit::section_heading(ui, tr(msg!("ui.orientation")));
         ui_kit::segmented(
             ui,
             &mut self.orientation,
-            &[tr("ui.drawing_first.landscape"), tr("ui.drawing_first.portrait")],
+            &[tr(msg!("ui.drawing_first.landscape")), tr(msg!("ui.drawing_first.portrait"))],
             ui_kit::Segments {
                 workspace_accent: true,
                 targets: &["drawing:orientation:landscape", "drawing:orientation:portrait"],
@@ -656,8 +660,8 @@ impl PaperChoice {
             },
         );
         if self.size == SIZES.len() {
-            ui_kit::text_row(ui, tr("ui.drawing_first.short_side"), &mut self.short, "");
-            ui_kit::text_row(ui, tr("ui.drawing_first.long_side"), &mut self.long, "");
+            ui_kit::text_row(ui, tr(msg!("ui.drawing_first.short_side")), &mut self.short, "");
+            ui_kit::text_row(ui, tr(msg!("ui.drawing_first.long_side")), &mut self.long, "");
         }
     }
 }
@@ -719,10 +723,10 @@ pub(super) fn paper_border(ui: &mut egui::Ui, paper: Option<Paper>, border: Opti
             Some(SheetSize::Standard(size)) => format!("ISO 5457 · {}", size_name(size)),
             _ => "ISO 5457".to_owned(),
         },
-        Some(_) => tr("ui.graphics_custom").to_owned(),
-        None => tr("ui.drawing_panel.none").to_owned(),
+        Some(_) => tr(msg!("ui.graphics_custom")).to_owned(),
+        None => tr(msg!("ui.drawing_panel.none")).to_owned(),
     };
-    ui.add_enabled_ui(false, |ui| choice(ui, tr("ui.drawing_panel.border"), 0, &[&label]));
+    ui.add_enabled_ui(false, |ui| choice(ui, tr(msg!("ui.drawing_panel.border")), 0, &[&label]));
 }
 
 pub(super) struct SheetNotice {
@@ -753,7 +757,7 @@ fn sheet_notice(app: &mut SolveApp, ui: &mut egui::Ui, drawing: &Drawing, sheet:
         return;
     }
     let t = Tokens::get();
-    let message = solidcraft_ui_text::format("ui.drawing_settings.outside", &[("count", &notice.views.len().to_string())]);
+    let message = msg!("ui.drawing_settings.outside", count = &notice.views.len().to_string()).tr();
     let container = ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Panel);
     let frame =
         container.edge_frame(t.pref_note_fill).stroke(t.control_border_stroke(t.pref_note)).corner_radius(t.radius_md).inner_margin(t.space_12);
@@ -762,12 +766,12 @@ fn sheet_notice(app: &mut SolveApp, ui: &mut egui::Ui, drawing: &Drawing, sheet:
         .show_frame(ui, frame, area, |ui| {
             ui.set_width((area.width() - 2.0 * t.space_12).max(0.0));
             ui.label(egui::RichText::new(message).strong().color(t.pref_note));
-            ui.label(tr("ui.drawing_settings.unmoved"));
+            ui.label(tr(msg!("ui.drawing_settings.unmoved")));
             ui.horizontal_wrapped(|ui| {
                 let mut picked = None;
                 for (index, view) in drawing.views.iter().filter(|view| view.sheet == sheet.id).enumerate() {
                     if notice.views.contains(&view.id) {
-                        let label = solidcraft_ui_text::format("ui.drawing_settings.view", &[("number", &(index + 1).to_string())]);
+                        let label = msg!("ui.drawing_settings.view", number = &(index + 1).to_string()).tr();
                         if ui_kit::button(ui, label, Button::Small).clicked() {
                             picked = Some(view.id);
                         }
@@ -798,7 +802,7 @@ pub(super) fn sheet_settings(app: &mut SolveApp, ui: &mut egui::Ui) {
             sheet_fields(app, ui, sheet);
 
             next_sheet_section(ui, "ui.drawing_panel.screen");
-            ui_kit::row(ui, tr("ui.sheet_page.colour"), |ui| crate::drawing_sheet_page::colour_choice(app, ui));
+            ui_kit::row(ui, tr(msg!("ui.sheet_page.colour")), |ui| crate::drawing_sheet_page::colour_choice(app, ui));
         });
         ui.add_space(t.space_8);
         ui.separator();
@@ -820,8 +824,8 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
     let context = ui.ctx().clone();
     let name_id = ui.make_persistent_id(("sheet_settings_name", app.session.uid, sheet.id));
     let mut name = context.data(|data| data.get_temp::<String>(name_id)).unwrap_or_else(|| sheet.name.clone());
-    ui_kit::section_heading(ui, tr("ui.drawing_panel.sheet"));
-    let (enter, response) = ui_kit::row(ui, tr("ui.drawing_panel.name"), |ui| ui_kit::text_field_reserving(ui, &mut name, "", 0.0));
+    ui_kit::section_heading(ui, tr(msg!("ui.drawing_panel.sheet")));
+    let (enter, response) = ui_kit::row(ui, tr(msg!("ui.drawing_panel.name")), |ui| ui_kit::text_field_reserving(ui, &mut name, "", 0.0));
     if app.drawing_workspace.rename_sheet.take() == Some(sheet.id) {
         response.request_focus();
     }
@@ -840,7 +844,7 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
         SheetSize::Custom { sides_mm: [a, b] } => format!("{a} × {b} mm"),
     };
     let mut new_size = None;
-    let picker = ui_kit::row(ui, tr("ui.drawing_panel.size"), |ui| {
+    let picker = ui_kit::row(ui, tr(msg!("ui.drawing_panel.size")), |ui| {
         ui_kit::dropdown_menu(ui, "drawing_sheet_size", &selected, |ui| {
             for size in PaperSize::ALL {
                 let caption = size_caption(size);
@@ -858,11 +862,11 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
         change_sheet(app, sheet.id, "size", json!(SheetSize::Standard(size)));
     }
     let mut orientation = usize::from(sheet.sheet.orientation == Orientation::Portrait);
-    let changed = ui_kit::row(ui, tr("ui.drawing_panel.orientation"), |ui| {
+    let changed = ui_kit::row(ui, tr(msg!("ui.drawing_panel.orientation")), |ui| {
         ui_kit::segmented(
             ui,
             &mut orientation,
-            &[tr("ui.drawing_panel.landscape"), tr("ui.drawing_panel.portrait")],
+            &[tr(msg!("ui.drawing_panel.landscape")), tr(msg!("ui.drawing_panel.portrait"))],
             ui_kit::Segments { workspace_accent: true, ..Default::default() },
         )
     });
@@ -872,7 +876,7 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
     }
     let dpi_id = ui.make_persistent_id(("sheet_settings_dpi", app.session.uid, sheet.id));
     let mut dpi = context.data(|data| data.get_temp::<String>(dpi_id)).unwrap_or_else(|| sheet.dpi.to_string());
-    let picture = tr("ui.drawing_settings.picture");
+    let picture = tr(msg!("ui.drawing_settings.picture"));
     let (enter, response) = ui_kit::row(ui, picture, |ui| {
         let t = Tokens::get();
         let (enter, response) = ui_kit::text_field_reserving(ui, &mut dpi, "", t.space_24);
@@ -901,15 +905,15 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
     }
     next_sheet_section(ui, "ui.drawing_panel.border_title");
     paper_border(ui, Some(sheet.sheet), sheet.border.as_ref());
-    let built_in = tr("ui.drawing_panel.built_in");
-    let none = tr("ui.drawing_panel.none");
+    let built_in = tr(msg!("ui.drawing_panel.built_in"));
+    let none = tr(msg!("ui.drawing_panel.none"));
     let current = match sheet.title_block.as_ref() {
         Some(block) if *block == *STANDARD_TITLE_BLOCK => built_in,
-        Some(_) => tr("ui.graphics_custom"),
+        Some(_) => tr(msg!("ui.graphics_custom")),
         None => none,
     };
     let mut replacement = None;
-    ui_kit::row(ui, tr("ui.drawing_panel.title_block"), |ui| {
+    ui_kit::row(ui, tr(msg!("ui.drawing_panel.title_block")), |ui| {
         ui_kit::dropdown_menu(ui, "drawing_sheet_title_block", current, |ui| {
             for (label, value) in [(built_in, json!("built-in")), (none, Value::Null)] {
                 if ui_kit::list_picker(ui, label, label, current == label).clicked() {
@@ -924,18 +928,18 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
     if let Some(value) = replacement {
         change_sheet(app, sheet.id, "title_block", value);
     }
-    let template = tr("ui.drawing_panel.template");
+    let template = tr(msg!("ui.drawing_panel.template"));
     ui.add_enabled_ui(false, |ui| choice(ui, template, 0, &[none]));
     ui_kit::below_row_control(ui, template, ui.available_width(), |ui| {
         settings_note(ui, "ui.drawing_settings.template_help");
     });
     next_sheet_section(ui, "ui.drawing_panel.counting");
     let mut count = !sheet.excluded.count;
-    if ui_kit::checkbox(ui, tr("ui.drawing_panel.count_sheet"), &mut count).changed() {
+    if ui_kit::checkbox(ui, tr(msg!("ui.drawing_panel.count_sheet")), &mut count).changed() {
         change_sheet(app, sheet.id, "excluded", json!({"count": !count}));
     }
     let mut print = !sheet.excluded.print;
-    if ui_kit::checkbox(ui, tr("ui.drawing_panel.print_sheet"), &mut print).changed() {
+    if ui_kit::checkbox(ui, tr(msg!("ui.drawing_panel.print_sheet")), &mut print).changed() {
         change_sheet(app, sheet.id, "excluded", json!({"print": !print}));
     }
 }

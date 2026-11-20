@@ -140,14 +140,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(prompt) = app.network_prompt.as_ref() else { return };
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     let hosts = prompt.hosts.iter().map(|h| format!("\\\\{h}")).collect::<Vec<_>>().join(", ");
-    let detail = solidcraft_ui_text::format("network.prompt_detail", &[("host", &hosts)]);
+    let detail = msg!("network.prompt_detail", host = &hosts).tr();
     let (closed, action) =
-        ui_kit::Confirm::new(egui::Id::unique("sc_network_prompt"), "status_warning", solidcraft_ui_text::tr("network.prompt_title"))
+        ui_kit::Confirm::new(egui::Id::unique("sc_network_prompt"), "status_warning", solidcraft_ui_text::tr(msg!("network.prompt_title")))
             .tone(ui_kit::Tone::Warning)
             .actions(
-                solidcraft_ui_text::tr("network.allow_once"),
-                solidcraft_ui_text::tr("ui.cancel"),
-                Some(solidcraft_ui_text::tr("network.always_allow")),
+                solidcraft_ui_text::tr(msg!("network.allow_once")),
+                solidcraft_ui_text::tr(msg!("ui.cancel")),
+                Some(solidcraft_ui_text::tr(msg!("network.always_allow"))),
             )
             .selected(ui_kit::Action::Cancel)
             .show(ctx, true, |ui| {

@@ -25,7 +25,7 @@ pub(crate) fn start_selected(app: &mut SolveApp) {
     {
         start(app, *component, None);
     } else {
-        app.set_status(app.tr("ui.relink_select_one").to_string(), true);
+        app.set_status(app.tr(msg!("ui.relink_select_one")).to_string(), true);
     }
 }
 
@@ -297,7 +297,7 @@ pub fn show_copies(app: &mut SolveApp, ctx: &egui::Context) {
         crate::ui_kit::Confirm::new(egui::Id::unique("sc_link_copies"), "help", solidcraft_ui_text::tr_label("Link Identical Copies"))
             .actions("Link", "Keep", None)
             .show(ctx, true, |ui| {
-                let text = solidcraft_ui_text::format("ui.link_copies_text", &[("name", &name)]);
+                let text = msg!("ui.link_copies_text", name = &name).tr();
                 crate::ui_kit::text(ui, &text, crate::ui_kit::Text::Report("copies", false));
                 for (id, copy) in &c.copies {
                     crate::ui_kit::text(ui, &format!("  • {copy}"), crate::ui_kit::Text::Report(&format!("copy:{id}"), false));

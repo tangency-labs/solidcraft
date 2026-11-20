@@ -172,7 +172,7 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str, selected: bool) {
                             egui::Label::new(RichText::new(text).monospace().size(size - (t.font_button - t.font_body)).color(t.text)).wrap(),
                             selected,
                         );
-                        if crate::ui_kit::button(ui, tr("ui.agent_chat_copy"), crate::ui_kit::Button::Small).clicked() {
+                        if crate::ui_kit::button(ui, tr(msg!("ui.agent_chat_copy")), crate::ui_kit::Button::Small).clicked() {
                             ui.ctx().copy_text(text.clone());
                         }
                     },

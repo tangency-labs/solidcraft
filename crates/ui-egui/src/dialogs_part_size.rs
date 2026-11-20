@@ -164,7 +164,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 /// Change Part Size has no standard part to work on: say what it takes, not the command's
 /// "`component` must be an id or a name" (#8735).
 pub(crate) fn needs_a_part(app: &mut SolveApp) {
-    let hint = app.tr("ui.part_size_needs_a_part").to_owned();
+    let hint = app.tr(msg!("ui.part_size_needs_a_part")).to_owned();
     app.set_status(hint, true);
 }
 
@@ -197,7 +197,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Resize) -> bool {
             ui.label(configuration_name(&k.family.id, size, k.length));
         });
     }
-    crate::ui_kit::text(ui, solidcraft_ui_text::tr("ui.part_size_shared"), crate::ui_kit::Text::Hint("part_size_shared"));
+    crate::ui_kit::text(ui, solidcraft_ui_text::tr(msg!("ui.part_size_shared")), crate::ui_kit::Text::Hint("part_size_shared"));
     false
 }
 
@@ -418,7 +418,7 @@ mod tests {
             assert!(app.dialog.is_none());
             let (text, _, error) = app.status.clone().expect("a status message");
             assert!(error);
-            assert_eq!(text, app.tr("ui.part_size_needs_a_part"));
+            assert_eq!(text, app.tr(msg!("ui.part_size_needs_a_part")));
             // Nothing ran: the design and its history are as they were, and no message carries
             // the command's own error.
             assert_eq!(app.session.doc, doc);

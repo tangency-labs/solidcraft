@@ -208,7 +208,7 @@ pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, 
         r = r.translate(vec2(0.0, nav.top() - 6.0 - r.bottom()));
     }
     let id = egui::Id::unique("sc_frame_rate");
-    let clicked = ui.interact(r, id, Sense::click()).backing_on_hover_text(tr("perf.click_for_details")).clicked();
+    let clicked = ui.interact(r, id, Sense::click()).backing_on_hover_text(tr(msg!("perf.click_for_details"))).clicked();
     if clicked {
         app.preferences.frame_rate_details = !app.preferences.frame_rate_details;
     }
@@ -247,7 +247,7 @@ fn details(app: &SolveApp, painter: &egui::Painter, view: Rect, below: Rect, dra
 
     // Heading: the slowest frames, which the mean hides.
     let heading = match app.frame_rate.slowest() {
-        Some((low, worst)) => format!("{} {:.0} FPS · {} {worst:.1} ms", tr("perf.low_1"), 1000.0 / low.max(0.01), tr("perf.worst")),
+        Some((low, worst)) => format!("{} {:.0} FPS · {} {worst:.1} ms", tr(msg!("perf.low_1")), 1000.0 / low.max(0.01), tr(msg!("perf.worst"))),
         None => String::new(),
     };
     text(pos2(inner.left(), y), Align2::LEFT_TOP, &heading, font, t.text);
@@ -285,7 +285,13 @@ fn details(app: &SolveApp, painter: &egui::Painter, view: Rect, below: Rect, dra
             })
             .collect();
         painter.add(egui::Shape::line(pts, Stroke::new(1.5, t.text.gamma_multiply(0.8))));
-        text(pos2(graph.left(), graph.top() - 1.0), Align2::LEFT_BOTTOM, &format!("— {} {}", grouped(most), tr("perf.triangles")), &small, t.text);
+        text(
+            pos2(graph.left(), graph.top() - 1.0),
+            Align2::LEFT_BOTTOM,
+            &format!("— {} {}", grouped(most), tr(msg!("perf.triangles"))),
+            &small,
+            t.text,
+        );
     }
     text(pos2(graph.right(), graph.top() - 1.0), Align2::RIGHT_BOTTOM, &format!("↑ {top_ms:.0} ms"), &small, t.text_dim);
     y = graph.bottom() + 6.0;
@@ -318,22 +324,22 @@ fn details(app: &SolveApp, painter: &egui::Painter, view: Rect, below: Rect, dra
         text(pos2(inner.right(), y), Align2::RIGHT_TOP, &v, font, t.text);
         y += row;
     };
-    kv(tr("perf.triangles"), grouped(drawn.triangles));
-    kv(tr("perf.line_segments"), grouped(drawn.line_segments));
-    kv(tr("perf.draw_calls"), grouped(u64::from(drawn.draw_calls)));
+    kv(tr(msg!("perf.triangles")), grouped(drawn.triangles));
+    kv(tr(msg!("perf.line_segments")), grouped(drawn.line_segments));
+    kv(tr(msg!("perf.draw_calls")), grouped(u64::from(drawn.draw_calls)));
     let px = view.size() * painter.ctx().pixels_per_point();
     let msaa = app.viewport.gpu.map_or(1, |g| g.samples);
     let ss = if drawn.supersampled { " · SSAA" } else { "" };
-    kv(tr("perf.viewport"), format!("{:.0}×{:.0} · MSAA {msaa}×{ss}", px.x, px.y));
-    kv(tr("perf.ui_time"), format!("{:.1} ms", app.frame_ms));
-    kv(tr("perf.scene_build"), format!("{:.1} ms", app.viewport.build_ms));
+    kv(tr(msg!("perf.viewport")), format!("{:.0}×{:.0} · MSAA {msaa}×{ss}", px.x, px.y));
+    kv(tr(msg!("perf.ui_time")), format!("{:.1} ms", app.frame_ms));
+    kv(tr(msg!("perf.scene_build")), format!("{:.1} ms", app.viewport.build_ms));
     // The view's own passes on the GPU (start of the first to end of the last), and the longest.
     if let Some(gpu) = drawn.gpu {
-        kv(tr("perf.gpu_time"), gpu_time(&gpu));
+        kv(tr(msg!("perf.gpu_time")), gpu_time(&gpu));
     }
     // The adapter's name can be long: on a line of its own, cut to the panel's width.
     let (backend, adapter) = app.viewport.adapter.split_once(" · ").unwrap_or(("CPU", ""));
-    kv(tr("perf.renderer"), backend.to_string());
+    kv(tr(msg!("perf.renderer")), backend.to_string());
     let room = (inner.width() / 6.0) as usize;
     let adapter: String =
         if adapter.chars().count() > room { adapter.chars().take(room.saturating_sub(1)).chain(['…']).collect() } else { adapter.to_string() };

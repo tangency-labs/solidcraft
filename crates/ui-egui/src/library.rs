@@ -187,13 +187,13 @@ impl LibraryState {
     fn set_highlight(&mut self, path: &Path, color: Option<Highlight>) {
         if let Some(color) = color {
             if path.to_str().is_none() {
-                self.error = Some(solidcraft_ui_text::tr("library.utf8").into());
+                self.error = Some(solidcraft_ui_text::tr(msg!("library.utf8")).into());
                 return;
             }
             if self.highlights.contains_key(path) || self.highlights.len() < MAX_HIGHLIGHTS {
                 self.highlights.insert(path.to_path_buf(), color);
             } else {
-                self.error = Some(solidcraft_ui_text::tr("library.highlight_limit").to_string());
+                self.error = Some(solidcraft_ui_text::tr(msg!("library.highlight_limit")).to_string());
             }
         } else {
             self.highlights.remove(path);
@@ -284,7 +284,7 @@ impl LibraryState {
                 Err(error) => {
                     self.listing = Listing::default();
                     self.filter_key = None;
-                    self.error = Some(solidcraft_ui_text::format("library.scan_failed", &[("error", &error.to_string())]));
+                    self.error = Some(msg!("library.scan_failed", error = &error.to_string()).tr());
                 }
             }
         }
@@ -314,7 +314,7 @@ impl LibraryState {
                     self.pending = None;
                     self.listing = Listing::default();
                     self.filter_key = None;
-                    self.error = Some(solidcraft_ui_text::tr("library.scan_stopped").into());
+                    self.error = Some(solidcraft_ui_text::tr(msg!("library.scan_stopped")).into());
                 }
             }
         }
@@ -363,27 +363,25 @@ impl LibraryState {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn read_folder(root: &Path, current: &Path) -> Result<Listing, String> {
-    let canonical_root =
-        root.canonicalize().map_err(|error| solidcraft_ui_text::format("library.root_unavailable", &[("error", &error.to_string())]))?;
-    let canonical_current =
-        current.canonicalize().map_err(|error| solidcraft_ui_text::format("library.folder_unavailable", &[("error", &error.to_string())]))?;
+    let canonical_root = root.canonicalize().map_err(|error| msg!("library.root_unavailable", error = &error.to_string()).tr())?;
+    let canonical_current = current.canonicalize().map_err(|error| msg!("library.folder_unavailable", error = &error.to_string()).tr())?;
     if !canonical_current.starts_with(&canonical_root) {
-        return Err(solidcraft_ui_text::tr("library.outside").into());
+        return Err(solidcraft_ui_text::tr(msg!("library.outside")).into());
     }
-    let contents = std::fs::read_dir(current).map_err(|error| solidcraft_ui_text::format("library.read_failed", &[("error", &error.to_string())]))?;
+    let contents = std::fs::read_dir(current).map_err(|error| msg!("library.read_failed", error = &error.to_string()).tr())?;
     let mut result = Listing::default();
     let mut entries = Vec::new();
     for (index, entry) in contents.enumerate() {
         if index >= MAX_ENTRIES {
-            result.warning = Some(solidcraft_ui_text::tr("library.limit").into());
+            result.warning = Some(solidcraft_ui_text::tr(msg!("library.limit")).into());
             break;
         }
         let Ok(entry) = entry else {
-            result.warning = Some(solidcraft_ui_text::tr("library.partial_permissions").into());
+            result.warning = Some(solidcraft_ui_text::tr(msg!("library.partial_permissions")).into());
             continue;
         };
         let Ok(kind) = entry.file_type() else {
-            result.warning = Some(solidcraft_ui_text::tr("library.partial").into());
+            result.warning = Some(solidcraft_ui_text::tr(msg!("library.partial")).into());
             continue;
         };
         // Do not follow symlinks or list special files. Only enumerate this directory;
@@ -465,7 +463,7 @@ fn open_entry(app: &mut SolveApp, entry: Entry) {
     } else if let Some(path) = entry.path.to_str() {
         crate::home::open_recent(app, path);
     } else {
-        app.set_status(solidcraft_ui_text::tr("library.open_utf8"), true);
+        app.set_status(solidcraft_ui_text::tr(msg!("library.open_utf8")), true);
     }
 }
 
@@ -473,12 +471,16 @@ fn messages(state: &LibraryState, ui: &mut egui::Ui) {
     if state.loading() {
         ui.horizontal(|ui| {
             ui.spinner();
-            ui.label(solidcraft_ui_text::tr("library.reading"));
+            ui.label(solidcraft_ui_text::tr(msg!("library.reading")));
         });
     } else if let Some(error) = &state.error {
         ui.label(error);
     } else if state.filtered.is_empty() {
-        ui.label(if state.search.is_empty() { solidcraft_ui_text::tr("library.empty") } else { solidcraft_ui_text::tr("library.no_matches") });
+        ui.label(if state.search.is_empty() {
+            solidcraft_ui_text::tr(msg!("library.empty"))
+        } else {
+            solidcraft_ui_text::tr(msg!("library.no_matches"))
+        });
     }
     if let Some(warning) = &state.listing.warning {
         ui.label(warning);
@@ -584,10 +586,13 @@ fn rows(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
                     );
                     crate::scenario::publish_handle(&format!("library:entry:{index}"), response.rect.center());
                     actions::context_menu(app, ui, &response, &entry);
-                    let tooltip =
-                        if active { format!("{}\n{}", entry.path.display(), app.tr("home.open_now")) } else { entry.path.display().to_string() };
+                    let tooltip = if active {
+                        format!("{}\n{}", entry.path.display(), app.tr(msg!("home.open_now")))
+                    } else {
+                        entry.path.display().to_string()
+                    };
                     let tooltip = if let Some(highlight) = highlight {
-                        format!("{tooltip}\n{}: {}", app.tr("library.highlight"), app.tr(highlight.label()))
+                        format!("{tooltip}\n{}: {}", app.tr(msg!("library.highlight")), app.tr(highlight.label()))
                     } else {
                         tooltip
                     };
@@ -664,9 +669,9 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
             egui::Stroke::new(1.0, solidcraft_theme::Tokens::get().border),
             egui::StrokeKind::Inside,
         );
-        home.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, solidcraft_ui_text::tr("library.home")));
+        home.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, solidcraft_ui_text::tr(msg!("library.home"))));
         crate::scenario::publish_handle("library:home", home.rect.center());
-        if home.on_hover_text(solidcraft_ui_text::tr("library.home_hint")).clicked() {
+        if home.on_hover_text(solidcraft_ui_text::tr(msg!("library.home_hint"))).clicked() {
             go_home(app);
         }
         let (chevron, _) = ui.allocate_exact_size(egui::vec2(12.0, 24.0), egui::Sense::hover());
@@ -676,7 +681,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
             .root
             .as_deref()
             .map(|root| root.file_name().unwrap_or(root.as_os_str()).to_string_lossy().into_owned())
-            .unwrap_or_else(|| app.tr("home.samples").to_string());
+            .unwrap_or_else(|| app.tr(msg!("home.samples")).to_string());
         let size = egui::vec2((ui.available_width() - 32.0).max(1.0), 24.0);
         let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
         let mut label_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
@@ -687,11 +692,11 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
                 egui::Role::DisclosureTriangle,
                 true,
                 app.library.folders_expanded,
-                solidcraft_ui_text::tr("library.recent_folders"),
+                solidcraft_ui_text::tr(msg!("library.recent_folders")),
             )
         });
         crate::scenario::publish_target("library:folders", picker.rect);
-        if picker.on_hover_text(solidcraft_ui_text::tr("library.recent_folders")).clicked() {
+        if picker.on_hover_text(solidcraft_ui_text::tr(msg!("library.recent_folders"))).clicked() {
             app.library.folders_expanded = !app.library.folders_expanded;
             app.library.folder_menu = None;
         }
@@ -706,8 +711,8 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
             egui::Stroke::new(1.0, solidcraft_theme::Tokens::get().border),
             egui::StrokeKind::Inside,
         );
-        let settings = settings.on_hover_text(solidcraft_ui_text::tr("library.choose_folder"));
-        settings.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, solidcraft_ui_text::tr("library.choose_folder")));
+        let settings = settings.on_hover_text(solidcraft_ui_text::tr(msg!("library.choose_folder")));
+        settings.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, solidcraft_ui_text::tr(msg!("library.choose_folder"))));
         crate::scenario::publish_handle("library:settings", settings.rect.center());
         if settings.clicked() {
             choose_folder(app);
@@ -764,7 +769,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
                 }
                 ui.close();
             }
-            if crate::ui_kit::button(ui, solidcraft_ui_text::tr("library.remove_folder"), crate::ui_kit::Button::Normal).clicked() {
+            if crate::ui_kit::button(ui, solidcraft_ui_text::tr(msg!("library.remove_folder")), crate::ui_kit::Button::Normal).clicked() {
                 app.library.remove_recent(&path);
                 ui.close();
             }
@@ -775,7 +780,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
     }
     if app.library.root.is_none() {
         egui::Frame::NONE.fill(solidcraft_theme::Tokens::get().field).inner_margin(8.0).corner_radius(4.0).show(ui, |ui| {
-            ui.label(solidcraft_ui_text::tr("library.samples_note"));
+            ui.label(solidcraft_ui_text::tr(msg!("library.samples_note")));
         });
         ui.add_space(6.0);
         egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 0)).show(ui, |ui| sample_rows(app, ui));
@@ -813,10 +818,11 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
                             ui,
                             ui.scope_id().with("library_search"),
                             &mut app.library.search,
-                            solidcraft_ui_text::tr("library.search_hint"),
+                            solidcraft_ui_text::tr(msg!("library.search_hint")),
                         );
-                        response
-                            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, solidcraft_ui_text::tr("library.search_label")));
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::Role::TextInput, true, solidcraft_ui_text::tr(msg!("library.search_label")))
+                        });
                     })
                     .response
                     .rect
@@ -826,7 +832,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
         let rect =
             egui::Rect::from_center_size(egui::pos2(ui.cursor().left() + button_size / 2.0, search.center().y), egui::vec2(button_size, button_size));
         ui.allocate_rect(rect, egui::Sense::hover());
-        let refresh = crate::ui_kit::icon_button_colored(ui, rect, "refresh", solidcraft_ui_text::tr("library.refresh"), Some(t.text));
+        let refresh = crate::ui_kit::icon_button_colored(ui, rect, "refresh", solidcraft_ui_text::tr(msg!("library.refresh")), Some(t.text));
         crate::scenario::publish_rect("library:refresh", rect);
         ui.painter().rect_stroke(rect, t.control_radius, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
         if refresh.clicked() {
@@ -846,7 +852,11 @@ pub(super) fn app_bar_toggle(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::
     }
     let t = solidcraft_theme::Tokens::get();
     let response = ui.interact(rect, ui.scope_id().with("document_browser_toggle"), egui::Sense::click());
-    let label = if app.preferences.show_document_browser { solidcraft_ui_text::tr("library.hide") } else { solidcraft_ui_text::tr("library.show") };
+    let label = if app.preferences.show_document_browser {
+        solidcraft_ui_text::tr(msg!("library.hide"))
+    } else {
+        solidcraft_ui_text::tr(msg!("library.show"))
+    };
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     crate::scenario::publish_handle("library:toggle", rect.center());
     crate::scenario::publish_rect("library:toggle", rect);

@@ -89,7 +89,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, s: &Session, cmd: &str, extra: &mut Map<St
     if keys(cmd).len() > 1 {
         choice_row(ui, "Placement", "pr_place", &mut choice, &BOX_PLACEMENTS);
     } else {
-        let point = if keys(cmd) == ["center"] { tr("ui.center") } else { tr("Base Center") };
+        let point = if keys(cmd) == ["center"] { tr(msg!("ui.center")) } else { tr(msg!("Base Center")) };
         ui_kit::row(ui, "Placement", |ui| {
             ui_kit::text(ui, point, ui_kit::Text::Cell);
         });

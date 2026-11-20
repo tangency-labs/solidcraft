@@ -33,7 +33,7 @@ pub(crate) fn decoration(app: &SolveApp, names: &[String]) -> Decoration {
     let count = bodies.iter().map(|b| app.session.doc.face_colors(b).len()).fold(0usize, usize::saturating_add);
     Decoration {
         swatch: Some(if mixed { Tokens::get().text_dim } else { look_color(app, body, look.as_ref()) }),
-        name: if mixed { app.tr("render.tree_mixed").into() } else { look_name(app, look.as_ref()) },
+        name: if mixed { app.tr(msg!("render.tree_mixed")).into() } else { look_name(app, look.as_ref()) },
         count: if count == 0 {
             String::new()
         } else {
@@ -58,7 +58,7 @@ pub(crate) fn same_look(app: &SolveApp, names: &[String]) -> bool {
 }
 
 fn look_name(app: &SolveApp, look: Option<&Look>) -> String {
-    look.map_or_else(|| app.tr("render.tree_default").into(), |look| look.name.clone())
+    look.map_or_else(|| app.tr(msg!("render.tree_default")).into(), |look| look.name.clone())
 }
 fn look_color(app: &SolveApp, body: &ModelBody, look: Option<&Look>) -> Color32 {
     let color = look.map(|l| l.color).or_else(|| app.session.doc.body_color(body).map(|c| c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)));
@@ -70,7 +70,7 @@ fn section(app: &mut SolveApp, rows: &mut Rows<'_>, key: &str) -> bool {
     let open = browser::is_open(app, &id, true);
     let label = app.tr(&format!("render.tree_{key}")).to_string();
     let add_label = app.tr(if key == "lights" { "render.tree_add_light" } else { "render.tree_add_shot" }).to_string();
-    let pending = app.tr("render.method_limit_raster").to_string();
+    let pending = app.tr(msg!("render.method_limit_raster")).to_string();
     let actions = [ui_kit::TreeAction {
         icon: "plus",
         hover_only: false,
@@ -146,44 +146,38 @@ pub(crate) fn environment(app: &SolveApp) -> (String, String) {
     if view.method == ImageMethod::GpuRaytrace && view.studio.environment == studio::Environment::None && view.studio.lighting_enabled {
         // An explicit constant, including black, is not the implicit studio.
         // It owns RGB radiance, not the legacy draft rotation/intensity pair.
-        return (app.tr("render.tree_constant").to_string(), String::new());
+        return (app.tr(msg!("render.tree_constant")).to_string(), String::new());
     }
-    let fixed = || (app.tr("render.tree_fixed_studio").to_string(), view.draft.environment_rotation, view.draft.environment_intensity);
+    let fixed = || (app.tr(msg!("render.tree_fixed_studio")).to_string(), view.draft.environment_rotation, view.draft.environment_intensity);
     let source = |input: &hdr::Input| match input {
-        hdr::Input::EmbeddedResource { resource } => format!("{} {resource}", app.tr("render.tree_hdr")),
+        hdr::Input::EmbeddedResource { resource } => format!("{} {resource}", app.tr(msg!("render.tree_hdr"))),
         hdr::Input::FileCaptured { path, .. } | hdr::Input::FilePending { path } => {
-            std::path::Path::new(path).file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| app.tr("render.tree_hdr").into())
+            std::path::Path::new(path).file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| app.tr(msg!("render.tree_hdr")).into())
         }
-        hdr::Input::Empty => app.tr("render.tree_no_environment").into(),
+        hdr::Input::Empty => app.tr(msg!("render.tree_no_environment")).into(),
     };
     let (name, rotation, intensity) = match view.method {
         ImageMethod::CpuRaytrace => match view.cpu.environment {
             cpu::Environment::Hdr => (source(&view.cpu.hdr), view.cpu.rotation_rad, view.cpu.intensity),
-            cpu::Environment::Sky => (app.tr("render.studio_sky").into(), view.cpu.rotation_rad, view.cpu.intensity),
-            cpu::Environment::Constant => (app.tr("render.tree_constant").into(), 0.0, view.cpu.intensity),
+            cpu::Environment::Sky => (app.tr(msg!("render.studio_sky")).into(), view.cpu.rotation_rad, view.cpu.intensity),
+            cpu::Environment::Constant => (app.tr(msg!("render.tree_constant")).into(), 0.0, view.cpu.intensity),
             cpu::Environment::None => fixed(),
         },
         ImageMethod::GpuRaytrace => match view.studio.environment {
             studio::Environment::Hdr => (source(&view.studio.hdr), view.studio.rotation_rad, view.studio.intensity),
-            studio::Environment::Sky => (app.tr("render.tree_sky").into(), view.studio.rotation_rad, view.studio.intensity),
+            studio::Environment::Sky => (app.tr(msg!("render.tree_sky")).into(), view.studio.rotation_rad, view.studio.intensity),
             studio::Environment::None => fixed(),
         },
         ImageMethod::Raster => fixed(),
     };
-    (
-        name,
-        solidcraft_ui_text::format(
-            "render.tree_environment_values",
-            &[("rotation", &format!("{:.0}", rotation.to_degrees())), ("intensity", &format!("{intensity:.2}"))],
-        ),
-    )
+    (name, msg!("render.tree_environment_values", rotation = &format!("{:.0}", rotation.to_degrees()), intensity = &format!("{intensity:.2}")).tr())
 }
 
 pub(crate) fn sections(app: &mut SolveApp, rows: &mut Rows<'_>) {
     setups::refresh_dirty(app);
     let (source, _detail) = environment(app);
     let open = browser::is_open(app, "render:tree:environment", true);
-    let environment_label = app.tr("render.tree_environment").to_string();
+    let environment_label = app.tr(msg!("render.tree_environment")).to_string();
     let row = node_row(
         rows,
         Spec { key: "render_environment", ..Default::default() },
@@ -214,7 +208,7 @@ pub(crate) fn sections(app: &mut SolveApp, rows: &mut Rows<'_>) {
             let visible = app.render_workspace.view.lights.visibility.visible(id);
             let solo = app.render_workspace.view.lights.visibility.solo.as_deref() == Some(id);
             let solo_target = format!("render:tree:light:{index}:solo");
-            let solo_label = app.tr("render.tree_solo").to_string();
+            let solo_label = app.tr(msg!("render.tree_solo")).to_string();
             let actions = [ui_kit::TreeAction { icon: "lookat", hover_only: true, label: &solo_label, reason: None, target: &solo_target }];
             let light_key = format!("render_light:{id}");
             let row = node_row(
@@ -267,7 +261,7 @@ pub(crate) fn sections(app: &mut SolveApp, rows: &mut Rows<'_>) {
                     icon: "camera",
                     selected: app.render_workspace.view.selection == RenderSelection::Shot(name.clone()),
                     radio: Some(active),
-                    radio_hint: app.tr("render.tree_switch"),
+                    radio_hint: app.tr(msg!("render.tree_switch")),
                     modified: active && app.render_workspace.view.dirty,
                     ..Default::default()
                 },
@@ -310,7 +304,7 @@ pub(crate) fn output(app: &mut SolveApp, rows: &mut Rows<'_>) {
         rows,
         Spec { key: "render_output", ..Default::default() },
         Row {
-            label: app.tr("render.tree_output"),
+            label: app.tr(msg!("render.tree_output")),
             icon: "render_image",
             name: true,
             subtitle: &subtitle,
@@ -376,7 +370,7 @@ pub(crate) fn groups(app: &SolveApp) -> Vec<LookGroup> {
 pub(crate) fn wear_subtitle(app: &SolveApp) -> String {
     let count = app.render_workspace.view.studio.aging.len();
     if count == 0 {
-        app.tr("render.wear_no_layers").into()
+        app.tr(msg!("render.wear_no_layers")).into()
     } else {
         solidcraft_ui_text::format(if count == 1 { "render.wear_layer_one" } else { "render.wear_layer_count" }, &[("count", &count.to_string())])
     }
@@ -389,7 +383,7 @@ fn wear(app: &mut SolveApp, rows: &mut Rows<'_>) {
         Spec { key: "render_wear", ..Default::default() },
         Row {
             depth: 1,
-            label: app.tr("render.wear_title"),
+            label: app.tr(msg!("render.wear_title")),
             name: true,
             icon: "appearance",
             subtitle: &subtitle,

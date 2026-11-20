@@ -168,9 +168,9 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, doc: &Document, can_export
     let id = panel_id();
     let mut state = if reset { PanelState::default() } else { ui.ctx().data_mut(|data| data.get_temp::<PanelState>(id)).unwrap_or_default() };
     ui_kit::section(ui, "sheet_rule_library", "sheet.library.title", false, |ui| {
-        ui_kit::text(ui, tr("sheet.library.scope"), Text::Report("sheet_library_scope", false));
+        ui_kit::text(ui, tr(msg!("sheet.library.scope")), Text::Report("sheet_library_scope", false));
         let materials: Vec<String> = library::standard_materials().into_iter().map(str::to_string).collect();
-        let display = if state.material.is_empty() { tr("sheet.library.select_material").to_string() } else { state.material.clone() };
+        let display = if state.material.is_empty() { tr(msg!("sheet.library.select_material")).to_string() } else { state.material.clone() };
         let mut chosen = None;
         picker(ui, "sheet_library_material", "sheet.library.material", &display, &materials, &mut chosen);
         if let Some(material) = chosen.and_then(|index| materials.get(index)) {
@@ -196,8 +196,10 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, doc: &Document, can_export
             let gauges: Vec<&PackRule> = library::standard_gauges(&state.material).into_iter().filter(|r| is_metric(r) == (series == 1)).collect();
             let labels: Vec<String> = gauges.iter().map(|r| gauge_label(r)).collect();
             // The box shows the gauge alone; its menu gives each one's thickness too.
-            let display =
-                gauges.iter().find(|r| r.rule.name == state.picked).map_or_else(|| tr("sheet.library.select_gauge").to_string(), |r| r.gauge.clone());
+            let display = gauges
+                .iter()
+                .find(|r| r.rule.name == state.picked)
+                .map_or_else(|| tr(msg!("sheet.library.select_gauge")).to_string(), |r| r.gauge.clone());
             let mut chosen = None;
             picker(ui, "sheet_library_gauge", "sheet.library.gauge", &display, &labels, &mut chosen);
             let method = BendMethod::ALL.get(state.method).copied().unwrap_or_default();
@@ -228,10 +230,10 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, doc: &Document, can_export
                     state.request = Some(request);
                 }
             };
-            button(ui, "import", tr("sheet.library.import"), true, Request::Import);
-            button(ui, "export", tr("sheet.library.export"), can_export, Request::Export);
+            button(ui, "import", tr(msg!("sheet.library.import")), true, Request::Import);
+            button(ui, "export", tr(msg!("sheet.library.export")), can_export, Request::Export);
         });
-        ui_kit::text(ui, tr("sheet.library.pack_scope"), Text::Report("sheet_library_pack_scope", false));
+        ui_kit::text(ui, tr(msg!("sheet.library.pack_scope")), Text::Report("sheet_library_pack_scope", false));
     });
     ui.ctx().data_mut(|data| data.insert_temp(id, state));
 }
@@ -242,7 +244,7 @@ pub(crate) fn run_request(ctx: &egui::Context, app: &mut SolveApp) {
     let id = panel_id();
     let Some(request) = ctx.data_mut(|data| data.get_temp_mut_or_default::<PanelState>(id).request.take()) else { return };
     match request {
-        Request::Import => app.pick_file(tr("sheet.library.pack_kind"), &["json", "csv"], |app, path| {
+        Request::Import => app.pick_file(tr(msg!("sheet.library.pack_kind")), &["json", "csv"], |app, path| {
             if let Some(path) = path {
                 let (message, error) = import(app, &path);
                 app.set_status(message, error);
@@ -260,11 +262,11 @@ pub(crate) fn run_request(ctx: &egui::Context, app: &mut SolveApp) {
 fn import(app: &mut SolveApp, path: &str) -> (String, bool) {
     let bytes = match solidcraft_engine::io::vfs::read(path, library::MAX_PACK_BYTES) {
         Ok(bytes) => bytes,
-        Err(e) => return (format!("{}: {e}", tr("sheet.library.import_failed")), true),
+        Err(e) => return (format!("{}: {e}", tr(msg!("sheet.library.import_failed"))), true),
     };
     let read = match library::read(&bytes) {
         Ok(read) => read,
-        Err(e) => return (format!("{}: {e}", tr("sheet.library.import_failed")), true),
+        Err(e) => return (format!("{}: {e}", tr(msg!("sheet.library.import_failed"))), true),
     };
     let rules: Vec<_> = read.pack.rules.iter().map(|r| r.rule.clone()).collect();
     let (added, left_out) = app.preferences.personal_sheet_rules.import(&rules);
@@ -298,7 +300,7 @@ fn export(app: &mut SolveApp, path: &str) -> (String, bool) {
             }
             (message, false)
         }
-        Err(e) => (format!("{}: {e}", tr("sheet.library.export_failed")), true),
+        Err(e) => (format!("{}: {e}", tr(msg!("sheet.library.export_failed"))), true),
     }
 }
 

@@ -290,14 +290,14 @@ impl NavPreset {
 
     pub(crate) fn translated_label(&self) -> &str {
         match self.id {
-            "creo" => solidcraft_ui_text::tr("nav.creo.label"),
-            TOUCHPAD_NAV => solidcraft_ui_text::tr("nav.touchpad.label"),
+            "creo" => solidcraft_ui_text::tr(msg!("nav.creo.label")),
+            TOUCHPAD_NAV => solidcraft_ui_text::tr(msg!("nav.touchpad.label")),
             _ => solidcraft_ui_text::tr_label(self.label),
         }
     }
 
     pub(crate) fn translated_help(&self) -> &str {
-        if self.id == "creo" { solidcraft_ui_text::tr("nav.creo.help") } else { solidcraft_ui_text::tr_label(self.help) }
+        if self.id == "creo" { solidcraft_ui_text::tr(msg!("nav.creo.help")) } else { solidcraft_ui_text::tr_label(self.help) }
     }
 }
 
@@ -622,9 +622,9 @@ impl OriginPlaneNames {
     /// language; any other plane (a construction plane) by its own name.
     pub fn label(self, name: &str) -> &str {
         match (self, name) {
-            (Self::TopFrontRight, "XY") => solidcraft_ui_text::tr("ui.top"),
-            (Self::TopFrontRight, "XZ") => solidcraft_ui_text::tr("ui.front"),
-            (Self::TopFrontRight, "YZ") => solidcraft_ui_text::tr("ui.right"),
+            (Self::TopFrontRight, "XY") => solidcraft_ui_text::tr(msg!("ui.top")),
+            (Self::TopFrontRight, "XZ") => solidcraft_ui_text::tr(msg!("ui.front")),
+            (Self::TopFrontRight, "YZ") => solidcraft_ui_text::tr(msg!("ui.right")),
             _ => name,
         }
     }
@@ -2456,7 +2456,7 @@ fn theme_action(app: &mut SolveApp, ui: &mut egui::Ui, action: Option<&str>, act
             if looks_like_theme(&text) {
                 import_theme_text(app, Ok(text));
             } else {
-                app.set_status(app.tr("prefs.theme_paste_none").to_string(), true);
+                app.set_status(app.tr(msg!("prefs.theme_paste_none")).to_string(), true);
             }
         }
         Some("export") => {
@@ -2493,7 +2493,7 @@ fn follow_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
         ui.add_enabled_ui(FOLLOW_AVAILABLE, |ui| {
             let mut on = !path.is_empty();
-            let check = ui_kit::checkbox(ui, app.tr("prefs.theme_follow"), &mut on);
+            let check = ui_kit::checkbox(ui, app.tr(msg!("prefs.theme_follow")), &mut on);
             crate::scenario::publish_target("prefs:theme_follow_toggle", check.rect);
             if check.changed() {
                 if on {
@@ -2502,12 +2502,12 @@ fn follow_row(app: &mut SolveApp, ui: &mut egui::Ui) {
                     stop = true;
                 }
             }
-            ui_kit::help_icon(ui, app.tr("prefs.appearance.follow_help"));
+            ui_kit::help_icon(ui, app.tr(msg!("prefs.appearance.follow_help")));
             let button = ui_kit::button(ui, app.tr_label("Choose…"), ui_kit::Button::Small);
             crate::scenario::publish_target("prefs:theme_follow", button.rect);
             choose |= button.clicked();
         });
-        ui_kit::settings_state_badge(ui, app.tr("prefs.appearance.desktop_only"), ui_kit::SettingsBadgeTone::Neutral);
+        ui_kit::settings_state_badge(ui, app.tr(msg!("prefs.appearance.desktop_only")), ui_kit::SettingsBadgeTone::Neutral);
         if !path.is_empty() {
             let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             ui_kit::settings_inline_note(ui, &name);
@@ -2515,7 +2515,7 @@ fn follow_row(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     });
     if let Some(error) = error.filter(|_| !path.is_empty()) {
-        ui_kit::text(ui, &solidcraft_ui_text::format("prefs.theme_follow_error", &[("error", &error)]), ui_kit::Text::Error("theme_follow"));
+        ui_kit::text(ui, &msg!("prefs.theme_follow_error", error = &error).tr(), ui_kit::Text::Error("theme_follow"));
     }
     if stop {
         stop_following(app);
@@ -2533,7 +2533,7 @@ fn follow_row(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// The interface font (#1290): the built-in font first, then the installed families, with a
 /// search box. The choice applies at once, like the other preferences.
 fn ui_font_row(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let builtin = solidcraft_ui_text::format("sketch_text.builtin_font", &[("family", "IBM Plex Sans")]);
+    let builtin = msg!("sketch_text.builtin_font", family = "IBM Plex Sans").tr();
     let current = if app.preferences.ui_font.trim().is_empty() { builtin.clone() } else { app.preferences.ui_font.clone() };
     let families = crate::sketch_text::families(ui.ctx());
     let mut values = vec![(String::new(), builtin.clone(), "prefs:font_builtin".to_string())];
@@ -2554,8 +2554,8 @@ fn ui_font_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     if let Some(rect) = crate::scenario::rect_of(&format!("dialog:widget:{}", solidcraft_ui_text::tr_label("Interface font"))) {
         crate::scenario::publish_target("prefs:ui_font", rect);
-        crate::scenario::publish_target(&format!("dialog:{}", app.tr("prefs.font")), rect);
-        crate::scenario::publish_rect(&format!("dialog:widget:{}", app.tr("prefs.font")), rect);
+        crate::scenario::publish_target(&format!("dialog:{}", app.tr(msg!("prefs.font"))), rect);
+        crate::scenario::publish_rect(&format!("dialog:widget:{}", app.tr(msg!("prefs.font"))), rect);
     }
     if let Some(name) = chosen {
         if name.is_empty() || crate::fonts::ui_font(&name).is_some() {
@@ -2956,7 +2956,7 @@ pub const GRAPHICS_BACKENDS: &[&str] = if cfg!(target_os = "windows") {
 /// Human-readable API names, retaining legacy manually configured choices for display.
 pub fn graphics_backend_label(backend: &str) -> String {
     match backend {
-        "auto" | "" => solidcraft_ui_text::tr("prefs.graphics_api_auto").to_string(),
+        "auto" | "" => solidcraft_ui_text::tr(msg!("prefs.graphics_api_auto")).to_string(),
         "dx12" => "Direct3D 12".into(),
         "vulkan" => "Vulkan".into(),
         "gl" => "OpenGL".into(),
@@ -2981,14 +2981,14 @@ fn window_system_row(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
     let labels: Vec<_> = labels.iter().map(String::as_str).collect();
     let now = app.services.window_system.map(label);
     let text = match &now {
-        Some(now) => solidcraft_ui_text::format("settings.window_system_note_now", &[("now", now)]),
-        None => app.tr("settings.msaa_applies_on_restart").to_string(),
+        Some(now) => msg!("settings.window_system_note_now", now = now).tr(),
+        None => app.tr(msg!("settings.msaa_applies_on_restart")).to_string(),
     };
     let row_width = (label_width + t.space_14 + t.space_24 * 10.0).min(ui.available_width());
     ui.horizontal_wrapped(|ui| {
         ui.allocate_ui_with_layout(egui::vec2(row_width, t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
             ui_kit::settings_form(ui, label_width, |ui| {
-                ui_kit::settings_row_help(ui, app.tr("ui.window_system"), &text, |ui| {
+                ui_kit::settings_row_help(ui, app.tr(msg!("ui.window_system")), &text, |ui| {
                     ui.allocate_ui_with_layout(
                         egui::vec2((t.space_24 * 10.0).min(ui.available_width()), t.control_height),
                         egui::Layout::top_down(egui::Align::Min),
@@ -3012,8 +3012,8 @@ fn window_system_row(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
     let choice = app.preferences.window_system.as_str();
     if choice == "wayland" || (choice == "auto" && app.services.window_system == Some("wayland")) {
         ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new(app.tr("settings.window_system_wayland_limited")).size(t.font_small).color(t.warning));
-            ui.hyperlink_to(egui::RichText::new(app.tr("settings.window_system_details")).size(t.font_small), WAYLAND_DROP_ISSUE);
+            ui.label(egui::RichText::new(app.tr(msg!("settings.window_system_wayland_limited"))).size(t.font_small).color(t.warning));
+            ui.hyperlink_to(egui::RichText::new(app.tr(msg!("settings.window_system_details"))).size(t.font_small), WAYLAND_DROP_ISSUE);
         });
     }
 }
@@ -3038,7 +3038,7 @@ pub(crate) fn read_graphics_settings(path: &std::path::Path) -> Result<serde_jso
 /// Save a backend choice and its last working choice together before changing the UI state.
 /// Consecutive edits retain the original recovery choice until a window confirms startup.
 fn save_graphics_backend(app: &SolveApp, backend: &str) -> Result<(), String> {
-    let path = app.services.graphics_path.as_deref().ok_or_else(|| app.tr("prefs.graphics_api_unavailable").to_string())?;
+    let path = app.services.graphics_path.as_deref().ok_or_else(|| app.tr(msg!("prefs.graphics_api_unavailable")).to_string())?;
     let result = (|| {
         let path = std::path::Path::new(path);
         let mut graphics = read_graphics_settings(path)?;
@@ -3062,7 +3062,7 @@ fn save_graphics_backend(app: &SolveApp, backend: &str) -> Result<(), String> {
         }
         solidcraft_engine::io::safe_write::write_atomic(path, graphics.to_string().as_bytes(), false).map_err(|error| error.to_string())
     })();
-    result.map_err(|error: String| solidcraft_ui_text::format("prefs.graphics_api_save_failed", &[("error", &error)]))
+    result.map_err(|error: String| msg!("prefs.graphics_api_save_failed", error = &error).tr())
 }
 
 /// Select the graphics API for the next launch without a terminal or environment override.
@@ -3079,10 +3079,10 @@ pub fn set_graphics_backend(app: &mut SolveApp, backend: &str) -> Result<(), Str
 /// Check restart availability before saving a choice or applying a combined control request.
 pub fn check_graphics_restart(app: &SolveApp) -> Result<(), String> {
     if app.services.graphics_backend_override {
-        return Err(app.tr("prefs.graphics_api_override").to_string());
+        return Err(app.tr(msg!("prefs.graphics_api_override")).to_string());
     }
     if app.services.graphics_restart.is_none() {
-        return Err(app.tr("prefs.graphics_api_restart_unavailable").to_string());
+        return Err(app.tr(msg!("prefs.graphics_api_restart_unavailable")).to_string());
     }
     Ok(())
 }
@@ -3173,12 +3173,16 @@ impl SettingReset {
     pub fn message(&self) -> String {
         match self {
             SettingReset::Msaa { requested, reset, supported } => {
-                let setting = format!("{} › {}", solidcraft_ui_text::tr("ui.graphics"), solidcraft_ui_text::tr("ui.anti_aliasing"));
+                let setting = format!("{} › {}", solidcraft_ui_text::tr(msg!("ui.graphics")), solidcraft_ui_text::tr(msg!("ui.anti_aliasing")));
                 let supported = supported.iter().map(|n| format!("{n}")).collect::<Vec<_>>().join("×, ") + "×";
-                solidcraft_ui_text::format(
+                msg!(
                     "settings.msaa_reset",
-                    &[("setting", &setting), ("requested", &requested.to_string()), ("reset", &reset.to_string()), ("supported", &supported)],
+                    setting = &setting,
+                    requested = &requested.to_string(),
+                    reset = &reset.to_string(),
+                    supported = &supported
                 )
+                .tr()
             }
         }
     }
@@ -3238,7 +3242,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         id: window_id(),
         prefix: "prefs",
         labels: prefs_window::Labels {
-            title: app.tr("ui.preferences"),
+            title: app.tr(msg!("ui.preferences")),
             icon: "settings",
             ok: "OK",
             cancel: "Cancel",
@@ -3364,16 +3368,16 @@ fn panel_restore_banner(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 let (icon, _) = ui.allocate_exact_size(egui::vec2(t.space_16, t.space_16), egui::Sense::hover());
                 crate::icons::paint_ink(ui.painter(), icon, "status_warning", t.form_error);
                 ui.label(
-                    egui::RichText::new(app.tr("ui.panel_layout.restore_failed"))
+                    egui::RichText::new(app.tr(msg!("ui.panel_layout.restore_failed")))
                         .font(crate::ui_kit::type_face::semibold(t.font_label))
                         .color(t.form_error),
                 );
-                let retry = ui_kit::button(ui, app.tr("ui.panel_layout.try_again"), ui_kit::Button::Primary);
+                let retry = ui_kit::button(ui, app.tr(msg!("ui.panel_layout.try_again")), ui_kit::Button::Primary);
                 crate::scenario::publish_target("prefs:panel_restore_retry", retry.rect);
                 if retry.clicked() {
                     app.prefs_window.panel_restore_retry = true;
                 }
-                let details = ui_kit::button(ui, app.tr("ui.panel_layout.details"), ui_kit::Button::Normal);
+                let details = ui_kit::button(ui, app.tr(msg!("ui.panel_layout.details")), ui_kit::Button::Normal);
                 crate::scenario::publish_target("prefs:panel_restore_details", details.rect);
                 if details.clicked() {
                     app.prefs_window.panel_restore_details = !app.prefs_window.panel_restore_details;
@@ -3381,13 +3385,13 @@ fn panel_restore_banner(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             });
             if app.prefs_window.panel_restore_details {
                 ui.label(egui::RichText::new(&reason).color(t.form_ink).size(t.font_small));
-                if ui_kit::button(ui, app.tr("ui.panel_layout.copy"), ui_kit::Button::Ghost).clicked() {
+                if ui_kit::button(ui, app.tr(msg!("ui.panel_layout.copy")), ui_kit::Button::Ghost).clicked() {
                     ui.ctx().copy_text(reason.clone());
                 }
             }
         },
     );
-    shown.response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Alert, true, app.tr("ui.panel_layout.restore_failed")));
+    shown.response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Alert, true, app.tr(msg!("ui.panel_layout.restore_failed"))));
     crate::scenario::publish_target("prefs:panel_restore_error", shown.response.rect);
     ui.add_space(t.space_16);
 }
@@ -3399,8 +3403,8 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
             let mut show = |ui: &mut egui::Ui| {
                 ui_kit::settings_heading_with_tag(
                     ui,
-                    app.tr("prefs.shortcuts"),
-                    app.tr("prefs.shortcuts_intro"),
+                    app.tr(msg!("prefs.shortcuts")),
+                    app.tr(msg!("prefs.shortcuts_intro")),
                     Some(crate::settings_profiles::tag),
                 );
                 crate::keymap::page(app, ui);
@@ -3447,11 +3451,12 @@ fn space_mouse_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// A device's own app on this computer driving the view (the navigation bridge): on or off, its
 /// port, and whether an app is connected. Part of the 3D mouse Advanced section.
 fn nav_bridge(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let (label, tip, port) = (app.tr("ui.nav_bridge").to_owned(), app.tr("ui.nav_bridge_tip").to_owned(), app.tr("ui.nav_bridge_port").to_owned());
+    let (label, tip, port) =
+        (app.tr(msg!("ui.nav_bridge")).to_owned(), app.tr(msg!("ui.nav_bridge_tip")).to_owned(), app.tr(msg!("ui.nav_bridge_port")).to_owned());
     let status = match (&app.space_mouse.bridge, app.preferences.nav_bridge_enabled) {
         (_, false) => None,
-        (Some(name), true) => Some((format!("{} · {name}", app.tr("ui.nav_bridge_connected")), false)),
-        (None, true) => Some((app.tr("ui.nav_bridge_waiting").to_owned(), true)),
+        (Some(name), true) => Some((format!("{} · {name}", app.tr(msg!("ui.nav_bridge_connected"))), false)),
+        (None, true) => Some((app.tr(msg!("ui.nav_bridge_waiting")).to_owned(), true)),
     };
     ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
         ui_kit::checkbox(ui, &label, &mut app.preferences.nav_bridge_enabled).backing_on_hover_text(&tip);
@@ -3551,7 +3556,7 @@ fn picture_and_boat(
     let mut boat_and_reset = |ui: &mut egui::Ui| {
         ui.vertical(|ui| {
             crate::test_boat::show(ui, boat, motion, free_orbit, egui::vec2(width.max(0.0), BOAT_HEIGHT));
-            if ui_kit::button(ui, solidcraft_ui_text::tr("ui.3d_mouse_reset_view"), ui_kit::Button::Normal).clicked() {
+            if ui_kit::button(ui, solidcraft_ui_text::tr(msg!("ui.3d_mouse_reset_view")), ui_kit::Button::Normal).clicked() {
                 crate::test_boat::reset(boat);
             }
         });
@@ -3576,7 +3581,7 @@ fn picture_and_boat(
 fn space_mouse_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
     let Some(device) = app.space_mouse.device.clone() else {
         ui_kit::settings_form(ui, FORM_LABEL_WIDTH, |ui| {
-            hint_under_controls(ui, solidcraft_ui_text::tr("ui.3d_mouse_buttons_no_device"), "space_mouse_buttons");
+            hint_under_controls(ui, solidcraft_ui_text::tr(msg!("ui.3d_mouse_buttons_no_device")), "space_mouse_buttons");
         });
         return;
     };
@@ -3586,9 +3591,9 @@ fn space_mouse_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
     numbers.extend((1..=32).filter(|&number| app.space_mouse.seen & bit(number) != 0));
     let mut changed = false;
     ui_kit::settings_form(ui, FORM_LABEL_WIDTH, |ui| {
-        hint_under_controls(ui, solidcraft_ui_text::tr("ui.3d_mouse_buttons_hint"), "space_mouse_buttons");
+        hint_under_controls(ui, solidcraft_ui_text::tr(msg!("ui.3d_mouse_buttons_hint")), "space_mouse_buttons");
         for number in numbers {
-            let mut name = solidcraft_ui_text::format("ui.3d_mouse_button", &[("number", &number.to_string())]);
+            let mut name = msg!("ui.3d_mouse_button", number = &number.to_string()).tr();
             if app.space_mouse.buttons & bit(number) != 0 {
                 name.push_str("  ●");
             }
@@ -3608,7 +3613,7 @@ fn space_mouse_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
     if app.preferences.space_mouse_buttons.contains_key(&device) {
         ui_kit::settings_form(ui, FORM_LABEL_WIDTH, |ui| {
             ui_kit::row(ui, "", |ui| {
-                if ui_kit::button(ui, solidcraft_ui_text::tr("ui.3d_mouse_buttons_reset"), ui_kit::Button::Normal).clicked() {
+                if ui_kit::button(ui, solidcraft_ui_text::tr(msg!("ui.3d_mouse_buttons_reset")), ui_kit::Button::Normal).clicked() {
                     app.preferences.space_mouse_buttons.remove(&device);
                 }
             });
@@ -3620,8 +3625,8 @@ fn space_mouse_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn button_job_label(app: &SolveApp, job: Option<&crate::space_mouse::ButtonJob>) -> String {
     use crate::space_mouse::{ButtonJob, ButtonKey};
     match job {
-        None => solidcraft_ui_text::tr("ui.3d_mouse_button_nothing").to_string(),
-        Some(ButtonJob::Settings) => solidcraft_ui_text::tr("ui.3d_mouse_button_settings").to_string(),
+        None => solidcraft_ui_text::tr(msg!("ui.3d_mouse_button_nothing")).to_string(),
+        Some(ButtonJob::Settings) => solidcraft_ui_text::tr(msg!("ui.3d_mouse_button_settings")).to_string(),
         Some(ButtonJob::View(view)) => {
             let mut name = view.clone();
             if let Some(first) = name.get_mut(0..1) {
@@ -4256,10 +4261,10 @@ fn theme_options_text() -> ui_kit::ThemeOptionsText<'static> {
             let id = if count == 1 { "prefs.appearance.option_count_one" } else { "prefs.appearance.option_count" };
             solidcraft_ui_text::format(id, &[("count", &count.to_string())])
         },
-        more: |count| solidcraft_ui_text::format("prefs.theme_options_more", &[("count", &count.to_string())]),
-        reset: solidcraft_ui_text::tr("prefs.theme_options_reset"),
-        blur_off: solidcraft_ui_text::tr("prefs.blur_off"),
-        blur_cost: solidcraft_ui_text::tr("prefs.blur_cost"),
+        more: |count| msg!("prefs.theme_options_more", count = &count.to_string()).tr(),
+        reset: solidcraft_ui_text::tr(msg!("prefs.theme_options_reset")),
+        blur_off: solidcraft_ui_text::tr(msg!("prefs.blur_off")),
+        blur_cost: solidcraft_ui_text::tr(msg!("prefs.blur_cost")),
     }
 }
 
@@ -4272,27 +4277,28 @@ fn theme_options_row(app: &mut SolveApp, ui: &mut egui::Ui) {
         .iter()
         .map(|notice| {
             let raw = app.preferences.theme_options.get(&file.id).and_then(|v| v.get(&notice.id));
-            (
-                notice.id.clone(),
-                format!("{:?}:{raw:?}", notice.kind),
-                solidcraft_ui_text::format("prefs.theme_option_invalid", &[("option", &notice.id)]),
-            )
+            (notice.id.clone(), format!("{:?}:{raw:?}", notice.kind), msg!("prefs.theme_option_invalid", option = &notice.id).tr())
         })
         .collect();
     if file.needs_newer() {
-        problems.push(("newer".into(), file.requires.to_string(), app.tr("prefs.theme_options_newer").to_owned()));
+        problems.push(("newer".into(), file.requires.to_string(), app.tr(msg!("prefs.theme_options_newer")).to_owned()));
     }
     for (id, identity, text) in problems {
         let key = theme_notice_key(&file.id, &id, &identity);
         if !app.blur_session.dismissed(key)
-            && ui_kit::theme_option_notice(ui, &id, &text, solidcraft_ui_text::tr("prefs.theme_notice_dismiss"), false).1
+            && ui_kit::theme_option_notice(ui, &id, &text, solidcraft_ui_text::tr(msg!("prefs.theme_notice_dismiss")), false).1
         {
             app.blur_session.dismiss(key);
         }
     }
     if app.blur_session.guard.notice {
-        let (undo, dismiss) =
-            ui_kit::theme_option_notice(ui, "guard", app.tr("prefs.blur_guard"), solidcraft_ui_text::tr("prefs.theme_notice_dismiss"), true);
+        let (undo, dismiss) = ui_kit::theme_option_notice(
+            ui,
+            "guard",
+            app.tr(msg!("prefs.blur_guard")),
+            solidcraft_ui_text::tr(msg!("prefs.theme_notice_dismiss")),
+            true,
+        );
         if undo {
             app.blur_session.guard.undo();
             ui.ctx().request_repaint();

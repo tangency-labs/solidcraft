@@ -307,7 +307,7 @@ pub trait LocaleNames {
 /// `Component3`), translated.
 fn default_name(locale: Locale, text: &str) -> Option<String> {
     if text == "Untitled" {
-        return Some(locale.text("ui.untitled").to_string());
+        return Some(locale.text(msg!("ui.untitled")).to_string());
     }
     for (prefix, id) in [("Sketch", "browser.sketch_name"), ("Body", "browser.body_name"), ("Component", "browser.component_name")] {
         if let Some(number) = text.strip_prefix(prefix)
@@ -327,7 +327,7 @@ impl LocaleNames for Locale {
 
     fn diagnostic(self, text: &str) -> String {
         if let Some((feature, reference)) = solidcraft_engine::doc::reselect_parts(text) {
-            return self.format("diagnostic.reselect_reference", &[("feature", &self.given_name(feature)), ("reference", reference)]);
+            return self.fill(msg!("diagnostic.reselect_reference", feature = &self.given_name(feature), reference = reference));
         }
         if let Some(lost) = solidcraft_engine::doc::lost_projection_parts(text) {
             let feature = self.given_name(lost.feature);
@@ -348,13 +348,13 @@ impl LocaleNames for Locale {
             && count.parse::<usize>().is_ok_and(|count| count > 0)
         {
             let body = self.given_name(body);
-            let message = self.format("diagnostic.stitch_open_edges", &[("body", &body), ("count", count)]);
+            let message = self.fill(msg!("diagnostic.stitch_open_edges", body = &body, count = count));
             return format!("{before}{message}{after}");
         }
         // A profile pick with more curves than a design keeps track of, after anything naming
         // the feature or command in front.
         if let Some(before) = text.strip_suffix(solidcraft_engine::doc::WHOLE_PROFILE_TOO_MANY_CURVES) {
-            return format!("{before}{}", self.text("diagnostic.whole_profile_too_many_curves"));
+            return format!("{before}{}", self.text(msg!("diagnostic.whole_profile_too_many_curves")));
         }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)
@@ -363,7 +363,7 @@ impl LocaleNames for Locale {
             && let Some((other, after)) = detail.split_once("' — activate that component or pick the body as a target")
         {
             let (component, body, other) = (self.given_name(component), self.given_name(body), self.given_name(other));
-            let message = self.format("diagnostic.empty_boolean_component", &[("component", &component), ("body", &body), ("other", &other)]);
+            let message = self.fill(msg!("diagnostic.empty_boolean_component", component = &component, body = &body, other = &other));
             return format!("{before}{message}{after}");
         }
         text.to_string()
@@ -379,16 +379,16 @@ impl LocaleNames for Locale {
             }
         }
         if let Some(count) = text.strip_prefix("Parameters (").and_then(|s| s.strip_suffix(')')) {
-            return self.format("browser.parameters", &[("count", count)]);
+            return self.fill(msg!("browser.parameters", count = count));
         }
         if let Some(number) = text.strip_prefix("Section ").filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())) {
-            return self.format("browser.section_plane", &[("number", number)]);
+            return self.fill(msg!("browser.section_plane", number = number));
         }
         if let Some(count) = text.strip_suffix(" degrees of freedom")
             && !count.is_empty()
             && count.chars().all(|c| c.is_ascii_digit())
         {
-            return self.format("sketch.degrees_of_freedom", &[("count", count)]);
+            return self.fill(msg!("sketch.degrees_of_freedom", count = count));
         }
         self.label(text).to_string()
     }
@@ -441,7 +441,7 @@ pub fn tr_engine_error(error: &str) -> String {
         .and_then(|rest| rest.strip_suffix("; use a numeric component ID"))
         .and_then(|rest| rest.rsplit_once("`; matching IDs: "))
     {
-        return format("component.error.ambiguous_name", &[("name", name), ("ids", ids)]);
+        return msg!("component.error.ambiguous_name", name = name, ids = ids).tr();
     }
     for (prefix, suffix, id) in [
         ("ambiguous contact set `", "; use a numeric contact set ID", "contact.error.ambiguous_name"),
@@ -456,38 +456,38 @@ pub fn tr_engine_error(error: &str) -> String {
         }
     }
     if text == "joint limit minimum must not exceed maximum" {
-        return tr("joint.error.limit_order").to_string();
+        return tr(msg!("joint.error.limit_order")).to_string();
     }
     if text == "nothing to break at there" {
-        return tr("sketch.error.nothing_to_break").to_string();
+        return tr(msg!("sketch.error.nothing_to_break")).to_string();
     }
     if let Some(name) = text.strip_prefix("sketch `").and_then(|rest| {
         rest.strip_suffix("` comes after this sketch in the timeline, so its geometry cannot be used here. Move the source sketch earlier if its dependencies allow, or use a sketch after it.")
     }) {
-        return format("sketch.error.source_later_in_timeline", &[("name", name)]);
+        return msg!("sketch.error.source_later_in_timeline", name = name).tr();
     }
     if let Some(id) = offset_error_id(
         text,
         " is an offset, and its ends follow its source curves: ",
         " the source curves instead, or break the offset association first",
     ) {
-        return format("sketch.error.offset_trim", &[("id", id)]);
+        return msg!("sketch.error.offset_trim", id = id).tr();
     }
     if let Some(id) = offset_error_id(
         text,
         " is an offset, and its corners follow its source curves: ",
         " the source corners before offsetting, or break the offset association first",
     ) {
-        return format("sketch.error.offset_fillet_chamfer", &[("id", id)]);
+        return msg!("sketch.error.offset_fillet_chamfer", id = id).tr();
     }
     if text == "a closed curve needs two crossings to trim" {
-        return tr("sketch.error.closed_curve_two_crossings").to_string();
+        return tr(msg!("sketch.error.closed_curve_two_crossings")).to_string();
     }
     if let Some(id) = point_error_id(text, "projected") {
-        return format("sketch.error.point_is_projected", &[("id", id)]);
+        return msg!("sketch.error.point_is_projected", id = id).tr();
     }
     if let Some(id) = point_error_id(text, "fixed") {
-        return format("sketch.error.point_is_fixed", &[("id", id)]);
+        return msg!("sketch.error.point_is_fixed", id = id).tr();
     }
     error.to_string()
 }

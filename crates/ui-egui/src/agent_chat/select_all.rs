@@ -28,9 +28,9 @@ pub(super) fn transcript_text(items: &[Item]) -> String {
     let mut out = Vec::new();
     for (user, text) in items.iter().filter_map(message) {
         let (who, body) = if user {
-            (tr("ui.agent_chat_transcript_user"), text.trim_end().to_owned())
+            (tr(msg!("ui.agent_chat_transcript_user")), text.trim_end().to_owned())
         } else {
-            (tr("ui.agent_chat_transcript_assistant"), markdown_view::plain_text(&markdown::parse(text)))
+            (tr(msg!("ui.agent_chat_transcript_assistant")), markdown_view::plain_text(&markdown::parse(text)))
         };
         out.push(format!("{who}\n{body}"));
     }

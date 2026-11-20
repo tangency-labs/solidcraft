@@ -359,7 +359,7 @@ pub fn quick_add(app: &mut SolveApp, id: &str) -> Result<(), String> {
         return Ok(());
     }
     if list.len() >= MAX_QUICK_ACCESS {
-        return Err(solidcraft_ui_text::format("ui.quick_access_full", &[("count", &MAX_QUICK_ACCESS.to_string())]));
+        return Err(msg!("ui.quick_access_full", count = &MAX_QUICK_ACCESS.to_string()).tr());
     }
     list.push(spec.id.to_string());
     Ok(())
@@ -417,7 +417,7 @@ pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
 pub fn toolbar_items(app: &SolveApp) -> Vec<Item> {
     let mut v = Vec::new();
     if !crate::render_workspace::active(app) {
-        v.push(Item::heading(app.tr("prefs.toolbar_tabs")));
+        v.push(Item::heading(app.tr(msg!("prefs.toolbar_tabs"))));
         for tab in crate::workspace::choosable_tabs() {
             let on = crate::workspace::tab_turned_on(app, tab);
             // The row reads as the tab does, in every language.
@@ -525,11 +525,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
             .cards(2.0)
             .actions("", "ui.close", None)
             .show(ctx, true, |ui| {
-                ui_kit::text(
-                    ui,
-                    &solidcraft_ui_text::format("toolbar.customize_note", &[("tab", app.tr_label(&tab))]),
-                    ui_kit::Text::Note("customize"),
-                );
+                ui_kit::text(ui, &msg!("toolbar.customize_note", tab = app.tr_label(&tab)).tr(), ui_kit::Text::Note("customize"));
                 egui::ScrollArea::vertical()
                     .max_height(
                         (ctx.content_rect().height() - solidcraft_theme::Tokens::get().control_height * 8.0)

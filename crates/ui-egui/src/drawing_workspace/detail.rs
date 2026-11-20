@@ -31,7 +31,7 @@ pub(crate) struct Draft {
     pub(crate) sheet: Option<u64>,
 }
 
-fn tr(id: &'static str) -> &'static str {
+fn tr(id: impl solidcraft_ui_text::Key<'static>) -> &'static str {
     solidcraft_ui_text::tr(id)
 }
 
@@ -92,7 +92,7 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen
             if clicked {
                 match view_at(objects, point) {
                     Some(view) => draft.centre = Some((view, point)),
-                    None => app.set_status(tr("ui.drawing_detail.pick_view"), true),
+                    None => app.set_status(tr(msg!("ui.drawing_detail.pick_view")), true),
                 }
             }
         }
@@ -127,8 +127,8 @@ pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let mut draft = app.drawing_workspace.detail.unwrap_or_default();
     let cancel = super::inset(ui, |ui| {
         let mut shape = usize::from(draft.rectangle);
-        let options = [tr("ui.drawing_detail.circle"), tr("ui.drawing_detail.rectangle")];
-        ui_kit::choice_row(ui, tr("ui.drawing_detail.shape"), "drawing:detail:shape", &mut shape, &options);
+        let options = [tr(msg!("ui.drawing_detail.circle")), tr(msg!("ui.drawing_detail.rectangle"))];
+        ui_kit::choice_row(ui, tr(msg!("ui.drawing_detail.shape")), "drawing:detail:shape", &mut shape, &options);
         // The shape changes the region still being drawn, never one already fixed.
         if draft.half.is_none() {
             draft.rectangle = shape == 1;
@@ -140,7 +140,7 @@ pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         };
         ui_kit::text(ui, tr(step), ui_kit::Text::Note(step));
         ui.separator();
-        ui_kit::button(ui, tr("ui.cancel"), ui_kit::Button::Normal).clicked()
+        ui_kit::button(ui, tr(msg!("ui.cancel")), ui_kit::Button::Normal).clicked()
     });
     app.drawing_workspace.detail = Some(draft);
     if cancel {

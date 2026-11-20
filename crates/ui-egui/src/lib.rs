@@ -1319,7 +1319,7 @@ impl SolveApp {
     pub fn gpu_unavailable(&mut self) {
         self.viewport.gpu_unavailable = true;
         self.viewport.gpu_preparing = false;
-        let text = self.tr("starting.view_unavailable").to_owned();
+        let text = self.tr(msg!("starting.view_unavailable")).to_owned();
         self.set_status(text, true);
     }
 
@@ -1584,7 +1584,7 @@ impl SolveApp {
         let id = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
         crate::plugins::sync_policy(self);
         if plugins::busy(self) && matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
-            return Err(self.tr("prefs.plugin_busy").into());
+            return Err(self.tr(msg!("prefs.plugin_busy")).into());
         }
         if id.eq_ignore_ascii_case("plugin.run")
             || solidcraft_engine::plugin::resolve_call(&self.session, id, &params).map_err(|e| e.to_string())?.is_some()
@@ -1802,7 +1802,7 @@ impl SolveApp {
                 "timeline.redefine" if v.get("rolled_back").and_then(Value::as_bool) == Some(true) => {
                     let feature = v.get("feature").and_then(Value::as_u64).and_then(|f| self.session.doc.feature(f));
                     let name = feature.map(|f| f.name.clone()).unwrap_or_default();
-                    self.set_status(solidcraft_ui_text::format("timeline.edited_rolled_back", &[("name", &name)]), false);
+                    self.set_status(msg!("timeline.edited_rolled_back", name = &name).tr(), false);
                 }
                 _ => {}
             }
@@ -1965,7 +1965,7 @@ impl SolveApp {
                 // Frames of a gesture (a continuous view move, a part dragged by its joints) are
                 // not echoed one by one.
                 if v.get("continuous").and_then(Value::as_bool) != Some(true) {
-                    self.session.echo(language.format("ui.command_done", &[("command", label)]));
+                    self.session.echo(language.fill(msg!("ui.command_done", command = label)));
                 }
                 if id == "sketch.move" {
                     released_status(self, language, v);
@@ -1979,7 +1979,7 @@ impl SolveApp {
                     && let Some(path) = v.get("path").and_then(Value::as_str)
                 {
                     let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    self.set_status(language.format("drawing.template_saved_as_scdwg", &[("name", &name)]), false);
+                    self.set_status(language.fill(msg!("drawing.template_saved_as_scdwg", name = &name)), false);
                 }
                 if id == "file.new" {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
@@ -2064,7 +2064,7 @@ impl SolveApp {
     /// none was started yet: the status line says so.
     pub fn repeat_last(&mut self) -> bool {
         let Some((id, _)) = self.last_command.clone() else {
-            self.set_status(self.tr("ui.repeat_nothing").to_string(), false);
+            self.set_status(self.tr(msg!("ui.repeat_nothing")).to_string(), false);
             return false;
         };
         self.start(&id);
@@ -2155,7 +2155,7 @@ impl SolveApp {
         let mut seen = std::collections::BTreeSet::new();
         targets.retain(|(occurrence, _)| seen.insert(*occurrence));
         if targets.is_empty() {
-            self.set_status(self.tr("ui.ground_select_first"), false);
+            self.set_status(self.tr(msg!("ui.ground_select_first")), false);
             return;
         }
         let grounded = !targets.iter().all(|(_, grounded)| *grounded);
@@ -2269,7 +2269,7 @@ impl SolveApp {
         // selected it says what to pick instead of running with no features.
         if id == "timeline.delete" {
             if delete::nothing_to_delete(self) && self.tree.picked_timeline_groups.is_empty() {
-                self.set_status(self.tr("ui.delete_select_first"), false);
+                self.set_status(self.tr(msg!("ui.delete_select_first")), false);
             } else if !timeline_left::delete_selected_folders(self) {
                 delete::delete_selection(self);
             }
@@ -2283,7 +2283,7 @@ impl SolveApp {
         if id == "timeline.dependents" {
             let selected = timeline::selected_feature_ids(self);
             if selected.is_empty() {
-                self.set_status(self.tr("ui.dependents_select_first"), false);
+                self.set_status(self.tr(msg!("ui.dependents_select_first")), false);
                 return;
             }
             for feature_id in selected {
@@ -2308,7 +2308,7 @@ impl SolveApp {
                 })
                 .collect();
             if dimensions.is_empty() {
-                self.set_status(self.tr("ui.toggle_dimension_select_first"), false);
+                self.set_status(self.tr(msg!("ui.toggle_dimension_select_first")), false);
                 return;
             }
             for constraint in dimensions {
@@ -2503,7 +2503,7 @@ impl SolveApp {
         }
         // Send to Slicer always asks which slicer (the dialog pre-selects the last one).
         if matches!(id, "file.send_to_slicer" | "file.open_in_easyprint") && !dialogs_save_mesh::available(self) {
-            self.set_status(self.tr("ui.send_to_slicer_unavailable").to_string(), true);
+            self.set_status(self.tr(msg!("ui.send_to_slicer_unavailable")).to_string(), true);
             self.restore_command_tab();
             return;
         }
@@ -2547,7 +2547,7 @@ impl SolveApp {
         }
         // The picked section is placed (chord, pivot, position, angle, previewed) before OK adds it.
         if id == "sketch.insert_airfoil" {
-            self.pick_file(solidcraft_ui_text::tr("insert_airfoil.filter"), &["dat"], |app, path| {
+            self.pick_file(solidcraft_ui_text::tr(msg!("insert_airfoil.filter")), &["dat"], |app, path| {
                 if let Some(path) = path {
                     dialogs_insert_airfoil::open(app, path);
                 }
@@ -2873,7 +2873,7 @@ impl SolveApp {
         if id == "component.move_features" {
             let features = timeline::selected_feature_ids(self);
             if features.is_empty() {
-                let hint = self.tr("ui.move_features_needs_features").to_owned();
+                let hint = self.tr(msg!("ui.move_features_needs_features")).to_owned();
                 self.set_status(hint, true);
                 self.restore_command_tab();
             } else if self.run(id, json!({ "features": features })).is_err() {
@@ -3017,7 +3017,7 @@ impl SolveApp {
     /// they wait for it.
     pub(crate) fn close_editor_for_history(&mut self) -> Result<(), String> {
         if self.pending_feature_edit.is_some() {
-            let why = solidcraft_ui_text::tr("ui.history_waits_for_editor").to_string();
+            let why = solidcraft_ui_text::tr(msg!("ui.history_waits_for_editor")).to_string();
             self.set_status(why.clone(), true);
             return Err(why);
         }
@@ -3046,17 +3046,17 @@ impl SolveApp {
                     use solidcraft_engine::doc::FeatureKind;
                     let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
                     let kind = match &f.kind {
-                        FeatureKind::Import { .. } => language.text("ui.feature_kind.import"),
-                        FeatureKind::MeshImport { .. } => language.text("ui.feature_kind.mesh_import"),
-                        FeatureKind::MeshConvert { .. } => language.text("ui.feature_kind.mesh_convert"),
-                        FeatureKind::Repair { .. } => language.text("ui.feature_kind.repair"),
-                        FeatureKind::Align { .. } => language.text("ui.feature_kind.align"),
-                        FeatureKind::BodyTransfer { .. } => language.text("ui.feature_kind.body_transfer"),
-                        FeatureKind::ConstructionAxis { .. } => language.text("ui.feature_kind.construction_axis"),
-                        FeatureKind::ConstructionPoint { .. } => language.text("ui.feature_kind.construction_point"),
+                        FeatureKind::Import { .. } => language.text(msg!("ui.feature_kind.import")),
+                        FeatureKind::MeshImport { .. } => language.text(msg!("ui.feature_kind.mesh_import")),
+                        FeatureKind::MeshConvert { .. } => language.text(msg!("ui.feature_kind.mesh_convert")),
+                        FeatureKind::Repair { .. } => language.text(msg!("ui.feature_kind.repair")),
+                        FeatureKind::Align { .. } => language.text(msg!("ui.feature_kind.align")),
+                        FeatureKind::BodyTransfer { .. } => language.text(msg!("ui.feature_kind.body_transfer")),
+                        FeatureKind::ConstructionAxis { .. } => language.text(msg!("ui.feature_kind.construction_axis")),
+                        FeatureKind::ConstructionPoint { .. } => language.text(msg!("ui.feature_kind.construction_point")),
                         _ => f.kind.base_name(),
                     };
-                    self.set_status(language.format("ui.feature_nothing_to_edit", &[("kind", kind)]), false);
+                    self.set_status(language.fill(msg!("ui.feature_nothing_to_edit", kind = kind)), false);
                 }
             }
         }
@@ -3324,14 +3324,14 @@ impl SolveApp {
     pub(crate) fn say_newer_file(&mut self) {
         let Some(file) = self.session.doc.newer_file.clone() else { return };
         for what in &file.not_understood {
-            let text = solidcraft_ui_text::format("document.newer_file_not_read", &[("what", what)]);
+            let text = msg!("document.newer_file_not_read", what = what).tr();
             self.messages.push(&text, false, now_ms());
         }
         let text = if file.format <= file.reads_up_to && !file.unknown_changes.is_empty() {
             let change = file.unknown_changes.first().map_or("", String::as_str);
-            solidcraft_ui_text::format("document.newer_file_change", &[("format", &file.format.to_string()), ("change", change)])
+            msg!("document.newer_file_change", format = &file.format.to_string(), change = change).tr()
         } else {
-            solidcraft_ui_text::format("document.newer_file", &[("format", &file.format.to_string()), ("reads", &file.reads_up_to.to_string())])
+            msg!("document.newer_file", format = &file.format.to_string(), reads = &file.reads_up_to.to_string()).tr()
         };
         self.set_status(text, false);
     }
@@ -3392,17 +3392,17 @@ impl SolveApp {
                     .filter(|entry| !entry.is_empty())
                     .any(|entry| entry.eq_ignore_ascii_case(fingerprint));
                 if trusted {
-                    solidcraft_ui_text::format("ui.open_signature_valid", &[("key", &key)])
+                    msg!("ui.open_signature_valid", key = &key).tr()
                 } else {
-                    solidcraft_ui_text::format("ui.open_signature_valid_untrusted", &[("key", fingerprint)])
+                    msg!("ui.open_signature_valid_untrusted", key = fingerprint).tr()
                 }
             }
-            "not_covered" => solidcraft_ui_text::tr("ui.open_signature_not_covered").to_string(),
+            "not_covered" => solidcraft_ui_text::tr(msg!("ui.open_signature_not_covered")).to_string(),
             "invalid" => {
                 let reason = signature.get("reason").and_then(serde_json::Value::as_str).unwrap_or("");
-                solidcraft_ui_text::format("ui.open_signature_invalid", &[("reason", reason)])
+                msg!("ui.open_signature_invalid", reason = reason).tr()
             }
-            "unsupported" => solidcraft_ui_text::tr("ui.open_signature_unsupported").to_string(),
+            "unsupported" => solidcraft_ui_text::tr(msg!("ui.open_signature_unsupported")).to_string(),
             _ => return,
         };
         self.set_status(text, status == "invalid");
@@ -4595,10 +4595,12 @@ fn unground_joint_status(app: &mut SolveApp, language: solidcraft_ui_text::Local
         let (Some(joint), Some(reason)) = (problem.get("name").and_then(Value::as_str), problem.get("why").and_then(Value::as_str)) else {
             continue;
         };
-        let msg = language.format(
+        let msg = language.fill(msg!(
             "joint.unground_issue",
-            &[("occurrence", &occurrence), ("joint", &language.given_name(joint)), ("reason", &language.diagnostic(reason))],
-        );
+            occurrence = &occurrence,
+            joint = &language.given_name(joint),
+            reason = &language.diagnostic(reason)
+        ));
         app.session.echo(msg.clone());
         app.set_status(msg, false);
     }

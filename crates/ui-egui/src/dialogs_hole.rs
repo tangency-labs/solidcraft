@@ -70,9 +70,7 @@ pub(crate) fn head_counterbore_texts(opts: &HoleOpts) -> Option<(String, String)
 /// the bolt size. None when it does, or without a head.
 pub(crate) fn head_problem(opts: &HoleOpts) -> Option<String> {
     let standard = SCREW_HEADS.get(opts.head)?.1?;
-    head_counterbore_texts(opts)
-        .is_none()
-        .then(|| solidcraft_ui_text::format("hole.no_head", &[("standard", standard), ("size", opts.clearance_size.trim())]))
+    head_counterbore_texts(opts).is_none().then(|| msg!("hole.no_head", standard = standard, size = opts.clearance_size.trim()).tr())
 }
 
 /// A clearance counterbore's Head row: the cap screw head it seats (ISO 4762 socket head or
@@ -134,8 +132,7 @@ pub(crate) fn clearance_rows(ui: &mut egui::Ui, opts: &mut HoleOpts) -> bool {
             let default = format!("{d} mm");
             let fit = CLEARANCE_FITS.get(opts.clearance_fit).map_or("", |f| solidcraft_ui_text::tr(f.0));
             let mm = format!("{d}");
-            let tip =
-                solidcraft_ui_text::format("hole.clearance_tip", &[("size", opts.clearance_size.as_str()), ("fit", fit), ("diameter", mm.as_str())]);
+            let tip = msg!("hole.clearance_tip", size = opts.clearance_size.as_str(), fit = fit, diameter = mm.as_str()).tr();
             let mut text = opts.clearance_diameter.clone().unwrap_or_else(|| default.clone());
             let (submitted, changed) = crate::ui_kit::text_field_tip(ui, &mut text, &default, &tip);
             if changed {
@@ -144,7 +141,7 @@ pub(crate) fn clearance_rows(ui: &mut egui::Ui, opts: &mut HoleOpts) -> bool {
             enter = submitted;
         }
         None => {
-            ui.label(solidcraft_ui_text::tr("thread.select_size"));
+            ui.label(solidcraft_ui_text::tr(msg!("thread.select_size")));
         }
     });
     enter

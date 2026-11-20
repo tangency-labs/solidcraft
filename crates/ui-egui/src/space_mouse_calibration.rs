@@ -188,8 +188,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let done = matches!(result, Some(Ok(_)));
     let text = |ui: &mut egui::Ui, text: &str, key: &str| crate::ui_kit::text(ui, text, crate::ui_kit::Text::Report(key, false));
     let (closed, action) =
-        crate::ui_kit::Window::new(egui::Id::unique("sc_space_mouse_calibration"), "settings", app.tr("ui.3d_mouse_calibrate_title"))
-            .actions(if done { app.tr("ui.save") } else { "" }, app.tr("ui.cancel"), None)
+        crate::ui_kit::Window::new(egui::Id::unique("sc_space_mouse_calibration"), "settings", app.tr(msg!("ui.3d_mouse_calibrate_title")))
+            .actions(if done { app.tr(msg!("ui.save")) } else { "" }, app.tr(msg!("ui.cancel")), None)
             .show_with_left(
                 ctx,
                 done,
@@ -240,28 +240,34 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         }
                     }
                     // The device's six raw axes as they come, so the jitter at rest is there to see.
-                    crate::ui_kit::text(ui, app.tr("ui.3d_mouse_reading"), crate::ui_kit::Text::Note("space_mouse_reading"));
+                    crate::ui_kit::text(ui, app.tr(msg!("ui.3d_mouse_reading")), crate::ui_kit::Text::Note("space_mouse_reading"));
                     reading_grid(ui, raw);
                     // A reassignment made in Preferences stays on top of whatever this records.
                     if app.preferences.space_mouse_axis_source != crate::space_mouse::SAME_AXES {
-                        crate::ui_kit::text(ui, app.tr("ui.3d_mouse_axes_reassigned"), crate::ui_kit::Text::Note("space_mouse_axes_reassigned"));
+                        crate::ui_kit::text(
+                            ui,
+                            app.tr(msg!("ui.3d_mouse_axes_reassigned")),
+                            crate::ui_kit::Text::Note("space_mouse_axes_reassigned"),
+                        );
                     }
-                    crate::ui_kit::row(ui, app.tr("ui.3d_mouse_dead_zone"), |ui| {
-                        dead_zone_slider(ui, &mut dead_zone).backing_on_hover_text(app.tr("ui.3d_mouse_dead_zone_tip"));
+                    crate::ui_kit::row(ui, app.tr(msg!("ui.3d_mouse_dead_zone")), |ui| {
+                        dead_zone_slider(ui, &mut dead_zone).backing_on_hover_text(app.tr(msg!("ui.3d_mouse_dead_zone_tip")));
                     });
                 },
                 |ui| {
                     ui.horizontal(|ui| {
                         back = ui
-                            .add_enabled_ui(stage != Stage::Choose, |ui| crate::ui_kit::button(ui, app.tr("ui.back"), crate::ui_kit::Button::Normal))
+                            .add_enabled_ui(stage != Stage::Choose, |ui| {
+                                crate::ui_kit::button(ui, app.tr(msg!("ui.back")), crate::ui_kit::Button::Normal)
+                            })
                             .inner
                             .clicked();
                         skip = can_skip
-                            && crate::ui_kit::button(ui, app.tr("ui.3d_mouse_skip"), crate::ui_kit::Button::Normal)
-                                .backing_on_hover_text(app.tr("ui.3d_mouse_skip_tip"))
+                            && crate::ui_kit::button(ui, app.tr(msg!("ui.3d_mouse_skip")), crate::ui_kit::Button::Normal)
+                                .backing_on_hover_text(app.tr(msg!("ui.3d_mouse_skip_tip")))
                                 .clicked();
                         over = matches!(result, Some(Err(_)))
-                            && crate::ui_kit::button(ui, app.tr("ui.start_over"), crate::ui_kit::Button::Normal).clicked();
+                            && crate::ui_kit::button(ui, app.tr(msg!("ui.start_over")), crate::ui_kit::Button::Normal).clicked();
                     });
                 },
             );

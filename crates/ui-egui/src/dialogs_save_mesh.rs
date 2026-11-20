@@ -194,7 +194,7 @@ fn send_to_slicer(app: &mut SolveApp, params: Value) {
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     if let Some(wait) = &app.slicer_wait {
         // Whatever was picked this time (another slicer, other bodies): nothing else is sent.
-        let line = solidcraft_ui_text::format("ui.slicer_still_starting", &[("slicer", &wait.slicer.name)]);
+        let line = msg!("ui.slicer_still_starting", slicer = &wait.slicer.name).tr();
         app.set_status(line, false);
         return;
     }
@@ -215,7 +215,7 @@ fn begin_wait(app: &mut SolveApp, params: Value, result: &Value) {
     let spec = params["slicer"].as_str().unwrap_or_default().to_string();
     let Some(slicer) = slicers::resolve(&spec) else {
         // Started, but it can't be found again to be sent the file: say so rather than go quiet.
-        app.set_status(solidcraft_ui_text::format("ui.slicer_lost", &[("slicer", &name), ("path", &path)]), true);
+        app.set_status(msg!("ui.slicer_lost", slicer = &name, path = &path).tr(), true);
         return;
     };
     // Same reading as `slicers::wait_for_ready`: when `busctl` is missing or fails, send; when it is
@@ -224,7 +224,7 @@ fn begin_wait(app: &mut SolveApp, params: Value, result: &Value) {
     let done =
         spawn_wait(move |left| probe.is_ready_within(left.min(slicers::PROBE_LIMIT)) != Some(false), slicers::READY_LIMIT, slicers::READY_POLL);
     app.slicer_wait = Some(SlicerWait { done, slicer, result: result.clone() });
-    app.set_status(solidcraft_ui_text::format("ui.slicer_starting", &[("slicer", &name)]), false);
+    app.set_status(msg!("ui.slicer_starting", slicer = &name).tr(), false);
 }
 
 /// Per frame: when the slicer being waited for is ready, send the file; when the wait ran out, say so.
@@ -241,7 +241,7 @@ pub fn tick_wait(app: &mut SolveApp, ctx: &egui::Context) {
     let path = wait.result.get("path").and_then(Value::as_str).unwrap_or_default().to_string();
     if ready && path.is_empty() {
         // Nothing was written to send (the answer had no path): say so, rather than open "".
-        app.set_status(solidcraft_ui_text::format("ui.slicer_no_file", &[("slicer", &wait.slicer.name)]), true);
+        app.set_status(msg!("ui.slicer_no_file", slicer = &wait.slicer.name).tr(), true);
     } else if ready {
         // The file is already written: open that one, rather than export the design again.
         let mut result = wait.result;
@@ -256,7 +256,7 @@ pub fn tick_wait(app: &mut SolveApp, ctx: &egui::Context) {
         }
         report(app, &result);
     } else {
-        app.set_status(solidcraft_ui_text::format("ui.slicer_no_response", &[("slicer", &wait.slicer.name), ("path", &path)]), true);
+        app.set_status(msg!("ui.slicer_no_response", slicer = &wait.slicer.name, path = &path).tr(), true);
     }
 }
 
@@ -351,7 +351,7 @@ fn sync_print_face(app: &mut SolveApp, k: &mut SaveMesh, inputs: &mut [SelInput]
             for face in picked.iter().filter(|f| !shown.contains(f)) {
                 let Sel::Face { body, .. } = face else { continue };
                 if !bodies.contains(body) {
-                    app.set_status(solidcraft_ui_text::tr("ui.print_face_body_not_sent"), true);
+                    app.set_status(solidcraft_ui_text::tr(msg!("ui.print_face_body_not_sent")), true);
                 } else if !done.contains(body) {
                     crate::print_face_ui::set(app, body, Some(face));
                     done.push(body.clone());
@@ -433,7 +433,7 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
     let current = entries.iter().find(|e| e.key == k.slicer);
     let pad = "\u{2003}\u{2003}";
     let easyprint = crate::easyprint_ui::available(app);
-    let easyprint_label = solidcraft_ui_text::tr("ui.easyprint_row");
+    let easyprint_label = solidcraft_ui_text::tr(msg!("ui.easyprint_row"));
     let text = match current {
         Some(e) => format!("{pad}{}", e.slicer.name),
         None if easyprint && k.slicer == EASYPRINT => format!("{pad}{easyprint_label}"),
@@ -463,7 +463,7 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
             ui.painter().galley(at, text, Tokens::get().text);
             crate::scenario::publish_handle(&format!("dialog:Slicer:{}", e.slicer.name), rect.center());
             if e.user {
-                let hint = solidcraft_ui_text::format("ui.slicer_delete_tip", &[("program", e.slicer.command.first().map_or("", String::as_str))]);
+                let hint = msg!("ui.slicer_delete_tip", program = e.slicer.command.first().map_or("", String::as_str)).tr();
                 resp.clone().backing_on_hover_text(if elided { format!("{}\n{hint}", e.slicer.name) } else { hint });
                 if resp.hovered() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
                     delete = Some(e.key.clone());
@@ -509,7 +509,7 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
             Tokens::get().text,
         );
         crate::scenario::publish_handle("dialog:Slicer:Custom", rect.center());
-        if resp.backing_on_hover_text(solidcraft_ui_text::tr("ui.custom_program_tip")).clicked() {
+        if resp.backing_on_hover_text(solidcraft_ui_text::tr(msg!("ui.custom_program_tip"))).clicked() {
             pick_custom = true;
             ui.close();
         }
@@ -543,7 +543,7 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
 /// Put a program the user picked at the top of the list (and keep it).
 fn add_custom(app: &mut SolveApp, path: &str) -> Result<(), String> {
     if slicers::custom(path).is_none() {
-        return Err(solidcraft_ui_text::format("ui.not_a_program", &[("path", path)]));
+        return Err(msg!("ui.not_a_program", path = path).tr());
     }
     let list = &mut app.preferences.custom_slicers;
     list.retain(|p| p != path);
@@ -564,12 +564,12 @@ pub fn commands(k: &SaveMesh, inputs: &[SelInput]) -> Result<Vec<(String, Value)
     }
     let names = crate::selection::items(inputs, 0).body_names();
     if names.is_empty() {
-        return Err(solidcraft_ui_text::tr("ui.save_mesh_pick_bodies").into());
+        return Err(solidcraft_ui_text::tr(msg!("ui.save_mesh_pick_bodies")).into());
     }
     p["bodies"] = json!(names);
     if k.open {
         if k.slicer.is_empty() {
-            return Err(solidcraft_ui_text::tr("ui.save_mesh_no_slicer_open").into());
+            return Err(solidcraft_ui_text::tr(msg!("ui.save_mesh_no_slicer_open")).into());
         }
         p["format"] = json!("3mf");
         if k.slicer == EASYPRINT {
@@ -642,25 +642,23 @@ fn report(app: &mut SolveApp, result: &Value) {
         None => match result.get("slicer").and_then(Value::as_str) {
             Some(s) => {
                 let mut line = match (result.get("numbered").and_then(Value::as_bool), std::path::Path::new(path).file_name()) {
-                    (Some(true), Some(file)) => {
-                        solidcraft_ui_text::format("ui.sent_to_slicer_copy", &[("slicer", s), ("file", &file.to_string_lossy())])
-                    }
-                    _ => solidcraft_ui_text::format("ui.sent_to_slicer", &[("slicer", s)]),
+                    (Some(true), Some(file)) => msg!("ui.sent_to_slicer_copy", slicer = s, file = &file.to_string_lossy()).tr(),
+                    _ => msg!("ui.sent_to_slicer", slicer = s).tr(),
                 };
                 if !skipped_suffix.is_empty() {
                     line.push_str(&skipped_suffix);
                 }
                 // Said once: sending the same bodies again overwrites the file the slicer has open.
                 if result.get("numbered").is_some() && !std::mem::replace(&mut app.preferences.slicer_resend_hint_seen, true) {
-                    line = format!("{line}. {}", solidcraft_ui_text::tr("ui.slicer_resend_hint"));
+                    line = format!("{line}. {}", solidcraft_ui_text::tr(msg!("ui.slicer_resend_hint")));
                 }
                 if result.get("stl_fallback").and_then(Value::as_bool) == Some(true) {
-                    line = format!("{line}. {}", solidcraft_ui_text::tr("ui.slicer_stl_fallback"));
+                    line = format!("{line}. {}", solidcraft_ui_text::tr(msg!("ui.slicer_stl_fallback")));
                 }
                 app.set_status(line, false);
             }
             None => {
-                let saved = solidcraft_ui_text::format("ui.saved_to", &[("path", path)]);
+                let saved = msg!("ui.saved_to", path = path).tr();
                 let line = if skipped_suffix.is_empty() { saved } else { format!("{saved}{skipped_suffix}") };
                 app.set_status(line, false);
             }

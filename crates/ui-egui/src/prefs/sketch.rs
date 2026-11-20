@@ -4,7 +4,12 @@ use super::*;
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_page(ui, |ui| {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-        ui_kit::settings_heading_with_tag(ui, app.tr("prefs.structure.sketch"), app.tr("prefs.sketch.note"), Some(crate::settings_profiles::tag));
+        ui_kit::settings_heading_with_tag(
+            ui,
+            app.tr(msg!("prefs.structure.sketch")),
+            app.tr(msg!("prefs.sketch.note")),
+            Some(crate::settings_profiles::tag),
+        );
         snapping(app, ui);
         drawing(app, ui);
         opening(app, ui);
@@ -15,7 +20,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    ui_kit::settings_section(ui, "sketch", app.tr("prefs.sketch.snapping_guides"), |ui| {
+    ui_kit::settings_section(ui, "sketch", app.tr(msg!("prefs.sketch.snapping_guides")), |ui| {
         let available = ui.available_width();
         let figure_width = t.space_24 * 5.0;
         let labels_width = [
@@ -76,9 +81,9 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                 setting::sketch_square_rectangles(app, ui);
             });
         });
-        let label_width = ui_kit::ContentWidth::label(ui, app.tr("prefs.hold_stop_snapping"));
+        let label_width = ui_kit::ContentWidth::label(ui, app.tr(msg!("prefs.hold_stop_snapping")));
         ui_kit::settings_form(ui, label_width, |ui| {
-            ui_kit::row(ui, app.tr("prefs.hold_stop_snapping"), |ui| {
+            ui_kit::row(ui, app.tr(msg!("prefs.hold_stop_snapping")), |ui| {
                 ui_kit::settings_control_width(ui, t.space_24 * 8.0 + t.space_8, |ui| {
                     let combo = &mut app.preferences.suppress_sketch_snap;
                     let response = ui_kit::dropdown_menu(ui, "pref_suppress_sketch_snap", &combo.shown_label(), |ui| {
@@ -88,7 +93,7 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         }
                     })
-                    .backing_on_hover_text(solidcraft_ui_text::tr("prefs.snap_drawing_note"));
+                    .backing_on_hover_text(solidcraft_ui_text::tr(msg!("prefs.snap_drawing_note")));
                     crate::scenario::publish_target("prefs:suppress_sketch_snap", response.rect);
                 });
             });
@@ -98,7 +103,7 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    ui_kit::settings_section(ui, "drawing", app.tr("prefs.sketch.drawing"), |ui| {
+    ui_kit::settings_section(ui, "drawing", app.tr(msg!("prefs.sketch.drawing")), |ui| {
         let left_labels = [
             "prefs.line_drag_draws_one",
             "prefs.line_hover_tangent_arc",
@@ -267,9 +272,9 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// than the default.
 fn sketch_size(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
     use solidcraft_engine::sketch::limits::{CEILING_POINTS, DEFAULT_POINTS};
-    let label = app.tr("prefs.sketch.max_points").to_string();
-    let unit = app.tr("prefs.sketch.max_points_unit").to_string();
-    ui_kit::settings_block_hint(ui, &label, app.tr("prefs.sketch.max_points_note"), label_width, |ui| {
+    let label = app.tr(msg!("prefs.sketch.max_points")).to_string();
+    let unit = app.tr(msg!("prefs.sketch.max_points_unit")).to_string();
+    ui_kit::settings_block_hint(ui, &label, app.tr(msg!("prefs.sketch.max_points_note")), label_width, |ui| {
         ui.horizontal(|ui| {
             let t = Tokens::get();
             ui.spacing_mut().item_spacing.x = t.space_4;
@@ -287,7 +292,7 @@ fn sketch_size(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
 
 fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    ui_kit::settings_section(ui, "opening_closing", app.tr("prefs.sketch.opening_closing"), |ui| {
+    ui_kit::settings_section(ui, "opening_closing", app.tr(msg!("prefs.sketch.opening_closing")), |ui| {
         check(
             ui,
             "sketch_face_activates_part",
@@ -309,8 +314,8 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
             Some("prefs.sketch.escape_twice_finishes_note"),
             &mut app.preferences.escape_twice_finishes_sketch,
         );
-        picture_group(ui, app.tr("prefs.sketch_exit_view"), |ui| {
-            let label = app.tr("prefs.sketch_exit_view");
+        picture_group(ui, app.tr(msg!("prefs.sketch_exit_view")), |ui| {
+            let label = app.tr(msg!("prefs.sketch_exit_view"));
             let mut indexed = crate::ui_kit::settings_search::texts_hit(ui, &[label]);
             if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                 ui_kit::section_heading(ui, label);
@@ -326,12 +331,12 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
                         "",
                         ui_kit::paint_sketch_exit_previous as fn(&egui::Painter, egui::Rect),
                     ),
-                    (SketchExitView::Keep, "keep", "prefs.sketch.exit_keep", app.tr("prefs.default"), ui_kit::paint_sketch_exit_keep),
+                    (SketchExitView::Keep, "keep", "prefs.sketch.exit_keep", app.tr(msg!("prefs.default")), ui_kit::paint_sketch_exit_keep),
                     (
                         SketchExitView::UnlessRotated,
                         "unless_rotated",
                         "prefs.sketch.exit_unless_rotated",
-                        app.tr("prefs.sketch.unless_turned_note"),
+                        app.tr(msg!("prefs.sketch.unless_turned_note")),
                         ui_kit::paint_sketch_exit_unless_turned,
                     ),
                 ] {
@@ -349,7 +354,7 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
                         },
                         width,
                     )
-                    .backing_on_hover_text(app.tr("prefs.sketch_exit_view_note"));
+                    .backing_on_hover_text(app.tr(msg!("prefs.sketch_exit_view_note")));
                     crate::scenario::publish_target(&format!("prefs:sketch_exit_view:{key}"), response.rect);
                     crate::scenario::publish_target(&format!("dialog:list:{}", choice.label_id()), response.rect);
                     if app.preferences.sketch_exit_view == choice {
@@ -376,7 +381,7 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    ui_kit::settings_section(ui, "marks", app.tr("prefs.sketch.marks"), |ui| {
+    ui_kit::settings_section(ui, "marks", app.tr(msg!("prefs.sketch.marks")), |ui| {
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(t.space_10, t.space_10);
             let available = ui.available_width();
@@ -432,18 +437,18 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
         // Larger constraint glyphs, readable at any zoom (#10794).
-        let label_width = ui_kit::ContentWidth::label(ui, app.tr("prefs.constraint_glyph_size"));
+        let label_width = ui_kit::ContentWidth::label(ui, app.tr(msg!("prefs.constraint_glyph_size")));
         ui_kit::settings_form(ui, label_width, |ui| {
-            setting::constraint_glyph_scale(app, ui).backing_on_hover_text(app.tr("prefs.constraint_glyph_size_note"));
+            setting::constraint_glyph_scale(app, ui).backing_on_hover_text(app.tr(msg!("prefs.constraint_glyph_size_note")));
         });
     });
 }
 
 fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    ui_kit::settings_section(ui, "selection", app.tr("prefs.selecting"), |ui| {
-        picture_group(ui, app.tr("prefs.sketch.click_selects"), |ui| {
-            let label = app.tr("prefs.sketch.click_selects");
+    ui_kit::settings_section(ui, "selection", app.tr(msg!("prefs.selecting")), |ui| {
+        picture_group(ui, app.tr(msg!("prefs.sketch.click_selects")), |ui| {
+            let label = app.tr(msg!("prefs.sketch.click_selects"));
             let mut indexed = crate::ui_kit::settings_search::texts_hit(ui, &[label]);
             if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                 ui_kit::section_heading(ui, label);
@@ -497,15 +502,15 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
             &mut app.preferences.selection_shift_add_only,
         );
         // Draw after the checkbox so the Shift legend reflects this frame's change.
-        let click = app.tr("prefs.click");
-        let shift = app.tr("prefs.shift");
+        let click = app.tr(msg!("prefs.click"));
+        let shift = app.tr(msg!("prefs.shift"));
         let ctrl = crate::tool_modifiers::ctrl_name_for(crate::tool_modifiers::Platform::of(ui.ctx()));
-        let toggle = app.tr("prefs.toggle_item");
+        let toggle = app.tr(msg!("prefs.toggle_item"));
         ui_kit::settings_bindings(
             ui,
             &[
-                (&[click], app.tr("prefs.select_one_item")),
-                (&[shift, click], if app.preferences.selection_shift_add_only { app.tr("prefs.add_item") } else { toggle }),
+                (&[click], app.tr(msg!("prefs.select_one_item"))),
+                (&[shift, click], if app.preferences.selection_shift_add_only { app.tr(msg!("prefs.add_item")) } else { toggle }),
                 (&[ctrl, click], toggle),
             ],
         );
@@ -624,9 +629,9 @@ fn targets(key: &str, response: &egui::Response) {
 /// Where a dimension's value is typed, and what the window's arrows step lengths and angles by
 /// (#7246). The steps only matter in the window, so they wait for it.
 fn dimension_values(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
-    let label = app.tr("prefs.dimension_values").to_string();
-    ui_kit::settings_block_hint(ui, &label, app.tr("prefs.dimension_values_note"), label_width, |ui| {
-        let options = [app.tr("prefs.dimension_values_view"), app.tr("prefs.dimension_values_window")];
+    let label = app.tr(msg!("prefs.dimension_values")).to_string();
+    ui_kit::settings_block_hint(ui, &label, app.tr(msg!("prefs.dimension_values_note")), label_width, |ui| {
+        let options = [app.tr(msg!("prefs.dimension_values_view")), app.tr(msg!("prefs.dimension_values_window"))];
         let mut selected = usize::from(app.preferences.dimension_input == DimensionInput::Window);
         if ui_kit::settings_segments(ui, &label, &mut selected, &options) {
             app.preferences.dimension_input = if selected == 1 { DimensionInput::Window } else { DimensionInput::View };
@@ -635,18 +640,18 @@ fn dimension_values(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
     let window = app.preferences.dimension_input == DimensionInput::Window;
     let units = app.session.doc.units.clone();
     let decimals = app.preferences.length_decimals;
-    ui_kit::settings_block(ui, app.tr("prefs.dimension_steps"), label_width, |ui| {
+    ui_kit::settings_block(ui, app.tr(msg!("prefs.dimension_steps")), label_width, |ui| {
         ui.add_enabled_ui(window, |ui| {
             ui.horizontal(|ui| {
                 let t = Tokens::get();
                 ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
                     let p = &mut app.preferences;
                     ui_kit::bounded_length_field(ui, &mut p.dimension_step_mm, &units, decimals, DIMENSION_STEP_MM, 0.1)
-                        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_length"));
+                        .backing_on_hover_text(solidcraft_ui_text::tr(msg!("prefs.dimension_step_length")));
                 });
                 ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
                     ui_kit::number_field(ui, &mut app.preferences.dimension_step_deg, DIMENSION_STEP_DEG, 0.1, "°")
-                        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_angle"));
+                        .backing_on_hover_text(solidcraft_ui_text::tr(msg!("prefs.dimension_step_angle")));
                 });
             });
         });
@@ -664,8 +669,8 @@ fn dimension_appearance(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32)
         let colour = t.dimension.to_array();
         [colour[0], colour[1], colour[2]]
     };
-    let size_label = app.tr("prefs.dimension_text_size").to_string();
-    ui_kit::settings_block_hint(ui, &size_label, app.tr("prefs.dimension_text_size_note"), label_width, |ui| {
+    let size_label = app.tr(msg!("prefs.dimension_text_size")).to_string();
+    ui_kit::settings_block_hint(ui, &size_label, app.tr(msg!("prefs.dimension_text_size_note")), label_width, |ui| {
         let response = ui_kit::slider(
             ui,
             &mut app.preferences.dimension_text_scale,
@@ -674,9 +679,9 @@ fn dimension_appearance(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32)
         );
         crate::scenario::publish_target("prefs:dimension_text_scale", response.rect);
     });
-    let colour_label = app.tr("prefs.dimension_colour").to_string();
-    ui_kit::settings_block_hint(ui, &colour_label, app.tr("prefs.dimension_colour_note"), label_width, |ui| {
-        let labels = [app.tr("prefs.dimension_colour_theme"), app.tr("prefs.dimension_colour_custom")];
+    let colour_label = app.tr(msg!("prefs.dimension_colour")).to_string();
+    ui_kit::settings_block_hint(ui, &colour_label, app.tr(msg!("prefs.dimension_colour_note")), label_width, |ui| {
+        let labels = [app.tr(msg!("prefs.dimension_colour_theme")), app.tr(msg!("prefs.dimension_colour_custom"))];
         let mut selected = usize::from(app.preferences.dimension_colour.is_some());
         if ui_kit::settings_segments(ui, &colour_label, &mut selected, &labels) {
             app.preferences.dimension_colour = (selected == 1).then_some(theme_colour);
@@ -706,7 +711,7 @@ fn dimension_appearance(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32)
             }
             ui.add_enabled_ui(saved.is_some(), |ui| {
                 ui_kit::settings_control_width(ui, t.space_24 * 4.0, |ui| {
-                    let response = ui_kit::cell_editor(ui, key.with("edit"), &mut hex, app.tr("color.hex_hint"), false);
+                    let response = ui_kit::cell_editor(ui, key.with("edit"), &mut hex, app.tr(msg!("color.hex_hint")), false);
                     crate::scenario::publish_target("prefs:dimension_colour_hex", response.rect);
                     if response.changed()
                         && let Some(colour) = crate::dialogs_appearance::parse_color(&json!(hex))

@@ -505,7 +505,7 @@ pub(super) fn report_notice(app: &mut crate::SolveApp) {
         let preserved = app.panel_runtime.as_ref().and_then(|runtime| runtime.preferences.as_ref()).is_some_and(|state| state.preserve.is_some());
         let text =
             if reset.is_empty() || app.panel_runtime.as_ref().and_then(|runtime| runtime.preferences.as_ref()).is_some_and(|state| state.failed) {
-                app.tr("prefs.panel_layout.recovery").to_string()
+                app.tr(msg!("prefs.panel_layout.recovery")).to_string()
             } else {
                 reset_notice(&reset, preserved)
             };

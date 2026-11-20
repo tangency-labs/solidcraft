@@ -490,7 +490,7 @@ fn comb_options_card(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
     let available = crate::shell::workspace_content(app, crate::shell::content_rect(app, proj.rect));
     let width = tk.form_card_width.min(available.width() - 2.0 * tk.space_16).max(0.0);
     let mut options = comb_options();
-    let (length_tip, teeth_tip) = (app.tr("ui.comb_length_tip").to_string(), app.tr("ui.comb_teeth_tip").to_string());
+    let (length_tip, teeth_tip) = (app.tr(msg!("ui.comb_length_tip")).to_string(), app.tr(msg!("ui.comb_teeth_tip")).to_string());
     let shown = crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Canvas)
         .area(egui::Id::unique("sc_comb_options"))
         .fixed_pos(available.left_top() + egui::vec2(tk.space_16, tk.space_16))
@@ -1023,11 +1023,11 @@ pub fn hint(id: &str) -> Option<String> {
             "inspect.center_of_mass" => "Center of mass of all bodies; click a body for its own",
             "inspect.isocurve" => "Isocurves: click faces",
             "inspect.continuity" => "Continuity: click an edge for its numbers (the button again turns the colours off)",
-            "canvas.insert" => solidcraft_ui_text::tr("canvas.place_hint"),
-            "canvas.decal" => solidcraft_ui_text::tr("canvas.decal_place_hint"),
-            "sketch.trim" => tr("sketch.hint.trim"),
-            "sketch.extend" => tr("sketch.hint.extend"),
-            "sketch.break" => tr("sketch.hint.break"),
+            "canvas.insert" => solidcraft_ui_text::tr(msg!("canvas.place_hint")),
+            "canvas.decal" => solidcraft_ui_text::tr(msg!("canvas.decal_place_hint")),
+            "sketch.trim" => tr(msg!("sketch.hint.trim")),
+            "sketch.extend" => tr(msg!("sketch.hint.extend")),
+            "sketch.break" => tr(msg!("sketch.hint.break")),
             "sketch.line.midpoint" => "Midpoint line: click the middle, then an end",
             "sketch.arc.tangent" => "Tangent arc: click the end of a line or arc, then the arc's end",
             "sketch.ellipse" => "Ellipse: click the centre, the end of the major axis, then a point on it",
@@ -1077,11 +1077,11 @@ fn project_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, hits: &[Hit]) {
     } else if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)) {
         vec![r]
     } else {
-        app.set_status(app.tr("sketch.project.nothing_under_cursor").to_string(), true);
+        app.set_status(app.tr(msg!("sketch.project.nothing_under_cursor")).to_string(), true);
         return;
     };
     if refs.is_empty() {
-        app.set_status(app.tr("sketch.project.nothing_under_cursor").to_string(), true);
+        app.set_status(app.tr(msg!("sketch.project.nothing_under_cursor")).to_string(), true);
         return;
     }
     // A command failure is already reported by `SolveApp::run`. A refusal that returns
@@ -1486,7 +1486,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                         }
                         tool.picks.clear();
                     } else {
-                        app.set_status(app.tr("ui.intersection_curve_second_pick").to_string(), false);
+                        app.set_status(app.tr(msg!("ui.intersection_curve_second_pick")).to_string(), false);
                     }
                 }
             }

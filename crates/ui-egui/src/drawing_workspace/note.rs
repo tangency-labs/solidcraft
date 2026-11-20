@@ -24,7 +24,7 @@ pub(super) struct Draft {
 /// How finely a preview's letters are flattened, on paper.
 const PREVIEW_TOLERANCE_MM: f64 = 0.01;
 
-fn tr(key: &'static str) -> &'static str {
+fn tr(key: impl solidcraft_ui_text::Key<'static>) -> &'static str {
     solidcraft_ui_text::tr(key)
 }
 
@@ -53,19 +53,20 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Option<u64
     let (cancel, save) = super::inset(ui, |ui| {
         let mut valid = false;
         if let Some(draft) = app.drawing_workspace.note.as_mut() {
-            let field = ui_kit::multiline_text_field(ui, tr("ui.drawing_panel.text"), ui.scope_id().with("note_text"), &mut draft.text);
+            let field = ui_kit::multiline_text_field(ui, tr(msg!("ui.drawing_panel.text")), ui.scope_id().with("note_text"), &mut draft.text);
             crate::scenario::publish_rect("drawing:note:text", field.rect);
             valid = ready(&draft.text);
             if selected.is_none() {
-                ui_kit::text(ui, tr("ui.drawing_note.place"), ui_kit::Text::Note("drawing_note_place"));
+                ui_kit::text(ui, tr(msg!("ui.drawing_note.place")), ui_kit::Text::Note("drawing_note_place"));
             }
         } else {
-            ui_kit::text(ui, tr("ui.drawing_note.fields"), ui_kit::Text::Note("drawing_note_fields"));
+            ui_kit::text(ui, tr(msg!("ui.drawing_note.fields")), ui_kit::Text::Note("drawing_note_fields"));
         }
         ui.separator();
         ui.horizontal(|ui| {
-            let cancel = ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
-            let save = selected.is_some() && ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr("ui.heading_ok"), Button::Normal)).inner.clicked();
+            let cancel = ui_kit::button(ui, tr(msg!("ui.cancel")), Button::Normal).clicked();
+            let save =
+                selected.is_some() && ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr(msg!("ui.heading_ok")), Button::Normal)).inner.clicked();
             (cancel, save)
         })
         .inner

@@ -623,7 +623,7 @@ impl SolveApp {
                 let _ = tx.send(result);
                 None
             }) else {
-                let _ = req.reply.send(json!({"ok":false,"error":self.tr("ui.plugin_start_failed")}));
+                let _ = req.reply.send(json!({"ok":false,"error":self.tr(msg!("ui.plugin_start_failed"))}));
                 return None;
             };
             req.ticket.computing(true);
@@ -765,13 +765,13 @@ impl SolveApp {
             if current {
                 self.session.plugin_state.packages.insert(id.to_owned(), path.to_owned());
             } else {
-                reply = json!({"ok":false,"error":self.tr("ui.plugin_context_changed")});
+                reply = json!({"ok":false,"error":self.tr(msg!("ui.plugin_context_changed"))});
             }
         }
         let export = executed(&job.req.params).and_then(|(command, _)| spec_id(command)).is_some_and(|id| ANSWERED_ON_A_COPY.contains(&id));
         if reply["ok"] == true && export {
             let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
-            self.session.echo(language.format("ui.command_done", &[("command", job.label.as_str())]));
+            self.session.echo(language.fill(msg!("ui.command_done", command = job.label.as_str())));
         }
         let _ = job.req.reply.send(reply);
     }
@@ -832,11 +832,11 @@ impl SolveApp {
                 || grants != &self.preferences.plugin_grants
                 || *limits != crate::plugins::host_limits(&self.preferences)
             {
-                Err(self.tr("ui.plugin_context_changed").to_string())
+                Err(self.tr(msg!("ui.plugin_context_changed")).to_string())
             } else {
                 prepared
                     .try_recv()
-                    .map_err(|_| self.tr("ui.plugin_no_result").to_string())
+                    .map_err(|_| self.tr(msg!("ui.plugin_no_result")).to_string())
                     .and_then(|r| r)
                     .and_then(|prepared| {
                         let before = self.session.doc.clone();
@@ -852,9 +852,11 @@ impl SolveApp {
                         } else {
                             self.session.redo = redo;
                         }
-                        replies.map_err(|_| self.tr("ui.plugin_context_changed").to_string())
+                        replies.map_err(|_| self.tr(msg!("ui.plugin_context_changed")).to_string())
                     })
-                    .and_then(|replies| replies.into_iter().last().map(|(_, reply)| reply).ok_or_else(|| self.tr("ui.plugin_no_result").to_string()))
+                    .and_then(|replies| {
+                        replies.into_iter().last().map(|(_, reply)| reply).ok_or_else(|| self.tr(msg!("ui.plugin_no_result")).to_string())
+                    })
             };
             self.big_operation |= crate::now_ms() - job.started >= crate::recovery_ui::BIG_OPERATION_MS;
             let result = result.and_then(|reply| {
