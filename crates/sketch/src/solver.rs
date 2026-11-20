@@ -1538,9 +1538,11 @@ fn lm_in(
     if !budget.counts_numeric() {
         return lm_run(sk, lay, blocks, vars, x, col, MAX_ITERS, None, give_up).unwrap_or((0, f64::INFINITY));
     }
-    let mut meter = Budget::new(usize::MAX);
-    let out = lm_capped_with_budget(sk, lay, blocks, vars, x, col, MAX_ITERS, Some(&mut meter)).unwrap_or((0, f64::INFINITY));
-    budget.charge_numeric(meter.spent());
+    let mut meter = Budget::new(if budget.numeric_stops() { budget.numeric_left().unwrap_or(0) } else { usize::MAX });
+    // A value edit's run is taken again like an unbudgeted one: a remembered run costs no work.
+    let memo = budget.numeric_stops();
+    let out = lm_run_with(sk, lay, blocks, vars, x, col, MAX_ITERS, Some(&mut meter), false, memo).unwrap_or((0, f64::INFINITY));
+    budget.charge_numeric(if meter.exhausted() { usize::MAX } else { meter.spent() });
     out
 }
 
@@ -1586,9 +1588,26 @@ fn lm_run(
     budget: Option<&mut Budget>,
     give_up: bool,
 ) -> Option<(usize, f64)> {
-    // A run with a work budget charges its work to it: always made.
-    let key =
-        (budget.is_none() && lm_memo::remembers(vars.len()) && lm_memo::active()).then(|| run_key(sk, lay, blocks, vars, x, col, max_iters, give_up));
+    lm_run_with(sk, lay, blocks, vars, x, col, max_iters, budget, give_up, false)
+}
+
+/// [`lm_run`]; with `memo_budgeted`, a run with a work budget is also taken again and remembered
+/// unless its budget cut it short (a value edit's, #17905). Other budgeted runs (a live drag
+/// frame's) charge their work to it: always made.
+fn lm_run_with(
+    sk: &Sketch,
+    lay: &Layout,
+    blocks: &[(Block, Vec<usize>)],
+    vars: &[usize],
+    x: &mut Vec<f64>,
+    col: &[usize],
+    max_iters: usize,
+    mut budget: Option<&mut Budget>,
+    give_up: bool,
+    memo_budgeted: bool,
+) -> Option<(usize, f64)> {
+    let key = ((budget.is_none() || memo_budgeted) && lm_memo::remembers(vars.len()) && lm_memo::active())
+        .then(|| run_key(sk, lay, blocks, vars, x, col, max_iters, give_up));
     if let Some(key) = &key
         && let Some((values, out)) = lm_memo::get(key)
     {
@@ -1601,10 +1620,11 @@ fn lm_run(
         }
         return out;
     }
-    let out = lm_compute(sk, lay, blocks, vars, x, col, max_iters, budget, give_up);
-    // A cancelled run stopped part way: not its result.
+    let out = lm_compute(sk, lay, blocks, vars, x, col, max_iters, budget.as_deref_mut(), give_up);
+    // A cancelled run, or one its budget cut, stopped part way: not its result.
     if let Some(key) = key
         && !cancelled()
+        && !budget.is_some_and(|b| b.exhausted())
     {
         lm_memo::put(key, lm_memo::Entry { values: vars.iter().map(|v| x.get(*v).copied().unwrap_or(f64::NAN)).collect(), out });
     }
@@ -2367,11 +2387,12 @@ fn solve_after_edit_now(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[V
     }
     let old_values: Vec<Option<f64>> = sk.constraints.iter().map(|c| old.get(&c.id).copied()).collect();
     let before = stored.is_none().then(|| sk.clone());
-    let report = solve_from(sk, &Hold::default(), stored, analysis, Some(&old_values), &mut Budget::full());
+    let mut budget = Budget::full().for_edit(edit_work());
+    let report = solve_from(sk, &Hold::default(), stored, analysis, Some(&old_values), &mut budget);
     let report = if report.keeps_orientation() {
         report
     } else {
-        match before.and_then(|before| solve_in_steps(&before, &old, analysis)) {
+        match before.and_then(|before| solve_in_steps(&before, &old, analysis, &mut budget)) {
             Some((stepped, stepped_report)) => {
                 *sk = stepped;
                 stepped_report
@@ -2455,7 +2476,7 @@ pub fn keep_point_order(stored: &mut ConstraintKind, solved: &ConstraintKind) {
 /// values a step before still reaches them keeping every turn (the linkage family in
 /// `continuation_tests`). `None` when no try reaches the new values keeping every orientation,
 /// when nothing that can be stepped changed, or when the sketch is not solved for the old values.
-fn solve_in_steps(start: &Sketch, old: &DrivingValues, analysis: Analysis) -> Option<(Sketch, SolveReport)> {
+fn solve_in_steps(start: &Sketch, old: &DrivingValues, analysis: Analysis, budget: &mut Budget) -> Option<(Sketch, SolveReport)> {
     let changed: Vec<(usize, f64, f64)> = start
         .constraints
         .iter()
@@ -2471,10 +2492,16 @@ fn solve_in_steps(start: &Sketch, old: &DrivingValues, analysis: Analysis) -> Op
         return None;
     }
     'tries: for steps in EDIT_STEPS {
+        if budget.numeric_exhausted() {
+            return None;
+        }
         let mut at = start.clone();
         let mut values = old.clone();
         let mut last = None;
         for k in 1..=steps {
+            if budget.numeric_exhausted() {
+                return None;
+            }
             let t = k as f64 / steps as f64;
             for &(i, was, new) in &changed {
                 if let Some(c) = at.constraints.get_mut(i) {
@@ -2483,7 +2510,10 @@ fn solve_in_steps(start: &Sketch, old: &DrivingValues, analysis: Analysis) -> Op
             }
             let from: Vec<Option<f64>> = at.constraints.iter().map(|c| values.get(&c.id).copied()).collect();
             let step_analysis = if k == steps { analysis } else { Analysis::StatusOnly };
-            let report = solve_from(&mut at, &Hold::default(), None, step_analysis, Some(&from), &mut Budget::full());
+            let left_before = budget.numeric_left().unwrap_or(0);
+            let mut step = Budget::full().for_edit(left_before);
+            let report = solve_from(&mut at, &Hold::default(), None, step_analysis, Some(&from), &mut step);
+            budget.charge_numeric(left_before - step.numeric_left().unwrap_or(0));
             if !report.keeps_orientation() {
                 continue 'tries;
             }
@@ -2928,6 +2958,16 @@ fn nudge_line_angles(sk: &Sketch, lay: &Layout, x: &mut [f64]) {
 
 /// Continuation steps an edit in sixty-fourths of it: the smallest sub-step is one of them.
 const SUBSTEPS: usize = 64;
+/// The dense LM work one value edit may spend over all its solves (#17905).
+const EDIT_WORK: usize = if 256_000_000_000u64 > usize::MAX as u64 { usize::MAX } else { 256_000_000_000u64 as usize };
+/// [`EDIT_WORK`], or a test's override of it.
+fn edit_work() -> usize {
+    #[cfg(test)]
+    if let Some(w) = edit_work_override::get() {
+        return w;
+    }
+    EDIT_WORK
+}
 /// LM iterations one continuation may spend over all its sub-steps (taken and halved).
 const CONTINUATION_ITERS: usize = 4 * MAX_ITERS;
 /// Triangles of distance dimensions whose turn one component's fold check reads.
@@ -3373,6 +3413,7 @@ fn continue_values(
     col: &[usize],
     x: &mut [f64],
     edit: &ValueEdit,
+    budget: &mut Budget,
 ) -> (usize, bool) {
     #[cfg(feature = "solver-profiling")]
     profiling::count(|c| c.continuation_runs = c.continuation_runs.saturating_add(1));
@@ -3381,13 +3422,22 @@ fn continue_values(
     let mut blocks: Vec<(Block, Vec<usize>)> = sub.iter().map(|(b, v)| (copy_block(b), v.clone())).collect();
     let (mut t, mut h, mut spent) = (0, SUBSTEPS / 2, 0);
     let mut trial = x.to_vec();
-    while t < SUBSTEPS && spent < CONTINUATION_ITERS {
+    let stops = budget.numeric_stops();
+    while t < SUBSTEPS && spent < CONTINUATION_ITERS && !(stops && budget.numeric_exhausted()) {
         let next = (t + h).min(SUBSTEPS);
         if let Some(kinds) = arena.get(next) {
             edit.point_at(&mut blocks, kinds);
         }
         trial.copy_from_slice(x);
-        let (its, residual) = lm_capped(sk, lay, &blocks, vars, &mut trial, col, MAX_ITERS.min(CONTINUATION_ITERS - spent));
+        let cap = MAX_ITERS.min(CONTINUATION_ITERS - spent);
+        let (its, residual) = if stops {
+            let mut meter = Budget::new(budget.numeric_left().unwrap_or(0));
+            let out = lm_run_with(sk, lay, &blocks, vars, &mut trial, col, cap, Some(&mut meter), false, true).unwrap_or((0, f64::INFINITY));
+            budget.charge_numeric(if meter.exhausted() { usize::MAX } else { meter.spent() });
+            out
+        } else {
+            lm_capped(sk, lay, &blocks, vars, &mut trial, col, cap)
+        };
         spent += its.max(1);
         if edit.holds(residual, &State { sk, lay, x: &trial }) {
             x.copy_from_slice(&trial);
@@ -3936,7 +3986,7 @@ fn solve_inner(
                         *s = *s0;
                     }
                 }
-                let (its, mut done) = continue_values(sk, &lay, &sub, vars, &col, &mut from, &edit);
+                let (its, mut done) = continue_values(sk, &lay, &sub, vars, &col, &mut from, &edit, budget);
                 iterations += its;
                 if !done {
                     // The last sub-step's solution, solved for the new values in one jump.
