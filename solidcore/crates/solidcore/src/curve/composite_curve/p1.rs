@@ -2253,8 +2253,10 @@ fn fixed_segment_target_interval(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::curve::arc::ArcDefinition;
     use crate::curve::hermite_curve::HermiteCurve;
     use crate::curve::line::Line;
+    use crate::curve::path::PathPiece;
     use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
 
     fn line(a: [f64; 3], b: [f64; 3]) -> Curve {
@@ -2821,8 +2823,9 @@ mod tests {
         // `crv_point_error` bounds the line's points (degree 1: 2p + 2 = 4 levels) by
         // e = 16 * 4 * eps * 1010 = 1.4e-11. A point 3e-12 of the offset (5e-14) inside it
         // is below upstream's cutoff `d (1 - 1e-12)` (d - 1.75e-14), but not proved
-        // closer: the bound is 2e. One e inside is not proved either; four are, and so is
-        // half the offset.
+        // closer: the bound is 2e. 1.5e inside is not proved either (d + 0.5e with the
+        // bound); 2.5e inside is (d - 0.5e), so a bound of e or 3e fails a row. Four e
+        // inside are proved, and so is half the offset.
         let k = Kernel::default();
         let orig = line([1000.0, 0.0, 0.0], [1010.0, 0.0, 0.0]);
         let e = orig
@@ -2835,6 +2838,8 @@ mod tests {
             (d, false, false),
             (d * (1.0 - 3e-12), true, false),
             (d - e, true, false),
+            (d - 1.5 * e, true, false),
+            (d - 2.5 * e, true, true),
             (d - 4.0 * e, true, true),
             (0.5 * d, true, true),
         ] {
@@ -2842,6 +2847,37 @@ mod tests {
                 closer_above(&k, &orig, d, above),
                 (upstream, proved),
                 "{above}"
+            );
+        }
+        // The issue's curves are arcs: rational quadratics, whose bound carries their
+        // weights. A quarter arc of radius 9 about (1000, 0, 0), from 45 to 135 degrees, has
+        // control points up to x = 1000 + 9 / sqrt 2 and weights 1 and 1 / sqrt 2:
+        // e = 16 * 6 * eps * (1000 + 9 / sqrt 2) * sqrt 2 = 3.0e-11, the same two rows.
+        let arc = ArcDefinition {
+            centre: Point3::new(1000.0, 0.0, 0.0),
+            axis: Vec3::Z,
+            reference: Vec3::X,
+            radius: 9.0,
+            start: std::f64::consts::FRAC_PI_4,
+            end: 3.0 * std::f64::consts::FRAC_PI_4,
+        };
+        let orig = PathPiece::of_arc(&k, &arc).unwrap().curve().clone();
+        assert!(matches!(orig.kind(), CurveKind::Ellipse(_)));
+        let e = orig
+            .point_error_bound(orig.natural_interval().evaluate(0.5))
+            .unwrap();
+        let sqrt2 = std::f64::consts::SQRT_2;
+        let expected = 16.0 * 6.0 * f64::EPSILON * (1000.0 + 9.0 / sqrt2) * sqrt2;
+        assert!((e - expected).abs() <= 1e-3 * expected, "{e}");
+        for (above, upstream, proved) in [
+            (d, false, false),
+            (d - 1.5 * e, true, false),
+            (d - 2.5 * e, true, true),
+        ] {
+            assert_eq!(
+                closer_above(&k, &orig, d, above),
+                (upstream, proved),
+                "arc {above}"
             );
         }
         // An offset of 10 from a line 100 from the origin: upstream's margin, 1e-11, is wider
