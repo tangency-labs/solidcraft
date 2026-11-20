@@ -4096,12 +4096,12 @@ fn chord_and_variable_fillets() {
         json!({"edges": [[10, 10, 30]], "radius": 2, "type": "variable", "radius2": 2, "start": [10, 0, 30], "mid": [[0.5, "waist"]]}),
     );
     let vol = |s: &Session| solidcraft_kernel::measure(&s.world_state().unwrap().body("B").unwrap().body).unwrap().volume;
-    let removed = 2.0 * (1.0 - PI / 4.0) * 10.0 * (4.0 + 8.0 + 16.0) / 3.0;
-    assert!(rel(vol(&s), 6000.0 - removed) < 1e-4, "{}", vol(&s));
-    // The middle radius follows its parameter.
+    // Integrating the union of the rolling balls, as in the kernel's corner-law test.
+    // Compare the removed material directly, so the surrounding 6000 mm³ cannot mask an error.
+    let removed = 6000.0 - vol(&s);
+    assert!(rel(removed, 39.541034) < 1e-4, "{removed}");
     run(&mut s, "parameters.change", json!({"name": "waist", "expression": "3 mm"}));
-    let removed = 2.0 * (1.0 - PI / 4.0) * 10.0 * (4.0 + 6.0 + 9.0) / 3.0;
-    assert!(rel(vol(&s), 6000.0 - removed) < 1e-4, "{}", vol(&s));
+    assert!(rel(6000.0 - vol(&s), 27.093682) < 1e-4, "{}", vol(&s));
     assert!(
         s.execute(
             "solid.fillet",
