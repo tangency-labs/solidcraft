@@ -5213,12 +5213,13 @@ fn a_round_between_two_cones_on_a_short_arc_reads_back_and_the_rim_rounds_after_
 
     let slope = 0.25_f64;
     let frustum = PI * 48.0 / 3.0 * (24.0 * 24.0 + 24.0 * 36.0 + 36.0 * 36.0);
-    let p = [
+    let p: [[f64; 2]; 3] = [
         [18.0, 28.5],
         [26.743_129, 33.353_628],
         [27.370_857, 30.842_714],
     ];
-    let cross = (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
+    let cross =
+        (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
     let rib = cross.abs() / 2.0 * (p[0][1] + p[1][1] + p[2][1]) / 3.0 * 12.0_f64.to_radians();
     let unit = |d: [f64; 2]| {
         let l = d[0].hypot(d[1]);
@@ -5227,7 +5228,11 @@ fn a_round_between_two_cones_on_a_short_arc_reads_back_and_the_rim_rounds_after_
     let along_cone = unit([1.0, slope]);
     let up_rib = unit([p[1][0] - p[0][0], p[1][1] - p[0][1]]);
     let turn = (along_cone[0] * up_rib[0] + along_cone[1] * up_rib[1]).acos();
-    assert!((turn.to_degrees() - 15.0).abs() < 1e-5, "{}", turn.to_degrees());
+    assert!(
+        (turn.to_degrees() - 15.0).abs() < 1e-5,
+        "{}",
+        turn.to_degrees()
+    );
     // the round fills the corner outside both sides: between the cone's side back towards
     // x = 0 and the rib's side
     let (area, rho) = corner_round(p[0], [-along_cone[0], -along_cone[1]], up_rib, 1.0);
