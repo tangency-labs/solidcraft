@@ -578,8 +578,25 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
         // Curved and slanted edges, and their pcurves, are fitted within a quarter of the body's
         // tolerance each.
         let wall_form = label.as_ref().and_then(|f| OnForm::of(f, o, axis, radial, tangent));
-        let wall_form = wall_form.zip(selected.nurbs.as_ref()).zip(label.as_ref()).and_then(|((on, n), f)| on.on(n, f));
-        let cap_form = OnForm { delta: 0.0, sigma: 1.0, u0: 0.0, k: 1.0, v0: 0.0, vk: axis.dot(radial.cross(tangent)) };
+        let wall_form = wall_form.zip(selected.nurbs.as_ref()).zip(label.as_ref()).and_then(|((on, n), f)| on.on(n, f, o, axis));
+        // A form on the face's own arcs takes the footprint's angles about its middle.
+        let (x_lo, x_hi) = mapped
+            .iter()
+            .flat_map(|m| m.loops())
+            .flat_map(|l| &l.segs)
+            .map(seg_box)
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (l, h)| (a.min(l.x), b.max(h.x)));
+        let wall_form = wall_form.map(|w| w.centred(0.5 * (x_lo + x_hi), r));
+        let cap_form = OnForm {
+            delta: 0.0,
+            sigma: 1.0,
+            u0: 0.0,
+            k: 1.0,
+            phi: QUARTER,
+            span: std::f64::consts::TAU,
+            v0: 0.0,
+            vk: axis.dot(radial.cross(tangent)),
+        };
         let wall = Wrap {
             o,
             axis,
@@ -820,18 +837,26 @@ struct Wrap {
 
 /// How a cylinder's form parameterises the wall: wrapped coordinates (arc length `s` at the
 /// wall's radius `r`, height `z`) lie at the angle `delta + sigma s / r` from where the form's
-/// quarter arcs start, and at the height `v0 + vk z` along its frame's z axis. The form's u is
-/// `u0 + k` times that angle's parameter on the quarter grid ([`form::param`]): its quarters are
-/// `k` long (1 on [`form::surface`]'s forms, `r π/2` on a primitive's); its v is the height.
+/// arcs start, and at the form's v `v0 + vk z`. The form's u is `u0 + k` times that angle's
+/// parameter on arcs of `phi` each ([`OnForm::param`]): `phi` is a quarter turn on its frame's
+/// quarter grid ([`form::param`]; quarters 1 long on [`form::surface`]'s forms, `r π/2` on a
+/// primitive's), or less on a form laid on the face's own arcs from where it starts
+/// (`form::surface_on_own_arcs`, as a face rebuilt by Repair Part, #12029).
 #[derive(Clone, Copy, Debug)]
 struct OnForm {
     delta: f64,
     sigma: f64,
     u0: f64,
     k: f64,
+    phi: f64,
+    /// The angle the form's arcs cover, from `delta`'s zero.
+    span: f64,
     v0: f64,
     vk: f64,
 }
+
+/// A quarter turn: the arcs of a form on its frame's quarter grid.
+const QUARTER: f64 = std::f64::consts::FRAC_PI_2;
 
 impl OnForm {
     /// The form of a cylinder labelled on `frame`, about the wall's axis.
@@ -846,22 +871,105 @@ impl OnForm {
             sigma: fz.dot(radial.cross(tangent)).signum(),
             u0: 0.0,
             k: 1.0,
+            phi: QUARTER,
+            span: std::f64::consts::TAU,
             v0: (o - fo).dot(fz),
             vk: axis.dot(fz),
         })
     }
 
-    /// The same, on the face form `nurbs` labelled on `frame`: its quarters as long as its first
-    /// knot interval, starting where its first knot lies on the frame. [`Wrap::check_wall_form`]
-    /// confirms it.
-    fn on(self, nurbs: &Surface, frame: &Frame) -> Option<OnForm> {
+    /// The same, on the face form `nurbs` labelled on `frame`, a ring of equal arcs round the
+    /// wall's axis through `o`: its arcs as long as its first knot interval and as wide as the
+    /// angle that interval turns through, starting where its first knot lies on the frame, its v
+    /// read off along the axis. [`Wrap::check_wall_form`] confirms it.
+    fn on(self, nurbs: &Surface, frame: &Frame, o: Vec3, axis: Vec3) -> Option<OnForm> {
         let Surface::RationalSpline { u_knots, v_knots, .. } = nurbs else { return None };
-        let (&u0, &v_lo, &v_hi) = (u_knots.first()?, v_knots.first()?, v_knots.last()?);
+        let (&u0, &u1, &v_lo, &v_hi) = (u_knots.first()?, u_knots.last()?, v_knots.first()?, v_knots.last()?);
         let next = *u_knots.iter().find(|x| **x > u0)?;
-        let p = SurfaceEval::new(nurbs).ok()?.point([u0, 0.5 * (v_lo + v_hi)])?;
+        let k = next - u0;
+        // Every arc as long as the first.
+        let mut breaks: Vec<f64> = u_knots.clone();
+        breaks.dedup();
+        if breaks.windows(2).any(|w| ((w[1] - w[0]) - k).abs() > 1e-9 * k.abs().max(1.0)) {
+            return None;
+        }
+        let eval = SurfaceEval::new(nurbs).ok()?;
+        let mid = 0.5 * (v_lo + v_hi);
         let (fo, fx, fy) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
-        let start = (p - fo).dot(fy).atan2((p - fo).dot(fx));
-        Some(OnForm { delta: self.delta - start, u0, k: next - u0, ..self })
+        let angle = |p: Vec3| (p - fo).dot(fy).atan2((p - fo).dot(fx));
+        let start = angle(eval.point([u0, mid])?);
+        let mut phi = (angle(eval.point([next, mid])?) - start).rem_euclid(std::f64::consts::TAU);
+        if (phi - QUARTER).abs() <= 1e-9 {
+            phi = QUARTER;
+        }
+        let (h_lo, h_hi) = ((eval.point([u0, v_lo])? - o).dot(axis), (eval.point([u0, v_hi])? - o).dot(axis));
+        let vk = (v_hi - v_lo) / (h_hi - h_lo);
+        let v0 = v_lo - h_lo * vk;
+        if !(phi > 1e-6 && phi <= QUARTER && k > 0.0 && vk.is_finite() && v0.is_finite()) {
+            return None;
+        }
+        Some(OnForm { delta: self.delta - start, u0, k, phi, span: (u1 - u0) / k * phi, v0, vk, ..self })
+    }
+
+    /// Whether the form is on its frame's quarter grid.
+    fn on_grid(&self) -> bool {
+        self.phi == QUARTER
+    }
+
+    /// The same with the angle at the profile's first coordinate `x` (a wall of radius `r`)
+    /// within half a turn of the middle of the form's arcs, so a form on the face's own arcs,
+    /// short of a turn, takes the profile's angles on its own range (a quarter grid takes them
+    /// a turn round as they are).
+    fn centred(self, x: f64, r: f64) -> OnForm {
+        if self.on_grid() {
+            return self;
+        }
+        let tau = std::f64::consts::TAU;
+        let turns = ((0.5 * self.span - (self.delta + self.sigma * x / r)) / tau).round();
+        OnForm { delta: self.delta + turns * tau, ..self }
+    }
+
+    /// The form parameter (in arcs) at angle `theta` from where the arcs start: on an arc of
+    /// sweep φ, `tan(ψ/2 − φ/4) = tan(φ/4)(2t − 1)`; [`form::param`] on the quarter grid.
+    fn param(&self, theta: f64) -> f64 {
+        if self.on_grid() {
+            return form::param(theta);
+        }
+        let j = (theta / self.phi + 1e-12).floor();
+        let psi = (theta - j * self.phi).clamp(0.0, self.phi);
+        j + 0.5 * ((0.5 * psi - 0.25 * self.phi).tan() / (0.25 * self.phi).tan() + 1.0)
+    }
+
+    /// The parameter's rate of change with the angle at `theta`: `sec²(ψ/2 − φ/4) / (4 tan(φ/4))`,
+    /// the same at both ends of an arc (so the parameter is C1 across them; its second derivative
+    /// is not).
+    fn rate(&self, theta: f64) -> f64 {
+        if self.on_grid() {
+            return param_rate(theta);
+        }
+        let j = (theta / self.phi + 1e-12).floor();
+        let psi = (theta - j * self.phi).clamp(0.0, self.phi);
+        let c = (0.5 * psi - 0.25 * self.phi).cos();
+        1.0 / (4.0 * (0.25 * self.phi).tan() * c * c)
+    }
+
+    /// Bounds on the parameter's derivatives 1 to 4 with the angle, within an arc: those of
+    /// `tan(x) / (2 tan(φ/4)) / 2^k` at `|x| = φ/4`, where each is largest ([`PARAM_BOUNDS`] on
+    /// the quarter grid). With `T = tan(φ/4)` and `S = 1 + T²`: tan' = S, tan'' = 2ST,
+    /// tan''' = 2S² + 4ST², tan'''' = 16S²T + 8ST³.
+    fn bounds(&self) -> [f64; 4] {
+        if self.on_grid() {
+            return PARAM_BOUNDS;
+        }
+        let t = (0.25 * self.phi).tan();
+        let s = 1.0 + t * t;
+        // Rounded up a part in a million, as PARAM_BOUNDS are.
+        [s / (4.0 * t), 0.25 * s, (2.0 * s * s + 4.0 * s * t * t) / (16.0 * t), 0.25 * (2.0 * s * s + s * t * t)].map(|g| g * (1.0 + 1e-6))
+    }
+
+    /// The most the angle changes per unit of the parameter: `4 tan(φ/4)`, at an arc's middle.
+    fn angle_rate(&self) -> f64 {
+        if self.on_grid() { ANGLE_RATE } else { 4.0 * (0.25 * self.phi).tan() }
     }
 }
 
@@ -1040,22 +1148,26 @@ impl Wrap {
     }
 
     /// Whether segment `seg` (wall coordinates) wraps exactly: a line along the axis or round
-    /// the wall. Any other is fitted.
+    /// the wall, on a wall whose form is on its frame's quarter grid (a circle labelled there
+    /// then shares the form's parameter). Any other is fitted, with its pcurves.
     fn exact(&self, seg: &Seg2) -> bool {
         let d = seg.end() - seg.start();
-        matches!(seg, Seg2::Line { .. }) && (d.x.abs() <= self.tol || d.y.abs() <= self.tol)
+        matches!(seg, Seg2::Line { .. }) && (d.x.abs() <= self.tol || d.y.abs() <= self.tol) && self.wall_form.is_none_or(|w| w.on_grid())
     }
 
-    /// That the wall face's form is the one [`OnForm`] describes (its frame's quarter grid), at
-    /// the start of the fitted segment `seg`: its pcurves are fitted on that form.
+    /// That the wall face's form is the one [`OnForm`] describes, at the start of the fitted
+    /// segment `seg`: its pcurves are fitted on that form.
     fn check_wall_form(&self, selected: &AFace, seg: Option<&Seg2>) -> Result<()> {
-        let refuse = || fail("the wall's surface form is not on its frame's quarter grid");
+        let refuse = || fail("the wall's surface form is not one of equal circular arcs");
         let (Some(on), Some(nurbs), Some(seg)) = (self.wall_form, selected.nurbs.as_ref(), seg) else { return Err(refuse()) };
         let eval = SurfaceEval::new(nurbs).map_err(|_| refuse())?;
         let c = seg.start();
-        let (mut u, v) = (on.u0 + on.k * form::param(on.delta + on.sigma * c.x / self.r), on.v0 + on.vk * c.y);
-        // Onto the face's own turn of the form (four quarters to a turn).
-        if let Some([[u0, _], _]) = selected.domain {
+        let (mut u, v) = (on.u0 + on.k * on.param(on.delta + on.sigma * c.x / self.r), on.v0 + on.vk * c.y);
+        // Onto the face's own turn of a form on the quarter grid (four quarters to a turn); a
+        // form on the face's own arcs is short of a turn and its angles are already centred on it.
+        if on.on_grid()
+            && let Some([[u0, _], _]) = selected.domain
+        {
             u -= ((u - u0) / (4.0 * on.k)).floor() * 4.0 * on.k;
         }
         let hit = eval.point([u, v]).ok_or_else(refuse)?;
@@ -1091,9 +1203,9 @@ impl Wrap {
     /// The pcurve of the wrap of segment `seg` (ending at the next corner `q`) on the form `on`
     /// of a cylinder of `radius`, in the edge's parameter t in [0, 1] (the segment's own): the
     /// cubic Hermite spline through the form parameters and their rates at breaks that include
-    /// every quarter line it crosses (where the parameter is only C1), with enough breaks
+    /// every end of the form's arcs it crosses (where the parameter is only C1), with enough breaks
     /// between them that it lifts within `fit` of the wrap. Lifted, an error `du` in u moves at
-    /// most `radius · 4tan(π/8) · du` and one in v as much; the parameter's fourth derivative
+    /// most `radius · 4tan(φ/4) · du` (arcs of φ, [`OnForm::angle_rate`]) and one in v as much; the parameter's fourth derivative
     /// in t is bounded from [`PARAM_BOUNDS`] and the segment's [`derivative_bounds`] by Faà di
     /// Bruno's formula, as in [`fit_spans`].
     fn pcurve(&self, seg: &Seg2, q: Vec2, on: OnForm, radius: f64) -> Result<Curve2> {
@@ -1101,16 +1213,16 @@ impl Wrap {
         let across = across_bounds(seg).ok_or_else(|| fail("a profile curve whose shape cannot be bounded"))?;
         let th: Vec<f64> = across.iter().map(|x| x / self.r).collect();
         let (Some(&t1), Some(&t2), Some(&t3), Some(&t4)) = (th.first(), th.get(1), th.get(2), th.get(3)) else { return Err(fail("bounds")) };
-        let [g1, g2, g3, g4] = PARAM_BOUNDS;
+        let [g1, g2, g3, g4] = on.bounds();
         let u4 = g1 * t4 + g2 * (4.0 * t1 * t3 + 3.0 * t2 * t2) + 6.0 * g3 * t1 * t1 * t2 + g4 * t1.powi(4);
-        let m = radius * ANGLE_RATE * u4 + b[3];
+        let m = radius * on.angle_rate() * u4 + b[3];
         let room = self.fit - seg.end().dist(q) * (radius / self.r).max(1.0);
         if room.is_nan() || room <= 0.0 {
             return Err(fail("a profile curve is too detailed to wrap"));
         }
-        // The quarter lines the segment crosses, as values of its first coordinate.
+        // The arcs' ends the segment crosses, as values of its first coordinate.
         let (lo, hi) = seg_box(seg);
-        let quarter = std::f64::consts::FRAC_PI_2;
+        let quarter = on.phi;
         let angle = |x: f64| on.delta + on.sigma * x / self.r;
         let (a0, a1) = (angle(lo.x).min(angle(hi.x)), angle(lo.x).max(angle(hi.x)));
         let mut cuts = vec![0.0, 1.0];
@@ -1139,7 +1251,7 @@ impl Wrap {
             let c = if i == last { q } else { seg.point_at(t) };
             let d = seg.derivative(t);
             let theta = angle(c.x);
-            let (u, du) = (on.u0 + on.k * form::param(theta), on.k * param_rate(theta) * on.sigma * d.x / self.r);
+            let (u, du) = (on.u0 + on.k * on.param(theta), on.k * on.rate(theta) * on.sigma * d.x / self.r);
             let (v, dv) = (on.v0 + on.vk * c.y, on.vk * d.y);
             if ![u, du, v, dv].iter().all(|x| x.is_finite()) {
                 return Err(fail("a profile curve that does not evaluate"));
@@ -1241,7 +1353,7 @@ impl Wrap {
             AUse { edge: ra, forward: false, given: line([0.0, 0.0], [0.0, 1.0]) },
         ];
         let face = AFace { surface, nurbs: None, natural_out: true, loops: vec![lp], shell, domain: None };
-        let on_wall = self.wall_form.ok_or_else(|| fail("the wall's surface form is not on its frame's quarter grid"))?;
+        let on_wall = self.wall_form.ok_or_else(|| fail("the wall's surface form is not one of equal circular arcs"))?;
         let below = self.pcurve(seg, q, on_wall, self.r)?;
         let above = self.pcurve(seg, q, self.cap_form, rr)?;
         Ok((AUse { edge: eb, forward: true, given: Some(below) }, AUse { edge: et, forward: true, given: Some(above) }, face))
@@ -2134,11 +2246,33 @@ mod tests {
         let side = Plane::new(Vec3::ZERO, Vec3::X, Vec3::Z).unwrap();
         let flanged = crate::revolve(&side, &[section], Vec2::ZERO, Vec2::new(0., 1.), std::f64::consts::TAU).unwrap().remove(0);
         let circle = Region2 { outer: Loop2::circle(Vec2::new(0., 7.5), 2.), holes: vec![] };
+        // A sector of a tube from 60° to 180°, extruded from its section: its wall's form is the
+        // section arc's own, two arcs of 60° from where it starts, not its frame's quarter grid.
+        let (t0, t1) = (std::f64::consts::FRAC_PI_3, std::f64::consts::PI);
+        let at = |rho: f64, t: f64| Vec2::new(rho * t.cos(), rho * t.sin());
+        let ring = Loop2 {
+            segs: vec![
+                Seg2::Arc { center: Vec2::ZERO, radius: 10., start: t0, sweep: t1 - t0 },
+                Seg2::Line { a: at(10., t1), b: at(8., t1) },
+                Seg2::Arc { center: Vec2::ZERO, radius: 8., start: t1, sweep: t0 - t1 },
+                Seg2::Line { a: at(8., t0), b: at(10., t0) },
+            ],
+        };
+        let sector = crate::extrude(&Plane::XY, &[Region2 { outer: ring, holes: vec![] }], 0., 20.).unwrap().remove(0);
+        let rec = sector.record();
+        let wall = rec.faces.iter().position(|f| matches!(f.surface, Surface::Cylinder { radius, .. } if (radius - 10.).abs() < 1e-9)).unwrap();
+        let Surface::Cylinder { frame, .. } = &rec.faces[wall].surface else { panic!("a cylinder") };
+        let own = OnForm::of(frame, Vec3::ZERO, Vec3::Z, Vec3::X, Vec3::Y)
+            .and_then(|w| w.on(rec.faces[wall].nurbs.as_ref().unwrap(), frame, Vec3::ZERO, Vec3::Z))
+            .unwrap();
+        assert!(own.phi < QUARTER - 0.1, "{own:?} {:?}", rec.faces[wall].nurbs);
         let under_flange =
             Region2 { outer: Loop2::polygon(&[Vec2::new(-2., 15.), Vec2::new(2., 15.), Vec2::new(2., 19.5), Vec2::new(-2., 19.5)]), holes: vec![] };
         for (body, sketch, r, region) in [
             (&half, plane(), 10., profile()),
             (&half, plane(), 10., circle.clone()),
+            (&sector, plane(), 10., profile()),
+            (&sector, plane(), 10., circle.clone()),
             (&rounded, on_corner, 5., profile()),
             (&flanged, plane(), 10., under_flange),
         ] {
