@@ -1039,7 +1039,7 @@ mod tests {
 
         let current_window = egui::Context::default();
         for _ in 0..8 {
-            let _ = current_window.run_ui(Default::default(), |_| {});
+            current_window.run_ui(Default::default(), |_| {}).textures_delta.clear();
             if !current_window.has_requested_repaint() {
                 break;
             }
@@ -1110,7 +1110,7 @@ mod tests {
         let ctx = egui::Context::default();
         let settle = || {
             for _ in 0..8 {
-                let _ = ctx.run_ui(Default::default(), |_| {});
+                ctx.run_ui(Default::default(), |_| {}).textures_delta.clear();
                 if !ctx.has_requested_repaint() {
                     break;
                 }
@@ -1345,9 +1345,9 @@ mod tests {
             }],
             ..Default::default()
         };
-        let _ = ctx.run_ui(event(true), |_| diagnostics::prepare(&mut app, &ctx));
+        ctx.run_ui(event(true), |_| diagnostics::prepare(&mut app, &ctx)).textures_delta.clear();
         assert!(diagnostics::source_for_test(&app).is_none());
-        let _ = ctx.run_ui(event(false), |_| diagnostics::prepare(&mut app, &ctx));
+        ctx.run_ui(event(false), |_| diagnostics::prepare(&mut app, &ctx)).textures_delta.clear();
         diagnostics::flush_source_for_test(&mut app, &ctx).unwrap();
         assert!(diagnostics::source_for_test(&app).is_some());
     }
@@ -1449,7 +1449,7 @@ mod tests {
         app.forms_prototype.live.pending = Some(Pending { key: requested, source, identity: SelectionIdentity::current(&app).unwrap(), done });
         let before = app.session.forms_prototype.as_ref().unwrap().inspect();
         let ctx = egui::Context::default();
-        let _ = ctx.run_ui(egui::RawInput::default(), |_| tick(&mut app, &ctx));
+        ctx.run_ui(egui::RawInput::default(), |_| tick(&mut app, &ctx)).textures_delta.clear();
         assert!(app.forms_prototype.live.error.is_some());
         assert!(selection_geometry(&app).is_none());
         assert!(Arc::ptr_eq(&input, &diagnostics::source_for_test(&app).unwrap()));
@@ -1771,7 +1771,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let _ = context.run_ui(input, |_| tick(&mut app, &context));
+        context.run_ui(input, |_| tick(&mut app, &context)).textures_delta.clear();
         assert!(app.forms_prototype.live.pending.is_none());
         assert!(app.forms_prototype.live.ready.is_none());
         assert!(selection_geometry(&app).is_none());
@@ -2140,13 +2140,15 @@ mod tests {
             }],
             ..Default::default()
         };
-        let _ = ctx.run_ui(input, |_| {
+        ctx.run_ui(input, |_| {
             assert!(ctx.input(|i| i.pointer.primary_down()));
             tick(&mut app, &ctx);
-        });
+        })
+        .textures_delta
+        .clear();
         assert!(app.forms_prototype.live.pending.is_none());
         app.preferences.forms_mesh_while_dragging = false;
-        let _ = ctx.run_ui(Default::default(), |_| tick(&mut app, &ctx));
+        ctx.run_ui(Default::default(), |_| tick(&mut app, &ctx)).textures_delta.clear();
         assert!(app.forms_prototype.live.pending.is_some());
         let f = app.session.forms_prototype.as_ref().unwrap();
         assert_eq!(app.forms_prototype.live.requested, Some((f.revision, 0.01_f64.to_bits())));

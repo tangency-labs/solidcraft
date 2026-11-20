@@ -2157,12 +2157,14 @@ mod tests {
                 ..Default::default()
             };
             let mut events = Vec::new();
-            let _ = ctx.run_ui(raw, |ui| {
+            ctx.run_ui(raw, |ui| {
                 if claimed {
                     super::claim_wheel(ui.ctx());
                 }
                 events = ui.input(|i| i.events.clone());
-            });
+            })
+            .textures_delta
+            .clear();
             if claimed {
                 assert!(
                     events
