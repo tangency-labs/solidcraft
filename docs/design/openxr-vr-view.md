@@ -70,25 +70,27 @@ is?" without leaving VR.
 
 ## What the hardware says
 
-Four reports from real hardware, collected with `xr-info` through the discussion on
-#2172, cover two runtimes and three headsets:
+Five reports from real hardware, collected with `xr-info` through the discussion on
+#2172, cover two runtimes and four headsets. The newest is SteamVR on Linux, and it
+reports the same shape as SteamVR on Windows:
 
-| | Quest 3S / Oculus | Quest 3 / Oculus | Quest 3 / SteamVR | Steam Frame / SteamVR |
-|---|---|---|---|---|
-| Runtime version | 1.208.0 | 1.208.0 | 2.18.4 | 2.18.4 |
-| Recommended per-eye image | 1824 x 1872 | 2064 x 2272 | 2528 x 2780 | 2644 x 2644 |
-| Largest per-eye image | 3648 x 3744 | 4128 x 4544 | 8192 x 8192 | 8192 x 8192 |
-| Largest swapchain image | 4096 x 4096 | 4096 x 4096 | 8192 x 8192 | 8192 x 8192 |
-| Composition layers | 16 | 16 | 16 | 16 |
-| Recommended / max sample count | 1 / 4 | 1 / 4 | 1 / 1 | 1 / 1 |
-| `XR_KHR_vulkan_enable2` | present | present | present | present |
-| `XR_KHR_vulkan_swapchain_format_list` | absent | absent | absent | absent |
-| `XR_KHR_composition_layer_depth` | present | present | present | present |
+| | Quest 3S / Oculus | Quest 3 / Oculus | Quest 3 / SteamVR | Steam Frame / SteamVR | Valve Index / SteamVR |
+|---|---|---|---|---|---|
+| Runtime version | 1.208.0 | 1.208.0 | 2.18.4 | 2.18.4 | 2.18.4 (Linux) |
+| Recommended per-eye image | 1824 x 1872 | 2064 x 2272 | 2528 x 2780 | 2644 x 2644 | 2468 x 2740 |
+| Largest per-eye image | 3648 x 3744 | 4128 x 4544 | 8192 x 8192 | 8192 x 8192 | 8192 x 8192 |
+| Largest swapchain image | 4096 x 4096 | 4096 x 4096 | 8192 x 8192 | 8192 x 8192 | 8192 x 8192 |
+| Composition layers | 16 | 16 | 16 | 16 | 16 |
+| Recommended / max sample count | 1 / 4 | 1 / 4 | 1 / 1 | 1 / 1 | 1 / 1 |
+| Environment blend modes | not reported | not reported | not reported | not reported | opaque |
+| `XR_KHR_vulkan_enable2` | present | present | present | present | present |
+| `XR_KHR_vulkan_swapchain_format_list` | absent | absent | absent | absent | absent |
+| `XR_KHR_composition_layer_depth` | present | present | present | present | present |
 
 The Quest 3S report is kept as a test fixture
 (`apps/solidcraft-cli/tests/fixtures/quest3s-oculus-1.208.0.json`).
 
-What follows from the four:
+What follows from the five:
 
 - **Instance adoption is possible everywhere.** `XR_KHR_vulkan_enable2` is present on
   both runtimes, so the path below is not a Meta or a Valve special case.
@@ -104,10 +106,16 @@ What follows from the four:
   them.
 - **Sample counts are per runtime as well.** Both recommend 1. Oculus supports up to 4;
   SteamVR reports a maximum of 1, so there is no MSAA through it at all.
+- **Nothing on record composites with the room.** Blend modes are only in reports from
+  the current probe, and both of those - the wired Index above and a simulated Monado
+  headset - offer `opaque` alone. A VR view can be built for opaque composition without
+  worrying about passthrough; a see-through mode would need a headset that reports
+  `alpha_blend` or `additive`, and none has yet.
 
 No Windows Mixed Reality report yet. Nothing in this note depends on one: the two
 runtimes that do report differ in numbers, not in shape, and the probe runs there
-unchanged.
+unchanged. The two SteamVR columns agree on every row, which says these numbers are a
+property of the runtime rather than of the operating system.
 
 ## Adopting the runtime's Vulkan objects
 
