@@ -63,29 +63,53 @@ pub(crate) fn unfold_index(method: &str) -> usize {
     let method = solidcraft_engine::doc::sheet::UnfoldMethod::parse(method).unwrap_or_default();
     UNFOLD_METHODS.iter().position(|m| *m == method.name()).unwrap_or(0)
 }
-/// Switching the manager's Unfold choice to Bend Deduction or Bend Allowance keeps the part as it
-/// is: an empty 90° field gets the value equivalent to the K-factor the rule unfolds by now, and a
-/// value moving from deduction to allowance (or back) is converted, so the user starts from the
-/// equivalent and types their chart's over it, with no error before they have typed. A 90° value
-/// already there is kept, and K Factor keeps the rule's own K-factor. `main` holds the rule's fields
-/// in `RULE_FIELDS` order (thickness, K Factor, bend radius, …) and `extra` the 90° value. A field
-/// that does not evaluate leaves everything as typed.
-pub(crate) fn switch_unfold(doc: &solidcraft_engine::doc::Document, main: &[String], extra: &mut [String], from: usize, to: usize) {
+/// Switching the manager's Unfold choice keeps the part as it is, whichever way it goes, so the
+/// user starts from the equivalent and types their chart's value over it, with no error before
+/// they have typed:
+/// - K Factor to Bend Deduction or Bend Allowance: the 90° field gets the value the K Factor field
+///   gives now. A value left there by an earlier choice is replaced unless it already says that
+///   K-factor for the new choice (so a typed `3.2 mm` comes back as typed).
+/// - Deduction to allowance, or back: the value is converted.
+/// - A chart choice to K Factor: the K Factor field gets the K-factor the 90° value works out to.
+///
+/// `main` holds the rule's fields in `RULE_FIELDS` order (thickness, K Factor, bend radius, …) and
+/// `extra` the 90° value. `Thickness` in the bend radius is the rule's thickness, as the rule
+/// itself reads it. A field that does not evaluate leaves everything as typed.
+pub(crate) fn switch_unfold(doc: &solidcraft_engine::doc::Document, main: &mut [String], extra: &mut [String], from: usize, to: usize) {
     use solidcraft_engine::doc::{expr::Kind as Ek, sheet::UnfoldMethod};
+    /// Two K-factors that give the same flat pattern to well under a nanometre.
+    const SAME_K: f64 = 1e-9;
     let method = |i: usize| UNFOLD_METHODS.get(i).and_then(|m| UnfoldMethod::parse(m));
-    let length = |text: Option<&String>| text.and_then(|t| crate::length_input::eval(doc, t, Ek::Length).ok()).filter(|v| v.is_finite());
-    let (Some(thickness), Some(radius), Some(from), Some(to), Some(field)) =
-        (length(main.first()), length(main.get(2)), method(from), method(to), extra.first_mut())
-    else {
-        return;
-    };
-    let k = match from {
-        UnfoldMethod::KFactor if field.trim().is_empty() => main.get(1).and_then(|t| doc.eval(t, Ek::Unitless).ok()),
-        UnfoldMethod::KFactor => None,
-        chart => length(Some(field)).and_then(|v| chart.k_factor(v, thickness, radius)),
-    };
-    if let Some(value) = k.filter(|k| k.is_finite()).and_then(|k| to.value(k, thickness, radius)).filter(|v| v.is_finite()) {
-        *field = crate::length_input::shown(doc, value);
+    let length = |text: &str| crate::length_input::eval(doc, text, Ek::Length).ok().filter(|v| v.is_finite());
+    let (Some(from), Some(to), Some(field)) = (method(from), method(to), extra.first_mut()) else { return };
+    let Some(thickness) = main.first().and_then(|t| length(t)) else { return };
+    let Some(radius) = crate::sheet_rule_library::radius_mm(main, doc, thickness).filter(|r| r.is_finite()) else { return };
+    let typed_k = main.get(1).and_then(|t| doc.eval(t, Ek::Unitless).ok()).filter(|k| k.is_finite());
+    let chart_k = |chart: UnfoldMethod, field: &str| length(field).and_then(|v| chart.k_factor(v, thickness, radius)).filter(|k| k.is_finite());
+    match (from, to) {
+        (UnfoldMethod::KFactor, chart) => {
+            let Some(k) = typed_k else { return };
+            let says_k = chart_k(chart, field).is_some_and(|have| (have - k).abs() < SAME_K);
+            if !says_k && let Some(value) = chart.value(k, thickness, radius).filter(|v| v.is_finite()) {
+                *field = crate::length_input::precise(doc, value);
+            }
+        }
+        (chart, UnfoldMethod::KFactor) => {
+            // A value outside 0 to 1 is the rule's own error to report: the K Factor field stays.
+            let Some(k) = chart_k(chart, field).filter(|k| (0.0..=1.0).contains(k)) else { return };
+            if typed_k.is_none_or(|have| (have - k).abs() >= SAME_K)
+                && let Some(k_field) = main.get_mut(1)
+            {
+                let text = format!("{k:.12}");
+                let text = text.trim_end_matches('0').trim_end_matches('.');
+                *k_field = if text.is_empty() { "0".into() } else { text.into() };
+            }
+        }
+        (chart, other) => {
+            if let Some(value) = chart_k(chart, field).and_then(|k| other.value(k, thickness, radius)).filter(|v| v.is_finite()) {
+                *field = crate::length_input::precise(doc, value);
+            }
+        }
     }
 }
 /// The corner relief shapes an edge flange offers: the rule's (index 0, nothing of its own), then

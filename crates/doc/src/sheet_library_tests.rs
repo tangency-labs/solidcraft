@@ -247,12 +247,16 @@ fn a_rule_that_unfolds_from_a_90_degree_value_goes_into_a_pack_with_its_k_factor
     let no_parameters = std::collections::BTreeMap::new();
     let k = crate::Document::default().rule_values(&no_parameters, &chart).unwrap().k_factor;
     assert!((k - 0.432394487827058).abs() < 1e-12, "{k}");
-    let row = PackRule::of(chart);
+    let row = PackRule::of(chart.clone()).expect("a chart rule of plain numbers has a K-factor");
     assert_eq!((row.rule.unfold_method.as_str(), row.rule.unfold_value.as_str()), ("k_factor", ""));
     assert_eq!(row.rule.k_factor.parse::<f64>(), Ok(k));
-    // A K-factor rule goes in as it is.
+    // A 90° value or a thickness that reads a design's parameter has no K-factor outside that
+    // design: no row, rather than one with the stored K-factor (0.3) the rule does not unfold by.
+    assert!(PackRule::of(SheetRule { unfold_value: "BD90".into(), ..chart.clone() }).is_none());
+    assert!(PackRule::of(SheetRule { thickness: "Stock".into(), ..chart.clone() }).is_none());
+    // A K-factor rule goes in as it is, a parameter in it too.
     let plain = SheetRule { k_factor: "0.44".into(), ..SheetRule::named("Plain") };
-    assert_eq!(PackRule::of(plain.clone()).rule, plain);
+    assert_eq!(PackRule::of(plain.clone()).map(|row| row.rule), Some(plain));
     let pack = RulePack { rules: vec![row.clone()], ..RulePack::default() };
     for text in [write_json(&pack), write_csv(&pack)] {
         assert!(!text.contains("unfold"), "{text}");

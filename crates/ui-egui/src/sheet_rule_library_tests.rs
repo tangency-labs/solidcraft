@@ -125,6 +125,26 @@ fn a_rule_pack_imports_into_the_personal_rules_and_they_export_as_one() {
     let written = std::fs::read(&out).unwrap();
     let back = solidcraft_engine::doc::sheet_library::read(&written).unwrap();
     assert_eq!(back.pack.rules.iter().map(|r| r.rule.clone()).collect::<Vec<_>>(), rules);
+    // A rule that unfolds from a chart's 90° value exports with the K-factor it works out to. One
+    // whose value reads a design's parameter has none outside that design: left out and named,
+    // never written with its stored K-factor (#6794).
+    let chart = |name: &str, value: &str| solidcraft_engine::doc::sheet::SheetRule {
+        thickness: "2 mm".into(),
+        bend_radius: "2 mm".into(),
+        k_factor: "0.3".into(),
+        unfold_method: "deduction".into(),
+        unfold_value: value.into(),
+        ..solidcraft_engine::doc::sheet::SheetRule::named(name)
+    };
+    let (added, _) = h.app.preferences.personal_sheet_rules.import(&[chart("Chart 3.5", "3.5 mm"), chart("Chart BD90", "BD90")]);
+    assert_eq!(added, 2);
+    h.step(&json!({"click":{"handle":"dialog:sheet.library:export"}})).unwrap();
+    h.frames(4);
+    let back = solidcraft_engine::doc::sheet_library::read(&std::fs::read(&out).unwrap()).unwrap();
+    let k_of = |name: &str| back.pack.rules.iter().find(|r| r.rule.name == name).map(|r| r.rule.k_factor.parse::<f64>().unwrap_or(f64::NAN));
+    assert!(k_of("Chart 3.5").is_some_and(|k| (k - 0.432394487827058).abs() < 1e-12), "{:?}", k_of("Chart 3.5"));
+    assert_eq!(k_of("Chart BD90"), None);
+    assert!(status(&h).contains("Chart BD90") && !status(&h).contains("Chart 3.5"), "{}", status(&h));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -144,7 +164,13 @@ fn a_library_pick_takes_a_rule_that_unfolds_by_bend_deduction_back_to_its_k_fact
     let entry = solidcraft_engine::doc::sheet_library::standard_rule("Mild steel (cold-rolled)", "1.5 mm").expect("the library's 1.5 mm mild steel");
     let doc = h.app.session.doc.clone();
     let Some(Kind::Sheet(sm)) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("no manager") };
+    // The switch filled the 90° field from the K-factor (the default rule's radius is `Thickness`).
+    let Sm::Rules { values, .. } = &*sm else { panic!("no rules") };
+    assert!(values.last().is_some_and(|value| !value.is_empty()), "{values:?}");
     super::fill(sm, entry, &doc, solidcraft_engine::doc::sheet_library::BendMethod::Air);
+    // The pick clears it: it was the old thickness's, and Bend Deduction again starts from the pick's K.
+    let Sm::Rules { values, .. } = &*sm else { panic!("no rules") };
+    assert_eq!(values.last().map(String::as_str), Some(""), "{values:?}");
     h.frames(2);
     let commands = ok_commands(&h);
     let p = &commands[0].1;

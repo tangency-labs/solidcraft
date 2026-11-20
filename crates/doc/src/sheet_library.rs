@@ -173,17 +173,19 @@ impl PackRule {
     ///
     /// A pack row unfolds from a K-factor: it has no column for a 90° bend deduction or allowance.
     /// A rule that unfolds from one (#6794) goes in with the K-factor that value works out to, so
-    /// the pack gives the same flat pattern as the rule.
-    pub fn of(mut rule: SheetRule) -> PackRule {
+    /// the pack gives the same flat pattern as the rule. `None` when that K-factor cannot be worked
+    /// out here: the rule's thickness, radius or 90° value reads a design's parameters (`BD90`), or
+    /// the value is out of range. The rule's stored K-factor is not what it unfolds by, so it is
+    /// never written in its place.
+    pub fn of(mut rule: SheetRule) -> Option<PackRule> {
         if UnfoldMethod::parse(&rule.unfold_method) != Some(UnfoldMethod::KFactor) {
             let no_parameters = std::collections::BTreeMap::new();
-            if let Ok(values) = crate::Document::default().rule_values(&no_parameters, &rule) {
-                rule.k_factor = values.k_factor.to_string();
-            }
+            let values = crate::Document::default().rule_values(&no_parameters, &rule).ok()?;
+            rule.k_factor = values.k_factor.to_string();
             rule.unfold_method = UnfoldMethod::KFactor.name().into();
         }
         rule.unfold_value.clear();
-        PackRule {
+        Some(PackRule {
             rule,
             gauge: String::new(),
             chart: String::new(),
@@ -191,7 +193,7 @@ impl PackRule {
             min_bend_radius: String::new(),
             given: Given { k_factor: true, bend_radius: true },
             sources: Vec::new(),
-        }
+        })
     }
 
     /// The minimum inside radius for a sheet `thickness` mm thick, when one is published.
