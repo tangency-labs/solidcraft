@@ -5018,12 +5018,17 @@ fn plugin_panel_row_action_runs_the_same_entry_over_mcp() {
     let mut session = solidcraft_engine::Session::default();
     session.plugin_state.plugins_dir = Some(root.clone());
     let mut backend = Headless::new(session);
-    let initial = crate::call_tool(&mut backend, "sample.make", &json!({}));
+    let initial = crate::call_tool(&mut backend, "sample.make", &json!({"panel":"jobs","event":"refresh"}));
     assert_ne!(initial["isError"], true, "{initial}");
     backend.session.merge_plugin_panel_data();
     assert_eq!(backend.session.plugin_panels()[0].data.get("/jobs/0/state"), Some(&solidcraft_engine::plugin::ui::UiValue::Text("ready".into())));
+    let described = solidcraft_engine::plugin::describe_entry(&backend.session, "sample.make").unwrap().unwrap();
+    assert!(described.pointer("/input/properties/ui_event").is_some(), "the explicit event envelope is discoverable");
+    backend.session.param_check = solidcraft_engine::schema::ParamCheck::Strict;
     let event = json!({"panel":"jobs","event":"edit","path":"/jobs","row":"op1","value":null});
-    let posted = crate::call_tool(&mut backend, "sample.make", &event);
+    let approval = solidcraft_engine::plugin::read_package(&folder.to_string_lossy()).unwrap().approval;
+    let posted =
+        crate::call_tool(&mut backend, "execute", &json!({"command":"sample.make","params":{"approval":approval,"params":event,"ui_event":event}}));
     assert_ne!(posted["isError"], true, "{posted}");
     backend.session.merge_plugin_panel_data();
     assert_eq!(backend.session.plugin_panels()[0].data.get("/jobs/0/state"), Some(&solidcraft_engine::plugin::ui::UiValue::Text("posted".into())));

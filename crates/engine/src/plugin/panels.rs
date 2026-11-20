@@ -144,20 +144,22 @@ pub(super) fn show_panel(session: Option<&mut Session>, panel: &str, visible: bo
     Ok(())
 }
 
-/// The event is ordinary entry input, so MCP and panel clicks have the same behaviour.
+/// Only the host envelope opts into event delivery; entry input remains plugin-owned.
 #[cfg(any(test, all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
-pub(super) fn event_for(manifest: &Manifest, entry: &str, params: &Value) -> Result<Option<ui::UiEvent>> {
-    let Some(declarations) = manifest.runtime.as_ref().and_then(|runtime| runtime.ui.as_ref()) else { return Ok(None) };
-    if params.get("panel").is_none() || params.get("event").is_none() {
-        return Ok(None);
-    }
-    let event: ui::UiEvent = serde_json::from_value(params.clone()).map_err(|e| error(format!("invalid panel event: {e}")))?;
+pub(super) fn event_for(manifest: &Manifest, entry: &str, event: Option<&ui::UiEvent>) -> Result<Option<ui::UiEvent>> {
+    let Some(event) = event else { return Ok(None) };
+    let declarations = manifest
+        .runtime
+        .as_ref()
+        .and_then(|runtime| runtime.ui.as_ref())
+        .ok_or_else(|| HostError::InvalidInput { field: "ui_event".into(), reason: "the plugin does not declare a panel UI".into() })?;
+    event.validate()?;
     let panel = declarations.panel(&event.panel).ok_or_else(|| error("unknown panel event target"))?;
     let command = format!("{}.{}", manifest.id, entry);
     if !panel.layout.nodes.iter().enumerate().any(|(index, _)| {
-        u32::try_from(index).ok().and_then(|node| declarations.action_command(&manifest.id, node, &event).ok()).as_ref() == Some(&command)
+        u32::try_from(index).ok().and_then(|node| declarations.action_command(&manifest.id, node, event).ok()).as_ref() == Some(&command)
     }) {
         return Err(error("panel event does not name this entry's declared action"));
     }
-    Ok(Some(event))
+    Ok(Some(event.clone()))
 }

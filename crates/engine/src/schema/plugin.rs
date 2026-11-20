@@ -31,6 +31,9 @@ pub struct RunParams {
     pub entry: String,
     #[serde(default = "empty_params")]
     pub params: Value,
+    /// Explicit panel action notification, separate from the entry's ordinary arguments.
+    #[serde(default)]
+    pub ui_event: Option<crate::plugin::ui::UiEvent>,
     /// Called by name (`<plugin>.<entry>`, as a tool): a missing grant or a read entry's refusal
     /// comes back naming the plugin, the grant and how to approve it, or the refused import.
     #[serde(default)]

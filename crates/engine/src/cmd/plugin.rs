@@ -43,7 +43,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("id: plugin id; takes back everything approved for it and keeps it installed: it runs with nothing granted until it is installed again with approvals"),
     CommandSpec::new("plugin.run", "Run Plugin", checked!("plugin.run", run)).icon("play")
         .contract(&TypedContract::<RunParams>::new()).output(output_schema_for::<RunResult>)
-        .params("path, approval: exact hash from plugin.inspect after reviewing permissions, entry, params?: JSON, named?: bool (refusals name the missing grant and how to approve it); explicit native Wasm component execution, one undo step; errors discard all edits"),
+        .params("path, approval: exact hash from plugin.inspect after reviewing permissions, entry, params?: JSON, ui_event?: explicit typed panel action, named?: bool (refusals name the missing grant and how to approve it); explicit native Wasm component execution, one undo step; errors discard all edits"),
     CommandSpec::new("plugin.tools", "List Plugin Tools", checked!("plugin.tools", tools)).icon("inspect").noundo().read_only().doc_only()
         .contract(&TypedContract::<ToolsParams>::new()).output(output_schema_for::<ToolsResult>)
         .params("name?: one tool, <plugin>.<entry>; every installed, enabled plugin's entries as tools for agents: name, kind (command or importer), the plugin's name, version and description, effect and strict input schema, and with name a command entry's approval hash; no plugin code runs"),
@@ -169,7 +169,7 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("plugin.run", "approval does not match this manifest and component; inspect and review again"));
     }
     let manifest = p.named.then(|| package.manifest.clone());
-    let result = plugin::run(s, package, &p.entry, &p.params).map_err(|e| match &manifest {
+    let result = plugin::run_with_ui_event(s, package, &p.entry, &p.params, p.ui_event.as_ref()).map_err(|e| match &manifest {
         Some(manifest) => plugin::explain_named(s, manifest, &p.entry, e),
         None => e,
     })?;

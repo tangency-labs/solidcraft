@@ -365,10 +365,14 @@ For example, `runtime.ui` can declare a job table whose row action runs the entr
 
 Every action names an entry in `runtime.entries`. Buttons, toolbar items, list selection,
 table selection or editing, and form changes invoke ordinary `<plugin>.<entry>` commands.
-The entry receives a `ui-event` as its JSON arguments, and `ui-provider.on-event` receives the
-typed event in the same transaction. For the table above, the event is
+Panel clicks put the event in the host command envelope's `ui_event` field and pass the same
+event as the entry's `params`. `ui-provider.on-event` receives the typed event in the same
+transaction. For the table above, the event is
 `{"panel":"jobs","event":"edit","path":"/jobs","row":"op1","value":null}`.
-An MCP caller can pass the same arguments to the same entry. Programmatic calls open no forms.
+An MCP caller uses `execute` with the same `<plugin>.<entry>` command and an envelope containing
+`approval`, `params` and `ui_event`. Ordinary entry parameters, including fields named `panel`
+and `event`, remain entry data and do not invoke `ui-provider.on-event`. Programmatic calls open
+no forms.
 
 The component updates cells with `ui.set-data`, for example `/jobs/0/id` = `text("op1")` and
 `/jobs/0/name` = `text("Pocket")`. Values are typed scalars, with lengths in mm and angles in
@@ -383,8 +387,9 @@ progress and empty states. Trees, charts and newer widget versions show a placeh
 Panels are transient view state, cleared when a design closes or the plugin is disabled.
 The host remembers placement by plugin id, panel id and dock zones. Code and data updates keep
 that placement. Changing the allowed zones or initial zone opens a new section in a legal dock.
-Limits are eight panels per plugin, 512 nodes per layout, 1 MiB of data per panel and 100,000
-rows. Lists and tables scroll virtually.
+Limits are eight panels per plugin, 512 widgets per layout, 1 MiB of data per panel and 100,000
+rows. The widget count includes every layout node, toolbar button, form field and table column.
+Lists and tables scroll virtually.
 
 ## Commands and permissions
 

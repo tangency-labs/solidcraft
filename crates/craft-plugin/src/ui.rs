@@ -289,6 +289,7 @@ pub struct UiEvent {
     pub panel: String,
     pub event: EventKind,
     pub path: String,
+    /// An opaque row id, separate from the slash path; it may itself contain slashes.
     pub row: Option<String>,
     pub value: Option<UiValue>,
 }
@@ -298,7 +299,7 @@ impl UiEvent {
         if !valid_id(&self.panel)
             || self.path.len() > 1024
             || self.path.chars().any(char::is_control)
-            || self.row.as_ref().is_some_and(|row| !plain(row, 1024) || row.contains('/'))
+            || self.row.as_ref().is_some_and(|row| !plain(row, 1024))
         {
             return Err(HostError::InvalidInput {
                 field: "ui.event".into(),

@@ -17,7 +17,7 @@ const MAX_ACTIONS: usize = 16;
 struct Snapshot {
     panels: BTreeMap<String, PanelSnapshot>,
     actions: VecDeque<QueuedAction>,
-    visibility: BTreeMap<String, u64>,
+    visibility: BTreeMap<(u64, String, String), u64>,
     document: String,
 }
 struct QueuedAction {
@@ -164,75 +164,86 @@ pub(super) fn sync(app: &mut crate::SolveApp) -> PanelResult<()> {
                 crate::plugin_menu::start_panel_picking(app, plugin, approval, entry, event);
                 continue;
             }
-            let params = json!({"approval":panel.approval,"params":event});
+            let params = json!({"approval":panel.approval,"params":event,"ui_event":event});
             if let Err(reason) = crate::plugin_menu::run_panel(app, format!("{plugin}.{entry}"), params) {
                 app.set_status(reason, true);
             }
         }
     }
     let panels = state.0.try_borrow().map_err(|_| error(Rule::Lifecycle, "plugin panel data borrowed"))?.panels.clone();
+    let mut failure = None;
     for (id, panel) in panels {
-        let spec = registration(&panel)?;
-        let integration = app.panel_runtime.as_mut().ok_or_else(|| error(Rule::Lifecycle, "plugin panel host missing"))?;
-        if integration.runtime.layout().registry().get(&spec.kind).is_err() {
-            integration.runtime.register_panel(spec.clone(), state.binding(&id))?;
+        let result = sync_visibility(app, &state, id, panel);
+        if failure.is_none() {
+            failure = result.err();
         }
-        let layout = integration.runtime.layout().layout();
-        let existing = layout.instance(&InstanceId(id.clone())).ok();
-        let prior = state.0.try_borrow().map_err(|_| error(Rule::Lifecycle, "plugin panel visibility borrowed"))?.visibility.get(&id).copied();
-        let request = panel.visibility_revision > 0 && prior != Some(panel.visibility_revision);
-        let open = existing.is_none() || (request && panel.visible && existing.is_some_and(|instance| !instance.requested_open));
-        let close = request && !panel.visible && (existing.is_none() || existing.is_some_and(|instance| instance.requested_open));
-        if !open && !close {
-            state
-                .0
-                .try_borrow_mut()
-                .map_err(|_| error(Rule::Lifecycle, "plugin panel visibility borrowed"))?
-                .visibility
-                .insert(id, panel.visibility_revision);
-            continue;
-        }
-        let mut mutations = Vec::new();
-        if open {
-            let destination = if existing.is_none() {
-                let section = next_section_id_with_reservations(layout, &integration.preference_identity_reservations()?)?;
-                Some(
-                    if let Some(anchor) =
-                        layout.sections.iter().find(|section| spec.default_zone.side() && section.location.zone() == spec.default_zone)
-                    {
-                        Destination::Relative {
-                            section: anchor.id.clone(),
-                            placement: RelativePlacement::Below,
-                            new_section: section,
-                            new_column: None,
-                            size: spec.default_size,
-                        }
-                    } else {
-                        Destination::NewSection {
-                            section,
-                            index: layout.sections.len(),
-                            location: SectionLocation::Dock { zone: spec.default_zone },
-                            size: spec.default_size,
-                        }
-                    },
-                )
-            } else {
-                None
-            };
-            mutations.push(Mutation::Open { kind: spec.kind, instance: InstanceId(id.clone()), destination });
-        }
-        if close {
-            mutations.push(Mutation::Close { instance: InstanceId(id.clone()) });
-        }
-        let revision = integration.runtime.layout().inspect().revision;
-        app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: Some(revision), mutations })?;
+    }
+    failure.map_or(Ok(()), Err)
+}
+
+fn sync_visibility(app: &mut crate::SolveApp, state: &PluginState, id: String, panel: PanelSnapshot) -> PanelResult<()> {
+    let spec = registration(&panel)?;
+    // Guest counters restart in each document execution context.
+    let visibility_key = (app.session.uid, app.session.document_id.clone(), id.clone());
+    let integration = app.panel_runtime.as_mut().ok_or_else(|| error(Rule::Lifecycle, "plugin panel host missing"))?;
+    if integration.runtime.layout().registry().get(&spec.kind).is_err() {
+        integration.runtime.register_panel(spec.clone(), state.binding(&id))?;
+    }
+    let layout = integration.runtime.layout().layout();
+    let existing = layout.instance(&InstanceId(id.clone())).ok();
+    let prior =
+        state.0.try_borrow().map_err(|_| error(Rule::Lifecycle, "plugin panel visibility borrowed"))?.visibility.get(&visibility_key).copied();
+    let request = panel.visibility_revision > 0 && prior != Some(panel.visibility_revision);
+    let open = existing.is_none() || (request && panel.visible && existing.is_some_and(|instance| !instance.requested_open));
+    let close = request && !panel.visible && (existing.is_none() || existing.is_some_and(|instance| instance.requested_open));
+    if !open && !close {
         state
             .0
             .try_borrow_mut()
             .map_err(|_| error(Rule::Lifecycle, "plugin panel visibility borrowed"))?
             .visibility
-            .insert(id, panel.visibility_revision);
+            .insert(visibility_key, panel.visibility_revision);
+        return Ok(());
     }
+    let mut mutations = Vec::new();
+    if open {
+        let destination = if existing.is_none() {
+            let section = next_section_id_with_reservations(layout, &integration.preference_identity_reservations()?)?;
+            Some(
+                if let Some(anchor) = layout.sections.iter().find(|section| spec.default_zone.side() && section.location.zone() == spec.default_zone)
+                {
+                    Destination::Relative {
+                        section: anchor.id.clone(),
+                        placement: RelativePlacement::Below,
+                        new_section: section,
+                        new_column: None,
+                        size: spec.default_size,
+                    }
+                } else {
+                    Destination::NewSection {
+                        section,
+                        index: layout.sections.len(),
+                        location: SectionLocation::Dock { zone: spec.default_zone },
+                        size: spec.default_size,
+                    }
+                },
+            )
+        } else {
+            None
+        };
+        mutations.push(Mutation::Open { kind: spec.kind, instance: InstanceId(id.clone()), destination });
+    }
+    if close {
+        mutations.push(Mutation::Close { instance: InstanceId(id.clone()) });
+    }
+    let revision = integration.runtime.layout().inspect().revision;
+    app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: Some(revision), mutations })?;
+    state
+        .0
+        .try_borrow_mut()
+        .map_err(|_| error(Rule::Lifecycle, "plugin panel visibility borrowed"))?
+        .visibility
+        .insert(visibility_key, panel.visibility_revision);
     Ok(())
 }
 
@@ -347,6 +358,13 @@ fn event(panel: &PanelSnapshot, kind: model::EventKind, path: &str, row: Option<
     model::UiEvent { panel: panel.panel.id.clone(), event: kind, path: path.into(), row, value }
 }
 pub(super) type Actions = Vec<(String, model::UiEvent)>;
+
+#[derive(Clone)]
+struct TextDraft {
+    observed_source: String,
+    value: String,
+    submitted: Option<String>,
+}
 
 fn button(ui: &mut egui::Ui, panel: &PanelSnapshot, spec: &model::ButtonSpec, actions: &mut Actions) {
     let response = crate::ui_kit::icon_label_action(ui, &spec.label, spec.icon.as_deref(), true, false);
@@ -576,17 +594,30 @@ fn form(ui: &mut egui::Ui, panel: &PanelSnapshot, spec: &model::FormSpec, action
             model::FieldKind::Text => {
                 let id = ui.scope_id().with(&path);
                 let source = value_text(current, None, units);
-                let mut value = ui
-                    .ctx()
-                    .data_mut(|data| data.get_temp::<(String, String)>(id))
-                    .filter(|(previous, _)| previous == &source)
-                    .map(|(_, draft)| draft)
-                    .unwrap_or_else(|| source.clone());
-                let (edited, _) = crate::ui_kit::text_row(ui, &field.label, &mut value, "");
-                if edited {
-                    changed = Some(model::UiValue::Text(value.clone()));
+                let mut draft = ui.ctx().data_mut(|data| data.get_temp::<TextDraft>(id)).unwrap_or_else(|| TextDraft {
+                    observed_source: source.clone(),
+                    value: source.clone(),
+                    submitted: None,
+                });
+                if draft.observed_source != source {
+                    // Only an observed acknowledgement of the latest edit ends its pending state.
+                    if draft.submitted.as_ref() == Some(&source) {
+                        draft.submitted = None;
+                    }
+                    draft.observed_source.clone_from(&source);
                 }
-                ui.ctx().data_mut(|data| data.insert_temp(id, (source, value)));
+                if draft.submitted.is_none() {
+                    draft.value.clone_from(&source);
+                }
+                let (_, response) = crate::ui_kit::row(ui, &field.label, |ui| crate::ui_kit::text_field_reserving(ui, &mut draft.value, "", 0.0));
+                if response.changed() {
+                    draft.submitted = Some(draft.value.clone());
+                    changed = Some(model::UiValue::Text(draft.value.clone()));
+                }
+                if response.lost_focus() {
+                    draft.submitted = None;
+                }
+                ui.ctx().data_mut(|data| data.insert_temp(id, draft));
             }
         });
         if let (Some(value), Some(entry)) = (changed, &field.on_change) {

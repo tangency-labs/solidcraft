@@ -260,6 +260,38 @@ fn panel_layouts_are_bounded_trees_with_declared_actions() {
 }
 
 #[test]
+fn panel_row_actions_preserve_opaque_ids_with_slashes() {
+    let mut value = panel_manifest();
+    value["runtime"]["ui"]["panels"][0]["layout"]["nodes"][0]["widget"] = json!({"table":{
+        "bind":"/jobs", "row_id":"id", "columns":[{"key":"id","label":"Operation","unit":null}],
+        "select":"single", "on_select":"make", "on_edit":"make"
+    }});
+    let runtime = parse(&value).unwrap().runtime.unwrap();
+    let declarations = runtime.ui.as_ref().unwrap();
+    let layout = &declarations.panels[0].layout;
+    let mut data = ui::PanelData::default();
+    data.set_data_for(layout, &[ui::Datum { path: "/jobs/0/id".into(), value: ui::UiValue::Text("setup/op1".into()) }]).unwrap();
+    assert!(data.merge_frame());
+    assert_eq!(data.rows("/jobs")[0].0, "0", "the data index stays separate from the opaque row id");
+    assert_eq!(data.get("/jobs/0/id"), Some(&ui::UiValue::Text("setup/op1".into())));
+    for event in [ui::EventKind::Select, ui::EventKind::Edit] {
+        let event = ui::UiEvent { panel: "tools".into(), event, path: "/jobs".into(), row: Some("setup/op1".into()), value: None };
+        assert_eq!(declarations.action_command("sample", 0, &event), Ok("sample.make".into()), "{event:?}");
+        let encoded = serde_json::to_value(&event).unwrap();
+        assert_eq!(encoded["path"], "/jobs");
+        assert_eq!(encoded["row"], "setup/op1");
+        let mut wrong_binding = event.clone();
+        wrong_binding.path = "/jobs/0".into();
+        assert!(declarations.action_command("sample", 0, &wrong_binding).is_err());
+        for row in ["".to_owned(), "setup/\nop1".to_owned(), "x".repeat(1025)] {
+            let mut hostile = event.clone();
+            hostile.row = Some(row);
+            assert!(declarations.action_command("sample", 0, &hostile).is_err());
+        }
+    }
+}
+
+#[test]
 fn panel_data_updates_are_atomic_and_merged_once_per_frame() {
     let mut data = ui::PanelData::default();
     let datum = |path: &str, value| ui::Datum { path: path.into(), value };

@@ -103,8 +103,7 @@ fn panel_manifest() -> Value {
     m
 }
 
-#[test]
-fn panel_updates_are_namespaced_transactional_and_merged_once_per_frame() {
+fn panel_host() -> SolidCraftHost {
     let package = Package {
         manifest: parse_manifest(panel_manifest().to_string().as_bytes(), "sample").unwrap(),
         approval: "approved".into(),
@@ -113,7 +112,7 @@ fn panel_updates_are_namespaced_transactional_and_merged_once_per_frame() {
     let mut session = Session::default();
     panels::register_package(&mut session, &package).unwrap();
     session.plugin_state.ui_caller = Some("sample".into());
-    let mut host = SolidCraftHost {
+    SolidCraftHost {
         session,
         transaction: None,
         sketch_exits: Vec::new(),
@@ -122,7 +121,12 @@ fn panel_updates_are_namespaced_transactional_and_merged_once_per_frame() {
         file_folders: Vec::new(),
         file_read_folders: Vec::new(),
         evaluation: None,
-    };
+    }
+}
+
+#[test]
+fn panel_updates_are_namespaced_transactional_and_merged_once_per_frame() {
+    let mut host = panel_host();
     let updates = [
         ui::Datum { path: "/jobs/0/id".into(), value: ui::UiValue::Text("op1".into()) },
         ui::Datum { path: "/jobs/0/name".into(), value: ui::UiValue::Text("Pocket".into()) },
@@ -161,19 +165,75 @@ fn panel_updates_are_namespaced_transactional_and_merged_once_per_frame() {
 }
 
 #[test]
+fn panel_namespace_survives_design_replacement_within_a_component_transaction() {
+    let mut host = panel_host();
+    host.groups.insert("file".into());
+    host.begin_transaction().unwrap();
+    host.ui_set_data("jobs", &[ui::Datum { path: "/old".into(), value: ui::UiValue::Flag(true) }]).unwrap();
+    host.run_command("file.new", &json!({"name":"New part"})).unwrap();
+    host.ui_set_data("jobs", &[ui::Datum { path: "/new".into(), value: ui::UiValue::Flag(true) }]).unwrap();
+    host.ui_show_panel("jobs", false).unwrap();
+    host.commit_transaction().unwrap();
+    host.session.merge_plugin_panel_data();
+    let panel = host.session.plugin_panels().remove(0);
+    assert_eq!(panel.data.get("/old"), None, "data from the closed design is cleared");
+    assert_eq!(panel.data.get("/new"), Some(&ui::UiValue::Flag(true)));
+    assert!(!panel.visible);
+    host.session.replace_design(Session::default());
+    assert_eq!(host.session.plugin_state.ui_caller, None, "a live design switch never keeps a guest call active");
+}
+
+#[test]
+fn panel_outer_cancellation_restores_published_data_and_visibility() {
+    let mut session = panel_host().session;
+    panels::set_data(Some(&mut session), "jobs", &[ui::Datum { path: "/before".into(), value: ui::UiValue::Flag(true) }]).unwrap();
+    session.merge_plugin_panel_data();
+    let before = session.plugin_state.panels.clone();
+    let command = crate::cmd::CommandSpec::new("plugin.run", "Run Plugin", |session, _| {
+        panels::set_data(Some(&mut *session), "jobs", &[ui::Datum { path: "/after".into(), value: ui::UiValue::Flag(true) }])?;
+        panels::show_panel(Some(&mut *session), "jobs", false)?;
+        solidcraft_doc::progress::current().unwrap().cancel();
+        Ok(json!({}))
+    });
+    let progress = std::sync::Arc::new(solidcraft_doc::progress::Progress::default());
+    let result = solidcraft_doc::progress::watch(progress, || session.execute_spec(&command, &json!({})));
+    assert!(matches!(result, Err(EngineError::Cancelled(_))), "{result:?}");
+    assert_eq!(session.plugin_state.panels, before, "the outer cancellation discards data and visibility published by the runtime");
+    session.merge_plugin_panel_data();
+    assert_eq!(session.plugin_panels()[0].data.get("/after"), None);
+}
+
+#[test]
 fn panel_actions_resolve_only_the_declared_entry_and_binding() {
-    let manifest = parse_manifest(panel_manifest().to_string().as_bytes(), "sample").unwrap();
+    let panel_plugin = parse_manifest(panel_manifest().to_string().as_bytes(), "sample").unwrap();
     let event = json!({"panel":"jobs","event":"edit","path":"/jobs","row":"op1","value":null});
-    assert!(panels::event_for(&manifest, "make", &event).unwrap().is_some());
-    assert!(panels::event_for(&manifest, "delete", &event).is_err());
+    let typed_event: ui::UiEvent = serde_json::from_value(event.clone()).unwrap();
+    assert!(panels::event_for(&panel_plugin, "make", Some(&typed_event)).unwrap().is_some());
+    assert!(panels::event_for(&panel_plugin, "delete", Some(&typed_event)).is_err());
     for change in [json!({"panel":"other"}), json!({"path":"/tools"}), json!({"event":"press"})] {
         let mut bad = event.clone();
         for (key, value) in change.as_object().unwrap() {
             bad[key] = value.clone();
         }
-        assert!(panels::event_for(&manifest, "make", &bad).is_err(), "{bad}");
+        let bad = serde_json::from_value(bad).unwrap();
+        assert!(panels::event_for(&panel_plugin, "make", Some(&bad)).is_err(), "{bad:?}");
     }
-    assert!(panels::event_for(&manifest, "make", &json!({})).unwrap().is_none());
+    assert!(panels::event_for(&panel_plugin, "make", None).unwrap().is_none());
+    let ordinary = parse_manifest(manifest().to_string().as_bytes(), "sample").unwrap();
+    assert!(panels::event_for(&ordinary, "make", None).unwrap().is_none());
+    let refused = panels::event_for(&ordinary, "make", Some(&typed_event)).unwrap_err();
+    assert!(matches!(refused.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "ui_event"));
+}
+
+#[test]
+fn panel_named_calls_keep_the_explicit_event_envelope_separate_from_entry_params() {
+    let mut session = Session::default();
+    session.plugin_state.packages.insert("sample".into(), "sample-folder".into());
+    let event = json!({"panel":"jobs","event":"edit","path":"/jobs","row":"op1","value":null});
+    let params = json!({"panel":"application-domain-panel","event":"rebuild"});
+    let call = resolve_call(&session, "sample.make", &json!({"approval":"reviewed","params":params,"ui_event":event})).unwrap().unwrap();
+    assert_eq!(call["params"], params);
+    assert_eq!(call["ui_event"], event);
 }
 
 #[test]
@@ -486,6 +546,73 @@ mod native {
         let original = "      call $box\n      call $box\n";
         assert!(template.contains(original));
         wat::parse_str(template.replacen(original, &format!("      {code}\n"), 1)).unwrap()
+    }
+    fn panel_fixture() -> Fixture {
+        let fixture = Fixture::new("call $box");
+        let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.2","ui@0.1"],"runtime":{
+            "module":"plugin.wasm","commands":["inspect.measure"],"entries":[{"name":"make","effect":"read"}],
+            "limits":{"fuel":1000000,"memory_mib":2,"deadline_ms":5000},
+            "ui":{"ui_version":1,"panels":[{"id":"jobs","title":"Jobs","zones":["bottom"],"layout":{"root":0,"nodes":[{"widget":{"table":{
+                "bind":"/jobs","row_id":"id","columns":[{"key":"state","label":"state","unit":null}],"select":"single","on_select":"make","on_edit":"make"
+            }}}]}}],"workspaces":[]}
+        }});
+        let (package, version) = API.split_once('@').unwrap();
+        let source = include_str!("../../../craft-plugin-wasm/src/ui_fixture.wat")
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("__COMMAND__", "inspect.measure")
+            .replace("__COMMAND_LEN__", "15")
+            .replace("__ARGS__", "{}")
+            .replace("__ARGS_LEN__", "2");
+        std::fs::write(fixture.0.join("sample/plugin.json"), manifest.to_string()).unwrap();
+        std::fs::write(fixture.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+        fixture
+    }
+    #[test]
+    fn panel_event_shaped_entry_params_remain_ordinary_inputs() {
+        let fixture = panel_fixture();
+        let mut session = Session::default();
+        let approval = session.execute("plugin.inspect", &json!({"path":fixture.path()})).unwrap()["approval"].clone();
+        let event = json!({"panel":"jobs","event":"select","path":"/jobs","row":"op1","value":null});
+        session.execute("sample.make", &json!({"approval":approval,"params":event})).unwrap();
+        session.merge_plugin_panel_data();
+        assert_eq!(
+            session.plugin_panels()[0].data.get("/jobs/0/state"),
+            Some(&ui::UiValue::Text("ready".into())),
+            "ordinary fields never call ui-provider.on-event"
+        );
+        session.execute("sample.make", &json!({"approval":approval,"params":event,"ui_event":event})).unwrap();
+        session.merge_plugin_panel_data();
+        assert_eq!(
+            session.plugin_panels()[0].data.get("/jobs/0/state"),
+            Some(&ui::UiValue::Text("posted".into())),
+            "the explicit envelope delivers on-event before the entry"
+        );
+    }
+    #[test]
+    fn panel_frame_merges_keep_plugin_workers_current_and_grant_changes_stale() {
+        let fixture = panel_fixture();
+        let mut session = Session::default();
+        fixture.run(&mut session).unwrap();
+        let package = read_package(&fixture.path()).unwrap();
+        let request = json!({"path":fixture.path(),"approval":package.approval,"entry":"make"});
+        let prepared = session.scratch().compute_commands(&[("plugin.run".into(), request.clone())], None).unwrap();
+        assert!(session.plugin_panels()[0].data.values().is_empty(), "successful data is pending before the frame");
+        session.merge_plugin_panel_data();
+        assert!(prepared.is_current(&session), "frame adoption changes presentation only");
+        session.accept_commands(prepared).unwrap();
+        assert_eq!(
+            session.plugin_panels()[0].data.get("/jobs/0/state"),
+            Some(&ui::UiValue::Text("ready".into())),
+            "an unchanged worker keeps the merged live frame"
+        );
+        let prepared = session.scratch().compute_commands(&[("plugin.run".into(), request)], None).unwrap();
+        session.plugin_state.grants.insert(
+            "sample".into(),
+            Grants { package_hash: Some(package.approval), command_groups: BTreeSet::from(["file".into()]), ..Default::default() },
+        );
+        assert!(!prepared.is_current(&session), "a real approval change still invalidates plugin work");
+        assert!(session.accept_commands(prepared).is_err());
     }
     fn file_component(write: bool) -> Vec<u8> {
         file_component_path(write, "secret.txt")

@@ -316,11 +316,28 @@ pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
 
 /// Runs `entry` of `package`. A failure starts with the plugin's name.
 pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {
-    let name = package.manifest.name.clone();
-    run_package(session, package, entry, params).map_err(messages::named(&name, None))
+    run_with_ui_event(session, package, entry, params, None)
 }
 
-fn run_package(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {
+/// Deliver an explicitly requested panel action while preserving the entry's ordinary input.
+pub fn run_with_ui_event(
+    session: &mut Session,
+    package: Package,
+    entry: &str,
+    params: &serde_json::Value,
+    ui_event: Option<&ui::UiEvent>,
+) -> Result<crate::schema::plugin::RunResult> {
+    let name = package.manifest.name.clone();
+    run_package(session, package, entry, params, ui_event).map_err(messages::named(&name, None))
+}
+
+fn run_package(
+    session: &mut Session,
+    package: Package,
+    entry: &str,
+    params: &serde_json::Value,
+    ui_event: Option<&ui::UiEvent>,
+) -> Result<crate::schema::plugin::RunResult> {
     session.plugin_state.refresh_stored();
     if session.disabled_plugins.contains(&package.manifest.id) {
         return Err(error("plugin is disabled"));
@@ -371,7 +388,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
         let file_read_folders = approved_file_folders(&approved, &rt.permissions.files, false);
         let file_folders = approved_file_folders(&approved, &rt.permissions.files, true);
         let host = SolidCraftHost { file_folders, file_read_folders, ..host };
-        let event = panels::event_for(&package.manifest, entry, params)?;
+        let event = panels::event_for(&package.manifest, entry, ui_event)?;
         let (host, result) = match event {
             Some(event) => craft_plugin_wasm::run_ui_event(host, &package.manifest, &package.component, entry, params, &event),
             None => craft_plugin_wasm::run(host, &package.manifest, &package.component, entry, params),
@@ -392,7 +409,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
-        let _ = params;
+        let _ = (params, ui_event);
         Err(error("plugin execution requires an x86-64 or AArch64 native build with the plugins feature"))
     }
 }
@@ -512,8 +529,12 @@ impl PluginHost for SolidCraftHost {
         let before = s.doc.clone();
         let previous: BTreeMap<_, _> = s.model.results.iter().map(|r| (r.id, r.error.clone())).collect();
         // Even implicit font and linked-design reads have no authority from a command grant.
-        let reply = solidcraft_io::vfs::scoped(Some(scope), || s.execute(name, params))
-            .map_err(|e| HostError::CommandFailed { command: name.into(), reason: e.to_string() })?;
+        let ui_caller = s.plugin_state.ui_caller.clone();
+        let reply = solidcraft_io::vfs::scoped(Some(scope), || s.execute(name, params));
+        // Replacing the design clears ambient callers. This component still owns its
+        // active transaction and may populate its panels for the newly opened design.
+        s.plugin_state.ui_caller = ui_caller;
+        let reply = reply.map_err(|e| HostError::CommandFailed { command: name.into(), reason: e.to_string() })?;
         if let Some(failed) = s
             .model
             .results
@@ -636,7 +657,11 @@ pub fn resolve_call(s: &Session, id: &str, params: &Value) -> Result<Option<Valu
     let inputs = params.get("params").cloned().unwrap_or(json!({}));
     // Preserve direct calls' input pass-through; tool callers validate their listed schema.
     // `named`: a refusal comes back in words an agent can act on (`tools::explain`).
-    Ok(Some(json!({"path":path,"approval":approval,"entry":entry,"params":inputs,"named":true})))
+    let mut call = json!({"path":path,"approval":approval,"entry":entry,"params":inputs,"named":true});
+    if let (Some(event), Some(call)) = (params.get("ui_event"), call.as_object_mut()) {
+        call.insert("ui_event".into(), event.clone());
+    }
+    Ok(Some(call))
 }
 
 /// `engine.describe` of an installed, enabled plugin's entry: a command entry as the

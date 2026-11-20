@@ -2318,6 +2318,23 @@ impl Session {
             return self.execute("plugin.run", &call);
         }
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        self.execute_spec(spec, params)
+    }
+
+    fn execute_spec(&mut self, spec: &cmd::CommandSpec, params: &Value) -> Result<Value> {
+        // Plugin data is transient view state, so it stays out of undo snapshots.
+        // Restore it for every command error, including failures after guest publication.
+        let plugin_panels_before = (spec.id == "plugin.run").then(|| self.plugin_state.panels.clone());
+        let result = self.execute_spec_inner(spec, params);
+        if result.is_err()
+            && let Some(panels) = plugin_panels_before
+        {
+            self.plugin_state.panels = panels;
+        }
+        result
+    }
+
+    fn execute_spec_inner(&mut self, spec: &cmd::CommandSpec, params: &Value) -> Result<Value> {
         if panels::commands::is_command(spec.id) {
             // Layout is application state. Even a missing capability must not
             // clear live links, map picks, snapshot, evaluate or refresh a design.
