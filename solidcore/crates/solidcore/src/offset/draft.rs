@@ -868,6 +868,167 @@ pub fn draft_surface(
     Ok(Ok(drafted))
 }
 
+/// Points tried on each edge of a face by [`drafted_through`], its ends included.
+const THROUGH_POINTS: usize = 17;
+
+/// A face a draft would have to cut through ([`drafted_through`]): the drafted face, the face
+/// it runs into, a point of that face inside the band the draft takes off or adds, and how far
+/// that point lies past the drafted plane.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DraftedThrough {
+    /// The drafted face.
+    pub drafted: FaceId,
+    /// The face it runs into.
+    pub through: FaceId,
+    /// A point of `through` in the band between the face's plane and its drafted plane.
+    pub at: Point3,
+    /// The point's distance past the drafted plane: the face reaches at least this far in.
+    pub depth: f64,
+}
+
+/// Not upstream: a face of `b` that drafting the plane faces `faces` onto the planes `surfaces`
+/// (in the same order) would cut through. A draft replaces each face by its drafted plane and
+/// extends or trims the faces around it ([`crate::topology::brep::local_operation`]); a face that
+/// meets no drafted face, not even at a vertex, but has a point between a drafted face's plane
+/// and its drafted plane, on the face's own span, would be cut through, a change of topology the
+/// draft does not make (a hole whose wall passes within the draft of the side, #19686).
+///
+/// The point is proved, not estimated: it is one of the face's vertices or a point evaluated on
+/// one of its edges' curves, and it lies past each plane by more than the edge's or vertex's
+/// tolerance and the rounding of the comparison. Its span is the box of the drafted face's
+/// vertices in its plane, shrunk by the same margin. A face with no such point among those tried
+/// is not reported; a pair that is not two planes is skipped.
+///
+/// # Errors
+///
+/// Those of reading the faces, edges, vertices and surfaces and of evaluating the curves.
+pub fn drafted_through(
+    k: &Kernel,
+    b: &Brep,
+    faces: &[FaceId],
+    surfaces: &[Surface],
+) -> Result<Option<DraftedThrough>> {
+    use crate::topology::face::p4::{edges, vertices};
+    // each drafted plane face: its plane's origin and outward normal, its drafted plane's,
+    // its plane's frame and the box of its vertices in it
+    let mut bands = Vec::new();
+    for (&f, drafted) in faces.iter().zip(surfaces) {
+        let (Some(surf), Some(fu)) = (b.face(f)?.surface.as_ref(), outer_faceuse(b, f)?) else {
+            continue;
+        };
+        let (SurfaceKind::Plane(plane), SurfaceKind::Plane(tilted)) =
+            (surf.kind_with_nurb(k)?, drafted.kind_with_nurb(k)?)
+        else {
+            continue;
+        };
+        let sense = if b.faceuse(fu)?.orientation == OrientType::Same {
+            1.0
+        } else {
+            -1.0
+        };
+        let (at, tilted_at) = (plane.position(), tilted.position());
+        let (u, v) = (at.x_axis(), at.y_axis());
+        let mut span = [
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        for vx in vertices(b, f, None, false, None)? {
+            let d = b.vertex(vx)?.point - at.origin();
+            let (x, y) = (d.dot(u), d.dot(v));
+            span = [
+                span[0].min(x),
+                span[1].max(x),
+                span[2].min(y),
+                span[3].max(y),
+            ];
+        }
+        bands.push((
+            f,
+            at.origin(),
+            at.z_axis() * sense,
+            tilted_at.origin(),
+            tilted_at.z_axis() * sense,
+            (u, v),
+            span,
+        ));
+    }
+    if bands.is_empty() {
+        return Ok(None);
+    }
+    // what touches a drafted face: its edges' and vertices' other faces are trimmed or extended
+    let mut near_edges = Vec::new();
+    let mut near_vertices = Vec::new();
+    for &f in faces {
+        near_edges.extend(edges(b, f, None, false, None)?);
+        near_vertices.extend(vertices(b, f, None, false, None)?);
+    }
+    for g in crate::topology::brep::p1::faces(b, None)? {
+        if faces.contains(&g) {
+            continue;
+        }
+        let g_edges = edges(b, g, None, false, None)?;
+        let g_vertices = vertices(b, g, None, false, None)?;
+        if g_edges.iter().any(|e| near_edges.contains(e))
+            || g_vertices.iter().any(|v| near_vertices.contains(v))
+        {
+            continue;
+        }
+        let mut points = Vec::new();
+        for &vx in &g_vertices {
+            let vertex = b.vertex(vx)?;
+            points.push((vertex.point, vertex.tolerance));
+        }
+        for &e in &g_edges {
+            let edge = b.edge(e)?;
+            let Some(curve) = edge.curve.as_ref() else {
+                continue;
+            };
+            let (t0, t1) = (edge.interval.min(), edge.interval.max());
+            if !(t0.is_finite() && t1.is_finite() && t0 <= t1) {
+                continue;
+            }
+            for i in 0..THROUGH_POINTS {
+                let s = i as f64 / (THROUGH_POINTS - 1) as f64;
+                points.push((curve.evaluate_point(k, t0 + (t1 - t0) * s)?, edge.tolerance));
+            }
+        }
+        let mut deepest: Option<DraftedThrough> = None;
+        for &(f, origin, n, hinge, normal, (u, v), span) in &bands {
+            for &(q, tol) in &points {
+                let (to_face, to_drafted) = (q - origin, q - hinge);
+                // the comparisons' rounding: a few units in the last place of the largest term
+                let scale = [
+                    q.x, q.y, q.z, origin.x, origin.y, origin.z, hinge.x, hinge.y, hinge.z,
+                ]
+                .iter()
+                .fold(1.0_f64, |m, c| m.max(c.abs()));
+                let margin = tol.max(0.0) + 64.0 * f64::EPSILON * scale;
+                let (a, d) = (n.dot(to_face), normal.dot(to_drafted));
+                let (x, y) = (to_face.dot(u), to_face.dot(v));
+                let within = x > span[0] + margin
+                    && x < span[1] - margin
+                    && y > span[2] + margin
+                    && y < span[3] - margin;
+                let between = (a < -margin && d > margin) || (a > margin && d < -margin);
+                if within && between && deepest.is_none_or(|w| d.abs() > w.depth) {
+                    deepest = Some(DraftedThrough {
+                        drafted: f,
+                        through: g,
+                        at: q,
+                        depth: d.abs(),
+                    });
+                }
+            }
+        }
+        if deepest.is_some() {
+            return Ok(deepest);
+        }
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

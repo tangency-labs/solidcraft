@@ -7020,6 +7020,50 @@ fn draft_on_a_cylinder_side_makes_a_frustum() {
     assert!(rel(volume(&mut s), expect) < 1e-3, "{} vs {expect}", volume(&mut s));
 }
 
+/// #19686: a 2400 x 1600 x 1000 block with a Ø190 blind hole from the top, 500 deep, its four
+/// sides drafted 3° about the base. 3° leans the +X side in by 1000 tan 3° = 52.4 at the top, so a
+/// hole whose wall is nearer the side than that is cut through by the drafted side, which no
+/// draft does: it is refused naming the hole's wall, for the issue's 0.00002 wall as for a 10 one,
+/// and the design is left as it was. A 60 wall stays clear of the drafted side and builds: the
+/// drafted block less the whole hole.
+#[test]
+fn a_draft_that_would_cut_through_a_hole_near_the_side_is_refused_naming_it() {
+    let block = |hole: Option<f64>| {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 2400, "width": 1600, "height": 1000, "corner": [-1200, -800, 0], "operation": "new", "body_name": "Part"}),
+        );
+        if let Some(x) = hole {
+            run(
+                &mut s,
+                "solid.cylinder",
+                json!({"radius": 95, "height": 500, "base": [x, 0, 500], "axis": "Z", "operation": "cut", "targets": ["Part"]}),
+            );
+        }
+        s
+    };
+    let draft = json!({"faces": [[1200, 0, 500], [-1200, 0, 500], [0, 800, 500], [0, -800, 500]], "angle": "3 deg", "neutral": "XY"});
+    for wall in [0.00002, 10.0] {
+        let mut s = block(Some(1200.0 - 95.0 - wall));
+        let features = s.doc.features.len();
+        let error = s.execute("solid.draft", &draft).unwrap_err().to_string();
+        assert!(error.contains("would cut through the face at") && error.contains("smaller draft angle"), "wall {wall}: {error}");
+        assert_eq!(s.doc.features.len(), features, "wall {wall}: the draft is not added");
+    }
+    let mut plain = block(None);
+    run(&mut plain, "solid.draft", draft.clone());
+    let mut s = block(Some(1200.0 - 95.0 - 60.0));
+    run(&mut s, "solid.draft", draft);
+    let state = s.world_state().unwrap();
+    assert_eq!(state.bodies.len(), 1);
+    assert!(state.bodies[0].body.validity().is_empty(), "{:?}", state.bodies[0].body.validity());
+    drop(state);
+    let expect = volume(&mut plain) - PI * 95.0 * 95.0 * 500.0;
+    assert!(rel(volume(&mut s), expect) < 1e-9, "{} vs {expect}", volume(&mut s));
+}
+
 /// The copies added after a rename keep their numbers through undo/redo, save/reopen and a
 /// further count change; lowering the count drops the last copies (#372).
 #[test]

@@ -29,6 +29,7 @@ use solidcore::nurbs::b_spline_curve::ControlPointForm;
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::nurbs::knots::Side;
+use solidcore::offset::draft::drafted_through;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions, local_operation_simple, offset_brep_simple};
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::query::api_queries::{face_bounding_box, face_classify_uv, face_closest_point_in_shape, face_internal_point};
@@ -669,9 +670,15 @@ pub(crate) fn draft(
         }
         // `moved_faces(b, status(b->LocalOperation(faces, surfaces)))`, its marks on the picked
         // faces (`mark_moved`).
+        // A face the drafted faces would cut through (a hole's wall within the draft of the side,
+        // #19686): read before the kernel edits the copy, named if the kernel then refuses.
+        let through = drafted_through(k, &w, &picked, &surfaces)?;
         mark_moved(&mut w, &picked)?;
         if let Err(e) = called(local_operation_simple(k, &mut w, &picked, surfaces))? {
-            return Ok(Err(e));
+            return Ok(Err(match through {
+                Some(t) => Error::DraftCutsThrough { at: [t.at.x, t.at.y, t.at.z], depth: t.depth },
+                None => e,
+            }));
         }
         if !moved_faces(&mut w)? {
             return Ok(Err(Error::NoEffect));
