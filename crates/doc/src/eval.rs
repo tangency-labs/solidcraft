@@ -15412,6 +15412,32 @@ mod body_name_tests {
         assert_eq!(names.unique("Pin"), "Pin (2)");
         assert_eq!(names.first_free("Pin", 2), "Pin (3)");
     }
+
+    /// A 10 mm cube from `x` along x.
+    fn cube_at(x: f64) -> Body {
+        kernel::box_solid(Vec3::new(x, 0.0, 0.0), Vec3::new(x + 10.0, 10.0, 10.0)).unwrap()
+    }
+
+    /// Base, made by feature 3, moved into component 5 by a transfer that turned it, under the
+    /// definition name Def.
+    fn transferred_base() -> ModelBody {
+        let mut base = ModelBody::new("Base".into(), cube_at(0.0), 3);
+        base.component = 5;
+        base.transferred = true;
+        base.source_name = Some("Def".into());
+        base.source_transform = crate::rigid(Vec3::new(1.0, 2.0, 3.0), Vec3::ZERO, Vec3::Z, 0.5);
+        base
+    }
+
+    /// A body a feature changes keeps its name, feature, definition and frame: a later step of
+    /// the same feature still meets it in its component, where it is placed (#19451).
+    #[test]
+    fn a_changed_body_keeps_its_definition_and_frame() {
+        let base = transferred_base();
+        let b = base.remade(crate::lineage::Traced { body: cube_at(1.0), lineage: None, recipe: None });
+        assert_eq!((b.name.as_str(), b.feature, b.source_name.as_deref()), ("Base", 3, Some("Def")));
+        assert_eq!((b.component, b.transferred, b.source_transform), (5, true, base.source_transform));
+    }
 }
 
 /// The parts of a body split by a plane, on its positive side first (only the non-empty ones).
