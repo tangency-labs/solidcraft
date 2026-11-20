@@ -50,9 +50,57 @@ fn unified_shaft_threads_keep_their_size_class_and_form_after_reopen() {
             };
             assert_size(&s);
             let saved = s.doc.to_json();
+            let value: Value = serde_json::from_str(&saved).unwrap();
+            assert_eq!(value["features"].as_array().unwrap().last().unwrap()["form"], "unified");
             assert_size(&Session::new(solidcraft_doc::Document::from_json(&saved).unwrap()));
         }
     }
+}
+
+/// Before Unified support, an inch callout without a stored form was refused as metric.
+/// Opening it must not opt in; creating or explicitly editing that Thread records Unified.
+#[test]
+fn unified_threads_require_a_saved_form_but_new_and_edited_threads_record_it() {
+    use solidcraft_doc::thread_forms::ThreadForm;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":3.175,"height":10}));
+    let params = json!({"face":[3.175,0,5],"designation":"1/4-20 UNC"});
+    let made = run(&mut s, "solid.thread", params.clone());
+    let feature = made["feature"].as_u64().unwrap();
+    let saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    assert_eq!(saved["features"].as_array().unwrap().last().unwrap()["form"], "unified");
+    let assert_unified = |session: &Session| {
+        assert!(session.model.results.last().unwrap().error.is_none());
+        let state = session.model.state();
+        assert_eq!(state.threads.len(), 1);
+        assert_eq!(state.threads[0].form, ThreadForm::Unified);
+        assert_eq!(state.threads[0].designation, "1/4-20 UNC");
+        assert_eq!((state.threads[0].major_diameter, state.threads[0].pitch), (6.35, 1.27));
+    };
+    assert_unified(&Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap()));
+
+    // Match the file before this change: no Thread form and no Unified pending-format marker.
+    let mut legacy = saved;
+    legacy["features"].as_array_mut().unwrap().last_mut().unwrap().as_object_mut().unwrap().remove("form");
+    legacy["format_pending"].as_array_mut().unwrap().retain(|change| change.as_str() != Some("unified-thread-form"));
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&legacy.to_string()).unwrap());
+    let error = reopened.model.results.last().unwrap().error.as_deref().unwrap();
+    assert!(error.contains("`1/4-20 UNC` is a unified designation, not metric"), "{error}");
+    assert!(reopened.model.state().threads.is_empty());
+
+    // Other forms keep their historical inference from a designation with no stored form.
+    let mut trapezoidal = legacy;
+    trapezoidal["features"].as_array_mut().unwrap().last_mut().unwrap()["designation"] = json!("Tr6.35x1");
+    let trapezoidal = Session::new(solidcraft_doc::Document::from_json(&trapezoidal.to_string()).unwrap());
+    assert!(trapezoidal.model.results.last().unwrap().error.is_none());
+    assert_eq!(trapezoidal.model.state().threads[0].form, ThreadForm::Trapezoidal);
+
+    run(&mut reopened, "timeline.redefine", json!({"feature":feature,"command":"solid.thread","params":params}));
+    assert_unified(&reopened);
+    let saved = reopened.doc.to_json();
+    let value: Value = serde_json::from_str(&saved).unwrap();
+    assert_eq!(value["features"].as_array().unwrap().last().unwrap()["form"], "unified");
+    assert_unified(&Session::new(solidcraft_doc::Document::from_json(&saved).unwrap()));
 }
 
 #[test]
