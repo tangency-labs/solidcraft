@@ -607,7 +607,11 @@ Only an importer may say `open`.
   without compiling again; nothing compiled is written to disk. Return `unsupported(reason)` for a
   deliberate refusal meant for the user: File › Open and drag-and-drop open show the plugin's name
   and its reason as plain text in a dialog with OK. Traps and other failures use the status line.
-  Scripts and MCP return the existing typed error and the reason without opening a dialog.
+  Rust engine callers receive a typed `Unsupported` error with the plugin's reason. Answered
+  background opens also include `plugin_error: {"kind":"unsupported","plugin":"Sample","reason":"..."}`
+  alongside `ok: false` and the readable `error` text. Scripts and MCP do not open a dialog;
+  their error responses carry the readable text, not a stable importer refusal kind. Control
+  responses use `ok` and `error`; MCP tool responses use `isError` and text content.
 - **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
   `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel has to fit the user's ceiling in Preferences › Plugins, and
   its memory too unless the user approved more at install. Build it for `wasm32-unknown-unknown` and wrap it with
@@ -616,9 +620,9 @@ Only an importer may say `open`.
 ## Errors
 
 Every plugin failure starts with the plugin's name, and an importer's with the file's name too.
-Programs get the structured error (`kind` and its fields) from the engine as well as the text. The
-text comes from the message catalog (`plugin_error.*`) in the window's language; the command line
-and MCP give the English.
+Rust engine callers get the structured error (`kind` and its fields) as well as the text; script
+and MCP responses flatten importer errors to text as described above. The text comes from the
+message catalog (`plugin_error.*`) in the window's language; the command line and MCP give the English.
 
 | What happened | What the user reads |
 |---|---|

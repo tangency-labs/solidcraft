@@ -1626,6 +1626,44 @@ fn importer_refusal_from_file_open_and_drop_shows_an_acknowledgeable_dialog() {
 
 #[test]
 #[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn importer_refusal_from_home_can_be_acknowledged_without_leaving_home() {
+    let (mut h, path) = importer_window("home-refusal", b"U", "the model has no solids");
+    h.app.home.open = true;
+    h.step(&json!({"choose_file":path})).unwrap();
+    h.app.start("doc.open");
+    finish_import(&mut h);
+    assert!(h.app.home.open);
+    assert!(h.widget("Sample Importer").is_some());
+    assert!(h.widget("the model has no solids").is_some());
+    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+    h.frames(3);
+    assert!(h.app.home.open);
+    assert!(h.widget("the model has no solids").is_none());
+    assert!(crate::scenario::handle_at("dialog:OK").is_none());
+}
+
+#[test]
+#[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn queued_importer_refusals_each_wait_for_acknowledgement() {
+    let (mut h, first) = importer_window("queued-refusals", b"U", "the model has no solids");
+    h.app.home.open = false;
+    let second = h.dir.join("second.smp");
+    std::fs::write(&second, b"U").unwrap();
+    h.app.open_path_async(&first);
+    h.app.open_path_async(&second.to_string_lossy());
+    finish_import(&mut h);
+    assert!(h.widget("the model has no solids").is_some());
+    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+    h.frames(3);
+    assert!(h.widget("the model has no solids").is_some(), "the second refusal still needs acknowledgement");
+    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+    h.frames(3);
+    assert!(h.widget("the model has no solids").is_none());
+    assert!(crate::scenario::handle_at("dialog:OK").is_none());
+}
+
+#[test]
+#[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
 fn importer_traps_and_plain_failures_stay_in_the_status_line() {
     for (tag, input, message) in [("trap", b"T", "it stopped on an error inside the plugin"), ("plain", b"I", "the model has no solids")] {
         let (mut h, path) = importer_window(tag, input, "the model has no solids");
@@ -1648,6 +1686,12 @@ fn importer_refusal_from_a_programmatic_open_never_opens_a_dialog() {
     let reply = reply.try_recv().unwrap();
     assert_eq!(reply["ok"], false);
     assert!(reply["error"].as_str().unwrap().contains("the model has no solids"));
+    assert_eq!(reply["plugin_error"], json!({"kind":"unsupported","plugin":"Sample Importer","reason":"the model has no solids"}));
+    assert!(crate::scenario::handle_at("dialog:OK").is_none());
+    let (reply, _) = h.call_queued("engine.execute", json!({"command":"doc.open","params":{"path":path}}));
+    assert_eq!(reply["ok"], false);
+    assert!(reply["error"].as_str().unwrap().contains("the model has no solids"));
+    assert_eq!(reply["plugin_error"], json!({"kind":"unsupported","plugin":"Sample Importer","reason":"the model has no solids"}));
     assert!(crate::scenario::handle_at("dialog:OK").is_none());
     assert!(h.app.run("doc.open", json!({"path":path})).unwrap_err().contains("the model has no solids"));
     h.frames(3);

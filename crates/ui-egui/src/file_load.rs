@@ -179,14 +179,26 @@ impl Request {
         }
     }
     fn answer(&self, r: Result<Value, String>) {
+        self.answer_response(match r {
+            Ok(v) => json!({"ok": true, "result": v}),
+            Err(e) => json!({"ok": false, "error": e}),
+        });
+    }
+    fn answer_failure(&self, failure: &LoadFailure) {
+        let mut response = json!({"ok": false, "error": failure.text});
+        if let Some(refusal) = &failure.refusal
+            && let solidcraft_engine::plugin::HostError::Unsupported { reason } = &refusal.error
+        {
+            response["plugin_error"] = json!({"kind": "unsupported", "plugin": refusal.plugin, "reason": reason});
+        }
+        self.answer_response(response);
+    }
+    fn answer_response(&self, response: Value) {
         if let Some(reply) = &self.reply {
             let mut response = if crate::control::chat_turn_cancelled(self.chat_turn.as_deref()) {
                 crate::control::cancelled_chat_response()
             } else {
-                match r {
-                    Ok(v) => json!({"ok": true, "result": v}),
-                    Err(e) => json!({"ok": false, "error": e}),
-                }
+                response
             };
             if let Some((level, warnings)) = &self.param_check {
                 crate::control::add_param_warnings(&mut response, warnings.clone());
@@ -355,8 +367,8 @@ impl Running {
 
 #[derive(Default)]
 pub struct FileLoad {
-    /// An interactive importer refusal, kept until the person acknowledges it.
-    refusal: Option<solidcraft_engine::plugin::PluginFailure>,
+    /// Interactive importer refusals, each kept until the person acknowledges it.
+    refusals: VecDeque<solidcraft_engine::plugin::PluginFailure>,
     queued: VecDeque<Request>,
     running: Option<Running>,
     /// Results that are in and wait to land: their design's tab is not shown, or the person is in
@@ -1604,7 +1616,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// The app's shared message card, with plugin-controlled content rendered as plain text.
 pub(crate) fn show_refusal(app: &mut SolveApp, ctx: &egui::Context) {
-    let Some(refusal) = app.file_load.refusal.clone() else { return };
+    let Some(refusal) = app.file_load.refusals.front().cloned() else { return };
     let solidcraft_engine::plugin::HostError::Unsupported { reason } = &refusal.error else { return };
     let (closed, action) =
         crate::ui_kit::Confirm::new(egui::Id::unique("sc_import_refusal"), "status_warning", app.tr("plugin_import.refused_title"))
@@ -1616,7 +1628,7 @@ pub(crate) fn show_refusal(app: &mut SolveApp, ctx: &egui::Context) {
             });
     app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
     if closed || action != crate::ui_kit::Action::None {
-        app.file_load.refusal = None;
+        app.file_load.refusals.pop_front();
     }
 }
 
@@ -1915,18 +1927,18 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                 app.set_status(e, true);
             }
             Err(failure) => {
+                request.answer_failure(&failure);
                 // Only an interactive Open asks for acknowledgement. Programs get the error;
                 // traps, invalid input and host failures keep the status-line path.
                 if request.kind == Kind::Open
                     && request.reply.is_none()
                     && let Some(refusal) = failure.refusal
                 {
-                    app.file_load.refusal = Some(*refusal);
+                    app.file_load.refusals.push_back(*refusal);
                 }
                 let e = failure.text;
                 // A real cancel took the `running.cancelled()` arm above; this is a failure.
                 outcome = Outcome::Failed(e.clone());
-                request.answer(Err(e.clone()));
                 if request.reads_again() {
                     // Said as when the command ran here (the status line, the run's messages).
                     app.finish_command(request.command().0, &Err(e));
