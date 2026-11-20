@@ -3834,6 +3834,11 @@ impl SolveApp {
 
     /// Apply view.fit / view.home to the active canvas, retaining each canvas's framing policy.
     fn frame_view(&mut self, home: bool) {
+        self.frame_view_bounds(home, None);
+    }
+
+    /// Frame a preview's result through the same path, using its bounds before it is committed.
+    fn frame_view_bounds(&mut self, home: bool, preview_bounds: Option<solidcraft_engine::geom::Aabb3>) {
         if render_workspace::result_active(self) {
             render_workspace::fit_result(self);
             return;
@@ -3859,6 +3864,16 @@ impl SolveApp {
         let mut to = self.cam;
         if home {
             to.set_view(StandardView::Iso);
+        }
+        if let Some(bounds) = preview_bounds {
+            let shared = home && self.preferences.navigator_fit;
+            self.pending_fit = Some((to, bounds, true, shared));
+            to = if shared {
+                self.navigator_fitted_bounds(to, &bounds).unwrap_or_else(|| self.fitted_bounds(to, &bounds))
+            } else {
+                self.fitted_bounds(to, &bounds)
+            };
+        } else if home {
             // With the navigators' Fit on, Home shares their zoom, so a face clicked after it
             // keeps the zoom (#10091).
             let shared = self.preferences.navigator_fit;

@@ -170,6 +170,7 @@ impl StraightPreview {
             bounds,
             layer: None,
             joints: Vec::new(),
+            plugin_view: None,
         }))
     }
 }
