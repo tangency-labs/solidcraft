@@ -92,12 +92,11 @@ A SolidCraft remote added before the project moved to `docs.solidcraft.io` (from
 `flatpak remote-modify --user --url=https://docs.solidcraft.io/flatpak/repo/ solidcraft` and
 `flatpak update --user`.
 
-Earlier releases used the application IDs `ai.storyteller.solidcraft` and, up to 0.7,
-`ai.storyteller.solvecraft`. If you installed one of those from the SolidCraft remote,
+Earlier releases used the application ID `ai.storyteller.solidcraft`. If you installed that from the SolidCraft remote,
 `flatpak update --user` reports it as end-of-life and offers to replace it with
 `io.tangencylabs.solidcraft`; accept, and your settings and autosaves move with it. If you
 installed a `.flatpak` bundle, install the new bundle, launch it once (it copies your settings),
-then run `flatpak uninstall --user ai.storyteller.solidcraft` (or `ai.storyteller.solvecraft`; see the
+then run `flatpak uninstall --user ai.storyteller.solidcraft` (see the
 [compatibility notes](https://github.com/tangency-labs/solidcraft/blob/main/docs/compatibility.md#linux-app-id)).
 
 Alternatively, download the release's `.flatpak` file for your architecture and run
@@ -280,6 +279,28 @@ joystick instead of the mouse wheel. Delete the file to undo it.
 </AppCfg>
 ```
 
+### Shift+right-click in Firefox
+
+In Firefox, holding Shift while you right-click opens Firefox's own menu (Save Image As…,
+Inspect and so on), and a web page can't stop it. On Linux, SolidCraft doesn't see the click at
+all: the face isn't selected and SolidCraft's menu doesn't open. On Windows, SolidCraft selects
+the face and opens its menu, and Firefox's menu opens on top. Chrome, Edge and the desktop app
+aren't affected.
+
+The gestures this blocks in Firefox, and what to use instead:
+
+- **Shift+right drag** to snap to the nearest standard or diagonal view (every preset): click an
+  axis on the axis view, or drag the axis view with Shift held, which snaps the same way.
+- **Shift+right drag** to pan in the Tinkercad preset: middle drag pans too.
+- **Shift+right drag** to zoom in the OpenSCAD preset: Shift+middle drag or the wheel zooms too.
+- **Shift+Alt+right drag** to zoom in the Alias preset: the wheel zooms too.
+
+To have Firefox pass Shift+right-click to the page, open `about:config`, search for
+`dom.event.contextmenu.shift_suppresses_event` and set it to `false`. It takes effect at once,
+without a restart. It applies to every website, though: Shift+right-click will no longer get
+past pages that block right-click. Firefox Sync doesn't copy it, so set it on each computer.
+Setting it back to `true` undoes it.
+
 ## CLI
 
 `solidcraft-cli` runs the same commands without a window:
@@ -413,11 +434,10 @@ and Z is up.
 
 ## Name and compatibility
 
-SolidCraft was renamed from an earlier working name. Since 0.5.0 everything uses the new
-name: the `solidcraft` and `solidcraft-cli` programs, `.solidcraft` designs (`.sc` since then), `SOLIDCRAFT_*`
-environment variables, settings folders and the `solidcraft` MCP server. Upgrading keeps
-working: designs, settings, recovery files, environment variables and CLI/MCP setups from
-earlier builds carry over. Every compatibility shim is listed in the
+SolidCraft was renamed from an earlier working name, and that name is gone: the `solidcraft`
+and `solidcraft-cli` programs, `.sc` designs, `SOLIDCRAFT_*` environment variables, settings
+folders and the `solidcraft` MCP server all use the current name. Designs saved by earlier
+builds still open, whatever their file extension. Every compatibility shim is listed in the
 [compatibility notes](https://github.com/tangency-labs/solidcraft/blob/main/docs/compatibility.md).
 
 Use the SolidCraft documentation and web-app URLs. GitHub redirects links to the renamed

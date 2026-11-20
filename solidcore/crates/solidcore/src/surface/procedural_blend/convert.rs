@@ -237,8 +237,8 @@ pub fn rebuild_for_face(
     rec: &ProceduralBlendRecord,
 ) -> Result<ProceduralBlend> {
     rebuild(k, rec).map_err(|e| {
-        // (a cancel ends the operation; it is no refusal of the face)
-        if e.is_cancelled() {
+        // (a cancel, or a certificate's budget spent, ends the operation; it is no refusal of the face)
+        if e.is_cancelled() || e.is_not_certified() {
             return e;
         }
         SolidError::surface_at(
@@ -698,22 +698,21 @@ pub fn definition_surface(
         ));
     };
     let net = surface_record(&form)?;
-    // (a cancel ends the operation; any other failure of the certificate refuses the net)
+    // (a cancel, or a certificate's work budget spent, ends the operation; any other failure
+    // of the certificate refuses the net)
     let certified = |r: Result<f64>, eps: f64| match r {
         Ok(_) => Ok(Ok(())),
-        Err(e) if e.is_cancelled() => Err(e),
+        Err(e) if e.is_cancelled() || e.is_not_certified() => Err(e),
         Err(_) => Ok(Err(eps)),
     };
     Ok(match definition {
         FaceDefinition::Procedural(d) => {
-            let pb = from_record(
-                k,
-                &ProceduralBlendRecord {
-                    definition: (**d).clone(),
-                    net,
-                },
-            )?;
-            certified(pb.recertify(k), d.bound)?.map(|()| Surface::from(pb))
+            let record = ProceduralBlendRecord {
+                definition: (**d).clone(),
+                net,
+            };
+            let pb = from_record(k, &record)?;
+            certified(recertify_remembered(k, &pb, &record), d.bound)?.map(|()| Surface::from(pb))
         }
         FaceDefinition::ExactRound(d) => {
             let rec = ExactRoundRecord {
@@ -738,6 +737,86 @@ pub fn definition_surface(
             proved.map(|()| made)
         }
     })
+}
+
+/// [`RecertifyMemo`]'s cap on the bytes its keys hold, the loop area memo's 8 MiB: past it the
+/// memo starts again empty. A round's key is about 45 KB (its definition's supports and its net
+/// as text), so the cap holds about 180 of them.
+const RECERTIFY_MEMO_BYTES: usize = 8 << 20;
+
+/// The memo of the procedural blends a kernel recertified as it gave a record's faces their
+/// definitions back (not upstream): the bound [`ProceduralBlend::recertify`] proved for each,
+/// by every bit of the blend's record (its definition and its net, by their debug text,
+/// which writes each double so that it reads back exactly) and of the kernel's tolerances
+/// and fixes. The certificate reads nothing else, so a hit returns what recertifying the
+/// blend again returns. A body that goes through one boolean after another comes back from
+/// each as a record, and its blends unchanged by the boolean are certified once, not again
+/// at every import. Only a certificate that finished is kept, not a refusal or a cancel.
+/// [`Kernel::memoize_curve_caches`] turns it off, with the curve cache memo.
+#[derive(Debug, Default)]
+pub struct RecertifyMemo {
+    bounds: std::collections::HashMap<Box<str>, f64>,
+    bytes: usize,
+}
+
+impl RecertifyMemo {
+    /// The blends the memo keeps.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.bounds.len()
+    }
+
+    /// Whether it keeps none.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.bounds.is_empty()
+    }
+
+    /// Keeps `bound` for `key`, its keys holding at most `cap` bytes: past the cap the memo
+    /// starts again empty. A key larger than the cap on its own is not kept, and the memo is
+    /// left as it was, since emptying it would not make room for that key.
+    fn remember(&mut self, key: String, bound: f64, cap: usize) {
+        if key.len() > cap {
+            return;
+        }
+        if self.bytes + key.len() > cap {
+            self.bounds.clear();
+            self.bytes = 0;
+        }
+        // (a boxed key holds its length exactly, not a grown string's spare room)
+        self.bytes += key.len();
+        self.bounds.insert(key.into_boxed_str(), bound);
+    }
+}
+
+/// `pb`'s [`ProceduralBlend::recertify`], from the kernel's [`RecertifyMemo`] when it
+/// recertified the same `record` (the one `pb` was made from) before.
+fn recertify_remembered(
+    k: &Kernel,
+    pb: &ProceduralBlend,
+    record: &ProceduralBlendRecord,
+) -> Result<f64> {
+    use std::fmt::Write as _;
+    if !k.memoize_curve_caches {
+        k.work_counters.add_blend_recertified();
+        return pb.recertify(k);
+    }
+    let mut key = format!("{:?}", k.tolerances);
+    for (name, on) in k.fixes.flags() {
+        key.push_str(if on { "+" } else { "-" });
+        key.push_str(name);
+    }
+    // (writing to a `String` never fails)
+    let _ = write!(key, "\n{record:?}");
+    if let Some(&hit) = k.recertify_memo.borrow().bounds.get(key.as_str()) {
+        return Ok(hit);
+    }
+    k.work_counters.add_blend_recertified();
+    let bound = pb.recertify(k)?;
+    k.recertify_memo
+        .borrow_mut()
+        .remember(key, bound, RECERTIFY_MEMO_BYTES);
+    Ok(bound)
 }
 
 /// Give each face of `faces` its definition back: its net is the face's surface as it was
@@ -1349,6 +1428,34 @@ pub fn section_blend_rebuild(rec: &SectionBlendRecord) -> Result<Surface> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The memo keeps keys up to its cap, starts again empty when the next key would pass it,
+    /// and keeps no key larger than the cap on its own, so no such allocation outlives the call.
+    #[test]
+    fn the_recertify_memo_keeps_no_key_larger_than_its_cap() {
+        let mut memo = RecertifyMemo::default();
+        memo.remember("a".repeat(6), 1.0, 10);
+        memo.remember("b".repeat(4), 2.0, 10);
+        assert_eq!(
+            (memo.len(), memo.bytes),
+            (2, 10),
+            "two keys fill the cap exactly"
+        );
+        memo.remember("c".repeat(3), 3.0, 10);
+        assert_eq!(
+            (memo.len(), memo.bytes),
+            (1, 3),
+            "a key past the cap starts the memo again"
+        );
+        assert_eq!(memo.bounds.get("ccc"), Some(&3.0));
+        memo.remember("d".repeat(11), 4.0, 10);
+        assert_eq!(
+            (memo.len(), memo.bytes),
+            (1, 3),
+            "a key larger than the cap is not kept"
+        );
+        assert_eq!(memo.bounds.get("d".repeat(11).as_str()), None);
+    }
 
     /// The record conversion failures keep the operation, status, kind and entity of the bare
     /// `Upstream` statuses they replace (a sample).

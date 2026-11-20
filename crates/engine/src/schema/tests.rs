@@ -728,7 +728,8 @@ pub(super) fn names_of<T: serde::Serialize>(values: &[T]) -> Vec<String> {
 /// (strict's comes from `TypedContract::check` and serde), and the handler may stop first at
 /// one the contract can't see (against the design: a pick that finds nothing, a missing sketch,
 /// an expression that doesn't evaluate; one of two keys, such as `radius` or `diameter`; an
-/// empty list).
+/// empty list). A value a helper reads as another command's (the pick-up's `appearance.chain`
+/// target) names that command with the check off and the one that was called in strict.
 /// Each module's `strict_keeps_todays_errors` calls this with its commands' cases; each runs
 /// after `sketch_rectangle`.
 pub(super) fn assert_strict_keeps_todays_errors(cases: &[(&str, Value)]) {
@@ -1155,7 +1156,9 @@ fn axis_lines_match_the_axis_reader() {
         (json!("Bore"), true),
         (json!({"dir": [0, 0, 1]}), true),
         (json!({"origin": [1, 2, 3], "dir": {"x": 0, "y": 1, "z": 0}}), true),
-        (json!({"origin": ["1 mm", 0, 0], "dir": [0, 0, 1]}), false),
+        (json!({"origin": ["1 mm", "r - 2 mm", 0], "dir": [0, 0, 1]}), true),
+        (json!({"origin": [true, 0, 0], "dir": [0, 0, 1]}), false),
+        (json!({"origin": [0, 0], "dir": [0, 0, 1]}), false),
         (json!({"dir": [0, 0, 1], "type": "world", "axis": "X"}), true),
         (json!({"edge": [1, 2, 3]}), true),
         (json!({"face": [1, 2, 3], "dir": [0, 0, 1]}), true),

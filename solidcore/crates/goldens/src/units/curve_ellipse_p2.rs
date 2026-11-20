@@ -455,7 +455,7 @@ fn run_op(k: &Kernel, a: &mut Ellipse, op: &OpJ, o: &mut Vec<f64>) -> Result<(),
             let r = match other {
                 None => {
                     let oi = sub_ivl(a.base(), *other_ivl);
-                    a.intersect_with_ellipse::<i64>(&Kernel::default(), &i, a, &oi, *tol, Some(0), Some(0))
+                    a.intersect_with_ellipse::<i64>(&Kernel::default(), &i, a, &oi, *tol, 0.0, Some(0), Some(0))
                 }
                 Some(e) => {
                     let bb = build(k, e).map_err(|e| match Output::unported(&e) {
@@ -467,7 +467,7 @@ fn run_op(k: &Kernel, a: &mut Ellipse, op: &OpJ, o: &mut Vec<f64>) -> Result<(),
                         return Ok(());
                     }
                     let oi = sub_ivl(bb.base(), *other_ivl);
-                    a.intersect_with_ellipse::<i64>(&Kernel::default(), &i, &bb, &oi, *tol, Some(0), Some(1))
+                    a.intersect_with_ellipse::<i64>(&Kernel::default(), &i, &bb, &oi, *tol, 0.0, Some(0), Some(1))
                 }
             };
             if let Some(r) = st(o, r)? {
@@ -493,7 +493,7 @@ fn run_op(k: &Kernel, a: &mut Ellipse, op: &OpJ, o: &mut Vec<f64>) -> Result<(),
                 &opts,
             );
             let oi = line_ivl(&l, *li);
-            let r = a.intersect_with_line::<i64>(&Kernel::default(), &i, &l, &oi, *tol, Some(0), Some(1));
+            let r = a.intersect_with_line::<i64>(&Kernel::default(), &i, &l, &oi, *tol, 0.0, Some(0), Some(1));
             if let Some(r) = st(o, r)? {
                 o.push(b(r.needs_more_intersections));
                 put_sols(o, &r.solutions);

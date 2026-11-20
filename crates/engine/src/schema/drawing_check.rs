@@ -66,6 +66,8 @@ impl FindingKind {
 #[serde(rename_all = "snake_case")]
 pub enum CheckedKind {
     View,
+    Sketch,
+    Fill,
     Dimension,
     Balloon,
     Note,
@@ -75,6 +77,7 @@ pub enum CheckedKind {
     TitleBlock,
     /// A view's label: its id is the view's.
     ViewLabel,
+    RevisionTag,
 }
 
 /// The record a finding names.

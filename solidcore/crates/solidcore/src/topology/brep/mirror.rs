@@ -34,11 +34,14 @@
 //! debug drawing code is omitted. No recursion is introduced here.
 //!
 //! [`transform_matrix`] runs upstream's steps and branches in order: the low-work
-//! test, `SVDecompose` (status ignored upstream; a failure here is `SM_ERR` without
+//! test (where its `AngleBetween` fails, `degenerate_low_work_transform` applies
+//! upstream's reading of the matrix only when the result passes the Level 2 check),
+//! `SVDecompose` (status ignored upstream; a failure here is `SM_ERR` without
 //! touching the B-rep, where upstream reads the arrays the failed call left), then
 //! the `Transform` / `Mirror` sequence, every status folded with `std::max` (the error
 //! with the largest code is returned; one without an exact status counts as `SM_ERR`).
-//! A failed `AngleBetween` reads as angle `0`, as upstream sets it.
+//! After the decomposition, a failed `SetCanonical` or `AngleBetween` is returned, as
+//! the fork does (WR-658), where upstream reads the angle as `0`.
 
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -57,6 +60,7 @@ use crate::topology::brep::p5::{
     set_edge_curve_owner, set_joined_edge_curve, set_vertex_point, transform_owner_key,
     transform_with_notifications, with_notifications, EditNotifyEnv,
 };
+use crate::topology::brep::validation::{check_brep_with_keys, CheckLevel};
 use crate::topology::Brep;
 use crate::EntityRef;
 
@@ -278,6 +282,104 @@ fn fold_status(worst: &mut Option<SolidError>, r: Result<()>) -> Result<()> {
     Ok(())
 }
 
+/// Not upstream (WR-658, #16956): the low-work branch of [`transform_matrix`] when
+/// `AngleBetween` of row 0 × row 1 and row 2 fails, that is when either is within the
+/// zero length (`SM_IS_ZERO_SQUARED`): the matrix is singular, or scales some
+/// direction by about `1e-6` or less. Upstream reads the failed angle as `0` and
+/// transforms by the unit rows scaled by their lengths. That is the matrix itself when
+/// the unit rows 0 and 1 are perpendicular within `SM_EFF_ZERO` (the branch's own test
+/// is absolute, so short rows pass it at any angle) and row 2 is zero to working
+/// precision or lies along their cross product within `SM_EFF_ZERO_RAD`. Only then is
+/// the transform made, first on a [standing copy](Brep::clone_standing_for_self) in a
+/// trial kernel with the same tolerances and fixes and no callbacks (so nobody is
+/// notified of it), and it is applied to `b` only when the copy passes the Level 2
+/// check (its geometry owners named by the body's naming scheme, as
+/// [`standing`](crate::topology::brep::validation::standing) names them): a planar
+/// sheet under a rank-2 map can stay a valid sheet, while a solid
+/// collapses or shrinks below its tolerances. Otherwise, and for rows of zero or
+/// non-finite length, a non-finite translation, sheared unit rows or a row 2 off their
+/// cross product (matrices upstream's branch would not reproduce), `angle_error` is
+/// returned and `b` is untouched. The fork passes `angle_error` on in every case.
+///
+/// # Errors
+///
+/// `angle_error` as above; those of [`Brep::clone_standing_for_self`], of the copy's
+/// [`transform`](crate::topology::brep::p5::transform) and of the final transform;
+/// an unported or cancelled error of the check.
+#[allow(clippy::too_many_arguments)]
+fn degenerate_low_work_transform(
+    k: &mut Kernel,
+    b: &mut Brep,
+    disp: Vec3,
+    [row0, row1, row2]: [Vec3; 3],
+    scale_tolerances: bool,
+    notifications: Option<&mut EditNotifyEnv<'_>>,
+    angle_error: SolidError,
+) -> Result<()> {
+    let row0_len = row0.length();
+    let row1_len = row1.length();
+    let row2_len = row2.length();
+    let positive = |l: f64| l.is_finite() && l > 0.0;
+    let finite = disp.x.is_finite() && disp.y.is_finite() && disp.z.is_finite();
+    if !(positive(row0_len) && positive(row1_len) && row2_len.is_finite() && finite) {
+        return Err(angle_error);
+    }
+    let x = row0 / row0_len;
+    let y = row1 / row1_len;
+    let along = x.dot(y).abs() <= EFF_ZERO
+        && (crate::geom::tol::is_zero_squared(row2.length_squared())
+            || x.cross(y)
+                .angle_between(row2 / row2_len)
+                .is_ok_and(|angle| angle <= EFF_ZERO_RAD));
+    if !along {
+        return Err(angle_error);
+    }
+    let input_scale = Vec3::new(row0_len, row1_len, row2_len);
+    let input_transform = Axis2Placement::new(disp, x, y);
+    let mut trial = Kernel {
+        tolerances: k.tolerances,
+        fixes: k.fixes,
+        memoize_curve_caches: k.memoize_curve_caches,
+        cancel: k.cancel.clone(),
+        // (the caller's WR-57 replay seam, test only: the trial calls through it)
+        #[cfg(feature = "wr57-replay")]
+        replay: k.replay.clone(),
+        ..Kernel::default()
+    };
+    let mut copy = b.clone_standing_for_self()?;
+    transform_with_notifications(
+        &mut trial,
+        &mut copy,
+        &input_transform,
+        Some(input_scale),
+        scale_tolerances,
+        None,
+    )?;
+    // the geometry owners are the identities the body's naming scheme names its
+    // entities by (as `check_brep` and `standing` read them): a read body's recorded
+    // keys, not the arena references, or every edge fails its owner test
+    let naming = copy.naming();
+    let recorded = copy.geometry_owner_keys().clone();
+    let keys =
+        |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
+    let valid = match check_brep_with_keys(&mut trial, &mut copy, CheckLevel::Level2, &keys) {
+        Ok(check) => check.is_valid(),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => false,
+    };
+    if !valid {
+        return Err(angle_error);
+    }
+    transform_with_notifications(
+        k,
+        b,
+        &input_transform,
+        Some(input_scale),
+        scale_tolerances,
+        notifications,
+    )
+}
+
 /// `SmBrep::Transform(const double[4][4], bScaleTol)`: applies the affine map
 /// `p' = p·A + t` to a B-rep, where `A` is the upper-left 3x3 block of `matrix`
 /// (rows `matrix[0..3]`, columns `0..3`) and `t` its fourth row (row-vector
@@ -333,12 +435,21 @@ pub fn transform_matrix_with_notifications(
 
     // Low work case: No sheer or reflection?
     if row0.dot(row1).abs() < EFF_ZERO {
-        // a failed AngleBetween reports 0
+        // a failed AngleBetween reports 0 upstream; the fork (60a8a51) passes the status
+        // on. Here the degenerate matrix is applied only where the result is valid.
         let angle_check = match row0.cross(row1).angle_between(row2) {
-            Ok(a) => a,
-            // (fork 60a8a51 passes the status on: `SER`)
-            Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
-            Err(_) => 0.0,
+            Ok(angle) => angle,
+            Err(e) => {
+                return degenerate_low_work_transform(
+                    k,
+                    b,
+                    disp,
+                    [row0, row1, row2],
+                    scale_tolerances,
+                    notifications,
+                    e,
+                );
+            }
         };
 
         if angle_check <= EFF_ZERO_RAD {
@@ -411,10 +522,7 @@ pub fn transform_matrix_with_notifications(
     let scale_v = Vec3::new(vx_len, vy_len, vz_len);
     let origin = Vec3::new(0.0, 0.0, 0.0);
     // upstream ignores SetCanonical's status
-    ignore_status(crate::error::passed_on(
-        transform_v.set_canonical(origin, vx / vx_len, vy / vy_len),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    transform_v.set_canonical(origin, vx / vx_len, vy / vy_len)?;
 
     let utx = row(&ut, 0)?;
     let uty = row(&ut, 1)?;
@@ -429,20 +537,11 @@ pub fn transform_matrix_with_notifications(
 
     // Transforms below are rigid, need to check if we require a mirror to fix the
     // handedness of the orthonormal decomposition.
-    let angle_v = match vx.cross(vy).angle_between(vz) {
-        Ok(a) => a,
-        // (fork 60a8a51 passes the status on: `SER`)
-        Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
-        Err(_) => 0.0,
-    };
+    // (fork 60a8a51 passes both statuses on: `SER`)
+    let angle_v = vx.cross(vy).angle_between(vz)?;
     let mirror_v = angle_v > HALF_PI;
 
-    let angle_ut = match utx.cross(uty).angle_between(utz) {
-        Ok(a) => a,
-        // (fork 60a8a51 passes the status on: `SER`)
-        Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
-        Err(_) => 0.0,
-    };
+    let angle_ut = utx.cross(uty).angle_between(utz)?;
     let mirror_ut = angle_ut > HALF_PI;
 
     let mut worst = None;
@@ -468,10 +567,7 @@ pub fn transform_matrix_with_notifications(
     }
 
     if mirror_ut {
-        ignore_status(crate::error::passed_on(
-            transform_ut.set_canonical(origin, utx / utx_len, uty / uty_len),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        transform_ut.set_canonical(origin, utx / utx_len, uty / uty_len)?;
         fold_status(
             &mut worst,
             transform_with_notifications(
@@ -491,10 +587,7 @@ pub fn transform_matrix_with_notifications(
         let v_x = Vec3::new(1.0, 0.0, 0.0);
         let v_y = Vec3::new(0.0, 1.0, 0.0);
 
-        ignore_status(crate::error::passed_on(
-            transform_ut.set_canonical(disp, v_x, v_y),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        transform_ut.set_canonical(disp, v_x, v_y)?;
         // the defaults: no scale, bScaleTol = TRUE
         fold_status(
             &mut worst,
@@ -502,10 +595,7 @@ pub fn transform_matrix_with_notifications(
         )?;
     } else {
         // transform without mirror
-        ignore_status(crate::error::passed_on(
-            transform_ut.set_canonical(disp, utx / utx_len, uty / uty_len),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        transform_ut.set_canonical(disp, utx / utx_len, uty / uty_len)?;
         fold_status(
             &mut worst,
             transform_with_notifications(
@@ -528,6 +618,310 @@ mod tests {
     use super::*;
     use crate::primitive::api_primitives::create_box;
     use crate::topology::brep::p1;
+
+    fn concave_arc_round(k: &mut Kernel) -> Brep {
+        use crate::blend::fillet_executive::session::FilletSession;
+        use crate::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+        use crate::curve::composite_curve::OffsetCornerType;
+        use crate::curve::curve::Curve;
+        use crate::curve::ellipse::Ellipse;
+        use crate::curve::line::Line;
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::geom::extent1d::Extent1d;
+        use crate::math::{Point3, Vec3};
+        use crate::query::api_queries::edge_closest_point;
+        use crate::sweep::api_brep::TaperExtrude;
+        use crate::sweep::extrude::{extrude, Draft, ExtrudeTolerances};
+        let p = [
+            Point3::new(-20., 0., 0.),
+            Point3::new(20., 0., 0.),
+            Point3::new(20., 0., -10.),
+            Point3::new(-20., 0., -10.),
+        ];
+        let line = |a, b| Curve::from(Line::create_line_segment(3, a, b, None).unwrap());
+        let angle = 100.0_f64.atan2(20.).to_degrees();
+        let arc = Ellipse::create_canonical_circle(
+            k,
+            &Axis2Placement::new(Point3::new(0., 0., -110.), Vec3::X, Vec3::Z),
+            10_400.0_f64.sqrt(),
+            Some(&Extent1d::from_min_max(angle, 180. - angle)),
+            None,
+        )
+        .unwrap();
+        let curves = [
+            line(p[0], p[1]),
+            line(p[1], p[2]),
+            Curve::from(arc),
+            line(p[3], p[0]),
+        ];
+        let TaperExtrude::Solid(mut body) = extrude(
+            k,
+            &curves,
+            Vec3::Y,
+            10.,
+            Some(Draft {
+                angle_deg: 12.,
+                corner: OffsetCornerType::CurveExtension,
+            }),
+            true,
+            &ExtrudeTolerances {
+                loop_gap: 1e-6,
+                parallel: 1e-9,
+            },
+        )
+        .unwrap() else {
+            panic!("draft refused")
+        };
+        let at = Point3::new(
+            0.0,
+            10.0,
+            -110.0 + 10_400.0_f64.sqrt() + 10.0 * 12.0_f64.to_radians().tan(),
+        );
+        let edge = *body
+            .edge_list()
+            .iter()
+            .find(|&&edge| {
+                edge_closest_point(k, &body, edge, at).is_ok_and(|r| r.closest.distance < 0.01)
+            })
+            .unwrap();
+        let mut session = FilletSession::new(k, &mut body).unwrap();
+        session
+            .prepare_per_edge_constant_radius(
+                k,
+                &[edge],
+                &[0.2],
+                &[FilletSurfaceGeneratorType::Circular],
+                1,
+                1.,
+            )
+            .unwrap();
+        session.do_fillet(k).unwrap();
+        drop(session);
+        crate::topology::brep::p5::stitch_and_orient(
+            k,
+            &mut body,
+            &crate::topology::brep::p5::StitchAndOrientOptions::default(),
+        )
+        .unwrap();
+        body.refresh_cached_topology();
+        body
+    }
+
+    /// A round on a drafted concave circular wall keeps its revolution parameterization
+    /// when copied and reflected. The profile, draft and radius are independently chosen.
+    #[test]
+    fn mirrored_revolution_patches_keep_their_parameterization() {
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+        use crate::math::Point3;
+        use crate::topology::brep::mirror::mirror;
+        use crate::topology::brep::valid_and_outward_failure;
+
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let mut body = concave_arc_round(&mut k);
+        // Reload the exact round as modelling operations do before copying the body.
+        let mut rounds = 0;
+        let mut parameter_error = 0.0_f64;
+        for face in body.face_list().to_vec() {
+            let source = body.face(face).unwrap().surface.as_ref().unwrap();
+            if matches!(
+                source.procedural_blend(),
+                Some(crate::surface::procedural_blend::BlendRef::Exact { .. })
+            ) {
+                rounds += 1;
+                let record =
+                    crate::surface::procedural_blend::convert::exact_to_record(&k, source).unwrap();
+                assert_eq!(
+                    record.net.kind,
+                    crate::surface::procedural_blend::record::ExactNetKindRecord::Revolution
+                );
+                let mut restored =
+                    crate::surface::procedural_blend::convert::exact_from_record(&k, &record)
+                        .unwrap();
+                let domain = body.face(face).unwrap().uv_domain;
+                for u in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                    for v in [0.0, 0.5, 1.0] {
+                        let uv = domain.evaluate(u, v);
+                        let expected = source.evaluate_point(&k, uv).unwrap();
+                        let step_uv = restored.convert_uv_from_nurbs_to_step(&k, uv).unwrap();
+                        let actual = restored.evaluate_step_point(&k, step_uv).unwrap();
+                        let error = (actual - expected).length();
+                        parameter_error = parameter_error.max(error);
+                        assert!(error < 1e-9);
+                    }
+                }
+                restored.set_owner(source.owner());
+                restored.set_owner_zone_tol_3d(Some(body.face(face).unwrap().tolerance));
+                body.face_mut(face).unwrap().surface = Some(restored);
+            }
+        }
+        assert_eq!(rounds, 1);
+        assert_eq!(valid_and_outward_failure(&mut k, &mut body).unwrap(), None);
+        let checked =
+            crate::topology::brep::validation::check_brep(&mut k, &mut body, CheckLevel::Level2)
+                .unwrap();
+        assert!(checked.is_valid(), "{:?}", checked.lines());
+        let attributes = AttributeStore::default();
+        let attrs = PropertyAttributes {
+            store: &attributes,
+            key_of: &|_| ObjectKey(0),
+        };
+        let before_volume = brep_volume(&k, &mut body, 1e-6, &attrs).unwrap();
+        assert!(before_volume > 0.0);
+        let vertices = p1::vertices(&body, None).unwrap();
+        let before: Vec<Point3> = vertices
+            .iter()
+            .map(|&v| body.vertex(v).unwrap().point)
+            .collect();
+        let plane = Axis2Placement::new(Point3::ZERO, Vec3::X, Vec3::Z);
+        mirror(&mut k, &mut body, &plane).unwrap();
+        assert_eq!(valid_and_outward_failure(&mut k, &mut body).unwrap(), None);
+        let checked =
+            crate::topology::brep::validation::check_brep(&mut k, &mut body, CheckLevel::Level2)
+                .unwrap();
+        assert!(checked.is_valid(), "{:?}", checked.lines());
+        let after_volume = brep_volume(&k, &mut body, 1e-6, &attrs).unwrap();
+        assert!((after_volume - before_volume).abs() < 1e-6 * before_volume);
+        let mut vertex_error = 0.0_f64;
+        for (&vertex, point) in vertices.iter().zip(before) {
+            let expected = Point3::new(point.x, -point.y, point.z);
+            let error = (body.vertex(vertex).unwrap().point - expected).length();
+            vertex_error = vertex_error.max(error);
+            assert!(error < 1e-10);
+        }
+        eprintln!("source volume={before_volume:.12}, mirrored volume={after_volume:.12}, parameter error={parameter_error:e}, vertex error={vertex_error:e}");
+    }
+
+    /// A shallow cylinder's support must reload before measuring its top round (#16297).
+    #[test]
+    fn shallow_arc_top_round_reloads_as_a_closed_solid_with_analytic_volume() {
+        use crate::blend::fillet_executive::session::FilletSession;
+        use crate::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+        use crate::curve::curve::Curve;
+        use crate::curve::ellipse::Ellipse;
+        use crate::curve::line::Line;
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+        use crate::math::Point3;
+        use crate::query::api_queries::edge_closest_point;
+        use crate::surface::procedural_blend::convert::{exact_from_record, exact_to_record};
+        use crate::sweep::api_brep::TaperExtrude;
+        use crate::sweep::extrude::{extrude, ExtrudeTolerances};
+        use crate::topology::brep::validation::{check_brep, CheckLevel};
+
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        // Original geometry, constructed here without loading a reporter's design:
+        // a 30 x 10 mm profile with a 0.5 mm crown, extruded 10 mm along Z.
+        // R = (15^2 + 0.5^2) / (2 * 0.5) = 225.25 mm; centre (15, -214.75).
+        let p = [
+            Point3::new(0., 0., 0.),
+            Point3::new(30., 0., 0.),
+            Point3::new(30., 10., 0.),
+            Point3::new(0., 10., 0.),
+        ];
+        let line = |a, b| Curve::from(Line::create_line_segment(3, a, b, None).unwrap());
+        let arc =
+            Ellipse::circle_from_3_points(&k, p[2], Point3::new(15., 10.5, 0.), p[3], 3, false)
+                .unwrap();
+        let curves = [
+            line(p[0], p[1]),
+            line(p[1], p[2]),
+            Curve::from(arc),
+            line(p[3], p[0]),
+        ];
+        let TaperExtrude::Solid(mut body) = extrude(
+            &mut k,
+            &curves,
+            Vec3::Z,
+            10.,
+            None,
+            true,
+            &ExtrudeTolerances {
+                loop_gap: 1e-6,
+                parallel: 1e-9,
+            },
+        )
+        .unwrap() else {
+            panic!("shallow arc extrusion refused")
+        };
+        let at = Point3::new(15., 10.5, 10.);
+        let edge = *body
+            .edge_list()
+            .iter()
+            .find(|&&edge| {
+                edge_closest_point(&k, &body, edge, at).is_ok_and(|r| r.closest.distance < 1e-6)
+            })
+            .unwrap();
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_per_edge_constant_radius(
+                &mut k,
+                &[edge],
+                &[2.],
+                &[FilletSurfaceGeneratorType::Circular],
+                1,
+                1.,
+            )
+            .unwrap();
+        session.do_fillet(&mut k).unwrap();
+        drop(session);
+        crate::topology::brep::p5::stitch_and_orient(
+            &mut k,
+            &mut body,
+            &crate::topology::brep::p5::StitchAndOrientOptions::default(),
+        )
+        .unwrap();
+        body.refresh_cached_topology();
+
+        let mut rounds = 0;
+        for face in body.face_list().to_vec() {
+            let source = body.face(face).unwrap().surface.as_ref().unwrap();
+            if matches!(
+                source.procedural_blend(),
+                Some(crate::surface::procedural_blend::BlendRef::Exact { .. })
+            ) {
+                rounds += 1;
+                let record = exact_to_record(&k, source).unwrap();
+                // This derives and builds the cylinder support. Before the endpoint-tangent
+                // fix, the shallow arc's recovered centre/radius failed `evaluates_as`.
+                let mut restored = exact_from_record(&k, &record).unwrap();
+                restored.set_owner(source.owner());
+                restored.set_owner_zone_tol_3d(Some(body.face(face).unwrap().tolerance));
+                body.face_mut(face).unwrap().surface = Some(restored);
+            }
+        }
+        assert_eq!(rounds, 1);
+        assert!(crate::topology::brep::is_manifold_solid(&body).unwrap());
+        assert_eq!(
+            crate::topology::brep::valid_and_outward_failure(&mut k, &mut body).unwrap(),
+            None
+        );
+        let checked = check_brep(&mut k, &mut body, CheckLevel::Level2).unwrap();
+        assert!(checked.is_valid(), "{:?}", checked.lines());
+
+        // Independently integrate horizontal sections, keeping the end planes x=0,30.
+        // A(rho) = 30*(-214.75) + 15*sqrt(rho^2-225) + rho^2*asin(15/rho).
+        // Below z=8: rho=R. On the 2 mm round: rho=R-2+sqrt(4-(z-8)^2).
+        // V = 8*A(R) + integral_0^(pi/2) A(R-2+2*cos(t))*2*cos(t) dt.
+        // Composite Simpson integration at 512 and 1024 intervals agrees within 3e-10
+        // mm^3, giving 3074.25085063447 mm^3 (unrounded: 3100.02221869620 mm^3).
+        let attributes = AttributeStore::default();
+        let attrs = PropertyAttributes {
+            store: &attributes,
+            key_of: &|_| ObjectKey(0),
+        };
+        let volume = brep_volume(&k, &mut body, 1e-6, &attrs).unwrap();
+        let expected = 3074.25085063447;
+        // Absolute 0.0001 mm^3 tolerance, about 3.3e-8 relative.
+        assert!((volume - expected).abs() < 1e-4, "volume={volume:.12}");
+    }
 
     #[test]
     fn mirrors_a_box_in_a_plane_through_its_side() {
@@ -564,5 +958,150 @@ mod tests {
         for (&v, p) in vertices.iter().zip(&before) {
             assert!((b.vertex(v).unwrap().point - *p).length() < 1e-12);
         }
+    }
+
+    fn points(b: &Brep) -> Vec<Vec3> {
+        p1::vertices(b, None)
+            .unwrap()
+            .iter()
+            .map(|&v| b.vertex(v).unwrap().point)
+            .collect()
+    }
+
+    fn counts(b: &Brep) -> [usize; 3] {
+        [
+            p1::faces(b, None).unwrap().len(),
+            p1::edges(b, None).unwrap().len(),
+            p1::vertices(b, None).unwrap().len(),
+        ]
+    }
+
+    fn level2_valid(k: &mut Kernel, b: &mut Brep) -> bool {
+        crate::topology::brep::validation::standing(k, b)
+            .unwrap()
+            .check
+            .is_valid()
+    }
+
+    /// The rotation rows of the goldens' singular matrices (`mat0046`): rows 0 and 1
+    /// perpendicular unit vectors, row 2 zero, so `AngleBetween` fails.
+    fn rank_two(t: [f64; 3]) -> [[f64; 4]; 4] {
+        let (a, c) = (0.3_f64, 0.8_f64);
+        let (ca, sa, cc, sc) = (a.cos(), a.sin(), c.cos(), c.sin());
+        [
+            [ca, sa, 0.0, 0.0],
+            [-sa * cc, ca * cc, sc, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+            [t[0], t[1], t[2], 1.0],
+        ]
+    }
+
+    #[test]
+    fn a_singular_matrix_refuses_a_solid_and_leaves_it_untouched() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Vec3::new(1.0, 2.0, 3.0), 2.0, 3.0, 4.0).unwrap();
+        let before = points(&b);
+        let r = transform_matrix(&mut k, &mut b, &rank_two([1.0, -2.0, 0.5]), true);
+        assert!(zero_length(&r), "{r:?}");
+        assert_eq!(points(&b), before);
+        assert_eq!(counts(&b), [6, 12, 8]);
+        assert!(level2_valid(&mut k, &mut b));
+    }
+
+    #[test]
+    fn a_tiny_uniform_scale_refuses_a_solid_it_would_shrink_below_its_tolerances() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Vec3::ZERO, 2.0, 3.0, 4.0).unwrap();
+        let before = points(&b);
+        let s = 5e-7;
+        let m = [
+            [s, 0.0, 0.0, 0.0],
+            [0.0, s, 0.0, 0.0],
+            [0.0, 0.0, s, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        let r = transform_matrix(&mut k, &mut b, &m, true);
+        assert!(zero_length(&r), "{r:?}");
+        assert_eq!(points(&b), before);
+        assert_eq!(counts(&b), [6, 12, 8]);
+    }
+
+    fn zero_length(r: &Result<()>) -> bool {
+        matches!(r, Err(SolidError::InvalidInput { reason, .. }) if *reason == "zero-length vector")
+    }
+
+    #[test]
+    fn a_degenerate_matrix_upstreams_branch_would_not_reproduce_is_refused() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Vec3::ZERO, 2.0, 3.0, 4.0).unwrap();
+        let before = points(&b);
+        // short rows 0 and 1 at 45 degrees: their dot (8.1e-13) passes the branch's
+        // absolute test, their cross product fails AngleBetween, and the unit rows'
+        // frame would apply a different (valid) map
+        let a = 0.9e-6;
+        let sheared = [
+            [a, 0.0, 0.0, 0.0],
+            [a, a, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        // row 2 off the cross product of perpendicular short rows 0 and 1
+        let off_axis = [
+            [1e-7, 0.0, 0.0, 0.0],
+            [0.0, 1e-7, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        // a non-finite translation
+        let mut nan_t = rank_two([0.0; 3]);
+        nan_t[3][0] = f64::NAN;
+        for m in [sheared, off_axis, nan_t] {
+            let r = transform_matrix(&mut k, &mut b, &m, true);
+            assert!(zero_length(&r), "{m:?}: {r:?}");
+            assert_eq!(points(&b), before);
+            assert_eq!(counts(&b), [6, 12, 8]);
+        }
+    }
+
+    #[test]
+    fn a_singular_matrix_maps_a_planar_sheet_to_its_exact_image() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_plane(
+            &mut k,
+            Vec3::new(0.5, -1.0, 0.0),
+            3.0,
+            2.0,
+        )
+        .unwrap();
+        let before = points(&b);
+        let t = [1.0, -2.0, 0.5];
+        let m = rank_two(t);
+        transform_matrix(&mut k, &mut b, &m, true).unwrap();
+        assert_eq!(counts(&b), [1, 4, 4]);
+        let image = |p: Vec3| {
+            Vec3::new(
+                p.x * m[0][0] + p.y * m[1][0] + p.z * m[2][0] + t[0],
+                p.x * m[0][1] + p.y * m[1][1] + p.z * m[2][1] + t[1],
+                p.x * m[0][2] + p.y * m[1][2] + p.z * m[2][2] + t[2],
+            )
+        };
+        for (q, p) in points(&b).into_iter().zip(before) {
+            assert!((q - image(p)).length() < 1e-12, "{q:?} {:?}", image(p));
+        }
+        assert!(level2_valid(&mut k, &mut b));
+    }
+
+    #[test]
+    fn a_degenerate_matrix_with_a_zero_row_is_refused_before_any_copy() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_plane(&mut k, Vec3::ZERO, 3.0, 2.0).unwrap();
+        let before = points(&b);
+        let mut m = rank_two([0.0; 3]);
+        m[1] = [0.0, 0.0, 0.0, 0.0];
+        let r = transform_matrix(&mut k, &mut b, &m, true);
+        assert!(zero_length(&r), "{r:?}");
+        assert_eq!(points(&b), before);
+        assert_eq!(counts(&b), [1, 4, 4]);
     }
 }

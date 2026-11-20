@@ -69,12 +69,10 @@ use solidcore_record::{Region2, Seg2, Vec2};
 pub mod annotate;
 pub mod clip;
 pub mod cubic_pieces;
-pub mod flatten;
 pub mod grid;
 pub mod line;
 pub mod text;
 
-pub use flatten::flatten;
 pub use grid::{FillRule, Grid, GridDashes, GridGroup, GridItem, GridPath, GridPoint, GridReport, OnGrid, Piece};
 use text::{Font, TextRun};
 
@@ -160,6 +158,12 @@ pub enum ObjectKind {
     ViewLabel,
     /// A balloon's circle and number, with its leader to the part it numbers.
     Balloon,
+    /// A revision tag's triangle and the revision in it, on the sheet.
+    RevisionTag,
+    /// A sheet-owned sketch's printable curves.
+    Sketch,
+    /// A drawing-owned sketch fill, solid or expanded hatch marks.
+    Fill,
 }
 
 impl ObjectKind {
@@ -178,6 +182,9 @@ impl ObjectKind {
             ObjectKind::Note => "NOTE",
             ObjectKind::ViewLabel => "VIEW_LABEL",
             ObjectKind::Balloon => "BALLOON",
+            ObjectKind::RevisionTag => "REVISION_TAG",
+            ObjectKind::Sketch => "SKETCH",
+            ObjectKind::Fill => "FILL",
         }
     }
 
@@ -197,6 +204,8 @@ impl ObjectKind {
                 DrawnFor::Sheet => 5,
             },
             ObjectKind::PartsList | ObjectKind::RevisionTable => 4,
+            ObjectKind::Fill => 4,
+            ObjectKind::Sketch | ObjectKind::RevisionTag => 5,
             ObjectKind::TitleBlock => 6,
         }
     }

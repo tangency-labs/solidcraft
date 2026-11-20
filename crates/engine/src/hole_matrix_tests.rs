@@ -1181,3 +1181,47 @@ fn a_counterbore_on_a_round_bar_drills_its_whole_rim() {
     // Beside the counterbore (radius 2.5), under the surface (x 99.964 at y 2.7).
     assert!(solid_at(&s, Vec3::new(99.95, 2.7, 20.0)), "the bar beside the counterbore is cut");
 }
+
+/// A Ø0.29 × 1 blind hole drilled down beside the edge of a 2 mm extrusion of a spline outline,
+/// its side 0.00004 mm to 0 inside the outline's point at X = 2. 0.43.0 refused the 0.00002 wall
+/// with "it would remove all of `Base`" and the 0.00001 wall with SMLib's check (#18293). Each
+/// builds one closed valid solid, the hole stops at its depth, and the material taken is the
+/// bore within the outline: a hair short of the whole bore, because the outline leans across the
+/// hole's outer side, and a hair less with each step out.
+/// The probes stand off the plane y = 0: at the 0.00002 wall the point classification reads the
+/// bore's axis there as material, though the hole is cut (a classification bug of its own).
+#[test]
+fn a_hole_a_hair_inside_a_spline_extrusions_edge_is_cut() {
+    let outline = || {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"})).unwrap();
+        let points = json!([[2, 0], [1.51, 1.14], [0, 1.35], [-1.51, 1.14], [-2, 0], [-1.31, -0.986], [0, -1.65], [1.31, -0.986]]);
+        run(&mut s, "sketch.spline.fit_point", json!({"points": points, "periodic": true})).unwrap();
+        run(&mut s, "sketch.finish", json!({})).unwrap();
+        run(&mut s, "solid.extrude", json!({"sketch": "Outline", "distance": 2, "operation": "new", "body_name": "Base"})).unwrap();
+        s
+    };
+    let r = 0.145;
+    let bore = cyl(r, 1.0);
+    let mut last = f64::INFINITY;
+    for wall in [4e-5, 3e-5, 2e-5, 1e-5, 0.0] {
+        let x = 2.0 - wall - r;
+        let mut s = outline();
+        let (start, _) = measure(&mut s).unwrap();
+        run(&mut s, "solid.hole", json!({"position": [x, 0, 2], "diameter": 0.29, "depth": 1, "targets": ["Base"]}))
+            .unwrap_or_else(|e| panic!("wall {wall}: {e}"));
+        let bodies = &s.model.state().bodies;
+        assert_eq!(bodies.len(), 1, "wall {wall}: one body");
+        for b in bodies {
+            let bad = b.body.validity();
+            assert!(bad.is_empty() && b.body.shell_count() == 1, "wall {wall}: {bad:?}, {} shells", b.body.shell_count());
+        }
+        assert!(!solid_at(&s, Vec3::new(x, 0.05, 1.5)), "wall {wall}: the bore is drilled");
+        assert!(solid_at(&s, Vec3::new(x, 0.05, 0.5)), "wall {wall}: the blind hole stops at 1 mm");
+        let (after, _) = measure(&mut s).unwrap();
+        let removed = start - after;
+        assert!(removed <= bore && removed > bore - 1e-4, "wall {wall}: removed {removed}, the bore is {bore}");
+        assert!(removed < last, "wall {wall}: moved out, the hole takes less ({removed} after {last})");
+        last = removed;
+    }
+}

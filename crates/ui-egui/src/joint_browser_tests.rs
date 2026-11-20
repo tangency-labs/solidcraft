@@ -15,7 +15,7 @@ fn joint_shapes(h: &Harness) -> Vec<egui::Shape> {
     let ctx = crate::fonts::test_context();
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
     let cam = h.app.cam;
-    let proj = crate::viewport::Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect };
+    let proj = crate::viewport::Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect, bounds: None };
     let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
         let painter = ui.painter().clone();
         crate::dialogs_assembly::joint_glyphs(&h.app, &painter, &proj);

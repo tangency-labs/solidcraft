@@ -123,6 +123,7 @@ use crate::surface::surface::{Surface, SurfaceKind};
 mod certify;
 mod convexity;
 mod curved;
+mod face_plane;
 mod graph;
 mod qp;
 mod saddle;
@@ -130,6 +131,7 @@ mod scale;
 mod spring;
 
 pub use curved::{no_more_concave, round_end_curvature};
+pub(crate) use face_plane::{FacePlane, Hom2};
 pub use spring::{spring_curve, SpringCurve, SpringHalf};
 
 pub(crate) use scale::bisect_thousandths;
@@ -339,7 +341,7 @@ pub fn ease_surface(
 }
 
 /// [`ease_surface`] of two fillet surfaces that may be the fork's procedural blends
-/// (`SmProceduralBlend`, opt-in `fillet_round_as_definition`): the fork's `EaseSurface`
+/// (`SmProceduralBlend`): the fork's `EaseSurface`
 /// takes them as `SmBSplineSurface`s, and its copies' `Reparameterize`, `Reverse` and
 /// `EvaluatePoint` are a blend's own (its map follows, its points are its
 /// definition's); the ease itself is made of the nets. Surfaces that are not blends go

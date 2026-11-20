@@ -23,6 +23,13 @@ const fn icon_primary(rgb: [u8; 3]) -> Color32 {
 impl Tokens {
     pub const fn light() -> Tokens {
         Tokens {
+            library_highlights: [
+                Color32::from_rgb(190, 45, 45),
+                Color32::from_rgb(165, 85, 0),
+                Color32::from_rgb(30, 125, 65),
+                Color32::from_rgb(30, 100, 200),
+                Color32::from_rgb(115, 65, 170),
+            ],
             nav_hover: Color32::from_rgb(233, 237, 242),
             nav_press: Color32::from_rgb(220, 226, 234),
             nav_dim: Color32::from_rgb(136, 149, 167),
@@ -198,10 +205,10 @@ impl Tokens {
             preview_new: Color32::from_rgb(240, 225, 105),
             preview_sketch: Color32::from_rgb(32, 190, 96),
             preview_cut: Color32::from_rgba_unmultiplied_const(232, 84, 44, 110),
-            cube_face: Color32::from_rgb(236, 239, 244),
-            cube_border: Color32::from_rgb(85, 94, 110),
-            cube_text: Color32::from_rgb(38, 42, 50),
-            cube_hover: Color32::from_rgb(190, 220, 252),
+            navigator_face: Color32::from_rgb(236, 239, 244),
+            navigator_border: Color32::from_rgb(85, 94, 110),
+            navigator_text: Color32::from_rgb(38, 42, 50),
+            navigator_hover: Color32::from_rgb(190, 220, 252),
             viewport_top: Color32::from_rgb(240, 243, 247),
             viewport_bottom: Color32::from_rgb(203, 210, 221),
             grid: Color32::from_rgb(196, 202, 212),
@@ -464,6 +471,13 @@ impl Tokens {
         t.timeline_item_error = Color32::from_rgb(110, 50, 54);
         t.timeline_marker = Color32::from_rgb(170, 178, 192);
         t.field = Color32::from_rgb(30, 34, 41);
+        t.library_highlights = [
+            Color32::from_rgb(245, 100, 100),
+            Color32::from_rgb(245, 170, 60),
+            Color32::from_rgb(90, 195, 115),
+            Color32::from_rgb(100, 165, 250),
+            Color32::from_rgb(185, 145, 240),
+        ];
         t.box_window = Color32::from_rgb(70, 150, 255);
         t.box_crossing = Color32::from_rgb(80, 200, 120);
         t.bend_up = Color32::from_rgb(110, 200, 120);

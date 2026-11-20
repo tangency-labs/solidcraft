@@ -6,7 +6,20 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    let create = ["font", "language", "line_group", "name", "projection", "source", "template", "units"];
+    let create = [
+        "first_sheet_name",
+        "first_sheet_paper",
+        "font",
+        "language",
+        "line_group",
+        "name",
+        "omit_first_sheet_title_block",
+        "projection",
+        "source",
+        "standard_views",
+        "template",
+        "units",
+    ];
     assert_keys(input_schema_for::<DrawingCreateParams>(), &create);
     let set = ["font", "language", "line_group", "name", "projection", "revision_numbering", "units", "updates", "view_letters_reuse"];
     assert_keys(input_schema_for::<DrawingSetParams>(), &set);
@@ -25,6 +38,7 @@ fn the_template_save_reply_matches_its_output_schema() {
     let saved = output_schema_for::<TemplateSaveResult>();
     let r = s.execute("drawing.template.save", &json!({"path": path})).unwrap();
     assert!(conforms(saved.as_value(), saved.as_value(), &r) && r.get("param_warnings").is_none(), "{r}");
+    let path = r["path"].as_str().unwrap().to_string();
     let applied = output_schema_for::<TemplateApplyResult>();
     let r = s.execute("drawing.template.apply", &json!({"template": path, "dry_run": true})).unwrap();
     assert!(conforms(applied.as_value(), applied.as_value(), &r) && r.get("param_warnings").is_none(), "{r}");

@@ -9,6 +9,17 @@
 //! The pinned C++ still fails; since the loft seam alignment (#15263, WR-778) this port
 //! builds the difference, and these tests pin that solid.
 //!
+//! The skin's side surfaces are split into faces at the knots that are at most G1. Their
+//! knots are curvature continuous (both sides' Frenet curvatures agree to 4e-6 relative,
+//! most to 1e-10), so with G2 judged by the geometry (WR-380) the outer skin has 7 faces
+//! and the inner 6. Upstream's parametric G2 test compares raw second derivatives, whose
+//! lengths follow the parameter speed (it jumps by up to 1.3e-5 relative at these knots),
+//! called hundreds of the knots G1 and split the skins into 342 and 274 faces. On the 7
+//! and 6 faces the difference needs the nearest-point half of
+//! `simple_coincidence_crossing_is_point` (WR-647, on in SolidCraft; its crossing half is
+//! always on); without it it fails
+//! in `topology/brep/p6.rs` as the pinned C++ does.
+//!
 //! Provenance of `tests/data/issue_948_min7.txt` (third-party data): source
 //! <https://github.com/NVIDIA-Omniverse/usd-brep/issues/32>, the inline `min7.txt` block,
 //! posted by GitHub user `meros` on 2026-10-25. It is the reporter's posted repro data
@@ -83,26 +94,42 @@ fn ruled_skin(k: &mut Kernel, secs: &[Vec<Point3>]) -> Brep {
         .brep
 }
 
-/// The difference of the two skins, on both query paths (`query_statuses_pass_on` off and on).
-/// The pinned C++ fails here with `SM_ERR` in `SmBrep::MakeFaceTopology`. Since each closed
-/// section's seam is aligned with the previous section's (the loft fix for #15263, WR-778), the
-/// skins' side faces no longer twist between sections, and the difference is one closed
-/// manifold solid smaller than the outer skin.
-fn difference_volume(query_statuses_pass_on: bool) -> f64 {
+/// The difference of the two skins. The pinned C++ fails here with `SM_ERR` in
+/// `SmBrep::MakeFaceTopology`. Since each closed section's seam is aligned with the previous
+/// section's (the loft fix for #15263, WR-778), the skins' side faces no longer twist between
+/// sections, and the difference is one closed manifold solid smaller than the outer skin.
+/// The queries pass on the statuses SMLib drops (WR-663): with the fork's
+/// tangency-labs/smlib@8ea6a20 a refined end past a curve/curve range does not abort the
+/// intersection. The skins are 7 and 6 faces (see the module docs) and the difference 18
+/// faces, 42 edges, 26 vertices and 2 shells.
+fn difference_volume() -> f64 {
     use solidcore::mass::integrator::properties::brep_volume_default;
+    use solidcore::topology::brep::p1::shells;
     let data = sections(MIN7);
     let mut k = Kernel::default();
-    k.fixes.query_statuses_pass_on = query_statuses_pass_on;
+    k.fixes.simple_coincidence_crossing_is_point = true;
     let mut outer = ruled_skin(&mut k, &data[0].1);
     let inner = ruled_skin(&mut k, &data[1].1);
     assert!(is_manifold_solid(&outer).unwrap());
     assert!(is_manifold_solid(&inner).unwrap());
+    assert_eq!(
+        (outer.face_list().len(), inner.face_list().len()),
+        (7, 6),
+        "the skins' faces"
+    );
     let outer_volume = brep_volume_default(&k, &mut outer, 1e-3).unwrap();
     let mut body = match boolean_difference(&mut k, outer, inner) {
         Ok(body) => body,
         Err(e) => panic!("expected a solid, got {e}"),
     };
     assert!(is_manifold_solid(&body).unwrap());
+    let topology = (
+        body.face_list().len(),
+        body.edge_list().len(),
+        body.vertex_list().len(),
+        shells(&mut k, &body, None).unwrap().len(),
+    );
+    assert_eq!(topology, (18, 42, 26, 2), "faces, edges, vertices, shells");
     let volume = brep_volume_default(&k, &mut body, 1e-3).unwrap();
     assert!(
         volume > 0.0 && volume < outer_volume,
@@ -118,18 +145,6 @@ fn issue_948_difference_of_two_ruled_skins_is_a_solid() {
     assert_eq!((data[0].0.as_str(), data[0].1.len()), ("outer", 7));
     assert_eq!((data[1].0.as_str(), data[1].1.len()), ("inner", 7));
     assert!(data.iter().all(|(_, s)| s.iter().all(|p| p.len() == 86)));
-    let volume = difference_volume(false);
+    let volume = difference_volume();
     assert!((volume - 74_838.2).abs() < 1.0, "{volume}");
-}
-
-/// WR-663 with the fork's tangency-labs/smlib@8ea6a20: a refined end past a curve/curve range
-/// does not abort the intersection, and the query path gives the same solid as the default one.
-#[test]
-fn a_refined_parameter_outside_the_range_does_not_abort_the_intersection() {
-    let default_path = difference_volume(false);
-    let query_path = difference_volume(true);
-    assert!(
-        (default_path - query_path).abs() < 1e-3,
-        "{default_path} vs {query_path}"
-    );
 }

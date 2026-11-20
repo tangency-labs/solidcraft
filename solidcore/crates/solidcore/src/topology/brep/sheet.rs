@@ -4,7 +4,9 @@
 //! a sheet turned over ([`turn_over_shell`], [`turn_over_sheet`]), a sheet of several faces
 //! taken as the pieces of one surface and made again from it ([`one_surface`], [`sheet_of`]),
 //! a planar face rebuilt as the Coons spline of its edges ([`face_spline_sheet`]), and any face
-//! made a sheet with a control net ([`editable_sheet`]: an analytic face as its exact NURBS form).
+//! made a sheet with a control net ([`editable_sheet`]: an analytic face as its exact NURBS form),
+//! and a sheet's loop started at a side of its box ([`start_at_side`], [`first_side`]), so a sheet
+//! made again on an edited surface lists its edges as before.
 //!
 //! Not upstream: the composition an operation that rebuilds a face on a new surface (a sheet
 //! extended past a side) makes of `new_brep` and `SmBrep::CreateFaceFromSurface`, kept in the
@@ -89,6 +91,105 @@ pub fn face_on(k: &mut Kernel, b: &mut Brep, surface: Surface, bx: &Extent2d) ->
         this_face: &this_face,
     };
     create_face_from_surface(k, b, Some(surface), bx, &mut fenv)
+}
+
+const OP_SIDE: &str = "topology::brep::sheet::first_side";
+
+/// [`sheet_on`] with its face's loop starting at the side `first` of the box
+/// ([`start_at_side`]).
+///
+/// # Errors
+///
+/// Those of [`sheet_on`] and [`start_at_side`].
+pub fn sheet_on_from(
+    k: &mut Kernel,
+    surface: Surface,
+    tolerance: f64,
+    first: BoxSide,
+) -> Result<(Brep, FaceId)> {
+    let (mut b, f) = sheet_on(k, surface, tolerance)?;
+    start_at_side(k, &mut b, f, first)?;
+    Ok((b, f))
+}
+
+/// Face `f`'s loop made to start at the edge on side `first` of its box, the others following
+/// round the loop as before (its upward use's first loop use, and its mate from the mate of
+/// that edge use): a sheet made again on an edited surface then lists its edges in the order the
+/// sheet it replaces did ([`first_side`]). Unchanged where no edge lies on `first` (a side
+/// collapsed to a point).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a face without its upward use, loop or surface; those of
+/// the UV ends and of `SetEdgeuse`.
+pub fn start_at_side(k: &Kernel, b: &mut Brep, f: FaceId, first: BoxSide) -> Result<()> {
+    let (lu, uses) = outer_loop_uses(b, f)?;
+    for eu in uses {
+        if side_of_use(k, b, f, eu)? == Some(first) {
+            loopuse::set_edgeuse(b, lu, Some(eu))?;
+            if let (Some(mate_eu), Some(mate_lu)) = (eu1::mate(b, eu)?, b.loopuse(lu)?.mate) {
+                loopuse::set_edgeuse(b, mate_lu, Some(mate_eu))?;
+            }
+            b.refresh_cached_topology();
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// The side of face `f`'s parameter box its loop's first edge use runs along (its upward use's
+/// first loop, as the loop is listed), the side both its UV ends lie on; `None` where they lie
+/// on no one side (an edge inside the box).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a face without its upward use, loop or surface; those of the
+/// UV ends.
+pub fn first_side(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Option<BoxSide>> {
+    let (_, uses) = outer_loop_uses(b, f)?;
+    let Some(&eu) = uses.first() else {
+        return Ok(None);
+    };
+    side_of_use(k, b, f, eu)
+}
+
+/// The face's upward use's first loop use and its edge uses, as it lists them.
+fn outer_loop_uses(
+    b: &Brep,
+    f: FaceId,
+) -> Result<(crate::topology::LoopuseId, Vec<crate::topology::EdgeuseId>)> {
+    let fu = fp2::upward_faceuse(b, f)?
+        .ok_or_else(|| SolidError::invalid_input(OP_SIDE, "a face without its upward use"))?;
+    let lu = eu1::faceuse_loopuses(b, fu, false, None)?
+        .first()
+        .copied()
+        .ok_or_else(|| SolidError::invalid_input(OP_SIDE, "a face without its loop"))?;
+    Ok((lu, loopuse::edgeuses(b, lu, None, None)?))
+}
+
+/// The side of face `f`'s box edge use `eu` runs along: the one side both its UV ends lie on,
+/// within a millionth of the box's size.
+fn side_of_use(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    eu: crate::topology::EdgeuseId,
+) -> Result<Option<BoxSide>> {
+    use crate::geom::extent2d::{SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
+    let dom = face_surface(b, f)?
+        .ok_or_else(|| SolidError::invalid_input(OP_SIDE, "a face without a surface"))?
+        .natural_uv_domain_with_nurb(k)?;
+    let (start, end) = crate::topology::trimming_tools::edge_uv_ends(k, b, eu)?;
+    let size = dom.x_length().max(dom.y_length());
+    let tol = crate::math::EFF_ZERO_SQRT * (1.0 + size);
+    let on = dom.point_boundaries(start, tol) & dom.point_boundaries(end, tol);
+    Ok(match on {
+        SS_UMIN => Some(BoxSide::UMin),
+        SS_UMAX => Some(BoxSide::UMax),
+        SS_VMIN => Some(BoxSide::VMin),
+        SS_VMAX => Some(BoxSide::VMax),
+        _ => None,
+    })
 }
 
 const OP_MERGED: &str = "topology::brep::sheet::merged_faces";
@@ -452,7 +553,9 @@ pub fn face_spline_sheet(k: &mut Kernel, b: &Brep, f: FaceId) -> Result<Option<B
             }
         }
     }
-    let (sheet, _) = sheet_on(k, patch, b.tolerance())?;
+    // the patch's v min side is the loop's first edge (`coons_patch_of_loop`): the sheet lists
+    // its edges in the face's order
+    let (sheet, _) = sheet_on_from(k, patch, b.tolerance(), BoxSide::VMin)?;
     Ok(Some(sheet))
 }
 

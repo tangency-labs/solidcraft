@@ -488,3 +488,174 @@ impl UnitDiff for Runner {
         Ok(cases)
     }
 }
+
+#[cfg(test)]
+mod review_geometry_tests {
+    use super::*;
+    use solidcore::geom::global_solver::SolverOperation;
+
+    /// Maximum-distance results are evaluated independently and challenged by in-domain points.
+    #[test]
+    fn review_global_maximum_outputs_have_geometric_evidence() {
+        let k = Kernel::default();
+        let known =
+            crate::golden::known_failing(&crate::golden::default_dir(), Runner.id()).unwrap();
+        let mut unexplained = Vec::new();
+        for name in ["matrix_0267", "matrix_0337"] {
+            let case = crate::case::regression_case(&Runner, name);
+            let input: Inputs = case.parse().unwrap();
+            assert_eq!(input.solver, 4);
+            let surface = geometry(&k, &input).unwrap();
+            let output = rust(&input).unwrap();
+            let values = &output.values["out"];
+            let reported = values[4];
+            let actual = surface
+                .evaluate_point(&k, p2([values[2], values[3]]))
+                .unwrap()
+                .distance(v3(input.test));
+            assert!((actual - reported).abs() < 1e-11 * actual.max(1.0));
+            let mut witness = (0.0_f64, [0.0; 2]);
+            for iu in 0..=10 {
+                for iv in 0..=10 {
+                    let uv = [
+                        input.dom[0] + (input.dom[2] - input.dom[0]) * f64::from(iu) / 10.0,
+                        input.dom[1] + (input.dom[3] - input.dom[1]) * f64::from(iv) / 10.0,
+                    ];
+                    let distance = surface
+                        .evaluate_point(&k, p2(uv))
+                        .unwrap()
+                        .distance(v3(input.test));
+                    if distance > witness.0 {
+                        witness = (distance, uv);
+                    }
+                }
+            }
+            eprintln!(
+                "{name}: reported={reported:?}; farther witness={witness:?}; tol={:?}",
+                input.tol
+            );
+            if witness.0 > reported + input.tol && !known.contains_key(name) {
+                unexplained.push(name);
+            }
+        }
+        assert!(
+            unexplained.is_empty(),
+            "wrong maxima still blessed: {unexplained:?}"
+        );
+    }
+
+    /// WR-57: a maximize stepping into a singular point keeps the farthest iso curve
+    /// drop, and the guess where every drop is proven nearer, reported unconverged
+    /// (nothing shows the guess is a maximum); the nearest drop ended these local
+    /// maximize solves nearer the test point than the main branch's. `matrix_0105` keeps
+    /// main's `UnableToConverge` (code 5) at main's point; the others end at least as
+    /// far as main's.
+    #[test]
+    fn wr57_maximize_keeps_the_farthest_singular_answer() {
+        let k = Kernel::default();
+        for (name, main, unconverged) in [
+            ("matrix_0105", 21_900.553_430_444_63, true),
+            ("matrix_0822", 0.592_092_503_846_087, false),
+            ("matrix_0957", 1.163_218_054_077_855_2, false),
+        ] {
+            let case = crate::case::regression_case(&Runner, name);
+            let input: Inputs = case.parse().unwrap();
+            assert_eq!(solver_op(input.solver).unwrap(), SolverOperation::Maximize);
+            assert!(matches!(input.op, Operation::Local { .. }), "{name}");
+            let surface = geometry(&k, &input).unwrap();
+            let output = rust(&input).unwrap();
+            let values = &output.values["out"];
+            let reported = values[6];
+            let actual = surface
+                .evaluate_point(&k, p2([values[4], values[5]]))
+                .unwrap()
+                .distance(v3(input.test));
+            assert!((actual - reported).abs() <= 1e-12 * actual, "{name}: {actual} {reported}");
+            assert!(reported >= main, "{name}: {reported} < {main}");
+            if unconverged {
+                assert_eq!(values[1], 5.0, "{name}: {values:?}");
+                assert!((reported - main).abs() <= 1e-12 * main, "{name}: {reported} {main}");
+            }
+        }
+    }
+
+    /// The local solves WR-57's retirement moved (#17856): each case's name, main's row
+    /// (3740d2254) and the new row (`values[1]` the reason, `[4..6]` the answer's `u`, `v`
+    /// and distance).
+    #[rustfmt::skip]
+    const WR57_MOVED: &[(&str, &[f64], &[f64])] = &[
+        ("matrix_0511", &[1.0, 1.0, 0.0, 1.0, -1.5818805874435007, -1.1520818153828836, 3.133991971692754e-15, 1.0, 0.0, 1.0, 1.0], &[1.0, 1.0, 0.0, 1.0, -1.5818805874435011, -1.152081815382878, 0.0, 1.0, 0.0, 1.0, 1.0]),
+        ("matrix_0698", &[1.0, 1.0, 0.0, 1.0, 1.2086437884418642, 0.05049691621437583, 4.244835760994505, 1.0, 0.0, 1.0, 1.0], &[1.0, 1.0, 0.0, 1.0, 1.2086437884418642, 0.9662401036934778, 1.7281261817905709, 1.0, 0.0, 1.0, 1.0]),
+        ("matrix_0822", &[1.0, 1.0, 0.0, 1.0, 0.4127548407697886, 0.8200607287797311, 0.592092503846087, 1.0, 0.0, 1.0, 1.0], &[1.0, 5.0, 0.0, 1.0, 0.2402072156240318, 0.0, 0.6947377622543364, 1.0, 0.0, 1.0, 1.0]),
+        ("matrix_0957", &[1.0, 1.0, 0.0, 1.0, 2.198184284773183, 0.5320965165959111, 1.1632180540778552, 1.0, 0.0, 1.0, 1.0], &[1.0, 5.0, 0.0, 1.0, 0.5706589560298241, 0.053094881626908896, 3.4366983956367245, 1.0, 0.0, 1.0, 1.0]),
+        ("matrix_1074", &[1.0, 1.0, 0.0, 1.0, -0.4281683613170542, -0.01020393315696179, 7.943795879082694e-07, 1.0, 0.0, 1.0, 1.0], &[1.0, 1.0, 0.0, 1.0, -0.42816836132035424, -0.010203933142704728, 7.943795876004761e-07, 1.0, 0.0, 1.0, 1.0]),
+        ("review106_wrapped_cone_1_solver_4", &[1.0, 1.0, 0.0, 1.0, 5.729577951308233e-08, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0], &[1.0, 1.0, 0.0, 1.0, 5.7295779513082324e-08, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0]),
+    ];
+
+    /// WR-57 (#17856): every local solve that moved from main is replayed (the row agrees
+    /// with the golden: the code checked is the code that blessed) and certified with
+    /// enclosed distances from the test point (the evaluation's rounding
+    /// [`crate::certify::evaluation_slack_at`], grown past the knots, and the distance's own
+    /// charged): a minimize's or
+    /// intersection's new answer is not proven farther than main's, a maximize's not proven nearer (each
+    /// proven better where the enclosures part), and another operation's is main's point
+    /// to the rounding (the enclosures meet). A surface without a NURBS form (the
+    /// evaluation unbounded) must answer main's parameters to an ulp each.
+    #[test]
+    fn wr57_moved_local_solves_are_not_worse() {
+        let k = Kernel::default();
+        let mut proven_better = 0usize;
+        for &(name, main, new) in WR57_MOVED {
+            let case = crate::case::regression_case(&Runner, name);
+            let input: Inputs = case.parse().unwrap();
+            let row = &rust(&input).unwrap().values["out"];
+            assert!(
+                row.len() == new.len()
+                    && row.iter().zip(new).all(|(a, b)| (a - b).abs() <= crate::REL_TOL * a.abs().max(b.abs())),
+                "{name}: the code gives {row:?}, not the new row"
+            );
+            assert!(matches!(input.op, Operation::Local { .. }), "{name}");
+            let surface = geometry(&k, &input).unwrap();
+            let nurbs = solidcore::blend::fillet_section::station::as_b_spline(&k, crate::certify::measured(&surface))
+                .unwrap()
+                .is_some();
+            if !nurbs {
+                // (no NURBS form to bound the evaluation by: the answer must be main's
+                // parameters to an ulp each, the same point)
+                let ulp = |a: f64, b: f64| a == b || a.next_up() == b || a.next_down() == b;
+                assert!(ulp(main[4], new[4]) && ulp(main[5], new[5]), "{name}: main {main:?}, new {new:?}");
+                eprintln!("{name}: main's parameters to an ulp, main {main:?} new {new:?}");
+                continue;
+            }
+            let at = |r: &[f64]| {
+                let uv = p2([r[4], r[5]]);
+                let q = surface.evaluate_point(&k, uv).unwrap();
+                let d = solidcore::geom::certified::distance(q, v3(input.test));
+                let slack = crate::certify::evaluation_slack_at(&k, &surface, uv)?;
+                Some((d.value - d.bound - slack, d.value + d.bound + slack))
+            };
+            let (Some(m), Some(n)) = (at(main), at(new)) else {
+                panic!("{name}: past a rational net's knots, no enclosure (main {main:?}, new {new:?})");
+            };
+            match solver_op(input.solver).unwrap() {
+                SolverOperation::Maximize => {
+                    assert!(n.1 >= m.0, "{name}: new {n:?} proven nearer than main {m:?}");
+                    proven_better += usize::from(n.0 > m.1);
+                }
+                // (an intersection with the point minimizes its distance to zero)
+                SolverOperation::Minimize | SolverOperation::Intersect => {
+                    assert!(n.0 <= m.1, "{name}: new {n:?} proven farther than main {m:?}");
+                    proven_better += usize::from(n.1 < m.0);
+                }
+                op => {
+                    // (another operation's answer is not ranked by its distance: the
+                    // moved row must be main's point to the rounding)
+                    assert!(n.0 <= m.1 && m.0 <= n.1, "{name} ({op:?}): new {n:?}, main {m:?}");
+                }
+            }
+            eprintln!("{name} ({:?}): main {m:?} new {n:?}", solver_op(input.solver).unwrap());
+        }
+        eprintln!("{proven_better} answers proven better than main's");
+        assert_eq!(proven_better, 4, "the certified count moved");
+    }
+}

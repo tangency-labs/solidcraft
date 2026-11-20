@@ -2,8 +2,8 @@
 //! `knife_edge_chamfers` at d 0.5 and 0.8): `SmFilletGeom::TrimOriginalSurfaces` takes the
 //! piece of a face 'inside' a fillet's rail as one whose binormal dot with the fillet's is
 //! above a fixed 0.2, which refuses a fillet meeting its face at more than 78 degrees.
-//! With `fillet_trim_inside_by_best_dot` the inside piece is the one with the largest
-//! positive dot.
+//! The port takes the inside piece as the one with the largest positive dot (formerly the
+//! opt-in `fillet_trim_inside_by_best_dot`, now retired).
 //!
 //! The part is WR-570's knife edge: a 62 1/6 x 21 plate whose corner is cut by a circle of
 //! radius 21 tangent to its back face y = 0 at x = TIP, extruded 10 (knife edges need
@@ -100,10 +100,9 @@ fn removed(d: f64) -> f64 {
 
 /// The knife edge of the part (mirrored when `s` is -1) chamfered `d`: its volume, or why
 /// it failed (the chamfer's error, or a body that is not a solid).
-fn chamfer(best_dot: bool, s: f64, d: f64) -> Result<f64, String> {
+fn chamfer(s: f64, d: f64) -> Result<f64, String> {
     let mut k = Kernel::default();
     k.fixes.fillet_knife_edge_rounds = true;
-    k.fixes.fillet_trim_inside_by_best_dot = best_dot;
     let mut b = part(&mut k, s);
     let e = knife_edge(&k, &b, s);
     // the linear section (`xsect_type` 0) on the ball of radius d
@@ -121,28 +120,13 @@ fn wr_611_steep_knife_edge_chamfers_trim_their_face() {
     assert!((removed(2.0) - 159.236_450_742_901_18).abs() <= 1e-12 * 159.236_450_742_901_18);
     for d in [0.5, 0.8, 1.0, 2.0, 5.0] {
         for s in [1.0, -1.0] {
-            let v = chamfer(true, s, d)
+            let v = chamfer(s, d)
                 .unwrap_or_else(|e| panic!("d {d}, side {s}: the chamfer failed: {e}"));
             let want = before - removed(d);
             assert!(
                 (v - want).abs() <= 1e-9 * want,
                 "d {d}, side {s}: volume {v}, expected {want}"
             );
-        }
-    }
-}
-
-/// Without the opt-in the 0.5 and 0.8 chamfers (meeting the flat face past 78 degrees)
-/// trim nothing: the chamfer fails or leaves a body that is not a solid. From d 1 they
-/// build either way.
-#[test]
-fn wr_611_without_the_opt_in_steep_chamfers_fail() {
-    for s in [1.0, -1.0] {
-        for d in [0.5, 0.8] {
-            assert!(chamfer(false, s, d).is_err(), "d {d}, side {s}");
-        }
-        if let Err(e) = chamfer(false, s, 2.0) {
-            panic!("d 2, side {s}: {e}");
         }
     }
 }

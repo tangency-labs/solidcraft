@@ -6,7 +6,8 @@ use super::{
     AsBuiltJointParams, CamParams, CamResult, CouplingResult, CreateConstraintParams, CreateJointParams, DeleteJointParams, DeleteJointResult,
     DriveJointParams, DriveJointResult, EditConstraintParams, EditJointParams, EditJointResult, GearParams, InspectJointParams, InspectJointResult,
     JointAddedResult, JointKindName, JointLimitsParams, ListJointsParams, ListJointsResult, MakeJointOriginParams, MakeJointOriginResult,
-    MotionLinkParams, RackPinionParams, ReachParams, ReachResult, RigidGroupParams, RigidGroupResult, ScrewParams, SolveJointsParams, SolveResult,
+    MotionLinkParams, MotionLinkResult, RackPinionParams, ReachParams, ReachResult, RigidGroupParams, RigidGroupResult, ScrewParams,
+    SolveJointsParams, SolveResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -14,10 +15,13 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<EditJointParams>(), &["a", "angle", "b", "flip", "joint", "name", "offset", "quiet", "suppressed", "type"]);
+    assert_keys(
+        input_schema_for::<EditJointParams>(),
+        &["a", "angle", "b", "flip", "joint", "name", "offset", "offset_x", "offset_y", "quiet", "suppressed", "type"],
+    );
     assert_keys(
         input_schema_for::<CreateJointParams>(),
-        &["a", "angle", "b", "flip", "limits", "name", "offset", "quiet", "type", "value", "values"],
+        &["a", "angle", "b", "flip", "limits", "name", "offset", "offset_x", "offset_y", "quiet", "type", "value", "values"],
     );
     assert_keys(input_schema_for::<EditConstraintParams>(), &["angle", "constraint", "flip", "name", "offset", "quiet", "suppressed", "type"]);
     assert_keys(input_schema_for::<CreateConstraintParams>(), &["a", "angle", "b", "flip", "name", "offset", "quiet", "type"]);
@@ -25,16 +29,19 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<DriveJointParams>(), &["continuous", "index", "joint", "quiet", "stop_at_budget", "value", "values"]);
     assert_keys(input_schema_for::<JointLimitsParams>(), &["index", "joint", "max", "min", "quiet"]);
     assert_keys(input_schema_for::<DeleteJointParams>(), &["joint", "link", "origin", "quiet"]);
-    assert_keys(input_schema_for::<ListJointsParams>(), &["quiet"]);
-    assert_keys(input_schema_for::<InspectJointParams>(), &["joint"]);
-    assert_keys(input_schema_for::<SolveJointsParams>(), &["quiet"]);
+    assert_keys(
+        input_schema_for::<ListJointsParams>(),
+        &["dof_free_only", "exclude_rigid", "exclude_rigid_groups", "kinds", "moving_only", "occurrences", "quiet", "summary"],
+    );
+    assert_keys(input_schema_for::<InspectJointParams>(), &["exclude_rigid", "exclude_rigid_groups", "joint", "kinds", "moving_only", "occurrences"]);
+    assert_keys(input_schema_for::<SolveJointsParams>(), &["dof_free_only", "quiet"]);
     assert_keys(
         input_schema_for::<MakeJointOriginParams>(),
         &["axis", "body", "circle", "corner", "edge", "end", "face", "frame", "name", "occurrence", "on", "path", "plane", "point", "x", "z"],
     );
     assert_keys(input_schema_for::<RigidGroupParams>(), &["occurrences"]);
     assert_keys(input_schema_for::<ReachParams>(), &["at", "axis", "continuous", "joints", "occurrence", "point", "quiet", "z"]);
-    assert_keys(input_schema_for::<MotionLinkParams>(), &["a", "b", "ia", "ib", "offset", "quiet", "ratio"]);
+    assert_keys(input_schema_for::<MotionLinkParams>(), &["a", "b", "ia", "ib", "link", "offset", "quiet", "ratio"]);
     assert_keys(input_schema_for::<GearParams>(), &["a", "b", "internal", "link", "quiet", "ra", "rb", "reverse"]);
     assert_keys(input_schema_for::<RackPinionParams>(), &["a", "b", "link", "quiet", "radius", "reverse"]);
     assert_keys(input_schema_for::<ScrewParams>(), &["a", "b", "joint", "link", "pitch", "quiet", "reverse"]);
@@ -523,7 +530,14 @@ fn the_schemas_take_what_the_handlers_read() {
     );
     takes(
         input_schema_for::<InspectJointParams>(),
-        &[(json!({}), true), (json!({"joint": "J"}), true), (json!({"joint": 4}), true), (json!({"joint": true}), false)],
+        &[
+            (json!({}), true),
+            (json!({"joint": "J"}), true),
+            (json!({"joint": 4}), true),
+            (json!({"joint": true}), false),
+            (json!({"exclude_rigid_groups": true, "kinds": ["ball"]}), true),
+            (json!({"moving_only": "yes"}), false),
+        ],
     );
     takes(
         input_schema_for::<CreateConstraintParams>(),
@@ -549,8 +563,24 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"constraint": "Mate1", "joint": "Mate1"}), false),
         ],
     );
-    takes(input_schema_for::<ListJointsParams>(), &[(json!({}), true), (json!({"quiet": false}), true), (json!({"quiet": 1}), false)]);
-    takes(input_schema_for::<SolveJointsParams>(), &[(json!({}), true), (json!({"quiet": false}), true), (json!({"quiet": 1}), false)]);
+    takes(
+        input_schema_for::<ListJointsParams>(),
+        &[
+            (json!({}), true),
+            (json!({"quiet": false}), true),
+            (json!({"quiet": 1}), false),
+            (json!({"kinds": ["revolute", "slider"], "exclude_rigid": true, "moving_only": false, "summary": true}), true),
+            (json!({"occurrences": ["Arm", 4], "exclude_rigid_groups": true, "dof_free_only": true}), true),
+            (json!({"kinds": "revolute"}), false),
+            (json!({"kinds": [3]}), false),
+            (json!({"occurrences": [true]}), false),
+            (json!({"exclude_rigid": 1}), false),
+        ],
+    );
+    takes(
+        input_schema_for::<SolveJointsParams>(),
+        &[(json!({}), true), (json!({"quiet": false}), true), (json!({"quiet": 1}), false), (json!({"dof_free_only": true}), true)],
+    );
 }
 
 fn matches(schema: schemars::Schema, id: &str, reply: &Value) {
@@ -630,6 +660,16 @@ fn replies_match_the_output_schema() {
     let quiet = run("joint.list", json!({"quiet": true}));
     matches(output_schema_for::<ListJointsResult>(), "joint.list", &quiet);
     assert!(quiet.get("dof").is_none(), "{quiet}");
+    // Filtered and summarised, the reply still matches, and says what it left out.
+    let filtered = run("joint.list", json!({"exclude_rigid": true, "summary": true, "dof_free_only": true, "kinds": ["slider", "revolute"]}));
+    matches(output_schema_for::<ListJointsResult>(), "joint.list", &filtered);
+    assert!(filtered["omitted"]["joints"].as_u64().is_some_and(|n| n > 0) && filtered["summary"]["joints"] == 4, "{filtered}");
+    let narrowed = run("joint.list", json!({"occurrences": ["LeafC"], "moving_only": true, "exclude_rigid_groups": true}));
+    matches(output_schema_for::<ListJointsResult>(), "joint.list", &narrowed);
+    let solved = run("joint.solve", json!({"dof_free_only": true}));
+    matches(output_schema_for::<SolveResult>(), "joint.solve", &solved);
+    let inspected = run("joint.inspect", json!({"moving_only": true}));
+    matches(output_schema_for::<InspectJointResult>(), "joint.inspect", &inspected);
 
     for p in [json!({}), json!({"joint": "Slide"}), json!({"joint": null}), json!({"joint": made["joint"]})] {
         let inspected = run("joint.inspect", p);
@@ -1569,9 +1609,9 @@ fn replies_of_the_rest_match_the_output_schema() {
     let apart = coupled(&mut s, "joint.screw", json!({"a": "K", "b": "Slide2", "pitch": 3}));
     assert_eq!(apart["link"], 3, "{apart}");
     let linked = put(&mut s, "joint.motion_link", json!({"a": "G1", "b": "X", "ratio": 2}));
-    ok(output_schema_for::<SolveResult>(), "joint.motion_link", &linked);
+    ok(output_schema_for::<MotionLinkResult>(), "joint.motion_link", &linked);
     let quiet = put(&mut s, "joint.motion_link", json!({"a": "G1", "b": "K", "ratio": 1, "offset": "5 deg", "ia": 0, "ib": 0, "quiet": true}));
-    ok(output_schema_for::<SolveResult>(), "joint.motion_link", &quiet);
+    ok(output_schema_for::<MotionLinkResult>(), "joint.motion_link", &quiet);
     assert!(quiet.get("dof").is_none() && quiet.get("fixed").is_none(), "{quiet}");
     let list = put(&mut s, "joint.list", json!({}));
     assert!(list["links"].as_array().is_some_and(|l| l.len() == 6), "{list}");

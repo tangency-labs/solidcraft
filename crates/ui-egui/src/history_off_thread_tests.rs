@@ -1329,7 +1329,7 @@ fn a_computing_batch_is_a_row_of_the_operations_panel_that_stops_it() {
     assert_eq!(reply_to(&mut h, &single)["ok"], true);
     h.frames(1);
     let finished = crate::operations::control(&mut h.app, &json!({})).unwrap()["finished"].clone();
-    if h.app.operations.rows(crate::now_ms()).any(|(r, _)| r.key == "agent") || finished[0]["key"] == "agent" {
+    if h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).any(|(r, _)| r.key == "agent") || finished[0]["key"] == "agent" {
         assert_eq!(finished[0]["outcome"], "done", "{finished}");
     }
 }
@@ -1437,13 +1437,24 @@ fn plugin_execution_is_off_thread_even_with_agent_off_thread_disabled() {
 #[test]
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn a_plugin_result_is_discarded_after_design_or_selection_changes() {
-    for context in ["document", "selection", "plugin_limits"] {
+    for context in ["document", "selection", "plugin_limits", "plugin_grants"] {
         let (mut h, tx) = agent_harness();
         h.app.preferences.language = if context == "selection" { "ja" } else { "en" }.into();
         h.app.run("solid.box", json!({"length":1,"width":1,"height":1,"corner":[200,200,200]})).unwrap();
         h.app.run("edit.undo", json!({})).unwrap();
         assert!(!h.app.session.redo.is_empty());
         let root = plugin_package_for_worker_test(&format!("stale-{context}"));
+        if context == "plugin_grants" {
+            let manifest_path = root.join("sample/plugin.json");
+            let mut manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+            manifest["runtime"]["permissions"] = json!({"command_groups":["file"],"files":[{"name":"work","read":true,"write":false}]});
+            std::fs::write(manifest_path, manifest.to_string()).unwrap();
+            crate::prefs::set(
+                &mut h.app,
+                &json!({"plugin_grants":{"sample":{"command_groups":["file"],"folders":[{"name":"work","folder":root,"read":true,"write":false}]}}}),
+            )
+            .unwrap();
+        }
         let path = root.join("sample").to_string_lossy().into_owned();
         let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
         let (release, gate) = std::sync::mpsc::channel();
@@ -1456,6 +1467,9 @@ fn a_plugin_result_is_discarded_after_design_or_selection_changes() {
             h.app.run("solid.box", json!({"length":2,"width":2,"height":2,"corner":[100,100,100]})).unwrap();
         } else if context == "plugin_limits" {
             crate::prefs::set(&mut h.app, &json!({"plugin_max_memory_mib":512})).unwrap();
+        } else if context == "plugin_grants" {
+            crate::prefs::set(&mut h.app, &json!({"plugin_grants":{}})).unwrap();
+            assert!(!h.app.session.plugin_state.grants.contains_key("sample"));
         } else {
             let selection = vec![solidcraft_engine::Sel::Feature { id: feature_ids(&h)[0] }];
             if h.app.session.selection == selection {
@@ -1505,20 +1519,40 @@ fn cancelling_a_plugin_worker_answers_stopped_without_adopting_its_result() {
 #[test]
 fn plugin_commands_in_batches_and_scripts_are_refused_before_an_earlier_edit() {
     let mut h = Harness::new();
+    h.app.preferences.agent_off_thread = false;
+    let root = h.dir.join("plugin-management");
+    let package = root.join("sample");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(package.join("plugin.json"), "invalid manifest: review must never read this").unwrap();
+    std::fs::write(package.join("keep.txt"), "removal must never reach this folder").unwrap();
+    h.app.session.plugin_state.plugins_dir = Some(root);
+    h.app.preferences.plugin_grants.insert("sample".into(), solidcraft_engine::plugin::Grants::default());
+    let grants = h.app.preferences.plugin_grants.clone();
     let before = h.app.session.doc.to_json();
-    for command in ["plugin.run", "PLUGIN.RUN"] {
+    for command in ["plugin.run", "PLUGIN.RUN", "plugin.install", "PLUGIN.INSTALL", "plugin.remove", "PLUGIN.REMOVE"] {
         for method in ["engine.batch", "engine.script"] {
+            let params = if command.eq_ignore_ascii_case("plugin.install") {
+                json!({"path":package})
+            } else if command.eq_ignore_ascii_case("plugin.remove") {
+                json!({"id":"sample"})
+            } else {
+                json!({})
+            };
             let reply = h.call(
                 method,
                 json!({"commands":[
                     {"command":"solid.box","params":{"length":2,"width":3,"height":4}},
-                    {"command":command,"params":{}}
+                    {"command":command,"params":params}
                 ]}),
             );
+            let key = if command.eq_ignore_ascii_case("plugin.run") { "ui.plugin_standalone" } else { "ui.plugin_management_standalone" };
             assert_eq!(reply["ok"], false, "{method}: {reply}");
-            assert_eq!(reply["error"], h.app.tr("ui.plugin_standalone"), "{method}: {reply}");
+            assert_eq!(reply["error"], h.app.tr(key), "{method}: {reply}");
             assert_eq!(h.app.session.doc.to_json(), before, "{method}: {command}");
             assert!(h.app.session.undo.is_empty());
+            assert_eq!(std::fs::read_to_string(package.join("keep.txt")).unwrap(), "removal must never reach this folder");
+            assert_eq!(h.app.preferences.plugin_grants, grants, "refused management commands never revoke stored grants");
+            assert!(!crate::plugins::busy(&h.app), "refused batches start no package I/O worker");
         }
     }
 }
@@ -1724,7 +1758,7 @@ fn many_waiting_agent_commands_keep_the_panel_and_fold_into_one_row() {
     h.frames(1);
     assert!(h.app.agent_computing().is_some());
     assert!(h.app.operations.panel_drew, "the panel is drawn with 40 commands waiting");
-    let shown = h.app.operations.rows(crate::now_ms()).count();
+    let shown = h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).count();
     assert_eq!(shown, 1 + MAX_WAITING_SHOWN + 1, "the computing one, the first waiting ones and the summary row");
     let rows = agent_rows(&mut h);
     assert_eq!(rows.iter().filter(|r| r["queued"] == true).count(), 40, "all of them stay listed");
@@ -1760,9 +1794,119 @@ fn the_summary_row_stays_above_the_waiting_rows_when_one_unfolds() {
     let first = rows.iter().rfind(|r| r["queued"] == true).unwrap()["key"].as_str().unwrap().to_string();
     crate::operations::cancel(&mut h.app, &first).unwrap();
     h.frames(1);
-    let shown: Vec<_> = h.app.operations.rows(crate::now_ms()).map(|(r, alpha)| (r.key.clone(), r.label.clone(), alpha)).collect();
+    let shown: Vec<_> = h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).map(|(r, _)| (r.key.clone(), r.label.clone(), r.queued)).collect();
     assert_eq!(shown.last().map(|r| r.0.as_str()), Some("agent:held:more"), "the summary row is the top one: {shown:?}");
-    let live: Vec<_> = shown.iter().filter(|r| r.0.starts_with("agent:held:") && r.0 != "agent:held:more" && r.2 == 1.0).collect();
+    // Those still waiting: the cancelled one is fading out, no longer queued (fully opaque on the
+    // frame it went, since its fade starts on that frame's clock).
+    let live: Vec<_> = shown.iter().filter(|r| r.0.starts_with("agent:held:") && r.0 != "agent:held:more" && r.2).collect();
     let places: Vec<_> = live.iter().map(|r| r.1.split('.').next().unwrap().to_string()).collect();
     assert_eq!(places, (1..=MAX_WAITING_SHOWN).map(|n| n.to_string()).collect::<Vec<_>>(), "in queue order: {shown:?}");
+}
+
+/// A block whose length is the parameter `len` (60 mm), with a boss and a hole placed by `len`: a
+/// change of `len` recomputes every feature. Every command computes off the window thread.
+fn block_of_len() -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("parameters.add", json!({"name": "len", "expression": "60 mm"})).unwrap();
+    for (id, p) in [
+        ("solid.box", json!({"length": "len", "width": 20, "height": 10})),
+        ("solid.box", json!({"corner": ["len / 2", 5, 10], "length": 10, "width": 10, "height": 5, "operation": "join"})),
+        ("solid.cylinder", json!({"base": ["len / 2 + 5", 10, -1], "axis": [0, 0, 1], "radius": 2, "height": 20, "operation": "cut"})),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h
+}
+
+fn len(h: &Harness) -> Option<String> {
+    h.app.session.doc.param("len").map(|p| p.expr.clone())
+}
+
+fn volume_at_len(h: &mut Harness, mm: f64) -> f64 {
+    let v = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    v - (mm * 200.0 + 500.0 - std::f64::consts::PI * 4.0 * 15.0)
+}
+
+/// A parameter changed in the Parameters dialog computes off the window thread (#6777): the
+/// design stays as it was while the window goes on, saying it computes, the row shows the
+/// expression being applied, and the change is in once computed.
+#[test]
+fn a_parameter_changed_in_the_dialog_computes_off_the_window_thread() {
+    let mut h = block_of_len();
+    // The toast says it (with the operations panel on, its row does).
+    h.app.preferences.operations_panel = false;
+    h.step(&json!({"start": "parameters.change"})).unwrap();
+    h.frames(4);
+    h.run(&json!([{"click": {"handle": "param:len"}}, {"key": "A", "cmd": true}, {"text": "70 mm"}, {"key": "Enter"}])).unwrap();
+    assert!(h.app.computing_since().is_some(), "computing");
+    assert_eq!(len(&h).as_deref(), Some("60 mm"), "the design is as it was while it computes");
+    let applying = h.app.params.as_ref().and_then(|d| d.applying.get("len").cloned());
+    assert_eq!(applying.as_deref(), Some("70 mm"), "the row shows the expression it applies");
+    h.frames(1);
+    assert!(crate::scenario::rect_of("toast:computing").is_some(), "the window says it computes");
+    until_settled(&mut h);
+    assert_eq!(len(&h).as_deref(), Some("70 mm"));
+    assert!(volume_at_len(&mut h, 70.0).abs() < 1.0);
+    h.frames(1);
+    assert!(h.app.params.as_ref().is_some_and(|d| d.applying.is_empty() && d.editing.is_empty()), "nothing left pending");
+}
+
+/// Edits held for Apply (#9279) go in one change, off the window thread too.
+#[test]
+fn held_parameter_edits_applied_compute_off_the_window_thread() {
+    let mut h = block_of_len();
+    h.app.preferences.parameters_apply_live = false;
+    h.step(&json!({"start": "parameters.change"})).unwrap();
+    h.frames(4);
+    h.run(&json!([{"click": {"handle": "param:len"}}, {"key": "A", "cmd": true}, {"text": "80 mm"}, {"key": "Enter"}])).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.params.as_ref().and_then(|d| d.editing.get("len").cloned()).as_deref(), Some("80 mm"), "held for Apply");
+    h.step(&json!({"click": {"handle": "dialog:apply"}})).unwrap();
+    assert!(h.app.computing_since().is_some(), "computing");
+    assert_eq!(len(&h).as_deref(), Some("60 mm"));
+    until_settled(&mut h);
+    assert_eq!(len(&h).as_deref(), Some("80 mm"));
+    assert!(volume_at_len(&mut h, 80.0).abs() < 1.0);
+}
+
+/// A configuration activated in the configurations table computes off the window thread too.
+#[test]
+fn a_configuration_activated_computes_off_the_window_thread() {
+    let mut h = block_of_len();
+    h.app.run("config.configure", json!({"params": ["len"]})).unwrap();
+    h.app.run("config.row", json!({"name": "Long", "values": {"len": "80 mm"}})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "config:activate:Long"}})).unwrap();
+    assert!(h.app.computing_since().is_some(), "computing");
+    assert_ne!(h.app.session.doc.configs.active.as_deref(), Some("Long"), "not active while it computes");
+    until_settled(&mut h);
+    assert_eq!(h.app.session.doc.configs.active.as_deref(), Some("Long"));
+    assert_eq!(len(&h).as_deref(), Some("80 mm"));
+    assert!(volume_at_len(&mut h, 80.0).abs() < 1.0);
+}
+
+/// Cancel puts back a live edit that computed off the window thread (#15377, #6777), whether it
+/// is in already or still computing when Cancel is clicked.
+#[test]
+fn cancel_puts_back_a_parameter_change_computed_off_the_window_thread() {
+    for in_before_cancel in [true, false] {
+        let mut h = block_of_len();
+        h.app.preferences.parameters_apply_live = true;
+        h.step(&json!({"start": "parameters.change"})).unwrap();
+        h.frames(4);
+        h.run(&json!([{"click": {"handle": "param:len"}}, {"key": "A", "cmd": true}, {"text": "70 mm"}, {"key": "Enter"}])).unwrap();
+        assert!(h.app.computing_since().is_some(), "computing");
+        if in_before_cancel {
+            until_settled(&mut h);
+            assert_eq!(len(&h).as_deref(), Some("70 mm"), "the edit is in");
+        }
+        h.step(&json!({"click": {"handle": "dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.is_none(), "Cancel closes the dialog");
+        until_settled(&mut h);
+        assert_eq!(len(&h).as_deref(), Some("60 mm"), "Cancel puts the edit back (in before Cancel: {in_before_cancel})");
+        assert!(volume_at_len(&mut h, 60.0).abs() < 1.0);
+    }
 }
