@@ -127,9 +127,6 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
 /// Assembly records do not feed any of the feature kinds accepted by `local_geometry`.
 fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
     let Document {
-        // Identity and revision do not feed geometry.
-        document_id: _,
-        revision: _,
         newer_file: _,
         render,
         format,

@@ -75,7 +75,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&DOCUMENT_REVISION_CONTRACT)
         .output(output_schema_for::<RevisionResult>)
         .params(
-        "→ document_id (the design's persistent identity, kept through saving and reopening), \
+        "→ document_id (the open design's identity, new on opening or starting a design), \
          revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
          never on a selection or a view; from one counter for the whole run, so it never repeats). Read-only",
     ),

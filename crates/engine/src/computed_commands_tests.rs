@@ -206,6 +206,19 @@ fn editor_display_changes_allow_apply_and_cancel() {
 }
 
 #[test]
+fn cancelling_a_previewed_editor_restores_authored_bytes_with_a_fresh_plugin_token() {
+    let (mut session, source, original, commands) = extrusion_editor();
+    let bytes = original.doc.to_json();
+    let historical = original.design_token();
+    let rolled_back = session.design_token();
+    session.preview(&commands).unwrap();
+    session.restore_editor(&source, original).unwrap();
+    assert_eq!(session.doc.to_json(), bytes);
+    assert_ne!(session.design_token(), historical);
+    assert_ne!(session.design_token(), rolled_back);
+}
+
+#[test]
 fn editor_visibility_changes_allow_cancel_and_keep_undo_and_redo_at_the_original_marker() {
     for undo_hide in [false, true] {
         let (mut session, source, original, _) = extrusion_editor();

@@ -433,9 +433,12 @@ To change a feature after it is made, read its definition with `execute` `timeli
 
 To observe changes without reading the whole design again, `execute`
 `document.revision` answers `{document_id, revision}`. Its numeric observation revision
-also follows visibility and uncaptured positions. The document identity persists across
-saving and reopening. Revision-aware plugin edits use the persisted design-state token,
-whose revision is an opaque string preserved across saving and reopening; see
+also follows visibility and uncaptured positions. The document identity belongs to the
+open document's session; opening or importing a design creates a fresh identity,
+including when reopening the same file. Revision-aware plugin edits use the session's
+design-state token, whose revision is an opaque string. Saving preserves that token;
+each committed edit, undo and redo creates a fresh one. Neither token field is saved
+in authored document content or undo snapshots; see
 [design revisions](plugins.md#design-revisions-and-notifications).
 See [control-protocol.md](control-protocol.md#following-the-design).
 

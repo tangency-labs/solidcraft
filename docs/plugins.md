@@ -33,18 +33,20 @@ JSON `{ "document_id": "…", "revision": "0123456789abcdef0123456789abcdef:42" 
 or `null` without an open design.
 Existing plugins need no new imports or capabilities.
 
-The identity and revision are saved with the design. Every committed edit gets a
-new token. Undo and redo restore the token of the history state they restore;
-different history states never share a token, including edits made after undo.
-Saving does not change the token, and reopening retains its identity and saved
-revision. Different documents have different identities. Display-only changes
-do not invalidate calculations. Older files acquire these values when opened;
-save them to retain the values on subsequent opens.
-The revision is a bounded opaque string. It combines a 128-bit process namespace
-with the existing history generation, so restarting the host cannot reuse a
-generation from an earlier process for a different state. Compare the whole
-string for equality; keep it unchanged when storing or passing it back. Revisions
-do not order edits across app runs.
+The host keeps the identity and revision in the open document's session, outside
+the authored document, saved files and undo snapshots. Every committed edit,
+undo and redo gets a fresh token, including a redo that restores earlier content.
+Tokens never identify different history states. Saving does not change the token.
+Opening or importing a design creates a fresh identity and token, including when
+reopening the same file; switching between open tabs retains each tab's identity.
+Different open documents have different identities. Display-only changes do not
+invalidate calculations. These observations add no metadata to saved designs and
+do not alter the authored bytes restored by cancellation or undo.
+
+Both fields are bounded opaque strings. Compare the complete token for equality
+and pass it back unchanged. A token is valid only for its open document session;
+discard cached tokens after closing or reopening a design. Revisions do not order
+edits across sessions.
 Use this token for edit preconditions; `document.revision` reports the separate
 observation revision, which also follows visibility and uncaptured positions.
 

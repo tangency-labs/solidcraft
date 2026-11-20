@@ -188,10 +188,6 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
         }
         let mut doc = solidcraft_io::read_design(&imported.design)
             .map_err(|e| HostError::InvalidInput { field: "design".into(), reason: format!("it wrote a design SolidCraft can't read: {e}") })?;
-        // Importing creates a new design, even if the converter reuses a saved template.
-        // Only reopening a native design retains the identity stored in its file.
-        doc.document_id = solidcraft_doc::ids::new_document_id();
-        doc.revision = solidcraft_doc::ids::new_design_revision();
         if let Some(stem) = Path::new(path).file_stem().map(|s| s.to_string_lossy().into_owned())
             && doc.name.trim().is_empty()
         {

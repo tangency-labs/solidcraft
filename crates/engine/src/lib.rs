@@ -715,9 +715,11 @@ pub struct Session {
     visibility_revision: u64,
     /// [`Document::browser_stamp`] when the browser's groups and order were last checked.
     browser_stamp: [u64; 6],
-    /// The persistent design identity for programs that follow it (`document.revision`).
+    /// The open-session design identity for programs that follow it (`document.revision`).
     pub document_id: String,
-    /// The immutable authored state named by `doc.revision`. A weak association
+    /// The current plugin revision, outside authored data and undo snapshots.
+    design_revision: String,
+    /// The immutable authored state named by `design_revision`. A weak association
     /// retains no snapshot or document contents. Mutation invalidates it through
     /// copy-on-write; automatic refresh, pinning and save-name changes may retarget
     /// an equivalent representation without allocating another revision.
@@ -904,6 +906,7 @@ pub struct LiveEdit {
 #[derive(Clone, Debug)]
 pub(crate) struct Checkpoint {
     pub id: u64,
+    pub document_id: String,
     pub doc: Arc<Document>,
     pub active_sketch: Option<u64>,
     /// Explicitly owned sheet edit, independent of the model sketch being edited.
@@ -1185,7 +1188,7 @@ impl Session {
     /// folds kept which side stays has each fold's side settled first ([`Self::with_fold_sides`]).
     pub(crate) fn with_model(doc: Arc<Document>, visibility: Visibility, model: Model) -> Self {
         let (doc, model) = Self::with_fold_sides(doc, model);
-        let document_id = doc.document_id.clone();
+        let document_id = solidcraft_doc::ids::new_document_id();
         let design_state = Arc::downgrade(&doc);
         Session {
             stop: Default::default(),
@@ -1218,6 +1221,7 @@ impl Session {
             visibility_revision: 0,
             browser_stamp: [0; 6],
             document_id,
+            design_revision: solidcraft_doc::ids::new_design_revision(),
             design_state,
             followed: None,
             auto_project: true,
@@ -1421,12 +1425,12 @@ impl Session {
         if Arc::ptr_eq(&self.doc, &self.saved) {
             return false;
         }
-        let Ok(mut answer) = self.dirty_cache.lock() else { return !same_but_design_revision(&self.doc, &self.saved) };
+        let Ok(mut answer) = self.dirty_cache.lock() else { return *self.doc != *self.saved };
         let same = |a: &DirtyAnswer| a.revision == self.revision && Arc::ptr_eq(&a.doc, &self.doc) && Arc::ptr_eq(&a.saved, &self.saved);
         if let Some(a) = answer.as_ref().filter(|a| same(a)) {
             return a.differs;
         }
-        let differs = !same_but_design_revision(&self.doc, &self.saved);
+        let differs = *self.doc != *self.saved;
         *answer = Some(DirtyAnswer { revision: self.revision, doc: self.doc.clone(), saved: self.saved.clone(), differs });
         differs
     }
@@ -1758,11 +1762,11 @@ impl Session {
         Ok(result)
     }
 
-    /// Persistent identity and committed history state for plugin results.
-    /// View changes and saves leave this token alone. Undo and redo restore the
-    /// token of the state they restore; a new edit always receives a new revision.
+    /// Open-session identity and committed history state for plugin results.
+    /// View changes and saves leave this token alone. Authored edits and history
+    /// traversal receive fresh revisions without changing the document contents.
     pub fn design_token(&self) -> craft_plugin::DesignToken {
-        craft_plugin::DesignToken { document_id: self.doc.document_id.clone(), revision: self.doc.revision.clone() }
+        craft_plugin::DesignToken { document_id: self.document_id.clone(), revision: self.design_revision.clone() }
     }
 
     fn design_token_is_current(&self) -> bool {
@@ -1775,7 +1779,7 @@ impl Session {
 
     fn commit_design_token(&mut self) {
         if !self.design_token_is_current() {
-            Arc::make_mut(&mut self.doc).revision = solidcraft_doc::ids::new_design_revision();
+            self.design_revision = solidcraft_doc::ids::new_design_revision();
             self.follow_design_token();
         }
     }
@@ -2497,6 +2501,8 @@ impl Session {
             ..Snapshot::of(self, spec.label)
         };
         let ids = self.ids.clone();
+        let design_before = self.design_revision.clone();
+        let identity_before = self.document_id.clone();
         let section_before = self.section_state();
         // Where new geometry goes: not in the design, but a replay needs it (component.activate).
         let active_before = (self.active_component, self.active_occurrence_path.clone());
@@ -2626,11 +2632,7 @@ impl Session {
         let result = match r {
             Ok((v, live_edit)) => {
                 let v = if changed { self.with_created(spec.id, params, &before, v) } else { v };
-                if changed
-                    && *self.doc != *before.doc
-                    && self.replacements == replacements
-                    && !matches!(spec.id, "edit.undo" | "edit.redo" | "edit.restore_checkpoint" | "file.save" | "file.save_as")
-                {
+                if changed && *self.doc != *before.doc && self.replacements == replacements && !matches!(spec.id, "file.save" | "file.save_as") {
                     self.commit_design_token();
                 }
                 if changed || hidden {
@@ -2702,6 +2704,8 @@ impl Session {
             Err(e) => {
                 // A failed command draws no ids, so a replay of what succeeded draws the same.
                 self.ids = ids;
+                self.design_revision = design_before;
+                self.document_id = identity_before;
                 self.redo_watch = redo_watch_before;
                 self.open_drawing = open_drawing;
                 self.active_sheet_sketch = before.active_sheet_sketch.clone();
@@ -2728,8 +2732,7 @@ impl Session {
             }
         };
         // Refresh/pinning preserve the authored state just committed. A failure
-        // restored its immutable snapshot; saves and history traversal preserve
-        // their explicitly retained or restored token.
+        // restored its immutable snapshot and pre-call token; saves keep their token.
         self.follow_design_token();
         // A sketch open for editing that failed (a projected edge lost by name) is still shown, its
         // lost link marked, so it can be repaired from inside it (#12085).
@@ -2809,6 +2812,7 @@ impl Session {
         self.next_checkpoint += 1;
         self.checkpoints.push(Checkpoint {
             id,
+            document_id: self.document_id.clone(),
             doc: self.doc.clone(),
             active_sketch: self.active_sketch,
             active_sheet_sketch: self.active_sheet_sketch.clone(),
@@ -2838,7 +2842,8 @@ impl Session {
         let Some(c) = self.checkpoints.drain(i..).next() else { return Err(missing()) };
         let before = Snapshot::of(self, "");
         self.doc = c.doc;
-        self.document_id.clone_from(&self.doc.document_id);
+        self.document_id = c.document_id;
+        self.design_revision = solidcraft_doc::ids::new_design_revision();
         // A row put on the design after the checkpoint is gone with it.
         self.config_baseline = None;
         self.row_models.clear();
@@ -2910,6 +2915,7 @@ impl Session {
             visibility_revision: self.visibility_revision,
             browser_stamp: self.browser_stamp,
             document_id: self.document_id.clone(),
+            design_revision: self.design_revision.clone(),
             design_state: self.design_state.clone(),
             followed: None,
             auto_project: self.auto_project,
@@ -3001,7 +3007,6 @@ impl Session {
         }
         let mut expected = (*original.doc).clone();
         // The temporary rollback is another revision of the same model inputs.
-        expected.revision.clone_from(&source.doc.revision);
         expected.marker = source.doc.marker;
         // Rolling the marker solves the joints again and stores where that puts each occurrence...
         if expected.occurrences.len() == source.doc.occurrences.len() {
@@ -3139,6 +3144,8 @@ impl Session {
 
     fn same_document_context(&self, source: &Session) -> bool {
         Arc::ptr_eq(&self.doc, &source.doc)
+            && self.document_id == source.document_id
+            && self.design_revision == source.design_revision
             && self.ids.seed() == source.ids.seed()
             && self
                 .revision
@@ -3167,6 +3174,10 @@ impl Session {
         let redo_watch = self.redo_watch.clone();
         let ids = self.ids.clone();
         original.visibility.hidden_joints.clear();
+        // The editor's original authored snapshot carries an old session token.
+        // Cancelling restores its bytes, while remaining a fresh traversal.
+        original.design_revision = solidcraft_doc::ids::new_design_revision();
+        original.follow_design_token();
         self.accept_computed(original);
         self.undo = undo;
         self.redo = redo;
@@ -3237,7 +3248,23 @@ impl Session {
     pub fn accept_computed(&mut self, mut computed: Session) {
         // Audited direct-mutation jobs may not have passed through execute. Their
         // accepted document is still a new committed state with a fresh token.
-        computed.commit_design_token();
+        let newer = match (design_revision_generation(&computed.design_revision), design_revision_generation(&self.design_revision)) {
+            (Some((incoming_epoch, incoming)), Some((current_epoch, current))) => incoming_epoch == current_epoch && incoming > current,
+            _ => false,
+        };
+        // Reads usually share their document; only an older or untracked candidate
+        // needs a content comparison. A newly issued revision already names its edit.
+        let same_content = Arc::ptr_eq(&computed.doc, &self.doc) || (!newer && *computed.doc == *self.doc);
+        if !newer && computed.design_revision != self.design_revision {
+            // A retained original editor or another historical candidate must
+            // not restore an issued token, even when it restores authored bytes.
+            computed.design_revision = if same_content { self.design_revision.clone() } else { solidcraft_doc::ids::new_design_revision() };
+            computed.follow_design_token();
+        } else if computed.design_revision == self.design_revision && same_content {
+            computed.follow_design_token();
+        } else {
+            computed.commit_design_token();
+        }
         let previous_revision = self.revision;
         // Audited direct-mutation callers edit one current owner without commands.
         // Command provenance takes precedence if nested tools erased their history.
@@ -3258,7 +3285,7 @@ impl Session {
         self.body_renames = computed.body_renames;
         self.doc = computed.doc;
         self.design_state = computed.design_state;
-        self.document_id.clone_from(&self.doc.document_id);
+        self.design_revision = computed.design_revision;
         self.ids = computed.ids;
         self.model = computed.model;
         self.release_left();
@@ -3570,20 +3597,28 @@ fn image_host_availability(host: Option<&render::job::ImageHost>, expected: &ren
     }
 }
 
-/// A fresh history token alone is not an unsaved change. Reuse the exhaustive
-/// model-input comparison without cloning a design, restoring every other field
-/// it omits so identity, features and newer-file data still affect dirtiness.
-fn same_but_design_revision(a: &Document, b: &Document) -> bool {
-    a.document_id == b.document_id && a.newer_file == b.newer_file && a.features == b.features && same_but_features(a, b)
+/// Only the host compares generation order internally, to identify historical
+/// candidate tokens. Plugin clients continue to compare complete tokens for equality.
+fn design_revision_generation(token: &str) -> Option<(&str, u64)> {
+    if token.len() > 128 {
+        return None;
+    }
+    let (epoch, generation) = token.split_once(':')?;
+    if epoch.len() != 32
+        || !epoch.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || generation.is_empty()
+        || generation.len() > 20
+        || !generation.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    Some((epoch, generation.parse().ok()?))
 }
 
 /// Whether two designs differ at most in their features. Every field is named, so a new one has
 /// to be decided on here.
 fn same_but_features(a: &Document, b: &Document) -> bool {
     let Document {
-        // Tracking metadata does not affect model inputs.
-        document_id: _,
-        revision: _,
         newer_file: _,
         render,
         format,

@@ -33,9 +33,10 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 
 pub type Result<T> = std::result::Result<T, HostError>;
 
-/// An open document and its committed history state. Revisions are comparable only within the
-/// same document identity; saving preserves a token, while committed edits, undo and redo change it.
-/// Revision strings are opaque and must only be compared for equality.
+/// An open document session and its committed history state, kept outside authored document data.
+/// Saving preserves a token; committed edits, undo and redo each produce a fresh revision.
+/// Opening or importing a document creates a fresh identity, including reopening the same file.
+/// Both strings are opaque and must only be compared for equality within their open session.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DesignToken {

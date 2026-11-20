@@ -192,12 +192,7 @@ fn a_drag_and_a_world_move_leave_the_same_design() {
     let (mut moved, _) = build();
     run(&mut dragged, "occurrence.drag", json!({"occurrence": free, "at": [25, 0, 0], "point": [25, 15, 0]}));
     run(&mut moved, "occurrence.move", json!({"occurrence": free, "space": "world", "translate": [0, 15, 0]}));
-    // Independent designs have different tracking tokens; compare their full
-    // serialized authored state after normalizing only that metadata.
-    let mut moved_doc = (*moved.doc).clone();
-    moved_doc.document_id.clone_from(&dragged.doc.document_id);
-    moved_doc.revision.clone_from(&dragged.doc.revision);
-    assert_eq!(dragged.doc.to_json(), moved_doc.to_json());
+    assert_eq!(dragged.doc.to_json(), moved.doc.to_json());
     let shown = |s: &Session| format!("{:?}", s.world_state().unwrap().sketches.iter().map(|k| &k.sketch.points).collect::<Vec<_>>());
     assert_eq!(shown(&dragged), shown(&moved));
 }

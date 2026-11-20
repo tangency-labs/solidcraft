@@ -1539,18 +1539,23 @@ fn design_notifications_fire_when_an_unchanged_design_is_reopened_or_switched() 
     crate::plugin_events::observe(&mut app);
     let token = app.session.design_token();
     assert_eq!(app.plugin_events.take_due(0.11), Some(Some(token.clone())));
+    let authored = app.session.doc.to_json();
     let reopened = solidcraft_engine::Session::opened((*app.session.doc).clone(), None);
-    assert_eq!(reopened.design_token(), token);
+    assert_eq!(reopened.doc.to_json(), authored, "opening preserves the complete authored design");
+    let reopened_token = reopened.design_token();
+    assert_ne!(reopened_token, token);
+    assert_ne!(reopened_token.document_id, token.document_id, "each open has its own session identity");
     assert_ne!(reopened.uid, app.session.uid);
     std::sync::Arc::make_mut(&mut app.session.plugin_state.listener_data).insert("sample.refresh".into(), json!({"old":true}));
     crate::documents::open_tab(&mut app, reopened).unwrap();
     app.now = 1.0;
     crate::plugin_events::observe(&mut app);
     assert!(app.session.plugin_state.listener_data.is_empty(), "the old tab's panel data does not follow it");
-    assert_eq!(app.plugin_events.take_due(1.11), Some(Some(token.clone())));
+    assert_eq!(app.plugin_events.take_due(1.11), Some(Some(reopened_token)));
     crate::documents::switch(&mut app, 0);
     app.now = 2.0;
     crate::plugin_events::observe(&mut app);
+    assert_eq!(app.session.design_token(), token, "switching back restores the original tab's token");
     assert_eq!(app.plugin_events.take_due(2.11), Some(Some(token)));
     // Two switches inside one frame still invalidate once, even though the final context
     // is exactly the one whose last invalidation has already been delivered.

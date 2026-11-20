@@ -1375,12 +1375,7 @@ fn pinning_with_the_bodies_it_read_before_pins_as_reading_them_again() {
         fresh.made_bodies.clear();
         let (a, b) = (kept.execute(id, &params), fresh.execute(id, &params));
         assert_eq!(a.is_ok(), b.is_ok(), "step {step}: {id} {params}");
-        // Independent documents have distinct tracking tokens; pinning must
-        // nevertheless produce the same serialized authored state.
-        let mut fresh_doc = (*fresh.doc).clone();
-        fresh_doc.document_id.clone_from(&kept.doc.document_id);
-        fresh_doc.revision.clone_from(&kept.doc.revision);
-        assert_eq!(kept.doc.to_json(), fresh_doc.to_json(), "step {step}: {id} {params}");
+        assert_eq!(kept.doc.to_json(), fresh.doc.to_json(), "step {step}: {id} {params}");
         // The fingerprints match the design as fingerprinting the whole timeline again makes them
         // match it: evaluating it again reuses the same results (all, as a rule; the others are
         // computed or taken from the cache the copies share).

@@ -440,8 +440,6 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
     // Features from outside that built its bodies come along at the new design's root
     let to_root = |c: u64| if c == comp || !sc.subtree.contains(&c) { 0 } else { c };
     let mut part = (**source).clone();
-    part.document_id = solidcraft_doc::ids::new_document_id();
-    part.revision = solidcraft_doc::ids::new_design_revision();
     part.name = stem.to_string();
     part.marker = None;
     part.features.retain(|f| sc.inside.contains(&f.id) || sc.carried.contains(&f.id));

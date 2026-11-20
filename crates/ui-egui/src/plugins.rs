@@ -587,14 +587,6 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
             crate::plugin_install::start(app);
         }
         ui.add_space(8.0);
-        resource_controls(app, ui);
-        crate::ui_kit::checkbox(
-            ui,
-            solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position"),
-            &mut app.preferences.plugin_remember_dialog_position,
-        )
-        .on_hover_text(solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position_help"));
-        ui.add_space(8.0);
         let t = solidcraft_theme::Tokens::get();
         let path = dir.display().to_string();
         let searching = crate::ui_kit::settings_search::querying(ui);
@@ -656,6 +648,15 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
                 ui.label(RichText::new(format!("{who}: {}", skip.reason)).size(t.font_small).color(t.text_dim));
             }
         }
+        ui.add_space(8.0);
+        resource_controls(app, ui);
+        crate::ui_kit::checkbox(
+            ui,
+            solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position"),
+            &mut app.preferences.plugin_remember_dialog_position,
+        )
+        .on_hover_text(solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position_help"));
+        ui.add_space(8.0);
         if !searching {
             ui.horizontal(|ui| {
                 let button = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("prefs.plugins_show_folder"), "folder", true, false)
@@ -851,6 +852,13 @@ mod tests {
                 _ => false,
             }
         }
+        fn text_bounds(shape: &egui::Shape, expected: &str) -> Option<egui::Rect> {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| text_bounds(shape, expected)),
+                egui::Shape::Text(text) if text.galley.job.text.contains(expected) => Some(text.visual_bounding_rect()),
+                _ => None,
+            }
+        }
         let mut h = crate::scenario::Harness::new();
         let root = h.dir.join("installed");
         let path = package(&h, "workshop-helper");
@@ -867,6 +875,12 @@ mod tests {
                 output.shapes.iter().any(|shape| has_text(&shape.shape, "read entries cannot edit the design")),
                 "diagnostic remains visible at {size:?}"
             );
+            let (painted, clip) = output
+                .shapes
+                .iter()
+                .find_map(|shape| text_bounds(&shape.shape, "read entries cannot edit the design").map(|rect| (rect, shape.clip_rect)))
+                .unwrap();
+            assert!(bounds.contains_rect(painted) && clip.contains_rect(painted), "diagnostic is fully painted at {size:?}: {painted:?}");
         }
         capture_page(&mut h.app, &root, "plugin-design-listener-failure.png");
         capture_page_sized(&mut h.app, &root, "plugin-design-listener-failure-small.png", egui::vec2(640.0, 480.0));

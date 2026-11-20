@@ -156,12 +156,7 @@ fn the_drag_end_evaluates_once_to_the_scripted_drags_result() {
     assert_eq!(end["sketch"], json!({"solved": true, "dof": 2}));
     assert!(!live.model.is_stale());
     frames(&mut scripted, 3, false);
-    // These independently built documents have different tracking tokens; all
-    // authored fields must match the scripted drag's result.
-    let mut scripted_doc = (*scripted.doc).clone();
-    scripted_doc.document_id.clone_from(&live.doc.document_id);
-    scripted_doc.revision.clone_from(&live.doc.revision);
-    assert_eq!(*live.doc, scripted_doc, "the same design as dragging without `live`");
+    assert_eq!(*live.doc, *scripted.doc, "the same design as dragging without `live`");
     let (a, b) = (live.model.state(), scripted.model.state());
     let (sa, sb) = (&a.sketches[0], &b.sketches[0]);
     assert_eq!(sa.sketch, sb.sketch);

@@ -296,6 +296,8 @@ fn nested_plugin_edits_save_their_current_token_without_retagging_at_acceptance(
         evaluation: None,
     };
     let before = host.session.design_token();
+    let mut accepted = Session::default();
+    let identity = accepted.document_id.clone();
     // The real plugin entry owns this outer frame and one undo transaction.
     let (_frame, outermost) = crate::frames::Nested::enter("plugin.run");
     assert!(outermost);
@@ -308,12 +310,13 @@ fn nested_plugin_edits_save_their_current_token_without_retagging_at_acceptance(
     assert_ne!(edited, added, "each nested mutation receives a distinct token");
     host.run_command("file.save_as", &json!({"path": path})).unwrap();
     let saved = solidcraft_io::read_design(&std::fs::read(&path).unwrap()).unwrap();
-    assert_eq!((&saved.document_id, &saved.revision), (&edited.document_id, &edited.revision));
+    assert_eq!(saved.to_json(), host.transaction.as_ref().unwrap().doc.to_json());
+    assert_eq!(host.transaction.as_ref().unwrap().design_token(), edited);
     host.commit_transaction().unwrap();
     assert_eq!(host.session.design_token(), edited);
-    let mut accepted = Session::default();
     accepted.accept_computed(host.session);
-    assert_eq!(accepted.design_token(), edited);
+    assert_eq!(accepted.design_token().revision, edited.revision);
+    assert_eq!(accepted.design_token().document_id, identity);
 }
 
 /// A plugin reaches a command only by its exact registered id: another
@@ -611,6 +614,18 @@ mod native {
         }
     }
     #[test]
+    fn nested_plugin_failure_restores_the_callers_session_token_and_authored_bytes() {
+        let f = Fixture::new("call $box unreachable");
+        let mut s = Session::default();
+        let token = s.design_token();
+        let before = s.doc.to_json();
+        assert!(f.run(&mut s).is_err());
+        assert_eq!(s.design_token(), token);
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty() && s.redo.is_empty());
+    }
+
+    #[test]
     fn traps_fuel_memory_and_denied_calls_leave_design_and_history_untouched() {
         for (code, diagnostic) in [
             ("call $box unreachable", "trap=UnreachableCodeReached"),
@@ -775,6 +790,28 @@ mod native {
         assert_eq!(s.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"], 24.);
         s.execute("edit.undo", &json!({})).unwrap();
         assert!(s.doc.features.is_empty());
+    }
+
+    #[test]
+    fn stale_plugin_worker_is_refused_after_edit_and_undo_restore_the_authored_snapshot() {
+        let f = Fixture::new("call $box");
+        let mut s = Session::default();
+        let expected = s.design_token();
+        let original = s.doc.clone();
+        let bytes = s.doc.to_json();
+        let approval = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
+        let args = json!({"path":f.path(),"approval":approval,"entry":"make","expected_design":expected});
+        let prepared = s.scratch().compute_commands(&[("plugin.run".into(), args)], None).unwrap();
+        s.execute("parameters.add", &json!({"name":"width","expression":"10 mm"})).unwrap();
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&s.doc, &original));
+        assert_eq!(s.doc.to_json(), bytes);
+        let actual = s.design_token();
+        assert_ne!(actual, expected);
+        assert!(!prepared.is_current(&s));
+        let error = s.accept_commands(prepared).unwrap_err();
+        assert_eq!(error.host_error(), Some(&HostError::StaleRevision { expected, actual }));
+        assert_eq!(s.doc.to_json(), bytes);
     }
 
     #[test]
@@ -1724,15 +1761,15 @@ mod importers {
     fn imported_documents_do_not_share_the_converter_templates_identity() {
         let (mut s, root) = installed("distinct-identities", &[("smp", &["smp"], false)]);
         let bytes = design();
-        let template = solidcraft_io::read_design(&bytes).unwrap();
+        let original_identity = s.document_id.clone();
         let first = put(&root, "first.smp", &bytes);
         let second = put(&root, "second.smp", &bytes);
         s.execute("file.import", &json!({"path":first})).unwrap();
         let first = s.design_token();
         s.execute("file.import", &json!({"path":second})).unwrap();
         let second = s.design_token();
-        assert_ne!(first.document_id, template.document_id);
-        assert_ne!(second.document_id, template.document_id);
+        assert_ne!(first.document_id, original_identity);
+        assert_ne!(second.document_id, original_identity);
         assert_ne!(first.document_id, second.document_id);
         std::fs::remove_dir_all(root).unwrap();
     }
