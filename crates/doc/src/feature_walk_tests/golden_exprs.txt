@@ -224,7 +224,7 @@ coordinate_system_refs
   inputs:
     Angle = cs_z.angle (Angle)
     Offset = cs_z.offset (Length)
-  expressions: cs_z.angle, cs_z.offset
+  expressions: cs_z.angle, cs_z.offset, 0, 0, 0
 coordinate_system_typed
 split_face
   inputs:
