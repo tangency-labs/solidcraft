@@ -633,7 +633,9 @@ fn searchable_dropdown_with(
             chosen = Some(option.value.to_owned());
             ui.close();
         }
-        if (up || down) && let Some(option) = cursor.and_then(|index| visible.get(index)) {
+        if (up || down)
+            && let Some(option) = cursor.and_then(|index| visible.get(index))
+        {
             // Keep the chosen value when newly discovered options change the row order.
             ui.data_mut(|data| data.insert_temp(cursor_id, option.value.to_owned()));
         }
