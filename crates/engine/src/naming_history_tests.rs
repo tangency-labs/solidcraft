@@ -341,7 +341,7 @@ fn pieces_of_a_cut_keep_their_names_when_the_design_is_evaluated_again() {
 }
 
 #[test]
-fn a_name_of_a_body_without_history_is_found_by_geometry_and_says_so_once_it_moves() {
+fn an_aligned_body_keeps_exact_names_when_its_dimensions_change() {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "len", "expression": "40 mm"}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
@@ -349,21 +349,141 @@ fn a_name_of_a_body_without_history_is_found_by_geometry_and_says_so_once_it_mov
     run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "len"}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"distance": 10, "name": "Block"}));
-    // Lifting it 2 mm with Align: an operation that reports no history (Replace Face, used here
-    // before, keeps it now). The top ends at z = 12 as it did.
+    // A rigid alignment preserves face ownership, even where the new position does not
+    // overlap the old face. The top ends at z = 12.
     run(&mut s, "solid.align", json!({"bodies": ["Body1"], "from": [0, 0, 0], "to": [0, 0, 2], "name": "Lift"}));
     let state = s.model.state();
     let body = state.bodies.first().unwrap();
-    assert!((0..solidcraft_doc::naming::face_names(body).len()).all(|i| !solidcraft_doc::naming::face_name_exact(body, i)));
+    assert!((0..solidcraft_doc::naming::face_names(body).len()).all(|i| solidcraft_doc::naming::face_name_exact(body, i)));
     run(&mut s, "solid.fillet", json!({"edges": [[40, 15, 12]], "radius": 2, "name": "Round"}));
     // Where it was picked, the pick and the name agree: nothing to say.
     assert_eq!(warning(&s, "Round"), None);
-    // Moved away from the pick, only geometry found it: the fillet says so.
+    // The saved pick is now elsewhere; exact history still identifies the same edge.
     change(&mut s, "len", "50 mm");
     assert_eq!(error(&s, "Round"), None);
-    let w = warning(&s, "Round").unwrap_or_default();
-    assert!(w.contains("found by geometry, not exact history"), "{w}");
+    assert_eq!(warning(&s, "Round"), None);
     assert!(!solid_at(&s, [49.9, 15.0, 11.9]));
+}
+
+/// The #20288 topology: twelve chamfered box edges, including all eight three-way corners.
+fn box_chamfered_on_every_edge() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Box"}));
+    run(
+        &mut s,
+        "solid.chamfer",
+        json!({"body": "Box", "distance": 1, "name": "Bevel", "tangent_chain": false, "edges": [
+            [20, 0, 0], [20, 30, 0], [20, 0, 10], [20, 30, 10],
+            [0, 15, 0], [40, 15, 0], [0, 15, 10], [40, 15, 10],
+            [0, 0, 5], [40, 0, 5], [0, 30, 5], [40, 30, 5]
+        ]}),
+    );
+    s
+}
+
+#[test]
+fn align_keeps_every_face_pair_of_a_box_chamfered_on_twelve_edges() {
+    for turn in [false, true] {
+        let mut s = box_chamfered_on_every_edge();
+        let before = s.model.state();
+        let body = before.body("Box").unwrap();
+        let record = body.body.record();
+        // Six retained faces, twelve bevels, eight triangular corner faces; V=24,
+        // so Euler's relation gives E=24+26-2=48.
+        assert_eq!(body.body.face_count(), 26);
+        let old_names = solidcraft_doc::naming::edge_names(body);
+        assert_eq!(old_names.len(), 48);
+        let middles: Vec<Vec3> = record
+            .edges
+            .iter()
+            .map(|edge| {
+                let [a, b] = edge.vertices.map(|v| Vec3::from(record.vertices[v as usize].point));
+                (a + b) * 0.5
+            })
+            .collect();
+        let params = if turn {
+            // XY onto the plane y=80: Z turns onto Y and the plane target moves only
+            // along Y. Thus (x,y,z) becomes (x,z+80,-y).
+            json!({"bodies": ["Box"], "from_plane": "XY", "to_plane": {"origin": [0, 80, 0], "normal": [0, 1, 0]},
+                "flip": true, "name": "Align"})
+        } else {
+            json!({"bodies": ["Box"], "from": [0, 0, 0], "to": [100, 80, 50], "name": "Align"})
+        };
+        run(&mut s, "solid.align", params);
+        let check = |s: &Session| {
+            let state = s.model.state();
+            let moved = state.body("Box").unwrap();
+            let names = solidcraft_doc::naming::edge_names(moved);
+            assert_eq!(names.len(), 48);
+            for (middle, name) in middles.iter().zip(&old_names) {
+                let at = if turn { Vec3::new(middle.x, middle.z + 80., -middle.y) } else { *middle + Vec3::new(100., 80., 50.) };
+                let hits: Vec<_> = (0..moved.body.edge_count())
+                    .filter(|i| solidcraft_kernel::edge_distance(&moved.body, *i, at).unwrap().is_some_and(|d| d < 1e-6))
+                    .collect();
+                assert_eq!(hits.len(), 1, "one exact edge at {at:?}");
+                assert_eq!(&names[hits[0]], name, "face pair at {at:?}, turn={turn}");
+            }
+        };
+        check(&s);
+        let mut cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        cold.model.no_cache = true;
+        cold.refresh();
+        check(&cold);
+    }
+}
+
+#[test]
+fn saved_projections_of_a_fully_chamfered_aligned_box_keep_both_old_numberings() {
+    let mut s = box_chamfered_on_every_edge();
+    run(&mut s, "solid.align", json!({"bodies": ["Box"], "from": [0, 0, 0], "to": [100, 80, 50], "name": "Align"}));
+    let align = id(&s, "Align");
+    let profile = run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 60, "name": "Projection"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Box", "edge": [120, 81, 60]}, {"body": "Box", "edge": [139, 95, 60]}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let state = s.model.state();
+    let expected = &state.sketch(profile).unwrap().sketch;
+    assert_eq!(expected.links.len(), 2);
+    assert!(expected.links.iter().all(|link| !link.lost));
+    // Align's old output indices are not the input's face names. In particular the
+    // reported F3:face:0|F3:face:3 became F3:face:0|F3:face:1 between releases.
+    // Exercise those two ordinal forms at the same exact picks, plus the new names,
+    // through JSON and a cold open. The second pair is another deliberate permutation;
+    // these are synthetic saved links, not a capture of the unavailable issue attachment.
+    for pairs in [None, Some([[0, 3], [2, 5]]), Some([[0, 1], [4, 7]])] {
+        let mut doc = solidcraft_doc::Document::clone(&s.doc);
+        if let Some(pairs) = pairs {
+            let solidcraft_doc::FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(profile).unwrap().kind else { panic!("sketch") };
+            for (link, [a, b]) in sketch.links.iter_mut().zip(pairs) {
+                link.edge_name = Some(format!("F{align}:face:{a}|F{align}:face:{b}"));
+            }
+        }
+        let mut cold = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+        cold.model.no_cache = true;
+        cold.refresh();
+        assert_eq!(error(&cold, "Projection"), None, "{pairs:?}");
+        let reopened = cold.model.state();
+        let actual = &reopened.sketch(profile).unwrap().sketch;
+        assert_eq!(actual.links.len(), 2);
+        assert!(actual.links.iter().all(|link| !link.lost), "{pairs:?}");
+        assert_eq!(actual.curves, expected.curves, "{pairs:?}");
+        assert_eq!(actual.points, expected.points, "{pairs:?}");
+        // Recovery must survive another save and open, including the preserved old names.
+        let again = Session::new(solidcraft_doc::Document::from_json(&cold.doc.to_json()).unwrap());
+        assert_eq!(error(&again, "Projection"), None);
+        assert!(again.model.state().sketch(profile).unwrap().sketch.links.iter().all(|link| !link.lost));
+    }
+    // An unrelated feature, an out-of-range face, a vertex shared by several edges,
+    // and a point merely near an edge cannot recover an Align ordinal reference.
+    for (feature, face, point) in
+        [(align + 100, 3, [120., 81., 60.]), (align, 1000, [120., 81., 60.]), (align, 3, [101., 81., 60.]), (align, 3, [120., 81.01, 60.])]
+    {
+        let mut doc = solidcraft_doc::Document::clone(&s.doc);
+        let solidcraft_doc::FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(profile).unwrap().kind else { panic!("sketch") };
+        sketch.links[0].edge_name = Some(format!("F{feature}:face:0|F{feature}:face:{face}"));
+        sketch.links[0].source = solidcraft_sketch::LinkSource::Edge { body: "Box".into(), at: Vec3::from(point) };
+        let cold = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+        assert!(error(&cold, "Projection").is_some(), "{feature}, {face}, {point:?}");
+    }
 }
 
 /// Replace Face keeps the body's history, as Offset Face does: every face of the result is named

@@ -179,11 +179,70 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
 /// numbered pieces of faces that now evaluate whole (`F4:side:l6#2|F4:side:l7#2`, now
 /// `F4:side:l6|F4:side:l7`). Recover it only when the faces it separates are whole, the saved
 /// point lies on it, and its name is exact. A name that ends with the number of the edge a blend
-/// replaced is found at its point too (see [`recover_blend_numbered_edge`]). Other edge references
+/// replaced is found at its point too (see [`recover_blend_numbered_edge`]), as are the unreliable
+/// ordinals once assigned by Align (see [`recover_align_projected_edge`]). Other edge references
 /// still require the stored name as picked.
 pub(crate) fn locate_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
-    locate_edge(b, name, near)
-        .or_else(|miss| recover_numbered_projected_edge(b, name, near).or_else(|| recover_blend_numbered_edge(b, name, near)).ok_or(miss))
+    locate_edge(b, name, near).or_else(|miss| {
+        recover_numbered_projected_edge(b, name, near)
+            .or_else(|| recover_blend_numbered_edge(b, name, near))
+            .or_else(|| recover_align_projected_edge(b, name, near))
+            .ok_or(miss)
+    })
+}
+
+/// Align used to discard its transform's history and give faces it could not find at the
+/// unmoved position names such as `F3:face:0`. rc.4 and 0.45.0 could enumerate those faces
+/// differently (#20288). Neither numbering is a persistent identity: recover a saved Project
+/// link only on that Align's body, at one unique exact edge through its saved point. No mesh
+/// or nearest-edge substitution decides this, and unrelated feature names get no fallback.
+fn recover_align_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
+    use crate::persistent_name::{Base, EdgeName, Role};
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    let origin = b.names.origin.as_ref()?;
+    let FeatureKind::Align { bodies, .. } = &origin.feature.kind else { return None };
+    if !bodies.contains(&b.name) {
+        return None;
+    }
+    let read = EdgeName::parse(name).ok()?;
+    if read.tie.is_some() || read.faces.len() != 2 || read.faces.first() == read.faces.get(1) {
+        return None;
+    }
+    let mut numbered = false;
+    for face in &read.faces {
+        if let Base::Made { feature, role: Role::Index(index) } = &face.base
+            && feature.0 == origin.feature.id
+        {
+            if !face.suffixes.is_empty() || (*index as usize) >= b.body.face_count() {
+                return None;
+            }
+            numbered = true;
+        }
+    }
+    if !numbered {
+        return None;
+    }
+    let faces = naming::names(b);
+    let record = b.body.record();
+    // An ordinary face name, where Align happened to retain one by overlap, must still
+    // name an incident face. Only this Align's unreliable ordinals are read at the point.
+    let incident = |edge: &solidcore_record::brep::Edge| {
+        read.faces.iter().all(|face| match &face.base {
+            Base::Made { feature, role: Role::Index(_) } if feature.0 == origin.feature.id => true,
+            _ => edge.uses.iter().any(|u| crate::history_names::matches(&faces, u.face as usize, &face.to_string()).is_some_and(exactly)),
+        })
+    };
+    let mut on = record.edges.iter().enumerate().filter(|(i, edge)| {
+        let tolerance = record.tolerance.max(edge.tolerance);
+        edge.uses.len() == 2
+            && tolerance.is_finite()
+            && incident(edge)
+            && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= tolerance)
+    });
+    let edge = on.next().filter(|_| on.next().is_none())?.0;
+    Some(EdgeHit { edge, point: near, verified: false, on_point: true })
 }
 
 /// Find a saved edge between a face and a fillet's or chamfer's face whose name, in the older
