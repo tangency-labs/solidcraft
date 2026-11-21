@@ -1047,7 +1047,7 @@ mod tests {
         let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 220.0));
         let anchor = Rect::from_min_size(pos2(276.0, 4.0), vec2(32.0, 26.0));
         let id = egui::Id::unique("test-window-options");
-        let text = window_options_menu::WindowText::default();
+        let text = window_options_menu::WindowText { top_bar: "Top bar".into(), card_headers: "Card headers".into(), ..Default::default() };
         let menu = WindowMenu {
             text: &text,
             title: "Window 2",

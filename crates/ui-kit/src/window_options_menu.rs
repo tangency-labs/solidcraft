@@ -258,10 +258,9 @@ fn contents(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, state: &mut State) -> (O
     let mut focus = FocusRows::new(state.scroll_focus);
     let (mut action, flyout) = middle(ui, id, menu, state, &mut focus);
     Menu::separator(ui);
-    for (key, label, icon, shortcut, choice) in [
-        ("return", &menu.text.return_views, "undo", "", Action::ReturnViews),
-        ("close", &menu.text.close_window, "close", "Ctrl+W", Action::Close),
-    ] {
+    for (key, label, icon, shortcut, choice) in
+        [("return", &menu.text.return_views, "undo", "", Action::ReturnViews), ("close", &menu.text.close_window, "close", "Ctrl+W", Action::Close)]
+    {
         let response = row(ui, key, label, icon, shortcut);
         focus.row(ui, &response);
         if response.clicked() {
@@ -303,10 +302,9 @@ fn middle(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, state: &mut State, focus: 
     let (size_action, size_flyout) = sizes(ui, id, menu, state, focus);
     let (display_action, flyout) = displays(ui, id, &text.move_to_display, menu.displays, state, focus);
     action = display_action.or(size_action).or(action);
-    for (key, label, icon, shortcut, choice) in [
-        ("rename", &text.rename, "rename", "F2", Action::Rename),
-        ("use_defaults", &text.use_default, "star", "", Action::UseAsDefault),
-    ] {
+    for (key, label, icon, shortcut, choice) in
+        [("rename", &text.rename, "rename", "F2", Action::Rename), ("use_defaults", &text.use_default, "star", "", Action::UseAsDefault)]
+    {
         let response = row(ui, key, label, icon, shortcut);
         focus.row(ui, &response);
         if response.clicked() {
@@ -447,7 +445,14 @@ fn segment_row(
     changed.then_some(selected)
 }
 
-fn displays(ui: &mut Ui, id: Id, label: &str, displays: &[DisplayChoice<'_>], state: &mut State, focus: &mut FocusRows) -> (Option<Action>, Option<Rect>) {
+fn displays(
+    ui: &mut Ui,
+    id: Id,
+    label: &str,
+    displays: &[DisplayChoice<'_>],
+    state: &mut State,
+    focus: &mut FocusRows,
+) -> (Option<Action>, Option<Rect>) {
     let mut row = MenuItem::new("window_options:display", label, "display");
     row.shortcut = displays.iter().find(|display| display.current).map_or("", |display| display.name);
     row.submenu = true;

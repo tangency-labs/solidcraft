@@ -1193,8 +1193,13 @@ impl ViewSet {
     /// window references fall back to the main strip and empty windows are ignored.
     /// Keep an opaque, bounded UI panel record without parsing panel internals.
     pub fn read_panel_layout(value: &Value) -> Option<Value> {
-        value.get("catalogue")?.as_str().filter(|record| record.len() <= 256 * 1024)?;
-        Some(value.clone())
+        // The panel preferences keep their catalogue as an object, older records as its text.
+        let size = match value.get("catalogue")? {
+            Value::String(record) => record.len(),
+            catalogue @ Value::Object(_) => serde_json::to_string(catalogue).ok()?.len(),
+            _ => return None,
+        };
+        (size <= 256 * 1024).then(|| value.clone())
     }
 
     pub fn from_json(value: &Value) -> Option<ViewSet> {
