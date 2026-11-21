@@ -840,6 +840,9 @@ pub struct SolveApp {
     /// Designs just opened whose out-of-date links are in other folders, asking whether to load
     /// them: one question per design, shown while its tab is.
     pub link_folders_prompt: Vec<link_folders_prompt::LinkFoldersPrompt>,
+    /// Links held back by Not now, by design ([`solidcraft_engine::Session::uid`]) and component:
+    /// not read by themselves, nor asked about again, until their folder is allowed.
+    pub link_folders_held: Vec<(u64, u64)>,
     /// Designs left by crashed apps, offered for recovery.
     pub recoverable: Vec<solidcraft_engine::recovery::Entry>,
     /// The recovery folder holding this launch's reopen-guard marker (#5064); `None` when
@@ -1148,6 +1151,7 @@ impl SolveApp {
             disk_prompt: false,
             network_prompt: None,
             link_folders_prompt: Vec::new(),
+            link_folders_held: Vec::new(),
             recoverable: Vec::new(),
             reopen_guard_dir: None,
             recovery_discard_all: false,

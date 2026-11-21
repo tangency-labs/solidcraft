@@ -44,6 +44,7 @@ pub(crate) fn ask(app: &mut SolveApp, links: Vec<(u64, String)>) {
             // Questions for designs closed unanswered are dropped first (as after Not now).
             let open: Vec<u64> = crate::documents::open_sessions(app).iter().map(|s| s.uid).collect();
             app.link_folders_prompt.retain(|p| open.contains(&p.session));
+            app.link_folders_held.retain(|(s, _)| open.contains(s));
             app.link_folders_prompt.push(LinkFoldersPrompt { session, folders: Vec::new(), components: Vec::new() });
             app.link_folders_prompt.len() - 1
         }
@@ -59,14 +60,24 @@ pub(crate) fn ask(app: &mut SolveApp, links: Vec<(u64, String)>) {
     }
 }
 
+/// Whether the shown design's link `component` is held back: Not now was answered for it, or its
+/// question is still open.
+pub(crate) fn held(app: &SolveApp, component: u64) -> bool {
+    let session = app.session.uid;
+    app.link_folders_held.contains(&(session, component))
+        || app.link_folders_prompt.iter().any(|p| p.session == session && p.components.contains(&component))
+}
+
 /// Act on the answer to the shown design's question. Load remembers the folders and reads the links.
 pub fn answer(app: &mut SolveApp, answer: Answer) {
     let shown = app.session.uid;
     let Some(at) = app.link_folders_prompt.iter().position(|p| p.session == shown) else { return };
     let LinkFoldersPrompt { session, folders, components } = app.link_folders_prompt.remove(at);
     if answer == Answer::NotNow {
+        app.link_folders_held.extend(components.into_iter().map(|c| (session, c)));
         return;
     }
+    app.link_folders_held.retain(|(s, c)| *s != session || !components.contains(c));
     for folder in folders {
         if !app.preferences.linked_file_folders.contains(&folder) {
             app.preferences.linked_file_folders.push(folder);

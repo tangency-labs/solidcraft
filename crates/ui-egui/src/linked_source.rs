@@ -211,9 +211,9 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
     // Only links inside the design's own folder, or in a folder the user allowed linked files from
     // (`linked_file_folders`), are read unasked, when the design is met or when their files change
     // later: a design received from someone else names what it likes as "changed since last read",
-    // and one reaching out of its folder would copy another design of the user's into it. The
-    // others stay marked out of date until their folder is allowed: the user is asked once whether
-    // to load them (`link_folders_prompt`), and Update Links reads them anyway.
+    // and one reaching out of its folder would copy another design of the user's into it. For the
+    // others the user is asked whether to load them (`link_folders_prompt`); after Not now they stay
+    // out of date until their folder is allowed, and Update Links reads them anyway.
     let design = app.session.path.clone();
     let outside: Vec<u64> =
         now.iter().map(|(c, _)| *c).filter(|c| !app.session.doc.links.get(c).is_some_and(|l| inside_design_folder(design.as_deref(), &l.path))).collect();
@@ -230,8 +230,18 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
         }
         if app.preferences.linked_file_folders.iter().any(|f| folder_within(&folder, Path::new(f))) {
             allowed.push(c);
-        } else if first.contains(&c) && stale.contains(&c) {
+            continue;
+        }
+        // Not now (or a question still open) holds the link back until its folder is allowed.
+        if crate::link_folders_prompt::held(app, c) {
+            continue;
+        }
+        let changed_later = now.iter().any(|(k, s)| *k == c && s.is_some() && app.docs.link_stamps.iter().any(|(x, was)| *x == c && was != s));
+        if (first.contains(&c) && stale.contains(&c)) || (changed_later && design.is_some()) {
             ask.push((c, folder.to_string_lossy().into_owned()));
+        } else if changed_later {
+            // An unsaved design has no folder: its links follow their files as before.
+            allowed.push(c);
         }
     }
     let may_read = |c: &u64| !outside.contains(c) || allowed.contains(c);
@@ -1063,7 +1073,8 @@ mod tests {
     }
 
     /// A link in an allowed folder follows its file while the design is open; once the folder is
-    /// removed from the list, a later change is no longer read by itself.
+    /// removed from the list, a later change is no longer read by itself: it asks again, and after
+    /// Not now it neither reads nor asks.
     #[test]
     fn removing_an_allowed_folder_stops_reading_its_links_by_themselves() {
         let (root, case, folder) = outside_link("removed");
@@ -1081,6 +1092,11 @@ mod tests {
         update_changed(&mut app);
         assert!(app.file_load.idle(), "no longer read by itself");
         assert!((volume(&app) - 8000.0).abs() < 1e-6, "{}", volume(&app));
+        assert_eq!(app.link_folders_prompt.len(), 1, "it asks again instead");
+        crate::link_folders_prompt::answer(&mut app, crate::link_folders_prompt::Answer::NotNow);
+        save_part(&housing, [10.0, 20.0, 40.0], false);
+        update_changed(&mut app);
+        assert!(app.file_load.idle() && app.link_folders_prompt.is_empty(), "after Not now: not read, not asked");
         let _ = std::fs::remove_dir_all(root);
     }
 
