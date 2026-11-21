@@ -185,6 +185,20 @@ fn defect(op: &'static str, why: &'static str) -> SolidError {
     SolidError::blend(op, BlendFailure::Defect { why })
 }
 
+/// The drop of a processed end vertex onto its rail that found no point: the last
+/// attempt's error, where it returned one, kept as the cause of
+/// [`BlendFailure::RailEndNotDropped`] (rule 6, its class deciding); a drop that found no
+/// foot, a [`BlendFailure::Defect`]. Both keep upstream's `SM_ERR`.
+#[track_caller]
+fn rail_end_not_dropped(op: &'static str, last_err: Option<SolidError>) -> SolidError {
+    match last_err {
+        Some(e) => Failure::new(op, BlendFailure::RailEndNotDropped)
+            .caused_by(e)
+            .into_error(),
+        None => defect(op, RAIL_END_NO_DROP),
+    }
+}
+
 /// `NER(p)` on an object the kernel built or looked up that is not there: a
 /// [`BlendFailure::Defect`] whose reason `why` says why, keeping upstream's
 /// `SM_ERR_NULL_POINTER`; its origin is the call's file and line.
@@ -1294,10 +1308,10 @@ impl FilletBrep {
         let (prim, mate) = self.p5_prim_mate(e, OP_CROSS)?;
         let g1 = self.eu_geom(prim)?;
         let g2 = self.eu_geom(mate)?;
-        let mut fs2_tol: Option<f64> = None;
 
         let mut surface1: Surface;
-        let mut surface2: Option<Surface> = None;
+        // the other geometry, its solver's tolerance and its fillet surface, together
+        let mut second: Option<(FilletGeomId, f64, Surface)> = None;
         let tol: f64;
         if let Some(g1) = g1 {
             let sid1 = self.geom(g1)?.fillet_solver();
@@ -1314,14 +1328,14 @@ impl FilletBrep {
                         .fillet_solver()
                         .ok_or_else(|| broken_link(OP_CROSS, GEOM_NO_SOLVER))?,
                 )?;
-                fs2_tol = Some(fs2.approx_tol_3d);
-                surface2 = Some(
-                    self.geom(g2)?
-                        .fillet_surface(None)?
-                        .map(exact_surface)
-                        .transpose()?
-                        .ok_or_else(|| broken_link(OP_CROSS, GEOM_NO_SURFACE))?,
-                );
+                let fs2_tol = fs2.approx_tol_3d;
+                let surface2 = self
+                    .geom(g2)?
+                    .fillet_surface(None)?
+                    .map(exact_surface)
+                    .transpose()?
+                    .ok_or_else(|| broken_link(OP_CROSS, GEOM_NO_SURFACE))?;
+                second = Some((g2, fs2_tol, surface2));
             }
             let fs1 = resolve(sid1.ok_or_else(|| broken_link(OP_CROSS, GEOM_NO_SOLVER))?)?;
             tol = fs1.approx_tol_3d;
@@ -1393,14 +1407,13 @@ impl FilletBrep {
                             .map(exact_surface)
                             .transpose()?
                             .ok_or_else(|| broken_link(OP_CROSS, GEOM_NO_SURFACE))?;
-                        if surface2.is_some() {
-                            surface2 = Some(
-                                self.geom(g2)?
-                                    .fillet_surface(None)?
-                                    .map(exact_surface)
-                                    .transpose()?
-                                    .ok_or_else(|| broken_link(OP_CROSS, GEOM_NO_SURFACE))?,
-                            );
+                        if let Some((g2, _, surface2)) = second.as_mut() {
+                            *surface2 = self
+                                .geom(*g2)?
+                                .fillet_surface(None)?
+                                .map(exact_surface)
+                                .transpose()?
+                                .ok_or_else(|| broken_link(OP_CROSS, GEOM_NO_SURFACE))?;
                         }
                     }
                 }
@@ -1451,11 +1464,12 @@ impl FilletBrep {
             50.0 * tol,
             on_face,
         )?;
-        let mut curve_3d: Option<Curve> = uv.curve_3d;
         let uv_curve1 = uv.uv_curve1;
         let uv_curve2 = uv.uv_curve2;
 
-        if curve_3d.is_none() {
+        let curve_3d = if let Some(c) = uv.curve_3d {
+            c
+        } else {
             // Lift uv curve. `sm_CreateUVCurve` can succeed with neither curve, and
             // upstream then dereferences `*pUVCurve1` (UB-213).
             let uv1 = uv_curve1
@@ -1469,9 +1483,8 @@ impl FilletBrep {
                 tol / 10.0,
                 false,
             )?;
-            curve_3d = Some(lifted.curve);
-        }
-        let curve_3d = curve_3d.ok_or_else(|| broken_link(OP_CROSS, SECTION_NOT_LIFTED))?;
+            lifted.curve
+        };
 
         set_edge_curve(self.brep_mut(), e, Some(curve_3d))?; // side effect: delete current this->UVTrimCurves
         self.set_uv(prim, uv_curve1)?;
@@ -1497,8 +1510,7 @@ impl FilletBrep {
         }
 
         // See if we need to add side curve for the other solver
-        if let Some(surface2) = surface2 {
-            let tol = fs2_tol.ok_or_else(|| broken_link(OP_CROSS, SECOND_TOL_GONE))?;
+        if let Some((g2, tol, surface2)) = second {
             let uv = super::p4::create_uv_curve(
                 k,
                 self,
@@ -1510,7 +1522,6 @@ impl FilletBrep {
             )?;
             // the duplicate 3D curve and an unexpected second UV curve are deleted
             self.set_uv(mate, uv.uv_curve1)?;
-            let g2 = g2.ok_or_else(|| broken_link(OP_CROSS, SECOND_GEOM_GONE))?;
             self.geom_mut(g2)?.add_side_fillet_edgeuse(mate);
         }
 
@@ -2617,24 +2628,21 @@ impl FilletBrep {
             .map(exact_surface)
             .transpose()?
             .ok_or_else(|| broken_link(OP_END, GEOM_NO_SURFACE))?;
-        let mut eus = Vec::with_capacity(2);
-        for i in 0..2 {
-            let rail = self
+        // rail i's edge use at the end
+        let end_eu = |fb: &Self, i: usize| -> Result<EdgeuseId> {
+            let rail = fb
                 .geom(g)?
                 .rail(i)
                 .ok_or_else(|| broken_link(OP_END, GEOM_NO_RAIL))?;
-            let prim = primary_edgeuse(self.brep(), rail)?
+            let prim = primary_edgeuse(fb.brep(), rail)?
                 .ok_or_else(|| broken_link(OP_END, FE_NO_PRIMARY_EU))?;
-            eus.push(if end_index == 0 {
+            Ok(if end_index == 0 {
                 prim
             } else {
-                eu1::mate(self.brep(), prim)?.ok_or_else(|| broken_link(OP_END, EU_NO_MATE))?
-            });
-        }
-        let (Some(&eu_0), Some(&eu_1)) = (eus.first(), eus.get(1)) else {
-            return Err(broken_link(OP_END, END_EUS_GONE));
+                eu1::mate(fb.brep(), prim)?.ok_or_else(|| broken_link(OP_END, EU_NO_MATE))?
+            })
         };
-        let eus = [eu_0, eu_1];
+        let eus = [end_eu(self, 0)?, end_eu(self, 1)?];
         let vu_of = |fb: &Self, eu: EdgeuseId| -> Result<VertexuseId> {
             fb.brep()
                 .edgeuse(eu)?
@@ -2947,6 +2955,8 @@ impl FilletBrep {
                     // get a hit
                     let mut t = 0.0;
                     let mut success = false;
+                    // the last attempt's error, if it returned one
+                    let mut last_err = None;
                     let mut dropping_tol = app_tol;
                     let mut scale = 10.0;
                     while scale < 100.0 {
@@ -2961,13 +2971,17 @@ impl FilletBrep {
                         ) {
                             Ok(d) => {
                                 success = d.success;
+                                last_err = None;
                                 if d.success {
                                     t = d.parameter;
                                 }
                             }
                             Err(e) if e.is_unported_or_cancelled() => return Err(e),
                             // TrimRailCurve(): Suffered a SmCurve::DropPoint() failure
-                            Err(_) => success = false,
+                            Err(e) => {
+                                success = false;
+                                last_err = Some(e);
+                            }
                         }
                         if success {
                             break;
@@ -2976,7 +2990,7 @@ impl FilletBrep {
                         scale += 10.0;
                     }
                     if !success {
-                        return Err(defect(OP_TRIM, RAIL_END_NO_DROP));
+                        return Err(rail_end_not_dropped(OP_TRIM, last_err));
                     }
 
                     // clean up dT value from 3.000000001 to 3.0
@@ -3399,7 +3413,8 @@ impl FilletBrep {
                     let tol = solver.approx_tol_3d;
 
                     if self.fillet_vertex(start_v)?.is_processed() {
-                        let drop = |dist_tol: f64| -> Result<Option<f64>> {
+                        // the parameter, or the drop's error (`None`: it found no point)
+                        let drop = |dist_tol: f64| -> Result<core::result::Result<f64, Option<SolidError>>> {
                             match orig_rail_curve.drop_point(
                                 k,
                                 &trim_ivl,
@@ -3409,15 +3424,16 @@ impl FilletBrep {
                                 None,
                                 SolverOperation::Minimize,
                             ) {
-                                Ok(d) if d.success => Ok(Some(d.parameter)),
+                                Ok(d) if d.success => Ok(Ok(d.parameter)),
+                                Ok(_) => Ok(Err(None)),
                                 Err(e) if e.is_unported_or_cancelled() => Err(e),
-                                _ => Ok(None),
+                                Err(e) => Ok(Err(Some(e))),
                             }
                         };
                         param1 = match drop(tol)? {
-                            Some(t) => t,
-                            None => drop(10.0 * tol)?
-                                .ok_or_else(|| defect(OP_CLIFF, RAIL_END_NO_DROP))?,
+                            Ok(t) => t,
+                            Err(_) => drop(10.0 * tol)?
+                                .map_err(|last_err| rail_end_not_dropped(OP_CLIFF, last_err))?,
                         };
                     }
 
@@ -3763,21 +3779,12 @@ pub(crate) const FE_NO_ORIGINAL_FACE: &str =
 /// Why the UV curve creation gave no curve.
 const SECTION_NO_CURVE: &str = "the cross section's UV curve creation succeeded with neither a \
      3D nor a UV curve, though it joins the two vertices by a UV curve";
-/// Why the lifted cross section is not there.
-const SECTION_NOT_LIFTED: &str = "the cross section's 3D curve is not there, though it was \
-     made or just lifted from its UV curve";
 /// Why a closed cross section has no second UV curve.
 const CLOSED_NO_SECOND_UV: &str = "the cross section on a closed fillet surface has no second \
      UV curve, though the UV curve creation makes one at each of the surface's closing edges";
 /// Why a closed cross section has no geometry.
 const CLOSED_NO_GEOM: &str = "the cross section of a closed join has no fillet geometry, though \
      a closed join's cross section lies on its own fillet surface";
-/// Why the second solver's tolerance is not there.
-const SECOND_TOL_GONE: &str = "the second solver's tolerance is not there, though it is read \
-     with the second fillet surface";
-/// Why the second fillet geometry is not there.
-const SECOND_GEOM_GONE: &str = "the second fillet geometry is not there, though the second \
-     fillet surface was read from it";
 /// Why an edge's end vertices are not processed.
 const ENDS_NOT_PROCESSED: &str = "an end vertex of the fillet edge is not processed yet, though \
      the corner calculates its edges only after placing both their vertices";
@@ -3846,9 +3853,6 @@ const RAIL_EU_NO_FACE: &str = "the solver's edge use has no face and its rail ro
 /// Why the solver's edge use has no mate.
 const SOLVER_EU_NO_MATE: &str = "the solver's edge use has no mate, though the edge its rails \
      roll along is a manifold edge of the body, whose uses are mated";
-/// Why an end's edge uses are not both there.
-const END_EUS_GONE: &str = "the two rails' edge uses at the end are not both there, though one \
-     was taken for each of the two rails";
 /// Why a rail has no B-spline curve.
 const RAIL_NOT_B_SPLINE: &str = "the rail has no curve of a B-spline class, though the solver \
      builds every rail's curve as a B-spline";

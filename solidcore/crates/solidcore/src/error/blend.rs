@@ -27,7 +27,7 @@
 //! | [`BlendFailure::PlaneCurveLeavesDomain`] | [`ErrorKind::OutsideDomain`] (8)           |
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
 //! | [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::SideEdgeCurveNotBSpline`], [`BlendFailure::FilletEndVertexOffSideEdge`], [`BlendFailure::SqueezeEndNotRailEdgeuse`], [`BlendFailure::SurfaceKindNotBuilt`], [`BlendFailure::CurveKindNotBuilt`], [`BlendFailure::CrossSectionOnOneGeometry`], [`BlendFailure::ExtendedEdgeFaceCount`], [`BlendFailure::CliffRailEndsReversed`], [`BlendFailure::TangentEndSingular`] | [`ErrorKind::Unsupported`] (5) |
-//! | [`BlendFailure::FilletsNotIntersected`], [`BlendFailure::EndRibNotBuilt`] | [`ErrorKind::Failed`] (6): the stage's error, kept as the cause, decides defect or refusal |
+//! | [`BlendFailure::FilletsNotIntersected`], [`BlendFailure::RailEndNotDropped`], [`BlendFailure::EndRibNotBuilt`] | [`ErrorKind::Failed`] (6): the stage's error, kept as the cause, decides defect or refusal |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
 //! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
@@ -39,7 +39,7 @@
 //!
 //! | Rust                                   | Status difftest compares          |
 //! |----------------------------------------|-----------------------------------|
-//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::PlaneCurveTouches`], [`BlendFailure::PlaneCurveEndOff`], [`BlendFailure::PlaneCurveLeavesDomain`], [`BlendFailure::PlaneCurveStepVanished`], [`BlendFailure::PlaneCurveFitCap`], [`BlendFailure::SideEdgeTangentVanishes`], [`BlendFailure::BlendingRailEndOffFace`], [`BlendFailure::BlendingRailOffFace`], [`BlendFailure::SideEdgeCurveNotBSpline`], [`BlendFailure::FilletEndVertexOffSideEdge`], [`BlendFailure::SqueezeEndNotRailEdgeuse`], [`BlendFailure::SplitEndSupportNotPlanar`], [`BlendFailure::SplitEndRailMissesFillet`], [`BlendFailure::FilletsNotIntersected`], [`BlendFailure::EndRibNotBuilt`], [`BlendFailure::ExtendedEdgeFaceCount`], [`BlendFailure::SurfaceKindNotBuilt`], [`BlendFailure::CurveKindNotBuilt`], [`BlendFailure::CliffRailEndsReversed`], [`BlendFailure::RibPointNotDropped`], [`BlendFailure::TangentEndSingular`], [`BlendFailure::RibFitCap`], [`BlendFailure::RibStationNotSolved`] | `SM_ERR` |
+//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::PlaneCurveTouches`], [`BlendFailure::PlaneCurveEndOff`], [`BlendFailure::PlaneCurveLeavesDomain`], [`BlendFailure::PlaneCurveStepVanished`], [`BlendFailure::PlaneCurveFitCap`], [`BlendFailure::SideEdgeTangentVanishes`], [`BlendFailure::BlendingRailEndOffFace`], [`BlendFailure::BlendingRailOffFace`], [`BlendFailure::SideEdgeCurveNotBSpline`], [`BlendFailure::FilletEndVertexOffSideEdge`], [`BlendFailure::SqueezeEndNotRailEdgeuse`], [`BlendFailure::SplitEndSupportNotPlanar`], [`BlendFailure::SplitEndRailMissesFillet`], [`BlendFailure::FilletsNotIntersected`], [`BlendFailure::RailEndNotDropped`], [`BlendFailure::EndRibNotBuilt`], [`BlendFailure::ExtendedEdgeFaceCount`], [`BlendFailure::SurfaceKindNotBuilt`], [`BlendFailure::CurveKindNotBuilt`], [`BlendFailure::CliffRailEndsReversed`], [`BlendFailure::RibPointNotDropped`], [`BlendFailure::TangentEndSingular`], [`BlendFailure::RibFitCap`], [`BlendFailure::RibStationNotSolved`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`]               | `SM_ERR`                          |
 //! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::SideEdgeOffRailFace`], [`BlendFailure::CrossSectionOnOneGeometry`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`            |
@@ -333,6 +333,11 @@ pub enum BlendFailure {
     /// whether the failure is a defect or a refusal. A failed stage
     /// ([`ErrorKind::Failed`]); status `SM_ERR`.
     FilletsNotIntersected,
+    /// The drop of a processed end vertex onto its rail failed with an error on its last
+    /// attempt: that error is kept as the cause and decides whether the failure is a defect
+    /// or a refusal (a drop that found no point is a [`BlendFailure::Defect`]). A failed
+    /// stage ([`ErrorKind::Failed`]); status `SM_ERR`.
+    RailEndNotDropped,
     /// The side curve of a fillet surface on its end face (their intersection, or the rib
     /// from a tangent end) could not be built: the stage's error is kept as the cause and
     /// decides whether the failure is a defect or a refusal. A failed stage
@@ -418,9 +423,10 @@ pub enum BlendFailure {
         /// The spans halved.
         halvings: usize,
     },
-    /// The Newton solve of a zero-speed tangent end rib's exact point at the midpoint `t` of
-    /// a span to halve stopped: it did not converge in its 40 steps, or its system was
-    /// singular. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR`.
+    /// The Newton solve of a tangent end rib's exact point at `t` stopped (it did not
+    /// converge in its 40 steps, or its system was singular): at a station of the last span
+    /// count tried, so no fit was built, or at the midpoint of a zero-speed rib's span to
+    /// halve. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR`.
     RibStationNotSolved {
         /// The rib's parameter at the span's midpoint.
         t: f64,
@@ -774,6 +780,7 @@ impl BlendFailure {
             | Self::SplitEndSupportNotPlanar { .. }
             | Self::SplitEndRailMissesFillet { .. }
             | Self::FilletsNotIntersected
+            | Self::RailEndNotDropped
             | Self::EndRibNotBuilt
             | Self::ExtendedEdgeFaceCount { .. }
             | Self::SurfaceKindNotBuilt { .. }
@@ -824,8 +831,8 @@ impl BlendFailure {
     /// [`ErrorKind::SplitEndNotPlanar`] for [`BlendFailure::SplitEndSupportNotPlanar`],
     /// [`ErrorKind::NotFound`] for [`BlendFailure::SplitEndRailMissesFillet`],
     /// [`ErrorKind::Failed`] for a stage whose error is kept as the cause
-    /// ([`BlendFailure::FilletsNotIntersected`], [`BlendFailure::EndRibNotBuilt`]),
-    /// [`ErrorKind::StageFailed`] for a rib's solve that stopped
+    /// ([`BlendFailure::FilletsNotIntersected`], [`BlendFailure::RailEndNotDropped`],
+    /// [`BlendFailure::EndRibNotBuilt`]), [`ErrorKind::StageFailed`] for a rib's solve that stopped
     /// ([`BlendFailure::RibPointNotDropped`], [`BlendFailure::RibStationNotSolved`]),
     /// [`ErrorKind::NotWithinTolerance`] for [`BlendFailure::RibFitCap`], and
     /// [`ErrorKind::Unsupported`] for the unsupported kinds
@@ -844,6 +851,7 @@ impl BlendFailure {
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
             Self::ClosedCliffWouldNotSplit { .. }
             | Self::FilletsNotIntersected
+            | Self::RailEndNotDropped
             | Self::EndRibNotBuilt => ErrorKind::Failed,
             Self::StageFailed
             | Self::Defect { .. }
@@ -923,6 +931,7 @@ impl BlendFailure {
             | Self::SplitEndSupportNotPlanar { .. }
             | Self::SplitEndRailMissesFillet { .. }
             | Self::FilletsNotIntersected
+            | Self::RailEndNotDropped
             | Self::EndRibNotBuilt
             | Self::CrossSectionOnOneGeometry
             | Self::ExtendedEdgeFaceCount { .. }
@@ -985,6 +994,7 @@ impl BlendFailure {
             | Self::SplitEndSupportNotPlanar { .. }
             | Self::SplitEndRailMissesFillet { .. }
             | Self::FilletsNotIntersected
+            | Self::RailEndNotDropped
             | Self::EndRibNotBuilt
             | Self::CrossSectionOnOneGeometry
             | Self::ExtendedEdgeFaceCount { .. }
@@ -1157,6 +1167,11 @@ impl core::fmt::Display for BlendFailure {
             Self::FilletsNotIntersected => write!(
                 f,
                 "{}: the two fillet surfaces of the fillet/fillet edge could not be intersected from its processed end",
+                self.class()
+            ),
+            Self::RailEndNotDropped => write!(
+                f,
+                "{}: the drop of a processed end vertex onto its rail failed",
                 self.class()
             ),
             Self::EndRibNotBuilt => write!(
@@ -2100,7 +2115,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 49;
+    const VARIANTS: usize = 50;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -2156,6 +2171,7 @@ mod tests {
             BlendFailure::TangentEndSingular { .. } => (46, None),
             BlendFailure::RibFitCap { .. } => (47, None),
             BlendFailure::RibStationNotSolved { .. } => (48, None),
+            BlendFailure::RailEndNotDropped => (49, None),
         }
     }
 
@@ -2250,6 +2266,7 @@ mod tests {
             },
             BlendFailure::SplitEndRailMissesFillet { tolerance: 0.0 },
             BlendFailure::FilletsNotIntersected,
+            BlendFailure::RailEndNotDropped,
             BlendFailure::EndRibNotBuilt,
             BlendFailure::CrossSectionOnOneGeometry,
             BlendFailure::ExtendedEdgeFaceCount {

@@ -24,7 +24,7 @@
 //! file and line). A drop of a rib point that stops without a foot is a solve that stopped
 //! ([`BlendFailure::RibPointNotDropped`], a defect with its numbers); one that finds its
 //! foot farther than the tolerance is a [`BlendFailure::Defect`]. A zero-speed rib's
-//! midpoint whose Newton solve stops is [`BlendFailure::RibStationNotSolved`], a rib on a
+//! station or midpoint whose Newton solve stops is [`BlendFailure::RibStationNotSolved`], a rib on a
 //! face not enclosed that no station count fits [`BlendFailure::RibFitCap`], and an end
 //! surface singular at the tangent end a construction not built
 //! ([`BlendFailure::TangentEndSingular`]). Each keeps upstream's status for the goldens:
@@ -326,8 +326,8 @@ pub struct TangentEndRib {
 /// surface's section leaves the end surface's tangent plane there or an interpolation's
 /// second control point leaves its end; [`BlendFailure::TangentEndSingular`] when the end
 /// surface is singular at a zero-speed rib's tangent end;
-/// [`BlendFailure::RibStationNotSolved`] when a zero-speed rib's midpoint has no exact
-/// point; [`BlendFailure::RibFitCap`] where a face is not enclosed and no station count
+/// [`BlendFailure::RibStationNotSolved`] when a zero-speed rib's midpoint, or a station at
+/// the last span count tried, has no exact point; [`BlendFailure::RibFitCap`] where a face is not enclosed and no station count
 /// gives the rib's midpoints within tolerance; [`BlendFailure::NotCertified`] (#17744)
 /// where both faces are enclosed and no station count certifies the rib within tolerance;
 /// those of the drops, evaluations and fits.
@@ -584,8 +584,11 @@ pub fn tangent_end_rib(
     // a zero-speed rib's midpoint without an exact point ends the refinement (upstream's
     // break), with upstream's failure, not as not certified
     let mut unsolved = false;
-    // the midpoint whose exact point was last not found
+    // the station or midpoint whose exact point was last not found
     let mut unsolved_at = f64::NAN;
+    // the last span count's stations stopped at a station without its exact point: no fit
+    // was built from them
+    let mut stations_stopped = false;
     while spans <= max_spans {
         if !stations {
             // stations t = j / spans, solved from the tangent end outward
@@ -631,6 +634,7 @@ pub fn tangent_end_rib(
                 }
                 let Some((a, e, x)) = solve(t, alpha, uv)? else {
                     all = false;
+                    unsolved_at = t;
                     break;
                 };
                 ts.push(t);
@@ -639,9 +643,11 @@ pub fn tangent_end_rib(
                 xs.push(x);
             }
             if !all {
+                stations_stopped = true;
                 spans *= 2;
                 continue;
             }
+            stations_stopped = false;
             let last = xs
                 .get_mut(spans)
                 .ok_or_else(|| defect(OP_RIB, LAST_STATION_GONE))?;
@@ -804,6 +810,8 @@ pub fn tangent_end_rib(
         spans += off.len();
     }
 
+    // a station's solve that stopped, at the last span count tried, built no fit to measure
+    let unsolved = unsolved || stations_stopped;
     // no station count certifies the rib within the tolerance (#17744); upstream's check:
     // no stations give the rib within tolerance
     if faces.is_some() && !unsolved {
@@ -815,8 +823,8 @@ pub fn tangent_end_rib(
             },
         ));
     }
-    // a zero-speed rib's midpoint whose solve stopped; else no station count gives the rib
-    // within the tolerance
+    // a station (or a zero-speed rib's midpoint) whose solve stopped; else no station count
+    // gives the rib within the tolerance
     Err(SolidError::blend(
         OP_RIB,
         if unsolved {
@@ -1174,6 +1182,37 @@ mod tests {
         );
         assert_eq!(err.kind(), crate::error::ErrorKind::NotWithinTolerance);
         assert!(!err.is_defect() && !err.is_refusal());
+        assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR));
+    }
+
+    /// An end surface that is the fillet surface itself: both ends lie on both, but at every
+    /// station the rib point's Newton system is singular (the end surface's tangent plane
+    /// holds the fillet's along direction), so no span count gets its stations and no fit is
+    /// built. The stopped solve is reported at the last station tried (t = 1/1024 of the cap's
+    /// span count), not as a fit past its cap or not certified, keeping upstream's `SM_ERR`.
+    #[test]
+    fn a_rib_whose_stations_never_solve_names_the_stopped_station() {
+        let k = Kernel::default();
+        let (fillet, _) = bumped_rib_surfaces(0.0);
+        let end = fillet.clone();
+        let err = tangent_end_rib(
+            &k,
+            &fillet,
+            &end,
+            2,
+            Point3::new(-0.5, 0.0, 0.0),
+            Point3::new(0.5, 1.0, 0.0),
+            None,
+            false,
+            1e-6,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::RibStationNotSolved { t: 1.0 / 1024.0 }),
+            "{err:?}"
+        );
+        assert!(err.is_defect() && !err.is_refusal());
         assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR));
     }
 
