@@ -1571,6 +1571,152 @@ mod importers {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    const STORE_OPTIONS: &str = "i32.const 512 i32.const 5 i32.const 2048 i32.const 2 i32.const 128 call $set";
+
+    fn storage_importer(name: &str, code: &str, capability: bool) -> (Session, std::path::PathBuf) {
+        let (mut s, root) = installed(name, &[("smp", &["smp"], false)]);
+        let mut manifest = importer_manifest("smp", &["smp"], false);
+        manifest["capabilities"] = if capability { json!(["formats@0.2", "user-storage@0.1"]) } else { json!(["formats@0.2"]) };
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+        let fixture = include_str!("../../../craft-plugin-wasm/src/importer_storage_fixture.wat");
+        std::fs::write(root.join("plugins/smp/importer.wasm"), wat::parse_str(fixture.replace("__CODE__", code)).unwrap()).unwrap();
+        s.plugin_state.user_settings_dir = Some(root.join("settings"));
+        (s, root)
+    }
+
+    #[test]
+    fn importer_user_settings_are_read_on_the_next_successful_import_and_private_to_the_plugin() {
+        // Empty options require an absent key. A later run with options requires the saved 42.
+        let code = format!(
+            "i32.const 512 i32.const 5 i32.const 128 call $get
+             i32.const 128 i32.load if unreachable end
+             local.get 6 i32.const 2 i32.eq
+             if
+               i32.const 132 i32.load if unreachable end
+             else
+               i32.const 132 i32.load i32.const 1 i32.ne if unreachable end
+               i32.const 140 i32.load i32.const 2 i32.ne if unreachable end
+               i32.const 136 i32.load i32.load16_u i32.const 12852 i32.ne if unreachable end
+             end
+             {STORE_OPTIONS}"
+        );
+        let (mut first, root) = storage_importer("user-storage-success", &code, true);
+        let settings = root.join("settings");
+        user_storage::save(&settings, "other", &BTreeMap::from([("private".into(), json!(true))])).unwrap();
+        let file = put(&root, "bracket.smp", &design());
+        first.execute("doc.open", &json!({"path":file})).unwrap();
+        assert_eq!(user_storage::load(&settings, "smp").unwrap(), BTreeMap::from([("hinge".into(), json!(42))]));
+        assert!(first.undo.is_empty() && first.doc.plugin_data.is_empty());
+        drop(first);
+        let mut second = Session::default();
+        second.plugin_state.plugins_dir = Some(root.join("plugins"));
+        second.plugin_state.user_settings_dir = Some(settings.clone());
+        let importer = importer_for(&second, &file, None).unwrap().unwrap();
+        import_file(&mut second, &importer, &file, &json!({"again":true})).unwrap();
+        assert!(second.undo.is_empty() && second.doc.plugin_data.is_empty());
+        assert_eq!(user_storage::load(&settings, "other").unwrap(), BTreeMap::from([("private".into(), json!(true))]));
+        // The same component running under a different plugin id must see an absent key.
+        let other = root.join("plugins/another");
+        std::fs::create_dir_all(&other).unwrap();
+        let mut manifest = importer_manifest("another", &["oth"], false);
+        manifest["capabilities"] = json!(["formats@0.2", "user-storage@0.1"]);
+        std::fs::write(other.join("plugin.json"), manifest.to_string()).unwrap();
+        std::fs::copy(root.join("plugins/smp/importer.wasm"), other.join("importer.wasm")).unwrap();
+        second.execute("doc.open", &json!({"path":put(&root, "bracket.oth", &design())})).unwrap();
+        assert_eq!(user_storage::load(&settings, "another").unwrap()["hinge"], json!(42));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn importer_failures_cancellation_and_invalid_designs_never_publish_user_settings() {
+        let cancelled = "i32.const 0 i32.const 1 i32.store
+            i32.const 4 i32.const 6 i32.store
+            i32.const 0 return";
+        for (name, after_write, bytes, expected) in [
+            ("trap", "unreachable", design(), "trap"),
+            ("cancel", cancelled, design(), "cancelled"),
+            ("invalid-design", "", b"not a design".to_vec(), "design"),
+            ("empty-design", "", Vec::new(), "design"),
+        ] {
+            let code = format!("{STORE_OPTIONS} {after_write}");
+            let (mut s, root) = storage_importer(&format!("user-storage-{name}"), &code, true);
+            let settings = root.join("settings");
+            let file = put(&root, "broken.smp", &bytes);
+            let before = s.doc.clone();
+            let failure = s.execute("doc.open", &json!({"path":file})).unwrap_err();
+            let expected_error = match expected {
+                "trap" => matches!(failure.host_error(), Some(HostError::Trap { .. })),
+                "cancelled" => matches!(failure.host_error(), Some(HostError::Cancelled)),
+                _ => matches!(failure.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "design"),
+            };
+            assert!(expected_error, "{failure}");
+            assert!(std::sync::Arc::ptr_eq(&before, &s.doc));
+            assert!(!settings.join("plugin-user-data/smp.json").exists());
+            // A failed run must preserve existing settings too.
+            let saved = BTreeMap::from([("hinge".into(), json!(17))]);
+            user_storage::save(&settings, "smp", &saved).unwrap();
+            assert!(s.execute("doc.open", &json!({"path":file})).is_err());
+            assert_eq!(user_storage::load(&settings, "smp").unwrap(), saved);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn importer_user_storage_requires_the_capability_and_keeps_package_approval_checks() {
+        for (name, code) in [("read", "i32.const 512 i32.const 5 i32.const 128 call $get"), ("write", STORE_OPTIONS)] {
+            let (mut s, root) = storage_importer(&format!("user-storage-no-capability-{name}"), code, false);
+            let file = put(&root, "bracket.smp", &design());
+            let before = s.doc.clone();
+            let failure = s.execute("doc.open", &json!({"path":file})).unwrap_err();
+            assert!(matches!(failure.host_error(), Some(HostError::PermissionDenied { .. })), "{failure}");
+            assert!(std::sync::Arc::ptr_eq(&before, &s.doc));
+            assert!(!root.join("settings/plugin-user-data/smp.json").exists());
+            std::fs::remove_dir_all(root).unwrap();
+        }
+        let (mut s, root) = storage_importer("user-storage-stale-approval", STORE_OPTIONS, true);
+        s.plugin_state.grants.insert("smp".into(), Grants { package_hash: Some("stale".into()), ..Default::default() });
+        let failure = s.execute("doc.open", &json!({"path":put(&root, "bracket.smp", &design())})).unwrap_err();
+        assert!(matches!(failure.host_error(), Some(HostError::PermissionDenied { .. })), "{failure}");
+        assert!(!root.join("settings/plugin-user-data/smp.json").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn importer_settings_commit_failure_leaves_the_open_design_and_saved_settings_unchanged() {
+        let (mut s, root) = storage_importer("user-storage-commit-failure", STORE_OPTIONS, true);
+        let settings = root.join("settings");
+        let saved = BTreeMap::from([("hinge".into(), json!(17))]);
+        user_storage::save(&settings, "smp", &saved).unwrap();
+        let lock = std::fs::OpenOptions::new().read(true).write(true).open(settings.join("plugin-user-data/smp.lock")).unwrap();
+        lock.try_lock().unwrap();
+        let before = s.doc.clone();
+        let failure = s.execute("doc.open", &json!({"path":put(&root, "bracket.smp", &design())})).unwrap_err();
+        assert!(matches!(failure.host_error(), Some(HostError::UserStorageConflict { plugin }) if plugin == "smp"), "{failure}");
+        assert!(std::sync::Arc::ptr_eq(&before, &s.doc));
+        assert_eq!(user_storage::load(&settings, "smp").unwrap(), saved);
+        drop(lock);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn removing_an_importer_keeps_user_settings_unless_deletion_is_requested_and_in_scope() {
+        for remove in [false, true] {
+            let (mut s, root) = storage_importer(&format!("user-storage-remove-{remove}"), STORE_OPTIONS, true);
+            s.execute("doc.open", &json!({"path":put(&root, "bracket.smp", &design())})).unwrap();
+            let settings = root.join("settings");
+            let scope = solidcraft_io::vfs::PathScope::new([root.join("plugins")]);
+            solidcraft_io::vfs::scoped(Some(scope), || {
+                let failure = s.execute("plugin.remove", &json!({"id":"smp", "remove_user_data":true})).unwrap_err();
+                assert!(matches!(failure.host_error(), Some(HostError::PermissionDenied { .. })), "{failure}");
+                assert!(root.join("plugins/smp").is_dir());
+            });
+            s.execute("plugin.remove", &json!({"id":"smp", "remove_user_data":remove})).unwrap();
+            assert_eq!(user_storage::load(&settings, "smp").unwrap().is_empty(), remove);
+            assert!(!root.join("plugins/smp").exists());
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
     fn conditional_importer(name: &str) -> (Session, std::path::PathBuf) {
         let (s, root) = installed(name, &[("smp", &["smp"], false)]);
         let mut manifest = importer_manifest("smp", &["smp"], false);

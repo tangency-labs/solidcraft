@@ -442,7 +442,8 @@ reports progress and cancellation, reads named files and a clock, and exports th
 `plugin.json` lists what it needs, for example `"capabilities": ["commands@0.2"]`; the host refuses
 an unknown or newer capability when it reads the manifest, with a plain message such as "needs
 commands 0.3; update SolidCraft or the plugin". `formats@0.2` adds importers, `evaluate@0.2`
-lets an importer check its result, and `storage@0.1` keeps data in a design (below). `ui` and
+lets an importer check its result, `storage@0.1` keeps data in a design, and
+`user-storage@0.1` keeps per-user settings for command plugins and importers (below). `ui` and
 `viewport` arrive later as their own
 versioned interfaces. While a version is 0.x, a minor version may break the one before it.
 
@@ -522,7 +523,8 @@ plugin and importer.
 - `plugin.check` (`solidcraft-cli plugin check <folder|plugin.zip>`) checks a package without
   running it, through the code Install and a call use: the installer's reader and limits, the
   manifest, the permissions (`net` is refused), the limits against the app's ceilings, and the
-  component against its world (`command-plugin` or `importer-plugin`) and this app's WIT version,
+  component against its world (`command-plugin`, `importer-plugin` or
+  `importer-plugin-with-storage`) and this app's WIT version,
   with no WASI or network import. Each problem has a severity, the field, what is wrong and how to
   fix it. In a folder, `tests/` and hidden files are left out. It runs no plugin code, installs
   nothing and never opens a dialog.
@@ -568,6 +570,10 @@ Only an importer may say `open`.
   `importer.import-file(entry, file, options)` and imports `source` (the file, read in chunks of at
   most 1 MiB), `design` (where it writes a SolidCraft design file), `log`, `control` and `clock`.
   It has no `commands` import: an importer makes a design, it does not edit the open one.
+  To keep per-user preferences, add `"user-storage@0.1"` beside `"formats@0.2"` in the manifest
+  and build against the additive `importer-plugin-with-storage` world in `craft:plugin@0.2.0`.
+  It adds the same `user-storage` interface command plugins use; the existing `importer-plugin`
+  world is unchanged, so existing importers keep loading and running.
 - **The result.** The design opens as a new design that is not saved anywhere yet, named after
   the file unless the design names itself. The call returns a loss report,
   `{"summary": "...", "items": [{"severity": "info|degraded|dropped", "title": "...", "subject": "...", "message": "...", "code": "..."}], "details": {...}}`.
@@ -584,6 +590,12 @@ Only an importer may say `open`.
   **Save report…** saves it as a `.txt` file, or as a `.json` file in the shape of the reply.
   After OK, Plugins › Last import report… shows the last import's report again.
   Nothing changes unless the whole import succeeds.
+- **Per-user preferences.** An importer with `user-storage@0.1` can read its settings during an
+  import and stage `set` or `remove` calls, for example to remember the options used for a format.
+  Settings are saved only after the imported design is valid and the host accepts the successful
+  import. A failed or cancelled import, including an invalid output design, saves no settings.
+  The [per-user settings rules](#per-user-settings-user-storage01) below apply unchanged, including
+  key and byte limits and the scope checks for deleting settings when the plugin is uninstalled.
 - **Assemblies.** `source.read`, `source.size` and `source.resolve` with path `""` reach the file
   being imported. Any other path is relative to that file's folder (an assembly's parts) and needs
   the `input_folder` permission. The install review shows it and Install approves it, stored with
@@ -640,9 +652,10 @@ or sheet price, with the user using `user-storage@0.1`. A plugin can request bot
 
 ### Per-user settings (`user-storage@0.1`)
 
-Add `"user-storage@0.1"` beside `"commands@0.2"` in the manifest's capabilities. No
-`runtime.data_format` is needed unless the plugin also uses design storage. The additive
-`craft:plugin/user-storage@0.2.0` host interface in the command world offers:
+Add `"user-storage@0.1"` beside `"commands@0.2"` or `"formats@0.2"` in the manifest's
+capabilities. No `runtime.data_format` is needed unless the plugin also uses design storage.
+The `craft:plugin/user-storage@0.2.0` host interface is available in `command-plugin` and the
+additive `importer-plugin-with-storage` world. Both offer:
 
 | Call | Result |
 | --- | --- |
@@ -653,8 +666,9 @@ Add `"user-storage@0.1"` beside `"commands@0.2"` in the manifest's capabilities.
 
 All four return `result<…, plugin-error>`. JSON `null` is a value, distinct from an absent key.
 Only the calling plugin's entries can access its settings: no call accepts another plugin id
-or a file path. Existing plugins continue linking without the new import. This capability
-requires a command runtime; importers do not use it.
+or a file path. The manifest capability is required for every call; importing the interface
+alone grants no access. Deleting settings when uninstalling obeys the caller's file scope as
+described below. Existing command plugins and importers continue linking without the new import.
 
 Each plugin can keep at most **128 keys** and **65,536 bytes (64 KiB)** for the entire compact
 JSON object, including keys, values, quotes, braces and separators. Keys contain 1–128 UTF-8
@@ -666,7 +680,9 @@ consume the compact map's budget. A refused write leaves the previous data intac
 
 `set` and `remove` are refused from `read` entries, like design-storage writes. Changes are
 staged while the entry runs and published when the host commits it. Guest failures discard
-staged settings. The host remembers the loaded file's SHA-256 hash (including whether it was
+staged settings. Importers may read throughout the import; their writes are published only after
+the host validates and accepts the successful import. Failed or cancelled imports publish no
+settings. The host remembers the loaded file's SHA-256 hash (including whether it was
 absent) and checks it again under a per-plugin file lock before replacing the map. If the file
 changed, or another run holds the lock, commit refuses with the structured host error
 `{"kind":"user_storage_conflict", "plugin":"gears"}`. No settings or design changes from that

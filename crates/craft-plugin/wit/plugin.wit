@@ -7,7 +7,8 @@ package craft:plugin@0.2.0;
 // - `evaluate@0.2`: with `formats`, evaluate, so an importer can check its result;
 // - `storage@0.1`: with `commands`, the app's `storage.*` commands, so a plugin keeps its own data
 //   in the open design (no interface of its own).
-// - `user-storage@0.1`: with `commands`, user-storage, for per-user JSON settings outside designs.
+// - `user-storage@0.1`: with `commands` or `formats`, user-storage, for per-user JSON settings
+//   outside designs (importers use the additive world `importer-plugin-with-storage`).
 // Later capabilities (ui, viewport) arrive as their own interfaces. While the version is
 // 0.x, a minor version may break the one before it. 0.2 added `plugin-error.unsupported`. A host
 // still runs plugins built against 0.1 (`../wit-0.1/plugin.wit`): it reads the version from the
@@ -39,8 +40,8 @@ interface commands {
 }
 // Per-user settings for the calling plugin alone. Keys: 1..128 bytes without control characters.
 // At most 128 keys and 64 KiB for the compact JSON map; set accepts up to 1 MiB of JSON text.
-// Writes require a non-read entry and are
-// published on success; they do not edit a design or add an undo step. Absent keys return none.
+// Writes require a non-read entry and are published on success (for importers, after the app
+// accepts the design); they do not edit a design or add an undo step. Absent keys return none.
 interface user-storage {
     use types.{json, plugin-error};
     get: func(key: string) -> result<option<json>, plugin-error>;
@@ -130,4 +131,10 @@ world importer-plugin {
     import design;
     import evaluate;
     export importer;
+}
+// The original importer world stays unchanged for existing guests. New importers opt in with
+// `user-storage@0.1`; the host stages settings until the imported design is accepted.
+world importer-plugin-with-storage {
+    include importer-plugin;
+    import user-storage;
 }

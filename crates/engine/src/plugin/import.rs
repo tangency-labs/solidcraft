@@ -152,8 +152,12 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         let request = craft_plugin_wasm::ImportRequest { path: PathBuf::from(path), input_folder };
+        let user_storage = package.manifest.capabilities.iter().any(|c| c.starts_with("user-storage@"));
+        let mut scratch = Session::default();
+        scratch.plugin_state.user_settings_dir = session.plugin_state.user_settings_dir();
+        scratch.plugin_state.user_storage_caller = user_storage.then(|| package.manifest.id.clone());
         let host = SolidCraftHost {
-            session: Session::default(),
+            session: scratch,
             transaction: None,
             sketch_exits: Vec::new(),
             view: None,
@@ -172,7 +176,7 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
                 .name("plugin-import".into())
                 .stack_size(stack)
                 .spawn_scoped(scope, || {
-                    let import = || craft_plugin_wasm::run_import(host, &package.manifest, &package.component, &importer.entry, options, &request).1;
+                    let import = || craft_plugin_wasm::run_import(host, &package.manifest, &package.component, &importer.entry, options, &request);
                     // The worker's progress card and Cancel follow the import onto this thread.
                     match progress {
                         Some(progress) => solidcraft_doc::progress::watch(progress, import),
@@ -183,7 +187,10 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
                 .join()
                 .map_err(|_| HostError::Trap { reason: "the import stopped unexpectedly".into() })?
         });
-        let imported = result?;
+        // Keep settings staged while the app validates and evaluates the output. Any early
+        // return drops the private host and its pending settings without publishing them.
+        let (mut host, imported) = result?;
+        let imported = imported?;
         if solidcraft_doc::progress::cancelled() {
             return Err(HostError::Cancelled.into());
         }
@@ -201,6 +208,9 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
         // Cancel pressed while the new design was evaluated leaves the open one alone.
         if solidcraft_doc::progress::cancelled() {
             return Err(HostError::Cancelled.into());
+        }
+        if user_storage {
+            host.commit_transaction()?;
         }
         session.replace_design(fresh);
         Ok(ImportedDesign {

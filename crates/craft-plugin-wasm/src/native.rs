@@ -969,8 +969,8 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
     }
     let mut linker = Linker::<State<Inert>>::new(&engine);
     if importer {
-        importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
-        importer_bindings::ImporterPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
+        importer_bindings::ImporterPluginWithStorage::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        importer_bindings::ImporterPluginWithStoragePre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
     } else {
         bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         bindings::CommandPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
@@ -1067,7 +1067,7 @@ fn compile_with(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)>
 }
 
 pub(super) fn run_import<H: PluginHost + 'static>(
-    host: H,
+    mut host: H,
     manifest: &Manifest,
     bytes: &[u8],
     entry: &str,
@@ -1133,13 +1133,19 @@ pub(super) fn run_import<H: PluginHost + 'static>(
     if host.is_cancelled() {
         return (host, Err(HostError::Cancelled));
     }
+    let user_storage = manifest.capabilities.iter().any(|c| c.starts_with("user-storage@"));
+    if user_storage
+        && let Err(error) = host.begin_transaction()
+    {
+        return (host, Err(error));
+    }
     let limits = &runtime.limits;
     let state = State {
         host,
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
         effect: Effect::Open,
-        user_storage: false,
+        user_storage,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
@@ -1160,8 +1166,8 @@ pub(super) fn run_import<H: PluginHost + 'static>(
             Wit::V0_1 => v0_1::call_import(&engine, &mut store, &component, &entry.name, &file, &options),
             Wit::Current => {
                 let mut linker = Linker::new(&engine);
-                importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
-                let guest = importer_bindings::ImporterPlugin::instantiate(&mut store, &component, &linker)?;
+                importer_bindings::ImporterPluginWithStorage::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
+                let guest = importer_bindings::ImporterPluginWithStorage::instantiate(&mut store, &component, &linker)?;
                 Ok(call_import!(guest, &mut store, &entry.name, &file, &options)?.map_err(host_error))
             }
         })?;
@@ -1191,6 +1197,12 @@ pub(super) fn run_import<H: PluginHost + 'static>(
     })();
     let mut state = store.into_data();
     state.close_evaluation();
+    // The app accepts and validates the design before committing the pending preferences.
+    // Every execution failure, including an invalid report or missing design, discards them.
+    let outcome = match outcome {
+        Err(error) if user_storage => state.host.rollback_transaction().and(Err(error)),
+        outcome => outcome,
+    };
     (state.host, outcome.map_err(|error| with_limits(error, limits)))
 }
 

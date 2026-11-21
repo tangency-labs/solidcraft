@@ -36,12 +36,19 @@ multiple targets; a publication failure can leave files changed. These contracts
 promise atomic rollback of all external effects.
 
 The additive `user-storage@0.1` capability exposes `user-storage` in the current command
-world. `PluginHost::user_storage_get/set/remove/list` default to refusal, so existing hosts
-still compile. Hosts that implement them authenticate the calling plugin, keep JSON values
-outside designs, and stage changes until commit. `check_user_storage` enforces 128 keys and
-64 KiB for the entire compact JSON map; `check_user_storage_key` enforces 1–128 UTF-8 bytes
+world and the additive `importer-plugin-with-storage` world in `craft:plugin@0.2.0`. The
+existing `importer-plugin` world is unchanged, so existing importers keep loading and running.
+Importers request `user-storage@0.1` alongside `formats@0.2`; importing the interface without
+the manifest capability grants no access. `PluginHost::user_storage_get/set/remove/list` default
+to refusal, so existing hosts still compile. Hosts that implement them authenticate the calling
+plugin, keep JSON values outside designs, and stage changes until commit. Importers can read
+during an import, but staged writes commit only after the host validates and accepts
+the successful import. Failed or cancelled imports, including invalid output designs, discard
+all staged settings. `check_user_storage` enforces 128 keys and 64 KiB for the entire compact
+JSON map; `check_user_storage_key` enforces 1–128 UTF-8 bytes
 without control characters. The app chooses the per-user location and removal policy.
-Settings writes are external effects and do not add design undo steps.
+Importer settings share the calling plugin's store, budgets and removal policy with its command
+entries. Settings writes are external effects and do not add design undo steps.
 
 ## Limits and permissions
 

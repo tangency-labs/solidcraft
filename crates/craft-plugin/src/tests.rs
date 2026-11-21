@@ -290,7 +290,7 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
 }
 
 #[test]
-fn user_storage_is_additive_and_needs_a_command_runtime_but_no_design_format() {
+fn user_storage_is_additive_and_needs_a_command_or_importer_runtime_but_no_design_format() {
     let mut value = manifest();
     for capability in ["user-storage@0.1", "user-storage@0.1.0"] {
         value["capabilities"] = json!(["commands@0.1", capability]);
@@ -302,7 +302,13 @@ fn user_storage_is_additive_and_needs_a_command_runtime_but_no_design_format() {
     value["capabilities"] = json!(["commands@0.2", "user-storage@0.2"]);
     assert!(matches!(parse(&value), Err(HostError::UnsupportedCapability { .. })));
     let mut value = importer();
-    value["capabilities"] = json!(["formats@0.2", "user-storage@0.1"]);
+    for capability in ["user-storage@0.1", "user-storage@0.1.0"] {
+        value["capabilities"] = json!(["formats@0.2", capability]);
+        assert!(parse(&value).is_ok());
+    }
+    value["runtime"]["data_format"] = json!(1);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "runtime.data_format"));
+    value["capabilities"] = json!(["formats@0.2", "storage@0.1", "user-storage@0.1"]);
     assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
     let mut value = manifest();
     value["capabilities"] = json!(["user-storage@0.1"]);

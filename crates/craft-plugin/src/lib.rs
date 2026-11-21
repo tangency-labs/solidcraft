@@ -245,6 +245,8 @@ pub struct FileGrant {
 /// Granted file writes are staged until the guest succeeds and the app commits; rollback
 /// removes staged files without replacing their targets. Publication errors after app
 /// commit can leave a subset of files applied and must be reported to the caller.
+/// An importer with user storage leaves its transaction pending after conversion; the app
+/// commits only when it accepts the validated design, or discards it on failure.
 pub trait PluginHost {
     /// Only the host-authenticated plugin's per-user JSON settings. Optional for existing hosts.
     fn user_storage_get(&mut self, _key: &str) -> Result<Option<Value>> {
@@ -549,8 +551,8 @@ pub struct RuntimeManifest {
     pub data_format: Option<u32>,
 }
 impl RuntimeManifest {
-    /// Whether this runtime is an importer (world `importer-plugin`). A runtime's entries are all
-    /// commands or all importers.
+    /// Whether this runtime is an importer (world `importer-plugin`, optionally with storage).
+    /// A runtime's entries are all commands or all importers.
     pub fn is_importer(&self) -> bool {
         self.entries.first().is_some_and(|e| e.kind == EntryKind::Importer)
     }
@@ -736,10 +738,8 @@ fn plain(value: &str, max: usize) -> bool {
 /// A plugin that keeps data in designs asks for `storage@0.1` and says its data's format number;
 /// only a command plugin does: an importer makes a new design and keeps nothing in the open one.
 fn check_storage(manifest: &Manifest) -> Result<()> {
-    if manifest.capabilities.iter().any(|capability| capability.starts_with("user-storage@"))
-        && manifest.runtime.as_ref().is_none_or(RuntimeManifest::is_importer)
-    {
-        return Err(invalid("capabilities", "user-storage requires a command plugin runtime"));
+    if manifest.capabilities.iter().any(|capability| capability.starts_with("user-storage@")) && manifest.runtime.is_none() {
+        return Err(invalid("capabilities", "user-storage requires a command or importer plugin runtime"));
     }
 
     let storage = manifest.capabilities.iter().any(|capability| capability.starts_with("storage@"));

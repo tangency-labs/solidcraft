@@ -7,6 +7,8 @@ use std::collections::BTreeSet;
 #[derive(Default)]
 struct App {
     user_data: BTreeMap<String, Value>,
+    saved_user_data: Option<BTreeMap<String, Value>>,
+    cancel_after_set: bool,
     value: usize,
     saved: Option<usize>,
     begins: usize,
@@ -29,6 +31,7 @@ impl PluginHost for App {
         data.insert(key.into(), value.clone());
         craft_plugin::check_user_storage(&data)?;
         self.user_data = data;
+        self.cancelled |= self.cancel_after_set;
         Ok(())
     }
     fn user_storage_remove(&mut self, key: &str) -> Result<bool> {
@@ -52,6 +55,7 @@ impl PluginHost for App {
     }
     fn begin_transaction(&mut self) -> Result<()> {
         self.saved = Some(self.value);
+        self.saved_user_data = Some(self.user_data.clone());
         self.begins += 1;
         Ok(())
     }
@@ -63,11 +67,13 @@ impl PluginHost for App {
             return Err(trap("commit refused"));
         }
         self.saved = None;
+        self.saved_user_data = None;
         self.commits += 1;
         Ok(())
     }
     fn rollback_transaction(&mut self) -> Result<()> {
         self.value = self.saved.take().unwrap();
+        self.user_data = self.saved_user_data.take().unwrap();
         self.rollbacks += 1;
         Ok(())
     }
@@ -837,6 +843,14 @@ fn importer_component_for(version: &str) -> Vec<u8> {
     let source = if version == "0.1.0" { source.replace(r#" (case "unsupported" string)"#, "") } else { source };
     wat::parse_str(source).unwrap()
 }
+fn storage_importer_manifest() -> Manifest {
+    let mut manifest = importer_manifest(false);
+    manifest.capabilities.push("user-storage@0.1".into());
+    manifest
+}
+fn storage_importer_component(code: &str) -> Vec<u8> {
+    wat::parse_str(include_str!("../importer_storage_fixture.wat").replace("__CODE__", code)).unwrap()
+}
 fn import(manifest: &Manifest, path: PathBuf, input_folder: bool) -> Result<crate::Imported> {
     import_with(&importer_component(), manifest, path, input_folder)
 }
@@ -866,6 +880,136 @@ fn an_importer_streams_its_file_into_a_design_and_returns_its_loss_report() {
     assert!(matches!(run(&mut app, &importer_manifest(false), &importer_component(), "convert", &json!({})), Err(HostError::InvalidInput { .. })));
     std::fs::remove_dir_all(root).unwrap();
 }
+#[test]
+fn storage_importers_read_previous_successful_imports_and_leave_commit_to_acceptance() {
+    let root = import_folder(&[("bracket.smp", b"design bytes")]);
+    let request = crate::ImportRequest { path: root.join("bracket.smp"), input_folder: false };
+    let manifest = storage_importer_manifest();
+    let component = storage_importer_component(USER_SET);
+    crate::check_component(&manifest, &component).unwrap();
+    let (mut app, imported) = crate::run_import(App::default(), &manifest, &component, "convert", &json!({}), &request);
+    assert_eq!(imported.unwrap().design, b"design bytes");
+    assert_eq!((app.begins, app.commits, app.rollbacks), (1, 0, 0));
+    assert!(app.saved_user_data.as_ref().unwrap().is_empty(), "preferences are pending until acceptance");
+    app.commit_transaction().unwrap();
+    let read = "i32.const 512 i32.const 5 i32.const 128 call $get
+        i32.const 128 i32.load if unreachable end
+        i32.const 132 i32.load i32.const 1 i32.ne if unreachable end
+        i32.const 140 i32.load i32.const 2 i32.ne if unreachable end
+        i32.const 136 i32.load i32.load16_u i32.const 12852 i32.ne if unreachable end
+        i32.const 128 call $list
+        i32.const 128 i32.load if unreachable end
+        i32.const 136 i32.load i32.const 1 i32.ne if unreachable end
+        i32.const 132 i32.load i32.load offset=4 i32.const 5 i32.ne if unreachable end";
+    let (mut app, imported) = crate::run_import(app, &manifest, &storage_importer_component(read), "convert", &json!({}), &request);
+    imported.unwrap();
+    app.commit_transaction().unwrap();
+    let remove = "i32.const 512 i32.const 5 i32.const 128 call $remove
+        i32.const 128 i32.load if unreachable end
+        i32.const 132 i32.load i32.eqz if unreachable end";
+    let (mut app, imported) = crate::run_import(app, &manifest, &storage_importer_component(remove), "convert", &json!({}), &request);
+    imported.unwrap();
+    assert!(app.user_data.is_empty());
+    // A declined design restores the preferences even though guest execution succeeded.
+    app.rollback_transaction().unwrap();
+    assert_eq!(app.user_data["hinge"], json!(42));
+    assert_eq!((app.begins, app.commits, app.rollbacks), (3, 2, 1));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn storage_importers_rollback_traps_guest_errors_invalid_reports_empty_designs_and_cancellation() {
+    let root = import_folder(&[("bracket.smp", b"design bytes"), ("empty.smp", b"")]);
+    let manifest = storage_importer_manifest();
+    for (file, tail, cancel) in [
+        ("bracket.smp", "unreachable", false),
+        ("bracket.smp", "i32.const 0 i32.const 1 i32.store i32.const 4 i32.const 6 i32.store i32.const 0 return", false),
+        ("bracket.smp", "i32.const 1024 i32.const 120 i32.store8", false),
+        ("empty.smp", "", false),
+        ("bracket.smp", "", true),
+    ] {
+        let request = crate::ImportRequest { path: root.join(file), input_folder: false };
+        let app = App { user_data: BTreeMap::from([("previous".into(), json!(true))]), cancel_after_set: cancel, ..Default::default() };
+        let component = storage_importer_component(&format!("{USER_SET} {tail}"));
+        let (app, outcome) = crate::run_import(app, &manifest, &component, "convert", &json!({}), &request);
+        assert!(outcome.is_err(), "{file}, {tail}, cancel={cancel}");
+        assert_eq!(app.user_data, BTreeMap::from([("previous".into(), json!(true))]));
+        assert_eq!((app.begins, app.commits, app.rollbacks), (1, 0, 1));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn storage_importers_require_capability_for_every_storage_call() {
+    let root = import_folder(&[("bracket.smp", b"design bytes")]);
+    let request = crate::ImportRequest { path: root.join("bracket.smp"), input_folder: false };
+    for code in [
+        USER_SET,
+        "i32.const 512 i32.const 5 i32.const 128 call $get",
+        "i32.const 512 i32.const 5 i32.const 128 call $remove",
+        "i32.const 128 call $list",
+    ] {
+        let (app, outcome) =
+            crate::run_import(App::default(), &importer_manifest(false), &storage_importer_component(code), "convert", &json!({}), &request);
+        assert_eq!(outcome.unwrap_err(), HostError::PermissionDenied { permission: "user-storage@0.1 is not requested".into() });
+        assert!(app.user_data.is_empty());
+        assert_eq!((app.begins, app.commits, app.rollbacks), (0, 0, 0));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn storage_importers_share_key_json_and_total_storage_limits() {
+    let root = import_folder(&[("bracket.smp", b"design bytes")]);
+    let request = crate::ImportRequest { path: root.join("bracket.smp"), input_folder: false };
+    let manifest = storage_importer_manifest();
+    for (code, field) in [
+        ("i32.const 512 i32.const 0 i32.const 128 call $get", "user-storage.key"),
+        ("i32.const 512 i32.const 129 i32.const 128 call $get", "user-storage.key"),
+        ("i32.const 512 i32.const 5 i32.const 512 i32.const 5 i32.const 128 call $set", "user-storage.value"),
+    ] {
+        let (app, outcome) = crate::run_import(App::default(), &manifest, &storage_importer_component(code), "convert", &json!({}), &request);
+        assert!(matches!(outcome, Err(HostError::InvalidInput { field: actual, .. }) if actual == field));
+        assert!(app.user_data.is_empty());
+        assert_eq!((app.begins, app.commits, app.rollbacks), (1, 0, 1));
+    }
+    let oversized_input = "i32.const 20 memory.grow i32.const -1 i32.eq if unreachable end
+        i32.const 2050 i32.const 32 i32.const 1048575 memory.fill
+        i32.const 512 i32.const 5 i32.const 2048 i32.const 1048577 i32.const 128 call $set";
+    let (app, outcome) =
+        crate::run_import(App::default(), &manifest, &storage_importer_component(oversized_input), "convert", &json!({}), &request);
+    assert_eq!(outcome.unwrap_err(), HostError::LimitExceeded { limit: "user-storage JSON input bytes (1048576)".into() });
+    assert!(app.user_data.is_empty());
+    assert_eq!((app.begins, app.commits, app.rollbacks), (1, 0, 1));
+    for (data, limit) in [
+        ((0..craft_plugin::MAX_USER_STORAGE_KEYS).map(|i| (format!("k{i}"), json!(null))).collect(), "user-storage keys (128)"),
+        (BTreeMap::from([("large".into(), json!("x".repeat(craft_plugin::MAX_USER_STORAGE_BYTES - 14)))]), "user-storage total bytes (65536)"),
+    ] {
+        let app = App { user_data: data, ..Default::default() };
+        let original = app.user_data.clone();
+        let (app, outcome) = crate::run_import(app, &manifest, &storage_importer_component(USER_SET), "convert", &json!({}), &request);
+        assert_eq!(outcome.unwrap_err(), HostError::LimitExceeded { limit: limit.into() });
+        assert_eq!(app.user_data, original);
+        assert_eq!((app.begins, app.commits, app.rollbacks), (1, 0, 1));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn existing_importer_worlds_load_and_run_without_host_transactions() {
+    let root = import_folder(&[("bracket.smp", b"design bytes")]);
+    let request = crate::ImportRequest { path: root.join("bracket.smp"), input_folder: false };
+    let manifest = importer_manifest(false);
+    for version in craft_plugin::WIT_VERSIONS {
+        let component = importer_component_for(version);
+        crate::check_component(&manifest, &component).unwrap();
+        let (app, outcome) = crate::run_import(App::default(), &manifest, &component, "convert", &json!({}), &request);
+        assert_eq!(outcome.unwrap().design, b"design bytes");
+        assert_eq!((app.begins, app.commits, app.rollbacks), (0, 0, 0));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn reading_beside_the_file_needs_the_input_folder_permission_both_asked_and_granted() {
     let root = import_folder(&[("assembly.smp", b"S"), ("part.bin", b"part bytes"), (".hidden.smp", b"x")]);

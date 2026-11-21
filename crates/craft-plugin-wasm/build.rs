@@ -22,12 +22,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         "mod importer_bindings {{\n\
              wasmtime::component::bindgen!({{\n\
                  path: \"../craft-plugin/wit\",\n\
-                 world: \"importer-plugin\",\n\
+                 world: \"importer-plugin-with-storage\",\n\
                  with: {{\n\
                      \"{package_name}/types\": super::bindings::{namespace}::{name}::types,\n\
                      \"{package_name}/log\": super::bindings::{namespace}::{name}::log,\n\
                      \"{package_name}/control\": super::bindings::{namespace}::{name}::control,\n\
                      \"{package_name}/clock\": super::bindings::{namespace}::{name}::clock,\n\
+                     \"{package_name}/user-storage\": super::bindings::{namespace}::{name}::user_storage,\n\
                  }},\n\
              }});\n\
          }}\n\
