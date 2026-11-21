@@ -800,6 +800,26 @@ fn parse_zone(expr: &Expr<'_>, warnings: &mut Vec<String>) -> Vec<KicadZone> {
     contours.into_iter().map(|(layer, contours)| KicadZone { layer, contours }).collect()
 }
 
+/// How far apart two Edge.Cuts ends may be and still be one corner of the outline, in millimetres.
+/// A board drawn in KiCad can leave a few nanometres between the end of one line and the start of
+/// the next, and KiCad reads such an outline as closed: its own STEP export joins points up to
+/// 0.01 mm apart (the default of `kicad-cli pcb export step --min-distance`).
+const OUTLINE_JOIN_DISTANCE: f64 = 0.01;
+
+/// The cell of the outline-joining grid a point is in.
+fn outline_cell(point: [f64; 2]) -> (i64, i64) {
+    ((point[0] / OUTLINE_JOIN_DISTANCE).floor() as i64, (point[1] / OUTLINE_JOIN_DISTANCE).floor() as i64)
+}
+
+/// Take a joined segment's ends out of the grid, so a pile of ends is not searched again and again.
+fn forget_outline_segment(cells: &mut std::collections::HashMap<(i64, i64), Vec<usize>>, segment: ([f64; 2], [f64; 2]), index: usize) {
+    for end in [segment.0, segment.1] {
+        if let Some(cell) = cells.get_mut(&outline_cell(end)) {
+            cell.retain(|other| *other != index);
+        }
+    }
+}
+
 fn join_outline_segments(segments: Vec<([f64; 2], [f64; 2])>, warnings: &mut Vec<String>) -> Vec<Vec<[f64; 2]>> {
     // Every segment end, in the cells of a grid as wide as the joining distance: the ends within
     // that distance of a point are in its cell or one of the eight around it.
@@ -815,6 +835,7 @@ fn join_outline_segments(segments: Vec<([f64; 2], [f64; 2])>, warnings: &mut Vec
             continue;
         }
         used[index] = true;
+        forget_outline_segment(&mut cells, segments[index], index);
         let (start, end) = segments[index];
         let mut contour = vec![start, end];
         let mut closed = near2(start, end);
@@ -827,9 +848,6 @@ fn join_outline_segments(segments: Vec<([f64; 2], [f64; 2])>, warnings: &mut Vec
             let (cx, cy) = outline_cell(last);
             for cell in (-1..=1).flat_map(|dx| (-1..=1).map(move |dy| (cx.saturating_add(dx), cy.saturating_add(dy)))) {
                 for &candidate in cells.get(&cell).map(Vec::as_slice).unwrap_or_default() {
-                    if used.get(candidate).copied().unwrap_or(true) {
-                        continue;
-                    }
                     let Some((a, b)) = segments.get(candidate) else { continue };
                     for (gap, forward) in [(distance2(*a, last), true), (distance2(*b, last), false)] {
                         let nearer = best.is_none_or(|(least, index, _)| gap < least || (gap == least && candidate < index));
@@ -839,18 +857,23 @@ fn join_outline_segments(segments: Vec<([f64; 2], [f64; 2])>, warnings: &mut Vec
                     }
                 }
             }
+            // The contour is closed when it is back at its start and no segment goes on from
+            // nearer than that: a piece shorter than the joining distance beside the start is
+            // still walked, not cut off. A contour has at least three corners.
+            let home = distance2(last, start);
+            if contour.len() >= 4 && home <= OUTLINE_JOIN_DISTANCE && best.is_none_or(|(gap, _, _)| home <= gap) {
+                closed = true;
+                break;
+            }
             let Some((_, next_index, forward)) = best else { break };
-            let (Some(taken), Some((a, b))) = (used.get_mut(next_index), segments.get(next_index)) else { break };
+            let (Some(taken), Some(segment)) = (used.get_mut(next_index), segments.get(next_index).copied()) else { break };
             *taken = true;
-            let next = if forward { *b } else { *a };
-            contour.push(next);
+            forget_outline_segment(&mut cells, segment, next_index);
+            contour.push(if forward { segment.1 } else { segment.0 });
             if contour.len() > MAX_OUTLINE_POINTS {
                 contour.clear();
                 break;
             }
-            // A contour has at least three corners, so a run of segments shorter than the joining
-            // distance does not close on its own second point.
-            closed = contour.len() >= 4 && distance2(next, start) <= OUTLINE_JOIN_DISTANCE;
         }
         if closed && contour.len() >= 4 {
             contour.pop();
@@ -860,17 +883,6 @@ fn join_outline_segments(segments: Vec<([f64; 2], [f64; 2])>, warnings: &mut Vec
         }
     }
     contours
-}
-
-/// How far apart two Edge.Cuts ends may be and still be one corner of the outline, in millimetres.
-/// A board drawn in KiCad can leave a few nanometres between the end of one line and the start of
-/// the next, and KiCad reads such an outline as closed: its own STEP export joins points closer
-/// than 0.01 mm (the default of `kicad-cli pcb export step --min-distance`).
-const OUTLINE_JOIN_DISTANCE: f64 = 0.01;
-
-/// The cell of the outline-joining grid a point is in.
-fn outline_cell(point: [f64; 2]) -> (i64, i64) {
-    ((point[0] / OUTLINE_JOIN_DISTANCE).floor() as i64, (point[1] / OUTLINE_JOIN_DISTANCE).floor() as i64)
 }
 
 fn near2(a: [f64; 2], b: [f64; 2]) -> bool {

@@ -158,6 +158,36 @@ fn an_outline_whose_lines_miss_each_other_by_nanometres_is_closed() {
 }
 
 #[test]
+fn an_outline_piece_shorter_than_the_joining_distance_is_kept() {
+    // The outline's last piece is 0.005 mm long, so the corner before it is already within the
+    // joining distance of the start. The piece still belongs to the outline: five corners, and
+    // nothing left over.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 20 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10) (end 0 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0.005) (layer "Edge.Cuts"))
+      (gr_line (start 0 0.005) (end 0 0) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "short.kicad_pcb").unwrap();
+    assert!(board.warnings.is_empty(), "{:?}", board.warnings);
+    let [outline] = board.outlines.as_slice() else { panic!("expected one outline: {:?}", board.outlines) };
+    assert_eq!(outline.len(), 5, "{outline:?}");
+    // Short pieces right after the start do not close on themselves either.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 0.003 0) (layer "Edge.Cuts"))
+      (gr_line (start 0.003 0) (end 0.006 0) (layer "Edge.Cuts"))
+      (gr_line (start 0.006 0) (end 0.009 0) (layer "Edge.Cuts"))
+      (gr_line (start 0.009 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 20 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10) (end 0 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "short-start.kicad_pcb").unwrap();
+    assert!(board.warnings.is_empty(), "{:?}", board.warnings);
+    let [outline] = board.outlines.as_slice() else { panic!("expected one outline: {:?}", board.outlines) };
+    assert_eq!(outline.len(), 7, "{outline:?}");
+}
+
+#[test]
 fn an_outline_with_a_real_gap_stays_open() {
     // The last line stops 0.02 mm short of the first corner: more than the 0.01 mm KiCad joins.
     let source = r#"(kicad_pcb (general (thickness 1.6))
