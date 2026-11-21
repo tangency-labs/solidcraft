@@ -696,31 +696,21 @@ mod tests {
         sum / choose(n, k)
     }
 
-    /// The surface `(u, v, 1e8 (v - u^2) (v - u^2 - 5e-5))` over `[-0.02, 0.02] x
-    /// [-2e-4, 4e-4]`, one Bézier patch of degrees 4 and 2 (its control points the polynomial's
-    /// blossoms, so it is the polynomial exactly). The plane `z = 0` crosses it on two branches,
-    /// `v = u^2` and `v = u^2 + 5e-5`.
-    fn two_parabolas() -> Surface {
-        let (u0, u1, v0, v1) = (-0.02, 0.02, -2.0e-4, 4.0e-4);
-        let (a, d) = (1.0e8, 5.0e-5);
-        // f = a (v^2 - 2 u^2 v + u^4 - d v + d u^2), as (coefficient, power of u, power of v)
-        let terms = [
-            (a, 0, 2),
-            (-2.0 * a, 2, 1),
-            (a, 4, 0),
-            (-a * d, 0, 1),
-            (a * d, 2, 0),
-        ];
-        let net: Vec<Vec<CPoint>> = (0..=4_u32)
+    /// The graph `(u, v, f(u, v))` over `[u0, u1] x [v0, v1]` of the polynomial `f`, given as
+    /// (coefficient, power of `u`, power of `v`) terms of degrees at most `pu` and `pv`: one
+    /// Bézier patch whose control points are the polynomial's blossoms, so it is the polynomial
+    /// exactly.
+    fn graph(pu: u32, pv: u32, [u0, u1, v0, v1]: [f64; 4], terms: &[(f64, u32, u32)]) -> Surface {
+        let net: Vec<Vec<CPoint>> = (0..=pu)
             .map(|i| {
-                (0..=2_u32)
+                (0..=pv)
                     .map(|j| {
-                        let x = blossom(4, 1, i, u0, u1);
-                        let y = blossom(2, 1, j, v0, v1);
+                        let x = blossom(pu, 1, i, u0, u1);
+                        let y = blossom(pv, 1, j, v0, v1);
                         let z = terms
                             .iter()
                             .map(|&(c, p, q)| {
-                                c * blossom(4, p, i, u0, u1) * blossom(2, q, j, v0, v1)
+                                c * blossom(pu, p, i, u0, u1) * blossom(pv, q, j, v0, v1)
                             })
                             .sum();
                         CPoint::new(x, y, z, NOW)
@@ -728,9 +718,66 @@ mod tests {
                     .collect()
             })
             .collect();
-        let uk = [u0, u0, u0, u0, u0, u1, u1, u1, u1, u1];
-        let vk = [v0, v0, v0, v1, v1, v1];
-        Surface::from(BSplineSurface::from_data(4, 2, 4, 2, 9, 5, &net, &uk, &vk).unwrap())
+        let knots = |lo: f64, hi: f64, p: u32| -> Vec<f64> {
+            (0..2 * (p + 1))
+                .map(|i| if i <= p { lo } else { hi })
+                .collect()
+        };
+        let (n, m) = (usize::try_from(pu).unwrap(), usize::try_from(pv).unwrap());
+        let (uk, vk) = (knots(u0, u1, pu), knots(v0, v1, pv));
+        Surface::from(
+            BSplineSurface::from_data(n, m, n, m, 2 * n + 1, 2 * m + 1, &net, &uk, &vk).unwrap(),
+        )
+    }
+
+    /// The surface `(u, v, 1e8 (v - u^2) (v - u^2 - 5e-5))` over `[-0.02, 0.02] x
+    /// [-2e-4, 4e-4]`. The plane `z = 0` crosses it on two branches, `v = u^2` and
+    /// `v = u^2 + 5e-5`.
+    fn two_parabolas() -> Surface {
+        let (a, d) = (1.0e8, 5.0e-5);
+        // f = a (v^2 - 2 u^2 v + u^4 - d v + d u^2)
+        graph(
+            4,
+            2,
+            [-0.02, 0.02, -2.0e-4, 4.0e-4],
+            &[
+                (a, 0, 2),
+                (-2.0 * a, 2, 1),
+                (a, 4, 0),
+                (-a * d, 0, 1),
+                (a * d, 2, 0),
+            ],
+        )
+    }
+
+    /// The march's last step turning past a right angle: on `(u, v, v - 100 u^2)` cut by
+    /// `z = 0`, along `v = 100 u^2` from `(-0.3, 9)` down the arm to `(0.02, 0.04)` just past the
+    /// vertex, its steps growing on the nearly straight arm until one reaches the end across the
+    /// vertex, a turn of about 164 degrees under `ang_tol` 1.2. The curve's end tangent points the
+    /// way it runs there, up the other arm (+u, +v), not back down the first one.
+    #[test]
+    fn a_crossing_whose_last_step_turns_past_a_right_angle_ends_on_its_way() {
+        let k = Kernel::new(&KernelOptions::default());
+        let c = 100.0;
+        let surf = graph(2, 1, [-0.4, 0.4, -0.5, 16.0], &[(1.0, 0, 1), (-c, 2, 0)]);
+        let domain = Extent2d::from_bounds(-50.0, -50.0, 50.0, 50.0);
+        let floor = Surface::from(Plane::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            &domain,
+        ));
+        let on = |u: f64| Point3::new(u, c * u * u, 0.0);
+        let r =
+            surface_plane_curve(&k, &surf, &floor, on(-0.3), on(0.02), None, 1.0e-4, 1.2).unwrap();
+        let ivl = r.curve_3d.natural_interval();
+        let pv = r.curve_3d.evaluate(&k, ivl.max(), 1, false, true).unwrap();
+        let end = pv[1];
+        // the way the crossing runs at u = 0.02: (1, 2 c u, 0)
+        let way = Vec3::new(1.0, 2.0 * c * 0.02, 0.0);
+        assert!(end.dot(way) > 0.0, "{end:?}");
+        assert!(end.angle_between(way).unwrap() < 0.1, "{end:?}");
     }
 
     /// A span is split on the branch its stations trace. Stations at `u = -0.01` and `0.01` on
