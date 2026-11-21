@@ -2,8 +2,9 @@
 
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
-    API, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
-    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RibbonGroup, RuntimeManifest, UiSlot, check_input, conditions, swatches, valid_icon_path, valid_id,
+    API, DesignToken, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES,
+    MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RibbonGroup, RuntimeManifest, UiSlot, check_input, conditions, swatches, valid_icon_path,
+    valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
@@ -63,6 +64,12 @@ pub struct Grants {
 /// Trusted host state, never loaded from a design or supplied by guest code.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AppState {
+    /// Listener failures are application state, displayed in Preferences, never design data.
+    pub listener_failures: BTreeMap<String, String>,
+    /// Last successful listener result; the future panel adapter may consume this data.
+    pub listener_data: std::sync::Arc<BTreeMap<String, Value>>,
+    /// Host-only authority marker and event payload for a listener invocation.
+    pub(crate) listener_design: Option<Option<DesignToken>>,
     pub packages: BTreeMap<String, String>,
     pub grants: BTreeMap<String, Grants>,
     /// Adapter folder grants for the active call; runtime calls use the package's approved grants.
@@ -82,6 +89,16 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Background cache/panel updates do not revoke an in-flight command's authority.
+    pub(crate) fn same_execution_context(&self, other: &Self) -> bool {
+        self.packages == other.packages
+            && self.grants == other.grants
+            && self.file_grants == other.file_grants
+            && self.command_groups == other.command_groups
+            && self.plugins_dir == other.plugins_dir
+            && self.storage_caller == other.storage_caller
+            && self.stored == other.stored
+    }
     /// The installed plugins' folder, if this platform has one.
     pub fn plugins_dir(&self) -> Option<PathBuf> {
         if cfg!(target_arch = "wasm32") {
@@ -387,6 +404,8 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
 }
 
 pub mod check;
+mod events;
+pub use events::design_changed;
 pub mod grant_store;
 mod import;
 pub mod install;
@@ -443,6 +462,12 @@ impl SolidCraftHost {
 /// `timeline.roll_to` moves only that private session's marker.
 pub const EVALUATE_COMMANDS: &[&str] = &["document.inspect", "inspect.measure", "model.edges", "model.faces", "timeline.roll_to"];
 impl PluginHost for SolidCraftHost {
+    fn design_token(&self) -> craft_plugin::Result<Option<DesignToken>> {
+        match &self.session.plugin_state.listener_design {
+            Some(design) => Ok(design.clone()),
+            None => Ok(Some(self.transaction.as_ref().unwrap_or(&self.session).design_token())),
+        }
+    }
     fn evaluate_open(&mut self, design: &[u8]) -> craft_plugin::Result<()> {
         let doc = solidcraft_io::read_design(design)
             .map_err(|e| HostError::InvalidInput { field: "design".into(), reason: format!("SolidCraft can't read this design: {e}") })?;
@@ -476,6 +501,19 @@ impl PluginHost for SolidCraftHost {
             .collect()
     }
     fn run_command(&mut self, name: &str, params: &Value) -> craft_plugin::Result<Value> {
+        // A deviation sweep starts its own parallel work, outside the guest's fuel/deadline.
+        // It remains a read command for explicit invocations, but never starts from a listener.
+        if self.session.plugin_state.listener_design.is_some() && name == "pointcloud.deviation" {
+            return Err(HostError::PermissionDenied { permission: format!("work command {name} from read entry") });
+        }
+        if self.session.plugin_state.listener_design.is_some()
+            && (command_group(name).is_some()
+                || name.starts_with("render.")
+                || name.starts_with("jobs.")
+                || catalog_command(name).is_none_or(|command| command.effect != Effect::Read))
+        {
+            return Err(HostError::PermissionDenied { permission: format!("edit command {name} from read entry") });
+        }
         if catalog_command(name).is_none() {
             return Err(HostError::PermissionDenied { permission: format!("command {name} is not granted") });
         }
@@ -621,7 +659,11 @@ pub fn resolve_call(s: &Session, id: &str, params: &Value) -> Result<Option<Valu
     let inputs = params.get("params").cloned().unwrap_or(json!({}));
     // Preserve direct calls' input pass-through; tool callers validate their listed schema.
     // `named`: a refusal comes back in words an agent can act on (`tools::explain`).
-    Ok(Some(json!({"path":path,"approval":approval,"entry":entry,"params":inputs,"named":true})))
+    let mut call = json!({"path":path,"approval":approval,"entry":entry,"params":inputs,"named":true});
+    if let Some(expected) = params.get("expected_design") {
+        call["expected_design"] = expected.clone();
+    }
+    Ok(Some(call))
 }
 
 /// `engine.describe` of an installed, enabled plugin's entry: a command entry as the
