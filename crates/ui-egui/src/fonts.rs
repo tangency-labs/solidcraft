@@ -518,7 +518,8 @@ fn system_fallbacks() -> &'static SystemFonts {
         let hebrew =
             fallback::candidate_files(fallback::HEBREW).find_map(|path| try_read_font(std::path::Path::new(path)).filter(|bytes| covers(bytes, 'א')));
         let arabic = arabic_font();
-        let georgian = fallback::candidate_files(fallback::GEORGIAN).find_map(|path| try_read_font(std::path::Path::new(path)).filter(|bytes| covers(bytes, 'ა')));
+        let georgian = fallback::candidate_files(fallback::GEORGIAN)
+            .find_map(|path| try_read_font(std::path::Path::new(path)).filter(|bytes| covers(bytes, 'ა')));
         SystemFonts { cjk, chinese, hangul, thai, hebrew, arabic, georgian }
     })
 }
@@ -1109,8 +1110,10 @@ mod tests {
     /// Mkhedruli, and the fonts set up must then draw it.
     #[test]
     fn a_georgian_fallback_draws_georgian() {
-        let found: Vec<Vec<u8>> =
-            fallback::candidate_files(fallback::GEORGIAN).filter_map(|path| try_read_font(std::path::Path::new(path))).filter(|bytes| covers(bytes, 'ა')).collect();
+        let found: Vec<Vec<u8>> = fallback::candidate_files(fallback::GEORGIAN)
+            .filter_map(|path| try_read_font(std::path::Path::new(path)))
+            .filter(|bytes| covers(bytes, 'ა'))
+            .collect();
         for bytes in &found {
             let face = ttf_parser::Face::parse(bytes, 0).unwrap();
             for c in "გამარჯობა მსოფლიო".chars().filter(|c| !c.is_whitespace()) {
