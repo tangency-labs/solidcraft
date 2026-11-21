@@ -160,16 +160,32 @@ fn report(info: &wgpu::AdapterInfo) -> AdapterReport {
     }
 }
 
+/// Starts a wgpu instance; a process starts one at a time. Starting an instance loads the Vulkan
+/// drivers, and a second thread that started one meanwhile called into NVIDIA's half-loaded
+/// driver on Linux: the process crashed inside `vkEnumerateInstanceExtensionProperties` (#10232).
+/// Tests open a device each on parallel threads, so they met the crash as they began. Adapters,
+/// devices and rendering still run side by side.
+pub fn start_instance(desc: wgpu::InstanceDescriptor) -> wgpu::Instance {
+    static STARTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one_at_a_time = STARTING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    wgpu::Instance::new(desc)
+}
+
 fn instance() -> wgpu::Instance {
     let mut desc = crate::instance_descriptor_from_env();
     desc.backends = native_backends();
-    wgpu::Instance::new(desc)
+    start_instance(desc)
 }
 
 // Some Windows Vulkan drivers crash or hang while unloading their DLL during FLS cleanup.
 // Retain one successful instance for the process, while every call still creates its own
 // descriptor and devices. Retaining no device also leaves device loss and limits per caller.
-#[cfg(target_os = "windows")]
+//
+// On Linux only `pick_on_vulkan_alone` retains its instance. The loader unloads the drivers with
+// a process's last Vulkan instance, and NVIDIA's driver loads only a few times in one process:
+// then glibc answers "cannot allocate memory in static TLS block" and every later instance is
+// without the GPU. An instance that also holds OpenGL is not retained there (#10232).
+#[cfg(not(target_arch = "wasm32"))]
 fn retain_vulkan_instance(instance: &wgpu::Instance, found: &[wgpu::Adapter]) {
     if found.iter().any(|adapter| adapter.get_info().backend == wgpu::Backend::Vulkan) {
         static INSTANCE: std::sync::OnceLock<wgpu::Instance> = std::sync::OnceLock::new();
@@ -230,7 +246,7 @@ pub fn pick_path(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> O
     }
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
     desc.backends = backends;
-    let instance = wgpu::Instance::new(desc);
+    let instance = start_instance(desc);
     let mut all = pollster::block_on(instance.enumerate_adapters(backends));
     #[cfg(target_os = "windows")]
     retain_vulkan_instance(&instance, &all);
@@ -247,7 +263,37 @@ pub fn pick_path(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> O
 /// The adapter `policy` picks, with its report; `None` when no adapter qualifies.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn pick(policy: Policy) -> Option<(wgpu::Adapter, AdapterReport)> {
+    if let Some(found) = pick_on_vulkan_alone(policy) {
+        return Some(found);
+    }
     pick_among(adapters(&instance()), policy)
+}
+
+/// On Linux with NVIDIA's own driver, where the native backends are Vulkan and OpenGL: the adapter
+/// [`pick`] would choose, from an instance that starts Vulkan alone, when that is certain without
+/// asking OpenGL. It is certain for a discrete GPU, which no adapter outranks, and for a software
+/// adapter under [`Policy::Software`]; Vulkan's adapters come before OpenGL's among equals. `None`
+/// otherwise and on every other machine, and [`pick`] asks both backends as before.
+///
+/// An instance with OpenGL beside Vulkan holds an EGL context that a Vulkan device never uses.
+/// NVIDIA's driver deadlocks when one thread drops that context while another destroys a Vulkan
+/// device (#10232), which parallel tests did at the end of every test.
+#[cfg(not(target_arch = "wasm32"))]
+fn pick_on_vulkan_alone(policy: Policy) -> Option<(wgpu::Adapter, AdapterReport)> {
+    if !nvidia_linux_driver() || !native_backends().contains(wgpu::Backends::VULKAN | wgpu::Backends::GL) {
+        return None;
+    }
+    let mut desc = crate::instance_descriptor_from_env();
+    desc.backends = wgpu::Backends::VULKAN;
+    let instance = start_instance(desc);
+    let found = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::VULKAN));
+    retain_vulkan_instance(&instance, &found);
+    let (adapter, report) = pick_among(found, policy)?;
+    let certain = match policy {
+        Policy::Software => report.tier == Tier::Software,
+        _ => adapter.get_info().device_type == wgpu::DeviceType::DiscreteGpu,
+    };
+    certain.then_some((adapter, report))
 }
 
 /// The adapter `policy` picks among `found`, as [`pick`] picks among the native backends' (best

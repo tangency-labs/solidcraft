@@ -170,9 +170,23 @@ pub fn instance_descriptor_from_env() -> wgpu::InstanceDescriptor {
 
 /// An adapter and device without a window (native only): the adapter [`select::pick`] chooses
 /// under `policy`, which the host passes. wgpu's environment may narrow the backends and pick the
-/// D3D12 shader compiler (`WGPU_BACKEND`, `WGPU_DX12_COMPILER`).
+/// D3D12 shader compiler (`WGPU_BACKEND`, `WGPU_DX12_COMPILER`). Every call opens a device of its
+/// own, except in this crate's own tests, which share one (`test_env::shared_headless`).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn open_headless(policy: select::Policy) -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+    #[cfg(test)]
+    {
+        test_env::shared_headless(test_env::Sharers::Tests, policy)
+    }
+    #[cfg(not(test))]
+    {
+        open_own_headless(policy)
+    }
+}
+
+/// [`open_headless`]'s adapter and device, opened anew at every call.
+#[cfg(not(target_arch = "wasm32"))]
+fn open_own_headless(policy: select::Policy) -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     let (adapter, _) = select::pick(policy).ok_or(GpuError::NoAdapter(policy.name()))?;
     let (device, queue) = open_device(&adapter)?;
     Ok((adapter, device, queue))

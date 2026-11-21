@@ -50,7 +50,7 @@ fn opengl_viewport_pipelines_render_a_model() {
     // emit compute GLSL below 4.30, and request_device fails as Device(Lost). The test draws
     // nothing indirect, so the validation is not needed here.
     desc.flags.remove(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL);
-    let instance = wgpu::Instance::new(desc);
+    let instance = solidcraft_viewport_gpu::select::start_instance(desc);
     let adapter = match pollster::block_on(instance.request_adapter(&Default::default())) {
         Ok(adapter) => adapter,
         Err(e) => {
