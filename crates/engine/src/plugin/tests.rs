@@ -2435,10 +2435,10 @@ mod exporters {
         let mut manifest = exporter_manifest(json!([]));
         manifest["capabilities"] = json!(["formats@0.2", "dialog@0.1"]);
         manifest["runtime"]["entries"] = json!([{"name":"copy","kind":"exporter","extensions":["smp"],"dialog_hook":true,
-            "input_schema":{"type":"object","required":["width"],"properties":{
-                "width":{"type":"number","minimum":1},
-                "size":{"type":"string","oneOf":[{"const":"small"},{"const":"large"}]}
-            }}}]);
+        "input_schema":{"type":"object","required":["width"],"properties":{
+            "width":{"type":"number","minimum":1},
+            "size":{"type":"string","oneOf":[{"const":"small"},{"const":"large"}]}
+        }}}]);
         std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
         let reply = r#"{"width":{"default":24},"size":{"choices":["large"]}}"#;
         // The command fixture echoes its inputs. Give that echo the export-file signature

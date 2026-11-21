@@ -1385,7 +1385,8 @@ pub(super) fn run_export<H: PluginHost + 'static>(
         prepare_store(&mut store, limits)?;
         check_imports(&engine, &component)?;
         let mut linker = Linker::new(&engine);
-        exporter_bindings::ExporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(|e| trap(e.to_string()))?;
+        exporter_bindings::ExporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)
+            .map_err(|e| trap(e.to_string()))?;
         let response = with_interrupts(&engine, || {
             let guest = exporter_bindings::ExporterPlugin::instantiate(&mut store, &component, &linker)?;
             call_export!(guest, &mut store, &entry.name, &options)
