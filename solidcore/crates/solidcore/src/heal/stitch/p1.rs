@@ -98,6 +98,7 @@ use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::topology::brep::p1 as bp1;
+use crate::topology::brep::p6::InfiniteHalf;
 use crate::topology::brep_cache::{arena_identity, CacheObject};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{self as eu3, BinormalOptions};
@@ -900,6 +901,12 @@ pub struct Stitch<'c> {
     tol_3d: f64,
     /// Find and set the infinite region after gluing (`m_bDoRegionNesting`).
     pub do_region_nesting: bool,
+    /// A face use the caller knows to lie outside the one solid whose faces are stitched,
+    /// which are alone in the B-rep. The glue that closes the solid's shell splits the
+    /// infinite region and makes the half this face use is in the infinite one, with no
+    /// ray fired ([`InfiniteHalf::Of`]); the stitch's end searches as ever
+    /// (`do_region_nesting`). Not upstream, whose closing glue searches for the half.
+    pub(crate) outside: Option<FaceuseId>,
     /// Validate pointers after stitching in validating builds (`m_bValidateResult`).
     pub validate_result: bool,
     /// Don't signal an error and quit when two edges fail to glue
@@ -968,6 +975,7 @@ impl core::fmt::Debug for Stitch<'_> {
         f.debug_struct("Stitch")
             .field("stitch_tol_3d", &self.tol_3d)
             .field("do_region_nesting", &self.do_region_nesting)
+            .field("outside", &self.outside)
             .field("validate_result", &self.validate_result)
             .field("ignore_problems", &self.ignore_problems)
             .field("fast_edge_compare", &self.fast_edge_compare)
@@ -1068,13 +1076,15 @@ impl<'c> Stitch<'c> {
         orientation: OrientType,
         dist: f64,
         nest: bool,
+        half: InfiniteHalf,
         delete: EdgeId,
         inside: Option<&[FaceuseId]>,
     ) -> Result<()> {
+        // (an edit context's glue searches at each closed shell, as upstream)
         if let Some(edits) = self.edits.as_deref_mut() {
             edits.glue_edges(k, b, keep, orientation, dist, nest, delete, inside)
         } else {
-            glue_edges_general(k, b, keep, orientation, dist, nest, delete, inside)
+            glue_edges_searching(k, b, keep, orientation, dist, nest, half, delete, inside)
         }
     }
     #[allow(clippy::too_many_arguments)]
@@ -1173,6 +1183,7 @@ impl<'c> Stitch<'c> {
             edits: None,
             tol_3d: stitch_tol_3d,
             do_region_nesting,
+            outside: None,
             validate_result,
             ignore_problems: false,
             fast_edge_compare: false,
@@ -1598,6 +1609,7 @@ impl<'c> Stitch<'c> {
                         orientation,
                         dist_to_curve,
                         do_region_nesting,
+                        InfiniteHalf::Searched,
                         other,
                         None,
                     )?;
@@ -2294,6 +2306,7 @@ impl<'c> Stitch<'c> {
                         orientation,
                         dist_to_curve,
                         self.do_region_nesting,
+                        InfiniteHalf::Searched,
                         test_e,
                         None,
                     ) {
@@ -2488,6 +2501,7 @@ fn stitch_and_orient(
 /// ([`brep_p2::ArenaNotifyState`](crate::topology::brep::p2::ArenaNotifyState), so
 /// that `SmTopology::Notify`'s propagation finds both edges) and on the kernel's
 /// notification context, so its installed callbacks see the events.
+#[cfg(test)]
 pub(crate) fn glue_edges_general(
     k: &mut Kernel,
     b: &mut Brep,
@@ -2495,6 +2509,34 @@ pub(crate) fn glue_edges_general(
     orientation: OrientType,
     dist: f64,
     do_region_nesting: bool,
+    delete: EdgeId,
+    inside_faceuses: Option<&[FaceuseId]>,
+) -> Result<()> {
+    glue_edges_searching(
+        k,
+        b,
+        keep,
+        orientation,
+        dist,
+        do_region_nesting,
+        InfiniteHalf::Searched,
+        delete,
+        inside_faceuses,
+    )
+}
+
+/// [`glue_edges_general`] with the caller's word on how a split of the infinite region
+/// tells its infinite half
+/// ([`crate::topology::brep::p7::glue_edges_general_searching`]).
+#[allow(clippy::too_many_arguments)] // upstream's argument list and the half
+pub(crate) fn glue_edges_searching(
+    k: &mut Kernel,
+    b: &mut Brep,
+    keep: EdgeId,
+    orientation: OrientType,
+    dist: f64,
+    do_region_nesting: bool,
+    half: InfiniteHalf,
     delete: EdgeId,
     inside_faceuses: Option<&[FaceuseId]>,
 ) -> Result<()> {
@@ -2506,13 +2548,14 @@ pub(crate) fn glue_edges_general(
         crate::topology::brep::p2::ArenaNotifyState::with_attributes_of_reusing(records, b, serial);
     let r = Context::with_notification_context(k, |k, context| {
         let mut env = state.env(Some(context));
-        crate::topology::brep::p7::glue_edges_general(
+        crate::topology::brep::p7::glue_edges_general_searching(
             k,
             b,
             Some(keep),
             orientation,
             dist,
             do_region_nesting,
+            half,
             Some(delete),
             inside_faceuses,
             &mut env,

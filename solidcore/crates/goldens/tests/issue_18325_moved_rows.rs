@@ -1,14 +1,19 @@
 //! #18325: every golden element the exact iso-line drop moves is CLOSER to the exact value
 //! of the ideal pipeline than main's, EQUAL to main's, or EQUAL-at-rounding: within the
-//! a-priori bound of the kernel's own float evaluation. No element is FARTHER.
+//! a-priori bound of the kernel's own float evaluation, or (19 elements, MEASURED below)
+//! within a measured bound of main's. No element is FARTHER, except as a MEASURED one:
+//! two of those (a point solve's uv, 1 ulp) are farther from the exact iso line than
+//! main's and are accepted on that measured bound alone.
 //!
 //! The fix makes `drop_curve` return the iso line `(f, t)` of a B-spline surface, with
 //! ends exactly `(f, t0)` and `(f, t1)`, when the curve is that iso line, decided before the
 //! station loop so the drop quality is measured on that exact line; and it seeds the
 //! edge/face gap of a `CrvOnSurf` on the other surface itself at its own uv, the exact
-//! foot (`heal/gap.rs` `own_foot`). Together they move 2462 elements of 333 rows of
-//! `topology.edgeuse_p2` (47), `topology.edgeuse_p3` (2343) and `topology.face_p3` (72),
-//! and the 476 elements of 39 rows of six other units below.
+//! foot (`heal/gap.rs` `own_foot`). Together with the edge's 3D iso curve that
+//! `crv_trim`'s left-knot insertion now computes with `affine2` (#17896, the
+//! `keep_operand_uv_trims` retirement), they move 2805 elements of 333 rows of
+//! `topology.edgeuse_p2` (60), `topology.edgeuse_p3` (2673) and `topology.face_p3` (72),
+//! and the 498 elements of 39 rows of six other units below.
 //! `data/issue_18325_moved_rows.tsv` lists them (`E unit case key i main new class`, main's
 //! and the new golden's values and the pinned class), main's whole vector of every row (`M`,
 //! the bits) and main's old golden line (`O`), with the stations the drop quality maxima are
@@ -76,6 +81,21 @@
 //!     the model) and `face_p3`'s mean and maximum curve/surface gaps (every edge curve of
 //!     the face its boundary row along a domain side, checked on the model): the reference
 //!     is `0`, and the new values are `0` exactly.
+//!   - a point or tangent of the edge's 3D iso B-spline curve (`create_iso_parametric_curve`:
+//!     `extract_iso_crv`, `crv_trim`, `end_at_insertion_point`) at `t`: the reference is the
+//!     exact surface point `S(f, t)` (tangent `S_v` or `S_u`, negated for an `Opposite` edge
+//!     use); the curve's control points are within `γ_{14(dx+2d)} M` of the exact ones, so a
+//!     point is within `γ_{14(dx+2d)+7d+3} M` and a tangent within
+//!     `(2d/h) γ_{14(dx+2d)+7d+6} M` ([`label_iso_tangent`]); a rational net is enclosed
+//!     through the kernel's own quotient chain ([`label_iso_tangent_rational`]).
+//! * MEASURED (19 elements; not certified): `|new − main|` is within a measured bound, the
+//!   edge curve's a-priori move ([`iso_curve_move`]) carried through a step whose
+//!   sensitivity is sampled, not enclosed: a point solve's uv (over the surface's smallest
+//!   singular value at `(f, t)`, [`solved_uv_bound`], 2 elements, both 1 ulp farther from
+//!   the exact iso line than main's: the exact reference classes them FARTHER, and the
+//!   measured bound is used only then), `check_set`'s maximum
+//!   edge / UV-curve distance (a sampled search, 9) and a drop quality with no dumped
+//!   stations (8).
 //! * A binormal row's vertex/face-gap-cached flag (`1 → 0`): proven `0` on the replayed
 //!   model (`prove_corner_flag`): the edge's curve and its loop neighbour's at the shared
 //!   vertex are `create_iso_parametric_curve` of two domain sides of different coordinates,
@@ -182,6 +202,7 @@ use solidcore::nurbs::b_spline_curve::{BSplineCurve, ControlPointForm};
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface::p2::IsoCurveOptions;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
+use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::{vertexuse, Brep, EdgeuseId};
@@ -217,6 +238,10 @@ enum Class {
     /// Neither nearer: `new` lies in the a-priori enclosure `E` of the kernel's own float
     /// result, so `|new − ref| <= B = sup_{x in E} |x − ref|` (see the module docs).
     AtRounding,
+    /// MEASURED, not certified: no exact reference is in reach (a numerical search's or
+    /// solver's output), and `|new − main|` is within a stated bound of how far the
+    /// search's certified input moved ([`Cert::Measured`]).
+    Measured,
     /// None of the above: a defect.
     Farther,
 }
@@ -896,6 +921,10 @@ fn deriv_net(net: &[Vec<[Iv; 3]>], kn: &[f64], p: usize, along_u: bool) -> Vec<V
             .map(|i| {
                 (0..net[0].len())
                     .map(|j| {
+                        if kn[i + p + 1] == kn[i + 1] {
+                            // its basis function vanishes identically (degree 0)
+                            return [Iv::p(0.0); 3];
+                        }
                         let d = Iv::p(kn[i + p + 1]).sub(Iv::p(kn[i + 1]));
                         std::array::from_fn(|c| pf.mul(net[i + 1][j][c].sub(net[i][j][c])).div(d))
                     })
@@ -907,6 +936,10 @@ fn deriv_net(net: &[Vec<[Iv; 3]>], kn: &[f64], p: usize, along_u: bool) -> Vec<V
             .map(|i| {
                 (0..net[0].len() - 1)
                     .map(|j| {
+                        if kn[j + p + 1] == kn[j + 1] {
+                            // its basis function vanishes identically (degree 0)
+                            return [Iv::p(0.0); 3];
+                        }
                         let d = Iv::p(kn[j + p + 1]).sub(Iv::p(kn[j + 1]));
                         std::array::from_fn(|c| pf.mul(net[i][j + 1][c].sub(net[i][j][c])).div(d))
                     })
@@ -1010,12 +1043,16 @@ enum Cert {
         e: Option<Iv>,
         what: &'static str,
     },
+    /// MEASURED: the output of a numerical search or solve whose inputs moved at most a
+    /// certified amount; `bound` is that move through the search's (measured, not
+    /// certified) sensitivity, and `|new − main| <= bound` is checked.
+    Measured { bound: f64, what: &'static str },
 }
 
 impl Cert {
     fn what(&self) -> &'static str {
         match self {
-            Cert::Exact { what, .. } | Cert::Enc { what, .. } => what,
+            Cert::Exact { what, .. } | Cert::Enc { what, .. } | Cert::Measured { what, .. } => what,
         }
     }
 }
@@ -1049,6 +1086,13 @@ fn classify(new: f64, main: f64, c: &Cert) -> Class {
                 Class::Closer
             } else if e.is_some_and(|e| e.contains(new) && e.lo <= r.lo && r.hi <= e.hi) {
                 Class::AtRounding
+            } else {
+                Class::Farther
+            }
+        }
+        Cert::Measured { bound, .. } => {
+            if Iv::p(new).sub(Iv::p(main)).abs().hi <= *bound {
+                Class::Measured
             } else {
                 Class::Farther
             }
@@ -1247,6 +1291,65 @@ fn norm(a: &V3) -> Iv {
     dot(a, a).sqrt()
 }
 
+/// The a-priori bound of how far the edge's float iso curve can lie from its exact `S(f, ·)`
+/// (Euclidean, [`label_iso_bspline`]'s `γ_K |M|`, with the degrees along and across the
+/// side both bounded by the larger of the net's): twice that bounds main's and the new
+/// curve's distance. A rational net's homogeneous error `δQ`, `δw` maps to the Euclidean
+/// `(|δQ| + |P| |δw|) / w_min`, `|P| <= |M| / w_min`.
+fn iso_curve_move(srf: &Srf) -> f64 {
+    let d = srf.p.max(srf.q);
+    let m: [f64; 4] = std::array::from_fn(|c| {
+        srf.net
+            .iter()
+            .flatten()
+            .map(|cp| cp[c].abs())
+            .fold(0.0, f64::max)
+    });
+    let norm = Iv::p(m[0])
+        .mul(Iv::p(m[0]))
+        .add(Iv::p(m[1]).mul(Iv::p(m[1])))
+        .add(Iv::p(m[2]).mul(Iv::p(m[2])))
+        .sqrt()
+        .hi;
+    let g = gam(14 * 3 * d + 7 * d + 3);
+    let one = if srf.rational {
+        let wmin = srf
+            .net
+            .iter()
+            .flatten()
+            .map(|cp| cp[3])
+            .fold(f64::INFINITY, f64::min);
+        assert!(wmin > 0.0, "a rational net with a non-positive weight");
+        let p = Iv::p(norm).div(Iv::p(wmin)).hi;
+        Iv::p(up_mul(g, norm))
+            .add(Iv::p(up_mul(p, up_mul(g, m[3]))))
+            .div(Iv::p(wmin))
+            .hi
+    } else {
+        up_mul(g, norm)
+    };
+    up_mul(2.0, one)
+}
+
+/// MEASURED: the bound of a point solve's uv move. Its input, the edge's 3D point, moved
+/// at most [`iso_curve_move`]; the solve's uv moves by that over the surface's smallest
+/// singular value `σ` at the exact `(f, t)` (the local inverse's gain, evaluated at one
+/// point, not enclosed), plus `8 u` of the larger value. The `8 u` is a measured allowance,
+/// not a bound on the solver: its stopping tolerance is far coarser, and only the observed
+/// moves (1 ulp, after the same number of steps on both trees) justify it.
+fn solved_uv_bound(srf: &Srf, uv: [f64; 2], new: f64, main: f64) -> f64 {
+    let (_, su, sv) = srf.exact(Iv::p(uv[0]), Iv::p(uv[1]));
+    let (a, b, c) = (
+        dot(&su, &su).mid(),
+        dot(&su, &sv).mid(),
+        dot(&sv, &sv).mid(),
+    );
+    let h = (a - c) / 2.0;
+    let lmin = (a + c) / 2.0 - (h * h + b * b).sqrt();
+    assert!(lmin > 0.0, "a singular surface at the iso point");
+    iso_curve_move(srf) / lmin.sqrt() + 8.0 * U * new.abs().max(main.abs())
+}
+
 /// `EvaluateBinormal` at a point of the iso line (record `[point, binormal, tangent,
 /// normal, uv, uv_vector]`): the references at the exact `(f, t)` (`t` the edge interval's
 /// `evaluate(frac)`, as the kernel's), the enclosures the same chain rounded as the kernel
@@ -1286,14 +1389,25 @@ fn label_binormal_at(
     uv[iso.c] = iso.f;
     let b = line_bound(iso);
     for (q, r) in uv.into_iter().enumerate() {
-        out.insert(
-            base + 12 + q,
-            Cert::Exact {
-                r,
-                b: Some(b),
-                what: "bin uv",
-            },
-        );
+        let exact = Cert::Exact {
+            r,
+            b: Some(b),
+            what: "bin uv",
+        };
+        // main's own uv off the iso line by more than the trim evaluation's bound: the uv
+        // is a point solve's (the edge use evaluated in 3D only), not the trim's. The exact
+        // reference still certifies the row when the new value is closer to it or at
+        // rounding; only a row it cannot certify falls back to the measured bound.
+        let solved = Iv::p(main[12 + q]).sub(Iv::p(r)).abs().hi > b;
+        let c = if solved && classify(v[12 + q], main[12 + q], &exact) == Class::Farther {
+            Cert::Measured {
+                bound: solved_uv_bound(srf, uv, v[12 + q], main[12 + q]),
+                what: "bin uv (point solve)",
+            }
+        } else {
+            exact
+        };
+        out.insert(base + 12 + q, c);
     }
     // The chain `n = ±unit(S_u × S_v)`, `b = unit(n × T)`, `uv_vector` the 2×2 solve of
     // `[S_u S_v]ᵀ[S_u S_v] x = [S_u S_v]ᵀ b`, once exactly at `(f, t)` (the reference) and
@@ -2585,8 +2699,39 @@ fn certificates(
             f,
             ivl: (ivl.min(), ivl.max()),
         };
+        // #17896: the edge's own iso curve moves at rounding (exact shared coordinates in
+        // its knot insertions), and its tangent with it
+        let tangent = bits(&v[7..10]) != bits(&main[7..10]);
+        if tangent || bits(&v[1..4]) != bits(&main[1..4]) {
+            let opposite = eu1::orientation(&m.brep, eu).unwrap() == OrientType::Opposite;
+            label_iso_tangent(
+                &m.bspline_curve(),
+                &srf,
+                &iso,
+                t,
+                opposite,
+                tangent,
+                1,
+                &mut out,
+            );
+        }
         label_binormal_at(v, main, 1, false, t, &srf, &iso, &mut out);
         return out;
+    }
+    if unit == "topology.edgeuse_p2" && inputs["op"] == "check_set" && v[0] != main[0] {
+        // `check_and_set_uv_trim_curve`'s `max_dist_to_surf`: `curve_max_distance_between`
+        // the edge's iso curve and the `CrvOnSurf` over the given UV curve, a sampled
+        // search. The exact maximum distance is 1-Lipschitz in the edge curve, which moved
+        // at most `iso_curve_move`; the search's own sensitivity is MEASURED (plus `8 u` of
+        // the value for its last rounding).
+        let srf = Srf::from_input(inputs);
+        out.insert(
+            0,
+            Cert::Measured {
+                bound: iso_curve_move(&srf) + 8.0 * U * v[0].abs().max(main[0].abs()),
+                what: "check_set max edge / UV curve distance (a sampled search)",
+            },
+        );
     }
     let (Some(iso), 0) = (iso, status) else {
         return out;
@@ -2614,6 +2759,29 @@ fn certificates(
             // a `CrvOnSurf` edge's tangent is certified first: the binormal chain takes it
             if cos {
                 label_cos(v, inputs, &srf, &iso, &mut out);
+            } else if bits(&v[6..9]) != bits(&main[6..9]) || bits(&v[0..3]) != bits(&main[0..3]) {
+                // #17896: the edge's own iso curve moves at rounding, and its tangent
+                let m = Model::of(case);
+                let k = Kernel::default();
+                assert_eq!(
+                    m.iso_side(&k, m.eu, dom),
+                    Some((iso.c, iso.f)),
+                    "{name}: the edge is not its side's iso curve"
+                );
+                let n = v.len();
+                let t = ev(v[n - 3], v[n - 2], num(&inputs["frac"])).clamp(v[n - 3], v[n - 2]);
+                let opposite = eu1::orientation(&m.brep, m.eu).unwrap() == OrientType::Opposite;
+                let tangent = bits(&v[6..9]) != bits(&main[6..9]);
+                label_iso_tangent(
+                    &m.bspline_curve(),
+                    &srf,
+                    &iso,
+                    t,
+                    opposite,
+                    tangent,
+                    0,
+                    &mut out,
+                );
             }
             label_binormal(v, main, &srf, &iso, num(&inputs["frac"]), &mut out);
         }
@@ -2635,6 +2803,21 @@ fn certificates(
                     "{name}: the edge's UV curve is not the iso line"
                 );
                 label_goc(&mut out);
+            }
+            if !d.drops.contains_key(name) {
+                // no drop stations were dumped (the drop runs outside the iso station
+                // loop): the drop quality, a maximum over the drop's own samples of the
+                // distance from the edge curve, is 1-Lipschitz in that curve, which moved at
+                // most `iso_curve_move`; the samples' sensitivity is MEASURED
+                for i in 0..2 {
+                    // only where no certificate (the `goc` labels') holds the key already
+                    if v[i] != main[i] && (i == 0 || name.contains("getcreate")) {
+                        out.entry(i).or_insert_with(|| Cert::Measured {
+                            bound: iso_curve_move(&srf) + 8.0 * U * v[i].abs().max(main[i].abs()),
+                            what: "drop quality, no station dump (sampled)",
+                        });
+                    }
+                }
             }
             if let Some(dr) = d.drops.get(name) {
                 let m = Model::of(case);
@@ -2825,6 +3008,251 @@ fn line_at(l: &Crv, s: f64) -> [Iv; 2] {
     })
 }
 
+/// Checks that `curve` is laid out as the input surface's iso curve along the side of
+/// fixed coordinate `c` over `[lo, hi]` (`create_iso_parametric_curve`, not reversed): a
+/// non-rational B-spline of the surface's degree along the side, its knots the surface's
+/// along the side clamped to `[lo, hi]`, bit for bit. Returns the degrees `(d, d_x)` along
+/// and across the side.
+fn iso_bspline_degrees(srf: &Srf, c: usize, curve: &Crv, (lo, hi): (f64, f64)) -> (usize, usize) {
+    let (d, kn, dx) = if c == 0 {
+        (srf.q, &srf.v, srf.p)
+    } else {
+        (srf.p, &srf.u, srf.q)
+    };
+    assert!(
+        (srf.rational || !curve.rational()) && curve.p == d,
+        "the edge curve is not a B-spline of the surface's degree, rational as it is"
+    );
+    let mut want = vec![lo; d + 1];
+    want.extend(kn.iter().copied().filter(|&x| lo < x && x < hi));
+    want.extend(vec![hi; d + 1]);
+    assert_eq!(
+        bits(&curve.knots),
+        bits(&want),
+        "the edge curve's knots are not the surface's clamped to the domain"
+    );
+    (d, dx)
+}
+
+/// The tangent `[base + 6, base + 9)` of a binormal record whose edge curve is the input
+/// surface's iso curve along `iso` (`create_iso_parametric_curve`, checked by the caller
+/// with [`Model::iso_side`], and laid out as [`iso_bspline_degrees`] checks), evaluated at
+/// `t`. In exact arithmetic that curve is `S(f, ·)` along the side, so the reference is the
+/// exact `S_v(f, t)` (`S_u` for a side of fixed `v`). `E` is it widened by the a-priori
+/// bound of the kernel's float derivative: the control points' error `γ_{14 (d_x + 2 d)} M`
+/// ([`label_iso_bspline`]) and the derivative basis's rounding `γ_{7 d + 6} M`, each
+/// through `Σ|N'_j| <= 2 d / h`, `h` the curve's shortest non-empty knot span. The record's
+/// tangent is the edge use's: negated (exactly) for an `Opposite` edge use
+/// (`evaluate_binormal`), so are the reference and `E` (`opposite`).
+///
+/// A rational net goes to [`label_iso_tangent_rational`].
+///
+/// The point `[base, base + 3)` is labelled too: the reference the exact `S(f, t)`, `E` it
+/// widened by [`label_iso_bspline`]'s `γ_{14 (d_x + 2 d) + 7 d + 3} M` (the point row of
+/// the same `crv_derivs`). The tangent only when `tangent` (it moved): the binormal chain
+/// takes an unmoved tangent as it is.
+#[allow(clippy::too_many_arguments)] // test
+fn label_iso_tangent(
+    curve: &Crv,
+    srf: &Srf,
+    iso: &Iso,
+    t: f64,
+    opposite: bool,
+    tangent: bool,
+    base: usize,
+    out: &mut BTreeMap<usize, Cert>,
+) {
+    if srf.rational {
+        label_iso_tangent_rational(curve, srf, iso, t, opposite, tangent, base, out);
+        return;
+    }
+    let bounds = srf.bounds();
+    let (d, dx) = iso_bspline_degrees(srf, iso.c, curve, iso.ivl);
+    let h = curve
+        .knots
+        .windows(2)
+        .map(|w| Iv::p(w[1]).sub(Iv::p(w[0])).lo)
+        .filter(|&x| x > 0.0)
+        .fold(f64::INFINITY, f64::min);
+    assert!(h.is_finite() && h > 0.0, "the iso curve has no knot span");
+    let lip = Iv::p(2.0 * d as f64).div(Iv::p(h)).hi;
+    let g = gam(14 * (dx + 2 * d) + 7 * d + 6);
+    let mut uv = [Iv::p(t), Iv::p(t)];
+    uv[iso.c] = Iv::p(iso.f);
+    let (p, su, sv) = srf.exact(uv[0], uv[1]);
+    let gp = gam(14 * (dx + 2 * d) + 7 * d + 3);
+    for (q, (&pq, &mq)) in p.iter().zip(&bounds.m).enumerate() {
+        out.insert(
+            base + q,
+            Cert::Enc {
+                r: pq,
+                e: Some(pq.widen(up_mul(gp, mq))),
+                what: "iso B-spline point",
+            },
+        );
+    }
+    if !tangent {
+        return;
+    }
+    let r = if iso.c == 0 { sv } else { su };
+    let r = r.map(|x| if opposite { x.neg() } else { x });
+    for (q, (&rq, &mq)) in r.iter().zip(&bounds.m).enumerate() {
+        out.insert(
+            base + 6 + q,
+            Cert::Enc {
+                r: rq,
+                e: Some(rq.widen(up_mul(lip, up_mul(g, mq)))),
+                what: "iso B-spline tangent",
+            },
+        );
+    }
+}
+
+/// [`label_iso_tangent`] for a rational net. The kernel's homogeneous control points `Q̃_j`
+/// of the edge curve are within `γ_{14 (d_x + 2 d)} M_c` per coordinate `c` (weight
+/// included) of the exact iso curve's `Q_j` (the a-priori bound of [`label_iso_bspline`]:
+/// the same `affine2` levels on all four coordinates, `M_c` the net's largest homogeneous
+/// coordinate). `E` encloses, over those boxes around the kernel's `Q̃_j`, the kernel's
+/// float rational tangent operation for operation (`crv_derivs` through
+/// `rational_basis_derivs_into`): the basis and its derivative widened as [`Srf::kernel`]
+/// counts them (`γ_{6 d}`), `d0 = Σ w_j N_j` and `d1 = Σ w_j N'_j` (one rounding per
+/// product and sum), `R_j = w_j N_j / d0`, `R'_j = (w_j N'_j − d1 R_j) / d0`, the
+/// Euclidean points `Q_j (1 / w_j)` (`to_euclid`) and the running sums `Σ R'_j P_j`. Each
+/// rounding widening also holds the exact operation, so `E` holds the exact tangent of
+/// the exact curve too: the reference, the exact `S_v(f, t)` (`S_u` for a side of fixed
+/// `v`). The point likewise: `Σ R_j P_j` over the same boxes, the reference `S(f, t)`.
+#[allow(clippy::too_many_arguments)] // test
+fn label_iso_tangent_rational(
+    curve: &Crv,
+    srf: &Srf,
+    iso: &Iso,
+    t: f64,
+    opposite: bool,
+    tangent: bool,
+    base: usize,
+    out: &mut BTreeMap<usize, Cert>,
+) {
+    let (d, dx) = iso_bspline_degrees(srf, iso.c, curve, iso.ivl);
+    let g = gam(14 * (dx + 2 * d));
+    let m: [f64; 4] = std::array::from_fn(|c| {
+        srf.net
+            .iter()
+            .flatten()
+            .map(|cp| cp[c].abs())
+            .fold(0.0, f64::max)
+    });
+    let q: Vec<[Iv; 4]> = curve
+        .cps
+        .iter()
+        .map(|cp| std::array::from_fn(|c| Iv::p(cp[c]).widen(up_mul(g, m[c]))))
+        .collect();
+    let r = |x: Iv| rnd(x, U, true);
+    let (n0, n1, n1a) = basis(&curve.knots, d, Iv::p(t));
+    let gb = gam(6 * d);
+    let n0: Vec<Iv> = n0.iter().map(|x| x.rel(gb)).collect();
+    let n1: Vec<Iv> = n1
+        .iter()
+        .zip(&n1a)
+        .map(|(x, a)| x.widen(up_mul(gb, a.hi)))
+        .collect();
+    let zero = Iv::p(0.0);
+    let (mut d0, mut d1) = (zero, zero);
+    for ((qj, a), b) in q.iter().zip(&n0).zip(&n1) {
+        d0 = r(d0.add(r(qj[3].mul(*a))));
+        d1 = r(d1.add(r(qj[3].mul(*b))));
+    }
+    let mut e = [zero; 3];
+    let mut e0 = [zero; 3];
+    for ((qj, a), b) in q.iter().zip(&n0).zip(&n1) {
+        let rj = r(r(qj[3].mul(*a)).div(d0));
+        let rdj = r(r(r(qj[3].mul(*b)).sub(r(d1.mul(rj)))).div(d0));
+        let rw = r(Iv::p(1.0).div(qj[3]));
+        for c in 0..3 {
+            let pc = r(qj[c].mul(rw));
+            e[c] = r(e[c].add(r(rdj.mul(pc))));
+            e0[c] = r(e0[c].add(r(rj.mul(pc))));
+        }
+    }
+    let mut uv = [Iv::p(t), Iv::p(t)];
+    uv[iso.c] = Iv::p(iso.f);
+    let (p, su, sv) = srf.exact(uv[0], uv[1]);
+    for c in 0..3 {
+        out.insert(
+            base + c,
+            Cert::Enc {
+                r: p[c],
+                e: Some(e0[c]),
+                what: "rational iso B-spline point",
+            },
+        );
+    }
+    if !tangent {
+        return;
+    }
+    let rf = if iso.c == 0 { sv } else { su };
+    let rf = rf.map(|x| if opposite { x.neg() } else { x });
+    let e = e.map(|x| if opposite { x.neg() } else { x });
+    for c in 0..3 {
+        out.insert(
+            base + 6 + c,
+            Cert::Enc {
+                r: rf[c],
+                e: Some(e[c]),
+                what: "rational iso B-spline tangent",
+            },
+        );
+    }
+}
+
+/// The samples of a 3D edge curve that is the input surface's iso curve along the domain
+/// side `cand` over `[lo, hi]` (`create_iso_parametric_curve`: `extract_iso_crv` at the
+/// side, `crv_trim` to the domain, `end_at_insertion_point`). Checked on the replayed
+/// model: a non-rational B-spline of the surface's degree along the side, its knots the
+/// surface's along the side clamped to `[lo, hi]` (not reversed), bit for bit. In exact
+/// arithmetic each of those steps keeps the curve's points, so the ideal curve is
+/// `S(f, s)` and the reference is the exact surface point there (`ideal`).
+///
+/// `E` is that reference widened by the a-priori bound `γ_K M` of the kernel's float chain,
+/// `M` the net's largest coordinate (every control point of the chain is a convex
+/// combination of net points). Each knot-insertion level is `CPoint::affine2`'s
+/// `α a + (1 − α) b` with `α = (t − k_i) / (k_j − k_i)` in `[0, 1]`: `α` within `γ_3`,
+/// `1 − α` one more rounding, two products and a sum, at most `γ_10 M` new error per level,
+/// and the inherited error grows by at most `1 + γ_4` (`affine2` only replaces a shared
+/// coordinate by its exact value). A control point of the trimmed curve passes at most
+/// `d_x + 2 d` levels (`d_x` the degree across the side, extraction; `d` along it, the
+/// trim's left then right insertion; the end insertion `d_x + d`), so `γ_{14 (d_x + 2 d)}`.
+/// The evaluation (`crv_eval`, or a clamped end's control point as is) adds the basis
+/// (`6 d`), the sum of `d + 1` terms and `2` more: `K = 14 (d_x + 2 d) + 7 d + 3`.
+#[allow(clippy::too_many_arguments)]
+fn label_iso_bspline(
+    srf: &Srf,
+    bounds: &Bounds,
+    curve: &Crv,
+    (c, _, rev): (usize, f64, bool),
+    (lo, hi): (f64, f64),
+    at: usize,
+    out: &mut BTreeMap<usize, Cert>,
+    ideal: impl Fn(f64) -> V3,
+) {
+    assert!(!rev, "a reversed iso B-spline edge curve");
+    let (d, dx) = iso_bspline_degrees(srf, c, curve, (lo, hi));
+    let g = gam(14 * (dx + 2 * d) + 7 * d + 3);
+    for i in 0..5u8 {
+        let s = ev(lo, hi, f64::from(i) / 4.0);
+        let r = ideal(s);
+        for (q, (&rq, &mq)) in r.iter().zip(&bounds.m).enumerate() {
+            out.insert(
+                at + 2 + 3 * usize::from(i) + q,
+                Cert::Enc {
+                    r: rq,
+                    e: Some(rq.widen(up_mul(g, mq))),
+                    what: "iso B-spline sample",
+                },
+            );
+        }
+    }
+}
+
 /// `topology.brep_validation` (`curve_samples`): `[lo, hi]` and 5 samples `[x, y, z]` at
 /// `evaluate(i/4)` per present curve, the edges' curves and then the edge uses' UV trims
 /// (in arena order, on the replayed model). Each edge curve here is a `CrvOnSurf` on the
@@ -2872,13 +3300,14 @@ fn label_validation(
         let (lo, hi) = (main[at], main[at + 1]);
         assert_eq!(bits(&v[at..at + 2]), bits(&[lo, hi]), "the curve's domain");
         if *edge {
-            let CurveKind::CrvOnSurf(cs) = curve.kind() else {
-                panic!("a moved edge curve that is not a CrvOnSurf");
-            };
-            assert!(
-                srf.is(bspline_surface(cs.surface())),
-                "the CrvOnSurf's surface is not the input surface"
-            );
+            match curve.kind() {
+                CurveKind::CrvOnSurf(cs) => assert!(
+                    srf.is(bspline_surface(cs.surface())),
+                    "the CrvOnSurf's surface is not the input surface"
+                ),
+                CurveKind::BSpline(_) => {}
+                _ => panic!("a moved edge curve that is neither a CrvOnSurf nor a B-spline"),
+            }
         }
         let line_of = |(c, side, rev): (usize, f64, bool)| {
             let mut a = [side; 2];
@@ -2915,6 +3344,12 @@ fn label_validation(
             },
             "the curve's ideal line",
         );
+        if let (true, CurveKind::BSpline(cb)) = (*edge, curve.kind()) {
+            label_iso_bspline(&srf, &bounds, &crv_of(cb), cand, (lo, hi), at, out, |s| {
+                ideal(cand, s)
+            });
+            continue;
+        }
         let l = line_of(cand);
         // the bounds below are of the kernel evaluating this degree-1 line: the curve's UV
         // curve on the replayed model is it, bit for bit
@@ -4179,11 +4614,11 @@ fn mass_replay(
                             surface_knots_inside(k, surface, SurfParamType::V, base, s.c0[1])
                                 .unwrap();
                         assert!(
-                        knots.len() >= exact.len()
-                            && knots[..exact.len()] == exact[..]
-                            && knots[exact.len()..].iter().all(|&x| x == s.c0[1]),
-                        "the kernel's knots below the trim point {knots:?} are not the exact top's {exact:?}"
-                    );
+                            knots.len() >= exact.len()
+                                && knots[..exact.len()] == exact[..]
+                                && knots[exact.len()..].iter().all(|&x| x == s.c0[1]),
+                            "the kernel's knots below the trim point {knots:?} are not the exact top's {exact:?}"
+                        );
                         let mut v0 = Iv::p(base);
                         let mut ends: Vec<Iv> = knots.iter().map(|&x| Iv::p(x)).collect();
                         ends.push(p0[1]);
@@ -4760,6 +5195,7 @@ fn moved_elements_are_closer_equal_or_at_rounding() {
                 }
                 worst = match (worst, class) {
                     (_, Class::Farther) | (Class::Farther, _) => Class::Farther,
+                    (_, Class::Measured) | (Class::Measured, _) => Class::Measured,
                     (_, Class::AtRounding) | (Class::AtRounding, _) => Class::AtRounding,
                     (_, Class::Closer) | (Class::Closer, _) => Class::Closer,
                     _ => Class::Equal,

@@ -523,7 +523,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
         ui_kit::Window::new(egui::Id::unique("sc_toolbar_customize"), "settings", solidcraft_ui_text::tr_label("Customize Toolbar"))
             .placed(egui::Align2::LEFT_TOP, origin)
             .cards(2.0)
-            .actions("", "Close", None)
+            .actions("", "ui.close", None)
             .show(ctx, true, |ui| {
                 ui_kit::text(
                     ui,

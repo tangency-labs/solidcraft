@@ -113,6 +113,42 @@ mod tests {
     use crate::{BoolOp, boolean, cylinder, torus};
     use solidcraft_geom::prelude::*;
 
+    #[test]
+    fn selected_faces_skip_exact_conversion_for_either_mesh_operand() {
+        let mesh = crate::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y], &[[0, 1, 2]]).unwrap();
+        let exact = crate::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let mut unavailable = exact.clone();
+        // A cached refusal is how ops_body represents a B-rep it could not convert.
+        unavailable.ops = std::sync::Arc::new(std::sync::OnceLock::from(None));
+        assert!(mesh.is_mesh() && !unavailable.is_mesh());
+        for (a, b) in [(&mesh, &unavailable), (&unavailable, &mesh)] {
+            assert_eq!(crate::faces_closest(a, &[0], b, &[0]).unwrap(), None);
+        }
+        for (a, b) in [(&exact, &unavailable), (&unavailable, &exact)] {
+            assert!(
+                matches!(crate::faces_closest(a, &[0], b, &[0]), Err(crate::KernelError::Failed(message)) if message.contains("exact measurement is unavailable"))
+            );
+        }
+    }
+
+    /// The selected sides of nested cylinders are their radii apart; whole-body distance
+    /// would instead see coincident caps. Both witnesses belong to the selected surfaces.
+    #[test]
+    fn selected_cylinder_faces_measure_their_exact_gap() {
+        let a = cylinder(Vec3::ZERO, Vec3::Z, 20.0, 5.0).unwrap();
+        let b = cylinder(Vec3::ZERO, Vec3::Z, 35.0, 5.0).unwrap();
+        let side = |b: &Body| {
+            (0..b.record().faces.len())
+                .filter(|&f| matches!(crate::face_surface(b, f), Some(crate::FaceSurface::Cylinder { .. })))
+                .collect::<Vec<_>>()
+        };
+        let (af, bf) = (side(&a), side(&b));
+        assert!(!af.is_empty() && !bf.is_empty());
+        let c = crate::faces_closest(&a, &af, &b, &bf).unwrap().unwrap();
+        assert!(c.exact && (c.distance - 15.0).abs() < 1e-9, "{c:?}");
+        assert!((c.from.x.hypot(c.from.y) - 20.0).abs() < 1e-9 && (c.to.x.hypot(c.to.y) - 35.0).abs() < 1e-9, "{c:?}");
+    }
+
     /// The mass properties alone are [`measure`]'s, to the bit; and on a curved intersection
     /// they are the textbook ones.
     #[test]

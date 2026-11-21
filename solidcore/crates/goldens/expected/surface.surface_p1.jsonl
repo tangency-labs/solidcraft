@@ -77,7 +77,7 @@
 {"case":"domhist0074","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[],"status":[1001.0]}}
 {"case":"domhist0075","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[],"status":[1001.0]}}
 {"case":"domhist0076","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[-0.512209672539051,0.8523131924905027,-0.3977333991658773,4.796417225743482],"status":[0.0]}}
-{"case":"domhist0077","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.2634125541742552,1.0,0.8835306784979731],"status":[0.0]}}
+{"case":"domhist0077","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,1.0,1.0],"status":[0.0]}}
 {"case":"domhist0078","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.5336792522555576,1.0,2.5836961856777583],"status":[0.0]}}
 {"case":"domhist0079","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e+20,1e+20,-1e+20,-1e+20],"status":[0.0]}}
 {"case":"domhist0080","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.9994146907509989,1.8661369008015547,5.810499221221256,2.2370345120523103],"status":[0.0]}}

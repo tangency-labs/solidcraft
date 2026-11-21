@@ -84,6 +84,13 @@ mod imp {
         touched();
         std::fs::create_dir_all(path)
     }
+    /// A new folder and any missing folders above it, authorized as a new destination
+    /// ([`check_new`]): its parents need not exist yet, but those that do must be in scope.
+    pub fn create_new_dir_all(path: &str) -> Result<()> {
+        check_new(path)?;
+        touched();
+        std::fs::create_dir_all(path)
+    }
     /// The paths of the regular files directly in a folder, sorted; at most `max` of them.
     pub fn files_in(dir: &str, max: usize) -> Result<Vec<String>> {
         check(dir)?;
@@ -155,6 +162,10 @@ mod imp {
     }
     /// Files are keyed by their whole path here: a folder needs no making.
     pub fn create_dir_all(_path: &str) -> Result<()> {
+        Ok(())
+    }
+    /// As [`create_dir_all`]: nothing to make.
+    pub fn create_new_dir_all(_path: &str) -> Result<()> {
         Ok(())
     }
     pub fn insert(path: &str, bytes: Vec<u8>) {

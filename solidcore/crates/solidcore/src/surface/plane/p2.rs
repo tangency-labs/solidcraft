@@ -25,6 +25,11 @@
 //!   the geometric tolerance is returned as a point curve at the interval midpoint,
 //!   including a trailing interval at the source curve's end. The extent bound
 //!   includes arithmetic rounding.
+//! - **Domain sides in contact (not upstream).** `MakeNewPlaneEllipse` collapses an
+//!   ellipse's two crossings of a domain side to one touching point also where it overlaps
+//!   the side by up to a contact tolerance its caller gives, read as every contact site
+//!   reads it (`within_contact_tol`; [`Plane::make_new_plane_ellipse_in_contact`]; zero,
+//!   upstream's, by [`Plane::make_new_plane_ellipse`]).
 //! - **Plane first with a torus (not upstream).** `GlobalSurfaceIntersect` takes a torus's
 //!   own plane section (`Torus::intersect_with_plane_owned_into`, its orders and UV curves
 //!   swapped as for a surface of revolution; WR-721, #2405); upstream has no torus case and
@@ -89,7 +94,7 @@ use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::solution_array::{
     ObjectKind, SolutionArray, SolutionObject, SolutionType, SortKey,
 };
-use crate::geom::tol::{are_same, is_zero, is_zero_to_tol, ZONE_TOL_3D};
+use crate::geom::tol::{are_same, is_zero, is_zero_to_tol, within_contact_tol, ZONE_TOL_3D};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
@@ -1252,6 +1257,38 @@ impl Plane {
         anal_ivl: &Extent1d,
         tol: f64,
     ) -> Result<Vec<Curve>> {
+        self.make_new_plane_ellipse_in_contact(
+            k, uv_domain, center, radius_x, radius_y, x_axis, y_axis, anal_ivl, tol, 0.0,
+        )
+    }
+
+    /// [`Plane::make_new_plane_ellipse`] where an ellipse overlapping a side of the domain
+    /// past touching by up to `contact_tol` (not proved past it, `within_contact_tol`)
+    /// touches that side at one point, as it does by less than half `tol` (upstream's
+    /// [B10]); zero is upstream's. Not upstream: a face's domain is the box of its trims,
+    /// so a side of it runs along the face's own boundary where that boundary reaches the
+    /// box. A circle a hair past a round edge there, by up to the contact tolerance at which
+    /// the edge and the circle touch (docs/booleans.md §6, "Circles a hair less than
+    /// tangent"), was cut at the side, its two ends the lens's half length off the touch,
+    /// where no other site of the boolean put a vertex.
+    ///
+    /// # Errors
+    ///
+    /// As [`Plane::make_new_plane_ellipse`].
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream function
+    pub(crate) fn make_new_plane_ellipse_in_contact(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        center: Point3,
+        radius_x: f64,
+        radius_y: f64,
+        x_axis: Vec3,
+        y_axis: Vec3,
+        anal_ivl: &Extent1d,
+        tol: f64,
+        contact_tol: f64,
+    ) -> Result<Vec<Curve>> {
         // init output
         let mut crvs: Vec<Curve> = Vec::new();
 
@@ -1384,7 +1421,11 @@ impl Plane {
                     // About 10 deg: just to avoid a sqrt when not close.
                     // Max dist from ellipse to line between the two solutions:
                     let h = rad - sqrt(rad * rad - dist * dist * 0.25);
-                    if h < tol / 2.0 {
+                    // the contact as every contact site reads it (`within_contact_tol`)
+                    let size = center.max_dimension() + max2(radius_x, radius_y);
+                    if h < tol / 2.0
+                        || (contact_tol > 0.0 && within_contact_tol(h, contact_tol, size))
+                    {
                         params = vec![(a0 + a1) / 2.0];
                     }
                 }

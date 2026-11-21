@@ -701,6 +701,99 @@ fn linked_design_properties_repair_old_links_without_overwriting_assignments() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+fn numbered_part(path: &Path, values: Value) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+    run(&mut s, "document.metadata.set", json!({"values": values}));
+    run(&mut s, "file.save", json!({"path": path}));
+    s
+}
+
+fn part_property(s: &Session, component: u64, key: &str) -> Option<String> {
+    s.doc.components.iter().find(|c| c.id == component).and_then(|c| c.metadata.text(key)).map(str::to_string)
+}
+
+#[test]
+fn linked_part_properties_follow_the_design_and_keep_values_set_in_the_assembly() {
+    let dir = folder("part-properties");
+    let file = dir.join("plate.sc");
+    let mut part = numbered_part(&file, json!({"part_number": "P-1", "revision": "A", "description": "Plate"}));
+    let mut s = Session::default();
+    let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    // A second placement as its own component reads the changed file from the first one's read.
+    let other = run(&mut s, "component.insert_design", json!({"path": file, "translate": [30, 0, 0]}))["component"].as_u64().unwrap();
+    assert_eq!(part_property(&s, c, "revision").as_deref(), Some("A"));
+    assert_eq!(s.doc.links[&c].inherited_metadata.text("part_number"), Some("P-1"));
+    // A bill of materials type is the assembly's own: no update touches it.
+    run(&mut s, "component.metadata.set", json!({"component": c, "bom_type": "purchased"}));
+
+    // The design's new revision comes in, through one undo step.
+    run(&mut part, "document.metadata.set", json!({"values": {"revision": "B"}}));
+    run(&mut part, "file.save", json!({}));
+    let r = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(r["updated"].as_array().unwrap().len(), 2, "{r}");
+    for id in [c, other] {
+        assert_eq!(part_property(&s, id, "revision").as_deref(), Some("B"));
+        assert_eq!(part_property(&s, id, "part_number").as_deref(), Some("P-1"));
+    }
+    assert_eq!(part_property(&s, c, "bom_type").as_deref(), Some("purchased"));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(part_property(&s, c, "revision").as_deref(), Some("A"));
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(part_property(&s, c, "revision").as_deref(), Some("B"));
+
+    // A property changed in the assembly stays, and the update says so when the design moved on.
+    run(&mut s, "component.metadata.set", json!({"component": c, "description": "Plate, anodised"}));
+    run(&mut part, "document.metadata.set", json!({"values": {"description": "Plate v2", "revision": "C"}}));
+    run(&mut part, "file.save", json!({}));
+    let r = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(part_property(&s, c, "description").as_deref(), Some("Plate, anodised"));
+    assert_eq!(part_property(&s, c, "revision").as_deref(), Some("C"));
+    assert_eq!(part_property(&s, other, "description").as_deref(), Some("Plate v2"));
+    let warnings = r["warnings"].to_string();
+    assert!(warnings.contains("keeps its part property `description`") && warnings.contains("Plate v2"), "{r}");
+
+    // A property the design drops goes from the component too, and the record survives a save.
+    run(&mut part, "document.metadata.remove", json!({"keys": ["revision"]}));
+    run(&mut part, "file.save", json!({}));
+    run(&mut s, "component.update_links", json!({}));
+    assert_eq!(part_property(&s, c, "revision"), None);
+    let assembly = dir.join("assembly.sc");
+    run(&mut s, "file.save", json!({"path": assembly}));
+    let mut cold = Session::default();
+    run(&mut cold, "doc.open", json!({"path": assembly}));
+    assert_eq!(cold.doc.links[&c].inherited_metadata, s.doc.links[&c].inherited_metadata);
+    let r = run(&mut cold, "component.update_links", json!({}));
+    assert_eq!(r["updated"], json!([]), "{r}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn linked_part_properties_of_old_links_fill_gaps_without_overwriting_and_follow_a_relink() {
+    let dir = folder("part-properties-legacy");
+    let (first, second) = (dir.join("first.sc"), dir.join("second.sc"));
+    numbered_part(&first, json!({"part_number": "P-1", "revision": "A"}));
+    numbered_part(&second, json!({"part_number": "P-2", "revision": "A", "description": "Second plate"}));
+    let mut s = Session::default();
+    let c = run(&mut s, "component.insert_design", json!({"path": first}))["component"].as_u64().unwrap();
+    // A link made before it kept the properties it took: what the component has is its own.
+    s.doc_mut().links.get_mut(&c).unwrap().inherited_metadata = solidcraft_doc::Metadata::default();
+    run(&mut s, "component.metadata.set", json!({"component": c, "part_number": "LOCAL", "revision": null}));
+    let r = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(part_property(&s, c, "part_number").as_deref(), Some("LOCAL"));
+    assert_eq!(part_property(&s, c, "revision").as_deref(), Some("A"));
+    assert!(r["warnings"].to_string().contains("keeps its part property `part_number`"), "{r}");
+    // Relink Source: the new design's properties replace the ones the old design gave.
+    run(&mut s, "component.metadata.set", json!({"component": c, "part_number": "P-1"}));
+    run(&mut s, "component.update_links", json!({}));
+    run(&mut s, "component.relink", json!({"component": c, "path": second}));
+    assert_eq!(part_property(&s, c, "part_number").as_deref(), Some("P-2"));
+    assert_eq!(part_property(&s, c, "description").as_deref(), Some("Second plate"));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(part_property(&s, c, "part_number").as_deref(), Some("P-1"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn relink_repairs_a_moved_source_for_every_instance_in_one_undo_step() {
     let dir = folder("moved");

@@ -155,8 +155,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent1d::ExtentNd;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::{
-    evaluate_curve_continuity_with, frenet_from_derivatives, ContinuityOptions, ContinuityType,
-    CurveEval,
+    evaluate_curve_continuity, frenet_from_derivatives, ContinuityType, CurveEval,
 };
 use crate::geom::global_solver::{
     Branch, GlobalSolve, GlobalSolver, PreferredSolution, SolutionPairType, SolutionRequested,
@@ -583,8 +582,7 @@ pub fn base_evaluate_normal<S: SurfaceEvaluate + ?Sized>(
 /// # Errors
 ///
 /// [`SolidError::Unported`] from the surface's evaluation; those of
-/// `smgu_EvaluateCurveContinuity` (see the module docs; WR-380's opt-in G2 test from
-/// `Kernel::fixes.geometric_g2_continuity`).
+/// `smgu_EvaluateCurveContinuity` (see the module docs; its G2 test is geometric, WR-380).
 pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
     k: &Kernel,
     surface: &S,
@@ -708,7 +706,7 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
                     } else {
                         (d2_min.dv, d2_min.dvv, d2_max.dv, d2_max.dvv)
                     };
-                let curve_continuity = match evaluate_curve_continuity_with(
+                let curve_continuity = match evaluate_curve_continuity(
                     &CurveEval {
                         position: p_min,
                         first: first_min,
@@ -722,9 +720,6 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
                         third: None,
                     },
                     CONTINUITY_ANGLE,
-                    &ContinuityOptions {
-                        geometric_g2: k.fixes.geometric_g2_continuity,
-                    },
                 ) {
                     // a continuity that cannot be evaluated is not shown: Discontinuous
                     Err(e) if !e.is_unported_or_cancelled() => ContinuityType::Discontinuous,

@@ -291,7 +291,10 @@ make the UV trim curves (and adjust edge and vertex tolerances to the gaps they 
 4. Every edge whose tolerance differs from the one its gaps call for (`bad_small_zone_tol_3d` or
    `bad_large_zone_tol_3d`, either direction past `EFF_ZERO`) is re-measured with the formula of
    §5.2, its faces' largest tolerance as the floor, and set without the only-grow guard: a stored
-   tolerance larger than its gaps need shrinks.
+   tolerance larger than its gaps need shrinks. Where the formula's gain on the sampled gap would
+   take the edge to the pointer check's limit (1000 times the body's tolerance, §5.1), the edge
+   takes the certified bound of its edge/face gap instead (`curve_face_gap_bound`) when that
+   bound is under the limit; otherwise the formula stands and the check refuses the edge.
 5. Vertices the same way, the largest edge tolerance at each as the floor.
 
 The original tolerances are kept in the healer's properties (`orig_zone_tol_3d`) for the call, not

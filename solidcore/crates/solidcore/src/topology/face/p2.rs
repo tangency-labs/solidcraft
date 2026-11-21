@@ -3175,6 +3175,34 @@ fn spread_end_move(c: &mut BSplineCurve, target: Point3, edit_start: bool) -> Re
     Ok(())
 }
 
+/// The end (`edit_start`: the first) of the UV trim curve `curve` moved onto the UV point
+/// `uv` as [`fix_uv_trim_curves`] moves it: with the end's own weight for a rational
+/// curve, the control points next to the end moving part of the way.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a curve that is not a B-spline or line; those of the
+/// edit.
+pub(crate) fn edit_uv_end_point(
+    k: &Kernel,
+    curve: &mut Curve,
+    uv: Point2,
+    edit_start: bool,
+) -> Result<()> {
+    let weight = if curve.is_rational()? {
+        // (status ignored, as in `fix_uv_trim_curves`)
+        Some(curve.ends(k).map_or(crate::math::UNDEF_DOUBLE, |e| {
+            if edit_start {
+                e.start_weight
+            } else {
+                e.end_weight
+            }
+        }))
+    } else {
+        None
+    };
+    edit_end_point(curve, Point3::new(uv.x, uv.y, 0.0), edit_start, weight)
+}
+
 /// `SmBSplineCurve::EditEndPoint(point, bEditStart, pdWeight)` of a UV trim curve onto
 /// the UV point `uv`: `weight` is the end's weight for a rational curve, whose end
 /// control point upstream passes multiplied by it. Not upstream: a B-spline's control
