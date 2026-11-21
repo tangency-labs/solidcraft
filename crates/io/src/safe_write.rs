@@ -619,8 +619,11 @@ mod tests {
         let _ = child.wait();
         assert!(lock::held_elsewhere(&design, now).is_none(), "an ended process no longer does");
         // The same pid on another computer says nothing about that computer's process.
-        lock::write(&design, &lock::Lock { host: "WORKSHOP-PC".into(), ..held }).unwrap();
+        lock::write(&design, &lock::Lock { host: "WORKSHOP-PC".into(), ..held.clone() }).unwrap();
         assert!(lock::held_elsewhere(&design, now).is_some());
+        // Nor does another user's: their processes may be hidden from this one.
+        lock::write(&design, &lock::Lock { user: "someone-else".into(), ..held }).unwrap();
+        assert!(lock::held_elsewhere(&design, now).is_some(), "another user's process may be hidden");
         let _ = std::fs::remove_dir_all(&d);
     }
 

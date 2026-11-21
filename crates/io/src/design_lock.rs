@@ -98,8 +98,11 @@ impl Lock {
     ///
     /// A different live process may have taken over a dead one's pid; that lock is still treated
     /// as held, the safe side: the wait ends when the lock goes stale.
+    ///
+    /// Only a lock of this user counts: a system may hide other users' processes (Linux with
+    /// `hidepid`), so another user's process that can't be seen may still be running.
     pub fn owner_is_gone(&self) -> bool {
-        self.host == host_name() && self.pid != std::process::id() && process_running(self.pid) == Some(false)
+        self.host == host_name() && self.user == user_name() && self.pid != std::process::id() && process_running(self.pid) == Some(false)
     }
 
     /// Written by this process.
