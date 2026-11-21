@@ -338,10 +338,7 @@ fn coarse_accuracy_import(record: &Brep, accuracy: f64, spline_top: Option<usize
         let surface = brep::Surface::Spline {
             u_knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
             v_knots: vec![-0.016, -0.016, 1.0, 1.0],
-            points: [(0.0, 0.0), (0.5, 0.008), (1.0, 0.0)]
-                .into_iter()
-                .map(|(x, bump)| vec![[x, -0.016 + bump, 1.0], [x, 1.0 + bump, 1.0]])
-                .collect(),
+            points: [(0.0, 0.0), (0.5, 0.008), (1.0, 0.0)].into_iter().map(|(x, bump)| vec![[x, -0.016 + bump, 1.0], [x, 1.0 + bump, 1.0]]).collect(),
         };
         let (surface, _) = topology::surface(&surface).unwrap();
         GeomWriter::new(&mut w).surface(&surface)
