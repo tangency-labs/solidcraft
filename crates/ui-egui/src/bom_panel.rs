@@ -42,6 +42,14 @@ pub struct BomPanel {
 }
 
 impl BomPanel {
+    /// Pick row `i` (as a click on its item does): what it lists is its target, its fields what it says.
+    fn pick_row(&mut self, i: usize, row: &Value) {
+        self.picked = Some(i);
+        self.target = Some((row["components"].clone(), row["definition"].clone()));
+        self.fields = opened_fields(row);
+        self.opened = self.fields.clone();
+    }
+
     fn clear_pick(&mut self) {
         self.picked = None;
         self.target = None;
@@ -371,10 +379,7 @@ fn table(ui: &mut egui::Ui, d: &mut BomPanel, rows: &[Value], widths: [f32; 8]) 
                 if picked {
                     d.clear_pick();
                 } else {
-                    d.picked = Some(i);
-                    d.target = Some((row["components"].clone(), row["definition"].clone()));
-                    d.fields = opened_fields(row);
-                    d.opened = d.fields.clone();
+                    d.pick_row(i, row);
                 }
             }
             rest(ui, row);
@@ -573,10 +578,7 @@ mod tests {
         let row = h.app.session.execute("assembly.bom", &json!({})).unwrap()["rows"][0].clone();
         assert_eq!(row["components"], json!([0]), "the design is the part: {row}");
         let d = h.app.bom.as_mut().unwrap();
-        d.picked = Some(0);
-        d.target = Some((row["components"].clone(), row["definition"].clone()));
-        d.fields = super::opened_fields(&row);
-        d.opened = d.fields.clone();
+        d.pick_row(0, &row);
         d.fields[0] = "SP-1".into();
         d.fields[3] = "CRS, 16 ga".into();
         d.fields[4] = "Zinc plate, clear".into();
@@ -585,6 +587,39 @@ mod tests {
         assert_eq!(h.app.bom.as_ref().unwrap().error, None);
         let m = &h.app.session.doc.metadata;
         assert_eq!((m.part_number(), m.text("material"), m.text("finish")), (Some("SP-1"), Some("CRS, 16 ga"), Some("Zinc plate, clear")));
+    }
+
+    /// What Apply sent is what the design holds, so the next Apply compares with that, not with what the
+    /// row had when it was picked: material B applied to a row that opened with A, then A typed back,
+    /// puts A back. A refused Apply changes nothing the next one compares with.
+    #[test]
+    fn apply_compares_with_what_it_last_wrote_not_with_what_the_row_opened_with() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 3})).unwrap();
+        h.app.run("document.metadata.set", json!({"values": {"material": "A", "finish": "Mill finish"}})).unwrap();
+        open_report(&mut h);
+        h.frames(2);
+        let row = h.app.session.execute("assembly.bom", &json!({})).unwrap()["rows"][0].clone();
+        h.app.bom.as_mut().unwrap().pick_row(0, &row);
+        let material = |h: &Harness| h.app.session.doc.metadata.text("material").map(str::to_string);
+        let set = |h: &mut Harness, text: &str| {
+            h.app.bom.as_mut().unwrap().fields[3] = text.into();
+            h.frames(2);
+            h.step(&json!({"widget": "Apply"})).unwrap();
+        };
+        assert_eq!(h.app.bom.as_ref().unwrap().fields[3], "A");
+        set(&mut h, "B");
+        assert_eq!((material(&h), h.app.bom.as_ref().unwrap().error.clone()), (Some("B".into()), None));
+        set(&mut h, "A");
+        assert_eq!((material(&h), h.app.bom.as_ref().unwrap().error.clone()), (Some("A".into()), None), "A is written back");
+        // A refused write leaves the design, and what the next Apply compares with, as they were.
+        set(&mut h, &"x".repeat(5000));
+        assert!(h.app.bom.as_ref().unwrap().error.is_some());
+        assert_eq!(material(&h), Some("A".into()));
+        set(&mut h, "B");
+        assert_eq!((material(&h), h.app.bom.as_ref().unwrap().error.clone()), (Some("B".into()), None));
+        set(&mut h, "A");
+        assert_eq!(material(&h), Some("A".into()));
     }
 
     /// `column_widths` for `rows` in a grid `width` wide, and the measured width of each text.
