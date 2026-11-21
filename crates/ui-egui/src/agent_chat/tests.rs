@@ -1829,10 +1829,10 @@ fn new_chat_clears_everything_and_keeps_the_agent_and_mode() {
     assert!(!new_chat_needs_confirm(&app));
 }
 
-/// With a real ACP agent, New chat sends `session/new` on the same process (no restart).
+/// New chat releases an ACP adapter's sessions by ending it before starting its replacement.
 #[cfg(unix)]
 #[test]
-fn new_chat_with_an_acp_agent_opens_a_new_session_on_the_same_process() {
+fn new_chat_with_an_acp_agent_restarts_the_process() {
     let dir = std::env::temp_dir().join(format!("sc-agent-chat-new-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let log = dir.join("received.log");
@@ -1844,7 +1844,7 @@ while IFS= read -r line; do
   case "$line" in
     *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"agentInfo":{"name":"fake","version":"1"}}}\n' "$id" ;;
     *'"method":"session/new"'*) n=$((n+1)); printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s%s"}}\n' "$id" "$n" ;;
-    *'"method":"session/prompt"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id" ;;
+    *'"method":"session/prompt"'*) case "$line" in *stalled*) ;; *) printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id" ;; esac ;;
   esac
 done
 "#;
@@ -1870,14 +1870,23 @@ done
     new_chat(&mut app);
     assert!(app.agent_chat.items.is_empty());
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
-    assert_eq!(app.agent_chat.backend.as_ref().and_then(|b| b.pid()), pid, "same process");
+    assert_ne!(app.agent_chat.backend.as_ref().and_then(|b| b.pid()), pid, "a fresh process owns the new chat");
     send(&mut app, &ctx, "again".into());
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
     let log_text = std::fs::read_to_string(&log).unwrap();
     let methods: Vec<String> =
         log_text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter_map(|v| v["method"].as_str().map(String::from)).collect();
-    assert_eq!(methods, ["initialize", "session/new", "session/prompt", "session/new", "session/prompt"]);
-    assert!(log_text.lines().last().is_some_and(|l| l.contains("\"s2\"")), "the prompt goes to the new session: {log_text}");
+    assert_eq!(methods, ["initialize", "session/new", "session/prompt", "session/cancel", "initialize", "session/new", "session/prompt"]);
+    assert!(log_text.lines().last().is_some_and(|l| l.contains("\"s1\"")), "the prompt goes to the replacement's session: {log_text}");
+    send(&mut app, &ctx, "stalled".into());
+    assert_eq!(app.agent_chat.state(), State::Busy);
+    new_chat(&mut app);
+    new_chat(&mut app);
+    until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    assert!(!app.agent_chat.discard_end, "even repeated New chat retires the cancelled turn");
+    assert!(app.agent_chat.items.is_empty(), "the cancelled conversation contributes no late notices");
+    send(&mut app, &ctx, "after cancellation".into());
+    until(&mut app, &|a| a.agent_chat.state() == State::Ready);
     disconnect(&mut app);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1902,7 +1911,8 @@ while IFS= read -r line; do
 done
 "#;
     let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
-    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let bridge = acp::McpBridge { cli: dir.join("solidcraft-cli"), port: 7878 };
+    let start = backend::StartContext { cwd: dir.clone(), bridge: Some(bridge.clone()), tools: None, wake: Box::new(|| {}) };
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
     app.agent_chat.state = Some(State::Starting);
@@ -1929,6 +1939,8 @@ done
     let notes = [acp::SYSTEM_NOTE.to_string(), acp::system_note("Print flat side down.")];
     for (session, note) in sessions.iter().zip(&notes) {
         assert_eq!(session.pointer("/params/systemPrompt/content/0/text").and_then(Value::as_str), Some(note.as_str()));
+        assert_eq!(session["params"]["cwd"], dir.to_string_lossy().as_ref());
+        assert_eq!(session["params"]["mcpServers"], json!([bridge.to_json()]));
     }
     disconnect(&mut app);
     let _ = std::fs::remove_dir_all(&dir);
