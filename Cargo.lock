@@ -6451,6 +6451,7 @@ dependencies = [
  "arboard",
  "egui",
  "egui-wgpu",
+ "getrandom 0.2.17",
  "image",
  "log",
  "lopdf",

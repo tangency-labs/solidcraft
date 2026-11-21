@@ -111,7 +111,9 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "parts.insert" | "parts.fastener" => &[("point", Make), ("direction", Dir)],
         "appearance.assign" => &[("faces", Picks), ("bodies", Body), ("body", Body)],
         "solid.move" => &[("bodies", Body), ("translate", Delta), ("axis", Dir), ("origin", Moved)],
-        "solid.combine" => &[("target", Body), ("tools", Body)],
+        // A combine's tools keep the names of further placements (`Drill (Hinge:2)`): each cuts
+        // where its own occurrence puts it, not at the component's first placement (#20040).
+        "solid.combine" => &[("target", Body)],
         "solid.remove" | "solid.bounding_solid" | "material.assign" => &[("bodies", Body)],
         _ => &[],
     }
