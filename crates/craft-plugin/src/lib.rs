@@ -343,6 +343,10 @@ pub trait PluginHost {
     fn publish_committed(&mut self) -> Result<()> {
         Ok(())
     }
+    /// Called instead of [`PluginHost::publish_committed`] when the approved file writes could not
+    /// be published after a commit: drop what was staged for publication. The transaction has
+    /// already committed, so it is not rolled back. Nothing to do by default.
+    fn discard_committed(&mut self) {}
     fn rollback_transaction(&mut self) -> Result<()>;
     fn granted_folders(&self) -> Vec<FileGrant>;
     /// Read-only roots for annotated entry fields, already authorised by the app for this call.

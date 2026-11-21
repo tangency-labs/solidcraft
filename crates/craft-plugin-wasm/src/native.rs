@@ -1008,8 +1008,9 @@ fn run_mode<H: PluginHost + 'static>(
                     permission: format!("user-storage: the approved files were published but the settings were not saved: {error}"),
                 }),
                 Err(error) => {
-                    // Files may have changed, but the settings stay as they were.
-                    let _ = state.host.rollback_transaction();
+                    // Files may have changed, but the settings stay as they were. The transaction
+                    // has committed, so only what was staged for publication is dropped.
+                    state.host.discard_committed();
                     Err(error)
                 }
             },

@@ -881,6 +881,9 @@ impl PluginHost for SolidCraftHost {
         }
         Ok(())
     }
+    fn discard_committed(&mut self) {
+        self.user_data = None;
+    }
     fn rollback_transaction(&mut self) -> craft_plugin::Result<()> {
         self.transaction = None;
         self.user_data = None;
