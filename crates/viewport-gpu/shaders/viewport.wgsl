@@ -157,13 +157,11 @@ fn palette(i: u32) -> vec4<f32> {
     return unpack_color(palette_entry(i).x);
 }
 
-fn to_linear(c: vec3<f32>) -> vec3<f32> {
-    return select(c, pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4)), c > vec3<f32>(0.04045));
-}
-
+/// A display colour as the target wants it: decoded to linear light for an sRGB target, whose
+/// encoding then gives the same bytes back.
 fn out_color(c: vec4<f32>) -> vec4<f32> {
     if (u.back.w > 0.5) {
-        return vec4<f32>(to_linear(c.rgb), c.a);
+        return vec4<f32>(srgb_decode(c.rgb), c.a);
     }
     return c;
 }
@@ -877,7 +875,7 @@ fn lit(i: TOut, visibility: f32) -> vec4<f32> {
     return lit_color(i, visibility, i.c, true);
 }
 
-/// sRGB to linear light, exact (the straight segment too, which `to_linear` leaves out).
+/// sRGB to linear light, exact, with the straight segment near black.
 fn srgb_decode(c: vec3<f32>) -> vec3<f32> {
     return select(c / 12.92, pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4)), c > vec3<f32>(0.04045));
 }

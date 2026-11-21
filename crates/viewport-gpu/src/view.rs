@@ -7093,6 +7093,33 @@ mod glass_tests {
         assert_ne!(middle_pixel(scene(1.5, 0.0, true), false), Some(red), "no hidden marker where it is seen");
     }
 
+    /// A flat colour comes out as the same bytes whether the window's surface is sRGB or not,
+    /// near black too: the shader decodes for an sRGB surface with sRGB's straight segment, which
+    /// the surface's encoding then undoes. Without that segment, 1/255 showed as 13/255.
+    /// Skipped without a GPU.
+    #[test]
+    fn a_dark_colour_shows_the_same_on_an_srgb_surface() {
+        let marker = |grey: u8| {
+            let mut sc = GpuScene::with_palette(Palette::with_stable(vec![[grey, grey, grey, 255]]));
+            let mut b = BlockBuilder::default();
+            b.marker([0.0, 0.0, 0.0], PaletteIndex(0), 8.0, false);
+            sc.blocks.push(SceneBlock { key: 1, bytes: b.freeze() });
+            sc
+        };
+        for grey in [1u8, 3, 8, 10, 11, 64, 128, 250] {
+            let on = |format| middle_pixel_on(format, marker(grey), GpuScene::default(), false, 1, [0.0; 4]);
+            let Some(plain) = on(wgpu::TextureFormat::Rgba8Unorm) else {
+                eprintln!("skipping: no GPU adapter");
+                return;
+            };
+            let srgb = on(wgpu::TextureFormat::Rgba8UnormSrgb).unwrap_or_default();
+            assert_eq!(plain[..3], [grey; 3], "the plain surface shows the colour as given");
+            for (s, p) in srgb.iter().zip(&plain).take(3) {
+                assert!(s.abs_diff(*p) <= 1, "{grey}/255 on an sRGB surface: {srgb:?}, on a plain one: {plain:?}");
+            }
+        }
+    }
+
     /// A PBR triangle seen from its back: black with a one-sided material (no light reaches the
     /// side its normal turns from), lit as its front with a two-sided one (an open sheet's back).
     #[test]
@@ -7225,10 +7252,14 @@ mod glass_tests {
 
     /// [`middle_pixel_in_slots_with_samples`] with a section cut (`Frame::clip`).
     fn middle_pixel_cut(scene: GpuScene, sketch: GpuScene, oit: bool, samples: u32, clip: [f32; 4]) -> Option<[u8; 4]> {
+        middle_pixel_on(wgpu::TextureFormat::Rgba8Unorm, scene, sketch, oit, samples, clip)
+    }
+
+    /// [`middle_pixel_cut`] into a target of `format`.
+    fn middle_pixel_on(format: wgpu::TextureFormat, scene: GpuScene, sketch: GpuScene, oit: bool, samples: u32, clip: [f32; 4]) -> Option<[u8; 4]> {
         const SIZE: u32 = 64;
         let (_, device, queue) = crate::open_headless(crate::test_env::policy()).ok()?;
         let depth = crate::depth_format(&device, true);
-        let format = wgpu::TextureFormat::Rgba8Unorm;
         let mut r = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples, tess: false, oit: false, edges: false }, None);
         assert!(r.oit.is_some(), "this device does order-independent transparency");
         if !oit {
