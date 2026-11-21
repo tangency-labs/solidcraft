@@ -42,7 +42,11 @@ quantity and press Enter: four holes, evenly round the tube.
 
 **6. Change it.** Double-click **Extrude1** on the timeline: the model rolls back to it and its
 dialog opens. Type 20 and press Enter. Everything after it (shell, fillet, hole and pattern)
-rebuilds on the taller block.
+rebuilds on the taller block. The Extrude window's **Name** row (the first one) shows what the
+feature is called, the name it will get while you make it: type another to name it yourself, or
+change it when editing (the rename is a step of its own to undo; a name another feature has is
+refused). Left blank it keeps the default name. Right-click › Rename (F2) on the timeline does
+the same for any feature.
 
 <video src="../media/features/edit.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Double-clicking Extrude1 on the timeline, changing its distance to 20: the shell, fillet, hole and pattern rebuild"></video>
 
