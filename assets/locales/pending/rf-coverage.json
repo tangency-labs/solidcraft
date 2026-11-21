@@ -16,7 +16,8 @@
     "ui.rf_coverage_p5": "Weakest 5%",
     "ui.rf_coverage_slice": "Slice height",
     "ui.rf_coverage_video": "−67 dBm or better",
-    "ui.rf_coverage_walls": "Walls from"
+    "ui.rf_coverage_walls": "Walls from",
+    "ui.rf_coverage_short": "Wi-Fi"
   },
   "ar": {
     "cmd.inspect.rf_coverage": "تغطية Wi-Fi",
@@ -35,7 +36,8 @@
     "ui.rf_coverage_p5": "أضعف 5%",
     "ui.rf_coverage_slice": "ارتفاع المقطع",
     "ui.rf_coverage_video": "−67 dBm أو أفضل",
-    "ui.rf_coverage_walls": "الجدران من"
+    "ui.rf_coverage_walls": "الجدران من",
+    "ui.rf_coverage_short": "Wi-Fi"
   },
   "he": {
     "cmd.inspect.rf_coverage": "כיסוי Wi-Fi",
@@ -54,7 +56,8 @@
     "ui.rf_coverage_p5": "5% החלשים ביותר",
     "ui.rf_coverage_slice": "גובה החתך",
     "ui.rf_coverage_video": "‎−67 dBm או טוב יותר",
-    "ui.rf_coverage_walls": "קירות מתוך"
+    "ui.rf_coverage_walls": "קירות מתוך",
+    "ui.rf_coverage_short": "Wi-Fi"
   },
   "ja": {
     "cmd.inspect.rf_coverage": "Wi-Fi カバレッジ",
@@ -73,7 +76,8 @@
     "ui.rf_coverage_p5": "最も弱い 5%",
     "ui.rf_coverage_slice": "切断高さ",
     "ui.rf_coverage_video": "−67 dBm 以上",
-    "ui.rf_coverage_walls": "壁の対象"
+    "ui.rf_coverage_walls": "壁の対象",
+    "ui.rf_coverage_short": "Wi-Fi"
   },
   "vi": {
     "cmd.inspect.rf_coverage": "Vùng phủ Wi-Fi",
@@ -92,7 +96,8 @@
     "ui.rf_coverage_p5": "5% yếu nhất",
     "ui.rf_coverage_slice": "Độ cao lát cắt",
     "ui.rf_coverage_video": "−67 dBm trở lên",
-    "ui.rf_coverage_walls": "Tường lấy từ"
+    "ui.rf_coverage_walls": "Tường lấy từ",
+    "ui.rf_coverage_short": "Wi-Fi"
   },
   "zh": {
     "cmd.inspect.rf_coverage": "Wi-Fi 覆盖",
@@ -111,7 +116,8 @@
     "ui.rf_coverage_p5": "最弱 5%",
     "ui.rf_coverage_slice": "切片高度",
     "ui.rf_coverage_video": "−67 dBm 或更好",
-    "ui.rf_coverage_walls": "墙体来源"
+    "ui.rf_coverage_walls": "墙体来源",
+    "ui.rf_coverage_short": "Wi-Fi"
   },
   "de": {
     "cmd.inspect.rf_coverage": "WLAN-Abdeckung",
@@ -130,7 +136,8 @@
     "ui.rf_coverage_p5": "Schwächste 5 %",
     "ui.rf_coverage_slice": "Schnitthöhe",
     "ui.rf_coverage_video": "−67 dBm oder besser",
-    "ui.rf_coverage_walls": "Wände aus"
+    "ui.rf_coverage_walls": "Wände aus",
+    "ui.rf_coverage_short": "WLAN"
   },
   "ko": {
     "cmd.inspect.rf_coverage": "Wi-Fi 커버리지",
@@ -149,6 +156,7 @@
     "ui.rf_coverage_p5": "가장 약한 5%",
     "ui.rf_coverage_slice": "절단 높이",
     "ui.rf_coverage_video": "−67 dBm 이상",
-    "ui.rf_coverage_walls": "벽 대상"
+    "ui.rf_coverage_walls": "벽 대상",
+    "ui.rf_coverage_short": "Wi-Fi"
   }
 }

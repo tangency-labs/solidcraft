@@ -692,6 +692,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("inspect.draft", "Draft"),
     ("inspect.interference", "Interference"),
     ("inspect.isocurve", "Isocurve"),
+    ("inspect.rf_coverage", "Wi-Fi"),
     ("inspect.section", "Section"),
     ("inspect.zebra", "Zebra"),
     ("joint.as_built", "As-Built"),
