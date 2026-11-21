@@ -1713,7 +1713,7 @@ fn coil_edits_keep_whole_sketch_profiles_until_the_user_picks_them_explicitly() 
     assert_eq!(edit_profiles(&d), json!([0]));
 
     let mut d = for_feature(&h.app, feature, None).unwrap();
-    d.remove_listed(s, 0, &profile);
+    d.remove_listed(s, 0, 0, &profile);
     assert!(d.profile_selection_changed);
 }
 
@@ -1815,7 +1815,7 @@ fn coil_and_revolve_keep_the_owner_of_a_collinear_axis() {
 
 #[test]
 fn coil_from_a_profile_hides_the_primitive_section() {
-    let h = fixture();
+    let mut h = fixture();
     let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
     let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
     let primitive_options = [("section", json!("square")), ("section_position", json!("outside")), ("start_angle", json!("30 deg"))];
@@ -1836,9 +1836,25 @@ fn coil_from_a_profile_hides_the_primitive_section() {
     assert!(p.get("revolutions").is_some() && p.get("pitch").is_some(), "{p}");
     assert!(p.get("operation").is_some(), "{p}");
     assert_eq!((p["clockwise"].as_bool(), p["reversed"].as_bool()), (Some(true), Some(true)));
+    // The rows that would change nothing are not shown; the axis and both directions are.
+    let section_rows = ["Section", "Section position", "Start angle"];
+    h.app.dialog = Some(d);
+    h.frames(2);
+    for row in section_rows {
+        assert!(scenario::rect_of(&format!("dialog:row:{row}")).is_none(), "{row} is hidden with a profile");
+    }
+    assert!(scenario::rect_of("dialog:row:ui.direction").is_some());
+    for option in ["Clockwise", "Reverse Direction"] {
+        assert!(scenario::handle_at(&format!("dialog:{option}")).is_some(), "{option} stays with a profile");
+    }
 
-    d.inputs[0].items.clear();
-    let commands = apply_commands(&h.app, &d).unwrap();
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.frames(2);
+    for row in section_rows {
+        assert!(scenario::rect_of(&format!("dialog:row:{row}")).is_some(), "{row} is back without a profile");
+    }
+    let d = h.app.dialog.as_ref().unwrap();
+    let commands = apply_commands(&h.app, d).unwrap();
     let p = &commands[0].1;
     assert!(p.get("sketch").is_none(), "{p}");
     assert!(p.get("diameter").is_some() && p.get("section_size").is_some(), "{p}");

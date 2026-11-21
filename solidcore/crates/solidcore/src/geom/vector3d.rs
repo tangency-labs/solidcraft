@@ -179,8 +179,9 @@ impl Vec3 {
     /// constructor).
     pub const UNDEF: Self = Self::new(UNDEF_DOUBLE, UNDEF_DOUBLE, UNDEF_DOUBLE);
 
-    /// Orient an undirected axis toward the positive side of its largest component.
-    /// Components within 1e-9 of the largest magnitude tie in X, Y, Z order.
+    /// Orient an undirected axis toward the positive side of its largest component, keeping
+    /// its length. Components within a relative 1e-9 of the largest magnitude tie in X, Y, Z
+    /// order, at any scale, so a zero component never decides; the zero vector stays as it is.
     #[must_use]
     pub fn canonical_axis_direction(self) -> Self {
         let coordinates = self.to_array();
@@ -189,7 +190,7 @@ impl Vec3 {
             .fold(0.0_f64, |size, coordinate| size.max(coordinate.abs()));
         match coordinates
             .iter()
-            .find(|coordinate| coordinate.abs() >= largest - 1e-9)
+            .find(|coordinate| coordinate.abs() >= largest * (1.0 - 1e-9))
         {
             Some(coordinate) if *coordinate < 0.0 => -self,
             _ => self,
@@ -1281,6 +1282,33 @@ mod tests {
         ] {
             assert_eq!(v.length_and_unit(), None, "{v:?}");
         }
+    }
+
+    #[test]
+    fn a_canonical_axis_direction_is_one_orientation_at_any_scale() {
+        let half = core::f64::consts::FRAC_1_SQRT_2;
+        // unit vectors: the largest component turns positive, the first of equal ones decides
+        for (v, expected) in [
+            (Vec3::new(0.0, -1.0, 0.0), Vec3::Y),
+            (Vec3::new(0.0, 0.0, 1.0), Vec3::Z),
+            (Vec3::new(half, -half, 0.0), Vec3::new(half, -half, 0.0)),
+            (Vec3::new(-half, half, 0.0), Vec3::new(half, -half, 0.0)),
+        ] {
+            assert_eq!(v.canonical_axis_direction(), expected, "{v:?}");
+        }
+        // X within a relative 1e-12 of the larger Y still ties first, whichever way the axis points
+        let (x, y) = (half, half * (1.0 + 1e-12));
+        for v in [Vec3::new(-x, y, 0.0), Vec3::new(x, -y, 0.0)] {
+            assert_eq!(v.canonical_axis_direction(), Vec3::new(x, -y, 0.0), "{v:?}");
+        }
+        // below 1e-9 a zero component never decides; the length is kept
+        for (y, z) in [(1e-10, 0.0), (0.0, 1e-200), (0.0, 5e-324)] {
+            for sign in [1.0, -1.0] {
+                let v = Vec3::new(0.0, sign * y, sign * z);
+                assert_eq!(v.canonical_axis_direction(), Vec3::new(0.0, y, z), "{v:?}");
+            }
+        }
+        assert_eq!(Vec3::ZERO.canonical_axis_direction(), Vec3::ZERO);
     }
 
     #[test]

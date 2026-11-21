@@ -881,12 +881,14 @@ fn round_size_row(ui: &mut egui::Ui, fields: &mut [(&'static str, String)]) {
 
 /// The coil's axis, section, where the section sits on the diameter, the way it turns and where
 /// it starts. A default stays out of the parameters, so OK on an unchanged edit keeps the coil.
+/// A sketch profile is the section, so the section rows are hidden then.
 fn coil_rows(
     ui: &mut egui::Ui,
     extra: &mut serde_json::Map<String, Value>,
     placed_axis: Option<Vec3>,
     picked_axis: bool,
     unresolved_axis: bool,
+    from_sketch: bool,
 ) -> bool {
     let placed_axis = placed_axis.map(pt);
     let mut axis = if unresolved_axis {
@@ -904,6 +906,13 @@ fn coil_rows(
             extra.insert("axis".into(), value);
         }
     }
+    let enter = !from_sketch && coil_section_rows(ui, extra);
+    extra_options(ui, "coil_options", extra, &[("Clockwise", "clockwise"), ("Reverse Direction", "reversed")]);
+    enter || axis_enter
+}
+
+/// The primitive coil's own section: its shape, where it sits on the diameter and where it starts.
+fn coil_section_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
     const POSITIONS: [(&str, &str); 3] = [("Inside", "inside"), ("Center", "center"), ("Outside", "outside")];
     form_row(ui, "Section", |ui| extra_segments(ui, extra, "section", &[("Circular", "circular"), ("Square", "square")]));
     form_row(ui, "Section position", |ui| {
@@ -931,8 +940,7 @@ fn coil_rows(
             extra.insert("start_angle".into(), json!(angle));
         }
     }
-    extra_options(ui, "coil_options", extra, &[("Clockwise", "clockwise"), ("Reverse Direction", "reversed")]);
-    enter || axis_enter
+    enter
 }
 
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
@@ -1220,7 +1228,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
             if *cmd == "solid.coil" {
                 let picked_axis = d.inputs.get(1).is_some_and(|input| !input.items.is_empty());
-                enter |= coil_rows(ui, &mut d.extra, at.and_then(|(_, normal)| normal), picked_axis, unresolved_axis);
+                enter |= coil_rows(ui, &mut d.extra, at.and_then(|(_, normal)| normal), picked_axis, unresolved_axis, from_sketch);
             }
             if at.is_none() {
                 enter |= crate::primitive_placement::rows(ui, &app.session, cmd, &mut d.extra);
