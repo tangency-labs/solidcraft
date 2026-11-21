@@ -26,7 +26,9 @@
 //! discontinuities clamp the domain. Upstream's answer there depends on the history (its
 //! arrays are empty until the tree is built); the port's must not, so every
 //! `domhistNNNN` expectation is the answer without history (`plan/findings/`, "surface
-//! cache history").
+//! cache history"). The exception is a history step that fails, so the query never runs:
+//! its record is `-1` (`DOM_CONT_HISTORY_FAILED`). Only `GetTree` of a curve-bounded
+//! surface fails there (0052, 0074, 0075); any other failed step is a harness error.
 //!
 //! Deferred cases: the paths into unported units (every surface cache build needs
 //! `SmSurface::CalculateContinuities`, `surface.surface_p6`: `Cache`, `BBox` of
@@ -54,7 +56,6 @@ use solidcore::surface::surface::p1::{
 use solidcore::surface::surface::p2::IsoCurveLengthIntegrand;
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::surface::surface_cache::p1::SurfaceCache;
-use solidcore::error::SM_ERR;
 use solidcore::SolidError;
 
 use super::surface_surface_cache_p1::{
@@ -685,7 +686,15 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                 match built {
                     Ok(()) => {}
                     Err(e) if e.is_unported() => return Ok(Err(e)),
-                    Err(_) => return Ok(Ok(vec![f64::from(SM_ERR)])),
+                    // a failed history step is not a failed query: its own marker. Only a
+                    // curve-bounded surface is expected to fail here (its `GetTree` needs the
+                    // knots it does not answer, as it did before #20054: #20163)
+                    Err(_) if matches!(s.kind(), SurfaceKind::CurveBounded(_)) => {
+                        return Ok(Ok(vec![DOM_CONT_HISTORY_FAILED]));
+                    }
+                    Err(e) => {
+                        return Err(harness(format!("dom_cont: a history step failed: {e}")));
+                    }
                 }
             }
             k.context.set_doing_boolean(matches!(history, 1 | 2));
@@ -737,6 +746,11 @@ const MIN_SIL_ANG: f64 = 1e-3;
 const MAX_CONTINUITY: u8 = 13;
 /// The longest cache history of a `dom_cont` case.
 const MAX_DOM_CONT_HISTORY: u8 = 3;
+
+/// The record of a `DomCont` case whose history step (the cache request or its
+/// `GetTree`) failed, so the query never ran: distinct from every status. Only a
+/// curve-bounded surface's `GetTree` fails there; any other failure is a harness error.
+const DOM_CONT_HISTORY_FAILED: f64 = -1.0;
 
 fn fins(vs: &[f64]) -> bool {
     vs.iter().all(|&v| fin(v))

@@ -3487,8 +3487,8 @@ pub fn mate_lamina_edge_to_surface(
                     true,
                 )?
             } else {
-                // the face's surface reaches its face's cache (smsurf_GetSurfaceCache),
-                // made on the B-rep: an exact evaluation copy of the surface meanwhile
+                // the face's surface (an exact evaluation copy, as the B-rep is borrowed
+                // meanwhile); the lift reads its continuities and makes no cache
                 let surface = b
                     .face(face)?
                     .surface

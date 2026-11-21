@@ -518,8 +518,11 @@ mod tests {
     /// without loop uses, as the merged face mid-Boolean is) the context reader
     /// ([`SurfaceSolveContext::surface_cache_without_get_tree`]) and the live reader
     /// (`live_face_fast_drop_test`) both see point testing on while the tree is
-    /// deferred, as upstream does (main's answer in the rollover case). (This face's
-    /// own tree build fails: no edge use grows its face domain.)
+    /// deferred, as upstream does (main's answer in the rollover case). Outside a
+    /// Boolean operation both readers make the cache with its tree, so both see point
+    /// testing off. The test pins what the readers do and that they agree; which value
+    /// the bit should have on a face without loops is the open question of the
+    /// point-test follow-up issue.
     #[test]
     fn fast_drop_point_test_on_a_face_without_loops_while_the_tree_is_deferred() {
         let mut k = Kernel::default();
@@ -580,6 +583,41 @@ mod tests {
         assert!(state.tree().is_none());
         assert!(on(&state));
         assert_eq!(live_on, Some(on(&state)));
+        drop(services);
+
+        // outside a Boolean operation, on fresh B-reps (no cache kept from the first half):
+        // both readers make the face's cache with its tree, whose build on a face without
+        // loops leaves it untrimmed and turns point testing off
+        let mut k = Kernel::default();
+        let (mut b, face) = loopless(&mut k);
+        let (mut live_b, _) = loopless(&mut k);
+        let surface = b
+            .face(face)
+            .unwrap()
+            .surface
+            .as_ref()
+            .unwrap()
+            .clone_for_evaluation()
+            .unwrap();
+        let mut live_on = None;
+        crate::intersect::point_class::live_face_fast_drop_test(
+            &k,
+            &mut live_b,
+            face,
+            &mut live_on,
+            uv,
+            1e-6,
+        )
+        .unwrap();
+        let mut services = BrepFaceServices::new(&mut b);
+        let state = services
+            .surface_cache_without_get_tree(&k, &surface, handle)
+            .unwrap();
+        assert!(state.tree().is_some());
+        assert!(!state.is_trimmed());
+        assert!(!state.point_test_enabled);
+        assert!(!on(&state));
+        assert_eq!(live_on, Some(false));
     }
 
     #[test]

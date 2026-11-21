@@ -71,10 +71,10 @@
 //!   (`pMatchedOrigFace->GetContext()`); upstream's three possible B-reps reduce to
 //!   one target B-rep.
 //!   `CalcBlendingRail` takes the target as `&mut Brep`: the original face's surface
-//!   is solved, lifted and dropped onto as a copy through the B-rep's
-//!   `BrepFaceServices` (handle `CacheObject::Surface(face)`), so its surface cache is
-//!   the face's trimmed cache, made on the B-rep as upstream's `smsurf_GetSurfaceCache`
-//!   makes it through `GetFace()`.
+//!   is solved and dropped onto as a copy through the B-rep's `BrepFaceServices`
+//!   (handle `CacheObject::Surface(face)`), so its surface cache is the face's trimmed
+//!   cache, made on the B-rep as upstream's `smsurf_GetSurfaceCache` makes it through
+//!   `GetFace()`. Its lift reads the surface's own continuities and makes no cache.
 //! - **The piece inside a rail (not upstream, WR-611, the fork's de4dae6; #15129).**
 //!   `TrimOriginalSurfaces` deletes the one piece of the original face whose binormal
 //!   at the fillet edge's dropped midpoint makes the largest dot with the fillet's side

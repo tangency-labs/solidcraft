@@ -17,10 +17,11 @@
 //!   [`PlanarSectionOptions`] and `Option` fields of the result; the curves are owned
 //!   values, so upstream's delete lists and cleanup objects have no counterpart. The
 //!   faces are [`FaceId`]s.
-//! - **Face context.** A face's surface is intersected, dropped onto and lifted as an
+//! - **Face context.** A face's surface is intersected and dropped onto as an
 //!   evaluation copy (keeping its owner and cache slot) through the B-rep's
 //!   [`BrepFaceServices`], so its trimmed cache reaches the face as upstream's does
-//!   through `GetFace()`. `smsurf_GetSurfaceCache(this)` before the intersection is that
+//!   through `GetFace()`; its lift reads the surface's own continuities and makes no
+//!   cache. `smsurf_GetSurfaceCache(this)` before the intersection is that
 //!   context's [`SurfaceSolveContext::surface_cache_without_get_tree`] (upstream only reads the
 //!   cache's continuity there, and ignores it).
 //! - **Statuses.** A face whose surface section fails is skipped, as upstream's
