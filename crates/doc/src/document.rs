@@ -854,6 +854,21 @@ impl AlignFrame {
             _ => Err(DocError::Invalid("the frame has no finite origin and direction".into())),
         }
     }
+
+    /// The whole frame in `st` (its component's coordinates, columns x, y, z, origin): a joint
+    /// origin's own, a sketch point's or curve's with z along the sketch's normal and x along the
+    /// sketch's x.
+    pub fn resolve_frame(&self, doc: &Document, st: &crate::ModelState) -> Result<crate::Mat> {
+        let (o, z, x) = match self {
+            AlignFrame::Origin { origin } => return crate::joints::resolve_origin(doc, st, origin),
+            AlignFrame::SketchPoint { sketch, .. } | AlignFrame::SketchCurve { sketch, .. } => {
+                let (o, z) = self.resolve(doc, st)?;
+                let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
+                (o, z, ss.plane.x)
+            }
+        };
+        crate::joints::frame_of(o, z, Some(x)).ok_or_else(|| DocError::Invalid("the frame has no finite origin and direction".into()))
+    }
 }
 
 /// The side of a fold's line that stays put: left or right of the line as drawn (from its first
@@ -2500,6 +2515,28 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         seat: Option<AlignFrame>,
     },
+    /// Amalgamate (#18799): places a tool, the bodies an Amalgam Tag labels in another design,
+    /// at each seed (a frame found again on the model at every evaluation). At every seed the
+    /// tool's Remove bodies are cut from `remove_from` first; only then are its Add bodies joined
+    /// into `add_to`. Each role the tool has needs its targets ([`crate::amalgam`]).
+    Amalgamate {
+        tool: Box<crate::amalgam::AmalgamTool>,
+        seeds: Vec<AlignFrame>,
+        /// Quarter turns about each seed's z (0 to 3), the same for every copy.
+        #[serde(default, skip_serializing_if = "is_zero_u32")]
+        turns: u32,
+        /// Turn every copy over, its z against the seed's.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        remove_from: Vec<BodyName>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        add_to: Vec<BodyName>,
+    },
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
 }
 
 /// A fillet corner set back: the vertex at `vertex`, where every edge is rounded, has its corner
@@ -3307,6 +3344,7 @@ impl FeatureKind {
             FeatureKind::MeshConvert { .. } => "MeshConvertFeature",
             FeatureKind::Repair { .. } => "RepairFeature",
             FeatureKind::AmalgamTag { .. } => "AmalgamTagFeature",
+            FeatureKind::Amalgamate { .. } => "AmalgamateFeature",
         }
     }
 
@@ -3395,6 +3433,7 @@ impl FeatureKind {
             FeatureKind::MeshImport { .. } => "mesh_import",
             FeatureKind::Repair { .. } => "repair",
             FeatureKind::AmalgamTag { .. } => "amalgam_tag",
+            FeatureKind::Amalgamate { .. } => "amalgamate",
         }
     }
 
@@ -3482,6 +3521,7 @@ impl FeatureKind {
             "MeshConvertFeature" => "mesh_convert",
             "RepairFeature" => "repair",
             "AmalgamTagFeature" => "amalgam_tag",
+            "AmalgamateFeature" => "amalgamate",
             _ => return None,
         })
     }
@@ -3573,6 +3613,7 @@ impl FeatureKind {
             FeatureKind::MeshConvert { .. } => "ConvertMesh",
             FeatureKind::Repair { .. } => "Repair",
             FeatureKind::AmalgamTag { .. } => "Amalgam Tag",
+            FeatureKind::Amalgamate { .. } => "Amalgamate",
         }
     }
 }

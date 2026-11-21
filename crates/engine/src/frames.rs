@@ -116,6 +116,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.combine" => &[("target", Body)],
         "solid.remove" | "solid.bounding_solid" | "material.assign" => &[("bodies", Body)],
         "solid.amalgam_tag" => &[("remove", Body), ("add", Body), ("new", Body)],
+        "solid.amalgamate" => &[("remove_from", Body), ("add_to", Body)],
         _ => &[],
     }
 }

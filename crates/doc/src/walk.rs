@@ -52,6 +52,8 @@ impl Walk for solidcraft_sketch::PatternAlignment {}
 impl Walk for solidcraft_kernel::StepNode {}
 // An import kept as records holds no expressions, references or names to walk.
 impl Walk for Option<std::sync::Arc<solidcraft_kernel::ImportRecords>> {}
+// What an Amalgamate took from its tool design names nothing of this design (#18799).
+impl Walk for Box<crate::amalgam::AmalgamTool> {}
 impl Walk for crate::document::Operation {}
 impl Walk for solidcraft_kernel::Continuity {}
 impl Walk for solidcraft_kernel::DraftCorner {}

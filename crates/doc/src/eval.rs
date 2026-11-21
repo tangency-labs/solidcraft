@@ -5748,6 +5748,67 @@ fn empty_boolean_targets(doc: &Document, state: &ModelState, f: &Feature, tools:
 }
 
 /// [`apply_op`] with tools whose lineage is known: the bodies it makes or changes keep theirs.
+/// Amalgamate (#18799): the tool's bodies placed at every seed, where the seeds are now (each
+/// copy turned as the feature says), its Remove copies cut from `remove_from` first and only then
+/// its Add copies joined into `add_to`. Each copy's faces are named after its seed.
+#[allow(clippy::too_many_arguments)]
+fn eval_amalgamate(
+    doc: &Document,
+    st: &mut ModelState,
+    f: &Feature,
+    tool: &crate::amalgam::AmalgamTool,
+    seeds: &[crate::AlignFrame],
+    turns: u32,
+    flip: bool,
+    remove_from: &[crate::BodyName],
+    add_to: &[crate::BodyName],
+) -> Result<()> {
+    use crate::amalgam::{Role, check_placement, copy_roles, seed_key, turn};
+    check_placement(tool, seeds.len(), turns, remove_from, add_to)?;
+    let records = &tool.records;
+    let imp = kernel::records_import_shared(records)?;
+    if imp.bodies.len() != tool.roles.len() {
+        return Err(DocError::Invalid("the tool's bodies and their roles don't match".into()));
+    }
+    let digest = crate::config::payload_digest(&kernel::records_text(records)?);
+    // Each seed's frame, as the model is before this feature, and its name.
+    let turned = turn(turns, flip);
+    let mut placed: Vec<(crate::Mat, String)> = Vec::with_capacity(seeds.len());
+    for seed in seeds {
+        let key = seed_key(seed)?;
+        if placed.iter().any(|(_, k)| *k == key) {
+            return Err(DocError::Invalid(format!("two seeds are at the same place ({key})")));
+        }
+        placed.push((crate::mat_mul(&seed.resolve_frame(doc, st)?, &turned), key));
+    }
+    let copies = |role: Role| -> Result<Vec<Traced>> {
+        let mut out = Vec::new();
+        for (k, (read, r)) in imp.bodies.iter().zip(&tool.roles).enumerate() {
+            if *r != role {
+                continue;
+            }
+            let body = read.body.clone().with_import_certificate(&digest, f.id)?;
+            let carried = tool.faces.get(k).map_or(&[][..], Vec::as_slice);
+            for (m, key) in &placed {
+                let copy = kernel::transform_matrix(&body, *m)?;
+                let roles = copy_roles(key, carried, copy.face_count());
+                out.push(Traced::made(copy, Some(roles)));
+            }
+        }
+        Ok(out)
+    };
+    // Remove first, always; then Add.
+    let cut = copies(Role::Remove)?;
+    if !cut.is_empty() {
+        apply_traced(doc, st, f, cut, Operation::Cut, &crate::plain::<String, _>(remove_from))?;
+    }
+    let joined = copies(Role::Add)?;
+    if !joined.is_empty() {
+        apply_traced(doc, st, f, joined, Operation::Join, &crate::plain::<String, _>(add_to))?;
+    }
+    Ok(())
+}
+
 fn apply_traced(doc: &Document, state: &mut ModelState, f: &Feature, tools: Vec<Traced>, op: Operation, targets: &[String]) -> Result<()> {
     apply_traced_with(doc, state, f, tools, op, targets, &[])
 }
@@ -13378,6 +13439,9 @@ fn eval_feature_kind(
             let target = st.bodies.get_mut(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             *target = result;
             Ok(())
+        }
+        FeatureKind::Amalgamate { tool, seeds, turns, flip, remove_from, add_to } => {
+            eval_amalgamate(doc, st, f, tool, seeds, *turns, *flip, remove_from, add_to)
         }
         // A tag changes no geometry: evaluating it checks it where it stands (#18799).
         FeatureKind::AmalgamTag { remove, add, new, seat } => crate::amalgam::check_tag(doc, st, remove, add, new, seat.as_ref()),

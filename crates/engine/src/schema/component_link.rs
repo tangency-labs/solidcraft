@@ -90,7 +90,7 @@ fn design_path<'de, D: Deserializer<'de>>(d: D, message: &str) -> Result<Option<
     }
 }
 
-fn path_required<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+pub(super) fn path_required<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     design_path(d, "`path` is required")
 }
 
@@ -98,7 +98,7 @@ fn with_or_path<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Er
     design_path(d, "`with` or `path` is required")
 }
 
-fn path_schema(_: &mut SchemaGenerator) -> Schema {
+pub(super) fn path_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"type": "string", "pattern": not_blank_pattern(), "maxLength": 4095})
 }
 
@@ -126,12 +126,12 @@ fn component_and_path_required(schema: &mut Schema) {
     require(schema, "path");
 }
 
-fn path_only_required(schema: &mut Schema) {
+pub(super) fn path_only_required(schema: &mut Schema) {
     require(schema, "path");
 }
 
 /// Select a source configuration row, or follow the saved source state with `null`.
-fn configuration<'de, D: Deserializer<'de>>(d: D) -> Result<Option<RowRef>, D::Error> {
+pub(super) fn configuration<'de, D: Deserializer<'de>>(d: D) -> Result<Option<RowRef>, D::Error> {
     match Value::deserialize(d)? {
         Value::Null => Ok(None),
         Value::String(name) => Ok(Some(RowRef::Name(name))),
