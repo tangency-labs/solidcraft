@@ -1695,3 +1695,160 @@ fn a_driven_angle_to_a_plane_made_driving_keeps_the_side_the_line_is_on() {
     let end = fit(&s, &l, 1);
     assert!(end.z < 0.0 && (end.z / end.len() + 0.5).abs() < 1e-6, "still down at 30°: {end:?}");
 }
+
+#[test]
+fn move_copy_moves_drawn_points_and_curves() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let point = run(&mut s, "sketch.point3d", json!({"point":[17,32,45]}))["point"].as_str().unwrap().to_string();
+    let line = run(&mut s, "sketch.line3d", json!({"points":[[10,30,40],[10,30,50]]}))["curves"][0].as_str().unwrap().to_string();
+    let plane = s.world_state().unwrap().sketch(sketch).unwrap().plane;
+    let (x, y) = (plane.x, plane.y);
+    let shown = |s: &Session, w: &str| s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|q| q.id == w).unwrap().fit.clone();
+    let undo = s.undo.len();
+    run(&mut s, "sketch.move", json!({"entities":[format!("{point}@0")],"translate":[3,0]}));
+    near(shown(&s, &point)[0], Vec3::new(17.0, 32.0, 45.0) + x * 3.0);
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    run(&mut s, "sketch.move", json!({"entities":[line.clone()],"translate":[0,4]}));
+    let fit = shown(&s, &line);
+    near(fit[0], Vec3::new(10.0, 30.0, 40.0) + y * 4.0);
+    near(fit[1], Vec3::new(10.0, 30.0, 50.0) + y * 4.0);
+    let e = s.execute("sketch.move", &json!({"entities":[format!("{point}@0")],"translate":[1,0],"copy":true})).unwrap_err().to_string();
+    assert!(e.contains("not supported yet"), "{e}");
+    near(shown(&s, &point)[0], Vec3::new(17.0, 32.0, 45.0) + x * 3.0);
+}
+
+#[test]
+fn move_drawn_point_past_the_end_changes_nothing() {
+    let (mut s, _, _, _) = second_frame();
+    let point = run(&mut s, "sketch.point3d", json!({"point":[17,32,45]}))["point"].as_str().unwrap().to_string();
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move", &json!({"entities":[format!("{point}@9")],"translate":[3,0]})).unwrap_err().to_string();
+    assert!(!e.is_empty());
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn move_mixed_plane_and_drawn_picks_move_together() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let point = run(&mut s, "sketch.point3d", json!({"point":[17,32,45]}))["point"].as_str().unwrap().to_string();
+    let plane_line = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let plane = s.world_state().unwrap().sketch(sketch).unwrap().plane;
+    let y = plane.y;
+    let undo = s.undo.len();
+    let r = run(&mut s, "sketch.move", json!({"entities":[format!("{point}@0"), plane_line.clone()],"translate":[0,2]}));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    let shown = s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|q| q.id == point).unwrap().fit.clone();
+    near(shown[0], Vec3::new(17.0, 32.0, 45.0) + y * 2.0);
+    let curves: Vec<&str> = r["curves"].as_array().unwrap().iter().filter_map(|c| c.as_str()).collect();
+    assert!(curves.contains(&point.as_str()), "the moved drawn curve is listed: {curves:?}");
+    assert!(s.doc.sketch(sketch).unwrap().curve_index(&plane_line).is_some(), "the plane line stays");
+}
+
+#[test]
+fn move_joined_drawn_curves_moves_their_shared_point_once() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[10,30,40],[10,30,50],[20,30,50]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    let x = s.world_state().unwrap().sketch(sketch).unwrap().plane.x;
+    run(&mut s, "sketch.move", json!({"entities":[a.clone(), b.clone()],"translate":[3,0]}));
+    let wires = s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.clone();
+    let fit = |w: &str| wires.iter().find(|q| q.id == w).unwrap().fit.clone();
+    near(fit(&a)[0], Vec3::new(10.0, 30.0, 40.0) + x * 3.0);
+    near(fit(&a)[1], Vec3::new(10.0, 30.0, 50.0) + x * 3.0);
+    near(fit(&b)[0], Vec3::new(10.0, 30.0, 50.0) + x * 3.0);
+    near(fit(&b)[1], Vec3::new(20.0, 30.0, 50.0) + x * 3.0);
+}
+
+#[test]
+fn move_drawn_line_along_itself_by_its_length() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let x = s.world_state().unwrap().sketch(sketch).unwrap().plane.x;
+    let start = Vec3::new(10.0, 30.0, 40.0);
+    let end = start + x * 10.0;
+    let line = run(&mut s, "sketch.line3d", json!({"points":[[start.x, start.y, start.z],[end.x, end.y, end.z]]}))["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    run(&mut s, "sketch.move", json!({"entities":[line.clone()],"translate":[10,0]}));
+    let fit = s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|q| q.id == line).unwrap().fit.clone();
+    near(fit[0], end);
+    near(fit[1], end + x * 10.0);
+}
+
+#[test]
+fn move_drawn_curve_with_a_fixed_point_is_refused() {
+    let (mut s, _, _, _) = second_frame();
+    let line = run(&mut s, "sketch.line3d", json!({"points":[[10,30,40],[10,30,50]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{line}.start")}));
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move", &json!({"entities":[line],"translate":[3,0]})).unwrap_err().to_string();
+    assert!(e.contains("fixed"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn move_drawn_curve_that_breaks_a_3d_constraint_is_refused() {
+    let (mut s, _) = plane_3d_sketch();
+    let line = run(&mut s, "sketch.line3d", json!({"points":[[0,0,5],[10,0,5]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": line, "axis": "x"}));
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move", &json!({"entities":[line],"angle":90})).unwrap_err().to_string();
+    assert!(e.contains("cannot hold"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// `z` lifts drawn picks along the sketch normal, drawn-only: a drawn point and a whole drawn
+/// curve, each in one undo step.
+#[test]
+fn move_z_lifts_drawn_picks_along_the_normal() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let point = run(&mut s, "sketch.point3d", json!({"point":[17,32,45]}))["point"].as_str().unwrap().to_string();
+    let line = run(&mut s, "sketch.line3d", json!({"points":[[10,30,40],[10,30,50]]}))["curves"][0].as_str().unwrap().to_string();
+    let plane = s.world_state().unwrap().sketch(sketch).unwrap().plane;
+    let (x, n) = (plane.x, plane.normal());
+    let shown = |s: &Session, w: &str| s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|q| q.id == w).unwrap().fit.clone();
+    let undo = s.undo.len();
+    run(&mut s, "sketch.move", json!({"entities":[format!("{point}@0")],"translate":[3,0],"z":2}));
+    near(shown(&s, &point)[0], Vec3::new(17.0, 32.0, 45.0) + x * 3.0 + n * 2.0);
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    run(&mut s, "sketch.move", json!({"entities":[line.clone()],"translate":[0,0],"z":-5}));
+    let fit = shown(&s, &line);
+    near(fit[0], Vec3::new(10.0, 30.0, 40.0) - n * 5.0);
+    near(fit[1], Vec3::new(10.0, 30.0, 50.0) - n * 5.0);
+    assert_eq!(s.undo.len(), undo + 2, "one undo step per move");
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[30,30,40],[30,30,50],[40,30,50]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    run(&mut s, "sketch.move", json!({"entities":[a.clone(), b.clone()],"translate":[0,0],"z":2}));
+    near(shown(&s, &a)[1], Vec3::new(30.0, 30.0, 50.0) + n * 2.0);
+    near(shown(&s, &b)[0], Vec3::new(30.0, 30.0, 50.0) + n * 2.0);
+    near(shown(&s, &b)[1], Vec3::new(40.0, 30.0, 50.0) + n * 2.0);
+}
+
+/// `z` on a plane line and a drawn point picked together: both move along the normal in one
+/// command, and the plane line becomes a drawn line lifted by `z`.
+#[test]
+fn move_z_mixed_plane_and_drawn_picks_lift_together() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let point = run(&mut s, "sketch.point3d", json!({"point":[17,32,45]}))["point"].as_str().unwrap().to_string();
+    let plane_line = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let plane = s.world_state().unwrap().sketch(sketch).unwrap().plane;
+    let (x, y, n) = (plane.x, plane.y, plane.normal());
+    let undo = s.undo.len();
+    let r = run(&mut s, "sketch.move", json!({"entities":[format!("{point}@0"), plane_line.clone()],"translate":[0,2],"z":3}));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    let wires = s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.clone();
+    let shown = wires.iter().find(|q| q.id == point).unwrap().fit.clone();
+    near(shown[0], Vec3::new(17.0, 32.0, 45.0) + y * 2.0 + n * 3.0);
+    let lifted_id = r["curves"].as_array().unwrap().iter().filter_map(|c| c.as_str()).find(|c| *c != point).unwrap();
+    let lifted = &wires.iter().find(|w| w.id == lifted_id).unwrap().fit;
+    assert_eq!(lifted.len(), 2, "the plane line is lifted as one drawn line");
+    let a = plane.origin + y * 2.0 + n * 3.0;
+    near(lifted[0], a);
+    near(lifted[1], a + x * 10.0);
+}

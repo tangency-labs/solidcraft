@@ -202,3 +202,14 @@ SolidCraft changes:
   device events (`Motion` x, `Motion` y, `MouseMotion`) per report on the window thread. The
   summed motion is exact; motion is flushed before a button or wheel change in the same report
   stream, so the order of events is kept.
+- `src/platform_impl/windows/event_loop.rs`, `dark_mode.rs`: on Windows 11, `WM_DPICHANGED`
+  applies the rect Windows suggests (`takes_suggested_rect`), for a window that isn't maximized
+  or fullscreen. The nudge loop took the monitor the window was still on for the new one and
+  pushed the rect back, so a window moved to a monitor with another scale stayed on the
+  boundary and its size drifted (#9336). Same behaviour as rust-windowing/winit#4341 (winit 0.31
+  only; the 0.30 backport rust-windowing/winit#4637 was closed), except that the maximized path
+  stays as it was. On this path a size the application writes through the `InnerSizeWriter` of
+  `ScaleFactorChanged` is not applied; nothing in SolidCraft writes one. The version query in
+  `dark_mode.rs` passes the structure size to `RtlGetVersion`, as its documentation requires,
+  since this choice depends on the build number it returns. eframe 0.37 requires
+  winit 0.30, so this cannot come from a newer winit.

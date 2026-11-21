@@ -221,6 +221,27 @@ fn xy(p: &(Vec2, Option<String>)) -> Value {
     json!([p.0.x, p.0.y])
 }
 
+/// A clicked point that is held where it snapped: a midpoint, on-curve, crossing or body-vertex
+/// snap goes as itself, so the command keeps the point there. A snap to an existing point goes as
+/// its place, where the command's `connect` joins the two with a Coincident the sketch shows.
+/// So does a snap whose curve is no longer in the sketch: Undo between a rectangle's two clicks
+/// can take away the curve its first corner snapped to, and the command would refuse the snap
+/// click after click (the Line's chain re-checks the same way, #10016). And so does every snap
+/// in a drawing sheet's sketch, where the commands take no snap yet.
+fn held(app: &SolveApp, p: &(Vec2, Option<String>)) -> Value {
+    let stands = |id: &str| {
+        if app.session.sheet_sketching() {
+            return false;
+        }
+        let st = crate::open_meshing::session_world(&app.session);
+        app.session.active_sketch.and_then(|sid| st.sketch(sid)).is_some_and(|ss| crate::sketch_line_arc::chain_point(&ss.sketch, id, p.0).is_some())
+    };
+    match &p.1 {
+        Some(id) if solidcraft_engine::cmd::SNAP_PREFIXES.iter().any(|k| id.starts_with(k)) && stands(id) => json!(id),
+        _ => xy(p),
+    }
+}
+
 /// Shift exposes a line midpoint as a point target, only in the alignment tool.
 /// How near (screen pixels) a Coincident pick on a model edge must be to the edge's middle to
 /// take that middle, as near as a sketch line's middle is offered.
@@ -243,14 +264,15 @@ fn midpoint_at(app: &SolveApp, proj: &Proj, pos: Pos2, radius: f32) -> Option<(V
     })
 }
 
-/// The corner of a rectangle (two-point or centre) held to a square while the square chord is
-/// down: the side is the larger of the two distances from the first point, in the direction the
-/// cursor went. A snap on the corner no longer applies once it has moved.
 /// Whether the rectangle `t` is about to be drawn is held to a square.
 fn squared_rectangle(t: &Tool) -> bool {
     crate::tool_modifiers::square_rectangle() && matches!(t.cmd, "sketch.rectangle.two_point" | "sketch.rectangle.center")
 }
 
+/// The corner of a rectangle (two-point or centre) held to a square while the square chord is
+/// down: the side is the larger of the two distances from the first point, in the direction the
+/// cursor went. A corner the square moved loses its snap, which was for where the pointer was. A
+/// corner already square to the first point stays where it was clicked and keeps its snap.
 fn squared(t: &Tool, p: (Vec2, Option<String>)) -> (Vec2, Option<String>) {
     let rectangle = matches!(t.cmd, "sketch.rectangle.two_point" | "sketch.rectangle.center");
     let (true, true, [first]) = (rectangle, crate::tool_modifiers::square_rectangle(), t.pts.as_slice()) else { return p };
@@ -689,8 +711,10 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
     let d = |a: usize, b: usize| p[a].0.dist(p[b].0);
     let sides = crate::sketch_dims::locked_value(app, t, "Sides").map_or(6, |v| v as usize);
     let params = match t.cmd {
-        "sketch.rectangle.two_point" => json!({"p0": xy(&p[0]), "p1": xy(&p[1])}),
-        "sketch.rectangle.center" => json!({"center": xy(&p[0]), "corner": xy(&p[1])}),
+        // A corner or centre clicked on a curve, a midpoint or a crossing stays there, as a
+        // line's end does (#18756).
+        "sketch.rectangle.two_point" => json!({"p0": held(app, &p[0]), "p1": held(app, &p[1])}),
+        "sketch.rectangle.center" => json!({"center": held(app, &p[0]), "corner": held(app, &p[1])}),
         "sketch.rectangle.rounded" => {
             json!({"p0": xy(&p[0]), "p1": xy(&p[1]), "radius": crate::sketch_dims::rounded_radius_value(app, t, p[0].0, p[1].0)})
         }
