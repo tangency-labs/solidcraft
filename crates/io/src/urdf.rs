@@ -191,10 +191,12 @@ fn steps(kind: JointKind) -> Option<Vec<(Step, Vec3, usize)>> {
     })
 }
 
-/// `raw` with every character but `[A-Za-z0-9_]` (and `-` in file names) replaced by `_`, so it
-/// is a valid name in URDF, SDFormat and XML.
+/// `raw` with every character but `[A-Za-z0-9_]` replaced by `_`, so it is a valid name in URDF,
+/// SDFormat and XML. A file name also keeps `-` and any Unicode letter or digit, so parts named
+/// in another script keep distinct, readable mesh files (#20409).
 fn sanitise(raw: &str, file: bool) -> String {
-    let s: String = raw.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || (file && c == '-') { c } else { '_' }).collect();
+    let s: String =
+        raw.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || (file && (c == '-' || c.is_alphanumeric())) { c } else { '_' }).collect();
     if s.is_empty() { "part".into() } else { s }
 }
 
@@ -223,7 +225,7 @@ impl Names {
         let base = sanitise(raw, true);
         let mut name = format!("{base}.{ext}");
         let mut k = 2;
-        while !self.taken.insert(name.to_ascii_lowercase()) {
+        while !self.taken.insert(name.to_lowercase()) {
             name = format!("{base}_{k}.{ext}");
             k += 1;
         }
@@ -236,7 +238,7 @@ impl Names {
     /// `fold`). Names are never given back, so every suffix below the one kept for `base` is
     /// taken, and the search starts there.
     fn free(&mut self, base: String, fold: bool) -> String {
-        let key = |n: &str| if fold { n.to_ascii_lowercase() } else { n.to_string() };
+        let key = |n: &str| if fold { n.to_lowercase() } else { n.to_string() };
         if self.taken.insert(key(&base)) {
             return base;
         }
@@ -1205,6 +1207,12 @@ mod tests {
         // File systems that ignore case would make these one file.
         assert_eq!(n.file("t-base"), "t-base.stl");
         assert_eq!(n.file("t-Base"), "t-Base_2.stl");
+        // Parts named in another script keep distinct mesh files (#20409); link names stay ASCII.
+        assert_eq!(n.file("demo-红块"), "demo-红块.stl");
+        assert_eq!(n.file("demo-蓝块"), "demo-蓝块.stl");
+        assert_eq!(n.file("Ärm"), "Ärm.stl");
+        assert_eq!(n.file("ärm"), "ärm_2.stl", "case is folded beyond ASCII too");
+        assert_eq!(n.take("红块"), "__");
     }
 
     #[test]
