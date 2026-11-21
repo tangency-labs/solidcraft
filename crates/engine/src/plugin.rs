@@ -836,7 +836,12 @@ impl PluginHost for SolidCraftHost {
             return Err(HostError::PermissionDenied { permission: reason.into() });
         }
         if let Some(scope) = solidcraft_io::vfs::current_scope() {
-            return scope.check(&path.to_string_lossy()).map_err(|e| HostError::PermissionDenied { permission: e.to_string() });
+            // The session's refusal names absolute folders and `--allow-path` roots; a plugin
+            // only ever sees grant names and relative paths.
+            return scope.check(&path.to_string_lossy()).map_err(|_| {
+                let grant = self.input_folders.iter().find(|g| path.starts_with(&g.folder)).map_or("input", |g| g.name.as_str());
+                HostError::PermissionDenied { permission: format!("folders:{grant}: not allowed in this session") }
+            });
         }
         grant_covers(&self.input_folders, path, false)
     }
