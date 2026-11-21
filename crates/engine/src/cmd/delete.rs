@@ -631,6 +631,28 @@ mod tests {
         assert!(s.drawing("test").unwrap().dimension(dimension).is_none());
     }
 
+    #[test]
+    fn a_drawing_delete_matches_its_schemas_at_every_check_level() {
+        use crate::schema::delete::{SelectionDeleteParams, SelectionDeleteResult};
+        use crate::schema::tests::conforms;
+        use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
+        let (input, output) = (input_schema_for::<SelectionDeleteParams>(), output_schema_for::<SelectionDeleteResult>());
+        let (input, output) = (input.as_value(), output.as_value());
+        for level in [ParamCheck::Warn, ParamCheck::Strict] {
+            let (mut s, [_, right, top], dimension, balloon, drawing) = sheet_objects();
+            s.param_check = level;
+            let p = json!({"items": [item(drawing, right), item(drawing, dimension), item(drawing, balloon)], "contents": "delete"});
+            assert!(conforms(input, input, &p), "{level:?}: {p} doesn't match {input}");
+            let gone = s.execute("selection.delete", &p).unwrap_or_else(|e| panic!("{level:?}: {e}"));
+            assert!(gone.get("param_warnings").is_none(), "{level:?}: {gone}");
+            assert!(conforms(output, output, &gone), "{level:?}: {gone} doesn't match {output}");
+            let mut views = vec![ids::encode(right), ids::encode(top)];
+            views.sort();
+            assert_eq!(gone["views"], json!(views), "{gone}");
+            assert_eq!((&gone["dimensions"], &gone["balloons"]), (&json!([ids::encode(dimension)]), &json!([ids::encode(balloon)])), "{gone}");
+        }
+    }
+
     /// A view, a dimension and a balloon are selected by their ids, as a view's own id reads in every
     /// reply, with no undo step and no change to the design or its export. Adding one keeps the rest.
     #[test]
