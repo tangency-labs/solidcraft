@@ -182,7 +182,12 @@ pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps
     // it would not be split at the vertices on it and would stay open once the fold goes.
     let (mut tris, mut tags) = cancel_folds(tris, tags);
     // T-junctions: split open sides at open-side vertices lying on them.
-    for _ in 0..8 {
+    for pass in 0..8 {
+        // A split can make a fold too (a piece of a split triangle on the same vertices as another,
+        // the other way round): drop it before the next search, for the same reason as above.
+        if pass > 0 {
+            (tris, tags) = cancel_folds(tris, tags);
+        }
         let mut half: HashMap<(u32, u32), usize> = HashMap::new();
         for t in &tris {
             for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
@@ -2040,6 +2045,44 @@ pub(crate) mod tests {
         let (v, t) = weld(&positions, &triangles, 1e-7);
         assert_eq!(v.len(), 5);
         assert!(manifold(&t), "{t:?}");
+    }
+
+    /// A fold that a split makes is dropped before the next T-junction search: the piece (0, 3, 2)
+    /// of triangle (0, 1, 2), split at 3 on its side 0-1, runs the other way round from a sliver
+    /// (0, 2, 3). While both stand, side 0-2 looks matched, so surface triangle (2, 0, 7) is not
+    /// split at 4, which lies on that side and ends two triangles of the face beyond. Dropped only
+    /// at the end, the fold would leave that T-junction open.
+    #[test]
+    fn weld_drops_a_fold_made_by_a_split_before_the_next_search() {
+        let positions = [
+            Vec3::ZERO,
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(0.5, 1.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.25, 0.5, 0.0),
+            Vec3::new(-1.0, 1.0, 0.0),
+            Vec3::new(1.0, -1.0, 0.0),
+            Vec3::new(-1.0, 0.5, 0.0),
+        ];
+        let triangles = [[0, 1, 2], [0, 2, 3], [0, 4, 5], [4, 2, 5], [1, 3, 6], [3, 0, 6], [2, 0, 7]];
+        let (v, t) = weld(&positions, &triangles, 1e-7);
+        // No side used one way only has an end of such a side lying inside it.
+        let mut half: HashMap<(u32, u32), u32> = HashMap::new();
+        for t in &t {
+            for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                *half.entry((a, b)).or_default() += 1;
+            }
+        }
+        let open: Vec<(u32, u32)> = half.keys().filter(|(a, b)| !half.contains_key(&(*b, *a))).copied().collect();
+        for &(a, b) in &open {
+            let (pa, pb) = (v[a as usize], v[b as usize]);
+            for &(c, _) in &open {
+                let p = v[c as usize];
+                let d = pb - pa;
+                let s = (p - pa).dot(d) / d.dot(d);
+                assert!(!(s > 1e-9 && s < 1.0 - 1e-9 && (pa + d * s).dist(p) < 1e-9), "vertex {c} lies inside open side {a}-{b}: {t:?}");
+            }
+        }
     }
 
     /// A body far from the origin (a pattern spacing of "1e12 mm" gets there) welds without
