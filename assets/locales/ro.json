@@ -1012,6 +1012,7 @@
   "cmd.motion_list": "Listează studiile de mișcare",
   "cmd.motion_play": "Redă studiul de mișcare",
   "cmd.motion_plot": "Grafic studiu de mișcare",
+  "cmd.motion_simulate": "Simulează mișcarea",
   "cmd.motion_study": "Studiu de mișcare",
   "cmd.motion_trace": "Urma mișcării",
   "cmd.motion_trace_edit": "Editează urma mișcării",

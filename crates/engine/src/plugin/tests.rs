@@ -1896,7 +1896,7 @@ fn host_resource_policy_is_exact_user_state_and_never_design_data() {
 
 #[test]
 fn command_effects_are_explicit_and_independent_of_undo() {
-    let host = SolidCraftHost {
+    let mut host = SolidCraftHost {
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
@@ -1912,11 +1912,30 @@ fn command_effects_are_explicit_and_independent_of_undo() {
     for command in ["sketch.edit", "sketch.finish", "sketch.cancel", "solid.box", "sketch.export_dxf"] {
         assert_eq!(catalog.iter().find(|c| c.name == command).unwrap().effect, Effect::Edit, "{command}");
     }
-    for command in
-        ["model.mesh", "model.faces", "model.edges", "document.inspect", "timeline.inspect", "inspect.measure", "sketch.inspect", "sketch.solve"]
-    {
+    for command in [
+        "model.mesh",
+        "model.faces",
+        "model.edges",
+        "document.inspect",
+        "timeline.inspect",
+        "inspect.classify_points",
+        "inspect.measure",
+        "sketch.inspect",
+        "sketch.solve",
+    ] {
         assert_eq!(catalog.iter().find(|c| c.name == command).unwrap().effect, Effect::Read, "{command}");
     }
+    // A read listener has no command-group grants. It can query exact geometry anyway.
+    host.session.execute("solid.box", &json!({"length":2, "width":3, "height":4, "body_name":"Block"})).unwrap();
+    host.session.plugin_state.listener_design = Some(Some(host.session.design_token()));
+    let before = host.session.doc.clone();
+    host.begin_transaction().unwrap();
+    let queried = host.run_command("inspect.classify_points", &json!({"body":"Block", "points":[[1,1,1], [0,1,1]]})).unwrap();
+    assert_eq!(queried["results"][0]["class"], "inside");
+    assert_eq!(queried["results"][1]["class"], "on");
+    assert_eq!(queried["results"][1]["normal"], json!([-1., 0., 0.]));
+    host.commit_transaction().unwrap();
+    assert_eq!(host.session.doc, before);
     // A test-only command: its id goes through a variable so the icon audit, which reads command ids
     // registered under crates/engine/src, doesn't take this fixture for a real command without an icon.
     let id = "sample.new";
