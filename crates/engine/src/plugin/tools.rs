@@ -73,9 +73,10 @@ pub(super) fn describe(session: &Session, id: &str) -> Result<Option<Value>> {
         EntryKind::Command => {
             let inputs = tool_input(entry);
             json!({"id":id,"label":name,"kind":"command","plugin":plugin,
-                "params":"approval: the package hash (plugin.tools {name} or plugin.inspect), params: the entry's declared inputs; as a tool, the inputs alone",
+                "params":"approval: the package hash (plugin.tools {name} or plugin.inspect), params: the entry's declared inputs, expected_design?: token this edit was computed against; as a tool, the inputs alone",
                 "input":{"type":"object","required":["approval","params"],"additionalProperties":false,"properties":{
-                    "approval":{"type":"string"},"params":inputs.clone()}},
+                    "approval":{"type":"string"},"params":inputs.clone(),
+                    "expected_design":schemars::schema_for!(craft_plugin::DesignToken).to_value()}},
                 "tool":{"name":id,"input":inputs},
                 "output":{},"effect":entry.effect,"slots":entry.slots})
         }

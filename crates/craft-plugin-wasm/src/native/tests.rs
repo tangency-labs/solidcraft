@@ -13,6 +13,7 @@ struct App {
     rollbacks: usize,
     grants: Vec<FileGrant>,
     cancelled: bool,
+    no_design: bool,
     fail_commit: bool,
     unchanged_at_commit: Option<PathBuf>,
     /// The sensitive group `app.write` is in, and the groups the user granted.
@@ -20,6 +21,10 @@ struct App {
     groups: BTreeSet<String>,
 }
 impl PluginHost for App {
+    fn design_token(&self) -> Result<Option<craft_plugin::DesignToken>> {
+        Ok((!self.no_design)
+            .then(|| craft_plugin::DesignToken { document_id: "design-one".into(), revision: "0123456789abcdef0123456789abcdef:7".into() }))
+    }
     fn command_catalog(&self) -> Vec<CommandSchema> {
         vec![CommandSchema {
             name: "app.write".into(),
@@ -237,6 +242,88 @@ fn linker_has_no_socket_or_http_imports() {
     }
 }
 #[test]
+fn design_token_import_requires_its_capability_and_returns_identity_and_revision() {
+    let mut manifest = manifest();
+    manifest.runtime.as_mut().unwrap().entries[0].effect = Effect::Read;
+    let component = design_token_component();
+    let (_, result) = crate::run(App::default(), &manifest, &component, "make", &json!({}));
+    assert!(matches!(result, Err(HostError::PermissionDenied { permission }) if permission.contains("design@0.1")));
+    for capability in ["design@99.0", "design@bogus"] {
+        manifest.capabilities = vec!["commands@0.1".into(), capability.into()];
+        let (app, result) = crate::run(App::default(), &manifest, &component, "make", &json!({}));
+        assert!(matches!(
+            (capability, result),
+            ("design@99.0", Err(HostError::UnsupportedCapability { .. })) | ("design@bogus", Err(HostError::InvalidManifest { .. }))
+        ));
+        assert_eq!(app.begins, 0);
+    }
+    for capability in ["design@0.1", "design@0.1.3"] {
+        manifest.capabilities = vec!["commands@0.1".into(), capability.into()];
+        let (_, result) = crate::run(App::default(), &manifest, &component, "make", &json!({}));
+        assert_eq!(result.unwrap(), json!({"document_id":"design-one","revision":"0123456789abcdef0123456789abcdef:7"}));
+    }
+    let (_, result) = crate::run(App { no_design: true, ..Default::default() }, &manifest, &component, "make", &json!({}));
+    assert_eq!(result.unwrap(), Value::Null);
+}
+
+fn design_token_component() -> Vec<u8> {
+    wat::parse_str(design_token_source()).unwrap()
+}
+
+fn design_token_source() -> String {
+    let (package, version) = API.split_once('@').unwrap();
+    include_str!("../design_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)
+}
+
+#[test]
+fn dialog_hooks_and_commands_share_the_design_token_import_without_changing_old_worlds() {
+    let source = design_token_source();
+    let (prefix, _) = source.rsplit_once(')').unwrap();
+    let (package, version) = API.split_once('@').unwrap();
+    let source = format!(
+        r#"{prefix}
+      (func $update (param "entry" string) (param "values" $json) (result (result $json (error $plugin-error)))
+        (canon lift (core func ${package}/entry@{version}#execute) (memory $memory) (realloc $realloc) string-encoding=utf8))
+      (instance $dialog (export "json" (type $json)) (export "plugin-error" (type $plugin-error)) (export "update-fields" (func $update)))
+      (export "{package}/dialog-provider@{version}" (instance $dialog)))"#
+    );
+    let component = wat::parse_str(source).unwrap();
+    for declared in [false, true] {
+        let mut manifest = hook_manifest();
+        if declared {
+            manifest.capabilities.push("design@0.1".into());
+        }
+        crate::check_component(&manifest, &component).unwrap();
+        for no_design in [false, true] {
+            let (host, hook) = crate::dialog_fields(
+                App { no_design, ..Default::default() },
+                &manifest,
+                &component,
+                "make",
+                &json!({}),
+                craft_plugin::HostLimits::default(),
+            );
+            let (_, command) = crate::run(App { no_design, ..Default::default() }, &manifest, &component, "make", &json!({}));
+            if declared {
+                let expected = if no_design {
+                    Value::Null
+                } else {
+                    json!({"document_id":"design-one","revision":"0123456789abcdef0123456789abcdef:7"})
+                };
+                assert_eq!(serde_json::from_str::<Value>(&hook.unwrap()).unwrap(), expected);
+                assert_eq!(command.unwrap(), expected);
+                assert_eq!((host.value, host.begins, host.commits, host.rollbacks), (0, 1, 1, 0));
+            } else {
+                for result in [hook.map(Value::String), command] {
+                    assert!(matches!(result, Err(HostError::PermissionDenied { permission }) if permission.contains("design@0.1")));
+                }
+                assert_eq!((host.value, host.begins, host.commits, host.rollbacks), (0, 1, 0, 1));
+            }
+        }
+    }
+}
+
+#[test]
 fn read_entries_cannot_edit_even_when_manifest_grants_the_command() {
     let mut manifest = manifest();
     manifest.runtime.as_mut().unwrap().entries[0].effect = Effect::Read;
@@ -361,6 +448,7 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
         effect: Effect::Edit,
+        design_tokens: false,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
         clock: false,

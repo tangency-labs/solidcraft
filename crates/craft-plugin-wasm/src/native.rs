@@ -71,6 +71,9 @@ fn trap(reason: impl Into<String>) -> HostError {
 }
 fn wit_error(error: HostError) -> PluginError {
     match error {
+        error @ HostError::StaleRevision { .. } => {
+            PluginError::CommandFailed(types::CommandFailure { command: "plugin.run".into(), reason: error.to_string() })
+        }
         HostError::PermissionDenied { permission } => PluginError::PermissionDenied(permission),
         HostError::CommandFailed { command, reason } => PluginError::CommandFailed(types::CommandFailure { command, reason }),
         HostError::LimitExceeded { limit } => PluginError::LimitExceeded(limit),
@@ -111,6 +114,7 @@ struct State<H> {
     /// Sensitive command groups both the manifest requests and the app grants.
     groups: BTreeSet<String>,
     effect: Effect,
+    design_tokens: bool,
     folders: BTreeMap<String, Folder>,
     staged: BTreeMap<(String, PathBuf), PendingWrite>,
     clock: bool,
@@ -217,6 +221,20 @@ impl<H: PluginHost> commands::Host for State<H> {
         let text = serde_json::to_string(&result).map_err(|e| self.fail(trap(e.to_string())))?;
         if text.len() > MAX_JSON_BYTES {
             return Err(self.fail(limit("command result size")));
+        }
+        Ok(text)
+    }
+}
+impl<H: PluginHost> design_state::Host for State<H> {
+    fn get_token(&mut self) -> std::result::Result<String, PluginError> {
+        self.check()?;
+        if !self.design_tokens {
+            return Err(self.fail(HostError::PermissionDenied { permission: "design@0.1 capability is required".into() }));
+        }
+        let token = self.host.design_token().map_err(|error| self.fail(error))?;
+        let text = serde_json::to_string(&token).map_err(|error| self.fail(trap(error.to_string())))?;
+        if text.len() > MAX_JSON_BYTES {
+            return Err(self.fail(limit("design token JSON size")));
         }
         Ok(text)
     }
@@ -717,6 +735,12 @@ fn run_mode<H: PluginHost + 'static>(
     dialog: bool,
 ) -> (H, Result<Value>) {
     let prepared = (|| {
+        // A direct runtime caller may not have used parse_manifest. Validate only this new
+        // capability here, preserving older imports' existing validated-manifest contract.
+        let design_capabilities: Vec<String> =
+            manifest.capabilities.iter().filter(|capability| capability.split('@').next() == Some("design")).take(17).cloned().collect();
+        craft_plugin::check_capabilities(&design_capabilities, "the host")?;
+        let design_tokens = !design_capabilities.is_empty();
         let runtime = manifest
             .runtime
             .as_ref()
@@ -757,7 +781,7 @@ fn run_mode<H: PluginHost + 'static>(
             return Err(HostError::Cancelled);
         }
         host.begin_transaction()?;
-        Ok((runtime, entry, params, (engine, component, stack), (commands, groups), folders))
+        Ok((runtime, entry, params, (engine, component, stack), (commands, groups, design_tokens), folders))
     })();
     let (runtime, entry, params, compiled, commands, folders) = match prepared {
         Ok(prepared) => prepared,
@@ -788,7 +812,7 @@ fn execute<H: PluginHost + 'static>(
     entry: &craft_plugin::Entry,
     params: String,
     (engine, component, stack): (Engine, Component, usize),
-    (commands, groups): (BTreeMap<String, CommandSchema>, BTreeSet<String>),
+    (commands, groups, design_tokens): (BTreeMap<String, CommandSchema>, BTreeSet<String>, bool),
     folders: BTreeMap<String, Folder>,
     dialog: bool,
 ) -> (State<H>, Result<Value>) {
@@ -798,6 +822,7 @@ fn execute<H: PluginHost + 'static>(
         commands,
         groups,
         effect: if dialog { Effect::Read } else { entry.effect },
+        design_tokens,
         folders,
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
@@ -821,7 +846,8 @@ fn execute<H: PluginHost + 'static>(
                 if runtime.is_importer() {
                     importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 } else {
-                    dialog_bindings::DialogPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
+                    // Command hooks may also import design-state; the hook-only WIT world stays unchanged.
+                    bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 }
                 let guest = dialog_bindings::DialogPlugin::instantiate(&mut store, &component, &linker)?;
                 Ok(guest.craft_plugin_dialog_provider().call_update_fields(&mut store, &entry.name, &params)?.map_err(host_error))
@@ -1004,7 +1030,7 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
         if importer {
             importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         } else {
-            dialog_bindings::DialogPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+            bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         }
         dialog_bindings::DialogPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
     }
@@ -1181,6 +1207,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
         effect: Effect::Open,
+        design_tokens: false,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
