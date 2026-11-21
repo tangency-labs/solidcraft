@@ -2100,9 +2100,7 @@ mod tests {
         assert_eq!(e.operation(), OP);
         assert_eq!(
             e.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Missing(
-                "a surface for every face"
-            ))
+            Some(&TopologyFailure::Missing("a surface for every face"))
         );
     }
 
