@@ -87,6 +87,7 @@ pub use file::open_steps::OpenSteps;
 pub use file::runs_plugin_importer;
 pub use file::use_import_cache_dir;
 pub(crate) use file::{GEOMETRY_MESSAGE, NAMES_MESSAGE, READER_MESSAGE, UP_MESSAGE, names_form, up_form, usable_path};
+pub use gears::gear_diameters;
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
 pub use parts::part_length_label;
@@ -112,6 +113,8 @@ pub(crate) use file_library::uses_file as file_library_uses_file;
 mod frame;
 mod frame_end_cap;
 mod frame_rotate_member;
+mod gear_profile;
+mod gears;
 pub(crate) mod inspect;
 mod interference;
 pub(crate) mod joints;
@@ -144,6 +147,8 @@ pub(crate) use measure_sel::{measure_items, shape_of};
 pub(crate) use measure_shape::Shape;
 pub(crate) use point_cloud::filters as point_cloud_filters;
 pub(crate) use script::step_params;
+#[cfg(test)]
+mod gears_tests;
 #[cfg(test)]
 mod kernel_heal_tests;
 mod panels;
@@ -516,6 +521,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(motion_simulate::COMMANDS.iter());
     v.extend(panels::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());
+    v.extend(gears::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
     v.extend(mass_properties::COMMANDS.iter());

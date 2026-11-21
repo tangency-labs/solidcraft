@@ -3768,6 +3768,70 @@ pub struct StandardPart {
     pub length: Option<f64>,
 }
 
+/// An involute spur gear inserted as a component: what to rebuild its teeth from.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpurGear {
+    /// Module (mm).
+    pub module: f64,
+    /// Number of teeth.
+    pub teeth: u32,
+    /// Pressure angle (degrees).
+    pub pressure_angle: f64,
+    /// Thickness along +Z (mm).
+    pub face_width: f64,
+    /// Profile shift coefficient.
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub profile_shift: f64,
+    /// Backlash (mm).
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub backlash: f64,
+    /// Points along each flank.
+    pub flank_points: u32,
+    /// Clearance coefficient (0.25 unless saved otherwise).
+    #[serde(default = "default_gear_clearance", skip_serializing_if = "is_default_gear_clearance")]
+    pub clearance: f64,
+    /// Radius rounding where a flank meets the root (mm); 0 for sharp.
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub root_fillet: f64,
+    /// Radius rounding where a flank meets the tip (mm); 0 for sharp.
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub tip_round: f64,
+    /// The backlash thickens the teeth instead of thinning them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub backlash_thicker: bool,
+    /// An internal gear: a ring with its teeth pointing inward.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub internal: bool,
+    /// Ring thickness outside the tooth roots of an internal gear (mm).
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub rim_thickness: f64,
+    /// Diameter of the axle hole through an external gear (mm); 0 for none.
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub bore_diameter: f64,
+    /// How far the axle hole's centre is from the gear's along +X (mm).
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub bore_offset: f64,
+    /// Helix angle on the pitch circle (degrees); 0 for straight teeth, positive for right-hand.
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub helix_angle: f64,
+    /// Two mirrored helical halves.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub double_helical: bool,
+}
+
+fn is_zero_f64(v: &f64) -> bool {
+    *v == 0.0
+}
+
+/// The clearance every gear saved before it could be set was built with.
+fn default_gear_clearance() -> f64 {
+    0.25
+}
+
+fn is_default_gear_clearance(v: &f64) -> bool {
+    *v == 0.25
+}
+
 /// A component whose contents come from another design file (Insert Design): where that file
 /// is, and the Import feature in the component that holds its bodies (Update Links replaces
 /// them; Break Link keeps them and forgets the file).
@@ -3900,6 +3964,9 @@ pub struct Document {
     /// Components that are standard parts (by component id): what to rebuild them from.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub parts: std::collections::BTreeMap<u64, StandardPart>,
+    /// Components that are spur gears (by component id): what to rebuild their teeth from.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub gears: std::collections::BTreeMap<u64, SpurGear>,
     /// Components linked to another design file (by component id).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub links: std::collections::BTreeMap<u64, DesignLink>,
@@ -4255,6 +4322,7 @@ impl Document {
             plastic: Default::default(),
             configs: Default::default(),
             parts: Default::default(),
+            gears: Default::default(),
             links: Default::default(),
             body_components: Default::default(),
             body_offsets: Default::default(),

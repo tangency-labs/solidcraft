@@ -23,6 +23,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::ViewNavigator(_) => Some("view.navigator"),
         Kind::InsertDrawing(p) => Some(if p.command.ends_with("dxf") { "sketch.insert_dxf" } else { "sketch.insert_svg" }),
         Kind::InsertAirfoil(_) => Some("sketch.insert_airfoil"),
+        Kind::Gear(g) => Some(crate::dialogs_gear::command_id(g)),
         Kind::Sketch => Some("sketch.create"),
         Kind::SketchIntersect { .. } => Some("sketch.intersect"),
         Kind::SketchProject { .. } => Some("sketch.project"),
@@ -448,6 +449,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::ViewNavigator(form) => crate::view_gizmo::rows(app, ui, form, &d.inputs),
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::rows(ui, p),
         Kind::InsertAirfoil(a) => crate::dialogs_insert_airfoil::rows(ui, a),
+        Kind::Gear(g) => crate::dialogs_gear::rows(ui, g),
         Kind::Sketch => {
             let edge_on = edge_on_origin_planes(&app.cam);
             if !edge_on.is_empty() {

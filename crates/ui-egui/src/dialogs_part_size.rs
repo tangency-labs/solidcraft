@@ -62,12 +62,16 @@ impl std::fmt::Debug for Resize {
 
 /// Resolve a whole definition, including bodies displayed through an occurrence path.
 pub fn component_for_bodies(app: &SolveApp, bodies: &[String]) -> Option<u64> {
+    component_for_bodies_where(app, bodies, |doc, c| doc.parts.contains_key(&c))
+}
+
+pub(crate) fn component_for_bodies_where(app: &SolveApp, bodies: &[String], wanted: impl Fn(&Document, u64) -> bool) -> Option<u64> {
     let state = crate::open_meshing::session_world(&app.session);
     let mut component = None;
     for name in bodies {
         let body = state.bodies.iter().find(|b| b.name == *name)?;
         let id = app.session.doc.model_body_component(body);
-        if !app.session.doc.parts.contains_key(&id) || component.is_some_and(|c| c != id) {
+        if !wanted(&app.session.doc, id) || component.is_some_and(|c| c != id) {
             return None;
         }
         component = Some(id);
@@ -76,9 +80,14 @@ pub fn component_for_bodies(app: &SolveApp, bodies: &[String]) -> Option<u64> {
 }
 
 pub fn selected_component(app: &SolveApp) -> Option<u64> {
+    selected_component_where(app, |doc, c| doc.parts.contains_key(&c))
+}
+
+/// The one component the selection stands for, if `wanted` accepts it.
+pub fn selected_component_where(app: &SolveApp, wanted: impl Fn(&Document, u64) -> bool) -> Option<u64> {
     if app.session.selection.is_empty() {
         let [id] = app.tree.picked_components.as_slice() else { return None };
-        return app.session.doc.parts.contains_key(id).then_some(*id);
+        return wanted(&app.session.doc, *id).then_some(*id);
     }
     let mut bodies = Vec::new();
     let mut component = None;
@@ -88,7 +97,7 @@ pub fn selected_component(app: &SolveApp) -> Option<u64> {
             Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => bodies.push(body.clone()),
             Sel::Occurrence { path } => {
                 let id = app.session.occurrence_placement(path).ok()?.component;
-                if !app.session.doc.parts.contains_key(&id) || component.is_some_and(|c| c != id) {
+                if !wanted(&app.session.doc, id) || component.is_some_and(|c| c != id) {
                     return None;
                 }
                 component = Some(id);
@@ -97,7 +106,7 @@ pub fn selected_component(app: &SolveApp) -> Option<u64> {
         }
     }
     if !bodies.is_empty() {
-        let id = component_for_bodies(app, &bodies)?;
+        let id = component_for_bodies_where(app, &bodies, &wanted)?;
         if component.is_some_and(|c| c != id) {
             return None;
         }
