@@ -630,7 +630,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Operation" | "Type" | "Orientation" | "Move Type" | "Object Type" | "Rule" | "Rim Edge" | "Catch Direction" | "Shape" | "Holes" | "Size"
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
         | "Nut" | "Cam" | "Follower" | "Anchor" => Role::ComboBox,
-        "Inset By" => Role::ComboBox,
+        "Inset By" | "Extent Type" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
@@ -939,7 +939,7 @@ form_case!(surface_stitch, "surface.stitch", ["Tolerance"]);
 form_case!(surface_fair, "surface.fair", ["ui.fair_strength", "ui.fair_iterations", "Tolerance"]);
 form_case!(surface_match, "surface.match", ["Continuity"]);
 form_case!(thicken, "surface.thicken", ["Thickness", "Direction", "Operation"]);
-form_case!(surface_extend, "surface.extend", ["Distance"]);
+form_case!(surface_extend, "surface.extend", ["Extent Type", "Distance"]);
 form_case!(surface_trim, "surface.trim", []);
 form_case!(surface_untrim, "surface.untrim", ["Holes"]);
 form_case!(split_face, "solid.split_face", []);
