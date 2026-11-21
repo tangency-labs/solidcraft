@@ -18,8 +18,17 @@
 //! setbacks `d = c / (2 sin(alpha / 2))`.
 //!
 //! Between planes `alpha` is the planes' angle, and the sizes hold all along the edge.
-//! Elsewhere they hold where the wedge was measured: the offsets, not the setbacks, are
-//! what the definition keeps along the edge. Edges of one size on a tangent chain are one
+//!
+//! A chamfer's distances are setbacks: straight lines from the edge, in the plane square to it,
+//! at every station (#13710). Where a support's section there is a circle, the straight-section
+//! formula puts the feet past the setbacks on a convex support and short of them on a concave
+//! one. On rims of surfaces sharing an axis and on straight edges along a plane or a parallel
+//! cylinder, every station's sections are congruent, so [`feet_on_sections`] gives offsets
+//! that hold the setbacks all along. The definition keeps them as the straight-section reading
+//! of those offsets ([`ChamferDefinition::of_offsets`]), not the sizes asked (phase 1:
+//! `blend::fillet_executive::session::two_offsets`, `blend::chamfer_sections`). Elsewhere the
+//! sizes still hold only where the wedge was measured: the offsets, not the setbacks, are what
+//! the definition keeps along the edge. Edges of one size on a tangent chain are one
 //! chamfer, so one pair of offsets, and their rails meet where the edges run on into each
 //! other: its wedge is that of its edges between planes, on which the sizes then hold all
 //! along. Without one it is the narrowest at its edges' middles, whose offsets are the
@@ -31,7 +40,8 @@
 //! from 1.73 to 2.61. Setbacks that hold at every station are another definition. Edges
 //! between planes of different wedges have no one pair: each keeps its own.
 //!
-//! Not upstream (solidcore's, #2486). Deviations: none. No recursion.
+//! Not upstream (solidcore's, #2486, #13710). Deviations: none. No recursion: the chord's
+//! bisection is a fixed number of halvings.
 
 use crate::error::{Result, SolidError};
 use crate::math::PI;
@@ -181,6 +191,162 @@ impl ChamferDefinition {
     }
 }
 
+/// One support's section at a station of a chamfer's edge, in the plane square to the edge
+/// (#13710), in coordinates of that plane with the edge point at the origin: `t` the unit
+/// tangent into the face, `w` the unit normal toward the other support, `k` the section's
+/// signed curvature, `> 0` where its centre is on the `w` side (a convex support), `< 0` for a
+/// socket or groove, 0 for a line.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChamferSection {
+    /// The unit tangent into the face.
+    pub t: [f64; 2],
+    /// The unit normal toward the other support.
+    pub w: [f64; 2],
+    /// The signed curvature.
+    pub k: f64,
+}
+
+/// The feet of a chamfer of straight setbacks on two sections, and the offsets of the point
+/// that stands off both supports along their normals at the feet ([`feet_on_sections`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SectionFeet {
+    /// The feet on supports 1 and 2.
+    pub feet: [[f64; 2]; 2],
+    /// The offsets `r_1`, `r_2`.
+    pub offsets: [f64; 2],
+    /// The point the offsets stand off at.
+    pub point: [f64; 2],
+}
+
+fn cross(a: [f64; 2], b: [f64; 2]) -> f64 {
+    a[0] * b[1] - a[1] * b[0]
+}
+
+/// The foot at straight distance `d` along `s` and its section's normal there toward the
+/// `w` side: `F = d (cos b t + sin b w)`, `nu = cos 2b w - sin 2b t`, `b = asin(d k / 2)` (the
+/// angle between a chord of the circle and its tangent at the edge). `None` where `|d k| >= 2`
+/// (no point of the circle so far) or `d` is not finite and positive.
+fn foot(s: &ChamferSection, d: f64) -> Option<([f64; 2], [f64; 2])> {
+    let dk = d * s.k;
+    if !(positive(d) && dk.is_finite() && dk.abs() < 2.0) {
+        return None;
+    }
+    let (sb, cb) = (0.5 * dk).asin().sin_cos();
+    let (s2, c2) = (2.0 * sb * cb, cb * cb - sb * sb);
+    let f = [
+        d * (cb * s.t[0] + sb * s.w[0]),
+        d * (cb * s.t[1] + sb * s.w[1]),
+    ];
+    let nu = [c2 * s.w[0] - s2 * s.t[0], c2 * s.w[1] - s2 * s.t[1]];
+    Some((f, nu))
+}
+
+/// The chamfer of setbacks `d` (straight lines from the edge) on `sections`: its feet, and
+/// the offsets `r_1 = x(F_2 - F_1, nu_2) / x(nu_1, nu_2)`, `r_2 = x(F_2 - F_1, nu_1) / x(nu_1,
+/// nu_2)` of the point that stands off support 1 along its normal at its foot and support 2
+/// along its (`x` the cross product of the plane). With both sections lines it is
+/// [`ChamferDefinition::offsets`]' straight-section formula. `None` unless each foot exists,
+/// the normals cross at a sine of at least `least_cross`, both offsets are positive, and each
+/// is below its support's radius of curvature where the support is convex.
+#[must_use]
+pub fn feet_on_sections(
+    sections: [ChamferSection; 2],
+    d: [f64; 2],
+    least_cross: f64,
+) -> Option<SectionFeet> {
+    let [s1, s2] = sections;
+    let (f1, nu1) = foot(&s1, d[0])?;
+    let (f2, nu2) = foot(&s2, d[1])?;
+    let x = cross(nu1, nu2);
+    if !(x.is_finite() && x.abs() >= least_cross) {
+        return None;
+    }
+    let g = [f2[0] - f1[0], f2[1] - f1[1]];
+    let r = [cross(g, nu2) / x, cross(g, nu1) / x];
+    for (ri, s) in r.iter().zip([s1, s2]) {
+        if !positive(*ri) || (s.k > 0.0 && *ri * s.k >= 1.0) {
+            return None;
+        }
+    }
+    Some(SectionFeet {
+        feet: [f1, f2],
+        offsets: r,
+        point: [f1[0] + r[0] * nu1[0], f1[1] + r[0] * nu1[1]],
+    })
+}
+
+/// The halvings [`setback_for_chord`]'s bisection takes: fixed, so it stops.
+const CHORD_HALVINGS: usize = 64;
+
+/// The equal setbacks whose feet on `sections` are `chord` apart, on the branch where the
+/// feet's distance grows with the setback: a doubling out from the straight-section setback
+/// until the feet are at least `chord` apart, then a bisection of `CHORD_HALVINGS` (64) halvings.
+/// `None` where no setback reaches it before a foot runs off its circle (`|d k| >= 2`), or the
+/// distance is not growing at the root.
+#[must_use]
+pub fn setback_for_chord(sections: [ChamferSection; 2], chord: f64) -> Option<f64> {
+    if !positive(chord) {
+        return None;
+    }
+    let apart = |d: f64| -> Option<f64> {
+        let (f1, _) = foot(&sections[0], d)?;
+        let (f2, _) = foot(&sections[1], d)?;
+        Some((f2[0] - f1[0]).hypot(f2[1] - f1[1]))
+    };
+    // the straight sections' setback: the chord over 2 sin(wedge / 2)
+    let [s1, s2] = sections;
+    let wedge = (s1.t[0] * s2.t[0] + s1.t[1] * s2.t[1])
+        .clamp(-1.0, 1.0)
+        .acos();
+    let half = (0.5 * wedge).sin();
+    if !positive(half) {
+        return None;
+    }
+    let mut lo = 0.0;
+    let mut hi = chord / (2.0 * half);
+    let mut reached = false;
+    for _ in 0..CHORD_HALVINGS {
+        match apart(hi) {
+            Some(a) if a >= chord => {
+                reached = true;
+                break;
+            }
+            Some(_) => {
+                lo = hi;
+                hi *= 2.0;
+            }
+            None => break,
+        }
+    }
+    if !reached {
+        // past a foot's circle: halve back toward the last setback short of the chord
+        let top = sections
+            .iter()
+            .filter(|s| s.k != 0.0)
+            .map(|s| 2.0 / s.k.abs())
+            .fold(f64::INFINITY, f64::min);
+        if !(top.is_finite() && top > lo) {
+            return None;
+        }
+        hi = top * (1.0 - 1e-12);
+        if !apart(hi).is_some_and(|a| a >= chord) {
+            return None;
+        }
+    }
+    for _ in 0..CHORD_HALVINGS {
+        let mid = 0.5 * (lo + hi);
+        match apart(mid) {
+            Some(a) if a >= chord => hi = mid,
+            Some(_) => lo = mid,
+            None => return None,
+        }
+    }
+    let d = hi;
+    // growing at the root: the distance a little further on is more
+    let on = apart(d * (1.0 + 1e-6))?;
+    (on > chord).then_some(d)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -243,6 +409,83 @@ mod tests {
         assert!(c.offsets().is_err());
         let c = ChamferDefinition::new(ChamferSize::Distances([2.0, 1.1]), PI / 3.0).unwrap();
         assert!(c.offsets().is_ok());
+    }
+
+    /// A line section along `t`, with `w` its normal toward the other support.
+    fn line(t: [f64; 2], w: [f64; 2]) -> ChamferSection {
+        ChamferSection { t, w, k: 0.0 }
+    }
+
+    #[test]
+    fn straight_sections_give_the_straight_section_formula() {
+        // a 60 degree wedge: support 1 along +x, support 2 at 60 degrees
+        let a = PI / 3.0;
+        let (sa, ca) = a.sin_cos();
+        let s = [line([1.0, 0.0], [0.0, 1.0]), line([ca, sa], [sa, -ca])];
+        let got = feet_on_sections(s, [1.5, 2.0], 0.1).unwrap().offsets;
+        let want = ChamferDefinition::new(ChamferSize::Distances([1.5, 2.0]), a)
+            .unwrap()
+            .offsets()
+            .unwrap();
+        assert!(
+            close(got[0], want[0]) && close(got[1], want[1]),
+            "{got:?} {want:?}"
+        );
+    }
+
+    /// The hemisphere of radius 5 at a right angle (#13710): the flat along +x from the rim,
+    /// the ball up it. The offsets in closed form: `r_ball = R - 2R²(R - d_f)/(2R² - d_b²)`,
+    /// `r_flat = d_b sqrt(1 - d_b²/4R²)(R - d_f)/(R - d_b²/2R)`.
+    #[test]
+    fn a_hemisphere_rim_s_offsets_are_its_closed_forms() {
+        let r = 5.0_f64;
+        let s = [
+            line([1.0, 0.0], [0.0, 1.0]),
+            ChamferSection {
+                t: [0.0, 1.0],
+                w: [1.0, 0.0],
+                k: 1.0 / r,
+            },
+        ];
+        for (df, db) in [(2.0_f64, 1.0_f64), (1.0, 2.0), (0.5, 0.5), (4.0, 4.0)] {
+            let f = feet_on_sections(s, [df, db], 0.1).unwrap();
+            let ball = r - 2.0 * r * r * (r - df) / (2.0 * r * r - db * db);
+            let flat =
+                db * (1.0 - db * db / (4.0 * r * r)).sqrt() * (r - df) / (r - db * db / (2.0 * r));
+            assert!(
+                close(f.offsets[0], flat) && close(f.offsets[1], ball),
+                "{df} {db}: {f:?}"
+            );
+        }
+        // 0.2 on the flat and 2 on the ball: the ball's offset would be negative
+        assert!(feet_on_sections(s, [0.2, 2.0], 0.1).is_none());
+        // past the ball's diameter: no foot
+        assert!(feet_on_sections(s, [1.0, 10.0], 0.1).is_none());
+    }
+
+    /// A chord on a right angle with one circle of curvature `k`: `c² = 2d² - k d³`.
+    #[test]
+    fn a_chord_s_setback_on_one_curved_section() {
+        for k in [0.2_f64, -0.2, 1.0 / 3.0] {
+            let s = [
+                line([1.0, 0.0], [0.0, 1.0]),
+                ChamferSection {
+                    t: [0.0, 1.0],
+                    w: [1.0, 0.0],
+                    k,
+                },
+            ];
+            for d in [0.3_f64, 1.0, 1.5] {
+                let c = (2.0 * d * d - k * d * d * d).sqrt();
+                let got = setback_for_chord(s, c).unwrap();
+                assert!((got - d).abs() <= 1e-13 * (1.0 + d), "k {k} d {d}: {got}");
+            }
+        }
+        // two lines: the straight-section setback
+        let s = [line([1.0, 0.0], [0.0, 1.0]), line([0.0, 1.0], [1.0, 0.0])];
+        let got = setback_for_chord(s, 1.0).unwrap();
+        assert!((got - std::f64::consts::FRAC_1_SQRT_2).abs() <= 1e-15);
+        assert!(setback_for_chord(s, f64::NAN).is_none());
     }
 
     #[test]

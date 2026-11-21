@@ -1003,7 +1003,12 @@ fn lines_meet(p0: Point3, d0: Vec3, p1: Point3, d1: Vec3, tol: f64) -> Option<Po
 
 /// `sm_Coaxial`: whether two quadrics of revolution (or a plane, or a sphere's centre)
 /// share their axis within `tol` at a distance `reach` from it; the axis.
-fn coaxial(a: &BlendQuadric, b: &BlendQuadric, tol: f64, reach: f64) -> Option<(Point3, Vec3)> {
+pub(crate) fn coaxial(
+    a: &BlendQuadric,
+    b: &BlendQuadric,
+    tol: f64,
+    reach: f64,
+) -> Option<(Point3, Vec3)> {
     use QuadricKind as Q;
     let point_a = matches!(a.kind, Q::Sphere | Q::Point);
     let point_b = matches!(b.kind, Q::Sphere | Q::Point);

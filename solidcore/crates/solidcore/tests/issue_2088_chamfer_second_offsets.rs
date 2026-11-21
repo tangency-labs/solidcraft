@@ -311,3 +311,51 @@ fn issue_2486_chord_chamfers_of_a_cube_are_chords_by_their_definitions() {
     // twelve prisms of 20 x d^2 / 2, d = 1/sqrt 2, each corner giving back 3 d^3 / 4
     assert_close(volume(&k, &mut b), 7940.0 + 1.5 * std::f64::consts::SQRT_2);
 }
+
+/// #13710 phase 1: a chord on a curved section is the distance between feet at equal straight
+/// setbacks. The hemisphere of radius 5 (z >= 0): its rim chamfered by the chord sqrt 1.8. At the
+/// rim's right angle, with the ball's section a circle of curvature k = 1/5, feet at equal
+/// setbacks d are `c² = 2d² - k d³` apart, so the chord sqrt 1.8 is setbacks of 1. The flat's
+/// foot is at radius 4; the ball's at the chord 1 up it, the angle `phi = 2 asin(1/10)` from the
+/// rim. The body loses, turned about the axis (Pappus), the triangle of the rim and the two feet
+/// and the ball's segment between its foot and the rim.
+#[test]
+fn a_chord_on_a_hemisphere_s_rim_is_equal_straight_setbacks() {
+    use solidcore::primitive::api_primitives::create_sphere;
+    let mut k = definition_kernel();
+    let ball = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0).unwrap();
+    let below = create_box(&mut k, Point3::new(-6.0, -6.0, -6.0), 12.0, 12.0, 6.0).unwrap();
+    let mut b = boolean_difference(&mut k, ball, below).unwrap();
+    let rim = b
+        .edges()
+        .ids()
+        .find(|&e| {
+            let (s, t) = edge::start_end_vertices(&b, e).unwrap();
+            [s, t]
+                .iter()
+                .all(|v| vertex::point(&b, v.unwrap()).unwrap().z.abs() < 1e-9)
+        })
+        .unwrap();
+    {
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_chamfers(&k, &[rim], &[ChamferSize::Chord(1.8_f64.sqrt())])
+            .unwrap();
+        assert_eq!(s.straight_setback_edges(), 1);
+        s.create_corners(&k, None).unwrap();
+        for id in s.fillet_corners().unwrap() {
+            s.set_corner_bevel(id, true).unwrap();
+        }
+        s.do_filleting(&mut k, None).unwrap();
+    }
+    let (r, pi) = (5.0_f64, std::f64::consts::PI);
+    let phi = 2.0 * (0.1_f64).asin();
+    let (e, f1, f2) = ([r, 0.0], [r - 1.0, 0.0], [r * phi.cos(), r * phi.sin()]);
+    let triangle = 0.5 * ((f1[0] - e[0]) * (f2[1] - e[1]) - (f1[1] - e[1]) * (f2[0] - e[0])).abs();
+    let triangle_x = (e[0] + f1[0] + f2[0]) / 3.0;
+    let segment = 0.5 * r * r * (phi - phi.sin());
+    // its centroid from the centre toward the chord's middle, at 4 r sin³(phi/2) / (3 (phi - sin phi))
+    let segment_x =
+        4.0 * r * (0.5 * phi).sin().powi(3) / (3.0 * (phi - phi.sin())) * (0.5 * phi).cos();
+    let removed = 2.0 * pi * (triangle * triangle_x + segment * segment_x);
+    assert_close(volume(&k, &mut b), 250.0 * pi / 3.0 - removed);
+}

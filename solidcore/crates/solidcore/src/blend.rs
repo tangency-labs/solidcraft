@@ -11,6 +11,7 @@ pub mod blend_corner;
 pub mod blend_refusal;
 pub mod blend_setback;
 pub mod carried_face;
+pub mod chamfer_sections;
 pub mod chamfer_side;
 pub mod definition_check;
 pub mod feature_executive;
