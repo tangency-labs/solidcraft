@@ -360,7 +360,11 @@ pub fn measurable(k: &Kernel, surf: &Surface) -> Result<bool> {
 
 /// A certified lower bound of the distance from `p` to `surf` over `uv_box` (its NURB
 /// parameters; `None`, or an empty box, for the whole surface): no point of it is nearer to
-/// `p`. The NURBS form's Bézier patches over the box are subdivided, nearest bound first,
+/// `p`. The bound covers `uv_box` restricted to the surface's patches; a caller's box
+/// encloses a face's trimmed region, which lies within the surface's parameter domain (the
+/// face is the surface over it), so the restriction loses no part of the region. A box's
+/// ends may round a few ulps past the patches (a trim span's outward tight boxes); that
+/// rounding is admitted, while a box of foreign origin is refused. The NURBS form's Bézier patches over the box are subdivided, nearest bound first,
 /// until the nearest is at least `want` (then so is the bound returned), the nearest piece's
 /// centre is nearer than `want`, or [`MAX_PATCHES`] pieces have been made; the bound returned
 /// is the least over the pieces left, so it is certified whatever stopped the subdivision.
@@ -386,7 +390,7 @@ pub fn measurable(k: &Kernel, surf: &Surface) -> Result<bool> {
 /// # Errors
 ///
 /// `InvalidInput` for a point or `want` not finite, `want` negative, or a UV box not inside
-/// the patches' knot range (to its rounding); `Unsupported` for a surface without a NURBS
+/// the patches' knot range (past the admitted rounding of its ends); `Unsupported` for a surface without a NURBS
 /// form, a 2D form, or weights not proved positive; those of making the form and of its
 /// Bézier decomposition.
 pub fn surface_distance_lower_bound(
@@ -546,9 +550,18 @@ pub(crate) fn pieces_about(
     });
     if let Some(d) = dom {
         let (lo, hi) = (d.min(), d.max());
-        // the box's ends within the rounding of the knots they were made from
-        let du = 8.0 * f64::EPSILON * (ulo.abs() + uhi.abs());
-        let dv = 8.0 * f64::EPSILON * (vlo.abs() + vhi.abs());
+        // The box's ends, made from these knots (a face's trim span: the outward tight
+        // boxes of its UV trim curves, `topology::loopuse::loop_uv_span`), round a few
+        // ulps past them: 2^-44 past a 20-unit knot span was observed (wr_534's far moved
+        // top, refused at 8 eps). This slack is an ADMISSION threshold for that rounding,
+        // not a certified bound of it: the certificate needs none, because the region the
+        // box encloses — a face's trimmed region — lies within the surface's parameter
+        // domain (the face is the surface over that domain), so the restriction to the
+        // patches below loses no part of the region however the box's ends round out. A
+        // box of foreign origin (the wrong parameterization) overshoots far past the
+        // threshold and is still refused.
+        let du = 64.0 * f64::EPSILON * (ulo.abs() + uhi.abs());
+        let dv = 64.0 * f64::EPSILON * (vlo.abs() + vhi.abs());
         if !(lo.x >= ulo - du && hi.x <= uhi + du && lo.y >= vlo - dv && hi.y <= vhi + dv) {
             return Err(SolidError::invalid_input(
                 OP,
@@ -1390,6 +1403,56 @@ mod tests {
             let d = face_distance_lower_bound(&k, &b, f, p, exact * (1.0 - 1e-10)).unwrap();
             assert!((exact * (1.0 - 1e-10)..=exact).contains(&d), "{d}");
         }
+    }
+
+    /// A UV box whose ends round outside the surface's patches (the face's trim span is an
+    /// outward tight box: `wr_534`'s far moved top rounds 2^-44 below zero on a 20-unit knot
+    /// span) bounds the face the same as the plain box: the face's trimmed region lies
+    /// within the patches, so the restriction's clamped sliver holds no part of it. A box
+    /// of foreign origin (a partial overlap past the admitted rounding) is still refused.
+    #[test]
+    fn a_uv_box_rounding_outside_the_patches_still_bounds_the_face() {
+        let mut k = Kernel::default();
+        let b = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
+        let f = box_side(&k, &b);
+        let surf = b.face(f).unwrap().surface.clone().unwrap();
+        let dom = surf.natural_uv_domain_with_nurb(&k).unwrap();
+        let (lo, hi) = (dom.min(), dom.max());
+        let p = Point3::new(1010.0, 5.0, 5.0);
+        let exact = 1000.0;
+        // a useful bound within 1e-6 relative of the true distance (the piece cap stops
+        // tighter asks below it, `the_cap_stops_a_bound_below_the_distance`), never above
+        // the exact distance
+        let want = exact * (1.0 - 1e-6);
+        // the trim span's rounding, 2^-44 (wr_534's observed noise): past the 8-eps knot
+        // slack on this 10-unit span, within the admitted one
+        let over = 5.684341886080802e-14;
+        let mut plain = Extent2d::default();
+        plain.set_min_max_coords(lo.x, lo.y, hi.x, hi.y).unwrap();
+        let d_plain = surface_distance_lower_bound(&k, &surf, Some(&plain), p, want).unwrap();
+        assert!((want..=exact).contains(&d_plain), "{d_plain}");
+        for (a, b_, c, d) in [
+            (lo.x - over, lo.y, hi.x, hi.y),
+            (lo.x, lo.y, hi.x + over, hi.y),
+            (lo.x, lo.y - over, hi.x, hi.y),
+            (lo.x, lo.y, hi.x, hi.y + over),
+        ] {
+            let mut span = Extent2d::default();
+            span.set_min_max_coords(a, b_, c, d).unwrap();
+            let d = surface_distance_lower_bound(&k, &surf, Some(&span), p, want).unwrap();
+            assert!((want..=exact).contains(&d), "{d}");
+            // the clamped sliver holds no part of the region: the same bound
+            assert!((d - d_plain).abs() <= 1e-12, "{d} vs {d_plain}");
+        }
+        // a partial overlap past the admitted rounding is a foreign box: refused
+        let mut foreign = Extent2d::default();
+        foreign
+            .set_min_max_coords(lo.x, lo.y, hi.x + 5.0, hi.y)
+            .unwrap();
+        assert!(matches!(
+            surface_distance_lower_bound(&k, &surf, Some(&foreign), p, want),
+            Err(SolidError::InvalidInput { .. })
+        ));
     }
 
     #[test]
