@@ -5118,3 +5118,90 @@ fn the_disk_joined_with_its_lofted_blades_passes_the_check() {
     let report = joined.check(solidcore_ops::CheckLevel::All).unwrap();
     assert!(report.is_valid(), "{}", report.text);
 }
+
+/// A bounded cliff does not excuse a separate material-adding blend on the same plate.
+#[test]
+fn tangent_cliff_still_checks_a_separate_concave_blend() {
+    use solidcore_ops::blend::blend_with;
+    use solidcore_ops::{make_box, make_cylinder, pick};
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
+    let plate = make_box([-9.0, -6.0, -9.0], [12.0, 12.0, 9.0]).unwrap();
+    let tangent = make_cylinder([0.0, 0.0, -1.0], 3.0, 18.0).unwrap();
+    let inset = make_cylinder([-6.0, 0.0, -1.0], 1.0, 18.0).unwrap();
+    let plate = boolean(plate, tangent, BooleanOp::Union).unwrap().unwrap();
+    let body = boolean(plate, inset, BooleanOp::Union).unwrap().unwrap();
+    let points = [[0.0, 3.0, 0.0], [-6.0, 1.0, 0.0]];
+    let picks = pick::edges(&body, &points, 1e-4).unwrap().unwrap();
+    let apply = |body: &Body, picks: &[usize]| {
+        blend_with(
+            body,
+            Blend::Chamfer,
+            picks,
+            &[0.75],
+            &[],
+            Corners::Filled,
+            BlendOptions::default(),
+        )
+    };
+    for point in points {
+        let copy = body.copy().unwrap();
+        let pick = pick::edges(&copy, &[point], 1e-4).unwrap().unwrap();
+        apply(&copy, &pick).unwrap();
+        copy.check_solid().unwrap();
+    }
+    let error = apply(&body, &picks).unwrap_err();
+    assert_eq!(error, solidcore_ops::Error::NoRoom);
+}
+
+/// The exact cone, the original tangent walls and the upper rail survive clipping.
+#[test]
+fn tangent_cliff_chamfers_keep_the_walls_and_upper_rail() {
+    use solidcore_ops::measure::PointClass;
+    use solidcore_ops::pick;
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
+    for (name, walls) in [
+        (
+            "12060-chamfer-circular-shoulder-between-tangent-walls",
+            &[[0.0, -1.0], [0.0, 1.0]][..],
+        ),
+        (
+            "12060-chamfer-closed-shoulder-at-tangent-seam",
+            &[[1.0, 0.0]][..],
+        ),
+    ] {
+        let entry = corpus().join("fillets").join(format!("{name}.json"));
+        let case: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+        let operand: Record = serde_json::from_value(records(&entry, &case)["b1"].clone()).unwrap();
+        let (body, order) = Body::from_record(&operand, true).unwrap();
+        let mut input = [Slot {
+            body: Arc::new(body),
+            order: Some(order),
+        }];
+        let result = call(&case["calls"][0], &mut input).unwrap().unwrap();
+        let body = result.body;
+        body.check_solid().unwrap();
+        let diagonal = 3.0 * std::f64::consts::FRAC_1_SQRT_2;
+        assert!(pick::edges(&body, &[[diagonal, diagonal, 0.75]], 1e-5)
+            .unwrap()
+            .is_ok());
+        assert_eq!(
+            body.classify_point([-3.375, 0.0, 0.375]).unwrap(),
+            PointClass::OnBoundary,
+            "{name}: conical face at half height"
+        );
+        for &[x, y] in walls {
+            let point = |normal| [normal * x + 0.5 * y, normal * y + 0.5 * x, 0.375];
+            for (distance, class) in [
+                (2.98, PointClass::Inside),
+                (3.0, PointClass::OnBoundary),
+                (3.02, PointClass::Outside),
+            ] {
+                assert_eq!(
+                    body.classify_point(point(distance)).unwrap(),
+                    class,
+                    "{name}: original side wall at {x}, {y}"
+                );
+            }
+        }
+    }
+}

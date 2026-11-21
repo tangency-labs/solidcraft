@@ -43,6 +43,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Sheet", cr
     .output(output_schema_for::<ExportResult>)
     .params("sheet: id or name; format?: svg (default) | png | pdf | dxf (millimetres, layers VISIBLE, THIN, HIDDEN, DASHED, TEXT and FILL, each entity at its line's weight; pictures are left out and counted in report.pictures_left_out); pdf only: sheets?: [id or name, ...], one page each in that order (a pdf given neither sheet nor sheets holds every sheet, in the drawing's order), each page the sheet's paper size, its lines and text vector, shaded views and images embedded; path?: a file with the format's extension, required for png and pdf (else the reply holds an svg's or dxf's text, at most 64 MiB); png only: dpi?: 25 to 2400 (default the sheet's own), colour?: grey (default) | black_white | rgb | transparent; paper?: white (default) | blueprint | prussian_blue, whose png is rgb → {sheet, pages? (a pdf's sheets), format, bytes, path | svg | dxf, report: {widths_snapped, pieces_merged, pixels?: [width, height], pictures_left_out?}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's lines, then its parts lists and revision tables, then its title block's lines. Refused, naming them, while any view or sketch on the sheet failed or any fill failed or lost its boundary or any image won't decode; a placeholder view draws nothing. A view of another configuration evaluates a copy of the design; the design is unchanged."),
     CommandSpec::new(PRINT, "Print Drawing", crate::checked!("drawing.print", print))
+        .at("DRAWING REVIEW", "OUTPUT")
         .icon("export")
         .key("Ctrl+P")
         .in_drawing()
@@ -149,31 +150,33 @@ fn chosen_sheets(d: &Drawing, request: &ExportParams) -> Result<Vec<u64>> {
     }
 }
 
-/// `drawing.print`: the whole drawing's PDF, as `drawing.export` writes it, to its file.
+/// `drawing.print`: the whole drawing's PDF, as `drawing.export` writes it, asking a viewer to
+/// print it at actual size.
 fn print(s: &mut Session, p: &Value) -> Result<Value> {
     let request: PrintParams = crate::schema::read(PRINT, p)?;
     let mut params = serde_json::json!({"format": "pdf"});
     if let Some(path) = request.path {
         params["path"] = Value::String(path);
     }
-    export(s, &params)
+    export_into(s, &params, None, true)
 }
 
 /// The open drawing's PDF for printing, every sheet a page, as `drawing.print` writes it: its bytes,
 /// for the app to hand to a viewer, never as text.
 pub fn print_pdf(s: &mut Session) -> Result<Vec<u8>> {
     let mut document = Vec::new();
-    export_into(s, &serde_json::json!({"format": "pdf"}), Some(&mut document))?;
+    export_into(s, &serde_json::json!({"format": "pdf"}), Some(&mut document), true)?;
     Ok(document)
 }
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
-    export_into(s, p, None)
+    export_into(s, p, None, false)
 }
 
 /// `drawing.export`; with `bytes` and no path, the document goes there rather than to a file or the
-/// reply.
-fn export_into(s: &mut Session, p: &Value, bytes_out: Option<&mut Vec<u8>>) -> Result<Value> {
+/// reply. A PDF asks a viewer to print it at actual size when `actual_size` (Print), and leaves the
+/// viewer its own choice otherwise (Export), as it always has.
+fn export_into(s: &mut Session, p: &Value, bytes_out: Option<&mut Vec<u8>>, actual_size: bool) -> Result<Value> {
     let request: ExportParams = crate::schema::read(CMD, p)?;
     let d = s.drawing(CMD)?.clone();
     let sheets = chosen_sheets(&d, &request)?;
@@ -251,8 +254,7 @@ fn export_into(s: &mut Session, p: &Value, bytes_out: Option<&mut Vec<u8>>) -> R
         }
         (ExportFormat::Pdf, _) => {
             let sources: Vec<&dyn Pictures> = pictures.iter().map(|p| p as &dyn Pictures).collect();
-            let options =
-                PdfOptions { title: Some(d.name.clone()).filter(|name| !name.is_empty()), output_time: None, layers: true, actual_size: true };
+            let options = PdfOptions { title: Some(d.name.clone()).filter(|name| !name.is_empty()), output_time: None, layers: true, actual_size };
             let (pdf, reports) =
                 solidcraft_io::paper::paper_pdf_pages_with(&scenes, &options, Some(PdfPictures { pages: &sources, dpi: DEFAULT_DPI }))
                     .map_err(|e| bad(CMD, e.to_string()))?;
