@@ -2,7 +2,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use schemars::JsonSchema;
@@ -65,6 +65,7 @@ impl std::fmt::Display for DesignToken {
 
 pub mod conditions;
 mod input;
+mod schema_order;
 pub mod swatches;
 pub use input::{check_input, prepare_input, strict_input_schema};
 
@@ -447,6 +448,11 @@ pub struct Entry {
     pub extensions: Vec<String>,
     pub effect: Effect,
     pub input_schema: Value,
+    /// Property names in declaration order, keyed by the object schema's JSON Pointer (the
+    /// empty string for the root). Host metadata keeps that order across entry round trips;
+    /// ordinary JSON maps remain sorted. Missing keys use the dialog's usual field order.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub input_property_order: BTreeMap<String, Vec<String>>,
     pub slots: Vec<UiSlot>,
 }
 
@@ -476,8 +482,12 @@ struct DeclaredEntry {
     /// says `edit` (the only effect it could state before `open` existed) still opens a new design.
     #[serde(default)]
     effect: Option<Effect>,
-    #[serde(default = "empty_input_schema")]
-    input_schema: Value,
+    #[serde(default)]
+    #[schemars(with = "Value")]
+    input_schema: schema_order::InputSchema,
+    // Present in a host's serialized Entry; plugin authors only declare schema properties.
+    #[serde(default)]
+    input_property_order: Option<BTreeMap<String, Vec<String>>>,
     #[serde(default)]
     slots: Vec<UiSlot>,
 }
@@ -490,6 +500,7 @@ impl From<EntryDeclaration> for Entry {
                 extensions: Vec::new(),
                 effect: Effect::Edit,
                 input_schema: empty_input_schema(),
+                input_property_order: BTreeMap::new(),
                 slots: Vec::new(),
             },
             EntryDeclaration::Declared(value) => Self {
@@ -501,7 +512,8 @@ impl From<EntryDeclaration> for Entry {
                     (_, Some(effect)) => effect,
                     (EntryKind::Command, None) => Effect::Edit,
                 },
-                input_schema: value.input_schema,
+                input_schema: value.input_schema.value,
+                input_property_order: value.input_property_order.unwrap_or(value.input_schema.property_order),
                 slots: value.slots,
             },
         }
@@ -586,6 +598,11 @@ impl RuntimeManifest {
             let field = format!("runtime.entries.{}.input_schema", entry.name);
             if !entry.input_schema.is_object() || entry.input_schema.get("type").and_then(Value::as_str) != Some("object") {
                 return Err(invalid(&field, "entry inputs must be an object schema"));
+            }
+            if let Some(order) = entry.input_schema.get("x-solidcraft-field-order")
+                && order.as_str() != Some("declared")
+            {
+                return Err(invalid(format!("{field}.x-solidcraft-field-order"), "must be \"declared\" when present"));
             }
             validate_list_inputs(&entry.input_schema, &field)?;
             conditions::validate_conditions(&entry.input_schema)?;
