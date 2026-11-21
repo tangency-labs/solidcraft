@@ -20,6 +20,30 @@ pub struct Interval {
     pub retained_by_first: bool,
 }
 
+/// The signed dot product of two plate normals.
+#[must_use]
+pub fn normal_dot(first: Vec3, second: Vec3) -> f64 {
+    first.dot(second)
+}
+
+/// The positive side lengths of a finite, ordered axis-aligned box.
+#[must_use]
+pub fn bounds_size(lower: [f64; 3], upper: [f64; 3]) -> Option<[f64; 3]> {
+    if !lower.iter().chain(&upper).all(|value| value.is_finite())
+        || lower.iter().zip(upper).any(|(lo, hi)| *lo > hi)
+    {
+        return None;
+    }
+    let size = [
+        upper[0] - lower[0],
+        upper[1] - lower[1],
+        upper[2] - lower[2],
+    ];
+    size.iter()
+        .all(|value| value.is_finite() && *value > 0.0)
+        .then_some(size)
+}
+
 /// The dominant outward normal of a plate, inferred from its planar face normals and areas.
 ///
 /// Opposite parallel faces contribute to one pair. A second, equally dominant direction makes
@@ -216,4 +240,36 @@ pub fn allowances(
             + if index + 1 == slots { edge_offset } else { 0.0 };
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{bounds_size, normal_dot};
+    use crate::Vec3;
+
+    #[test]
+    fn normal_dot_measures_alignment() {
+        assert_eq!(
+            normal_dot(Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)),
+            0.0
+        );
+        assert_eq!(
+            normal_dot(Vec3::new(1.0, 0.0, 0.0), Vec3::new(-1.0, 0.0, 0.0)),
+            -1.0
+        );
+    }
+
+    #[test]
+    fn bounds_size_rejects_invalid_extents() {
+        assert_eq!(
+            bounds_size([1.0, 2.0, 3.0], [4.0, 7.0, 9.0]),
+            Some([3.0, 5.0, 6.0])
+        );
+        assert_eq!(bounds_size([1.0, 2.0, 3.0], [0.0, 7.0, 9.0]), None);
+        assert_eq!(bounds_size([1.0, 2.0, 3.0], [1.0, 7.0, 9.0]), None);
+        assert_eq!(
+            bounds_size([0.0, 0.0, 0.0], [f64::INFINITY, 1.0, 1.0]),
+            None
+        );
+    }
 }

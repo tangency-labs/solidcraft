@@ -11,7 +11,7 @@ use solidcore::{Point3, Vec3};
 pub struct Failure {
     /// The operation being performed when the error occurred.
     pub stage: &'static str,
-    /// The underlying SolidCore operation error.
+    /// The underlying `SolidCore` operation error.
     pub source: crate::Error,
 }
 
@@ -37,6 +37,9 @@ fn at_stage<T>(stage: &'static str, result: Result<T>) -> std::result::Result<T,
 }
 
 pub use solidcore::finger_joint::{allowances, cutter_box, pattern, Interval};
+
+/// Cutter bodies generated for the first and second plates of a pair.
+pub type PairCutterTools = (Option<crate::Body>, Option<crate::Body>);
 
 /// The dominant plate axis from outward planar face normals and areas.
 #[must_use]
@@ -87,7 +90,7 @@ pub fn pair_tools(
     clearance: f64,
     edge_offset: f64,
     inverted: bool,
-) -> std::result::Result<Option<(Option<crate::Body>, Option<crate::Body>)>, Failure> {
+) -> std::result::Result<Option<PairCutterTools>, Failure> {
     if count == 0
         || count > 64
         || !clearance.is_finite()
@@ -143,11 +146,8 @@ pub fn pair_tools(
     // Rectangular cutters are exact for rectangular footprints, but a zero-clearance cutter
     // must not extend across a notch in an orthogonal overlap. Keep angled and clearance-expanded
     // joints on the established through-cut path.
-    let normal_dot = first_normal
-        .iter()
-        .zip(second_normal)
-        .map(|(a, b)| *a * b)
-        .sum::<f64>();
+    let normal_dot =
+        solidcore::finger_joint::normal_dot(Vec3::from(first_normal), Vec3::from(second_normal));
     let clip_stepped_footprint = clearance == 0.0 && normal_dot.abs() <= 1e-6;
     let Some(line) = joint_line(first_normal, second_normal) else {
         return Ok(None);
@@ -219,11 +219,11 @@ pub fn pair_tools(
     }
     let first_tools = at_stage(
         "combining the first plate's cutters",
-        compound_tools(first_tools),
+        compound_tools(&first_tools),
     )?;
     let second_tools = at_stage(
         "combining the second plate's cutters",
-        compound_tools(second_tools),
+        compound_tools(&second_tools),
     )?;
     let first_to_body =
         crate::affine::then(&crate::affine::inverse(&first_world)?, &feature_world)?;
@@ -311,11 +311,8 @@ fn cutters_in_frame(
     let (overlap_lower, overlap_upper) = local_overlap.bounds()?;
     let (plate_lower, plate_upper) = local_plate.bounds()?;
     let clip_to_overlap = if clip_stepped_footprint {
-        let size = [
-            overlap_upper[0] - overlap_lower[0],
-            overlap_upper[1] - overlap_lower[1],
-            overlap_upper[2] - overlap_lower[2],
-        ];
+        let size = solidcore::finger_joint::bounds_size(overlap_lower, overlap_upper)
+            .ok_or(crate::Error::Argument)?;
         let bounds_box = crate::make_box(overlap_lower, size)?;
         crate::boolean::boolean(
             bounds_box,
@@ -358,7 +355,7 @@ fn cutters_in_frame(
 }
 
 /// The box cutters as one record compound, or `None` when a side has no slots to cut.
-fn compound_tools(tools: Vec<crate::Body>) -> Result<Option<crate::Body>> {
+fn compound_tools(tools: &[crate::Body]) -> Result<Option<crate::Body>> {
     if tools.is_empty() {
         return Ok(None);
     }
