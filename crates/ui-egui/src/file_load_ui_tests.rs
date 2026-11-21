@@ -1615,10 +1615,8 @@ fn programmatic_imports_use_only_explicit_options_and_schema_defaults() {
         // MCP/control opens offload the exact supplied options, without showing a form.
         let mut h = crate::scenario::Harness::new();
         let path = importer_with_expected_options(&mut h, json!({"size":3}));
-        let (request, _reply) = solidcraft_control::ControlRequest::new(
-            "engine.execute",
-            json!({"command":command,"params":{"path":path,"options":{"size":3}}}),
-        );
+        let (request, _reply) =
+            solidcraft_control::ControlRequest::new("engine.execute", json!({"command":command,"params":{"path":path,"options":{"size":3}}}));
         assert!(crate::file_load::control(&mut h.app, request).is_none());
         assert!(h.app.plugin_menu.dialogs.is_empty());
         assert_eq!(h.app.file_load.current_request().unwrap().options["options"], json!({"size":3}));

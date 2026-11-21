@@ -1081,10 +1081,8 @@ fn importer_entry(name: &str) -> solidcraft_engine::plugin::Entry {
 #[test]
 fn importer_options_are_remembered_per_entry_on_run_and_survive_preferences_reload() {
     let mut h = crate::scenario::Harness::new();
-    h.app.plugin_menu.listed = vec![
-        listed("gears", vec![importer_entry("open"), importer_entry("other")]),
-        listed("other", vec![importer_entry("open")]),
-    ];
+    h.app.plugin_menu.listed =
+        vec![listed("gears", vec![importer_entry("open"), importer_entry("other")]), listed("other", vec![importer_entry("open")])];
     h.app.plugin_menu.loaded = true;
     let before = h.app.session.doc.to_json();
     open_entry(&mut h.app, 0, 0);

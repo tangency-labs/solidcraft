@@ -904,9 +904,7 @@ pub(crate) fn forget_options(app: &mut SolveApp, plugin: &str) {
 /// An interactive file open uses the engine's importer resolution, retaining native-reader priority.
 /// Programmatic opens never call this function.
 pub(crate) fn open_importer_file(app: &mut SolveApp, path: &str) -> bool {
-    if cfg!(target_arch = "wasm32")
-        || !solidcraft_engine::cmd::runs_plugin_importer(&app.session, "doc.open", &json!({"path": path}))
-    {
+    if cfg!(target_arch = "wasm32") || !solidcraft_engine::cmd::runs_plugin_importer(&app.session, "doc.open", &json!({"path": path})) {
         return false;
     }
     let Ok(Some(importer)) = solidcraft_engine::plugin::importer_for(&app.session, path, None) else { return false };
@@ -1467,9 +1465,8 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
             }
             browse = body(app, ui, dialog, ready.as_ref().err(), &mut picker, &mut claim);
             if dialog.opens.is_some() && dialog.fields.is_some() {
-                let reset = ui
-                    .add_enabled_ui(!running, |ui| ui_kit::button(ui, app.tr("ui.plugin_importer_restore_defaults"), ui_kit::Button::Normal))
-                    .inner;
+                let reset =
+                    ui.add_enabled_ui(!running, |ui| ui_kit::button(ui, app.tr("ui.plugin_importer_restore_defaults"), ui_kit::Button::Normal)).inner;
                 crate::scenario::publish_target("plugin_dialog:defaults", reset.rect);
                 if reset.clicked() {
                     restore_defaults(dialog);
