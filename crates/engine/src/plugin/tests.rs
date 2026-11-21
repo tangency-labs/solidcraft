@@ -2574,6 +2574,63 @@ mod importers {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn importer_dialog_facts_bind_conditions_but_direct_calls_never_run_the_hook() {
+        let (mut session, root) = installed("dialog-file-facts", &[("smp", &["smp", "other"], false)]);
+        let mut manifest = importer_manifest("smp", &["smp", "other"], false);
+        manifest["runtime"]["entries"][0]["input_schema"] = json!({"type":"object","required":["parts"],"properties":{
+            "parts":{"type":"integer","minimum":1,"x-solidcraft-visible-when":{"file":"extension","eq":"smp"}}
+        }});
+        let folder = root.join("plugins/smp").to_string_lossy().into_owned();
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+        let file = put(&root, "Bracket.SMP", &design());
+        let package = read_package(&folder).unwrap();
+        let dialog = import_dialog(&session, &folder, &package.approval, "convert", &file, 7, &json!({})).unwrap();
+        assert_eq!(dialog.file.name, "Bracket.SMP");
+        assert_eq!(dialog.file.extension, "smp");
+        assert_eq!(dialog.file.size, std::fs::metadata(&file).unwrap().len());
+        assert_eq!(dialog.file.format, "smp.convert");
+        assert_eq!(dialog.file.generation, 7);
+        assert!(file_facts(&root.join("files").to_string_lossy(), "smp.convert", 7).is_err(), "directories are not files");
+        assert!(file_facts(&file, &"x".repeat(162), 7).is_err(), "format facts are bounded");
+        let long_extension = put(&root, &format!("part.{}", "a".repeat(33)), b"header");
+        assert!(file_facts(&long_extension, "smp.convert", 7).is_err(), "extension facts are bounded");
+        assert!(!dialog.hook);
+        assert!(craft_plugin::check_input(&dialog.schema, &json!({})).is_err());
+        assert!(import_dialog(&session, &folder, "replaced", "convert", &file, 8, &json!({})).is_err());
+        let error = session.execute("file.import", &json!({"path":file,"options":{}})).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::InvalidInput { .. })), "{error}");
+        let other = put(&root, "Bracket.other", &design());
+        assert!(session.execute("file.import", &json!({"path":other,"options":{"parts":"hidden"}})).is_ok());
+        // A copied package requesting the hook, but lacking its export, still imports directly:
+        // the command calls importer.import-file only. Opening the interactive form fails.
+        manifest["capabilities"] = json!(["formats@0.2", "dialog@0.1"]);
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+        assert!(session.execute("file.import", &json!({"path":file,"options":{"parts":2}})).is_ok());
+        let package = read_package(&folder).unwrap();
+        assert!(import_dialog(&session, &folder, &package.approval, "convert", &file, 9, &json!({})).is_err());
+        manifest["capabilities"] = json!(["formats@0.2"]);
+        manifest["optional_capabilities"] = json!(["dialog@0.1"]);
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+        let package = read_package(&folder).unwrap();
+        assert!(
+            import_dialog(&session, &folder, &package.approval, "convert", &file, 10, &json!({})).is_err(),
+            "a supported optional hook runs"
+        );
+        manifest["optional_capabilities"] = json!(["dialog@0.2"]);
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+        let package = read_package(&folder).unwrap();
+        assert!(
+            !import_dialog(&session, &folder, &package.approval, "convert", &file, 11, &json!({})).unwrap().hook,
+            "unsupported optional hooks are ignored"
+        );
+        let scope = solidcraft_io::vfs::PathScope::new(vec![root.join("plugins")]);
+        solidcraft_io::vfs::scoped(Some(scope), || {
+            assert!(file_facts(&file, "smp.convert", 10).is_err(), "dialog facts obey the caller's file scope");
+        });
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     /// An agent that may use only the folder of its input file still sees and uses the installed
     /// importer: the registry is the app's, not the agent's (finding 2 of a new-user walk). The
     /// input file itself is still checked, and refused with the path named.

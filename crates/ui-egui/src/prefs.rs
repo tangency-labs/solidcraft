@@ -2049,6 +2049,8 @@ preference_settings! {
     /// Remember a moved plugin command window's position for the current design, until the
     /// application closes (#18684). Off keeps the previously centred reopen behaviour.
     plugin_remember_dialog_position: bool = false, PAGE_PLUGINS;
+    /// Opt into picking an importer file before its options; off keeps the options-first dialog.
+    plugin_import_file_first: bool = false, PAGE_PLUGINS;
     /// Approved install permissions survive page resets and Cancel, like installed files.
     plugin_grants: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants> = std::collections::BTreeMap::new();
     /// User ceilings, not automatic increases to a package's approved execution budget.

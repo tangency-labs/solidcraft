@@ -369,6 +369,22 @@ pub fn update_dialog(
     protected: &BTreeSet<String>,
     complete: bool,
 ) -> Result<dialog::Update> {
+    let runtime = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
+    let declared = runtime.entries.iter().find(|declared| declared.name == entry).ok_or_else(|| error("unknown entry"))?;
+    let schema = conditions::bind_file_conditions(&declared.input_schema, None)?;
+    update_dialog_with_schema(session, package, entry, values, protected, complete, &schema)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_dialog_with_schema(
+    session: &Session,
+    package: &Package,
+    entry: &str,
+    values: &Value,
+    protected: &BTreeSet<String>,
+    complete: bool,
+    schema: &Value,
+) -> Result<dialog::Update> {
     if session.disabled_plugins.contains(&package.manifest.id) {
         return Err(error("plugin is disabled"));
     }
@@ -377,7 +393,6 @@ pub fn update_dialog(
     }
     let rt = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
     let declared = rt.entries.iter().find(|e| e.name == entry).ok_or_else(|| error("unknown entry"))?;
-    let schema = &declared.input_schema;
     let baseline = dialog::apply(schema, values, protected, None, false)?.values;
     if !declared.dialog_hook {
         return dialog::apply(schema, &baseline, protected, None, complete).map_err(Into::into);
@@ -533,7 +548,9 @@ pub mod storage;
 #[cfg(not(target_arch = "wasm32"))]
 pub use package::{remove, store_grants, validate_grants};
 
-pub use import::{Importer, describe as describe_importers, import_file, importer_for, importers, open_filters};
+pub use import::{
+    ImportDialog, Importer, describe as describe_importers, file_facts, import_dialog, import_file, importer_for, importers, open_filters,
+};
 pub use messages::PluginFailure;
 #[cfg(test)]
 mod tests;

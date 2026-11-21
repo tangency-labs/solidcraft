@@ -35,6 +35,25 @@ fn main() -> Result<(), Box<dyn Error>> {
          macro_rules! call_import {{ ($guest:expr, $store:expr, $entry:expr, $file:expr, $options:expr) => {{ $guest.{namespace}_{name}_importer().call_import_file($store, $entry, $file, $options) }}; }}\n"
     );
     fs::write(PathBuf::from(env::var("OUT_DIR")?).join("importer.rs"), importer)?;
+    let dialog = format!(
+        "mod importer_dialog_bindings {{\n\
+             wasmtime::component::bindgen!({{\n\
+                 path: \"../craft-plugin/wit\",\n\
+                 world: \"importer-dialog-plugin\",\n\
+                 with: {{\n\
+                     \"{package_name}/types\": super::bindings::{namespace}::{name}::types,\n\
+                     \"{package_name}/log\": super::bindings::{namespace}::{name}::log,\n\
+                     \"{package_name}/control\": super::bindings::{namespace}::{name}::control,\n\
+                     \"{package_name}/clock\": super::bindings::{namespace}::{name}::clock,\n\
+                     \"{package_name}/source\": super::importer_bindings::{namespace}::{name}::source,\n\
+                     \"{package_name}/design\": super::importer_bindings::{namespace}::{name}::design,\n\
+                     \"{package_name}/evaluate\": super::importer_bindings::{namespace}::{name}::evaluate,\n\
+                 }},\n\
+             }});\n\
+         }}\n\
+         macro_rules! call_dialog {{ ($guest:expr, $store:expr, $entry:expr, $context:expr) => {{ $guest.{namespace}_{name}_dialog_provider().call_update_fields($store, $entry, $context) }}; }}\n"
+    );
+    fs::write(PathBuf::from(env::var("OUT_DIR")?).join("dialog.rs"), dialog)?;
     // Keep the shipped 0.1 WIT frozen. Only the optional export world is additive, generated
     // against its original error type so legacy command/importer bindings remain unchanged.
     let older = "../craft-plugin/wit-0.1/plugin.wit";

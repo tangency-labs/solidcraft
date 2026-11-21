@@ -328,9 +328,95 @@ For example, `{"kind":"menu","name":"File"}` places an entry in File;
 Clicking a File, Help or ribbon item opens the same input-schema dialog as the Plugins menu.
 The host finds the entry by its namespaced `<plugin-id>.<entry>` command. The dialog uses the same
 enabled state and grant checks from every placement. Missing command-group grants leave Run off
-with an explanation. Opening the dialog executes no plugin code; for a command entry, Run submits the
-existing `plugin.run` transaction. An importer entry is not a command: its dialog shows the options,
-then its button chooses the file and opens it as a new design with `file.import`, as File > Open does.
+with an explanation. Opening a command dialog executes no plugin code; Run submits the
+existing `plugin.run` transaction. By default, importer menu entries show options before choosing
+a file, and File › Open and drag-and-drop import their paths directly.
+In **Preferences › Plugins**, turn on **Choose the file before import options**
+(`plugin_import_file_first`, off by default) to choose the file before showing its options.
+With this enabled, File › Open and drag-and-drop already have a path and go straight to the same
+form. Open file opens it as a new design with `file.import`; Cancel at either step opens nothing.
+An importer may opt into the bounded dialog hook below; choosing a file then runs that hook,
+never the importer. This is an app-wide workflow preference; it changes no saved designs.
+
+### File-aware importer forms
+
+File conditions use the same bounded condition grammar as sibling conditions, replacing `field`
+with `file`. Facts are host-owned, read-only and separate from input properties; a property named
+`extension` cannot override the selected file's extension. Facts are available without a new
+capability:
+
+```json
+"parts": {
+  "type": "string", "title": "Part",
+  "x-solidcraft-visible-when": {"file": "extension", "in": ["asm", "assembly"]}
+}
+```
+
+The fact names are `name` (filename, no folders, at most 255 UTF-8 bytes), `extension`
+(lowercase, no dot, at most 32 bytes), `size` (bytes, at most the import limit of 1 GiB), and
+`format` (the host-matched namespaced importer entry, such as `reader.convert`, at most 161
+bytes). File conditions accept `eq`, `in`, `all`, `any` and `not`, with the existing depth and
+node budgets. They work on visibility, enabled state, choices and conditional defaults,
+including nested schemas. Unknown facts and literals of the wrong type are rejected on load.
+Before a file is selected, file comparisons are false. Direct imports bind the same conditions
+to their supplied path before validating and omitting hidden options; they never open a form.
+
+An importer can additionally request `"dialog@0.1"` alongside `"formats@0.2"` and build against
+the additive `importer-dialog-plugin` world in `crates/craft-plugin/wit/plugin.wit`. This includes
+the existing importer world and adds the export `dialog-provider.update-fields(entry, context)`.
+The existing 0.1 and 0.2 importer worlds and their interfaces are unchanged; existing components
+need no rebuild and do not acquire a hook. The host checks the optional export when checking or
+installing the component; an explicit `dialog_hook` declaration requires it. This file-aware reply
+format is for importer entries without `dialog_hook`; entries with `"dialog_hook": true` use the
+general field patches described below.
+
+`context` is JSON:
+
+```json
+{"values":{"mode":"parts"},"file":{"name":"parts.asm","extension":"asm","size":2048,"format":"reader.convert","generation":3}}
+```
+
+`values` contains the current visible scalar inputs, including incomplete forms. The host does
+not accept file facts from option values. The hook returns JSON updates to already declared
+fields, for example after reading the part names listed by a header:
+
+```json
+{"fields":{"parts":{"oneOf":[{"const":"plate","title":"Plate"},{"const":"cover","title":"Cover"}],"default":"plate"}}}
+```
+
+A reply contains only `fields`, at most 256 updates and 64 KiB of JSON in total. Each update may
+change `title`, `description`, `default`, and either `enum` or `oneOf`. Text is at most 2,048
+bytes. Choice lists contain 1–256 strings; `oneOf` options contain `const` and optional `title`
+and `description`. Values must satisfy the original field constraints, and defaults must fit
+the updated choices. A hook cannot add fields, change types, constraints or directory semantics,
+or replace declarative conditions. Conditional choice lists cannot be replaced. Folder values
+still need the existing install grants: a hook default and a picked folder grant no new access.
+Untouched fields take new defaults; compatible text and numeric edits, including cleared or
+incomplete input, survive updates. Edited choices survive when the new choices still offer them.
+String choices retain their length constraints, and every offered value must satisfy them.
+If applying an update changes the visible values, the host calls the hook again with those
+values before enabling Open. Unchanged visible values do not trigger another call.
+
+Each update runs in a fresh sandbox on a worker, with at most 5,000,000 fuel, 500 ms shared by
+prefix acquisition and guest execution, and 256 host calls (or the manifest's smaller budgets).
+A prefix read that finishes after the deadline is discarded. The manifest's approved memory
+and stack ceilings still apply. Compilation and bounded prefix acquisition also run off the UI
+thread. Through the existing `source` interface, only path `""` is available: `size("")` reports
+the full file size, `resolve("")` returns `""`, and `read("", offset, len)` reads a snapshot of the
+first 64 KiB. Each requested range must lie in that prefix; the sum of requested lengths per
+update is at most 64 KiB, including repeat reads. Reads ending past EOF return fewer bytes.
+Sibling files remain inaccessible even with `input_folder` approved. `design.write` and design
+evaluation are refused during a hook; there are no app commands, folder grants or writes.
+The host bounds context JSON to 128 KiB. A failed or invalid update leaves Open off with the
+error; selecting a file again retries. No partial update is applied.
+
+**Change file…** keeps the form open, updates its host path and advances `file.generation`,
+even when the same path is picked again. Old header choices are cleared immediately. At most
+one worker runs per dialog; a result for an earlier generation is discarded before the next
+update starts. Closing the form disconnects its results. Editing inputs reruns an opted-in hook,
+with fields and Open disabled while it is pending. File conditions themselves never run Wasm.
+Scripts, CLI and MCP continue to pass `path` and `options` directly and never call this file-aware
+schema hook. An explicit `dialog_hook` entry still runs its general field hook before importing.
 
 ## Integration APIs
 
@@ -549,6 +635,9 @@ Both strings containing values are JSON objects. Existing command worlds keep th
 plugins without this capability need no new export and continue to link and run. The interface
 is available alongside both supported `craft:plugin` WIT versions (0.1 and 0.2); use the
 `command-dialog-plugin` world when building a command plugin with the hook.
+Importer entries can use the same general patches. When the file-first form has a selected file,
+the host binds its file conditions before validating patches. Changing the file invalidates older
+patch replies, and the file reader and field hook share one worker slot per dialog.
 
 A reply maps existing property names to patches, for example:
 
@@ -733,8 +822,8 @@ reports progress and cancellation, reads named files and a clock, and exports th
 `plugin.json` lists what it needs in `capabilities`, for example `"capabilities": ["commands@0.2"]`;
 the host refuses an unknown or incompatible required capability when it reads the manifest, with
 a plain message such as "needs commands 0.3; update SolidCraft or the plugin". `formats@0.2`
-adds importers, `evaluate@0.2`
-lets an importer check its result, and `storage@0.1` keeps data in a design (below). `ui` and
+adds importers, `evaluate@0.2` lets an importer check its result, `dialog@0.1` supplies bounded
+field patches and file-aware form updates, and `storage@0.1` keeps data in a design (below). `ui` and
 `viewport` arrive later as their own
 versioned interfaces. While a version is 0.x, a minor version may break the one before it.
 
@@ -933,7 +1022,8 @@ Only an importer may say `open`.
   (`plugin_id.entry`, listed in `plugin.list`'s `importers`) picks one for either command, for
   example for a `.fcstd` file SolidCraft also reads. `options` passes the entry's declared options.
   Two importers claiming one extension need `format`. File › Open offers the claimed extensions,
-  and the Plugins menu has each importer's entry: its dialog shows the options, then chooses the file.
+  and the Plugins menu has each importer's entry. With the file-first preference enabled, it
+  chooses the file, then shows its options (see [File-aware importer forms](#file-aware-importer-forms)).
 - **The world.** The component implements `importer-plugin`: it exports
   `importer.import-file(entry, file, options)` and imports `source` (the file, read in chunks of at
   most 1 MiB), `design` (where it writes a SolidCraft design file), `log`, `control` and `clock`.

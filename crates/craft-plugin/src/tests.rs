@@ -1250,3 +1250,73 @@ fn schema_composition_does_not_implicitly_close_object_constraints() {
         assert!(check_input(&schema, &json!({"a":1})).is_err());
     }
 }
+
+#[test]
+fn file_conditions_are_typed_host_facts_and_cannot_be_spoofed_by_options() {
+    let schema = json!({"type":"object","required":["parts"],"properties":{
+        "extension":{"type":"string"},
+        "parts":{"type":"integer","minimum":1,"x-solidcraft-visible-when":{"all":[
+            {"file":"extension","in":["asm","assembly"]},
+            {"file":"format","eq":"sample.convert"},
+            {"not":{"file":"size","eq":0}}
+        ]}},
+        "mode":{"type":"string","oneOf":[
+            {"const":"part"}, {"const":"assembly","x-solidcraft-when":{"file":"extension","eq":"asm"}}
+        ],"x-solidcraft-defaults":[{"when":{"file":"name","eq":"parts.asm"},"value":"assembly"}]}
+    }});
+    let mut file = dialog::FileFacts { name: "parts.asm".into(), extension: "asm".into(), size: 24, format: "sample.convert".into(), generation: 1 };
+    conditions::validate_conditions(&schema).unwrap();
+    assert!(conditions::uses_file_facts(&schema));
+    let bound = conditions::bind_file_conditions(&schema, Some(&file)).unwrap();
+    assert!(check_input(&bound, &json!({"extension":"txt"})).is_err(), "parts is required for the actual file");
+    assert!(check_input(&bound, &json!({"parts":2,"mode":"assembly"})).is_ok());
+    file.extension = "txt".into();
+    let bound = conditions::bind_file_conditions(&schema, Some(&file)).unwrap();
+    assert_eq!(prepare_input(&bound, &json!({"extension":"asm","parts":"hidden"})).unwrap(), json!({"extension":"asm"}));
+    assert!(check_input(&bound, &json!({"mode":"assembly"})).is_err());
+    for condition in [
+        json!({"file":"path","eq":"/secret"}),
+        json!({"file":"size","eq":-1}),
+        json!({"file":"extension","eq":1}),
+        json!({"file":"generation","eq":1}),
+        json!({"file":"name","eq":"x","field":"parts"}),
+    ] {
+        let bad = json!({"type":"object","properties":{"part":{"type":"string","x-solidcraft-visible-when":condition}}});
+        assert!(conditions::validate_conditions(&bad).is_err());
+    }
+}
+
+#[test]
+fn dialog_field_updates_are_bounded_and_preserve_types_conditions_and_directory_semantics() {
+    let schema = json!({"type":"object","properties":{
+        "part":{"type":"string"},
+        "folder":{"type":"string","format":"directory"},
+        "count":{"type":"integer","minimum":1}
+    }});
+    let update = json!({"fields":{"part":{"oneOf":[{"const":"plate","title":"Plate"},{"const":"cover","title":"Cover"}],"default":"plate"}}});
+    let updated = dialog::apply_update(&schema, &update).unwrap();
+    assert_eq!(updated["properties"]["part"]["default"], "plate");
+    assert_eq!(updated["properties"]["folder"], schema["properties"]["folder"]);
+    for fields in [
+        json!({"undeclared":{"default":1}}),
+        json!({"part":{"type":"integer"}}),
+        json!({"folder":{"format":"text"}}),
+        json!({"folder":{"enum":["/etc"]}}),
+        json!({"count":{"default":0}}),
+        json!({"part":{"oneOf":[{"const":"plate","x-solidcraft-when":{"all":[]}}]}}),
+        json!({"part":{"enum":[]}}),
+        json!({"part":{"enum":[4]}}),
+        json!({"part":{"description":"x".repeat(dialog::MAX_UPDATE_BYTES)}}),
+    ] {
+        assert!(dialog::apply_update(&schema, &json!({"fields":fields})).is_err());
+    }
+    let mut importing = importer();
+    importing["capabilities"] = json!(["formats@0.2", "dialog@0.1"]);
+    assert!(parse_manifest(importing.to_string().as_bytes(), "sample").is_ok());
+    let mut command = manifest();
+    command["capabilities"] = json!(["commands@0.2", "dialog@0.1"]);
+    command["runtime"]["entries"][0] = json!({"name":"make","dialog_hook":true});
+    assert!(parse_manifest(command.to_string().as_bytes(), "sample").is_ok());
+    command["capabilities"] = json!(["commands@0.2"]);
+    assert!(parse_manifest(command.to_string().as_bytes(), "sample").is_err());
+}

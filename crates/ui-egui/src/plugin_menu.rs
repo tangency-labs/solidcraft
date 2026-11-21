@@ -229,7 +229,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         ("integer", false) => &["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"],
         ("boolean", false) => &[],
         // A list of values, or of `{"const": value, "title": shown}` options; not both.
-        ("string", true) if p.contains_key("enum") != p.contains_key("oneOf") => &["enum", "oneOf"],
+        ("string", true) if p.contains_key("enum") != p.contains_key("oneOf") => &["enum", "oneOf", "minLength", "maxLength", "format"],
         ("string", false) => &["minLength", "maxLength", "format"],
         _ => return None,
     };
@@ -312,6 +312,17 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         "boolean" => (Kind::Boolean, Input::Boolean(default.and_then(Value::as_bool).unwrap_or(false))),
         "string" if choice => {
             let (values, titles, pictures) = choices(p)?;
+            // A finite choice still obeys the string's original bounds. Directory fields keep
+            // their text/picker path and grant checks rather than becoming dropdowns.
+            if text("format").as_deref() == Some("directory")
+                || values.iter().any(|value| {
+                    let length = value.chars().count() as u64;
+                    p.get("minLength").and_then(Value::as_u64).is_some_and(|min| length < min)
+                        || p.get("maxLength").and_then(Value::as_u64).is_some_and(|max| length > max)
+                })
+            {
+                return None;
+            }
             images = pictures;
             swatches = p
                 .get("oneOf")
@@ -938,8 +949,16 @@ pub(crate) struct EntryDialog {
     pub(crate) error: Option<String>,
     /// A read entry's result, as indented JSON.
     pub(crate) result: Option<String>,
-    /// An importer's extensions: its button chooses the file to open, with these options.
+    /// An importer's extensions, used by the initial picker and Change file.
     pub(crate) opens: Option<Vec<String>>,
+    /// The selected path stays host-side. A replacement invalidates all earlier hook work.
+    pub(crate) source: Option<String>,
+    pub(crate) file: Option<solidcraft_engine::plugin::dialog::FileFacts>,
+    pub(crate) file_generation: u64,
+    file_job: Option<FileJob>,
+    file_failed: bool,
+    has_hook: bool,
+    hook_values: Option<Value>,
     /// The design the selection fields' picks were made on. A change to it (an edit, an undo, an
     /// update) clears them: a reference into an older model never stands for another item.
     pub(crate) picked_on: Option<Arc<solidcraft_engine::doc::Document>>,
@@ -959,6 +978,11 @@ pub(crate) struct EntryDialog {
     validation_gate: Option<Arc<std::sync::Mutex<std::sync::mpsc::Receiver<()>>>>,
     /// Its first result has been shown: later previews leave the user's camera alone.
     preview_drawn: bool,
+}
+
+struct FileJob {
+    generation: u64,
+    reply: std::sync::mpsc::Receiver<Result<solidcraft_engine::plugin::ImportDialog, String>>,
 }
 
 /// One bounded worker per dialog; generations invalidate replies before any field is touched.
@@ -1093,7 +1117,14 @@ fn poll_hooks(app: &mut SolveApp, ctx: &egui::Context) {
             }
         }
         let Some(hook) = &mut dialog.hook else { continue };
-        if hook.pending.is_some() || hook.submitted == Some(hook.generation) {
+        if hook.pending.is_some()
+            || hook.submitted == Some(hook.generation)
+            || dialog.file_job.is_some()
+            || (dialog.source.is_some() && (dialog.file.is_none() || dialog.file_failed))
+        {
+            if dialog.source.is_some() && dialog.file.is_none() && !dialog.file_failed {
+                ctx.request_repaint_after(std::time::Duration::from_millis(25));
+            }
             continue;
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(25));
@@ -1107,13 +1138,19 @@ fn poll_hooks(app: &mut SolveApp, ctx: &egui::Context) {
         let plugin = dialog.plugin.clone();
         let entry = dialog.entry.clone();
         let generation = hook.generation;
+        let schema = hook.schema.clone();
         hook.submitted = Some(generation);
         hook.pending = crate::control_job::spawn(None, Default::default(), move || {
             let result = (|| {
-                let package =
+                let mut package =
                     solidcraft_engine::plugin::with_installed(&session, &plugin.path, || solidcraft_engine::plugin::read_package(&plugin.path))?;
                 if package.approval != plugin.approval {
                     return Err(solidcraft_engine::EngineError::Other("plugin approval changed".into()));
+                }
+                // File facts are already bound by the host's importer worker. The guest sees
+                // values only, and its patches are checked against those same constraints.
+                if let Some(declared) = package.manifest.runtime.as_mut().and_then(|r| r.entries.iter_mut().find(|e| e.name == entry)) {
+                    declared.input_schema = schema;
                 }
                 solidcraft_engine::plugin::update_dialog(&session, &package, &entry, &values, &protected, false)
             })();
@@ -1141,10 +1178,67 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
     if !shown(app, &plugin) {
         return;
     }
+    if entry.kind == solidcraft_engine::plugin::EntryKind::Importer && app.preferences.plugin_import_file_first {
+        pick_entry_file(app, &plugin, &entry.name, None);
+        return;
+    }
+    open_entry_at(app, p, e, None);
+}
+
+fn pick_entry_file(app: &mut SolveApp, plugin: &Listed, entry_name: &str, dialog: Option<u64>) {
+    let Some(entry) = plugin.entries.iter().find(|e| e.name == entry_name) else { return };
+    let extensions = entry.extensions.clone();
+    let (plugin_id, entry_name, session) = (plugin.id.clone(), entry.name.clone(), app.session.uid);
+    let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
+    app.pick_open_for(&extensions, move |app, path| {
+        let Some(path) = path else { return };
+        if app.session.uid != session {
+            return;
+        }
+        if let Some(id) = dialog {
+            select_file(app, id, path);
+            return;
+        }
+        let Some(p) = app.plugin_menu.listed.iter().position(|p| p.id == plugin_id) else { return };
+        let Some(e) = app.plugin_menu.listed.get(p).and_then(|p| p.entries.iter().position(|e| e.name == entry_name)) else { return };
+        open_entry_at(app, p, e, Some(path));
+    });
+}
+
+/// File › Open and drops arrive here with a path. Programmatic requests bypass this UI route.
+pub(crate) fn offer_import(app: &mut SolveApp, path: &str) -> bool {
+    if !app.preferences.plugin_import_file_first || !solidcraft_engine::cmd::runs_plugin_importer(&app.session, "doc.open", &json!({"path":path})) {
+        return false;
+    }
+    let importer = match solidcraft_engine::plugin::importer_for(&app.session, path, None) {
+        Ok(Some(importer)) => importer,
+        Ok(None) => return false,
+        Err(error) => {
+            app.set_status(error.to_string(), true);
+            return true;
+        }
+    };
+    refresh(app);
+    let Some(p) = app.plugin_menu.listed.iter().position(|p| p.id == importer.plugin_id) else { return false };
+    let Some(e) = app.plugin_menu.listed.get(p).and_then(|p| p.entries.iter().position(|e| e.name == importer.entry)) else { return false };
+    open_entry_at(app, p, e, Some(path.into()));
+    true
+}
+
+fn open_entry_at(app: &mut SolveApp, p: usize, e: usize, source: Option<String>) {
+    let Some(plugin) = app.plugin_menu.listed.get(p).cloned() else { return };
+    let Some(entry) = plugin.entries.get(e) else { return };
+    if !shown(app, &plugin) {
+        return;
+    }
     // The entry's dialog is already open on this design: it keeps its values, and stays where it
     // is. Another design's dialog for the same entry belongs to that design.
     let session = app.session.uid;
-    if app.plugin_menu.dialogs.iter().any(|d| d.plugin.id == plugin.id && d.entry == entry.name && d.session == session) {
+    if let Some(id) = app.plugin_menu.dialogs.iter().find(|d| d.plugin.id == plugin.id && d.entry == entry.name && d.session == session).map(|d| d.id)
+    {
+        if let Some(source) = source {
+            select_file(app, id, source);
+        }
         return;
     }
     let mut fields = form(&entry.input_schema);
@@ -1184,6 +1278,13 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         error: None,
         result: None,
         opens,
+        source: None,
+        file: None,
+        file_generation: 0,
+        file_job: None,
+        file_failed: false,
+        has_hook: false,
+        hook_values: None,
         picked_on: prefilled.then(|| app.session.doc.clone()),
         picks_cleared: false,
         preview: true,
@@ -1197,6 +1298,9 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         validation_gate: None,
         preview_drawn: false,
     });
+    if let Some(source) = source {
+        select_file(app, id, source);
+    }
     // The new dialog's first selection field takes the viewport's picks, unless another tool is
     // picking: that tool keeps them until a field here is clicked.
     if let Some(dialog) = app.plugin_menu.dialogs.last()
@@ -1496,6 +1600,148 @@ pub(crate) fn take_interactive_run(app: &mut SolveApp, serial: u64) -> bool {
     true
 }
 
+/// Advance the file generation before starting its update. Late work cannot mutate the form,
+/// even when the user picks the same path again or a hook finishes after the dialog closes.
+fn select_file(app: &mut SolveApp, id: u64, source: String) {
+    let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id) else { return };
+    dialog.file_generation = dialog.file_generation.saturating_add(1);
+    dialog.source = Some(source);
+    dialog.file = None;
+    // Keep at most one worker per dialog; its old generation will be discarded on arrival.
+    dialog.error = None;
+    dialog.file_failed = false;
+    dialog.has_hook = false;
+    dialog.hook_values = None;
+    if let Some(hook) = &mut dialog.hook {
+        hook.generation = hook.generation.wrapping_add(1);
+        hook.submitted = None;
+        hook.note = false;
+    }
+    // Remove choices supplied for the old header immediately. User edits remain when they
+    // still fit a declared field; the new file's defaults fill untouched fields afterwards.
+    if let Some(entry) = dialog.plugin.entries.iter().find(|e| e.name == dialog.entry) {
+        let mut fields = form(&entry.input_schema);
+        if let Some(fields) = &mut fields {
+            retain_edits(fields, dialog.fields.as_deref().unwrap_or_default());
+        }
+        dialog.fields = fields;
+    }
+    if let Some(picker) =
+        app.dialog.as_mut().filter(|picker| matches!(picker.kind, crate::dialogs::Kind::PluginPick { dialog: picker_id } if picker_id == id))
+    {
+        picker.inputs = dialog.selection_inputs();
+    }
+    start_file_job(app, id);
+}
+
+fn dialog_values(dialog: &EntryDialog) -> Value {
+    Value::Object(
+        dialog.fields.iter().flatten().filter(|(f, _)| f.visible).filter_map(|(f, i)| scalar_value(f, i).map(|v| (f.key.clone(), v))).collect(),
+    )
+}
+
+fn start_file_job(app: &mut SolveApp, id: u64) {
+    let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id) else { return };
+    let Some(source) = dialog.source.clone() else { return };
+    if dialog.file_job.is_some() || dialog.hook.as_ref().is_some_and(|hook| hook.pending.is_some()) {
+        return;
+    }
+    let (folder, approval, entry, generation) =
+        (dialog.plugin.path.clone(), dialog.plugin.approval.clone(), dialog.entry.clone(), dialog.file_generation);
+    let values = dialog_values(dialog);
+    dialog.hook_values = Some(values.clone());
+    dialog.file_failed = false;
+    dialog.error = None;
+    let mut session = solidcraft_engine::Session::default();
+    session.plugin_state = app.session.plugin_state.clone();
+    session.disabled_plugins = app.session.disabled_plugins.clone();
+    session.plugin_limits = app.session.plugin_limits;
+    let scope = solidcraft_engine::io::vfs::current_scope();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let started = std::thread::Builder::new().name("import-dialog".into()).spawn(move || {
+        let result = solidcraft_engine::io::vfs::scoped(scope, || {
+            session.plugin_state.refresh_stored();
+            solidcraft_engine::plugin::import_dialog(&session, &folder, &approval, &entry, &source, generation, &values)
+        })
+        .map_err(|e| e.to_string());
+        let _ = tx.send(result);
+    });
+    match started {
+        Ok(_) => dialog.file_job = Some(FileJob { generation, reply: rx }),
+        Err(error) => {
+            dialog.file_failed = true;
+            dialog.error = Some(error.to_string());
+        }
+    }
+}
+
+fn retain_edits(fields: &mut [(Field, Input)], previous: &[(Field, Input)]) {
+    for (field, input) in fields {
+        let Some((old, value)) = previous
+            .iter()
+            .find(|(old, value)| old.key == field.key && (old.edited || matches!(value, Input::Selection(picks) if !picks.is_empty())))
+        else {
+            continue;
+        };
+        let value = if old.edited { value } else { old.hook_baseline.as_ref().unwrap_or(value) };
+        let retained = match (&old.kind, &field.kind, value) {
+            (Kind::Text { .. }, Kind::Text { .. }, Input::Text(_))
+            | (Kind::Number { .. }, Kind::Number { .. }, Input::Typed(_))
+            | (Kind::Integer { .. }, Kind::Integer { .. }, Input::Typed(_))
+            | (Kind::Selection { .. }, Kind::Selection { .. }, Input::Selection(_)) => Some(value.clone()),
+            _ => scalar_value(old, value).and_then(|v| default_input(field, &v)),
+        };
+        if let Some(value) = retained {
+            *input = value;
+            field.edited = old.edited;
+        }
+    }
+}
+
+fn poll_file(dialog: &mut EntryDialog) {
+    let Some(job) = &dialog.file_job else { return };
+    let generation = job.generation;
+    let reply = match job.reply.try_recv() {
+        Ok(reply) => reply,
+        Err(std::sync::mpsc::TryRecvError::Empty) => return,
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(solidcraft_ui_text::tr("ui.plugin_no_result").into()),
+    };
+    dialog.file_job = None;
+    if generation != dialog.file_generation {
+        return;
+    }
+    let result = match reply {
+        Ok(result) if result.file.generation == dialog.file_generation => result,
+        Ok(_) => return,
+        Err(error) => {
+            dialog.file_failed = true;
+            dialog.error = Some(error);
+            return;
+        }
+    };
+    let Some(mut fields) = form(&result.schema) else {
+        dialog.file_failed = true;
+        dialog.error = Some(solidcraft_ui_text::tr("ui.plugin_dialog_unsupported").into());
+        return;
+    };
+    // An edited value survives an update if the new choices still offer it. Header defaults
+    // replace untouched fields. Refresh applies declarative rules after this merge.
+    retain_edits(&mut fields, dialog.fields.as_deref().unwrap_or_default());
+    refresh_conditions(&mut fields);
+    if let Some(hook) = &mut dialog.hook {
+        hook.schema = result.schema;
+        hook.generation = hook.generation.wrapping_add(1);
+        hook.observed = fields.iter().map(|(_, input)| input.clone()).collect();
+        hook.submitted = None;
+        hook.note = false;
+    }
+    dialog.fields = Some(fields);
+    dialog.file = Some(result.file);
+    dialog.has_hook = result.hook;
+    // Keep the submitted snapshot: defaults or visibility changes in this result may require
+    // another update before its choices describe the values currently displayed.
+}
+
 /// A selection field's label as the `'static` text a [`SelInput`] carries. Each distinct label is
 /// kept once for the life of the process, so dialogs opened again keep no more.
 fn static_label(label: &str) -> &'static str {
@@ -1687,6 +1933,16 @@ impl EntryDialog {
         if !missing.is_empty() {
             return Err(solidcraft_ui_text::format("ui.plugin_dialog_needs_groups", &[("groups", &missing.join(", "))]));
         }
+        if self.file_job.is_some()
+            || (self.source.is_some()
+                && !self.file_failed
+                && (self.file.is_none() || (self.has_hook && self.hook_values.as_ref() != Some(&dialog_values(self)))))
+        {
+            return Err(app.tr("ui.plugin_dialog_reading_file").into());
+        }
+        if self.file_failed {
+            return Err(self.error.clone().unwrap_or_default());
+        }
         let Some(fields) = &self.fields else { return Err(app.tr("ui.plugin_dialog_unsupported").into()) };
         if self.form_guard.is_some()
             && let Some(error) = self.field_errors(app).values().next()
@@ -1797,8 +2053,17 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
         keep_picks(app, &d);
     }
     let Some(dialog) = app.plugin_menu.dialogs.iter().find(|d| d.id == id) else { return Ok(()) };
-    // An importer: choose the file, then open it as a new design on the file worker, as File ›
-    // Open does, with the options from this dialog.
+    // A selected importer file opens with the form's options on the file worker. The legacy
+    // options-first dialog asks for its file here instead.
+    if let Some(source) = dialog.source.clone() {
+        let mut request = crate::file_load::Request::new(&source, crate::file_load::Kind::Open);
+        request.plugin_import = true;
+        request.options.insert("format".into(), json!(format!("{}.{}", dialog.plugin.id, dialog.entry)));
+        request.options.insert("options".into(), params);
+        crate::file_load::begin_request(app, request)?;
+        app.plugin_menu.dialogs.retain(|d| d.id != id);
+        return Ok(());
+    }
     if let Some(extensions) = dialog.opens.clone() {
         let format = std::format!("{}.{}", dialog.plugin.id, dialog.entry);
         app.plugin_menu.dialogs.retain(|d| d.id != id);
@@ -1851,6 +2116,19 @@ pub(crate) fn check_dispatch(app: &mut SolveApp, req: &solidcraft_control::Contr
 pub(crate) fn poll(app: &mut SolveApp) {
     let ids: Vec<u64> = app.plugin_menu.dialogs.iter().map(|d| d.id).collect();
     for id in ids {
+        if let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id) {
+            poll_file(dialog);
+        }
+        let refresh_hook = app.plugin_menu.dialogs.iter().find(|d| d.id == id).is_some_and(|d| {
+            d.session == app.session.uid
+                && d.source.is_some()
+                && d.file_job.is_none()
+                && !d.file_failed
+                && (d.file.is_none() || (d.has_hook && d.hook_values.as_ref() != Some(&dialog_values(d))))
+        });
+        if refresh_hook {
+            start_file_job(app, id);
+        }
         poll_dialog(app, id);
     }
 }
@@ -1986,8 +2264,9 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
         refresh_conditions(fields);
     }
     let ready = dialog.ready(app);
-    let running = dialog.running.is_some();
+    let running = dialog.running.is_some() || dialog.file_job.is_some();
     if dialog.running.as_ref().is_some_and(|running| running.received.is_none())
+        || dialog.file_job.is_some()
         || dialog.validation.lock().ok().is_some_and(|v| v.running.is_some())
         || dialog.hook.as_ref().is_some_and(|h| h.pending.is_some())
     {
@@ -1996,7 +2275,7 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     // Just the command's own title ("Gears"): no plugin or menu name after it.
     let title = dialog.label.clone();
     let run_key = if dialog.opens.is_some() {
-        "ui.plugin_dialog_choose_file"
+        if dialog.source.is_some() { "ui.plugin_dialog_open_file" } else { "ui.plugin_dialog_choose_file" }
     } else if dialog.form_guard.is_some() {
         "ui.plugin_edit_apply"
     } else {
@@ -2004,6 +2283,7 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     };
     let (run_label, close_label) = (app.tr(run_key).to_owned(), app.tr(if dialog.read { "ui.close" } else { "ui.cancel" }).to_owned());
     let mut browse = None;
+    let mut choose_file = false;
     // This dialog's picker, when the viewport picks into its fields: drawn here, then put back.
     let mut picker = if picking(app) == Some(dialog.id) { app.dialog.take() } else { None };
     let mut claim = None;
@@ -2012,6 +2292,20 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
         .fields()
         .actions(&run_label, &close_label, None)
         .show(ctx, ready.is_ok() && !running, |ui| {
+            if let Some(source) = &dialog.source {
+                let name = dialog
+                    .file
+                    .as_ref()
+                    .map(|f| f.name.as_str())
+                    .unwrap_or_else(|| Path::new(source).file_name().and_then(|n| n.to_str()).unwrap_or_default());
+                ui_kit::text(ui, name, ui_kit::Text::Note("plugin_file"));
+                let change = ui_kit::button(ui, app.tr("ui.plugin_dialog_change_file"), ui_kit::Button::Normal);
+                crate::scenario::publish_target("plugin_dialog:change_file", change.rect);
+                choose_file = change.clicked();
+                if dialog.file_job.is_some() {
+                    ui_kit::status_line(ui, app.tr("ui.plugin_dialog_reading_file"), ui_kit::StatusTone::Dim);
+                }
+            }
             browse = body(app, ui, dialog, ready.as_ref().err(), &mut picker, &mut claim);
         });
     if let Some(mut picker) = picker {
@@ -2038,6 +2332,9 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
         }
         return (false, false, None);
     }
+    if choose_file {
+        pick_entry_file(app, &dialog.plugin, &dialog.entry, Some(dialog.id));
+    }
     if let Some(key) = browse {
         let id = dialog.id;
         app.pick_folder(move |app, path| {
@@ -2058,6 +2355,7 @@ fn apply_browsed_folder(app: &mut SolveApp, id: u64, key: &str, path: String) {
         && let Input::Text(text) = input
     {
         *text = path;
+        field.edited = true;
     }
 }
 
@@ -2089,7 +2387,7 @@ fn body(
         let asks = solidcraft_ui_text::format("ui.plugin_dialog_needs_groups", &[("groups", &missing.join(", "))]);
         ui_kit::status_line(ui, &asks, ui_kit::StatusTone::Warning);
     }
-    let editable = dialog.running.is_none();
+    let editable = dialog.running.is_none() && dialog.file_job.is_none();
     let mut browse = None;
     match dialog.fields.as_mut() {
         None => {

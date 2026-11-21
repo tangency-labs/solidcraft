@@ -37,6 +37,7 @@ mod dialog_bindings {
 }
 include!(concat!(env!("OUT_DIR"), "/aliases.rs"));
 include!(concat!(env!("OUT_DIR"), "/importer.rs"));
+include!(concat!(env!("OUT_DIR"), "/dialog.rs"));
 
 // A separate package lets both frozen 0.1 and current 0.2 components negotiate capabilities.
 mod host_bindings {
@@ -146,6 +147,8 @@ struct State<H> {
 struct ImportState {
     /// The folder of the file being imported, opened by the app's authority.
     dir: Dir,
+    /// Prefix snapshot and full size during a read-only dialog hook.
+    dialog: Option<(Vec<u8>, u64)>,
     name: String,
     input_folder: bool,
     read_bytes: u64,
@@ -432,6 +435,18 @@ impl<H: PluginHost> source::Host for State<H> {
         if len == 0 || len > MAX_IMPORT_CHUNK_BYTES {
             return Err(self.fail(limit("source.read chunk (1 byte to 1 MiB)")));
         }
+        if let Some(import) = self.import.as_mut()
+            && let Some((prefix, _)) = &import.dialog
+        {
+            let cap = craft_plugin::dialog::MAX_PREFIX_BYTES;
+            if offset.checked_add(len as u64).is_none_or(|end| end > cap) || import.read_bytes.saturating_add(len as u64) > cap {
+                return Err(self.fail(limit("dialog source: only 64 KiB of prefix reads per update")));
+            }
+            import.read_bytes += len as u64;
+            let start = (offset as usize).min(prefix.len());
+            let end = start.saturating_add(len).min(prefix.len());
+            return Ok(prefix.get(start..end).unwrap_or_default().to_vec());
+        }
         self.count_file(&target)?;
         let read = (|| -> std::io::Result<Vec<u8>> {
             use std::io::{Seek, SeekFrom};
@@ -463,6 +478,9 @@ impl<H: PluginHost> source::Host for State<H> {
     fn size(&mut self, path: String) -> std::result::Result<Option<u64>, PluginError> {
         let target = self.source_path(&path)?;
         let import = self.import.as_ref().ok_or_else(|| PluginError::Trap("not an import".into()))?;
+        if let Some((_, size)) = &import.dialog {
+            return Ok(Some(*size));
+        }
         match import.dir.metadata(&target) {
             Ok(metadata) if metadata.is_file() => Ok(Some(metadata.len())),
             Ok(_) => Ok(None),
@@ -509,6 +527,9 @@ impl<H: PluginHost> source::Host for State<H> {
 impl<H: PluginHost> design::Host for State<H> {
     fn write(&mut self, bytes: Vec<u8>) -> std::result::Result<(), PluginError> {
         self.check()?;
+        if self.import.as_ref().is_some_and(|import| import.dialog.is_some()) {
+            return Err(self.fail(HostError::PermissionDenied { permission: "dialog hooks cannot write designs".into() }));
+        }
         if bytes.len() > MAX_IMPORT_CHUNK_BYTES {
             return Err(self.fail(limit("design.write chunk (at most 1 MiB)")));
         }
@@ -742,7 +763,7 @@ pub(super) fn dialog_fields<H: PluginHost + 'static>(
     if let Err(error) = ceilings.validate() {
         return (host, Err(error));
     }
-    if !manifest.capabilities.iter().any(|c| c.starts_with("dialog@")) {
+    if !manifest.granted_capabilities().iter().any(|c| c.starts_with("dialog@")) {
         return (host, Err(component_error("dialog@0.1 is not declared")));
     }
     let Some(runtime) = manifest.runtime.as_mut() else {
@@ -1047,7 +1068,7 @@ fn component_error(reason: impl Into<String>) -> HostError {
 
 /// Optional exports are checked before either ordinary execution or a field hook can run.
 fn check_dialog_export(manifest: &Manifest, engine: &Engine, component: &Component) -> Result<bool> {
-    let declared = manifest.capabilities.iter().any(|c| c.starts_with("dialog@"));
+    let declared = manifest.granted_capabilities().iter().any(|c| c.starts_with("dialog@"));
     let hook = manifest.runtime.as_ref().is_some_and(|r| r.entries.iter().any(|e| e.dialog_hook));
     let exported = component.component_type().exports(engine).any(|(name, _)| name.starts_with("craft:plugin/dialog-provider@"));
     if exported && !declared || hook && !exported {
@@ -1086,7 +1107,10 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
     }
     let mut linker = Linker::<State<Inert>>::new(&engine);
     link_host_query(&mut linker, &manifest.granted_capabilities()).map_err(link)?;
-    if importer {
+    if importer && !hook && component.component_type().exports(&engine).any(|(name, _)| name.starts_with("craft:plugin/dialog-provider@")) {
+        importer_dialog_bindings::ImporterDialogPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        importer_dialog_bindings::ImporterDialogPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
+    } else if importer {
         importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         importer_bindings::ImporterPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
     } else {
@@ -1184,6 +1208,11 @@ fn compile_with(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)>
     Ok((engine, component))
 }
 
+enum ImportOutput {
+    Design(Imported),
+    Fields(Value),
+}
+
 pub(super) fn run_import<H: PluginHost + 'static>(
     host: H,
     manifest: &Manifest,
@@ -1193,6 +1222,56 @@ pub(super) fn run_import<H: PluginHost + 'static>(
     request: &ImportRequest,
     runtime_options: RuntimeOptions,
 ) -> (H, Result<Imported>) {
+    let (host, result) = run_import_or_dialog(host, manifest, bytes, entry, options, request, runtime_options, false);
+    (
+        host,
+        result.and_then(|output| match output {
+            ImportOutput::Design(design) => Ok(design),
+            ImportOutput::Fields(_) => Err(trap("unexpected dialog output")),
+        }),
+    )
+}
+
+pub(super) fn update_fields<H: PluginHost + 'static>(
+    host: H,
+    manifest: &Manifest,
+    bytes: &[u8],
+    entry: &str,
+    context: &Value,
+    request: &ImportRequest,
+) -> (H, Result<Value>) {
+    if !manifest.granted_capabilities().iter().any(|c| c.starts_with("dialog@")) {
+        return (host, Err(HostError::PermissionDenied { permission: "dialog@0.1 was not requested".into() }));
+    }
+    if context.to_string().len() > 2 * craft_plugin::dialog::MAX_UPDATE_BYTES {
+        return (host, Err(limit("dialog context exceeds 128 KiB")));
+    }
+    let mut bounded = manifest.clone();
+    if let Some(runtime) = bounded.runtime.as_mut() {
+        runtime.limits.fuel = runtime.limits.fuel.min(craft_plugin::dialog::MAX_FUEL);
+        runtime.limits.deadline_ms = runtime.limits.deadline_ms.min(craft_plugin::dialog::DEADLINE_MS);
+    }
+    let (host, result) = run_import_or_dialog(host, &bounded, bytes, entry, context, request, RuntimeOptions::default(), true);
+    (
+        host,
+        result.and_then(|output| match output {
+            ImportOutput::Fields(fields) => Ok(fields),
+            ImportOutput::Design(_) => Err(trap("unexpected import output")),
+        }),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_import_or_dialog<H: PluginHost + 'static>(
+    host: H,
+    manifest: &Manifest,
+    bytes: &[u8],
+    entry: &str,
+    options: &Value,
+    request: &ImportRequest,
+    runtime_options: RuntimeOptions,
+    dialog: bool,
+) -> (H, Result<ImportOutput>) {
     let prepared = (|| {
         let runtime = manifest
             .runtime
@@ -1232,20 +1311,42 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         let stack = stack_bytes(&runtime.limits, runtime_options, true)?;
         let (engine, component) = compile(bytes, stack)?;
         check_dialog_export(manifest, &engine, &component)?;
+        // Compilation is cached and happens outside the execution budget. Prefix acquisition
+        // and guest execution share one deadline; a slow read cannot publish a late update.
+        let dialog_deadline = dialog.then(|| Instant::now() + Duration::from_millis(runtime.limits.deadline_ms));
+        let prefix = if dialog {
+            let mut options = OpenOptions::new();
+            options.read(true);
+            #[cfg(unix)]
+            options.custom_flags(O_NONBLOCK);
+            let mut file = dir.open_with(&name, &options).map_err(|e| trap(e.to_string()))?;
+            if !file.metadata().map_err(|e| trap(e.to_string()))?.is_file() {
+                return Err(component_error("dialog source must be a regular file"));
+            }
+            let mut prefix = Vec::new();
+            Read::by_ref(&mut file).take(craft_plugin::dialog::MAX_PREFIX_BYTES).read_to_end(&mut prefix).map_err(|e| trap(e.to_string()))?;
+            Some((prefix, size))
+        } else {
+            None
+        };
+        if dialog_deadline.is_some_and(|end| Instant::now() >= end) {
+            return Err(with_limits(deadline(), &runtime.limits));
+        }
         let import = ImportState {
+            dialog: prefix,
             dir,
             name: name.clone(),
-            input_folder: request.input_folder && runtime.permissions.input_folder,
+            input_folder: !dialog && request.input_folder && runtime.permissions.input_folder,
             read_bytes: 0,
             files: BTreeSet::new(),
             design: Vec::new(),
-            evaluate: manifest.granted_capabilities().iter().any(|capability| capability.starts_with("evaluate@")),
+            evaluate: !dialog && manifest.granted_capabilities().iter().any(|capability| capability.starts_with("evaluate@")),
             scratch: Vec::new(),
             evaluating: false,
         };
-        Ok((runtime, entry, options, (engine, component, stack), import, source::FileInfo { name, size }))
+        Ok((runtime, entry, options, (engine, component, stack), import, source::FileInfo { name, size }, dialog_deadline))
     })();
-    let (runtime, entry, options, (engine, component, stack), import, file) = match prepared {
+    let (runtime, entry, options, (engine, component, stack), import, file, dialog_deadline) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
@@ -1266,9 +1367,9 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         forms: false,
         failed: None,
         calls: 0,
-        max_calls: MAX_IMPORT_CALLS,
+        max_calls: if dialog { MAX_CALLS } else { MAX_IMPORT_CALLS },
         log_bytes: 0,
-        deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
+        deadline: dialog_deadline.unwrap_or_else(|| Instant::now() + Duration::from_millis(limits.deadline_ms)),
         // A large converter has a large indirect-call table.
         limits: store_limits(limits, 1_000_000),
         import: Some(import),
@@ -1277,8 +1378,18 @@ pub(super) fn run_import<H: PluginHost + 'static>(
     let outcome = (|| {
         prepare_store(&mut store, limits)?;
         let wit = check_imports(&engine, &component)?;
+        if dialog && wit != Wit::Current {
+            return Err(component_error("dialog@0.1 needs the current WIT package"));
+        }
         let response = with_interrupts(&engine, || match wit {
             Wit::V0_1 => v0_1::call_import(&engine, &mut store, &component, &entry.name, &file, &options),
+            Wit::Current if dialog => {
+                let mut linker = Linker::new(&engine);
+                link_host_query(&mut linker, &store.data().granted_capabilities)?;
+                importer_dialog_bindings::ImporterDialogPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
+                let guest = importer_dialog_bindings::ImporterDialogPlugin::instantiate(&mut store, &component, &linker)?;
+                Ok(call_dialog!(guest, &mut store, &entry.name, &options)?.map_err(host_error))
+            }
             Wit::Current => {
                 let mut linker = Linker::new(&engine);
                 link_host_query(&mut linker, &store.data().granted_capabilities)?;
@@ -1298,6 +1409,16 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         if store.data().host.is_cancelled() {
             return Err(HostError::Cancelled);
         }
+        if dialog {
+            if text.len() > craft_plugin::dialog::MAX_UPDATE_BYTES {
+                return Err(limit("dialog reply exceeds 64 KiB"));
+            }
+            if Instant::now() >= store.data().deadline {
+                return Err(deadline());
+            }
+            let fields = serde_json::from_str(&text).map_err(|e| component_error(format!("dialog reply is not JSON: {e}")))?;
+            return Ok(ImportOutput::Fields(fields));
+        }
         let report: LossReport = serde_json::from_str(&text)
             .map_err(|e| HostError::InvalidInput { field: "loss_report".into(), reason: format!("the importer's loss report is not valid: {e}") })?;
         report.validate()?;
@@ -1309,7 +1430,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         if Instant::now() >= store.data().deadline {
             return Err(deadline());
         }
-        Ok(Imported { design, report })
+        Ok(ImportOutput::Design(Imported { design, report }))
     })();
     let mut state = store.into_data();
     state.close_evaluation();
