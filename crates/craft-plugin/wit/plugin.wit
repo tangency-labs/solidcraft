@@ -3,6 +3,7 @@ package craft:plugin@0.2.0;
 // Capabilities are sets of the interfaces in this file. A plugin names the ones it needs in its
 // manifest's `capabilities` list:
 // - `commands@0.2`: types, commands, log, control, files, clock and entry (world `command-plugin`);
+// - `design@0.1`: with `commands`, design-state, for document identity/revision and read listeners.
 // - `formats@0.2`: types, log, control, clock, source, design and importer (world `importer-plugin`);
 // - `evaluate@0.2`: with `formats`, evaluate, so an importer can check its result;
 // - `storage@0.1`: with `commands`, the app's `storage.*` commands, so a plugin keeps its own data
@@ -36,6 +37,13 @@ interface types {
 interface commands {
     use types.{json, plugin-error};
     run: func(command: string, args: json) -> result<json, plugin-error>;
+}
+// Additive read-only import: JSON {document_id: string, revision: string}, or null with no document.
+// Both fields are opaque printable ASCII, bounded to 128 characters; compare them for equality.
+// Importing this interface requires the manifest capability design@0.1. Older components omit it.
+interface design-state {
+    use types.{json, plugin-error};
+    get-token: func() -> result<json, plugin-error>;
 }
 interface log {
     enum level { debug, info, warn, error }
@@ -104,6 +112,7 @@ interface importer {
 }
 world command-plugin {
     import commands;
+    import design-state;
     import log;
     import control;
     import files;
@@ -156,7 +165,13 @@ interface ui-provider {
     describe: func() -> declarations;
 }
 world workbench-plugin {
-    include command-plugin;
+    // Keep this world's original imports when the command world gains new capabilities.
+    import commands;
+    import log;
+    import control;
+    import files;
+    import clock;
     import ui;
+    export entry;
     export ui-provider;
 }

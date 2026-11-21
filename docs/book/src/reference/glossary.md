@@ -375,6 +375,19 @@ them. The *first moments* are the mass times the centre of mass.
 - **Elsewhere:** moment of inertia, inertia tensor, mass moment of inertia.
 - **For translators:** not the second moment of area of a cross-section, a different quantity.
 
+### multi-trim
+
+Cutting a frame member by the shapes of the other members it meets, so that it fits against them.
+
+A frame's corner cuts, copes, fitted ends, the pieces where members cross and the notches where they
+overlap are all multi-trims; `frame.multi_trim` sets how one corner of a frame is finished.
+
+- **In SolidCraft:** `frame.multi_trim` ("Multi-Trim Corner"); the Frame Member's `corners`
+  parameter and design-file key.
+- **Don't use:** cope (one kind of cut it makes), trim on its own.
+- **Elsewhere:** member trim, coping, end fitting.
+- **For translators:** not a sketch's trim of a curve and not a surface trim.
+
 ### note
 
 Text on a sheet or a view of a drawing, in its fields and its words, that may point at the model
@@ -666,6 +679,16 @@ A program that shows web pages, such as the one that runs SolidCraft's web build
 - **For translators:** not the *browser* panel. Where a language uses one word for both, use the
   CAD word for the panel.
 
+### weld gap
+
+The space left between frame members where they meet, for a weld to fill.
+
+- **In SolidCraft:** the `gap` parameter of `frame.member` and `frame.multi_trim` and of each
+  `corners` entry, and the same design-file keys; the Frame Member dialog's Gap rows.
+- **Don't use:** clearance; gap on its own where it could mean a hem gap.
+- **Elsewhere:** weld gap, root gap, root opening.
+- **For translators:** not a sheet metal hem gap and not a clearance.
+
 ## Words with more than one meaning
 
 An English word that means two things can be translated correctly for only one of them while both
@@ -687,6 +710,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | a named set of preferences | *settings profile* | `settings.profile.*`, Preferences › General |
 | Gap | the space a hem leaves | hem gap | the Hem dialog's Gap row |
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
+| | the space left between welded frame members | *weld gap* | the Frame Member dialog's Gap rows, `gap` |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
 | | a minimum distance field | clearance | the Interference and plastic rules dialogs |
 | | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
