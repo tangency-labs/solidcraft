@@ -1178,6 +1178,7 @@ mod tests {
 
     #[test]
     fn european_portuguese_catalog_is_registered_and_translates_keys() {
+        install();
         let pt = Locale::for_language("pt-PT");
         assert_eq!(pt.name(), "Português (Portugal)");
         assert!(is_supported("pt-PT"));
