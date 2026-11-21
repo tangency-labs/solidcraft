@@ -264,6 +264,87 @@ impl Shape {
     }
 }
 
+/// Dominant axis (`"horizontal"` or `"vertical"`) of the segment from `a` to `b`.
+pub fn axis_mode_between(a: Vec2, b: Vec2) -> &'static str {
+    let d = b - a;
+    if d.x.abs() >= d.y.abs() { "horizontal" } else { "vertical" }
+}
+
+/// Unit direction from `from` toward `to`, or `None` when points coincide or are non-finite.
+pub fn unit_direction(from: Vec2, to: Vec2) -> Option<Vec2> {
+    (from.is_finite() && to.is_finite()).then(|| (to - from).normalized()).flatten()
+}
+
+/// Intersection between two infinite 2D lines `(p0, d0)` and `(p1, d1)`.
+pub fn intersect_infinite_lines(p0: Vec2, d0: Vec2, p1: Vec2, d1: Vec2) -> Option<Vec2> {
+    if !(p0.is_finite() && d0.is_finite() && p1.is_finite() && d1.is_finite()) {
+        return None;
+    }
+    let u0 = d0.normalized()?;
+    let u1 = d1.normalized()?;
+    let a = Shape::Line { a: p0, b: p0 + u0 };
+    let b = Shape::Line { a: p1, b: p1 + u1 };
+    intersections(&a, &b).into_iter().find(|q| q.is_finite())
+}
+
+/// Where extension ray `(ext_origin, ext_dir)` meets infinite line `(origin, dir)` ahead of
+/// `ext_origin` within `max_dist` of `near`.
+pub fn intersect_extension_ray(origin: Vec2, dir: Vec2, ext_origin: Vec2, ext_dir: Vec2, near: Vec2, max_dist: f64) -> Option<Vec2> {
+    if !near.is_finite() || !max_dist.is_finite() || max_dist < 0.0 {
+        return None;
+    }
+    let ext_u = ext_dir.normalized()?;
+    let q = intersect_infinite_lines(origin, dir, ext_origin, ext_u)?;
+    ((q - ext_origin).dot(ext_u) > 1e-6 && q.dist(near) <= max_dist).then_some(q)
+}
+
+/// Closest intersection between curve `ci` of `sk` and infinite line `(origin, dir)` near `near`
+/// within `max_dist`.
+pub fn intersect_curve_with_line(sk: &Sketch, ci: usize, origin: Vec2, dir: Vec2, near: Vec2, max_dist: f64) -> Option<Vec2> {
+    if !(origin.is_finite() && dir.is_finite() && near.is_finite() && max_dist.is_finite() && max_dist >= 0.0) {
+        return None;
+    }
+    let u = dir.normalized()?;
+    let line = Shape::Line { a: origin, b: origin + u };
+    let mut best: Option<(f64, Vec2)> = None;
+    let mut offer = |q: Vec2| {
+        if q.is_finite() {
+            let d = q.dist(near);
+            if d <= max_dist && best.is_none_or(|b| d < b.0) {
+                best = Some((d, q));
+            }
+        }
+    };
+    if let Some(sh) = sk.shape(ci) {
+        let infinite = sk.curves.get(ci).is_some_and(|c| c.infinite);
+        for q in intersections_within(&line, &sh, 1e-6) {
+            if snap_distance(&sh, infinite, q) <= ON_CURVE {
+                offer(q);
+            }
+        }
+    } else if sk.curves.get(ci).is_some_and(|c| c.kind.is_freeform()) {
+        for w in sk.polyline(ci).windows(2) {
+            let seg = Shape::Line { a: w[0], b: w[1] };
+            for q in intersections(&line, &seg) {
+                if seg.dist(q) <= ON_CURVE {
+                    offer(q);
+                }
+            }
+        }
+    }
+    best.map(|(_, q)| q)
+}
+
+/// Whether `pt` lies on the rim of circle or arc `curve_id` in `sk`.
+pub fn is_on_circle_rim(sk: &Sketch, curve_id: &str, pt: Vec2) -> bool {
+    if !pt.is_finite() {
+        return false;
+    }
+    let Some(ci) = sk.curve_index(curve_id) else { return false };
+    let (Some(o), Some(r)) = (sk.center(ci), sk.radius(ci)) else { return false };
+    (pt.dist(o) - r).abs() <= 1e-6 * r.max(1.0)
+}
+
 impl Sketch {
     /// The nearest crossing of two analytic curves, respecting infinite construction lines.
     pub fn nearest_crossing(&self, a: usize, b: usize, near: Vec2) -> Option<Vec2> {
@@ -401,5 +482,27 @@ mod intersection_snap_tests {
         assert!(nearest_curve_intersection(&sk, Vec2::new(f64::NAN, 0.0), 1.0).is_none());
         assert!(nearest_curve_intersection(&sk, v(0.0, 0.0), 0.0).is_none());
         assert!(nearest_curve_intersection(&sk, v(0.0, 0.0), f64::INFINITY).is_none());
+    }
+
+    #[test]
+    fn snap_line_intersection_and_direction_helpers_work() {
+        assert_eq!(axis_mode_between(v(0.0, 0.0), v(10.0, 3.0)), "horizontal");
+        assert_eq!(axis_mode_between(v(0.0, 0.0), v(2.0, 10.0)), "vertical");
+        assert!(unit_direction(v(1.0, 1.0), v(1.0, 1.0)).is_none());
+        let dir = unit_direction(v(0.0, 0.0), v(3.0, 4.0)).expect("unit dir");
+        assert!((dir.x - 0.6).abs() < 1e-9 && (dir.y - 0.8).abs() < 1e-9);
+
+        let hit = intersect_infinite_lines(v(0.0, 10.0), v(1.0, 0.0), v(25.0, 0.0), v(0.0, 1.0)).expect("crossing");
+        assert!(hit.dist(v(25.0, 10.0)) < 1e-9);
+        assert!(intersect_infinite_lines(v(0.0, 0.0), v(1.0, 0.0), v(0.0, 5.0), v(2.0, 0.0)).is_none());
+        assert!(intersect_extension_ray(v(0.0, 10.0), v(1.0, 0.0), v(25.0, 0.0), v(0.0, 1.0), v(25.0, 10.0), 1.0).is_some());
+        assert!(intersect_extension_ray(v(0.0, 10.0), v(1.0, 0.0), v(25.0, 20.0), v(0.0, 1.0), v(25.0, 10.0), 1.0).is_none());
+
+        let mut sk = Sketch::new();
+        let ci = sk.add_circle(v(0.0, 0.0), 10.0, None, None).unwrap();
+        assert!(is_on_circle_rim(&sk, &sk.curves[ci].id, v(10.0, 0.0)));
+        assert!(!is_on_circle_rim(&sk, &sk.curves[ci].id, v(5.0, 0.0)));
+        let q = intersect_curve_with_line(&sk, ci, v(0.0, 0.0), v(1.0, 0.0), v(9.5, 0.2), 2.0).expect("circle hit");
+        assert!(q.dist(v(10.0, 0.0)) < 1e-6);
     }
 }
