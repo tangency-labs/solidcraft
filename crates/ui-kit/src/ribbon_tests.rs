@@ -536,7 +536,7 @@ impl MenuRig {
         crate::test_support::raw_frame(&self.ctx, input, |ui| {
             if self.grid {
                 let grouped: Vec<(Option<&str>, MenuEntry)> = entries.iter().map(|e| (None, *e)).collect();
-                let out = grid(ui, &grouped, &[], &style);
+                let out = grid(ui, &grouped, &[], &style, None);
                 chosen.extend(out.action.and_then(|(i, a)| entries.get(i).map(|e| (e.id.to_string(), a))));
             } else {
                 for e in &entries {

@@ -1962,7 +1962,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                             }
                             if sketch_create && app.preferences.ribbon_icon_grid && !cmds.is_empty() {
                                 let mut paints = Vec::new();
-                                let action = dropdown_grid(app, ui, &tab, &sketch_create_grouped(&cmds), &[], &mut paints);
+                                let action = dropdown_grid(app, ui, &tab, &sketch_create_grouped(&cmds), &[], None, &mut paints);
                                 grid_action(app, ui, action, &mut menu, &mut toggle);
                                 paint_persistent_ribbon(app, ui, paints, &tab, "ribbon_grid");
                                 return;
@@ -1975,14 +1975,22 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                 ribbon::section_footer(ui, solidcraft_ui_text::tr("ui.ribbon_pin_footer"));
                                 return;
                             }
+                            let chamfer_menu = tab == "SKETCH" && *panel == "MODIFY" && app.preferences.sketch_chamfer_submenu;
                             let grouped = if *panel == "CONSTRUCT" && !app.preferences.construct_menu_groups {
                                 cmds.iter().map(|c| (None, *c)).collect()
                             } else {
                                 crate::workspace::grouped_commands(&tab, panel, &cmds)
                             };
                             if app.preferences.ribbon_icon_grid && !grouped.is_empty() {
+                                let header = if chamfer_menu { sketch_chamfer_menu(app, ui, &cmds, &mut menu, &mut toggle) } else { None };
+                                let grid_grouped: Vec<_> =
+                                    grouped.iter().copied().filter(|(_, c)| !chamfer_menu || !is_sketch_chamfer(c.id)).collect();
                                 let mut paints = Vec::new();
-                                let action = dropdown_grid(app, ui, &tab, &grouped, &crate::workspace::ungrouped(&tab, panel, &cmds), &mut paints);
+                                let ungrouped: Vec<_> = crate::workspace::ungrouped(&tab, panel, &cmds)
+                                    .into_iter()
+                                    .filter(|id| !chamfer_menu || !is_sketch_chamfer(id))
+                                    .collect();
+                                let action = dropdown_grid(app, ui, &tab, &grid_grouped, &ungrouped, header, &mut paints);
                                 grid_action(app, ui, action, &mut menu, &mut toggle);
                                 // Paint in this popup's layer, after its command has changed the session.
                                 paint_persistent_ribbon(app, ui, paints, &tab, "ribbon_grid");
@@ -1994,10 +2002,30 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                             // Up and Down move the keyboard focus through the enabled rows (from none
                             // focused: the first or the last), instead of egui's own spatial move.
                             let (down, up) = ui.input(|i| (i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::ArrowUp)));
-                            if down || up {
-                                let enabled: Vec<&str> = cmds.iter().filter(|c| can_start(app, c)).map(|c| c.id).collect();
+                            let family_state =
+                                ui.ctx().data(|d| d.get_temp::<(egui::Id, bool, u64)>(egui::Id::unique("sketch_chamfer_family_state")));
+                            let family_open =
+                                chamfer_menu && family_state.is_some_and(|(_, open, pass)| open && pass + 1 >= ui.ctx().cumulative_pass_nr());
+                            if (down || up) && !family_open {
+                                let mut family_added = false;
+                                let enabled: Vec<egui::Id> = cmds
+                                    .iter()
+                                    .filter(|c| can_start(app, c))
+                                    .filter_map(|c| {
+                                        if chamfer_menu && is_sketch_chamfer(c.id) {
+                                            if family_added {
+                                                None
+                                            } else {
+                                                family_added = true;
+                                                family_state.map(|(id, _, _)| id)
+                                            }
+                                        } else {
+                                            Some(menu_style(app).focus_id(c.id))
+                                        }
+                                    })
+                                    .collect();
                                 let focused = ui.ctx().memory(|m| m.focused());
-                                let at = enabled.iter().position(|id| focused == Some(menu_style(app).focus_id(id)));
+                                let at = enabled.iter().position(|id| focused == Some(*id));
                                 let n = enabled.len();
                                 let next = match (at, down) {
                                     (None, true) => Some(0),
@@ -2007,7 +2035,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                 };
                                 if let Some(id) = next.and_then(|i| enabled.get(i)) {
                                     ui.ctx().memory_mut(|m| {
-                                        m.request_focus(menu_style(app).focus_id(id));
+                                        m.request_focus(*id);
                                         m.move_focus(egui::FocusDirection::None);
                                     });
                                 }
@@ -2017,7 +2045,15 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                             // an earlier, shorter list (#874); they still shrink to fit their content.
                             let room = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(ROW_H * 3.0);
                             egui::ScrollArea::vertical().id_salt("panel_menu_rows").max_height(room).min_scrolled_height(room).show(ui, |ui| {
+                                let mut chamfer_shown = false;
                                 for (heading, c) in &grouped {
+                                    if chamfer_menu && is_sketch_chamfer(c.id) {
+                                        if !chamfer_shown {
+                                            let _ = sketch_chamfer_menu(app, ui, &cmds, &mut menu, &mut toggle);
+                                            chamfer_shown = true;
+                                        }
+                                        continue;
+                                    }
                                     if let Some(heading) = heading {
                                         ribbon::section_heading(ui, &group_heading_text(heading), row_w);
                                     }
@@ -2052,7 +2088,6 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 }
             }
         }
-
         // Resolve persistent paint only after large buttons, dropdowns and overflow have
         // dispatched their actions. No already-painted old analysis can survive replacement.
         paint_persistent_ribbon(app, ui, persistent_paints, &tab, "ribbon");
@@ -2326,6 +2361,7 @@ fn dropdown_grid(
     tab: &str,
     grouped: &[(Option<&'static str>, &'static solidcraft_engine::CommandSpec)],
     loose: &[&str],
+    header: Option<ribbon::GridHeader>,
     paints: &mut Vec<PersistentRibbonPaint>,
 ) -> Option<(&'static str, ribbon::MenuAction)> {
     let labels: Vec<String> = grouped.iter().map(|(_, c)| app.tr_label(c.label).to_string()).collect();
@@ -2336,7 +2372,7 @@ fn dropdown_grid(
         .zip(&headings)
         .map(|(((_, c), label), heading)| (heading.as_deref(), grid_entry(app, c, label, crate::toolbar_custom::pinned_on(app, tab, c.id).is_some())))
         .collect();
-    let out = ribbon::grid(ui, &entries, loose, &menu_style(app));
+    let out = ribbon::grid(ui, &entries, loose, &menu_style(app), header);
     for cell in out.cells {
         if let Some((_, c)) = grouped.get(cell.index) {
             grid_cell_extras(app, ui, c, cell, paints);
@@ -2530,6 +2566,37 @@ fn sketch_create_grouped(cmds: &[&'static solidcraft_engine::CommandSpec]) -> Ve
 fn skip_on_ribbon(cmds: Vec<&'static solidcraft_engine::CommandSpec>, on_ribbon: &[&str]) -> Vec<&'static solidcraft_engine::CommandSpec> {
     let rest: Vec<_> = cmds.iter().copied().filter(|c| !on_ribbon.contains(&c.id)).collect();
     if rest.is_empty() { cmds } else { rest }
+}
+
+const SKETCH_CHAMFERS: &[&str] = &["sketch.chamfer.equal_distance", "sketch.chamfer.distance_angle", "sketch.chamfer.two_distance"];
+
+fn is_sketch_chamfer(id: &str) -> bool {
+    SKETCH_CHAMFERS.contains(&id)
+}
+
+fn sketch_chamfer_menu(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    cmds: &[&'static solidcraft_engine::CommandSpec],
+    menu: &mut Option<(egui::Pos2, &'static str)>,
+    toggle: &mut Option<&'static str>,
+) -> Option<ribbon::GridHeader> {
+    let variants: Vec<_> = SKETCH_CHAMFERS.iter().filter_map(|id| cmds.iter().find(|c| c.id == *id).copied()).collect();
+    let first = variants.first()?;
+    let label = app.tr("ui.chamfer").to_string();
+    let mut item = crate::ui_kit::MenuItem::new("sketch_chamfer_family", &label, first.icon);
+    item.submenu = true;
+    let preview = app.sbox.reveal.as_ref().is_some_and(|r| r.preview && variants.iter().any(|c| c.id == r.id));
+    let response = crate::ui_kit::Menu::item_button_preview(ui, &item, preview, |ui| {
+        dropdown_keys(app, ui, &variants);
+        let width = dropdown_width(app, ui, &variants);
+        sketch_menu_rows(app, ui, &variants, width, menu, toggle);
+    });
+    let header = ribbon::GridHeader { id: response.response.id, submenu_open: response.inner.is_some() };
+    let pass = ui.ctx().cumulative_pass_nr();
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sketch_chamfer_family_state"), (header.id, header.submenu_open, pass)));
+    crate::scenario::publish_handle("modify_family:Chamfer", response.response.rect.center());
+    Some(header)
 }
 
 /// Creation menus keep related variants together, including collapsed and overflow panels.
@@ -4136,6 +4203,104 @@ mod home_tests {
 #[cfg(test)]
 mod dropdown_tests {
     use super::*;
+
+    #[test]
+    fn sketch_chamfer_submenu_opens_each_mode_and_can_restore_separate_rows() {
+        for grid in [false, true] {
+            for id in SKETCH_CHAMFERS {
+                let mut h = crate::scenario::Harness::new();
+                h.app.home.open = false;
+                h.app.preferences.ribbon_icon_grid = grid;
+                h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+                h.frames(4);
+                h.step(&json!({"click":{"handle":"panel:SKETCH:MODIFY"}})).unwrap();
+                h.step(&json!({"click":{"handle":"modify_family:Chamfer"}})).unwrap();
+                h.step(&json!({"click":{"handle":format!("dropdown:{id}")}})).unwrap();
+                let command = h.app.dialog.as_ref().and_then(|d| match &d.kind {
+                    crate::dialogs::Kind::SketchModify(kind) => Some(crate::sketch_modify_ui::command(kind)),
+                    _ => None,
+                });
+                assert_eq!(command, Some(*id));
+            }
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.sketch_chamfer_submenu = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"panel:SKETCH:MODIFY"}})).unwrap();
+        for id in SKETCH_CHAMFERS {
+            assert!(crate::scenario::handle_at(&format!("dropdown:{id}")).is_some());
+        }
+    }
+
+    #[test]
+    fn sketch_chamfer_family_is_reachable_by_keyboard() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"panel:SKETCH:MODIFY"}})).unwrap();
+        h.frames(4);
+        let mut reached = false;
+        for _ in 0..30 {
+            h.step(&json!({"key":"ArrowDown"})).unwrap();
+            let family = h.ctx.data(|d| d.get_temp::<(egui::Id, bool, u64)>(egui::Id::unique("sketch_chamfer_family_state")));
+            if family.is_some_and(|(id, _, _)| h.ctx.memory(|m| m.focused()) == Some(id)) {
+                reached = true;
+                break;
+            }
+        }
+        assert!(reached, "Chamfer submenu must be reachable by arrow key");
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handle_at("dropdown:sketch.chamfer.equal_distance").is_some());
+    }
+
+    #[test]
+    fn sketch_chamfer_grid_keyboard_reaches_and_navigates_family() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ribbon_icon_grid = true;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"panel:SKETCH:MODIFY"}})).unwrap();
+        h.frames(4);
+        let mut reached = false;
+        for _ in 0..30 {
+            h.step(&json!({"key":"ArrowDown"})).unwrap();
+            let family = h.ctx.data(|d| d.get_temp::<(egui::Id, bool, u64)>(egui::Id::unique("sketch_chamfer_family_state")));
+            if family.is_some_and(|(id, _, _)| h.ctx.memory(|m| m.focused()) == Some(id)) {
+                reached = true;
+                break;
+            }
+        }
+        assert!(reached, "Chamfer family must be reachable in the icon grid");
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"ArrowDown"})).unwrap();
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(menu_style(&h.app).focus_id(SKETCH_CHAMFERS[0])));
+        h.step(&json!({"key":"ArrowDown"})).unwrap();
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(menu_style(&h.app).focus_id(SKETCH_CHAMFERS[1])));
+    }
+
+    #[test]
+    fn sketch_chamfer_search_preview_reveals_each_mode() {
+        for grid in [false, true] {
+            for id in SKETCH_CHAMFERS {
+                let mut h = crate::scenario::Harness::new();
+                h.app.home.open = false;
+                h.app.preferences.ribbon_icon_grid = grid;
+                h.app.preferences.ribbon_reveal = true;
+                h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+                h.frames(4);
+                h.app.sbox.reveal = Some(crate::shortcut_box::Reveal { id, since: h.ctx.input(|i| i.time), preview: true, back: "SKETCH".into() });
+                h.frames(4);
+                let row = crate::scenario::rect_of("ribbon:reveal").expect("search preview must reveal a row");
+                assert!(row.contains(crate::scenario::handle_at(&format!("dropdown:{id}")).expect("matching chamfer must be visible")));
+            }
+        }
+    }
 
     #[test]
     fn sketch_create_families_have_icons_and_open_their_variants() {
