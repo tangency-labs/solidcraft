@@ -1,0 +1,42 @@
+{
+  "en": {
+    "prefs.plugins_get_started": "Install a plugin .zip package to add tools. Review its permissions before approving installation.",
+    "prefs.plugins_guide": "Read the plugin guide",
+    "prefs.plugins_advanced_limits": "Show advanced fuel and memory limits"
+  },
+  "de": {
+    "prefs.plugins_get_started": "Installieren Sie ein Plugin-Paket als .zip, um Werkzeuge hinzuzufügen. Prüfen Sie vor der Installation die Berechtigungen.",
+    "prefs.plugins_guide": "Plugin-Anleitung lesen",
+    "prefs.plugins_advanced_limits": "Erweiterte Ressourcenlimits anzeigen"
+  },
+  "ja": {
+    "prefs.plugins_get_started": "ツールを追加するにはプラグインの .zip パッケージをインストールします。インストールの承認前に権限を確認してください。",
+    "prefs.plugins_guide": "プラグインガイドを読む",
+    "prefs.plugins_advanced_limits": "高度な燃料とメモリの上限を表示"
+  },
+  "zh": {
+    "prefs.plugins_get_started": "安装插件 .zip 包以添加工具。批准安装前请检查其权限。",
+    "prefs.plugins_guide": "阅读插件指南",
+    "prefs.plugins_advanced_limits": "显示高级燃料和内存限制"
+  },
+  "ar": {
+    "prefs.plugins_get_started": "ثبّت حزمة إضافة بصيغة .zip لإضافة أدوات. راجع الأذونات قبل الموافقة على التثبيت.",
+    "prefs.plugins_guide": "قراءة دليل الإضافات",
+    "prefs.plugins_advanced_limits": "عرض حدود الوقود والذاكرة المتقدمة"
+  },
+  "he": {
+    "prefs.plugins_get_started": "יש להתקין חבילת תוסף מסוג .zip כדי להוסיף כלים. יש לבדוק את ההרשאות לפני אישור ההתקנה.",
+    "prefs.plugins_guide": "קריאת מדריך התוספים",
+    "prefs.plugins_advanced_limits": "הצגת מגבלות דלק וזיכרון מתקדמות"
+  },
+  "ko": {
+    "prefs.plugins_get_started": "도구를 추가하려면 플러그인 .zip 패키지를 설치하세요. 설치 승인 전에 권한을 확인하세요.",
+    "prefs.plugins_guide": "플러그인 가이드 읽기",
+    "prefs.plugins_advanced_limits": "고급 연료 및 메모리 제한 표시"
+  },
+  "vi": {
+    "prefs.plugins_get_started": "Cài đặt gói plugin .zip để thêm công cụ. Xem lại quyền truy cập trước khi chấp thuận cài đặt.",
+    "prefs.plugins_guide": "Đọc hướng dẫn plugin",
+    "prefs.plugins_advanced_limits": "Hiện giới hạn nhiên liệu và bộ nhớ nâng cao"
+  }
+}
