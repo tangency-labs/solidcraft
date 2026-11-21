@@ -914,7 +914,8 @@ fn a_note_on_an_exploded_view_is_checked_as_any_views_and_covers_its_feature() {
 }
 
 /// A note is held to the paper by the extent its alignment gives it: one at 15 mm from the sheet's
-/// edge is on it when it starts there, and half off it when it is centred there or ends there.
+/// edge is on it when it starts there, and half off it when it is centred there or ends there; starting
+/// 34 mm from the right edge of the A2 sheet (594 mm) it runs off that side.
 #[test]
 fn a_note_is_checked_where_its_alignment_puts_it() {
     let (mut s, _, _, _) = assembly();
@@ -927,7 +928,7 @@ fn a_note_is_checked_where_its_alignment_puts_it() {
         let reply = checked(&mut s, json!({}));
         assert_eq!(of_kind(&reply, "outside_sheet"), [named("note", &note)], "{align}: {reply}");
     }
-    run(&mut s, "drawing.note.edit", json!({"note": note, "set": {"align": "left", "at": [400, 60]}}));
+    run(&mut s, "drawing.note.edit", json!({"note": note, "set": {"align": "left", "at": [560, 60]}}));
     let reply = checked(&mut s, json!({}));
     assert_eq!(of_kind(&reply, "outside_sheet"), [named("note", &note)], "{reply}");
 }
