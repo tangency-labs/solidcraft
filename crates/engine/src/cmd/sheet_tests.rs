@@ -2986,7 +2986,7 @@ fn flat_dxf_preserves_exact_cutout_entities() {
         let mut sk = s.model.state().surface_sheets[0].clone();
         sk.sheet.panels[0].region.holes = vec![hole];
         sk.build().unwrap();
-        super::surface_dxf(s, &sk, &super::DxfOptions::default()).unwrap()
+        super::surface_dxf(s, &sk, &super::DxfOptions::default(), None).unwrap()
     };
     let dxf =
         with_hole(&s, Loop2 { segs: vec![Seg2::Arc { center: Vec2::new(40.0, -30.0), radius: 5.0, start: PI, sweep: 2.0 * PI }] }.ccw().reversed());
