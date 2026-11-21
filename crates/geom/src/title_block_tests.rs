@@ -77,6 +77,47 @@ fn the_default_geometry_validates_and_its_cells_tile_the_block() {
     }
 }
 
+/// The compact block is the old built-in block exactly (#20126): 180 x 49 mm with its twelve cells, as
+/// the first release with a built-in block wrote them, and the built-in block is that block with
+/// the ISO 7200 row above it.
+#[test]
+fn the_compact_block_is_the_old_built_in_block() {
+    let compact = compact_block();
+    compact.validate().unwrap();
+    let field = |source, key: &str| Part::Field { source, key: key.into(), format: Format::default() };
+    let sheet = vec![field(Source::Sheet, "number"), Part::Text("/".into()), field(Source::Sheet, "count")];
+    // Each cell as `default_block` wrote it before the row came in: name, rectangle, label, the text
+    // it reads (none: empty), its cap height and its alignment.
+    let old: [(&str, [f64; 4], &str, Option<Vec<Part>>, f64, HAlign); 12] = [
+        ("title", [-180.0, 0.0, -68.0, 14.0], "Title", Some(vec![field(Source::Component, "name")]), 5.0, HAlign::Left),
+        ("identification_number", [-68.0, 0.0, 0.0, 14.0], "Identification number", Some(vec![field(Source::Drawing, "number")]), 5.0, HAlign::Left),
+        ("created_by", [-180.0, 14.0, -121.0, 24.0], "Created by", Some(vec![field(Source::Revision, "designer")]), 3.5, HAlign::Left),
+        ("approved_by", [-121.0, 14.0, -62.0, 24.0], "Approved by", Some(vec![field(Source::Revision, "checker")]), 3.5, HAlign::Left),
+        ("date_of_issue", [-62.0, 14.0, -30.0, 24.0], "Date of issue", Some(vec![field(Source::Revision, "date")]), 3.5, HAlign::Left),
+        ("sheet", [-30.0, 14.0, 0.0, 24.0], "Sheet", Some(sheet), 3.5, HAlign::Centre),
+        ("material", [-180.0, 24.0, -100.0, 34.0], "Material", Some(vec![field(Source::Component, "material")]), 3.5, HAlign::Left),
+        ("finish", [-100.0, 24.0, -30.0, 34.0], "Finish", Some(vec![field(Source::Component, "properties.finish")]), 3.5, HAlign::Left),
+        ("mass", [-30.0, 24.0, 0.0, 34.0], "Mass", Some(vec![field(Source::Component, "mass")]), 3.5, HAlign::Centre),
+        ("legal_owner", [-180.0, 34.0, -100.0, 49.0], "Legal owner", Some(vec![field(Source::Drawing, "organization")]), 3.5, HAlign::Left),
+        ("general_tolerances", [-100.0, 34.0, -30.0, 49.0], "General tolerances", Some(Vec::new()), 2.5, HAlign::Left),
+        ("projection", [-30.0, 34.0, 0.0, 49.0], "Projection", None, 0.0, HAlign::Left),
+    ];
+    assert_eq!((compact.size_mm, compact.outline_line_mm, compact.cell_line_mm, compact.cells.len()), (Vec2::new(180.0, 49.0), 0.7, 0.35, 12));
+    for (cell, (name, rect_mm, label, content, cap_mm, align)) in compact.cells.iter().zip(old) {
+        assert_eq!((cell.name.as_str(), cell.rect_mm), (name, rect_mm));
+        assert_eq!(cell.label, Some(Label { text: label.into(), cap_mm: 2.5 }), "{name}");
+        match (&cell.kind, content) {
+            (CellKind::Text(text), Some(content)) => assert_eq!((&text.content.0, text.cap_mm, text.align), (&content, cap_mm, align), "{name}"),
+            (CellKind::ProjectionSymbol, None) => {}
+            _ => panic!("{name}: the wrong kind of cell"),
+        }
+    }
+    // It lays out where the old block did, on A3 from (230, 10) to (410, 59), and it is the built-in
+    // block's lower twelve cells.
+    assert_eq!(compact.layout(&iso(PaperSize::A3, Orientation::Landscape)).unwrap().outline, rect(230.0, 10.0, 410.0, 59.0));
+    assert_eq!(compact.cells[..], default_block().cells[..12]);
+}
+
 /// ISO 7200's fields for a drawing sent to a shop (#20121): scale, document type, status, language,
 /// revision and department, in a row above the rest. The scale, the language and the revision are
 /// read, the other three are the shop's own text; each cell keeps its label's room, on A4 and A3.

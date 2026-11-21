@@ -213,6 +213,18 @@ pub fn default_block() -> TitleBlock {
     TitleBlock { size_mm: Vec2::new(180.0, 61.0), outline_line_mm: 0.7, cell_line_mm: 0.35, cells }
 }
 
+/// The compact block, 180 x 49 mm: the built-in block as it was before ISO 7200's six cells came in
+/// (#20121), its twelve cells alone, for a sheet that wants the lower, older block.
+pub fn compact_block() -> TitleBlock {
+    let mut block = default_block();
+    block.cells.retain(|cell| cell.rect_mm[1] < COMPACT_HEIGHT_MM);
+    block.size_mm = Vec2::new(block.size_mm.x, COMPACT_HEIGHT_MM);
+    block
+}
+
+/// The compact block's height: the top of its twelve cells.
+const COMPACT_HEIGHT_MM: f64 = 49.0;
+
 impl TitleBlock {
     /// The image files its cells show in place of their text.
     pub fn logos(&self) -> impl Iterator<Item = u64> + '_ {
