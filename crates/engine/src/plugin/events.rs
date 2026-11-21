@@ -97,10 +97,10 @@ pub fn design_notifications(session: &mut Session, design: Option<DesignToken>, 
         // Versions already read into the design remain visible without a file grant.
         // An unread source must lie inside both the plugin's approved read folders and the
         // session's own scope (`--allow-path`), as `granted_folders` narrows file grants.
-        let session = solidcraft_io::vfs::current_scope();
+        let session_scope = solidcraft_io::vfs::current_scope();
         let links: Vec<_> = links
             .iter()
-            .filter(|link| link.read || (scope.check(&link.path).is_ok() && session.as_ref().is_none_or(|s| s.check(&link.path).is_ok())))
+            .filter(|link| link.read || (scope.check(&link.path).is_ok() && session_scope.as_ref().is_none_or(|s| s.check(&link.path).is_ok())))
             .collect();
         let listeners = runtime.listeners.clone();
         approved_listeners.extend(listeners.iter().map(|listener| format!("{id}.{}", listener.entry)));
