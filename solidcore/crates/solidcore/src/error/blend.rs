@@ -21,10 +21,11 @@
 //! | [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::PlaneCurveStepVanished`] | [`ErrorKind::StageFailed`] (127) |
 //! | [`BlendFailure::SkinPastStationCap`], [`BlendFailure::PlaneCurveFitCap`] | [`ErrorKind::NotWithinTolerance`] (9) |
 //! | [`BlendFailure::PlaneCurveTouches`]    | [`ErrorKind::Degenerate`] (3)                |
-//! | [`BlendFailure::PlaneCurveEndOff`]     | [`ErrorKind::NotFound`] (2)                  |
+//! | [`BlendFailure::SideEdgeTangentVanishes`] | [`ErrorKind::SideEdgeDegenerate`] (132): a refusal no size decides |
+//! | [`BlendFailure::PlaneCurveEndOff`], [`BlendFailure::BlendingRailEndOffFace`], [`BlendFailure::BlendingRailOffFace`], [`BlendFailure::SideEdgeOffRailFace`] | [`ErrorKind::NotFound`] (2) |
 //! | [`BlendFailure::PlaneCurveLeavesDomain`] | [`ErrorKind::OutsideDomain`] (8)           |
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
-//! | [`BlendFailure::CreasePieceEndUnbuildable`] | [`ErrorKind::Unsupported`] (5)           |
+//! | [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::SideEdgeCurveNotBSpline`], [`BlendFailure::FilletEndVertexOffSideEdge`], [`BlendFailure::SqueezeEndNotRailEdgeuse`] | [`ErrorKind::Unsupported`] (5) |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
 //! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
@@ -36,9 +37,9 @@
 //!
 //! | Rust                                   | Status difftest compares          |
 //! |----------------------------------------|-----------------------------------|
-//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::PlaneCurveTouches`], [`BlendFailure::PlaneCurveEndOff`], [`BlendFailure::PlaneCurveLeavesDomain`], [`BlendFailure::PlaneCurveStepVanished`], [`BlendFailure::PlaneCurveFitCap`] | `SM_ERR` |
+//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::PlaneCurveTouches`], [`BlendFailure::PlaneCurveEndOff`], [`BlendFailure::PlaneCurveLeavesDomain`], [`BlendFailure::PlaneCurveStepVanished`], [`BlendFailure::PlaneCurveFitCap`], [`BlendFailure::SideEdgeTangentVanishes`], [`BlendFailure::BlendingRailEndOffFace`], [`BlendFailure::BlendingRailOffFace`], [`BlendFailure::SideEdgeCurveNotBSpline`], [`BlendFailure::FilletEndVertexOffSideEdge`], [`BlendFailure::SqueezeEndNotRailEdgeuse`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`]               | `SM_ERR`                          |
-//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`] | `SM_ERR_NULL_POINTER` |
+//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::SideEdgeOffRailFace`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`            |
 //! | [`BlendFailure::Inconsistent`]         | `SM_ERR_ASSERT_FAILURE`           |
 //! | [`BlendFailure::BadIntersections`]     | `SM_ERR_BAD_INTERSECTIONS`        |
@@ -230,6 +231,83 @@ pub enum BlendFailure {
         stations: usize,
         /// The refinement passes completed.
         passes: usize,
+    },
+    /// A fillet end's vertex lies on the body's side edge `edge` at its curve's parameter
+    /// `t`, where that curve's derivative has no length (shorter than the kernel's zero): the
+    /// curve's own parametrization stops there (for example at repeated control points), so
+    /// the end has no direction to leave the side edge along. A fact of the caller's body,
+    /// not of the fillet: a refusal no size decides ([`ErrorKind::SideEdgeDegenerate`]);
+    /// status `SM_ERR`.
+    SideEdgeTangentVanishes {
+        /// The body's side edge.
+        edge: crate::topology::EdgeId,
+        /// The parameter on the edge's curve.
+        t: f64,
+    },
+    /// An end vertex of a blending rail that is not a mate of the face (a special case, such
+    /// as a 4x2 concave corner) is not on its original face `face`: the point solve onto the
+    /// face's surface found no point within `tolerance`, the largest tolerance it tried. An
+    /// empty search ([`ErrorKind::NotFound`]); status `SM_ERR` (upstream's
+    /// `SM_FE_END_PNT_DROP_FAILURE` on the fillet edge).
+    BlendingRailEndOffFace {
+        /// The original face.
+        face: crate::topology::FaceId,
+        /// The fillet B-rep's vertex at the rail's end.
+        vertex: crate::topology::VertexId,
+        /// True for the rail's end vertex, false for its start.
+        at_end: bool,
+        /// The largest tolerance the solve tried.
+        tolerance: f64,
+    },
+    /// The 3D curve of a blending rail on a bilinear face `face` does not drop onto the
+    /// face's surface within `tolerance`: the drop found no UV curve (a curve between the
+    /// rails' ends that leaves a surface which is not planar). An empty search
+    /// ([`ErrorKind::NotFound`]); status `SM_ERR`.
+    BlendingRailOffFace {
+        /// The original face.
+        face: crate::topology::FaceId,
+        /// The drop's tolerance: the face's.
+        tolerance: f64,
+    },
+    /// The body's side edge `edge`, along which an edge-on-edge fillet edge at a corner runs,
+    /// has no edge use on the face of the edge use `edgeuse` the rail's end lies on, nor on
+    /// the face across it: the chain from the corner's vertex to the rail's end has no
+    /// start. An empty search ([`ErrorKind::NotFound`]); status `SM_ERR_NULL_POINTER` (the
+    /// `NER` it replaces).
+    SideEdgeOffRailFace {
+        /// The body's side edge.
+        edge: crate::topology::EdgeId,
+        /// The body's edge use the rail's end lies on.
+        edgeuse: crate::topology::EdgeuseId,
+    },
+    /// The body's edge `edge`, along which an edge-on-edge fillet edge runs (or a piece of its
+    /// side-edge chain), has a curve of kind `kind` (its type string), which is not of a
+    /// B-spline class: the fillet edge's curve is a trimmed B-spline copy of it, and this
+    /// kind has none. An unsupported kind ([`ErrorKind::Unsupported`]); status `SM_ERR`
+    /// unless its site says otherwise (`SM_ERR_NULL_POINTER` where it replaces a `NER`).
+    SideEdgeCurveNotBSpline {
+        /// The body's edge.
+        edge: crate::topology::EdgeId,
+        /// The curve's kind, as its type string.
+        kind: &'static str,
+    },
+    /// A fillet end's start or end vertex (`at_end`) is classified to `class`, not to a
+    /// side edge use (for example to a vertex of the body, where a rail ends exactly at
+    /// one): no fillet end is built from a vertex that is not on a side edge. A missing
+    /// construction ([`ErrorKind::Unsupported`]); status `SM_ERR`.
+    FilletEndVertexOffSideEdge {
+        /// True for the fillet end's end vertex, false for its start.
+        at_end: bool,
+        /// What the vertex is classified to.
+        class: crate::intersect::point_class::PointClassType,
+    },
+    /// A set-back rail at an N x 2 corner is shorter than the corner's tolerance, so it is
+    /// to be squeezed out at an end whose vertex is of type `vertex_type`, not a rail/edge-use
+    /// vertex: no squeeze is built at such an end. A missing construction
+    /// ([`ErrorKind::Unsupported`]); status `SM_ERR`.
+    SqueezeEndNotRailEdgeuse {
+        /// The type of the vertex the squeeze would delete.
+        vertex_type: crate::blend::fillet_geom::p1::FilletVertexType,
     },
     /// The routine could not continue, as the phrase says (for example "the fillet's law
     /// has no value at the base"). Upstream `return SE(SM_ERR)`. A phrase cause
@@ -549,11 +627,18 @@ impl BlendFailure {
             | Self::PlaneCurveLeavesDomain { .. }
             | Self::PlaneCurveStepVanished { .. }
             | Self::PlaneCurveFitCap { .. }
+            | Self::SideEdgeTangentVanishes { .. }
+            | Self::BlendingRailEndOffFace { .. }
+            | Self::BlendingRailOffFace { .. }
+            | Self::SideEdgeCurveNotBSpline { .. }
+            | Self::FilletEndVertexOffSideEdge { .. }
+            | Self::SqueezeEndNotRailEdgeuse { .. }
             | Self::NotCertified { .. }
             | Self::Failed(_) => SM_ERR,
-            Self::Missing(_) | Self::BandInputMissing(_) | Self::CliffInputMissing { .. } => {
-                SM_ERR_NULL_POINTER
-            }
+            Self::Missing(_)
+            | Self::BandInputMissing(_)
+            | Self::CliffInputMissing { .. }
+            | Self::SideEdgeOffRailFace { .. } => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::BadIntersections(_) => SM_ERR_BAD_INTERSECTIONS,
@@ -574,11 +659,17 @@ impl BlendFailure {
     /// [`BlendFailure::SkinPastStationCap`], [`BlendFailure::PlaneCurveFitCap`] and for a
     /// surface not certified within its tolerance in its work budget
     /// ([`BlendFailure::NotCertified`]), [`ErrorKind::Degenerate`] for
-    /// [`BlendFailure::PlaneCurveTouches`], [`ErrorKind::NotFound`] for
-    /// [`BlendFailure::PlaneCurveEndOff`], [`ErrorKind::OutsideDomain`] for
+    /// [`BlendFailure::PlaneCurveTouches`], [`ErrorKind::SideEdgeDegenerate`] for
+    /// [`BlendFailure::SideEdgeTangentVanishes`], [`ErrorKind::NotFound`] for
+    /// [`BlendFailure::PlaneCurveEndOff`] and the empty searches
+    /// ([`BlendFailure::BlendingRailEndOffFace`], [`BlendFailure::BlendingRailOffFace`],
+    /// [`BlendFailure::SideEdgeOffRailFace`]), [`ErrorKind::OutsideDomain`] for
     /// [`BlendFailure::PlaneCurveLeavesDomain`], [`ErrorKind::BallsFold`] for
     /// [`BlendFailure::BallsNest`], and
-    /// [`ErrorKind::Unsupported`] for [`BlendFailure::CreasePieceEndUnbuildable`]. A phrase
+    /// [`ErrorKind::Unsupported`] for [`BlendFailure::CreasePieceEndUnbuildable`], an
+    /// unsupported curve kind ([`BlendFailure::SideEdgeCurveNotBSpline`]) and the
+    /// constructions not built ([`BlendFailure::FilletEndVertexOffSideEdge`],
+    /// [`BlendFailure::SqueezeEndNotRailEdgeuse`]). A phrase
     /// cause keeps the kind of its status ([`ErrorKind::Failed`], [`ErrorKind::Missing`],
     /// [`ErrorKind::InvalidInput`], ...), as before the record ([`BlendFailure::is_phrase`]).
     #[must_use]
@@ -597,10 +688,17 @@ impl BlendFailure {
             | Self::NotCertified { .. }
             | Self::PlaneCurveFitCap { .. } => ErrorKind::NotWithinTolerance,
             Self::PlaneCurveTouches { .. } => ErrorKind::Degenerate,
-            Self::PlaneCurveEndOff { .. } => ErrorKind::NotFound,
+            Self::SideEdgeTangentVanishes { .. } => ErrorKind::SideEdgeDegenerate,
+            Self::PlaneCurveEndOff { .. }
+            | Self::BlendingRailEndOffFace { .. }
+            | Self::BlendingRailOffFace { .. }
+            | Self::SideEdgeOffRailFace { .. } => ErrorKind::NotFound,
             Self::PlaneCurveLeavesDomain { .. } => ErrorKind::OutsideDomain,
             Self::BallsNest { .. } => ErrorKind::BallsFold,
-            Self::CreasePieceEndUnbuildable { .. } => ErrorKind::Unsupported,
+            Self::CreasePieceEndUnbuildable { .. }
+            | Self::SideEdgeCurveNotBSpline { .. }
+            | Self::FilletEndVertexOffSideEdge { .. }
+            | Self::SqueezeEndNotRailEdgeuse { .. } => ErrorKind::Unsupported,
             Self::BandInputMissing(_) | Self::CliffInputMissing { .. } => ErrorKind::Missing,
             Self::Failed(_)
             | Self::Missing(_)
@@ -639,6 +737,13 @@ impl BlendFailure {
             | Self::PlaneCurveLeavesDomain { .. }
             | Self::PlaneCurveStepVanished { .. }
             | Self::PlaneCurveFitCap { .. }
+            | Self::SideEdgeTangentVanishes { .. }
+            | Self::BlendingRailEndOffFace { .. }
+            | Self::BlendingRailOffFace { .. }
+            | Self::SideEdgeOffRailFace { .. }
+            | Self::SideEdgeCurveNotBSpline { .. }
+            | Self::FilletEndVertexOffSideEdge { .. }
+            | Self::SqueezeEndNotRailEdgeuse { .. }
             | Self::BandInputMissing(_)
             | Self::CliffInputMissing { .. }
             | Self::NotCertified { .. } => false,
@@ -681,6 +786,13 @@ impl BlendFailure {
             | Self::PlaneCurveLeavesDomain { .. }
             | Self::PlaneCurveStepVanished { .. }
             | Self::PlaneCurveFitCap { .. }
+            | Self::SideEdgeTangentVanishes { .. }
+            | Self::BlendingRailEndOffFace { .. }
+            | Self::BlendingRailOffFace { .. }
+            | Self::SideEdgeOffRailFace { .. }
+            | Self::SideEdgeCurveNotBSpline { .. }
+            | Self::FilletEndVertexOffSideEdge { .. }
+            | Self::SqueezeEndNotRailEdgeuse { .. }
             | Self::BandInputMissing(_)
             | Self::CliffInputMissing { .. }
             | Self::Failed(_)
@@ -786,6 +898,48 @@ impl core::fmt::Display for BlendFailure {
             Self::PlaneCurveFitCap { stations, passes } => write!(
                 f,
                 "{}: the crossing's Hermite fit is still off the exact curve by more than a tenth of the tolerance with {stations} stations after {passes} passes",
+                self.class()
+            ),
+            Self::SideEdgeTangentVanishes { edge, t } => write!(
+                f,
+                "{}: the side edge {edge:?}'s curve has no tangent at t = {t}, where the fillet's end meets it",
+                self.class()
+            ),
+            Self::BlendingRailEndOffFace {
+                face,
+                vertex,
+                at_end,
+                tolerance,
+            } => write!(
+                f,
+                "{}: the blending rail's {} vertex {vertex:?} is not on its face {face:?} within {tolerance}",
+                self.class(),
+                if *at_end { "end" } else { "start" },
+            ),
+            Self::BlendingRailOffFace { face, tolerance } => write!(
+                f,
+                "{}: the blending rail's curve does not drop onto its bilinear face {face:?} within {tolerance}",
+                self.class()
+            ),
+            Self::SideEdgeOffRailFace { edge, edgeuse } => write!(
+                f,
+                "{}: the side edge {edge:?} has no use on the face of the edge use {edgeuse:?} the rail ends on, nor on the face across it",
+                self.class()
+            ),
+            Self::SideEdgeCurveNotBSpline { edge, kind } => write!(
+                f,
+                "{}: the edge {edge:?}'s curve is a {kind}, which is not of a B-spline class: no fillet edge is copied from it",
+                self.class()
+            ),
+            Self::FilletEndVertexOffSideEdge { at_end, class } => write!(
+                f,
+                "{}: the fillet end's {} vertex is classified to {class:?}, not to a side edge use: no fillet end is built there",
+                self.class(),
+                if *at_end { "end" } else { "start" },
+            ),
+            Self::SqueezeEndNotRailEdgeuse { vertex_type } => write!(
+                f,
+                "{}: the set-back rail to squeeze ends at a {vertex_type:?} vertex, not a rail/edge-use vertex: no squeeze is built there",
                 self.class()
             ),
             Self::Failed(what)
@@ -1382,6 +1536,110 @@ mod tests {
     }
 
     #[test]
+    fn a_side_edge_without_tangent_is_a_refusal_no_size_decides() {
+        let edge = crate::topology::EdgeId::from_index(3);
+        let cause = BlendFailure::SideEdgeTangentVanishes { edge, t: 0.5 };
+        assert_eq!(cause.class(), ErrorKind::SideEdgeDegenerate);
+        assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+        let e = Failure::new("blend::op", cause)
+            .at(EntityRef::Edge(edge))
+            .into_error();
+        assert_eq!(e.kind(), ErrorKind::SideEdgeDegenerate);
+        assert_eq!(e.blend_failure(), Some(&cause));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.entity(), Some(EntityRef::Edge(edge)));
+        assert!(e.is_refusal() && !e.is_defect() && !e.sized());
+        assert_eq!(
+            e.to_string(),
+            format!(
+                "blend::op: side_edge_degenerate: the side edge {edge:?}'s curve has no tangent at t = 0.5, where the fillet's end meets it (edge 3)"
+            )
+        );
+    }
+
+    /// A named cause of p6's (empty search or construction not built): its class, its
+    /// status, neither a defect nor a refusal, and its message.
+    fn assert_named_cause(cause: BlendFailure, class: ErrorKind, status: i32, message: &str) {
+        assert_eq!(cause.class(), class);
+        assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+        let e = SolidError::blend("blend::op", cause);
+        assert_eq!(e.kind(), class);
+        assert_eq!(e.blend_failure(), Some(&cause));
+        assert_eq!(e.upstream_status(), Some(status));
+        assert!(!e.is_defect() && !e.is_refusal() && !e.sized());
+        assert_eq!(e.to_string(), format!("blend::op: {class}: {message}"));
+    }
+
+    #[test]
+    fn the_fillet_edge_searches_and_missing_constructions_are_named() {
+        use crate::topology::{EdgeId, EdgeuseId, FaceId, VertexId};
+        let face = FaceId::from_index(2);
+        let vertex = VertexId::from_index(5);
+        assert_named_cause(
+            BlendFailure::BlendingRailEndOffFace {
+                face,
+                vertex,
+                at_end: true,
+                tolerance: 0.25,
+            },
+            ErrorKind::NotFound,
+            SM_ERR,
+            &format!(
+                "the blending rail's end vertex {vertex:?} is not on its face {face:?} within 0.25"
+            ),
+        );
+        assert_named_cause(
+            BlendFailure::BlendingRailOffFace {
+                face,
+                tolerance: 0.5,
+            },
+            ErrorKind::NotFound,
+            SM_ERR,
+            &format!(
+                "the blending rail's curve does not drop onto its bilinear face {face:?} within 0.5"
+            ),
+        );
+        let edge = EdgeId::from_index(7);
+        let edgeuse = EdgeuseId::from_index(9);
+        assert_named_cause(
+            BlendFailure::SideEdgeOffRailFace { edge, edgeuse },
+            ErrorKind::NotFound,
+            SM_ERR_NULL_POINTER,
+            &format!(
+                "the side edge {edge:?} has no use on the face of the edge use {edgeuse:?} the rail ends on, nor on the face across it"
+            ),
+        );
+        assert_named_cause(
+            BlendFailure::SideEdgeCurveNotBSpline {
+                edge,
+                kind: "SmOffsetCurve_TYPE",
+            },
+            ErrorKind::Unsupported,
+            SM_ERR,
+            &format!(
+                "the edge {edge:?}'s curve is a SmOffsetCurve_TYPE, which is not of a B-spline class: no fillet edge is copied from it"
+            ),
+        );
+        assert_named_cause(
+            BlendFailure::FilletEndVertexOffSideEdge {
+                at_end: false,
+                class: crate::intersect::point_class::PointClassType::Vertex,
+            },
+            ErrorKind::Unsupported,
+            SM_ERR,
+            "the fillet end's start vertex is classified to Vertex, not to a side edge use: no fillet end is built there",
+        );
+        assert_named_cause(
+            BlendFailure::SqueezeEndNotRailEdgeuse {
+                vertex_type: crate::blend::fillet_geom::p1::FilletVertexType::Mate,
+            },
+            ErrorKind::Unsupported,
+            SM_ERR,
+            "the set-back rail to squeeze ends at a Mate vertex, not a rail/edge-use vertex: no squeeze is built there",
+        );
+    }
+
+    #[test]
     fn a_plane_curve_end_off_names_the_end_and_distance_when_found() {
         for (at_end, end) in [(false, "start"), (true, "end")] {
             for (distance, detail) in [
@@ -1569,7 +1827,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 29;
+    const VARIANTS: usize = 36;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -1605,6 +1863,13 @@ mod tests {
             BlendFailure::PlaneCurveFitCap { .. } => (26, None),
             BlendFailure::ClosedCliffWouldNotSplit { .. } => (27, None),
             BlendFailure::CliffInputMissing { .. } => (28, None),
+            BlendFailure::SideEdgeTangentVanishes { .. } => (29, None),
+            BlendFailure::BlendingRailEndOffFace { .. } => (30, None),
+            BlendFailure::BlendingRailOffFace { .. } => (31, None),
+            BlendFailure::SideEdgeOffRailFace { .. } => (32, None),
+            BlendFailure::SideEdgeCurveNotBSpline { .. } => (33, None),
+            BlendFailure::FilletEndVertexOffSideEdge { .. } => (34, None),
+            BlendFailure::SqueezeEndNotRailEdgeuse { .. } => (35, None),
         }
     }
 
@@ -1664,6 +1929,35 @@ mod tests {
             BlendFailure::PlaneCurveFitCap {
                 stations: 0,
                 passes: 0,
+            },
+            BlendFailure::SideEdgeTangentVanishes {
+                edge: crate::topology::EdgeId::from_index(0),
+                t: 0.0,
+            },
+            BlendFailure::BlendingRailEndOffFace {
+                face: crate::topology::FaceId::from_index(0),
+                vertex: crate::topology::VertexId::from_index(0),
+                at_end: false,
+                tolerance: 0.0,
+            },
+            BlendFailure::BlendingRailOffFace {
+                face: crate::topology::FaceId::from_index(0),
+                tolerance: 0.0,
+            },
+            BlendFailure::SideEdgeOffRailFace {
+                edge: crate::topology::EdgeId::from_index(0),
+                edgeuse: crate::topology::EdgeuseId::from_index(0),
+            },
+            BlendFailure::SideEdgeCurveNotBSpline {
+                edge: crate::topology::EdgeId::from_index(0),
+                kind: "SmOffsetCurve_TYPE",
+            },
+            BlendFailure::FilletEndVertexOffSideEdge {
+                at_end: false,
+                class: crate::intersect::point_class::PointClassType::Vertex,
+            },
+            BlendFailure::SqueezeEndNotRailEdgeuse {
+                vertex_type: crate::blend::fillet_geom::p1::FilletVertexType::Unknown,
             },
             BlendFailure::BandInputMissing(BandInput::SharedFace),
             BlendFailure::TrimLoopOpen,
