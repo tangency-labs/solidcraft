@@ -42,6 +42,7 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<OpenParams>(),
         &[
             "folder",
+            "force",
             "format",
             "geometry",
             "history",

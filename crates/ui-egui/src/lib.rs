@@ -240,6 +240,7 @@ pub use navigation::WebWheelGestures;
 pub mod network_prompt;
 pub mod op_auto;
 pub mod open_elsewhere;
+pub mod open_memory;
 pub(crate) mod open_meshing;
 pub mod operations;
 pub mod panel_runtime;
@@ -847,6 +848,8 @@ pub struct SolveApp {
     pub locks: Option<open_elsewhere::Locks>,
     /// Opens waiting for "this design is open elsewhere" to be answered, first asked first.
     pub lock_prompts: Vec<open_elsewhere::LockPrompt>,
+    /// Opens and inserts waiting for "this file may need more memory" to be answered (#15588).
+    pub memory_prompts: Vec<open_memory::MemoryPrompt>,
     /// A Save waiting for "the file changed on disk" to be answered.
     pub disk_prompt: bool,
     /// Update Links, Open Linked Design or Reload from file waiting for a network server to be allowed.
@@ -1167,6 +1170,7 @@ impl SolveApp {
             autosave: None,
             locks: None,
             lock_prompts: Vec::new(),
+            memory_prompts: Vec::new(),
             disk_prompt: false,
             network_prompt: None,
             link_folders_prompt: Vec::new(),
@@ -4375,6 +4379,7 @@ impl SolveApp {
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
+        open_memory::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
         link_folders_prompt::show(self, ui.ctx());
         update::show(self, ui.ctx());

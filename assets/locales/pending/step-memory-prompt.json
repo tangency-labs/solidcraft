@@ -1,0 +1,34 @@
+{
+  "en": {
+    "document.needs_memory": "{name} may need more memory",
+    "document.needs_memory_detail": "Opening {name} may take about {needed} of memory, and SolidCraft can use about {available} on this computer (half of its memory). It may still open, but SolidCraft and other programs may slow down, or SolidCraft may run out of memory and close. Save your work before you open it anyway."
+  },
+  "ar": {
+    "document.needs_memory": "قد يحتاج {name} إلى ذاكرة أكثر",
+    "document.needs_memory_detail": "قد يستهلك فتح {name} نحو {needed} من الذاكرة، ويستطيع SolidCraft استخدام نحو {available} على هذا الحاسوب (نصف ذاكرته). قد يُفتح الملف رغم ذلك، لكن SolidCraft والبرامج الأخرى قد تبطؤ، أو قد تنفد ذاكرة SolidCraft فيُغلق. احفظ عملك قبل فتحه على أي حال."
+  },
+  "de": {
+    "document.needs_memory": "{name} braucht möglicherweise mehr Arbeitsspeicher",
+    "document.needs_memory_detail": "Das Öffnen von {name} kann etwa {needed} Arbeitsspeicher belegen; SolidCraft kann auf diesem Computer etwa {available} nutzen (die Hälfte seines Arbeitsspeichers). Die Datei lässt sich vielleicht trotzdem öffnen, aber SolidCraft und andere Programme können langsamer werden, oder SolidCraft kann der Speicher ausgehen und es schließt sich. Speichern Sie Ihre Arbeit, bevor Sie die Datei trotzdem öffnen."
+  },
+  "he": {
+    "document.needs_memory": "ייתכן ש-{name} ידרוש יותר זיכרון",
+    "document.needs_memory_detail": "פתיחת {name} עשויה לדרוש כ-{needed} זיכרון, ו-SolidCraft יכול להשתמש בכ-{available} במחשב הזה (מחצית מהזיכרון שלו). ייתכן שהקובץ ייפתח בכל זאת, אבל SolidCraft ותוכנות אחרות עלולים להאט, או ש-SolidCraft עלול להישאר בלי זיכרון ולהיסגר. שמרו את העבודה לפני שתפתחו אותו בכל זאת."
+  },
+  "ja": {
+    "document.needs_memory": "{name} は多くのメモリを必要とする可能性があります",
+    "document.needs_memory_detail": "{name} を開くには約 {needed} のメモリが必要になる可能性があります。このコンピューターで SolidCraft が使えるのは約 {available}（メモリの半分）です。それでも開ける場合がありますが、SolidCraft や他のプログラムが遅くなったり、SolidCraft のメモリが不足して終了したりすることがあります。それでも開く前に作業を保存してください。"
+  },
+  "ko": {
+    "document.needs_memory": "{name}에 더 많은 메모리가 필요할 수 있습니다",
+    "document.needs_memory_detail": "{name}을(를) 열려면 약 {needed}의 메모리가 필요할 수 있으며, 이 컴퓨터에서 SolidCraft가 쓸 수 있는 메모리는 약 {available}(전체 메모리의 절반)입니다. 그래도 열릴 수 있지만 SolidCraft와 다른 프로그램이 느려지거나, SolidCraft의 메모리가 부족해 종료될 수 있습니다. 그래도 열기 전에 작업을 저장하세요."
+  },
+  "vi": {
+    "document.needs_memory": "{name} có thể cần nhiều bộ nhớ hơn",
+    "document.needs_memory_detail": "Mở {name} có thể tốn khoảng {needed} bộ nhớ, trong khi SolidCraft có thể dùng khoảng {available} trên máy tính này (một nửa bộ nhớ của máy). Tệp vẫn có thể mở được, nhưng SolidCraft và các chương trình khác có thể chậm lại, hoặc SolidCraft có thể hết bộ nhớ và bị đóng. Hãy lưu công việc trước khi vẫn mở tệp."
+  },
+  "zh": {
+    "document.needs_memory": "{name} 可能需要更多内存",
+    "document.needs_memory_detail": "打开 {name} 可能需要约 {needed} 内存，而 SolidCraft 在这台计算机上可使用约 {available}（内存的一半）。文件仍可能打开，但 SolidCraft 和其他程序可能变慢，或者 SolidCraft 可能内存不足而关闭。仍要打开前，请先保存你的工作。"
+  }
+}
