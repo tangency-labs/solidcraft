@@ -30,7 +30,10 @@ use solidcraft_doc::frame::{self, Anchor, CornerOverride, CornerType, MAX_MEMBER
 use super::check::{keyed, located, whole};
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
-use super::types::{AngleExpr, FeatureCommon, GeoRefParam, IdOrName, LengthExpr, Point2, ProfilesParam, SketchRef, StringList, feature_common, not_blank_pattern, present};
+use super::types::{
+    AngleExpr, FeatureCommon, GeoRefParam, IdOrName, LengthExpr, Point2, ProfilesParam, SketchRef, StringList, feature_common, not_blank_pattern,
+    present,
+};
 use crate::params;
 
 /// The words `Anchor` is spelled with, as the handlers' message lists them.

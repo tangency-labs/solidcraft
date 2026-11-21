@@ -1519,7 +1519,7 @@ pub enum FeatureKind {
     /// faces: each member's end that meets a target is rebuilt flat against it, `gap` short of
     /// it. The member keeps its body and name.
     FrameTrim {
-        members: Vec<crate::frame::MemberRef>,
+        members: Vec<crate::frame::TrimMemberRef>,
         to: Vec<crate::frame::TrimTarget>,
         /// Which end of each member moves (default: the end nearer the target).
         #[serde(default, skip_serializing_if = "crate::frame::TrimEnd::is_auto")]

@@ -23,6 +23,12 @@ use crate::{DocError, Document, Feature, FeatureId, FeatureKind, ProfileSel, Res
 
 #[path = "frame_earlier.rs"]
 mod earlier;
+#[path = "eval_frame_trim.rs"]
+mod trimming;
+
+pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
+    trimming::trim(doc, vals, f, st, warning)
+}
 
 /// Most profiles a profile sketch may have for its material to be worked out.
 const MAX_PROFILE_PIECES: usize = 256;
@@ -236,6 +242,11 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
         let all: Vec<Traced> = made.into_iter().enumerate().flat_map(|(m, t)| t.into_iter().chain(later_of(m).into_iter().map(|p| p.1))).collect();
         for (k, t) in all.into_iter().enumerate() {
             let name = new_name(st, f, k);
+            if trimming::can_rebuild(&f.kind)
+                && let Some((line, ..)) = segments.get(k)
+            {
+                st.frame_members.push(trimming::record(f.id, line, &name, [None, None], &t.body));
+            }
             st.bodies.push(ModelBody::traced_new(name, t, f.id));
         }
         return Ok(());
@@ -247,6 +258,11 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
     // A piece with no body leaves its name unused.
     for (m, (name, t)) in named.iter().zip(made).enumerate() {
         if let Some(t) = t {
+            if trimming::can_rebuild(&f.kind)
+                && let Some(line) = ids.get(m)
+            {
+                st.frame_members.push(trimming::record(f.id, line, name, [None, None], &t.body));
+            }
             st.bodies.push(ModelBody::traced_new(name.clone(), t, f.id));
         }
         // A later piece of a tube split where another overlaps it, `L>X` (X: the other's line or pair id, a piece's
@@ -1919,6 +1935,17 @@ pub fn member_segments(doc: &Document, st: &ModelState, f: &Feature) -> Result<V
 /// which lies against the through member, a cope, a fit or a mitre, nor a piece's end where it is cut, fitted to the
 /// tube that crosses there). A piece split off where another tube overlaps it (`L>X`) is laid as L, only L's end open.
 pub(crate) fn member_section(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &ModelState,
+    line: &str,
+) -> Result<(Plane, f64, Region2, [bool; 2])> {
+    let original = untrimmed_member_section(doc, vals, f, st, line)?;
+    trimming::section(doc, vals, f, st, line, original)
+}
+
+fn untrimmed_member_section(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
     f: &Feature,

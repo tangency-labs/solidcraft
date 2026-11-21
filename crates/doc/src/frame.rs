@@ -397,7 +397,7 @@ pub enum MemberProfile {
 /// its feature and line, not by its body, so its trims (and later its cut list row) stay with it
 /// when its body is rebuilt or renamed.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, solidcraft_derive::Walk)]
-pub struct MemberRef {
+pub struct TrimMemberRef {
     pub feature: crate::FeatureName,
     pub line: String,
 }
@@ -420,7 +420,7 @@ pub enum TrimTarget {
     /// A side of another member (a butt joint), worked out from that member's line and profile,
     /// so it follows sketch and parameter edits. No side: the side the trimmed member meets.
     Member {
-        member: MemberRef,
+        member: TrimMemberRef,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         side: Option<Side>,
     },

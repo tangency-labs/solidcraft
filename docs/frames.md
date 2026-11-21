@@ -486,6 +486,12 @@ when both are given, `parallel_to` wins. **Edit Feature** reopens the step with 
 
 ## Trim/Extend
 
+General Trim/Extend currently accepts unjointed Frame Members: **None**, without corner overrides,
+**Fit Ends** or **Coped**. It refuses members made with Auto, Mitre, Butt, overrides, fitted ends
+or copes, both as members to trim and as member targets. Rebuilding their original stock would
+discard their existing cuts. Their ordinary Frame Member and Multi-Trim Corner operations stay
+available. A planar face on such a member can still be used as a plane target.
+
 **Trim/Extend** (WELDMENTS › MODIFY, `frame.trim`) moves the ends of members to what they meet:
 
 - **Another member** (a butt joint): the end stops flat against that member's side. The side is

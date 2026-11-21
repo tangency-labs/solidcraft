@@ -8,7 +8,7 @@
 
 use serde_json::{Map, Value, json};
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::frame::{self, CornerType, MemberProfile, MemberRef, TrimEnd, TrimTarget};
+use solidcraft_engine::doc::frame::{self, CornerType, MemberProfile, TrimEnd, TrimMemberRef, TrimTarget};
 use solidcraft_engine::doc::frame_corners::CORNER_TOL;
 use solidcraft_engine::doc::{FeatureKind, PlaneRef, ProfileSel};
 use solidcraft_engine::geom::prelude::*;
@@ -18,7 +18,8 @@ use solidcraft_engine::{Sel, Session};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, check, curves_sketch, form_row, input_rows_range, profile_indices, put, shown_expr};
 use crate::selection::{
-    BODIES, PLANAR_FACES, PLANES, CONSTRUCTION_POINTS, EXTERNAL_POINTS, ORIGIN, POINTS, PROFILES, SKETCH_LINES, SNAP_POINTS, SelInput, SelectionExt as _, VERTICES, is_point,
+    BODIES, CONSTRUCTION_POINTS, EXTERNAL_POINTS, ORIGIN, PLANAR_FACES, PLANES, POINTS, PROFILES, SKETCH_LINES, SNAP_POINTS, SelInput,
+    SelectionExt as _, VERTICES, is_point,
 };
 use crate::ui_kit::{choice_row, expr_row, hint_row, text_row};
 use crate::viewport::Hit;
@@ -505,7 +506,10 @@ const PICK_SECOND: &str = "Pick the second point";
 /// The dialog for Frame Member or Trim/Extend.
 pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     if id == "frame.trim" {
-        return Some((Kind::FrameTrim(Trim::new()), vec![SelInput::new("Members", BODIES, true), SelInput::new("Trim to", BODIES | PLANAR_FACES | PLANES, true)]));
+        return Some((
+            Kind::FrameTrim(Trim::new()),
+            vec![SelInput::new("Members", BODIES, true), SelInput::new("Trim to", BODIES | PLANAR_FACES | PLANES, true)],
+        ));
     }
     (id == "frame.member").then(|| {
         let inputs = vec![
@@ -1575,7 +1579,7 @@ pub fn trim_commands(app: &SolveApp, t: &Trim, inputs: &[SelInput], extra: &Map<
 }
 
 /// The body of a member in the current model, by its feature and line.
-fn body_of(app: &SolveApp, r: &MemberRef) -> Option<String> {
+fn body_of(app: &SolveApp, r: &TrimMemberRef) -> Option<String> {
     let id = app.session.doc.find_feature(&r.feature)?.id;
     let st = app.session.model.state();
     let record = st.frame_members.iter().find(|m| m.feature == id && m.line == r.line)?;

@@ -15,7 +15,9 @@ use solidcore_record::{Loop2, Seg2, Vec2};
 use solidcraft_doc::construct::{DatumItem, GeoRef};
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::frame::sizes::{self, Family};
-use solidcraft_doc::frame::{self, Anchor, CornerOverride, CornerType, MemberPair, MemberProfile, MemberRef, Profile, ProfileSpec, Side, TrimEnd, TrimTarget};
+use solidcraft_doc::frame::{
+    self, Anchor, CornerOverride, CornerType, MemberPair, MemberProfile, MemberRef, Profile, ProfileSpec, Side, TrimEnd, TrimMemberRef, TrimTarget,
+};
 use solidcraft_doc::{Feature, FeatureKind, ModelState, SketchId};
 use solidcraft_sketch::Sketch;
 
@@ -795,14 +797,26 @@ fn multi_trim(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// A member from a parameter: its body name, or `{feature, line}`. It is kept by its feature's
 /// name and its line, so a trim follows the member when its body is rebuilt or renamed.
-fn member_ref(s: &Session, v: &Value, cmd: &str) -> Result<MemberRef> {
+fn member_ref(s: &Session, v: &Value, cmd: &str) -> Result<TrimMemberRef> {
     let feature_name = |id: u64| s.doc.feature(id).map(|f| f.name.clone());
     match v {
         Value::String(body) => {
             let st = s.model.state();
-            let rec = st.frame_member(body.trim()).ok_or_else(|| bad(cmd, format!("`{}` is not a frame member's body", body.trim())))?;
-            let feature = feature_name(rec.feature).ok_or_else(|| bad(cmd, format!("the feature of `{}` is gone", body.trim())))?;
-            Ok(MemberRef { feature: feature.into(), line: rec.line.clone() })
+            if let Some(rec) = st.frame_member(body.trim()) {
+                let feature = feature_name(rec.feature).ok_or_else(|| bad(cmd, format!("the feature of `{}` is gone", body.trim())))?;
+                return Ok(TrimMemberRef { feature: feature.into(), line: rec.line.clone() });
+            }
+            // Auto/corner members have no rebuildable-stock record. Resolve their actual
+            // member so evaluation can explain the unsupported combination explicitly.
+            let source = st
+                .body(body.trim())
+                .and_then(|b| s.doc.feature(b.feature))
+                .filter(|f| matches!(f.kind, FeatureKind::FrameMember { .. }))
+                .ok_or_else(|| bad(cmd, format!("`{}` is not a frame member's body", body.trim())))?;
+            let line = frame::member_of_body(&s.doc, &st, source, body.trim())
+                .map_err(|e| bad(cmd, e.to_string()))?
+                .ok_or_else(|| bad(cmd, format!("`{}` is not a frame member's body", body.trim())))?;
+            Ok(TrimMemberRef { feature: source.name.clone().into(), line })
         }
         Value::Object(o) => {
             let f = match o.get("feature") {
@@ -820,7 +834,7 @@ fn member_ref(s: &Session, v: &Value, cmd: &str) -> Result<MemberRef> {
                 .map(str::trim)
                 .filter(|l| !l.is_empty() && l.len() <= 128)
                 .ok_or_else(|| bad(cmd, "a member's `line` must be its line's id"))?;
-            Ok(MemberRef { feature: f.name.clone().into(), line: line.to_string() })
+            Ok(TrimMemberRef { feature: f.name.clone().into(), line: line.to_string() })
         }
         _ => Err(bad(cmd, "a member is its body's name or {feature, line}")),
     }

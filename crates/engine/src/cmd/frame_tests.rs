@@ -6536,10 +6536,6 @@ fn rotate_member_hostile_params_never_panic() {
 // Trim/Extend (frame.trim)
 
 /// A 45 × 45 bar: its volume is 2025 mm² × its length.
-fn bar45() -> Value {
-    json!({"kind": "bar", "width": 45, "height": 45})
-}
-
 /// The member bodies a `frame.member` run made (not every body of the model), in line order.
 fn made(r: &Value) -> Vec<String> {
     r["created_bodies"].as_array().unwrap().iter().map(|b| b.as_str().unwrap().to_string()).collect()
@@ -7254,6 +7250,43 @@ fn an_off_centre_rectangular_member_rotates_then_trims_and_caps_after_reopen() {
         let solidcraft_doc::FeatureKind::FrameMemberTurn { member, .. } = &turn_step(&session).kind else { panic!("not a turn") };
         let pivot = solidcraft_doc::end_cap::member_pivot(&session.doc, &state, member).unwrap();
         assert!(near3([pivot.x, pivot.y, pivot.z], [20.0, 10.0, 150.0]), "{pivot:?}");
+    }
+}
+
+/// A cornered frame must not be reconstructed as unjointed stock by a later Trim.
+#[test]
+fn general_trim_refuses_cornered_members_without_losing_their_cuts() {
+    for corner in ["auto", "mitre", "butt"] {
+        let (mut s, made) = polyline_frame(json!([[0, 0], [300, 0], [300, 300]]), corner);
+        made.unwrap();
+        let members = bodies(&mut s);
+        assert_eq!(members.len(), 2, "{corner}: {members:?}");
+        let before = s.doc.to_json();
+        let err = s.execute("frame.trim", &json!({"members": [members[0].0], "to": {"plane": "XY"}})).unwrap_err().to_string();
+        assert!(err.contains("not supported yet: Trim/Extend") && err.contains("existing cuts must be kept"), "{corner}: {err}");
+        assert_eq!(s.doc.to_json(), before, "{corner}: refused trim changed the design");
+    }
+}
+
+/// The pair runs vertically at x=600. Its centred 40 x 20 bar ends at z=250 after Trim.
+#[test]
+fn general_trim_keeps_a_pair_only_members_section_after_reopen() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let made = run(
+        &mut s,
+        "frame.member",
+        json!({"profile": {"kind": "bar", "width": 40, "height": 20},
+        "pairs": [upright()], "anchor": "center", "body_name": "Pair"}),
+    );
+    let solidcraft_doc::FeatureKind::FrameMember { path_sketch, .. } = member_kind(&s, &made["feature"]) else { panic!("not a frame member") };
+    assert!(path_sketch.is_none());
+    run(&mut s, "frame.trim", json!({"members": ["Pair"], "to": {"plane": {"origin": [0, 0, 250], "normal": [0, 0, 1]}}, "end": "end"}));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    for mut session in [s, reopened] {
+        let bar = measured(&mut session, "Pair");
+        assert!(rel(bar.1, 40.0 * 20.0 * 250.0) < 1e-9, "{bar:?}");
+        assert!(near3(bar.2, [580.0, -10.0, 0.0]) && near3(bar.3, [620.0, 10.0, 250.0]), "{bar:?}");
     }
 }
 
