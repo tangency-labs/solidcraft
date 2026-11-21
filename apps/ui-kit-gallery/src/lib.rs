@@ -12,7 +12,7 @@ mod theme_panel;
 
 use egui::{Rect, Ui, UiBuilder, pos2, vec2};
 use solidcraft_theme::Tokens;
-use solidcraft_ui_kit as kit;
+use solidcraft_ui_kit as ui_kit;
 
 pub use pages::{Group, PAGES, Page};
 pub use theme_panel::ThemeEditor;
@@ -54,11 +54,11 @@ pub struct Demo {
     pub search: String,
     pub filter: String,
     pub rows: Vec<(String, String)>,
-    pub sort: kit::Sort,
+    pub sort: ui_kit::Sort,
     pub lens: usize,
     pub open_menu: bool,
     pub rename: String,
-    pub status: kit::StatusPresentation,
+    pub status: ui_kit::StatusPresentation,
     pub last: String,
 }
 
@@ -87,11 +87,11 @@ impl Default for Demo {
             search: String::new(),
             filter: String::new(),
             rows: vec![("Width".into(), "40 mm".into()), ("Height".into(), "Width / 2".into()), ("Thickness".into(), "3 mm".into())],
-            sort: kit::Sort::Ascending,
+            sort: ui_kit::Sort::Ascending,
             lens: 0,
             open_menu: false,
             rename: "Sketch1".into(),
-            status: kit::StatusPresentation::default(),
+            status: ui_kit::StatusPresentation::default(),
             last: String::new(),
         }
     }
@@ -165,14 +165,14 @@ impl Gallery {
             ui.label(egui::RichText::new(format!("{} components", PAGES.len())).size(t.font_small).color(t.text_dim));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let label = if self.theme_open { "Close theme" } else { "Theme…" };
-                if kit::button(ui, label, if self.theme_open { kit::Button::SmallSelected } else { kit::Button::Small }).clicked() {
+                if ui_kit::button(ui, label, if self.theme_open { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small }).clicked() {
                     self.theme_open = !self.theme_open;
                 }
                 ui.add_space(t.space_8);
                 let mut tone = usize::from(self.theme.dark);
                 ui.scope(|ui| {
                     ui.set_width(150.0);
-                    if kit::segmented(ui, &mut tone, &["Light", "Dark"], kit::Segments { dense: true, ..Default::default() }) {
+                    if ui_kit::segmented(ui, &mut tone, &["Light", "Dark"], ui_kit::Segments { dense: true, ..Default::default() }) {
                         self.theme.choose_tone(tone == 1);
                     }
                 });
@@ -182,7 +182,7 @@ impl Gallery {
 
     fn sidebar(&mut self, ui: &mut Ui) {
         let t = Tokens::get();
-        kit::search_field(ui, egui::Id::unique("gallery_filter"), &mut self.filter, "Find a component");
+        ui_kit::search_field(ui, egui::Id::unique("gallery_filter"), &mut self.filter, "Find a component");
         ui.add_space(t.space_6);
         let filter = self.filter.to_lowercase();
         egui::ScrollArea::vertical().id_salt("sidebar").auto_shrink([false, false]).show(ui, |ui| {
@@ -193,10 +193,10 @@ impl Gallery {
                     continue;
                 }
                 ui.add_space(t.space_6);
-                kit::section_heading(ui, group.title());
+                ui_kit::section_heading(ui, group.title());
                 for i in shown {
-                    let row = kit::Row { compact: true, label: PAGES[i].title, selected: self.page == i, ..Default::default() };
-                    if kit::tree_row(ui, egui::Id::unique(("gallery_page", PAGES[i].id)), &row).clicked {
+                    let row = ui_kit::Row { compact: true, label: PAGES[i].title, selected: self.page == i, ..Default::default() };
+                    if ui_kit::tree_row(ui, egui::Id::unique(("gallery_page", PAGES[i].id)), &row).clicked {
                         self.page = i;
                         self.demo.last.clear();
                         set_location(PAGES[i].id);
@@ -233,7 +233,7 @@ pub fn show_page(ui: &mut Ui, page: &Page, demo: &mut Demo) {
             ui.push_id(page.id, |ui| (page.demo)(ui, demo));
             if !demo.last.is_empty() {
                 ui.add_space(t.space_8);
-                kit::text(ui, &format!("Returned: {}", demo.last), kit::Text::MonoNote("returned"));
+                ui_kit::text(ui, &format!("Returned: {}", demo.last), ui_kit::Text::MonoNote("returned"));
             }
         })
         .response
@@ -244,7 +244,7 @@ pub fn show_page(ui: &mut Ui, page: &Page, demo: &mut Demo) {
     ui.advance_cursor_after_rect(card);
     ui.add_space(t.space_12);
     heading(ui, "How to use it");
-    kit::read_only_text(ui, page.usage.trim());
+    ui_kit::read_only_text(ui, page.usage.trim());
     ui.add_space(t.space_12);
     ui.columns(2, |columns| {
         rules(&mut columns[0], "Do", page.dos, t.agent_ok);
@@ -264,7 +264,7 @@ fn rules(ui: &mut Ui, title: &str, items: &[&str], mark: egui::Color32) {
     heading(ui, title);
     for item in items {
         ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new(if title == "Do" { "✓" } else { "✗" }).color(mark).strong());
+            ui.label(egui::RichText::new(if title == "Do" { "•" } else { "–" }).color(mark).strong());
             ui.label(egui::RichText::new(prose(item)).size(t.font_body).color(t.text));
         });
     }

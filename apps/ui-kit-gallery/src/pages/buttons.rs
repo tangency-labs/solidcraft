@@ -4,7 +4,7 @@ use super::{Group, Page};
 use crate::{disabled, state};
 use egui::vec2;
 use solidcraft_theme::Tokens;
-use solidcraft_ui_kit as kit;
+use solidcraft_ui_kit as ui_kit;
 
 pub const BUTTON: Page = Page {
     id: "button",
@@ -31,29 +31,29 @@ ui_kit::primary_button(ui, "Export");
         state(ui, "Kinds (hover and press them)", |ui| {
             ui.horizontal_wrapped(|ui| {
                 for (label, kind) in [
-                    ("Primary", kit::Button::Primary),
-                    ("Normal", kit::Button::Normal),
-                    ("Small", kit::Button::Small),
-                    ("Selected", kit::Button::SmallSelected),
-                    ("Ghost", kit::Button::Ghost),
-                    ("Delete", kit::Button::DangerOutlined),
+                    ("Primary", ui_kit::Button::Primary),
+                    ("Normal", ui_kit::Button::Normal),
+                    ("Small", ui_kit::Button::Small),
+                    ("Selected", ui_kit::Button::SmallSelected),
+                    ("Ghost", ui_kit::Button::Ghost),
+                    ("Delete", ui_kit::Button::DangerOutlined),
                 ] {
-                    if kit::button(ui, label, kind).clicked() {
+                    if ui_kit::button(ui, label, kind).clicked() {
                         d.said(format!("{label} clicked"));
                     }
                 }
             });
         });
         state(ui, "Wide primary", |ui| {
-            kit::wide_primary_button(ui, "Export");
+            ui_kit::wide_primary_button(ui, "Export");
         });
         state(ui, "Enabled(false)", |ui| {
-            kit::button(ui, "Apply", kit::Button::Enabled(false));
+            ui_kit::button(ui, "Apply", ui_kit::Button::Enabled(false));
         });
         disabled(ui, |ui| {
             ui.horizontal(|ui| {
-                kit::button(ui, "Primary", kit::Button::Primary);
-                kit::button(ui, "Normal", kit::Button::Normal);
+                ui_kit::button(ui, "Primary", ui_kit::Button::Primary);
+                ui_kit::button(ui, "Normal", ui_kit::Button::Normal);
             });
         });
     },
@@ -76,7 +76,7 @@ pub const ICON_BUTTONS: Page = Page {
     usage: r#"
 ui_kit::icon_label_button(ui, "Copy path", "copy", true, false);   // enabled, danger
 ui_kit::icon_action(ui, "Delete", "delete", true, true);
-ui_kit::compact_button(ui, "▲", "Move up", enabled, selected);
+ui_kit::compact_button(ui, ui_kit::MOVE_UP, "Move up", enabled, selected);
 ui_kit::icon_button_at(ui, rect, "settings", "Settings");            // at a rect you laid out
 "#,
     dos: &["Every icon-only button has a label: it is the hover text and the accessible name.", "Use the danger flag for actions that delete."],
@@ -87,11 +87,11 @@ ui_kit::icon_button_at(ui, rect, "settings", "Settings");            // at a rec
     demo: |ui, d| {
         state(ui, "With labels", |ui| {
             ui.horizontal(|ui| {
-                if kit::icon_label_button(ui, "Copy path", "copy", true, false).clicked() {
+                if ui_kit::icon_label_button(ui, "Copy path", "copy", true, false).clicked() {
                     d.said("Copy path");
                 }
-                kit::compact_icon_label_button(ui, "Export", "export", true);
-                kit::icon_action(ui, "Delete", "delete", true, true);
+                ui_kit::compact_icon_label_button(ui, "Export", "export", true);
+                ui_kit::icon_action(ui, "Delete", "delete", true, true);
             });
         });
         state(ui, "Icon only (hover for the label)", |ui| {
@@ -99,21 +99,21 @@ ui_kit::icon_button_at(ui, rect, "settings", "Settings");            // at a rec
             let size = vec2(t.control_height, t.control_height);
             ui.horizontal(|ui| {
                 let rect = ui.allocate_exact_size(size, egui::Sense::hover()).0;
-                if kit::icon_button_at(ui, rect, "settings", "Settings").clicked() {
+                if ui_kit::icon_button_at(ui, rect, "settings", "Settings").clicked() {
                     d.said("Settings");
                 }
                 let rect = ui.allocate_exact_size(size, egui::Sense::hover()).0;
-                kit::quiet_icon_button_at(ui, rect, "eye", "Hide");
+                ui_kit::quiet_icon_button_at(ui, rect, "eye", "Hide");
                 let rect = ui.allocate_exact_size(size, egui::Sense::hover()).0;
-                kit::mirrored_icon_button_at(ui, rect, "undo", "Redo");
-                kit::compact_button(ui, "▲", "Move up", true, false);
-                kit::compact_button(ui, "▼", "Move down", true, true);
+                ui_kit::mirrored_icon_button_at(ui, rect, "undo", "Redo");
+                ui_kit::compact_button(ui, ui_kit::MOVE_UP, "Move up", true, false);
+                ui_kit::compact_button(ui, ui_kit::MOVE_DOWN, "Move down", true, true);
             });
         });
         disabled(ui, |ui| {
             ui.horizontal(|ui| {
-                kit::icon_label_button(ui, "Copy path", "copy", false, false);
-                kit::compact_button(ui, "▲", "Move up", false, false);
+                ui_kit::icon_label_button(ui, "Copy path", "copy", false, false);
+                ui_kit::compact_button(ui, ui_kit::MOVE_UP, "Move up", false, false);
             });
         });
     },
@@ -134,25 +134,25 @@ ui_kit::action_menu(ui, "Actions", |ui| { ui_kit::button(ui, "Duplicate", ui_kit
     donts: &["Don't use a text button for the dialog's main action."],
     demo: |ui, d| {
         state(ui, "Text button", |ui| {
-            if kit::text_button(ui, "Show all", true).clicked() {
+            if ui_kit::text_button(ui, "Show all", true).clicked() {
                 d.said("Show all");
             }
         });
         state(ui, "Command menu button", |ui| {
             ui.set_max_width(260.0);
-            kit::command_menu_button(ui, "save", "Save", "save", "Ctrl+S", true);
-            kit::command_menu_button(ui, "export", "Export…", "export", "", true);
+            ui_kit::command_menu_button(ui, "save", "Save", "save", "Ctrl+S", true);
+            ui_kit::command_menu_button(ui, "export", "Export…", "export", "", true);
         });
         state(ui, "Action menu (open it)", |ui| {
-            kit::action_menu(ui, "Actions", |ui| {
-                kit::button(ui, "Duplicate", kit::Button::Normal);
-                kit::button(ui, "Rename", kit::Button::Normal);
+            ui_kit::action_menu(ui, "Actions", |ui| {
+                ui_kit::button(ui, "Duplicate", ui_kit::Button::Normal);
+                ui_kit::button(ui, "Rename", ui_kit::Button::Normal);
             });
         });
         disabled(ui, |ui| {
-            kit::text_button(ui, "Show all", false);
+            ui_kit::text_button(ui, "Show all", false);
             ui.set_max_width(260.0);
-            kit::command_menu_button(ui, "save_off", "Save", "save", "Ctrl+S", false);
+            ui_kit::command_menu_button(ui, "save_off", "Save", "save", "Ctrl+S", false);
         });
     },
 };
@@ -178,28 +178,28 @@ ui_kit::footer(ui, "OK", "Cancel", true, ui_kit::Footer { apply: Some("Apply"), 
     donts: &["Don't lay out OK and Cancel yourself: the order and keys are the kit's.", "Don't close a dialog on OK before the command succeeded."],
     demo: |ui, d| {
         state(ui, "OK and Cancel", |ui| {
-            let action = kit::footer(ui, "OK", "Cancel", true, kit::Footer::default());
-            if action != kit::Action::None {
+            let action = ui_kit::footer(ui, "OK", "Cancel", true, ui_kit::Footer::default());
+            if action != ui_kit::Action::None {
                 d.said(format!("{action:?}"));
             }
         });
         state(ui, "With Apply", |ui| {
-            kit::footer(ui, "OK", "Cancel", true, kit::Footer { apply: Some("Apply"), ..Default::default() });
+            ui_kit::footer(ui, "OK", "Cancel", true, ui_kit::Footer { apply: Some("Apply"), ..Default::default() });
         });
         state(ui, "Computing", |ui| {
-            kit::footer(ui, "OK", "Cancel", true, kit::Footer { status: Some("Computing…"), ..Default::default() });
+            ui_kit::footer(ui, "OK", "Cancel", true, ui_kit::Footer { status: Some("Computing…"), ..Default::default() });
         });
         state(ui, "Invalid input (OK disabled)", |ui| {
-            kit::footer(ui, "OK", "Cancel", false, kit::Footer::default());
+            ui_kit::footer(ui, "OK", "Cancel", false, ui_kit::Footer::default());
         });
         state(ui, "Button pair", |ui| {
-            kit::button_pair(
+            ui_kit::button_pair(
                 ui,
                 "gallery_pair",
                 [false, true],
                 [
-                    kit::PairButton { key: "look_at", label: "Look at", icon: Some("lookat") },
-                    kit::PairButton { key: "slice", label: "Slice", icon: None },
+                    ui_kit::PairButton { key: "look_at", label: "Look at", icon: Some("lookat") },
+                    ui_kit::PairButton { key: "slice", label: "Slice", icon: None },
                 ],
             );
         });
@@ -223,17 +223,17 @@ match ui_kit::keyboard(ui.ctx(), ok_enabled) {      // in a dialog without a `fo
     dos: &["Let every dialog close on Escape.", "Install the focus plugin in every context that draws kit text boxes."],
     donts: &["Don't make Enter run a destructive action without a confirmation."],
     demo: |ui, d| {
-        kit::install_keyboard_focus(ui.ctx());
+        ui_kit::install_keyboard_focus(ui.ctx());
         state(ui, "Press Tab to move between the boxes: the text is selected", |ui| {
-            kit::text_row(ui, "First", &mut d.text, "");
-            kit::text_row(ui, "Second", &mut d.rename, "");
+            ui_kit::text_row(ui, "First", &mut d.text, "");
+            ui_kit::text_row(ui, "Second", &mut d.rename, "");
         });
         state(ui, "Press Enter or Escape with nothing focused", |ui| {
-            let action = kit::keyboard(ui.ctx(), true);
-            if action != kit::Action::None {
+            let action = ui_kit::keyboard(ui.ctx(), true);
+            if action != ui_kit::Action::None {
                 d.said(format!("{action:?}"));
             }
-            kit::text(ui, "The result shows below.", kit::Text::Note("keys"));
+            ui_kit::text(ui, "The result shows below.", ui_kit::Text::Note("keys"));
         });
     },
 };

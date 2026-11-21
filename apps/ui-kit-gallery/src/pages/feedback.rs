@@ -4,7 +4,7 @@
 use super::{Group, Page};
 use crate::state;
 use egui::vec2;
-use solidcraft_ui_kit as kit;
+use solidcraft_ui_kit as ui_kit;
 
 pub const STATUS_LINE: Page = Page {
     id: "status-line",
@@ -24,19 +24,19 @@ ui_kit::text(ui, "Counts include the original.", ui_kit::Text::Note("pattern"));
     ],
     demo: |ui, _| {
         state(ui, "Dim (not ready yet)", |ui| {
-            kit::status_line(ui, "Needs a joint that turns and one that slides.", kit::StatusTone::Dim);
+            ui_kit::status_line(ui, "Needs a joint that turns and one that slides.", ui_kit::StatusTone::Dim);
         });
         state(ui, "Warning", |ui| {
-            kit::status_line(ui, "Two faces are thinner than the wall thickness.", kit::StatusTone::Warning);
+            ui_kit::status_line(ui, "Two faces are thinner than the wall thickness.", ui_kit::StatusTone::Warning);
         });
         state(ui, "Error", |ui| {
-            kit::status_line(ui, "The interference check could not finish. Check the selected bodies.", kit::StatusTone::Error);
+            ui_kit::status_line(ui, "The interference check could not finish. Check the selected bodies.", ui_kit::StatusTone::Error);
         });
         state(ui, "Note", |ui| {
-            kit::text(
+            ui_kit::text(
                 ui,
                 "Counts include the original. Centre balances copies; Flip chooses the extra side for even totals.",
-                kit::Text::Note("gallery_note"),
+                ui_kit::Text::Note("gallery_note"),
             );
         });
     },
@@ -68,29 +68,29 @@ ui_kit::check_status_line(ui, "watertight", "Watertight", ui_kit::CheckStatus::O
     donts: &["Don't show a bar that cannot move: use the steps or a spinner."],
     demo: |ui, d| {
         state(ui, "Progress (drag the fraction)", |ui| {
-            kit::progress(ui, "gallery_progress", d.fraction.clamp(0.0, 1.0));
-            kit::row(ui, "Fraction", |ui| kit::slider(ui, &mut d.fraction, 0.0..=1.0, kit::Slider::default()));
+            ui_kit::progress(ui, "gallery_progress", d.fraction.clamp(0.0, 1.0));
+            ui_kit::row(ui, "Fraction", |ui| ui_kit::slider(ui, &mut d.fraction, 0.0..=1.0, ui_kit::Slider::default()));
         });
         state(ui, "With Cancel", |ui| {
-            if kit::progress_action(ui, "gallery_render", "Rendering", "12 of 30 samples", 0.4, "Cancel").clicked() {
+            if ui_kit::progress_action(ui, "gallery_render", "Rendering", "12 of 30 samples", 0.4, "Cancel").clicked() {
                 d.said("Cancel");
             }
         });
         state(ui, "Steps", |ui| {
-            kit::steps(ui, "gallery_steps", &["Read", "Mesh", "Show"], 1, Some("40%"));
+            ui_kit::steps(ui, "gallery_steps", &["Read", "Mesh", "Show"], 1, Some("40%"));
         });
         state(ui, "Checks", |ui| {
-            kit::check_status_line(ui, "gallery_ok", "Watertight", kit::CheckStatus::Ok);
-            kit::check_status_line(ui, "gallery_warn", "Two thin walls", kit::CheckStatus::Warning);
-            kit::check_status_line(ui, "gallery_err", "Self-intersecting", kit::CheckStatus::Error);
-            kit::check_line(ui, "gallery_line", "Ready to print", false);
+            ui_kit::check_status_line(ui, "gallery_ok", "Watertight", ui_kit::CheckStatus::Ok);
+            ui_kit::check_status_line(ui, "gallery_warn", "Two thin walls", ui_kit::CheckStatus::Warning);
+            ui_kit::check_status_line(ui, "gallery_err", "Self-intersecting", ui_kit::CheckStatus::Error);
+            ui_kit::check_line(ui, "gallery_line", "Ready to print", false);
         });
         state(ui, "Header", |ui| {
-            kit::status_header(
+            ui_kit::status_header(
                 ui,
                 "gallery_header",
                 "Sketch 1",
-                kit::StatusHeader { icon: "sketch", text: "2 degrees of freedom", complete: false, fraction: 0.5 },
+                ui_kit::StatusHeader { icon: "sketch", text: "2 degrees of freedom", complete: false, fraction: 0.5 },
             );
         });
     },
@@ -116,20 +116,20 @@ let shown = toast::show(ui, free, toast::Place::Corner, "Exported Bracket.step".
     demo: |ui, d| {
         let width = ui.available_width().min(520.0);
         for (name, text, lead, countdown) in [
-            ("Done, going by itself", "Exported Bracket.step", kit::toast::Lead::Dot(false), Some((0.6, 6.0))),
-            ("Working", "Exporting Bracket.step…", kit::toast::Lead::Spinner, None),
-            ("Error", "Bracket.step could not be written: the folder is read-only.", kit::toast::Lead::Dot(true), None),
+            ("Done, going by itself", "Exported Bracket.step", ui_kit::toast::Lead::Dot(false), Some((0.6, 6.0))),
+            ("Working", "Exporting Bracket.step…", ui_kit::toast::Lead::Spinner, None),
+            ("Error", "Bracket.step could not be written: the folder is read-only.", ui_kit::toast::Lead::Dot(true), None),
         ] {
             state(ui, name, |ui| {
                 let (free, _) = ui.allocate_exact_size(vec2(width, 120.0), egui::Sense::hover());
-                let shown = kit::toast::show(
+                let shown = ui_kit::toast::show(
                     ui,
                     free,
-                    kit::toast::Place::Corner,
+                    ui_kit::toast::Place::Corner,
                     text.into(),
                     lead,
-                    &[("Show in folder", kit::toast::Action::Primary), ("Undo", kit::toast::Action::Dismiss)],
-                    kit::toast::Extras { close: Some("gallery"), countdown, ..Default::default() },
+                    &[("Show in folder", ui_kit::toast::Action::Primary), ("Undo", ui_kit::toast::Action::Dismiss)],
+                    ui_kit::toast::Extras { close: Some("gallery"), countdown, ..Default::default() },
                 );
                 if let Some(shown) = shown {
                     if let Some(i) = shown.clicked {
@@ -161,23 +161,23 @@ let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("save?"), "status_w
     demo: |ui, d| {
         ui.set_max_width(460.0);
         state(ui, "Warning", |ui| {
-            let (_, action) = kit::Confirm::new(ui.scope_id().with("warn"), "status_warning", "Save changes?")
-                .tone(kit::Tone::Warning)
+            let (_, action) = ui_kit::Confirm::new(ui.scope_id().with("warn"), "status_warning", "Save changes?")
+                .tone(ui_kit::Tone::Warning)
                 .actions("Save", "Cancel", Some("Don't Save"))
                 .content(ui, true, |ui| {
-                    kit::text(ui, "Your changes to Bracket will be lost.", kit::Text::Report("warn", false));
+                    ui_kit::text(ui, "Your changes to Bracket will be lost.", ui_kit::Text::Report("warn", false));
                 });
-            if action != kit::Action::None {
+            if action != ui_kit::Action::None {
                 d.said(format!("{action:?}"));
             }
         });
         state(ui, "Danger", |ui| {
-            kit::Confirm::new(ui.scope_id().with("danger"), "delete", "Delete")
-                .tone(kit::Tone::Danger)
+            ui_kit::Confirm::new(ui.scope_id().with("danger"), "delete", "Delete")
+                .tone(ui_kit::Tone::Danger)
                 .detail("Fillet2 · Chamfer1")
                 .actions("Delete", "Cancel", None)
                 .content(ui, true, |ui| {
-                    kit::text(ui, "These features will be deleted:", kit::Text::Report("danger", false));
+                    ui_kit::text(ui, "These features will be deleted:", ui_kit::Text::Report("danger", false));
                 });
         });
     },
@@ -198,12 +198,12 @@ let (rect, action) = ui_kit::viewport_status_item(ui, &item, &mut presentation);
     donts: &["Don't keep the presentation state per frame: it remembers which card is open."],
     demo: |ui, d| {
         for (id, kind, name, setting) in [
-            ("draft", kit::StatusKind::Mode, "Draft", "Z · 1°"),
-            ("interference", kit::StatusKind::Result, "Interference", "2 found"),
-            ("thin", kit::StatusKind::Attention, "Thin walls", "3 faces"),
+            ("draft", ui_kit::StatusKind::Mode, "Draft", "Z · 1°"),
+            ("interference", ui_kit::StatusKind::Result, "Interference", "2 found"),
+            ("thin", ui_kit::StatusKind::Attention, "Thin walls", "3 faces"),
         ] {
-            let item = kit::StatusItem { id: id.into(), kind, name: name.into(), setting: setting.into(), has_key: true, editable: false };
-            let (_, action) = kit::viewport_status_item(ui, &item, &mut d.status);
+            let item = ui_kit::StatusItem { id: id.into(), kind, name: name.into(), setting: setting.into(), has_key: true, editable: false };
+            let (_, action) = ui_kit::viewport_status_item(ui, &item, &mut d.status);
             if let Some(action) = action {
                 d.said(format!("{action:?}"));
             }
@@ -226,11 +226,11 @@ ui_kit::attention_mark(ui.painter(), response.rect, Some(3));
     donts: &["Don't use it for decoration or to advertise features."],
     demo: |ui, _| {
         ui.horizontal(|ui| {
-            let r = kit::button(ui, "Reports", kit::Button::Normal).rect;
-            kit::attention_mark(ui.painter(), r, Some(3));
+            let r = ui_kit::button(ui, "Reports", ui_kit::Button::Normal).rect;
+            ui_kit::attention_mark(ui.painter(), r, Some(3));
             ui.add_space(24.0);
-            let r = kit::button(ui, "Updates", kit::Button::Normal).rect;
-            kit::attention_mark(ui.painter(), r, None);
+            let r = ui_kit::button(ui, "Updates", ui_kit::Button::Normal).rect;
+            ui_kit::attention_mark(ui.painter(), r, None);
         });
     },
 };

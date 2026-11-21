@@ -7,7 +7,7 @@
 
 use egui::{Color32, Ui};
 use solidcraft_theme::Tokens;
-use solidcraft_ui_kit as kit;
+use solidcraft_ui_kit as ui_kit;
 use solidcraft_ui_kit::theme_files::{self, Base};
 
 /// A theme the panel offers: its name, base and resolved tokens and icon palette.
@@ -16,7 +16,7 @@ pub struct Theme {
     pub name: String,
     pub base: Base,
     pub tokens: Tokens,
-    pub icons: Option<kit::icons::Palette>,
+    pub icons: Option<ui_kit::icons::Palette>,
 }
 
 /// The theme being shown and the edits on top of it.
@@ -91,8 +91,8 @@ impl ThemeEditor {
         }
         if self.applied.is_none_or(|(choice, dark, _)| choice != self.choice || dark != self.dark) {
             let icons = self.themes.get(self.choice).and_then(|t| t.icons);
-            kit::icons::set_theme_palette(icons.map(|p| (self.dark, p)));
-            kit::icons::clear_texture_cache(ctx);
+            ui_kit::icons::set_theme_palette(icons.map(|p| (self.dark, p)));
+            ui_kit::icons::clear_texture_cache(ctx);
         }
         solidcraft_theme::apply(ctx);
         self.applied = Some(now);
@@ -168,21 +168,21 @@ impl ThemeEditor {
     /// The panel's contents.
     pub fn panel(&mut self, ui: &mut Ui) {
         let t = Tokens::get();
-        kit::section_heading(ui, "Theme");
+        ui_kit::section_heading(ui, "Theme");
         let names: Vec<&str> = self.themes.iter().map(|t| t.name.as_str()).collect();
         let mut choice = self.choice;
-        kit::row(ui, "Built-in", |ui| kit::dropdown(ui, "gallery_theme", &mut choice, &names));
+        ui_kit::row(ui, "Built-in", |ui| ui_kit::dropdown(ui, "gallery_theme", &mut choice, &names));
         if choice != self.choice {
             self.choose(choice);
         }
-        kit::text(ui, "Every example on every page draws with these tokens.", kit::Text::Note("theme_note"));
+        ui_kit::text(ui, "Every example on every page draws with these tokens.", ui_kit::Text::Note("theme_note"));
         let mut tokens = self.tokens;
         let mut recoloured = None;
-        kit::section(ui, "theme_colours", "Colours", true, |ui| {
-            kit::text(
+        ui_kit::section(ui, "theme_colours", "Colours", true, |ui| {
+            ui_kit::text(
                 ui,
                 "A colour carries the tokens that share it: the accent recolours primary buttons, focus and selection too.",
-                kit::Text::Note("theme_colours_note"),
+                ui_kit::Text::Note("theme_colours_note"),
             );
             for (label, colour) in [
                 ("Accent", &mut tokens.accent),
@@ -210,14 +210,14 @@ impl ThemeEditor {
         if let Some((was, now)) = recoloured {
             tokens = self.recolour(tokens, was, now);
         }
-        kit::section(ui, "theme_shape", "Shape", true, |ui| {
+        ui_kit::section(ui, "theme_shape", "Shape", true, |ui| {
             radius_row(ui, "Control radius", &mut tokens.control_radius);
             radius_row(ui, "Radius small", &mut tokens.radius_sm);
             radius_row(ui, "Radius medium", &mut tokens.radius_md);
             radius_row(ui, "Radius large", &mut tokens.radius_lg);
             size_row(ui, "Control height", &mut tokens.control_height, 16.0..=48.0);
         });
-        kit::section(ui, "theme_space", "Spacing", false, |ui| {
+        ui_kit::section(ui, "theme_space", "Spacing", false, |ui| {
             for (label, space) in [
                 ("space_2", &mut tokens.space_2),
                 ("space_3", &mut tokens.space_3),
@@ -233,7 +233,7 @@ impl ThemeEditor {
                 size_row(ui, label, space, 0.0..=40.0);
             }
         });
-        kit::section(ui, "theme_type", "Type sizes", false, |ui| {
+        ui_kit::section(ui, "theme_type", "Type sizes", false, |ui| {
             for (label, size) in [
                 ("Small", &mut tokens.font_small),
                 ("Caption", &mut tokens.font_caption),
@@ -251,20 +251,20 @@ impl ThemeEditor {
         }
         ui.add_space(t.space_8);
         ui.horizontal(|ui| {
-            if kit::button(ui, "Reset", kit::Button::Enabled(self.edited())).clicked() {
+            if ui_kit::button(ui, "Reset", ui_kit::Button::Enabled(self.edited())).clicked() {
                 self.tokens = self.shipped();
             }
-            if kit::button(ui, "Copy theme file", kit::Button::Primary).clicked() {
+            if ui_kit::button(ui, "Copy theme file", ui_kit::Button::Primary).clicked() {
                 ui.ctx().copy_text(self.export());
                 self.copied = true;
             }
         });
         if self.copied {
-            kit::status_line(ui, "Copied. Import it in SolidCraft under Preferences › Appearance › Import theme file.", kit::StatusTone::Dim);
+            ui_kit::status_line(ui, "Copied. Import it in SolidCraft under Preferences › Appearance › Import theme file.", ui_kit::StatusTone::Dim);
         }
         ui.add_space(t.space_8);
-        kit::section(ui, "theme_file", "Theme file", false, |ui| {
-            kit::read_only_text(ui, &self.export());
+        ui_kit::section(ui, "theme_file", "Theme file", false, |ui| {
+            ui_kit::read_only_text(ui, &self.export());
         });
     }
 }
@@ -272,16 +272,16 @@ impl ThemeEditor {
 fn colour_row(ui: &mut Ui, label: &str, colour: &mut Color32) {
     let [r, g, b, a] = colour.to_srgba_unmultiplied();
     let mut rgb = [r, g, b];
-    kit::row(ui, label, |ui| kit::color_field(ui, &mut rgb));
+    ui_kit::row(ui, label, |ui| ui_kit::color_field(ui, &mut rgb));
     if rgb != [r, g, b] {
         *colour = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], a);
     }
 }
 
 fn radius_row(ui: &mut Ui, label: &str, radius: &mut u8) {
-    kit::row(ui, label, |ui| kit::slider(ui, radius, 0..=16, kit::Slider { integer: true, ..Default::default() }));
+    ui_kit::row(ui, label, |ui| ui_kit::slider(ui, radius, 0..=16, ui_kit::Slider { integer: true, ..Default::default() }));
 }
 
 fn size_row(ui: &mut Ui, label: &str, size: &mut f32, range: std::ops::RangeInclusive<f32>) {
-    kit::row(ui, label, |ui| kit::slider(ui, size, range, kit::Slider { step: Some(0.5), ..Default::default() }));
+    ui_kit::row(ui, label, |ui| ui_kit::slider(ui, size, range, ui_kit::Slider { step: Some(0.5), ..Default::default() }));
 }

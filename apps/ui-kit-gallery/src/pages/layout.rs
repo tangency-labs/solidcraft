@@ -4,7 +4,7 @@ use super::{Group, Page};
 use crate::state;
 use egui::vec2;
 use solidcraft_theme::Tokens;
-use solidcraft_ui_kit as kit;
+use solidcraft_ui_kit as ui_kit;
 
 pub const SECTION: Page = Page {
     id: "section",
@@ -22,28 +22,28 @@ ui_kit::divider(ui, "after_output");
     donts: &["Don't fold the settings every use needs.", "Don't nest sections."],
     demo: |ui, d| {
         state(ui, "Open and closed (click the titles)", |ui| {
-            kit::section(ui, "gallery_general", "General", true, |ui| {
-                kit::text_row(ui, "Name", &mut d.text, "");
+            ui_kit::section(ui, "gallery_general", "General", true, |ui| {
+                ui_kit::text_row(ui, "Name", &mut d.text, "");
             });
-            kit::section(ui, "gallery_advanced", "Advanced", false, |ui| {
-                kit::checkbox(ui, "Keep tools", &mut d.second);
+            ui_kit::section(ui, "gallery_advanced", "Advanced", false, |ui| {
+                ui_kit::checkbox(ui, "Keep tools", &mut d.second);
             });
         });
         state(ui, "With a count", |ui| {
-            kit::section_count(ui, "gallery_count", "Parameters", false, Some(d.rows.len()), |ui| {
+            ui_kit::section_count(ui, "gallery_count", "Parameters", false, Some(d.rows.len()), |ui| {
                 for (name, value) in &d.rows {
-                    kit::text(ui, &format!("{name} = {value}"), kit::Text::Inline);
+                    ui_kit::text(ui, &format!("{name} = {value}"), ui_kit::Text::Inline);
                 }
             });
         });
         state(ui, "Editor section", |ui| {
-            kit::editor_section(ui, "gallery_edit", "Edit", true, |ui| {
-                kit::row(ui, "Colour", |ui| kit::color_field(ui, &mut d.rgb));
+            ui_kit::editor_section(ui, "gallery_edit", "Edit", true, |ui| {
+                ui_kit::row(ui, "Colour", |ui| ui_kit::color_field(ui, &mut d.rgb));
             });
         });
         state(ui, "Heading and divider", |ui| {
-            kit::section_heading(ui, "Output");
-            kit::divider(ui, "gallery_divider");
+            ui_kit::section_heading(ui, "Output");
+            ui_kit::divider(ui, "gallery_divider");
         });
     },
 };
@@ -66,12 +66,12 @@ if ui_kit::strip_toggle(ui, expanded, "Shots").clicked() { expanded = !expanded;
             ui.horizontal(|ui| {
                 for open in [true, false] {
                     let (rect, _) = ui.allocate_exact_size(vec2(t.form_close_size, t.form_close_size), egui::Sense::hover());
-                    kit::disclosure(ui.painter(), rect.center(), open, t.form_dim);
+                    ui_kit::disclosure(ui.painter(), rect.center(), open, t.form_dim);
                 }
             });
         });
         state(ui, "Strip toggle (click it)", |ui| {
-            if kit::strip_toggle(ui, d.checked, if d.checked { "Hide Shots strip" } else { "Shots" }).clicked() {
+            if ui_kit::strip_toggle(ui, d.checked, if d.checked { "Hide Shots strip" } else { "Shots" }).clicked() {
                 d.checked = !d.checked;
             }
         });
@@ -96,23 +96,23 @@ ui_kit::text(ui, "The sketch is not closed.", ui_kit::Text::Error("sketch"));
     donts: &["Don't set font sizes or colours with `RichText` in a form."],
     demo: |ui, _| {
         for (name, style) in [
-            ("Heading", kit::Text::Heading("g")),
-            ("Note", kit::Text::Note("g")),
-            ("Mono note", kit::Text::MonoNote("g")),
-            ("Report", kit::Text::Report("g", false)),
-            ("Hint", kit::Text::Hint("g")),
-            ("Error", kit::Text::Error("g")),
-            ("Inline", kit::Text::Inline),
-            ("Cell", kit::Text::Cell),
-            ("Mono cell", kit::Text::MonoCell),
-            ("Value", kit::Text::Value("g", false)),
+            ("Heading", ui_kit::Text::Heading("g")),
+            ("Note", ui_kit::Text::Note("g")),
+            ("Mono note", ui_kit::Text::MonoNote("g")),
+            ("Report", ui_kit::Text::Report("g", false)),
+            ("Hint", ui_kit::Text::Hint("g")),
+            ("Error", ui_kit::Text::Error("g")),
+            ("Inline", ui_kit::Text::Inline),
+            ("Cell", ui_kit::Text::Cell),
+            ("Mono cell", ui_kit::Text::MonoCell),
+            ("Value", ui_kit::Text::Value("g", false)),
         ] {
             state(ui, name, |ui| {
-                kit::text(ui, "Counts include the original; Flip chooses the side for even totals.", style);
+                ui_kit::text(ui, "Counts include the original; Flip chooses the side for even totals.", style);
             });
         }
         state(ui, "Lines", |ui| {
-            kit::text_lines(ui, "gallery_lines", "solid.fillet radius=2 mm\nsolid.chamfer distance=1 mm");
+            ui_kit::text_lines(ui, "gallery_lines", "solid.fillet radius=2 mm\nsolid.chamfer distance=1 mm");
         });
     },
 };
@@ -132,16 +132,16 @@ let (closed, action) = ui_kit::Window::new(egui::Id::unique("export"), "export",
     donts: &["Don't use `egui::Window`, `Area`, `SidePanel` or `CentralPanel` directly: `cargo xtask ui-containers` fails."],
     demo: |ui, d| {
         ui.set_max_width(460.0);
-        let (closed, action) = kit::Window::new(ui.scope_id().with("window"), "settings", "Export").actions("Export", "Cancel", None).content(
+        let (closed, action) = ui_kit::Window::new(ui.scope_id().with("window"), "settings", "Export").actions("Export", "Cancel", None).content(
             ui,
             true,
             |ui| {
-                kit::choice_row(ui, "Format", "export_format", &mut d.selected, &["STEP", "STL", "3MF"]);
-                kit::checkbox(ui, "Include hidden bodies", &mut d.second);
+                ui_kit::choice_row(ui, "Format", "export_format", &mut d.selected, &["STEP", "STL", "3MF"]);
+                ui_kit::checkbox(ui, "Include hidden bodies", &mut d.second);
             },
             |_| {},
         );
-        if closed || action != kit::Action::None {
+        if closed || action != ui_kit::Action::None {
             d.said(format!("closed: {closed}, action: {action:?}"));
         }
     },
@@ -165,16 +165,16 @@ let events = ui_kit::details(ui, "draft", &ui_kit::Details {
     donts: &["Don't build analysis cards by hand."],
     demo: |ui, d| {
         let t = Tokens::get();
-        let description = kit::Details {
+        let description = ui_kit::Details {
             caption: Some("Draft analysis".into()),
-            settings: vec![kit::DetailSetting {
+            settings: vec![ui_kit::DetailSetting {
                 id: "angle".into(),
                 label: "Draft angle".into(),
-                value: kit::DetailValue::Number { value: d.angle.min(45.0), min: 0.0, max: 45.0, suffix: "°".into() },
+                value: ui_kit::DetailValue::Number { value: d.angle.min(45.0), min: 0.0, max: 45.0, suffix: "°".into() },
                 enabled: true,
             }],
             key: vec![
-                kit::DetailKey {
+                ui_kit::DetailKey {
                     colour: t.agent_ok,
                     pattern: false,
                     pattern_colour: None,
@@ -182,7 +182,7 @@ let events = ui_kit::details(ui, "draft", &ui_kit::Details {
                     value: "12 faces".into(),
                     numeric: true,
                 },
-                kit::DetailKey {
+                ui_kit::DetailKey {
                     colour: t.error,
                     pattern: true,
                     pattern_colour: None,
@@ -194,15 +194,15 @@ let events = ui_kit::details(ui, "draft", &ui_kit::Details {
             findings_title: "Faces under the angle".into(),
             findings_count: Some("2".into()),
             findings: vec![
-                kit::DetailFinding { id: "f1".into(), label: "Face 4".into(), value: "1.2°".into(), warning: true, target: true },
-                kit::DetailFinding { id: "f2".into(), label: "Face 9".into(), value: "0.4°".into(), warning: true, target: true },
+                ui_kit::DetailFinding { id: "f1".into(), label: "Face 4".into(), value: "1.2°".into(), warning: true, target: true },
+                ui_kit::DetailFinding { id: "f2".into(), label: "Face 9".into(), value: "0.4°".into(), warning: true, target: true },
             ],
             readout: vec![("Pull direction".into(), "+Z".into())],
             actions: vec![("export".into(), "Export report".into())],
         };
         ui.set_max_width(420.0);
-        for event in kit::details(ui, "gallery_details", &description, 420.0, None) {
-            if let kit::DetailEvent::Change(id, kit::DetailValue::Number { value, .. }) = &event
+        for event in ui_kit::details(ui, "gallery_details", &description, 420.0, None) {
+            if let ui_kit::DetailEvent::Change(id, ui_kit::DetailValue::Number { value, .. }) = &event
                 && id == "angle"
             {
                 d.angle = *value;

@@ -5,7 +5,7 @@ use super::{Group, Page};
 use crate::state;
 use egui::{Rect, pos2, vec2};
 use solidcraft_theme::{AccentRamp, TabAccent, Tokens};
-use solidcraft_ui_kit as kit;
+use solidcraft_ui_kit as ui_kit;
 use solidcraft_ui_kit::{app_bar, history_bar, ribbon, view_compass, window_chrome};
 
 pub const APP_BAR: Page = Page {
@@ -35,6 +35,8 @@ for action in out.actions { /* BarAction::Home, File { rect }, Button { id }, �
         let (bar, _) = ui.allocate_exact_size(vec2(width, app_bar::HEIGHT), egui::Sense::hover());
         let button = |id, icon, tip| app_bar::BarButton { id, icon, tip, enabled: true, narrow: true, wide_only: false };
         let data = app_bar::AppBar {
+            items: None,
+            quick_ids: &[],
             mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
             name: "SolidCraft",
             leading: None,
@@ -200,7 +202,7 @@ struct Steps<'a> {
 
 impl history_bar::Contents for Steps<'_> {
     fn entries(&mut self, strip: &mut history_bar::Strip<'_, '_>) {
-        let tip = kit::StatusTip::default;
+        let tip = ui_kit::StatusTip::default;
         for (slot, (label, icon)) in self.steps.iter().enumerate() {
             strip.step(&history_bar::Step {
                 id: slot as u64,
@@ -326,32 +328,32 @@ ui_kit::navigation_button(ui, button_rect, ui_kit::NavigationButton {
     dos: &["Use `Tool` for modes that stay on and `Action` for one-off commands."],
     donts: &["Don't put model commands here: it is for looking at the model."],
     demo: |ui, d| {
-        for (name, size) in [("Regular", kit::NavigationSize::Regular), ("Compact", kit::NavigationSize::Compact)] {
+        for (name, size) in [("Regular", ui_kit::NavigationSize::Regular), ("Compact", ui_kit::NavigationSize::Compact)] {
             state(ui, name, |ui| {
-                let metrics = kit::NavigationMetrics::for_size(size);
-                let inset = kit::NAV_PADDING + kit::NAV_BORDER;
+                let metrics = ui_kit::NavigationMetrics::for_size(size);
+                let inset = ui_kit::NAV_PADDING + ui_kit::NAV_BORDER;
                 let buttons = [
-                    ("orbit", "orbit", "Orbit", kit::NavigationKind::Tool),
-                    ("pan", "pan", "Pan", kit::NavigationKind::Tool),
-                    ("zoom", "zoom", "Zoom", kit::NavigationKind::Tool),
-                    ("fit", "fit", "Fit", kit::NavigationKind::Action),
+                    ("orbit", "orbit", "Orbit", ui_kit::NavigationKind::Tool),
+                    ("pan", "pan", "Pan", ui_kit::NavigationKind::Tool),
+                    ("zoom", "zoom", "Zoom", ui_kit::NavigationKind::Tool),
+                    ("fit", "fit", "Fit", ui_kit::NavigationKind::Action),
                 ];
-                let width = buttons.len() as f32 * (metrics.button + kit::NAV_GAP) - kit::NAV_GAP + 2.0 * inset;
+                let width = buttons.len() as f32 * (metrics.button + ui_kit::NAV_GAP) - ui_kit::NAV_GAP + 2.0 * inset;
                 let (rect, _) = ui.allocate_exact_size(vec2(width, metrics.height()), egui::Sense::hover());
-                kit::navigation_surface(ui, rect, size, false);
+                ui_kit::navigation_surface(ui, rect, size, false);
                 let mut x = rect.left() + inset;
                 for (i, (id, icon, label, kind)) in buttons.into_iter().enumerate() {
                     let bounds = Rect::from_min_size(pos2(x, rect.top() + inset), vec2(metrics.button, metrics.button));
-                    let selected = kind == kit::NavigationKind::Tool && d.segment == i;
-                    if kit::navigation_button(ui, bounds, kit::NavigationButton { id, icon, label, kind, selected, labels: false, menu: false })
+                    let selected = kind == ui_kit::NavigationKind::Tool && d.segment == i;
+                    if ui_kit::navigation_button(ui, bounds, ui_kit::NavigationButton { id, icon, label, kind, selected, labels: false, menu: false })
                         .clicked()
                     {
-                        if kind == kit::NavigationKind::Tool {
+                        if kind == ui_kit::NavigationKind::Tool {
                             d.segment = i;
                         }
                         d.said(label);
                     }
-                    x += metrics.button + kit::NAV_GAP;
+                    x += metrics.button + ui_kit::NAV_GAP;
                 }
             });
         }
@@ -403,9 +405,11 @@ ui_kit::theme_card(ui, &ui_kit::ThemeCard { name: "Nord", note: "Built in", samp
     donts: &["Don't hard-code a theme's colours in its card."],
     demo: |ui, d| {
         state(ui, "Tone segments", |ui| {
-            let options =
-                [kit::ThemeSegment::new("Light", kit::ThemeGlyph::Sun, Some(9)), kit::ThemeSegment::new("Dark", kit::ThemeGlyph::Moon, Some(17))];
-            if let Some(i) = kit::theme_segments(ui, "gallery_tone", &options, Some(d.choice.min(1)), false) {
+            let options = [
+                ui_kit::ThemeSegment::new("Light", ui_kit::ThemeGlyph::Sun, Some(9)),
+                ui_kit::ThemeSegment::new("Dark", ui_kit::ThemeGlyph::Moon, Some(17)),
+            ];
+            if let Some(i) = ui_kit::theme_segments(ui, "gallery_tone", &options, Some(d.choice.min(1)), false) {
                 d.choice = i;
             }
         });
@@ -416,18 +420,18 @@ ui_kit::theme_card(ui, &ui_kit::ThemeCard { name: "Nord", note: "Built in", samp
                         .into_iter()
                         .enumerate()
                 {
-                    let card = kit::ThemeCard {
+                    let card = ui_kit::ThemeCard {
                         name,
                         note: "Built in",
                         options: None,
-                        sample: kit::ThemeSample::from_tokens(&tokens),
+                        sample: ui_kit::ThemeSample::from_tokens(&tokens),
                         selected: d.swatch == i,
                         dark,
                         high: false,
                         day: false,
                         night: false,
                     };
-                    if kit::theme_card(ui, &card, 150.0).clicked() {
+                    if ui_kit::theme_card(ui, &card, 150.0).clicked() {
                         d.swatch = i;
                         d.said(name);
                     }
@@ -435,8 +439,8 @@ ui_kit::theme_card(ui, &ui_kit::ThemeCard { name: "Nord", note: "Built in", samp
             });
         });
         state(ui, "Import and empty", |ui| {
-            kit::theme_import_button(ui, "Import theme file…");
-            kit::theme_empty(ui, "No themes match", "Clear filters", || {});
+            ui_kit::theme_import_button(ui, "Import theme file…");
+            ui_kit::theme_empty(ui, "No themes match", "Clear filters", || {});
         });
     },
 };

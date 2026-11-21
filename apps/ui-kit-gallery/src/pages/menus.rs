@@ -5,7 +5,7 @@ use super::{Group, Page};
 use crate::state;
 use egui::vec2;
 use solidcraft_theme::Tokens;
-use solidcraft_ui_kit as kit;
+use solidcraft_ui_kit as ui_kit;
 
 pub const MENU: Page = Page {
     id: "menu",
@@ -37,33 +37,33 @@ ui_kit::Menu::show(ui, 268.0, |ui| {
     ],
     demo: |ui, d| {
         state(ui, "Rows in every state (hover them)", |ui| {
-            kit::Menu::show(ui, 268.0, |ui| {
-                kit::Menu::heading(ui, "Body");
-                if kit::MenuItem::new("gallery:props", "Properties", "measure").show(ui).clicked() {
+            ui_kit::Menu::show(ui, 268.0, |ui| {
+                ui_kit::Menu::heading(ui, "Body");
+                if ui_kit::MenuItem::new("gallery:props", "Properties", "measure").show(ui).clicked() {
                     d.said("Properties");
                 }
-                let mut item = kit::MenuItem::new("gallery:hide", "Hide", "eye");
+                let mut item = ui_kit::MenuItem::new("gallery:hide", "Hide", "eye");
                 item.shortcut = "H";
                 if item.show(ui).clicked() {
                     d.said("Hide");
                 }
-                item = kit::MenuItem::new("gallery:appearance", "Appearance", "appearance");
+                item = ui_kit::MenuItem::new("gallery:appearance", "Appearance", "appearance");
                 item.submenu = true;
                 item.show(ui);
-                item = kit::MenuItem::new("gallery:paste", "Paste", "paste");
+                item = ui_kit::MenuItem::new("gallery:paste", "Paste", "paste");
                 item.enabled = false;
                 item.shortcut = "Ctrl+V";
                 item.show(ui);
-                item = kit::MenuItem::new("gallery:origin", "Show origin", "origin");
+                item = ui_kit::MenuItem::new("gallery:origin", "Show origin", "origin");
                 item.checked = Some(d.checked);
                 if item.show(ui).clicked() {
                     d.checked = !d.checked;
                 }
-                item = kit::MenuItem::new("gallery:swatch", "Aluminium, satin", "appearance");
+                item = ui_kit::MenuItem::new("gallery:swatch", "Aluminium, satin", "appearance");
                 item.swatch = Some(Tokens::get().control_border);
                 item.show(ui);
-                kit::Menu::separator(ui);
-                item = kit::MenuItem::new("gallery:delete", "Delete", "delete");
+                ui_kit::Menu::separator(ui);
+                item = ui_kit::MenuItem::new("gallery:delete", "Delete", "delete");
                 item.danger = true;
                 item.shortcut = "Del";
                 if item.show(ui).clicked() {
@@ -89,21 +89,21 @@ let chosen = ui_kit::workspace_menu(ui, &ui_kit::WorkspaceMenu { items: &items, 
     donts: &["Don't list a planned workspace as if it worked: `.on(false)`."],
     demo: |ui, d| {
         let items = [
-            kit::Item::action("sample.design", "Design", "ws_design").key("current"),
-            kit::Item::action("sample.render", "Render", "ws_render"),
-            kit::Item::action("sample.drawing", "Drawing", "ws_drawing").on(false),
+            ui_kit::Item::action("sample.design", "Design", "ws_design").key("current"),
+            ui_kit::Item::action("sample.render", "Render", "ws_render"),
+            ui_kit::Item::action("sample.drawing", "Drawing", "ws_drawing").on(false),
         ];
-        let style = |item: &kit::Item| {
+        let style = |item: &ui_kit::Item| {
             let (slug, description, tabs, ramp) = match item.label.as_str() {
                 "Design" => ("design", "Sketch, model and assemble", Some("Solid · Surface · Sheet metal"), None),
                 "Render" => ("render", "Lights, looks and pictures", Some("Scene · Shots"), Some(solidcraft_theme::AccentRamp::Render)),
                 _ => ("drawing", "Coming later", None, None),
             };
-            Some(kit::WorkspaceStyle { slug, description, tabs, ramp })
+            Some(ui_kit::WorkspaceStyle { slug, description, tabs, ramp })
         };
-        if let Some(item) = kit::workspace_menu(
+        if let Some(item) = ui_kit::workspace_menu(
             ui,
-            &kit::WorkspaceMenu { items: &items, style: &style, footer: "Every workspace opens the same design." },
+            &ui_kit::WorkspaceMenu { items: &items, style: &style, footer: "Every workspace opens the same design." },
             None,
             460.0,
         ) {
@@ -130,7 +130,7 @@ match ui_kit::rename_menu(ui, &mut name, &mut focused) {
     demo: |ui, d| {
         let mut focused = false;
         ui.set_max_width(260.0);
-        if let Some(keep) = kit::rename_menu(ui, &mut d.rename, &mut focused) {
+        if let Some(keep) = ui_kit::rename_menu(ui, &mut d.rename, &mut focused) {
             d.said(if keep { format!("renamed to {}", d.rename) } else { "cancelled".into() });
         }
     },
@@ -150,16 +150,16 @@ let chosen: Option<ui_kit::Item> = ui_kit::radial_menu(ui, centre, &items, hot_s
     demo: |ui, d| {
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().min(380.0), 360.0), egui::Sense::hover());
         let items = [
-            kit::Item::action("sample.repeat", "Repeat", "redo").key("R"),
-            kit::Item::action("sample.delete", "Delete", "delete").key("Del"),
-            kit::Item::action("sample.sketch", "Sketch", "sketch"),
-            kit::Item::action("sample.extrude", "Extrude", "extrude"),
-            kit::Item::action("sample.fillet", "Fillet", "fillet"),
-            kit::Item::action("sample.measure", "Measure", "measure"),
-            kit::Item::action("sample.undo", "Undo", "undo"),
-            kit::Item::action("sample.move", "Move/Copy", "move"),
+            ui_kit::Item::action("sample.repeat", "Repeat", "redo").key("R"),
+            ui_kit::Item::action("sample.delete", "Delete", "delete").key("Del"),
+            ui_kit::Item::action("sample.sketch", "Sketch", "sketch"),
+            ui_kit::Item::action("sample.extrude", "Extrude", "extrude"),
+            ui_kit::Item::action("sample.fillet", "Fillet", "fillet"),
+            ui_kit::Item::action("sample.measure", "Measure", "measure"),
+            ui_kit::Item::action("sample.undo", "Undo", "undo"),
+            ui_kit::Item::action("sample.move", "Move/Copy", "move"),
         ];
-        if let Some(item) = kit::radial_menu(ui, rect.center(), &items, None) {
+        if let Some(item) = ui_kit::radial_menu(ui, rect.center(), &items, None) {
             d.said(item.label);
         }
     },
@@ -183,27 +183,31 @@ ui_kit::CommandSearch::sheet(ui, width, 1.0, false, |ui| {
     demo: |ui, d| {
         let t = Tokens::get();
         ui.set_max_width(420.0);
-        kit::CommandSearch::field(
+        ui_kit::CommandSearch::field(
             ui,
             &mut d.search,
             false,
             true,
             true,
-            kit::SearchFieldGeometry { height: t.control_height + t.space_12, radius: kit::CommandSearch::field_radius(1.0, true), progress: 1.0 },
+            ui_kit::SearchFieldGeometry {
+                height: t.control_height + t.space_12,
+                radius: ui_kit::CommandSearch::field_radius(1.0, true),
+                progress: 1.0,
+            },
             Some("S"),
             4096,
         );
         ui.add_space(t.space_6);
         let query = if d.search.is_empty() { "fillet".to_owned() } else { d.search.clone() };
-        kit::CommandSearch::sheet(ui, ui.available_width(), 1.0, false, |ui| {
-            kit::CommandSearch::heading(ui, "search.commands", 2);
-            let mut row = kit::MenuItem::new("sample.fillet", "Fillet", "fillet");
+        ui_kit::CommandSearch::sheet(ui, ui.available_width(), 1.0, false, |ui| {
+            ui_kit::CommandSearch::heading(ui, "search.commands", 2);
+            let mut row = ui_kit::MenuItem::new("sample.fillet", "Fillet", "fillet");
             row.highlighted = true;
             row.shortcut = "F";
             row.search_row(ui, &query, "Solid › Modify", None);
-            let row = kit::MenuItem::new("sample.sketch_fillet", "Sketch fillet", "sketch_fillet");
+            let row = ui_kit::MenuItem::new("sample.sketch_fillet", "Sketch fillet", "sketch_fillet");
             row.search_row(ui, &query, "Sketch › Modify", None);
-            kit::CommandSearch::detail(ui, "radius  6 mm");
+            ui_kit::CommandSearch::detail(ui, "radius  6 mm");
         });
     },
 };
@@ -224,20 +228,20 @@ let picked = ui_kit::popup_list(ui.ctx(), id, field_rect, Some(0), &[
     demo: |ui, _| {
         let t = Tokens::get();
         ui.set_max_width(320.0);
-        let anchor = ui.allocate_space(vec2(240.0, kit::row_height())).1;
+        let anchor = ui.allocate_space(vec2(240.0, ui_kit::row_height())).1;
         ui.painter().rect_stroke(anchor, t.control_radius, egui::Stroke::new(1.0, t.control_border), egui::StrokeKind::Inside);
-        kit::popup_list(
+        ui_kit::popup_list(
             ui.ctx(),
             ui.scope_id().with("popup"),
             anchor,
             Some(0),
             &[
-                kit::PopupOption { kind: "parameter", text: "Width", detail: "40 mm", color: t.text },
-                kit::PopupOption { kind: "parameter", text: "Height", detail: "20 mm", color: t.text },
-                kit::PopupOption { kind: "function", text: "sqrt", detail: "square root", color: t.text_dim },
+                ui_kit::PopupOption { kind: "parameter", text: "Width", detail: "40 mm", color: t.text },
+                ui_kit::PopupOption { kind: "parameter", text: "Height", detail: "20 mm", color: t.text },
+                ui_kit::PopupOption { kind: "function", text: "sqrt", detail: "square root", color: t.text_dim },
             ],
             "Choose",
         );
-        ui.allocate_space(vec2(ui.available_width(), kit::row_height() * 5.0));
+        ui.allocate_space(vec2(ui.available_width(), ui_kit::row_height() * 5.0));
     },
 };

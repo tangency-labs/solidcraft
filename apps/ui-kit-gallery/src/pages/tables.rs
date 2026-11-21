@@ -3,7 +3,7 @@
 use super::{Group, Page};
 use crate::{disabled, state};
 use solidcraft_theme::Tokens;
-use solidcraft_ui_kit as kit;
+use solidcraft_ui_kit as ui_kit;
 
 pub const TABLE: Page = Page {
     id: "table",
@@ -48,15 +48,16 @@ ui_kit::table_custom(ui, "params", &columns, "No parameters yet", |ui, table| {
     ],
     demo: |ui, d| {
         state(ui, "Editable, sortable (click Name)", |ui| {
-            let columns = [kit::Column::new("Name", 1.0), kit::Column::new("Expression", 1.5).flex(), kit::Column::new("Delete", 0.3).icon_only()];
+            let columns =
+                [ui_kit::Column::new("Name", 1.0), ui_kit::Column::new("Expression", 1.5).flex(), ui_kit::Column::new("Delete", 0.3).icon_only()];
             let mut sort = d.sort;
             let mut remove = None;
             let mut add = false;
             d.sort.apply(&mut d.rows, |r| r.0.as_str());
-            kit::table_custom(ui, "gallery_params", &columns, "No parameters yet", |ui, table| {
+            ui_kit::table_custom(ui, "gallery_params", &columns, "No parameters yet", |ui, table| {
                 table.headers(ui, |ui, column| {
                     if column == 0 {
-                        kit::sort_header(ui, "Name", &mut sort);
+                        ui_kit::sort_header(ui, "Name", &mut sort);
                         true
                     } else {
                         false
@@ -65,10 +66,10 @@ ui_kit::table_custom(ui, "params", &columns, "No parameters yet", |ui, table| {
                 for (i, (name, value)) in d.rows.iter_mut().enumerate() {
                     let invalid = value.trim().is_empty();
                     table.row(ui, &format!("row{i}"), i == 0, |row| {
-                        row.cell(|ui| kit::text(ui, name, kit::Text::Cell));
-                        row.cell(|ui| kit::cell_editor(ui, ui.scope_id().with(("value", i)), value, "Expression", invalid));
+                        row.cell(|ui| ui_kit::text(ui, name, ui_kit::Text::Cell));
+                        row.cell(|ui| ui_kit::cell_editor(ui, ui.scope_id().with(("value", i)), value, "Expression", invalid));
                         row.cell(|ui| {
-                            if kit::bin_button(ui, "Delete").clicked() {
+                            if ui_kit::bin_button(ui, "Delete").clicked() {
                                 remove = Some(i);
                             }
                         });
@@ -88,19 +89,25 @@ ui_kit::table_custom(ui, "params", &columns, "No parameters yet", |ui, table| {
             }
         });
         state(ui, "Empty", |ui| {
-            kit::table_custom(ui, "gallery_empty", &[kit::Column::new("Name", 1.0).flex()], "No configurations yet", |ui, table| {
+            ui_kit::table_custom(ui, "gallery_empty", &[ui_kit::Column::new("Name", 1.0).flex()], "No configurations yet", |ui, table| {
                 table.headers(ui, |_, _| false);
                 table.add_prompt(ui, "Add configuration", "Add a configuration");
             });
         });
         disabled(ui, |ui| {
-            kit::table_custom(ui, "gallery_off", &[kit::Column::new("Name", 1.0), kit::Column::new("Value", 1.0).flex()], "None", |ui, table| {
-                table.headers(ui, |_, _| false);
-                table.row(ui, "off", false, |row| {
-                    row.cell(|ui| kit::text(ui, "Width", kit::Text::Cell));
-                    row.cell(|ui| kit::text(ui, "40 mm", kit::Text::Value("off", false)));
-                });
-            });
+            ui_kit::table_custom(
+                ui,
+                "gallery_off",
+                &[ui_kit::Column::new("Name", 1.0), ui_kit::Column::new("Value", 1.0).flex()],
+                "None",
+                |ui, table| {
+                    table.headers(ui, |_, _| false);
+                    table.row(ui, "off", false, |row| {
+                        row.cell(|ui| ui_kit::text(ui, "Width", ui_kit::Text::Cell));
+                        row.cell(|ui| ui_kit::text(ui, "40 mm", ui_kit::Text::Value("off", false)));
+                    });
+                },
+            );
         });
     },
 };
@@ -117,7 +124,7 @@ pub const GRID: Page = Page {
     dos: &["Use `table_custom` until the grid is in the kit."],
     donts: &["Don't build a one-off grid for a single dialog."],
     demo: |ui, _| {
-        kit::empty_box(ui, "grid_coming", "The spreadsheet grid is coming in its own pull request.");
+        ui_kit::empty_box(ui, "grid_coming", "The spreadsheet grid is coming in its own pull request.");
     },
 };
 
@@ -140,13 +147,13 @@ ui_kit::name_list(ui, "files", &["Name", "Size", ""], "No files", |list| {
     donts: &["Don't use it for values the user edits: that is a `table_custom`."],
     demo: |ui, d| {
         state(ui, "Default", |ui| {
-            kit::name_list(ui, "gallery_names", &["Name", "Size", "Actions"], "No files", |list| {
+            ui_kit::name_list(ui, "gallery_names", &["Name", "Size", "Actions"], "No files", |list| {
                 for (name, size) in [("Bracket.solidcraft", "12.3 KB"), ("Gearbox housing with a very long name.solidcraft", "1.2 MB")] {
                     list.row(name, |row| {
                         row.name(name);
-                        row.cell(|ui| kit::text(ui, size, kit::Text::Inline));
+                        row.cell(|ui| ui_kit::text(ui, size, ui_kit::Text::Inline));
                         row.cell(|ui| {
-                            if kit::button(ui, "Open", kit::Button::Small).clicked() {
+                            if ui_kit::button(ui, "Open", ui_kit::Button::Small).clicked() {
                                 d.said(format!("open {name}"));
                             }
                         });
@@ -155,7 +162,7 @@ ui_kit::name_list(ui, "files", &["Name", "Size", ""], "No files", |list| {
             });
         });
         state(ui, "Empty", |ui| {
-            kit::name_list(ui, "gallery_names_empty", &["Name", "Size"], "No files in this folder", |_| {});
+            ui_kit::name_list(ui, "gallery_names_empty", &["Name", "Size"], "No files in this folder", |_| {});
         });
     },
 };
@@ -178,27 +185,27 @@ if row.fold { /* fold or unfold */ }
     donts: &["Don't change your data inside the row's drawing: act on what it returns."],
     demo: |ui, d| {
         state(ui, "Header with lenses", |ui| {
-            if kit::tree_header(ui, "Scene", &mut d.lens, &["By object", "By look"], "Search objects") {
+            if ui_kit::tree_header(ui, "Scene", &mut d.lens, &["By object", "By look"], "Search objects") {
                 d.said(format!("lens {}", d.lens));
             }
         });
         state(ui, "Rows (hover them)", |ui| {
             let t = Tokens::get();
-            let add = [kit::TreeAction { icon: "plus", hover_only: false, label: "Add", reason: None, target: "gallery:tree:add" }];
-            let row = kit::tree_row(
+            let add = [ui_kit::TreeAction { icon: "plus", hover_only: false, label: "Add", reason: None, target: "gallery:tree:add" }];
+            let row = ui_kit::tree_row(
                 ui,
                 ui.scope_id().with("objects"),
-                &kit::Row { label: "Objects", icon: "folder", fold: Some(d.checked), actions: &add, ..Default::default() },
+                &ui_kit::Row { label: "Objects", icon: "folder", fold: Some(d.checked), actions: &add, ..Default::default() },
             );
             if row.clicked || row.fold {
                 d.checked = !d.checked;
                 d.said(if d.checked { "unfolded Objects" } else { "folded Objects" });
             }
             if d.checked {
-                kit::tree_row(
+                ui_kit::tree_row(
                     ui,
                     ui.scope_id().with("boss"),
-                    &kit::Row {
+                    &ui_kit::Row {
                         depth: 1,
                         label: "Boss",
                         icon: "body",
@@ -209,34 +216,34 @@ if row.fold { /* fold or unfold */ }
                         ..Default::default()
                     },
                 );
-                kit::tree_row(
+                ui_kit::tree_row(
                     ui,
                     ui.scope_id().with("rib"),
-                    &kit::Row { depth: 1, label: "Rib", icon: "body", eye: Some(false), ..Default::default() },
+                    &ui_kit::Row { depth: 1, label: "Rib", icon: "body", eye: Some(false), ..Default::default() },
                 );
             }
-            kit::tree_row(
+            ui_kit::tree_row(
                 ui,
                 ui.scope_id().with("output"),
-                &kit::Row { label: "Output", icon: "render_image", subtitle: "1920 × 1080 · PNG", ..Default::default() },
+                &ui_kit::Row { label: "Output", icon: "render_image", subtitle: "1920 × 1080 · PNG", ..Default::default() },
             );
         });
         state(ui, "Disabled action (hover the +)", |ui| {
-            let add = [kit::TreeAction {
+            let add = [ui_kit::TreeAction {
                 icon: "plus",
                 hover_only: false,
                 label: "Add",
                 reason: Some("Open a design first"),
                 target: "gallery:tree:add_off",
             }];
-            kit::tree_row(
+            ui_kit::tree_row(
                 ui,
                 ui.scope_id().with("lights"),
-                &kit::Row { label: "Lights", icon: "render_light_point", actions: &add, ..Default::default() },
+                &ui_kit::Row { label: "Lights", icon: "render_light_point", actions: &add, ..Default::default() },
             );
         });
         disabled(ui, |ui| {
-            kit::tree_row(ui, ui.scope_id().with("off"), &kit::Row { label: "Objects", icon: "folder", ..Default::default() });
+            ui_kit::tree_row(ui, ui.scope_id().with("off"), &ui_kit::Row { label: "Objects", icon: "folder", ..Default::default() });
         });
     },
 };
@@ -258,7 +265,7 @@ ui_kit::selection_field(ui, "2 faces", ui_kit::Selection { active: true, filled:
         state(ui, "List pickers", |ui| {
             ui.set_max_width(260.0);
             for (i, name) in ["Studio", "Outdoor", "Night"].iter().enumerate() {
-                if kit::list_picker(ui, &format!("preset{i}"), name, d.selected == i).clicked() {
+                if ui_kit::list_picker(ui, &format!("preset{i}"), name, d.selected == i).clicked() {
                     d.selected = i;
                     d.said(*name);
                 }
@@ -266,17 +273,17 @@ ui_kit::selection_field(ui, "2 faces", ui_kit::Selection { active: true, filled:
         });
         state(ui, "Removable rows (hover them)", |ui| {
             ui.set_max_width(260.0);
-            kit::list_row(ui, "face3", "Face 3");
-            kit::list_row(ui, "face7", "Face 7");
+            ui_kit::list_row(ui, "face3", "Face 3");
+            ui_kit::list_row(ui, "face7", "Face 7");
         });
         state(ui, "Selection field: waiting, filled", |ui| {
             ui.set_max_width(260.0);
-            kit::selection_field(ui, "Select faces", kit::Selection { active: true, filled: false });
-            kit::selection_field(ui, "2 faces", kit::Selection { active: false, filled: true });
+            ui_kit::selection_field(ui, "Select faces", ui_kit::Selection { active: true, filled: false });
+            ui_kit::selection_field(ui, "2 faces", ui_kit::Selection { active: false, filled: true });
         });
         disabled(ui, |ui| {
             ui.set_max_width(260.0);
-            kit::list_picker(ui, "preset_off", "Studio", true);
+            ui_kit::list_picker(ui, "preset_off", "Studio", true);
         });
     },
 };
@@ -298,22 +305,22 @@ ui_kit::empty_box(ui, "none", "No crash reports.");
     donts: &["Don't let a long list grow the dialog: give `report_list` a height."],
     demo: |ui, _| {
         state(ui, "With reports", |ui| {
-            kit::path_chip(ui, "~/.local/share/solidcraft/reports", |ui| {
-                kit::button(ui, "Copy path", kit::Button::Small);
+            ui_kit::path_chip(ui, "~/.local/share/solidcraft/reports", |ui| {
+                ui_kit::button(ui, "Copy path", ui_kit::Button::Small);
             });
-            kit::report_list(ui, "gallery_reports", 140.0, |ui| {
-                kit::report_header(ui, "Internal error", 3, "2026-10-18 21:04:12", "Report", |ui| {
-                    kit::bin_button(ui, "Delete");
+            ui_kit::report_list(ui, "gallery_reports", 140.0, |ui| {
+                ui_kit::report_header(ui, "Internal error", 3, "2026-10-18 21:04:12", "Report", |ui| {
+                    ui_kit::bin_button(ui, "Delete");
                 });
-                kit::text(ui, "solid.fillet · replayable", kit::Text::MonoNote("r1"));
-                kit::report_divider(ui, "gallery_reports");
-                kit::report_header(ui, "Panic", 1, "2026-10-17 09:12:40", "Report", |ui| {
-                    kit::bin_button(ui, "Delete");
+                ui_kit::text(ui, "solid.fillet · replayable", ui_kit::Text::MonoNote("r1"));
+                ui_kit::report_divider(ui, "gallery_reports");
+                ui_kit::report_header(ui, "Panic", 1, "2026-10-17 09:12:40", "Report", |ui| {
+                    ui_kit::bin_button(ui, "Delete");
                 });
             });
         });
         state(ui, "Empty", |ui| {
-            kit::empty_box(ui, "gallery_none", "No crash reports.");
+            ui_kit::empty_box(ui, "gallery_none", "No crash reports.");
         });
     },
 };
