@@ -17,7 +17,7 @@ pub(super) fn navigate(app: &mut SolveApp, action: Option<&str>, dir: Option<Vec
         params["direction"] = json!([d.x, d.y, d.z]);
     }
     // Preferences › Navigation: a view chosen on the navigator also frames the whole model (#10091).
-    if app.preferences.navigator_fit {
+    if app.preferences.navigation.navigator_fit {
         params["fit"] = json!(true);
     }
     let _ = app.run("view.navigate", params);
@@ -87,7 +87,7 @@ pub(super) fn arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
         ("up", vec2(0.0, -distance), vec2(0.0, 1.0), "Orbit up 90°"),
         ("down", vec2(0.0, distance), vec2(0.0, -1.0), "Orbit down 90°"),
     ] {
-        let (action, tooltip) = match app.preferences.invert_navigator_arrows.then(|| inverted_arrow(action)).flatten() {
+        let (action, tooltip) = match app.preferences.navigation.invert_navigator_arrows.then(|| inverted_arrow(action)).flatten() {
             Some(swapped) => (
                 swapped,
                 match swapped {
@@ -109,7 +109,7 @@ pub(super) fn arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
         ("counterclockwise", vec2(42.0, -72.0), vec2(40.0, 20.0), false, "Rotate view counterclockwise 90°"),
         ("clockwise", vec2(72.0, -42.0), vec2(20.0, 40.0), true, "Rotate view clockwise 90°"),
     ] {
-        let (action, tooltip) = match app.preferences.invert_curved_roll_arrows.then(|| inverted_roll(action)).flatten() {
+        let (action, tooltip) = match app.preferences.navigation.invert_curved_roll_arrows.then(|| inverted_roll(action)).flatten() {
             Some(swapped) => (swapped, if swapped == "clockwise" { "Rotate view clockwise 90°" } else { "Rotate view counterclockwise 90°" }),
             None => (action, tooltip),
         };

@@ -106,7 +106,7 @@ fn the_menu_closes_when_the_pointer_moves_away() {
 /// Off by default; with the preference off, selecting never opens the menu.
 #[test]
 fn opening_after_a_selection_is_off_by_default() {
-    assert!(!crate::prefs::Prefs::default().quick_menu_after_selection);
+    assert!(!crate::prefs::Prefs::default().navigation.quick_menu_after_selection);
     let mut h = sketch();
     h.app.menu.quick.click = Some((egui::pos2(200.0, 200.0), 0.0));
     h.app.session.selection = vec![curve("l2"), curve("l1")];
@@ -119,7 +119,7 @@ fn opening_after_a_selection_is_off_by_default() {
 #[test]
 fn with_the_preference_a_selecting_click_opens_the_menu() {
     let mut h = sketch();
-    h.app.preferences.quick_menu_after_selection = true;
+    h.app.preferences.navigation.quick_menu_after_selection = true;
     h.frames(2);
     let at = egui::pos2(400.0, 300.0);
     h.app.synthetic.push(egui::Event::PointerMoved(at));

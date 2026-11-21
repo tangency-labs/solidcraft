@@ -1153,8 +1153,8 @@ mod tests {
             for reversed in [false, true] {
                 for speed in [0.5, 2.0] {
                     let mut app = app();
-                    app.preferences.nav = "solidworks".into();
-                    app.preferences.free_orbit = true;
+                    app.preferences.navigation.nav = "solidworks".into();
+                    app.preferences.navigation.free_orbit = true;
                     app.preferences.space_mouse_reverse[3] = reversed;
                     app.preferences.space_mouse_axis_speed[3] = speed;
                     app.cam = initial;
@@ -1251,8 +1251,8 @@ mod tests {
     fn reverse_zoom_setting_flips_the_wheel_and_leaves_the_cap() {
         let wheel_zooms_in = |reverse: bool| {
             let mut h = crate::scenario::Harness::new();
-            h.app.preferences.zoom_reverse = reverse;
-            h.app.preferences.smooth_wheel_zoom = false;
+            h.app.preferences.navigation.zoom_reverse = reverse;
+            h.app.preferences.navigation.smooth_wheel_zoom = false;
             h.call("ui.move", serde_json::json!({"x":800,"y":500}));
             let before = h.app.cam.half_height();
             h.call("ui.scroll", serde_json::json!({"x":800,"y":500,"delta":120}));
@@ -1264,7 +1264,7 @@ mod tests {
         // invert switch for that axis on or off.
         let cap_distance = |wheel_reversed: bool, cap_inverted: bool| {
             let mut app = app();
-            app.preferences.zoom_reverse = wheel_reversed;
+            app.preferences.navigation.zoom_reverse = wheel_reversed;
             app.preferences.space_mouse_reverse[1] = cap_inverted;
             let ctx = window(true);
             app.space_mouse.device = Some("hid 046d:c62b".into());
@@ -1847,7 +1847,7 @@ mod tests {
         bridge(&mut app, &ctx, BridgeMotion { zoom: -2.0, ..Default::default() }, &[]);
         assert!((app.cam.distance - panned.distance).abs() < 1e-9, "and back out to where it was");
         // Reverse zoom direction reverses it, as it does the wheel's.
-        app.preferences.zoom_reverse = true;
+        app.preferences.navigation.zoom_reverse = true;
         bridge(&mut app, &ctx, BridgeMotion { zoom: 2.0, ..Default::default() }, &[]);
         assert!(app.cam.distance > panned.distance);
     }
@@ -1857,7 +1857,7 @@ mod tests {
         let ctx = window(true);
         let mut app = app();
         app.preferences.nav_bridge_enabled = true;
-        app.preferences.look_at_anim = false;
+        app.preferences.navigation.look_at_anim = false;
         assert!(bridge(&mut app, &ctx, BridgeMotion::default(), &["top"]));
         let mut top = Camera::default();
         top.set_view(solidcraft_viewport::StandardView::Top);

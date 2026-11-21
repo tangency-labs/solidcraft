@@ -660,7 +660,7 @@ fn compass_keeps_signed_targets_hover_and_clicks_at_both_scales() {
             let mut h = Harness::new();
             h.call("ui.set", json!({"layout": mode}));
             h.call("ui.prefs", json!({"ui_scale": scale}));
-            h.app.preferences.look_at_anim = false;
+            h.app.preferences.navigation.look_at_anim = false;
             h.settle();
             let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
             assert_eq!(outer.size(), vec2(116.0, 116.0));
@@ -1407,7 +1407,7 @@ fn view_angles_readout_shows_only_when_on_and_applies_typed_angles() {
     for style in ["axes", "custom"] {
         let mut h = Harness::new();
         h.call("ui.prefs", json!({"navigator_style": style}));
-        h.app.preferences.look_at_anim = false;
+        h.app.preferences.navigation.look_at_anim = false;
         h.settle();
         let design = h.app.session.doc.to_json();
         assert!(!h.app.preferences.show_view_angles, "off by default");
@@ -1472,7 +1472,7 @@ fn view_angles_readout_shows_only_when_on_and_applies_typed_angles() {
 fn view_angles_card_zero_buttons_and_axis_locks() {
     use solidcraft_viewport::ViewAngles;
     let mut h = Harness::new();
-    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigation.look_at_anim = false;
     h.call("engine.execute", json!({"command": "view.angle_readout", "params": {"enabled": true}}));
     h.call("ui.view", json!({"view": "iso"}));
     h.settle();

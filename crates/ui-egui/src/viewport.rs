@@ -56,12 +56,7 @@ mod navigator_controls;
 #[path = "viewport_drag_layer.rs"]
 mod drag_layer;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NavMode {
-    Orbit,
-    Pan,
-    Zoom,
-}
+pub use solidcraft_ui_kit::prefs_navigation::NavMode;
 
 /// Each GPU callback consumes its view's pending scenes after all tiles are laid out. Keep the
 /// slots separate, along with the keys and geometry used to build those scenes.
@@ -10008,7 +10003,7 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
             rect,
             &[],
             ctx.pixels_per_point(),
-            app.preferences.navigator_style,
+            app.preferences.navigation.navigator_style,
             crate::view_confirm::size(app),
             navigation,
         ));
@@ -10077,16 +10072,6 @@ fn axis_tips(cam: &Camera, c: Pos2) -> Vec<crate::view_compass::Tip> {
     crate::view_compass::tips(&view_axes(cam), c)
 }
 
-/// The six signed world axes as `cam` poses them, for the navigator figure in Preferences: each
-/// one's screen direction (right and down) and depth along the camera's back.
-pub(crate) fn navigator_axes(cam: &Camera) -> [crate::ui_kit::NavigatorAxis; 6] {
-    let axes = view_axes(cam);
-    crate::view_compass::AXES.map(|(name, direction)| {
-        let ([x, y], depth) = axes.pose(direction);
-        crate::ui_kit::NavigatorAxis { name, direction, screen: vec2(x as f32, y as f32), depth }
-    })
-}
-
 #[cfg(test)]
 fn axis_hit(tips: &[crate::view_compass::Tip], p: Pos2) -> Option<usize> {
     crate::view_compass::hit(tips, p)
@@ -10112,7 +10097,7 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
     if let Some(crate::view_compass::OrbitStep { dx, dy, snap }) = orbit.step {
         app.cancel_view_animation();
         // The widget has no model point under the cursor, but an explicit origin pivot still applies.
-        let around_origin = app.preferences.orbit_around == crate::prefs::OrbitAround::Origin;
+        let around_origin = app.preferences.navigation.orbit_around == crate::prefs::OrbitAround::Origin;
         orbit_drag(app, rect, dx, dy, None, snap, around_origin);
     }
     orbit.orbiting
@@ -10169,7 +10154,7 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         axes: view_axes(&app.cam),
         hover: ui.input(|i| i.pointer.hover_pos()).filter(|p| ui.is_enabled() && ui.rect_contains_pointer(rect) && !crate::shell::covered(app, *p)),
         orbiting,
-        snap_hint: !app.preferences.free_orbit,
+        snap_hint: !app.preferences.navigation.free_orbit,
         home_label: solidcraft_ui_text::tr_label("Home view").to_owned(),
     };
     // The compass returns a tip or Home; its drag came from `axis_view_orbit` above.
@@ -14023,7 +14008,7 @@ mod tests {
         for preset in crate::prefs::NAV_PRESETS.iter().map(|p| p.id) {
             let ctx = crate::fonts::test_context();
             let mut app = hover_app(false);
-            app.preferences.nav = preset.into();
+            app.preferences.navigation.nav = preset.into();
             app.set_origin_shown(false);
             hover_frame(&mut app, &ctx, vec![]);
             let point = projection(&app, app.viewport.rect.unwrap()).to_screen(Vec3::ZERO).unwrap();
@@ -14051,7 +14036,7 @@ mod tests {
             for action in ["orbit", "tool", "point", "click"] {
                 let ctx = crate::fonts::test_context();
                 let mut app = hover_app(false);
-                app.preferences.nav = preset.into();
+                app.preferences.navigation.nav = preset.into();
                 app.set_origin_shown(false);
                 hover_frame(&mut app, &ctx, vec![]);
                 let point = projection(&app, app.viewport.rect.unwrap()).to_screen(Vec3::ZERO).unwrap();
@@ -14107,7 +14092,7 @@ mod tests {
         for action in ["point", "box", "tool"] {
             let ctx = crate::fonts::test_context();
             let mut app = hover_app(false);
-            app.preferences.nav = crate::prefs::OPENSCAD_NAV.into();
+            app.preferences.navigation.nav = crate::prefs::OPENSCAD_NAV.into();
             app.set_origin_shown(false);
             hover_frame(&mut app, &ctx, vec![]);
             let point = projection(&app, app.viewport.rect.unwrap()).to_screen(Vec3::ZERO).unwrap();
@@ -14176,7 +14161,7 @@ mod tests {
             for (frames, is_click) in clicks.iter().map(|f| (f, true)).chain([(&drag, false)]) {
                 let ctx = crate::fonts::test_context();
                 let mut app = hover_app(false);
-                app.preferences.nav = nav.into();
+                app.preferences.navigation.nav = nav.into();
                 hover_frame(&mut app, &ctx, vec![]);
                 let before = app.cam;
                 for (k, events) in frames.iter().enumerate() {
@@ -14210,7 +14195,7 @@ mod tests {
         ] {
             let ctx = crate::fonts::test_context();
             let mut app = hover_app(false);
-            app.preferences.nav = crate::prefs::OPENSCAD_NAV.into();
+            app.preferences.navigation.nav = crate::prefs::OPENSCAD_NAV.into();
             hover_frame(&mut app, &ctx, vec![]);
             let point = projection(&app, app.viewport.rect.unwrap()).to_screen(Vec3::ZERO).unwrap();
             let p = if button == egui::PointerButton::Primary { point + vec2(80.0, 80.0) } else { point };
@@ -14257,7 +14242,7 @@ mod tests {
         for alt in [false, true] {
             let ctx = crate::fonts::test_context();
             let mut app = hover_app(false);
-            app.preferences.nav = "touchpad".into();
+            app.preferences.navigation.nav = "touchpad".into();
             let p = pos2(350.0, 300.0);
             hover_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(p)]);
             let before = app.cam;
@@ -14298,7 +14283,7 @@ mod tests {
             for canvas in [true, false] {
                 for alt in [true, false] {
                     let mut h = crate::scenario::Harness::new();
-                    h.app.preferences.nav = "touchpad".into();
+                    h.app.preferences.navigation.nav = "touchpad".into();
                     h.app.preferences.value_boxes_in_view = canvas;
                     if command == "solid.move" {
                         h.app.run("solid.box", json!({"length":30,"width":20,"height":10})).unwrap();
@@ -14382,7 +14367,7 @@ mod tests {
         s.execute("solid.box", &json!({"length":20,"width":20,"height":20})).unwrap();
         s.selection = vec![Sel::Body { name: "Body1".into() }];
         let mut app = SolveApp::new(s, crate::Services::default());
-        app.preferences.nav = "touchpad".into();
+        app.preferences.navigation.nav = "touchpad".into();
         app.start("solid.move");
         app.dialog.as_mut().unwrap().focus = false;
         let p = pos2(100.0, 100.0);
@@ -14410,8 +14395,8 @@ mod tests {
     fn touchpad_motion_preserves_input_ownership_and_rearms_without_jumping() {
         let ctx = crate::fonts::test_context();
         let mut app = hover_app(false);
-        app.preferences.nav = "touchpad".into();
-        app.preferences.orbit_around = crate::prefs::OrbitAround::Cursor;
+        app.preferences.navigation.nav = "touchpad".into();
+        app.preferences.navigation.orbit_around = crate::prefs::OrbitAround::Cursor;
         let p = pos2(350.0, 300.0);
         let alt = egui::Modifiers { alt: true, ..Default::default() };
         hover_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(p)]);
@@ -14462,7 +14447,7 @@ mod tests {
     fn touchpad_focus_and_preset_changes_discard_old_motion() {
         let ctx = crate::fonts::test_context();
         let mut app = hover_app(false);
-        app.preferences.nav = "touchpad".into();
+        app.preferences.navigation.nav = "touchpad".into();
         let alt = egui::Modifiers { alt: true, ..Default::default() };
         let frame = |app: &mut SolveApp, focused: bool, p: Pos2| {
             let mut out = ctx.run_ui(
@@ -14484,11 +14469,11 @@ mod tests {
         assert_eq!(app.cam, before, "focus loss and regain must not jump");
         frame(&mut app, true, pos2(360.0, 300.0));
         assert!((app.cam.yaw - before.yaw - 0.08).abs() < 1e-6);
-        app.preferences.nav = "fusion".into();
+        app.preferences.navigation.nav = "fusion".into();
         let before = app.cam;
         frame(&mut app, true, pos2(450.0, 300.0));
         assert_eq!(app.cam, before);
-        app.preferences.nav = "touchpad".into();
+        app.preferences.navigation.nav = "touchpad".into();
         frame(&mut app, true, pos2(500.0, 300.0));
         assert_eq!(app.cam, before, "changing presets must rearm before moving");
         app.viewport.spin = true;
@@ -14500,9 +14485,9 @@ mod tests {
     #[test]
     fn touchpad_vertical_trackpad_scroll_zooms_without_overwriting_saved_pan() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.nav = "touchpad".into();
-        h.app.preferences.smooth_wheel_zoom = false;
-        h.app.preferences.zoom_to_cursor = false;
+        h.app.preferences.navigation.nav = "touchpad".into();
+        h.app.preferences.navigation.smooth_wheel_zoom = false;
+        h.app.preferences.navigation.zoom_to_cursor = false;
         h.call("ui.move", json!({"x":800,"y":500}));
         let before = h.app.cam;
         for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
@@ -14517,11 +14502,11 @@ mod tests {
         }
         assert!((h.app.cam.distance - before.distance * (-0.18_f64).exp()).abs() < 1e-6);
         assert_eq!(h.app.cam.target, before.target);
-        assert!(h.app.preferences.trackpad_pan);
+        assert!(h.app.preferences.navigation.trackpad_pan);
         let after = h.app.cam;
         h.frames(60);
         assert_eq!(h.app.cam, after);
-        h.app.preferences.nav = "fusion".into();
+        h.app.preferences.navigation.nav = "fusion".into();
         for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
             h.app.synthetic.push(egui::Event::MouseWheel {
                 source: egui::MouseWheelSource::Unknown,
@@ -14868,7 +14853,7 @@ mod tests {
     #[test]
     fn the_lit_face_does_not_change_while_the_view_is_rotated() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
+        h.app.preferences.navigation.orbit_around = crate::prefs::OrbitAround::Origin;
         h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 400, "width": 400, "height": 200, "corner": [-200,-200,-100]}}));
         h.app.set_origin_shown(false);
         h.app.cam = Camera { target: Vec3::ZERO, yaw: 0.3, pitch: 0.15, roll: 0.0, distance: 700.0, fov: 0.0, up: Default::default() };
@@ -14978,7 +14963,7 @@ mod tests {
     #[test]
     fn the_highlight_goes_off_while_the_view_moves_with_the_preference_off() {
         let mut h = top_view();
-        h.app.preferences.keep_hover_while_navigating = false;
+        h.app.preferences.navigation.keep_hover_while_navigating = false;
         let at = face_pixel(&h);
 
         h.call("ui.move", json!({"x": at.x, "y": at.y}));
@@ -16600,9 +16585,9 @@ mod tests {
     #[test]
     fn immediate_wheel_zoom_applies_normalized_input_once() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.smooth_wheel_zoom = false;
-        h.app.preferences.trackpad_pan = false;
-        h.app.preferences.zoom_to_cursor = false;
+        h.app.preferences.navigation.smooth_wheel_zoom = false;
+        h.app.preferences.navigation.trackpad_pan = false;
+        h.app.preferences.navigation.zoom_to_cursor = false;
         h.call("ui.move", json!({"x":800,"y":500}));
         let before = h.app.cam;
         let line = h.ctx.options(|o| o.input_options.line_scroll_speed);
@@ -16625,7 +16610,7 @@ mod tests {
             assert_eq!(h.app.cam, after, "idle frames must not replay wheel input");
         }
         assert_eq!(h.app.cam.target, before.target);
-        h.app.preferences.zoom_reverse = true;
+        h.app.preferences.navigation.zoom_reverse = true;
         let height = h.app.cam.half_height();
         h.call("ui.scroll", json!({"x":800,"y":500,"delta":120}));
         assert!((h.app.cam.half_height() - height * 0.18_f64.exp()).abs() < 1e-6);
@@ -16634,8 +16619,8 @@ mod tests {
     #[test]
     fn wheel_zoom_setting_changes_do_not_replay_smoothing() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.zoom_to_cursor = false;
-        h.app.preferences.trackpad_pan = false;
+        h.app.preferences.navigation.zoom_to_cursor = false;
+        h.app.preferences.navigation.trackpad_pan = false;
         h.call("ui.move", json!({"x":800,"y":500}));
         h.app.synthetic.push(egui::Event::MouseWheel {
             source: egui::MouseWheelSource::Unknown,
@@ -16646,15 +16631,15 @@ mod tests {
         });
         h.frame();
         assert!(h.ctx.input(|i| i.is_scrolling()));
-        h.app.preferences.smooth_wheel_zoom = false;
+        h.app.preferences.navigation.smooth_wheel_zoom = false;
         let stopped = h.app.cam;
         h.frame();
         assert_eq!(h.app.cam, stopped);
-        h.app.preferences.smooth_wheel_zoom = true;
+        h.app.preferences.navigation.smooth_wheel_zoom = true;
         h.frames(90);
         assert_eq!(h.app.cam, stopped, "re-enabling must not replay the old smoothing tail");
         assert!(!h.app.viewport.wheel_zoom_raw_until_idle);
-        h.app.preferences.smooth_wheel_zoom = false;
+        h.app.preferences.navigation.smooth_wheel_zoom = false;
         for _ in 0..3 {
             h.app.synthetic.push(egui::Event::MouseWheel {
                 source: egui::MouseWheelSource::Unknown,
@@ -16689,10 +16674,10 @@ mod tests {
                         // must leave main's own handling (Cmd/Ctrl + wheel is a pinch, #8480) unchanged.
                         let run = |choice| {
                             let mut h = crate::scenario::Harness::new();
-                            h.app.preferences.nav = preset.into();
-                            h.app.preferences.trackpad_zoom_modifier = choice;
-                            h.app.preferences.zoom_reverse = reverse;
-                            h.app.preferences.zoom_to_cursor = false;
+                            h.app.preferences.navigation.nav = preset.into();
+                            h.app.preferences.navigation.trackpad_zoom_modifier = choice;
+                            h.app.preferences.navigation.zoom_reverse = reverse;
+                            h.app.preferences.navigation.zoom_to_cursor = false;
                             h.call("ui.move", json!({"x":800,"y":500}));
                             let before = h.app.cam;
                             let event = |phase| egui::Event::MouseWheel {
@@ -16736,7 +16721,7 @@ mod tests {
     fn trackpad_zoom_modifier_ignores_horizontal_only_scroll() {
         for chosen in [crate::prefs::TrackpadZoomModifier::Cmd, crate::prefs::TrackpadZoomModifier::Alt] {
             let mut h = crate::scenario::Harness::new();
-            h.app.preferences.trackpad_zoom_modifier = chosen;
+            h.app.preferences.navigation.trackpad_zoom_modifier = chosen;
             h.call("ui.move", json!({"x":800,"y":500}));
             let before = h.app.cam;
             for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
@@ -16759,9 +16744,9 @@ mod tests {
         for preset in ["fusion", crate::prefs::TOUCHPAD_NAV] {
             for unit in [egui::MouseWheelUnit::Point, egui::MouseWheelUnit::Line] {
                 let mut h = crate::scenario::Harness::new();
-                h.app.preferences.nav = preset.into();
-                h.app.preferences.smooth_wheel_zoom = false;
-                h.app.preferences.trackpad_zoom_modifier = crate::prefs::TrackpadZoomModifier::Cmd;
+                h.app.preferences.navigation.nav = preset.into();
+                h.app.preferences.navigation.smooth_wheel_zoom = false;
+                h.app.preferences.navigation.trackpad_zoom_modifier = crate::prefs::TrackpadZoomModifier::Cmd;
                 h.call("engine.execute", json!({"command":"solid.box","params":{"length":40,"width":30,"height":20}}));
                 h.call("ui.camera", json!({"fit":true}));
                 h.call("ui.move", json!({"x":800,"y":500}));
@@ -16793,7 +16778,7 @@ mod tests {
         for preset in ["fusion", crate::prefs::TOUCHPAD_NAV] {
             for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
                 let mut h = crate::scenario::Harness::new();
-                h.app.preferences.nav = preset.into();
+                h.app.preferences.navigation.nav = preset.into();
                 h.call("ui.move", json!({"x":800,"y":500}));
                 let before = h.app.cam;
                 for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
@@ -16816,8 +16801,8 @@ mod tests {
     #[test]
     fn trackpad_two_finger_scroll_pans_without_zooming() {
         let mut h = crate::scenario::Harness::new();
-        assert!(h.app.preferences.trackpad_pan, "two-finger pan is the default");
-        h.app.preferences.zoom_to_cursor = false;
+        assert!(h.app.preferences.navigation.trackpad_pan, "two-finger pan is the default");
+        h.app.preferences.navigation.zoom_to_cursor = false;
         h.call("ui.move", json!({"x":800,"y":500}));
         let gesture = |phase| egui::Event::MouseWheel {
             source: egui::MouseWheelSource::Unknown,
@@ -16840,7 +16825,7 @@ mod tests {
         h.frames(30);
         assert_eq!(h.app.cam, after, "pan must not drift once input stops");
         // Bare moves are a mouse: vertical zooms…
-        h.app.preferences.smooth_wheel_zoom = false;
+        h.app.preferences.navigation.smooth_wheel_zoom = false;
         h.app.synthetic.push(egui::Event::MouseWheel {
             source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
@@ -16863,7 +16848,7 @@ mod tests {
         assert_eq!(h.app.cam.half_height(), zoomed.half_height());
         assert_ne!(h.app.cam.target, zoomed.target);
         // Opting out restores the legacy wheel behaviour for all point input.
-        h.app.preferences.trackpad_pan = false;
+        h.app.preferences.navigation.trackpad_pan = false;
         h.app.synthetic.push(egui::Event::MouseWheel {
             source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
@@ -16918,8 +16903,8 @@ mod tests {
     #[test]
     fn fusion_shift_two_finger_scroll_orbits_without_pan_zoom_or_drift() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.nav = "fusion".into();
-        h.app.preferences.orbit_around = crate::prefs::OrbitAround::ViewCentre;
+        h.app.preferences.navigation.nav = "fusion".into();
+        h.app.preferences.navigation.orbit_around = crate::prefs::OrbitAround::ViewCentre;
         h.call("engine.execute", json!({"command":"solid.box","params":{"length":40,"width":30,"height":20}}));
         h.call("ui.camera", json!({"fit":true}));
         h.call("ui.move", json!({"x":800,"y":500}));
@@ -16964,9 +16949,9 @@ mod tests {
     fn reversed_trackpad_orbit_turns_the_other_way_and_leaves_pan_alone() {
         let step = |orbit_reverse: bool, modifiers: egui::Modifiers| {
             let mut h = crate::scenario::Harness::new();
-            h.app.preferences.nav = "fusion".into();
-            h.app.preferences.orbit_around = crate::prefs::OrbitAround::ViewCentre;
-            h.app.preferences.orbit_reverse = orbit_reverse;
+            h.app.preferences.navigation.nav = "fusion".into();
+            h.app.preferences.navigation.orbit_around = crate::prefs::OrbitAround::ViewCentre;
+            h.app.preferences.navigation.orbit_reverse = orbit_reverse;
             h.call("ui.move", json!({"x":800,"y":500}));
             let gesture = |phase| egui::Event::MouseWheel {
                 source: egui::MouseWheelSource::Unknown,
@@ -16993,8 +16978,8 @@ mod tests {
     #[test]
     fn fusion_trackpad_uses_each_events_modifiers_and_can_switch_mid_gesture() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.nav = "fusion".into();
-        h.app.preferences.orbit_around = crate::prefs::OrbitAround::ViewCentre;
+        h.app.preferences.navigation.nav = "fusion".into();
+        h.app.preferences.navigation.orbit_around = crate::prefs::OrbitAround::ViewCentre;
         h.call("ui.move", json!({"x":800,"y":500}));
         let gesture = |phase, modifiers| egui::Event::MouseWheel {
             source: egui::MouseWheelSource::Unknown,
@@ -17053,8 +17038,8 @@ mod tests {
     fn fusion_trackpad_inertia_stops_when_shift_changes() {
         use egui::{Modifiers, TouchPhase::*};
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.nav = "fusion".into();
-        h.app.preferences.orbit_around = crate::prefs::OrbitAround::ViewCentre;
+        h.app.preferences.navigation.nav = "fusion".into();
+        h.app.preferences.navigation.orbit_around = crate::prefs::OrbitAround::ViewCentre;
         h.call("ui.move", json!({"x":800,"y":500}));
         let gesture = |phase, modifiers| egui::Event::MouseWheel {
             source: egui::MouseWheelSource::Unknown,
@@ -17120,9 +17105,9 @@ mod tests {
         for preset in crate::prefs::NAV_PRESETS.iter().map(|preset| preset.id) {
             for trackpad_pan in [true, false] {
                 let mut h = crate::scenario::Harness::new();
-                h.app.preferences.nav = preset.into();
-                h.app.preferences.trackpad_pan = trackpad_pan;
-                h.app.preferences.zoom_to_cursor = false;
+                h.app.preferences.navigation.nav = preset.into();
+                h.app.preferences.navigation.trackpad_pan = trackpad_pan;
+                h.app.preferences.navigation.zoom_to_cursor = false;
                 h.call("ui.move", json!({"x":800,"y":500}));
                 let before = h.app.cam;
                 for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
@@ -17153,10 +17138,10 @@ mod tests {
     #[test]
     fn blender_two_finger_scroll_orbits_and_shift_scroll_pans() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.nav = "blender".into();
+        h.app.preferences.navigation.nav = "blender".into();
         // The orbit turns about the origin, so the expected camera is exact (#14651 moved the
         // view's centre pivot to the middle of the view, which moves the camera's target).
-        h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
+        h.app.preferences.navigation.orbit_around = crate::prefs::OrbitAround::Origin;
         h.call("ui.move", json!({"x":800,"y":500}));
         let gesture = |phase, modifiers| egui::Event::MouseWheel {
             source: egui::MouseWheelSource::Unknown,
@@ -17198,7 +17183,7 @@ mod tests {
                 continue;
             }
             let mut h = crate::scenario::Harness::new();
-            h.app.preferences.nav = preset.into();
+            h.app.preferences.navigation.nav = preset.into();
             h.call("ui.move", json!({"x":800,"y":500}));
             let before = h.app.cam;
             for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
@@ -17219,8 +17204,8 @@ mod tests {
         }
         // With two-finger panning off the scroll zooms like the wheel, in Blender too.
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.nav = "blender".into();
-        h.app.preferences.trackpad_pan = false;
+        h.app.preferences.navigation.nav = "blender".into();
+        h.app.preferences.navigation.trackpad_pan = false;
         h.call("ui.move", json!({"x":800,"y":500}));
         let height = h.app.cam.half_height();
         for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
@@ -17239,8 +17224,8 @@ mod tests {
     #[test]
     fn fusion_shift_trackpad_respects_orbit_centre_and_rejects_invalid_motion() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.nav = "fusion".into();
-        h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
+        h.app.preferences.navigation.nav = "fusion".into();
+        h.app.preferences.navigation.orbit_around = crate::prefs::OrbitAround::Origin;
         h.app.cam.target = Vec3::new(30.0, 20.0, 10.0);
         h.call("ui.move", json!({"x":800,"y":500}));
         let before = h.app.cam;
@@ -17271,8 +17256,8 @@ mod tests {
     #[test]
     fn pinch_gesture_zooms_and_ignores_noise() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.smooth_wheel_zoom = false;
-        h.app.preferences.zoom_to_cursor = false;
+        h.app.preferences.navigation.smooth_wheel_zoom = false;
+        h.app.preferences.navigation.zoom_to_cursor = false;
         h.call("ui.move", json!({"x":800,"y":500}));
         let height = h.app.cam.half_height();
         let target = h.app.cam.target;
@@ -17281,7 +17266,7 @@ mod tests {
         let zoomed = h.app.cam.half_height();
         assert!(((zoomed - height / 1.2) / (height / 1.2)).abs() < 1e-6, "spread must zoom in");
         assert_eq!(h.app.cam.target, target, "centre zoom keeps the target");
-        h.app.preferences.zoom_reverse = true;
+        h.app.preferences.navigation.zoom_reverse = true;
         let height = h.app.cam.half_height();
         h.app.synthetic.push(egui::Event::Zoom(1.2));
         h.frame();
@@ -17301,14 +17286,14 @@ mod tests {
     #[test]
     fn trackpad_twist_turns_the_view_about_the_up_axis() {
         let mut h = crate::scenario::Harness::new();
-        assert!(!h.app.preferences.trackpad_twist_turns, "the twist is opt-in");
+        assert!(!h.app.preferences.navigation.trackpad_twist_turns, "the twist is opt-in");
         h.call("ui.move", json!({"x":800,"y":500}));
         h.frame();
         let untouched = h.app.cam;
         h.app.synthetic.push(egui::Event::Rotate(-0.3));
         h.frame();
         assert_eq!(h.app.cam, untouched, "by default the twist does nothing, as before");
-        h.app.preferences.trackpad_twist_turns = true;
+        h.app.preferences.navigation.trackpad_twist_turns = true;
         let before = h.app.cam;
         // egui counts clockwise: -0.3 is a counter-clockwise twist of 0.3 rad.
         h.app.synthetic.push(egui::Event::Rotate(-0.3));
@@ -17318,7 +17303,7 @@ mod tests {
         assert_eq!((turned.pitch, turned.roll, turned.distance), (before.pitch, before.roll, before.distance));
         assert_eq!(turned.target, before.target, "about the view's centre the target stays");
 
-        h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
+        h.app.preferences.navigation.orbit_around = crate::prefs::OrbitAround::Origin;
         h.app.cam.target = Vec3::new(30.0, -20.0, 5.0);
         let before = h.app.cam;
         let origin = before.frame_coords(Vec3::ZERO);
@@ -17330,7 +17315,7 @@ mod tests {
 
         // Under the cursor: the pivot is picked once and kept through the gaps of a slow twist,
         // then let go when the twist pauses.
-        h.app.preferences.orbit_around = crate::prefs::OrbitAround::Cursor;
+        h.app.preferences.navigation.orbit_around = crate::prefs::OrbitAround::Cursor;
         h.frames(30);
         assert!(h.app.viewport.twist_pivot.is_none());
         h.app.synthetic.push(egui::Event::Rotate(-0.1));
@@ -17381,7 +17366,7 @@ mod tests {
         h.app.synthetic.push(egui::Event::Rotate(f32::NAN));
         h.frame();
         assert_eq!(h.app.cam, still, "a non-finite twist leaves the camera still");
-        h.app.preferences.trackpad_twist_turns = false;
+        h.app.preferences.navigation.trackpad_twist_turns = false;
         h.app.synthetic.push(egui::Event::Rotate(0.5));
         h.frame();
         assert_eq!(h.app.cam, still, "with the preference turned off again the twist does nothing");
@@ -17435,7 +17420,7 @@ mod tests {
         h.call("ui.move", json!({"x": at.x, "y": at.y}));
         h.frames(2);
         let pinched = h.app.cam;
-        h.app.preferences.smooth_wheel_zoom = false;
+        h.app.preferences.navigation.smooth_wheel_zoom = false;
         h.call("ui.scroll", json!({"x": at.x, "y": at.y, "delta": 120.0}));
         h.frames(2);
         assert_ne!(h.app.cam.half_height(), pinched.half_height(), "the wheel over the box zooms");
@@ -17494,7 +17479,7 @@ mod tests {
     fn trackpad_gestures_over_dialogs_do_not_move_the_view() {
         let ctx = crate::fonts::test_context();
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-        assert!(app.preferences.trackpad_pan);
+        assert!(app.preferences.navigation.trackpad_pan);
         crate::help::run(&mut app, &ctx, "shortcuts");
         let mut time = 0.0;
         let pan = |phase, modifiers| egui::Event::MouseWheel {
@@ -17562,8 +17547,8 @@ mod tests {
         for smooth in [true, false] {
             let ctx = crate::fonts::test_context();
             let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-            app.preferences.smooth_wheel_zoom = smooth;
-            app.preferences.trackpad_pan = false;
+            app.preferences.navigation.smooth_wheel_zoom = smooth;
+            app.preferences.navigation.trackpad_pan = false;
             crate::help::run(&mut app, &ctx, "shortcuts");
             let mut time = 0.0;
             let mut frame = |app: &mut SolveApp, pointer: Option<Pos2>, wheel: f32| {
@@ -17670,8 +17655,8 @@ mod tests {
         ] {
             let mut h = Harness::new();
             h.call("ui.set", json!({"layout":layout}));
-            h.app.preferences.smooth_wheel_zoom = smooth;
-            h.app.preferences.zoom_to_cursor = false;
+            h.app.preferences.navigation.smooth_wheel_zoom = smooth;
+            h.app.preferences.navigation.zoom_to_cursor = false;
             h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}}));
             h.call("ui.start", json!({"command": "material.assign"}));
             let field = handle_at("dialog:Material").expect("the dialog's material field");
@@ -17879,7 +17864,7 @@ mod tests {
         h.call("ui.prefs", json!({"navigator_fit":true}));
         h.call("ui.prefs", json!({"open":"Navigation"}));
         h.call("ui.prefs", json!({"button":"defaults"}));
-        assert!(!h.app.preferences.navigator_fit, "Navigation defaults restore the in-place turn");
+        assert!(!h.app.preferences.navigation.navigator_fit, "Navigation defaults restore the in-place turn");
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert_eq!(h.app.session.undo.len(), undo, "a view change edits nothing");
     }
@@ -17912,8 +17897,8 @@ mod tests {
             for snap in [false, true] {
                 let mut h = crate::scenario::Harness::new();
                 h.call("ui.prefs", json!({"navigator_style":"axes", "look_at_anim":false}));
-                h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
-                h.app.preferences.free_orbit = free;
+                h.app.preferences.navigation.orbit_around = crate::prefs::OrbitAround::Origin;
+                h.app.preferences.navigation.free_orbit = free;
                 h.app.cam = Camera { target: Vec3::new(40.0, -25.0, 15.0), yaw: 0.3, pitch: 0.2, distance: 200.0, fov: 0.6, ..Default::default() };
                 h.frames(2);
                 let initial = h.app.cam;
@@ -17947,7 +17932,7 @@ mod tests {
             h.app.run("solid.box", json!({"length":10, "width":10, "height":10})).unwrap();
             h.settle();
             h.call("ui.view", json!({"view":"front"}));
-            h.app.preferences.orbit_around = around;
+            h.app.preferences.navigation.orbit_around = around;
             // The model and the camera's target differ, so choosing a model pivot would move it.
             h.app.cam.target = Vec3::new(40.0, -25.0, 15.0);
             h.frames(2);
@@ -18229,7 +18214,7 @@ mod tests {
     #[test]
     fn snapping_keeps_the_origin_still() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
+        h.app.preferences.navigation.orbit_around = crate::prefs::OrbitAround::Origin;
         h.app.run("solid.box", json!({"length":40,"width":40,"height":40})).unwrap();
         h.app.fit_view();
         let rect = h.app.viewport.rect.unwrap();
@@ -18252,7 +18237,7 @@ mod tests {
         for perspective in [false, true] {
             for offset in [vec2(30.0, 20.0), vec2(-60.0, 10.0), vec2(120.0, -40.0)] {
                 let mut h = crate::scenario::Harness::new();
-                h.app.preferences.orbit_around = crate::prefs::OrbitAround::Cursor;
+                h.app.preferences.navigation.orbit_around = crate::prefs::OrbitAround::Cursor;
                 h.app.ui.perspective = perspective;
                 h.app.run("solid.box", json!({"length":80,"width":50,"height":20})).unwrap();
                 h.app.fit_view();
@@ -18282,7 +18267,7 @@ mod tests {
     fn an_erratic_cursor_orbit_keeps_its_pivot_and_comes_back() {
         for perspective in [false, true] {
             let mut h = crate::scenario::Harness::new();
-            h.app.preferences.orbit_around = crate::prefs::OrbitAround::Cursor;
+            h.app.preferences.navigation.orbit_around = crate::prefs::OrbitAround::Cursor;
             h.app.ui.perspective = perspective;
             h.app.run("solid.box", json!({"length":80,"width":50,"height":20})).unwrap();
             h.app.fit_view();
@@ -18339,7 +18324,7 @@ mod tests {
         let rect = h.app.viewport.rect.unwrap();
         let at = rect.center() + vec2(30.0, 20.0);
         let under = crate::prefs::pivot_under(&h.app, &projection(&h.app, rect), at);
-        assert!(h.app.preferences.mark_orbit_point, "the mark is on by default");
+        assert!(h.app.preferences.navigation.mark_orbit_point, "the mark is on by default");
         for (around, mark, want) in [
             (OrbitAround::Cursor, true, Some(under)),
             (OrbitAround::Origin, true, Some(solidcore_record::Vec3::ZERO)),
@@ -18347,8 +18332,8 @@ mod tests {
             (OrbitAround::Cursor, false, None),
             (OrbitAround::Origin, false, None),
         ] {
-            h.app.preferences.orbit_around = around;
-            h.app.preferences.mark_orbit_point = mark;
+            h.app.preferences.navigation.orbit_around = around;
+            h.app.preferences.navigation.mark_orbit_point = mark;
             h.app.viewport.orbit_pivot = None;
             h.app.viewport.orbit_pivot_at = None;
             h.app.viewport.orbit_mark = None;
@@ -18356,8 +18341,8 @@ mod tests {
             assert_eq!(h.app.viewport.orbit_mark, want, "{around:?}, mark {mark}");
         }
         // A real drag: the mark is there while the button is down and gone after it is released.
-        h.app.preferences.orbit_around = OrbitAround::Origin;
-        h.app.preferences.mark_orbit_point = true;
+        h.app.preferences.navigation.orbit_around = OrbitAround::Origin;
+        h.app.preferences.navigation.mark_orbit_point = true;
         h.app.viewport.orbit_mark = None;
         let shift = egui::Modifiers { shift: true, ..Default::default() };
         let send = |h: &mut crate::scenario::Harness, e: egui::Event| {
@@ -18379,7 +18364,7 @@ mod tests {
     #[test]
     fn shift_orbit_keeps_cursor_pivot_and_default_middle_pan() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.orbit_around = crate::prefs::OrbitAround::Cursor;
+        h.app.preferences.navigation.orbit_around = crate::prefs::OrbitAround::Cursor;
         h.app.run("solid.box", json!({"length":40,"width":40,"height":40})).unwrap();
         h.app.fit_view();
         let rect = h.app.viewport.rect.unwrap();
@@ -18409,7 +18394,7 @@ mod tests {
     fn preset_shift_middle_orbit_is_free_but_shift_right_orbit_snaps() {
         for preset in ["fusion", "inventor"] {
             let mut h = crate::scenario::Harness::new();
-            h.app.preferences.nav = preset.into();
+            h.app.preferences.navigation.nav = preset.into();
             h.call("ui.view", json!({"view":"front"}));
             let before = h.app.cam;
             let centre = orbit_centre(&h);
@@ -18432,7 +18417,7 @@ mod tests {
     #[test]
     fn a_middle_press_after_unseen_pointer_motion_does_not_jump_the_orbit() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.nav = "blender".into();
+        h.app.preferences.navigation.nav = "blender".into();
         h.call("ui.view", json!({"view":"front"}));
         let from = h.app.viewport.rect.unwrap().center();
         h.frame_with(vec![egui::Event::PointerMoved(from)]);
@@ -18458,7 +18443,7 @@ mod tests {
     #[test]
     fn a_second_button_pressed_during_an_orbit_keeps_that_frames_motion() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.nav = "blender".into();
+        h.app.preferences.navigation.nav = "blender".into();
         h.call("ui.view", json!({"view":"front"}));
         let at = h.app.viewport.rect.unwrap().center();
         let button = |button, pressed, pos| egui::Event::PointerButton { pos, button, pressed, modifiers: egui::Modifiers::NONE };
@@ -18486,7 +18471,7 @@ mod tests {
         for keeps in [true, false] {
             for (first, then) in [(shift, egui::Modifiers::NONE), (egui::Modifiers::NONE, shift)] {
                 let mut h = crate::scenario::Harness::new();
-                h.app.preferences.nav_drag_keeps_mode = keeps;
+                h.app.preferences.navigation.nav_drag_keeps_mode = keeps;
                 h.call("ui.view", json!({"view":"front"}));
                 let start = h.app.cam;
                 let start_centre = orbit_centre(&h);
@@ -18769,7 +18754,7 @@ mod tests {
     fn a_shift_marquee_adds_the_other_region_of_an_imported_svg_sketch() {
         let mut h = crate::scenario::Harness::new();
         // Leave room for the marquee's endpoints outside the fitted sketch.
-        h.app.preferences.home_fit_size = 0.8;
+        h.app.preferences.navigation.home_fit_size = 0.8;
         let svg = r#"<svg width="80mm" height="40mm" viewBox="0 0 80 40"><path d="M0 0 H30 V30 H0 Z"/><path d="M50 0 H80 V30 H50 Z"/></svg>"#;
         let imported = h.app.run("sketch.insert_svg", json!({"text": svg})).unwrap();
         let sketch = imported["sketch"].as_u64().unwrap();

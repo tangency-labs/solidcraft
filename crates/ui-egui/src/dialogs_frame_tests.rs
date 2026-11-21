@@ -573,7 +573,7 @@ fn rotate_member_parallel_to_fills_the_angle() {
 #[test]
 fn rotate_member_dial_sets_the_angle() {
     let mut h = post_harness();
-    h.app.preferences.nav = "openscad".into();
+    h.app.preferences.navigation.nav = "openscad".into();
     h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
     h.app.start("frame.rotate_member");
     h.frames(3);

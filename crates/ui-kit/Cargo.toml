@@ -21,6 +21,7 @@ solidcraft-ui-registry = { workspace = true }
 solidcraft-ui-text = { workspace = true }
 solidcraft-color = { workspace = true }
 # The blurred backing behind translucent panels: drawn over the viewport's GPU picture.
+solidcraft-viewport = { workspace = true }
 solidcraft-viewport-egui = { workspace = true }
 solidcraft-viewport-gpu = { workspace = true }
 egui = { workspace = true }

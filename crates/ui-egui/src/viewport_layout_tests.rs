@@ -657,7 +657,7 @@ fn host_normal_to_keeps_distance_and_selection_while_generic_view_follow_remains
         for perspective in [false, true] {
             let mut h = Harness::new();
             h.app.home.open = false;
-            h.app.preferences.look_at_anim = false;
+            h.app.preferences.navigation.look_at_anim = false;
             h.call("ui.resize", json!({"width":1400,"height":900}));
             h.app.run("solid.box", json!({"length":40,"width":30,"height":10})).unwrap();
             h.settle();
@@ -764,12 +764,12 @@ fn fit_home_animation_and_manual_takeover_use_one_layout_solution() {
         h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":1})).unwrap();
         h.settle();
         for view in ["fit", "home"] {
-            h.app.preferences.look_at_anim = false;
+            h.app.preferences.navigation.look_at_anim = false;
             h.app.animate_view(view);
             h.settle();
             let immediate = h.app.cam;
             h.app.cam.pan(50.0, 10.0, 400.0);
-            h.app.preferences.look_at_anim = true;
+            h.app.preferences.navigation.look_at_anim = true;
             h.app.animate_view(view);
             h.settle();
             assert_eq!(h.app.cam, immediate);
@@ -791,7 +791,7 @@ fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
                 let mut h = Harness::new();
                 h.call("ui.set", json!({"layout":mode}));
                 h.call("ui.prefs", json!({"navigator_style":style}));
-                h.app.preferences.look_at_anim = false;
+                h.app.preferences.navigation.look_at_anim = false;
                 h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
                 h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":1})).unwrap();
                 h.call("ui.prefs", json!({"ui_scale":scale}));

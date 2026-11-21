@@ -128,13 +128,13 @@ fn profile_panel_layout_is_checked_separately_from_ordinary_preferences() {
 fn switching_profiles_applies_every_setting_at_once() {
     let mut h = Harness::new();
     h.app.preferences.ui_scale = 1.0;
-    h.app.preferences.nav = "fusion".into();
+    h.app.preferences.navigation.nav = "fusion".into();
     assert_eq!(run(&mut h, "settings.profile.save", json!({"name": "Laptop"})), json!({"name": "Laptop"}));
 
     h.app.preferences.ui_scale = 1.5;
-    h.app.preferences.nav = "solidworks".into();
-    h.app.preferences.mouse_gestures.enabled = true;
-    h.app.preferences.radial_context_menu = true;
+    h.app.preferences.navigation.nav = "solidworks".into();
+    h.app.preferences.navigation.mouse_gestures.enabled = true;
+    h.app.preferences.navigation.radial_context_menu = true;
     h.app.keymap.custom.insert("solid.extrude".into(), vec!["E".into(), "Shift+E".into()]);
     h.app.sbox.pinned = vec!["solid.fillet".into()];
     h.app.toolbar_custom.panels.insert("DESIGN/SOLID/CREATE".into(), vec!["solid.box".into()]);
@@ -143,14 +143,14 @@ fn switching_profiles_applies_every_setting_at_once() {
 
     let out = run(&mut h, "settings.profile.apply", json!({"name": "Laptop"}));
     assert_eq!((out["name"].as_str(), out["skipped"].as_array().map(Vec::len)), (Some("Laptop"), Some(0)), "{out}");
-    assert_eq!((h.app.preferences.ui_scale, h.app.preferences.nav.as_str()), (1.0, "fusion"));
-    assert!(!h.app.preferences.mouse_gestures.enabled && !h.app.preferences.radial_context_menu);
+    assert_eq!((h.app.preferences.ui_scale, h.app.preferences.navigation.nav.as_str()), (1.0, "fusion"));
+    assert!(!h.app.preferences.navigation.mouse_gestures.enabled && !h.app.preferences.navigation.radial_context_menu);
     assert!(h.app.keymap.custom.is_empty() && h.app.sbox.pinned.is_empty() && h.app.toolbar_custom.panels.is_empty());
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
 
     run(&mut h, "settings.profile.apply", json!({"name": "Large monitor"}));
-    assert_eq!((h.app.preferences.ui_scale, h.app.preferences.nav.as_str()), (1.5, "solidworks"));
-    assert!(h.app.preferences.mouse_gestures.enabled && h.app.preferences.radial_context_menu);
+    assert_eq!((h.app.preferences.ui_scale, h.app.preferences.navigation.nav.as_str()), (1.5, "solidworks"));
+    assert!(h.app.preferences.navigation.mouse_gestures.enabled && h.app.preferences.navigation.radial_context_menu);
     assert_eq!(h.app.keymap.custom.get("solid.extrude").map(Vec::as_slice), Some(&["E".to_string(), "Shift+E".to_string()][..]));
     assert_eq!(h.app.sbox.pinned, ["solid.fillet"]);
     assert_eq!(h.app.toolbar_custom.panels.get("DESIGN/SOLID/CREATE"), Some(&vec!["solid.box".to_string()]));
@@ -291,20 +291,20 @@ fn export_and_import_go_through_one_file_and_import_never_switches() {
     let path = dir.join("laptop.json");
     let path = path.to_str().unwrap();
     let mut h = Harness::new();
-    h.app.preferences.zoom_reverse = true;
+    h.app.preferences.navigation.zoom_reverse = true;
     run(&mut h, "settings.profile.save", json!({"name": "Laptop"}));
     let out = run(&mut h, "settings.profile.export", json!({"name": "Laptop", "path": path}));
     assert_eq!(out["profile"]["format"], FORMAT);
     let written: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     assert_eq!(written, out["profile"]);
 
-    h.app.preferences.zoom_reverse = false;
+    h.app.preferences.navigation.zoom_reverse = false;
     run(&mut h, "settings.profile.save", json!({"name": "Desk"}));
     assert_eq!(run(&mut h, "settings.profile.import", json!({"path": path})), json!({"name": "Laptop 2"}));
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"), "an import doesn't switch");
-    assert!(!h.app.preferences.zoom_reverse);
+    assert!(!h.app.preferences.navigation.zoom_reverse);
     run(&mut h, "settings.profile.apply", json!({"name": "Laptop 2"}));
-    assert!(h.app.preferences.zoom_reverse);
+    assert!(h.app.preferences.navigation.zoom_reverse);
     assert_eq!(run(&mut h, "settings.profile.import", json!({"profile": written, "name": "Travel"})), json!({"name": "Travel"}));
 
     let big = dir.join("big.json");
@@ -355,7 +355,7 @@ fn hostile_profiles_are_refused_or_cut_down_without_panicking() {
     let out = run(&mut h, "settings.profile.apply", json!({"name": "Odd"}));
     assert_eq!((out["applied"].as_u64(), out["skipped"].clone()), (Some(1), json!(["ui_scale"])), "{out}");
     assert_eq!(h.app.preferences.ui_scale, before);
-    assert!(h.app.preferences.zoom_reverse);
+    assert!(h.app.preferences.navigation.zoom_reverse);
 
     for i in h.app.settings_profiles.list.len()..MAX_PROFILES {
         run(&mut h, "settings.profile.save", json!({ "name": format!("P{i}") }));
@@ -453,16 +453,16 @@ fn typing_a_profile_name_keeps_focus_out_of_preferences_search() {
 fn choosing_a_profile_in_preferences_applies_it() {
     let mut h = Harness::new();
     run(&mut h, "settings.profile.save", json!({"name": "Laptop"}));
-    h.app.preferences.zoom_reverse = true;
+    h.app.preferences.navigation.zoom_reverse = true;
     run(&mut h, "settings.profile.save", json!({"name": "Large monitor"}));
     run(&mut h, "settings.profile.apply", json!({"name": "Laptop"}));
-    assert!(!h.app.preferences.zoom_reverse);
+    assert!(!h.app.preferences.navigation.zoom_reverse);
     h.call("ui.prefs", json!({"open": "General"}));
     h.frames(3);
     h.step(&json!({"click": {"handle": "prefs:profile:Large monitor:apply"}})).unwrap();
     h.frames(3);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Large monitor"));
-    assert!(h.app.preferences.zoom_reverse);
+    assert!(h.app.preferences.navigation.zoom_reverse);
 }
 
 #[test]
@@ -577,7 +577,7 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
         );
         assert!(crate::scenario::rect_of("prefs:profile:Laptop:active").is_some());
         assert!(crate::scenario::rect_of("prefs:profile:Laptop:apply").is_none());
-        h.app.preferences.zoom_reverse = true;
+        h.app.preferences.navigation.zoom_reverse = true;
         h.frames(3);
         assert!(crate::scenario::rect_of("prefs:profile:Laptop:edited").is_some());
         assert!(crate::scenario::rect_of("prefs:profile:edited").is_some());
@@ -588,7 +588,7 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
         assert_eq!(h.app.settings_profiles.list[0]["preferences"]["zoom_reverse"], true);
         assert!(crate::scenario::rect_of("prefs:profile:Laptop:edited").is_none());
         assert!(crate::scenario::rect_of("prefs:profile:edited").is_none());
-        h.app.preferences.zoom_reverse = false;
+        h.app.preferences.navigation.zoom_reverse = false;
         h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
         h.step(&json!({"key":"A", "cmd":true})).unwrap();
         h.step(&json!({"text":"Desk"})).unwrap();
@@ -621,7 +621,7 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
         h.step(&json!({"click":{"handle":"prefs:profile:Laptop:apply"}})).unwrap();
         h.frames(3);
         assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
-        assert!(h.app.preferences.zoom_reverse);
+        assert!(h.app.preferences.navigation.zoom_reverse);
         assert_eq!(
             h.output
                 .accesskit_update
@@ -634,7 +634,7 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
             Some("Desk"),
             "applying a different row preserves the user-typed draft"
         );
-        h.app.preferences.zoom_reverse = false;
+        h.app.preferences.navigation.zoom_reverse = false;
         h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
         h.step(&json!({"key":"A", "cmd":true})).unwrap();
         h.step(&json!({"text":"Laptop"})).unwrap();
@@ -663,9 +663,9 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
 fn general_inactive_profile_rows_export_rename_import_and_delete_without_applying() {
     let mut h = Harness::new();
     h.app.home.open = false;
-    h.app.preferences.zoom_reverse = true;
+    h.app.preferences.navigation.zoom_reverse = true;
     run(&mut h, "settings.profile.save", json!({"name":"Laptop"}));
-    h.app.preferences.zoom_reverse = false;
+    h.app.preferences.navigation.zoom_reverse = false;
     run(&mut h, "settings.profile.save", json!({"name":"Desk"}));
     h.call("ui.prefs", json!({"language":"en", "open":"General"}));
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
@@ -688,7 +688,7 @@ fn general_inactive_profile_rows_export_rename_import_and_delete_without_applyin
     assert_eq!(exported["name"], "Laptop");
     assert_eq!(exported["preferences"]["zoom_reverse"], true);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
-    assert!(!h.app.preferences.zoom_reverse);
+    assert!(!h.app.preferences.navigation.zoom_reverse);
 
     h.step(&json!({"click":{"handle":"prefs:profile:Laptop:rename"}})).unwrap();
     h.frames(3);
@@ -698,7 +698,7 @@ fn general_inactive_profile_rows_export_rename_import_and_delete_without_applyin
     h.frames(3);
     assert_eq!(h.app.settings_profiles.names(), ["Travel", "Desk"]);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
-    assert!(!h.app.preferences.zoom_reverse);
+    assert!(!h.app.preferences.navigation.zoom_reverse);
     assert!(h.app.prefs_window.shell.open && h.app.prefs_window.shell.filter.is_empty());
     assert_eq!(
         h.output
@@ -723,7 +723,7 @@ fn general_inactive_profile_rows_export_rename_import_and_delete_without_applyin
     }
     assert_eq!(h.app.settings_profiles.names(), ["Travel", "Desk", "Laptop"]);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
-    assert!(!h.app.preferences.zoom_reverse, "import keeps the active settings");
+    assert!(!h.app.preferences.navigation.zoom_reverse, "import keeps the active settings");
     h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
     h.step(&json!({"text":"Next profile"})).unwrap();
     h.step(&json!({"click":{"handle":"prefs:profile:Travel:delete"}})).unwrap();
@@ -733,7 +733,7 @@ fn general_inactive_profile_rows_export_rename_import_and_delete_without_applyin
     h.step(&json!({"click":{"handle":"prefs:profile:Desk:delete"}})).unwrap();
     h.frames(3);
     assert_eq!(h.app.settings_profiles.active, None);
-    assert!(!h.app.preferences.zoom_reverse, "deleting never applies another row");
+    assert!(!h.app.preferences.navigation.zoom_reverse, "deleting never applies another row");
     assert_eq!(
         h.output
             .accesskit_update
@@ -930,7 +930,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     let defaults = crate::prefs::Prefs::default();
     assert!(!defaults.keep_work_on_tab_switch && !defaults.line_hover_tangent_arc && !defaults.ribbon_menus_follow_hover);
     for (key, page) in [("keep_work_on_tab_switch", crate::prefs::PAGE_LAYOUT), ("line_hover_tangent_arc", crate::prefs::PAGE_SKETCH)] {
-        let homes: Vec<_> = crate::prefs::FIELD_PAGES.iter().filter_map(|(field, page)| (*field == key).then_some(*page)).collect();
+        let homes: Vec<_> = crate::prefs::field_pages().into_iter().filter_map(|(field, page)| (field == key).then_some(page)).collect();
         assert_eq!(homes, [Some(page)], "{key} keeps its new page home");
     }
     h.app.preferences.nav_bridge_enabled = true;
@@ -941,9 +941,9 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.viewport_analysis_status = false;
     h.app.preferences.keep_work_on_tab_switch = true;
     h.app.preferences.line_hover_tangent_arc = true;
-    h.app.preferences.navigator_fit = true;
-    h.app.preferences.invert_navigator_arrows = true;
-    h.app.preferences.home_fit_size = 0.5;
+    h.app.preferences.navigation.navigator_fit = true;
+    h.app.preferences.navigation.invert_navigator_arrows = true;
+    h.app.preferences.navigation.home_fit_size = 0.5;
     h.app.preferences.ribbon_click_ends_tool = false;
     h.app.preferences.ribbon_menus_follow_hover = true;
     h.app.preferences.sketch_face_activates_part = true;
@@ -982,9 +982,9 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.viewport_analysis_status = true;
     h.app.preferences.keep_work_on_tab_switch = false;
     h.app.preferences.line_hover_tangent_arc = false;
-    h.app.preferences.navigator_fit = defaults.navigator_fit;
-    h.app.preferences.invert_navigator_arrows = defaults.invert_navigator_arrows;
-    h.app.preferences.home_fit_size = defaults.home_fit_size;
+    h.app.preferences.navigation.navigator_fit = defaults.navigation.navigator_fit;
+    h.app.preferences.navigation.invert_navigator_arrows = defaults.navigation.invert_navigator_arrows;
+    h.app.preferences.navigation.home_fit_size = defaults.navigation.home_fit_size;
     h.app.preferences.ribbon_click_ends_tool = defaults.ribbon_click_ends_tool;
     h.app.preferences.ribbon_menus_follow_hover = defaults.ribbon_menus_follow_hover;
     h.app.preferences.sketch_face_activates_part = defaults.sketch_face_activates_part;
@@ -998,7 +998,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
         let imported = run(&mut h, "settings.profile.import", json!({"profile":invalid, "name":"Invalid fit"}));
         let out = run(&mut h, "settings.profile.apply", json!({"name":imported["name"]}));
         assert_eq!(out["skipped"], json!(["home_fit_size"]));
-        assert_eq!(h.app.preferences.home_fit_size, 0.5, "an out-of-range profile value is refused");
+        assert_eq!(h.app.preferences.navigation.home_fit_size, 0.5, "an out-of-range profile value is refused");
     }
 }
 
@@ -1015,7 +1015,7 @@ fn theme_day_and_night_are_captured_restored_and_saved_in_appearance_profiles() 
     run(&mut h, "settings.profile.apply", json!({"name":"System pair"}));
     assert_eq!((&h.app.preferences.theme_day[..], &h.app.preferences.theme_night[..]), ("akari", "onyx"));
     for key in ["theme_day", "theme_night"] {
-        let pages: Vec<_> = crate::prefs::FIELD_PAGES.iter().filter(|(field, _)| *field == key).map(|(_, page)| *page).collect();
+        let pages: Vec<_> = crate::prefs::field_pages().into_iter().filter(|(field, _)| *field == key).map(|(_, page)| page).collect();
         assert_eq!(pages, [Some(crate::prefs::PAGE_APPEARANCE)]);
     }
 }
@@ -1026,7 +1026,7 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     h.app.home.open = false;
     h.app.preferences.language = "en".into();
     run(&mut h, "settings.profile.save", json!({"name":"Laptop"}));
-    h.app.preferences.zoom_reverse = true;
+    h.app.preferences.navigation.zoom_reverse = true;
     run(&mut h, "settings.profile.save", json!({"name":"Desk"}));
     h.call("ui.prefs", json!({"open":"Tools"}));
     h.frames(3);
@@ -1044,7 +1044,7 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     h.step(&json!({"click":{"handle":"dialog:list:Laptop"}})).unwrap();
     h.frames(3);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
-    assert!(!h.app.preferences.zoom_reverse);
+    assert!(!h.app.preferences.navigation.zoom_reverse);
     h.step(&json!({"widget":"General"})).unwrap();
     assert_eq!(
         h.output
@@ -1142,14 +1142,14 @@ fn a_profile_carries_the_view_navigators_body_and_one_without_leaves_it_alone() 
     let mut other = Harness::new();
     run(&mut other, "settings.profile.save", json!({"name": "Plain"}));
     assert_eq!(run(&mut other, "settings.profile.import", json!({"profile": exported})), json!({"name": "Gizmo"}));
-    assert!(other.app.preferences.navigator_arrows && other.app.preferences.navigator_home, "before the profile: the defaults");
+    assert!(other.app.preferences.navigation.navigator_arrows && other.app.preferences.navigation.navigator_home, "before the profile: the defaults");
     run(&mut other, "settings.profile.apply", json!({"name": "Gizmo"}));
     let shape = other.app.view_gizmo.shape.as_ref().expect("the profile brings the body along");
-    assert!(!other.app.preferences.navigator_arrows && !other.app.preferences.navigator_home, "and the arrows and Home");
+    assert!(!other.app.preferences.navigation.navigator_arrows && !other.app.preferences.navigation.navigator_home, "and the arrows and Home");
     assert_eq!(shape.name, body);
     assert_eq!(shape.mesh.triangles.len(), h.app.view_gizmo.shape.as_ref().unwrap().mesh.triangles.len());
-    assert_eq!(other.app.preferences.navigator_style, crate::prefs::NavigatorStyle::Custom);
-    assert_eq!(other.app.preferences.navigator_texture, crate::prefs::NavigatorTexture::Modeled);
+    assert_eq!(other.app.preferences.navigation.navigator_style, crate::prefs::NavigatorStyle::Custom);
+    assert_eq!(other.app.preferences.navigation.navigator_texture, crate::prefs::NavigatorTexture::Modeled);
 
     // A profile saved before a body was chosen keeps the current body.
     run(&mut other, "settings.profile.apply", json!({"name": "Plain"}));

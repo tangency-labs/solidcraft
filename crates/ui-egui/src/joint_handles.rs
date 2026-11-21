@@ -915,7 +915,7 @@ mod tests {
     fn empty_space_handles_own_the_drag_in_every_navigation_preset() {
         for preset in crate::prefs::NAV_PRESETS {
             let (mut h, _) = assembly("slider", Vec3::X, false);
-            h.app.preferences.nav = preset.id.into();
+            h.app.preferences.navigation.nav = preset.id.into();
             // Anchor at the far face so the outward arrow lies beyond the long arm.
             if let Some(Sel::Face { point, .. }) = h.app.session.selection.first_mut() {
                 *point = Vec3::new(60., 0., 10.);

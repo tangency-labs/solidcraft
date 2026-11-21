@@ -121,7 +121,7 @@ pub(crate) fn watch(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// The preference is on and nothing else has the pointer: no menu, tool or dialog.
 fn after_selection_ready(app: &SolveApp) -> bool {
-    app.preferences.quick_menu_after_selection && app.viewport.context_menu.is_none() && app.tool.is_none() && app.dialog.is_none()
+    app.preferences.navigation.quick_menu_after_selection && app.viewport.context_menu.is_none() && app.tool.is_none() && app.dialog.is_none()
 }
 
 #[cfg(test)]

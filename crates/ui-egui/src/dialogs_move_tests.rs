@@ -90,7 +90,7 @@ fn editing_a_move_in_a_turned_component_keeps_world_distances() {
 #[test]
 fn rotate_handle_updates_the_angle_without_moving_the_camera() {
     let mut h = crate::scenario::Harness::new();
-    h.app.preferences.nav = "openscad".into();
+    h.app.preferences.navigation.nav = "openscad".into();
     h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
     h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
     h.app.cam.distance = 180.0;

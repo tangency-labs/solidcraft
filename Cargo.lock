@@ -6506,6 +6506,7 @@ dependencies = [
  "solidcraft-theme",
  "solidcraft-ui-registry",
  "solidcraft-ui-text",
+ "solidcraft-viewport",
  "solidcraft-viewport-egui",
  "solidcraft-viewport-gpu",
  "syn 2.0.119",

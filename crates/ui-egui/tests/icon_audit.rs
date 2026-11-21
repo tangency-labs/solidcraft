@@ -400,7 +400,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         offer: Box::new(|| Some(solidcraft_ui_egui::install::Offer::Prompt)),
         prompt: Box::new(|| {}),
     });
-    h.app.preferences.radial_context_menu = true;
+    h.app.preferences.navigation.radial_context_menu = true;
     assert_eq!(h.call("ui.icon_audit", json!({"reset":true}))["ok"], true);
     h.app.session.run_script(&solidcraft_engine::sample::script()).unwrap();
     h.frames(3);

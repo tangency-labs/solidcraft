@@ -34,7 +34,7 @@ fn concentric_accepts_a_circle_and_point_before_or_after_starting_the_tool() {
         for reverse in [false, true] {
             for origin in [false, true] {
                 let mut h = Harness::new();
-                h.app.preferences.look_at_anim = false;
+                h.app.preferences.navigation.look_at_anim = false;
                 h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
                 h.app.run("sketch.circle.center", json!({"center": [30, 20], "radius": 8, "id": "c1"})).unwrap();
                 let target = if origin {

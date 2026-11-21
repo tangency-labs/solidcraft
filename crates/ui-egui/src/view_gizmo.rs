@@ -354,7 +354,7 @@ pub(crate) fn menu_items(app: &SolveApp) -> Vec<Item> {
                 NavigatorStyle::Axes => (app.tr("prefs.axes"), "origin"),
                 NavigatorStyle::Custom => (solidcraft_ui_text::tr_label("Custom"), "body"),
             };
-            act("ui.navigatorStyle", label, icon).with(json!({ "style": style })).key(if app.preferences.navigator_style == style {
+            act("ui.navigatorStyle", label, icon).with(json!({ "style": style })).key(if app.preferences.navigation.navigator_style == style {
                 "current"
             } else {
                 ""
@@ -406,30 +406,30 @@ pub(crate) fn command(app: &mut SolveApp, v: &Value) -> Result<Value, String> {
     }
     let p = &mut app.preferences;
     if let Some(style) = style {
-        p.navigator_style = style;
+        p.navigation.navigator_style = style;
     }
     if let Some(texture) = texture {
-        p.navigator_texture = texture;
+        p.navigation.navigator_texture = texture;
     }
     if let Some(on) = field("arrows").and_then(|x| x.as_bool()) {
-        p.navigator_arrows = on;
+        p.navigation.navigator_arrows = on;
     }
     if let Some(on) = field("home").and_then(|x| x.as_bool()) {
-        p.navigator_home = on;
+        p.navigation.navigator_home = on;
     }
     Ok(json!({
-        "style": p.navigator_style,
+        "style": p.navigation.navigator_style,
         "body": app.view_gizmo.shape.as_ref().map(|s| s.name.clone()),
-        "texture": p.navigator_texture,
-        "arrows": p.navigator_arrows,
-        "home": p.navigator_home,
+        "texture": p.navigation.navigator_texture,
+        "arrows": p.navigation.navigator_arrows,
+        "home": p.navigation.navigator_home,
     }))
 }
 
 /// The custom navigator's texture, arrows and Home, as a settings profile keeps them.
 pub(crate) fn profile_settings(app: &SolveApp) -> Value {
     let p = &app.preferences;
-    json!({"texture": p.navigator_texture, "arrows": p.navigator_arrows, "home": p.navigator_home})
+    json!({"texture": p.navigation.navigator_texture, "arrows": p.navigation.navigator_arrows, "home": p.navigation.navigator_home})
 }
 
 /// A profile's navigator settings cut down to the ones this version reads.
@@ -450,13 +450,13 @@ pub(crate) fn checked_profile_settings(v: &Value) -> Value {
 pub(crate) fn apply_profile_settings(app: &mut SolveApp, v: &Value) {
     let p = &mut app.preferences;
     if let Some(t) = v.get("texture").and_then(|t| serde_json::from_value(t.clone()).ok()) {
-        p.navigator_texture = t;
+        p.navigation.navigator_texture = t;
     }
     if let Some(on) = v.get("arrows").and_then(Value::as_bool) {
-        p.navigator_arrows = on;
+        p.navigation.navigator_arrows = on;
     }
     if let Some(on) = v.get("home").and_then(Value::as_bool) {
-        p.navigator_home = on;
+        p.navigation.navigator_home = on;
     }
 }
 
@@ -483,7 +483,15 @@ pub(crate) fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             body.items.push(Sel::Body { name: shape.name.clone() });
         }
         let p = &app.preferences;
-        (Kind::ViewNavigator(Form { texture: p.navigator_texture, arrows: p.navigator_arrows, home: p.navigator_home, preview: None }), vec![body])
+        (
+            Kind::ViewNavigator(Form {
+                texture: p.navigation.navigator_texture,
+                arrows: p.navigation.navigator_arrows,
+                home: p.navigation.navigator_home,
+                preview: None,
+            }),
+            vec![body],
+        )
     })
 }
 
@@ -548,7 +556,7 @@ pub(crate) struct Shown {
 
 /// The navigator the view lays out for: Custom stands as the signed axes until a body is chosen.
 pub(crate) fn style(app: &SolveApp) -> NavigatorStyle {
-    match app.preferences.navigator_style {
+    match app.preferences.navigation.navigator_style {
         NavigatorStyle::Custom if app.view_gizmo.shape.is_none() => NavigatorStyle::Axes,
         style => style,
     }
@@ -568,11 +576,11 @@ pub(crate) fn shown(app: &SolveApp) -> Shown {
             home: form.home,
         },
         _ => Shown {
-            style: p.navigator_style,
+            style: p.navigation.navigator_style,
             shape: app.view_gizmo.shape.clone(),
-            texture: p.navigator_texture,
-            arrows: p.navigator_arrows,
-            home: p.navigator_home,
+            texture: p.navigation.navigator_texture,
+            arrows: p.navigation.navigator_arrows,
+            home: p.navigation.navigator_home,
         },
     }
 }
@@ -763,7 +771,7 @@ mod tests {
             assert_eq!(current.len(), 1);
             assert_eq!(current[0].params.as_ref().map(|p| p["style"].clone()), Some(json!(from)));
             assert_eq!(h.call("ui.menuPick", json!({"item": pick}))["ok"], true, "{pick}");
-            assert_eq!(h.app.preferences.navigator_style, to, "Axes applies at once");
+            assert_eq!(h.app.preferences.navigation.navigator_style, to, "Axes applies at once");
             assert!(h.app.dialog.is_none());
         }
         assert_eq!(h.app.session.doc.to_json(), design);
@@ -773,18 +781,18 @@ mod tests {
     #[test]
     fn custom_opens_a_panel_whose_ok_sets_the_navigator_and_cancel_leaves_it() {
         let mut h = crate::scenario::Harness::new();
-        h.app.preferences.look_at_anim = false;
+        h.app.preferences.navigation.look_at_anim = false;
         h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10})).unwrap();
         h.frames(2);
         let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
         let open = |h: &mut crate::scenario::Harness| {
-            let before = h.app.preferences.navigator_style;
+            let before = h.app.preferences.navigation.navigator_style;
             let c = crate::scenario::rect_of("axis_view:outer").unwrap().center();
             h.call("ui.click", json!({"x": c.x, "y": c.y, "button": "right"}));
             assert_eq!(h.call("ui.menuPick", json!({"item": "Custom"}))["ok"], true);
             h.frames(2);
             assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::ViewNavigator(_))), "the Custom View Navigator panel");
-            assert_eq!(h.app.preferences.navigator_style, before, "nothing changes before OK");
+            assert_eq!(h.app.preferences.navigation.navigator_style, before, "nothing changes before OK");
         };
         // Pick the body as a click in the view would, and turn Home off (it starts on).
         let fill = |h: &mut crate::scenario::Harness| {
@@ -805,8 +813,8 @@ mod tests {
         h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
         h.frames(2);
         assert!(h.app.dialog.is_none());
-        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes, "Cancel keeps the axes");
-        assert!(h.app.view_gizmo.shape.is_none() && h.app.preferences.navigator_home, "Cancel keeps Home on");
+        assert_eq!(h.app.preferences.navigation.navigator_style, NavigatorStyle::Axes, "Cancel keeps the axes");
+        assert!(h.app.view_gizmo.shape.is_none() && h.app.preferences.navigation.navigator_home, "Cancel keeps Home on");
 
         let undo = h.app.session.undo.len();
         open(&mut h);
@@ -814,10 +822,10 @@ mod tests {
         h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
         h.frames(2);
         assert!(h.app.dialog.is_none());
-        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
+        assert_eq!(h.app.preferences.navigation.navigator_style, NavigatorStyle::Custom);
         assert_eq!(h.app.view_gizmo.shape.as_ref().map(|s| s.name.as_str()), Some(body.as_str()));
-        assert!(!h.app.preferences.navigator_home && h.app.preferences.navigator_arrows);
-        assert_eq!(h.app.preferences.navigator_texture, NavigatorTexture::Modeled);
+        assert!(!h.app.preferences.navigation.navigator_home && h.app.preferences.navigation.navigator_arrows);
+        assert_eq!(h.app.preferences.navigation.navigator_texture, NavigatorTexture::Modeled);
         assert_eq!(h.app.session.undo.len(), undo, "the navigator is never part of the design");
 
         // Opened again, the panel starts from the navigator as it is.

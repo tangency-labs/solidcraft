@@ -106,7 +106,7 @@ pub(crate) fn contents(app: &SolveApp) -> Contents {
         editing: edited.map(|name| solidcraft_ui_text::format("status.editing", &[("name", &crate::i18n::tr_name(&name))])),
         sketch: sketch.map(SketchState::of),
         units: app.session.doc.units.clone(),
-        navigation: crate::prefs::nav_preset(&app.preferences.nav).translated_label().to_string(),
+        navigation: crate::prefs::nav_preset(&app.preferences.navigation.nav).translated_label().to_string(),
     }
 }
 

@@ -902,7 +902,7 @@ fn actual_host_fit_and_centring_respect_the_shared_sketch_options_at_both_scales
     for scale in [1.0, 2.0] {
         let mut h = Harness::new();
         h.app.home.open = false;
-        h.app.preferences.look_at_anim = false;
+        h.app.preferences.navigation.look_at_anim = false;
         h.call("ui.resize", json!({"width":1400,"height":1000}));
         h.call("ui.prefs", json!({"ui_scale":scale}));
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -1255,7 +1255,7 @@ fn sketch_options_and_compass_share_measured_clearance() {
     for style in [crate::prefs::NavigatorStyle::Axes] {
         for (width, height, scale) in [(1400.0, 900.0, 1.0), (700.0, 720.0, 2.0)] {
             let mut h = Harness::new();
-            h.app.preferences.navigator_style = style;
+            h.app.preferences.navigation.navigator_style = style;
             h.call("ui.resize", json!({"width":width,"height":height}));
             h.call("ui.prefs", json!({"ui_scale":scale}));
             h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -1297,7 +1297,7 @@ fn short_sketch_options_paints_and_scrolls_inside_the_viewport() {
     for style in [crate::prefs::NavigatorStyle::Axes] {
         for height in [475, 385, 300] {
             let mut h = Harness::new();
-            h.app.preferences.navigator_style = style;
+            h.app.preferences.navigation.navigator_style = style;
             h.call("ui.resize", json!({"width":700,"height":height}));
             h.call("ui.prefs", json!({"ui_scale":2.0}));
             h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -2023,7 +2023,7 @@ fn status_bar_mouse_mapping_opens_the_mappings_and_picks_one_as_the_preferences_
     // Each mapping, picked from the menu, sets what Preferences › Navigation sets for it.
     for preset in crate::prefs::NAV_PRESETS {
         let mut expected = h.app.preferences.clone();
-        crate::prefs::choose_nav_preset(&mut expected, preset);
+        expected.navigation.choose_preset(preset);
         if h.app.viewport.context_menu.is_none() {
             h.step(&json!({"click":{"handle":"status:navigation"}})).unwrap();
             h.settle();
