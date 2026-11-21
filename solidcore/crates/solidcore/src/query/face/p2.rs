@@ -695,6 +695,8 @@ pub fn face_vertices(
 /// `SmBSplineSurface` (B-spline, plane, surface of revolution) without it; `None`
 /// when nothing changes (`SmTemporaryChangeValue` on `GetOutOfBoundsEnabled()`).
 fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Surface>> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let surface = surface.geometry();
     let enabled = match surface.kind() {
         SurfaceKind::BSpline(s) => s.is_out_of_bounds_enabled(),
         SurfaceKind::ProceduralBlend(pb) => {

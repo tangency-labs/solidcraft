@@ -453,6 +453,8 @@ pub fn nurbs_partials<T: GnScalar>(
 ///
 /// Those of making the NURB.
 pub fn as_b_spline<'a>(k: &Kernel, s: &'a Surface) -> Result<Option<Cow<'a, BSplineSurface>>> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let s = s.geometry();
     Ok(match s.kind_with_nurb(k)? {
         SurfaceKind::BSpline(b) => Some(Cow::Borrowed(b)),
         SurfaceKind::ProceduralBlend(pb) => {

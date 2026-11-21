@@ -1085,6 +1085,8 @@ impl SurfOfRevolution {
         test_surface: &Surface,
         tolerance_scale: f64,
     ) -> Result<Option<Self>> {
+        // (a curve-bounded surface is its basis over the same parameters)
+        let test_surface = test_surface.geometry();
         // low work - already a SmSurfOfRevolution
         if let SurfaceKind::SurfOfRevolution(s) = test_surface.kind() {
             return Ok(Some(s.copy()));

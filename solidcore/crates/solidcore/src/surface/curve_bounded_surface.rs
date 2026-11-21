@@ -41,15 +41,23 @@
 //! - **Object model.** The surface is the [`SurfaceKind::CurveBounded`] kind of
 //!   [`Surface`]; the `SmSurface` virtuals it does not override run the base-class
 //!   defaults there. Its own overrides pass the call along to the basis surface.
-//! - **Knots and iso curves** (not upstream, whose class overrides neither): `GetKnots`
-//!   ([`Surface::knots`], [`Surface::knots_with_nurb`]) and `CreateIsoParametricCurve`
-//!   ([`Surface::create_iso_parametric_curve`]) answer the basis surface's, as the
-//!   evaluators do. The surface is its basis over the same parameters (every evaluator
+//! - **Geometry queries answer the basis's** (not upstream, whose class overrides only
+//!   the evaluators, the natural domain, `GetRootSurface`, `operator==`, `WriteToDB` and
+//!   `AssertValid`). The surface is its basis over the same parameters: every evaluator
 //!   passes `uv` along unchanged, and the edits that could move a parameterisation,
 //!   `Reverse`, `Reparameterize`, `SwapUV`, `Transform`, `TrimWithDomain` and `SplitAt`,
-//!   are refused for this kind), so the basis's knots are the surface's. Upstream answers
-//!   `SM_ERR` there, so every continuity query, `LiftCurve` and surface cache tree on
-//!   the surface failed.
+//!   are refused for this kind. So every query whose answer is a function of the basis
+//!   geometry over its parameters answers the basis's: knots, degrees, control-point
+//!   counts, the analytic and STEP domains and conversions, STEP inversion, iso curves,
+//!   point drop, plane and surface intersection, the bilinear, planar, closed, parallel,
+//!   seam, singularity and degenerate point/curve tests, the surface's bounding boxes
+//!   (upstream's `CalculateBoundingBox` is the box of the whole surface's cache tree,
+//!   not of the bounded region), the cache-tree inputs ([`Surface::geometry`]) and the
+//!   out-of-bounds evaluation switch. The basis takes the surface's owner, owning face
+//!   and zone tolerance, as an offset surface's base does. Upstream answers `SM_ERR` or
+//!   a non-B-spline default there, so every continuity query, `LiftCurve` and surface
+//!   cache tree on the surface failed. The boundary curves bound nothing in these
+//!   answers, as upstream's evaluators ignore them too.
 //! - **Unported callees.** The basis surface's `EvaluateNormalAtSingularity`
 //!   (`surface.surface_p5`) is not in the [`Surface`] dispatch yet: that call returns
 //!   [`SolidError::Unported`]. The other basis-surface calls (`EvaluateSimple`,
@@ -94,6 +102,13 @@ const OP_WRITE: &str = "surface::curve_bounded_surface::CurveBoundedSurface::wri
 
 /// `SmCurveBoundedSurface_TYPE`.
 pub const TYPE: i64 = surface_p2::CURVE_BOUNDED_SURFACE_TYPE;
+
+/// The owner a curve-bounded surface gives its basis (not upstream): a surface of this
+/// type, through which the basis reaches the face the curve-bounded surface belongs to.
+pub const BASIS_OWNER: crate::geom::object::ObjectRef = crate::geom::object::ObjectRef {
+    type_code: TYPE,
+    key: crate::geom::attribute::ObjectKey(0),
+};
 /// `GetTypeString()` of `SmCurveBoundedSurface`.
 pub const TYPE_STRING: &str = "SmCurveBoundedSurface_TYPE";
 /// `GetClassString()` of `SmCurveBoundedSurface`.
@@ -159,6 +174,11 @@ impl CurveBoundedSurface {
     /// The basis surface, mutable, for [`Surface::detach_nurb_cells`].
     pub(crate) fn nested_surfaces_mut(&mut self) -> Vec<&mut Surface> {
         vec![self.basis.as_mut()]
+    }
+
+    /// The basis surface, mutable, for its owner ([`BASIS_OWNER`]).
+    pub(crate) fn basis_mut(&mut self) -> &mut Surface {
+        &mut self.basis
     }
 
     /// An evaluation copy retaining exact basis data, with Surface's `MAX_GEOMETRY_NESTING` bound.
@@ -762,8 +782,9 @@ mod tests {
             s.evaluate(k, uv, 1, 1, f).unwrap(),
             b.evaluate(uv, 1, 1, f).unwrap()
         );
-        // base-class defaults for what the class does not override
-        assert_eq!(s.degree(SurfParamType::U), surface_p2::base_degree());
+        // the basis's geometry queries (not upstream, whose base-class defaults answer
+        // them), and the base-class default for the copy the class does not override
+        assert_eq!(s.degree(SurfParamType::U), b.degree(SurfParamType::U));
         assert!(s.copy(&Kernel::default()).is_err());
         assert_eq!(
             c.evaluate_normal(k, uv, Side::Left, Side::Left).unwrap(),

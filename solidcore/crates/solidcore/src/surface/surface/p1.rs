@@ -1827,6 +1827,10 @@ impl Surface {
         flags: EvaluateFlags,
         d: &mut [[Vec3; 2]; 2],
     ) -> Result<()> {
+        // (not upstream: the basis surface over the same parameters)
+        if let SurfaceKind::CurveBounded(c) = self.kind() {
+            return c.basis().evaluate_simple_first_into(k, uv, flags, d);
+        }
         let base = match self.kind() {
             SurfaceKind::BSpline(s) => Some(s),
             SurfaceKind::BallPatch(s) => Some(s.net()),
@@ -2203,6 +2207,10 @@ impl Surface {
         k: &Kernel,
         uv_domain: &Extent2d,
     ) -> Result<Option<Extent3d>> {
+        // (not upstream: the basis surface over the same parameters)
+        if let SurfaceKind::CurveBounded(c) = self.kind() {
+            return c.basis().certified_bounding_box(k, uv_domain);
+        }
         Ok(match self.kind() {
             SurfaceKind::BSpline(s) => s.piece_box(uv_domain),
             SurfaceKind::Cone(_)
@@ -2235,6 +2243,17 @@ impl Surface {
         pseudo_guess: Option<&PseudoBox>,
         polar_guess: Option<&PolarBox>,
     ) -> Result<SurfaceBoxes> {
+        // (not upstream: the basis surface over the same parameters)
+        if let SurfaceKind::CurveBounded(c) = self.kind() {
+            return c.basis().calculate_bounding_box_with_guesses(
+                k,
+                uv_domain,
+                want,
+                expand_pos_boxes_by_zone_tol_3d,
+                pseudo_guess,
+                polar_guess,
+            );
+        }
         match self.kind() {
             // (SmSurfOfRevolution inherits the B-spline override)
             SurfaceKind::Cone(_)
@@ -2367,9 +2386,13 @@ impl Surface {
             SurfaceKind::BSpline(_)
             | SurfaceKind::ProceduralBlend(_)
             | SurfaceKind::BallPatch(_)
-            | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_) => self.natural_uv_domain_with_nurb_at(k, depth)?,
+            // (not upstream: the basis's, whose STEP evaluators the surface's are)
+            SurfaceKind::CurveBounded(s) => s.basis().step_uv_domain_with_nurb_at(
+                k,
+                nesting_depth(depth, "surface::surface::p1::step_uv_domain_with_nurb")?,
+            )?,
         })
     }
 
@@ -3160,6 +3183,10 @@ impl Surface {
         tol_3d: f64,
         uv_domain: Option<&Extent2d>,
     ) -> Result<bool> {
+        // (not upstream: the basis surface over the same parameters)
+        if let SurfaceKind::CurveBounded(c) = self.kind() {
+            return c.basis().is_degenerate_point(k, tol_3d, uv_domain);
+        }
         let natural = self.natural_uv_domain_with_nurb(k)?;
         match self.kind_with_nurb(k)? {
             SurfaceKind::BSpline(s) => s.is_degenerate_point(k, tol_3d, uv_domain),
@@ -3211,6 +3238,12 @@ impl Surface {
         uv_domain: Option<&Extent2d>,
         opt_3d_tol: f64,
     ) -> Result<bool> {
+        // (not upstream: the basis surface over the same parameters)
+        if let SurfaceKind::CurveBounded(c) = self.kind() {
+            return c
+                .basis()
+                .is_degenerate_curve(k, angle_tol_deg, uv_domain, opt_3d_tol);
+        }
         match self.kind_with_nurb(k)? {
             SurfaceKind::BSpline(s) => {
                 s.is_degenerate_curve(k, angle_tol_deg, uv_domain, opt_3d_tol)
@@ -3928,6 +3961,10 @@ pub fn crossed_seam_or_pole(
     curr_uv: Point2,
     domain: &Extent2d,
 ) -> Result<bool> {
+    // (not upstream: the basis surface over the same parameters)
+    if let SurfaceKind::CurveBounded(c) = surface.kind() {
+        return crossed_seam_or_pole(k, c.basis(), prev_uv, curr_uv, domain);
+    }
     // First special cases: SmPlane or bilinear.
     match surface.kind() {
         SurfaceKind::Plane(_) => return Ok(false),

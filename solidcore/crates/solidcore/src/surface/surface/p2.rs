@@ -1781,18 +1781,29 @@ impl Surface {
     }
 
     /// Passes the face this surface reaches down the chain of bases it owns (an owning
-    /// offset's base, its base's base, ...). Iterative: the chain length is bounded by
-    /// `MAX_SURFACE_NESTING` at construction but is walked without recursion.
+    /// offset's base, a curve-bounded surface's basis, their bases, ...). Iterative: the
+    /// chain length is bounded by `MAX_SURFACE_NESTING` at construction but is walked
+    /// without recursion. A curve-bounded surface's basis answers the queries the
+    /// surface passes to it as the surface would, its face's tolerance included (not
+    /// upstream, whose basis has no owner and is asked only to evaluate).
     pub(crate) fn update_owned_bases(&mut self) {
         let face = self.reached_face();
         // the bases reach the same face, so they carry its cached tolerance too
         let tol = face.zip(self.owner_zone_tol_3d());
         let mut cur = self;
-        while let SurfaceKind::OffsetSurface(off) = &mut cur.kind {
-            let Some(base) = off.owned_base_mut() else {
-                break;
+        loop {
+            let (base, owner) = match &mut cur.kind {
+                SurfaceKind::OffsetSurface(off) => match off.owned_base_mut() {
+                    Some(base) => (base, crate::surface::offset_surface::BASE_OWNER),
+                    None => break,
+                },
+                SurfaceKind::CurveBounded(cb) => (
+                    cb.basis_mut(),
+                    crate::surface::curve_bounded_surface::BASIS_OWNER,
+                ),
+                _ => break,
             };
-            base.owner = Some(crate::surface::offset_surface::BASE_OWNER);
+            base.owner = Some(owner);
             base.owner_chain_face = face;
             base.owner_zone_tol_3d = tol;
             cur = base;
@@ -2371,10 +2382,25 @@ impl Surface {
             SurfaceKind::BSpline(_)
             | SurfaceKind::ProceduralBlend(_)
             | SurfaceKind::BallPatch(_)
-            | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_) => base_step_uv_domain(self),
+            // (not upstream: the basis's, whose STEP evaluators the surface's are)
+            SurfaceKind::CurveBounded(s) => s.basis().step_uv_domain(),
         }
+    }
+
+    /// The surface whose geometry this one is: through every curve-bounded layer, its
+    /// basis surface (a curve-bounded surface is its basis over the same parameters:
+    /// [`crate::surface::curve_bounded_surface`]); any other surface itself. The kind
+    /// dispatch of a query that depends only on the geometry reads this surface's kind.
+    #[must_use]
+    pub fn geometry(&self) -> &Self {
+        let mut s = self;
+        // (bounded: construction caps the nesting at MAX_GEOMETRY_NESTING)
+        while let SurfaceKind::CurveBounded(c) = s.kind() {
+            s = c.basis();
+        }
+        s
     }
 
     /// The degree in `param`'s direction (`GetDegree`).
@@ -2390,7 +2416,9 @@ impl Surface {
                 let s = bp.net();
                 s.degree(param)
             }
-            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => base_degree(),
+            // (not upstream: the basis surface over the same parameters)
+            SurfaceKind::CurveBounded(s) => s.basis().degree(param),
+            SurfaceKind::Step(_) => base_degree(),
             SurfaceKind::SrfInVolume(s) => s.degree(param),
             SurfaceKind::Plane(s) => s.base_for_query().degree(param),
             SurfaceKind::Cone(s) => s.rev().base().degree(param),
@@ -2413,6 +2441,8 @@ impl Surface {
     /// [`SolidError::Unported`] from the make.
     pub fn degree_with_nurb(&self, k: &Kernel, param: SurfParamType) -> Result<usize> {
         match self.kind() {
+            // (the basis's, with its NURB made)
+            SurfaceKind::CurveBounded(s) => s.basis().degree_with_nurb(k, param),
             SurfaceKind::SurfOfExtrusion(s) if s.base().gw_nurb().is_none() => {
                 Ok(ignored_surface_result(s.base_with_nurb(k))?
                     .map_or(0, |base| base.degree(param)))
@@ -2511,10 +2541,11 @@ impl Surface {
                 let s = bp.net();
                 s.number_control_points(param)
             }
-            SurfaceKind::CurveBounded(_)
-            | SurfaceKind::Step(_)
-            | SurfaceKind::OffsetSurface(_)
-            | SurfaceKind::SrfInVolume(_) => base_number_control_points(),
+            // (not upstream: the basis surface over the same parameters)
+            SurfaceKind::CurveBounded(s) => s.basis().number_control_points(k, param),
+            SurfaceKind::Step(_) | SurfaceKind::OffsetSurface(_) | SurfaceKind::SrfInVolume(_) => {
+                base_number_control_points()
+            }
             SurfaceKind::Plane(s) => s.base_for_query().number_control_points(param),
             SurfaceKind::Cone(s) => s.rev().base().number_control_points(param),
             SurfaceKind::SurfOfRevolution(s) => s.base().number_control_points(param),
@@ -2572,7 +2603,9 @@ impl Surface {
                 ))
             }
             SurfaceKind::BallPatch(s) => s.net().max_analytic_domain(k),
-            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => Ok(base_max_analytic_domain()),
+            // (not upstream: the basis surface over the same parameters)
+            SurfaceKind::CurveBounded(s) => s.basis().max_analytic_domain(k),
+            SurfaceKind::Step(_) => Ok(base_max_analytic_domain()),
             SurfaceKind::SrfInVolume(s) => s.max_analytic_domain(k),
             SurfaceKind::Plane(s) => Ok(s.max_analytic_domain()),
             SurfaceKind::Cone(s) => s.max_analytic_domain(k),
@@ -2597,10 +2630,11 @@ impl Surface {
                 let s = bp.net();
                 s.is_bilinear()
             }
-            SurfaceKind::CurveBounded(_)
-            | SurfaceKind::Step(_)
-            | SurfaceKind::OffsetSurface(_)
-            | SurfaceKind::SrfInVolume(_) => base_is_bilinear(),
+            // (not upstream: the basis surface over the same parameters)
+            SurfaceKind::CurveBounded(s) => s.basis().is_bilinear(k),
+            SurfaceKind::Step(_) | SurfaceKind::OffsetSurface(_) | SurfaceKind::SrfInVolume(_) => {
+                base_is_bilinear()
+            }
             SurfaceKind::Plane(s) => s.base_for_query().is_bilinear(),
             SurfaceKind::Cone(s) => s.rev().base().is_bilinear(),
             SurfaceKind::SurfOfRevolution(s) => s.base().is_bilinear(),
@@ -2629,10 +2663,11 @@ impl Surface {
                 let s = bp.net();
                 s
             }
-            SurfaceKind::CurveBounded(_)
-            | SurfaceKind::Step(_)
-            | SurfaceKind::OffsetSurface(_)
-            | SurfaceKind::SrfInVolume(_) => return Ok(base_is_parallel_to_vector()),
+            // (not upstream: the basis surface over the same parameters)
+            SurfaceKind::CurveBounded(s) => return s.basis().is_parallel_to_vector(k, vector),
+            SurfaceKind::Step(_) | SurfaceKind::OffsetSurface(_) | SurfaceKind::SrfInVolume(_) => {
+                return Ok(base_is_parallel_to_vector())
+            }
             SurfaceKind::Plane(s) => return Ok(s.is_parallel_to_vector(vector)),
             // (not a plane: the SmBSplineSurface net test)
             SurfaceKind::Cone(s) => s.rev().base(),
@@ -2728,6 +2763,8 @@ impl Surface {
     /// Those of [`SurfOfRevolution::convert_uv_from_step_to_nurbs`].
     pub fn convert_uv_from_step_to_nurbs(&self, k: &Kernel, step_uv: Point2) -> Result<Point2> {
         match self.kind_with_nurb(k)? {
+            // (not upstream: the basis's, whose STEP evaluators the surface's are)
+            SurfaceKind::CurveBounded(s) => s.basis().convert_uv_from_step_to_nurbs(k, step_uv),
             SurfaceKind::Cone(s) => s.convert_uv_from_step_to_nurbs(k, step_uv),
             SurfaceKind::Sphere(s) => s.convert_uv_from_step_to_nurbs(k, step_uv),
             SurfaceKind::Torus(s) => s.convert_uv_from_step_to_nurbs(k, step_uv),
@@ -2756,6 +2793,8 @@ impl Surface {
     /// Those of [`SurfOfRevolution::convert_uv_from_nurbs_to_step`].
     pub fn convert_uv_from_nurbs_to_step(&self, k: &Kernel, nurbs_uv: Point2) -> Result<Point2> {
         match self.kind_with_nurb(k)? {
+            // (not upstream: the basis's, whose STEP evaluators the surface's are)
+            SurfaceKind::CurveBounded(s) => s.basis().convert_uv_from_nurbs_to_step(k, nurbs_uv),
             SurfaceKind::Cone(s) => s.convert_uv_from_nurbs_to_step(k, nurbs_uv),
             SurfaceKind::Sphere(s) => s.convert_uv_from_nurbs_to_step(k, nurbs_uv),
             SurfaceKind::Torus(s) => s.convert_uv_from_nurbs_to_step(k, nurbs_uv),
@@ -2787,6 +2826,9 @@ impl Surface {
         nurbs_uv: Point2,
     ) -> Result<(Point2, bool)> {
         match self.kind_with_nurb(k)? {
+            SurfaceKind::CurveBounded(s) => {
+                s.basis().convert_uv_from_nurbs_to_step_exact(k, nurbs_uv)
+            }
             SurfaceKind::Cone(s) => s.convert_uv_from_nurbs_to_step_exact(k, nurbs_uv),
             SurfaceKind::Sphere(s) => s.convert_uv_from_nurbs_to_step_exact(k, nurbs_uv),
             SurfaceKind::Torus(s) => s.convert_uv_from_nurbs_to_step_exact(k, nurbs_uv),
@@ -2905,7 +2947,12 @@ impl Surface {
                     s.step_inversion_on(k, self, anal_domain, point_on_surf, tol_3d, uv_guess)
                 }
             }
-            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => base_step_inversion(),
+            // (not upstream: the basis surface over the same parameters)
+            SurfaceKind::CurveBounded(s) => {
+                s.basis()
+                    .step_inversion(k, anal_domain, point_on_surf, tol_3d, uv_guess)
+            }
+            SurfaceKind::Step(_) => base_step_inversion(),
             SurfaceKind::OffsetSurface(s) => {
                 s.step_inversion(k, anal_domain, point_on_surf, tol_3d, uv_guess)
             }
@@ -3189,10 +3236,20 @@ impl Surface {
             SurfaceKind::BSpline(_)
             | SurfaceKind::ProceduralBlend(_)
             | SurfaceKind::BallPatch(_)
-            | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)
             | SurfaceKind::SrfInVolume(_) => base_drop_point_fast(),
+            // (not upstream: the basis surface over the same parameters)
+            SurfaceKind::CurveBounded(s) => s.basis().drop_point_fast(
+                k,
+                uv_domain,
+                operation,
+                test_point,
+                in_pointing_vector,
+                distance_tolerance,
+                target_distance,
+                requested,
+            ),
         }
     }
 
@@ -3209,15 +3266,18 @@ impl Surface {
     /// Those of [`Plane::intersect_with_plane`] (with this surface's owner for the
     /// zone tolerance) and [`SurfOfRevolution::intersect_with_plane`]; `SM_ERR` (the
     /// base default).
+    // (`use_surface_edges` and `ang_tol_rad` are upstream's; only the curve-bounded
+    // surface's basis call passes them on, the plane and revolution overrides read neither)
+    #[allow(clippy::only_used_in_recursion)]
     pub fn intersect_with_plane(
         &self,
         k: &Kernel,
         uv_domain: &Extent2d,
         plane: &Plane,
         other_uv_domain: &Extent2d,
-        _use_surface_edges: [bool; 2],
+        use_surface_edges: [bool; 2],
         approx_tol_3d: Option<f64>,
-        _ang_tol_rad: Option<f64>,
+        ang_tol_rad: Option<f64>,
     ) -> Result<(bool, SurfaceIntersection, Option<PlaneIntersectWarning>)> {
         let no_warning = |(more, x): (bool, SurfaceIntersection)| (more, x, None);
         match self.kind_with_nurb(k)? {
@@ -3275,10 +3335,19 @@ impl Surface {
             SurfaceKind::BSpline(_)
             | SurfaceKind::ProceduralBlend(_)
             | SurfaceKind::BallPatch(_)
-            | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)
             | SurfaceKind::SrfInVolume(_) => base_intersect_with_plane().map(no_warning),
+            // (not upstream: the basis surface over the same parameters)
+            SurfaceKind::CurveBounded(s) => s.basis().intersect_with_plane(
+                k,
+                uv_domain,
+                plane,
+                other_uv_domain,
+                use_surface_edges,
+                approx_tol_3d,
+                ang_tol_rad,
+            ),
         }
     }
 
@@ -4185,6 +4254,22 @@ impl Surface {
         context: Option<SurfaceIntersectContext<'_, O>>,
         out: &mut SurfaceIntersection,
     ) -> Result<()> {
+        // (not upstream: a curve-bounded surface, on either side, intersects as its basis
+        // over the same parameters)
+        let (this, that) = (self.geometry(), other.geometry());
+        if !core::ptr::eq(this, self) || !core::ptr::eq(that, other) {
+            return this.global_surface_intersect_into(
+                k,
+                uv_domain,
+                that,
+                other_uv_domain,
+                use_surface_edges,
+                approx_tol_3d,
+                ang_tol_rad,
+                context,
+                out,
+            );
+        }
         match self.kind_with_nurb(k)? {
             SurfaceKind::Plane(p) => crate::surface::plane::p2::global_surface_intersect_into(
                 k,

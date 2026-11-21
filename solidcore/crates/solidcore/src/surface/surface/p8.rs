@@ -729,6 +729,11 @@ impl Surface {
         tol_3d: f64,
         whole_surface: bool,
     ) -> Result<Coincidence> {
+        // (not upstream: a curve-bounded surface is its basis over the same parameters)
+        let (this, that) = (self.geometry(), other.geometry());
+        if !core::ptr::eq(this, self) || !core::ptr::eq(that, other) {
+            return this.coincidence_check(k, that, tol_3d, whole_surface);
+        }
         match self.kind() {
             SurfaceKind::Plane(p) => p.coincidence_check(k, other, tol_3d, whole_surface),
             _ => self.base_coincidence_check(k, other, tol_3d, whole_surface),
@@ -1598,7 +1603,8 @@ impl Surface {
         fire_ray: bool,
         distance_tolerance: f64,
     ) -> Result<SolutionArray<O>> {
-        match self.kind() {
+        // (not upstream: a curve-bounded surface is its basis over the same parameters)
+        match self.geometry().kind() {
             SurfaceKind::Plane(p) => p.global_line_intersect_in(
                 k,
                 surface,
@@ -1644,7 +1650,8 @@ impl Surface {
         fire_ray: bool,
         distance_tolerance: f64,
     ) -> Result<SolutionArray<O>> {
-        match self.kind() {
+        // (not upstream: a curve-bounded surface is its basis over the same parameters)
+        match self.geometry().kind() {
             // (the plane's base solve runs on this surface, its face's, with the
             // caller's cache and context)
             SurfaceKind::Plane(p) => p.global_line_intersect_with_base(
@@ -1851,7 +1858,8 @@ impl Surface {
         fire_ray: bool,
         distance_tolerance: f64,
     ) -> Result<SolutionArray<O>> {
-        match self.kind() {
+        // (not upstream: a curve-bounded surface is its basis over the same parameters)
+        match self.geometry().kind() {
             SurfaceKind::Plane(p) => p.global_line_intersect_in(
                 k,
                 Some(surface),
@@ -1902,7 +1910,8 @@ impl Surface {
         fire_ray: bool,
         distance_tolerance: f64,
     ) -> Result<SolutionArray<O>> {
-        match self.kind() {
+        // (not upstream: a curve-bounded surface is its basis over the same parameters)
+        match self.geometry().kind() {
             SurfaceKind::Plane(p) => p.global_line_intersect_in(
                 k,
                 Some(surface),
@@ -3068,7 +3077,8 @@ impl Surface {
         interval: &Extent1d,
         distance_tolerance: f64,
     ) -> Result<Option<SpanSplit<O>>> {
-        let SurfaceKind::Plane(plane) = self.kind() else {
+        // (not upstream: a curve-bounded surface is its basis over the same parameters)
+        let SurfaceKind::Plane(plane) = self.geometry().kind() else {
             return Ok(None);
         };
         let Some(nurb) = b_spline_part(curve).and_then(BSplineCurve::gw_nurb) else {

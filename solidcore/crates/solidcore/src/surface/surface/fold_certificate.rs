@@ -261,6 +261,8 @@ fn dispatch(
     natural: &Extent2d,
     domain: &Extent2d,
 ) -> Result<FoldCertificate> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let s = s.geometry();
     let centre = domain.evaluate(0.5, 0.5);
     let not = |reason| FoldCertificate::NotProved { uv: centre, reason };
     let (lo, hi) = (domain.min(), domain.max());

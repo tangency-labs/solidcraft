@@ -3787,7 +3787,7 @@ mod curve_bounded_tests {
     }
 
     #[test]
-    fn curve_bounded_given_is_defined_and_base_continuity_fails_test_4() {
+    fn curve_bounded_given_is_defined_and_test_4_reads_the_basis_continuities() {
         let k = Kernel::default();
         let surface = wrap(wrap(plane(1.0), vec![], vec![]), vec![], vec![]);
         let mut list = AssertArray::new();
@@ -3796,14 +3796,21 @@ mod curve_bounded_tests {
             .unwrap());
         assert!(list.is_empty());
         assert!(!list.last_add());
-        // The inherited base check reaches `sm_AssertTestSurface4`, whose
-        // `CalculateContinuities` fails here (a curve-bounded surface's generic `GetKnots`
-        // fails) without writing its output. Upstream reads that output uninitialised;
-        // the fork fails test 4 instead (tangency-labs/smlib 21dcf69, WR-663), so the
-        // surface is reported invalid.
+        // The inherited base check reaches `sm_AssertTestSurface4`. Its
+        // `CalculateContinuities` reads the knots, which a curve-bounded surface answers
+        // from its basis (not upstream, whose `GetKnots` fails here and leaves the output
+        // unwritten), so the surface over a plane is as valid as the plane.
         for level in [0, 1, 2] {
-            assert!(!surface.assert_valid(&k, None, level, ObjectKey(1)).unwrap());
+            assert!(surface.assert_valid(&k, None, level, ObjectKey(1)).unwrap());
+            assert!(plane(1.0)
+                .assert_valid(&k, None, level, ObjectKey(1))
+                .unwrap());
         }
+        // Continuities that cannot be computed still fail test 4, as the fork does
+        // (tangency-labs/smlib 21dcf69, WR-663): a STEP surface without base surface
+        // has no knots.
+        let no_knots = Surface::from(crate::surface::surface::StepSurface::empty());
+        assert!(!assert_test_surface4(&k, &no_knots).unwrap());
     }
 
     #[test]

@@ -279,8 +279,10 @@ impl SurfaceIntersector<'_> {
         let distance_tol = min_f(1e-2, tol_3d / size) / 100.0; // used for plane coincidence -hof- ??
 
         // locals
-        let surf1 = self.surface(SrfIndex::First);
-        let surf2 = self.surface(SrfIndex::Second);
+        // (not upstream: a curve-bounded surface is its basis over the same parameters,
+        // so the basis's control polygon is its own)
+        let surf1 = self.surface(SrfIndex::First).geometry();
+        let surf2 = self.surface(SrfIndex::Second).geometry();
 
         // Control polygons are not available for general surfaces: bail out if not
         // a BSplineSurface (SM_CAST_PTR(SmBSplineSurface, ..): every kind derived from
@@ -1704,6 +1706,8 @@ fn surface_evaluate_normal(k: &Kernel, surface: &Surface, uv: Point2) -> Result<
 /// `crSurface.IsSingularity(uv, eSingDir)`: the plane override (none); other kinds
 /// run `SmSurface::IsSingularity`.
 fn is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(bool, SurfParamType)> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let surface = surface.geometry();
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity()),
 

@@ -215,6 +215,17 @@ impl Surface {
         d3d_tol: f64,
         pt_test_only: bool,
     ) -> Result<Singularity> {
+        // (not upstream: the basis surface over the same parameters)
+        if let SurfaceKind::CurveBounded(c) = self.kind() {
+            return c.basis().is_singularity_with_poles(
+                k,
+                uv,
+                singularities,
+                pole_points,
+                d3d_tol,
+                pt_test_only,
+            );
+        }
         // the SmPlane overrides: a plane has no singularity
         if let SurfaceKind::Plane(p) = self.kind() {
             let (singular, direction) = if pole_points.is_some() || singularities != SS_UNKNOWN {

@@ -1300,6 +1300,10 @@ impl Surface {
     /// [`SolidError::Unported`]: the zone tolerance of a face's surface; those of
     /// [`Surface::is_on_boundary`], the tolerances and [`Surface::is_closed`].
     pub fn is_on_seam(&self, k: &Kernel, uv: Point2, opt_tol_3d: Option<f64>) -> Result<SeamInfo> {
+        // (not upstream: the basis surface over the same parameters)
+        if let super::SurfaceKind::CurveBounded(c) = self.kind() {
+            return c.basis().is_on_seam(k, uv, opt_tol_3d);
+        }
         // locals
         let domain = self.natural_uv_domain_with_nurb(k)?;
 

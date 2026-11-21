@@ -996,7 +996,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         // first, decompose the surface into starter Bezier patches
         // (an SmPlane or SmSurfOfRevolution is an SmBSplineSurface; its NURB is made
         // when it has none, as GetOrCreateGwNurbPointer)
-        let bspline: Option<std::borrow::Cow<'_, BSplineSurface>> = match self.surface().kind() {
+        // (a curve-bounded surface's patches are its basis's: not upstream, which
+        // approximates it)
+        let geometry = self.surface().geometry();
+        let bspline: Option<std::borrow::Cow<'_, BSplineSurface>> = match geometry.kind() {
             SurfaceKind::BSpline(b) => Some(std::borrow::Cow::Borrowed(b)),
             SurfaceKind::ProceduralBlend(pb) => {
                 let b = pb.net();
@@ -1012,8 +1015,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             SurfaceKind::Cone(_)
             | SurfaceKind::Sphere(_)
             | SurfaceKind::Torus(_)
-            | SurfaceKind::SurfOfRevolution(_) => self
-                .surface()
+            | SurfaceKind::SurfOfRevolution(_) => geometry
                 .revolution_base_with_nurb(k)?
                 .map(std::borrow::Cow::Borrowed),
             SurfaceKind::SurfOfExtrusion(s) => {

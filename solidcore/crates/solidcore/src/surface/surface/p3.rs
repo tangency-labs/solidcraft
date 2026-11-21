@@ -209,10 +209,9 @@ pub(crate) fn out_of_bounds_enabled(surface: &Surface) -> Option<bool> {
         SurfaceKind::Torus(s) => Some(s.base().is_out_of_bounds_enabled()),
         SurfaceKind::SurfOfRevolution(s) => Some(s.is_out_of_bounds_enabled()),
         SurfaceKind::SurfOfExtrusion(s) => Some(s.is_out_of_bounds_enabled()),
-        SurfaceKind::OffsetSurface(_)
-        | SurfaceKind::CurveBounded(_)
-        | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => None,
+        // (a curve-bounded surface evaluates through its basis: the basis's flag)
+        SurfaceKind::CurveBounded(c) => out_of_bounds_enabled(c.basis()),
+        SurfaceKind::OffsetSurface(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => None,
     }
 }
 
@@ -234,10 +233,8 @@ pub(crate) fn set_out_of_bounds_enabled(surface: &mut Surface, enabled: bool) {
         SurfaceKind::Torus(s) => *s.base.base_mut().out_of_bounds_enabled_mut() = enabled,
         SurfaceKind::SurfOfRevolution(s) => *s.base_mut().out_of_bounds_enabled_mut() = enabled,
         SurfaceKind::SurfOfExtrusion(s) => *s.base_mut().out_of_bounds_enabled_mut() = enabled,
-        SurfaceKind::OffsetSurface(_)
-        | SurfaceKind::CurveBounded(_)
-        | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => {}
+        SurfaceKind::CurveBounded(c) => set_out_of_bounds_enabled(c.basis_mut(), enabled),
+        SurfaceKind::OffsetSurface(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {}
     }
 }
 
@@ -993,6 +990,10 @@ impl Surface {
     ) -> Result<Extent3d> {
         use crate::geom::global_solver::SolutionRequested;
         use crate::nurbs::b_spline_surface::SurfParamType;
+        // (not upstream: the basis surface over the same parameters)
+        if let SurfaceKind::CurveBounded(c) = self.kind() {
+            return c.basis().calculate_tight_bounding_box(k, uv_domain);
+        }
 
         let mut tight_box = Extent3d::new();
         // the statuses SMLib drops here are passed on, as the fork (WR-663,

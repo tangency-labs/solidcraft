@@ -1242,6 +1242,8 @@ fn set_first_object<O: SolutionObject>(sol: &mut Solution<O>, surface_obj: Optio
 /// `SmBSplineSurface` (B-spline, plane, surface of revolution) without it; `None`
 /// when nothing changes (`SmTemporaryChangeValue` on `GetOutOfBoundsEnabled()`).
 pub(crate) fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Surface>> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let surface = surface.geometry();
     let enabled = match surface.kind() {
         SurfaceKind::BSpline(b) => b.is_out_of_bounds_enabled(),
         SurfaceKind::ProceduralBlend(pb) => {
@@ -1328,6 +1330,8 @@ pub(crate) fn with_out_of_bounds_enabled_in_place<R>(
 /// The `SmBSplineSurface` part whose `m_bOutOfBoundsEnabled` an evaluation of `surface`
 /// reads, `None` for the kinds not derived from it.
 fn out_of_bounds_base(surface: &Surface) -> Option<&BSplineSurface> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let surface = surface.geometry();
     match surface.kind() {
         SurfaceKind::BSpline(b) => Some(b),
         SurfaceKind::ProceduralBlend(pb) => {

@@ -216,7 +216,7 @@ pub(super) fn invalid(operation: &'static str, reason: &'static str) -> SolidErr
 /// `SmBSplineSurface` members: an `SmPlane` gives its B-spline part. Callers that
 /// reach a virtual member deal with planes first.
 pub(super) fn bspline_of(surface: &Surface) -> Option<&BSplineSurface> {
-    bspline_of_kind(surface.kind())
+    bspline_of_kind(surface.geometry().kind())
 }
 
 /// [`bspline_of`] of a surface kind (a made kind with its NURB, say).
@@ -303,7 +303,8 @@ fn create_iso_parametric_curve(
         domain.as_ref(),
         false,
     )?;
-    match surface.kind() {
+    // (a curve-bounded surface's iso curve is its basis's)
+    match surface.geometry().kind() {
         // the SmSurface body (surface.surface_p5) makes a B-spline
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
@@ -328,6 +329,8 @@ pub(super) fn calculate_bounding_box(
     domain: &Extent2d,
     req: &BoundingBoxRequest<'_>,
 ) -> Result<BoundingBoxes> {
+    // (a curve-bounded surface's: its basis's)
+    let surface = surface.geometry();
     match surface.kind_with_nurb(k)? {
         SurfaceKind::BSpline(b) => b.calculate_bounding_box(k, domain, req),
         // SmProceduralBlend::CalculateBoundingBox (the virtual one the cache calls on its
@@ -468,7 +471,7 @@ fn is_singularity(
     uv: Point2,
     memo: Option<&mut PoleMemo>,
 ) -> Result<bool> {
-    match surface.kind() {
+    match surface.geometry().kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity().0),
         SurfaceKind::Cone(_)
         | SurfaceKind::Sphere(_)

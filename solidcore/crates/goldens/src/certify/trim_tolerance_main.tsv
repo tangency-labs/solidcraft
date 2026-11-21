@@ -1,5 +1,24 @@
 # main ee673a19bf
 # topology.brep_validation: main's file without the coincidence search (WR-798): its 43 search cases and the `pairs` key gone, and the 7 generated cases that drew the search checking their bodies' pointers instead
+# heal.gap: main's file with a curve-bounded surface sampled at its basis's knots as B-spline geometry (#20163): 16 cases; no certified trim tolerance moves
+# intersect.surface_intersector_p2: main's file with curve-bounded surfaces intersected as their basis (#20163): the line and coincidence checks of 37 cases; no certified trim tolerance moves
+# intersect.surface_intersector_p3: main's file with curve-bounded surfaces intersected as their basis (#20163): 15 cases; no certified trim tolerance moves
+# intersect.surface_intersector_p4: main's file with curve-bounded surfaces intersected as their basis (#20163): 2 cases; no certified trim tolerance moves
+# intersect.surface_intersector_p5: main's file with curve-bounded surfaces intersected as their basis (#20163): 50 cases from 1006 (no surface cache) to their curves; no certified trim tolerance moves
+# surface.curve_bounded_surface: main's file with the geometry queries answered from the basis (#20163): knots, degrees, control points, analytic domain, bilinear and parallel tests of 26 cases; no certified trim tolerance moves
+# surface.offset_surface: main's file with an offset of a curve-bounded base reading the basis's knots and analytic domain (#20163): 26 cases; no certified trim tolerance moves
+# surface.surface_approximate: main's file with a curve-bounded surface approximated from its basis's knots (#20163): 1 case; no certified trim tolerance moves
+# surface.surface_assert_valid: main's file with the inherited check of a curve-bounded surface reading its basis's continuities (#20163): the seam and discontinuity reports of 106 cases gone, the boundary reports kept; no certified trim tolerance moves
+# surface.surface_cache_p2: main's file with the cache tree of a curve-bounded surface built from its basis (#20163): 30 cases; no certified trim tolerance moves
+# surface.surface_cache_p3: main's file with the cache tree of a curve-bounded surface built from its basis (#20163): 19 cases; no certified trim tolerance moves
+# surface.surface_p1: main's file with the continuities of a curve-bounded surface read from its basis (#20163): 12 cases; no certified trim tolerance moves
+# surface.surface_p5: main's file with the iso curves and singularities of a curve-bounded surface answered from its basis (#20163): 32 cases; no certified trim tolerance moves
+# surface.surface_p6: main's file with the continuity and derivative-surface queries of a curve-bounded surface answered from its basis (#20163): 58 cases; no certified trim tolerance moves
+# surface.surface_p7: main's file with the closed and planar tests of a curve-bounded surface answered from its basis (#20163): 15 cases; no certified trim tolerance moves
+# surface.surface_point_solve_p1: main's file with the point solves on a curve-bounded surface using its basis's cache tree and control net (#20163): 20 cases; no certified trim tolerance moves
+# surface.surface_point_solve_p2: main's file with the point solves on a curve-bounded surface using its basis's cache tree and control net (#20163): 19 cases; no certified trim tolerance moves
+# surface.surface_point_solve_p3: main's file with the point solves on a curve-bounded surface using its basis's cache tree (#20163): 13 cases; no certified trim tolerance moves
+# topology.trimming_tools: main's file with the continuities of a curve-bounded surface read from its basis (#20163): 4 cases; no certified trim tolerance moves
 blend.feature_executive	9ca7c0200e1392d9
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -90,7 +109,7 @@ geom.tree	1d1b8681e1e52568
 geom.vector2d	0788c82ad3aeddae
 geom.vector3d	d42760155d895320
 heal.face_props	0eee14123a0f7dfe
-heal.gap	18171374ace0084a
+heal.gap	badff05bb1d9aea5
 heal.heal_data_p1	814949569316074b
 heal.heal_data_p2	9fd678fc49ef523b
 heal.heal_data_p3	457871ebcf6a8779
@@ -114,10 +133,10 @@ intersect.surface_drop_lib_p1	2cf06152abbf3ea8
 intersect.surface_drop_lib_p2	e638190d664c28c3
 intersect.surface_drop_lib_p3	9ae5b84422221af2
 intersect.surface_intersector_p1	c15dc4e9c25559c9
-intersect.surface_intersector_p2	9fa228834822fe67
-intersect.surface_intersector_p3	f4e1ce3cf2b423ff
-intersect.surface_intersector_p4	ca876eb2ca791900
-intersect.surface_intersector_p5	215b11e66551b796
+intersect.surface_intersector_p2	09b83616dfa886d5
+intersect.surface_intersector_p3	dea790779a8beae4
+intersect.surface_intersector_p4	6029a6da7417277b
+intersect.surface_intersector_p5	b3b3911f642c99ce
 intersect.surface_silhouette	1c38bb6279dc58fd
 intersect.surface_tracer	502e37c7ea969cc5
 intersect.topology_solver_p1	c0ec89bee8fe9911
@@ -201,8 +220,8 @@ surface.bend_volume	4ed4f969a11b67a8
 surface.cone_p1	f919b20fa0fedb98
 surface.cone_p2	e45d5bc9b7336f39
 surface.cone_p3	a5fb6323191885b2
-surface.curve_bounded_surface	f1010cd243b40745
-surface.offset_surface	cbddc9fc2f5d54c6
+surface.curve_bounded_surface	6dfcb52c96b30a13
+surface.offset_surface	22f466561d90baf7
 surface.plane_p1	9a012f3facc74618
 surface.plane_p2	0888f448b19211d9
 surface.sphere	cec019c8fc8ad824
@@ -212,25 +231,25 @@ surface.surf_of_extrusion_p2	dbb70149e4d3d77c
 surface.surf_of_revolution_p1	9d9f693ed68b0323
 surface.surf_of_revolution_p2	b56ae0c9ffde13fd
 surface.surf_of_revolution_p3	18fc592c5b94c1ac
-surface.surface_approximate	262947f01ec97d9e
-surface.surface_assert_valid	d9eaf9799f02d1ab
+surface.surface_approximate	c99ab54393f5083f
+surface.surface_assert_valid	2fcd78e4f40a2e13
 surface.surface_cache_p1	36658877fe9eeb92
-surface.surface_cache_p2	d1495af52c276267
-surface.surface_cache_p3	c8c671adf2960218
-surface.surface_p1	18393fbdd3f836ba
+surface.surface_cache_p2	e7f5212593b4b76b
+surface.surface_cache_p3	2c4131b784efbf4d
+surface.surface_p1	98b82fba55064f80
 surface.surface_p10	4c4881a050a1ae8a
 surface.surface_p11	4813228760084e49
 surface.surface_p2	be0e87faaf6b9c35
 surface.surface_p3	dd67a7038520b511
 surface.surface_p4	08286ee77b021cb0
-surface.surface_p5	4053a16013112073
-surface.surface_p6	2b213a42de8cade5
-surface.surface_p7	6619493f96d9d624
+surface.surface_p5	326774a056197ff3
+surface.surface_p6	5094f0685bf7c047
+surface.surface_p7	8ea8af7f097f7579
 surface.surface_p8	8c429b3fc714a3d3
 surface.surface_p9	f2fca09a332c9f42
-surface.surface_point_solve_p1	4c854434083b74bd
-surface.surface_point_solve_p2	93e2c5b6169847de
-surface.surface_point_solve_p3	2cde20342ed8b4f9
+surface.surface_point_solve_p1	d4410d4958977452
+surface.surface_point_solve_p2	61e1a77948a77a39
+surface.surface_point_solve_p3	9371a7abf74852e7
 surface.torus	3bc22a9cc79e4e78
 surface.trim_srf_cache	655dddeca4f5ba3b
 surface.twist_volume	185622854f391b03
@@ -280,6 +299,6 @@ topology.proto_topology_p3	35e2254385743634
 topology.shell	a40ef11d608b2379
 topology.topology	12385645859cc5f2
 topology.topology_traverser	15b5b3e7bb4f69d6
-topology.trimming_tools	be08d634a18ebf10
+topology.trimming_tools	49719a13a66e74d6
 topology.vertex	f198b7dbb728e777
 topology.vertexuse	d80a9190581e3eff
