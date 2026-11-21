@@ -221,7 +221,16 @@ const FILE_COMMANDS: &[&str] = &[
 /// Only reviewed input readers can access a folder granted for read without write.
 /// A new command defaults to needing both permissions until its file effects are audited.
 fn input_only_command(id: &str) -> bool {
-    matches!(id, "file.insert_step" | "file.insert_mesh" | "file.insert_gerber" | "file.gerber_files" | "sketch.insert_dxf" | "sketch.insert_svg")
+    matches!(
+        id,
+        "component.insert_design"
+            | "file.insert_step"
+            | "file.insert_mesh"
+            | "file.insert_gerber"
+            | "file.gerber_files"
+            | "sketch.insert_dxf"
+            | "sketch.insert_svg"
+    )
 }
 
 /// Both the manifest and the user must approve a folder for the intended access.
