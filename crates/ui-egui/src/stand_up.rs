@@ -221,13 +221,19 @@ fn estimate_in(world: &solidcraft_engine::doc::ModelState, bodies: &[String]) ->
     upright(z_down, y_down.max(y_up), size)
 }
 
+/// Files offered to be stood up after they are in: STEP and IGES, and the FreeCAD and Rhino files
+/// read as STEP. Their import options leave out the up axis (`crate::import_options`); any other
+/// format with an `up` option (glTF) asks it before the import instead.
+pub fn offered_for(path: &str) -> bool {
+    solidcraft_engine::io::is_step_path(path) || solidcraft_engine::io::is_iges_path(path)
+}
+
 /// The bodies a just-opened file brought (`before`: body names before it opened, none for a
 /// new design), and the import's component placement from the command's `result`: offer to
-/// stand them up.
+/// stand them up. Only files [`offered_for`] names get the offer.
 pub fn offer(app: &mut SolveApp, path: &str, before: &[String], result: Option<&serde_json::Value>) {
     clear_offer(app);
-    let io = &solidcraft_engine::io::is_step_path;
-    if !(io(path) || solidcraft_engine::io::is_iges_path(path)) || app.preferences.up_axis != "z" {
+    if !offered_for(path) || app.preferences.up_axis != "z" {
         return;
     }
     let text = |k: &str| result.and_then(|r| r.get(k)).and_then(serde_json::Value::as_str);
