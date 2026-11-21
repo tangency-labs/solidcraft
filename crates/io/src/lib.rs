@@ -22,6 +22,7 @@ mod gerber;
 mod gerber_area;
 mod gerber_set;
 mod glb;
+pub mod hull3;
 pub use design::{
     DesignCompression, DesignContainerReader, DesignPreview, FileKind, ImportCache, OpenPgpSignature, OpenPgpSigner, ProvenanceChain,
     ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus, ProvenanceSummary, SignatureSource, Signer,

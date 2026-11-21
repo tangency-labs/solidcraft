@@ -1,0 +1,244 @@
+{
+ "commands": [
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "S0"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "body_name": "B0"
+   }
+  },
+  {
+   "command": "body.collision",
+   "params": {
+    "body": "B0",
+    "shape": "mesh"
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "S0:1",
+    "grounded": true
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "S1"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     30,
+     0,
+     0
+    ],
+    "body_name": "B1"
+   }
+  },
+  {
+   "command": "body.collision",
+   "params": {
+    "body": "B1",
+    "shape": "convex_hull"
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "S1:1",
+    "grounded": true
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "S2"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     60,
+     0,
+     0
+    ],
+    "body_name": "B2"
+   }
+  },
+  {
+   "command": "body.collision",
+   "params": {
+    "body": "B2",
+    "shape": "box"
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "S2:1",
+    "grounded": true
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "S3"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     90,
+     0,
+     0
+    ],
+    "body_name": "B3"
+   }
+  },
+  {
+   "command": "body.collision",
+   "params": {
+    "body": "B3",
+    "shape": "cylinder"
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "S3:1",
+    "grounded": true
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "S4"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     120,
+     0,
+     0
+    ],
+    "body_name": "B4"
+   }
+  },
+  {
+   "command": "body.collision",
+   "params": {
+    "body": "B4",
+    "shape": "sphere"
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "S4:1",
+    "grounded": true
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "S5"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     150,
+     0,
+     0
+    ],
+    "body_name": "B5"
+   }
+  },
+  {
+   "command": "body.collision",
+   "params": {
+    "body": "B5",
+    "shape": "none"
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "S5:1",
+    "grounded": true
+   }
+  }
+ ]
+}

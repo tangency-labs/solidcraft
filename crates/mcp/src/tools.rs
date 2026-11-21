@@ -334,7 +334,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              The format comes from the extension unless given; for OpenUSD the path's extension picks text, binary or package, and a \
              format naming another encoding is refused. URDF (.urdf) exports the whole assembly for robot simulators: a link per \
              component placement with mass and inertia, joints from the assembly's joints, and STL meshes in metres written \
-             next to it (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/. SDF (.sdf) writes a Gazebo \
+             next to it, or where mesh_prefix points with place_meshes (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/. SDF (.sdf) writes a Gazebo \
              model folder at the path (a .sdf ending dropped): model.config, model.sdf, an STL per body and each decal's image \
              on a textured quad, the image also its visual's albedo map (docs/sdf.md).",
             object(
@@ -343,9 +343,12 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "usd", "usda", "usdc", "usdz", "urdf", "sdf"]},
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf)"},
                     "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
-                    "effort": {"type": "number", "description": "urdf: joint effort limit, N or N m (default 1000)"},
-                    "velocity": {"type": "number", "description": "urdf: joint velocity limit, m/s or rad/s (default 10)"},
+                    "place_meshes": {"type": "boolean", "description": "urdf: write the meshes where mesh_prefix points, making its folder (default false: next to the .urdf)"},
+                    "effort": {"type": "number", "description": "urdf: effort limit for joints with none saved, N or N m (default 1000)"},
+                    "velocity": {"type": "number", "description": "urdf: velocity limit for joints with none saved, m/s or rad/s (default 10)"},
                     "images": {"type": "boolean", "description": "urdf: also write each picture shown on the model as a textured visual (default false)"},
+                    "mimic": {"type": "boolean", "description": "urdf: write <mimic> for motion links (default false)"},
+                    "collision": {"type": "string", "enum": ["mesh", "convex_hull"], "description": "urdf: what a body with no collision shape of its own becomes (default mesh)"},
                     "name": string("sdf: the model's name (default: the folder's name)"),
                     "static": {"type": "boolean", "description": "sdf: scenery Gazebo never moves (default true); false gives it the bodies' mass"},
                     "model_uris": {"type": "boolean", "description": "sdf: name files as model://<folder>/<file> (default false: relative to model.sdf)"},
@@ -1010,7 +1013,24 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "export" => exec(
             b,
             "file.export",
-            pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "images", "name", "static", "model_uris"]),
+            pick(
+                a,
+                &[
+                    "path",
+                    "format",
+                    "bodies",
+                    "mesh_prefix",
+                    "place_meshes",
+                    "effort",
+                    "velocity",
+                    "mimic",
+                    "collision",
+                    "images",
+                    "name",
+                    "static",
+                    "model_uris",
+                ],
+            ),
         ),
         "crash_reports" => match a.get("id") {
             Some(_) => exec(b, "diagnostics.crash_report", pick(a, &["id"])),
@@ -1221,7 +1241,24 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         "redo" => mapped("edit.redo", json!({})),
         "export" => mapped(
             "file.export",
-            pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "images", "name", "static", "model_uris"]),
+            pick(
+                a,
+                &[
+                    "path",
+                    "format",
+                    "bodies",
+                    "mesh_prefix",
+                    "place_meshes",
+                    "effort",
+                    "velocity",
+                    "mimic",
+                    "collision",
+                    "images",
+                    "name",
+                    "static",
+                    "model_uris",
+                ],
+            ),
         ),
         "save" => mapped("file.save", pick(a, &["path", "format"])),
         "open" => mapped("doc.open", pick(a, &["path", "up", "names", "geometry"])),
