@@ -34,6 +34,7 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 pub type Result<T> = std::result::Result<T, HostError>;
 
 pub mod conditions;
+pub mod images;
 mod input;
 pub use input::{check_input, prepare_input, strict_input_schema};
 
