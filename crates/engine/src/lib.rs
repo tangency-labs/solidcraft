@@ -680,6 +680,8 @@ pub struct Session {
     /// Scratch-only owner provenance, independent of the bounded undo vector.
     /// Ordinary sessions keep None; adoption never installs a child's watch map.
     redo_watch: Option<RedoWatch>,
+    /// Only a constructor running inside timeline.redefine may retain the old pattern exclusions.
+    pattern_edit: Option<u64>,
     /// Sketch feature being edited (sketch mode).
     pub active_sketch: Option<u64>,
     /// Explicitly owned sheet edit, independent of the model sketch being edited.
@@ -1229,6 +1231,7 @@ impl Session {
             undo: Vec::new(),
             redo: Vec::new(),
             redo_watch: None,
+            pattern_edit: None,
             active_sketch: None,
             active_sheet_sketch: None,
             open_drawing: None,
@@ -2154,6 +2157,7 @@ impl Session {
             // Results are in timeline order: the feature's own index first, the search only when not.
             let r = self.model.results.get(i).filter(|r| r.id == f.id).or_else(|| self.model.result(f.id));
             let Some(r) = r.filter(|r| r.error.is_none() && !r.skipped && !r.stale) else { continue };
+            let layout = r.state.pattern_body_layout(f.id);
             let made = match known.remove(&f.id).filter(|(state, _)| std::sync::Weak::as_ptr(state) == Arc::as_ptr(&r.state)) {
                 Some(entry) => made_bodies.entry(f.id).or_insert(entry),
                 None => made_bodies.entry(f.id).or_insert_with(|| {
@@ -2172,9 +2176,10 @@ impl Session {
             // mean the same copies read source by source. The copies of a source the pattern
             // left out keep the names stored for them, in their places.
             let left_out = r.state.pattern_left_out(f.id);
-            if f.pins_every_body_name() && (f.pattern_names_in_order || made.len() != f.body_names.len() || !left_out.is_empty()) {
+            if layout.is_some() || f.pins_every_body_name() && (f.pattern_names_in_order || made.len() != f.body_names.len() || !left_out.is_empty())
+            {
                 let made: Vec<String> = made.iter().map(|n| n.to_string()).collect();
-                let names = f.pattern_pins(&made, left_out).map_or(made, |(names, _)| names);
+                let names = f.pattern_pins(&made, left_out, layout).map_or(made, |(names, _)| names);
                 if f.pattern_names_in_order || names != f.body_names {
                     pins.push((f.id, names));
                 }
@@ -2954,6 +2959,7 @@ impl Session {
             undo: Vec::new(),
             redo: Vec::new(),
             redo_watch: Some(redo_watch),
+            pattern_edit: None,
             active_sketch: self.active_sketch,
             active_sheet_sketch: self.active_sheet_sketch.clone(),
             open_drawing: self.open_drawing,

@@ -1036,6 +1036,8 @@ fn feature_ids(s: &Session, p: &Value, cmd: &str) -> Result<Vec<u64>> {
     Ok(ids)
 }
 
+type BodyNamePins = (u64, Vec<String>, Vec<usize>, Option<solidcraft_doc::PatternBodyLayout>);
+
 /// The names the features from the first of `ids` to be suppressed on made, for those that made a
 /// body numbered by the counter (`BodyN`). Counted bodies take the next free number each time the
 /// design is computed, so once a feature that made one is suppressed, every counted body after it
@@ -1044,15 +1046,23 @@ fn feature_ids(s: &Session, p: &Value, cmd: &str) -> Result<Vec<u64>> {
 /// renamed (#1109). The suppressed feature keeps its own too: the counter passes the names of
 /// suppressed features by, so a body made meanwhile does not take `Body1` and lose it again when
 /// the feature is back.
-fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>, Vec<usize>)> {
+fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<BodyNamePins> {
     let made = |f: &Feature| -> Vec<String> {
         s.model.result(f.id).map(|r| r.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.clone()).collect()).unwrap_or_default()
     };
     let makes_counted = |f: &Feature| (0..made(f).len()).any(|i| super::browser::counted(f, i));
     let first = s.doc.features.iter().position(|f| ids.contains(&f.id) && !f.suppressed && makes_counted(f));
     let Some(at) = first else { return Vec::new() };
-    let left_out = |f: &Feature| s.model.result(f.id).map(|r| r.state.pattern_left_out(f.id).to_vec()).unwrap_or_default();
-    s.doc.features.iter().skip(at).filter(|f| makes_counted(f)).map(|f| (f.id, made(f), left_out(f))).collect()
+    s.doc
+        .features
+        .iter()
+        .skip(at)
+        .filter(|f| makes_counted(f))
+        .filter_map(|f| {
+            let state = &s.model.result(f.id)?.state;
+            Some((f.id, made(f), state.pattern_left_out(f.id).to_vec(), state.pattern_body_layout(f.id).cloned()))
+        })
+        .collect()
 }
 
 fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1079,9 +1089,9 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
     let keep = if want { counted_names_from(s, &ids) } else { Vec::new() };
     // One command, so one undo step however many features it changes.
     let doc = s.doc_mut();
-    for (id, made, left_out) in &keep {
+    for (id, made, left_out, layout) in &keep {
         if let Some(f) = doc.feature_mut(*id) {
-            f.pin_body_names(made, left_out);
+            f.pin_body_names(made, left_out, layout.as_ref());
         }
     }
     for id in &ids {
@@ -1421,6 +1431,22 @@ fn resolve_feature_names(v: &mut Value, doc: &solidcraft_doc::Document, cmd: &st
                 }
                 return Ok(());
             }
+            if matches!(o.get("type").and_then(Value::as_str), Some("rectangular" | "circular" | "path"))
+                && let Some(skip) = o.get("skip")
+            {
+                crate::params::pattern_skip(skip).map_err(|why| bad(cmd, why))?;
+            }
+            if let Some(skips) = o.get_mut("skip_members") {
+                let _ = crate::params::pattern_skip_members(skips).map_err(|why| bad(cmd, why))?;
+                if let Some(entries) = skips.as_array_mut() {
+                    for item in entries {
+                        if let Some(name) = item.get(1).and_then(Value::as_str) {
+                            let id = doc.seed_feature(name).ok_or_else(|| bad(cmd, format!("no feature `{name}`")))?.id;
+                            item[1] = json!(id);
+                        }
+                    }
+                }
+            }
             for (_, x) in o.iter_mut() {
                 resolve_feature_names(x, doc, cmd)?;
             }
@@ -1608,6 +1634,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(field) = unknown_field(set, Some(&before), Some(&after), &v, &mut Vec::new(), 0) {
         return Err(bad(cmd, unknown_field_message(&field, &before, &f.kind)));
     }
+    super::features::normalize_pattern_exclusions(s, &mut nf.kind, nf.component, &s.model.state_before(id), Some(&f.kind), cmd, false)?;
     if let FeatureKind::BodyTransfer { bodies, from, to, transform } = &nf.kind {
         solidcraft_doc::validate_body_transfer(&s.doc, &solidcraft_doc::plain(bodies), *from, *to, transform)?;
         nf.component = *to;
@@ -2609,12 +2636,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(parameters) = params.as_object_mut() {
         parameters.remove("name");
     }
+    trial.pattern_edit = Some(id);
     let r = {
         // Offset Plane has no parameter mapping in `frames::map_local`: its constructor maps
         // the complete definition, or captures a face directly in the authoring frame.
         let _world = (spec.id == "construct.plane.offset").then(crate::frames::world_geometry);
         spec.run_nested(&mut trial, &params)
-    }?;
+    };
+    trial.pattern_edit = None;
+    let r = r?;
     let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     let mut new = trial.doc.feature(made).cloned().ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     if let (FeatureKind::Emboss { face: Some(before), .. }, FeatureKind::Emboss { face: Some(after), .. }) = (&old.kind, &mut new.kind)

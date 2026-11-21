@@ -21,6 +21,15 @@ Repeat a hole, a pocket or a whole body in a row or a grid: a row of tapped hole
 | Quantity 2 | How many along the second direction, counting the original. 1 means a single row. | 3 rows. |
 | Spacing 2 | Centre-to-centre distance in the second direction. | 0.75 in. |
 | Alignment and Alignment 2 (Features only) | Flip direction runs the copies the other way. Center puts copies on both sides of the original: an odd Quantity splits evenly, an even Quantity puts one extra copy on one side, and Flip moves the extra copy to the other side. Quantity 4 with Center gives copies at 0, +1, −1 and +2 spacings. | Flip when the row runs off the end of the part. |
+| Instances to skip | Pick copies by marker. Each hole in a copied multi-hole feature has its own marker. | Skip one hole while keeping the others at that placement. |
+
+#### Skipping copies
+
+Turn on **Instances to skip** to show the copies' markers. Instance 1 is the original and always stays; instance 2 is the first copy. Each opening in a copied feature has its own marker, so you can leave out one hole without removing the other holes at that placement. Openings at the same placement share its instance number.
+
+Green markers stay and red markers are skipped. Click a marker, or drag a box or lasso around several, to change the selection. Use **Restore** beside a skipped item to bring it back, or **Clear skipped instances** to restore all. Editing the pattern shows skipped copies again so they can be restored.
+
+An exclusion follows its opening or body when the source list changes order. Reducing Quantity can temporarily remove a saved placement: the pattern warns, keeps the exclusion and applies it again when the placement returns. A newly drawn replacement for a deleted opening does not inherit the deleted opening's exclusion.
 
 #### Try it: a 5 × 3 grid of holes
 
