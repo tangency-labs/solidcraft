@@ -1415,9 +1415,14 @@ fn a_midplane_parallel_to_a_world_plane_takes_that_world_planes_frame() {
     assert!(built.x.dist(Vec3::X) < 1e-9 && built.y.dist(Vec3::Y) < 1e-9, "the midplane takes the world XY frame: {built:?}");
 }
 
-/// #18260: a design saved before the midplane took a world plane's frame keeps it. The pending
-/// format change marks every midplane of an older design, so the sketch drawn on it opens
-/// where it was drawn; a design saved now takes the world plane's frame.
+/// The last design format without `midplane-old-frame`, which 0.46.0 folded into format 64
+/// (`crates/doc/src/format/v64/midplane-old-frame.rs`). A fixed number, not `FORMAT - 1`, so the
+/// older design stays older when later changes are pending.
+const BEFORE_MIDPLANE_OLD_FRAME: u32 = 63;
+
+/// #18260: a design saved before the midplane took a world plane's frame keeps it. Format 64's
+/// change marks every midplane of an older design, so the sketch drawn on it opens where it was
+/// drawn; a design saved now takes the world plane's frame.
 #[test]
 fn a_design_saved_before_the_midplane_frame_change_keeps_its_old_frame() {
     // Two planes parallel to the world XY, the first picked away from the world axis and with
@@ -1443,10 +1448,10 @@ fn a_design_saved_before_the_midplane_frame_change_keeps_its_old_frame() {
     assert!(built.origin.dist(Vec3::new(0., 0., 20.)) < 1e-9, "the midplane takes the world XY frame: {built:?}");
     assert!(built.x.dist(Vec3::X) < 1e-9 && built.y.dist(Vec3::Y) < 1e-9, "the midplane takes the world XY frame: {built:?}");
 
-    // The design as an older build saved it: the format before this one, and no list of the
-    // changes it has, so the pending change is applied to it as it opens.
+    // The design as an older build saved it: the last format without the change, and no list of
+    // the changes it has, so the change is applied to it as it opens.
     let mut saved: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
-    saved["format"] = serde_json::json!(crate::format::format_string(crate::format::FORMAT - 1));
+    saved["format"] = serde_json::json!(crate::format::format_string(BEFORE_MIDPLANE_OLD_FRAME));
     saved.as_object_mut().unwrap().remove("format_pending");
     let older = crate::format::read(&serde_json::to_string(&saved).unwrap()).unwrap();
     let built = plane_of(&older);
