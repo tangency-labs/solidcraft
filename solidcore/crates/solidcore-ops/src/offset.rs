@@ -23,9 +23,10 @@ use solidcore::error::{ErrorKind, Reason};
 use solidcore::geom::attribute::{ids, Attribute, Behavior};
 use solidcore::offset::draft::{draft_surface, Draft, DraftRefusal};
 use solidcore::offset::offset_executive::p2::{
-    local_operation_simple, offset_brep_simple, shell_brep_simple, OffsetOptions, ShellOptions,
+    local_operation_simple, offset_brep_simple, OffsetOptions, ShellOptions,
 };
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
+use solidcore::offset::thin_features::shell_brep;
 use solidcore::offset::wall_room::{shell_wall_room, WallRoom};
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::{Brep, EntityRef, FaceId, Kernel, SolidError, Vec3};
@@ -42,7 +43,10 @@ const MAX_DISTANCE: f64 = 1e6;
 /// An offset's kernel error as the operation's: its offset refusal where it is one
 /// ([`typed`]), else as [`crate::error::status`].
 fn status(e: SolidError, index: &dyn Fn(EntityRef) -> Option<RecordEntity>) -> Error {
-    typed(&e, index).unwrap_or_else(|| kernel_status(e))
+    match typed(&e, index) {
+        Some(r) => crate::session::noted(&e, r),
+        None => kernel_status(e),
+    }
 }
 
 /// A kernel error as ops' offset refusal, for a caller that holds no [`Order`] of the body (any
@@ -51,6 +55,102 @@ fn status(e: SolidError, index: &dyn Fn(EntityRef) -> Option<RecordEntity>) -> E
 #[must_use]
 pub fn refusal(e: &SolidError) -> Option<Error> {
     typed(e, &|_| None)
+}
+
+/// (#18568) For a shell that failed without saying why: where a face of `b` has an outline
+/// that touches itself. That is a loop that passes through one vertex twice (not a seam's end),
+/// or a vertex of one loop that is a vertex of another loop of the face too, or lies on one of
+/// its edges within the vertex's and the edge's tolerances (exact distances to the edges'
+/// curves). The first such vertex's point, if any.
+pub fn outline_touch(k: &Kernel, b: &Brep) -> solidcore::Result<Option<[f64; 3]>> {
+    use solidcore::topology::edgeuse::p1 as eu1;
+    use solidcore::topology::vertex;
+    for f in solidcore::topology::brep::p1::faces(b, None)? {
+        let Some(fu) = b.face(f)?.faceuse else {
+            continue;
+        };
+        let loopuses = eu1::faceuse_loopuses(b, fu, false, None)?;
+        // each loop's vertices and edges
+        let mut loops = Vec::new();
+        for lu in loopuses {
+            let (mut vertices, mut edges) = (Vec::new(), Vec::new());
+            // each edge use's edge and the vertex it starts at
+            for eu in eu1::loopuse_edgeuses(b, lu)? {
+                let start = match eu1::vertexuse(b, eu)? {
+                    Some(vu) => b.vertexuse(vu)?.vertex,
+                    None => None,
+                };
+                if let (Some(e), Some(v)) = (b.edgeuse(eu)?.edge, start) {
+                    edges.push(e);
+                    vertices.push(v);
+                }
+            }
+            // A loop through one vertex twice pinches there, unless it is a seam's end: the
+            // seam's edge in the loop twice, once each way.
+            for (n, &v) in vertices.iter().enumerate() {
+                let again = vertices.iter().skip(n + 1).any(|&w| w == v);
+                let seam_end = edges
+                    .iter()
+                    .zip(&vertices)
+                    .any(|(e, &w)| w == v && edges.iter().filter(|&f| f == e).count() > 1);
+                if again && !seam_end {
+                    let p = vertex::point(b, v)?;
+                    return Ok(Some([p.x, p.y, p.z]));
+                }
+            }
+            loops.push((vertices, edges));
+        }
+        for (i, (vertices, _)) in loops.iter().enumerate() {
+            for (j, (others, edges)) in loops.iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+                for &v in vertices {
+                    let p = vertex::point(b, v)?;
+                    if others.contains(&v) {
+                        return Ok(Some([p.x, p.y, p.z]));
+                    }
+                    for &e in edges {
+                        // an edge the kernel cannot measure the point against is not touched
+                        if matches!(
+                            solidcore::query::api_queries::vertex_on_edge(k, b, v, e),
+                            Ok(true)
+                        ) {
+                            return Ok(Some([p.x, p.y, p.z]));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// An offset call's failure as application data: its typed refusal where there is
+/// one, alongside the complete kernel diagnostic. A caller still holding a kernel
+/// error can retain its operation, entities and cause chain without interpreting it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Diagnostic {
+    /// The typed offset refusal, with any face unnamed as in [`refusal`]. Phrase
+    /// refusals carry the complete diagnostic in their phrase as well.
+    pub refusal: Option<Error>,
+    /// The kernel's complete statement, including nested causes.
+    pub detail: String,
+}
+
+/// Extracts an offset call's diagnostic, retaining its refusal as typed data.
+#[must_use]
+pub fn diagnostic(e: &SolidError) -> Diagnostic {
+    let detail = e.to_string();
+    let mut refusal = refusal(e);
+    if let Some(Error::OffsetRefused {
+        why: OffsetRefusal::Phrase { phrase, .. },
+        ..
+    }) = &mut refusal
+    {
+        phrase.clone_from(&detail);
+    }
+    Diagnostic { refusal, detail }
 }
 
 /// The offset refusal a kernel error is, the one routing [`status`] and [`refusal`] share: a
@@ -112,6 +212,9 @@ fn offset_refused(
         OffsetFailure::Collapses {
             distance, radius, ..
         } => OffsetRefusal::Collapses { distance, radius },
+        OffsetFailure::WallsMeetAcross {
+            distance, largest, ..
+        } => OffsetRefusal::WallsMeetAcross { distance, largest },
         OffsetFailure::LoopsCross { crossing, .. } => OffsetRefusal::LoopsCross { crossing },
         OffsetFailure::DistanceUnresolved {
             distance,
@@ -126,6 +229,7 @@ fn offset_refused(
         OffsetFailure::SeamOpened { .. } => OffsetRefusal::SeamOpened,
         OffsetFailure::ExactCurveUncut => OffsetRefusal::ExactCurveUncut,
         OffsetFailure::FacesApart { .. } => OffsetRefusal::FacesApart,
+        OffsetFailure::PastSide { largest, .. } => OffsetRefusal::PastSide { largest },
         OffsetFailure::ReachUncertified { .. } => OffsetRefusal::ReachUncertified,
         OffsetFailure::LoopGapUncertified { .. } => OffsetRefusal::LoopGapUncertified,
         OffsetFailure::Unsound { what } => match unsound(what, index) {
@@ -248,7 +352,8 @@ fn shell_brep_full(
         create_offset_solid: true,
         merge_sheet_side_walls: true,
     };
-    shell_brep_simple(k, b, options, open)
+    // (a feature narrower than twice an inward wall stays solid: `thin_features`)
+    shell_brep(k, b, options, open)
 }
 
 /// The kernel's room test for a wall of `wall` (> 0) inward from every face of `b` but `open`:

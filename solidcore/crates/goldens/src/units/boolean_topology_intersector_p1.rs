@@ -1188,6 +1188,17 @@ impl CurveOnClassifyObjects<H> for Objs<'_> {
 }
 
 impl ProtoBrep<H> for Two {
+    fn raise_edge_tolerance(
+        &mut self,
+        k: &Kernel,
+        edge: H,
+        tolerance: f64,
+    ) -> solidcore::Result<()> {
+        if edge.kind != K_EDGE {
+            return Err(invalid("not an edge handle"));
+        }
+        IntersectorBrep::set_topology_tolerance(self, k, edge, tolerance, true, true)
+    }
     fn merge_point_class_into_brep(
         &mut self,
         k: &mut Kernel,
@@ -1730,6 +1741,15 @@ impl IntersectorBrep<H> for Two {
             env.this,
             &vertexuse_ref,
         )
+    }
+    fn vertex_update_edge_intervals(&mut self, k: &Kernel, vertex: H) -> solidcore::Result<()> {
+        if vertex.kind != K_VERTEX {
+            return Err(invalid("not a vertex handle"));
+        }
+        let b = self.brep_m(vertex)?;
+        with_edit_env(b, |b, env| {
+            solidcore::topology::brep::p1::update_vertex_edge_intervals(k, b, env, vid(vertex))
+        })
     }
     fn set_topology_tolerance(
         &mut self,

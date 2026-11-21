@@ -13,6 +13,8 @@ use crate::SolveApp;
 use crate::ui_kit;
 
 pub(crate) const DRAG_ZOOM: &str = crate::navigation_slots::ZOOM_TOOL;
+/// The command behind the navigation bar's Look At button and its key.
+const LOOK_AT: &str = "view.normal_to";
 
 /// Keys the application handles before any command shortcut.
 pub const RESERVED: &[&str] = &[
@@ -23,6 +25,7 @@ pub const RESERVED: &[&str] = &[
     "Backspace",
     "Ctrl+Z",
     "Ctrl+Y",
+    "Ctrl+Shift+Z",
     "Ctrl+S",
     "Ctrl+Shift+S",
     "Ctrl+N",
@@ -482,6 +485,9 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
     if keeps_old_show_hide(app, key) {
         app.start("ui.toggle_visibility");
     } else if let Some(id) = command_for(app, key) {
+        if repeat && matches!(id, "tab.view.pop_out" | "tab.view.move_to_window") {
+            return;
+        }
         if id == DRAG_ZOOM {
             // The viewport reads the held chord. A key press must not latch Zoom.
             return;
@@ -501,7 +507,24 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
             }
             return;
         }
-        app.start(variant_for_key(app, id));
+        let resolved = variant_for_key(app, id);
+        if app.preferences.shortcut_again_ends_tool {
+            if repeat {
+                return;
+            }
+            if crate::toolbar::end_running_command(app, resolved) {
+                return;
+            }
+        }
+        app.start(resolved);
+    } else if app.session.active_sketch.is_some() && !crate::render_workspace::active(app) && commands_for(app, key).contains(&LOOK_AT) {
+        // Look At's key with no planar face or plane selected: `command_for` skips the disabled
+        // command, yet the navigation bar's button and Ctrl+8 then face the open sketch. So
+        // does the key the button shows. A held key's repeats change nothing: asking again turns
+        // the view to the other side.
+        if !repeat {
+            crate::viewport::look_at_selection(app);
+        }
     } else if let Some(id) = sketch_tool_for(app, key) {
         let then = variant_for_key(app, id);
         app.start("sketch.create");
@@ -1211,6 +1234,24 @@ mod tests {
         assert!(!crate::agent_chat::assistant_tip(&h.app, crate::agent_chat::AssistantMark::Ready).contains("(J)"));
     }
 
+    /// #18233: Ctrl+A (Cmd+A) is Select All in the view, but a focused text field keeps its own.
+    #[test]
+    fn ctrl_a_selects_all_except_in_a_text_field() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10})).unwrap();
+        assert_eq!(command_for(&h.app, "Ctrl+A"), Some("select.all"));
+        h.call("ui.palette", json!({}));
+        h.frames(3);
+        h.app.session.selection.clear();
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        assert!(h.app.session.selection.is_empty(), "the palette's field selects its own text");
+        h.call("ui.palette", json!({"open": false}));
+        h.frames(2);
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Body { name: "Block".into() }]);
+    }
+
     fn app() -> SolveApp {
         SolveApp::new(solidcraft_engine::Session::default(), Default::default())
     }
@@ -1569,6 +1610,29 @@ mod tests {
         h.frames(2);
         assert!(h.app.keymap.capturing.is_none(), "typing in the search stops the recording");
         assert_eq!(h.app.prefs_window.shell.filter, "fixx");
+    }
+
+    /// Dialog OK (`ui.dialog_ok`, #17416) has no default key: a Preferences search finds it on
+    /// the shortcuts page, a key recorded there binds it, and `ui.shortcut` reports that key.
+    #[test]
+    fn dialog_ok_is_found_in_a_preferences_search_and_takes_a_recorded_key() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open": "General"}));
+        h.frames(3);
+        h.step(&json!({"text": "dialog ok"})).expect("search");
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "prefs:search:shortcuts"}})).expect("unfold the shortcut matches");
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "shortcut:ui.dialog_ok"}})).expect("Dialog OK is listed");
+        assert!(capturing(&h.app), "recording Dialog OK's key");
+        h.step(&json!({"key": "F9", "pressed": true})).unwrap();
+        h.step(&json!({"key": "F9", "pressed": false})).unwrap();
+        h.frames(65);
+        assert!(h.app.keymap.capturing.is_none(), "{:?}", h.app.keymap.message);
+        assert_eq!(effective(&h.app, "ui.dialog_ok").as_deref(), Some("F9"));
+        let got = h.call("ui.shortcut", json!({"command": "ui.dialog_ok"}));
+        assert_eq!(got["result"]["key"], "F9", "{got}");
     }
 
     #[test]

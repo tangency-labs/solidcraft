@@ -11,7 +11,8 @@
 //! the features it evaluated ([`solidcraft_engine::Session::prime`]) rather than computing them
 //! again. Commands asked for meanwhile wait their turn; a marker moved again
 //! replaces the move still waiting, so a drag computes where it ends rather than every slot it
-//! crossed.
+//! crossed. A parameter changed in the Parameters dialog and a configuration activated in the
+//! configurations table compute the same way (#6777).
 //!
 //! A delete first checks what it takes with it and what it would make fail (#2678): the
 //! timeline's Delete asks `timeline.dependents`, Delete on the selection runs `selection.delete`
@@ -440,9 +441,19 @@ impl SolveApp {
         let (tx, rx) = std::sync::mpsc::channel();
         let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
         let watching = progress.clone();
+        // Tests hold the result until let go (`apply_gate`), so a window thread held up under load
+        // cannot find the work already in where the command should still be computing.
+        #[cfg(test)]
+        let gate = self.apply_gate.clone();
         let spawned = std::thread::Builder::new().name("history".into()).spawn(move || {
             let cancelled = watching.clone();
             let evaluated = solidcraft_engine::doc::progress::watch(watching, || ahead.evaluate(&commands).ok());
+            #[cfg(test)]
+            if let Some(gate) = gate
+                && let Ok(gate) = gate.lock()
+            {
+                let _ = gate.recv();
+            }
             // A cancelled evaluation skipped features: what it holds is not the design's.
             let _ = tx.send(evaluated.filter(|_| !cancelled.is_cancelled()));
         });

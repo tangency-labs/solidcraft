@@ -3,10 +3,12 @@
 //! keys SolidCraft reads, and the checks a change gets, are `solidcraft_doc::metadata`'s
 //! (`KEYS`, the rows the design takes); keys other tools wrote are kept as they are. The UI's Design
 //! Properties dialog, scripts and MCP agents all go through these commands. A change evaluates
-//! nothing: properties are no geometry.
+//! nothing: properties are no geometry. A drawing's properties are read and changed by the same
+//! rules ([`reading`], [`setting`], [`removing`]), through `drawing.properties`.
 
 use serde_json::{Map, Value, json};
-use solidcraft_doc::metadata::{self, BOM_TYPE, MAX_KEYS, Owner};
+use solidcraft_doc::Metadata;
+use solidcraft_doc::metadata::{self, MAX_KEYS, Owner, PART_ONLY};
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
@@ -52,14 +54,20 @@ fn reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
     serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))
 }
 
-fn read(s: &mut Session, _: &Value) -> Result<Value> {
-    let m = &s.doc.metadata;
-    let properties: Map<String, Value> = metadata::keys(Owner::Design).map(|k| (k.name.to_string(), json!(m.text(k.name)))).collect();
-    reply("document.metadata", MetadataResult { metadata: m.0.clone(), properties })
+/// SolidCraft's properties in `m`, each its text or null.
+fn properties(m: &Metadata) -> Map<String, Value> {
+    metadata::keys(Owner::Design).map(|k| (k.name.to_string(), json!(m.text(k.name)))).collect()
 }
 
-fn set(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "document.metadata.set";
+/// What reading `m` answers: the object as saved, and SolidCraft's properties, each its text or
+/// null.
+pub(super) fn reading(m: &Metadata) -> Value {
+    json!({"metadata": m, "properties": properties(m)})
+}
+
+/// `m` with a call's `key` and `value`, or its `values`, set (all or nothing), and the keys that
+/// changed.
+pub(super) fn setting(cmd: &str, m: &Metadata, p: &Value) -> Result<(Metadata, Vec<String>)> {
     let entries: Vec<(&str, &Value)> = match (p.get("values"), p.get("key")) {
         (Some(Value::Object(values)), None) if values.len() <= MAX_KEYS => values.iter().map(|(k, v)| (k.as_str(), v)).collect(),
         (Some(Value::Object(_)), None) => return Err(bad(cmd, format!("`values` can hold at most {MAX_KEYS} keys"))),
@@ -70,16 +78,49 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         }
         _ => return Err(bad(cmd, "give `key` and `value`, or `values`: {key: value, …}")),
     };
-    let mut next = s.doc.metadata.clone();
+    let mut next = m.clone();
     let mut changed = Vec::new();
     for (key, value) in entries {
-        if key == BOM_TYPE {
-            return Err(bad(cmd, "`bom_type` is a component's part property: set it with component.metadata.set"));
+        if PART_ONLY.contains(&key) {
+            return Err(bad(cmd, format!("`{key}` is a component's part property: set it with component.metadata.set")));
         }
         if next.set(Owner::Design, key, value.clone()).map_err(|e| bad(cmd, e.to_string()))? {
             changed.push(key.to_string());
         }
     }
+    Ok((next, changed))
+}
+
+/// `m` with a call's `key`, or its `keys`, removed, and the keys that were there.
+pub(super) fn removing(cmd: &str, m: &Metadata, p: &Value) -> Result<(Metadata, Vec<String>)> {
+    let keys: Vec<&str> = match (p.get("keys"), p.get("key")) {
+        (Some(Value::Array(keys)), None) if keys.len() <= MAX_KEYS => {
+            keys.iter().map(Value::as_str).collect::<Option<_>>().ok_or_else(|| bad(cmd, "`keys` must be a list of keys"))?
+        }
+        (None, Some(_)) => vec![str_(p, "key").ok_or_else(|| bad(cmd, "`key` must be text"))?],
+        _ => return Err(bad(cmd, format!("give `key`, or `keys`: a list of at most {MAX_KEYS} keys"))),
+    };
+    let mut removed: Vec<String> = Vec::new();
+    for k in keys {
+        if m.get(k).is_some() && !removed.iter().any(|r| r == k) {
+            removed.push(k.to_string());
+        }
+    }
+    let mut next = m.clone();
+    for k in &removed {
+        next.remove(k);
+    }
+    Ok((next, removed))
+}
+
+fn read(s: &mut Session, _: &Value) -> Result<Value> {
+    let m = &s.doc.metadata;
+    reply("document.metadata", MetadataResult { metadata: m.0.clone(), properties: properties(m) })
+}
+
+fn set(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "document.metadata.set";
+    let (next, changed) = setting(cmd, &s.doc.metadata, p)?;
     // Only a real change touches the design (an undo step, unsaved changes).
     if next != s.doc.metadata {
         s.doc_mut().metadata = next;
@@ -89,26 +130,10 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn remove(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "document.metadata.remove";
-    let keys: Vec<&str> = match (p.get("keys"), p.get("key")) {
-        (Some(Value::Array(keys)), None) if keys.len() <= MAX_KEYS => {
-            keys.iter().map(Value::as_str).collect::<Option<_>>().ok_or_else(|| bad(cmd, "`keys` must be a list of keys"))?
-        }
-        (None, Some(_)) => vec![str_(p, "key").ok_or_else(|| bad(cmd, "`key` must be text"))?],
-        _ => return Err(bad(cmd, format!("give `key`, or `keys`: a list of at most {MAX_KEYS} keys"))),
-    };
-    let mut removed: Vec<&str> = Vec::new();
-    for k in keys {
-        if s.doc.metadata.get(k).is_some() && !removed.contains(&k) {
-            removed.push(k);
-        }
-    }
+    let (next, removed) = removing(cmd, &s.doc.metadata, p)?;
     if !removed.is_empty() {
-        let m = &mut s.doc_mut().metadata;
-        for k in &removed {
-            m.remove(k);
-        }
+        s.doc_mut().metadata = next;
     }
-    let removed = removed.into_iter().map(str::to_string).collect();
     reply(cmd, MetadataRemoveResult { metadata: s.doc.metadata.0.clone(), removed, param_warnings: Vec::new() })
 }
 
@@ -235,10 +260,10 @@ mod tests {
     fn a_design_without_properties_saves_as_before() {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
-        let before = solidcraft_io::write_design(&s.doc);
+        let before = solidcraft_io::write_design(&s.doc).unwrap();
         run(&mut s, "document.metadata.set", json!({"key": "author", "value": "Jane"}));
         run(&mut s, "document.metadata.remove", json!({"key": "author"}));
-        assert_eq!(solidcraft_io::write_design(&s.doc), before, "byte for byte");
+        assert_eq!(solidcraft_io::write_design(&s.doc).unwrap(), before, "byte for byte");
         assert!(!String::from_utf8_lossy(&before).contains("\"metadata\""));
     }
 

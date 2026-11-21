@@ -155,8 +155,9 @@ sketch, a brief, a part to fit around.
   thumbnails (hold the pointer over one for a bigger preview, click it to open the viewer, where
   the file's name is shown and ‹ › step through the message's pictures, together with the picture
   of the view); the other files are listed by name. Pictures in any of the formats above are
-  decoded in the background, with a spinner until they are in. A file that can't be attached says
-  why.
+  decoded in the background, with a spinner until they are in. A photo stored turned by its EXIF
+  orientation is attached upright: its chip and size are the turned picture's, and it is sent as
+  upright pixels. A file that can't be attached says why.
 
 Files stay with their message: one queued while the agent works keeps its files, and one sent
 again after a sign-in sends them again. When several queued messages go as one prompt, their
@@ -523,6 +524,12 @@ each agent can have its own setting in its row.
 
 **Always allow** remembers that command for that agent. The page lists what you allowed this way,
 per agent, with **Reset**.
+
+Installed plugins are tools too (`<plugin>.<entry>`, see [Plugins as tools for
+agents](plugins.md#plugins-as-tools-for-agents)). A call to one always waits for **Allow** or
+**Deny**, in every mode and after **Always allow**: running a plugin's code needs your go each
+time. So does opening a file with an importer plugin (`file.import`, or `doc.open` of a file an
+installed importer opens), alone or in a batch. The plugin opens none of its own dialogs.
 
 These settings cover SolidCraft's tools. A coding agent's own tools (its shell, its file edits)
 follow the agent's own mode, which you pick in the panel's header. When an agent asks before

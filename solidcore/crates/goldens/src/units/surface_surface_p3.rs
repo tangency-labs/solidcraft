@@ -831,6 +831,132 @@ impl UnitDiff for Runner {
     }
 }
 
+/// WR-407's fold rule is the default (tangency-labs/solidcraft#17215): the six generated
+/// covers it now refuses, replayed with their witnesses, and gen2303, which the fork's
+/// rule refused and which keeps its cover.
+#[cfg(test)]
+mod fold_witness_tests {
+    use super::*;
+    use solidcore::geom::extent2d::Extent2d;
+    use solidcore::geom::vector2d::Point2;
+    use solidcore::surface::surface::p2::SurfaceKind;
+    use solidcore::surface::surface::p3::{ContinuationFold, CoverCoincident};
+
+    /// Generated case `index`: its surface, its cover inputs and the cover's result on a
+    /// fresh kernel, as the runner runs it.
+    fn cover_case(index: usize) -> (Surface, Surface, f64, CoverCoincident) {
+        let mut rng = Rng::new(CaseContext::seed_for("surface.surface_p3", index));
+        let i: Inputs = serde_json::from_value(Runner.generate(&mut rng).unwrap()).unwrap();
+        let OpIn::Cover { other, tol, dom } = &i.op else {
+            panic!("gen{index:04} is not a cover: {:?}", i.op)
+        };
+        let mut s = surface_raw(&i.surface, i.raw_knots[0]).unwrap();
+        let input = s.clone();
+        let other = surface_of(other).unwrap();
+        let k = Kernel::new(&KernelOptions::default());
+        let covered = s
+            .cover_coincident_surface_deferring_trims(&k, &other, *tol, dom.map(dom_of).as_ref())
+            .unwrap();
+        (input, s, *tol, covered)
+    }
+
+    /// The unit normal of `s` (out-of-bounds evaluation on) at `uv`, from its first
+    /// derivatives, and the length of `Du x Dv`.
+    fn unit_normal(s: &Surface, uv: Point2) -> (Vec3, f64) {
+        let mut s = s.clone();
+        let SurfaceKind::BSpline(b) = s.kind_mut() else {
+            panic!("not a B-spline surface")
+        };
+        *b.out_of_bounds_enabled_mut() = true;
+        let k = Kernel::default();
+        let d = s.evaluate_step(&k, uv, 1, 1, EvaluateFlags::default()).unwrap();
+        let n = d[1][0].cross(d[0][1]);
+        (n / n.length(), n.length())
+    }
+
+    /// The rounding bound `2 γ_4 |Du| |Dv|` of `s`'s normal at `uv`, at or below which the
+    /// fold rule gives the normal no direction.
+    fn normal_noise(s: &Surface, uv: Point2) -> f64 {
+        let mut s = s.clone();
+        let SurfaceKind::BSpline(b) = s.kind_mut() else {
+            panic!("not a B-spline surface")
+        };
+        *b.out_of_bounds_enabled_mut() = true;
+        let k = Kernel::default();
+        let d = s.evaluate_step(&k, uv, 1, 1, EvaluateFlags::default()).unwrap();
+        2.0 * solidcore::nurbs::math::gamma(4) * d[1][0].length() * d[0][1].length()
+    }
+
+    /// gen2303 keeps its cover (as on main): the only witness the fork's rule had was the
+    /// normal at the corner (-0.938, 0) of the surface's own domain, which is exactly
+    /// zero (a degenerate point, no direction). Every drop of the cover is within the
+    /// tolerance (`max_dist <= tol`), and the domain grows to take in the covered part.
+    #[test]
+    fn gen2303_degenerate_corner_keeps_its_cover() {
+        let (input, after, tol, covered) = cover_case(2303);
+        let orig = input.step_uv_domain();
+        let corner = Point2::new(orig.u_min(), orig.v_min());
+        assert!((corner.x + 0.938).abs() < 5e-4 && corner.y == 0.0, "{corner:?}");
+        assert_eq!(unit_normal(&input, corner).1, 0.0);
+        assert!(covered.success, "{covered:?}");
+        assert_eq!(covered.fold, None);
+        assert!(covered.max_dist <= tol, "{} > {tol}", covered.max_dist);
+        let covered_domain = covered.covered_step_domain.unwrap();
+        let after = after.step_uv_domain();
+        assert_eq!(after, orig.union(&covered_domain));
+        // The corner is the first sample of the fold rule's grid over that domain.
+        assert_eq!(after.evaluate(0.0, 0.0), corner);
+        assert!(!covered_domain.is_contained_by(&orig, 0.0));
+    }
+
+    /// The six covers that now refuse: the continuation's normals at two neighbouring
+    /// samples of the rule's grid turn back. `(case, uv, neighbour)` as replayed in
+    /// tangency-labs/solidcraft#17101 (rounded to 3 decimals there).
+    const FOLDS: [(usize, [f64; 2], [f64; 2]); 6] = [
+        (41, [-1.878, -0.236], [-2.028, -0.236]),
+        (1448, [0.657, 0.344], [0.657, 0.292]),
+        (1514, [0.606, 0.032], [0.606, -0.020]),
+        (1567, [0.25, 1.025], [0.2, 1.025]),
+        (2066, [0.117, 0.968], [0.117, 0.916]),
+        (2376, [-0.575, 2.143], [-0.575, 2.078]),
+    ];
+
+    /// Each refusal names its reversed pair, and the pair is recomputed here from the
+    /// surface's own derivatives: both normals are longer than their rounding bound (so
+    /// have a direction), their dot product is the one reported and is negative, and the
+    /// pair lies on one grid row or column (it matches the listed pair, one grid step
+    /// apart), in the continuation past the surface's own domain.
+    #[test]
+    fn six_folded_continuations_refuse_with_their_reversed_pair() {
+        for (index, at, next) in FOLDS {
+            let (input, after, _, covered) = cover_case(index);
+            let orig = input.step_uv_domain();
+            assert!(!covered.success, "gen{index:04}: {covered:?}");
+            // A refused cover changes nothing.
+            assert_eq!(after.step_uv_domain(), orig, "gen{index:04}");
+            let Some(ContinuationFold::TurnsBack { uv, neighbour, dot }) = covered.fold else {
+                panic!("gen{index:04}: {:?}", covered.fold)
+            };
+            let near = |p: Point2, q: [f64; 2]| (p.x - q[0]).abs() < 5e-4 && (p.y - q[1]).abs() < 5e-4;
+            assert!(near(uv, at) && near(neighbour, next), "gen{index:04}: {uv:?} {neighbour:?}");
+            assert!(uv.x == neighbour.x || uv.y == neighbour.y, "gen{index:04}");
+            let (n0, l0) = unit_normal(&input, uv);
+            let (n1, l1) = unit_normal(&input, neighbour);
+            assert!(
+                l0 > normal_noise(&input, uv) && l1 > normal_noise(&input, neighbour),
+                "gen{index:04}: {l0} {l1}"
+            );
+            // Exact: a refused cover has not changed the surface, so these are the
+            // evaluations and the arithmetic the rule did.
+            assert_eq!(n0.dot(n1), dot, "gen{index:04}");
+            assert!(dot < 0.0, "gen{index:04}: {dot}");
+            // At least one of the pair is on the continuation.
+            let outside = |p: Point2| !Extent2d::from_points(p, p).is_contained_by(&orig, 0.0);
+            assert!(outside(uv) || outside(neighbour), "gen{index:04}: {orig:?}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

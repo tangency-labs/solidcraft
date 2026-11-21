@@ -374,6 +374,10 @@ pub fn preset_card(
 /// Enter or Space, so a click, a touch or the keyboard reaches it too. Assistive technology reads
 /// the same text. A click on the icon or outside the popover, or Escape, closes the popover.
 pub fn help_icon(ui: &mut Ui, text: &str) -> Response {
+    // The search hid the setting just before this icon, so the icon goes too (#16115).
+    if super::settings_search::follows_hidden(ui) {
+        return super::settings_search::hidden_response(ui);
+    }
     let t = Tokens::get();
     let size = t.space_12 + 1.0;
     let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::click());

@@ -18,6 +18,7 @@ pub mod optical_boundary;
 mod product;
 #[cfg(feature = "raytrace-cpu")]
 pub mod raytrace;
+pub mod sheet_image;
 mod silhouette;
 pub mod stage;
 pub mod studio;
@@ -27,6 +28,7 @@ pub mod texture_interpolation;
 pub mod texture_lod;
 pub mod texture_sampling;
 pub mod transmission;
+mod visual_style;
 
 pub use backend::{
     Availability, BackendDescriptor, BackendId, ExecutorDescriptor, ExecutorId, MAX_RENDER_ID_BYTES, RenderFeature, RenderFormat, RenderLimits,
@@ -38,3 +40,4 @@ pub use gif::gif;
 pub use model_bounds::view_bounds;
 pub use product::{FaceAppearance, ProductMesh, ProductScene};
 pub use silhouette::{PreparedSilhouettes, SilhouetteBuilder, SilhouetteEdge, SilhouetteView};
+pub use visual_style::VisualStyle;

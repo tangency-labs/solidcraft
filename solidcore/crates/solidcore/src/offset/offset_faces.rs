@@ -1863,7 +1863,6 @@ mod tests {
     #[test]
     fn a_rebuilt_vertex_keeps_its_own_tolerance() {
         let mut k = Kernel::default();
-        k.fixes.offset_edges_keep_source_tolerance = true;
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
         let at = |b: &Brep, x: f64, y: f64, z: f64| {
             b.vertices()

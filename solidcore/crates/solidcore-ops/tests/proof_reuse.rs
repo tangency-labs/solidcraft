@@ -10,9 +10,9 @@
 #![cfg(feature = "profile")]
 #![allow(clippy::unwrap_used)]
 
-use solidcore_ops::boolean::boolean;
+use solidcore_ops::boolean::boolean_with;
 use solidcore_ops::session::{self, CallProfile};
-use solidcore_ops::{make_box, make_cylinder, Body, BooleanOp};
+use solidcore_ops::{make_box, make_cylinder, Body, BooleanOp, Contract};
 
 /// The volume-sign decisions in `calls`.
 fn decisions(calls: &[CallProfile]) -> u64 {
@@ -37,12 +37,28 @@ fn drill(i: u32) -> Body {
     make_cylinder([10.0 * f64::from(i), 10.0, -1.0], 2.0, 12.0).unwrap()
 }
 
+/// `a` less `b`, proved ([`Contract::Proved`]: the contract that makes and takes proofs).
 fn cut(a: Body, b: Body) -> Body {
-    boolean(a, b, BooleanOp::Subtract).unwrap().unwrap()
+    boolean_with(a, b, BooleanOp::Subtract, Contract::Proved)
+        .unwrap()
+        .unwrap()
 }
 
-/// The drilled plate, each cut's result kept as it is (`fresh`: false) or replaced by a copy,
-/// which holds no proof (`fresh`: true), with the decisions the cuts made.
+/// `b` after an edit that changes nothing (the identity transform): any edit, through the
+/// body's lock, drops the proof.
+fn unproved(b: Body) -> Body {
+    b.transform(&[
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ])
+    .unwrap();
+    b
+}
+
+/// The drilled plate, each cut's result kept as it is (`fresh`: false) or edited by the
+/// identity, which drops its proof (`fresh`: true), with the decisions the cuts made.
 fn drilled(fresh: bool) -> (Body, u64) {
     let drills: Vec<Body> = (1..=9).map(drill).collect();
     let start = plate();
@@ -50,7 +66,7 @@ fn drilled(fresh: bool) -> (Body, u64) {
         drills.into_iter().fold(start, |a, d| {
             let r = cut(a, d);
             if fresh {
-                r.copy().unwrap()
+                unproved(r)
             } else {
                 r
             }
@@ -63,17 +79,17 @@ fn drilled(fresh: bool) -> (Body, u64) {
 fn a_drilled_plate_proves_each_cut_result_once() {
     all_fixes();
     let (kept, reused) = drilled(false);
-    let (copied, every) = drilled(true);
+    let (edited, every) = drilled(true);
     assert_eq!(every, 27, "each cut proves both operands and its result");
     assert_eq!(
         reused, 19,
         "the 8 results proved by the cut before are not proved again"
     );
     // the same body either way
-    assert_eq!(kept.counts().unwrap(), copied.counts().unwrap());
+    assert_eq!(kept.counts().unwrap(), edited.counts().unwrap());
     assert_eq!(
         kept.volume(1e-9).unwrap().to_bits(),
-        copied.volume(1e-9).unwrap().to_bits()
+        edited.volume(1e-9).unwrap().to_bits()
     );
 }
 
@@ -91,16 +107,37 @@ fn a_proved_body_changed_since_is_proved_again() {
     assert_eq!(second_cut(cut(plate(), drill(1))), 2);
     // transformed (here by the identity: any edit, through the body's lock, drops the proof
     // whatever it changes): decided again
-    let moved = cut(plate(), drill(1));
-    moved
-        .transform(&[
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0],
-        ])
-        .unwrap();
-    assert_eq!(second_cut(moved), 3);
+    assert_eq!(second_cut(unproved(cut(plate(), drill(1)))), 3);
+}
+
+/// A copy of a proved body brings its proof: cut from, it is decided as often as the body
+/// itself, and once less than the body with its proof dropped (the copy is not proved again).
+#[test]
+fn a_copy_of_a_proved_body_is_not_proved_again() {
+    all_fixes();
+    let proved = second_cut(cut(plate(), drill(1)));
+    let copied = second_cut(cut(plate(), drill(1)).copy().unwrap());
+    let dropped = second_cut(unproved(cut(plate(), drill(1))));
+    assert_eq!(copied, proved);
+    assert_eq!(copied + 1, dropped);
+}
+
+/// Under the default contract a boolean decides no volume's sign: it tests its operands and
+/// its result for closure only.
+#[test]
+fn a_boolean_under_the_default_contract_proves_nothing() {
+    all_fixes();
+    let (a, d) = (plate(), drill(1));
+    let (r, calls) = session::profiled(|| {
+        solidcore_ops::boolean::boolean(a, d, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+    });
+    assert_eq!(decisions(&calls), 0);
+    assert_eq!(
+        r.counts().unwrap(),
+        cut(plate(), drill(1)).counts().unwrap()
+    );
 }
 
 #[test]
