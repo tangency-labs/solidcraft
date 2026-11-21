@@ -57,8 +57,9 @@ impl std::error::Error for PeriodicSeamError {
 
 /// Complete an import's periodic topology after its lifted pcurves are known, before the
 /// record is published. Returns the completed record and each output face's input index;
-/// `None` leaves an already in-domain record unchanged. The kernel removes crossed internal
-/// cuts, splits genuine boundaries at the base cut, inserts seams and translates the pieces.
+/// `None` leaves a record with in-domain trims and complete sectors unchanged. The kernel
+/// removes crossed internal cuts, splits genuine boundaries at the base cut, inserts seams
+/// and translates the pieces.
 ///
 /// # Errors
 /// Typed evaluation, conversion and topology failures, including a lost face origin.
@@ -67,7 +68,7 @@ pub fn complete_periodic_seams(
 ) -> std::result::Result<Option<(solidcore_record::brep::Brep, Vec<usize>)>, PeriodicSeamError> {
     use solidcore_convert::brep::{to_kernel, to_record};
     use solidcore_record::brep::Loop;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     let mut targets = Vec::new();
     for (i, face) in record.faces.iter().enumerate() {
@@ -80,14 +81,20 @@ pub fn complete_periodic_seams(
             continue;
         }
         let mut outside = false;
+        let mut seen = BTreeSet::new();
+        let mut internal_seam = false;
         for l in &face.loops {
             if let Loop::Edges { edges } = l {
                 for u in edges {
                     outside |= k::leaves_base_period(domain, &solidcore_convert::curve2(&u.pcurve));
+                    internal_seam |= !seen.insert(u.edge);
                 }
             }
         }
-        if outside {
+        // An internal seam may have in-domain trims yet leave a 3D vertex sector
+        // crossing the cut. Let the kernel inspect those sectors before taking the
+        // no-edit path; bounds alone do not establish seam validity.
+        if outside || internal_seam {
             targets.push(i);
         }
     }
@@ -103,17 +110,25 @@ pub fn complete_periodic_seams(
         .enumerate()
         .map(|(i, &f)| (f, i))
         .collect();
+    let mut changed = false;
     for i in targets {
         let f = *order
             .faces
             .get(i)
             .ok_or(PeriodicSeamError::InputFaceLost(i))?;
-        let pieces =
+        let Some(pieces) =
             solidcore::topology::face::p1::complete_imported_face_seams(&mut kernel, &mut body, f)
-                .map_err(PeriodicSeamError::Topology)?;
+                .map_err(PeriodicSeamError::Topology)?
+        else {
+            continue;
+        };
+        changed = true;
         for piece in pieces {
             origins.insert(piece, i);
         }
+    }
+    if !changed {
+        return Ok(None);
     }
     let (completed, order) =
         to_record(&mut kernel, &mut body).map_err(PeriodicSeamError::Conversion)?;

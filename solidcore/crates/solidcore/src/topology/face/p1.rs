@@ -2609,9 +2609,11 @@ pub fn complete_merged_face_seam(
 
 /// Complete an imported face after its trims have been lifted across periodic cuts.
 /// An edge used on both sides by this face is an internal cut: if its trim crosses the
-/// base-period cut, remove it before inserting the natural seam. Real boundary edges stay;
-/// `SplitAtSeam` splits those edges, including every adjacent face's uses, at the cut.
-/// The returned faces are the pieces of `f`; no material or shell side is changed.
+/// base-period cut or leaves a sector missing a seam, remove it before inserting the natural
+/// seam. Real boundary edges stay; `SplitAtSeam` splits those edges, including every
+/// adjacent face's uses, at the cut.
+/// The returned faces are the pieces of `f`; no material or shell side is changed. `None`
+/// means its trims and sectors already respect the base-period seam.
 ///
 /// This belongs after trim construction: a trim builder has one edge use and returns one
 /// curve, whereas a crossed cut requires a body edit. The existing seam classification and
@@ -2624,34 +2626,31 @@ pub fn complete_imported_face_seams(
     k: &mut Kernel,
     b: &mut Brep,
     f: FaceId,
-) -> Result<Vec<FaceId>> {
+) -> Result<Option<Vec<FaceId>>> {
     use crate::topology::brep::p1::HealLoopHandle;
     use crate::topology::brep::p4::{delete_edge, DeleteEnv};
 
+    let mut needs_completion = false;
+    for eu in super::p4::upward_edgeuses(b, f, false, None)? {
+        let trim = get_or_create_uv_trim_curve(k, b, eu)?;
+        needs_completion |= imported_trim_shift(k, b, f, &trim)? != Some(Vec3::ZERO);
+    }
+    let mut redundant = Vec::new();
+    for e in face_edges(b, f)? {
+        if imported_internal_seam_needs_replacement(k, b, f, e)? {
+            redundant.push(e);
+        }
+    }
+    if !needs_completion && redundant.is_empty() {
+        return Ok(None);
+    }
+
     brep_p3::edit_brep(k, b, |k, b, scope| {
-        for e in face_edges(b, f)? {
+        for e in redundant {
             if b.edge(e).is_err() {
                 continue;
             }
-            let uses = crate::topology::edge::edgeuses(b, e, None, None)?;
-            if uses.len() != 4 || !crate::topology::edge::is_manifold(b, e)? {
-                continue;
-            }
-            let mut same_face = true;
-            for &eu in &uses {
-                same_face &= eu1::face(b, eu)? == Some(f);
-            }
-            if !same_face {
-                continue;
-            }
-            let mut crosses = false;
-            for eu in uses {
-                let trim = get_or_create_uv_trim_curve(k, b, eu)?;
-                crosses |= imported_trim_shift(k, b, f, &trim)? != Some(Vec3::ZERO);
-            }
-            if crosses {
-                delete_edge(k, b, &mut DeleteEnv::from_notify(scope.env), e, Some(f))?;
-            }
+            delete_edge(k, b, &mut DeleteEnv::from_notify(scope.env), e, Some(f))?;
         }
 
         let check = super::p4::has_seam_problem_in_brep_mut::<HealLoopHandle>(
@@ -2676,6 +2675,9 @@ pub fn complete_imported_face_seams(
                 None,
                 &|o: HealLoopHandle| o.as_topology(),
             )?;
+            for e in split.edges {
+                store_imported_seam_curve(k, b, e, scope.env)?;
+            }
             for face in split.faces {
                 if !faces.contains(&face) {
                     faces.push(face);
@@ -2713,8 +2715,80 @@ pub fn complete_imported_face_seams(
                 calculate_uv_domain_from_uv_trim_curves(k, b, face, true, false, false)?.domain;
             fp2::set_uv_domain(b, face, &domain)?;
         }
-        Ok(faces)
+        Ok(Some(faces))
     })
+}
+
+/// A shared internal edge can hide a missing seam even with in-domain UV fits. Seam
+/// status is derived from the connected sectors, not stored as a bit on an edge.
+fn imported_internal_seam_needs_replacement(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    e: EdgeId,
+) -> Result<bool> {
+    let uses = crate::topology::edge::edgeuses(b, e, None, None)?;
+    if uses.len() != 4 || !crate::topology::edge::is_manifold(b, e)? {
+        return Ok(false);
+    }
+    for &eu in &uses {
+        if eu1::face(b, eu)? != Some(f) {
+            return Ok(false);
+        }
+    }
+    for eu in uses {
+        let trim = get_or_create_uv_trim_curve(k, b, eu)?;
+        if imported_trim_shift(k, b, f, &trim)? != Some(Vec3::ZERO) {
+            return Ok(true);
+        }
+        // The 3D edge may bow away from a trim fitted along the cut. Use the same
+        // missing-sector predicate as the vertex-use validity check (Test #5).
+        if let Some(vu) = eu1::vertexuse(b, eu)? {
+            if crate::topology::vertexuse::is_sector_missing_seam(k, b, vu, true)?.missing {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Seam insertion needs the curve-on-surface representation (including its seam identity).
+/// Once connected, store the exact iso curve in a form the record can carry. The iso's
+/// parameter is the varying surface coordinate; restore the edge's parameter before the
+/// notified replacement, and retain both sides' trims which that replacement invalidates.
+fn store_imported_seam_curve(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    env: &mut crate::topology::edge::NotifyEnv<'_>,
+) -> Result<()> {
+    let interval = b.edge(e)?.interval;
+    let mut curve = crate::topology::brep::p5::exact_bspline_of_edge(k, b, e, interval, 0.0)?
+        .ok_or_else(|| {
+            SolidError::topology(
+                OP,
+                TopologyFailure::CurveNotBSpline {
+                    entity: Some(EntityRef::Edge(e)),
+                },
+            )
+        })?;
+    curve.edit_parameterization_exactly(k, &interval)?;
+    let mut trims = Vec::new();
+    for eu in crate::topology::edge::edgeuses(b, e, None, None)? {
+        trims.push((eu, get_or_create_uv_trim_curve(k, b, eu)?));
+    }
+    crate::topology::edge::replace_3d_curve(b, e, Some(curve), env)?;
+    for (eu, trim) in trims {
+        eu1::set_uv_trim_curve(
+            b,
+            eu,
+            eu1::UvTrimCurveArg::New(Box::new(trim)),
+            0.0,
+            true,
+            None,
+        )?;
+    }
+    Ok(())
 }
 
 /// The whole-period translation putting a trim in its surface's base domain, or `None`

@@ -984,18 +984,14 @@ fn periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell() {
             .map(|p| vec![[p[0], p[1], 0.0, p[2]], [p[0], p[1], h * p[2], p[2]]])
             .collect(),
     };
-    let curves = [
-        arc(0.0),
-        Curve::Line {
-            start: vertices[1].point,
-            end: vertices[2].point,
-        },
-        arc(h),
-        Curve::Line {
-            start: vertices[0].point,
-            end: vertices[3].point,
-        },
-    ];
+    // Degree-one B-splines keep the ruling's parameter in [0, h], just like v.
+    // A record Line's vector is end - start per unit parameter: [0, h] would
+    // otherwise traverse this height-h vector h times.
+    let ruling = |a: usize, b: usize| Curve::Spline {
+        knots: vec![0.0, 0.0, h, h],
+        points: vec![vertices[a].point, vertices[b].point],
+    };
+    let curves = [arc(0.0), ruling(1, 2), arc(h), ruling(0, 3)];
     let intervals = [[3.5, 4.5], [0.0, h], [3.5, 4.5], [0.0, h]];
     let ends = [[0, 1], [1, 2], [3, 2], [0, 3]];
     let directions = [true, true, false, false];
@@ -1060,6 +1056,8 @@ fn periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell() {
         edges,
         vertices,
     };
+    crate::record_check::validate(&source).unwrap();
+    crate::record_check::agreement(&source).unwrap();
     let (completed, origins) = crate::pcurve::complete_periodic_seams(&source)
         .unwrap()
         .unwrap();
@@ -1077,6 +1075,13 @@ fn periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell() {
     crate::record_check::agreement(&completed).unwrap();
     let seam = completed.edges.iter().find(|e| e.uses.len() == 2).unwrap();
     assert_ne!(seam.uses[0].face, seam.uses[1].face);
+    // The inserted curve-on-surface must be stored as its exact iso B-spline,
+    // retaining its own edge parameter rather than the surface's [0, h].
+    assert!(matches!(
+        seam.nurbs.as_ref().unwrap_or(&seam.curve),
+        Curve::Spline { .. } | Curve::RationalSpline { .. }
+    ));
+    assert_eq!(seam.interval, [0.0, 1.0]);
     for &v in &seam.vertices {
         let [x, y, z] = completed.vertices[v as usize].point;
         assert!((x - r).abs() < 1e-9 && y.abs() < 1e-9);
