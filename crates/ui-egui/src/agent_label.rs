@@ -27,9 +27,15 @@ pub fn tool_of(raw: &str) -> &str {
     }
 }
 
-/// Whether `raw` is an MCP tool's id (`mcp__server__tool` and its dotted forms).
-pub fn is_mcp_id(raw: &str) -> bool {
+/// Whether `raw` names an MCP tool of any server (`mcp__server__tool` and its dotted forms).
+fn is_mcp_name(raw: &str) -> bool {
     tool_of(raw) != raw.trim()
+}
+
+/// Whether `raw` is the id of one of SolidCraft's own MCP tools (`mcp__solidcraft-app__batch`
+/// and its dotted forms). Another server's tool is not ours to rename: it keeps its title.
+pub fn is_mcp_id(raw: &str) -> bool {
+    is_mcp_name(raw) && raw.to_ascii_lowercase().contains("solidcraft")
 }
 
 /// A word list from an id: `set_parameter`, `ui.prefs`, `solid-fillet` read "Set parameter",
@@ -114,7 +120,7 @@ pub fn card_title(language: Locale, title: &str) -> String {
         let names: Vec<String> = list.split(", ").map(|c| name_in(language, c)).collect();
         return batch_of(language, &names, more || names.len() > BATCH_NAMES);
     }
-    let one_id = !title.contains(char::is_whitespace) && (title.contains(['.', '_']) || is_mcp_id(title));
+    let one_id = !title.contains(char::is_whitespace) && if is_mcp_name(title) { is_mcp_id(title) } else { title.contains(['.', '_']) };
     if one_id { name_in(language, title) } else { title.to_string() }
 }
 
@@ -134,6 +140,7 @@ mod tests {
         }
         assert_eq!(tool_of("solid.fillet"), "solid.fillet");
         assert!(is_mcp_id("mcp__solidcraft-app__batch") && !is_mcp_id("Read a.step"));
+        assert!(!is_mcp_id("mcp__github__create_issue"), "another server's tool is not ours to rename");
     }
 
     #[test]
@@ -155,6 +162,7 @@ mod tests {
         assert_eq!(card_title(english(), "batch: solid.fillet, solid.chamfer (+3)"), "Batch: Fillet, Chamfer, …");
         assert_eq!(card_title(english(), "mcp__solidcraft-app__undo"), "Undo");
         assert_eq!(card_title(english(), "Read a.step"), "Read a.step");
+        assert_eq!(card_title(english(), "mcp__github__create_issue"), "mcp__github__create_issue");
     }
 
     #[test]
