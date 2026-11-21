@@ -258,13 +258,24 @@ pub(crate) fn split_curves_at_singular_points(
         if splits.is_empty() {
             continue;
         }
-        let (Some(parent_3), Some(parent_uv1), Some(parent_uv2)) = (
-            curves_3d.get(ii).cloned(),
-            uv1_curves.get(ii).cloned(),
-            uv2_curves.get(ii).cloned(),
+        // the parents stay as they are, for the pieces' deviations and to be put back; the
+        // splits work on exact copies (`clone_for_evaluation`: no copy-constructor knot
+        // fix-up, so the copies are the parents bit for bit)
+        let (Some(c3), Some(uv1), Some(uv2)) = (
+            curves_3d.get_mut(ii),
+            uv1_curves.get_mut(ii),
+            uv2_curves.get_mut(ii),
         ) else {
             continue;
         };
+        let (work_3, work_uv1, work_uv2) = (
+            c3.clone_for_evaluation()?,
+            uv1.clone_for_evaluation()?,
+            uv2.clone_for_evaluation()?,
+        );
+        let parent_3 = core::mem::replace(c3, work_3);
+        let parent_uv1 = core::mem::replace(uv1, work_uv1);
+        let parent_uv2 = core::mem::replace(uv2, work_uv2);
         let mut tails = Vec::new();
         for &split in splits.iter().rev() {
             let (Some(c3), Some(uv1), Some(uv2)) = (
@@ -328,7 +339,7 @@ mod tests {
     use super::*;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::crv_basic::Curve as Nurb;
-    use crate::nurbs::math::{CPoint, NOW};
+    use crate::nurbs::math::{CPoint, NOW, NOZ};
 
     /// A cubic with one interior knot, at 1; rational (one weight 2) when asked.
     fn parent(rational: bool) -> Curve {
@@ -420,5 +431,170 @@ mod tests {
         let u = vec![a, a, a, a, 2.5, 2.5, 2.5, 2.5];
         let cleaned = Curve::from(BSplineCurve::from_gw_nurb(3, &Nurb::new(pw, 3, u).unwrap()));
         assert_eq!(piece_deviation(&whole, &cleaned, 0.25), None);
+    }
+
+    /// A non-rational bilinear patch over `[0, 1]^2`: `x = u`, `y = v`, `z` from the rows
+    /// `zs` (degree `zs.len() - 1` in `u`).
+    fn patch(zs: &[f64]) -> Surface {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::srf_basic::Surface as Patch;
+        let p = zs.len() - 1;
+        let net = zs
+            .iter()
+            .enumerate()
+            .map(|(i, &z)| {
+                let x = i as f64 / p as f64;
+                vec![CPoint::new(x, 0.0, z, NOW), CPoint::new(x, 1.0, z, NOW)]
+            })
+            .collect();
+        let mut u = vec![0.0; p + 1];
+        u.extend(vec![1.0; p + 1]);
+        let net = Patch::new(net, p, 1, u, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+        Surface::from(BSplineSurface::from_gw_nurb(&net))
+    }
+
+    /// The straight UV curve from `a` to `b` over `[0, 2.5]`.
+    fn uv_line(a: (f64, f64), b: (f64, f64)) -> Curve {
+        let pw = [
+            CPoint::new(a.0, a.1, NOZ, NOW),
+            CPoint::new(b.0, b.1, NOZ, NOW),
+        ];
+        Curve::from(BSplineCurve::from_data(2, 1, 3, 1, &pw, &[0.0, 0.0, 2.5, 2.5]).unwrap())
+    }
+
+    /// A refused split puts the parents back exactly. The plane z = 0 and the trough
+    /// `z = (2u - 1)^2` have parallel normals at u = 1/2, which the second UV curve
+    /// reaches at t = 1.25, so the crossing is split there. Its 3D curve is rational
+    /// (unit weights) and its first span [0, 1] collapses to a pole at the start, so the
+    /// split's `Trim` cleans that span off the lead piece and drops the parent's knot
+    /// at 1. A rational piece cannot be bounded (`piece_deviation` is `None`) and the curve
+    /// is left unsplit: the three parents must come back with their knots, control
+    /// points, owner and recorded edge tolerance. A `Clone` (the copy constructor) drops
+    /// the owner and the tolerance and merges the first UV curve's knots 1e-14 apart,
+    /// so this fails if the parents are kept as `Clone`s. The same curve non-rational is
+    /// bounded, and its split at 1.25 stands.
+    #[test]
+    fn a_refused_singular_split_restores_the_parents_exactly() {
+        let k = Kernel::default();
+        let plane = patch(&[0.0, 0.0]);
+        let trough = patch(&[1.0, -1.0, 1.0]);
+        // P0..P3 lie within 1e-7: the span [0, 1] collapses to a pole at the start
+        let pw = vec![
+            CPoint::new(0.0, 0.0, 0.0, 1.0),
+            CPoint::new(1e-8, 2e-8, 0.5e-8, 1.0),
+            CPoint::new(3e-8, 3e-8, -1e-8, 1.0),
+            CPoint::new(4e-8, 1e-8, 2e-8, 1.0),
+            CPoint::new(6.0, 0.0, 1.0, 1.0),
+        ];
+        let u = vec![0.0, 0.0, 0.0, 0.0, 1.0, 2.5, 2.5, 2.5, 2.5];
+        let mut c3 = Curve::from(BSplineCurve::from_gw_nurb(3, &Nurb::new(pw, 3, u).unwrap()));
+        let edge = crate::geom::object::ObjectRef {
+            type_code: 16016, // SM_TYPE of an edge
+            key: crate::geom::attribute::ObjectKey(7),
+        };
+        let _ = c3.set_owner(Some(edge), None);
+        c3.set_owner_zone_tol_3d(Some(3e-6));
+        // a knot pair 1e-14 apart, which the copy constructor (`Clone`) would merge
+        let mut b = BSplineCurve::from_data(
+            2,
+            3,
+            5,
+            1,
+            &[0.0, 1.0, 1.0 + 1e-14, 2.5].map(|t| {
+                let x = 0.2 + 0.6 * t / 2.5;
+                CPoint::new(x, x, NOZ, NOW)
+            }),
+            &[0.0, 0.0, 1.0, 1.0, 2.5, 2.5],
+        )
+        .unwrap();
+        b.get_or_create_gw_nurb()
+            .unwrap()
+            .knots_mut()
+            .copy_from_slice(&[0.0, 0.0, 1.0, 1.0 + 1e-14, 2.5, 2.5]);
+        let mut uv1 = Curve::from(b);
+        let _ = uv1.set_owner(Some(edge), None);
+        assert_ne!(knots_of(&uv1.clone()), knots_of(&uv1));
+        let uv2 = uv_line((0.0, 0.5), (1.0, 0.5));
+
+        let mut curves_3d = vec![c3.clone_for_evaluation().unwrap()];
+        let mut uv1_curves = vec![uv1.clone_for_evaluation().unwrap()];
+        let mut uv2_curves = vec![uv2.clone_for_evaluation().unwrap()];
+        let mut curve_types = vec![TsectCurveType::Crossing];
+        let mut deviations = vec![0.25];
+        split_curves_at_singular_points(
+            &k,
+            &plane,
+            &trough,
+            1e-12,
+            &mut curves_3d,
+            &mut uv1_curves,
+            &mut uv2_curves,
+            &mut curve_types,
+            &mut deviations,
+        )
+        .unwrap();
+
+        // the split at 1.25 makes a lead piece without the knot at 1, which is refused
+        let mut lead = c3.clone_for_evaluation().unwrap();
+        let tail = lead.create_by_split_curve(&k, 1.25).unwrap();
+        assert!(!knots_of(&lead).contains(&1.0), "{:?}", knots_of(&lead));
+        assert_eq!(piece_deviation(&c3, &lead, 0.25), None);
+        assert_eq!(piece_deviation(&c3, &tail, 0.25), Some(0.25));
+
+        assert_eq!(
+            (curves_3d.len(), uv1_curves.len(), uv2_curves.len()),
+            (1, 1, 1)
+        );
+        assert_eq!(
+            (curve_types, deviations),
+            (vec![TsectCurveType::Crossing], vec![0.25])
+        );
+        for (got, want) in [
+            (&curves_3d[0], &c3),
+            (&uv1_curves[0], &uv1),
+            (&uv2_curves[0], &uv2),
+        ] {
+            let (CurveKind::BSpline(g), CurveKind::BSpline(w)) = (got.kind(), want.kind()) else {
+                panic!("not a B-spline")
+            };
+            let (g, w) = (g.nurb.as_ref().unwrap(), w.nurb.as_ref().unwrap());
+            assert_eq!(g.knots(), w.knots());
+            assert_eq!(g.cpts(), w.cpts());
+            assert_eq!(got.owner(), want.owner());
+            assert_eq!(got.owner_zone_tol_3d(), want.owner_zone_tol_3d());
+        }
+        assert_eq!(curves_3d[0].owner(), Some(edge));
+        assert_eq!(curves_3d[0].owner_zone_tol_3d(), Some(3e-6));
+        assert_eq!(knots_of(&uv1_curves[0])[3], 1.0 + 1e-14);
+
+        // the same curve, non-rational: its pieces are bounded and the split stands
+        let CurveKind::BSpline(b) = c3.kind() else {
+            panic!("not a B-spline")
+        };
+        let pw = b.nurb.as_ref().unwrap().cpts().iter();
+        let pw = pw.map(|c| CPoint::new(c.x, c.y, c.z, NOW)).collect();
+        let u = knots_of(&c3);
+        let polynomial = Curve::from(BSplineCurve::from_gw_nurb(3, &Nurb::new(pw, 3, u).unwrap()));
+        let mut curves_3d = vec![polynomial];
+        let mut uv1_curves = vec![uv1.clone_for_evaluation().unwrap()];
+        let mut uv2_curves = vec![uv2];
+        let mut curve_types = vec![TsectCurveType::Crossing];
+        let mut deviations = vec![0.25];
+        split_curves_at_singular_points(
+            &k,
+            &plane,
+            &trough,
+            1e-12,
+            &mut curves_3d,
+            &mut uv1_curves,
+            &mut uv2_curves,
+            &mut curve_types,
+            &mut deviations,
+        )
+        .unwrap();
+        assert_eq!(curves_3d.len(), 2);
+        let (lead, tail) = (knots_of(&curves_3d[0]), knots_of(&curves_3d[1]));
+        assert!((lead[lead.len() - 1] - 1.25).abs() < 1e-6, "{lead:?}");
+        assert!((tail[0] - 1.25).abs() < 1e-6, "{tail:?}");
     }
 }

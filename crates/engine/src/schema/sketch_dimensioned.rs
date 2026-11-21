@@ -28,6 +28,7 @@ pub const CREATORS: &[&str] = &[
     "sketch.rectangle.center",
     "sketch.rectangle.three_point",
     "sketch.rectangle.rounded",
+    "sketch.rectangle.edge_center",
     "sketch.circle.center",
     "sketch.circle.two_point",
     "sketch.circle.three_point",
@@ -122,7 +123,7 @@ impl JsonSchema for DimensionValues {
         let length = generator.subschema_for::<LengthExpr>();
         let angle = generator.subschema_for::<AngleExpr>();
         json_schema!({
-            "description": "The sizes to place, each by its role: a number (in the design's unit) or an expression, or `name = expression`, which also defines the user parameter `name`. The roles a creator takes are its own: a line or midpoint line takes `length` and `angle`; a rectangle `width` and `height`; a circle `diameter` or `radius` (not both); an arc by centre `radius` and `sweep`; an ellipse `major_radius` and `minor_radius`; a centre-to-centre, overall or centre-point slot `length` and `width`; a centre arc slot `radius`, `sweep` and `width`; a three-point arc slot `width`; an inscribed or circumscribed polygon `radius`; an edge polygon `radius` or `length` (not both). A role the creator does not take is refused.",
+            "description": "The sizes to place, each by its role: a number (in the design's unit) or an expression, or `name = expression`, which also defines the user parameter `name`. The roles a creator takes are its own: a line or midpoint line takes `length` and `angle`; a rectangle `width` and `height`, an edge-centre rectangle `length` (its first edge) and `width`; a circle `diameter` or `radius` (not both); an arc by centre `radius` and `sweep`; an ellipse `major_radius` and `minor_radius`; a centre-to-centre, overall or centre-point slot `length` and `width`; a centre arc slot `radius`, `sweep` and `width`; a three-point arc slot `width`; an inscribed or circumscribed polygon `radius`; an edge polygon `radius` or `length` (not both). A role the creator does not take is refused.",
             "type": "object",
             "properties": {
                 "length": length,

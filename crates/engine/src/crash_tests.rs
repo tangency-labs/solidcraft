@@ -62,6 +62,8 @@ fn child() {
     }
     set_environment("Renderer: test");
     let mut s = Session { crash_journal: true, ..Default::default() };
+    // Where the session's ids stand at the journal's base, its first command.
+    println!("BASE_IDS {}", s.ids.seed());
     s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
     if mode == "read_only" {
         let state = STATE.get().unwrap();
@@ -163,11 +165,19 @@ fn child() {
             let _ = s.execute("diagnostics.crash_test", &json!({"mode":"abort"}));
         }
         "command" => {
+            println!("IDS {}", s.ids.seed());
             for _ in 0..3 {
                 let r = s.execute("diagnostics.crash_test", &json!({"mode": "panic"}));
                 assert!(matches!(r, Err(crate::EngineError::Internal(..))), "{r:?}");
             }
             assert_eq!(s.doc.features.len(), 1, "the design is unchanged");
+        }
+        "drawing" => {
+            s.execute("drawing.create", &json!({"name": "Broken"})).unwrap();
+            let mut doc = (*s.doc).clone();
+            std::sync::Arc::make_mut(&mut doc.drawings[0]).language = "?".into();
+            s.doc = std::sync::Arc::new(doc);
+            assert!(s.execute("diagnostics.crash_test", &json!({"mode": "panic"})).is_err());
         }
         // A panic inside a solidcore call: caught there, an internal error of the command.
         "kernel" => {
@@ -213,7 +223,7 @@ fn child() {
             drop(scope);
             assert!(matches!(r.as_slice(), [Err(solidcraft_kernel::KernelError::Internal(_))]), "{r:?}");
             assert!(list(&STATE.get().unwrap().dir).is_empty(), "the worker's panic waits for the command to end");
-            command_done(true, false, &before, &s.doc, "test.guarded_worker", &params, Err("the item failed".into()));
+            command_done(true, false, &before, &s.doc, ("test.guarded_worker", &params, s.ids.seed()), Err("the item failed".into()));
         }
         // `thread_dies`: the panic ends the app, as one on the window's thread does.
         "thread" | "thread_dies" => {
@@ -282,6 +292,11 @@ fn run_child(dir: &Path, mode: &str) -> (String, bool) {
     (String::from_utf8_lossy(&out.stdout).into_owned(), out.status.success())
 }
 
+/// The id seed a child printed after `label`.
+fn printed_seed(out: &str, label: &str) -> u64 {
+    out.lines().find_map(|l| l.strip_prefix(label)).and_then(|x| x.trim().parse().ok()).unwrap()
+}
+
 #[test]
 fn accepted_prepared_commands_replay_and_discarded_work_is_not_journaled() {
     let directory = fresh_dir("prepared");
@@ -317,7 +332,7 @@ fn only_report(dir: &Path) -> (Summary, Value) {
 #[test]
 fn a_command_panic_is_reported_once_with_the_design_and_the_command() {
     let d = fresh_dir("command");
-    let (_, ok) = run_child(&d, "command");
+    let (out, ok) = run_child(&d, "command");
     assert!(ok, "the panics were caught");
     let (s, v) = only_report(&d);
     assert_eq!(s.kind, "command_panic");
@@ -340,7 +355,24 @@ fn a_command_panic_is_reported_once_with_the_design_and_the_command() {
     assert_eq!(design.features.len(), 1);
     let replay: Value = serde_json::from_slice(&fs::read(v["replay_path"].as_str().unwrap()).unwrap()).unwrap();
     assert_eq!(replay["commands"], json!([{"command": "diagnostics.crash_test", "params": {"mode": "panic"}}]));
+    assert_eq!(replay["ids"], json!(printed_seed(&out, "IDS ")), "the session's id seed when the command started");
     assert!(fs::read_dir(d.join("sessions")).unwrap().next().is_none(), "a clean exit leaves no journal");
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// A drawing that breaks a rule of the record would keep the report's design from opening: the
+/// copy leaves it out, and the report's notes name it and the rule.
+#[test]
+fn a_crash_reports_design_leaves_out_a_drawing_that_breaks_a_rule() {
+    let d = fresh_dir("drawing");
+    let (_, ok) = run_child(&d, "drawing");
+    assert!(ok, "the panic was caught");
+    let (_, v) = only_report(&d);
+    let design = solidcraft_io::read_design(&fs::read(v["design_path"].as_str().unwrap()).unwrap()).unwrap();
+    assert_eq!(design.features.len(), 1);
+    assert!(design.drawings.is_empty());
+    let notes = v["notes"].to_string();
+    assert!(notes.contains(r#"drawing \"Broken\" ("#) && notes.contains(") left out: the language is not"), "{notes}");
     let _ = fs::remove_dir_all(&d);
 }
 
@@ -545,7 +577,7 @@ fn an_idle_unclean_exit_of_another_version_is_not_reported() {
 #[test]
 fn an_abort_is_reported_at_the_next_start_with_a_replay() {
     let d = fresh_dir("abort");
-    let (_, ok) = run_child(&d, "abort");
+    let (started, ok) = run_child(&d, "abort");
     assert!(!ok, "the child aborted");
     assert!(list(&d).is_empty(), "no hook sees an abort");
     // The next start finds the journal nobody holds and tells about it.
@@ -561,6 +593,7 @@ fn an_abort_is_reported_at_the_next_start_with_a_replay() {
     let replay: Value = serde_json::from_slice(&fs::read(v["replay_path"].as_str().unwrap()).unwrap()).unwrap();
     let ids: Vec<&str> = replay["commands"].as_array().unwrap().iter().map(|c| c["command"].as_str().unwrap()).collect();
     assert_eq!(ids, ["solid.box", "diagnostics.crash_test"], "read-only commands are not journaled");
+    assert_eq!(replay["ids"], json!(printed_seed(&started, "BASE_IDS ")), "the id seed kept at the journal's base");
     assert!(v.get("design_path").is_none());
     // Told once: the start after that has nothing new.
     let (out, _) = run_child(&d, "none");
@@ -724,7 +757,7 @@ fn startup_steps_survive_a_rebase_and_running_ends_startup() {
     let mut j = Journal::open(&d, &build(), now());
     j.phase = Some(json!({"phase": "first frame", "ms": 5}).to_string());
     j.environment = Some(json!({"environment": "Renderer: X"}).to_string());
-    j.rebase(&json!("new"), 1);
+    j.rebase(&json!("new"), 1, None);
     // Read through the journal's own handle, as `read_live_journal` does: Windows refuses a
     // second handle on a live journal's locked range (#1448).
     let r = read_journal_file(j.file.as_ref().unwrap().try_clone().unwrap());
@@ -784,7 +817,7 @@ fn fake_report(dir: &Path, secs: u64, sig: u64, kind: &str) -> String {
 fn a_report_from_an_earlier_release_still_finds_its_design() {
     let d = fresh_dir("legacy-design");
     let id = fake_report(&d, 1_700_000_000, 7, "command_panic");
-    fs::write(d.join(&id).join("design.solidcraft"), solidcraft_io::write_design(&solidcraft_doc::Document::default())).unwrap();
+    fs::write(d.join(&id).join("design.solidcraft"), solidcraft_io::write_design(&solidcraft_doc::Document::default()).unwrap()).unwrap();
     let v = read(&d, &id).unwrap();
     assert!(v["design_path"].as_str().unwrap().ends_with("design.solidcraft"), "{v}");
     let _ = fs::remove_dir_all(&d);

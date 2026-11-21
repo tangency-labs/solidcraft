@@ -12,7 +12,7 @@ use serde_json::Value;
 // The WIT package declaration is the sole source of the API identifier.
 include!(concat!(env!("OUT_DIR"), "/api.rs"));
 pub const WIT: &str = include_str!("../wit/plugin.wit");
-pub const MAX_MANIFEST_BYTES: usize = 16 * 1024;
+pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 pub const MAX_COMPONENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_JSON_BYTES: usize = 1024 * 1024;
 /// An importer's component may be larger: a real converter measured 28 to 42 MB (RFC 0002).
@@ -33,10 +33,60 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 
 pub type Result<T> = std::result::Result<T, HostError>;
 
+/// An open document session and its committed history state, kept outside authored document data.
+/// Saving preserves a token; committed edits, undo and redo each produce a fresh revision.
+/// Opening or importing a document creates a fresh identity, including reopening the same file.
+/// Both strings are opaque and must only be compared for equality within their open session.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DesignToken {
+    #[serde(deserialize_with = "deserialize_design_token_part")]
+    #[schemars(length(min = 1, max = 128))]
+    pub document_id: String,
+    #[serde(deserialize_with = "deserialize_design_token_part")]
+    #[schemars(length(min = 1, max = 128))]
+    pub revision: String,
+}
+fn deserialize_design_token_part<'de, D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<String, D::Error> {
+    use serde::de::Error;
+
+    let value = String::deserialize(deserializer)?;
+    if value.is_empty() || value.len() > 128 || !value.bytes().all(|byte| (b' '..=b'~').contains(&byte)) {
+        return Err(D::Error::custom("a design token field must contain 1 to 128 printable ASCII characters"));
+    }
+    Ok(value)
+}
+
+impl std::fmt::Display for DesignToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}@{}", self.document_id, self.revision)
+    }
+}
+
+pub mod conditions;
+pub mod dialog;
+mod input;
+pub mod swatches;
+pub use input::{check_input, prepare_input, strict_input_schema};
+
+/// The host imports that change something outside the design. A `read` entry is refused every
+/// one of them, whatever folders its plugin was granted, as it is refused edit commands.
+pub const WRITING_IMPORTS: &[&str] = &["write-file"];
+
+/// The refusal of a writing host import to a `read` entry: it names the import.
+pub fn read_entry_refusal(import: &str) -> HostError {
+    HostError::PermissionDenied { permission: format!("{READ_ENTRY_IMPORT}{import}") }
+}
+/// How [`read_entry_refusal`]'s permission starts; the import's name follows it.
+pub const READ_ENTRY_IMPORT: &str = "read entry may not use the host import ";
+
 /// Failures are actionable data at the app boundary, including failures before instantiation.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema, thiserror::Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HostError {
+    /// An edit was computed against a different history state. Checked in its transaction.
+    #[error("stale design revision: expected {expected}, current {actual}")]
+    StaleRevision { expected: DesignToken, actual: DesignToken },
     #[error("permission denied: {permission}")]
     PermissionDenied { permission: String },
     #[error("command {command} failed: {reason}")]
@@ -51,17 +101,74 @@ pub enum HostError {
     Trap { reason: String },
     #[error("plugin cancelled")]
     Cancelled,
+    #[error("interactive_required: opening {entry} requires the app form; call the entry with params instead")]
+    InteractiveRequired { entry: String },
     /// The plugin needs a capability, or a version of one, that this host does not serve.
     #[error("{reason}")]
     UnsupportedCapability { capability: String, reason: String },
+    /// The input is valid, but this plugin does not handle it (WIT `plugin-error.unsupported`,
+    /// from API 0.2): a file it can't convert, an option value it doesn't offer.
+    #[error("not supported: {reason}")]
+    Unsupported { reason: String },
+    /// The plugin asks for more of a budget than the app lets plugins have, so it was not run.
+    /// `limit` is the manifest field (`fuel`, `memory_mib`); `requested` and `allowed` are in its
+    /// unit.
+    #[error("{}", over_ceiling(limit, *requested, *allowed))]
+    OverCeiling { limit: String, requested: u64, allowed: u64 },
+    /// The plugin ran into one of its budgets and was stopped. `limit` is `fuel`, `memory_mib`,
+    /// `deadline_ms` or `stack_kib` (the manifest's own budgets) or `design_mib` (the most an
+    /// importer may hand over); `allowed` is that budget, in its unit.
+    #[error("{}", exhausted(limit, *allowed))]
+    Exhausted { limit: String, allowed: u64 },
+}
+
+fn over_ceiling(limit: &str, requested: u64, allowed: u64) -> String {
+    match limit {
+        "memory_mib" => format!(
+            "asks for {requested} MiB of memory, more than the {allowed} MiB plugins may use; allow its memory request when you install it, or raise the memory ceiling for plugins"
+        ),
+        "fuel" => format!("asks for {requested} fuel, more than the {allowed} plugins may use; raise the fuel ceiling for plugins"),
+        _ => format!("asks for {requested} {limit}, more than the {allowed} plugins may use"),
+    }
+}
+
+fn exhausted(limit: &str, allowed: u64) -> String {
+    match limit {
+        "fuel" => format!("used all {allowed} fuel it asks for and was stopped"),
+        "memory_mib" => format!("needed more than the {allowed} MiB of memory it asks for and was stopped"),
+        "deadline_ms" if allowed == 0 => "ran longer than its time limit and was stopped".into(),
+        "deadline_ms" => format!("ran longer than its time limit of {allowed} ms and was stopped"),
+        "stack_kib" => format!("ran out of its {allowed} KiB stack and was stopped"),
+        "design_mib" => format!("made a design larger than {allowed} MiB, the most an importer may hand over"),
+        _ => format!("went over its {limit} limit of {allowed} and was stopped"),
+    }
 }
 
 /// The capabilities this host serves, as name and `major.minor`. Each is a set of WIT interfaces
 /// a plugin names in its manifest's `capabilities` list. While a major version is 0, a minor
 /// version may break the one before it, so 0.x matches only the same minor.
-pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
+pub const CAPABILITIES: &[(&str, (u32, u32))] = &[
+    ("commands", (0, 2)),
+    ("design", (0, 1)),
+    ("dialog", (0, 1)),
+    ("evaluate", (0, 2)),
+    ("formats", (0, 2)),
+    ("forms", (0, 1)),
+    ("storage", (0, 1)),
+];
+/// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
+/// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
+pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
+/// The WIT versions a host runs, newest first: [`API`]'s and the frozen 0.1 one.
+pub const WIT_VERSIONS: &[&str] = &["0.2.0", "0.1.0"];
+/// `craft:plugin@0.1.0`, unchanged, for plugins built before 0.2.
+pub const WIT_0_1: &str = include_str!("../wit-0.1/plugin.wit");
 
-fn capability_version(text: &str) -> Option<(u32, u32)> {
+/// The highest data format number a plugin may declare (`runtime.data_format`).
+pub const MAX_DATA_FORMAT: u32 = 1_000_000;
+
+/// Parse a capability version as major/minor, accepting an optional numeric patch.
+pub fn capability_version(text: &str) -> Option<(u32, u32)> {
     let mut parts = text.split('.');
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next()?.parse().ok()?;
@@ -92,6 +199,9 @@ pub fn check_capabilities(requested: &[String], app: &str) -> Result<()> {
             return Err(unsupported(format!("needs {name} {major}.{minor}, which this version of {app} does not have; update {app} or the plugin")));
         };
         let (have_major, have_minor) = (*have_major, *have_minor);
+        if OLDER_CAPABILITIES.iter().any(|(known, version)| *known == name && *version == (major, minor)) {
+            continue;
+        }
         if (major, minor) > (have_major, have_minor) {
             return Err(unsupported(format!("needs {name} {major}.{minor}; update {app} or the plugin")));
         }
@@ -111,9 +221,13 @@ fn invalid(field: impl Into<String>, reason: impl Into<String>) -> HostError {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Effect {
+    /// Reads the open design and changes nothing.
     Read,
+    /// Changes the open design.
     #[default]
     Edit,
+    /// Opens a file as a new design and leaves the open one as it is: every importer's effect.
+    Open,
 }
 
 /// The app supplies the same contracts it exposes to its other programmatic clients.
@@ -147,6 +261,15 @@ pub struct FileGrant {
 /// removes staged files without replacing their targets. Publication errors after app
 /// commit can leave a subset of files applied and must be reported to the caller.
 pub trait PluginHost {
+    /// Request a populated form. Programs refuse; interactive hosts defer opening until success.
+    fn open_form(&mut self, entry: &str, _params: &Value) -> Result<()> {
+        Err(HostError::InteractiveRequired { entry: entry.into() })
+    }
+    /// The active document's identity and committed revision (`design@0.1`), or none when closed.
+    /// Existing hosts need not implement this additive read-only capability.
+    fn design_token(&self) -> Result<Option<DesignToken>> {
+        Err(HostError::PermissionDenied { permission: "design@0.1 is not available in this host".into() })
+    }
     fn command_catalog(&self) -> Vec<CommandSchema>;
     fn run_command(&mut self, name: &str, args: &Value) -> Result<Value>;
     fn begin_transaction(&mut self) -> Result<()>;
@@ -176,6 +299,20 @@ pub trait PluginHost {
     }
     fn log(&mut self, message: &str);
     fn progress(&mut self, fraction: f32, message: &str);
+    /// Writes the running plugin's file `name` in the open design from its bytes, as they are
+    /// (`storage@0.1`, the `storage` interface's `put-blob`); `append` adds them to its end. The
+    /// file's size. An app that keeps no plugin data refuses, as here.
+    fn storage_put_blob(&mut self, _name: &str, _data: &[u8], _cache: bool, _append: bool) -> Result<u64> {
+        Err(HostError::PermissionDenied { permission: "storage: this app keeps no plugin data".into() })
+    }
+    /// Up to `len` bytes of a plugin's file from `offset` (`get-blob`).
+    fn storage_get_blob(&mut self, _plugin: Option<&str>, _name: &str, _offset: u64, _len: u32) -> Result<Vec<u8>> {
+        Err(HostError::PermissionDenied { permission: "storage: this app keeps no plugin data".into() })
+    }
+    /// Up to `len` bytes of a plugin's main document, its saved JSON, from `offset` (`get-document`).
+    fn storage_get_document(&mut self, _plugin: Option<&str>, _offset: u64, _len: u32) -> Result<Vec<u8>> {
+        Err(HostError::PermissionDenied { permission: "storage: this app keeps no plugin data".into() })
+    }
     fn is_cancelled(&self) -> bool {
         false
     }
@@ -217,10 +354,14 @@ impl HostLimits {
         self.validate()?;
         requested.validate()?;
         if requested.fuel > self.max_fuel {
-            return Err(HostError::LimitExceeded { limit: "fuel exceeds user host limits".into() });
+            return Err(HostError::OverCeiling { limit: "fuel".into(), requested: requested.fuel, allowed: self.max_fuel });
         }
         if requested.memory_mib > self.max_memory_mib {
-            return Err(HostError::LimitExceeded { limit: "memory exceeds user host limits".into() });
+            return Err(HostError::OverCeiling {
+                limit: "memory_mib".into(),
+                requested: requested.memory_mib as u64,
+                allowed: self.max_memory_mib as u64,
+            });
         }
         Ok(())
     }
@@ -335,6 +476,8 @@ pub struct Entry {
     pub extensions: Vec<String>,
     pub effect: Effect,
     pub input_schema: Value,
+    /// Opt in to the read-only dialog-provider export (dialog@0.1).
+    pub dialog_hook: bool,
     pub slots: Vec<UiSlot>,
 }
 
@@ -360,10 +503,14 @@ struct DeclaredEntry {
     kind: EntryKind,
     #[serde(default)]
     extensions: Vec<String>,
+    /// A command's effect is `edit` unless it says `read`; an importer's is `open`. An importer that
+    /// says `edit` (the only effect it could state before `open` existed) still opens a new design.
     #[serde(default)]
-    effect: Effect,
+    effect: Option<Effect>,
     #[serde(default = "empty_input_schema")]
     input_schema: Value,
+    #[serde(default)]
+    dialog_hook: bool,
     #[serde(default)]
     slots: Vec<UiSlot>,
 }
@@ -376,14 +523,20 @@ impl From<EntryDeclaration> for Entry {
                 extensions: Vec::new(),
                 effect: Effect::Edit,
                 input_schema: empty_input_schema(),
+                dialog_hook: false,
                 slots: Vec::new(),
             },
             EntryDeclaration::Declared(value) => Self {
                 name: value.name,
                 kind: value.kind,
                 extensions: value.extensions,
-                effect: value.effect,
+                effect: match (value.kind, value.effect) {
+                    (EntryKind::Importer, None | Some(Effect::Edit)) => Effect::Open,
+                    (_, Some(effect)) => effect,
+                    (EntryKind::Command, None) => Effect::Edit,
+                },
                 input_schema: value.input_schema,
+                dialog_hook: value.dialog_hook,
                 slots: value.slots,
             },
         }
@@ -407,18 +560,36 @@ pub struct Manifest {
     pub runtime: Option<RuntimeManifest>,
 }
 
+/// A read-only entry called after a coalesced design or linked-file invalidation. Listeners refresh
+/// their own caches or panel data; they do not edit, write files or start background work.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Listener {
+    pub entry: String,
+    pub on: Vec<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeManifest {
     /// A single file name within the package, never a directory or absolute path.
     pub module: String,
     pub entries: Vec<Entry>,
+    /// Opt-in notifications, under capability `design@0.1`. Missing for existing packages.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub listeners: Vec<Listener>,
     /// Exact app command ids, intersected with the app catalog by the runtime.
     pub commands: BTreeSet<String>,
     #[serde(default)]
     pub limits: Limits,
     #[serde(default)]
     pub permissions: Permissions,
+    /// The format number of the data the plugin keeps in a design (capability `storage@0.1`),
+    /// 1 or more. The app stamps it on what the plugin saves; data saved with a higher number
+    /// (by a newer version of the plugin) is read-only to this version, and a lower one tells the
+    /// plugin to migrate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_format: Option<u32>,
 }
 impl RuntimeManifest {
     /// Whether this runtime is an importer (world `importer-plugin`). A runtime's entries are all
@@ -452,12 +623,32 @@ impl RuntimeManifest {
                 return Err(invalid(&field, "entry inputs must be an object schema"));
             }
             validate_list_inputs(&entry.input_schema, &field)?;
+            conditions::validate_conditions(&entry.input_schema)?;
             if entry.slots.len() > 16
                 || entry.slots.iter().any(|slot| match slot {
                     UiSlot::Menu { name } | UiSlot::Ribbon { name } => !plain(name, 80),
                 })
             {
                 return Err(invalid("runtime.entries.slots", "requires at most 16 named menu or ribbon slots"));
+            }
+        }
+        if self.listeners.len() > 16 {
+            return Err(invalid("runtime.listeners", "at most 16 distinct listeners"));
+        }
+        let mut listeners = BTreeSet::new();
+        for listener in &self.listeners {
+            let entry = self.entries.iter().find(|entry| entry.name == listener.entry);
+            let mut events = BTreeSet::new();
+            let valid_events = !listener.on.is_empty()
+                && listener.on.iter().all(|event| matches!(event.as_str(), "design.changed" | "design.links_changed") && events.insert(event));
+            if !listeners.insert(&listener.entry)
+                || !valid_events
+                || entry.is_none_or(|entry| entry.kind != EntryKind::Command || entry.effect != Effect::Read)
+            {
+                return Err(invalid(
+                    "runtime.listeners",
+                    "distinct read command entries listening to a nonempty, unique selection of design.changed and design.links_changed are required",
+                ));
             }
         }
         if self.commands.len() > 128 || self.commands.iter().any(|id| !valid_command_name(id)) {
@@ -493,6 +684,9 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
     }
     match entry.kind {
         EntryKind::Command if !entry.extensions.is_empty() => Err(invalid(format!("{field}.extensions"), "only an importer claims file extensions")),
+        EntryKind::Command if entry.effect == Effect::Open => {
+            Err(invalid(format!("{field}.effect"), "only an importer opens a file as a new design; a command's effect is read or edit"))
+        }
         EntryKind::Command => Ok(()),
         EntryKind::Importer => {
             let mut seen = BTreeSet::new();
@@ -504,8 +698,8 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
                     "an importer claims 1..32 distinct lowercase extensions without the dot, such as \"f3d\"",
                 ));
             }
-            if entry.effect != Effect::Edit {
-                return Err(invalid(format!("{field}.effect"), "an importer makes a design: its effect is edit"));
+            if entry.effect != Effect::Open {
+                return Err(invalid(format!("{field}.effect"), "an importer opens a file as a new design: its effect is open"));
             }
             Ok(())
         }
@@ -601,6 +795,33 @@ fn plain(value: &str, max: usize) -> bool {
     !value.trim().is_empty() && value.chars().count() <= max && !value.chars().any(char::is_control)
 }
 
+/// A plugin that keeps data in designs asks for `storage@0.1` and says its data's format number;
+/// only a command plugin does: an importer makes a new design and keeps nothing in the open one.
+fn check_storage(manifest: &Manifest) -> Result<()> {
+    let storage = manifest.capabilities.iter().any(|capability| capability.starts_with("storage@"));
+    let runtime = manifest.runtime.as_ref();
+    let format = runtime.and_then(|runtime| runtime.data_format);
+    if !storage {
+        if format.is_some() {
+            return Err(invalid(
+                "runtime.data_format",
+                "only a plugin that keeps data in designs has a data format: add \"storage@0.1\" to capabilities",
+            ));
+        }
+        return Ok(());
+    }
+    if runtime.is_none_or(RuntimeManifest::is_importer) {
+        return Err(invalid(
+            "capabilities",
+            "storage keeps a command plugin's data in the open design; an importer or a plugin without a runtime has none",
+        ));
+    }
+    if !format.is_some_and(|format| (1..=MAX_DATA_FORMAT).contains(&format)) {
+        return Err(invalid("runtime.data_format", "a plugin with storage says its data's format number, 1 to 1000000, e.g. \"data_format\": 1"));
+    }
+    Ok(())
+}
+
 pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
     parse_manifest_for(text, folder, "the app")
 }
@@ -608,17 +829,24 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
 /// [`parse_manifest`], naming the host `app` in a capability refusal.
 pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manifest> {
     if text.len() > MAX_MANIFEST_BYTES {
-        return Err(HostError::LimitExceeded { limit: "manifest size exceeds 16 KiB".into() });
+        return Err(HostError::LimitExceeded { limit: "manifest size exceeds 64 KiB".into() });
     }
     // A plugin from before capabilities names its API in `runtime.api`: say so plainly.
-    if let Ok(value) = serde_json::from_slice::<Value>(text)
-        && let Some(api) = value.get("runtime").and_then(|runtime| runtime.get("api"))
-    {
-        let api = api.as_str().map(|api| api.chars().take(64).collect::<String>()).unwrap_or_else(|| "an older plugin API".into());
-        return Err(HostError::UnsupportedCapability {
-            capability: api.clone(),
-            reason: format!("was built for {api}; this version of {app} runs {API} plugins (capabilities [\"commands@0.1\"]); update the plugin"),
-        });
+    if let Ok(value) = serde_json::from_slice::<Value>(text) {
+        if let Some(api) = value.get("runtime").and_then(|runtime| runtime.get("api")) {
+            let api = api.as_str().map(|api| api.chars().take(64).collect::<String>()).unwrap_or_else(|| "an older plugin API".into());
+            return Err(HostError::UnsupportedCapability {
+                capability: api.clone(),
+                reason: format!("was built for {api}; this version of {app} runs {API} plugins (capabilities [\"commands@0.2\"]); update the plugin"),
+            });
+        }
+        // A newer capability may introduce new manifest keys. Report that capability first,
+        // before strict deserialization would misdiagnose it as an unknown field.
+        if let Some(capabilities) = value.get("capabilities")
+            && let Ok(requested) = serde_json::from_value::<Vec<String>>(capabilities.clone())
+        {
+            check_capabilities(&requested, app)?;
+        }
     }
     let mut manifest: Manifest = serde_json::from_slice(text).map_err(|error| invalid("manifest", error.to_string()))?;
     manifest.name = manifest.name.trim().to_string();
@@ -628,7 +856,13 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         return Err(invalid("id", "must match its lowercase package folder"));
     }
     if manifest.id != folder {
-        return Err(invalid("id", format!("package id `{}` does not match the folder `{folder}`", manifest.id)));
+        return Err(invalid(
+            "id",
+            format!(
+                "package id `{}` does not match the folder `{folder}`: a package folder is named after its plugin's id, so rename the folder to `{}`",
+                manifest.id, manifest.id
+            ),
+        ));
     }
     if !plain(&manifest.name, 80) {
         return Err(invalid("name", "requires 1..80 printable characters"));
@@ -641,6 +875,9 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
     }
     check_capabilities(&manifest.capabilities, app)?;
     if let Some(runtime) = &manifest.runtime {
+        if runtime.entries.iter().any(|entry| entry.dialog_hook) && !manifest.capabilities.iter().any(|c| c.starts_with("dialog@")) {
+            return Err(invalid("capabilities", "a dialog hook needs the dialog capability: dialog@0.1"));
+        }
         if runtime.is_importer() {
             if !manifest.capabilities.iter().any(|capability| capability.starts_with("formats@")) {
                 return Err(invalid("capabilities", "an importer needs the formats capability: \"capabilities\": [\"formats@0.1\"]"));
@@ -652,6 +889,12 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         }
         runtime.validate()?;
     }
+    if manifest.runtime.as_ref().is_some_and(|runtime| !runtime.listeners.is_empty())
+        && !manifest.capabilities.iter().any(|capability| capability.starts_with("design@"))
+    {
+        return Err(invalid("runtime.listeners", "design listeners require capability design@0.1"));
+    }
+    check_storage(&manifest)?;
     Ok(manifest)
 }
 

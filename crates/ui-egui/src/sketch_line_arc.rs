@@ -93,7 +93,7 @@ pub fn rejoin(app: &SolveApp, t: &mut Tool) {
 /// A drawing snap has no point id until the command materializes it. Keep its picked position
 /// while its source curves remain, including when Undo returns to the start of the chain.
 /// Model-vertex snaps are resolved by the drawing command, not by the sketch's point lookup.
-fn chain_point(sketch: &Sketch, id: &str, picked: Vec2) -> Option<Vec2> {
+pub(crate) fn chain_point(sketch: &Sketch, id: &str, picked: Vec2) -> Option<Vec2> {
     if let Some(point) = sketch.resolve_point(id).and_then(|p| sketch.point(p)) {
         return Some(point);
     }

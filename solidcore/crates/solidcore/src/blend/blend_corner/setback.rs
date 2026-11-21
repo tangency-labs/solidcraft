@@ -163,7 +163,7 @@ pub struct SetbackCorner {
     /// `m_bSetBackOpen` (the fork's ef57570, smlib#125): an open G1 corner, its spring
     /// curves made in closed form ([`build_setback_fill`]), no fill and no patches.
     pub open: bool,
-    /// Not the fork (#2488, with `fillet_round_as_definition`): the fill's definition, which
+    /// Not the fork (#2488): the fill's definition, which
     /// its patches keep.
     pub definition: Option<Arc<SetbackFill>>,
 }
@@ -2914,7 +2914,7 @@ pub fn build_setback_fill<S: SetbackSolvers>(
         Vec::new()
     };
     let definition = match worst {
-        Some(worst) if k.fixes.fillet_round_as_definition => Some(keep_definition(
+        Some(worst) => Some(keep_definition(
             k,
             &planes.planes,
             &rounds,
@@ -3069,7 +3069,7 @@ fn one_weight_polynomial(curve: &mut BSplineCurve) -> Result<()> {
     curve.make_non_rational()
 }
 
-/// Not the fork (#2488, with `fillet_round_as_definition`): the fill's definition
+/// Not the fork (#2488): the fill's definition
 /// ([`SetbackFill`]: the faces' planes, the rounds at their end sections, the rule's order
 /// and tolerance, the corner's convexity and its containment), certified at once: the rule
 /// run again from the definition makes this fill, number for number, with its

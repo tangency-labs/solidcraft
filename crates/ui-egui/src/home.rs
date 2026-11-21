@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use egui::Color32;
 use solidcraft_engine::Session;
 use solidcraft_viewport::{Camera, StandardView};
 
@@ -13,6 +14,28 @@ use crate::start_page;
 /// Recent designs kept.
 pub const MAX_RECENT: usize = 12;
 const THUMB: [usize; 2] = solidcraft_engine::io::THUMBNAIL_SIZE;
+
+/// A design whose placed world holds more bodies than this gets no picture on Home (its card
+/// shows without one). Each placed body is a copy of its part where it stands, made to draw the
+/// picture: a large assembly placed a hundred times took tens of gigabytes for it, enough to
+/// stall the machine while the design opened. One large assembly placed once is about 600.
+const PICTURE_MAX_BODIES: usize = 5_000;
+
+/// How many bodies the design's placed world holds, counted from the design: each component's
+/// own bodies at each of its placements, as the world is placed, without placing anything.
+fn placed_bodies(s: &Session) -> usize {
+    let st = s.model.state();
+    let mut per_component: HashMap<u64, usize> = HashMap::new();
+    for c in s.doc.model_body_components(&st) {
+        *per_component.entry(c).or_default() += 1;
+    }
+    if s.doc.occurrences.is_empty() {
+        return st.bodies.len();
+    }
+    let placements = s.doc.placements();
+    let root = if placements.iter().any(|(c, _, _)| *c == 0) { 0 } else { per_component.get(&0).copied().unwrap_or(0) };
+    root + placements.iter().map(|(c, _, _)| per_component.get(c).copied().unwrap_or(0)).sum::<usize>()
+}
 const SAMPLE_PICTURES: [&[u8]; 6] = [
     include_bytes!("../../../assets/samples/exports/0.png"),
     include_bytes!("../../../assets/samples/exports/1.png"),
@@ -38,6 +61,7 @@ pub struct HomeState {
     /// them back. Opening or saving a design clears it from here.
     pub forgotten: std::collections::BTreeSet<String>,
     thumbs: HashMap<String, Option<egui::TextureHandle>>,
+    library_stamps: HashMap<String, crate::library::FileStamp>,
     /// Keys whose picture could not be made (an empty or unreadable design). Terminal: the card
     /// shows a placeholder instead of spinning forever. Cleared when the design is opened or saved
     /// (see `add_recent`), which asks for the picture again.
@@ -145,6 +169,10 @@ impl HomeState {
 
 /// A picture of a design: iso view, fitted.
 pub fn thumbnail(s: &Session) -> Option<egui::ColorImage> {
+    // Decided before anything is placed: placing the world is what costs.
+    if placed_bodies(s) > PICTURE_MAX_BODIES {
+        return None;
+    }
     let mut cam = Camera::default();
     cam.set_view(StandardView::Iso);
     // No picture of a model that cannot be placed.
@@ -170,6 +198,11 @@ fn cache_path(key: &str) -> Option<std::path::PathBuf> {
     key.hash(&mut h);
     meta.len().hash(&mut h);
     meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.hash(&mut h);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (meta.ctime(), meta.ctime_nsec()).hash(&mut h);
+    }
     Some(pictures_dir()?.join(format!("{:016x}.png", h.finish())))
 }
 
@@ -582,6 +615,67 @@ fn want(h: &mut HomeState, key: &str) {
     }
 }
 
+/// Draw document-browser thumbnails with a neutral image tint.
+pub(crate) fn paint_document_thumbnail(painter: &egui::Painter, texture: &egui::TextureHandle, rect: egui::Rect, dim: bool) {
+    let tint = if dim { Color32::from_white_alpha(90) } else { Color32::WHITE };
+    painter.image(texture.id(), rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), tint);
+}
+
+/// Invalidate changed paths using metadata already read by the folder worker.
+pub(crate) fn refresh_document_thumbnails(h: &mut HomeState, identities: &std::collections::BTreeMap<std::path::PathBuf, crate::library::FileStamp>) {
+    let changed: Vec<_> = identities
+        .iter()
+        .filter_map(|(path, stamp)| {
+            let key = path.to_str()?;
+            (h.library_stamps.get(key) != Some(stamp) && h.thumbs.contains_key(key)).then(|| key.to_owned())
+        })
+        .collect();
+    if !changed.is_empty() {
+        // Dropped receivers reject late results from before this scan. Requeue interrupted
+        // placeholders on demand, while retaining ready pictures for unchanged files.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            h.rx = None;
+            h.remembering = None;
+        }
+        h.queued.clear();
+        h.thumbs.retain(|key, image| image.is_some() || h.failed.contains(key) || key.starts_with("sample:"));
+        for key in changed {
+            h.thumbs.remove(&key);
+            h.failed.remove(&key);
+        }
+    }
+    h.library_stamps.retain(|key, _| h.thumbs.contains_key(key));
+    for (path, stamp) in identities {
+        if let Some(key) = path.to_str() {
+            h.library_stamps.insert(key.to_owned(), stamp.clone());
+        }
+    }
+}
+
+/// Share the existing background thumbnail cache with the document browser.
+pub(crate) fn document_thumbnail(app: &mut SolveApp, ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {
+    poll(app, ctx);
+    if !app.home.thumbs.contains_key(path)
+        && let Some(i) = path.strip_prefix("sample:").and_then(|i| i.parse::<usize>().ok())
+    {
+        install(&mut app.home, ctx, path, sample_picture(i));
+    }
+    if !app.home.thumbs.contains_key(path) {
+        // Library browsing can visit many files; retain Home's recents and samples.
+        if app.home.thumbs.len() >= 256 {
+            let discard: Vec<_> =
+                app.home.thumbs.keys().filter(|key| !key.starts_with("sample:") && !app.home.recent.contains(key)).take(128).cloned().collect();
+            for key in discard {
+                app.home.thumbs.remove(&key);
+            }
+        }
+        want(&mut app.home, path);
+        ctx.request_repaint();
+    }
+    app.home.thumbs.get(path).and_then(Clone::clone)
+}
+
 /// Open a built-in sample (a copy of the design made for its picture).
 pub fn open_sample(app: &mut SolveApp, i: usize) {
     match app.home.samples.get(&i) {
@@ -808,6 +902,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(action) = start_page::show(ui, page) {
         dispatch(app, ui.ctx(), action);
     }
+    // The first start usually opens on Home: the usage statistics notice shows here as in the view.
+    #[cfg(feature = "usage-stats")]
+    {
+        let t = solidcraft_theme::Tokens::get();
+        let _ = crate::usage_stats::notice_toast(app, ui, ui.max_rect().shrink(t.space_16));
+    }
 }
 
 /// SolidCraft's rail: Start, New, Open, Recover; the design's own entries; the app's.
@@ -1003,9 +1103,6 @@ fn recent_kind(app: &SolveApp, path: &str) -> String {
     if solidcraft_engine::io::is_design_ext(ext) || ext.eq_ignore_ascii_case("json") {
         return app.tr("home.design_workspace").to_string();
     }
-    if solidcraft_engine::io::is_drawing_path(path) {
-        return app.tr_label("Drawing").to_string();
-    }
     let label = match ext.to_ascii_lowercase().as_str() {
         "step" | "stp" => "STEP",
         "igs" | "iges" => "IGES",
@@ -1015,6 +1112,7 @@ fn recent_kind(app: &SolveApp, path: &str) -> String {
         "glb" | "gltf" => "glTF",
         "fcstd" => "FreeCAD",
         "3dm" => "Rhino",
+        "usd" | "usda" | "usdc" | "usdz" => "OpenUSD",
         other if !other.is_empty() => return other.to_ascii_uppercase(),
         _ => return app.tr("home.design_workspace").to_string(),
     };
@@ -1080,7 +1178,9 @@ fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
         ("view_dxf", "DXF", None, FileAction::ViewDxf),
         ("obj", "OBJ", None, FileAction::Export("obj")),
         ("glb", "GLB", None, FileAction::Export("glb")),
+        ("usd", "OpenUSD", None, FileAction::Export("usd")),
         ("urdf", "URDF", None, FileAction::Export("urdf")),
+        ("sdf", "SDF", None, FileAction::Export("sdf")),
         ("json", "JSON", Some("home.export_json_hint"), FileAction::Export("json")),
     ];
     let tiles = formats
@@ -1124,13 +1224,12 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
                 app.open_chosen_file(&path);
             }
         }),
-        FileAction::Import => {
-            app.pick_open_for(&["step", "stp", "iges", "igs", "stl", "obj", "3mf", "gltf", "glb", "ply", "xyz", "pts"], |app, path| {
-                if let Some(path) = path {
-                    app.open_path_async(&path);
-                }
-            })
-        }
+        // Every foreign file Import takes, from the format registry (#7328).
+        FileAction::Import => app.pick_open_for(&solidcraft_engine::io::formats::import_extensions(true), |app, path| {
+            if let Some(path) = path {
+                app.open_path_async(&path);
+            }
+        }),
         FileAction::Save => {
             app.home.open = false;
             crate::toolbar::save(app);
@@ -1189,7 +1288,107 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
 
 #[cfg(test)]
 mod tests {
+    /// The count that decides whether a design gets a picture is the number of bodies its placed
+    /// world holds, counted without placing it: a part's bodies at each of its placements, and
+    /// the design's own. Past [`PICTURE_MAX_BODIES`] no picture is made.
+    #[test]
+    fn a_designs_picture_is_left_out_past_a_count_of_its_placed_bodies() {
+        let mut s = Session::default();
+        s.execute("solid.box", &serde_json::json!({"length": 5, "width": 5, "height": 5, "body_name": "Own"})).unwrap();
+        let c = s.execute("component.create", &serde_json::json!({"name": "Part", "grounded": false})).unwrap();
+        for k in 0..10 {
+            s.execute(
+                "solid.box",
+                &serde_json::json!({"corner": [10 * k, 0, 0], "length": 5, "width": 5, "height": 5, "body_name": format!("B{k}")}),
+            )
+            .unwrap();
+        }
+        s.execute("component.activate", &serde_json::json!({"component": 0})).unwrap();
+        for k in 1..5 {
+            s.execute("occurrence.copy", &serde_json::json!({"component": c["component"], "translate": [0, 20 * k, 0]})).unwrap();
+        }
+        let world = s.world_state().unwrap().bodies.len();
+        assert_eq!(world, 1 + 10 * 5, "the design's own body and the part's ten at five placements");
+        assert_eq!(placed_bodies(&s), world, "counted as the world places them");
+        // Placed past the limit: no picture, decided without placing the world.
+        // Ten bodies at 600 more placements (a 30 by 20 pattern): 6,000 bodies and more.
+        let pattern = serde_json::json!({"components": ["Part"], "dir1": [1, 0, 0], "count1": 30, "spacing1": 40, "dir2": [0, 1, 0], "count2": 20, "spacing2": 40});
+        s.execute("solid.pattern.rectangular", &pattern).unwrap();
+        assert!(placed_bodies(&s) > PICTURE_MAX_BODIES);
+        assert!(thumbnail(&s).is_none());
+    }
+
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn library_cache_identity_tracks_replacements_with_preserved_mtime() {
+        let h = crate::scenario::Harness::new();
+        let path = h.dir.join("replaced.sc");
+        std::fs::write(&path, b"old").unwrap();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let before = cache_path(path.to_str().unwrap()).unwrap();
+        // The change time ticks at the kernel's coarse clock (one jiffy, often 4 ms or more), so a
+        // replacement inside the same tick is indistinguishable by metadata. Replace until it ticks.
+        use std::os::unix::fs::MetadataExt;
+        let ctime = |p: &std::path::Path| std::fs::metadata(p).map(|m| (m.ctime(), m.ctime_nsec())).unwrap();
+        let first = ctime(&path);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            std::fs::write(&path, b"new").unwrap();
+            std::fs::File::options().write(true).open(&path).unwrap().set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+            if ctime(&path) != first || std::time::Instant::now() > deadline {
+                break;
+            }
+        }
+        assert_ne!(ctime(&path), first, "the change time never moved");
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), modified);
+        assert_ne!(cache_path(path.to_str().unwrap()).unwrap(), before);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn library_refresh_invalidates_changed_previews_and_rejects_late_jobs() {
+        let mut h = crate::scenario::Harness::new();
+        let path = h.dir.join("changed.sc");
+        let key = path.to_str().unwrap();
+        let stamp = crate::library::FileStamp {
+            bytes: 1,
+            modified: None,
+            #[cfg(unix)]
+            changed: (1, 0),
+        };
+        let mut identities = std::collections::BTreeMap::from([(path.clone(), stamp.clone())]);
+        refresh_document_thumbnails(&mut h.app.home, &identities);
+        install(&mut h.app.home, &h.ctx, key, Some(egui::ColorImage::filled([2, 2], Color32::WHITE)));
+        let old = h.app.home.thumbs[key].as_ref().unwrap().id();
+        refresh_document_thumbnails(&mut h.app.home, &identities);
+        assert_eq!(h.app.home.thumbs[key].as_ref().unwrap().id(), old, "unchanged files retain their texture");
+        let (tx, rx) = std::sync::mpsc::channel();
+        h.app.home.rx = Some(rx);
+        want(&mut h.app.home, "interrupted.sc");
+        identities.insert(path.clone(), crate::library::FileStamp { bytes: 2, ..stamp });
+        refresh_document_thumbnails(&mut h.app.home, &identities);
+        assert!(!h.app.home.thumbs.contains_key(key));
+        assert!(!h.app.home.thumbs.contains_key("interrupted.sc"));
+        assert!(tx.send((key.into(), Some(egui::ColorImage::filled([2, 2], Color32::RED)), None)).is_err());
+        assert!(h.app.home.rx.is_none());
+        want(&mut h.app.home, key);
+        assert_eq!(h.app.home.queued, [key]);
+    }
+
+    #[test]
+    fn library_sample_previews_do_not_build_or_queue_models() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home = HomeState::default();
+        for i in 0..solidcraft_engine::sample::samples().len() {
+            assert!(document_thumbnail(&mut h.app, &h.ctx, &format!("sample:{i}")).is_some());
+        }
+        assert!(h.app.home.samples.is_empty());
+        assert!(h.app.home.queued.is_empty());
+        assert!(h.app.home.wanted.is_none());
+    }
 
     #[test]
     fn recent_paths_only_abbreviate_complete_home_ancestors() {
@@ -1730,6 +1929,26 @@ mod tests {
         }
     }
 
+    /// Start › Import asks the host's picker for every foreign file it takes, FreeCAD, Rhino and
+    /// KiCad among them (#7328).
+    #[test]
+    fn start_import_offers_every_file_kind_import_takes() {
+        let mut h = crate::scenario::Harness::new();
+        let asked: std::rc::Rc<std::cell::RefCell<Vec<Vec<String>>>> = Default::default();
+        let log = asked.clone();
+        h.app.services.pick_open = Some(Box::new(move |extensions| {
+            log.borrow_mut().push(extensions.iter().map(|e| e.to_string()).collect());
+            Box::pin(std::future::ready(None))
+        }));
+        h.app.home.show(0);
+        click_file(&mut h, "home:import");
+        let want: Vec<String> = solidcraft_engine::io::formats::import_extensions(true).iter().map(|e| e.to_string()).collect();
+        assert_eq!(asked.borrow().last(), Some(&want));
+        for e in ["fcstd", "3dm", "kicad_pcb", "step", "ply"] {
+            assert!(want.iter().any(|x| x == e), "{e} missing from {want:?}");
+        }
+    }
+
     #[test]
     fn file_view_save_as_and_export_act_only_after_an_explicit_file_action() {
         let mut h = crate::scenario::Harness::new();
@@ -1820,7 +2039,13 @@ mod tests {
             let page = crate::scenario::rect_of("home:page").unwrap();
             let tile = crate::scenario::rect_of("home:new_mm").unwrap();
             assert!(page.contains_rect(tile), "{dark}: the new tile escapes the narrow page");
-            h.step(&serde_json::json!({"widget":"Start page"})).unwrap();
+            // The movable Home button shares this label; use the File page's own navigation.
+            let navigation = h
+                .widgets("Start page")
+                .into_iter()
+                .find(|[x, y]| page.contains(egui::pos2(*x as f32, *y as f32)))
+                .expect("the narrow page's navigation");
+            h.step(&serde_json::json!({"click":navigation})).unwrap();
             h.frames(2);
             assert!(crate::scenario::handle_at("home:settings").is_some(), "all File actions remain available through the narrow menu");
         }
