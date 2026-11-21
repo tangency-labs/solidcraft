@@ -6,8 +6,9 @@
 //!   (variable, CFF, a collection) embeds, and nothing is embedded that the scene did not already
 //!   draw. A simple font has at most 255 codes, so one scene font is as many PDF fonts as it needs,
 //!   a code for each glyph and the text it carries.
-//! - **Placement** is one `Tm` for each glyph, from the run's origin, angle, slant and the glyph's own
-//!   place, so the layout the scene fixed (kerning, marks, right to left) is exactly the page's.
+//! - **Placement** is one `Tm` for each glyph, read off the run's own placement of its points
+//!   ([`TextRun::placement`]), so the layout the scene fixed (kerning, marks, right to left) is
+//!   exactly the page's, with no second copy of the rotation here.
 //! - **Extraction:** a `ToUnicode` CMap gives each code its cluster's text. A cluster of several
 //!   glyphs (a base and its marks) is wrapped in `ActualText`, its later glyphs mapped to nothing;
 //!   a run that reads right to left is wrapped whole in `ActualText` of its text in reading order,
@@ -24,7 +25,7 @@ use solidcore_record::{Seg2, Vec2};
 use solidcraft_geom::paper::text::{Embed, Font, FontGlyph, TextRun};
 use solidcraft_geom::prelude::*;
 
-use super::Refs;
+use super::{Refs, quadratic_controls};
 use crate::{IoError, MAX_DRAWING_BYTES, Result};
 
 /// The most codes a simple font has: 1 to 255.
@@ -75,9 +76,7 @@ impl TextBook {
     pub fn set(&mut self, refs: &mut Refs, font: &Font, run: &TextRun, used: &mut PageFonts) -> Result<RunText> {
         let visible = font.embed == Embed::Subset;
         let k = EM / f64::from(font.units_per_em);
-        let (cos, sin) = (run.angle.cos(), run.angle.sin());
-        let em = run.scale * f64::from(font.units_per_em);
-        let matrix = [em * cos, em * sin, em * (run.slant * cos - sin), em * (run.slant * sin + cos)];
+        let upem = f64::from(font.units_per_em);
         let texts = glyph_texts(run);
         let mut out = String::new();
         if run.rtl {
@@ -115,9 +114,12 @@ impl TextBook {
                 let actual = run.text.get(c.text.start as usize..c.text.end as usize).unwrap_or_default();
                 let _ = writeln!(out, "/Span << /ActualText {} >> BDC", utf16_hex(actual));
             }
-            let e = run.origin.x + g.x * cos - g.rise * sin;
-            let f = run.origin.y + g.x * sin + g.rise * cos;
-            let [a, b, c, d] = matrix;
+            // The glyph's matrix, read off the run's own placement of its points: where its origin
+            // lands, and where a step along each font axis goes (an em is `upem` font units).
+            let place = run.placement(g);
+            let at = place(Vec2::new(0.0, 0.0));
+            let (right, up) = (place(Vec2::new(upem, 0.0)) - at, place(Vec2::new(0.0, upem)) - at);
+            let (a, b, c, d, e, f) = (right.x, right.y, up.x, up.y, at.x, at.y);
             let _ = writeln!(out, "{} {} {} {} {} {} Tm <{code:02X}> Tj", num(a), num(b), num(c), num(d), num(e), num(f));
             if i + 1 == cluster_end {
                 out.push_str("EMC\n");
@@ -291,9 +293,10 @@ fn glyph_proc(glyph: &FontGlyph, k: f64) -> String {
                     [c1, c2, to].into_iter().for_each(&mut note);
                     let _ = writeln!(body, "{} {} {} {} {} {} c", num(c1.0), num(c1.1), num(c2.0), num(c2.1), num(to.0), num(to.1));
                 }
-                // A parabola is the cubic with its control points two thirds of the way to the apex.
+                // A parabola is a cubic ([`quadratic_controls`]).
                 Seg2::Conic { a, apex, b, w } if (w - 1.0).abs() <= 1e-12 => {
-                    let (c1, c2, to) = (at(a + (apex - a) * (2.0 / 3.0)), at(b + (apex - b) * (2.0 / 3.0)), at(b));
+                    let (c1, c2) = quadratic_controls(a, apex, b);
+                    let (c1, c2, to) = (at(c1), at(c2), at(b));
                     [c1, c2, to].into_iter().for_each(&mut note);
                     let _ = writeln!(body, "{} {} {} {} {} {} c", num(c1.0), num(c1.1), num(c2.0), num(c2.1), num(to.0), num(to.1));
                 }

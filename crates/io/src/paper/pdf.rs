@@ -62,6 +62,13 @@ use crate::{IoError, MAX_DRAWING_BYTES, Result};
 
 mod text;
 
+/// The control points of the cubic that is the parabola from `a` to `b` with control point `c`:
+/// two thirds of the way from each end to `c`. The one place this is worked out, for the lines and
+/// for glyph outlines (`text.rs`).
+fn quadratic_controls(a: Vec2, c: Vec2, b: Vec2) -> (Vec2, Vec2) {
+    (a + (c - a) * (2.0 / 3.0), b + (c - b) * (2.0 / 3.0))
+}
+
 /// How far an arc's cubics may stray from the arc, rounding onto the grid included.
 pub const ARC_TOLERANCE_MM: f64 = 1e-4;
 /// Points a millimetre.
@@ -722,9 +729,9 @@ impl Content {
                 }
                 // A parabola is the cubic with its control points two thirds of the way to `c`.
                 Piece::Quadratic { c, to } => {
-                    let (a, c, b) = (vec(at), vec(c), vec(to));
-                    self.near(a + (c - a) * (2.0 / 3.0))?;
-                    self.near(b + (c - b) * (2.0 / 3.0))?;
+                    let (c1, c2) = quadratic_controls(vec(at), vec(c), vec(to));
+                    self.near(c1)?;
+                    self.near(c2)?;
                     self.point(to)?;
                     self.append("c\n")?;
                 }
