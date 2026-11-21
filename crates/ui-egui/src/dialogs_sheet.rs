@@ -943,7 +943,6 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<
                     enter |= expr_row(ui, "Angle", angle);
                     choice_row(ui, "Bend Position", "sm_pos", position, &POSITION_LABELS);
                     choice_row(ui, "Height From", "sm_height_from", height_from, &HEIGHT_FROM_LABELS);
-                    enter |= flange_corner_rows(app, ui, corners, corner_pairs, thickness);
                     // Further bends: each a flange on the far edge of the one before it.
                     form_row(ui, "Further Bends", |ui| {
                         let add = crate::ui_kit::button(ui, "Add bend", crate::ui_kit::Button::Normal)
@@ -1064,6 +1063,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<
                             }
                         }
                     });
+                    enter |= flange_corner_rows(app, ui, corners, corner_pairs, thickness);
                 }
                 2 => {
                     enter |= expr_row(ui, "Distance", distance);
