@@ -83,7 +83,7 @@ fn step_producer(bytes: &[u8]) -> Producer {
     let text = crate::step_text(head);
     let mut from = 0;
     for _ in 0..STEP_HEADER_ENDS {
-        let Some(end) = text.get(from..).and_then(|rest| rest.find("ENDSEC")).map(|at| from + at + "ENDSEC".len()) else { break };
+        let Some(end) = next_end_section(&text, from) else { break };
         let header = format!("{};\nEND-ISO-10303-21;\n", text.get(..end).unwrap_or_default());
         if let Ok(ex) = solidcore_record::step::p21::parse(&header) {
             return Producer { system: ex.originating_system, preprocessor: ex.preprocessor, description: ex.description };
@@ -91,6 +91,27 @@ fn step_producer(bytes: &[u8]) -> Producer {
         from = end;
     }
     Producer::default()
+}
+
+/// The offset just past the next `ENDSEC` keyword in `text` at or after `from` that is not
+/// inside a quoted string, the keyword included. A header field's text can hold the keyword,
+/// and one that ends nothing must not be tried as the header's end or use up the tries.
+fn next_end_section(text: &str, from: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let (mut at, mut quoted) = (from, false);
+    while at < bytes.len() {
+        match *bytes.get(at)? {
+            // A quote is written doubled inside a string.
+            b'\'' if quoted && bytes.get(at + 1) == Some(&b'\'') => at += 2,
+            b'\'' => {
+                quoted = !quoted;
+                at += 1;
+            }
+            b'E' if !quoted && text.get(at..).is_some_and(|rest| rest.starts_with("ENDSEC")) => return Some(at + "ENDSEC".len()),
+            _ => at += 1,
+        }
+    }
+    None
 }
 
 /// Read a FreeCAD or Rhino file (`file` is its name) into an import kept as B-rep records,
