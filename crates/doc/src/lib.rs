@@ -53,6 +53,7 @@ pub mod import_defects;
 mod inline_params;
 pub use format_offsets::whole_profile_selection_from_value;
 pub use inline_params::Defined;
+pub mod joint_layout;
 pub mod joints;
 mod json_layout;
 mod lineage;
