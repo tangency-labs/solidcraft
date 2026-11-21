@@ -1823,16 +1823,15 @@ impl Body {
             return None;
         }
         let tol = self.planar_edges_tolerance();
-        // An edge on a cylinder whose axis is the view, such as an intersection curve held only
-        // approximately: its image is that cylinder's circle (sampled, then proved by the turn).
         if !solidcore_ops::spline_projection::has_parallel_projection(&self.record, plane, edge, tol) {
+            // An edge on a cylinder whose axis is the view, such as an intersection curve held
+            // only approximately: its image is that cylinder's circle (sampled, then proved by
+            // the turn).
             let faces = crate::history::faces_of(self.record.edges.get(edge)?);
-            if let Some(segs) = self.projected_on_cylinder(plane, edge, &faces, tol) {
-                return Some(segs.into_iter().map(crate::PlanarPiece::Seg).collect());
-            }
+            return self.projected_on_cylinder(plane, edge, &faces, tol).map(|segs| segs.into_iter().map(crate::PlanarPiece::Seg).collect());
         }
-        // Otherwise the kernel's certified reading of the complete native curve, which also
-        // finds a planar spline rim's circle (#20280).
+        // A planar rim readable in the view: the kernel's certified circular reading of the
+        // complete native curve, which finds a shelled wall's marched rim as its circle (#20280).
         solidcore_ops::spline_projection::cylinder_edge_projection(&self.record, plane, edge, tol)
     }
 

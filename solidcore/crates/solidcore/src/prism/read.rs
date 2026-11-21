@@ -272,6 +272,7 @@ fn circle_span(
     radius: f64,
     tol: f64,
     source_error: f64,
+    refine: bool,
     work: &mut usize,
 ) -> Option<f64> {
     let mut total = 0.0_f64;
@@ -305,10 +306,14 @@ fn circle_span(
         if !(radial_tol > 0.0) {
             return None;
         }
-        // A Bernstein hull can overestimate a marched rim's radial error. Subdivide
-        // that bound just like the angular bound; never increase the tolerance.
         let radial =
             (residual + roundoff) / (min_w * min_w) <= radial_tol * (2.0 * radius - radial_tol);
+        // A Bernstein hull can overestimate a marched rim's radial error. A boundary of a known
+        // cylinder (`refine`) subdivides that bound like the angular one, never raising the
+        // tolerance; every other reading keeps refusing as before.
+        if !radial && !refine {
+            return None;
+        }
         let (angular, mut error) = determinant(&x, &y)?;
         let extent = x.iter().chain(&y).map(|v| v.abs()).fold(0.0, f64::max);
         error += coordinate_error * extent * n2 * 32.0;
@@ -417,7 +422,9 @@ fn read_pieces(
     let proved = |work: &mut usize| {
         label
             .or_else(|| through_three(k, run, (ts, te), frame, a, tol))
-            .and_then(|(center, radius)| arc(&spans, center, radius, a, b, tol, error, work, whole))
+            .and_then(|(center, radius)| {
+                arc(&spans, center, radius, a, b, tol, error, work, whole, false)
+            })
     };
     if a.distance(b) > tol
         && spans
@@ -527,8 +534,10 @@ pub fn circular_boundary(
     if !(start.distance(vertex_a) <= tol && end.distance(vertex_b) <= tol) {
         return None;
     }
-    arc(&spans, center, radius, start, end, tol, error, work, true)
-        .map(|pieces| pieces.into_iter().map(PlanarPiece::Seg).collect())
+    arc(
+        &spans, center, radius, start, end, tol, error, work, true, true,
+    )
+    .map(|pieces| pieces.into_iter().map(PlanarPiece::Seg).collect())
 }
 
 /// The spans (from `a` to `b`) as one circular arc about `center` of `radius`, when every span
@@ -544,10 +553,11 @@ fn arc(
     error: f64,
     work: &mut usize,
     whole: bool,
+    refine: bool,
 ) -> Option<Vec<Seg2>> {
     let mut sweep: f64 = 0.0;
     for span in spans {
-        let ds = circle_span(span, center, radius, tol, error, work)?;
+        let ds = circle_span(span, center, radius, tol, error, refine, work)?;
         if sweep != 0.0 && sweep.signum() != ds.signum() {
             return None;
         }

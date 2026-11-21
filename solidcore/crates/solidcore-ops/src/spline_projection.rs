@@ -85,6 +85,13 @@ pub fn cylinder_edge_projection(
     tol: f64,
 ) -> Option<Vec<PlanarPiece>> {
     let edge = body.edges.get(index)?;
+    // An analytic curve keeps the general path's own reading.
+    if matches!(
+        &edge.curve,
+        Curve::Line { .. } | Curve::Circle { .. } | Curve::Ellipse { .. } | Curve::Polyline { .. }
+    ) {
+        return None;
+    }
     if !edge.uses.iter().any(|usage| {
         body.faces
             .get(usage.face as usize)
@@ -136,9 +143,6 @@ pub fn project_edges(
     edges
         .iter()
         .map(|i| {
-            if let Some(pieces) = cylinder_edge_projection(body, plane, *i, tol) {
-                return Some(pieces);
-            }
             let edge = body.edges.get(*i)?;
             let at = |i: u32| {
                 body.vertices

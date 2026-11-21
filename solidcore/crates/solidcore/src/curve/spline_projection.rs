@@ -363,9 +363,11 @@ pub fn cylinder_projection(
     let axis = vector(support.x_axis).cross(vector(support.y_axis));
     let normal = vector(target.x_axis).cross(vector(target.y_axis));
     // Only a projection along the cylinder's axis is its circle. A tilted
-    // projection retains the general native-curve projection path.
+    // projection retains the general native-curve projection path. The two frames come from
+    // different constructions, so their axes agree only to rounding of those; the certificate
+    // below measures the projected spans against the circle itself.
     let tilt = axis.cross(normal).length();
-    if !tilt.is_finite() || tilt > 64.0 * f64::EPSILON {
+    if !tilt.is_finite() || tilt > 1e-9 {
         return None;
     }
     let k = crate::Kernel::default();
