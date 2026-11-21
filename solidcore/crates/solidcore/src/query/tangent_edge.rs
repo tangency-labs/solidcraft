@@ -2779,11 +2779,12 @@ mod tests {
                 .collect();
             while let Some((s0, s1, depth)) = stack.pop() {
                 let kind = pair.margin(&k, s0, s1).unwrap();
-                let why = [&pair.a, &pair.c].map(|u| margin_why(&k, u, s0, s1));
+                // the diagnosis, built only where a piece fails (it costs as much as a margin)
+                let why = || [&pair.a, &pair.c].map(|u| margin_why(&k, u, s0, s1));
                 match kind {
                     Margin::Bounded(m) if m < half => assert!(m > 0.0, "{e:?} [{s0}, {s1}]: {m}"),
                     Margin::NotEnclosed if depth >= MAX_UNENCLOSED_SPLITS => {
-                        left.push((s0, s1, why));
+                        left.push((s0, s1, why()));
                     }
                     // halved as the decision halves a piece (to MAX_CELL_DEPTH on the box path;
                     // the margin falls with the part's width)
@@ -2792,7 +2793,7 @@ mod tests {
                         stack.push((s0, mid, depth + 1));
                         stack.push((mid, s1, depth + 1));
                     }
-                    other => panic!("{e:?} [{s0}, {s1}]: {other:?}: {why:?}"),
+                    other => panic!("{e:?} [{s0}, {s1}]: {other:?}: {:?}", why()),
                 }
             }
             let mut counts = Counts::default();

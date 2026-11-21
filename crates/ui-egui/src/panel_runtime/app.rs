@@ -590,6 +590,7 @@ impl AppPanelRuntime {
                                 return Err(error(Rule::Capability, "desktop viewport became unavailable"));
                             }
                             desktop.observe(ui.ctx(), &host, active);
+                            let _blur = content.app.blur.begin(ui.ctx());
                             solidcraft_ui_registry::isolated(|| {
                                 super::native_ui::paint(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)
                             })
@@ -1133,9 +1134,13 @@ impl crate::SolveApp {
         Ok(())
     }
     pub fn universal_panel_host_enabled(&self) -> bool {
-        self.panel_content_frame.is_some() || self.panel_runtime.as_ref().is_some_and(|integration| integration.host.is_some())
+        !self.view_windows.is_child()
+            && (self.panel_content_frame.is_some() || self.panel_runtime.as_ref().is_some_and(|integration| integration.host.is_some()))
     }
     pub fn universal_panel_frame(&self) -> Option<&HostFrame> {
+        if self.view_windows.is_child() {
+            return None;
+        }
         self.panel_runtime
             .as_ref()
             .and_then(|integration| integration.host.as_ref())
@@ -1217,6 +1222,8 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
         integration.last_error = Some(reason);
     }
     let direction = crate::i18n::panel_direction(&app.preferences.language);
+    // The Browser's search field takes its title's place while it is open (#1634).
+    let browser_header = crate::browser_search::bar_shown(app).then(crate::browser_search::header_min_width);
     if let Some(integration) = &mut app.panel_runtime {
         let frame = ctx.cumulative_frame_nr();
         if integration.last_tick_frame == Some(frame) {
@@ -1228,6 +1235,9 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             && let Some(host) = &mut integration.host
         {
             host.set_header_action_visible(InstanceId("history".into()), ControlId("play".into()), app.preferences.history_play_button);
+            host.set_header_content(InstanceId("browser".into()), browser_header);
+            // The open search box holds the magnifier.
+            host.set_header_action_visible(InstanceId("browser".into()), ControlId("magnifier".into()), browser_header.is_none());
             host.set_live_drag(app.preferences.live_panel_drag_preview);
         }
         let result = (|| {
@@ -1479,6 +1489,26 @@ impl crate::SolveApp {
                     self.panel_runtime = Some(integration);
                 }
             });
+        // Legacy drawing chrome needs the measured ribbon and Browser bounds.
+        if crate::drawing_workspace::active(self)
+            && self.preferences.drawing_sheets_visibility == "legacy"
+            && render_domain.is_positive()
+            && render_domain.is_finite()
+        {
+            let mut bounds = render_domain;
+            if let Some(bottom) = self.shell.cards.iter().map(egui::Rect::bottom).max_by(f32::total_cmp) {
+                bounds.min.y = bottom.clamp(bounds.top(), bounds.bottom());
+            }
+            if self.preferences.drawing_panel_side == "left"
+                && let Some(browser) = self.shell.browser
+            {
+                bounds.min.x = browser.right().clamp(bounds.left(), bounds.right());
+            }
+            let mut legacy = ui.new_child(egui::UiBuilder::new().id_salt("legacy_drawing_inspector").max_rect(bounds));
+            crate::drawing_workspace::panel(self, &mut legacy);
+            crate::drawing_workspace::chrome(self, ui, render_domain);
+        }
+        crate::drawing_workspace::show_add_sheet(self, ui.ctx());
         if self.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some()) && !self.preferences.agent_chat_popped {
             crate::agent_chat::finish_shared(self, ui.ctx());
         }

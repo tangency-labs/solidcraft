@@ -1963,7 +1963,7 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     );
     assert!(gpu.lines.is_empty() && gpu.overlay.is_empty() && gpu.under.is_empty() && gpu.hidden.is_empty() && gpu.ghost.is_empty());
     s.selection = vec![solidcraft_engine::Sel::Body { name: "Glass".into() }];
-    s.section = Some((solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X));
+    s.section = vec![solidcraft_engine::SectionPlane { id: 1, origin: solidcore_record::Vec3::ZERO, normal: solidcore_record::Vec3::X }];
     let after = solidcraft_engine::product_scene::extract(&s).unwrap();
     assert_eq!(gpu_scene(&after).unwrap().0, key);
     s.execute("appearance.assign", &json!({"bodies":["Glass"],"color":"#336699","opacity":0.0})).unwrap();
@@ -4564,12 +4564,12 @@ fn hdr_ui_save_embeds_once_without_a_host_and_reload_never_reopens_the_source_pa
     let cpu = h.app.session.doc.render.setups.get("HDR CPU").unwrap().clone();
     assert!(matches!(&cpu.job, Some(RenderJob::CpuRaytrace { options, .. })
         if options.hdr.unwrap().samples == 64 && options.progressive.unwrap().samples_per_pixel == 7 && options.progressive.unwrap().seed == 84));
-    let encoded = h.app.session.doc.to_json();
-    assert!(!encoded.contains("original-embedded.hdr"), "the document never stores the source path");
+    assert!(!h.app.session.doc.to_json().contains("original-embedded.hdr"), "the document never stores the source path");
+    let encoded = solidcraft_engine::io::write_design_container(&h.app.session.doc).unwrap();
     std::fs::remove_file(&path).unwrap();
 
     for (name, expected, target) in [("HDR GPU", gpu, hdr::Target::Gpu), ("HDR CPU", cpu, hdr::Target::Cpu)] {
-        let loaded = solidcraft_engine::doc::Document::from_json(&encoded).unwrap();
+        let loaded = solidcraft_engine::io::read_design(&encoded).unwrap();
         h.app.session = Session::new(loaded);
         h.app.render_workspace.view.name = name.into();
         setups::load(&mut h.app);
@@ -8964,6 +8964,7 @@ fn current_live_pixels_use_only_the_depth_correct_feedback_callback_and_stale_pi
         samples: 1,
         tess: false,
         oit: false,
+        edges: false,
     });
     h.app.render_workspace.host = Some(host_executor(4096, true, 1).unwrap());
     sync_backend(&mut h.app);
@@ -9155,15 +9156,21 @@ fn live_image_imported_mesh_keeps_selected_and_hovered_face_and_body_feedback() 
         255,
     ];
 
-    // Expand actual highlighted placements too: an empty CPU triangle list alone
-    // does not mean that a whole-body GPU highlight is missing.
+    // Count the triangles and check the palette colour of both copied and shared feedback.
     let filled_vertices = |app: &SolveApp, expected_color: [u8; 4]| {
         let feedback = crate::viewport::build_highlight(app).merged();
         assert!(feedback.overlay.is_empty() && feedback.xray.is_empty(), "feedback must remain depth-tested");
         assert!(feedback.selected_planned.is_empty() && feedback.hover_planned.is_empty());
         assert!(feedback.selected_blocks.is_empty() && feedback.hover_blocks.is_empty() && feedback.recoloured.is_empty());
+        if active(app) {
+            assert!(feedback.selected_face_instanced.is_empty(), "Render keeps the selected face in its own feedback geometry");
+        } else if app.viewport.gpu.is_some() {
+            let [face] = feedback.selected_face_instanced.as_slice() else { panic!("Design draws one selected reference mesh") };
+            assert!(Arc::ptr_eq(&face.tris, &reference_shared), "Design shares the model's reference triangles");
+            assert_eq!(face.count(), 1, "Design tints the reference at one placement");
+        }
         let mut tris = feedback.tris.clone();
-        for mesh in feedback.selected_instanced.iter().chain(&feedback.hover_instanced) {
+        for mesh in feedback.selected_instanced.iter().chain(&feedback.hover_instanced).chain(&feedback.selected_face_instanced) {
             mesh.expand_into(&mut tris);
         }
         let vertices = tris.as_chunks::<{ crate::gpu::TRI_SIZE }>().0;
@@ -16360,6 +16367,10 @@ fn render_quality_denoise_mask_displays_categorical_receipt_exports_and_returns_
     let host = CpuHost::for_platform().unwrap();
     h.app.session.set_render_job_host(Some(host.clone())).unwrap();
     h.app.render_workspace.image_host = Some(host);
+    if image_host(&h.app, ImageMethod::CpuRaytrace).is_err() {
+        eprintln!("render quality denoise mask test requires raytrace-cpu");
+        return;
+    }
     h.app.run("solid.box", json!({"length":5,"width":4,"height":3,"body_name":"Mask subject"})).unwrap();
     let request = json!({"settings":{"width":16,"height":8,"camera":h.app.cam,"job":{"method":"cpu_raytrace",
         "options":{"threads":1,"progressive":{"samples_per_pixel":2,"seed":81},

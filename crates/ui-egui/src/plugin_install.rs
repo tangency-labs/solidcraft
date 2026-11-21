@@ -159,6 +159,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     );
                     ui_kit::text(ui, &std::format!("• {line}"), ui_kit::Text::Hint("plugin_install_memory"));
                 }
+                for warning in list(plugin.get("param_warnings")) {
+                    ui_kit::status_line(ui, &warning, ui_kit::StatusTone::Warning);
+                }
                 for grant in &mut ask.grants.folders {
                     let access = tr(match (grant.read, grant.write) {
                         (true, true) => "prefs.plugin_folder_read_write",
@@ -280,6 +283,31 @@ mod tests {
     }
 
     #[test]
+    fn install_review_shows_swatch_warnings_and_keeps_install_available() {
+        let mut h = crate::scenario::Harness::new();
+        let warning = "x-solidcraft-swatch bad.png: invalid image; swatch omitted";
+        described(&mut h.app, "test.zip".into(), json!({"name":"Finishes","version":"1","param_warnings":[warning]}));
+        let ctx = crate::fonts::test_context();
+        for frame in 0..6 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0))),
+                    time: Some(frame as f64 / 60.0),
+                    ..Default::default()
+                },
+                |ui| ui_kit::scope(ui, |ui| show(&mut h.app, ui.ctx())),
+            );
+            output.textures_delta.clear();
+            if frame == 5 {
+                let text = crate::test_support::text_shapes(&output).map(|shape| shape.galley.text().to_owned()).collect::<Vec<_>>().join("\n");
+                assert!(text.contains(warning), "{text}");
+                assert!(crate::plugins::valid_grants(&h.app.plugin_install.ask.as_ref().unwrap().grants));
+                assert!(crate::scenario::handle_at("dialog:ok").is_some());
+            }
+        }
+    }
+
+    #[test]
     fn plugin_install_permissions_use_plain_words_and_exact_folder_access() {
         // Each test runs in its own process under nextest: load the catalogs, or `tr` returns ids.
         crate::i18n::install();
@@ -327,8 +355,14 @@ mod tests {
         let zip = zip.finish().unwrap().into_inner();
         let path = h.dir.join("gears.zip");
         std::fs::write(&path, &zip).unwrap();
-        review(&mut h.app, path.to_string_lossy().into_owned());
+        // Dropping the plugin archive has the same reviewed path as Install plugin...
+        // and never tries to open a design (#18761).
+        let (tabs, before) = (h.app.docs.count(), h.app.session.doc.to_json());
+        h.app.drop_path(&path.to_string_lossy());
+        assert!(!h.app.file_load.busy(), "the ZIP is not a design");
         crate::plugins::tick(&mut h.app, &h.ctx, true);
+        assert_eq!(h.app.docs.count(), tabs);
+        assert_eq!(h.app.session.doc.to_json(), before);
         let ask = h.app.plugin_install.ask.as_ref().expect("asks first");
         assert!(!plugins.join("gears").exists(), "nothing is written before the answer");
         let lines = permission_lines(&ask.plugin);
@@ -360,10 +394,13 @@ mod tests {
         assert!(grants.command_groups.contains("file"));
         assert_eq!(grants.folders[0].folder, h.dir);
         // A broken .zip is refused in plain words, with no question.
-        let bad = h.dir.join("bad.zip");
+        let bad = h.dir.join("bad.ZIP");
         std::fs::write(&bad, b"not a zip").unwrap();
-        review(&mut h.app, bad.to_string_lossy().into_owned());
+        h.app.drop_path(&bad.to_string_lossy());
+        assert!(!h.app.file_load.busy(), "a bad ZIP is still a package, not a design");
         crate::plugins::tick(&mut h.app, &h.ctx, true);
-        assert!(h.app.plugin_install.ask.is_none());
+        assert!(h.app.plugin_install.ask.is_none(), "an invalid ZIP never opens an approval dialog");
+        assert!(h.app.status.as_ref().is_some_and(|s| s.2), "the plugin review reports the invalid archive");
+        assert_eq!(h.app.docs.count(), tabs);
     }
 }

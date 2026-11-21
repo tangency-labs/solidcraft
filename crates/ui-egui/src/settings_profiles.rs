@@ -46,6 +46,7 @@ const MAX_ID: usize = 200;
 const PROFILE_KEYS: &[&str] = &[
     "browser_bodies_folders",
     "browser_eye_left",
+    "browser_scroll_wheel",
     "center_arc_follows_cursor",
     "color_vision",
     "design_reopen_views",
@@ -109,6 +110,7 @@ const PROFILE_KEYS: &[&str] = &[
     "selection_shift_add_only",
     "shortcut_again_ends_tool",
     "shortcut_cycles_modes",
+    "show_design_view_switcher",
     "show_document_browser",
     "show_selected_hidden_edges",
     "sketch_align_points",

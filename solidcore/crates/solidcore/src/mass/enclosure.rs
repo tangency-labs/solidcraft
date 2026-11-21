@@ -18,7 +18,9 @@
 //!   polynomial of degree `ORDER - 1` at the cell's middle, every coefficient enclosed at
 //!   that point and the polynomial integrated exactly, and the Lagrange remainder from the
 //!   coefficients of degree `ORDER` enclosed over the whole cell (rounded interval
-//!   arithmetic, [`Ivl`]; the surface's partials over a box, [`nurbs_partials_within_span`]).
+//!   arithmetic, [`Ivl`]; the surface's partials over a box,
+//!   [`nurbs_partials_within_span_centred`]: its rational quotient taken about the box's
+//!   middle point, so a face's distance from the origin does not widen them).
 //!   A cell is first evaluated at the low degree [`FIRST_ORDER`] and at `ORDER` only once it
 //!   is the widest. The expansion holds where the cell's image lies on one polynomial piece
 //!   of the surface; a cell whose image may cross a knot line is enclosed by the integrand's
@@ -69,7 +71,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap};
 
 use crate::blend::fillet_section::certificate::{
-    curve_derivs_over, nurbs_partials_within_span, partials_hull, NurbsCurve,
+    curve_derivs_over, nurbs_partials_within_span_centred, partials_hull, NurbsCurve,
 };
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::series::V3;
@@ -239,7 +241,8 @@ pub fn moment_centre(k: &Kernel, b: &mut Brep) -> Result<Point3> {
 
 /// An enclosure of `quantity` of the closed body `b` at most `width` wide, as
 /// [`enclose_volume`] refines it (the [`VolumeEnclosure`] then holds that quantity, not
-/// the volume, unless it is the volume).
+/// the volume, unless it is the volume). [`Quantity::Area`] also takes a sheet body: a
+/// face void on both sides has an area, though it bounds no volume or moment.
 ///
 /// # Errors
 ///
@@ -265,7 +268,9 @@ pub fn enclose_quantity(
 
 /// An enclosure of the total area of the faces `faces` of `b` at most `width` wide, as
 /// [`enclose_quantity`] refines [`Quantity::Area`] (an area is its faces' alone, so any set
-/// of faces has one; a face listed twice counts twice).
+/// of faces has one; a face listed twice counts twice). A sheet's face, void on both sides,
+/// is measured from its upward use; its area, like any face's, is positive whichever of its
+/// uses is upward.
 ///
 /// # Errors
 ///
@@ -284,6 +289,43 @@ pub fn enclose_face_area(
     }
     let mut w = Work::over(k, b, Quantity::Area, Some(faces))?;
     w.refine(|e| e.hi - e.lo <= width, |_, _| false)
+}
+
+/// An enclosure of the total area of the faces `faces` of `b` at most `rel` of its own
+/// magnitude wide ([`EnclosureStop::Reached`]), or else the narrowest one refinement gives
+/// ([`EnclosureStop::Budget`], [`EnclosureStop::Exhausted`]), as [`enclose_face_area`]
+/// refines it. The width asked follows the enclosure as it narrows, in one refinement: no
+/// rough first enclosure is needed to size it, and no restart re-evaluates an earlier
+/// run's cells. An unbounded enclosure never counts as reached.
+///
+/// # Errors
+///
+/// Those of [`enclose_face_area`]; [`SolidError::InvalidInput`] for a `rel` that is not
+/// positive.
+pub fn enclose_face_area_relative(
+    k: &Kernel,
+    b: &mut Brep,
+    faces: &[FaceId],
+    rel: f64,
+) -> Result<VolumeEnclosure> {
+    if rel.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+        return Err(SolidError::invalid_input(OP, "rel not positive"));
+    }
+    if faces.is_empty() {
+        return Err(SolidError::invalid_input(OP, "no faces"));
+    }
+    let mut w = Work::over(k, b, Quantity::Area, Some(faces))?;
+    w.refine(within(rel), |_, _| false)
+}
+
+/// Whether an enclosure is finite and at most `rel` of its own magnitude wide (false for
+/// infinite or NaN ends: `inf <= rel * inf` would hold, so an unbounded enclosure would
+/// count as reached before any cell is cut; refinement goes on instead, to its budget).
+fn within(rel: f64) -> impl Fn(Ivl) -> bool {
+    move |e: Ivl| {
+        let width = e.hi - e.lo;
+        width.is_finite() && width <= rel * e.mag()
+    }
 }
 
 /// A certified enclosure `[lo, hi]` of one mass property.
@@ -341,7 +383,8 @@ pub struct MassEnclosure {
 /// [`MassEnclosure`] of the closed body `b`: the area, the volume and each moment about
 /// [`moment_centre`] enclosed ([`enclose_quantity`]) at most `rel` of its scale wide (the
 /// area's, the volume's, and the volume times the box's half diagonal to the moment's
-/// degree), then shifted to the origin in interval arithmetic.
+/// degree), then shifted to the origin in interval arithmetic. The area stage takes a
+/// sheet's faces too ([`enclose_quantity`]); the volume stage still refuses them.
 ///
 /// # Errors
 ///
@@ -356,8 +399,14 @@ pub fn enclose_mass_properties(k: &Kernel, b: &mut Brep, rel: f64) -> Result<Mas
     let half = 0.5 * bbox.size().length();
     let mut short = None;
     let mut cells = 0;
-    let mut run = |b: &mut Brep, q: Quantity, width: f64| -> Result<(Ivl, EnclosureStop)> {
-        let e = enclose_quantity(k, b, q, width)?;
+    // `width`: an absolute width; `None`: `rel` of the quantity's own magnitude, the width
+    // asked following the enclosure as it narrows in one refinement (no rough first
+    // enclosure sizes it, and no restart re-evaluates an earlier run's cells)
+    let mut run = |b: &mut Brep, q: Quantity, width: Option<f64>| -> Result<(Ivl, EnclosureStop)> {
+        let e = match width {
+            Some(width) => enclose_quantity(k, b, q, width)?,
+            None => Work::with(k, b, q)?.refine(within(rel), |_, _| false)?,
+        };
         cells += e.counts.cells;
         Ok((Ivl::new(e.lo, e.hi), e.stop))
     };
@@ -366,24 +415,10 @@ pub fn enclose_mass_properties(k: &Kernel, b: &mut Brep, rel: f64) -> Result<Mas
             short = Some((q, stop));
         }
     };
-    // a quantity `rel` of its own size wide: a first rough enclosure (its few cells' ranges,
-    // far wider than the value) sets the width asked of the next, until one is that narrow
-    // (a later one's size is the value's to its width, so the third settles it)
-    let mut relative = |b: &mut Brep, q: Quantity| -> Result<(Ivl, EnclosureStop)> {
-        let mut e = run(b, q, f64::MAX)?;
-        for _ in 0..3 {
-            let width = rel * e.0.mag();
-            if e.0.hi - e.0.lo <= width || e.1 != EnclosureStop::Reached {
-                break;
-            }
-            e = run(b, q, width)?;
-        }
-        Ok(e)
-    };
-    let (area, stop) = relative(b, Quantity::Area)?;
+    let (area, stop) = run(b, Quantity::Area, None)?;
     note(Quantity::Area, stop);
     let vol_q = Quantity::Moment { x: 0, y: 0, z: 0 };
-    let (volume, stop) = relative(b, vol_q)?;
+    let (volume, stop) = run(b, vol_q, None)?;
     note(vol_q, stop);
     if volume.lo.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
         return Err(SolidError::invalid_input(
@@ -410,7 +445,7 @@ pub fn enclose_mass_properties(k: &Kernel, b: &mut Brep, rel: f64) -> Result<Mas
     let mut first = [IZ; 3];
     for (i, m) in first.iter_mut().enumerate() {
         let q = powers(&[i]);
-        let (e, stop) = run(b, q, scale(1))?;
+        let (e, stop) = run(b, q, Some(scale(1)))?;
         note(q, stop);
         *m = e;
     }
@@ -418,7 +453,7 @@ pub fn enclose_mass_properties(k: &Kernel, b: &mut Brep, rel: f64) -> Result<Mas
     let mut second = [[IZ; 3]; 3];
     for (i, j) in [(0, 0), (1, 1), (2, 2), (1, 2), (2, 0), (0, 1)] {
         let q = powers(&[i, j]);
-        let (e, stop) = run(b, q, scale(2))?;
+        let (e, stop) = run(b, q, Some(scale(2)))?;
         note(q, stop);
         set2(&mut second, i, j, e);
         set2(&mut second, j, i, e);
@@ -945,9 +980,11 @@ fn breaks_within(knots: &[f64], degree: usize, x: Ivl) -> bool {
     })
 }
 
-/// The partials of piece `(ku, kv)` over the box ([`nurbs_partials_within_span`]), or `None`
-/// where its weights are not proved positive over it (its one failure: a box too large for
-/// the interval evaluation, which a smaller one proves; a cell answers it by refining).
+/// The partials of piece `(ku, kv)` over the box ([`nurbs_partials_within_span_centred`]:
+/// the quotient taken about the box's middle point, not the origin, so on a rational face
+/// far from the origin they are of the box's size), or `None` where its weights are not
+/// proved positive over it (its one failure: a box too large for the interval evaluation,
+/// which a smaller one proves; a cell answers it by refining).
 fn piece_partials(
     cn: &Nurbs,
     (ku, kv): (usize, usize),
@@ -955,7 +992,7 @@ fn piece_partials(
     v: Ivl,
     lk: usize,
 ) -> Option<Partials<Ivl>> {
-    nurbs_partials_within_span(cn, ku, kv, u.lo, u.hi, v.lo, v.hi, lk).ok()
+    nurbs_partials_within_span_centred(cn, ku, kv, u.lo, u.hi, v.lo, v.hi, lk).ok()
 }
 
 /// The surface's partials up to order `lk` at every point of the box, from every piece it
@@ -1210,13 +1247,17 @@ impl<'a> Work<'a> {
             }
         };
         let (mu, mm) = (material(up)?, material(mate)?);
-        if mu == mm {
+        // a sheet's face (void on both sides) has an area but bounds no material: its
+        // area is measured from its upward use (the integrand `|S_u x S_v|`, with the
+        // loops walked as that use's orientation gives, is positive either way)
+        let sheet_area = self.weight.is_area() && !mu && !mm;
+        if mu == mm && !sheet_area {
             return Err(SolidError::invalid_input(
                 OP,
                 "a face whose sides are not one material region and one void",
             ));
         }
-        let fu = if mu { up } else { mate };
+        let fu = if mu || sheet_area { up } else { mate };
         let sign = if b.faceuse(fu)?.orientation == OrientType::Same {
             -1.0
         } else {
@@ -2446,6 +2487,75 @@ fn pcurve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<NurbsCurve> {
 mod tests {
     use super::*;
 
+    /// The relative stop test holds only of a finite enclosure within `rel` of its
+    /// magnitude: an unbounded one (a cell enclosed to the whole line, where `inf <= inf`)
+    /// or one with a NaN end never counts as reached.
+    #[test]
+    fn the_relative_stop_needs_a_finite_enclosure() {
+        let done = within(1e-2);
+        assert!(done(Ivl::new(99.5, 100.0)));
+        assert!(!done(Ivl::new(98.0, 100.0)));
+        assert!(!done(Ivl::whole()));
+        assert!(!done(Ivl::new(1.0, f64::INFINITY)));
+        assert!(!done(Ivl::new(f64::NEG_INFINITY, -1.0)));
+        assert!(!done(Ivl::new(f64::NAN, 1.0)));
+    }
+
+    /// A sheet's faces, void on both sides, have area enclosures, positive whichever use
+    /// of each face is upward, face by face and over the whole sheet, though they bound no
+    /// volume: the volume is still refused.
+    #[test]
+    fn a_sheet_face_has_an_area_enclosure() {
+        use crate::primitive::api_curves::create_line_segment;
+        let mut k = Kernel::default();
+        // a 3 x 3 square and, apart from it, a 2 x 2 one: areas 9 and 4
+        let squares = [(0.0, 3.0), (4.0, 2.0)];
+        let mut curves: Vec<crate::curve::curve::Curve> = Vec::new();
+        for (x0, s) in squares {
+            let pts = [[x0, 0.0], [x0 + s, 0.0], [x0 + s, s], [x0, s]];
+            for i in 0..4 {
+                let (a, c) = (pts[i], pts[(i + 1) % 4]);
+                curves.push(
+                    create_line_segment(Point3::new(a[0], a[1], 0.0), Point3::new(c[0], c[1], 0.0))
+                        .unwrap()
+                        .into(),
+                );
+            }
+        }
+        let mut b = crate::primitive::api_trim_ops::create_planar_faces(&mut k, &curves).unwrap();
+        let faces = crate::topology::brep::p1::faces(&b, None).unwrap();
+        assert_eq!(faces.len(), 2);
+        let holds = |e: &VolumeEnclosure, a: f64| {
+            assert!(
+                e.lo > 0.0 && e.lo <= a && a <= e.hi,
+                "[{}, {}] for {a}",
+                e.lo,
+                e.hi
+            );
+            assert!(e.hi - e.lo <= 1e-8 * a, "[{}, {}] for {a}", e.lo, e.hi);
+        };
+        for flip in [None, Some(0), Some(1)] {
+            if let Some(i) = flip {
+                crate::topology::face::p1::flip_face_orientation(&mut b, faces[i]).unwrap();
+            }
+            let mut areas = [0.0; 2];
+            for (i, &f) in faces.iter().enumerate() {
+                let e = enclose_face_area_relative(&k, &mut b, &[f], 1e-9).unwrap();
+                areas[i] = (e.lo + e.hi) / 2.0;
+                let a = if (areas[i] - 9.0).abs() < 1.0 {
+                    9.0
+                } else {
+                    4.0
+                };
+                holds(&e, a);
+            }
+            assert!((areas[0] - areas[1]).abs() > 1.0, "{areas:?}");
+            let whole = enclose_quantity(&k, &mut b, Quantity::Area, 1e-8).unwrap();
+            holds(&whole, 13.0);
+        }
+        assert!(enclose_volume(&k, &mut b, 1e-6).is_err());
+    }
+
     /// The cylinder r 2, h 5, its side moved along x by `shift`.
     fn cylinder_side_moved(k: &mut Kernel, shift: f64) -> Brep {
         let mut b = crate::primitive::api_primitives::create_cylinder(
@@ -2703,5 +2813,123 @@ mod tests {
         w.add_piece(face, &segment([u0, v1], [u1, v1]).unwrap(), 1.0)
             .unwrap();
         assert!(w.items.len() > before.1);
+    }
+
+    /// The box 40 x 30 x 20 with its edge through (20, 30, 20) rounded at radius 3: the
+    /// round's face is rational and lies 20 to 40 from the origin.
+    fn rounded_box(k: &mut Kernel) -> Brep {
+        let mut b = crate::primitive::api_primitives::create_box(
+            k,
+            Point3::new(0.0, 0.0, 0.0),
+            40.0,
+            30.0,
+            20.0,
+        )
+        .unwrap();
+        let q = Point3::new(20.0, 30.0, 20.0);
+        let e = b
+            .edge_list()
+            .iter()
+            .copied()
+            .find(|&e| {
+                crate::query::api_queries::edge_closest_point(k, &b, e, q)
+                    .is_ok_and(|c| c.closest.distance < 1e-9)
+            })
+            .unwrap();
+        crate::blend::fillet_executive::api::fillet_edges(k, &mut b, &[e], 3.0, 1, 1, 1.0).unwrap();
+        b
+    }
+
+    /// A cell of the round's face (a rational face 20 to 40 from the origin), a sixteenth of
+    /// its piece each way: the partials taken about the cell's middle ([`piece_partials`])
+    /// and about the origin ([`nurbs_partials_within_span`]) both hold the face's partials
+    /// at a grid of points of the cell (each point's own interval enclosure lies inside them,
+    /// so its exact partial does). Taken about the cell, each component of the first partial
+    /// along the direction the weights vary in is at least `NARROWER` times narrower (7.8 to
+    /// 17 times, measured). A box that is one point is enclosed exactly as before (no shift).
+    /// Taken about the origin, the quotient's `w_ij S` terms are as wide
+    /// as the face's distance from the origin: the area enclosure's cells then never proved
+    /// `|S_u x S_v|^2` positive, fell back to range times area, and spent the whole budget.
+    #[test]
+    fn a_far_rational_cells_partials_are_taken_about_the_cell() {
+        use crate::blend::fillet_section::certificate::nurbs_partials_within_span;
+        use crate::blend::fillet_section::station::nurbs_partials;
+        const NARROWER: f64 = 6.0;
+        let mut k = Kernel::default();
+        let mut b = rounded_box(&mut k);
+        let w = Work::new(&k, &mut b).unwrap();
+        let weight = |cn: &Nurbs, i: usize, j: usize| cn.pw[4 * (i * cn.nv + j) + 3];
+        // whether the weights vary along u (else along v), on a rational face
+        let varies = |cn: &Nurbs| {
+            let along_u =
+                (0..cn.nv).any(|j| (1..cn.nu).any(|i| weight(cn, i, j) != weight(cn, 0, j)));
+            let along_v =
+                (0..cn.nu).any(|i| (1..cn.nv).any(|j| weight(cn, i, j) != weight(cn, i, 0)));
+            (along_u || along_v).then_some(along_u)
+        };
+        let (cn, along_u) = w
+            .faces
+            .iter()
+            .find_map(|f| varies(&f.cn).map(|d| (&f.cn, d)))
+            .unwrap();
+        let mid = |k: &[f64]| 0.5 * (k.first().unwrap() + k.last().unwrap());
+        let (ku, kv) = (
+            span(&cn.u, cn.p, cn.nu, mid(&cn.u)),
+            span(&cn.v, cn.q, cn.nv, mid(&cn.v)),
+        );
+        // a sixteenth of the piece each way, about its middle
+        let cell = |k: &[f64], s: usize| {
+            let (a, b) = (knot(k, s as isize), knot(k, s as isize + 1));
+            let (m, h) = (0.5 * (a + b), (b - a) / 32.0);
+            (m - h, m + h)
+        };
+        let ((ua, ub), (va, vb)) = (cell(&cn.u, ku), cell(&cn.v, kv));
+        let lk = 2;
+        let new = piece_partials(cn, (ku, kv), Ivl::new(ua, ub), Ivl::new(va, vb), lk).unwrap();
+        let old = nurbs_partials_within_span(cn, ku, kv, ua, ub, va, vb, lk).unwrap();
+        let comps = |p: V3<Ivl>| [p.x, p.y, p.z];
+        let inside = |p: Ivl, e: Ivl| e.lo <= p.lo && p.hi <= e.hi;
+        // the grid's last point is the box's end exactly (a + (b - a) may round past b)
+        let grid = |a: f64, b: f64, n: i32| {
+            if n == 4 {
+                b
+            } else {
+                a + (b - a) * f64::from(n) / 4.0
+            }
+        };
+        for i in 0..=4 {
+            for j in 0..=4 {
+                let u = grid(ua, ub, i);
+                let v = grid(va, vb, j);
+                let at = nurbs_partials(cn, ku, kv, Ivl::from(u), Ivl::from(v), lk);
+                for a in 0..=lk {
+                    for c in 0..=(lk - a) {
+                        let x = comps(at.at(a, c));
+                        for (name, e) in [("about the cell", &new), ("about the origin", &old)] {
+                            for (xe, ee) in x.iter().zip(comps(e.at(a, c))) {
+                                assert!(
+                                    inside(*xe, ee),
+                                    "{name}: P[{a}][{c}] at ({u}, {v}): {xe:?} not in {ee:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let width = |i: Ivl| i.hi - i.lo;
+        let (a, c) = if along_u { (1, 0) } else { (0, 1) };
+        for (n, o) in comps(new.at(a, c)).into_iter().zip(comps(old.at(a, c))) {
+            assert!(
+                NARROWER * width(n) <= width(o),
+                "P[{a}][{c}]: {n:?} against {o:?}"
+            );
+        }
+        // a box that is one point is enclosed as before, exactly
+        let (u, v) = (0.5 * (ua + ub), 0.5 * (va + vb));
+        assert_eq!(
+            piece_partials(cn, (ku, kv), Ivl::from(u), Ivl::from(v), lk).unwrap(),
+            nurbs_partials_within_span(cn, ku, kv, u, u, v, v, lk).unwrap()
+        );
     }
 }

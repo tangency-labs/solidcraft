@@ -350,6 +350,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             layout_check(
                 ui,
+                app.tr("prefs.show_design_view_switcher"),
+                app.tr("prefs.show_design_view_switcher_note"),
+                &mut app.preferences.show_design_view_switcher,
+                "show_design_view_switcher",
+            );
+            layout_check(
+                ui,
                 app.tr("prefs.design_sub_tab_sheets"),
                 app.tr("prefs.design_sub_tab_sheets_note"),
                 &mut app.preferences.design_sub_tab_sheets,

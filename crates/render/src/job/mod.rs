@@ -64,8 +64,8 @@ pub use host::{
 };
 pub use host_memory::{HostMemoryAdmission, HostMemorySource, NativeMemoryPolicy};
 pub use image::{
-    Admission, BodyRole, ImageTask, MAX_TILES, OrthoFrame, PicturePoll, PictureRequest, PictureTask, PixelWindow, Projection, Supersample, TaskPoll,
-    admit, admit_geometry, admit_geometry_with_limits, admit_picture,
+    Admission, BodyRole, ImageTask, MAX_PICTURE_PIXEL_TESTS, MAX_TILES, OrthoFrame, PicturePoll, PictureRequest, PictureTask, PixelWindow,
+    Projection, Supersample, TaskPoll, admit, admit_geometry, admit_geometry_with_limits, admit_picture,
 };
 pub use lens::ThinLens;
 pub use lighting::{AreaLight, AreaLights, DirectionalLights, MAX_AREA_LIGHTS, MAX_DIRECTIONAL_LIGHTS, StudioLighting, Sun, ToneMap};

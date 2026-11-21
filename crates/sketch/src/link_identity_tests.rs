@@ -86,6 +86,84 @@ fn large_face_permutation_is_bounded_and_preserves_geometry() {
 }
 
 #[test]
+fn a_small_ordered_move_of_a_large_face_updates_points_without_losing_identity() {
+    let mut sk = Sketch::new();
+    let geom: Vec<_> = (1..=129).flat_map(|i| square(f64::from(i))).collect();
+    let link = sk.add_link(LinkKind::Project, face(), &geom).unwrap();
+    let points = sk.link_points(&link);
+    let ids: Vec<_> = sk.link_curves(&link).iter().map(|i| sk.curves[*i].id.clone()).collect();
+    let old: Vec<_> = points.iter().map(|i| sk.points[*i].pos).collect();
+    let free = sk.add_point(Vec2::new(-129.0, -129.0), None).unwrap();
+    sk.add_constraint(ConstraintKind::Coincident { p: free, q: points[0] }, None).unwrap();
+    let constraint = sk.constraints[0].clone();
+    let shift = Vec2::new(1e-8, -1e-8);
+    let fresh: Vec<_> = geom
+        .iter()
+        .map(|g| match g {
+            LinkGeom::Line(a, b) => LinkGeom::Line(*a + shift, *b + shift),
+            _ => panic!("line fixture"),
+        })
+        .collect();
+    assert!(!sk.update_link(&link, &fresh).unwrap());
+    assert!(!sk.link(&link).unwrap().lost);
+    assert_eq!(points, sk.link_points(&link));
+    assert_eq!(ids, sk.link_curves(&link).iter().map(|i| sk.curves[*i].id.clone()).collect::<Vec<_>>());
+    assert_eq!(sk.constraints, vec![constraint]);
+    for (i, p) in points.iter().zip(&old) {
+        assert_eq!(sk.points[*i].pos, *p + shift, "the change must be applied, not ignored");
+    }
+    let moved = sk.clone();
+    let large_move: Vec<_> = fresh
+        .iter()
+        .map(|g| match g {
+            LinkGeom::Line(a, b) => LinkGeom::Line(*a + Vec2::X, *b + Vec2::X),
+            _ => panic!("line fixture"),
+        })
+        .collect();
+    assert!(sk.update_link(&link, &large_move).is_err());
+    assert_eq!(sk.points, moved.points);
+    assert_eq!(sk.curves, moved.curves);
+}
+
+#[test]
+fn small_moves_of_large_faces_use_relative_scale_and_apply_the_edit() {
+    for (offset, delta) in [(0.0, 1e-8), (1000.0, 1e-5), (100_000.0, 1e-3)] {
+        let origin = Vec2::new(offset, offset);
+        let geom: Vec<_> = (1..=129)
+            .flat_map(|i| square(f64::from(i)))
+            .map(|g| match g {
+                LinkGeom::Line(a, b) => LinkGeom::Line(a + origin, b + origin),
+                _ => panic!("line fixture"),
+            })
+            .collect();
+        let mut sk = Sketch::new();
+        let link = sk.add_link(LinkKind::Project, face(), &geom).unwrap();
+        let points = sk.link_points(&link);
+        let ids: Vec<_> = sk.link_curves(&link).iter().map(|i| sk.curves[*i].id.clone()).collect();
+        let old: Vec<_> = points.iter().map(|i| sk.points[*i].pos).collect();
+        let free = sk.add_point(origin, None).unwrap();
+        sk.add_constraint(ConstraintKind::Coincident { p: free, q: points[0] }, None).unwrap();
+        let constraint = sk.constraints[0].clone();
+        let shift = Vec2::new(delta, -delta);
+        let fresh: Vec<_> = geom
+            .into_iter()
+            .map(|g| match g {
+                LinkGeom::Line(a, b) => LinkGeom::Line(a + shift, b + shift),
+                _ => panic!("line fixture"),
+            })
+            .collect();
+        assert!(!sk.update_link(&link, &fresh).unwrap(), "offset={offset}");
+        assert!(!sk.link(&link).unwrap().lost);
+        assert_eq!(points, sk.link_points(&link));
+        assert_eq!(ids, sk.link_curves(&link).iter().map(|i| sk.curves[*i].id.clone()).collect::<Vec<_>>());
+        assert_eq!(sk.constraints, vec![constraint]);
+        for (id, old) in points.iter().zip(old) {
+            assert_eq!(sk.points[*id].pos, old + shift, "offset={offset}: apply the geometry change");
+        }
+    }
+}
+
+#[test]
 fn geometric_refresh_updates_conic_and_ellipse_scalar_values() {
     let mut sk = Sketch::new();
     let geom = |rho, minor| {
@@ -431,6 +509,7 @@ fn edge_on_face_saved_as_a_line_pair_keeps_the_line_an_offset_follows() {
         face_name: None,
         edge_name: None,
         vertex_name: None,
+        curve_edges: Vec::new(),
         auto_face: false,
         lost: false,
         name_dropped: false,
@@ -837,4 +916,55 @@ fn a_rebuilt_face_gives_an_unchanged_concentric_circle_its_own_id() {
     let four = id_of(&sk, 4.0).unwrap();
     assert!(sk.update_link(&link, &rings(&[1.0, 4.0, 6.0])).unwrap());
     assert_eq!(id_of(&sk, 4.0), Some(four), "the circle of radius 4 is where it was");
+}
+
+/// #18711: a face recorded with the names of its edges, read again sheared far out of its old
+/// box and with its edges in another order, is the same four lines: each keeps its id and goes
+/// where its edge went, and a point held on a corner follows it. Without the names the reading is
+/// matched by geometry alone, as before.
+#[test]
+fn a_face_read_by_its_edge_names_keeps_its_curves_through_any_order() {
+    let names: Vec<String> = ["F1:side:a|F1:top", "F1:side:b|F1:top", "F1:side:c|F1:top", "F1:side:d|F1:top"].map(String::from).to_vec();
+    let shear = |p: Vec2| Vec2::new(p.x + 3.0 * p.y, p.y);
+    let sheared: Vec<LinkGeom> = square(10.0)
+        .into_iter()
+        .map(|g| match g {
+            LinkGeom::Line(a, b) => LinkGeom::Line(shear(a), shear(b)),
+            _ => panic!(),
+        })
+        .collect();
+    // The same edges, the first one read last.
+    let order = [1, 2, 3, 0];
+    let fresh: Vec<LinkGeom> = order.iter().map(|i| sheared[*i].clone()).collect();
+    let fresh_names: Vec<String> = order.iter().map(|i| names[*i].clone()).collect();
+
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &square(10.0)).unwrap();
+    sk.set_link_curve_edges(&link, &square(10.0), &names);
+    assert_eq!(sk.link(&link).unwrap().curve_edges, names);
+    let ids: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    let corner = sk.link_points(&link).into_iter().find(|p| sk.points[*p].pos == Vec2::new(10.0, 10.0)).unwrap();
+    let free = sk.add_point(Vec2::new(10.0, 10.0), None).unwrap();
+    sk.add_constraint(ConstraintKind::Coincident { p: free, q: corner }, None).unwrap();
+    let unnamed = sk.clone();
+
+    assert_eq!(sk.update_link_named(&link, &fresh, &fresh_names).map_err(|e| e.to_string()), Ok(false));
+    assert!(!sk.link(&link).unwrap().lost);
+    assert_eq!(ids, sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect::<Vec<_>>());
+    assert_eq!(sk.link(&link).unwrap().curve_edges, names, "the names stay with their curves");
+    assert_eq!(sk.points[corner].pos, shear(Vec2::new(10.0, 10.0)));
+    assert_eq!(sk.constraints.len(), 1);
+    assert!(solve(&mut sk).ok());
+    assert!(sk.points[free].pos.dist(shear(Vec2::new(10.0, 10.0))) < 1e-7);
+
+    // A link saved without the names is read as before: by geometry, and this reading is not one.
+    let mut old = unnamed.clone();
+    old.links.iter_mut().for_each(|l| l.curve_edges.clear());
+    let mut plain = old.clone();
+    let named = old.update_link_named(&link, &fresh, &fresh_names).map_err(|e| e.to_string());
+    let geometric = plain.update_link(&link, &fresh).map_err(|e| e.to_string());
+    assert_eq!(named, geometric);
+    assert_eq!(old.points, plain.points);
+    assert_eq!(old.curves, plain.curves);
+    assert_eq!(old.constraints, plain.constraints);
 }
