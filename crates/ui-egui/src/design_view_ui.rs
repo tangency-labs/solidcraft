@@ -205,7 +205,8 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
 }
 
 pub(crate) fn window_layout(app: &SolveApp) -> solidcraft_ui_kit::view_layout_menu::LayoutMenu {
-    use solidcraft_ui_kit::view_layout_menu::{LayoutMenu, LayoutView, LayoutWindow};
+    use solidcraft_ui_kit::view_layout_menu::{LayoutMenu, LayoutText, LayoutView, LayoutWindow};
+    use solidcraft_ui_text::tr;
     use solidcraft_views::CameraLinkMode;
 
     let choices = crate::view_windows::window_choices(app);
@@ -237,6 +238,25 @@ pub(crate) fn window_layout(app: &SolveApp) -> solidcraft_ui_kit::view_layout_me
         CameraLinkMode::Both => "both",
     };
     LayoutMenu {
+        text: LayoutText {
+            heading: tr("view_layout.heading").to_owned(),
+            summary_single: tr("view_layout.summary_single").to_owned(),
+            summary: tr("view_layout.summary").to_owned(),
+            this_window: tr("view_layout.this_window").to_owned(),
+            show: tr("view_layout.show").to_owned(),
+            bring: tr("view_layout.bring").to_owned(),
+            windows: tr("view_layout.windows").to_owned(),
+            link: tr("view_layout.link").to_owned(),
+            off: tr("view_layout.off").to_owned(),
+            orientation: tr("view_layout.orientation").to_owned(),
+            zoom: tr("view_layout.zoom").to_owned(),
+            both: tr("view_layout.both").to_owned(),
+            new_cells: tr("view_layout.new_cells").to_owned(),
+            detach: tr("view_layout.detach").to_owned(),
+            equal: tr("view_layout.equal").to_owned(),
+            reset: tr("view_layout.reset").to_owned(),
+            clean: tr("view_layout.clean").to_owned(),
+        },
         design: crate::i18n::tr_name(&documents::tab_name(app, &app.session)),
         window: app.view_windows.current_window(),
         native: crate::view_windows::supports_pop_out(app) && crate::view_windows::can_create(app),
@@ -253,7 +273,7 @@ fn layout_action(app: &mut SolveApp, id: &str) -> bool {
     let window = app.view_windows.current_window();
     let (command, args) = match id {
         "layout.equal" => ("tab.view.equal_sizes", json!({"window": window})),
-        "layout.reset" => ("tab.view.reset_cameras", json!({"window": window})),
+        "layout.reset_cameras" => ("tab.view.reset_cameras", json!({"window": window})),
         "layout.clean" => ("tab.window.clean", json!({"window": window})),
         _ if let Some(mode) = id.strip_prefix("layout.link.") => ("tab.view.link", json!({"window": window, "mode": mode})),
         _ if let Some(target) = id.strip_prefix("win.focus.").and_then(|value| value.parse::<u32>().ok()) => {

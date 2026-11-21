@@ -1353,7 +1353,7 @@ fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed
         let title_width = strip
             .view_layout
             .filter(|_| !layout_name(strip).is_empty())
-            .map_or(0.0, |_| 6.0 + text_width(ui, layout_name(strip), FontId::proportional(12.0)));
+            .map_or(0.0, |_| 6.0 + text_width(ui, layout_name(strip), FontId::proportional(Tokens::get().font_body)));
         let stages = [
             common + expanded + title_width,
             common + expanded,
@@ -2218,7 +2218,7 @@ fn clear_layout_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, show_nam
     let glyph = Rect::from_center_size(pos2(rect.left() + 16.0, rect.center().y), vec2(16.0, 16.0));
     paint_layout_glyph(painter, glyph, strip.layout_current, t.app_bar_text);
     if show_name {
-        painter.text(pos2(glyph.right() + 6.0, rect.center().y), Align2::LEFT_CENTER, name, FontId::proportional(12.0), t.app_bar_text);
+        painter.text(pos2(glyph.right() + 6.0, rect.center().y), Align2::LEFT_CENTER, name, FontId::proportional(t.font_body), t.app_bar_text);
     }
     let indicator = Rect::from_center_size(pos2(rect.right() - 10.0, rect.center().y), vec2(10.0, 10.0));
     crate::disclosure::dropdown_indicator(painter, indicator, t.app_bar_text);

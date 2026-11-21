@@ -1,9 +1,9 @@
 {
   "en": {
-    "cmd.tab.view.equal_sizes": "Equalise View Sizes",
-    "cmd.tab.view.link": "Link View Cameras",
-    "cmd.tab.view.reset_cameras": "Reset All View Cameras",
-    "cmd.tab.window.clean": "Toggle Clean Window",
+    "cmd.tab.view.equal_sizes": "Equal Sizes",
+    "cmd.tab.view.link": "Link Cameras Between Views",
+    "cmd.tab.view.reset_cameras": "Reset All Cameras",
+    "cmd.tab.window.clean": "Clean Window (Present)",
     "view_layout.both": "Both",
     "view_layout.bring": "Bring here",
     "view_layout.button": "Layout: {layout}",

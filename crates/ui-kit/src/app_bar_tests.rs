@@ -1865,8 +1865,9 @@ fn elsewhere_view_has_only_a_return_button_on_hover() {
 }
 
 fn layout_test_data(visible: usize, window_count: usize) -> crate::view_layout_menu::LayoutMenu {
-    use crate::view_layout_menu::{LayoutMenu, LayoutView, LayoutWindow};
+    use crate::view_layout_menu::{LayoutMenu, LayoutText, LayoutView, LayoutWindow};
     LayoutMenu {
+        text: LayoutText::default(),
         design: "One".into(),
         window: 0,
         native: true,
@@ -1926,8 +1927,8 @@ fn adding_a_window_expands_the_layout_menu_to_its_extra_rows() {
     rig.layout = Some((2, 2));
     rig.frame(Vec::new());
     rig.frame(Vec::new());
-    let reset = rig.at("menu:layout.reset");
-    assert_eq!(rig.press(reset, egui::PointerButton::Primary), vec![TabAction::LayoutMenu { id: "layout.reset".into() }]);
+    let reset = rig.at("menu:layout.reset_cameras");
+    assert_eq!(rig.press(reset, egui::PointerButton::Primary), vec![TabAction::LayoutMenu { id: "layout.reset_cameras".into() }]);
 }
 
 #[test]
