@@ -6892,3 +6892,26 @@ fn frame_member_refusals_keep_their_geometry_data_and_session_failure_code() {
     stock::line(origin, [10.0, 0.0, 0.0].into()).unwrap();
     assert_eq!(session::take_failure_code(), None);
 }
+
+#[test]
+fn removing_a_continuous_tube_uses_its_physical_member_identity_and_undo_restores_it() {
+    let mut s = Session::default();
+    let ids = chassis_path(&mut s);
+    let feature = run(
+        &mut s,
+        "frame.member",
+        json!({"sketch": "Chassis", "lines": ids, "continuous": true,
+        "profile": {"kind": "round_tube", "diameter": 20, "wall": 2}, "body_name": "Hoop"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    let before = s.doc.to_json();
+    remove(&mut s, json!([{"feature": feature, "line": "$path"}]));
+    assert!(s.doc.feature(feature).is_none());
+    assert!(bodies(&mut s).is_empty());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    let frame = s.doc.feature(feature).unwrap();
+    let state = s.model.state();
+    assert_eq!(solidcraft_doc::frame::member_of_body(&s.doc, &state, frame, "Hoop").unwrap().as_deref(), Some("$path"));
+}

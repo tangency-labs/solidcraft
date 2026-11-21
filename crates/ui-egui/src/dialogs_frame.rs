@@ -339,6 +339,7 @@ pub(crate) fn remove_tubes(app: &mut SolveApp, ids: &[String]) {
     for t in all.iter().filter(|t| ids.contains(&t.id)) {
         match t.pair {
             Some(k) => gone.extend(pairs.get(k).into_iter().flat_map(|(a, b)| [*a, *b])),
+            None if m.continuous && t.id == "$path" => gone.extend(lines.iter().copied()),
             None => gone.extend(lines.iter().filter(|i| line_id(path.items.get(**i)) == Some(t.id.as_str()))),
         }
     }
