@@ -537,6 +537,56 @@ pub struct AppearanceCopyResult {
     pub param_warnings: Vec<String>,
 }
 
+/// The look `appearance.favorite` asks about: the same five keys `appearance.assign` and
+/// `appearance.paint` take, read by the same parser (`cmd::appearance_look`), so a call either
+/// names a library appearance or a starter recipe, or describes a look by `color`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct FavoriteLook {
+    /// A library appearance's name or a starter recipe's name or stable `starter.*` id (see
+    /// `appearance.library`). With `color` too, that colour under this name.
+    #[serde(default)]
+    pub appearance: Option<String>,
+    /// The colour, `"#rrggbb"` or `[r, g, b]` (0–255); with `appearance`, it replaces the
+    /// recipe's colour.
+    #[serde(default)]
+    pub color: Option<ColorParam>,
+    /// A label for the look: needs `color`, not with `appearance`.
+    #[serde(default)]
+    pub name: Option<LookLabel>,
+    /// 0 (clear) to 1 (opaque). Default: 1, or the appearance's own.
+    #[serde(default)]
+    pub opacity: Option<f64>,
+    /// The opaque PBR response (needs `color` or `appearance`, and opacity 1).
+    #[serde(default)]
+    pub pbr: Option<PbrParam>,
+}
+
+/// `appearance.favorite` takes the look to mark and the preference: `look` is read as
+/// `appearance.assign` reads one, `favorite` says whether to mark it. It writes nothing to the
+/// design (its `doc_only`), so the reply is what the call described.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppearanceFavoriteParams {
+    /// The look to mark or unmark.
+    pub look: FavoriteLook,
+    /// `true` to mark it as a favourite, `false` to clear the mark.
+    pub favorite: bool,
+}
+
+/// What a favourite request answers: the look the call described, resolved as `appearance.assign`
+/// resolves one, and the preference back. Nothing was written to the design.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppearanceFavoriteResult {
+    /// The look that was resolved, in the shape `appearance.copy` reports it.
+    pub look: LookReply,
+    /// The preference the call asked for.
+    pub favorite: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 #[cfg(test)]
 #[path = "appearance_tests.rs"]
 mod tests;

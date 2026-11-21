@@ -81,10 +81,9 @@ def test_a_vertical_dimension_driven_to_zero_comes_back_on_its_side():
     assert pin_centre("vertical", "0 mm", "5 mm") == pytest.approx((0, -5), abs=1e-3)
 
 
-def test_a_distance_driven_to_zero_comes_back_mirrored():
-    # #18024: once a distance keeps its side as well, this fails and trap 1 needs its text changed.
-    assert pin_centre("distance") == pytest.approx((0, -5), abs=1e-3)
-    assert pin_centre("distance", "0 mm", "5 mm") == pytest.approx((0, 5), abs=1e-3)
+def test_a_distance_held_plumb_driven_to_zero_comes_back_on_its_side():
+    assert pin_centre("distance", "0 mm") == pytest.approx((0, 0), abs=1e-3)
+    assert pin_centre("distance", "0 mm", "5 mm") == pytest.approx((0, -5), abs=1e-3)
 
 
 def slot_centre(*changes: list) -> float:

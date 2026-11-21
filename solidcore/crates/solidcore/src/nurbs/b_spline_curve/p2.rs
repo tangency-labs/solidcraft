@@ -437,34 +437,6 @@ impl BSplineCurve {
         Ok(self.degree()? == 3 && self.is_piecewise_c0()?)
     }
 
-    /// Certified boxes covering the part of the curve over `interval`, one per knot span
-    /// that meets it ([`crate::nurbs::nurbs_crv::crv_span_boxes`]); `None`, meaning no
-    /// certified cover, without a NURB, when the weights, knots or interval cannot be
-    /// read as a cover, or while evaluation beyond the natural interval is enabled.
-    /// Not upstream.
-    #[must_use]
-    pub fn span_boxes(&self, interval: &Extent1d) -> Option<Vec<Extent3d>> {
-        if self.is_out_of_bounds_enabled() {
-            return None;
-        }
-        crate::nurbs::nurbs_crv::crv_span_boxes(self.nurb.as_ref()?, interval)
-    }
-
-    /// The refinable certified cover ([`crate::nurbs::nurbs_crv::CurveCover`]) over
-    /// `interval`, refined `depth` times; `None` under the conditions of
-    /// [`BSplineCurve::span_boxes`]. Not upstream.
-    #[must_use]
-    pub fn cover(
-        &self,
-        interval: &Extent1d,
-        depth: usize,
-    ) -> Option<crate::nurbs::nurbs_crv::CurveCover> {
-        if self.is_out_of_bounds_enabled() {
-            return None;
-        }
-        crate::nurbs::nurbs_crv::CurveCover::new(self.nurb.as_ref()?, interval, depth)
-    }
-
     /// Bounding boxes of the part of the curve over `interval` (clamped to the natural
     /// interval), built from the control points of the spans it covers
     /// (`CalculateBoundingBox`). The pseudo box takes its basis from the control point
@@ -914,6 +886,16 @@ impl BSplineCurve {
         Ok((joined, breaks))
     }
 
+    /// Whether a segment ending at `last` and one starting at `first` are end to end as
+    /// [`BSplineCurve::create_by_joining`] requires: no further apart than
+    /// `1000 * sqrt(SM_EFF_ZERO) * (1 + max|last|)`. A caller that chains pieces for the
+    /// join tests them with this, so it never hands the join a pair it refuses.
+    pub(crate) fn ends_meet_for_join(last: Point3, first: Point3) -> bool {
+        let scaled_zero = EFF_ZERO_SQRT * 1000.0 * (1.0 + last.max_dimension());
+        // (written so a NaN distance does not meet)
+        last.distance(first) <= scaled_zero
+    }
+
     /// `CreateByJoining`, recording the segments' breaks in `breaks` when asked.
     fn join(
         segments: &mut [Self],
@@ -1081,8 +1063,7 @@ impl BSplineCurve {
                 }
             }
             // Make sure end-points are the same
-            let scaled_zero = EFF_ZERO_SQRT * 1000.0 * (1.0 + last_point.max_dimension());
-            if last_point.distance(first_pt) > scaled_zero {
+            if !Self::ends_meet_for_join(last_point, first_pt) {
                 return Err(invalid(OP_JOIN, "segments not end to end"));
             }
 

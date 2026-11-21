@@ -596,7 +596,7 @@ fn rust_brep(
     i: &Inputs,
 ) -> Result<crate::own_builder::RustBrep<OwnBrep>, HarnessError> {
     use crate::own_builder::{build_as, counts, failed_output, Built, Conventions};
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let conv = &Conventions::TOPOLOGY_FIXTURE;
     let built = if let Some(built) = build_as(&mut k, &i.brep, i.validate_only, i.init_gaps, conv)?
     {
@@ -622,6 +622,17 @@ fn rust_brep(
         }
         Built::Failed(e) => Ok(Err(failed_output(&e))),
     }
+}
+
+/// The replayed model of a case: the Rust B-rep as the op receives it (#18325's
+/// certificates, `tests/issue_18325_moved_rows.rs`); `None` when it does not build.
+///
+/// # Errors
+///
+/// A [`HarnessError`] for inputs that do not parse or a source the harness cannot read.
+pub fn scene(case: &Case) -> Result<Option<Brep>, HarnessError> {
+    let i = case.parse::<Inputs>()?;
+    Ok(rust_brep(&i)?.ok().map(|(b, _)| b))
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
@@ -712,7 +723,7 @@ fn fill_gaps(b: &mut Brep) -> Result<(), SolidError> {
 
 fn fill_gaps_body(b: &mut Brep) -> Result<(), SolidError> {
     use std::collections::BTreeSet;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     k.context.set_doing_boolean(true);
     let k = k;
     let vus: Vec<(VertexuseId, bool, bool)> = b
@@ -815,7 +826,7 @@ fn fill_edge_ccw_edge_gap(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<(),
 }
 
 fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let vid = |x: i64| VertexuseId::from_index(x as u32);
     let body: Vec<f64> = match op {
         OpIn::VuQuery { vu } => {

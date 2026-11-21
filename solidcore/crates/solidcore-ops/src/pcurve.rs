@@ -2,7 +2,8 @@
 //! surface parameters, from the record's 3D edges and surface. This checks the records' structure
 //! as the record's validation does (counts against a [`Budget`], a use's interval in its curve's
 //! natural range, a given pcurve as a valid 2D B-spline), converts them through
-//! `solidcore-convert`, calls the kernel, and converts its pcurves back.
+//! `solidcore-convert`, calls the kernel, and converts its pcurves back. The pcurve of a
+//! B-spline edge folded across a cylinder or cone ([`folded_pcurve`]) is converted the same way.
 //!
 //! The request types a kernel that makes the remaining pcurves takes ([`TrimFace`], [`Trims`])
 //! are here too: they hold records.
@@ -162,11 +163,50 @@ pub fn exact_pcurves(
         .collect())
 }
 
+/// The pcurve on a cylinder or cone face `label` (on its NURBS form `form` when the face has
+/// one) of a B-spline edge `curve` folded across it, on the edge's `interval`
+/// ([`solidcore::eval::folded::folded_pcurve`]). `None` for another face or curve, a record
+/// that does not convert, or past the kernel's piece budget.
+#[must_use]
+pub fn folded_pcurve(
+    label: &Surface,
+    form: Option<&Surface>,
+    curve: &Curve,
+    interval: [f64; 2],
+) -> Option<Curve2> {
+    // Only a spline on a cylinder or cone has one: nothing else is converted.
+    if !matches!(label, Surface::Cylinder { .. } | Surface::Cone { .. })
+        || !matches!(curve, Curve::Spline { .. } | Curve::RationalSpline { .. })
+    {
+        return None;
+    }
+    let label = solidcore_convert::surface(label).ok()?;
+    let form = form.map(solidcore_convert::surface).transpose().ok()?;
+    let curve = solidcore_convert::curve(curve).ok()?;
+    solidcore::eval::folded::folded_pcurve(&label, form.as_ref(), &curve, interval)
+        .map(solidcore_convert::record_curve2)
+}
+
 /// The point of pcurve `c` at `t` (`None` outside its interval or for a malformed record)
 /// ([`solidcore::eval::pcurve::eval`]).
 #[must_use]
 pub fn eval(c: &Curve2, t: f64) -> Option<[f64; 2]> {
     k::eval(&solidcore_convert::curve2(c), t)
+}
+
+/// The point of pcurve `c` at `t` and its first derivative there (`None` outside its interval or
+/// for a malformed record) ([`solidcore::eval::pcurve::eval_d1`]).
+#[must_use]
+pub fn eval_d1(c: &Curve2, t: f64) -> Option<([f64; 2], [f64; 2])> {
+    k::eval_d1(&solidcore_convert::curve2(c), t)
+}
+
+/// The pieces of pcurve `c`'s interval that the flux of a field through its face is integrated
+/// over, a Gauss rule on each: one or two to each knot span, at most 64 (`None` for a malformed
+/// record) ([`solidcore::eval::pcurve::flux_pieces`]).
+#[must_use]
+pub fn flux_pieces(c: &Curve2) -> Option<Vec<[f64; 2]>> {
+    k::flux_pieces(&solidcore_convert::curve2(c))
 }
 
 /// One use's records as the kernel's values.

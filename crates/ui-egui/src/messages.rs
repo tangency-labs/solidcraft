@@ -38,6 +38,12 @@ pub struct Messages {
 impl Messages {
     /// Keep a message: the same one again in a row counts up instead.
     pub fn push(&mut self, text: &str, error: bool, at: f64) {
+        // The log on disk keeps what the person was told (`log_file`).
+        if error {
+            log::warn!("{text}");
+        } else {
+            log::info!("{text}");
+        }
         if let Some(last) = self.list.back_mut()
             && last.text == text
             && last.error == error

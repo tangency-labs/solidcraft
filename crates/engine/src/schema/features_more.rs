@@ -90,6 +90,10 @@ pub struct RibParams {
     pub flip: Option<bool>,
     #[serde(default)]
     pub direction: Option<RibDirectionParam>,
+    /// True: the curves' open ends run on in their own direction until they meet the part, so
+    /// the wall reaches the face beyond them. Default: false.
+    #[serde(default)]
+    pub extend: Option<bool>,
     /// What the join makes of pieces that share no face. Default: separate.
     #[serde(default)]
     pub touching: Option<TouchingParam>,
@@ -348,7 +352,7 @@ pub struct EmbossParams {
     /// The bodies to emboss, by name. With `face`, only these are searched for it.
     #[serde(default)]
     pub targets: Option<NameList>,
-    /// A world point selecting a planar face or a complete cylindrical wall, outside or a bore. Default:
+    /// A world point on the face to emboss: planar, a cylinder wall (either side) or another curved face. Default:
     /// inferred when exactly one supported tangent cylinder matches the selected profiles.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "EmbossFacePoint")]

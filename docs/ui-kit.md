@@ -165,6 +165,26 @@ diagnostics without preparing or evaluating geometry. `details_findings` and
 preferences, manager cards, prompts, context menus and the sketch palette. Import through
 `crate::ui_kit::{...}`. Most controls are crate-visible; the container API is public so platform apps use the same hosts.
 
+## Grid
+
+`Grid` is the one editable table: a cell cursor, ranges, editing, TSV copy and paste, fill down
+and clear, over `table_custom` (so column layout, resizing, `Sort` headings, the empty state,
+reveal and the `dialog:table:…` handles are the table's own). The caller implements `GridSource`
+(rows, columns, each cell's text and `CellKind`, a per-cell message, `set_cell` to refuse a value,
+and the optional add row and add column). The grid keeps only view state in egui memory; every
+gesture returns one `Vec<Edit>` in `GridOutput`, which the caller applies as one command and one
+undo step, calling `Grid::refuse` when that command says no.
+
+Keys with no cell being edited: arrows (Shift extends the range), Tab and Shift+Tab across with
+wrap, Enter and Shift+Enter down and up, Home/End, Ctrl+Home/End, Ctrl+A. Typing starts an edit
+that replaces the cell; F2 or a double-click opens it with its text selected. While editing,
+Escape cancels and Enter, Tab or leaving the cell commit; Ctrl+Enter writes the value to every
+selected cell. Ctrl+C copies the range as Excel and Google Sheets write it (tabs, CRLF, quotes
+only where needed); Ctrl+V pastes (one value fills the range; a block below the last row adds
+rows when the source offers an add row); Ctrl+D fills down; Delete clears. Clipboard access goes
+through egui, so it works in wasm. Rows have one height and only the visible ones are built.
+Each cell is named "{column}, {row key}" for accessibility and publishes `grid:{id}:{row}:{column}`.
+
 ## Stage bars
 
 `StageBar` composes two clipped, horizontally scrollable rows inside the shell's
@@ -358,6 +378,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | status: `completion_text` | Compact strip readout with an optional green completion tick and caller-supplied result identity | `font_small`, `control_height`, `form_ink/success/dim`, `space_4/14` |
 | metrics: `row_height`, `table_row_height`, `header_height` | Shared control/header heights | `control_height`, `space_8`, `form_header_height` |
 | layout: `scope`, `row`, `value_row` | Form styling and aligned label/control columns; `value_row` shows read-only text that wraps in the control column and grows its row to hold every line (one line keeps the 28 pt row) | `form_label_width`, `form_gap_y`, `control_*`, `font_label`, `dialog_label`, `space_4/8` |
+| `with_row_label_tooltip` | Scoped override for row labels' hover text when a description is available. Without an override, clipped labels keep their full-text tooltip. Controls keep their own tooltips. | Enclosed row tokens |
 | `caption`, `warning_caption` | Dim caption aligned beneath a control; the warning one says what is wrong with its value | `font_small`, `text_dim`, `warning`, label-column tokens |
 | `status_line`, `StatusTone` | Full-width, wrapping status or refusal text in dim, warning or error ink. Translates source labels; already translated messages also work. Place directly in the form, outside `row`, so its height grows with the whole message. Rect: `dialog:status:TEXT`. | `font_label`, `text_dim`, `warning`, `error` |
 | `figure_rows`, `FigureSlot` | A caller-painted figure in the label column beside a stack of captioned expression fields (the Hole dialog's section); the caller gets each field's rect and hover/focus state to draw leaders and light the part it sizes. Fields keep their `dialog:<label>` handles; the block publishes `dialog:figure:<id>` and its picture `dialog:figure_picture:<id>` | `control_height`, `form_label_width`, `font_small`, `form_dim`, `space_2/4`, label gap |
@@ -378,6 +399,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `menu_filter` | The filter at the top of a long menu: search glyph, frameless editor and a rule under them, so it does not read as an entry; the caller filters and owns focus | `space_8/16`, `font_label`, `form_dim/ink`, `dialog_rule` |
 | `text_area` | Bounded multiline JSON/data editor | field tokens |
 | `dropdown`, `dropdown_menu`, `compact_dropdown_menu` | Indexed choices or caller-supplied menu controls | `control_height`, `text_dim`, form tokens |
+| `swatch_picker`, `SwatchPicker` | Cached raster tiles beside option titles; complete artwork opens a searchable grid. Filtering preserves option indices, and artwork keeps its colours and aspect ratio. | `control_height`, `control_fill/border/radius`, `selected_bg/ink`, `hover`, `font_small`, spacing |
 | `searchable_dropdown`, `SearchOption` | Filtered choices, custom-value action and pending message | dropdown tokens |
 | `search_picker`, `SearchPicker`, `SearchChoice`, `Picked` | Dropdown whose popup opens on a focused search box over rows filtered by value, label and tip, with group headings (two or more groups fold under headers with a count, the current value's open), per-row tips, an optional "use what was typed" row and a dim note; Enter picks the exact or first match, Esc closes the popup only; only the rows in view are laid out, and the popup keeps the height it opened with, the list taking what the rest leaves. Handles `{handles}`, `{handles}:search`, `{handles}:custom`, `{handles}:{value}`; returns the pick and the control's response | dropdown and field tokens, `space_16/24`, `font_small`, `text_dim`, `form_card_width` |
 | `selection_field`, `Selection` | Selection chip with explicit `active` and `filled` state, in three looks: the active input (where the next pick goes) has a `form_primary` border and `selected_bg` tint; a filled inactive one a quiet neutral tint, a stronger neutral border and its count in `form_ink`; an empty inactive one the plain control with a dim prompt | `selected_bg/ink`, `form_primary/ink/dim`, `control_*`, `form_inset`, `space_2/8/24` |

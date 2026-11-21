@@ -217,8 +217,9 @@ fn records(entities: Vec<Ent>, k: f64, file: &mut DxfFile<DxfShape>, budget: &mu
                     fit: budget.points(&entity, 11, 21, k)?,
                     weights: budget.numbers(&entity, 41)?,
                 },
-                "TEXT" | "MTEXT" => match (entity.get(10), entity.get(20), entity.get(40), entity.text(1)) {
+                "TEXT" | "MTEXT" => match (entity.get(10), entity.get(20), entity.get(40), raw_text_value(&entity)?) {
                     (Some(x), Some(y), Some(height), Some(text)) => {
+                        let text = text.trim();
                         budget.charge(text.len(), 1)?;
                         budget.copied(text.len())?;
                         DxfShape::Text { at: pt(x, y), height: height * k, angle_deg: entity.get(50).unwrap_or(0.0), text: paragraph_text(text)? }
@@ -366,8 +367,15 @@ fn project_records(
                     }
                 }
             }
-            DxfShape::SourceSpline { degree, ctrl, fit, .. } => {
-                if fit.len() >= 2 {
+            DxfShape::SourceSpline { degree, ctrl, fit, knots, weights, .. } => {
+                // The file's own knots and weights give its exact curve (#9355): kept whenever they
+                // are valid and differ from the evenly spaced, unweighted spline a sketch draws
+                // over the points anyway. Anything else imports as before.
+                if let Some(pieces) = knotted_pieces(*degree, ctrl, knots, weights, work) {
+                    for piece in pieces {
+                        push(out, piece)?;
+                    }
+                } else if fit.len() >= 2 {
                     push(out, Geom2::Spline { pts: copy_points(fit, work)?, control: false, degree: 3 })?;
                 } else if ctrl.len() >= 2 {
                     push(
@@ -386,6 +394,73 @@ fn project_records(
         }
     }
     Ok(())
+}
+
+/// A SPLINE's control points, knots and weights as the exact curve they describe (#9355): one
+/// [`Geom2::Nurbs`] per piece, clamped at its ends (a periodic SPLINE's open knot vector is
+/// clamped to its domain exactly, by knot insertion) and split where an interior knot repeats
+/// more than the degree (a gap or a break the sketch's splines can't hold). `None` when the
+/// curve is the evenly spaced, unweighted spline the old import draws over the points anyway,
+/// or when the knots or weights are not a valid spline: the caller imports it as before. (A
+/// piece too big for a sketch spline is left to the sketch import, which draws it as before.)
+fn knotted_pieces(degree: f64, ctrl: &[Vec2], knots: &[f64], weights: &[f64], work: &mut usize) -> Option<Vec<Geom2>> {
+    use solidcore_record::Vec3;
+    use solidcraft_geom::bspline::{self, HPoint};
+    let (n, max) = (ctrl.len(), solidcore_record::MAX_BEZIER_DEGREE);
+    if !(degree.is_finite() && degree >= 1.0 && degree <= max as f64 && degree.fract() == 0.0) {
+        return None;
+    }
+    let p = degree as usize;
+    if n <= p || knots.len() != n + p + 1 || !(weights.is_empty() || weights.len() == n) {
+        return None;
+    }
+    if knots.iter().any(|k| !k.is_finite()) || knots.windows(2).any(|w| w[1] < w[0]) || weights.iter().any(|w| !(w.is_finite() && *w > 0.0)) {
+        return None;
+    }
+    let (min_w, max_w) = weights.iter().fold((f64::INFINITY, 0.0f64), |(a, b), w| (a.min(*w), b.max(*w)));
+    let rational = !weights.is_empty() && max_w - min_w > 1e-12 * max_w;
+    let (lo, hi) = (knots[p], knots[n]);
+    if !(hi > lo) || (hi - lo).is_infinite() {
+        return None;
+    }
+    // Already what the old import draws: clamped, evenly spaced, unweighted.
+    let spans = n - p;
+    let uniform = knots[..=p].iter().all(|k| *k == lo)
+        && knots[n..].iter().all(|k| *k == hi)
+        && (0..=spans).all(|i| (knots[p + i] - (lo + (hi - lo) * i as f64 / spans as f64)).abs() <= 1e-9 * (hi - lo));
+    if uniform && !rational {
+        return None;
+    }
+    visit(work, knots.len() + n).ok()?;
+    let ctrl_h: Vec<HPoint> =
+        ctrl.iter().enumerate().map(|(i, q)| HPoint::weighted(Vec3::new(q.x, q.y, 0.0), if rational { weights[i] } else { 1.0 })).collect();
+    // Break points: the domain's ends, and every interior knot repeated more than the degree.
+    let mut cuts = vec![lo];
+    let mut i = p + 1;
+    while i < n {
+        let run = knots[i..].iter().take_while(|k| **k == knots[i]).count();
+        if knots[i] > lo && knots[i] < hi && run > p {
+            cuts.push(knots[i]);
+        }
+        i += run;
+    }
+    cuts.push(hi);
+    let mut pieces = Vec::new();
+    for w in cuts.windows(2) {
+        let (k, c) = bspline::segment(p, knots, &ctrl_h, w[0], w[1]).ok()?;
+        let mut pts = Vec::with_capacity(c.len());
+        let mut ws = Vec::with_capacity(c.len());
+        for h in &c {
+            let q = h.project()?;
+            pts.push(Vec2::new(q.x, q.y));
+            ws.push(h.w);
+        }
+        if !pts.iter().all(|q| q.is_finite()) {
+            return None;
+        }
+        pieces.push(Geom2::Nurbs { pts, degree: p as u8, knots: k, weights: if rational { ws } else { Vec::new() } });
+    }
+    Some(pieces)
 }
 
 pub(super) fn copy_points(points: &[Vec2], work: &mut usize) -> Result<Vec<Vec2>> {
