@@ -13379,6 +13379,8 @@ fn eval_feature_kind(
             *target = result;
             Ok(())
         }
+        // A tag changes no geometry: evaluating it checks it where it stands (#18799).
+        FeatureKind::AmalgamTag { remove, add, new } => crate::amalgam::check_tag(st, remove, add, new),
         FeatureKind::Repair { body, gap, patch_holes } => {
             let gap = val(vals, gap, Kind::Length)?;
             let index = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;

@@ -2483,6 +2483,19 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         patch_holes: bool,
     },
+    /// Amalgam Tag (#18799): makes this design a tool that other designs place with Amalgamate.
+    /// Where it is placed, its `remove` bodies are cut from the bodies named for them, then its
+    /// `add` bodies are joined into the bodies named for those, and its `new` bodies come in as
+    /// a part of their own. It changes no geometry; its name is the feature's name
+    /// ([`crate::amalgam`]).
+    AmalgamTag {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        remove: Vec<BodyName>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        add: Vec<BodyName>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        new: Vec<BodyName>,
+    },
 }
 
 /// A fillet corner set back: the vertex at `vertex`, where every edge is rounded, has its corner
@@ -3289,6 +3302,7 @@ impl FeatureKind {
             FeatureKind::MeshImport { .. } => "MeshFeature",
             FeatureKind::MeshConvert { .. } => "MeshConvertFeature",
             FeatureKind::Repair { .. } => "RepairFeature",
+            FeatureKind::AmalgamTag { .. } => "AmalgamTagFeature",
         }
     }
 
@@ -3376,6 +3390,7 @@ impl FeatureKind {
             FeatureKind::MeshConvert { .. } => "mesh_convert",
             FeatureKind::MeshImport { .. } => "mesh_import",
             FeatureKind::Repair { .. } => "repair",
+            FeatureKind::AmalgamTag { .. } => "amalgam_tag",
         }
     }
 
@@ -3462,6 +3477,7 @@ impl FeatureKind {
             "MeshFeature" => "mesh_import",
             "MeshConvertFeature" => "mesh_convert",
             "RepairFeature" => "repair",
+            "AmalgamTagFeature" => "amalgam_tag",
             _ => return None,
         })
     }
@@ -3552,6 +3568,7 @@ impl FeatureKind {
             FeatureKind::MeshImport { .. } => "Mesh",
             FeatureKind::MeshConvert { .. } => "ConvertMesh",
             FeatureKind::Repair { .. } => "Repair",
+            FeatureKind::AmalgamTag { .. } => "Amalgam Tag",
         }
     }
 }
