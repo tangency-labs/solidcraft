@@ -959,6 +959,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc.links.iter().filter(|(c, _)| only.as_ref().is_none_or(|o| o.contains(c))).map(|(c, l)| (*c, l.clone())).collect();
     let (mut updated, mut unchanged, mut warnings): (Vec<String>, Vec<String>, Vec<String>) = (Vec::new(), Vec::new(), Vec::new());
     let mut failed: Vec<LinkFailure> = Vec::new();
+    let mut read_components = Vec::new();
     let count = links.len();
     for (index, (comp, link)) in links.into_iter().enumerate() {
         let cname = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone());
@@ -1005,6 +1006,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             } else {
                 unchanged.push(cname)
             }
+            read_components.push(comp);
             continue;
         }
         let (_, sf, faces, metadata, properties) = match design_bodies(&file, &bytes, selected_configuration(&link), s.validation()) {
@@ -1031,6 +1033,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             } else {
                 unchanged.push(cname)
             }
+            read_components.push(comp);
             continue;
         }
         // The same bodies, their faces named for the first time (a link made before names were
@@ -1056,7 +1059,12 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         }
         s.refresh();
         let changed = inherit_properties(s, comp, &properties)? || changed;
-        if changed { updated.push(cname) } else { unchanged.push(cname) }
+        if changed {
+            updated.push(cname)
+        } else {
+            unchanged.push(cname)
+        }
+        read_components.push(comp);
     }
     solidcraft_doc::progress::item(None);
     // None could be read: nothing to take back either.
@@ -1072,6 +1080,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         let sol = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
         warnings.extend(sol.errors.iter().chain(&sol.conflicts).map(|(_, name, why)| format!("joint {name}: {why}")));
     }
+    crate::plugin::record_link_reads(s, &read_components);
     reply(cmd, UpdateLinksResult { updated, unchanged, warnings, failed, param_warnings: Vec::new() })
 }
 
@@ -1309,6 +1318,7 @@ fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
+    let mut observations = Vec::new();
     let links: Vec<LinkInfo> = s
         .doc
         .links
@@ -1325,11 +1335,14 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                     let found = solidcraft_io::vfs::design_path_is_file(&shown, s.path.as_deref());
                     // Whether the file is no longer what this design last read (#9739): `null`
                     // when it isn't found, or the link keeps no digest (made before they were).
-                    let changed = l
-                        .file_sha256
-                        .as_ref()
-                        .filter(|_| found == Some(true))
-                        .and_then(|kept| file_sha256(Path::new(&shown), s.path.as_deref()).map(|now| now != *kept));
+                    let current =
+                        l.file_sha256.as_ref().filter(|_| found == Some(true)).and_then(|_| file_sha256(Path::new(&shown), s.path.as_deref()));
+                    let changed = current.as_ref().zip(l.file_sha256.as_ref()).map(|(now, kept)| now != kept);
+                    if let (Some(digest), Some(changed)) = (current, changed)
+                        && (changed || s.plugin_state.link_changes.get(c).is_some_and(|change| !change.read))
+                    {
+                        observations.push((*c, shown.clone(), digest, !changed));
+                    }
                     // Why a file that can't be reached can't be: `None` when it can be read.
                     let (state, reason) = match link_presence(&file, s.path.as_deref()) {
                         Some(why) => (Some(why.state), Some(why.reason)),
@@ -1361,6 +1374,9 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
             }
         })
         .collect();
+    for (component, path, digest, read) in observations {
+        crate::plugin::record_link_change(s, component, path, digest, read);
+    }
     reply("component.links", LinksResult { links, param_warnings: Vec::new() })
 }
 

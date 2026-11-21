@@ -502,11 +502,12 @@ fn read_session(
         // with its model is not evaluated again (a 226-feature design took two minutes to open
         // for a one-line export). The model is taken only when every feature's fingerprint
         // matches; otherwise the timeline is evaluated as before.
-        let (doc, saved) =
-            solidcraft_engine::io::read_design_file(path, None::<fn(solidcraft_engine::io::DesignPreview)>).map_err(|e| format!("{path}: {e}"))?;
-        // A file with provenance is evaluated from its timeline, never from a cache the signature
-        // does not cover (as `doc.open`).
-        let saved = if solidcraft_engine::io::has_design_provenance(path) { None } else { saved };
+        // A file with provenance gives no model: it is evaluated from its timeline, never from a
+        // cache the signature does not cover (as `doc.open`). Read from the bytes already read, so
+        // the model and that decision come from one file.
+        let (doc, saved) = solidcraft_engine::io::read_design_with_model(&bytes).map_err(|e| format!("{path}: {e}"))?;
+        // `--profile` (or SOLIDCRAFT_PROFILE) records the evaluation, as before the model was taken.
+        let saved = if solidcraft_engine::profile::enabled() { None } else { saved };
         let mut session = Session::opened_at_validating(doc, saved.as_ref(), Some(path), validation);
         session.param_check = check;
         return Ok(session);
@@ -1430,5 +1431,18 @@ mod tests {
             |s: &Session| s.world_state().unwrap().bodies.iter().map(|b| solidcraft_engine::kernel::measure(&b.body).unwrap().volume).sum::<f64>();
         assert_eq!(volume(&s).to_bits(), volume(&built).to_bits());
         assert!(s.model.results.iter().all(|r| r.error.is_none()));
+        // `--profile` records the evaluation, so the timeline is evaluated as before.
+        struct Profiling;
+        impl Drop for Profiling {
+            fn drop(&mut self) {
+                solidcraft_engine::profile::set_enabled(false);
+            }
+        }
+        let _profiling = Profiling;
+        solidcraft_engine::profile::set_enabled(true);
+        let s = read_session(&path.0.to_string_lossy(), solidcraft_engine::schema::ParamCheck::Off, solidcraft_engine::kernel::Validation::default())
+            .unwrap();
+        assert!(s.model.last_recomputed > 0, "evaluated while profiling");
+        assert_eq!(volume(&s).to_bits(), volume(&built).to_bits());
     }
 }
