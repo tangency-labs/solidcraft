@@ -1,6 +1,8 @@
 # main ee673a19bf
 # topology.brep_validation: main's file without the coincidence search (WR-798): its 43 search cases and the `pairs` key gone, and the 7 generated cases that drew the search checking their bodies' pointers instead
 # offset.offset_executive_p2: main's file with the offset-role attribute (#3138): the `attributes` key of its 30 cases that mark roles, the attribute-only rows
+# surface.surface_point_solve_p2: main's file without the lines of gen0072 and gen0546, Solve maxima a witness grid refutes, now known failing (#13684)
+# surface.surface_point_solve_p3: main's file without the lines of 51 global point solves a witness grid refutes, now known failing (#13684)
 blend.feature_executive	9ca7c0200e1392d9
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -230,8 +232,8 @@ surface.surface_p7	6619493f96d9d624
 surface.surface_p8	8c429b3fc714a3d3
 surface.surface_p9	f2fca09a332c9f42
 surface.surface_point_solve_p1	4c854434083b74bd
-surface.surface_point_solve_p2	93e2c5b6169847de
-surface.surface_point_solve_p3	2cde20342ed8b4f9
+surface.surface_point_solve_p2	44853fdb11f55ee8
+surface.surface_point_solve_p3	47b41b54631f9cd9
 surface.torus	3bc22a9cc79e4e78
 surface.trim_srf_cache	655dddeca4f5ba3b
 surface.twist_volume	185622854f391b03
