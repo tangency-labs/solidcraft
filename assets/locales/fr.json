@@ -7077,7 +7077,7 @@
   "ui.material_review.yield_strength": "Limite élastique",
   "ui.mcp_agents": "Agents via MCP",
   "ui.mcp_compact": "Sortie compacte",
-  "ui.mcp_compact_note": "Pour les agents connectés via le serveur MCP (solidcraft-cli mcp) : inspect_conception résume les esquisses et les résultats des outils ne sont pas mis en forme, ce qui réduit le nombre de jetons utilisés. S’applique aux sessions d’agent démarrées après la modification ; les options --compact ou SOLIDCRAFT_MCP_COMPACT=1 activent également ce mode.",
+  "ui.mcp_compact_note": "Pour les agents connectés via le serveur MCP (solidcraft-cli mcp) : inspect_design résume les esquisses et les résultats des outils ne sont pas mis en forme, ce qui réduit le nombre de jetons utilisés. S’applique aux sessions d’agent démarrées après la modification ; les options --compact ou SOLIDCRAFT_MCP_COMPACT=1 activent également ce mode.",
   "ui.measure": "Mesurer",
   "ui.mesh_format_3mf": "3MF",
   "ui.mesh_format_3mf_tagged": "3MF avec étiquettes de faces",
