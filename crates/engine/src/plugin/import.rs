@@ -138,9 +138,21 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
     if !options.is_object() {
         return Err(HostError::InvalidInput { field: "options".into(), reason: "the importer's options are an object".into() }.into());
     }
+    // All callers receive schema defaults for omitted options. User preferences belong to the
+    // interactive form only; explicit values (including null) always remain the caller's own.
+    let mut defaults = options.clone();
+    if let Some(values) = defaults.as_object_mut()
+        && let Some(properties) = importer.input_schema.get("properties").and_then(Value::as_object)
+    {
+        for (key, property) in properties {
+            if let Some(default) = property.get("default") {
+                values.entry(key.clone()).or_insert_with(|| default.clone());
+            }
+        }
+    }
     let prepared =
-        conditions::has_conditions(&importer.input_schema).then(|| craft_plugin::prepare_input(&importer.input_schema, options)).transpose()?;
-    let options = prepared.as_ref().unwrap_or(options);
+        conditions::has_conditions(&importer.input_schema).then(|| craft_plugin::prepare_input(&importer.input_schema, &defaults)).transpose()?;
+    let options = prepared.as_ref().unwrap_or(&defaults);
     // The caller's file scope covers the file, and with input_folder, the folder it is in. The
     // folder is read only when the manifest asks for it and the user approved it at install, for
     // this exact package (the grant above).

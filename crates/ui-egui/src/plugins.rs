@@ -412,6 +412,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context, wait: bool) {
                 }
             }
             if job.command == "plugin.remove" {
+                crate::plugin_menu::forget_options(app, id);
                 app.preferences.disabled_plugins.remove(id);
                 app.session.disabled_plugins.remove(id);
             }
@@ -588,6 +589,7 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
         }
         ui.add_space(8.0);
         resource_controls(app, ui);
+        crate::prefs::importer_options_control(app, ui);
         crate::ui_kit::checkbox(
             ui,
             solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position"),

@@ -1537,3 +1537,110 @@ fn an_opened_files_import_warnings_are_said_on_the_web_as_on_the_desktop() {
     assert_eq!(desktop.app.status.as_ref().map(|s| (s.0.as_str(), s.2)), Some((warned, false)));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The existing original importer fixture copies the input file into a design. Check the exact
+/// options bytes at the guest boundary so accidental memory injection fails the open.
+#[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn importer_with_expected_options(h: &mut crate::scenario::Harness, expected: serde_json::Value) -> String {
+    let folder = h.dir.join("plugins/sample");
+    std::fs::create_dir_all(&folder).unwrap();
+    let (package, version) = solidcraft_engine::plugin::API.split_once('@').unwrap();
+    let fixture = include_str!("../../engine/src/plugin/importer_fixture.wat")
+        .replace("\r\n", "\n")
+        .replace("__PACKAGE__", package)
+        .replace("__VERSION__", version);
+    let signature = "(func $import (;3;) (type 3) (param i32 i32 i32 i32 i64 i32 i32) (result i32)\n";
+    assert!(fixture.contains(signature));
+    let bytes = expected.to_string().into_bytes();
+    let mut check = format!("      local.get 6\n      i32.const {}\n      i32.ne\n      if\n        unreachable\n      end\n", bytes.len());
+    for (offset, byte) in bytes.iter().enumerate() {
+        check.push_str(&format!(
+            "      local.get 5\n      i32.load8_u offset={offset}\n      i32.const {byte}\n      i32.ne\n      if\n        unreachable\n      end\n"
+        ));
+    }
+    let fixture = fixture.replacen(signature, &format!("{signature}{check}"), 1);
+    std::fs::write(folder.join("importer.wasm"), wat::parse_str(fixture).unwrap()).unwrap();
+    let manifest = json!({"id":"sample","name":"Sample Importer","version":"1","capabilities":["formats@0.1"],"runtime":{
+        "module":"importer.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["smp"],
+            "input_schema":{"type":"object","properties":{"size":{"type":"integer","minimum":1,"maximum":10,"default":2}}}}],
+        "limits":{"fuel":10000000,"memory_mib":2,"deadline_ms":5000,"stack_kib":16384}}});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    h.app.session.plugin_state.plugins_dir = Some(h.dir.join("plugins"));
+    h.app.preferences.plugin_importer_options.insert("sample".into(), [("convert".into(), json!({"size":7}))].into());
+    let path = h.dir.join("bracket.smp");
+    std::fs::write(&path, solidcraft_engine::io::write_design(&Session::default().doc).unwrap()).unwrap();
+    path.to_string_lossy().into_owned()
+}
+
+#[test]
+#[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn file_open_and_drop_share_the_remembered_importer_dialog_and_run_its_options() {
+    let mut h = crate::scenario::Harness::new();
+    let path = importer_with_expected_options(&mut h, json!({"size":7}));
+    h.app.open_chosen_file(&path);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"size":7}));
+    assert!(h.app.file_load.idle(), "choosing a file only opens the form");
+    h.app.plugin_menu.dialogs.clear();
+    h.app.drop_path(&path);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().import_path.as_deref(), Some(path.as_str()));
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"size":7}));
+    crate::plugin_menu::run(&mut h.app).unwrap();
+    assert_eq!(h.app.file_load.current_request().unwrap().options["options"], json!({"size":7}));
+    assert_eq!(h.app.file_load.current_request().unwrap().path, path);
+
+    let mut h = crate::scenario::Harness::new();
+    let path = importer_with_expected_options(&mut h, json!({"size":2}));
+    crate::prefs::set(&mut h.app, &json!({"plugin_remember_importer_options":false})).unwrap();
+    h.app.open_chosen_file(&path);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"size":2}));
+    h.app.plugin_menu.dialogs.clear();
+    h.app.drop_path(&path);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"size":2}));
+}
+
+#[test]
+#[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn programmatic_imports_use_only_explicit_options_and_schema_defaults() {
+    for command in ["doc.open", "file.import"] {
+        for options in [json!({}), json!({"size":3}), json!({"size":null})] {
+            let expected = if options == json!({}) { json!({"size":2}) } else { options.clone() };
+            let mut h = crate::scenario::Harness::new();
+            let path = importer_with_expected_options(&mut h, expected);
+            let memory = h.app.preferences.plugin_importer_options.clone();
+            // Scripts execute these same engine commands. The guest traps on any other options.
+            h.app.run(command, json!({"path":path,"options":options})).unwrap();
+            assert!(h.app.plugin_menu.dialogs.is_empty());
+            assert_eq!(h.app.preferences.plugin_importer_options, memory);
+        }
+        // MCP/control opens offload the exact supplied options, without showing a form.
+        let mut h = crate::scenario::Harness::new();
+        let path = importer_with_expected_options(&mut h, json!({"size":3}));
+        let (request, _reply) = solidcraft_control::ControlRequest::new(
+            "engine.execute",
+            json!({"command":command,"params":{"path":path,"options":{"size":3}}}),
+        );
+        assert!(crate::file_load::control(&mut h.app, request).is_none());
+        assert!(h.app.plugin_menu.dialogs.is_empty());
+        assert_eq!(h.app.file_load.current_request().unwrap().options["options"], json!({"size":3}));
+        assert_eq!(h.app.preferences.plugin_importer_options["sample"]["convert"]["size"], 7);
+    }
+}
+
+#[test]
+#[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn removing_an_importer_forgets_every_entry_and_preferences_cancel_cannot_restore_it() {
+    let mut h = crate::scenario::Harness::new();
+    let path = importer_with_expected_options(&mut h, json!({"size":7}));
+    h.app.preferences.plugin_importer_options.get_mut("sample").unwrap().insert("second".into(), json!({"size":5}));
+    h.app.preferences.plugin_importer_options.insert("other".into(), [("convert".into(), json!({"size":4}))].into());
+    crate::prefs::control(&mut h.app, &json!({"open":"Plugins"})).unwrap();
+    h.app.open_chosen_file(&path);
+    h.app.run("plugin.remove", json!({"id":"sample"})).unwrap();
+    assert!(!h.app.preferences.plugin_importer_options.contains_key("sample"));
+    assert!(h.app.plugin_menu.dialogs.is_empty());
+    crate::prefs::control(&mut h.app, &json!({"button":"cancel"})).unwrap();
+    let mut restored = SolveApp::new(Session::default(), Default::default());
+    restored.load_prefs(&h.app.prefs());
+    assert!(!restored.preferences.plugin_importer_options.contains_key("sample"));
+    assert_eq!(restored.preferences.plugin_importer_options["other"]["convert"]["size"], 4);
+}

@@ -1074,6 +1074,124 @@ fn a_previewed_run_has_none_of_the_plugins_grants() {
     assert!(session.plugin_state.grants["other"].command_groups.contains("doc"), "other plugins keep theirs");
 }
 
+fn importer_entry(name: &str) -> solidcraft_engine::plugin::Entry {
+    serde_json::from_value(json!({"name":name,"kind":"importer","extensions":["sample"],"input_schema":gear_schema()})).unwrap()
+}
+
+#[test]
+fn importer_options_are_remembered_per_entry_on_run_and_survive_preferences_reload() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.plugin_menu.listed = vec![
+        listed("gears", vec![importer_entry("open"), importer_entry("other")]),
+        listed("other", vec![importer_entry("open")]),
+    ];
+    h.app.plugin_menu.loaded = true;
+    let before = h.app.session.doc.to_json();
+    open_entry(&mut h.app, 0, 0);
+    set_input(h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap(), "teeth", Input::Integer(42));
+    // Cancel and a cancelled file picker both leave memory alone.
+    h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
+    assert!(h.app.preferences.plugin_importer_options.is_empty());
+    open_entry(&mut h.app, 0, 0);
+    set_input(h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap(), "teeth", Input::Integer(42));
+    h.app.services.pick_open = Some(Box::new(|_| Box::pin(std::future::ready(None))));
+    run(&mut h.app).unwrap();
+    h.frames(2);
+    assert!(h.app.preferences.plugin_importer_options.is_empty());
+
+    // A chosen file starts the import with the exact options on the form.
+    open_entry(&mut h.app, 0, 0);
+    set_input(h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap(), "teeth", Input::Integer(42));
+    let path = h.dir.join("gear.sample").to_string_lossy().into_owned();
+    h.app.services.pick_open = Some(Box::new(move |_| Box::pin(std::future::ready(Some(path.clone())))));
+    run(&mut h.app).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.preferences.plugin_importer_options["gears"]["open"]["teeth"], 42);
+    assert_eq!(h.app.session.doc.to_json(), before, "options are user bookkeeping, outside the design");
+
+    let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    restored.load_prefs(&h.app.prefs());
+    restored.plugin_menu.listed = h.app.plugin_menu.listed.clone();
+    open_entry(&mut restored, 0, 0);
+    assert_eq!(restored.plugin_menu.dialog().unwrap().ready(&restored).unwrap()["teeth"], 42);
+    open_entry(&mut restored, 0, 1);
+    assert_eq!(restored.plugin_menu.dialog().unwrap().ready(&restored).unwrap()["teeth"], 20);
+    open_entry(&mut restored, 1, 0);
+    assert_eq!(restored.plugin_menu.dialog().unwrap().ready(&restored).unwrap()["teeth"], 20);
+}
+
+#[test]
+fn stale_importer_values_fall_back_individually_to_the_current_schema_defaults() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.plugin_menu.listed = vec![listed("gears", vec![importer_entry("open")])];
+    remember_options(
+        &mut app,
+        "gears",
+        "open",
+        &json!({"module":0,"teeth":42,"pressure_angle":"removed","hub":null,"name":"too long a name","gone":true}),
+    );
+    app.load_prefs(&app.prefs());
+    open_entry(&mut app, 0, 0);
+    assert_eq!(app.plugin_menu.dialog().unwrap().ready(&app).unwrap(), json!({"module":2.0,"teeth":42,"pressure_angle":"20","hub":false}));
+    app.plugin_menu.dialogs.clear();
+    app.plugin_menu.listed[0].entries[0].input_schema["properties"]["teeth"]["maximum"] = json!(30);
+    open_entry(&mut app, 0, 0);
+    assert_eq!(app.plugin_menu.dialog().unwrap().ready(&app).unwrap()["teeth"], 20, "a tightened range invalidates old values");
+}
+
+#[test]
+fn remembered_importer_choices_validate_against_the_remembered_controller() {
+    let schema = json!({"type":"object","properties":{
+        "mode":{"type":"boolean","default":false},
+        "size":{"type":"string","default":"small","oneOf":[
+            {"const":"small"},{"const":"large","x-solidcraft-when":{"field":"mode","eq":true}}]}
+    }});
+    let mut fields = form(&schema).unwrap();
+    assert!(refresh_with_memory(&mut fields, Some(&json!({"mode":true,"size":"large"}))));
+    assert_eq!(params(&fields).unwrap(), json!({"mode":true,"size":"large"}));
+    let mut fields = form(&schema).unwrap();
+    assert!(refresh_with_memory(&mut fields, Some(&json!({"mode":false,"size":"large"}))));
+    assert_eq!(params(&fields).unwrap(), json!({"mode":false,"size":"small"}));
+}
+
+#[test]
+fn restore_importer_defaults_changes_the_form_and_only_a_run_changes_memory() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.plugin_menu.loaded = true;
+    h.app.plugin_menu.listed = vec![listed("gears", vec![importer_entry("open")])];
+    remember_options(&mut h.app, "gears", "open", &json!({"teeth":42,"module":3,"hub":true,"pressure_angle":"25","name":"Gear","bore":4}));
+    let memory = h.app.preferences.plugin_importer_options.clone();
+    open_entry(&mut h.app, 0, 0);
+    h.step(&json!({"click":{"handle":"plugin_dialog:defaults"}})).unwrap();
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"module":2.0,"teeth":20,"pressure_angle":"20","hub":false}));
+    assert_eq!(h.app.preferences.plugin_importer_options, memory);
+    h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
+    open_entry(&mut h.app, 0, 0);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["teeth"], 42);
+    restore_defaults(&mut h.app.plugin_menu.dialogs[0]);
+    h.app.plugin_menu.dialogs[0].import_path = Some(h.dir.join("gear.sample").to_string_lossy().into_owned());
+    run(&mut h.app).unwrap();
+    assert_eq!(h.app.preferences.plugin_importer_options["gears"]["open"]["teeth"], 20);
+}
+
+#[test]
+fn remember_importer_options_preference_off_restores_schema_defaults_and_page_reset_enables_it() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.plugin_menu.listed = vec![listed("gears", vec![importer_entry("open")])];
+    remember_options(&mut h.app, "gears", "open", &json!({"teeth":42}));
+    crate::prefs::control(&mut h.app, &json!({"plugin_remember_importer_options":false})).unwrap();
+    open_entry(&mut h.app, 0, 0);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["teeth"], 20);
+    remember_options(&mut h.app, "gears", "open", &json!({"teeth":30}));
+    assert_eq!(h.app.preferences.plugin_importer_options["gears"]["open"]["teeth"], 42, "off does not update memory");
+    let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    restored.load_prefs(&h.app.prefs());
+    assert!(!restored.preferences.plugin_remember_importer_options);
+    crate::prefs::control(&mut h.app, &json!({"open":"Plugins","button":"defaults"})).unwrap();
+    assert!(h.app.preferences.plugin_remember_importer_options);
+    assert_eq!(h.app.preferences.plugin_importer_options["gears"]["open"]["teeth"], 42, "page reset keeps last-run bookkeeping");
+}
+
 #[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
 mod native {
     use super::*;

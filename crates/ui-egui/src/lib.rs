@@ -1743,6 +1743,11 @@ impl SolveApp {
         // A grant taken back here that the shared store still holds is not taken back: say so.
         let r = match r {
             Ok(v) if matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove" | "plugin.revoke") => {
+                if id.eq_ignore_ascii_case("plugin.remove")
+                    && let Some(plugin) = v.get("id").and_then(Value::as_str)
+                {
+                    plugin_menu::forget_options(self, plugin);
+                }
                 let saved = plugins::persist_grants(self);
                 plugin_slots::invalidate(self);
                 saved.map(|()| v)

@@ -342,6 +342,11 @@ pub struct FileLoad {
 }
 
 impl FileLoad {
+    #[cfg(test)]
+    pub(crate) fn current_request(&self) -> Option<&Request> {
+        self.running.as_ref().map(|running| &running.request).or_else(|| self.queued.front())
+    }
+
     /// How many more requests can wait.
     pub(crate) fn room(&self) -> usize {
         crate::documents::MAX_OPEN.saturating_sub(self.queued.len())
@@ -485,6 +490,10 @@ impl SolveApp {
 }
 
 pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
+    // Only interactive opens ask for options. Control/script requests go straight to begin_request.
+    if !insert && crate::plugin_menu::open_importer_file(app, path) {
+        return;
+    }
     // An STL or OBJ file states no unit: ask which, then import (see `crate::mesh_units`).
     if crate::mesh_units::ask(app, path, insert) {
         return;

@@ -959,6 +959,11 @@ pub(crate) fn follow_view_fov(app: &mut SolveApp) {
     }
 }
 
+pub(crate) fn importer_options_control(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let response = setting::plugin_remember_importer_options(app, ui);
+    crate::scenario::publish_target("prefs:plugin_remember_importer_options", response.rect);
+}
+
 /// The browser sidebar's first width, and the width [`Prefs::default`] restores; the panel
 /// itself clamps what the user drags to its own range.
 pub const DEFAULT_BROWSER_WIDTH: f32 = 250.0;
@@ -2019,6 +2024,10 @@ preference_settings! {
     /// Remember a moved plugin command window's position for the current design, until the
     /// application closes (#18684). Off keeps the previously centred reopen behaviour.
     plugin_remember_dialog_position: bool = false, PAGE_PLUGINS;
+    /// Importer dialogs reuse the last options run by this user. Off starts from schema defaults.
+    plugin_remember_importer_options: bool = true, PAGE_PLUGINS => check_id_help("prefs.plugin_remember_importer_options", "prefs.plugin_remember_importer_options_help");
+    /// Last-run importer options, by plugin id and entry name. Bookkeeping, never design data.
+    plugin_importer_options: std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>> = std::collections::BTreeMap::new();
     /// Approved install permissions survive page resets and Cancel, like installed files.
     plugin_grants: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants> = std::collections::BTreeMap::new();
     /// User ceilings, not automatic increases to a package's approved execution budget.
@@ -2288,8 +2297,10 @@ impl Snapshot {
         let update = std::mem::take(&mut app.preferences.update);
         let stand_up_answers = std::mem::take(&mut app.preferences.stand_up_answers);
         let plugin_grants = std::mem::take(&mut app.preferences.plugin_grants);
+        let plugin_importer_options = std::mem::take(&mut app.preferences.plugin_importer_options);
         app.preferences = self.prefs;
         app.preferences.plugin_grants = plugin_grants;
+        app.preferences.plugin_importer_options = plugin_importer_options;
         crate::plugins::sync_policy(app);
         self.panel_visibility.restore(app);
         sync_surface_analysis(app);
@@ -2357,6 +2368,7 @@ impl Snapshot {
             held.update.clone_from(&app.preferences.update);
             held.stand_up_answers.clone_from(&app.preferences.stand_up_answers);
             held.plugin_grants.clone_from(&app.preferences.plugin_grants);
+            held.plugin_importer_options.clone_from(&app.preferences.plugin_importer_options);
             held == app.preferences
         };
         same_prefs
@@ -2393,6 +2405,7 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
     prefs.update.clone_from(&app.preferences.update);
     prefs.stand_up_answers.clone_from(&app.preferences.stand_up_answers);
     prefs.plugin_grants.clone_from(&app.preferences.plugin_grants);
+    prefs.plugin_importer_options.clone_from(&app.preferences.plugin_importer_options);
     let mut shortcut_box = app.sbox.prefs();
     if let Some(o) = shortcut_box.as_object_mut() {
         o.insert("pinned".into(), serde_json::json!(s.favourites));
@@ -4562,6 +4575,11 @@ fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
     for grants in p.plugin_grants.values_mut() {
         grants.folders.sort_by(|a, b| a.name.cmp(&b.name));
     }
+    p.plugin_importer_options.retain(|id, entries| {
+        entries.retain(|name, value| crate::plugin_menu::valid_saved_options(name, value));
+        crate::plugins::valid_id(id) && entries.len() <= crate::plugins::MAX_DISABLED
+    });
+    p.plugin_importer_options = p.plugin_importer_options.into_iter().take(crate::plugins::MAX_DISABLED).collect();
     p.disabled_plugins.retain(|id| crate::plugins::valid_id(id));
     if p.disabled_plugins.len() > crate::plugins::MAX_DISABLED {
         p.disabled_plugins = p.disabled_plugins.into_iter().take(crate::plugins::MAX_DISABLED).collect();
@@ -4776,6 +4794,15 @@ fn prepare_preferences(
     }
     if new.ui_font != app.preferences.ui_font && !new.ui_font.trim().is_empty() && crate::fonts::ui_font(&new.ui_font).is_none() {
         return Err(format!("`ui_font`: `{}` is not an installed font family or a readable font file", new.ui_font.trim()));
+    }
+    if new.plugin_importer_options.len() > crate::plugins::MAX_DISABLED
+        || new.plugin_importer_options.iter().any(|(id, entries)| {
+            !crate::plugins::valid_id(id)
+                || entries.len() > crate::plugins::MAX_DISABLED
+                || entries.iter().any(|(name, value)| !crate::plugin_menu::valid_saved_options(name, value))
+        })
+    {
+        return Err("`plugin_importer_options` needs bounded plugin ids, entry names and option objects".into());
     }
     if new.plugin_grants.len() > crate::plugins::MAX_DISABLED
         || new.plugin_grants.iter().any(|(id, grants)| !crate::plugins::valid_id(id) || !crate::plugins::valid_grants(grants))
