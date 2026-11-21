@@ -209,6 +209,59 @@ fn urdf_writes_a_turned_photo_decal_upright() {
     assert!((span(0) - 8.0).abs() < 1e-6 && (span(1) - 16.0).abs() < 1e-6, "8 mm wide, 16 high: {positions:?}");
 }
 
+/// A turned photo larger than tracing reads is still exported upright (#19112): 6400 x 6300 as stored with
+/// orientation 6 is 161 MB decoded, over tracing's 40 megapixels but within what the view reads.
+#[test]
+fn urdf_writes_a_large_turned_photo_upright() {
+    use std::io::Write;
+    let mut s = two_cubes();
+    run(&mut s, "component.activate", json!({"component": "B"}));
+    let (w, h) = (6400u32, 6300u32);
+    let mut file = Vec::new();
+    let mut encoder = png::Encoder::new(&mut file, w, h);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().unwrap();
+    // A big-endian TIFF block whose IFD0 has one entry: Orientation (0x0112) = 6.
+    let exif = [b"MM\0\x2a\0\0\0\x08\0\x01\x01\x12\0\x03\0\0\0\x01\0\x06".as_slice(), &[0; 6]].concat();
+    writer.write_chunk(png::chunk::ChunkType(*b"eXIf"), &exif).unwrap();
+    // One colour, row by row: a small file, and no whole picture held here.
+    let row = [90u8, 120, 200, 255].repeat(w as usize);
+    let mut stream = writer.stream_writer().unwrap();
+    for _ in 0..h {
+        stream.write_all(&row).unwrap();
+    }
+    stream.finish().unwrap();
+    writer.finish().unwrap();
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&file), "plane": "XY", "width": 63, "name": "Big"}));
+    let d = temp("large-turned-decal");
+    let r = run(&mut s, "file.export", json!({"path": d.join("t.urdf").to_string_lossy(), "images": true}));
+    // The canvas's opacity warning is expected; the picture itself is neither left out nor written as stored.
+    let failed = |w: &str| w.contains("`Big`") && (w.contains("left out") || w.contains("written as stored"));
+    assert!(r["warnings"].as_array().unwrap().iter().all(|w| !w.as_str().is_some_and(failed)), "{r}");
+    let written = image::ImageReader::open(d.join("t-B-Big.png")).unwrap().into_dimensions().unwrap_or_else(|e| panic!("{e}: {r}"));
+    assert_eq!(written, (h, w), "upright");
+}
+
+/// A turned photo whose pixels can't be decoded is written as it is stored, with a warning, as before
+/// orientations were read (#19112): never left out.
+#[test]
+fn urdf_writes_an_undecodable_turned_photo_as_stored() {
+    let mut s = two_cubes();
+    run(&mut s, "component.activate", json!({"component": "B"}));
+    // The 32 x 16 PNG with orientation 6, cut off halfway through its pixel data.
+    let whole = crate::drawing_pictures::tests::photo(6, true);
+    let idat = whole.windows(4).position(|w| w == b"IDAT").unwrap();
+    let length = u32::from_be_bytes(whole[idat - 4..idat].try_into().unwrap()) as usize;
+    let cut = whole[..idat + 4 + length / 2].to_vec();
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&cut), "plane": "XY", "width": 8, "name": "Cut"}));
+    let d = temp("undecodable-turned-decal");
+    let r = run(&mut s, "file.export", json!({"path": d.join("t.urdf").to_string_lossy(), "images": true}));
+    let warned = r["warnings"].as_array().unwrap().iter().any(|w| w.as_str().is_some_and(|w| w.contains("`Cut`") && w.contains("written as stored")));
+    assert!(warned, "{r}");
+    assert_eq!(std::fs::read(d.join("t-B-Cut.png")).unwrap_or_else(|e| panic!("{e}: {r}")), cut, "its own bytes");
+}
+
 fn names(m: &UrdfModel) -> (Vec<&str>, Vec<&str>) {
     (m.links.iter().map(|l| l.name.as_str()).collect(), m.joints.iter().map(|j| j.name.as_str()).collect())
 }

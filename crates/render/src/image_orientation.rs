@@ -2,13 +2,14 @@
 //! EXIF orientation every viewer turns them by. One reader, so a picture's size and its decoded pixels
 //! always agree.
 //!
-//! - Nothing is decoded or copied. The walk reads a JPEG's segments up to its scan and a PNG's chunks up
-//!   to its pixel data, where a header holds them; input is hostile, so every read is checked.
+//! - No pixels are decoded. The walk reads a JPEG's segments up to its scan; a PNG's size is its IHDR's
+//!   and its chunks up to its pixel data are read by the PNG decoder's own `read_info`, so its CRC checks
+//!   are the decoder's. Input is hostile, so every read is checked.
 //! - The orientation is the EXIF block's: a JPEG's APP1 segment that starts `Exif\0\0` (of two, the last
 //!   before its scan, as the decoder keeps it), or a PNG's `eXIf` chunk, which comes before IDAT (PNG 3rd
-//!   edition, table 7). The `image` crate reads its IFD0. None, a damaged one or a value outside 1 to 8
-//!   is 1: the picture shows as stored, as a browser shows it (CSS Images 3, `image-orientation:
-//!   from-image`).
+//!   edition, table 7; with a bad CRC it is skipped, and of two the first counts, as the decoder does).
+//!   The `image` crate reads its IFD0. None, a damaged one or a value outside 1 to 8 is 1: the picture
+//!   shows as stored, as a browser shows it (CSS Images 3, `image-orientation: from-image`).
 //! - Decoded pixels turn in one place, [`turn`]; a file's own tag is read through its decoder in one
 //!   place, [`upright`]. Phones and cameras often save a portrait photo as landscape pixels plus an
 //!   orientation tag, and the `image` crate decodes the pixels as stored (#19138): everything that
@@ -35,7 +36,7 @@ pub fn header(b: &[u8]) -> Option<Header> {
     if b.len() > 24 && b.starts_with(b"\x89PNG\r\n\x1a\n") {
         let w = u32::from_be_bytes([*b.get(16)?, *b.get(17)?, *b.get(18)?, *b.get(19)?]);
         let h = u32::from_be_bytes([*b.get(20)?, *b.get(21)?, *b.get(22)?, *b.get(23)?]);
-        return (w > 0 && h > 0).then(|| Header { format: "png", stored: [w, h], orientation: orientation(png_exif(b)) });
+        return (w > 0 && h > 0).then(|| Header { format: "png", stored: [w, h], orientation: png_orientation(b) });
     }
     if b.starts_with(&[0xFF, 0xD8]) {
         return jpeg(b);
@@ -77,23 +78,12 @@ fn orientation(exif: Option<&[u8]>) -> u8 {
     exif.and_then(Orientation::from_exif_chunk).map_or(1, Orientation::to_exif)
 }
 
-/// A PNG's `eXIf` chunk, before its first IDAT.
-fn png_exif(b: &[u8]) -> Option<&[u8]> {
-    let mut at = 8usize;
-    loop {
-        let head = b.get(at..)?.get(..8)?;
-        let length = usize::try_from(u32::from_be_bytes([*head.first()?, *head.get(1)?, *head.get(2)?, *head.get(3)?])).ok()?;
-        let kind = head.get(4..8)?;
-        if kind == b"IDAT" || kind == b"IEND" {
-            return None;
-        }
-        let data = at.checked_add(8)?;
-        let end = data.checked_add(length)?;
-        if kind == b"eXIf" {
-            return b.get(data..end);
-        }
-        at = end.checked_add(4)?;
-    }
+/// A PNG's orientation as its decoder reads it. The PNG decoder's own `read_info` reads the chunks up to
+/// the first IDAT by its rules: an `eXIf` with a bad CRC is skipped, and of two the first counts. A file
+/// it refuses shows as stored, and its decoder refuses it too. No pixels are decoded.
+fn png_orientation(b: &[u8]) -> u8 {
+    let Ok(reader) = png::Decoder::new(std::io::Cursor::new(b)).read_info() else { return 1 };
+    orientation(reader.info().exif_metadata.as_deref())
 }
 
 /// A JPEG's header: the size of its first frame, and the last EXIF block before its scan.
@@ -166,6 +156,13 @@ mod tests {
         out
     }
 
+    /// Where a [`png`]'s first `eXIf` chunk sits, whole: its length, kind, data and CRC.
+    fn exif_chunk(file: &[u8]) -> std::ops::Range<usize> {
+        let at = file.windows(4).position(|w| w == b"eXIf").unwrap() - 4;
+        let length = u32::from_be_bytes(file[at..at + 4].try_into().unwrap()) as usize;
+        at..at + 12 + length
+    }
+
     fn read(b: &[u8]) -> Option<(&'static str, [u32; 2], u8)> {
         header(b).map(|h| (h.format, h.stored, h.orientation))
     }
@@ -195,7 +192,7 @@ mod tests {
     }
 
     /// The header's orientation and the decoder's are one: for JPEGs and PNGs with no EXIF block, one,
-    /// two that disagree, a damaged one, and values 0 to 9, the size the header gives is the size
+    /// two that disagree, a damaged one, a PNG eXIf with a broken CRC, and values 0 to 9, the size the header gives is the size
     /// `decode_upright` turns the pixels to, and they turn exactly when the header names a transform.
     #[test]
     fn the_header_and_the_decoder_agree_on_a_files_orientation() {
@@ -214,6 +211,14 @@ mod tests {
             files.push(png(Some(&exif), false));
             files.push(with_segment(&photo(Some(tiff(&[[0x0112, 3, 6]]))), 0xE1, &[b"Exif\0\0".as_slice(), &exif].concat()));
         }
+        // A PNG's eXIf as its decoder reads it: one whose CRC is broken is skipped, and of two the first counts.
+        let six = png(Some(&tiff(&[[0x0112, 3, 6]])), false);
+        let mut broken = six.clone();
+        broken[exif_chunk(&six).end - 1] ^= 0xFF;
+        files.push(broken);
+        let eight = png(Some(&tiff(&[[0x0112, 3, 8]])), false);
+        let end = exif_chunk(&six).end;
+        files.push([&six[..end], &eight[exif_chunk(&eight)], &six[end..]].concat());
         for (case, file) in files.iter().enumerate() {
             let h = header(file).unwrap();
             let (picture, turned) = decoded(file);

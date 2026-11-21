@@ -141,27 +141,27 @@ fn pick(s: &Session, p: &Value, cmd: &str) -> Result<Canvas> {
     })
 }
 
-/// A canvas's picture `bytes` decoded and turned by its `orientation`, as the canvas shows it
-/// (#19112); `None` when it can't be read or isn't a PNG or JPEG, the only pictures a canvas holds.
-/// The decoder is limited to `MAX_PIXELS`, whatever the header said. Tracing and the exports read a
-/// canvas's picture through this.
-pub(crate) fn shown_picture(bytes: &[u8], orientation: u8) -> Option<image::DynamicImage> {
-    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?;
+/// A canvas's picture `bytes` decoded under `limits` and turned by its `orientation`, as the canvas
+/// shows it (#19112); an error when it can't be read under them or isn't a PNG or JPEG, the only
+/// pictures a canvas holds. Tracing and the exports read a canvas's picture through this: tracing
+/// at most `MAX_PIXELS`, whatever the header said, and the exports what the view reads.
+pub(crate) fn shown_picture(bytes: &[u8], orientation: u8, limits: image::Limits) -> image::ImageResult<image::DynamicImage> {
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
     if !matches!(reader.format(), Some(image::ImageFormat::Png | image::ImageFormat::Jpeg)) {
-        return None;
+        return Err(image::ImageError::Unsupported(image::error::ImageFormatHint::Unknown.into()));
     }
-    let mut limits = image::Limits::default();
-    limits.max_alloc = Some(MAX_PIXELS * 4 + (1 << 20));
     reader.limits(limits);
-    let mut img = reader.decode().ok()?;
+    let mut img = reader.decode()?;
     solidcraft_render::image_orientation::turn(&mut img, orientation);
-    Some(img)
+    Ok(img)
 }
 
 /// Ink (0 background … 1 drawing) at working resolution, row-major, as the canvas shows it
-/// ([`shown_picture`]).
+/// ([`shown_picture`], at most `MAX_PIXELS`).
 fn load(bytes: &[u8], orientation: u8) -> Option<(usize, usize, Vec<f64>)> {
-    let img = shown_picture(bytes, orientation)?.to_rgba8();
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(MAX_PIXELS * 4 + (1 << 20));
+    let img = shown_picture(bytes, orientation, limits).ok()?.to_rgba8();
     let (iw, ih) = img.dimensions();
     if iw == 0 || ih == 0 {
         return None;

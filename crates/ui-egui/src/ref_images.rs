@@ -17,8 +17,10 @@ const MAX_SIDE: u32 = 2048;
 /// Grid cells per side, so perspective views bend the image only slightly (CPU path).
 const CELLS: usize = 8;
 
-/// Decoded pixels: (data length they came from, version, size, RGBA).
-type Decoded = (usize, u64, [u32; 2], Arc<Vec<u8>>);
+/// Decoded pixels: (the data length and orientation they came from, version, size, RGBA). The orientation
+/// is part of it because another open document can have a canvas with this id and these bytes, turned
+/// otherwise.
+type Decoded = ((usize, u8), u64, [u32; 2], Arc<Vec<u8>>);
 
 thread_local! {
     static PIXELS: RefCell<HashMap<u64, Option<Decoded>>> = RefCell::new(HashMap::new());
@@ -41,7 +43,7 @@ fn pixels(c: &Canvas) -> Option<Decoded> {
     PIXELS.with(|m| {
         let mut m = m.borrow_mut();
         if let Some(d) = m.get(&c.id)
-            && d.as_ref().is_none_or(|d| d.0 == c.data.len())
+            && d.as_ref().is_none_or(|d| d.0 == (c.data.len(), c.orientation))
         {
             return d.clone();
         }
@@ -53,7 +55,7 @@ fn pixels(c: &Canvas) -> Option<Decoded> {
                 v.set(v.get() + 1);
                 v.get()
             });
-            (c.data.len(), v, [rgba.width(), rgba.height()], Arc::new(rgba.into_raw()))
+            ((c.data.len(), c.orientation), v, [rgba.width(), rgba.height()], Arc::new(rgba.into_raw()))
         });
         m.insert(c.id, d.clone());
         d
@@ -210,5 +212,12 @@ mod codec_tests {
         let [image] = images.as_slice() else { panic!("one canvas: {}", images.len()) };
         assert_eq!(image.size, [16, 32], "the texture is upright");
         assert_eq!(image.corners, [[-30.0, -60.0, 0.0], [30.0, -60.0, 0.0], [30.0, 60.0, 0.0], [-30.0, 60.0, 0.0]], "60 mm wide, 120 high");
+
+        // Another open document's canvas with this id and these bytes, saved before orientations were
+        // (#19112): its pixels are as stored, not the cached turned ones.
+        std::sync::Arc::make_mut(&mut h.app.session.doc).canvases[0].orientation = 1;
+        let images = super::gpu_images(&h.app);
+        let [image] = images.as_slice() else { panic!("one canvas: {}", images.len()) };
+        assert_eq!(image.size, [32, 16], "the texture as stored");
     }
 }
