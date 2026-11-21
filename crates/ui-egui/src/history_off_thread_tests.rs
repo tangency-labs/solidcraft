@@ -1396,6 +1396,250 @@ fn plugin_package_for_worker_test(tag: &str) -> std::path::PathBuf {
 }
 
 #[test]
+fn design_notifications_coalesce_a_burst_and_preserve_the_latest_token() {
+    let mut session = solidcraft_engine::Session::default();
+    let mut events = crate::plugin_events::State::default();
+    let initial = session.design_token();
+    events.observe(Some(initial), 0.0);
+    session.execute("document.metadata.set", &json!({"key":"description","value":"First"})).unwrap();
+    events.observe(Some(session.design_token()), 0.02);
+    session.execute("document.metadata.set", &json!({"key":"description","value":"Second"})).unwrap();
+    let latest = session.design_token();
+    events.observe(Some(latest.clone()), 0.04);
+    assert!(events.take_due(0.099).is_none());
+    assert_eq!(events.take_due(0.1), Some(Some(latest)));
+    assert!(events.take_due(1.0).is_none(), "one invalidation for the whole burst");
+}
+
+#[test]
+fn design_notifications_retry_a_failed_worker_spawn_after_the_interval() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let ctx = egui::Context::default();
+    crate::plugin_events::observe(&mut app);
+    let token = app.session.design_token();
+    app.now = 0.11;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, event| {
+        assert_eq!(event, Some(token.clone()));
+        None
+    });
+    assert!(app.plugin_events.take_due(0.209).is_none());
+    assert_eq!(app.plugin_events.take_due(0.211), Some(Some(token)));
+    assert!(app.plugin_events.take_due(1.0).is_none(), "the failed spawn retains one invalidation");
+}
+
+#[test]
+fn design_notifications_retry_a_disconnected_worker_after_the_interval() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let ctx = egui::Context::default();
+    crate::plugin_events::observe(&mut app);
+    let token = app.session.design_token();
+    app.now = 0.11;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, _| {
+        let (send, done) = std::sync::mpsc::channel();
+        drop(send);
+        Some(done)
+    });
+    app.now = 0.12;
+    let mut spawned = false;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, _| {
+        spawned = true;
+        None
+    });
+    assert!(!spawned, "a disconnected worker waits before retrying");
+    assert!(app.plugin_events.take_due(0.219).is_none());
+    assert_eq!(app.plugin_events.take_due(0.221), Some(Some(token)));
+}
+
+#[test]
+fn design_notifications_preserve_a_newer_pending_token_when_a_worker_disconnects() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let ctx = egui::Context::default();
+    crate::plugin_events::observe(&mut app);
+    let initial = app.session.design_token();
+    app.now = 0.11;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, _| {
+        let (send, done) = std::sync::mpsc::channel();
+        drop(send);
+        Some(done)
+    });
+    app.now = 0.12;
+    app.run("document.metadata.set", json!({"key":"description","value":"Newer state"})).unwrap();
+    let latest = app.session.design_token();
+    assert_ne!(latest, initial);
+    app.now = 0.15;
+    let mut spawned = false;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, _| {
+        spawned = true;
+        None
+    });
+    assert!(!spawned);
+    assert!(app.plugin_events.take_due(0.219).is_none());
+    assert_eq!(app.plugin_events.take_due(0.221), Some(Some(latest)), "a newer invalidation keeps its token and deadline");
+}
+
+#[test]
+fn design_notifications_fire_after_visibility_undo_redo_but_not_failed_history_actions() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    crate::plugin_events::observe(&mut app);
+    app.plugin_events.take_due(0.11);
+    let token = app.session.design_token();
+    let initially_hidden = app.session.visibility.hidden_origin.iter().any(|name| name == "XY");
+    app.now = 1.0;
+    app.run("browser.visibility", json!({"items":["XY"],"visible":initially_hidden})).unwrap();
+    assert_eq!(app.session.visibility.hidden_origin.iter().any(|name| name == "XY"), !initially_hidden);
+    assert_eq!(app.session.design_token(), token, "display history keeps the design token");
+    assert!(app.plugin_events.take_due(1.11).is_none());
+    for (command, time, hidden) in [("edit.undo", 2.0, initially_hidden), ("edit.redo", 3.0, !initially_hidden)] {
+        app.now = time;
+        app.run(command, json!({})).unwrap();
+        assert_eq!(app.session.visibility.hidden_origin.iter().any(|name| name == "XY"), hidden);
+        assert_eq!(app.session.design_token(), token);
+        assert!(app.plugin_events.take_due(time + 0.099).is_none());
+        assert_eq!(app.plugin_events.take_due(time + 0.11), Some(Some(token.clone())), "{command}");
+    }
+    app.now = 4.0;
+    assert!(app.run("edit.redo", json!({})).is_err());
+    assert!(app.plugin_events.take_due(4.11).is_none(), "failed redo emits no invalidation");
+    app.now = 5.0;
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.plugin_events.take_due(5.11), Some(Some(token)));
+    app.now = 6.0;
+    assert!(app.run("edit.undo", json!({})).is_err());
+    assert!(app.plugin_events.take_due(6.11).is_none(), "failed undo emits no invalidation");
+}
+
+#[test]
+fn design_notifications_observe_undo_redo_document_switch_and_close() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let mut events = crate::plugin_events::State::default();
+    events.observe(Some(app.session.design_token()), 0.0);
+    events.take_due(0.1);
+    app.session.execute("document.metadata.set", &json!({"key":"description","value":"Edited"})).unwrap();
+    events.observe(Some(app.session.design_token()), 1.0);
+    assert_eq!(events.take_due(1.1), Some(Some(app.session.design_token())));
+    for (command, time) in [("edit.undo", 2.0), ("edit.redo", 3.0)] {
+        app.session.execute(command, &json!({})).unwrap();
+        events.observe(Some(app.session.design_token()), time);
+        assert_eq!(events.take_due(time + 0.11), Some(Some(app.session.design_token())), "{command}");
+    }
+    crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+    events.observe(Some(app.session.design_token()), 4.0);
+    assert_eq!(events.take_due(4.11), Some(Some(app.session.design_token())));
+    let active = app.docs.active;
+    crate::documents::close(&mut app, active, true);
+    events.observe(Some(app.session.design_token()), 5.0);
+    assert_eq!(events.take_due(5.11), Some(Some(app.session.design_token())));
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn design_notifications_fire_when_an_unchanged_design_is_reopened_or_switched() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.now = 0.0;
+    crate::plugin_events::observe(&mut app);
+    let token = app.session.design_token();
+    assert_eq!(app.plugin_events.take_due(0.11), Some(Some(token.clone())));
+    let authored = app.session.doc.to_json();
+    let reopened = solidcraft_engine::Session::opened((*app.session.doc).clone(), None);
+    assert_eq!(reopened.doc.to_json(), authored, "opening preserves the complete authored design");
+    let reopened_token = reopened.design_token();
+    assert_ne!(reopened_token, token);
+    assert_ne!(reopened_token.document_id, token.document_id, "each open has its own session identity");
+    assert_ne!(reopened.uid, app.session.uid);
+    std::sync::Arc::make_mut(&mut app.session.plugin_state.listener_data).insert("sample.refresh".into(), json!({"old":true}));
+    crate::documents::open_tab(&mut app, reopened).unwrap();
+    app.now = 1.0;
+    crate::plugin_events::observe(&mut app);
+    assert!(app.session.plugin_state.listener_data.is_empty(), "the old tab's panel data does not follow it");
+    assert_eq!(app.plugin_events.take_due(1.11), Some(Some(reopened_token)));
+    crate::documents::switch(&mut app, 0);
+    app.now = 2.0;
+    crate::plugin_events::observe(&mut app);
+    assert_eq!(app.session.design_token(), token, "switching back restores the original tab's token");
+    assert_eq!(app.plugin_events.take_due(2.11), Some(Some(token)));
+    // Two switches inside one frame still invalidate once, even though the final context
+    // is exactly the one whose last invalidation has already been delivered.
+    app.now = 3.0;
+    crate::documents::switch(&mut app, 1);
+    crate::documents::switch(&mut app, 0);
+    assert_eq!(app.plugin_events.take_due(3.11), Some(Some(app.session.design_token())));
+}
+
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn design_notifications_run_on_the_command_worker_and_return_panel_data() {
+    let mut h = Harness::new();
+    let root = plugin_package_for_worker_test("design-events");
+    let dir = root.join("sample");
+    let (package, version) = solidcraft_engine::plugin::API.rsplit_once('@').unwrap();
+    let wat = include_str!("plugin_fixture.wat").replace("PLUGIN_PACKAGE", package).replace("PLUGIN_VERSION", version).replace(
+        "i32.const 0\n    )\n    (data",
+        "i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store i32.const 0\n    )\n    (data",
+    );
+    std::fs::write(dir.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
+    std::fs::write(
+        dir.join("plugin.json"),
+        json!({
+            "id":"sample","name":"Worker sample","version":"1","capabilities":["commands@0.1","design@0.1"],
+            "runtime":{"module":"plugin.wasm","entries":[{"name":"refresh","effect":"read"}],"commands":[],
+                "listeners":[{"entry":"refresh","on":["design.changed"]}]}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let inspected = h.app.session.execute("plugin.inspect", &json!({"path":dir})).unwrap();
+    h.app.session.plugin_state.grants.insert(
+        "sample".into(),
+        solidcraft_engine::plugin::Grants { package_hash: Some(inspected["approval"].as_str().unwrap().into()), ..Default::default() },
+    );
+    h.app.preferences.plugin_grants.clone_from(&h.app.session.plugin_state.grants);
+    h.app.now = 1.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 1.11;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    assert!(h.app.session.plugin_state.listener_data.is_empty(), "the window does not run the handler");
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert_eq!(h.app.session.plugin_state.listener_data["sample.refresh"], json!({"design":h.app.session.design_token()}));
+    assert!(h.app.session.plugin_state.listener_failures.is_empty());
+    h.app.session.execute("document.metadata.set", &json!({"key":"description","value":"Changed"})).unwrap();
+    h.app.now = 2.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 2.11;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    h.app.preferences.disabled_plugins.insert("sample".into());
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert!(h.app.session.plugin_state.listener_data.is_empty(), "disabled listeners cannot publish a result already in flight");
+    h.app.preferences.disabled_plugins.remove("sample");
+    h.app.session.execute("document.metadata.set", &json!({"key":"description","value":"Changed again"})).unwrap();
+    h.app.now = 3.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 3.11;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    h.app.preferences.plugin_grants.remove("sample");
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert!(h.app.session.plugin_state.listener_data.is_empty(), "revoking approval prevents publication before the next frame");
+    let trapping = include_str!("plugin_fixture.wat")
+        .replace("PLUGIN_PACKAGE", package)
+        .replace("PLUGIN_VERSION", version)
+        .replace("i32.const 0\n    )\n    (data", "unreachable\n    )\n    (data");
+    std::fs::write(dir.join("plugin.wasm"), wat::parse_str(trapping).unwrap()).unwrap();
+    let inspected = h.app.session.execute("plugin.inspect", &json!({"path":dir})).unwrap();
+    h.app.preferences.plugin_grants.insert(
+        "sample".into(),
+        solidcraft_engine::plugin::Grants { package_hash: Some(inspected["approval"].as_str().unwrap().into()), ..Default::default() },
+    );
+    h.app.session.execute("document.metadata.set", &json!({"key":"description","value":"Failure"})).unwrap();
+    h.app.now = 4.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 4.11;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    h.app.preferences.plugin_grants.remove("sample");
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert!(h.app.session.plugin_state.listener_failures.is_empty(), "revoked listeners cannot publish failures already in flight");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn plugin_execution_is_off_thread_even_with_agent_off_thread_disabled() {
     let (mut h, tx) = agent_harness();
@@ -1437,13 +1681,19 @@ fn plugin_execution_is_off_thread_even_with_agent_off_thread_disabled() {
 #[test]
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn a_plugin_result_is_discarded_after_design_or_selection_changes() {
-    for context in ["document", "selection", "plugin_limits", "plugin_grants"] {
+    for context in ["document", "expected_design", "selection", "plugin_limits", "plugin_grants"] {
         let (mut h, tx) = agent_harness();
         h.app.preferences.language = if context == "selection" { "ja" } else { "en" }.into();
         h.app.run("solid.box", json!({"length":1,"width":1,"height":1,"corner":[200,200,200]})).unwrap();
         h.app.run("edit.undo", json!({})).unwrap();
         assert!(!h.app.session.redo.is_empty());
         let root = plugin_package_for_worker_test(&format!("stale-{context}"));
+        if context == "expected_design" {
+            let manifest_path = root.join("sample/plugin.json");
+            let mut manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+            manifest["capabilities"] = json!(["commands@0.1", "design@0.1"]);
+            std::fs::write(manifest_path, manifest.to_string()).unwrap();
+        }
         if context == "plugin_grants" {
             let manifest_path = root.join("sample/plugin.json");
             let mut manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
@@ -1459,11 +1709,15 @@ fn a_plugin_result_is_discarded_after_design_or_selection_changes() {
         let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
         let (release, gate) = std::sync::mpsc::channel();
         h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
-        let request =
-            ask(&tx, "engine.execute", json!({"command":"plugin.run","params":{"path":path,"approval":inspected["approval"],"entry":"make"}}));
+        let expected = h.app.session.design_token();
+        let mut params = json!({"path":path,"approval":inspected["approval"],"entry":"make"});
+        if context == "expected_design" {
+            params["expected_design"] = json!(expected);
+        }
+        let request = ask(&tx, "engine.execute", json!({"command":"plugin.run","params":params}));
         h.frames(1);
         assert!(h.app.agent_computing().is_some());
-        if context == "document" {
+        if matches!(context, "document" | "expected_design") {
             h.app.run("solid.box", json!({"length":2,"width":2,"height":2,"corner":[100,100,100]})).unwrap();
         } else if context == "plugin_limits" {
             crate::prefs::set(&mut h.app, &json!({"plugin_max_memory_mib":512})).unwrap();
@@ -1484,7 +1738,19 @@ fn a_plugin_result_is_discarded_after_design_or_selection_changes() {
         let reply = reply_to(&mut h, &request);
         assert_eq!(reply["ok"], false, "{context}: {reply}");
         let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
-        assert_eq!(reply["error"], language.text("ui.plugin_context_changed"), "{context}: {reply}");
+        if context == "expected_design" {
+            let error = reply["error"].as_str().unwrap();
+            assert!(error.contains(&expected.to_string()), "{reply}");
+            assert!(error.contains(&h.app.session.design_token().to_string()), "{reply}");
+            assert_eq!(reply["kind"], "stale_revision", "{reply}");
+            assert_eq!(reply["expected"], json!(expected), "{reply}");
+            assert_eq!(reply["actual"], json!(h.app.session.design_token()), "{reply}");
+        } else {
+            assert_eq!(reply["error"], language.text("ui.plugin_context_changed"), "{context}: {reply}");
+            for key in ["kind", "expected", "actual"] {
+                assert!(reply.get(key).is_none(), "{context}: {reply}");
+            }
+        }
         assert_eq!(h.app.session.doc.to_json(), before);
         assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
         let _ = std::fs::remove_dir_all(root);
