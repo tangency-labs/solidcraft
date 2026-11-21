@@ -466,6 +466,7 @@ index) and, for the bends, a linetype that the file defines.
 | `BEND_NOTES` | 8 grey | continuous | the note beside each bend line, only with `"bend_notes": true` |
 | `POCKET_…` | 3 green | continuous | pockets, a layer for each depth (see below) |
 | `PERFORATION` | 3 green | continuous | the holes of a perforation field |
+| `HARDWARE` | 8 grey | continuous | the note beside each press-in hardware hole, `M3 nut` or `M4 stud 10 mm`, as high as `note_height`; not with `"layers": "single"` |
 
 `OUTLINE`, `CUT`, `BEND_UP` and `BEND_DOWN` are always in the layer table, the others when the
 sheet has something for them. The inner contours (`CUT`, `TEXT`) are written before the outline,
