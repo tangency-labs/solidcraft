@@ -2831,7 +2831,16 @@ impl Batches {
     /// pixels.
     /// Where the device can, the GPU culls instead ([`gpu_cull`]), in `encoder` before the
     /// frame's passes: here only the see-through looks' placements are, to sort them.
-    fn cull(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, vp: &[[f32; 4]; 4], size: [f32; 2], motions: &Motions, edge_px: f32) {
+    fn cull(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        vp: &[[f32; 4]; 4],
+        size: [f32; 2],
+        motions: &Motions,
+        edge_px: f32,
+    ) {
         self.cull_blocks(vp, motions);
         if std::mem::take(&mut self.gpu_cull_stale) {
             self.gpu_cull = None;

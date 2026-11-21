@@ -475,7 +475,7 @@ mod tests {
     #[test]
     fn the_gpu_culls_the_placements_the_cpu_would() {
         use super::super::{
-            Batches, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook, InstancedMesh, PaletteIndex, Renderer, SceneSlot, SharedEdges, SharedTris,
+            Batches, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook, InstancedMesh, Motions, PaletteIndex, Renderer, SceneSlot, SharedEdges, SharedTris,
         };
         use solidcore_record::Vec3;
         use std::sync::{Arc, Mutex};
@@ -532,8 +532,9 @@ mod tests {
         let vp = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, -1.0, -1.0], [0.0, 0.0, -1.0, 0.0]];
         let size = [800.0, 600.0];
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        gpu.cull(&device, &queue, &mut encoder, &vp, size);
-        cpu.cull(&device, &queue, &mut encoder, &vp, size);
+        let motions = Motions::default();
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions);
+        cpu.cull(&device, &queue, &mut encoder, &vp, size, &motions);
         queue.submit([encoder.finish()]);
         assert!(cpu.gpu_cull.is_none());
         let Some(g) = gpu.gpu_cull.as_ref() else { panic!("the GPU culls the scene") };
