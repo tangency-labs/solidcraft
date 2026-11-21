@@ -31,17 +31,24 @@
 //! STEP, not the full cylinders' axial extents, and are tested against both face domains at their
 //! middle, not their bottom end, which a trimmed face domain skips (WR-259).
 //! Conversion errors propagate; the original tolerance branches are kept.
+//! Not upstream: a plane's section of the cone, a circle or an ellipse, touches a side of
+//! the plane's domain where it overlaps it by up to the contact tolerance
+//! (`within_contact_tol`) and both surfaces are faces'
+//! (`Plane::make_new_plane_ellipse_in_contact`, docs/booleans.md §6).
 //! WR-510 (#1525): a plane parallel to a cylinder's axis is also tangent when it lies
 //! within the zone tolerance of a bounded face's wall along a line (the larger of the
 //! cone's and the plane's face tolerances, 0 without a face) and that line lies in the
-//! face's sweep, else its crossings are tested; bare surfaces keep upstream's test.
+//! face's sweep, else its crossings are tested; bare surfaces keep upstream's test. "Within"
+//! is read as every contact site reads it (`within_contact_tol`): a plane exactly the zone
+//! tolerance into the wall, or off a cone's generator, is within it.
 //! A plane holding a generator of a cone (a box's face against a cone lying on it) touches
 //! it along that generator: one tangent line in closed form, as for the cylinder, instead of
 //! a traced curve through the tangency, whose repeated points the check refuses. It holds
 //! the generator within a face's zone tolerance; a bare plane that dips into the cone does
 //! only while its two crossings lie within `tol` of the generator, the cylinder's own test.
 //! WR-787 (#15429): parallel cylinders that both bound faces and overlap past touching by
-//! less than [`contact_tol_3d`] touch along one line; bare surfaces keep two crossings.
+//! up to [`contact_tol_3d`] (`within_contact_tol`) touch along one line; bare surfaces keep
+//! two crossings.
 //! No input-driven recursion is introduced.
 
 use super::{Cone, ConeStepInversion};
@@ -58,7 +65,9 @@ use crate::geom::geom_utility::p1::{
     parallelogram_cross_vectors, CircleCircle,
 };
 use crate::geom::geom_utility::p2::segment_segment_intersect;
-use crate::geom::tol::{approx_tol3d, are_same_to_tol, contact_tol_3d, is_zero};
+use crate::geom::tol::{
+    approx_tol3d, are_same_to_tol, contact_tol_3d, is_zero, within_contact_tol,
+};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
@@ -361,6 +370,14 @@ impl Cone {
     ) -> Result<(bool, SurfaceIntersection)> {
         let mut out = SurfaceIntersection::default();
         let tol = approx_tol.map_or(EFF_ZERO_SQRT, |t| approx_tol3d(k, t));
+        // a section a hair past a side of the plane's domain touches it where both
+        // surfaces are faces' (`Plane::make_new_plane_ellipse_in_contact`); bare surfaces keep
+        // upstream's
+        let contact = if zone_tols.iter().all(Option::is_some) {
+            contact_tol_3d(k)
+        } else {
+            0.0
+        };
         let box1 = bbox(k, self, domain)?;
         // crPlane.CalculateBoundingBox: expanded by its face's tolerance (no face:
         // SM_ZONE_TOL_3D)
@@ -403,10 +420,15 @@ impl Cone {
                 let zone_tol = zone_tols[0].unwrap_or(0.0).max(zone_tols[1].unwrap_or(0.0));
                 let dir = if distance > 0.0 { -normal } else { normal };
                 let line_in_sweep = angle_in_sweep(self, axis, dir, ang_tol)?;
+                // (within the zone tolerance as every contact site reads it,
+                // `within_contact_tol`)
+                let size = bottom.max_dimension().max(plane_origin.max_dimension()) + bot_radius;
                 let tangent = distance.abs() >= bot_radius
                     || (distance.abs() > bot_radius - tol
                         && bot_radius * bot_radius - distance * distance < tol * tol)
-                    || (distance.abs() > bot_radius - zone_tol && line_in_sweep);
+                    || (zone_tol > 0.0
+                        && within_contact_tol(bot_radius - distance.abs(), zone_tol, size)
+                        && line_in_sweep);
                 if tangent {
                     if line_in_sweep {
                         let start = bottom + bot_radius * dir;
@@ -484,7 +506,7 @@ impl Cone {
             }
             let center = position.origin() + v * axis;
             let radius = self.radius(v).abs();
-            let curves = plane.make_new_plane_ellipse(
+            let curves = plane.make_new_plane_ellipse_in_contact(
                 k,
                 other_domain,
                 center,
@@ -494,6 +516,7 @@ impl Cone {
                 position.y_axis(),
                 &step.u_interval(),
                 tol,
+                contact,
             )?;
             add_plane_ellipses(k, &mut out, curves)?;
         } else {
@@ -527,9 +550,12 @@ impl Cone {
                         // How far `p` lies past the plane, away from the axis: above 0 where the
                         // plane cuts into the cone at that end.
                         let side = d.dot(normal).signum();
+                        let size = plane_origin
+                            .max_dimension()
+                            .max(bottom.max_dimension().max(top.max_dimension()) + reach);
                         let held = |p: Point3| {
                             let e = (p - plane_origin).dot(normal) * side;
-                            e.abs() <= zone_tol
+                            (zone_tol > 0.0 && within_contact_tol(e.abs(), zone_tol, size))
                                 || (e <= 0.0 && -e <= tol)
                                 || (e > 0.0 && 2.0 * reach * e / tilt <= tol * tol)
                         };
@@ -607,7 +633,7 @@ impl Cone {
                 tol,
             )?;
             for interval in intervals {
-                let curves = plane.make_new_plane_ellipse(
+                let curves = plane.make_new_plane_ellipse_in_contact(
                     k,
                     other_domain,
                     center,
@@ -617,6 +643,7 @@ impl Cone {
                     y,
                     &interval,
                     tol,
+                    contact,
                 )?;
                 add_plane_ellipses(k, &mut out, curves)?;
             }

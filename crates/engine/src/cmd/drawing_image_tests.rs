@@ -295,12 +295,30 @@ fn a_logo_travels_in_a_template_file() {
     let template = dir.join("mine.scdwg").to_string_lossy().into_owned();
     let (mut s, _) = titled();
     s.execute(LOGO, &json!({"cell": "legal_owner", "file": file})).unwrap();
-    // A .json template can't hold the logo's file: saving one is refused and names the way that can.
+    // A template is one .scdwg file, its logo a part of it. Asked for as .json, as templates were,
+    // it goes beside that name as .scdwg, and the reply names the file written and the one asked for.
     let json = dir.join("mine.json").to_string_lossy().into_owned();
-    let refused = s.execute("drawing.template.save", &json!({"path": json})).unwrap_err().to_string();
-    assert!(refused.contains("logo") && refused.contains(".scdwg"), "{refused}");
-    assert!(!std::path::Path::new(&json).exists());
-    s.execute("drawing.template.save", &json!({"path": template})).unwrap();
+    let saved = s.execute("drawing.template.save", &json!({"path": json})).unwrap();
+    assert_eq!((saved["path"].as_str(), saved["renamed_from"].as_str()), (Some(template.as_str()), Some(json.as_str())), "{saved}");
+    assert!(!std::path::Path::new(&json).exists() && std::path::Path::new(&template).exists());
+    let again = s.execute("drawing.template.save", &json!({"path": template})).unwrap();
+    assert!(again.get("renamed_from").is_none(), "{again}");
+    // An older .json template kept its logo as base64 in the record: it still opens, logo and all.
+    // (Its records in `images`, its logo cells naming their files, as such a file has them.)
+    let mut older: Value = serde_json::from_str(&solidcraft_io::read_drawing_file(&template).unwrap().to_json().unwrap()).unwrap();
+    let mut files = older.as_object_mut().unwrap().remove("image_files").unwrap();
+    for image in files.as_array_mut().unwrap() {
+        image["data"] = json!(solidcraft_doc::canvas::base64_encode(&bytes));
+        image.as_object_mut().unwrap().remove("part");
+    }
+    older["images"] = files;
+    for logo in older.as_object_mut().unwrap().remove("logo_cells").unwrap().as_array().unwrap() {
+        let sheet = older["sheets"].as_array_mut().unwrap().iter_mut().find(|s| s["id"] == logo["sheet"]).unwrap();
+        let cell = sheet["title_block"]["cells"].as_array_mut().unwrap().iter_mut().find(|c| c["name"] == logo["cell"]).unwrap();
+        cell["kind"]["text"]["image"] = logo["image"].clone();
+    }
+    let old = dir.join("old.json").to_string_lossy().into_owned();
+    std::fs::write(&old, older.to_string()).unwrap();
     std::fs::remove_file(&file).unwrap();
 
     let shows = |s: &Session| {
@@ -315,5 +333,8 @@ fn a_logo_travels_in_a_template_file() {
     s.execute("drawing.create", &json!({})).unwrap();
     s.execute("drawing.template.apply", &json!({"template": template})).unwrap();
     assert_eq!(shows(&s), bytes);
+    s.execute("drawing.close", &json!({})).unwrap();
+    s.execute("drawing.create", &json!({"template": old})).unwrap();
+    assert_eq!(shows(&s), bytes, "the older .json template");
     std::fs::remove_dir_all(dir).unwrap();
 }

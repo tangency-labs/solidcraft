@@ -14,9 +14,9 @@ pub struct ViewportCallback(pub Frame);
 /// A frame of one of several views drawn in the same window (tiles): the view `.0` keeps its own
 /// picture on the GPU, so the tiles of one egui frame do not draw over each other
 /// ([`Renderer::prepare_view`]).
-pub struct TileCallback(pub u32, pub Frame);
+pub struct TileCallback(pub u64, pub Frame);
 /// A transparent, depth-correct selection/hover layer over live product pixels.
-pub struct ProductHighlightCallback(pub Frame);
+pub struct ProductHighlightCallback(pub Frame, pub Option<u64>);
 
 /// The view's background: a vertical gradient from `top` at the top edge to `bottom` at the
 /// bottom edge. The viewport callback composites transparently onto this egui mesh, so the host
@@ -189,18 +189,23 @@ impl egui_wgpu::CallbackTrait for ProductHighlightCallback {
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         if let Some(renderer) = resources.get_mut::<Renderer>() {
-            renderer.prepare_product_highlights(device, queue, encoder, &self.0);
+            if let Some(tile) = self.1 {
+                renderer.prepare_product_highlights_view(tile, device, queue, &self.0);
+            } else {
+                renderer.prepare_product_highlights(device, queue, encoder, &self.0);
+            }
         }
         Vec::new()
     }
     fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
         let Some(renderer) = resources.get::<Renderer>() else { return };
         let viewport = info.viewport_in_pixels();
-        renderer.paint_product_highlights(
-            &self.0,
-            pass,
-            [viewport.left_px as f32, viewport.top_px as f32, viewport.width_px as f32, viewport.height_px as f32],
-        );
+        let pixels = [viewport.left_px as f32, viewport.top_px as f32, viewport.width_px as f32, viewport.height_px as f32];
+        if let Some(tile) = self.1 {
+            renderer.paint_product_highlights_view(tile, &self.0, pass, pixels);
+        } else {
+            renderer.paint_product_highlights(&self.0, pass, pixels);
+        }
     }
 }
 

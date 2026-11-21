@@ -322,8 +322,12 @@ fn resolve_uncached(
                 Some(b) => Ok(exact_edges(b, plane, &[e])?.pop().flatten()),
                 None => Ok(None),
             };
+            let section = || match st.bodies.get(bi) {
+                Some(b) => edge_section(b, e, plane),
+                None => Err(lost("the edge")),
+            };
             let pts = mesh.edges.get(e).cloned().unwrap_or_default();
-            edge_geom(plane, kind, planar, (pts, || edge_curves(st.bodies.get(bi), e)), &mut wires, &mut exact)?
+            edge_geom(plane, kind, planar, section, (pts, || edge_curves(st.bodies.get(bi), e)), &mut wires, &mut exact)?
         }
         LinkSource::Face { body, at } => {
             let (bi, mesh) = body_mesh(st, body, *at)?;
@@ -577,19 +581,25 @@ fn off_plane(plane: &Plane, pts: &[Vec3]) -> bool {
 }
 
 /// What a body edge (its `exact` curve when read, and its polyline `pts`) gives a sketch: its
-/// section with the sketch plane, itself as a 3D curve (its points into `wires`, its exact
-/// curve into `exact`) when it is included and leaves the plane, else its projection (the exact
-/// planar curve `planar`, or the polyline fitted).
+/// section with the sketch plane (`section`: where its exact curve crosses it, the whole edge
+/// when it lies in the plane, a mesh body's polyline crossings), itself as a 3D curve (its
+/// points into `wires`, its exact curve into `exact`) when it is included and leaves the plane,
+/// else its projection (the exact planar curve `planar`, or the polyline fitted).
 fn edge_geom(
     plane: &Plane,
     kind: LinkKind,
     planar: impl FnOnce() -> Result<Option<Vec<LinkGeom>>>,
+    section: impl FnOnce() -> Result<EdgeSection>,
     (pts, curves): (Vec<Vec3>, impl FnOnce() -> Vec<WireCurve>),
     wires: &mut Vec<Vec<Vec3>>,
     exact: &mut Vec<Vec<WireCurve>>,
 ) -> Result<Vec<LinkGeom>> {
     Ok(match kind {
-        LinkKind::Intersect => section_of_polyline(plane, &pts),
+        LinkKind::Intersect => match section()? {
+            EdgeSection::Crossings(points) => points,
+            EdgeSection::InPlane => planar()?.unwrap_or_else(|| fit_world(plane, &pts)),
+            EdgeSection::Mesh => section_of_polyline(plane, &pts),
+        },
         LinkKind::Include if off_plane(plane, &pts) => {
             wires.push(pts);
             exact.push(curves());
@@ -610,6 +620,35 @@ fn edge_curves(body: Option<&crate::ModelBody>, e: usize) -> Vec<WireCurve> {
         .filter(|edge| !matches!(edge.curve, solidcore_record::brep::Curve::SurfaceIntersection { .. }))
         .map(|edge| vec![WireCurve { curve: edge.parameters().clone(), interval: edge.interval }])
         .unwrap_or_default()
+}
+
+/// Where a body edge meets a sketch plane.
+enum EdgeSection {
+    /// The points where its exact curve crosses or touches the plane, in the plane's coordinates.
+    Crossings(Vec<LinkGeom>),
+    /// It lies in the plane: it meets the plane along its whole length.
+    InPlane,
+    /// A mesh body's edge: its display polyline is the edge.
+    Mesh,
+}
+
+/// Where edge `e` of `body` meets `plane`: the kernel's crossings of the curve it evaluates the
+/// edge on (an intersection curve's NURBS form). The kernel counts a contact at either end of
+/// the edge and gives no crossings for a curve lying in the plane, so an edge with none whose
+/// two vertices are in the plane (each within its own tolerance) lies in it.
+fn edge_section(body: &crate::ModelBody, e: usize, plane: &Plane) -> Result<EdgeSection> {
+    if body.body.is_mesh() {
+        return Ok(EdgeSection::Mesh);
+    }
+    let record = body.body.record();
+    let edge = record.edges.get(e).ok_or_else(|| lost("the edge"))?;
+    let hits = solidcore_ops::curve::plane_crossings(edge.parameters(), edge.interval, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
+    if !hits.is_empty() {
+        return Ok(EdgeSection::Crossings(hits.into_iter().map(LinkGeom::Point).collect()));
+    }
+    let on_plane =
+        |v: &u32| record.vertices.get(*v as usize).is_some_and(|v| plane.height(Vec3::new(v.point[0], v.point[1], v.point[2])).abs() <= v.tolerance);
+    Ok(if edge.vertices.iter().all(on_plane) { EdgeSection::InPlane } else { EdgeSection::Crossings(Vec::new()) })
 }
 
 /// The sketch segments `segs` of `ss` projected along the sketch normal `normal` (turned toward
@@ -1022,7 +1061,8 @@ fn resolve_named_edge(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
         .ok_or_else(|| lost("named projection edge"))?;
     let (mut wires, mut exact) = (Vec::new(), Vec::new());
     let planar = || Ok(exact_edges(target, plane, &[index])?.pop().flatten());
-    let geom = edge_geom(plane, kind, planar, (pts, || edge_curves(Some(target), index)), &mut wires, &mut exact)?;
+    let section = || edge_section(target, index, plane);
+    let geom = edge_geom(plane, kind, planar, section, (pts, || edge_curves(Some(target), index)), &mut wires, &mut exact)?;
     if geom.is_empty() && wires.is_empty() {
         return Err(DocError::Invalid("named edge projects to nothing on this sketch plane".into()));
     }
@@ -2332,6 +2372,52 @@ fn exact_silhouette(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGe
     outline
 }
 
+/// Whether face `f` of `rec` is a straight extrusion along `n`: a B-spline or NURBS surface of
+/// degree 1 one way with two rows of controls, each control of the second row its partner of the
+/// first moved by one vector parallel to `n` (with the same weight). Seen along `n`, such a face
+/// is edge-on everywhere and shows only its edges.
+fn extruded_along(rec: &solidcore_record::brep::Brep, f: usize, n: Vec3) -> bool {
+    use solidcore_record::brep::Surface;
+    let Some(face) = rec.faces.get(f) else { return false };
+    // Each control as a point and its weight, by rows along u.
+    let (u_knots, v_knots, rows): (&[f64], &[f64], Vec<Vec<(Vec3, f64)>>) = match &face.surface {
+        Surface::Spline { u_knots, v_knots, points } => {
+            (u_knots, v_knots, points.iter().map(|row| row.iter().map(|p| (Vec3::new(p[0], p[1], p[2]), 1.0)).collect()).collect())
+        }
+        Surface::RationalSpline { u_knots, v_knots, homogeneous } => (
+            u_knots,
+            v_knots,
+            homogeneous
+                .iter()
+                .map(|row| {
+                    row.iter()
+                        .map(|h| if h[3] > 0.0 { (Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]), h[3]) } else { (Vec3::ZERO, 0.0) })
+                        .collect()
+                })
+                .collect(),
+        ),
+        _ => return false,
+    };
+    if rows.iter().flatten().any(|(p, w)| !(*w > 0.0 && p.is_finite())) {
+        return false;
+    }
+    // The pairs a straight extrusion moves by one vector: the two rows along u (degree 1 in u:
+    // four knots), or the two controls of each row (degree 1 in v).
+    let pairs: Vec<((Vec3, f64), (Vec3, f64))> = match rows.as_slice() {
+        [first, second] if u_knots.len() == 4 && first.len() == second.len() => first.iter().copied().zip(second.iter().copied()).collect(),
+        _ if v_knots.len() == 4 && rows.iter().all(|row| row.len() == 2) => {
+            rows.iter().filter_map(|row| Some((*row.first()?, *row.get(1)?))).collect()
+        }
+        _ => return false,
+    };
+    let Some(&((p0, _), (q0, _))) = pairs.first() else { return false };
+    let step = q0 - p0;
+    let scale = pairs.iter().fold(step.len(), |s, ((p, _), (q, _))| s.max(p.len()).max(q.len())).max(1.0);
+    let tol = 1e-9 * scale;
+    let Some(dir) = step.normalized() else { return false };
+    dir.cross(n).len() <= 1e-9 && pairs.iter().all(|((p, wp), (q, wq))| ((*q - *p) - step).len() <= tol && (wp - wq).abs() <= 1e-12 * wp.max(*wq))
+}
+
 /// The outline of a solid seen along the sketch normal, from its exact faces and edges: the
 /// stretches of its edges between a face that faces the sketch and one that does not (and of an
 /// open sheet's border where its face faces the sketch; the kernel's
@@ -2343,8 +2429,9 @@ fn exact_silhouette(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGe
 /// elliptical arcs, not lines and circular arcs fitted to the mesh (which bulged the wrong way and
 /// ran to hundreds of curves on a sketch at 45 degrees).
 ///
-/// `None` for a mesh body, a body hidden lines leave out (a freeform face, a trim they cannot
-/// read), or an edge or face the kernel cannot read exactly here: the mesh's outline is traced
+/// `None` for a mesh body, a body hidden lines leave out (a freeform face that is not a straight
+/// extrusion along the normal, [`extruded_along`]; a trim they cannot read), or an edge or face
+/// the kernel cannot read exactly here: the mesh's outline is traced
 /// then ([`silhouette`]).
 ///
 /// [`hlr::silhouettes`]: solidcraft_geom::hlr::silhouettes
@@ -2388,7 +2475,13 @@ fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec
     // Prepared once per body: every sketch that projects it, on any plane, shares it.
     let def = body.body.outline_prepared()?;
     let opts = hlr::Options { trim_samples: solidcraft_kernel::OUTLINE_TRIM_SAMPLES, threads: 1, ..hlr::Options::default() };
-    if !def.report.freeform_faces.is_empty() || !def.report.unsupported_trims.is_empty() {
+    // A free-form face hidden lines leave out is no matter when it is a straight extrusion along
+    // the sketch normal (the walls of an extruded letter or spline profile): seen edge-on all
+    // over, its outline is its edges, which the stretches above already hold. Falling back to the
+    // mesh for it fitted arcs that missed each other by thousandths of a millimetre, so a
+    // letter's outline made no profile and could not be offset (#14987).
+    let freeform_matters = def.report.freeform_faces.iter().any(|f| !extruded_along(rec, *f, n));
+    if freeform_matters || !def.report.unsupported_trims.is_empty() {
         return None;
     }
     let view = hlr::View { x: plane.x, y: plane.y, d: n };
