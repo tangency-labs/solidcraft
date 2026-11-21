@@ -1275,8 +1275,12 @@ pub(crate) fn resplit_numbered_loops(ordered: &[(Plane, NumberedLoop)]) -> Resul
         })
         .collect();
     let mut out = Vec::with_capacity(ordered.len());
+    let mut before: Option<Vec3> = None;
     for (p, l) in ordered {
-        let back = p.normal().dot(normal) < 0.0;
+        let centre = p.to_world(l.lp.centroid());
+        let back =
+            before.is_some_and(|c: Vec3| solidcore_ops::sweep::loft_section_faces_back(normal.into(), c.into(), p.normal().into(), centre.into()));
+        before = Some(centre);
         let local: Vec<Vec2> = dirs.iter().map(|d| Vec2::new(d.dot(p.x), d.dot(p.y))).collect();
         // Break angles: the matched corners seen in this plane. A re-split circle runs counter-
         // clockwise in its plane; wound the other way when the plane faces back.
