@@ -163,7 +163,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::BoundingSolid { margin, .. }) {
             margin: String = "2 mm".into() => shown_expr(margin, ValueKind::Length),
         } => json!({"margin": margin});
-        Pipe("solid.pipe", "PIPE", [("Path", CURVES, true)],
+        Pipe("solid.pipe", "PIPE", [("Path", CURVES | EDGES, true)],
             FeatureKind::Pipe { diameter, wall, operation, .. }) {
             diameter: String = "5 mm".into() => shown_expr(diameter, ValueKind::Length),
             wall: String = String::new() => wall.as_deref().map(|e| shown_expr(e, ValueKind::Length)).unwrap_or_default(),
@@ -973,7 +973,11 @@ impl Dialog {
                 let bodies = s.selection.iter().any(|sel| matches!(sel, Sel::Body { .. }));
                 Dialog::new(
                     Kind::SketchProject { bodies, projection_link: true },
-                    vec![SelInput::new("ui.sketch_project_geometry", if bodies { BODIES } else { PROJECT_GEOMETRY }, true)],
+                    vec![if bodies {
+                        SelInput::new("ui.sketch_project_geometry", BODIES, true)
+                    } else {
+                        SelInput::new("ui.sketch_project_geometry", PROJECT_GEOMETRY, true).chains()
+                    }],
                 )
             }
             "solid.extrude" => Dialog::new(
@@ -1004,6 +1008,11 @@ impl Dialog {
             ),
             "solid.fillet" => Dialog::new(fillet_kind(&fillet_radius_default(app), false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.chamfer" => Dialog::new(fillet_kind(&length_default(s, "1"), true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
+            // The path is a sketch's curves or a body's edges, with Tangent Chain (#16084).
+            "solid.pipe" => {
+                let (kind, inputs) = Kind::simple_start(id)?;
+                Dialog::new(crate::length_input::defaults(&s.doc, kind), inputs.into_iter().map(SelInput::chains).collect())
+            }
             "solid.shell" => {
                 let (kind, inputs) = Kind::simple_start(id)?;
                 let mut d = Dialog::new(crate::length_input::defaults(&s.doc, kind), inputs);
@@ -1050,7 +1059,7 @@ impl Dialog {
             "solid.remove" => Dialog::new(Kind::Remove, vec![SelInput::new("Bodies", BODIES, true)]),
             "solid.pattern.path" => Dialog::new(
                 Kind::PathPattern { count: "4".into(), spacing: length_default(s, "20") },
-                vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
+                vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES | EDGES, true).chains()],
             ),
             "mesh.convert" => Dialog::new(
                 Kind::MeshConvert { tolerance: crate::length_input::model(&s.doc, 0.05) },
@@ -1135,7 +1144,7 @@ impl Dialog {
                 let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
                 vec![
                     SelInput::new("Profile", PROFILES, true),
-                    SelInput::new("Path", CURVES | EDGES, true),
+                    SelInput::new("Path", CURVES | EDGES, true).chains(),
                     crate::dialogs_sweep::direction_input(),
                     rail,
                     rail2,
@@ -2126,6 +2135,10 @@ impl Dialog {
         }
         if !add {
             inp.items.clear();
+            // A replacing marquee starts the chains afresh: each item it takes is a new pick,
+            // even one the chains held before.
+            inp.chain_seeds.clear();
+            inp.chain_written.clear();
         }
         let mut accepted = false;
         for x in sels {
@@ -2168,6 +2181,13 @@ impl Dialog {
                 }
             } else if !inp.items.iter().any(|y| selection::same_item(y, &x)) {
                 inp.items.push(x);
+            } else if inp.chain == Some(true)
+                && inp.chain_written.iter().any(|y| selection::same_item(y, &x))
+                && !inp.chain_seeds.iter().any(|(y, _)| selection::same_item(y, &x))
+            {
+                // Already listed through an earlier pick's chain, it is a pick of its own all the
+                // same: unticking Tangent Chain keeps it.
+                inp.chain_seeds.push((x, None));
             }
         }
         // A marquee that took something is the pick a waiting pick field waited for (#10428).
@@ -2200,6 +2220,80 @@ impl Dialog {
         }
         inp.items = items;
         self.error = None;
+    }
+
+    /// Keep each input with Tangent Chain on ([`SelInput::chain`]) holding its picks' curve
+    /// chains, whichever way its items changed (a click, a marquee, the selection the dialog
+    /// opened with, a listed row's remove button): a new item is a pick and brings its chain,
+    /// and stays a pick (to go back to when the switch is unticked) even when an earlier pick's
+    /// chain already holds it; an item gone takes out the picks whose chain held it, with their
+    /// chains, as picking a chain's edge again does.
+    ///
+    /// A chain is closed under walking on (the edge an edge runs on into depends on that edge
+    /// alone), so the chain of a pick inside an earlier pick's chain lies inside that chain: it
+    /// adds nothing, and holds nothing gone while the earlier pick stays. Such a pick is walked
+    /// only once the earlier pick goes, so a marquee over a smooth loop of N edges walks once.
+    pub fn sync_input_chains(&mut self, s: &Session) {
+        for inp in &mut self.inputs {
+            if inp.chain != Some(true) || inp.items == inp.chain_written {
+                continue;
+            }
+            let listed = selection::ItemSet::of(&inp.items);
+            let written = selection::ItemSet::of(&inp.chain_written);
+            let gone = selection::ItemSet::of(inp.chain_written.iter().filter(|x| !listed.contains(x)));
+            // The picks so far, each checked against what is gone, then each new item as a pick.
+            let mut seeds: Vec<(Sel, Option<Vec<Sel>>, bool)> = inp.chain_seeds.drain(..).map(|(x, chain)| (x, chain, true)).collect();
+            let mut seeded = selection::ItemSet::of(seeds.iter().map(|(x, ..)| x));
+            for x in &inp.items {
+                if !written.contains(x) && seeded.insert(x) {
+                    seeds.push((x.clone(), None, false));
+                }
+            }
+            let mut items: Vec<Sel> = Vec::new();
+            let mut have = selection::ItemSet::default();
+            for (x, chain, old) in seeds {
+                let chain = match chain {
+                    Some(chain) => chain,
+                    // Inside a chain kept before it (the picks so far come first, each checked
+                    // against what is gone): its own chain adds nothing and holds nothing gone.
+                    None if have.contains(&x) => {
+                        inp.chain_seeds.push((x, None));
+                        continue;
+                    }
+                    None => curve_edges(s, &x),
+                };
+                if old && chain.iter().any(|y| gone.contains(y)) {
+                    continue;
+                }
+                for y in &chain {
+                    if have.insert(y) {
+                        items.push(y.clone());
+                    }
+                }
+                inp.chain_seeds.push((x, Some(chain)));
+            }
+            inp.items = items.clone();
+            inp.chain_written = items;
+        }
+    }
+
+    /// Tick or untick input `i`'s Tangent Chain: ticked, each item picked so far brings its
+    /// chain; unticked, the input goes back to the items picked by hand.
+    pub fn set_input_chain(&mut self, s: &Session, i: usize, on: bool) {
+        let Some(inp) = self.inputs.get_mut(i) else { return };
+        if inp.chain.is_none() || inp.chain == Some(on) {
+            return;
+        }
+        inp.chain = Some(on);
+        if on {
+            inp.chain_seeds.clear();
+            inp.chain_written.clear();
+        } else {
+            inp.items = inp.chain_seeds.drain(..).map(|(x, _)| x).collect();
+            inp.chain_written.clear();
+        }
+        self.error = None;
+        self.sync_input_chains(s);
     }
 
     /// What input `i`'s list of picked items shows, one row each (#3683): what its chip counts.
@@ -2323,6 +2417,26 @@ fn fillet_edges(s: &Session, sel: &Sel, chain: bool) -> Vec<Sel> {
         }
     }
     picked
+}
+
+/// What a pick into an input with Tangent Chain on stands for: an edge with every edge that
+/// continues it smoothly as a curve, from the model's exact edges
+/// ([`solidcraft_engine::doc::ModelBody::curve_chain`]), the pick first; anything else alone.
+fn curve_edges(s: &Session, sel: &Sel) -> Vec<Sel> {
+    let mut out = vec![sel.clone()];
+    if let Sel::Edge { body, index, .. } = sel
+        && let Some(b) = crate::open_meshing::session_world(s).body(body)
+    {
+        let m = b.mesh();
+        for i in b.curve_chain(*index) {
+            if i != *index
+                && let Some(e) = m.edges.get(i)
+            {
+                out.push(Sel::Edge { body: body.clone(), index: i, point: polyline_mid(e) });
+            }
+        }
+    }
+    out
 }
 
 /// How close two edge ends are to be one vertex (mm).
@@ -3632,6 +3746,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let text_focus = crate::ui_kit::editor_has_focus(ui.ctx());
     let mut toggle_list: Option<usize> = None;
     let mut hovered: Option<(usize, Sel)> = None;
+    let mut chain_set: Option<(usize, bool)> = None;
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
         let stored_reference = stored_input_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
@@ -3723,6 +3838,14 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 }
             });
         });
+        // Tangent Chain, right under the input it is for (several inputs may each have one).
+        if let Some(on) = inp.chain {
+            let mut ticked = on;
+            form_row(ui, "", |ui| crate::ui_kit::checkbox_grid(ui, &mut [("Tangent Chain", &mut ticked)], 1));
+            if ticked != on {
+                chain_set = Some((i, ticked));
+            }
+        }
         if inp.multi && d.listed == Some(i) && !inp.items.is_empty() {
             let rows = d.listed_items(s, i);
             let labels = crate::dialogs_frame::row_labels(s, names, d, i);
@@ -3756,6 +3879,9 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     }
     if let Some((input, row, item)) = remove {
         d.remove_listed(s, input, row, &item);
+    }
+    if let Some((input, on)) = chain_set {
+        d.set_input_chain(s, input, on);
     }
     if let Some(i) = activate {
         d.active = i;
@@ -4594,6 +4720,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             let body = |ui: &mut egui::Ui| {
                 d.sync_fillet_chain(&app.session);
+                d.sync_input_chains(&app.session);
                 crate::hole_presets::rows(ui, &mut d, &mut app.preferences.hole_presets, &app.session.doc, reset_scroll);
                 let can_export = !app.preferences.personal_sheet_rules.is_empty();
                 crate::sheet_rule_library::rows(ui, &mut d, &app.session.doc, can_export, reset_scroll);
@@ -4602,6 +4729,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 enter |= accepted;
                 value_fields = fields;
                 d.sync_fillet_chain(&app.session);
+                d.sync_input_chains(&app.session);
                 if cell_enter {
                     ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
                 }
@@ -6172,6 +6300,34 @@ pub(crate) fn emboss_profile_plane(app: &SolveApp, sketch: u64) -> Result<Option
     .ok_or_else(|| "the Emboss author frame is degenerate".into())
 }
 
+/// A Pipe's or a Pattern on Path's path into its command's parameters (#16084): a chain of a
+/// body's edges (`path_body`, `path_edges`), or the curves of one sketch (`path_sketch`, `path`).
+fn put_path(app: &SolveApp, picks: &[Sel], p: &mut Value) -> Result<(), String> {
+    if let Some((body, edges)) = crate::dialogs_sweep::edge_path(picks)? {
+        p["path_body"] = json!(body);
+        p["path_edges"] = json!(edges);
+    } else {
+        p["path_sketch"] = json!(picks_sketch(app, picks, None).ok_or("the path curves must be in one sketch")?);
+        p["path"] = json!(picks.curve_ids());
+    }
+    Ok(())
+}
+
+/// A stored path as the Path input's picks: the edges on the body the path was picked on, or
+/// the sketch's curves (#16084).
+fn path_sels(
+    s: &Session,
+    path_sketch: &solidcraft_engine::doc::SketchId,
+    path: &[String],
+    path_body: &Option<solidcraft_engine::doc::BodyName>,
+    path_edges: &[solidcraft_engine::doc::Position],
+) -> Vec<Sel> {
+    match path_body {
+        Some(body) => path_edges.iter().filter_map(|p| edge_sel_on(s, Some(body.0.as_str()), p.0)).collect(),
+        None => path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect(),
+    }
+}
+
 /// The commands (id, parameters) a dialog's OK runs.
 fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
@@ -6804,9 +6960,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::PathPattern { count, spacing } => {
             need(0, "objects")?;
             need(1, "the path")?;
-            let path = sels(d, 1).curve_ids();
-            let sketch = picks_sketch(app, sels(d, 1), None).ok_or("the path curves must be in one sketch")?;
-            let mut p = json!({"path_sketch": sketch, "path": path, "count": count});
+            let mut p = json!({"count": count});
+            put_path(app, sels(d, 1), &mut p)?;
             // A saved extent stays first-to-last distance when the quantity changes.
             p[if d.extra.contains_key("distance") { "distance" } else { "spacing" }] = json!(spacing);
             pattern_objects(s, sels(d, 0), &mut p);
@@ -6814,9 +6969,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Pipe { wall, .. } => {
             need(0, "the path")?;
-            let path = sels(d, 0).curve_ids();
-            let sketch = picks_sketch(app, sels(d, 0), None).ok_or("the path curves must be in one sketch")?;
-            let mut p = json!({"path_sketch": sketch, "path": path});
+            let mut p = json!({});
+            put_path(app, sels(d, 0), &mut p)?;
             put(&mut p, &[("wall", wall)]);
             ("solid.pipe", p)
         }
@@ -8756,11 +8910,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     }
                     d
                 }
-                PatternKind::Path { path_sketch, path, count, spacing, extent, flip, orient } => {
+                PatternKind::Path { path_sketch, path, path_body, path_edges, count, spacing, extent, flip, orient } => {
                     let mut d = start("solid.pattern.path")?;
                     d.kind = Kind::PathPattern { count: count.to_string(), spacing: spacing.to_string() };
                     if let Some(inp) = d.inputs.get_mut(1) {
-                        inp.items = path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect();
+                        inp.items = path_sels(s, path_sketch, path, path_body, path_edges);
                     }
                     // Preserve options the current dialog does not expose as controls.
                     d.extra.insert("flip".into(), json!(flip));
@@ -9086,11 +9240,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Pipe { path_sketch, path, targets, .. } => {
+        FeatureKind::Pipe { path_sketch, path, path_body, path_edges, targets, .. } => {
             let mut d = start("solid.pipe")?;
             d.kind = Kind::simple_restore(&f.kind)?;
             if let Some(inp) = d.inputs.first_mut() {
-                inp.items = path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect();
+                inp.items = path_sels(s, path_sketch, path, path_body, path_edges);
             }
             if !targets.is_empty() {
                 d.extra.insert("targets".into(), json!(targets));

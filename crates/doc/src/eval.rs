@@ -432,6 +432,24 @@ impl ModelBody {
         kernel::whole_edge(&self.body, edge)
     }
 
+    /// The display edges a path, rail or boundary pick of display edge `edge` stands for with
+    /// its curve chain: `edge` first, then each other edge that continues it smoothly (within
+    /// [`solidcraft_geom::TANGENT_CHAIN`]) as curves alone, whatever faces they bound
+    /// ([`kernel::curve_chain_of_edges`], exact: it stops at a branch). The chain is walked from
+    /// `edge` itself, not from a point that might lie nearer another edge at a shared vertex.
+    /// Just `edge` when the kernel cannot walk the chain.
+    pub fn curve_chain(&self, edge: usize) -> Vec<usize> {
+        let mut out = vec![edge];
+        if let Ok(chain) = kernel::curve_chain_of_edges(&self.body, &[edge], solidcraft_geom::TANGENT_CHAIN) {
+            for i in chain {
+                if !out.contains(&i) {
+                    out.push(i);
+                }
+            }
+        }
+        out
+    }
+
     /// The display plan of this body at the viewport's display quality
     /// ([`crate::display_quality::current`]; at Normal, the same tolerance and angle as
     /// [`ModelBody::mesh`]), made once per level; `None` when the body has no plan (a mesh body,
@@ -9133,11 +9151,7 @@ fn feature_tools_with_constructor(
             }
             regions.iter().map(|r| Ok(tool(r, kernel::sweep_with(&ss.plane, r, &segs, &ctl)?))).collect()
         }
-        FeatureKind::Pipe { path_sketch, path, diameter, wall, .. } => {
-            let ps =
-                st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
-            let mapped = path_in_frame(doc, ps, f.component)?;
-            let ps = mapped.as_ref();
+        FeatureKind::Pipe { path_sketch, path, path_body, path_edges, diameter, wall, .. } => {
             let r = val(vals, diameter, Kind::Length)? / 2.0;
             if !(r > 1e-6) {
                 return Err(DocError::Invalid("pipe diameter must be positive".into()));
@@ -9145,14 +9159,28 @@ fn feature_tools_with_constructor(
             let region = pipe_region(vals, r, wall)?;
             // Its faces are named as a sweep's caps and a cylinder's wall are (#14897).
             let tool = |body: Body| crate::lineage::pipe_tool(body, region.outer.segs.len());
-            if let Some(along) = path_points(&curves_in(ps, path), Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
-                let pts = along.points();
-                let (Some(a), Some(b)) = (pts.first().copied(), pts.get(1).copied()) else { return Err(DocError::Invalid("empty path".into())) };
-                let t = (b - a).normalized().ok_or_else(|| DocError::Invalid("path direction".into()))?;
-                let plane = Plane::from_normal(a, t).ok_or_else(|| DocError::Invalid("pipe profile plane".into()))?;
-                return Ok(vec![tool(kernel::sweep_point_path_with(&plane, &region, &along, &kernel::SweepControl::default())?)]);
-            }
-            let segs = path_segments(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))?;
+            // The path is a chain of a body's edges (#16084), in the chain's own order, or the
+            // curves of a sketch.
+            let segs = match path_body {
+                Some(body) => edge_path_segments(st, body, path_edges, Vec3::new(f64::NAN, f64::NAN, f64::NAN), None)?,
+                None => {
+                    let ps = st
+                        .sketch(path_sketch.0)
+                        .ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
+                    let mapped = path_in_frame(doc, ps, f.component)?;
+                    let ps = mapped.as_ref();
+                    if let Some(along) = path_points(&curves_in(ps, path), Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
+                        let pts = along.points();
+                        let (Some(a), Some(b)) = (pts.first().copied(), pts.get(1).copied()) else {
+                            return Err(DocError::Invalid("empty path".into()));
+                        };
+                        let t = (b - a).normalized().ok_or_else(|| DocError::Invalid("path direction".into()))?;
+                        let plane = Plane::from_normal(a, t).ok_or_else(|| DocError::Invalid("pipe profile plane".into()))?;
+                        return Ok(vec![tool(kernel::sweep_point_path_with(&plane, &region, &along, &kernel::SweepControl::default())?)]);
+                    }
+                    path_segments(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))?
+                }
+            };
             let first = segs.first().ok_or_else(|| DocError::Invalid("empty path".into()))?;
             let start = first.start();
             let (t, _) = first.tangents().ok_or_else(|| DocError::Invalid("path direction".into()))?;
@@ -9526,12 +9554,10 @@ pub(crate) fn edge_path_segments(
         return Err(DocError::Invalid("the path's edges have no curve to follow".into()));
     }
     if kernel::chain_closes(&b.body, &chain) {
-        // A closed chain is begun at the profile, so the profile is swept from where it stands.
-        let segs = match profile {
-            Some(profile) => from_profile_on_closed_edge_path(&b.body, &chain, groups, profile, start),
-            None => groups.iter().flatten().copied().collect(),
-        };
-        return Ok(segs);
+        // A closed chain is begun at the profile, so the profile is swept from where it stands;
+        // without a profile, at the chain's point nearest `start` (a Pattern on Path's first
+        // pick, #16084), or where the chain itself begins when `start` is not a point.
+        return Ok(from_profile_on_closed_edge_path(&b.body, &chain, groups, profile, start));
     }
     // The path runs from the end nearest the profile.
     let mut segs: Vec<kernel::PathSeg> = groups.iter().flatten().copied().collect();
@@ -9545,12 +9571,13 @@ pub(crate) fn edge_path_segments(
 /// A closed chain of a body's edges begun where the profile's plane crosses it nearest the
 /// profile: the edge it crosses there split in two, its second part first and its first part
 /// last (or the chain begun at the joint there), so the path starts at the profile (#2216).
-/// Unchanged when the chain's point nearest the profile is off that plane.
+/// Unchanged when the chain's point nearest the profile is off that plane. Without a profile,
+/// begun at the chain's point nearest `start` (#16084); unchanged when `start` is not a point.
 fn from_profile_on_closed_edge_path(
     body: &Body,
     chain: &[(usize, bool)],
     groups: Vec<Vec<kernel::PathSeg>>,
-    profile: &Plane,
+    profile: Option<&Plane>,
     start: Vec3,
 ) -> Vec<kernel::PathSeg> {
     let flat = |groups: &[Vec<kernel::PathSeg>]| groups.iter().flatten().copied().collect::<Vec<_>>();
@@ -9570,7 +9597,7 @@ fn from_profile_on_closed_edge_path(
     }
     let Some((k, t, q)) = best else { return flat(&groups) };
     // The profile stands on the chain only where the chain meets the profile's plane.
-    if profile.height(q).abs() > (size * 1e-6).max(1e-6) {
+    if profile.is_some_and(|profile| profile.height(q).abs() > (size * 1e-6).max(1e-6)) {
         return flat(&groups);
     }
     let (Some(g), Some(e)) = (groups.get(k), record.edges.get(chain[k].0)) else { return flat(&groups) };
@@ -10141,14 +10168,29 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
                 }
             }
         }
-        crate::PatternKind::Path { path_sketch, path, count: c, spacing, extent, flip, orient } => {
+        crate::PatternKind::Path { path_sketch, path, path_body, path_edges, count: c, spacing, extent, flip, orient } => {
             let n = count(c)?;
             let d = val(vals, spacing, Kind::Length)?;
-            let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("path sketch {path_sketch}")))?;
-            let mapped = path_in_frame(doc, ps, component)?;
-            let ps = mapped.as_ref();
-            // Free-form curves measured along their polylines.
-            let mut segs = kernel::PathSeg::flattened(&path_segments(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))?);
+            // The path is a chain of a body's edges (#16084), from its end nearest the first
+            // point, or the curves of a sketch; free-form curves are measured along their
+            // polylines. Copies turn about the normal of the plane the path lies in.
+            let (mut segs, normal) = match path_body {
+                Some(body) => {
+                    let start = path_edges.first().map(|p| p.0).unwrap_or(Vec3::new(f64::NAN, f64::NAN, f64::NAN));
+                    let segs = kernel::PathSeg::flattened(&edge_path_segments(st, body, path_edges, start, None)?);
+                    let normal = kernel::PathSeg::plane_normal(&segs, 1e-6);
+                    if *orient && normal.is_none() {
+                        return Err(DocError::Invalid("copies turn with the path only along a path in one plane".into()));
+                    }
+                    (segs, normal.unwrap_or(Vec3::Z))
+                }
+                None => {
+                    let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("path sketch {path_sketch}")))?;
+                    let mapped = path_in_frame(doc, ps, component)?;
+                    let ps = mapped.as_ref();
+                    (kernel::PathSeg::flattened(&path_segments(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))?), ps.plane.normal())
+                }
+            };
             if *flip {
                 segs = segs.iter().rev().map(reverse_seg).collect();
             }
@@ -10157,7 +10199,6 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
             if (step * (n - 1) as f64).abs() > total * (1.0 + 1e-5) + 1e-6 {
                 return Err(DocError::Invalid(format!("the instances run past the end of the path ({total:.3} mm long)")));
             }
-            let normal = ps.plane.normal();
             let (p0, t0) = path_at(&segs, 0.0);
             for i in 1..n {
                 let (pk, tk) = path_at(&segs, step * i as f64);
@@ -10212,8 +10253,10 @@ fn seg_len(s: &kernel::PathSeg) -> f64 {
     match *s {
         kernel::PathSeg::Line { a, b } => (b - a).len(),
         kernel::PathSeg::Arc { a, center, angle, .. } => (a - center).len() * angle.abs(),
-        // Patterns flatten their paths; a curve left is measured along its chord.
-        kernel::PathSeg::Curve { .. } | kernel::PathSeg::Bezier(_) => s.start().dist(s.end()),
+        // A span of an edge's curve by its arc-length integral (#16084).
+        kernel::PathSeg::Bezier(_) => s.length().unwrap_or_else(|| s.start().dist(s.end())),
+        // Patterns flatten sketch curves; a curve left is measured along its chord.
+        kernel::PathSeg::Curve { .. } => s.start().dist(s.end()),
     }
 }
 
@@ -10237,6 +10280,8 @@ fn seg_at(s: &kernel::PathSeg, t: f64) -> (Vec3, Vec3) {
             let v = rotate_vec(a - center, k, s * t / r);
             (center + v, k.cross(v).normalized().unwrap_or(Vec3::X) * s)
         }
+        // A span of an edge's curve where its arc length reaches `t` (#16084).
+        kernel::PathSeg::Bezier(_) if let Some(at) = s.length().filter(|l| *l > 1e-12).and_then(|l| s.along(t / l)) => at,
         kernel::PathSeg::Curve { .. } | kernel::PathSeg::Bezier(_) => {
             let (a, b) = (s.start(), s.end());
             let d = (b - a).normalized().unwrap_or(Vec3::X);

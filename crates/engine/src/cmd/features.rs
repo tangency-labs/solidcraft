@@ -143,7 +143,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("pattern_path")
         .contract(&PATTERN_PATH_CONTRACT)
         .output(output_schema_for::<PatternResult>)
-        .params("features: [names] | bodies: [names]; path_sketch: sketch; path: [curve ids in order]; count; spacing (between instances) | distance (first to last); orientation?: identical|path; flip?: bool"),
+        .params("features: [names] | bodies: [names]; path_sketch: sketch; path: [curve ids in order]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves, starting at the chain's end nearest the first point, or a closed chain at its point nearest the first point); count; spacing (between instances) | distance (first to last); orientation?: identical|path; flip?: bool"),
     CommandSpec::new("solid.mirror", "Mirror", crate::checked!("solid.mirror", mirror))
         .at("SOLID", "CREATE")
         .icon("mirror")
@@ -160,7 +160,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("pipe")
         .contract(&PIPE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("path_sketch: sketch; path: [curve ids in order]; diameter: expr; wall?: expr (hollow); operation?, targets?, name?, body_name?"),
+        .params("path_sketch: sketch; path: [curve ids in order]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); diameter: expr; wall?: expr (hollow); operation?, targets?, name?, body_name?"),
     CommandSpec::new("solid.bounding_solid", "Bounding Solid", crate::checked!("solid.bounding_solid", bounding_solid))
         .at("SOLID", "CREATE")
         .icon("bounding_solid")
@@ -3045,11 +3045,17 @@ fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
 fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.pattern.path";
     let (features, bodies) = pattern_sources(s, p, cmd)?;
-    let path_sketch = sketch_id(s, p.get("path_sketch").or_else(|| p.get("sketch")), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() || path.len() > 1000 {
-        return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
-    }
+    // The path is a chain of a body's edges (#16084) or the curves of a sketch.
+    let (path_sketch, path, path_body, path_edges) = if p.get("path_body").is_some_and(|b| !b.is_null()) {
+        one_sketch_path(s, p, cmd)?
+    } else {
+        let path_sketch = sketch_id(s, p.get("path_sketch").or_else(|| p.get("sketch")), cmd, "path_sketch")?;
+        let path = string_list(cmd, p, "path")?;
+        if path.is_empty() || path.len() > 1000 {
+            return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
+        }
+        (path_sketch, path, None, Vec::new())
+    };
     let count = req_expr(cmd, p, "count")?;
     check_count(s, &count, cmd, "count")?;
     let (spacing, extent) = match (expr(p, "spacing"), expr(p, "distance")) {
@@ -3064,7 +3070,8 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
         Some(o) => return Err(bad(cmd, format!("unknown orientation `{o}` (identical or path)"))),
     };
     let flip = bool_(p, "flip").unwrap_or(false);
-    let pattern = solidcraft_doc::PatternKind::Path { path_sketch: SketchId(path_sketch), path, count, spacing, extent, flip, orient };
+    let pattern =
+        solidcraft_doc::PatternKind::Path { path_sketch: SketchId(path_sketch), path, path_body, path_edges, count, spacing, extent, flip, orient };
     finish_pattern(s, p, features, pattern, bodies)
 }
 
@@ -4333,6 +4340,21 @@ pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<
     Ok((path_sketch, path, None, Vec::new()))
 }
 
+/// [`sweep_path`] for a feature whose path is curves of its path sketch only (Pipe, Pattern
+/// on Path): each entry as its curve id. A curve of another sketch is refused.
+fn one_sketch_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<String>, Option<BodyName>, Vec<Position>)> {
+    let (path_sketch, path, path_body, path_edges) = sweep_path(s, p, cmd)?;
+    let path = path
+        .into_iter()
+        .map(|e| match e {
+            solidcraft_doc::PathEntry::OfPathSketch(id) => Ok(id),
+            solidcraft_doc::PathEntry::OfSketch { sketch, curve } if sketch.0 == path_sketch => Ok(curve),
+            solidcraft_doc::PathEntry::OfSketch { .. } => Err(bad(cmd, "the path's curves must all be in `path_sketch`")),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok((path_sketch, path, path_body, path_edges))
+}
+
 /// The points on the edges of a sweep's path (`path_edges`), one on each edge of the chain.
 fn path_edge_points(p: &Value, cmd: &str) -> Result<Vec<Position>> {
     let a = p.get("path_edges").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`path_edges` must be a list of points"))?;
@@ -4698,11 +4720,8 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.pipe";
-    let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() {
-        return Err(bad(cmd, "`path` must list curve ids"));
-    }
+    // The path is a chain of a body's edges (#16084) or the curves of a sketch, as a sweep's.
+    let (path_sketch, path, path_body, path_edges) = one_sketch_path(s, p, cmd)?;
     let diameter = req_expr(cmd, p, "diameter")?;
     check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
     let wall = expr(p, "wall");
@@ -4715,6 +4734,8 @@ fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
         FeatureKind::Pipe {
             path_sketch: SketchId(path_sketch),
             path,
+            path_body,
+            path_edges,
             diameter,
             wall,
             operation: operation(p, cmd)?,

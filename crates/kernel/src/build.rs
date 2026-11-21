@@ -1491,6 +1491,59 @@ impl PathSeg {
             .collect()
     }
 
+    /// The unit normal of a plane the whole path lies in, within `tol` radians: the axis of its
+    /// first arc, or else the turn between its first two directions of travel that are not
+    /// parallel, checked against every segment over its whole length: a line's direction, an
+    /// arc's axis, and a free-form segment's control points ([`PathSeg::in_plane`]). A straight
+    /// path lies in many planes and gets one of them. `None` for a path that leaves every plane,
+    /// or has no direction.
+    pub fn plane_normal(path: &[PathSeg], tol: f64) -> Option<Vec3> {
+        let directions = |s: &PathSeg| -> Vec<Vec3> {
+            match s {
+                PathSeg::Line { .. } | PathSeg::Arc { .. } => s.tangents().map(|(a, b)| vec![a, b]).unwrap_or_default(),
+                _ => (0..=8).filter_map(|i| s.along(f64::from(i) / 8.0).map(|(_, d)| d)).collect(),
+            }
+        };
+        let dirs: Vec<Vec3> = path.iter().flat_map(directions).collect();
+        let first = *dirs.first()?;
+        let arc = path.iter().find_map(|s| if let PathSeg::Arc { axis, .. } = *s { axis.normalized() } else { None });
+        let turn = || dirs.iter().find_map(|d| first.cross(*d).normalized().filter(|_| first.cross(*d).len() > tol.sin()));
+        let n = match arc.or_else(turn) {
+            Some(n) => n,
+            // A straight path: any plane through its line.
+            None => {
+                let other = if first.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+                first.cross(other).normalized()?
+            }
+        };
+        let fits = |s: &PathSeg| match *s {
+            PathSeg::Arc { axis, .. } => axis.normalized().is_some_and(|k| k.cross(n).len() <= tol.sin()),
+            PathSeg::Line { .. } => {
+                let d = directions(s);
+                !d.is_empty() && d.iter().all(|d| d.dot(n).abs() <= tol.sin())
+            }
+            PathSeg::Curve { .. } | PathSeg::Bezier(_) => !directions(s).is_empty() && s.in_plane(n, tol),
+        };
+        // A sketch line or arc carried as a curve is checked as the line or arc it is.
+        let flat = path.iter().all(|s| match *s {
+            PathSeg::Curve { plane, seg: seg @ (Seg2::Line { .. } | Seg2::Arc { .. }) } => fits(&PathSeg::of_sketch(&plane, &seg)),
+            _ => fits(s),
+        });
+        flat.then_some(n)
+    }
+
+    /// Whether a free-form segment lies in the plane through its start with unit normal `n`:
+    /// every control point within `tol` radians of that plane as seen from the start (within
+    /// `sin(tol)` times its distance from the start). A rational Bézier span with positive
+    /// weights lies in the hull of its control points, and a span in a plane has all of them in
+    /// it, so this decides the whole span, not sampled points of it. A line or an arc is not
+    /// free-form and answers `false`.
+    fn in_plane(&self, n: Vec3, tol: f64) -> bool {
+        let Some(b) = self.space_bezier() else { return false };
+        let start = b.start();
+        b.ctrl().iter().all(|q| q.project().is_some_and(|p| (p - start).dot(n).abs() <= tol.sin() * (p - start).len()))
+    }
+
     /// Points along the segment (an arc within `tol` of its chords), without its start.
     pub(crate) fn points_after_start(&self, tol: f64) -> Vec<Vec3> {
         match *self {
