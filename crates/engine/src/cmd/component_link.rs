@@ -845,8 +845,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         Some(bytes) => bytes,
         None => read_link(&file, s.path.as_deref())?,
     };
-    let ((design_name, mut sf, faces, metadata, properties), (images, image_warnings)) =
-        design_bodies(&file, &bytes, configuration, s.validation())?;
+    let ((design_name, mut sf, faces, metadata, properties), (images, image_warnings)) = design_bodies(&file, &bytes, configuration, s.validation())?;
     sf.warnings.extend(image_warnings);
     let read = DesignLink::file_digest(&bytes);
     let name = str_(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or(design_name);
