@@ -14,7 +14,7 @@
 //! | [`SurfaceEval::eval_normal_section`]              | `SmSurfaceEval::EvalNormalSection`               |
 //! | [`pass_sp_convergence_test`]                      | `sm_PassSPConvergenceTest` (static)              |
 //! | [`Surface::create_seam_curve`]                    | `SmSurface::CreateSeamCurve`                     |
-//! | [`Surface::seam_curve`], [`SeamCurve`]            | not upstream: the seam's 3d curve the seam checks classify |
+//! | [`Surface::seam_ruling`]                          | not upstream: a cone's seam as its ruling line |
 //! | [`Surface::create_line_on_surf`]                  | `SmSurface::CreateLineOnSurf`                    |
 //! | [`Surface::is_on_seam`], [`SeamInfo`]             | `SmSurface::IsOnSeam`                            |
 //! | [`Surface::global_point_solve`], [`Surface::global_point_solve_point_test_off`], [`Surface::global_point_solve_face_tested`], [`FaceTest`], [`global_point_solve_starts`], [`NoObject`] | `SmSurface::GlobalPointSolve` |
@@ -57,13 +57,13 @@
 //! - **`CreateSeamCurve`** returns `None` for a surface that is not closed and builds
 //!   its [`CrvOnSurf`] on the concrete [`Surface`], retaining its virtual evaluation
 //!   and native owning-copy behavior.
-//! - **The seam's 3d curve** ([`Surface::seam_curve`], not upstream). On a native cone or
-//!   cylinder the seam is a ruling, and its 3d curve is that ruling as a [`Line`] over the
-//!   seam's own interval: the curve on the surface and the line are the same curve,
-//!   parameter for parameter, and an analytic curve has its intersections with lines and
-//!   circles in closed form, where a curve on a surface needs a cache and a subdivision
-//!   solve (tangency-labs/solidcraft#11574). Every other surface keeps upstream's curve on
-//!   the surface.
+//! - **A seam's ruling** ([`Surface::seam_ruling`], not upstream). On a native cone or
+//!   cylinder the seam is a ruling, which is a [`Line`] over the seam's own interval: the
+//!   curve on the surface and the line are the same curve, parameter for parameter, and an
+//!   analytic curve has its intersections with lines and circles in closed form, where a
+//!   curve on a surface needs a cache and a subdivision solve
+//!   (tangency-labs/solidcraft#11574). The seam checks intersect the line in the seam's
+//!   place and read the seam itself everywhere else.
 //! - **Classification** (`sm_ClassifyCurveSurfaceXSectPoint`) returns the outputs as
 //!   [`XsectClassification`]; an out-of-domain guess keeps its unclamped values, as
 //!   upstream. `SmCurve::EvaluateGeometric` failing with `SM_ERR` marks the point touching
@@ -1188,17 +1188,6 @@ pub fn pass_sp_convergence_test(
     Ok(r.good_point)
 }
 
-/// A seam's curves ([`Surface::seam_curve`]).
-#[derive(Debug, Clone)]
-pub struct SeamCurve {
-    /// The 3d curve: a [`Line`] on a cone's ruling, else the curve on the surface.
-    pub curve: Curve,
-    /// Its UV curve: the line of constant `u` or `v` across the natural UV domain.
-    pub uv_curve: Curve,
-    /// Its interval, the UV curve's.
-    pub interval: Extent1d,
-}
-
 /// The result of [`Surface::is_on_seam`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct SeamInfo {
@@ -1260,57 +1249,41 @@ impl Surface {
         Ok(Some(seam))
     }
 
-    /// The seam of [`Surface::create_seam_curve`] as the seam checks classify it: its 3d
-    /// curve, its UV curve and its interval; `None` when the surface is not closed in
-    /// `param`.
+    /// `seam`, this surface's seam in `param` ([`Surface::create_seam_curve`]), as a
+    /// [`Line`] over the seam's interval when it is one, parameter for parameter; `None`
+    /// otherwise.
     ///
     /// Not upstream: on a native cone or cylinder ([`SurfaceKind::Cone`]) a seam runs
     /// along the sweep, where the sweep angle is constant, and the cone's height is
     /// affine in its NURB's linear parameter (`cone_convert_uv_from_nurbs_to_step`). So
-    /// the seam is the ruling between its two ends, at a parameter affine in the seam's,
-    /// and its 3d curve is that ruling as a [`Line`] over the same interval: the same
-    /// curve, parameter for parameter, which an analytic edge meets in closed form. Any
-    /// other surface, and a cone's direction that is not its sweep, keeps the curve on the
-    /// surface.
+    /// the seam is the ruling between its two ends, at a parameter affine in the seam's.
+    /// Any other surface, and a cone's direction that is not its sweep, has no ruling.
     ///
     /// # Errors
     ///
-    /// Those of [`Surface::create_seam_curve`] and of the seam's evaluation at its ends.
-    pub fn seam_curve(
+    /// Those of the seam's evaluation at its ends.
+    pub fn seam_ruling(
         &self,
         kernel: &Kernel,
         param: SurfParamType,
-        known_closed: bool,
-    ) -> Result<Option<SeamCurve>> {
-        let Some(seam) = self.create_seam_curve(kernel, param, known_closed)? else {
-            return Ok(None);
-        };
-        let uv_curve = seam.uv_curve().clone();
-        let interval = seam.natural_interval();
+        seam: &CrvOnSurf,
+    ) -> Result<Option<Curve>> {
         // the seam is a ruling when its constant parameter is the cone's sweep: the NURB's
         // v when its UV are swapped (`SurfOfRevolution::swap_uv`), else its u
         let ruling = match self.kind() {
             SurfaceKind::Cone(cone) => (param == SurfParamType::V) == cone.rev.swap_uv(),
             _ => false,
         };
-        let curve = if ruling {
-            let start = seam.evaluate_point(kernel, interval.min())?;
-            let end = seam.evaluate_point(kernel, interval.max())?;
-            // `Line::from_points` is over [0, 1], the seam's interval (`create_seam_curve`'s
-            // UV line), unless the two ends are one point, which a cone's height range is not
-            if interval.min() == 0.0 && interval.max() == 1.0 && (end - start).length() > EFF_ZERO {
-                Curve::from(Line::from_points(start, end, 3))
-            } else {
-                Curve::from(seam)
-            }
-        } else {
-            Curve::from(seam)
-        };
-        Ok(Some(SeamCurve {
-            curve,
-            uv_curve,
-            interval,
-        }))
+        let interval = seam.natural_interval();
+        // `Line::from_points` is over [0, 1], the seam's interval (`create_seam_curve`'s
+        // UV line), unless the two ends are one point, which a cone's height range is not
+        if !(ruling && interval.min() == 0.0 && interval.max() == 1.0) {
+            return Ok(None);
+        }
+        let start = seam.evaluate_point(kernel, interval.min())?;
+        let end = seam.evaluate_point(kernel, interval.max())?;
+        Ok(((end - start).length() > EFF_ZERO)
+            .then(|| Curve::from(Line::from_points(start, end, 3))))
     }
 
     /// The line from `start_uv` to `end_uv` in the surface's parameter space, as a 3d
@@ -2654,9 +2627,9 @@ mod tests {
     }
 
     /// tangency-labs/solidcraft#11574: a native cone's or cylinder's seam runs along a
-    /// ruling, so its 3d curve is that ruling as a line, the seam curve on the surface
-    /// parameter for parameter, whichever NURB direction is the sweep, inside out or not,
-    /// bounded or not. A sphere's and a torus's seams stay curves on their surfaces.
+    /// ruling, a line that is the seam curve on the surface parameter for parameter,
+    /// whichever NURB direction is the sweep, inside out or not, bounded or not. A
+    /// sphere's and a torus's seams have none.
     #[test]
     fn a_cones_seam_is_its_ruling_as_a_line_parameter_for_parameter() {
         use crate::geom::axis2_placement::Axis2Placement;
@@ -2685,24 +2658,16 @@ mod tests {
                     let s = Surface::from(cone);
                     let mut seams = 0;
                     for param in [SurfParamType::U, SurfParamType::V] {
-                        let seam = s.create_seam_curve(&k, param, false).unwrap();
-                        let curve = s.seam_curve(&k, param, false).unwrap();
-                        assert_eq!(seam.is_some(), curve.is_some());
-                        let (Some(seam), Some(curve)) = (seam, curve) else {
+                        let Some(seam) = s.create_seam_curve(&k, param, false).unwrap() else {
                             continue;
                         };
                         seams += 1;
                         let case = format!("{bottom} {top} {height} swap {swap_uv} inside out {inside_out} {param:?}");
-                        assert!(curve.curve.is_analytic(), "{case}: a line");
-                        assert_eq!(curve.interval, seam.natural_interval(), "{case}");
-                        for end in [curve.interval.min(), curve.interval.max()] {
-                            let (a, b) = (
-                                curve.uv_curve.evaluate_point(&k, end).unwrap(),
-                                seam.uv_curve().evaluate_point(&k, end).unwrap(),
-                            );
-                            assert_eq!(a, b, "{case}: the seam's UV line");
-                        }
-                        same_curve(&k, &seam, &curve.curve);
+                        let line = s.seam_ruling(&k, param, &seam).unwrap();
+                        let line = line.unwrap_or_else(|| panic!("{case}: a ruling"));
+                        assert!(line.is_analytic(), "{case}: a line");
+                        assert_eq!(line.natural_interval(), seam.natural_interval(), "{case}");
+                        same_curve(&k, &seam, &line);
                         lines += 1;
                     }
                     assert_eq!(
@@ -2719,15 +2684,10 @@ mod tests {
         );
         for s in [&sphere, &torus] {
             for param in [SurfParamType::U, SurfParamType::V] {
-                if let Some(curve) = s.seam_curve(&k, param, false).unwrap() {
+                if let Some(seam) = s.create_seam_curve(&k, param, false).unwrap() {
                     assert!(
-                        !curve.curve.is_analytic(),
-                        "{param:?}: the curve on the surface"
-                    );
-                    same_curve(
-                        &k,
-                        &s.create_seam_curve(&k, param, false).unwrap().unwrap(),
-                        &curve.curve,
+                        s.seam_ruling(&k, param, &seam).unwrap().is_none(),
+                        "{param:?}: no ruling"
                     );
                 }
             }

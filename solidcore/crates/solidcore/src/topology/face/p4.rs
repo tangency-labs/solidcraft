@@ -91,9 +91,10 @@
 //!   `SetProps_Stage2` keeps in the face properties hold the handles only: a later
 //!   caller that resolves their curves needs the curves of the `SeamCheck`.
 //!   `SplitAtSeam`'s merges (`merge_seam_intervals`) rebuild them from the face's
-//!   surface as this function builds them. Both, and the closure checks, take the seam's
-//!   3d curve from [`Surface::seam_curve`] (not upstream): a native cone's ruling as a line
-//!   (tangency-labs/solidcraft#11574), every other seam the curve on the surface.
+//!   surface as this function builds them. Not upstream (tangency-labs/solidcraft#11574):
+//!   a native cone's seam meets the face's edges as its ruling ([`Surface::seam_ruling`],
+//!   the seam parameter for parameter), which the classification intersects in the seam's
+//!   place ([`ClassGeometry::intersect_curve`]); everything else reads the seam itself.
 //! - **[`BrepSeamObjects`] as merge objects.** Over `&mut Brep`
 //!   ([`BrepSeamObjects::for_merge`]) they are the [`MergeIntervalBrep`] of
 //!   `SplitAtSeam`'s `MergeIntervals`: its edits notify into the objects' own empty
@@ -151,7 +152,6 @@ use crate::query::face::p2::{
     CurveOnClassifyBrep, CurveOnClassifyCache, CurveOnClassifyObjects, FaceBrep, FaceSurfaceCache,
     PointClassifyOptions, SnapshotObjects,
 };
-use crate::surface::surface::p4::SeamCurve;
 use crate::surface::surface::p5::{SS_NONE, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
 use crate::surface::surface::p8::{FaceSolveCache, HeldSolveCache};
 use crate::surface::surface::Surface;
@@ -985,11 +985,11 @@ fn closure_of(k: &Kernel, surface: &Surface, uv_domain: &Extent2d) -> Result<Clo
         .is_closed(k, uv_domain, SurfParamType::V, None, false)?
         .0;
     let seam_u = surface
-        .seam_curve(k, SurfParamType::U, closed_u)?
-        .map(|s| s.curve);
+        .create_seam_curve(k, SurfParamType::U, closed_u)?
+        .map(Curve::from);
     let seam_v = surface
-        .seam_curve(k, SurfParamType::V, closed_v)?
-        .map(|s| s.curve);
+        .create_seam_curve(k, SurfParamType::V, closed_v)?
+        .map(Curve::from);
     Ok(Closure {
         closed_u,
         closed_v,
@@ -1429,6 +1429,9 @@ struct WithSeam<'a, R, O> {
     inner: R,
     seam: Option<(O, &'a Curve)>,
     seam_uv: Option<(O, &'a Curve)>,
+    /// Not upstream: the seam's ruling ([`Surface::seam_ruling`]), which the edge
+    /// intersection takes in the seam's place ([`ClassGeometry::intersect_curve`]).
+    seam_ruling: Option<&'a Curve>,
 }
 
 impl<R: core::ops::Deref, O: ClassObject> ClassGeometry<O> for WithSeam<'_, R, O>
@@ -1442,6 +1445,12 @@ where
             }
         }
         self.inner.curve(o)
+    }
+    fn intersect_curve(&self, o: O) -> Option<&Curve> {
+        match (self.seam, self.seam_ruling) {
+            (Some((h, _)), Some(ruling)) if h == o => Some(ruling),
+            _ => self.inner.intersect_curve(o),
+        }
     }
     fn surface(&self, o: O) -> Option<&Surface> {
         self.inner.surface(o)
@@ -1596,10 +1605,10 @@ pub(crate) fn merge_seam_intervals<O: LoopObject>(
 ) -> Result<core::result::Result<MergedTopology<O>, PartialMergeError<O>>> {
     // (a failure to rebuild the seam leaves it unresolved, as above)
     let seam = match b.face(f)?.surface.as_ref() {
-        Some(s) => s.seam_curve(k, dir, true).ok().flatten(),
+        Some(s) => s.create_seam_curve(k, dir, true).ok().flatten(),
         None => None,
     };
-    let seam = seam.map(|s| (s.uv_curve, s.curve));
+    let seam = seam.map(|s| (s.uv_curve().clone(), Curve::from(s)));
     let (ci, ui) = if dir == SurfParamType::V {
         SEAM_V_TEMPS
     } else {
@@ -1626,6 +1635,7 @@ pub(crate) fn merge_seam_intervals<O: LoopObject>(
         seam_uv: seam
             .as_ref()
             .and_then(|(uv, _)| O::temporary(ui, ClassObjectKind::Curve).map(|h| (h, uv))),
+        seam_ruling: None,
     };
     Ok(c.merge_intervals_mut_with_partial(k, &mut objects, vertices_only))
 }
@@ -1757,16 +1767,17 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyBrep<O>>(
     touches_read: bool,
 ) -> Result<(CurveClassification<O>, bool, bool, bool, SeamCurves)> {
     profile_scope!(k, "topology::face::classify_seam");
-    // Build SeamConst curve (a cone's ruling as a line, `Surface::seam_curve`)
-    let SeamCurve {
-        curve: seam,
-        uv_curve: seam_uv,
-        interval,
-    } = objects
+    // Build SeamConst curve, and its ruling on a cone (`Surface::seam_ruling`)
+    let surface = objects
         .classify_surface(f)?
-        .ok_or_else(|| null("HasSeamProblem: face without surface"))?
-        .seam_curve(k, dir, periodic)?
+        .ok_or_else(|| null("HasSeamProblem: face without surface"))?;
+    let seam = surface
+        .create_seam_curve(k, dir, periodic)?
         .ok_or_else(|| null("HasSeamProblem: periodic surface without seam curve"))?;
+    let ruling = surface.seam_ruling(k, dir, &seam)?;
+    let seam_uv = seam.uv_curve().clone();
+    let interval = seam.natural_interval();
+    let seam = Curve::from(seam);
     let temp = |i: usize| -> Result<O> {
         O::temporary(i, ClassObjectKind::Curve).ok_or_else(|| {
             null("HasSeamProblem: classification handles cannot name the seam curve")
@@ -1782,6 +1793,7 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyBrep<O>>(
         inner: objects,
         seam: Some((seam_h, &seam)),
         seam_uv: Some((seam_uv_h, &seam_uv)),
+        seam_ruling: ruling.as_ref(),
     };
 
     // build Seam classification object (owning the curve, edge not modified)
