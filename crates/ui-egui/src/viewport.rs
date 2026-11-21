@@ -4246,6 +4246,7 @@ fn pick_cached_with(app: &mut SolveApp, proj: &Proj, pos: Pos2, feedback: Option
     app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).hash(&mut h);
     crate::hole_place::snapping(app).hash(&mut h);
     crate::drag_snap::suppressed().hash(&mut h);
+    crate::tool_modifiers::target_midpoint().hash(&mut h);
     app.session.visibility.hidden_bodies.hash(&mut h);
     app.dialog.as_ref().map(|d| &d.edit_source_bodies).hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
@@ -4459,11 +4460,12 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     let sketches = if through { st.sketches.iter().map(|s| s.feature).collect() } else { visible_sketches(app) };
     let mut hits = Vec::new();
     let (o, d) = proj.ray(pos);
-    // MID is an idle sketch selection target. Tools and dialogs keep their existing picks.
+    // MID is an idle sketch selection target only when Shift is held. Tools and dialogs keep their existing picks.
     // Put it before a materialized helper point so later constraints still refer to the edge.
     if include_midpoints
         && app.tool.is_none()
         && app.dialog.is_none()
+        && (all || crate::tool_modifiers::target_midpoint())
         && let Some(ss) = s.active_sketch.and_then(|sid| st.sketch(sid))
     {
         let mut mids = Near::new(all);
@@ -5489,16 +5491,20 @@ fn tool_hover(app: &SolveApp, hits: &[Hit]) -> Option<Hit> {
     hits.iter().find(|h| crate::sketch_tools::takes(cmd, h)).cloned()
 }
 
-/// A sketch annotation under either a left-click or a context-menu click. Dimension text
-/// wins over geometry; dimension lines yield to points and curves, and glyphs to midpoints.
+/// A sketch annotation under either a left-click or a context-menu click. Constraints and
+/// constraint boxes win over dimensions and geometry behind them; otherwise dimension text wins
+/// over geometry and dimension lines yield to points and curves.
 pub(crate) fn sketch_constraint_at(app: &SolveApp, pos: Pos2, hit: Option<&Hit>) -> Option<Sel> {
     app.session.active_sketch?;
     let off = |kind: &str| app.ui.pick_off.iter().any(|x| x == kind);
+    let glyph = crate::sketch_tools::glyph_at(pos).filter(|_| !off("constraints"));
+    if glyph.is_some() || crate::sketch_tools::over_constraint_ui(app, pos) {
+        return glyph.map(|id| Sel::SketchConstraint { id });
+    }
     let on_geometry = matches!(hit, Some(Hit::SketchPoint { .. } | Hit::SketchMidpoint { .. } | Hit::SketchCurve { .. }));
     let dimension =
         crate::dim_view::hit_text(pos).or_else(|| if on_geometry { None } else { crate::dim_view::hit(pos) }).filter(|_| !off("dimensions"));
-    let glyph = crate::sketch_tools::glyph_at(pos).filter(|_| !off("constraints") && !matches!(hit, Some(Hit::SketchMidpoint { .. })));
-    dimension.or(glyph).map(|id| Sel::SketchConstraint { id })
+    dimension.map(|id| Sel::SketchConstraint { id })
 }
 
 /// What a click would pick: the first hit the open dialog's active input accepts, or with no
@@ -7405,7 +7411,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             );
             live.contains(crate::tool_modifiers::ModAction::TargetMidpoint)
         } else {
-            false
+            mods.shift
         };
         crate::tool_modifiers::set_target_midpoint(mid);
         let square = app.tool.as_ref().map(|t| t.cmd).is_some_and(|cmd| {
@@ -7458,9 +7464,18 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // An appearance swatch uses this frame's hover as its drop target.
     let swatch_released =
         ui.input(|i| i.pointer.any_released()) && egui::DragAndDrop::has_payload_of_type::<solidcraft_engine::doc::appearance::Look>(ui.ctx());
+    let constraint_pointer = app.tool.is_none()
+        && !app.dialog.as_ref().is_some_and(|d| d.wants_picks())
+        && hover.is_some_and(|p| inside && crate::sketch_tools::over_constraint_ui(app, p));
     let hits = hover
         .filter(|_| {
-            inside && app.viewport.boxsel.is_none() && !crate::joint_drag::active(app) && !joint_handle_pointer && !navigating && !dragging_layer
+            inside
+                && app.viewport.boxsel.is_none()
+                && !crate::joint_drag::active(app)
+                && !joint_handle_pointer
+                && !constraint_pointer
+                && !navigating
+                && !dragging_layer
         })
         .map(|p| {
             if primary_down || swatch_released || resp.clicked() || resp.secondary_clicked() {
@@ -7472,7 +7487,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         .unwrap_or_default();
     // The Fillet and Chamfer window resolves its own corners: the nearest sketch point to a
     // corner drawn from the origin is the fixed origin, which ends no two curves.
-    let corner = hover.filter(|_| inside && !navigating).and_then(|p| crate::sketch_modify_ui::corner_hit(app, &proj, p));
+    let corner = hover.filter(|_| inside && !navigating && !constraint_pointer).and_then(|p| crate::sketch_modify_ui::corner_hit(app, &proj, p));
     let corner_hovered = corner.is_some();
     let cand = if app.tool.is_some() {
         tool_hover(app, &hits).map(|h| (h, None))
@@ -7484,7 +7499,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     };
     // The view moved under a still pointer: the highlight under it stays on the face it
     // was on instead of going off (#2130). It is picked again when the gesture ends.
-    if !(hover_frozen && inside) {
+    if constraint_pointer || !(hover_frozen && inside) {
         app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
     }
     wake_centre(app, &hits, hover, &proj);
@@ -7499,7 +7514,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // held Space owns drags, not a still press, so only a navigation that has started cancels
     // it. A preset's modifier binding (Maya Alt, Alias Shift+Alt) or Ctrl+left orbit is a
     // gesture to navigate from the press on, so it still cancels the hold at once.
-    let navigating_from_press = mode.is_some() || app.viewport.primary_nav.is_some() || joint_handle_pointer;
+    let navigating_from_press = mode.is_some() || app.viewport.primary_nav.is_some() || joint_handle_pointer || constraint_pointer;
     let held = crate::select_other::track_hold(app, ui.ctx(), &proj, inside, primary_pressed, primary_down, hover, navigating_from_press);
     crate::select_other::hover_override(app);
     list_hover(app);
@@ -7877,17 +7892,30 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     app.dialog = Some(dialog);
                 }
+            } else if crate::sketch_tools::click_group_badge(app, p) {
+                // Clicking a collapsed constraint group badge expands it immediately.
             } else {
                 let annotation = sketch_constraint_at(app, p, cand.as_ref().map(|c| &c.0));
                 if crate::sketch_text_handles::over(app, &proj, p) {
                     // A text's resize or rotation handle: the text stays selected.
                 } else if !crate::sketch3d::click(app, &proj, p) {
                     match annotation {
-                        Some(sel) => select(app, Some(sel), add || pen_select, allow_toggle || pen_select),
+                        Some(sel) => {
+                            if let Sel::SketchConstraint { id } = &sel {
+                                crate::sketch_tools::note_clicked_constraint(id, p);
+                            } else {
+                                crate::sketch_tools::clear_clicked_constraint();
+                            }
+                            select(app, Some(sel), add || pen_select, allow_toggle || pen_select);
+                        }
+                        None if crate::sketch_tools::over_constraint_ui(app, p) => {}
                         // Clicking again on the same spot selects the next thing under it (not
                         // the second click of a double-click, which has its own actions).
-                        None if !pen_select && !add && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {}
+                        None if !pen_select && !add && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {
+                            crate::sketch_tools::clear_clicked_constraint();
+                        }
                         None => {
+                            crate::sketch_tools::clear_clicked_constraint();
                             // Clicking empty space clears the selection, and the woken centre
                             // sleeps with it (#16346): the cross in the ring must not outlive
                             // the circle or arc it belongs to. A click on the centre itself
@@ -7939,8 +7967,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && app.tool.is_none()
             && app.dialog.is_none()
             && (crate::sketch_modify_ui::double_click_pattern(app, p)
-                || crate::dim_view::double_click(app, p)
-                || crate::dim_view::model_double_click(app, p));
+                || (!crate::sketch_tools::over_constraint_ui(app, p)
+                    && (crate::dim_view::double_click(app, p) || crate::dim_view::model_double_click(app, p))));
         // Double-click a text (an outline or inside a letter; the first click selected it): edit it.
         if resp.double_clicked()
             && !held
@@ -8017,12 +8045,27 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if app.tool.is_some() {
                 crate::tools::finish(app);
             } else if app.dialog.is_none() {
-                crate::context_menu::open(app, p, held_mods);
+                if crate::sketch_tools::detach_simulated_at(app, p) || crate::sketch_tools::break_symmetry_at(app, p) {
+                    // Right-clicking a simulated break-off glyph detaches/unmirrors immediately.
+                } else if app.preferences.right_click_deletes_constraint && crate::sketch_tools::delete_glyph_at(app, p) {
+                    // Right-clicking an individual constraint glyph deletes it directly.
+                } else {
+                    crate::context_menu::open(app, p, held_mods);
+                }
             } else if crate::dialogs_frame::open_menu(app, p) {
                 // A centreline of the Frame Member being made: its Remove Tube menu (#15705).
             } else if app.preferences.right_click_confirms {
                 crate::dialogs::right_click(app);
             }
+        }
+        // Middle-click on a constraint glyph turns on that constraint tool.
+        if resp.clicked_by(egui::PointerButton::Middle)
+            && !held
+            && app.dialog.is_none()
+            && app.tool.as_ref().is_none_or(|t| t.cmd.starts_with("sketch.constraint."))
+            && crate::sketch_tools::activate_tool_at(app, p)
+        {
+            app.viewport.middle_clicked = false;
         }
     }
     // Dragging a sketch point of the active sketch moves it; the solver keeps the constraints.
@@ -8038,7 +8081,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             .drag_started_by(egui::PointerButton::Primary)
             .then(|| ui.input(|i| i.pointer.press_origin()))
             .flatten()
-            .filter(|a| !crate::sketch_text_handles::drag_start(app, &proj, *a) && !crate::sketch3d::drag_start(app, &proj, *a))
+            .filter(|a| {
+                !crate::sketch_text_handles::drag_start(app, &proj, *a)
+                    && !crate::sketch3d::drag_start(app, &proj, *a)
+                    && !crate::sketch_tools::over_constraint_ui(app, *a)
+            })
             .map(|a| (a, pick(app, &proj, a).into_iter().next()));
         // A drag from a tangent handle a selected spline only shows stores its handles first,
         // in the drag's undo step (#6502).
@@ -8056,6 +8103,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         if let Some((a, hit)) = &grabbed
             && !crate::sketch_text_handles::dragging(app)
+            && !crate::sketch_tools::over_constraint_ui(app, *a)
             && let Some(q) = on_plane(app, *a)
         {
             let on_geometry = matches!(hit, Some(Hit::SketchPoint { .. } | Hit::SketchMidpoint { .. } | Hit::SketchCurve { .. }));

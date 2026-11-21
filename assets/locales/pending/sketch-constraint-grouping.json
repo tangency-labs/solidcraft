@@ -1,0 +1,90 @@
+{
+  "en": {
+    "prefs.constraint_group_never": "Never",
+    "prefs.constraint_group_threshold": "Group constraints over",
+    "prefs.constraint_group_threshold_note": "Group constraint glyphs on the same curve or coincident point when there are more than this many. Set to Never to show every constraint separately.",
+    "prefs.only_show_constraints_on_geometry_hover": "Only show constraints related to hovered geometry",
+    "prefs.only_show_constraints_on_geometry_hover_note": "Hide healthy unselected constraints until a sketch curve or point is hovered for 400 ms (or kept visible after left-clicking a hovered geometry).",
+    "prefs.right_click_deletes_constraint": "Right-click deletes constraints",
+    "prefs.right_click_deletes_constraint_note": "Delete a constraint glyph when you right-click it instead of opening its context menu.",
+    "prefs.show_constraints_on_geometry_hover": "Show constraints on hover over geometry",
+    "prefs.show_constraints_on_geometry_hover_note": "Hovering over a sketch curve or point for 400 ms highlights its constraints and expands any collapsed groups that contain them."
+  },
+  "ar": {
+    "prefs.constraint_group_never": "أبدًا",
+    "prefs.constraint_group_threshold": "تجميع القيود الأكثر من",
+    "prefs.constraint_group_threshold_note": "تجميع رموز القيود على نفس المنحنى أو النقطة المتطابقة عندما يتجاوز عددها هذا الحد. اختر أبدًا لإظهار كل قيد على حدة.",
+    "prefs.only_show_constraints_on_geometry_hover": "إظهار القيود المرتبطة بالهندسة المُمرَّر فوقها فقط",
+    "prefs.only_show_constraints_on_geometry_hover_note": "إخفاء القيود السليمة غير المحددة حتى يتم التمرير فوق منحنى أو نقطة في الرسم لمدة 400 مللي ثانية (أو إبقاؤها ظاهرة بعد النقر الأيسر عليها).",
+    "prefs.right_click_deletes_constraint": "النقر بزر الفأرة الأيمن يحذف القيود",
+    "prefs.right_click_deletes_constraint_note": "حذف رمز القيد عند النقر بزر الفأرة الأيمن بدلًا من فتح قائمة السياق.",
+    "prefs.show_constraints_on_geometry_hover": "إظهار القيود عند التمرير فوق الهندسة",
+    "prefs.show_constraints_on_geometry_hover_note": "يؤدي التمرير فوق منحنى أو نقطة في الرسم لمدة 400 مللي ثانية إلى تمييز قيودها وتوسيع أي مجموعات مطوية تحتوي عليها."
+  },
+  "de": {
+    "prefs.constraint_group_never": "Nie",
+    "prefs.constraint_group_threshold": "Bindungen gruppieren ab mehr als",
+    "prefs.constraint_group_threshold_note": "Gruppiert Bindungssymbole derselben Kurve oder desselben koinzidenten Punkts, wenn es mehr als diese Anzahl sind. Auf Nie stellen, um jede Bindung einzeln anzuzeigen.",
+    "prefs.only_show_constraints_on_geometry_hover": "Nur Bindungen der überfahrenen Geometrie anzeigen",
+    "prefs.only_show_constraints_on_geometry_hover_note": "Blendet gesunde, nicht ausgewählte Bindungen aus, bis eine Skizzenkurve oder ein Punkt 400 ms überfahren (oder danach angeklickt) wird.",
+    "prefs.right_click_deletes_constraint": "Rechtsklick löscht Bindungen",
+    "prefs.right_click_deletes_constraint_note": "Löscht ein Bindungssymbol beim Rechtsklick direkt, statt das Kontextmenü zu öffnen.",
+    "prefs.show_constraints_on_geometry_hover": "Bindungen beim Überfahren von Geometrie anzeigen",
+    "prefs.show_constraints_on_geometry_hover_note": "Wenn der Mauszeiger 400 ms über einer Skizzenkurve oder einem Punkt ruht, werden deren Bindungen hervorgehoben und zugehörige Gruppen aufgeklappt."
+  },
+  "he": {
+    "prefs.constraint_group_never": "אף פעם",
+    "prefs.constraint_group_threshold": "קבץ אילוצים מעל",
+    "prefs.constraint_group_threshold_note": "קיבוץ סמלי אילוצים על אותה עקומה או נקודה חופפת כאשר יש יותר ממספר זה. הגדר לאף פעם כדי להציג כל אילוץ בנפרד.",
+    "prefs.only_show_constraints_on_geometry_hover": "הצג רק אילוצים הקשורים לגאומטריה שמתחת לסמן",
+    "prefs.only_show_constraints_on_geometry_hover_note": "הסתרת אילוצים תקינים שאינם נבחרים עד שמרחפים מעל עקומה או נקודה למשך 400 אלפיות שנייה (או משאירים אותם מוצגים לאחר לחיצה שמאלית).",
+    "prefs.right_click_deletes_constraint": "לחיצה ימנית מוחקת אילוצים",
+    "prefs.right_click_deletes_constraint_note": "מחיקת סמל אילוץ בלחיצה ימנית במקום פתיחת תפריט ההקשר.",
+    "prefs.show_constraints_on_geometry_hover": "הצג אילוצים בעת ריחוף מעל גאומטריה",
+    "prefs.show_constraints_on_geometry_hover_note": "ריחוף מעל עקומה או נקודה בשרטוט למשך 400 אלפיות שנייה מדגיש את האילוצים שלה ומרחיב קבוצות מכווצות המכילות אותם."
+  },
+  "ja": {
+    "prefs.constraint_group_never": "なし",
+    "prefs.constraint_group_threshold": "拘束をまとめる上限",
+    "prefs.constraint_group_threshold_note": "同じ曲線または一致点上の拘束がこの数を超える場合、1つの記号にまとめます。「なし」にするとすべての拘束を個別に表示します。",
+    "prefs.only_show_constraints_on_geometry_hover": "ホバー中のジオメトリに関連する拘束のみ表示",
+    "prefs.only_show_constraints_on_geometry_hover_note": "スケッチ曲線または点に 400 ms ホバー（またはホバー後に左クリック）するまで、未選択の正常な拘束を非表示にします。",
+    "prefs.right_click_deletes_constraint": "右クリックで拘束を削除",
+    "prefs.right_click_deletes_constraint_note": "コンテキストメニューを開かずに、右クリックで拘束グリフを削除します。",
+    "prefs.show_constraints_on_geometry_hover": "ジオメトリ上のホバー時に拘束を表示",
+    "prefs.show_constraints_on_geometry_hover_note": "スケッチ曲線または点の上に 400 ms カーソルを置くと、関連する拘束をハイライトし、それらを含むグループを展開します。"
+  },
+  "ko": {
+    "prefs.constraint_group_never": "사용 안 함",
+    "prefs.constraint_group_threshold": "구속 조건 그룹 기준",
+    "prefs.constraint_group_threshold_note": "같은 곡선이나 일치하는 점의 구속 조건이 이 개수를 초과하면 하나의 기호로 묶습니다. '사용 안 함'으로 설정하면 모든 구속 조건을 개별 표시합니다.",
+    "prefs.only_show_constraints_on_geometry_hover": "마우스를 올린 형상과 관련된 구속 조건만 표시",
+    "prefs.only_show_constraints_on_geometry_hover_note": "스케치 곡선이나 점 위에 400ms 동안 마우스를 올리거나(또는 올린 뒤 왼쪽 클릭할 때까지) 선택되지 않은 정상 구속 조건을 숨깁니다.",
+    "prefs.right_click_deletes_constraint": "오른쪽 클릭으로 구속 조건 삭제",
+    "prefs.right_click_deletes_constraint_note": "상황에 맞는 메뉴를 여는 대신 오른쪽 클릭으로 구속 조건 기호를 바로 삭제합니다.",
+    "prefs.show_constraints_on_geometry_hover": "형상 위에 마우스를 올릴 때 구속 조건 표시",
+    "prefs.show_constraints_on_geometry_hover_note": "스케치 곡선이나 점 위에 400ms 동안 마우스를 올리면 해당 구속 조건을 강조하고 이를 포함한 그룹을 펼칩니다."
+  },
+  "vi": {
+    "prefs.constraint_group_never": "Không bao giờ",
+    "prefs.constraint_group_threshold": "Nhóm ràng buộc khi vượt quá",
+    "prefs.constraint_group_threshold_note": "Nhóm các biểu tượng ràng buộc trên cùng đường cong hoặc điểm trùng nhau khi số lượng vượt quá mức này. Chọn Không bao giờ để luôn hiện riêng từng ràng buộc.",
+    "prefs.only_show_constraints_on_geometry_hover": "Chỉ hiện ràng buộc liên quan đến hình học đang di chuột",
+    "prefs.only_show_constraints_on_geometry_hover_note": "Ẩn các ràng buộc bình thường chưa chọn cho đến khi giữ chuột trên đường cong hoặc điểm trong 400 ms (hoặc giữ nguyên sau khi nhấp chuột trái).",
+    "prefs.right_click_deletes_constraint": "Nhấp chuột phải để xóa ràng buộc",
+    "prefs.right_click_deletes_constraint_note": "Xóa biểu tượng ràng buộc khi nhấp chuột phải thay vì mở menu ngữ cảnh.",
+    "prefs.show_constraints_on_geometry_hover": "Hiện ràng buộc khi di chuột lên hình học",
+    "prefs.show_constraints_on_geometry_hover_note": "Giữ chuột trên đường cong hoặc điểm phác thảo trong 400 ms để làm nổi bật các ràng buộc của nó và mở rộng các nhóm thu gọn chứa chúng."
+  },
+  "zh": {
+    "prefs.constraint_group_never": "从不",
+    "prefs.constraint_group_threshold": "约束分组阈值",
+    "prefs.constraint_group_threshold_note": "当同一曲线或重合点上的约束数量超过此值时将其合并为一个分组符号。设为“从不”则单独显示每个约束。",
+    "prefs.only_show_constraints_on_geometry_hover": "仅显示与悬停几何图形相关的约束",
+    "prefs.only_show_constraints_on_geometry_hover_note": "在草图曲线或点上悬停 400 毫秒（或悬停并左键单击后保持显示）之前，隐藏未选中的正常约束。",
+    "prefs.right_click_deletes_constraint": "右键单击删除约束",
+    "prefs.right_click_deletes_constraint_note": "右键单击约束符号时直接删除它，而不是打开上下文菜单。",
+    "prefs.show_constraints_on_geometry_hover": "悬停在几何图形上时显示约束",
+    "prefs.show_constraints_on_geometry_hover_note": "在草图曲线或点上悬停 400 毫秒时高亮显示其约束，并展开包含这些约束的折叠分组。"
+  }
+}

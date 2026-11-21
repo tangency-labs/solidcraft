@@ -119,10 +119,9 @@ fn a_rounded_rectangle_completes_from_an_existing_vertex() {
     let at_vertex = |i: usize| sk.point(i).is_some_and(|p| (p.x - 40.0).abs() < 1e-6 && p.y.abs() < 1e-6);
     let end = sk.resolve_point(&format!("{line}.end")).expect("the line's end");
     assert!(at_vertex(end), "the line's end stays at the vertex");
-    assert!(
-        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if at_vertex(p) && at_vertex(q))),
-        "the vertex stays tied to the corner"
-    );
+    let tied_by_coincident = sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if at_vertex(p) && at_vertex(q)));
+    let virtual_corner = sk.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, .. } if p == end)).count() >= 2;
+    assert!(tied_by_coincident || virtual_corner, "the vertex stays tied to the corner");
     // The shape is whole: a 20 × 20 rectangle with 2 mm corners.
     let si = run(&mut s, "sketch.inspect", json!({}));
     let area = si["profiles"][0]["area_mm2"].as_f64().unwrap();

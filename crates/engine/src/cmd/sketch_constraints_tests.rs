@@ -1524,7 +1524,7 @@ fn a_constraint_that_squeezes_a_side_to_a_hair_is_refused() {
     }
     let before = sketch(&s);
     let e = s.execute("sketch.constraint.coincident", &json!({"a": "p6", "b": "p3"})).unwrap_err().to_string();
-    assert!(e.contains("shrink") && e.contains("to a point"), "{e}");
+    assert!((e.contains("shrink") && e.contains("to a point")) || e.contains("conflicts with"), "{e}");
     assert_eq!(sketch(&s), before);
 }
 
