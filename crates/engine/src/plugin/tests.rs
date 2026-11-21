@@ -1039,6 +1039,10 @@ mod native {
                 ("binary.svg", &[0xff]),
                 ("large.svg", large.as_slice()),
                 ("colour.svg", br##"<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="8" fill="#ff00ff"/></svg>"##.as_slice()),
+                ("clip.svg", br#"<svg viewBox="0 0 64 64"><g clip-path="url(other.svg#c)"></g></svg>"#.as_slice()),
+                ("mask.svg", br#"<svg viewBox="0 0 64 64"><path d="M8 8L56 56" mask="url(other.svg#m)"/></svg>"#.as_slice()),
+                ("closing-tag.svg", br#"<svg viewBox="0 0 64 64"><g></defs></svg>"#.as_slice()),
+                ("close-path.svg", br#"<svg viewBox="0 0 64 64"><path d="M8 8L56 8L56 56Z 1 2"/></svg>"#.as_slice()),
             ];
             for (name, bytes) in &files {
                 std::fs::write(f.0.join("sample").join(name), bytes).unwrap();
@@ -1053,6 +1057,10 @@ mod native {
                 (Some(json!("binary.svg")), true),
                 (Some(json!("large.svg")), true),
                 (Some(json!("colour.svg")), true),
+                (Some(json!("clip.svg")), true),
+                (Some(json!("mask.svg")), true),
+                (Some(json!("closing-tag.svg")), true),
+                (Some(json!("close-path.svg")), true),
                 (Some(json!("../valid.svg")), true),
                 (Some(json!(7)), true),
             ] {

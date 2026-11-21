@@ -16,7 +16,9 @@ SolidCraft's open code; it should not look like SolidCraft unless the maintainer
       the code-drawn glyphs, and the built-in themes.
    c. The theme, `crates/theme` (solidcraft-theme): the design tokens, colour palettes, accent
       ramps, sizes and spacing that give SolidCraft its appearance.
-   d. The SolidCraft name, logo, app icon and brand kit (`assets/branding`, `assets/icons/app`).
+   d. The icon SVG parser, `crates/icon-svg` (solidcraft-icon-svg): the parsing code shared
+      by the UI icon renderer and plugin package checks.
+   e. The SolidCraft name, logo, app icon and brand kit (`assets/branding`, `assets/icons/app`).
 
    Third-party material inside these folders keeps its own licence, listed in ATTRIBUTION.md.
    In particular the IBM Plex fonts are under the SIL Open Font License 1.1, and nothing here

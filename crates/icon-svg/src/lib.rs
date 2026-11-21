@@ -108,24 +108,38 @@ impl Roles<'_> {
                     stack.push(Frame::Clip(doc.clips.len() - 1));
                 }
                 ("g", false) => {
-                    let clip = match t.get("clip-path").and_then(url_ref) {
-                        Some(id) => Some(*clip_ids.get(id).ok_or("unknown clip")?),
+                    let clip = match t.get("clip-path") {
+                        Some(value) => {
+                            let id = url_ref(value).ok_or("unsupported clip-path")?;
+                            Some(*clip_ids.get(id).ok_or("unknown clip")?)
+                        }
                         None => None,
                     };
                     let opacity = t.get("opacity").and_then(|o| o.parse().ok()).unwrap_or(1.0);
                     stack.push(Frame::Group { clip, opacity, items: Vec::new() });
                 }
-                ("defs" | "mask" | "clipPath" | "g", true) => match stack.pop() {
-                    Some(Frame::Group { clip, opacity, items }) => {
-                        let item = Item::Group { clip, opacity, items };
-                        match stack.last_mut() {
-                            Some(Frame::Group { items, .. }) => items.push(item),
-                            _ => doc.items.push(item),
-                        }
+                ("defs" | "mask" | "clipPath" | "g", true) => {
+                    if !matches!(
+                        (t.name, stack.last()),
+                        ("defs", Some(Frame::Defs))
+                            | ("mask", Some(Frame::Mask(_)))
+                            | ("clipPath", Some(Frame::Clip(_)))
+                            | ("g", Some(Frame::Group { .. }))
+                    ) {
+                        return Err("mismatched closing tag".into());
                     }
-                    Some(_) => {}
-                    None => return Err("unbalanced tags".into()),
-                },
+                    match stack.pop() {
+                        Some(Frame::Group { clip, opacity, items }) => {
+                            let item = Item::Group { clip, opacity, items };
+                            match stack.last_mut() {
+                                Some(Frame::Group { items, .. }) => items.push(item),
+                                _ => doc.items.push(item),
+                            }
+                        }
+                        Some(_) => {}
+                        None => return Err("unbalanced tags".into()),
+                    }
+                }
                 ("path" | "circle", _) => {
                     let in_mask = matches!(stack.last(), Some(Frame::Mask(_)));
                     let path = if t.name == "path" {
@@ -133,8 +147,11 @@ impl Roles<'_> {
                     } else {
                         sk::PathBuilder::from_circle(t.num("cx")?, t.num("cy")?, t.num("r")?).ok_or("bad circle")?
                     };
-                    let mask = match t.get("mask").and_then(url_ref) {
-                        Some(id) => Some(*mask_ids.get(id).ok_or("unknown mask")?),
+                    let mask = match t.get("mask") {
+                        Some(value) => {
+                            let id = url_ref(value).ok_or("unsupported mask")?;
+                            Some(*mask_ids.get(id).ok_or("unknown mask")?)
+                        }
                         None => None,
                     };
                     let dash = parse_dash(t.get("stroke-dasharray"));
@@ -362,6 +379,7 @@ fn parse_path(d: &str) -> Result<sk::Path, String> {
                 if open {
                     pb.close();
                 }
+                cmd = ' ';
             }
             other => return Err(format!("path command {other} is not supported")),
         }
