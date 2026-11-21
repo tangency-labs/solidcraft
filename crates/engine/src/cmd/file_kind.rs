@@ -141,3 +141,56 @@ fn a(kind: DesignKind) -> String {
     let article = if name.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" };
     format!("{article} {name}")
 }
+
+/// The sheet metal commands that model: a part or an assembly doesn't hold their features. The
+/// ones that only read (export, measure, flat pattern, the rules) are allowed everywhere.
+const SHEET_METAL_MODELLING: [&str; 9] = [
+    "sheet.flange",
+    "sheet.convert",
+    "sheet.fold",
+    "sheet.hem",
+    "sheet.path_flange",
+    "sheet.perforate",
+    "sheet.unfold",
+    "sheet.refold",
+    "sheet.recognize",
+];
+
+/// The commands that make a new body from nothing: an assembly holds parts from their own files.
+/// A feature that can also cut or add to what is there (an extrude, a hole) is not here: whether
+/// an assembly may hold such features is still open (step 13).
+const NEW_BODY_FROM_NOTHING: [&str; 10] = [
+    "solid.box",
+    "solid.cylinder",
+    "solid.sphere",
+    "solid.cone",
+    "solid.torus",
+    "solid.coil",
+    "solid.pipe",
+    "solid.bounding_solid",
+    "solid.cell_grid",
+    "solid.boundary_fill",
+];
+
+/// Why the command `id` doesn't fit a file of `kind`, under Parts and assemblies (the experiment
+/// on); none when it fits. A single design is never restricted (step 13 has the rules and what
+/// is still open).
+pub fn refusal(kind: DesignKind, id: &str) -> Option<String> {
+    refusal_with(kind, id, experimental_file_kinds())
+}
+
+/// [`refusal`] with the experiment `on` or off.
+pub(crate) fn refusal_with(kind: DesignKind, id: &str, on: bool) -> Option<String> {
+    if !on {
+        return None;
+    }
+    match kind {
+        DesignKind::Part if SHEET_METAL_MODELLING.contains(&id) => {
+            Some("a part holds part features: create a new sheet metal part, or use features to convert".into())
+        }
+        DesignKind::Assembly if NEW_BODY_FROM_NOTHING.contains(&id) || SHEET_METAL_MODELLING.contains(&id) => {
+            Some("an assembly holds parts from their own files and their joints: create a new part, then insert it".into())
+        }
+        _ => None,
+    }
+}

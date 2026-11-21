@@ -3382,6 +3382,51 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// What each kind holds (#6892, step 13): a part refuses the sheet metal modelling commands, an
+    /// assembly refuses a body made from nothing and sheet metal, with what to do instead, and
+    /// the design is unchanged; a single design and a sheet metal part refuse nothing; the
+    /// ribbon's check gives the same reason. With the experiment off nothing is refused.
+    #[test]
+    fn a_command_that_does_not_fit_the_kind_is_refused_with_what_to_do_instead() {
+        use solidcraft_io::DesignKind;
+        crate::set_experimental_file_kinds(true);
+        let mut part = Session::default();
+        part.execute("file.new", &json!({"kind": "part"})).unwrap();
+        part.execute("solid.box", &json!({"length": 40, "width": 30, "height": 2})).unwrap();
+        let before = part.doc.to_json();
+        let refused = part.execute("sheet.convert", &json!({})).unwrap_err().to_string();
+        assert!(refused.contains("a part holds part features: create a new sheet metal part, or use features to convert"), "{refused}");
+        assert_eq!(part.doc.to_json(), before, "a refused command changes nothing");
+        let spec = super::super::find_command("sheet.flange").unwrap();
+        assert!(spec.allowed(&part).unwrap_err().contains("create a new sheet metal part"), "the ribbon says the same");
+        // Reading sheet metal is allowed anywhere.
+        for id in ["sheet.export_dxf", "sheet.measure_body", "sheet.rules", "sheet.flat_pattern"] {
+            assert_eq!(kind::refusal_with(DesignKind::Part, id, true), None, "{id}");
+        }
+        let mut assembly = Session::default();
+        assembly.execute("file.new", &json!({"kind": "assembly"})).unwrap();
+        let refused = assembly.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap_err().to_string();
+        assert!(refused.contains("an assembly holds parts from their own files and their joints: create a new part, then insert it"), "{refused}");
+        assert!(assembly.model.state().bodies.is_empty());
+        for id in ["solid.cylinder", "sheet.flange"] {
+            assert!(kind::refusal_with(DesignKind::Assembly, id, true).is_some(), "{id}");
+        }
+        // Still open (step 13): assembly features, more bodies in a part, solids in sheet metal.
+        for (kind, id) in [
+            (DesignKind::Assembly, "solid.extrude"),
+            (DesignKind::Assembly, "solid.hole"),
+            (DesignKind::Part, "solid.box"),
+            (DesignKind::SheetMetal, "solid.box"),
+        ] {
+            assert_eq!(kind::refusal_with(kind, id, true), None, "{kind:?} {id}");
+        }
+        // A single design is never restricted, and nothing is with the experiment off.
+        for id in ["solid.box", "sheet.flange", "sheet.convert"] {
+            assert_eq!(kind::refusal_with(DesignKind::Single, id, true), None, "{id}");
+            assert_eq!(kind::refusal_with(DesignKind::Assembly, id, false), None, "{id}");
+        }
+    }
+
     /// Three-digit hex colours expand one digit per channel, as CSS does: `#fff` is white.
     #[test]
     fn a_three_digit_colour_expands_each_digit() {

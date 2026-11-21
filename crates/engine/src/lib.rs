@@ -2709,6 +2709,11 @@ impl Session {
             return self.execute("plugin.run", &call);
         }
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        // A command that doesn't fit the open file's kind is refused before anything changes
+        // (experimental, #6892).
+        if let Some(why) = cmd::kind_refusal(self.design_kind, spec.id) {
+            return Err(EngineError::Disabled(spec.id.to_string(), why));
+        }
         if panels::commands::is_command(spec.id) {
             // Layout is application state. Even a missing capability must not
             // clear live links, map picks, snapshot, evaluate or refresh a design.

@@ -84,7 +84,7 @@ pub use features::{auto_operation, clearance_diameter, clearance_sizes, extrude_
 pub(crate) use features::{rail_fit_form, sweep_orientation};
 pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mask, side_point, sketch_frame_id};
 pub(crate) use file::import::realign_imports;
-pub use file::kind::{experimental_file_kinds, file_kinds_on_for_tests, set_experimental_file_kinds};
+pub use file::kind::{experimental_file_kinds, file_kinds_on_for_tests, refusal as kind_refusal, set_experimental_file_kinds};
 pub(crate) use file::mesh_crease_angle;
 pub use file::open_steps::OpenSteps;
 pub use file::runs_plugin_importer;
@@ -406,6 +406,11 @@ impl CommandSpec {
     /// Whether the command can run in `s` now: on the part open, and enabled. The one check
     /// running a command, running it inside another and listing it make.
     pub fn allowed(&self, s: &Session) -> std::result::Result<(), String> {
+        // A command that doesn't fit the open file's kind (experimental, #6892): disabled, with
+        // what to do instead as its tooltip.
+        if let Some(why) = file::kind::refusal(s.design_kind, self.id) {
+            return Err(why);
+        }
         if s.active_sheet_sketch.is_some() && matches!(self.id, "drawing.create" | "drawing.open" | "drawing.close" | "drawing.delete") {
             return Err("finish or cancel the sheet sketch before switching drawings".into());
         }
