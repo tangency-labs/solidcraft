@@ -41,7 +41,7 @@ use crate::{Error, Result};
 
 impl Answer for Vec<q::EdgeFaceGapSample> {}
 impl Answer for Distance {}
-impl Answer for solidcore::geom::extent3d::Extent3d {}
+impl Answer for Extent3d {}
 impl Answer for [f64; 3] {}
 impl Answer for Vec<[f64; 3]> {}
 impl Answer for Vec<Option<f64>> {}
@@ -1653,17 +1653,14 @@ fn face_normal_in_body(
 fn find_point_normal(
     k: &Kernel,
     b: &mut Brep,
-    candidates: &[(usize, FaceId, Extent3d)],
+    candidates: &q::FacePointCandidates,
     p: Point3,
     tol: f64,
     selected: Option<usize>,
 ) -> Result<Option<(usize, Normal)>> {
-    for (index, f, bounds) in candidates {
-        if selected.is_some_and(|s| s != *index) || !bounds.contains_point(p, tol) {
-            continue;
-        }
-        if let Some(normal) = face_normal_in_body(k, b, *f, p, tol)? {
-            return Ok(Some((*index, normal)));
+    for (index, f) in candidates.at_point(p, tol, selected).map_err(status)? {
+        if let Some(normal) = face_normal_in_body(k, b, f, p, tol)? {
+            return Ok(Some((index, normal)));
         }
     }
     Ok(None)
@@ -1688,16 +1685,15 @@ fn classify_with_normals(
     }
     let needs_faces = matches!(face, Some(PointNormalFace::Point(_)))
         || classes.contains(&PointClass::OnBoundary);
-    let mut candidates = Vec::new();
-    if needs_faces {
-        for (index, &f) in order.faces.iter().enumerate() {
-            if matches!(face, Some(PointNormalFace::Index(i)) if i != index) {
-                continue;
-            }
-            let bounds = q::face_bounding_box(k, b, f, false).map_err(status)?;
-            candidates.push((index, f, bounds));
-        }
-    }
+    let candidates = if needs_faces {
+        let selected = match face {
+            Some(PointNormalFace::Index(i)) => Some(i),
+            _ => None,
+        };
+        q::FacePointCandidates::new(k, b, &order.faces, selected).map_err(status)?
+    } else {
+        q::FacePointCandidates::default()
+    };
     let selected = match face {
         Some(PointNormalFace::Index(i)) => Some(i),
         Some(PointNormalFace::Point(p)) => Some(
