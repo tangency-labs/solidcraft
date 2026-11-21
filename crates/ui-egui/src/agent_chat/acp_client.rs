@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use super::acp::{self, Incoming};
+use super::acp::{self, Answer, Incoming};
 use super::backend::{ChatBackend, Event, PromptPart, StartContext, TestError};
 use super::process::{AgentProcess, FromAgent};
 
@@ -46,6 +46,9 @@ pub struct AcpBackend {
     auth: Vec<acp::AuthMethod>,
     /// Open permission questions: our key → the agent's request id.
     permissions: HashMap<u64, Value>,
+    /// Open questions of the agent's own: our key → the agent's request id and the property its
+    /// answer belongs to.
+    questions: HashMap<u64, (Value, Option<String>)>,
     next_key: u64,
     cancelling: Option<(u64, Instant)>,
     exited: bool,
@@ -75,6 +78,7 @@ impl AcpBackend {
             documents: false,
             auth: Vec::new(),
             permissions: HashMap::new(),
+            questions: HashMap::new(),
             next_key: 0,
             cancelling: None,
             exited: false,
@@ -203,6 +207,17 @@ impl AcpBackend {
                 self.permissions.insert(self.next_key, rpc);
                 out.push(Event::Permission { key: self.next_key, title, kind, options });
             }
+            Incoming::Question { rpc, session, message, options, field, url } => {
+                // A question of a session that is not this one belongs to a chat that is over: it
+                // is not asked, but the agent is told it was dismissed, so it waits for nothing.
+                if !session.is_empty() && self.session.as_deref() != Some(session.as_str()) {
+                    self.proc.send(&acp::question_reply(rpc, field.as_deref(), &Answer::Cancel));
+                    return;
+                }
+                self.next_key += 1;
+                self.questions.insert(self.next_key, (rpc, field.clone()));
+                out.push(Event::Question { key: self.next_key, message, options, field, url });
+            }
             Incoming::AuthStatus(s) => out.push(Event::AuthStatus(s)),
             Incoming::ModeChanged(m) if !self.modern_config => out.push(Event::Modes { current: m, available: Vec::new() }),
             Incoming::ModelChanged(m) if !self.modern_config => out.push(Event::Models { current: m, available: Vec::new() }),
@@ -270,6 +285,10 @@ impl ChatBackend for AcpBackend {
         for (_, rpc) in self.permissions.drain() {
             self.proc.send(&acp::permission_reply(rpc, None));
         }
+        // The agent's own questions are dismissed the same way.
+        for (_, (rpc, field)) in self.questions.drain() {
+            self.proc.send(&acp::question_reply(rpc, field.as_deref(), &Answer::Cancel));
+        }
         if let Some(s) = &self.session {
             self.proc.send(&acp::notification("session/cancel", json!({"sessionId": s})));
             // Repeated Stop presses must not postpone the fallback. An idle session needs none.
@@ -298,6 +317,12 @@ impl ChatBackend for AcpBackend {
     fn answer_permission(&mut self, key: u64, option: Option<&str>) {
         if let Some(rpc) = self.permissions.remove(&key) {
             self.proc.send(&acp::permission_reply(rpc, option));
+        }
+    }
+
+    fn answer_question(&mut self, key: u64, answer: &Answer) {
+        if let Some((rpc, field)) = self.questions.remove(&key) {
+            self.proc.send(&acp::question_reply(rpc, field.as_deref(), answer));
         }
     }
 
