@@ -1545,6 +1545,52 @@ mod importers {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    fn conditional_importer(name: &str) -> (Session, std::path::PathBuf) {
+        let (s, root) = installed(name, &[("smp", &["smp"], false)]);
+        let mut manifest = importer_manifest("smp", &["smp"], false);
+        manifest["runtime"]["entries"][0]["input_schema"] = json!({"type":"object","properties":{
+            "mode":{"type":"boolean"},
+            "count":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}},
+            "size":{"type":"string","oneOf":[
+                {"const":"small","x-solidcraft-when":{"field":"mode","eq":true}},
+                {"const":"large","x-solidcraft-when":{"field":"mode","eq":false}}]}
+        }});
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+        (s, root)
+    }
+
+    #[test]
+    fn importer_options_omit_hidden_fields_before_entering_wasm() {
+        let (mut s, root) = conditional_importer("conditional-hidden");
+        // The guest traps unless the serialized options contain only {"mode":false}.
+        let (package, version) = API.split_once('@').unwrap();
+        let fixture = include_str!("importer_fixture.wat").replace("\r\n", "\n").replace("__PACKAGE__", package).replace("__VERSION__", version);
+        let signature = "(func $import (;3;) (type 3) (param i32 i32 i32 i32 i64 i32 i32) (result i32)\n";
+        assert!(fixture.contains(signature));
+        let fixture = fixture.replacen(
+            signature,
+            &format!("{signature}      local.get 6\n      i32.const 14\n      i32.ne\n      if\n        unreachable\n      end\n"),
+            1,
+        );
+        std::fs::write(root.join("plugins/smp/importer.wasm"), wat::parse_str(fixture).unwrap()).unwrap();
+        let file = put(&root, "bracket.smp", &design());
+        let importer = importer_for(&s, &file, None).unwrap().unwrap();
+        let imported = import_file(&mut s, &importer, &file, &json!({"mode":false,"count":"hidden"}));
+        assert!(imported.is_ok(), "{imported:?}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn importer_options_reject_unavailable_choices_before_entering_wasm() {
+        let (mut s, root) = conditional_importer("conditional-choice");
+        let file = put(&root, "bracket.smp", &design());
+        let importer = importer_for(&s, &file, None).unwrap().unwrap();
+        let error = import_file(&mut s, &importer, &file, &json!({"mode":false,"size":"small"})).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "params.size"), "{error}");
+        assert!(import_file(&mut s, &importer, &file, &json!({"mode":false,"size":"large"})).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     /// An agent that may use only the folder of its input file still sees and uses the installed
     /// importer: the registry is the app's, not the agent's (finding 2 of a new-user walk). The
     /// input file itself is still checked, and refused with the path named.
@@ -1766,6 +1812,36 @@ mod install_zip {
         let path = root.join("zips").join(name);
         std::fs::write(&path, bytes).unwrap();
         path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn invalid_swatches_warn_in_check_and_install_review_but_install_succeeds() {
+        let (mut s, root) = session("swatches");
+        let mut m: Value = serde_json::from_slice(&manifest_bytes("gears", json!(["commands@0.1"]))).unwrap();
+        m["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"finish":{"type":"string","oneOf":[
+            {"const":"oak","x-solidcraft-swatch":"bad.png"}, {"const":"plain","x-solidcraft-swatch":"../outside.png"}
+        ]}}}}]);
+        let (package, version) = API.split_once('@').unwrap();
+        let component = wat::parse_str(include_str!("fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap();
+        let zip = zip(&[("plugin.json", &serde_json::to_vec(&m).unwrap()), ("plugin.wasm", &component), ("bad.png", b"not an image")]);
+        let path = put(&root, "swatches.zip", &zip);
+        let dry = s.execute("plugin.install", &json!({"path":path,"dry_run":true})).unwrap();
+        assert_eq!(dry["param_warnings"].as_array().unwrap().len(), 2);
+        let checked = s.execute("plugin.check", &json!({"path":path})).unwrap();
+        assert_eq!(checked["ok"], true, "{checked}");
+        let warnings: Vec<_> = checked["problems"].as_array().unwrap().iter().filter(|p| p["field"] == "x-solidcraft-swatch").collect();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings.iter().all(|p| p["severity"] == "warning"));
+        let installed = s.execute("plugin.install", &json!({"path":path})).unwrap();
+        assert_eq!(installed["installed"], true);
+        let folder = root.join("plugins/gears");
+        let checked_folder = s.execute("plugin.check", &json!({"path":folder})).unwrap();
+        assert_eq!(checked_folder["ok"], true, "{checked_folder}");
+        // Builds without plugin execution also report an unrelated component warning.
+        let folder_warnings: Vec<_> = checked_folder["problems"].as_array().unwrap().iter().filter(|p| p["field"] == "x-solidcraft-swatch").collect();
+        assert_eq!(folder_warnings.len(), 2);
+        assert!(folder_warnings.iter().all(|p| p["severity"] == "warning"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
