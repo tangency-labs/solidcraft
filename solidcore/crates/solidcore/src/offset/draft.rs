@@ -1035,6 +1035,8 @@ mod tests {
     use crate::topology::brep::p1 as brep_p1;
 
     const THETA: f64 = 5.0 * core::f64::consts::PI / 180.0;
+    /// A draft steep enough to reach past a pocket's floor into the empty pocket behind it.
+    const THIRTY: f64 = 30.0 * core::f64::consts::PI / 180.0;
 
     /// The face of `b` whose tight box is flat at `x = at` (`axis` 0), `y = at` (1) or
     /// `z = at` (2).
@@ -1598,5 +1600,73 @@ mod tests {
             off.angle = 2.0 * THETA;
             assert!(draft_rebuild(&k, &off).is_err());
         }
+    }
+
+    /// A 40 x 40 x 20 block with an r = 1 hole through it at (37, 20), 2 from the x = 40 side.
+    /// Drafted 30 degrees inwards about its bottom, that side reaches x = 40 - z tan 30 degrees,
+    /// so the hole's wall, which meets the side nowhere, lies inside the band the draft takes
+    /// off and over the side itself: the draft would cut through it (#19686).
+    #[test]
+    fn a_draft_through_a_hole_near_the_side_is_reported() {
+        use crate::boolean::api_brep::boolean_difference;
+        let mut k = Kernel::default();
+        let block = create_box(&mut k, Point3::ZERO, 40.0, 40.0, 20.0).unwrap();
+        let bore = create_cylinder(&mut k, Point3::new(37.0, 20.0, -1.0), 1.0, 22.0).unwrap();
+        let mut b = boolean_difference(&mut k, block, bore).unwrap();
+        let wall = curved_face(&k, &b);
+        let f = flat_face(&k, &b, 0, 40.0);
+        let steep = Draft::new(Point3::ZERO, Vec3::Z, Vec3::Z, THIRTY).unwrap();
+        let s = draft_surface(&k, &b, f, &steep).unwrap().unwrap();
+        let through = drafted_through(&k, &mut b, &[f], &[s]).unwrap().unwrap();
+        assert_eq!((through.drafted, through.through), (f, wall));
+        // the point is on the wall, behind the side's plane and past the drafted one:
+        // 40 - z tan 30 degrees < x < 40
+        let r = ((through.at.x - 37.0).powi(2) + (through.at.y - 20.0).powi(2)).sqrt();
+        assert!((r - 1.0).abs() < 1e-9, "not on the wall: {:?}", through.at);
+        let reached = 40.0 - through.at.z * THIRTY.tan();
+        assert!(
+            reached < through.at.x && through.at.x < 40.0,
+            "{:?} {}",
+            through.at,
+            reached
+        );
+        assert!(through.depth > 0.0);
+    }
+
+    /// The same block with a pocket cut through the x = 40 side, opening y 15..25, z 5..15 and
+    /// 5 deep, so that side is a rectangle with a rectangular hole in it and the pocket's floor
+    /// is the face at x = 35. The drafted plane does reach past that floor (40 - 15 tan 30
+    /// degrees is 31.3), but every point of the floor meets the side's plane inside the
+    /// pocket's opening, over no part of the side: the drafted face passes through the empty
+    /// pocket and cuts nothing. The box of the side's vertices, which knows only the side's
+    /// outer edges, would name the floor.
+    #[test]
+    fn a_draft_into_the_empty_space_of_a_pocket_is_not_reported() {
+        use crate::boolean::api_brep::boolean_difference;
+        let mut k = Kernel::default();
+        let block = create_box(&mut k, Point3::ZERO, 40.0, 40.0, 20.0).unwrap();
+        let pocket = create_box(&mut k, Point3::new(35.0, 15.0, 5.0), 6.0, 10.0, 10.0).unwrap();
+        let mut b = boolean_difference(&mut k, block, pocket).unwrap();
+        let f = flat_face(&k, &b, 0, 40.0);
+        // the pocket is there, and its floor is a face of its own, meeting the side nowhere
+        let floor = flat_face(&k, &b, 0, 35.0);
+        assert_ne!(floor, f);
+        let steep = Draft::new(Point3::ZERO, Vec3::Z, Vec3::Z, THIRTY).unwrap();
+        let s = draft_surface(&k, &b, f, &steep).unwrap().unwrap();
+        // the drafted plane is the one the case is read against, and it does reach past the floor
+        assert!(on(
+            &k,
+            &s,
+            &Implicit::Plane {
+                origin: Point3::new(40.0, 0.0, 0.0),
+                normal: Vec3::new(THIRTY.cos(), 0.0, THIRTY.sin())
+            }
+        ));
+        let reaches = 40.0 - 15.0 * THIRTY.tan();
+        assert!(
+            reaches < 35.0,
+            "the drafted plane does not reach the floor: {reaches}"
+        );
+        assert_eq!(drafted_through(&k, &mut b, &[f], &[s]).unwrap(), None);
     }
 }
