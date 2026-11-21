@@ -1043,7 +1043,15 @@ impl Dialog {
                 Kind::Revolve { angle: "360 deg".into(), operation: 0, axis: None },
                 vec![SelInput::new("Profile", PROFILES | PLANAR_FACES, true), SelInput::new("Axis", AXIS_PICKS, false)],
             ),
-            "solid.fillet" => Dialog::new(fillet_kind(&fillet_radius_default(app), false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
+            "solid.fillet" => {
+                let mut d = Dialog::new(fillet_kind(&fillet_radius_default(app), false), vec![SelInput::new("Edges", EDGES | FACES, true)]);
+                // A new fillet starts at Auto, or at Mitre where the preference keeps the old
+                // behaviour. An existing fillet keeps its own saved turn ([`edit_feature`]).
+                if app.preferences.fillet_legacy_turn {
+                    d.extra.insert("turn".into(), json!("mitre"));
+                }
+                d
+            }
             "solid.chamfer" => Dialog::new(fillet_kind(&length_default(s, "1"), true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.shell" => {
                 let (kind, inputs) = Kind::simple_start(id)?;
@@ -8606,7 +8614,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let FeatureKind::Fillet { turn, .. } = &f.kind {
                 use solidcraft_engine::doc::FilletTurn;
                 match turn {
-                    FilletTurn::Auto => {}
+                    // A new fillet's start (Mitre with the preference on) is not this fillet's
+                    // turn: editing keeps the saved one.
+                    FilletTurn::Auto => {
+                        d.extra.remove("turn");
+                    }
                     FilletTurn::Mitre => {
                         d.extra.insert("turn".into(), json!("mitre"));
                     }

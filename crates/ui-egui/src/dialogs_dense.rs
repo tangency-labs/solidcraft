@@ -1629,7 +1629,12 @@ mod tests {
     }
 
     fn fillet_harness() -> Harness {
+        fillet_harness_with_legacy_turn(false)
+    }
+
+    fn fillet_harness_with_legacy_turn(legacy: bool) -> Harness {
         let mut h = Harness::new();
+        h.app.preferences.fillet_legacy_turn = legacy;
         h.call("ui.resize", json!({"width":1400,"height":1000}));
         sample(&mut h);
         let edge = edge_sel(&h.app.session, Vec3::new(5.0, 0.0, 5.0)).unwrap();
@@ -1901,6 +1906,42 @@ mod tests {
         choose(&mut h, "ui.fillet_turn", "ui.fillet_turn_swept");
         choose(&mut h, "Type", "Chord length");
         assert!(parameters(&h).get("turn").is_none() && scenario::handle_at("dialog:ui.fillet_turn").is_none(), "Turns is for Constant radius only");
+    }
+
+    /// The `fillet_legacy_turn` preference keeps the old Mitre start for a new fillet. An
+    /// existing fillet keeps its own saved turn either way, so editing it never rewrites it.
+    #[test]
+    fn the_legacy_turn_preference_starts_a_new_fillet_at_mitre_and_leaves_an_existing_one_alone() {
+        // Off, a new fillet's Turns row is Auto, which the command does not take (it is the
+        // default): nothing is sent.
+        let mut h = fillet_harness();
+        set_edges(&mut h, 3);
+        assert!(h.widget("Auto").is_some(), "a new fillet's Turns row starts at Auto");
+        assert!(parameters(&h).get("turn").is_none(), "Auto is the default, not sent");
+        // On, the row starts at Mitre, and Mitre is sent so the fillet is built mitred.
+        let mut h = fillet_harness_with_legacy_turn(true);
+        set_edges(&mut h, 3);
+        assert!(h.widget("Mitre").is_some(), "the preference starts a new fillet's Turns row at Mitre");
+        assert_eq!(parameters(&h)["turn"], json!("mitre"), "Mitre is sent");
+        // An existing fillet keeps its own saved turn with the preference on: a mitred one stays
+        // mitred, and one saved at Auto stays Auto.
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1400,"height":1000}));
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        for (edge, turn, sent) in [([20, 0, 20], Some("mitre"), Some("mitre")), ([20, 30, 20], None, None)] {
+            let mut p = json!({"edges": [edge], "radius": "1", "tangent_chain": false});
+            if let Some(t) = turn {
+                p["turn"] = json!(t);
+            }
+            h.app.run("solid.fillet", p).unwrap();
+            let saved = h.app.session.doc.features.last().unwrap().id;
+            h.app.preferences.fillet_legacy_turn = true;
+            h.app.edit_feature(saved);
+            h.frames(4);
+            assert_eq!(redefined(&h).get("turn").and_then(Value::as_str), sent, "{turn:?}");
+            h.step(&json!({"widget":"Cancel"})).unwrap();
+            h.frames(2);
+        }
     }
 
     /// Editing a fillet keeps its turn. A mitred fillet, as every fillet saved before the
