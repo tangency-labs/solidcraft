@@ -1061,6 +1061,10 @@ pub fn curve_face_gap_bound(
 /// parameter box): where the surface's point is not dropped at a cut, the straight map's
 /// middle stands for it, and the bound holds either way.
 ///
+/// On a face whose surface is a plane (its net bilinear, [`plane_gap_bound`]) the curve's
+/// control points bound the gap at once (#20373): where that bound is at most `enough` (and
+/// `over`) it is the answer, and no piece is cut. Otherwise the bisection runs as without it.
+///
 /// `None` when the gap is not enclosed: as [`curve_face_gap_bound`], and where the nearest
 /// point of one of the first pieces' ends is not found.
 ///
@@ -1074,7 +1078,219 @@ pub fn curve_face_gap_bound_within(
     curve: &BSplineCurve,
     range: [f64; 2],
     floor: f64,
+    within: [f64; 2],
+) -> Result<Option<f64>> {
+    Ok(curve_face_gap_bound_within_counted(k, brep, face, curve, range, floor, within)?.0)
+}
+
+/// [`curve_face_gap_bound_within`] with the number of pieces its bisection bounded (none
+/// where the plane bound answers).
+///
+/// # Errors
+///
+/// Those of [`curve_face_gap_bound_within`].
+pub(crate) fn curve_face_gap_bound_within_counted(
+    k: &Kernel,
+    brep: &crate::topology::Brep,
+    face: crate::topology::FaceId,
+    curve: &BSplineCurve,
+    range: [f64; 2],
+    floor: f64,
     [enough, over]: [f64; 2],
+) -> Result<(Option<f64>, usize)> {
+    let [lo, hi] = range;
+    // (only where the bisection would bound the gap: a valid range and floor, inside the
+    // curve's domain)
+    let valid = lo.is_finite() && hi.is_finite() && lo < hi && floor.is_finite() && floor >= 0.0;
+    if valid && enough.is_finite() {
+        let rec = brep.face(face)?;
+        if let (Some(surface), Ok(cn)) = (rec.surface.as_ref(), NurbsCurve::of(curve)) {
+            let inside = matches!(
+                (cn.u.get(cn.p), cn.u.get(cn.n)),
+                (Some(&d0), Some(&d1)) if d0 <= lo && hi <= d1
+            );
+            if inside {
+                let surface = surface.clone_for_evaluation()?;
+                if let Some(g) = plane_face_gap_bound(k, &surface, &cn, range)? {
+                    if g <= enough && g <= over {
+                        return Ok((Some(g), 0));
+                    }
+                }
+            }
+        }
+    }
+    let pieces = std::cell::Cell::new(0_usize);
+    let gap = bisected_face_gap_bound(k, brep, face, curve, range, floor, [enough, over], &pieces)?;
+    Ok((gap, pieces.get()))
+}
+
+/// Not upstream (#20373): [`plane_gap_bound`] of the curve data `cn` over `range` against the
+/// net of `surface`, for a plane or a B-spline surface (whose net is the surface, as
+/// [`NetSurface::of`] takes it) whose net agrees with the surface at its four corners. `None`
+/// for other kinds, a net that is not bilinear, and where [`plane_gap_bound`] gives none.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+fn plane_face_gap_bound(
+    k: &Kernel,
+    surface: &Surface,
+    cn: &NurbsCurve,
+    range: [f64; 2],
+) -> Result<Option<f64>> {
+    use crate::surface::surface::SurfaceKind;
+    if !matches!(
+        surface.kind(),
+        SurfaceKind::Plane(_) | SurfaceKind::BSpline(_)
+    ) {
+        return Ok(None);
+    }
+    let Some(net) = NetSurface::of(k, surface, &[])? else {
+        return Ok(None);
+    };
+    let (u, v) = net.domain();
+    let corners = [
+        Point2::new(u.lo, v.lo),
+        Point2::new(u.hi, v.lo),
+        Point2::new(u.lo, v.hi),
+        Point2::new(u.hi, v.hi),
+    ];
+    let Some(net) = NetSurface::of(k, surface, &corners)? else {
+        return Ok(None);
+    };
+    Ok(plane_gap_bound(cn, &net.net, range))
+}
+
+/// Not upstream (#20373): a proved bound on the distance from every point of the curve `cn`
+/// over `range` to the net `net` over its parameter box, for a net of degree 1 by 1 with two by
+/// two control points of one positive weight: the bilinear `S(a, b) = P00 + a E1 + b E2 + a b T`
+/// over `a, b` in `[0, 1]` (`E1 = P10 - P00`, `E2 = P01 - P00`, `T` the twist `P11 - P10 - P01 +
+/// P00`; a plane's net has `T` zero up to the rounding of its corners).
+///
+/// A rational curve of positive weights is at each parameter a convex combination of the
+/// control points whose basis functions do not vanish there: over `range`, of those `P_i`
+/// whose knot span `[u_i, u_{i+p+1}]` meets it. The orthogonal projection onto the plane
+/// through `P00` spanned by `E1, E2` is affine, so the projection `F(t)` of the curve's point
+/// `C(t)` has the same convex combination of the control points' projections' parameters
+/// `(a_i, b_i)`, and lies in `[0, 1]^2` when each of those does. `S(a(t), b(t))` is then a
+/// point of the net over its box, and
+///
+/// `dist(C(t), S) <= |C(t) - F(t)| + |a b| |T| <= max_i |N . (P_i - P00)| / |N| + |T|`
+///
+/// (`N = E1 x E2`; `|N . (C - P00)|` is the convex combination of the control points' values,
+/// at most the largest). Every quantity is enclosed in outward-rounded interval arithmetic
+/// from the stored homogeneous data (the points `P = (x w, y w, z w) / w`), so the bound counts
+/// the rounding; the parameters `(a_i, b_i)` are `((d x E2) . N, (E1 x d) . N) / |N|^2` for
+/// `d = P_i - P00`.
+///
+/// `None` (the caller bisects instead) for any other net, an empty, unordered or not finite
+/// `range`, a weight of the curve's that is not positive or not finite, a degenerate net (`|N|^2`
+/// not positive), a projected control point not inside the box, or a bound that is not finite.
+pub(crate) fn plane_gap_bound(cn: &NurbsCurve, net: &Nurbs, [lo, hi]: [f64; 2]) -> Option<f64> {
+    if !(lo.is_finite() && hi.is_finite() && lo < hi) {
+        return None;
+    }
+    if !(net.p == 1 && net.q == 1 && net.nu == 2 && net.nv == 2 && net.pw.len() == 16) {
+        return None;
+    }
+    let clamped = |k: &[f64]| matches!(k, [a, b, c, d] if a == b && b < c && c == d);
+    if !(clamped(&net.u) && clamped(&net.v)) {
+        return None;
+    }
+    // (the net's control points: u-major, `P_ij` at `(i nv + j) 4`)
+    let corner = |i: usize| -> Option<(V3<Ivl>, f64)> {
+        let s = net.pw.get(4 * i..4 * i + 4)?;
+        let [x, y, z, w] = [*s.first()?, *s.get(1)?, *s.get(2)?, *s.get(3)?];
+        Some((point_of([x, y, z, w])?, w))
+    };
+    let (p00, w00) = corner(0)?;
+    let (p01, w01) = corner(1)?;
+    let (p10, w10) = corner(2)?;
+    let (p11, w11) = corner(3)?;
+    if !(w00 == w01 && w00 == w10 && w00 == w11) {
+        return None;
+    }
+    let e1 = minus(p10, p00);
+    let e2 = minus(p01, p00);
+    let twist = plus(minus(minus(p11, p10), p01), p00);
+    let normal = cross(e1, e2);
+    let nn = dot(normal, normal);
+    if !nn.is_positive() {
+        return None;
+    }
+    let length = nn.sqrt();
+    let twist = norm_upper(twist)?;
+    let inside = |x: Ivl| x.lo >= 0.0 && x.hi <= 1.0;
+    let mut worst = 0.0_f64;
+    let mut any = false;
+    for i in 0..cn.n {
+        let (Some(&a), Some(&b)) = (cn.u.get(i), cn.u.get(i + cn.p + 1)) else {
+            return None;
+        };
+        // (only control points whose basis function may not vanish somewhere in `range`)
+        if !(a <= hi && b >= lo) {
+            continue;
+        }
+        let s = cn.pw.get(4 * i..4 * i + 4)?;
+        let q = point_of([*s.first()?, *s.get(1)?, *s.get(2)?, *s.get(3)?])?;
+        let d = minus(q, p00);
+        let alpha = dot(cross(d, e2), normal) / nn;
+        let beta = dot(cross(e1, d), normal) / nn;
+        if !(inside(alpha) && inside(beta)) {
+            return None;
+        }
+        let height = Ivl::from(dot(normal, d).mag()) / length;
+        if !height.is_finite() {
+            return None;
+        }
+        worst = worst.max(height.hi);
+        any = true;
+    }
+    let bound = (Ivl::from(worst) + Ivl::from(twist)).hi;
+    (any && bound.is_finite()).then_some(bound)
+}
+
+/// The point `(x, y, z) / w` of homogeneous data, enclosed; `None` for a weight that is not
+/// positive or data that are not finite.
+fn point_of([x, y, z, w]: [f64; 4]) -> Option<V3<Ivl>> {
+    if !(w.is_finite() && w > 0.0 && x.is_finite() && y.is_finite() && z.is_finite()) {
+        return None;
+    }
+    let w = Ivl::from(w);
+    Some(V3 {
+        x: Ivl::from(x) / w,
+        y: Ivl::from(y) / w,
+        z: Ivl::from(z) / w,
+    })
+}
+
+fn dot(a: V3<Ivl>, b: V3<Ivl>) -> Ivl {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+fn cross(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
+    V3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x,
+    }
+}
+
+/// The bisection of [`curve_face_gap_bound_within`], counting in `pieces` the pieces it
+/// bounds.
+///
+/// # Errors
+///
+/// Those of [`curve_face_gap_bound_within`].
+fn bisected_face_gap_bound(
+    k: &Kernel,
+    brep: &crate::topology::Brep,
+    face: crate::topology::FaceId,
+    curve: &BSplineCurve,
+    range: [f64; 2],
+    floor: f64,
+    [enough, over]: [f64; 2],
+    pieces: &std::cell::Cell<usize>,
 ) -> Result<Option<f64>> {
     use crate::error::ignored;
     use crate::surface::surface::p4::NoObject;
@@ -1171,6 +1387,7 @@ pub fn curve_face_gap_bound_within(
             let mid = 0.5 * (a + b);
             let last = depth >= MAX_DEPTH || !(a < mid && mid < b) || made + 2 > MAX_PIECES;
             let mut slack = f64::INFINITY;
+            pieces.set(pieces.get() + 1);
             match surface_piece(cn, [a, b], net, ends, a, b) {
                 Ok(Some(p)) => {
                     let bound = (Ivl::from(p.ends) + Ivl::from(p.with_slack)).hi;
@@ -1700,7 +1917,7 @@ fn exact_curve_data(c: &Curve, is_2d: bool) -> Result<Option<(NurbsCurve, f64)>>
 #[must_use]
 pub fn plane_uv_lipschitz(s: &Surface, ends: &[crate::nurbs::math::CPoint], d: f64) -> Option<f64> {
     use crate::nurbs::math::{CPoint, NOW};
-    use crate::surface::surface::p2::SurfaceKind;
+    use crate::surface::surface::SurfaceKind;
     let SurfaceKind::Plane(plane) = s.kind() else {
         return None;
     };
@@ -3730,5 +3947,128 @@ mod tests {
             g >= peak && g <= peak * (1.0 + 1e-2),
             "{g:e} against {peak:e}"
         );
+    }
+
+    /// A cylinder of radius 12.5 (a round tube's profile, #20373): each of its two cap
+    /// circles (an ellipse's B-spline, with its interval) and its planar cap face.
+    fn cap_circles() -> (
+        Kernel,
+        crate::topology::Brep,
+        Vec<(crate::topology::FaceId, BSplineCurve, [f64; 2])>,
+    ) {
+        use crate::curve::curve::p2::CurveKind;
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 12.5, 50.0)
+            .unwrap();
+        let mut out = Vec::new();
+        for e in crate::query::api_queries::get_edges(&b).unwrap() {
+            let rec = b.edge(e).unwrap();
+            let Some(CurveKind::Ellipse(el)) = rec.curve.as_ref().map(Curve::kind) else {
+                continue;
+            };
+            for f in crate::topology::edge::faces(&b, e, None).unwrap() {
+                let s = b.face(f).unwrap().surface.as_ref().unwrap();
+                if matches!(s.kind(), crate::surface::surface::SurfaceKind::Plane(_)) {
+                    let ivl = rec.interval;
+                    out.push((f, el.base().clone_exact(), [ivl.min(), ivl.max()]));
+                }
+            }
+        }
+        (k, b, out)
+    }
+
+    /// `cn` rebuilt as a B-spline with each control point moved by `dz` along z.
+    fn moved(cn: &NurbsCurve, dz: f64) -> BSplineCurve {
+        let cps = cn
+            .pw
+            .chunks_exact(4)
+            .map(|q| CPoint::new(q[0], q[1], (q[2] / q[3] + dz) * q[3], q[3]))
+            .collect();
+        let c = NurbCurve::new(cps, cn.p, cn.u.clone()).unwrap();
+        BSplineCurve::from_nurb(c, 3, false)
+    }
+
+    /// #20373: a circle lying in its plane face is shown within `1e-5` by its control points
+    /// alone. Before the plane bound the bisection cut each circle into about 8160 pieces (the
+    /// straight map between two feet is a chord of the circle's image, its sagitta the
+    /// second-order term), about 60 ms each in a release build.
+    #[test]
+    fn a_circle_in_its_plane_face_is_bounded_without_cutting_it() {
+        let (k, b, caps) = cap_circles();
+        assert_eq!(caps.len(), 2, "two cap circles, each on its cap");
+        for (f, circle, range) in &caps {
+            let within = [1e-5, f64::INFINITY];
+            let (g, pieces) =
+                curve_face_gap_bound_within_counted(&k, &b, *f, circle, *range, 1e-8, within)
+                    .unwrap();
+            assert!(g.is_some_and(|g| (0.0..=1e-5).contains(&g)), "{g:?}");
+            assert!(pieces <= FIRST_PIECES, "{pieces} pieces");
+            // the bisection alone shows the same: within `enough` (only the value differs,
+            // and the contract leaves any value up to `enough`)
+            let cut = std::cell::Cell::new(0);
+            let alone =
+                bisected_face_gap_bound(&k, &b, *f, circle, *range, 1e-8, within, &cut).unwrap();
+            assert!(alone.is_some_and(|g| g <= 1e-5), "{alone:?}");
+            assert!(cut.get() > 1000, "{} pieces", cut.get());
+        }
+    }
+
+    /// A circle `2e-5` off its cap's plane is `2e-5` from it everywhere: the plane bound is at
+    /// least that, above `enough = 1e-5`, so the bisection decides, exactly as without the
+    /// plane bound, and the gap is still caught.
+    #[test]
+    fn a_circle_off_its_plane_face_is_bisected_as_before() {
+        let (k, b, caps) = cap_circles();
+        let (f, circle, range) = caps.first().unwrap();
+        let cn = NurbsCurve::of(circle).unwrap();
+        let lift = 2e-5;
+        let off = moved(&cn, lift);
+        let surface = b.face(*f).unwrap().surface.clone().unwrap();
+        let plane = plane_face_gap_bound(&k, &surface, &NurbsCurve::of(&off).unwrap(), *range)
+            .unwrap()
+            .unwrap();
+        assert!(plane >= lift && plane <= lift * (1.0 + 1e-6), "{plane:e}");
+        for within in [[1e-5, f64::INFINITY], [1e-5, 1e-5]] {
+            let (g, pieces) =
+                curve_face_gap_bound_within_counted(&k, &b, *f, &off, *range, 1e-8, within)
+                    .unwrap();
+            let cut = std::cell::Cell::new(0);
+            let alone =
+                bisected_face_gap_bound(&k, &b, *f, &off, *range, 1e-8, within, &cut).unwrap();
+            assert_eq!(g.map(f64::to_bits), alone.map(f64::to_bits));
+            assert_eq!(pieces, cut.get());
+            assert!(pieces > 0);
+            assert!(g.is_some_and(|g| g >= lift), "{g:?}");
+        }
+    }
+
+    /// The plane bound holds only for positive weights and control points whose projections
+    /// lie in the net's box; otherwise it gives none and the bisection decides.
+    #[test]
+    fn the_plane_bound_needs_positive_weights_and_projections_inside_the_box() {
+        let (k, b, caps) = cap_circles();
+        let (f, circle, range) = caps.first().unwrap();
+        let surface = b.face(*f).unwrap().surface.clone().unwrap();
+        let net = NetSurface::of(&k, &surface, &[]).unwrap().unwrap().net;
+        let cn = NurbsCurve::of(circle).unwrap();
+        let g = plane_gap_bound(&cn, &net, *range).unwrap();
+        assert!(g <= 1e-9, "{g:e}");
+        for w in [0.0, -1.0, f64::NAN] {
+            let mut bad = cn.clone();
+            bad.pw[7] = w;
+            assert_eq!(plane_gap_bound(&bad, &net, *range), None, "weight {w}");
+        }
+        // a circle in the plane, its control polygon reaching past the net's box
+        let (u, v) = NetSurface::of(&k, &surface, &[]).unwrap().unwrap().domain();
+        let reach = 4.0 * (u.hi - u.lo).max(v.hi - v.lo);
+        let mut wide = cn.clone();
+        for q in wide.pw.chunks_exact_mut(4) {
+            q[0] *= reach;
+            q[1] *= reach;
+        }
+        assert_eq!(plane_gap_bound(&wide, &net, *range), None);
+        // an empty or reversed range bounds nothing
+        assert_eq!(plane_gap_bound(&cn, &net, [range[0], range[0]]), None);
+        assert_eq!(plane_gap_bound(&cn, &net, [range[1], range[0]]), None);
     }
 }
