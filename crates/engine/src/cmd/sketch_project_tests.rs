@@ -3954,3 +3954,20 @@ fn redefining_a_sketch_onto_a_parallel_plane_keeps_its_points_where_they_were() 
         assert!((x2 - x).abs() < 1e-6 && (y2 - y).abs() < 1e-6, "{id}: ({x}, {y}) -> ({x2}, {y2})");
     }
 }
+
+#[test]
+fn an_edge_point_on_edges_of_two_bodies_is_refused_unless_a_body_is_named() {
+    // #20504: A and B share the edge line x = 0, z = 10; a point on it named no body and the
+    // sketch silently followed A's 20 mm edge.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20, "width":20, "height":10, "corner":[0,0,0], "name":"BoxA", "operation":"new", "body_name":"A"}));
+    run(&mut s, "solid.box", json!({"length":30, "width":10, "height":10, "corner":[0,0,0], "name":"BoxB", "operation":"new", "body_name":"B"}));
+    run(&mut s, "sketch.create", json!({"plane":{"face":[25,5,10]}, "project_edges":false, "name":"OnB"}));
+    let e = s.execute("sketch.project", &json!({"refs":[{"edge":[0,5,10]}]})).expect_err("a point on edges of A and B is ambiguous").to_string();
+    assert!(e.contains("lies on edges of 2 bodies") && e.contains('A') && e.contains('B') && e.contains("project"), "{e}");
+    run(&mut s, "sketch.project", json!({"refs":[{"edge":[0,5,10], "body":"B"}]}));
+    // An edge only one body has is still found without a name.
+    run(&mut s, "sketch.project", json!({"refs":[{"edge":[30,5,10]}]}));
+    let links = linked_curves(&inspect(&mut s));
+    assert_eq!(links.len(), 2, "{links:?}");
+}

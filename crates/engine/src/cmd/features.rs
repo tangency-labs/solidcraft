@@ -1803,7 +1803,7 @@ fn prim_cone(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// What [`edge_points`] found: a point on each edge, in its body's frame, and the body the
 /// feature keeps (`None`: each edge is looked up on its own).
-struct EdgePicks {
+pub(crate) struct EdgePicks {
     points: Vec<Vec3>,
     body: Option<String>,
 }
@@ -1851,12 +1851,16 @@ fn edge_reach(size: f64) -> f64 {
 /// whose edge is in the same place only in its own frame is not in the way, and two bodies
 /// with an edge there make it ambiguous. The polylines short-list the edges; which body a pick
 /// means is decided on the exact curves.
-fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
+pub(crate) fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
     let a = p.get("edges").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`edges` must be a list"))?;
     if a.is_empty() || a.len() > 1000 {
         return Err(bad(cmd, "select 1…1000 edges"));
     }
-    let verb = if cmd == "solid.chamfer" { "chamfer" } else { "round" };
+    let verb = match cmd {
+        "solid.chamfer" => "chamfer",
+        c if c.starts_with("sketch.") => "project",
+        _ => "round",
+    };
     let st = s.model.state();
     // A picked point must lie on an edge (within the distance the kernel re-finds an edge from)
     // of the body the feature names, or of any body: a pick far from every edge would round

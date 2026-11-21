@@ -153,6 +153,19 @@ pub(crate) fn ref_form(v: &Value) -> std::result::Result<RefForm<'_>, String> {
     Err(format!("cannot project {v}"))
 }
 
+/// The body an edge reference means: the one it names, else none, which the design decides. A
+/// point on edges of two bodies is refused, naming them, as Fillet refuses it: the sketch would
+/// silently follow whichever body comes first (#20504).
+fn edge_owner(s: &Session, body: String, at: Vec3, cmd: &str) -> Result<String> {
+    if !body.is_empty() {
+        return Ok(body);
+    }
+    match super::features::edge_points(s, &json!({"edges": [[at.x, at.y, at.z]]}), cmd) {
+        Err(e) if e.to_string().contains("lies on edges of") => Err(e),
+        _ => Ok(body),
+    }
+}
+
 /// Parse one reference.
 fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
     match ref_form(v).map_err(|why| bad(cmd, why))? {
@@ -162,7 +175,7 @@ fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
             _ if s.model.state().body(name).is_some() => Ok(LinkSource::Body { body: name.to_string() }),
             _ => Err(bad(cmd, format!("unknown reference `{name}`"))),
         },
-        RefForm::Edge { body, at } => Ok(LinkSource::Edge { body, at }),
+        RefForm::Edge { body, at } => Ok(LinkSource::Edge { body: edge_owner(s, body, at, cmd)?, at }),
         RefForm::Face { body, at } => Ok(LinkSource::Face { body, at }),
         RefForm::Vertex { body, at } => Ok(LinkSource::Vertex { body, at }),
         RefForm::Sketch { key, curve, point } => {
@@ -986,6 +999,7 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
             let pi = sk.link_points(&l).first().copied().ok_or_else(|| bad(cmd, "vertex projects to nothing"))?;
             sk.points.get(pi).map(|q| q.id.clone()).unwrap_or_default()
         } else if let Some(at) = edge {
+            let body = edge_owner(s, body, at, cmd)?;
             let l = add_link(s, d, id, sk, LinkKind::Project, LinkSource::Edge { body, at }).map_err(|e| bad(cmd, format!("edge: {e}")))?;
             let before = s.model.state_before(id);
             let plane = sketch_plane(d, id, &*state_for_sketch(s, d, id, &before, &[])?)?;
