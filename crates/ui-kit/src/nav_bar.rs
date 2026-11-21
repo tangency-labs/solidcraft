@@ -78,9 +78,18 @@ pub enum MenuEntry {
     Heading(String),
     Separator,
     Row(MenuRow),
-    Percent { value: u32, label: String, target: String },
+    Percent {
+        value: u32,
+        label: String,
+        target: String,
+    },
     /// A segmented choice (the picked one is item `{id}:{index}`).
-    Segments { id: String, options: Vec<String>, selected: usize, targets: Vec<String> },
+    Segments {
+        id: String,
+        options: Vec<String>,
+        selected: usize,
+        targets: Vec<String>,
+    },
 }
 
 /// One row of a slot's menu.
@@ -384,7 +393,9 @@ fn menu_rows(ui: &mut egui::Ui, menu: &str, entries: &[MenuEntry], keep_open: bo
                 let margin = egui::Margin::symmetric(t.space_8 as i8, t.space_2 as i8);
                 let changed = egui::Frame::NONE
                     .inner_margin(margin)
-                    .show(ui, |ui| crate::segmented(ui, &mut chosen, &labels, crate::Segments { compact: true, targets: &targets, ..Default::default() }))
+                    .show(ui, |ui| {
+                        crate::segmented(ui, &mut chosen, &labels, crate::Segments { compact: true, targets: &targets, ..Default::default() })
+                    })
                     .inner;
                 if changed {
                     picked = Some((NavAction::Item { menu: menu.to_owned(), item: format!("{id}:{chosen}") }, !keep_open));
