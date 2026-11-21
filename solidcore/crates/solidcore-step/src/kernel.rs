@@ -24,6 +24,39 @@ pub(crate) fn radial_order(curve: &Curve, interval: [f64; 2], faces: &[(&Surface
     k::pcurve::radial_order(&curve, interval, &faces).map_err(|e| e.to_string())
 }
 
+/// A certified upper bound on `curve`'s length over `interval`, its ends and knots as given
+/// ([`solidcore::curve::curve::Curve::length_bound`], `width` the widest bracket asked): `None`
+/// where the kernel does not enclose that curve's kind or cannot make the curve.
+pub(crate) fn curve_length_upper(curve: &Curve, interval: [f64; 2], width: f64) -> Result<Option<f64>, Error> {
+    // A line record with one point is that point: its length is 0, while the kernel's line
+    // constructor takes only a direction, which this one has none of.
+    if matches!(curve, Curve::Line { start, end } if start == end) {
+        return Ok(Some(0.0));
+    }
+    let kernel = solidcore::kernel::Kernel::default();
+    let Ok(record) = c::curve(curve) else { return Ok(None) };
+    let Ok(made) = solidcore::curve::from_parameters::from_parameters(&kernel, &record, interval) else { return Ok(None) };
+    match made.curve.length_bound(&kernel, &made.interval, width) {
+        Ok(bracket) => Ok(Some(bracket.upper)),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Whether every point of `a` over `a_on` lies within `tol` of `b` over `b_on`, and every point
+/// of `b` within `tol` of `a` ([`solidcore::curve::curve::Curve::proved_together`], a whole-span
+/// enclosure, never samples): `None` where the kernel cannot prove it, or make a curve.
+pub(crate) fn curves_within(a: &Curve, a_on: [f64; 2], b: &Curve, b_on: [f64; 2], tol: f64) -> Result<Option<bool>, Error> {
+    let kernel = solidcore::kernel::Kernel::default();
+    let (Ok(a), Ok(b)) = (c::curve(a), c::curve(b)) else { return Ok(None) };
+    let (Ok(a), Ok(b)) = (
+        solidcore::curve::from_parameters::from_parameters(&kernel, &a, a_on),
+        solidcore::curve::from_parameters::from_parameters(&kernel, &b, b_on),
+    ) else {
+        return Ok(None);
+    };
+    a.curve.proved_together(&kernel, &a.interval, &b.curve, &b.interval, tol, &[]).map(Some).map_err(|e| e.to_string())
+}
+
 /// A curve record ready to evaluate.
 pub(crate) struct CurveEval(k::CurveEval);
 

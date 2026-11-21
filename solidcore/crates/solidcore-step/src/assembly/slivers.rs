@@ -12,15 +12,10 @@
 use crate::vec::Vec3Geom as _;
 use std::collections::{HashMap, HashSet};
 
-use crate::kernel::CurveEval;
+use crate::kernel;
 use solidcore_record::Vec3;
-use solidcore_record::brep::Curve as BCurve;
 
 use super::{Assembly, Bound, R, index};
-
-/// Points along an edge at which its length is summed, and at which one long edge is measured
-/// against the other.
-const SAMPLES: usize = 32;
 
 /// Union-find root of `v` in `parent` (a vertex not in it is its own).
 fn root(parent: &HashMap<u32, u32>, mut v: u32) -> u32 {
@@ -31,14 +26,6 @@ fn root(parent: &HashMap<u32, u32>, mut v: u32) -> u32 {
         v = p;
     }
     v
-}
-
-/// The distance from `p` to the segment from `a` to `b`.
-fn segment_distance(p: Vec3, a: Vec3, b: Vec3) -> f64 {
-    let ab = b - a;
-    let length = ab.dot(ab);
-    let t = if length > 0.0 { ((p - a).dot(ab) / length).clamp(0.0, 1.0) } else { 0.0 };
-    p.dist(a + ab * t)
 }
 
 /// What collapsing one sliver face does.
@@ -52,7 +39,8 @@ struct Collapse {
     kept: u32,
     gone: u32,
     against: bool,
-    /// How far the two long edges lie apart (mm): the kept one's tolerance covers it.
+    /// A proved bound on how far apart the two long edges lie (mm), at most `tol`: the kept
+    /// one's tolerance covers it.
     apart: f64,
 }
 
@@ -195,78 +183,37 @@ impl Assembly<'_> {
                 }
             }
         }
-        // The two long edges lie within the tolerance of each other, both ways.
-        let Some(ab) = self.edge_apart(a, b, tol)? else { return Ok(None) };
-        let Some(ba) = self.edge_apart(b, a, tol)? else { return Ok(None) };
+        // The two long edges lie within the tolerance of each other, both ways: the kernel
+        // encloses every point of each over its whole span. Where it cannot prove that, the
+        // face is kept.
+        let Some(apart) = self.edges_together(a, b, tol)? else { return Ok(None) };
         let against = pa[0] != pb[0];
-        Ok(Some(Collapse { face: fi, short, merged, kept: a, gone: b, against, apart: ab.max(ba) }))
+        Ok(Some(Collapse { face: fi, short, merged, kept: a, gone: b, against, apart }))
     }
 
-    /// Whether edge `e` is no longer than `tol`: its points' path, and its ends' gap.
-    fn edge_length_within(&self, e: u32, tol: f64) -> R<bool> {
+    /// Whether edge `e` is no longer than `tol`: its ends' gap, and a certified upper bound on
+    /// its length over its whole span ([`kernel::curve_length_upper`], never a sampled path).
+    pub(crate) fn edge_length_within(&self, e: u32, tol: f64) -> R<bool> {
         let edge = self.edges.get(e as usize).ok_or("edge reference")?;
         let [p, q] = edge.vertices;
         let (vp, vq) = (self.vertices.get(p as usize).ok_or("vertex reference")?, self.vertices.get(q as usize).ok_or("vertex reference")?);
         if Vec3::from(vp.point).dist(Vec3::from(vq.point)) > tol {
             return Ok(false);
         }
-        let Ok(eval) = CurveEval::new(&edge.curve) else { return Ok(false) };
-        let [t0, t1] = edge.interval;
-        let mut length = 0.0;
-        let mut last: Option<Vec3> = None;
-        for k in 0..=SAMPLES {
-            let t = if k == SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / SAMPLES as f64) };
-            let Some(x) = eval.point(t) else { return Ok(false) };
-            if let Some(l) = last {
-                length += l.dist(x);
-            }
-            if !(length <= tol) {
-                return Ok(false);
-            }
-            last = Some(x);
-        }
-        Ok(true)
+        // An edge the kernel cannot enclose is not proved short, and the face is kept.
+        let Some(upper) = kernel::curve_length_upper(&edge.curve, edge.interval, tol)? else { return Ok(false) };
+        Ok(upper <= tol)
     }
 
-    /// The farthest edge `from`'s points lie from edge `to`'s curve, where every one lies within
-    /// `tol` of it; `None` where one does not, or where it cannot be measured.
-    fn edge_apart(&self, from: u32, to: u32, tol: f64) -> R<Option<f64>> {
-        let (f, t) = (self.edges.get(from as usize).ok_or("edge reference")?, self.edges.get(to as usize).ok_or("edge reference")?);
-        let Ok(eval) = CurveEval::new(&f.curve) else { return Ok(None) };
-        // A line edge is the segment between its ends, measured to directly (a file may write
-        // its line from a point far off, past what the kernel's nearest-point search takes).
-        let segment = match &t.curve {
-            BCurve::Line { .. } => {
-                let Ok(on) = CurveEval::new(&t.curve) else { return Ok(None) };
-                let (Some(a), Some(b)) = (on.point(t.interval[0]), on.point(t.interval[1])) else { return Ok(None) };
-                Some((a, b))
-            }
+    /// Whether the two long edges lie within `tol` of each other, both ways, and so how far
+    /// apart they are at most: the kernel's whole-span enclosure ([`kernel::curves_within`]),
+    /// never samples. `None` where it cannot prove that, and the face is not collapsed.
+    pub(crate) fn edges_together(&self, a: u32, b: u32, tol: f64) -> R<Option<f64>> {
+        let (x, y) = (self.edges.get(a as usize).ok_or("edge reference")?, self.edges.get(b as usize).ok_or("edge reference")?);
+        Ok(match kernel::curves_within(&x.curve, x.interval, &y.curve, y.interval, tol)? {
+            Some(true) => Some(tol),
             _ => None,
-        };
-        let [t0, t1] = f.interval;
-        let mut far = 0.0f64;
-        for k in 1..SAMPLES {
-            let s = t0 + (t1 - t0) * (k as f64 / SAMPLES as f64);
-            let Some(p) = eval.point(s) else { return Ok(None) };
-            let d = match segment {
-                Some((a, b)) => segment_distance(p, a, b),
-                None => {
-                    let Ok(Some(near)) = solidcore_ops::curve::closest_point(&t.curve, [p.x, p.y, p.z], tol) else { return Ok(None) };
-                    // The nearest point lies on the edge's own piece of its curve.
-                    let [lo, hi] = t.interval;
-                    let slack = 1e-9 * (hi - lo).abs().max(1.0);
-                    if !(near.parameter >= lo - slack && near.parameter <= hi + slack) {
-                        return Ok(None);
-                    }
-                    p.dist(Vec3::from(near.point))
-                }
-            };
-            if !(d <= tol) {
-                return Ok(None);
-            }
-            far = far.max(d);
-        }
-        Ok(Some(far))
+        })
     }
 
     /// Collapse a sliver ([`Self::sliver`]): its vertices made one, its short edges left out of

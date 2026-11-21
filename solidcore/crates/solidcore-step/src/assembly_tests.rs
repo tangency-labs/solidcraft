@@ -955,6 +955,51 @@ fn a_face_narrower_than_the_tolerance_that_cannot_be_read_is_left_out_its_sides_
     assert!(both.notes.iter().any(|n| n.contains("1 faces narrower than")), "{:?}", both.notes);
 }
 
+/// A degree-1 spline whose control polygon runs out 1 mm and back within the first 1/64 of its
+/// span, and then stays at its start: every one of the 33 evenly spaced points lies at the start,
+/// so a path summed between them is 0 long, but the curve's own length is 1 + 1 = 2 mm. Its
+/// length is enclosed as 2 mm, not summed, so it is not a short edge of a sliver.
+#[test]
+fn a_splines_excursion_between_samples_is_not_a_short_edge() {
+    let tol = 0.01;
+    let mut asm = Assembly::new(tol, None);
+    let (a, b) = (asm.add_vertex([0.0, 0.0, 0.0]).unwrap(), asm.add_vertex([0.0, 0.0, 0.0]).unwrap());
+    let points = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]];
+    let knots = vec![0.0, 0.0, 1.0 / 128.0, 1.0 / 64.0, 1.0, 1.0];
+    let curve = spline_curve(1, knots, &points, None).unwrap();
+    let (e, _) = asm.add_edge(1, curve, [0.0, 1.0], [a, b]).unwrap();
+    let eval = crate::kernel::CurveEval::new(&asm.edges[e as usize].curve).unwrap();
+    for k in 0..=32 {
+        let p = eval.point(f64::from(k) / 32.0).unwrap();
+        assert!(p.dist(Vec3::from([0.0, 0.0, 0.0])) < 1e-9, "sample {k} is at {p:?}");
+    }
+    assert!(!asm.edge_length_within(e, tol).unwrap(), "the 2 mm excursion is past {tol} mm");
+}
+
+/// A straight long edge from 0 to 10 mm, and a long edge that follows it except for a 1 mm
+/// excursion within the first 1/64 of its span: every sample of the second lies on the first, so
+/// a separation measured at samples is 0, but the curves are 1 mm apart. The two are not proved
+/// within the tolerance, either way round, so the sliver is not collapsed.
+#[test]
+fn a_splines_excursion_between_samples_is_not_within_the_long_edges_tolerance() {
+    let tol = 0.01;
+    let mut asm = Assembly::new(tol, None);
+    let (a, b) = (asm.add_vertex([0.0, 0.0, 0.0]).unwrap(), asm.add_vertex([10.0, 0.0, 0.0]).unwrap());
+    let line = BCurve::Line { start: [0.0, 0.0, 0.0], end: [10.0, 0.0, 0.0] };
+    let (straight, _) = asm.add_edge(1, line, [0.0, 1.0], [a, b]).unwrap();
+    let points = [[0.0, 0.0, 0.0], [0.01, 1.0, 0.0], [0.02, 0.0, 0.0], [10.0, 0.0, 0.0]];
+    let knots = vec![0.0, 0.0, 1.0 / 128.0, 1.0 / 64.0, 1.0, 1.0];
+    let curve = spline_curve(1, knots, &points, None).unwrap();
+    let (excursion, _) = asm.add_edge(2, curve, [0.0, 1.0], [a, b]).unwrap();
+    let eval = crate::kernel::CurveEval::new(&asm.edges[excursion as usize].curve).unwrap();
+    for k in 1..32 {
+        let p = eval.point(f64::from(k) / 32.0).unwrap();
+        assert!(p.y.abs() < 1e-9 && p.z.abs() < 1e-9, "sample {k} of the excursion is at {p:?}");
+    }
+    assert!(asm.edges_together(excursion, straight, tol).unwrap().is_none(), "the 1 mm excursion is past {tol} mm");
+    assert!(asm.edges_together(straight, excursion, tol).unwrap().is_none(), "the enclosure holds both ways");
+}
+
 /// A side of a spline face 5 µm long that the file made one vertex, at its middle: a vertex
 /// whose tolerance takes in the whole side is raised to reach along it from its end, where the
 /// record check measures it; one whose tolerance does not take it in is left as it is.
