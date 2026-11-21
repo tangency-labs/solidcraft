@@ -1,0 +1,42 @@
+{
+  "en": {
+    "plugin_export.files_menu": "Export {format} (folder or .zip)…",
+    "plugin_export.folder": "Folder…",
+    "plugin_export.zip": ".zip…"
+  },
+  "ar": {
+    "plugin_export.files_menu": "تصدير {format} (مجلد أو .zip)…",
+    "plugin_export.folder": "مجلد…",
+    "plugin_export.zip": ".zip…"
+  },
+  "de": {
+    "plugin_export.files_menu": "{format} exportieren (Ordner oder .zip)…",
+    "plugin_export.folder": "Ordner…",
+    "plugin_export.zip": ".zip…"
+  },
+  "he": {
+    "plugin_export.files_menu": "ייצוא {format} (תיקייה או .zip)…",
+    "plugin_export.folder": "תיקייה…",
+    "plugin_export.zip": ".zip…"
+  },
+  "ja": {
+    "plugin_export.files_menu": "{format} をエクスポート（フォルダーまたは .zip）…",
+    "plugin_export.folder": "フォルダー…",
+    "plugin_export.zip": ".zip…"
+  },
+  "ko": {
+    "plugin_export.files_menu": "{format} 내보내기(폴더 또는 .zip)…",
+    "plugin_export.folder": "폴더…",
+    "plugin_export.zip": ".zip…"
+  },
+  "vi": {
+    "plugin_export.files_menu": "Xuất {format} (thư mục hoặc .zip)…",
+    "plugin_export.folder": "Thư mục…",
+    "plugin_export.zip": ".zip…"
+  },
+  "zh": {
+    "plugin_export.files_menu": "导出 {format}（文件夹或 .zip）…",
+    "plugin_export.folder": "文件夹…",
+    "plugin_export.zip": ".zip…"
+  }
+}

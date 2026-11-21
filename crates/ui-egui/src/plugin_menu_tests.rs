@@ -1,6 +1,9 @@
 //! The Plugins menu and its entry dialog: schema fields, selection fields picked in the viewport,
 //! required gating, and a run through the dialog matching `plugin.run`.
 use super::*;
+use crate::scenario::Harness;
+#[path = "../tests/support/raster.rs"]
+mod raster;
 use std::collections::BTreeSet;
 
 fn gear_schema() -> Value {
@@ -1086,6 +1089,101 @@ fn an_open_tool_keeps_the_viewport_until_it_is_done() {
     h.frames(2);
     assert!(h.app.dialog.is_none());
     assert!(h.app.plugin_menu.dialogs.is_empty());
+}
+
+#[test]
+fn a_files_export_dialog_offers_folder_and_zip_pickers_and_queues_file_export() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    for zip_target in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        let mut schema = cabinet_schema();
+        schema["properties"]["reference_folder"] = json!({
+            "type":"string","title":"Reference folder","format":"directory","description":"Choose a reference folder"
+        });
+        let entry = serde_json::from_value(json!({
+            "name":"sheets","kind":"exporter","extensions":["dxf"],"output":"files","input_schema":schema
+        }))
+        .unwrap();
+        h.app.plugin_menu.listed = vec![listed("cabinet", vec![entry])];
+        let picked = Rc::new(RefCell::new(Vec::new()));
+        let folder_picked = picked.clone();
+        h.app.services.pick_folder = Some(Box::new(move || {
+            folder_picked.borrow_mut().push("folder".to_string());
+            Box::pin(std::future::ready(Some("/tmp/sheets".to_string())))
+        }));
+        let zip_picked = picked.clone();
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            assert!(name.ends_with(".zip"));
+            assert_eq!(extensions, ["zip"]);
+            zip_picked.borrow_mut().push("zip".to_string());
+            Box::pin(std::future::ready(Some("/tmp/sheets.zip".to_string())))
+        }));
+        open_entry(&mut h.app, 0, 0);
+        h.app.home.open = false;
+        h.ctx = egui::Context::default();
+        h.ctx.enable_accesskit();
+        crate::fonts::setup_bundled_fonts(&h.ctx);
+        solidcraft_theme::apply(&h.ctx);
+        let mut textures = std::collections::HashMap::new();
+        for _ in 0..8 {
+            raster::paint(&mut h, &mut textures, vec![]);
+        }
+        let out = raster::paint(&mut h, &mut textures, vec![]);
+        let image = raster::raster(&mut h, &textures, out);
+        let card = crate::scenario::rect_of("dialog:window").unwrap();
+        let ppp = h.ctx.pixels_per_point();
+        let image = image::imageops::crop_imm(
+            &image,
+            (card.left() * ppp).max(0.0) as u32,
+            (card.top() * ppp).max(0.0) as u32,
+            (card.width() * ppp) as u32,
+            (card.height() * ppp) as u32,
+        )
+        .to_image();
+        let review = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/plugin-export-files");
+        std::fs::create_dir_all(&review).unwrap();
+        image.save(review.join("dialog.png")).unwrap();
+        assert!(crate::scenario::handle_at("dialog:ok").is_some());
+        assert!(crate::scenario::handle_at("dialog:apply").is_some());
+        h.frames(2);
+        let browse = h.app.tr("ui.plugin_dialog_browse").to_owned();
+        assert_eq!(h.widgets(&browse).len(), 1);
+        h.step(&json!({"widget":browse})).unwrap();
+        h.frames(2);
+        assert_eq!(*picked.borrow(), ["folder"], "Browse uses the folder picker without exporting");
+        assert!(h.app.control_held.is_empty());
+        let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+        let fields = dialog.fields.as_mut().unwrap();
+        let reference = &fields.iter().find(|(field, _)| field.key == "reference_folder").unwrap().1;
+        assert_eq!(*reference, Input::Text("/tmp/sheets".into()));
+        // Browsing does not grant an exporter file access. Clear the optional input before exporting.
+        set_input(fields, "reference_folder", Input::Text(String::new()));
+        set_input(fields, "storage", Input::Choice(Some(1)));
+        set_input(fields, "has_back", Input::Boolean(false));
+        assert!(!fields.iter().find(|(field, _)| field.key == "back_thickness").unwrap().0.enabled);
+        h.frames(2);
+        let target = if zip_target { "dialog:apply" } else { "dialog:ok" };
+        let at = crate::scenario::handle_at(target).unwrap();
+        h.frame_with(vec![egui::Event::PointerMoved(at)]);
+        for pressed in [true, false] {
+            h.frame_with(vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() }]);
+        }
+        // Complete the picker before the next frame dispatches the queued export.
+        crate::file_picker::tick(&mut h.app, &h.ctx);
+        assert_eq!(*picked.borrow(), ["folder", if zip_target { "zip" } else { "folder" }]);
+        let request = h.app.control_held.front().unwrap();
+        assert_eq!(request.params["command"], "file.export");
+        assert_eq!(request.params["params"]["format"], "cabinet.sheets");
+        assert_eq!(request.params["params"]["path"], if zip_target { "/tmp/sheets.zip" } else { "/tmp/sheets" });
+        let options = &request.params["params"]["options"];
+        assert!(options.get("reference_folder").is_none());
+        assert!(options.get("shelf_count").is_none(), "hidden fields are omitted for both export targets");
+        assert_eq!(options["drawer_count"], 4);
+        assert_eq!(options["size"], "large", "conditional choices and defaults reach the exporter");
+        assert_eq!(options["length"], 30.0);
+        assert_eq!(options["back_thickness"], 6.0, "disabled fields retain their values");
+    }
 }
 
 #[test]

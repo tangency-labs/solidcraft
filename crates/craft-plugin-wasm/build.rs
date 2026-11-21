@@ -35,5 +35,24 @@ fn main() -> Result<(), Box<dyn Error>> {
          macro_rules! call_import {{ ($guest:expr, $store:expr, $entry:expr, $file:expr, $options:expr) => {{ $guest.{namespace}_{name}_importer().call_import_file($store, $entry, $file, $options) }}; }}\n"
     );
     fs::write(PathBuf::from(env::var("OUT_DIR")?).join("importer.rs"), importer)?;
+    // An exporter reads the design through the command world's `commands`, so it shares that
+    // world's host state too.
+    let exporter = format!(
+        "mod exporter_bindings {{\n\
+             wasmtime::component::bindgen!({{\n\
+                 path: \"../craft-plugin/wit\",\n\
+                 world: \"exporter-plugin\",\n\
+                 with: {{\n\
+                     \"{package_name}/types\": super::bindings::{namespace}::{name}::types,\n\
+                     \"{package_name}/commands\": super::bindings::{namespace}::{name}::commands,\n\
+                     \"{package_name}/log\": super::bindings::{namespace}::{name}::log,\n\
+                     \"{package_name}/control\": super::bindings::{namespace}::{name}::control,\n\
+                     \"{package_name}/clock\": super::bindings::{namespace}::{name}::clock,\n\
+                 }},\n\
+             }});\n\
+         }}\n\
+         macro_rules! call_export {{ ($guest:expr, $store:expr, $slot:expr, $options:expr) => {{ $guest.{namespace}_{name}_formats_provider().call_export_file($store, $slot, $options) }}; }}\n"
+    );
+    fs::write(PathBuf::from(env::var("OUT_DIR")?).join("exporter.rs"), exporter)?;
     Ok(())
 }

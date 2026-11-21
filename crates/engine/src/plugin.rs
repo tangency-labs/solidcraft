@@ -2,8 +2,9 @@
 
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
-    API, DesignToken, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES,
-    MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, swatches, valid_id,
+    API, DesignToken, Effect, Entry, EntryKind, ExportOutput, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity,
+    MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, swatches,
+    valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
@@ -170,6 +171,9 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
                 "runtime.permissions.command_groups",
                 format!("unknown command group `{group}`; SolidCraft has {}", COMMAND_GROUPS.join(", ")),
             ));
+        }
+        if runtime.is_exporter() {
+            export::refuse_unreadable(runtime)?;
         }
         let storage = manifest.capabilities.iter().any(|capability| capability.starts_with("storage@"));
         for command in &runtime.commands {
@@ -404,7 +408,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
 
 pub mod check;
 mod events;
-pub use events::design_changed;
+mod export;
 pub mod grant_store;
 mod import;
 pub mod install;
@@ -415,7 +419,9 @@ pub mod storage;
 #[cfg(not(target_arch = "wasm32"))]
 pub use package::{remove, store_grants, validate_grants};
 
-pub use import::{Importer, describe as describe_importers, import_file, importer_for, importers, open_filters};
+pub use events::design_changed;
+pub use export::{describe as describe_exporters, export_file, exporter_for, exporters};
+pub use import::{FormatSlot, Importer, describe as describe_importers, format_slots, import_file, importer_for, importers, open_filters};
 pub use messages::PluginFailure;
 #[cfg(test)]
 mod tests;
@@ -666,7 +672,8 @@ pub fn resolve_call(s: &Session, id: &str, params: &Value) -> Result<Option<Valu
 }
 
 /// `engine.describe` of an installed, enabled plugin's entry: a command entry as the
-/// `<plugin>.<entry>` command, an importer as the tool that opens its files; each with the
+/// `<plugin>.<entry>` command, an importer as the tool that opens its files, or an exporter as
+/// the tool that writes the open design; each with the
 /// schema `tools/list` gives it. Read with the app's authority, whatever the caller's folders.
 pub fn describe_entry(s: &Session, id: &str) -> Result<Option<Value>> {
     tools::describe(s, id)
