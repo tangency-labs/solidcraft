@@ -74,6 +74,7 @@ pub use construct_auto::{construct_method, construct_methods, is_construct_tool}
 pub use design_link::{LinkProblem, LinkState};
 pub use drawing_dimension::preview_scene as drawing_dimension_preview;
 pub use drawing_ui::pending_icon as drawing_pending_icon;
+pub(crate) use edit::pick_mode;
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::move_matrix_params;
 pub(crate) use features::profiles as feature_profiles;
@@ -89,6 +90,7 @@ pub use file::use_import_cache_dir;
 pub(crate) use file::{GEOMETRY_MESSAGE, NAMES_MESSAGE, READER_MESSAGE, UP_MESSAGE, names_form, up_form, usable_path};
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
+pub use joints::{MAX_REACH_JOINTS, reach_from, reach_preview};
 pub use parts::part_length_label;
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;

@@ -1,0 +1,29 @@
+{
+  "en": {
+    "cmd.inspect.classify_points": "Classify Points"
+  },
+  "pl": {
+    "cmd.inspect.classify_points": "Klasyfikuj punkty"
+  },
+  "de": {
+    "cmd.inspect.classify_points": "Punkte klassifizieren"
+  },
+  "ja": {
+    "cmd.inspect.classify_points": "点を分類"
+  },
+  "ko": {
+    "cmd.inspect.classify_points": "점 분류"
+  },
+  "zh": {
+    "cmd.inspect.classify_points": "点分类"
+  },
+  "ar": {
+    "cmd.inspect.classify_points": "تصنيف النقاط"
+  },
+  "he": {
+    "cmd.inspect.classify_points": "סיווג נקודות"
+  },
+  "vi": {
+    "cmd.inspect.classify_points": "Phân loại điểm"
+  }
+}

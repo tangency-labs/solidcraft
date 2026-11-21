@@ -332,7 +332,7 @@ impl Product {
                     .collect()
             }
             Self::Browser => {
-                presentation.status = Some(crate::browser_search::body_count(&app.session));
+                presentation.status = Some(crate::browser_search::body_count(app));
                 vec![RuntimeAction {
                     id: ControlId("magnifier".into()),
                     label: solidcraft_ui_text::tr("ui.browser_search_hint").into(),

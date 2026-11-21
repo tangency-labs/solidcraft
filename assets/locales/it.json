@@ -1222,6 +1222,7 @@
   "cmd.motion_list": "Elenca studi del movimento",
   "cmd.motion_play": "Riproduci studio del movimento",
   "cmd.motion_plot": "Grafico dello studio del movimento",
+  "cmd.motion_simulate": "Simula movimento",
   "cmd.motion_study": "Studio del movimento",
   "cmd.motion_trace": "Traiettoria del movimento",
   "cmd.motion_trace_edit": "Modifica traccia di movimento",

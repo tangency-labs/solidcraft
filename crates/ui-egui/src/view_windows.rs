@@ -28,6 +28,7 @@ pub(crate) struct Windows {
     choices: Vec<WindowChoice>,
     foreign_views: Vec<(WindowId, DesignView)>,
     strip_order: std::collections::BTreeMap<u64, Vec<u64>>,
+    clean: std::collections::BTreeSet<(u64, WindowId)>,
     pending_action: Option<PendingAction>,
 }
 
@@ -37,6 +38,7 @@ pub(crate) struct WindowChoice {
     pub(crate) label: String,
     pub(crate) name: String,
     pub(crate) number: u32,
+    pub(crate) display_label: Option<String>,
     display: Option<String>,
 }
 
@@ -44,6 +46,7 @@ enum PendingAction {
     Move { view: u64, target: WindowTarget },
     Focus { view: u64, window: WindowId },
     Close { view: u64 },
+    Bring { source: WindowId, target: WindowId },
 }
 
 struct Host {
@@ -165,9 +168,16 @@ pub(crate) fn remember_local_reorder(app: &mut SolveApp, window: WindowId) {
     }
 }
 
+pub(crate) fn layout_views(app: &SolveApp) -> Vec<(WindowId, &DesignView)> {
+    available_strip_views(app).collect()
+}
+
 pub(crate) fn strip_views(app: &SolveApp) -> Vec<(WindowId, &DesignView)> {
     let order = app.view_windows.strip_order.get(&app.docs.current_tab());
-    let mut views: Vec<_> = available_strip_views(app).collect();
+    let mut views = layout_views(app);
+    if app.view_windows.is_child() && !app.preferences.clear_view_tabs {
+        views.retain(|(window, _)| *window == app.view_windows.current_window());
+    }
     if app.preferences.clear_view_tabs
         && let Some(order) = order
     {
@@ -232,7 +242,12 @@ pub(crate) fn focus_view(app: &mut SolveApp, view: u64, window: Option<WindowId>
 }
 
 fn focus(app: &mut SolveApp, id: WindowId) -> Result<(), String> {
-    if app.view_windows.painting != Some(id) && app.docs.views.views_of(id).is_none() {
+    let exists = if app.view_windows.is_child() {
+        app.view_windows.choices.iter().any(|choice| choice.id == id)
+    } else {
+        app.docs.views.views_of(id).is_some()
+    };
+    if !exists {
         return Err("no_such_window".into());
     }
     let target = (app.docs.active_tab(), id);
@@ -408,14 +423,11 @@ fn placement_json(placement: Option<&WindowPlacement>) -> Value {
 
 fn collect_choices(app: &SolveApp) -> Vec<WindowChoice> {
     let displays = &app.view_windows.displays;
-    let label = |name: &str, display: Option<&str>| {
-        let number = displays.iter().position(|entry| display == Some(entry.name.as_str()));
-        if let Some(index) = number {
-            let display = solidcraft_ui_text::format("multi_window.display_number", &[("n", &(index + 1).to_string())]);
-            format!("{name} · {display}")
-        } else {
-            name.to_owned()
-        }
+    let display_label = |display: Option<&str>| {
+        displays
+            .iter()
+            .position(|entry| display == Some(entry.name.as_str()))
+            .map(|index| solidcraft_ui_text::format("multi_window.display_number", &[("n", &(index + 1).to_string())]))
     };
     let root_display = app.view_windows.root_rect.zip(app.view_windows.root_scale).and_then(|(rect, scale)| {
         let position = (rect.center().to_vec2() * scale).to_pos2();
@@ -423,7 +435,9 @@ fn collect_choices(app: &SolveApp) -> Vec<WindowChoice> {
     });
     let choice = |id: WindowId, fallback: &str, display: Option<String>, label_display: Option<&str>| {
         let name = if app.preferences.clear_view_tabs { window_name(app, id) } else { fallback.to_owned() };
-        WindowChoice { id, label: label(&name, label_display), name, number: id.saturating_add(1), display }
+        let display_label = display_label(label_display);
+        let label = display_label.as_ref().map_or_else(|| name.clone(), |display| format!("{name} · {display}"));
+        WindowChoice { id, label, name, number: id.saturating_add(1), display, display_label }
     };
     std::iter::once(choice(0, &app.session.doc.name, None, root_display.map(|display| display.name.as_str())))
         .chain(app.docs.views.windows().iter().map(|window| {
@@ -439,6 +453,32 @@ pub(crate) fn window_choices(app: &SolveApp) -> std::borrow::Cow<'_, [WindowChoi
 
 pub(crate) fn can_create(app: &SolveApp) -> bool {
     window_choices(app).len().saturating_sub(1) < solidcraft_views::MAX_POPOUTS
+}
+
+pub(crate) fn bring_views(app: &mut SolveApp, source: WindowId) -> Result<(), String> {
+    let target = app.view_windows.current_window();
+    if source == 0 || source == target {
+        return Err("last_view_of_main_window".into());
+    }
+    if app.view_windows.is_child() {
+        app.view_windows.pending_action = Some(PendingAction::Bring { source, target });
+        return Ok(());
+    }
+    apply_bring(app, source, target)
+}
+
+fn apply_bring(app: &mut SolveApp, source: WindowId, target: WindowId) -> Result<(), String> {
+    let ids: Vec<_> = app.docs.views.views_of(source).ok_or("no_such_window")?.ids().collect();
+    let destination = WindowTarget::Existing { window: target, index: None };
+    // A layout or ownership error must leave all the views in their original windows.
+    let mut check = app.docs.views.clone();
+    for &id in &ids {
+        check.move_to_window(id, destination.clone()).map_err(|error| error.code().to_owned())?;
+    }
+    for id in ids {
+        app.run("tab.view.move_to_window", json!({"view": id, "window": target}))?;
+    }
+    Ok(())
 }
 
 fn apply_move(app: &mut SolveApp, view: u64, target: WindowTarget) -> Result<Value, String> {
@@ -587,24 +627,64 @@ fn close(app: &mut SolveApp, id: WindowId, toast: bool) -> Result<Vec<u64>, Stri
     Ok(ids)
 }
 
-fn window_row(id: WindowId, views: &ViewSet, placement: Option<&WindowPlacement>) -> Value {
+fn window_row(id: WindowId, views: &ViewSet, placement: Option<&WindowPlacement>, clean: bool) -> Value {
     let layout = views
         .tiles()
         .and_then(solidcraft_views::Tiles::preset_kind)
         .map_or(if views.is_tiled() { "custom" } else { "single" }, solidcraft_views::Preset::key);
-    json!({"id":id,"level":if id==0 {"full"} else {"views_only"},"views":views.views().iter().map(|view|view.id).collect::<Vec<_>>(),
+    json!({"id":id,"level":if clean {"clean"} else if id==0 {"full"} else {"views_only"},"views":views.views().iter().map(|view|view.id).collect::<Vec<_>>(),
         "active":views.active().id,"layout":layout,"display":placement.and_then(|p|p.display.as_deref()),
         "placement":placement_json(placement),"tool_window":id==0})
+}
+
+pub(crate) fn is_clean(app: &SolveApp) -> bool {
+    app.view_windows.clean.contains(&(app.docs.current_tab(), app.view_windows.current_window()))
+}
+
+pub(crate) fn show_clean(app: &mut SolveApp, ui: &mut Ui) {
+    if !app.view_windows.is_child() {
+        crate::panel_runtime::hide_app_host(app);
+    }
+    app.shell.cards.clear();
+    app.shell.workspace_panels.clear();
+    app.shell.browser = None;
+    app.shell.history = None;
+    app.shell.status_bar = None;
+    let rect = ui.available_rect_before_wrap();
+    app.shell.content = Some(rect);
+    app.viewport.host_windows = Some(Vec::new());
+    app.viewport.host_confirm = None;
+    let mut scene = ui.new_child(egui::UiBuilder::new().id_salt("clean_workspace").max_rect(rect));
+    app.show_workspace(&mut scene);
+    crate::view_tiles::focus_pressed(app);
+    app.resolve_fit(ui.ctx());
+    documents::sync_linked_active(app);
 }
 
 pub(crate) fn command(app: &mut SolveApp, command: &str, request: Value) -> Result<Value, String> {
     let id = request.get("window").and_then(Value::as_u64).and_then(|id| WindowId::try_from(id).ok()).unwrap_or_default();
     match command {
         "tab.window.list" => {
-            let rows = std::iter::once(window_row(0, &app.docs.views, None))
-                .chain(app.docs.views.windows().iter().map(|w| window_row(w.id, &w.views, w.placement.as_ref())))
+            let clean = |id| app.view_windows.clean.contains(&(app.docs.current_tab(), id));
+            let rows = std::iter::once(window_row(0, &app.docs.views, None, clean(0)))
+                .chain(app.docs.views.windows().iter().map(|w| window_row(w.id, &w.views, w.placement.as_ref(), clean(w.id))))
                 .collect::<Vec<_>>();
             Ok(json!({"windows":rows}))
+        }
+        "tab.window.clean" => {
+            let params =
+                serde_json::from_value::<solidcraft_engine::schema::tab_windows::TabWindowCleanParams>(request).map_err(|error| error.to_string())?;
+            with_strip(app, params.window, |app| {
+                let key = (app.docs.current_tab(), app.view_windows.current_window());
+                let on = params.on.unwrap_or_else(|| !app.view_windows.clean.contains(&key));
+                if on {
+                    app.view_windows.clean.insert(key);
+                    app.docs.view_placement = None;
+                } else {
+                    app.view_windows.clean.remove(&key);
+                }
+                Ok(json!({"window": key.1, "on": on}))
+            })
         }
         "tab.window.focus" => {
             focus(app, id)?;
@@ -711,6 +791,10 @@ fn toast(app: &mut SolveApp, ctx: &Context) {
 
 fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId) {
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
+    if is_clean(app) {
+        show_clean(app, ui);
+        return;
+    }
     let tokens = solidcraft_theme::Tokens::get();
     let edge = Container::new(ui.ctx(), Surface::ApplicationBar).edge("sc_view_window_bar", Edge::Top);
     let frame = Container::new(ui.ctx(), Surface::ApplicationBar).edge_frame(tokens.app_bar);
@@ -749,8 +833,19 @@ fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId) {
                         }
                     },
                 );
-                let left = brand_end + 12.0;
+                let mut left = brand_end + 12.0;
                 let right = menu.left() - 6.0;
+                let name = window_name(app, id);
+                let font = crate::ui_kit::type_face::semibold(tokens.font_small);
+                let name = ui.painter().layout_no_wrap(name, font, tokens.app_bar_text);
+                let width = 16.0 + tokens.space_6 + name.size().x;
+                if right - left >= width + 200.0 {
+                    let icon = egui::Rect::from_center_size(egui::pos2(left + 8.0, content.center().y), egui::Vec2::splat(16.0));
+                    crate::ui_kit::icons::paint_ink(ui.painter(), icon, crate::ui_kit::icons::window_icon(true), tokens.app_bar_text);
+                    let at = egui::pos2(icon.right() + tokens.space_6, content.center().y - name.size().y / 2.0);
+                    ui.painter().galley(at, name, tokens.app_bar_text);
+                    left += width + tokens.space_12;
+                }
                 if right > left {
                     documents::tabs(app, ui, rect, left, right);
                 }
@@ -779,6 +874,7 @@ fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId) {
     crate::view_tiles::focus_pressed(app);
     crate::view_tiles::placement_overlay(app, ui.ctx());
     app.resolve_fit(ui.ctx());
+    documents::sync_linked_active(app);
     crate::shortcut_box::show(app, ui.ctx());
     crate::context_menu::show(app, ui.ctx());
     documents::sync_window_title(app, ui.ctx());
@@ -838,13 +934,15 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
         return;
     }
     toast(app, ctx);
+    let open_windows = documents::view_window_ids(app);
+    app.view_windows.clean.retain(|(tab, id)| if *id == 0 { app.docs.tab_open(*tab) } else { open_windows.contains(&(*tab, *id)) });
     let root = app.docs.active_tab();
     let root_home = app.home.open;
     let mut old = std::mem::take(&mut app.view_windows.hosts);
     let mut retired = Vec::new();
     let mut tool_tab = None;
     let mut returned_focus_tab = None;
-    for (tab, id) in documents::view_window_ids(app) {
+    for (tab, id) in open_windows {
         let mut host = old.iter().position(|host| (host.tab, host.id) == (tab, id)).map_or_else(|| Host::new(tab, id), |index| old.remove(index));
         if !documents::select_tab(app, tab) {
             continue;
@@ -941,9 +1039,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             }
             documents::park_active_look(app);
             app.view_windows.parked = Some((tab, app.docs.views.ids().collect()));
-            if app.preferences.clear_view_tabs {
-                app.view_windows.foreign_views = available_strip_views(app).map(|(owner, view)| (owner, view.clone())).collect();
-            }
+            app.view_windows.foreign_views = available_strip_views(app).map(|(owner, view)| (owner, view.clone())).collect();
             std::mem::swap(&mut app.docs.views, &mut window.views);
             host.swap(app);
             let decorations = (app.custom_titlebar, app.integrated_titlebar);
@@ -995,14 +1091,16 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
                 PendingAction::Move { view, target } => apply_move(app, view, target).map(|_| ()),
                 PendingAction::Focus { view, window } => focus_view(app, view, Some(window)).and_then(|()| focus(app, window)),
                 PendingAction::Close { view } => app.run("tab.view.close", json!({"id": view})).map(|_| ()),
+                PendingAction::Bring { source, target } => apply_bring(app, source, target),
             };
             if let Err(reason) = result {
                 crate::design_view_ui::show_move_error(app, reason);
             }
-            if app.view_windows.focus == Some((tab, 0)) {
-                returned_focus_tab = Some(tab);
-            }
             ctx.request_repaint();
+        }
+        if app.view_windows.focus == Some((tab, 0)) {
+            returned_focus_tab = Some(tab);
+            ctx.request_repaint_of(ViewportId::ROOT);
         }
         if refused || close_request.is_some() {
             documents::select_tab(app, tab);

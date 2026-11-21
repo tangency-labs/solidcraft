@@ -1097,6 +1097,17 @@ pub enum Reason {
         /// The support net's domain.
         domain: [[f64; 2]; 2],
     },
+    /// An intersection edge whose end is continued to its vertex would leave its faces: the
+    /// continued span, `gap` long at its end, lies up to `bound` (certified) off them,
+    /// past the `tolerance` it must stay within (not upstream, #3062).
+    EdgeOffItsFaces {
+        /// How far the edge's end lay from its vertex.
+        gap: f64,
+        /// The certified bound of the continued span's distance from its faces.
+        bound: f64,
+        /// The tolerance it must stay within.
+        tolerance: f64,
+    },
 }
 
 impl Reason {
@@ -1118,7 +1129,8 @@ impl Reason {
             | Self::Topology(_)
             | Self::Surface(_)
             | Self::Blend(_)
-            | Self::FootPastDomainEnd { .. } => None,
+            | Self::FootPastDomainEnd { .. }
+            | Self::EdgeOffItsFaces { .. } => None,
             Self::Offset(o) => o.entity(),
             Self::Boolean(b) => b.entity(),
         }
@@ -1128,7 +1140,9 @@ impl Reason {
     /// comparison detail).
     pub(crate) fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) | Self::FootPastDomainEnd { .. } => SM_ERR,
+            Self::Failed(_) | Self::FootPastDomainEnd { .. } | Self::EdgeOffItsFaces { .. } => {
+                SM_ERR
+            }
             Self::Offset(o) => o.comparison_status(),
             Self::Nurbs(n) => n.comparison_status(),
             Self::Boolean(b) => b.comparison_status(),
@@ -1153,6 +1167,7 @@ impl Reason {
         match self {
             Self::Failed(_) => ErrorKind::of_status(status),
             Self::FootPastDomainEnd { .. } => ErrorKind::OutsideDomain,
+            Self::EdgeOffItsFaces { .. } => ErrorKind::NotWithinTolerance,
             Self::Offset(o) => o.kind(),
             Self::Nurbs(n) => n.kind(),
             Self::Boolean(b) => b.kind(),
@@ -1176,6 +1191,14 @@ impl core::fmt::Display for Reason {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Failed(what) => f.write_str(what),
+            Self::EdgeOffItsFaces {
+                gap,
+                bound,
+                tolerance,
+            } => write!(
+                f,
+                "an intersection edge continued {gap:e} to its vertex would lie up to {bound:e} off its faces, past their tolerance {tolerance:e}"
+            ),
             Self::Offset(o) => o.fmt(f),
             Self::Nurbs(n) => n.fmt(f),
             Self::Boolean(b) => b.fmt(f),

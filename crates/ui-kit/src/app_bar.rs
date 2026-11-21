@@ -903,6 +903,8 @@ pub struct TabStrip<'a> {
     /// The layouts the Layout button offers, each drawn as a miniature (its id ends in the layout's
     /// key: `single`, `side_by_side`, `stacked`, `large_and_two`, `grid`); empty: no button.
     pub layout_menu: &'a [TabMenuRow<'a>],
+    /// The full per-window menu, when the clear view tabs are enabled.
+    pub view_layout: Option<&'a crate::view_layout_menu::LayoutMenu>,
     /// The id of the layout shown now, outlined in the menu; empty for none.
     pub layout_current: &'a str,
     pub layout_tip: &'a str,
@@ -1198,6 +1200,7 @@ struct Geom {
     more_w: f32,
     switch_w: f32,
     stage: Option<CollapseStage>,
+    layout_extra: f32,
 }
 
 fn text_width(ui: &egui::Ui, text: &str, font: FontId) -> f32 {
@@ -1230,8 +1233,16 @@ const LAYOUT_BUTTON: f32 = 28.0;
 
 /// What a pill takes after its views: the + (and the Layout button), the separator and the close.
 fn pill_after(strip: &TabStrip) -> f32 {
-    PILL_AFTER - if strip.pop_out || strip.clear_view_tabs { DESIGN_CLOSE_WIDTH } else { 0.0 }
-        + if strip.layout_menu.is_empty() { 0.0 } else { LAYOUT_BUTTON }
+    let layout = if strip.layout_menu.is_empty() { 0.0 } else { LAYOUT_BUTTON + if clear_layout_data(strip).is_some() { 16.0 } else { 0.0 } };
+    PILL_AFTER - if strip.pop_out || strip.clear_view_tabs { DESIGN_CLOSE_WIDTH } else { 0.0 } + layout
+}
+
+fn clear_layout_data<'a>(strip: &'a TabStrip<'_>) -> Option<&'a crate::view_layout_menu::LayoutMenu> {
+    strip.view_layout.filter(|_| strip.clear_view_tabs && !strip.layout_menu.is_empty())
+}
+
+pub(crate) fn layout_name<'a>(strip: &'a TabStrip<'_>) -> &'a str {
+    strip.layout_menu.iter().find(|row| row.id == strip.layout_current).map_or("", |row| solidcraft_ui_text::tr_label(row.label))
 }
 
 /// What a pill takes before its views: border, padding, the unsaved dot, the name and its separator.
@@ -1324,6 +1335,7 @@ fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed
         if lifted_here { 0.0 } else { data.get_temp::<(usize, f32)>(strip.id.with("view_drag_slot")).map_or(0.0, |(_, width)| width + VIEW_GAP) }
     });
     let mut stage = None;
+    let mut layout_extra = 0.0;
     let (kind, width) = if strip.clear_view_tabs && (strip.views_as_tabs || strip.pop_out) {
         more_w = 28.0 + text_width(ui, &n.saturating_sub(1).to_string(), crate::type_face::semibold(t.font_caption));
         let width_at = |k: usize, density: CollapseStage| {
@@ -1338,9 +1350,21 @@ fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed
         name_w = name_w.min((room - fixed - overflow).max(0.0));
         let common = fixed + name_w;
         let expanded = all(CollapseStage::Full);
-        let stages =
-            [common + expanded, common + expanded, common + all(CollapseStage::WindowNumber), common + all(CollapseStage::Icons), common + overflow];
+        let title_width = strip
+            .view_layout
+            .filter(|_| !layout_name(strip).is_empty())
+            .map_or(0.0, |_| 6.0 + text_width(ui, layout_name(strip), FontId::proportional(Tokens::get().font_body)));
+        let stages = [
+            common + expanded + title_width,
+            common + expanded,
+            common + all(CollapseStage::WindowNumber),
+            common + all(CollapseStage::Icons),
+            common + overflow,
+        ];
         let chosen = collapse_stage(stages, room);
+        if chosen == CollapseStage::Full {
+            layout_extra = title_width;
+        }
         stage = Some(chosen);
         view_ws = (0..n).map(|k| width_at(k, chosen)).collect();
         (SelectedLayout::Pill, (stages[chosen as usize] + incoming).min(room).max(stages[CollapseStage::Overflow as usize].min(room)))
@@ -1356,7 +1380,7 @@ fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed
     } else {
         (name_w, switch_w)
     };
-    Geom { kind, index: strip.selected, width, dot, name_w, view_ws, more_w, switch_w, stage }
+    Geom { kind, index: strip.selected, width, dot, name_w, view_ws, more_w, switch_w, stage, layout_extra }
 }
 
 /// Opens the menu `which` at `at`, or closes it when it is the one open.
@@ -1395,11 +1419,6 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
         "render" => &[&[(8.0, 9.0), (8.9, 7.9), (9.9, 7.2), (11.0, 7.0)]],
         "animation" => &[&[(5.0, 5.0), (19.0, 5.0), (19.0, 19.0), (5.0, 19.0), (5.0, 5.0)], &[(10.0, 9.0), (15.0, 12.0), (10.0, 15.0), (10.0, 9.0)]],
         "rename" => &[&[(4.0, 20.0), (5.0, 16.0), (16.0, 5.0), (19.0, 8.0), (8.0, 19.0), (4.0, 20.0)]],
-        "window" => &[
-            &[(14.0, 4.0), (20.0, 4.0), (20.0, 10.0)],
-            &[(20.0, 4.0), (11.0, 13.0)],
-            &[(18.0, 14.0), (18.0, 20.0), (4.0, 20.0), (4.0, 6.0), (10.0, 6.0)],
-        ],
         "close" => &[&[(6.0, 6.0), (18.0, 18.0)], &[(18.0, 6.0), (6.0, 18.0)]],
         "duplicate" => &[&[(8.0, 8.0), (19.0, 8.0), (19.0, 19.0), (8.0, 19.0), (8.0, 8.0)], &[(5.0, 15.0), (5.0, 5.0), (15.0, 5.0)]],
         "tiles" => &[&[(4.0, 4.0), (20.0, 4.0), (20.0, 20.0), (4.0, 20.0), (4.0, 4.0)], &[(12.0, 4.0), (12.0, 20.0)], &[(4.0, 12.0), (20.0, 12.0)]],
@@ -1414,6 +1433,10 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
 /// Draws a view's icon (`model`, `sketch`, `sheet`, `render` or `animation`, or the menu glyphs
 /// `rename`, `window`, `close`, `duplicate`, `tiles` and `reopen`; another name draws nothing) as strokes of `ink` in `r`.
 pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
+    if matches!(icon, "window_here" | "window_other") {
+        crate::icons::paint_ink(p, r, icon, ink);
+        return;
+    }
     let s = r.width() / 24.0;
     let stroke = Stroke::new(2.0 * s, ink);
     let at = |(x, y): (f32, f32)| r.min + vec2(x * s, y * s);
@@ -1448,7 +1471,13 @@ fn menu_rows<'a>(
         }
         let mut item = crate::Item::action(row.id, row.label, "");
         if !row.icon.is_empty() {
-            let (icon, ink) = (row.icon.to_string(), row.accent.unwrap_or(Tokens::get().form_dim));
+            let (icon, ink) = (
+                row.icon.to_string(),
+                row.accent.unwrap_or_else(|| {
+                    let t = Tokens::get();
+                    if matches!(row.icon, "window_here" | "window_other") { t.text_dim } else { t.form_dim }
+                }),
+            );
             item.icon = crate::ItemIcon::paint(move |p, r, opacity| paint_view_glyph(p, r, &icon, ink.gamma_multiply(opacity)));
         }
         if keys && !row.key_on_selected.is_empty() {
@@ -1529,7 +1558,7 @@ fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str, modern: bool, m
         solidcraft_ui_registry::publish_target(&id, resp.rect);
         if !modern && view.to_window.is_some() {
             let mark = Rect::from_center_size(pos2(resp.rect.right() - t.space_16, resp.rect.center().y), vec2(13.0, 13.0));
-            paint_view_glyph(ui.painter(), mark, "window", t.form_ink.gamma_multiply(DETACHED_VIEW_OPACITY));
+            paint_view_glyph(ui.painter(), mark, crate::icons::window_icon(false), t.app_bar_text.gamma_multiply(DETACHED_VIEW_OPACITY));
             solidcraft_ui_registry::publish_target(&format!("{id}:window"), mark);
         }
         match view.state {
@@ -1724,7 +1753,7 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
     if detached {
         let dot_width = if view.state == ViewState::SourceChanged { 14.0 } else { 0.0 };
         let rect = Rect::from_center_size(pos2(label_x + label_w + dot_width + 10.0, vr.center().y), vec2(13.0, 13.0));
-        paint_view_glyph(&painter, rect, "window", ink);
+        paint_view_glyph(&painter, rect, crate::icons::window_icon(false), ink);
         solidcraft_ui_registry::publish_target(&format!("{}{k}:window", h.view), rect);
     }
     if view.active {
@@ -1942,7 +1971,7 @@ fn draw_clear_view(
             let badge = window_badge(view, stage);
             let mark = Rect::from_min_size(pos2(after, rect.center().y - 5.5), vec2(11.0, 11.0));
             let badge_ink = t.app_bar_text.gamma_multiply(0.70);
-            paint_view_glyph(&painter, mark, "window", badge_ink);
+            paint_view_glyph(&painter, mark, crate::icons::window_icon(false), badge_ink);
             solidcraft_ui_registry::publish_target(&format!("{}{k}:window", strip.handles.view), mark);
             painter.text(pos2(mark.right() + 4.0, rect.center().y), Align2::LEFT_CENTER, badge, crate::type_face::semibold(t.font_small), badge_ink);
         }
@@ -2021,15 +2050,17 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
         separator(close.left() - 4.0);
     }
     let has_layout = !strip.layout_menu.is_empty();
-    let layout_x = close.left() - 20.0 + if strip.pop_out || modern { DESIGN_CLOSE_WIDTH } else { 0.0 };
-    let layout = Rect::from_center_size(pos2(layout_x, cy), vec2(24.0, if modern { 26.0 } else { 24.0 }));
-    let plus = if has_layout { layout.translate(vec2(-LAYOUT_BUTTON, 0.0)) } else { layout };
+    let layout_extra = clear_layout_data(strip).map_or(0.0, |_| 16.0 + g.layout_extra);
+    let layout_x = close.left() - 20.0 + if strip.pop_out || modern { DESIGN_CLOSE_WIDTH } else { 0.0 } - layout_extra / 2.0;
+    let layout = Rect::from_center_size(pos2(layout_x, cy), vec2(24.0 + layout_extra, if modern { 26.0 } else { 24.0 }));
+    let plus_x = if has_layout { layout.left() - 16.0 } else { layout_x };
+    let plus = Rect::from_center_size(pos2(plus_x, cy), vec2(24.0, if modern { 26.0 } else { 24.0 }));
     if modern && has_layout {
         separator(layout.left() - 2.0);
     }
     let start = name_end + chip_action + 1.0 + 8.0 + VIEW_GAP;
     let active = tab.views.iter().position(|v| v.active).unwrap_or(0);
-    let right = (pr.right() - pill_after(strip)).max(start);
+    let right = (pr.right() - pill_after(strip) - g.layout_extra).max(start);
     let (first, count) = match g.stage {
         Some(CollapseStage::Overflow) => (active, usize::from(!tab.views.is_empty())),
         Some(_) => (0, tab.views.len()),
@@ -2126,7 +2157,11 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     }
     plus_button(ui, strip, plus, 14.0, pen);
     if has_layout {
-        layout_button(ui, strip, layout, pen);
+        if clear_layout_data(strip).is_some() {
+            clear_layout_button(ui, strip, layout, g.layout_extra > 0.0, pen);
+        } else {
+            layout_button(ui, strip, layout, pen);
+        }
     }
     if !strip.pop_out {
         if !modern {
@@ -2166,16 +2201,37 @@ fn layout_key(id: &str) -> &str {
     id.rsplit('.').next().unwrap_or(id)
 }
 
-/// Paints the miniature of the layout `key` in `rect`: the focused view is the tinted cell and
-/// the others are framed.
-fn paint_layout(p: &Painter, rect: Rect, key: &str) {
+fn clear_layout_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, show_name: bool, pen: &mut Pen) {
     let t = Tokens::get();
-    let inner = rect.shrink(6.0);
-    let gap = 3.0;
+    let response = ui.interact(rect, ui.scope_id().with("view_layout"), Sense::click());
+    let open = pen.popup.is_some_and(|(which, ..)| which == Popup::Layout);
+    let name = layout_name(strip);
+    let args = [("layout", name)];
+    let label = solidcraft_ui_text::format("view_layout.button_a11y", &args);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(open));
+    solidcraft_ui_registry::publish_target("view:layout", rect);
+    let painter = ui.painter();
+    if response.has_focus() || response.hovered() || open {
+        painter.rect_filled(rect, CLEAR_VIEW_RADIUS, if open { t.app_bar_hover_strong } else { t.app_bar_hover_button });
+    }
+    let glyph = Rect::from_center_size(pos2(rect.left() + 16.0, rect.center().y), vec2(16.0, 16.0));
+    paint_layout_glyph(painter, glyph, strip.layout_current, t.app_bar_text);
+    if show_name {
+        painter.text(pos2(glyph.right() + 6.0, rect.center().y), Align2::LEFT_CENTER, name, FontId::proportional(t.font_body), t.app_bar_text);
+    }
+    let indicator = Rect::from_center_size(pos2(rect.right() - 10.0, rect.center().y), vec2(10.0, 10.0));
+    crate::disclosure::dropdown_indicator(painter, indicator, t.app_bar_text);
+    if response.backing_on_hover_text(solidcraft_ui_text::format("view_layout.button", &args)).clicked() {
+        toggle(ui.ctx(), &mut pen.popup, Popup::Layout, pos2(rect.right(), pen.below), rect);
+    }
+}
+
+fn layout_cells(inner: Rect, gap: f32, key: &str) -> Vec<Rect> {
     let (w, h) = (inner.width(), inner.height());
     let half = |len: f32| (len - gap) / 2.0;
     let cell = |x: f32, y: f32, cw: f32, ch: f32| Rect::from_min_size(inner.min + vec2(x, y), vec2(cw, ch));
-    let cells: Vec<Rect> = match key {
+    match key {
         "side_by_side" => vec![cell(0.0, 0.0, half(w), h), cell(half(w) + gap, 0.0, half(w), h)],
         "stacked" => vec![cell(0.0, 0.0, w, half(h)), cell(0.0, half(h) + gap, w, half(h))],
         "large_and_two" => {
@@ -2189,13 +2245,31 @@ fn paint_layout(p: &Painter, rect: Rect, key: &str) {
             cell(half(w) + gap, half(h) + gap, half(w), half(h)),
         ],
         _ => vec![cell(0.0, 0.0, w, h)],
-    };
-    for (i, c) in cells.into_iter().enumerate() {
+    }
+}
+
+/// Paints the miniature of the layout key in rect: the focused view is tinted and the others are framed.
+fn paint_layout(p: &Painter, rect: Rect, key: &str) {
+    let t = Tokens::get();
+    for (i, c) in layout_cells(rect.shrink(6.0), 3.0, key).into_iter().enumerate() {
         if i == 0 {
             p.rect_filled(c, 3u8, t.accent_soft);
         } else {
             p.rect_filled(c, 3u8, t.panel_header);
             p.rect_stroke(c, 3u8, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+        }
+    }
+}
+
+/// The glyph shared by the compact app bar button and the layout choices.
+pub(crate) fn paint_layout_glyph(p: &Painter, rect: Rect, layout: &str, ink: egui::Color32) {
+    let unit = rect.width().min(rect.height()) / 16.0;
+    let inside = rect.shrink(unit);
+    for (index, cell) in layout_cells(inside, unit, layout_key(layout)).into_iter().enumerate() {
+        if index == 0 {
+            p.rect_filled(cell, 2, ink);
+        } else {
+            p.rect(cell, 2, ink.gamma_multiply(0.22), Stroke::new(unit, ink.gamma_multiply(0.7)), egui::StrokeKind::Inside);
         }
     }
 }
@@ -2323,6 +2397,12 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
     let Some((which, at, opener, opened)) = pen.popup else {
         return;
     };
+    if which == Popup::Layout
+        && let Some(data) = clear_layout_data(strip)
+    {
+        clear_layout_popup(ui, strip, data, opener, opened, pen);
+        return;
+    }
     let views = strip.tabs.get(strip.selected).map_or(&[][..], |tab| tab.views);
     if matches!(which, Popup::View(k) if k >= views.len()) {
         pen.popup = None;
@@ -2413,6 +2493,45 @@ pub fn clear_view_popup(ctx: &egui::Context, strip: egui::Id) {
         data.remove::<PopupState>(strip.with("view_popup"));
         data.remove::<ViewDrag>(strip.with("view_drag"));
     });
+}
+
+fn clear_layout_popup(ui: &egui::Ui, strip: &TabStrip, data: &crate::view_layout_menu::LayoutMenu, opener: Rect, opened: u64, pen: &mut Pen) {
+    use crate::view_layout_menu;
+    let screen = ui.ctx().content_rect();
+    let width = view_layout_menu::WIDTH.min(screen.width());
+    let id = strip.id.with("clear_view_layout_popup");
+    let height = ui.ctx().memory(|memory| memory.area_rect(id)).map_or(0.0, |rect| rect.height());
+    let left = (opener.right() - width).clamp(screen.left(), (screen.right() - width).max(screen.left()));
+    let above = opener.top() - height;
+    let top = if opener.bottom() + height > screen.bottom() && above >= screen.top() { above } else { opener.bottom() };
+    let available_height = (screen.bottom() - top).max(0.0);
+    let response = crate::Container::new(ui.ctx(), crate::Surface::Popup).area(id).fixed_pos(pos2(left, top)).order(egui::Order::Foreground).show(
+        ui.ctx(),
+        |ui| {
+            // egui remembers the earlier popup size. The one-window menu must be able to grow
+            // when another window appears.
+            ui.set_max_height(available_height);
+            crate::menu::Menu::show(ui, width, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("layout_controls")
+                    .max_height((available_height - 14.0).max(0.0))
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| view_layout_menu::show(ui, strip, data, opened))
+                    .inner
+            })
+        },
+    );
+    let inside = ui.ctx().pointer_latest_pos().is_some_and(|pos| {
+        opener.contains(pos) || response.response.rect.contains(pos) || response.inner.submenu.is_some_and(|rect| rect.contains(pos))
+    });
+    let outside = opened != ui.ctx().cumulative_frame_nr() && !inside && ui.input(|input| input.pointer.any_pressed());
+    let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
+    let chose_final = response.inner.action.as_deref().is_some_and(|id| !view_layout_menu::keep_open(id));
+    if outside || escape || chose_final {
+        pen.popup = None;
+        ui.memory_mut(|memory| memory.request_focus(ui.scope_id().with("view_layout")));
+    }
+    pen.actions.extend(response.inner.action.map(|id| TabAction::LayoutMenu { id }));
 }
 
 /// The selected design strip can receive a view from another window.

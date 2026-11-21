@@ -6,9 +6,10 @@
 use solidcore::curve::from_parameters;
 use solidcore::error::EntityRef;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::extent3d::Extent3d;
 use solidcore::geom::object::Shape;
 use solidcore::geom::tol::{brep_zone_tol_3d, SmallTopoType};
-use solidcore::intersect::point_class::PointClassType;
+use solidcore::intersect::point_class::{PointClassType, PointClassification};
 use solidcore::mass::integrator::properties::{
     brep_area_about, brep_mass_properties_estimated, edge_length, face_area, face_centroid,
     region_material, AreaAbout, MassPropertyRequest, PropertyAttributes,
@@ -40,7 +41,7 @@ use crate::{Error, Result};
 
 impl Answer for Vec<q::EdgeFaceGapSample> {}
 impl Answer for Distance {}
-impl Answer for solidcore::geom::extent3d::Extent3d {}
+impl Answer for Extent3d {}
 impl Answer for [f64; 3] {}
 impl Answer for Vec<[f64; 3]> {}
 impl Answer for Vec<Option<f64>> {}
@@ -123,6 +124,31 @@ pub enum PointClass {
     OnBoundary,
 }
 
+/// Which face supplies normals in [`Body::classify_points_with_normals`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PointNormalFace {
+    /// A record face index.
+    Index(usize),
+    /// A point on the face; the first containing face in record order is chosen.
+    Point([f64; 3]),
+}
+
+/// A point's material class and, on the boundary, its named-by-index face and normal.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ClassifiedPoint {
+    /// Inside a material region.
+    Inside,
+    /// Outside material, including holes and cavities.
+    Outside,
+    /// On a trimmed face within the body's modelling tolerance.
+    On {
+        /// Face index in the supplied record order.
+        face: usize,
+        /// Unit normal facing out of material.
+        normal: Normal,
+    },
+}
+
 /// Where the kernel's classification put a point ([`locate_points`]), before any rule for a
 /// region it is unsure of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -185,12 +211,20 @@ fn locate(
     let pc = classifier
         .point_3d_classify(k, p, tol, true)
         .map_err(LocateFailure::Classify)?;
+    located(classifier.brep(), &pc)
+}
+
+/// Read a classification against the body that supplied its region ids.
+fn located(
+    b: &Brep,
+    pc: &PointClassification<EntityRef>,
+) -> std::result::Result<Located, LocateFailure> {
     match (pc.point_class(), pc.object()) {
         (PointClassType::Vertex | PointClassType::Edge | PointClassType::Face, _) => {
             Ok(Located::OnBoundary)
         }
         (PointClassType::Region, Some(EntityRef::Region(region))) => {
-            match region_material(classifier.brep(), region) {
+            match region_material(b, region) {
                 Ok(m) => Ok(Located::InRegion {
                     region,
                     material: Some(m),
@@ -1226,6 +1260,63 @@ impl Body {
         })
     }
 
+    /// The outward unit normal at `p` on trimmed record face `face`, within the body's
+    /// modelling tolerance, or `None` off that face. Uses the same tolerance as
+    /// [`Body::classify_points`] and the material-side sense of [`Body::face_normal_at_edge`].
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an invalid face index or non-finite point; those of
+    /// [`Body::face_normal_at_edge`] for an undefined normal or material side.
+    pub fn face_normal_at_point(
+        &self,
+        order: &Order,
+        face: usize,
+        p: [f64; 3],
+    ) -> Result<Option<Normal>> {
+        let (f, p) = (order::face(order, face)?, point(p)?);
+        with_body("face_normal_at_point", self, |k, b| {
+            let tol = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
+            Ok(face_normal_in_body(k, b, f, p, tol))
+        })?
+    }
+
+    /// Classify all `points` and resolve boundary faces and outward normals in one
+    /// rollback scope. A single mutable B-rep query classifies the whole batch without
+    /// another body copy. Face boxes are built once and exclude distant faces before
+    /// exact trimmed-face membership is tested, in record order.
+    ///
+    /// `face` selects one normal's face for all boundary points; without it the first
+    /// containing face is chosen per point. Classes remain relative to the whole body.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for non-finite coordinates, an invalid face index, or a
+    /// point that has no containing selected face; [`Error::Unsupported`] when
+    /// a point lies on a material/material partition (never merely when a candidate
+    /// face is a partition); those of classification, face boxes and
+    /// [`Body::face_normal_at_point`].
+    pub fn classify_points_with_normals(
+        &self,
+        order: &Order,
+        points: &[[f64; 3]],
+        face: Option<PointNormalFace>,
+    ) -> Result<Vec<ClassifiedPoint>> {
+        for &p in points {
+            point(p)?;
+        }
+        match face {
+            Some(PointNormalFace::Index(i)) => {
+                order::face(order, i)?;
+            }
+            Some(PointNormalFace::Point(p)) => {
+                point(p)?;
+            }
+            None => {}
+        }
+        with_body("classify_points_with_normals", self, |k, b| {
+            Ok(classify_with_normals(k, b, order, points, face))
+        })?
+    }
+
     /// The area of record face `face` (`SmApiFaceComputeArea`) at `relative_accuracy`, as the
     /// kernel's contract takes it (ops passes it on as given). **Estimated, not proved**
     /// ([`MassPropertiesEstimate`]).
@@ -1536,6 +1627,96 @@ pub(crate) fn outer_faceuse(b: &Brep, f: FaceId) -> solidcore::Result<Result<Fac
             "a face with material on both sides has no side that faces out",
         )),
     })
+}
+
+/// Membership precedes material-side selection: an unrelated partition has no normal
+/// to request and must not refuse a query on another face.
+fn face_normal_in_body(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    p: Point3,
+    tol: f64,
+) -> Result<Option<Normal>> {
+    let Some(uv) = q::face_parameters_at_point(k, b, f, p, tol).map_err(status)? else {
+        return Ok(None);
+    };
+    let fu = outer_faceuse(b, f).map_err(status)??;
+    let n = q::face_normal_at_uv(k, b, f, uv, fu).map_err(status)?;
+    Ok(Some(Normal {
+        value: array(n.value),
+        bound: n.bound,
+    }))
+}
+
+/// First exact containing face, after rejecting points outside the faces' kernel boxes.
+fn find_point_normal(
+    k: &Kernel,
+    b: &mut Brep,
+    candidates: &q::FacePointCandidates,
+    p: Point3,
+    tol: f64,
+    selected: Option<usize>,
+) -> Result<Option<(usize, Normal)>> {
+    for (index, f) in candidates.at_point(p, tol, selected).map_err(status)? {
+        if let Some(normal) = face_normal_in_body(k, b, f, p, tol)? {
+            return Ok(Some((index, normal)));
+        }
+    }
+    Ok(None)
+}
+
+/// The whole classification workflow, on the one body already protected by `with_body`.
+fn classify_with_normals(
+    k: &Kernel,
+    b: &mut Brep,
+    order: &Order,
+    points: &[[f64; 3]],
+    face: Option<PointNormalFace>,
+) -> Result<Vec<ClassifiedPoint>> {
+    let tol = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
+    let query = BrepQuery::of_brep(b);
+    let mut classes = Vec::new();
+    for &p in points {
+        let pc = query
+            .point_3d_classify(k, b, point(p)?, tol, true)
+            .map_err(status)?;
+        classes.push(point_class(located(b, &pc))?);
+    }
+    let needs_faces = matches!(face, Some(PointNormalFace::Point(_)))
+        || classes.contains(&PointClass::OnBoundary);
+    let candidates = if needs_faces {
+        let selected = match face {
+            Some(PointNormalFace::Index(i)) => Some(i),
+            _ => None,
+        };
+        q::FacePointCandidates::new(k, b, &order.faces, selected).map_err(status)?
+    } else {
+        q::FacePointCandidates::default()
+    };
+    let selected = match face {
+        Some(PointNormalFace::Index(i)) => Some(i),
+        Some(PointNormalFace::Point(p)) => Some(
+            find_point_normal(k, b, &candidates, point(p)?, tol, None)?
+                .ok_or(Error::Argument)?
+                .0,
+        ),
+        None => None,
+    };
+    points
+        .iter()
+        .zip(classes)
+        .map(|(&p, class)| match class {
+            PointClass::Inside => Ok(ClassifiedPoint::Inside),
+            PointClass::Outside => Ok(ClassifiedPoint::Outside),
+            PointClass::OnBoundary => {
+                let (face, normal) =
+                    find_point_normal(k, b, &candidates, point(p)?, tol, selected)?
+                        .ok_or(Error::Argument)?;
+                Ok(ClassifiedPoint::On { face, normal })
+            }
+        })
+        .collect()
 }
 
 /// The face across rim edge `e` from the faces `set` ([`Body::outline_cuts`]): the one face of
@@ -1954,6 +2135,130 @@ pub(crate) mod tests {
             }
             assert_eq!((inner, outer), (24, 24), "turned {turned}");
         }
+    }
+
+    /// The cavity wall at x=3 faces +X into void; the outside wall at x=0 faces -X.
+    /// This is independent of the surfaces' parameterisation and record face order.
+    #[test]
+    fn point_normals_face_out_of_material_in_record_order() {
+        all_fixes();
+        for turned in [false, true] {
+            let b = cavity(turned);
+            let mut order = kernel_order(&b);
+            order.faces.reverse();
+            for (p, want) in [([3., 5., 5.], [1., 0., 0.]), ([0., 5., 5.], [-1., 0., 0.])] {
+                let normals: Vec<_> = (0..order.faces.len())
+                    .filter_map(|f| b.face_normal_at_point(&order, f, p).unwrap())
+                    .collect();
+                assert_eq!(normals.len(), 1);
+                for n in normals {
+                    for (value, expected) in n.value.into_iter().zip(want) {
+                        assert!((value - expected).abs() < 1e-12, "{n:?}");
+                    }
+                }
+            }
+            assert!(b
+                .face_normal_at_point(&order, usize::MAX, [0., 0., 0.])
+                .is_err());
+            assert!(b
+                .face_normal_at_point(&order, 0, [f64::NAN, 0., 0.])
+                .is_err());
+        }
+    }
+
+    /// A merged inner cube leaves six material/material partitions. Put them first in
+    /// record order: off-partition points must still reach the two outer x faces,
+    /// while a point actually on a partition still has no outward normal.
+    #[test]
+    fn batched_point_normals_skip_unrelated_partitions() {
+        all_fixes();
+        let b = make_box([0., 0., 0.], [10., 10., 10.]).unwrap();
+        let inner = make_box([3., 3., 3.], [4., 4., 4.]).unwrap();
+        session::run("merge", |k| {
+            let mut g = b.lock();
+            let outer = std::mem::replace(&mut *g, Brep::new());
+            *g = solidcore::boolean::api_brep::boolean_merge(k, outer, inner.into_inner())?;
+            Ok(())
+        })
+        .unwrap();
+        let mut order = kernel_order(&b);
+        let partitions: Vec<_> = {
+            let g = b.lock();
+            order
+                .faces
+                .iter()
+                .copied()
+                .filter(|&f| matches!(outer_faceuse(&g, f), Ok(Err(Error::Unsupported(_)))))
+                .collect()
+        };
+        assert_eq!(partitions.len(), 6);
+        order.faces.sort_by_key(|f| !partitions.contains(f));
+        let mut refused = 0;
+        for i in 0..6 {
+            assert_eq!(
+                b.face_normal_at_point(&order, i, [0., 5., 5.]).unwrap(),
+                None
+            );
+            match b.face_normal_at_point(&order, i, [3., 5., 5.]) {
+                Ok(None) => {}
+                Err(Error::Unsupported(_)) => refused += 1,
+                other => panic!("unexpected partition normal: {other:?}"),
+            }
+        }
+        assert_eq!(refused, 1, "only the x=3 partition contains this point");
+
+        let points = [[0., 5., 5.], [10., 5., 5.], [1., 1., 1.], [20., 5., 5.]];
+        let results = b
+            .classify_points_with_normals(&order, &points, None)
+            .unwrap();
+        #[cfg(feature = "profile")]
+        {
+            let many = vec![points[0]; 256];
+            let (batch, calls) =
+                session::profiled(|| b.classify_points_with_normals(&order, &many, None).unwrap());
+            assert_eq!(batch.len(), many.len());
+            assert_eq!(
+                calls.iter().map(|c| c.call).collect::<Vec<_>>(),
+                ["classify_points_with_normals"]
+            );
+        }
+        assert_eq!(results.len(), points.len());
+        for (result, want) in results.iter().zip([[-1., 0., 0.], [1., 0., 0.]]) {
+            let ClassifiedPoint::On { face, normal } = result else {
+                panic!("expected an exterior face: {result:?}");
+            };
+            assert!(*face >= 6, "the first six faces are internal partitions");
+            for (value, expected) in normal.value.into_iter().zip(want) {
+                assert!((value - expected).abs() < 1e-12, "{normal:?}");
+            }
+        }
+        assert_eq!(results[2], ClassifiedPoint::Inside);
+        assert_eq!(results[3], ClassifiedPoint::Outside);
+        let ClassifiedPoint::On { face, .. } = results[0] else {
+            panic!("the x=0 point is on the exterior");
+        };
+        for selected in [
+            PointNormalFace::Index(face),
+            PointNormalFace::Point([0., 4., 5.]),
+        ] {
+            assert_eq!(
+                b.classify_points_with_normals(&order, &points[..1], Some(selected))
+                    .unwrap(),
+                results[..1]
+            );
+        }
+        assert!(matches!(
+            b.classify_points_with_normals(&order, &[[3., 5., 5.]], None),
+            Err(Error::Unsupported(_))
+        ));
+        assert_eq!(
+            b.classify_points_with_normals(&order, &points[..1], Some(PointNormalFace::Index(0))),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            b.classify_points_with_normals(&order, &[[f64::NAN, 0., 0.]], None),
+            Err(Error::Argument)
+        );
     }
 
     /// The kernel's `Degenerate` (a normal at a pole or an apex) and `UnsureRegion` are typed
