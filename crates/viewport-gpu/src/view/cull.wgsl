@@ -5,6 +5,7 @@
 //          draw arguments);
 //   scan:  one workgroup turns the counts into where each level's placements start;
 //   place: each placement copies itself to its slot.
+// While the view moves, `pick` also leaves out the placements the last frame's depth hides.
 
 struct View {
     vp: mat4x4<f32>,
@@ -22,6 +23,11 @@ struct View {
     edge_args_at: u32,
     edge_out_at: u32,
     _pad: u32,
+    // While the view moves: the view the last frame's depth pyramid (`hiz.rs`) was drawn with,
+    // and the pyramid's frame width and height (pixels), its level count, and flags (1: leave
+    // out the placements it hides, 2: the depth buffer is 1 at the near plane).
+    prev_vp: mat4x4<f32>,
+    hiz: vec4<u32>,
 }
 
 @group(0) @binding(0) var<uniform> view: View;
@@ -37,6 +43,46 @@ struct View {
 @group(0) @binding(3) var<storage, read_write> out: array<u32>;
 // Per placement: its triangles' entry and slot, its edges' entry and slot (NONE: not drawn).
 @group(0) @binding(4) var<storage, read_write> picks: array<u32>;
+@group(0) @binding(5) var hiz: texture_2d<f32>;
+
+// Whether a box (corners `lo`, `hi` moved by the rows) lies wholly behind the depth the last
+// frame drew where the box would be seen in that frame's view: its nearest point farther than the
+// farthest depth of the pyramid's texels its outline covers (at the level where that is at most
+// 2 × 2 texels). A box with a corner behind that view's eye, or off its frame, is not.
+fn hidden(r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>, lo: vec3<f32>, hi: vec3<f32>) -> bool {
+    let frame = vec2<f32>(f32(view.hiz.x), f32(view.hiz.y));
+    var pmin = vec2<f32>(1e30, 1e30);
+    var pmax = vec2<f32>(-1e30, -1e30);
+    var near = 1e30;
+    for (var k = 0u; k < 8u; k = k + 1u) {
+        let p = vec4<f32>(corner(lo, hi, k), 1.0);
+        let c = view.prev_vp * vec4<f32>(dot(r0, p), dot(r1, p), dot(r2, p), 1.0);
+        if (!(c.w > 1e-6)) { return false; }
+        let ndc = c.xyz / c.w;
+        let px = vec2<f32>((ndc.x * 0.5 + 0.5) * frame.x, (0.5 - ndc.y * 0.5) * frame.y);
+        pmin = min(pmin, px);
+        pmax = max(pmax, px);
+        near = min(near, select(ndc.z, 1.0 - ndc.z, (view.hiz.w & 2u) != 0u));
+    }
+    if (pmax.x < 0.0 || pmax.y < 0.0 || pmin.x >= frame.x || pmin.y >= frame.y) { return false; }
+    let a = max(pmin, vec2<f32>(0.0, 0.0)) * 0.5;
+    let b = min(pmax, frame - vec2<f32>(1.0, 1.0)) * 0.5;
+    let span = max(b.x - a.x, b.y - a.y);
+    var level = 0u;
+    if (span > 1.0) { level = u32(ceil(log2(span))); }
+    level = min(level, view.hiz.z - 1u);
+    let dims = vec2<i32>(textureDimensions(hiz, level));
+    let scale = 1.0 / f32(1u << level);
+    let t0 = clamp(vec2<i32>(floor(a * scale)), vec2<i32>(0, 0), dims - vec2<i32>(1, 1));
+    let t1 = clamp(vec2<i32>(floor(b * scale)), vec2<i32>(0, 0), dims - vec2<i32>(1, 1));
+    var far = 0.0;
+    for (var y = t0.y; y <= t1.y; y = y + 1) {
+        for (var x = t0.x; x <= t1.x; x = x + 1) {
+            far = max(far, textureLoad(hiz, vec2<i32>(x, y), i32(level)).x);
+        }
+    }
+    return near > far + 1e-6;
+}
 
 const NONE: u32 = 0xffffffffu;
 // Words of a placement as it is drawn ([`INSTANCE_SIZE`]), and of one in `scene`: the placement,
@@ -129,6 +175,9 @@ fn pick(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) g
             out_far = out_far && c.z > c.w;
         }
         if out_px || out_nx || out_py || out_ny || out_near || out_far {
+            return;
+        }
+        if (view.hiz.w & 1u) != 0u && hidden(r0, r1, r2, lo, hi) {
             return;
         }
     }
