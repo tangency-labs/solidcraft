@@ -106,6 +106,19 @@ pub enum TopologyFailure {
         /// The face the surface belongs to, where it has one.
         entity: Option<EntityRef>,
     },
+    /// The B-rep the caller gave has no infinite region. [`ErrorKind::InvalidInput`].
+    NoInfiniteRegion,
+    /// An edge gave no B-spline copy of its curve trimmed to its interval: it has no curve,
+    /// its curve has no B-spline form, or the trim failed. Class `failed`.
+    NoTrimmedBSpline,
+    /// The caller gave no surface. [`ErrorKind::InvalidInput`].
+    NoSurfaceGiven,
+    /// A face the caller listed to copy is listed more than once.
+    /// [`ErrorKind::InvalidInput`].
+    FaceListedTwice,
+    /// The two edges the caller gave to glue do not share both their vertices.
+    /// [`ErrorKind::InvalidInput`].
+    EdgesNotSharingVertices,
     /// The face's upward face use has no edge use (its loops are vertex loops, or it has
     /// none), so no edge gives a direction to vote with. [`ErrorKind::Unsupported`].
     FaceWithoutEdges,
@@ -139,6 +152,72 @@ pub enum TopologyFailure {
     /// The vertex to delete still has edges; the caller deletes them first.
     /// [`ErrorKind::InvalidInput`].
     VertexHasEdges,
+    /// No radial sector of an edge takes a new face's edge use there; the face is still
+    /// made. Class `failed`.
+    NoSectorForNewEdgeuse,
+    /// No point stepped off the face use's first edge could be classified against the
+    /// shells: the step leaves the face (a face narrower than the step) or the
+    /// classification fails, at every step tried. Class `failed`.
+    NoClassifiablePoint,
+    /// The UV trim curves of a face could not be made; the error that stopped them, where
+    /// there is one, is the cause. Class `failed`; whether it is a defect or a refusal is
+    /// its cause's.
+    UvTrimCurvesNotMade,
+    /// A requested face has no copy, or more than one, after the copy: the merge passed
+    /// over a face it failed to make, or split one. Class `failed`.
+    FacesNotCopiedOnce,
+    /// The caller gave no region. [`ErrorKind::InvalidInput`].
+    NoRegionGiven,
+    /// The surface to trim is not G1 and the caller's loops are not oriented, which the trim
+    /// does not take: it orients loops only on a G1 surface. [`ErrorKind::Unsupported`].
+    UnorientedLoopsOnNonG1Surface,
+    /// The face has no loops. [`ErrorKind::InvalidInput`].
+    FaceWithoutLoops,
+    /// The caller's curves do not close into loops, or one lies off the loops' plane.
+    /// [`ErrorKind::InvalidInput`].
+    LoopsNotClosedOrPlanar {
+        /// Whether every loop closed.
+        closed: bool,
+        /// Whether every curve lies on the loops' plane.
+        on_plane: bool,
+    },
+    /// A curve meeting a loop vertex has a zero tangent at its end there, so the curves round
+    /// the vertex cannot be ordered by direction. [`ErrorKind::Unsupported`].
+    CurveEndWithoutTangent,
+    /// A loop encloses no area (its points give no normal). [`ErrorKind::InvalidInput`].
+    LoopWithoutArea,
+    /// The caller gave no curves. [`ErrorKind::InvalidInput`].
+    NoCurvesGiven,
+    /// The face's first loop is not outer, or a later loop is not inner.
+    /// [`ErrorKind::InvalidInput`].
+    LoopsMisoriented,
+    /// A loop crosses the surface's closure more than once without a singular side.
+    /// [`ErrorKind::InvalidInput`].
+    LoopCrossesClosure,
+    /// The surface is discontinuous in a parameter direction, which the trim does not take.
+    /// [`ErrorKind::Unsupported`].
+    SurfaceDiscontinuous,
+    /// A loop index the caller gave is not below the number of loops.
+    /// [`ErrorKind::InvalidInput`].
+    LoopIndexOutOfRange {
+        /// The index given.
+        index: usize,
+        /// The number of loops.
+        loops: usize,
+    },
+    /// A curve index the caller gave lies in no loop. [`ErrorKind::InvalidInput`].
+    CurveIndexOutOfRange {
+        /// The index given.
+        index: usize,
+    },
+    /// A curve the caller named is not in the loops. [`ErrorKind::InvalidInput`].
+    CurveNotInLoops,
+    /// The curve loops hold no loop. [`ErrorKind::InvalidInput`].
+    NoLoops,
+    /// Two curves the caller named are not in one loop. [`ErrorKind::InvalidInput`].
+    CurvesNotInOneLoop,
+    /// Two curves the caller named are not adjacent in their loop. [`ErrorKind::InvalidInput`].
+    CurvesNotAdjacent,
 }
 
 impl TopologyFailure {
@@ -158,12 +237,38 @@ impl TopologyFailure {
             | Self::EdgeNotDeletable
             | Self::InnerLoopsOnBothSides
             | Self::LaminaEdgeIsStrut
-            | Self::VertexHasEdges => SM_ERR,
+            | Self::VertexHasEdges
+            | Self::NoInfiniteRegion
+            | Self::FaceListedTwice
+            | Self::EdgesNotSharingVertices
+            | Self::NoSectorForNewEdgeuse
+            | Self::NoClassifiablePoint
+            | Self::UvTrimCurvesNotMade
+            | Self::FacesNotCopiedOnce
+            | Self::UnorientedLoopsOnNonG1Surface
+            | Self::FaceWithoutLoops
+            | Self::LoopsNotClosedOrPlanar { .. }
+            | Self::CurveEndWithoutTangent
+            | Self::LoopWithoutArea
+            | Self::LoopsMisoriented
+            | Self::LoopCrossesClosure
+            | Self::SurfaceDiscontinuous
+            | Self::CurveIndexOutOfRange { .. }
+            | Self::CurveNotInLoops
+            | Self::NoLoops
+            | Self::CurvesNotInOneLoop
+            | Self::CurvesNotAdjacent => SM_ERR,
             Self::Missing(_)
             | Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
-            | Self::CurveNotApproximated => SM_ERR_NULL_POINTER,
-            Self::InvalidValue(_) | Self::NoBrepGiven => SM_ERR_INVALID_INPUT,
+            | Self::CurveNotApproximated
+            | Self::NoSurfaceGiven => SM_ERR_NULL_POINTER,
+            Self::InvalidValue(_)
+            | Self::NoBrepGiven
+            | Self::NoTrimmedBSpline
+            | Self::NoRegionGiven
+            | Self::NoCurvesGiven
+            | Self::LoopIndexOutOfRange { .. } => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) | Self::GatheredBothSides => SM_ERR_ASSERT_FAILURE,
             Self::OutOfMemory(_) => SM_ERR_OUT_OF_MEMORY,
             Self::DropFailed { status } => *status,
@@ -186,15 +291,35 @@ impl TopologyFailure {
             | Self::NotInBrep
             | Self::VertexNotOnEdge
             | Self::ClosedEdge
-            | Self::VertexHasEdges => ErrorKind::InvalidInput,
+            | Self::VertexHasEdges
+            | Self::NoInfiniteRegion
+            | Self::NoSurfaceGiven
+            | Self::FaceListedTwice
+            | Self::EdgesNotSharingVertices
+            | Self::NoRegionGiven
+            | Self::FaceWithoutLoops
+            | Self::LoopsNotClosedOrPlanar { .. }
+            | Self::LoopWithoutArea
+            | Self::NoCurvesGiven
+            | Self::LoopsMisoriented
+            | Self::LoopCrossesClosure
+            | Self::LoopIndexOutOfRange { .. }
+            | Self::CurveIndexOutOfRange { .. }
+            | Self::CurveNotInLoops
+            | Self::NoLoops
+            | Self::CurvesNotInOneLoop
+            | Self::CurvesNotAdjacent => ErrorKind::InvalidInput,
             Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
             | Self::FaceWithoutEdges
             | Self::WireEndSqueezed
             | Self::EdgeNotDeletable
             | Self::InnerLoopsOnBothSides
-            | Self::LaminaEdgeIsStrut => ErrorKind::Unsupported,
-            Self::CurveNotApproximated => ErrorKind::Failed,
+            | Self::LaminaEdgeIsStrut
+            | Self::UnorientedLoopsOnNonG1Surface
+            | Self::CurveEndWithoutTangent
+            | Self::SurfaceDiscontinuous => ErrorKind::Unsupported,
+            Self::CurveNotApproximated | Self::NoTrimmedBSpline => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -263,6 +388,41 @@ impl core::fmt::Display for TopologyFailure {
             }
             Self::LaminaEdgeIsStrut => f.write_str("the lamina edge to delete is a strut"),
             Self::VertexHasEdges => f.write_str("the vertex still has edges"),
+            Self::NoInfiniteRegion => f.write_str("the B-rep has no infinite region"),
+            Self::NoTrimmedBSpline => {
+                f.write_str("an edge gave no B-spline of its curve trimmed to its interval")
+            }
+            Self::NoSurfaceGiven => f.write_str("no surface was given"),
+            Self::FaceListedTwice => f.write_str("a face to copy is listed twice"),
+            Self::EdgesNotSharingVertices => {
+                f.write_str("the edges to glue do not share both vertices")
+            }
+            Self::NoSectorForNewEdgeuse => {
+                f.write_str("no radial sector of the edge takes the new edge use")
+            }
+            Self::NoClassifiablePoint => {
+                f.write_str("no point stepped off the face use could be classified")
+            }
+            Self::UvTrimCurvesNotMade => f.write_str("the face's UV trim curves could not be made"),
+            Self::FacesNotCopiedOnce => {
+                f.write_str("a requested face has no copy, or more than one")
+            }
+            Self::NoRegionGiven => f.write_str("no region was given"),
+            Self::UnorientedLoopsOnNonG1Surface => f.write_str("the surface is not G1 and the loops are not oriented"),
+            Self::FaceWithoutLoops => f.write_str("the face has no loops"),
+            Self::LoopsNotClosedOrPlanar { closed, on_plane } => write!(f, "the curves do not form closed loops in one plane (closed: {closed}, on the plane: {on_plane})"),
+            Self::CurveEndWithoutTangent => f.write_str("a curve has a zero tangent at its end"),
+            Self::LoopWithoutArea => f.write_str("a loop encloses no area"),
+            Self::NoCurvesGiven => f.write_str("no curves were given"),
+            Self::LoopsMisoriented => f.write_str("the first loop is not outer, or a later loop is not inner"),
+            Self::LoopCrossesClosure => f.write_str("a loop crosses the surface's closure more than once"),
+            Self::SurfaceDiscontinuous => f.write_str("the surface is discontinuous"),
+            Self::LoopIndexOutOfRange { index, loops } => write!(f, "loop index {index} is past the last of {loops} loops"),
+            Self::CurveIndexOutOfRange { index } => write!(f, "curve index {index} lies in no loop"),
+            Self::CurveNotInLoops => f.write_str("the curve is not in the loops"),
+            Self::NoLoops => f.write_str("there are no loops"),
+            Self::CurvesNotInOneLoop => f.write_str("the curves are not in one loop"),
+            Self::CurvesNotAdjacent => f.write_str("the two curves are not adjacent in their loop"),
         }
     }
 }
@@ -579,6 +739,104 @@ mod tests {
         assert_eq!(missing.topology_failure(), Some(&defect));
     }
 
+    /// The named causes of the later B-rep edits (face copy and surface transfer) keep the
+    /// status of the phrase each replaced, and have their class.
+    #[test]
+    fn the_face_copy_causes_keep_their_status_and_have_their_class() {
+        use ErrorKind as K;
+        let op = "topology::op";
+        let cases = [
+            (TopologyFailure::NoInfiniteRegion, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::NoTrimmedBSpline,
+                SM_ERR_INVALID_INPUT,
+                K::Failed,
+            ),
+            (
+                TopologyFailure::NoSurfaceGiven,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (TopologyFailure::FaceListedTwice, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::EdgesNotSharingVertices,
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (TopologyFailure::NoSectorForNewEdgeuse, SM_ERR, K::Failed),
+            (TopologyFailure::NoClassifiablePoint, SM_ERR, K::Failed),
+            (TopologyFailure::UvTrimCurvesNotMade, SM_ERR, K::Failed),
+            (TopologyFailure::FacesNotCopiedOnce, SM_ERR, K::Failed),
+            (
+                TopologyFailure::NoRegionGiven,
+                SM_ERR_INVALID_INPUT,
+                K::InvalidInput,
+            ),
+            (
+                TopologyFailure::UnorientedLoopsOnNonG1Surface,
+                SM_ERR,
+                K::Unsupported,
+            ),
+            (TopologyFailure::FaceWithoutLoops, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::LoopsNotClosedOrPlanar {
+                    closed: false,
+                    on_plane: true,
+                },
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (
+                TopologyFailure::CurveEndWithoutTangent,
+                SM_ERR,
+                K::Unsupported,
+            ),
+            (TopologyFailure::LoopWithoutArea, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::NoCurvesGiven,
+                SM_ERR_INVALID_INPUT,
+                K::InvalidInput,
+            ),
+            (TopologyFailure::LoopsMisoriented, SM_ERR, K::InvalidInput),
+            (TopologyFailure::LoopCrossesClosure, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::SurfaceDiscontinuous,
+                SM_ERR,
+                K::Unsupported,
+            ),
+            (
+                TopologyFailure::LoopIndexOutOfRange { index: 2, loops: 2 },
+                SM_ERR_INVALID_INPUT,
+                K::InvalidInput,
+            ),
+            (
+                TopologyFailure::CurveIndexOutOfRange { index: 7 },
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (TopologyFailure::CurveNotInLoops, SM_ERR, K::InvalidInput),
+            (TopologyFailure::NoLoops, SM_ERR, K::InvalidInput),
+            (TopologyFailure::CurvesNotInOneLoop, SM_ERR, K::InvalidInput),
+            (TopologyFailure::CurvesNotAdjacent, SM_ERR, K::InvalidInput),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::topology(op, failure);
+            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.topology_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+        }
+        // the trim curves' failure stays their cause, and decides defect or refusal
+        let why = "a step the kernel got wrong";
+        let cause = SolidError::topology(op, TopologyFailure::Defect { why });
+        let e = Failure::new(op, TopologyFailure::UvTrimCurvesNotMade)
+            .caused_by(cause.clone())
+            .into_error();
+        assert_eq!(e.cause(), Some(&cause));
+        assert!(e.is_defect());
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+    }
+
     /// The sites that build a topology phrase cause only fall:
     /// per file, in the library code of `solidcore` and `solidcore-ops`, as
     /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
@@ -597,11 +855,6 @@ mod tests {
                 Builder::Method("topology_failed", Some(1)),
                 Builder::Method("topology_missing", Some(1)),
                 Builder::Method("topology_invalid_value", Some(1)),
-                Builder::Shared(
-                    "solidcore/src/topology/trimming_tools",
-                    "invalid_value",
-                    Some(0),
-                ),
             ],
             wrappers: Wrappers::Phrase,
         };
@@ -616,8 +869,6 @@ mod tests {
             ("solidcore/src/topology/brep/p10.rs", 10),
             ("solidcore/src/topology/brep/p2.rs", 16),
             ("solidcore/src/topology/brep/p5.rs", 61),
-            ("solidcore/src/topology/brep/p6.rs", 29),
-            ("solidcore/src/topology/brep/p7.rs", 13),
             ("solidcore/src/topology/brep/p8.rs", 15),
             ("solidcore/src/topology/brep/p9.rs", 18),
             ("solidcore/src/topology/brep/planar_section.rs", 3),
@@ -646,8 +897,6 @@ mod tests {
             ("solidcore/src/topology/proto_topology/p3.rs", 6),
             ("solidcore/src/topology/shell.rs", 15),
             ("solidcore/src/topology/topology_traverser.rs", 3),
-            ("solidcore/src/topology/trimming_tools.rs", 22),
-            ("solidcore/src/topology/trimming_tools/curve_loops.rs", 12),
             ("solidcore/src/topology/vertex/corner.rs", 1),
             ("solidcore/src/topology/vertexuse.rs", 10),
         ];
