@@ -198,6 +198,9 @@ fn finish(r: SolidResult<Vec<f64>>) -> Result<Output, HarnessError> {
 
 /// The shim's B-rep record.
 fn put_brep(k: &mut Kernel, o: &mut Vec<f64>, b: &Brep) -> SolidResult<()> {
+    // the recorded body, for the tolerance certificate (`certify::trim_tolerance`)
+    #[cfg(test)]
+    crate::certify::written(b);
     let faces = bl::faces(b, None)?;
     let edges = bl::edges(b, None)?;
     let vertices = bl::vertices(b, None)?;

@@ -422,7 +422,7 @@ pub struct ViewState {
     dirty: bool,
     live_paused: bool,
     /// Product framing retained across Design/Render visits, never a saved setting.
-    render_camera: Option<Camera>,
+    pub(crate) render_camera: Option<Camera>,
     /// The CPU sampling choice was initialised or explicitly selected in this draft.
     cpu_sampling_initialized: bool,
     clean_setup: Option<RenderSetup>,
@@ -934,6 +934,12 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         cache_render_images(app, ctx);
     }
     prepare::tick(app, ctx);
+    if active(app) || tiled(app) || !app.view_windows.has_render() {
+        tick_live(app, ctx);
+    }
+}
+
+pub(crate) fn tick_live(app: &mut SolveApp, ctx: &egui::Context) {
     let canvas = app.render_workspace.tile_canvas.filter(|(uid, _)| *uid == app.session.uid);
     if !app.home.open
         && tiled(app)
@@ -3606,10 +3612,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             || app.viewport.axis_drag.is_some()
             || app.viewport.spin
             || app.cam_anim.is_some();
+        // A material dragged from the shelf is dropped on primary release without a canvas click.
+        let primary_released = ui.input(|i| i.pointer.button_released(egui::PointerButton::Primary));
         let hits = input
             .hover
             .filter(|_| image_inside && !navigating && geometry_current)
-            .map(|p| crate::viewport::pick_cached(app, &crate::viewport::projection(app, rect), p))
+            .map(|p| {
+                let proj = crate::viewport::projection(app, rect);
+                if input.primary_down || primary_released || response.clicked() || response.secondary_clicked() {
+                    crate::viewport::pick_cached(app, &proj, p)
+                } else {
+                    crate::viewport::pick_hover(app, &proj, p, ui.ctx())
+                }
+            })
             .unwrap_or_default();
         let candidate = assign::candidate(app, &hits, input.mods);
         // The view moved under a still pointer: the highlight under it stays on the face
@@ -3782,7 +3797,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             hatch: Default::default(),
             moving: None,
         };
-        match (feedback, app.viewport.tile) {
+        match (feedback, app.viewport.scene_slot()) {
             (true, tile) => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, solidcraft_viewport_egui::ProductHighlightCallback(frame, tile)));
             }

@@ -83,6 +83,10 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         let sketch = sketch::parts(s, tolerance).map_err(|e| bad(CMD, refused(e)))?;
         mesh_lines::drawing(&meshes, &sketch, &view).map_err(|e| bad(CMD, refused(e)))?
     };
+    // A sketch under a body's outline is drawn once, as the body's line (#19507). Both curves are
+    // sampled at `tolerance`, so they can lie that far apart from each other twice over.
+    let reach = 2. * tolerance + drawing.eps;
+    drawing.sketch = mesh_lines::sketch_off_lines(std::mem::take(&mut drawing.sketch), &drawing.lines, reach);
     if at_origin {
         // The drawing is centred on the camera target; move it so the model origin is 0,0.
         let zero = view.world_origin().map_err(|e| bad(CMD, refused(e)))?;
