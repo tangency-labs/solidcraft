@@ -28,6 +28,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use solidcore::blend::feature_executive::{FeatureExecutive, RebuildBrepType};
 use solidcore::curve::curve::Curve as KCurve;
 use solidcore::geom::tol::are_same_to_tol;
 use solidcore::kernel::Kernel;
@@ -44,9 +45,9 @@ use solidcore::EntityRef;
 
 use crate::body::{finish, Body, Expect};
 use crate::error::status;
-use crate::history;
+use crate::history::{self, History, Made};
 use crate::order::{self, Order};
-use crate::session::run_on;
+use crate::session::{run_on, with_body};
 use crate::split::{copies_of, curve_ref, MAX_FACES};
 use crate::sweep::{dropped_on, kernel_curves, tolerance_ok, Curve};
 use crate::{Error, Result};
@@ -505,17 +506,11 @@ fn keep_picked(
 /// - [`Error::Empty`]: every face taken out;
 /// - the kernel's errors.
 pub fn remove_faces(body: &Body, order: &Order, faces: &[usize]) -> Result<Body> {
-    if faces.is_empty() || faces.len() > MAX_FACES {
-        return Err(Error::Argument);
-    }
-    let mut seen = HashSet::new();
-    let mut picked = Vec::new();
-    for &f in faces {
-        if !seen.insert(f) {
-            return Err(Error::Argument);
-        }
-        picked.push(order::face(order, f)?);
-    }
+    validate_face_indices(order, faces)?;
+    let picked = faces
+        .iter()
+        .map(|&i| order::face(order, i))
+        .collect::<Result<Vec<_>>>()?;
     let left = run_on("remove_faces", &[("brep", body)], |k| {
         // the record's faces are the body's own: looked up in it, then mapped to their copies
         let (mut a, picked) = {
@@ -540,4 +535,70 @@ pub fn remove_faces(body: &Body, order: &Order, faces: &[usize]) -> Result<Body>
         finish(k, a, Expect::FACES)
     })??;
     Ok(Body::new(left))
+}
+
+fn validate_face_indices(order: &Order, faces: &[usize]) -> Result<()> {
+    if faces.is_empty() || faces.len() > MAX_FACES {
+        return Err(Error::Argument);
+    }
+    let mut seen = HashSet::new();
+    if faces
+        .iter()
+        .any(|&i| i >= order.faces.len() || !seen.insert(i))
+    {
+        return Err(Error::Argument);
+    }
+    Ok(())
+}
+
+/// Remove a selected groove whose two rims the kernel can close together. Returns the new
+/// solid and its face and edge history in record order. Other selections give `None`.
+/// The operand is unchanged, including when the kernel refuses the construction.
+///
+/// # Errors
+/// Invalid face indices or repeated picks, the kernel's construction errors, or a result
+/// that is not a valid outward solid.
+pub fn remove_ring_groove(
+    body: &Body,
+    order: &Order,
+    faces: &[usize],
+) -> Result<Option<(Body, History)>> {
+    validate_face_indices(order, faces)?;
+    let (result, mapped) = body.copy_with_order(order)?;
+    let picked = faces
+        .iter()
+        .map(|&i| order::face(&mapped, i))
+        .collect::<Result<Vec<_>>>()?;
+    let selection: HashSet<_> = picked.iter().copied().collect();
+    let mut removed = false;
+    let history = history::recorded(&result, &mapped, Made::Plain, || {
+        removed = with_body("remove_ring_groove", &result, |k, b| {
+            let mut feature = FeatureExecutive::new(k, b)?;
+            let Some(i) = feature.add_feature(
+                k,
+                &picked,
+                RebuildBrepType::ExtendSurface,
+                RebuildBrepType::FromOtherBrep,
+            )?
+            else {
+                return Ok(false);
+            };
+            // add_feature partitions from the first selected face. Never accept a subset
+            // of a disconnected selection as the requested groove.
+            if !feature.features().get(i).is_some_and(|f| {
+                f.faces.len() == selection.len()
+                    && f.faces.iter().all(|face| selection.contains(face))
+            }) || feature.annular_supports(k, i)?.is_none()
+            {
+                return Ok(false);
+            }
+            Ok(feature.do_defeature(k)?.is_empty())
+        })?;
+        Ok(())
+    })?;
+    if !removed {
+        return Ok(None);
+    }
+    result.check_solid()?;
+    Ok(Some((result, history)))
 }

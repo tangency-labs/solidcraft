@@ -14,6 +14,8 @@
 //! | [`DefeatureFailure::ExtensionWithinTolerance`] | `SM_ERR` (WR-656)      |
 //! | [`DefeatureFailure::LoopNotPlanar`]          | `SM_ERR` (WR-656)        |
 //! | [`DefeatureFailure::NotEnclosed`]            | `SM_ERR` (WR-656)        |
+//! | [`DefeatureFailure::PatchEnclosesFace`]      | no upstream counterpart  |
+//! | [`DefeatureFailure::PatchIntersectsFace`]    | no upstream counterpart  |
 //! | [`DefeatureFailure::TangentNeighbours`]      | `SM_ERR` (WR-656)        |
 //!
 //! Deviations: not upstream. The failure's entity is the base loop edge of the hole the
@@ -56,6 +58,16 @@ pub enum DefeatureFailure {
         /// How far the faces were extended, when the patch was built in this call.
         extended_by: Option<f64>,
     },
+    /// The patch would bury another shell's face within the rebuilt material.
+    PatchEnclosesFace {
+        /// A retained face that would cease to separate material from void.
+        face: crate::topology::FaceId,
+    },
+    /// A face outside the feature and its supports obstructs the proposed patch.
+    PatchIntersectsFace {
+        /// The retained face the patch would intersect.
+        face: crate::topology::FaceId,
+    },
     /// The faces along the loop, extended, meet only tangentially where the cap would need a
     /// bound: a piece of the patch on the loop is cut from its neighbour only along an edge
     /// the kernel proves smooth ([`crate::query::tangent_edge::tangent_all_along`] within the
@@ -76,6 +88,8 @@ impl DefeatureFailure {
             | Self::ExtensionWithinTolerance { .. }
             | Self::LoopNotPlanar
             | Self::NotEnclosed { .. }
+            | Self::PatchEnclosesFace { .. }
+            | Self::PatchIntersectsFace { .. }
             | Self::TangentNeighbours { .. } => SM_ERR,
         }
     }
@@ -88,6 +102,8 @@ impl DefeatureFailure {
             | Self::ExtensionWithinTolerance { .. }
             | Self::LoopNotPlanar
             | Self::NotEnclosed { .. }
+            | Self::PatchEnclosesFace { .. }
+            | Self::PatchIntersectsFace { .. }
             | Self::TangentNeighbours { .. } => ErrorKind::Unsupported,
         }
     }
@@ -97,6 +113,12 @@ impl core::fmt::Display for DefeatureFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match *self {
             Self::LoopNotPlanar => f.write_str("a planar cap was asked for a loop no plane holds"),
+            Self::PatchEnclosesFace { face } => write!(
+                f, "the circular patch would enclose retained face {}", face.index()
+            ),
+            Self::PatchIntersectsFace { face } => write!(
+                f, "the circular patch intersects retained face {}", face.index()
+            ),
             Self::ExtensionRefused { distance } => write!(
                 f,
                 "a face along the loop could not be extended by {distance}"
