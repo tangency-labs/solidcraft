@@ -31,7 +31,7 @@ use solidcore::query::brep::BrepClassifier;
 use solidcore::query::faces_continue::{faces_continue, Continues};
 use solidcore::topology::{edge, face, EdgeId, FaceId};
 use solidcore::{Brep, Kernel, Point3};
-use solidcore_record::Brep as Record;
+use solidcore_record::brep::Brep as Record;
 
 use crate::body::Body;
 use crate::order::{self, Order};
