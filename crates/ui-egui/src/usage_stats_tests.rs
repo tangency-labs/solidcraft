@@ -419,21 +419,39 @@ fn ids_are_random_version_4_uuids() {
 }
 
 #[test]
-fn the_notice_shows_once_and_counting_starts_with_it() {
+fn the_notice_stays_until_dismissed_and_counting_runs_once_it_was_displayed() {
     let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let (mut app, _) = app_with_server(Some(200));
     app.usage.store.notice_shown = false;
-    assert!(notice_pending(&app));
-    assert!(notice(&mut app, 0.0), "the first start shows it");
-    assert!(app.usage.store.notice_shown, "and from then on counting runs");
-    assert!(notice(&mut app, NOTICE_SECONDS - 1.0));
-    assert!(!notice(&mut app, NOTICE_SECONDS + 1.0), "it goes by itself");
-    // The next start keeps the store: no second notice.
+    assert!(notice_pending(&app), "the first start shows it");
+    use_app(&mut app, T0, 0.0);
+    assert!(app.usage.store.days.is_empty(), "nothing counted before it was displayed");
+    notice_displayed(&mut app);
+    use_app(&mut app, T0, 1.0);
+    assert!(!app.usage.store.days.is_empty(), "counting runs once it was displayed");
+    // It never goes by itself: still there at the next start, until dismissed.
     let store = app.usage.store.clone();
     let (mut again, _) = app_with_server(Some(200));
     again.usage.store = store;
-    assert!(!notice(&mut again, 0.0));
+    assert!(notice_pending(&again), "shown again at the next start");
+    act(&mut again, NoticeAction::Dismiss);
     assert!(!notice_pending(&again));
+    let store = again.usage.store.clone();
+    let (mut later, _) = app_with_server(Some(200));
+    later.usage.store = store;
+    assert!(!notice_pending(&later), "dismissed for good");
+}
+
+#[test]
+fn an_installation_whose_0_46_0_notice_went_by_itself_sees_it_once_more() {
+    // 0.46.0 kept `notice_shown` and counted from then on; its notice went by itself after 30 s.
+    let stored = r#"{"install_id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", "notice_shown": true, "days": {"2023-11-14": {"active_minutes": 3}}}"#;
+    let store = Store::from_stored(Some(stored));
+    assert!(store.notice_shown && !store.notice_dismissed);
+    let mut app = SolveApp::new(Session::default(), crate::Services::default());
+    app.load_usage_stats(Some(stored));
+    assert!(notice_pending(&app), "shown once more");
+    assert!(active(&app), "counting goes on, as it was displayed before");
 }
 
 #[test]
@@ -448,31 +466,27 @@ fn no_notice_when_the_organization_or_the_environment_turned_statistics_off() {
             app.usage.env_off = true;
         }
         assert!(!notice_pending(&app));
-        assert!(!notice(&mut app, 0.0));
-        assert!(!app.usage.store.notice_shown, "nothing starts counting");
+        use_app(&mut app, T0, 0.0);
+        assert!(app.usage.store.days.is_empty(), "nothing starts counting");
     }
 }
 
 #[test]
-fn turn_off_on_the_notice_turns_statistics_off_and_details_opens_privacy() {
+fn settings_on_the_notice_opens_privacy_and_turning_off_there_deletes_unsent_days() {
     let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let (mut app, requests) = app_with_server(Some(200));
     app.usage.store.notice_shown = false;
-    assert!(notice(&mut app, 0.0));
+    notice_displayed(&mut app);
     use_app(&mut app, T0, 0.0);
-    act(&mut app, NoticeAction::TurnOff);
-    assert!(!app.preferences.usage_statistics);
-    assert!(app.usage.store.days.is_empty(), "what was counted is deleted");
-    assert!(!notice(&mut app, 1.0));
-    use_app(&mut app, T0 + DAY, 1.0e6);
-    assert!(requests.lock().unwrap().is_empty());
-    let (mut app, _) = app_with_server(Some(200));
-    app.usage.store.notice_shown = false;
-    assert!(notice(&mut app, 0.0));
-    act(&mut app, NoticeAction::Details);
+    act(&mut app, NoticeAction::Settings);
     assert!(app.prefs_window.shell.open);
     assert_eq!(app.prefs_window.shell.section, crate::prefs::PAGE_PRIVACY);
-    assert!(app.preferences.usage_statistics, "Details changes nothing");
+    assert!(!notice_pending(&app), "Settings is an answer too: not shown again");
+    // Turned off there: nothing kept, nothing sent.
+    app.preferences.usage_statistics = false;
+    use_app(&mut app, T0 + DAY, 1.0e6);
+    assert!(app.usage.store.days.is_empty());
+    assert!(requests.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -519,7 +533,6 @@ fn the_notice_shows_on_a_real_first_start_and_never_in_an_app_that_keeps_nothing
     // Tests, scenarios and hosts that keep nothing between runs: no notice, nothing counted.
     let mut kept_nothing = SolveApp::new(Session::default(), crate::Services::default());
     assert!(!notice_pending(&kept_nothing));
-    assert!(!notice(&mut kept_nothing, 0.0));
     tick_at(&mut kept_nothing, T0, 0.0, true);
     assert!(!kept_nothing.session.count_usage);
     assert!(kept_nothing.usage.store.days.is_empty());
@@ -530,8 +543,8 @@ fn the_notice_shows_on_a_real_first_start_and_never_in_an_app_that_keeps_nothing
     let mut first = SolveApp::new(Session::default(), crate::Services::default());
     first.load_usage_stats(None);
     assert!(notice_pending(&first), "the first start shows the notice");
-    assert!(notice(&mut first, 0.0));
-    // The next start loads what this one kept: no second notice.
+    act(&mut first, NoticeAction::Dismiss);
+    // The next start loads what this one kept: answered, no second notice.
     let kept = first.usage_stats_for_storage();
     let mut next = SolveApp::new(Session::default(), crate::Services::default());
     next.load_usage_stats(Some(&kept));
@@ -619,4 +632,58 @@ fn the_host_reaches_only_the_report_and_delete_addresses() {
     ] {
         assert!(!allowed_url(&not), "{not}");
     }
+}
+
+#[test]
+fn the_toast_stays_past_the_old_30_seconds_until_dismissed() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.load_usage_stats(None);
+    // A minute of frames: still there, and counting runs since it was displayed.
+    h.frames(3600);
+    assert!(crate::scenario::rect_of("toast:usage_stats").is_some(), "it never goes by itself");
+    assert!(h.app.usage.store.notice_shown && h.app.session.count_usage);
+    // Its buttons: Dismiss, then Settings (the main one, right-most). The × does what Dismiss does.
+    h.step(&json!({"click": {"handle": "toast:usage_stats:close"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.usage.store.notice_dismissed);
+    assert!(crate::scenario::rect_of("toast:usage_stats").is_none());
+    assert!(h.app.session.count_usage, "dismissing changes nothing about counting");
+}
+
+#[test]
+fn delete_my_data_says_it_was_requested_and_shows_the_new_id() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.load_usage_stats(None);
+    notice_displayed(&mut h.app);
+    h.app.usage.store.install_id = new_id().unwrap();
+    crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_PRIVACY);
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"prefs:usage_statistics:delete"}})).unwrap();
+    h.frames(2);
+    let new = h.app.usage.store.install_id.clone();
+    let said = format!("Deletion requested. New installation ID: {new}");
+    assert!(h.widget(&said).is_some(), "said on the page");
+    assert!(h.app.status.as_ref().is_some_and(|(text, _, _)| *text == said), "and as the status");
+}
+
+#[test]
+fn delete_my_data_waits_for_the_one_on_its_way() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.load_usage_stats(None);
+    notice_displayed(&mut h.app);
+    h.app.usage.store.install_id = new_id().unwrap();
+    crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_PRIVACY);
+    h.frames(3);
+    // No server in the harness: the first deletion stays on its way.
+    for _ in 0..20 {
+        let _ = h.step(&json!({"click":{"handle":"prefs:usage_statistics:delete"}}));
+        h.frames(1);
+    }
+    assert_eq!(h.app.usage.store.forget.len(), 1, "twenty clicks, one deletion: {:?}", h.app.usage.store.forget);
 }
