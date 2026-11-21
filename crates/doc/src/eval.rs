@@ -1173,6 +1173,7 @@ impl ModelState {
             pattern_left_out,
             legacy_picks,
             cut_extents,
+            tab_slots,
         } = self;
         ModelState {
             frame_bodies: frame_bodies.clone(),
@@ -1193,6 +1194,7 @@ impl ModelState {
             pattern_left_out: pattern_left_out.clone(),
             legacy_picks: legacy_picks.clone(),
             cut_extents: cut_extents.clone(),
+            tab_slots: tab_slots.clone(),
         }
     }
 
