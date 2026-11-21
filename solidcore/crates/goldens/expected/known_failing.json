@@ -268,8 +268,13 @@
     "rev_gen0057": "tangency-labs/solidcraft#13684: Maximize reports 3.027869047705328, but in-domain UV (0.6, 0) has distance 10.106374942763338; main already reports a nonmaximum (1.9529663001246003)"
   },
   "surface.surface_point_solve_p3": {
+    "matrix_0222": "tangency-labs/solidcraft#13684: a local 3D signed directed maximise on a curve-bounded surface, answered as its basis's, reports found (stopped at the v = 1 bound) at uv (0.9059338948111216, 1) with position 2.7329679561821134 along the direction, but the in-domain neighbour uv (0.9069338948111216, 1) is at 2.733527340763763, 5.6e-4 farther",
     "matrix_0267": "tangency-labs/solidcraft#13684: Maximize reports 6.848382229992056, but in-domain UV (-0.7767981984343537, 1) has distance 8.510836007198144; main already reports a nonmaximum (6.978354978629408)",
-    "matrix_0337": "tangency-labs/solidcraft#13684: Maximize reports 0.44831251217740314, but in-domain UV (0.5, 2.342948734736579) has distance 4.1697843031871535; main already reports a nonmaximum (0.4483685594987209); Nodes request is ignored"
+    "matrix_0289": "tangency-labs/solidcraft#13684: Maximize (single) on a curve-bounded surface, answered as its basis's, reports 1.1283293393845126 at uv (1.8992037790310736, -1.4354713960266052), but in-domain uv (-0.9616515653966511, -0.176321833140616) has distance 4.172223326484837",
+    "matrix_0337": "tangency-labs/solidcraft#13684: Maximize reports 0.44831251217740314, but in-domain UV (0.5, 2.342948734736579) has distance 4.1697843031871535; main already reports a nonmaximum (0.4483685594987209); Nodes request is ignored",
+    "matrix_0370": "tangency-labs/solidcraft#17773: a local Minimize on a curve-bounded surface, answered as its basis's, reports found (converged) at uv (-1.3935674086203755, 0.2987676461347276) at distance 0.8079081815484316, but the in-domain neighbour uv (-1.3935674086203755, 0.2997676461347276) is at 0.8069009049880987, 1.0e-3 nearer",
+    "matrix_0627": "tangency-labs/solidcraft#13684: Maximize (single) on a curve-bounded surface, answered as its basis's, reports 0.9774672161110098 at uv (1, 0.3741145336502267), but in-domain uv (0, 1) has distance 5.815217507540103",
+    "matrix_1156": "tangency-labs/solidcraft#13684: Maximize (nodes, answered as single) on a curve-bounded surface, answered as its basis's, reports 4.315800424404778 at uv (-0.47881421600201257, 0.5686340825426551), but in-domain uv (0.15784348883999977, 1) has distance 6.717541291701532"
   },
   "surface.volume_p2": {
     "gen0106": "tangency-labs/solidcraft#16502: the unbend pseudo box (unexpanded boxes of the 12 mapped box edges, through a twist) is not an enclosure: 200k samples per mapped edge reach 3.3e-4 below its interval 1 and 1.3e-6 above its interval 2, before and after the twist Duw sign fix, which moves the box by up to 1.07e-6"

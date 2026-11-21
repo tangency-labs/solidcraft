@@ -18,7 +18,7 @@
 # surface.surface_p7: main's file with the closed and planar tests of a curve-bounded surface answered from its basis (#20163): 15 cases; no certified trim tolerance moves
 # surface.surface_point_solve_p1: main's file with the point solves on a curve-bounded surface using its basis's cache tree and control net (#20163): 20 cases; no certified trim tolerance moves
 # surface.surface_point_solve_p2: main's file with the point solves on a curve-bounded surface using its basis's cache tree and control net (#20163): 19 cases; no certified trim tolerance moves
-# surface.surface_point_solve_p3: main's file with the point solves on a curve-bounded surface using its basis's cache tree (#20163): 13 cases; no certified trim tolerance moves
+# surface.surface_point_solve_p3: main's file with the point solves on a curve-bounded surface using its basis's cache tree (#20163): 8 cases; matrix_0222, matrix_0289, matrix_0370, matrix_0627 and matrix_1156 known failing; no certified trim tolerance moves
 # topology.trimming_tools: main's file with the continuities of a curve-bounded surface read from its basis (#20163): 4 cases; no certified trim tolerance moves
 blend.feature_executive	9ca7c0200e1392d9
 blend.fillet_corner_p1	b2b709c01153c4b4
@@ -250,7 +250,7 @@ surface.surface_p8	8c429b3fc714a3d3
 surface.surface_p9	f2fca09a332c9f42
 surface.surface_point_solve_p1	d4410d4958977452
 surface.surface_point_solve_p2	61e1a77948a77a39
-surface.surface_point_solve_p3	9371a7abf74852e7
+surface.surface_point_solve_p3	15fc2721b1e04b91
 surface.torus	3bc22a9cc79e4e78
 surface.trim_srf_cache	655dddeca4f5ba3b
 surface.twist_volume	185622854f391b03

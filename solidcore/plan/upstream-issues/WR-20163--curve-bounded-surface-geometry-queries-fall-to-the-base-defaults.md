@@ -14,5 +14,6 @@
   - `heal.gap` `gen0036` and `gen0276` drop to curves, which no certificate covers.
   - `heal.gap` `gen0061`, `gen0242`, `gen0281` and `gen0307` meet the B-spline gap sampling's refusal of a sample domain that spans no knot interval (`SmGap.cpp:1764-1767`).
   - `surface.surface_p1` `domhist0052` and `domhist0079` start off the natural domain (tangency-labs/solidcraft#20239).
+  - `surface.surface_point_solve_p3` `matrix_0222`, `matrix_0289`, `matrix_0627` and `matrix_1156` report maxima that in-domain points beat (tangency-labs/solidcraft#13684), and `matrix_0370` a local minimum a neighbour beats (tangency-labs/solidcraft#17773).
   - `surface.surface_p1` `domhist0070` reads the continuities of a cache without a tree (tangency-labs/solidcraft#20054).
   - UB-273's generic continuity failure is gone (its addendum of 2026-11-21).
