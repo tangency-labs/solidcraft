@@ -237,11 +237,14 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let idle = !app.file_load_holds();
             // Save, Undo and Redo use the same actions as the File menu and shortcuts.
             let shown = design_shown(app) && idle;
-            let tip = |id: &str, key: &str| {
+            // The keys as the platform names them (Cmd on macOS); Redo has two (#12902).
+            let tip = |id: &str, keys: &[&str]| {
                 let label = app.tr(id);
-                if shown { format!("{label} ({key})") } else { solidcraft_ui_text::format("ui.needs_design", &[("command", label)]) }
+                let keys = keys.iter().map(|key| crate::ui_kit::chord_label(key)).collect::<Vec<_>>().join(", ");
+                if shown { format!("{label} ({keys})") } else { solidcraft_ui_text::format("ui.needs_design", &[("command", label)]) }
             };
-            let (save_tip, undo_tip, redo_tip) = (tip("ui.save", "Ctrl+S"), tip("ui.undo", "Ctrl+Z"), tip("ui.redo", "Ctrl+Y"));
+            let (save_tip, undo_tip, redo_tip) =
+                (tip("ui.save", &["Ctrl+S"]), tip("ui.undo", &["Ctrl+Z"]), tip("ui.redo", &["Ctrl+Y", "Ctrl+Shift+Z"]));
             let prefs_tip = if cfg!(target_os = "macos") {
                 format!("{} (Cmd+,)", app.tr("ui.preferences"))
             } else {
@@ -250,11 +253,14 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let version = format!("v{}", crate::update::current_version());
             let url = crate::update::release_notes_url(crate::update::current_version(), crate::update::release_build());
             let file_open = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
-            let quick = app.toolbar_custom.quick_access.iter().filter(|id| solidcraft_engine::find_command(id).is_some()).count();
+            let quick_ids: Vec<_> =
+                app.toolbar_custom.quick_access.iter().filter(|id| solidcraft_engine::find_command(id).is_some()).map(String::as_str).collect();
             let action = |id, icon, tip, enabled, wide_only| app_bar::BarButton { id, icon, tip, enabled, narrow: true, wide_only };
             let palette_shortcut = crate::keymap::display_for(app, "ui.palette");
             // Narrow windows retain Save; Undo and Redo remain available from their shortcuts and menus.
             let bar = app_bar::AppBar {
+                items: Some(&app.toolbar_custom.app_bar),
+                quick_ids: &quick_ids,
                 mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
                 name: "SolidCraft",
                 leading: (crate::library::available(app) && !app.home.open).then_some(vec2(26.0, 26.0)),
@@ -266,7 +272,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     action("undo", "undo", &undo_tip, shown, true),
                     action("redo", "redo", &redo_tip, shown, true),
                 ],
-                quick,
+                quick: quick_ids.len(),
                 help: app_bar::BarButton { id: "help", icon: "help", tip: app.tr("ui.help"), enabled: true, narrow: false, wide_only: false },
                 settings: app_bar::BarButton { id: "settings", icon: "settings", tip: &prefs_tip, enabled: true, narrow: false, wide_only: false },
                 report: app_bar::Report {
@@ -285,7 +291,18 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 version: (app.header.version == VersionPlace::Header).then_some(app_bar::Version { text: &version, url: &url }),
                 handles: APP_BAR_HANDLES,
             };
-            let out = app_bar::show(ui, &bar, r, content);
+            let measure =
+                |text: &str| ui.painter().layout_no_wrap(text.to_string(), FontId::proportional(t.font_label), t.app_bar_text).size().x + 40.0;
+            let offers = app_bar::Offers {
+                update: crate::update::offered(app)
+                    .map(|release| measure(&solidcraft_ui_text::format("update.button_version", &[("version", release.version())]))),
+                managed: app.policy.managed_by().map(|label| measure(&label)),
+            };
+            let mut out = app_bar::show_with_offers(ui, &bar, r, content, offers);
+            fill_overflow_rows(app, &mut out.overflow_items, shown);
+            if let Some(action) = app_bar::overflow_menu(ui.ctx(), &out.overflow_items, out.overflow_button) {
+                out.actions.push(action);
+            }
             if let Some(rect) = out.leading {
                 crate::library::app_bar_toggle(app, ui, rect);
             }
@@ -330,22 +347,26 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     }
                     app_bar::BarAction::Version => ui.ctx().open_url(egui::OpenUrl::new_tab(&url)),
+                    app_bar::BarAction::App { id } => run_overflow_control(app, id),
                 }
             }
-            if let Some((first, step)) = out.quick {
-                quick_access_bar(app, ui, r, first, step, shown);
-            }
-            if let Some(search) = out.search {
-                // shortcut_box::show draws the one search editor wherever this rectangle is.
-                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_ribbon_search"), search));
+            quick_access_bar(app, ui, r, &out.quick_slots, shown);
+            if search_in_header(app) {
+                // Overflow must clear the previous frame's anchor, or the search editor would
+                // still paint over the controls that have taken its old slot.
+                ui.ctx().data_mut(|d| {
+                    let id = egui::Id::unique("sc_ribbon_search");
+                    d.remove::<Rect>(id);
+                    if let Some(search) = out.search {
+                        d.insert_temp(id, search);
+                    }
+                });
             }
             // A newer release: its Update button stays before the right cluster, and the
             // organization's Managed by badge left of it and of the link pills.
-            let update = crate::update::button(app, ui, out.offer, out.offer_labeled);
-            let badge_right = update.map_or(out.controls_left, |u| u.left().min(out.controls_left)) - 6.0;
-            let badge_span = Rect::from_min_max(out.offer.min, pos2(badge_right.max(out.offer.min.x), out.offer.max.y));
-            let badge = crate::policy::badge(app, ui, badge_span, out.offer_labeled);
-            let tabs_end = badge.or(update).map_or(out.controls_left, |u| u.left()) - 8.0;
+            let (update, badge) = draw_bar_offers(app, ui, &out);
+            let tabs_end =
+                if out.reserved_offers { out.tabs_end } else { badge.or(update).map_or(out.tabs_end, |u| out.tabs_end.min(u.left() - 8.0)) };
             // Narrow title bars can fit only part of the tab strip. Its hit regions must not
             // extend into the persistent report and window controls.
             let tabs_rect = Rect::from_min_max(pos2(out.tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));
@@ -364,6 +385,105 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::plugin_menu::menu(app, &ui.ctx().clone());
     let help_x = ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::unique("sc_help_anchor")).unwrap_or(300.0));
     crate::help::show(app, &ui.ctx().clone(), pos2(help_x - 14.0, APP_BAR_HEIGHT));
+}
+
+/// Reserved slots keep the tab minimum in the layout, so their labels need no second tab allowance.
+fn draw_bar_offers(app: &mut SolveApp, ui: &mut egui::Ui, out: &app_bar::BarOut) -> (Option<Rect>, Option<Rect>) {
+    if !out.reserved_offers {
+        let update = crate::update::button(app, ui, out.offer, out.offer_labeled);
+        let badge = out.managed.and_then(|mut span| {
+            let right = update.map_or(out.controls_left, |u| u.left().min(out.controls_left)) - 6.0;
+            span.max.x = right.max(span.min.x);
+            crate::policy::badge(app, ui, span, out.managed_labeled)
+        });
+        return (update, badge);
+    }
+    let update = crate::update::offered(app).map(|r| r.version().to_string()).and_then(|version| {
+        let full = solidcraft_ui_text::format("update.button_version", &[("version", &version)]);
+        let labels = [full.as_str(), solidcraft_ui_text::tr("update.button")];
+        let (rect, response) = offer_pill(ui, out.offer, out.offer_labeled, &labels, 0.0, "update", "titlebar:update", false)?;
+        if response.backing_on_hover_text(solidcraft_ui_text::format("update.available", &[("version", &version)])).clicked() {
+            run_overflow_control(app, "offered");
+        }
+        Some(rect)
+    });
+    let badge = app.policy.managed_by().zip(out.managed).and_then(|(full, span)| {
+        let labels = [full.as_str(), solidcraft_ui_text::tr("policy.managed_short")];
+        let (rect, response) = offer_pill(ui, span, out.managed_labeled, &labels, 0.0, "briefcase", "titlebar:managed", true)?;
+        if response.backing_on_hover_text(format!("{full}\n{}", solidcraft_ui_text::tr("policy.managed_tip"))).clicked() {
+            run_overflow_control(app, "managed");
+        }
+        Some(rect)
+    });
+    (update, badge)
+}
+
+/// Complete host-owned menu rows without changing the kit's bar order.
+fn fill_overflow_rows(app: &SolveApp, rows: &mut [app_bar::OverflowItem], shown: bool) {
+    for row in rows {
+        match row.id.as_str() {
+            "offered" => {
+                row.label = app.tr("update.button").to_string();
+                row.icon = "update".to_string();
+                row.enabled = crate::update::offered(app).is_some();
+            }
+            "managed" => {
+                row.label = app.policy.managed_by().unwrap_or_else(|| app.tr("policy.managed_short").to_string());
+                row.icon = "briefcase".to_string();
+            }
+            "assistant" => {
+                row.label = app.tr("ui.assistant").to_string();
+                row.icon = "assistant".to_string();
+            }
+            "search" => {
+                row.label = app.tr("cmd.ui.palette").to_string();
+                row.icon = "zoom".to_string();
+            }
+            "leading" => {
+                row.label = app.tr(if app.preferences.show_document_browser { "library.hide" } else { "library.show" }).to_string();
+                row.icon = "document_browser".to_string();
+            }
+            _ => {
+                if let Some(command) = row
+                    .id
+                    .strip_prefix("quick:")
+                    .and_then(|i| i.parse::<usize>().ok())
+                    .and_then(|i| app.toolbar_custom.quick_access.iter().filter_map(|id| solidcraft_engine::find_command(id)).nth(i))
+                {
+                    let info = command.info(&app.session);
+                    row.label = app.tr_label(info.label).to_string();
+                    row.icon = info.icon.to_string();
+                    row.enabled = shown && info.enabled;
+                }
+            }
+        }
+    }
+}
+
+fn run_overflow_control(app: &mut SolveApp, id: &str) {
+    match id {
+        "offered" => {
+            if crate::update::offered(app).is_some() {
+                app.updater.open = !app.updater.open;
+            }
+        }
+        "managed" => crate::prefs::open_at(app, 0),
+        "assistant" => crate::agent_chat::toggle(app),
+        "search" => app.start("ui.palette"),
+        "leading" => {
+            app.preferences.show_document_browser = !app.preferences.show_document_browser;
+        }
+        _ => {
+            if let Some(command) = id
+                .strip_prefix("quick:")
+                .and_then(|i| i.parse::<usize>().ok())
+                .and_then(|i| app.toolbar_custom.quick_access.iter().filter_map(|id| solidcraft_engine::find_command(id)).nth(i))
+                && !end_running_tool(app, command.id)
+            {
+                app.start_pinned(command.id, None);
+            }
+        }
+    }
 }
 
 /// File, edit and application actions shared by the in-window and native menus.
@@ -1989,21 +2109,20 @@ struct QuickAccessDrag(String);
 /// The quick-access bar (#10223): the commands added from a command's menu, after Save, Undo and
 /// Redo, each with its own icon. A click starts the command as its ribbon button does, a
 /// right-click opens the command's menu (Remove from Quick Access), and a drag along the bar
-/// reorders the buttons. They start at `x`, `step` apart ([`app_bar::BarOut::quick`]).
-fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32, step: f32, shown: bool) {
+/// reorders the buttons. Each button uses its own [`app_bar::BarOut::quick_slots`] position.
+fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, slots: &[(usize, f32)], shown: bool) {
     let t = Tokens::get();
-    let ids: Vec<&'static solidcraft_engine::CommandSpec> =
-        app.toolbar_custom.quick_access.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect();
+    let commands: Vec<_> = app.toolbar_custom.quick_access.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect();
+    let mut ids: Vec<_> = slots.iter().filter_map(|&(i, x)| commands.get(i).map(|c| (*c, x))).collect();
+    ids.sort_by(|a, b| a.1.total_cmp(&b.1));
     if ids.is_empty() {
         return;
     }
-    let first = x;
     let mut buttons = Vec::with_capacity(ids.len());
     let mut start = None;
     let mut menu = None;
-    for c in &ids {
-        let br = Rect::from_center_size(pos2(x, bar.center().y), vec2(32.0, 32.0));
-        x += step;
+    for (c, x) in &ids {
+        let br = Rect::from_center_size(pos2(*x, bar.center().y), vec2(32.0, 32.0));
         let info = c.info(&app.session);
         let enabled = shown && info.enabled;
         let resp = ui.interact(br, ui.scope_id().with(("quick_access", c.id)), Sense::click_and_drag());
@@ -2030,7 +2149,7 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
         }
         buttons.push((c.id, br));
     }
-    let span = Rect::from_min_max(pos2(first - step / 2.0, bar.top()), pos2(x - step / 2.0, bar.bottom()));
+    let span = buttons.iter().map(|(_, rect)| *rect).reduce(Rect::union).unwrap_or(Rect::NOTHING).expand(1.0);
     crate::scenario::publish_rect("appbar:quick_access", span);
     // Dragged along the bar: the line shows where it goes; let go and it moves there.
     if let Some(drag) = egui::DragAndDrop::payload::<QuickAccessDrag>(ui.ctx())
@@ -2038,12 +2157,12 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
     {
         let before = buttons.iter().find(|(_, br)| p.x < br.center().x).map(|(id, _)| *id);
         let line = before.and_then(|b| buttons.iter().find(|(id, _)| *id == b)).map_or(span.right(), |(_, br)| br.left());
-        if span.expand2(vec2(step, 0.0)).contains(p) {
+        if buttons.iter().any(|(_, rect)| rect.expand2(vec2(35.0, 1.0)).contains(p)) {
             ui_kit::insertion_marker(ui.painter(), line, bar.top() + 6.0, bar.bottom() - 6.0);
         }
         if ui.input(|i| i.pointer.any_released()) {
             egui::DragAndDrop::clear_payload(ui.ctx());
-            if span.expand2(vec2(step, 0.0)).contains(p) {
+            if buttons.iter().any(|(_, rect)| rect.expand2(vec2(35.0, 1.0)).contains(p)) {
                 crate::toolbar_custom::quick_move(app, &drag.0, before);
             }
         }
@@ -2589,14 +2708,16 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     {
         return;
     }
-    // File is a custom Area, so it must claim Escape before the underlying editors and
-    // sketch shortcuts. Clear raw events too: egui may replay them on a layout pass.
-    let file_menu_id = egui::Id::unique("sc_file_menu");
-    if !app.native_file_menu
-        && ctx.data(|d| d.get_temp::<bool>(file_menu_id).unwrap_or(false))
+    // Application bar menus claim Escape before the underlying editors and sketch
+    // shortcuts. Clear raw events too: egui may replay them on a layout pass.
+    let menu = [("sc_file_menu", !app.native_file_menu), ("sc_appbar_overflow_open", true)].into_iter().find_map(|(name, enabled)| {
+        let id = egui::Id::unique(name);
+        (enabled && ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false))).then_some(id)
+    });
+    if let Some(menu_id) = menu
         && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
-        ctx.data_mut(|d| d.insert_temp(file_menu_id, false));
+        ctx.data_mut(|d| d.insert_temp(menu_id, false));
         egui::Popup::close_all(ctx);
         ctx.input_mut(|i| {
             i.raw.events.retain(|event| !matches!(event, egui::Event::Key { key: egui::Key::Escape, modifiers, .. } if modifiers.matches_logically(egui::Modifiers::NONE)));
@@ -2783,6 +2904,8 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                         drop(app.run("tab.view.close", json!({})));
                     }
                 }
+                // Ctrl+Shift+Z redoes like Ctrl+Y (#12902): it used to fall into Undo, Shift ignored.
+                Key::Z if mods.shift => drop(app.run("edit.redo", json!({}))),
                 Key::Z => {
                     if !crate::tools::undo_spline_point(app) {
                         drop(app.run("edit.undo", json!({})));
@@ -2973,6 +3096,27 @@ mod header_report_tests {
             assert_eq!(h.app.session.doc.to_json(), before);
             assert!(h.app.last_escape.is_none(), "closing File must not arm Finish Sketch");
         }
+    }
+
+    #[test]
+    fn escape_closes_app_bar_more_without_cancelling_a_sketch_tool() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.start("sketch.line");
+        h.call("ui.resize", json!({"width":320,"height":720}));
+        h.frames(3);
+        let before = (h.app.session.active_sketch, h.app.session.doc.to_json(), h.app.session.selection.clone());
+        h.step(&json!({"click":{"handle":"appbar:overflow"}})).unwrap();
+        let id = egui::Id::unique("sc_appbar_overflow_open");
+        assert!(h.ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false)));
+        h.app.last_escape = Some(h.ctx.input(|i| i.time));
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert!(!h.ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false)));
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.line"));
+        assert_eq!(before, (h.app.session.active_sketch, h.app.session.doc.to_json(), h.app.session.selection.clone()));
+        assert!(h.app.last_escape.is_none(), "closing More does not arm Finish Sketch");
     }
 
     #[test]
@@ -3478,6 +3622,54 @@ mod header_report_tests {
         }
     }
 
+    #[test]
+    fn app_bar_overflowed_search_clears_its_old_anchor_and_still_opens() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = false;
+        h.app.header.search = SearchPlace::Header;
+        h.call("ui.resize", json!({"width":1400,"height":720}));
+        h.frames(3);
+        let anchor = egui::Id::unique("sc_ribbon_search");
+        assert!(h.ctx.data(|d| d.get_temp::<Rect>(anchor)).is_some());
+        h.call("ui.resize", json!({"width":320,"height":720}));
+        h.frames(3);
+        assert!(h.ctx.data(|d| d.get_temp::<Rect>(anchor)).is_none(), "overflow clears the stale field");
+        assert!(crate::scenario::rect_of("titlebar:search").is_none());
+        h.step(&json!({"click":{"handle":"appbar:overflow"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"menu:appbar:overflow:search"}})).unwrap();
+        assert!(h.app.ui.palette_open, "the hidden search opens from More");
+    }
+
+    /// The Update action survives the first narrow frame, without any previous registry rect.
+    #[test]
+    fn app_bar_overflowed_update_remains_reachable() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = false;
+        h.app.updater.release = Some(crate::update::Release {
+            tag: "v9999.0.0".to_string(),
+            name: "Future release".to_string(),
+            notes: String::new(),
+            page: "https://example.invalid/release".to_string(),
+            assets: Vec::new(),
+        });
+        h.call("ui.resize", json!({"width":320,"height":720}));
+        h.frames(3);
+        assert!(crate::update::offered(&h.app).is_some());
+        assert!(crate::scenario::rect_of("titlebar:update").is_none(), "Update is behind More");
+        assert!(!h.app.updater.open);
+        assert!(h.widget("More").is_some(), "More has its catalogue accessible name");
+        assert_eq!(crate::scenario::rect_of("appbar:overflow").unwrap().size(), vec2(32.0, 32.0));
+        assert_eq!(crate::scenario::rect_of("appbar:overflow"), crate::scenario::rect_of("titlebar:overflow"));
+        h.step(&json!({"click":{"handle":"appbar:overflow"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("menu:appbar:overflow:offered").is_some());
+        h.step(&json!({"click":{"handle":"menu:appbar:overflow:offered"}})).unwrap();
+        assert!(h.app.updater.open, "the overflow row opens the same Update card");
+    }
+
     /// The 34 px bar groups brand/home, File/Save/Undo/Redo, documents, then the right cluster.
     #[test]
     fn title_bar_keeps_tabs_left_and_help_right() {
@@ -3561,7 +3753,10 @@ mod header_report_tests {
             h.frames(3);
             // A long version (a release candidate's) gives way to the document tabs on a narrow bar.
             let Some(version) = crate::scenario::handle_at("titlebar:version") else {
-                assert!(width < 900.0, "the version is drawn as a link at {width}");
+                h.step(&json!({"click":{"handle":"appbar:overflow"}})).unwrap();
+                h.frames(2);
+                assert!(crate::scenario::rect_of("menu:appbar:overflow:version").is_some(), "the hidden version remains reachable at {width}");
+                h.step(&json!({"key":"Escape"})).unwrap();
                 continue;
             };
             let report = crate::scenario::handle_at("titlebar:report").expect("the report button is drawn");
@@ -3742,7 +3937,12 @@ mod header_report_tests {
             h.call("ui.resize", json!({"width":width,"height":720}));
             h.frames(3);
             let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision);
-            let point = h.widget("Report a bug").expect("compact and full buttons retain an accessible name");
+            if h.widget("Report a bug").is_none() {
+                h.step(&json!({"click":{"handle":"appbar:overflow"}})).unwrap();
+                h.frames(2);
+                assert!(crate::scenario::rect_of("menu:appbar:overflow:report").is_some(), "Report is reachable in More at {width}");
+            }
+            let point = h.widget("Report a bug").expect("bar and overflow buttons retain an accessible name");
             h.step(&json!({"click":point})).unwrap();
             assert!(h.app.issue_report.draft.is_some(), "width {width}: header click must reach the report");
             assert!(crate::issue_report::pending(&h.app));
@@ -3760,8 +3960,14 @@ mod header_report_tests {
             }
             h.step(&json!({"widget":close_label})).unwrap();
             assert!(h.app.issue_report.draft.is_none(), "width {width}: review closes through its actual button");
-            h.step(&json!({"click":{"handle":"tab:home"}})).unwrap();
-            assert!(h.app.home.open, "width {width}: the Home tab remains reachable beside Report");
+            if crate::scenario::handle_at("tab:home").is_some() {
+                h.step(&json!({"click":{"handle":"tab:home"}})).unwrap();
+            } else {
+                h.step(&json!({"click":{"handle":"appbar:overflow"}})).unwrap();
+                h.frames(2);
+                h.step(&json!({"click":{"handle":"menu:appbar:overflow:home"}})).unwrap();
+            }
+            assert!(h.app.home.open, "width {width}: Home remains reachable beside Report or through More");
             assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision));
         }
     }
@@ -4776,6 +4982,113 @@ mod app_bar_tests {
     use super::*;
 
     #[test]
+    fn app_bar_reset_command_runs_from_control_and_the_palette_without_a_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.show(h.app.session.revision);
+        assert!(h.app.home.open && h.app.session.doc.features.is_empty());
+        crate::toolbar_custom::quick_add(&mut h.app, "solid.box").unwrap();
+        h.app.preferences.show_donate_button = false;
+        h.app.preferences.show_discord_button = false;
+        h.app.preferences.ai_toolbar_button = false;
+        let defaults = h.app.toolbar_custom.app_bar.clone();
+        let mut custom = defaults.clone();
+        custom.items.reverse();
+        custom.items.iter_mut().find(|p| p.id == "save").unwrap().shown = false;
+        custom.items.iter_mut().find(|p| p.id == "quick:solid.box").unwrap().zone = ui_kit::app_bar_items::Zone::End;
+        let before = (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        let row = crate::shortcut_box::search(&h.app, "Reset App Bar").into_iter().find(|row| row.0 == "ui.appBarReset").unwrap();
+        assert_eq!(row.1, "Reset App Bar");
+        assert!(solidcraft_engine::find_command(row.0).unwrap().info(&h.app.session).enabled);
+        h.app.toolbar_custom.apply_app_bar(custom.clone());
+        h.app.session.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+        let invalid = h.call("engine.execute", json!({"command":"ui.appBarReset","params":{"reset":false}}));
+        assert_eq!(invalid["ok"], false, "{invalid}");
+        assert_eq!(h.app.toolbar_custom.app_bar, custom, "validation precedes the UI effect");
+        let result = h.call("engine.execute", json!({"command":"UI.APPBARRESET","params":{}}));
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(result["result"], json!({"reset":true}));
+        assert_eq!(h.app.toolbar_custom.app_bar, defaults);
+        assert!(h.app.home.open);
+        h.app.toolbar_custom.apply_app_bar(custom.clone());
+        let started = h.call("ui.start", json!({"command":"ui.appBarReset"}));
+        assert_eq!(started["ok"], true, "{started}");
+        assert_eq!(h.app.toolbar_custom.app_bar, defaults);
+        assert!(h.app.home.open);
+        // The existing palette is rendered in the editor. No design is loaded or created.
+        h.app.home.open = false;
+        h.app.toolbar_custom.apply_app_bar(custom);
+        h.call("ui.palette", json!({"text":"Reset App Bar"}));
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"menu:ui.appBarReset"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.toolbar_custom.app_bar, defaults, "the palette reaches the registered UI dispatch");
+        assert!(h.app.dialog.is_none() && h.app.tool.is_none());
+        assert!(!h.app.preferences.show_donate_button && !h.app.preferences.show_discord_button && !h.app.preferences.ai_toolbar_button);
+        assert_eq!((h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), before);
+    }
+
+    #[test]
+    fn app_bar_layout_and_legacy_visibility_switches_both_gate_drawing() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1920,"height":720}));
+        for flags in 0..8 {
+            h.app.preferences.show_donate_button = flags & 1 != 0;
+            h.app.preferences.show_discord_button = flags & 2 != 0;
+            h.app.preferences.ai_toolbar_button = flags & 4 != 0;
+            h.app.toolbar_custom.load(&json!({"version":3,"quick_access":["solid.box"]}));
+            h.frames(2);
+            assert_eq!(crate::scenario::rect_of("titlebar:kofi").is_some(), flags & 1 != 0);
+            assert_eq!(crate::scenario::rect_of("titlebar:discord").is_some(), flags & 2 != 0);
+            if flags & 4 == 0 {
+                assert!(crate::scenario::rect_of("titlebar:assistant").is_none());
+            }
+        }
+        h.app.preferences.show_donate_button = false;
+        h.app.preferences.show_discord_button = false;
+        h.app.preferences.ai_toolbar_button = false;
+        h.frames(3);
+        for id in ["titlebar:kofi", "titlebar:discord", "titlebar:assistant"] {
+            assert!(crate::scenario::rect_of(id).is_none(), "{id}");
+        }
+        // A layout reset preserves the old preferences, including after migrating old pins.
+        crate::toolbar_custom::run(&mut h.app, "ui.appBarReset", &json!({}));
+        assert!(!h.app.preferences.show_donate_button && !h.app.preferences.show_discord_button && !h.app.preferences.ai_toolbar_button);
+        h.app.preferences.show_donate_button = true;
+        h.app.preferences.show_discord_button = true;
+        let mut custom = h.app.toolbar_custom.app_bar.clone();
+        custom.items.iter_mut().find(|p| p.id == "donate").unwrap().shown = false;
+        h.app.toolbar_custom.apply_app_bar(custom);
+        h.frames(3);
+        assert!(crate::scenario::rect_of("titlebar:kofi").is_none());
+        assert!(h.app.preferences.show_donate_button);
+        h.app.toolbar_custom.reset_app_bar();
+        h.frames(2);
+        for id in ["kofi", "discord"] {
+            let handle = format!("titlebar:{id}:hide");
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            h.frames(2);
+            assert!(!(crate::links::by_id(id).unwrap().shown)(&h.app.preferences));
+        }
+        let mut custom = h.app.toolbar_custom.app_bar.clone();
+        for p in &mut custom.items {
+            if p.id == "save" || p.id == "quick:solid.box" {
+                p.shown = false;
+            }
+            if p.id == "settings" {
+                p.zone = ui_kit::app_bar_items::Zone::Start;
+            }
+        }
+        h.app.toolbar_custom.apply_app_bar(custom);
+        h.frames(3);
+        assert!(crate::scenario::rect_of("appbar:save").is_none());
+        assert!(crate::scenario::rect_of("appbar:quick:solid.box").is_none());
+        let settings = crate::scenario::rect_of("titlebar:preferences").unwrap();
+        let tabs = crate::scenario::rect_of("tab:design:0").unwrap();
+        assert!(settings.right() <= tabs.left());
+    }
+
+    #[test]
     fn plugins_host_menu_and_ribbon_slots_show_identity_and_obey_disabled_policy() {
         let mut h = crate::scenario::Harness::new();
         let root = h.dir.join("plugins-slots");
@@ -5528,31 +5841,49 @@ mod fill_width_tests {
                     }
                     assert!(crate::scenario::handle_at("button:sketch.finish").is_some(), "{at}: Finish stays reachable");
                 }
-                // The assistant lives in the title bar; visible ribbon tabs fit before search (or,
-                // with search in the title bar, within the ribbon card).
-                let search = crate::scenario::rect_of("ribbon:search").unwrap();
+                // Ribbon tabs stay within their card and outside any closed search field.
+                let search = crate::scenario::rect_of("ribbon:search");
+                if layout.search != SearchPlace::Header {
+                    assert!(search.is_some(), "{at}: the ribbon keeps search");
+                }
                 let card = crate::scenario::rect_of("ribbon:card").unwrap_or(bar);
                 for t in TABS.iter().chain(["SKETCH"].iter()) {
                     if let Some(r) = crate::scenario::rect_of(&format!("toolbar_tab:{t}")) {
-                        assert!(r.right() < search.left() || search.bottom() <= APP_BAR_HEIGHT, "{at}: the {t} tab runs into search");
+                        if let Some(search) = search {
+                            assert!(r.right() < search.left() || search.bottom() <= APP_BAR_HEIGHT, "{at}: the {t} tab runs into search");
+                        }
                         assert!(r.right() <= card.right(), "{at}: the {t} tab runs past the ribbon");
                     }
                 }
-                // The title bar keeps document tabs before Assistant, Preferences, Help and Report.
-                let report = crate::scenario::rect_of("titlebar:report").unwrap();
-                let tabs_end = crate::scenario::handles("tab:design:").iter().map(|(_, p)| p.x).fold(0.0, f32::max);
-                assert!(tabs_end < report.left(), "{at}: the document tabs run into Report a bug");
-                let assistant = crate::scenario::rect_of("titlebar:assistant").unwrap();
-                let help = crate::scenario::rect_of("appbar:help").unwrap();
-                let prefs = crate::scenario::rect_of("titlebar:preferences").unwrap();
-                assert!(tabs_end < assistant.left(), "{at}: the document tabs run into Assistant");
-                assert!(
-                    assistant.right() <= prefs.left() && prefs.right() <= help.left() && help.right() <= report.left(),
-                    "{at}: the title bar's right-hand controls overlap"
-                );
+                // Every requested End control is either laid out after the tabs, in order,
+                // or has a row in More. Check reachability rather than assuming none can yield.
+                let mut controls = vec![("titlebar:assistant", "assistant")];
                 if layout.search == SearchPlace::Header {
-                    assert!(assistant.right() <= search.left() && search.right() <= prefs.left(), "{at}: search sits between Assistant and Settings");
-                    assert!(tabs_end < search.left(), "{at}: the document tabs run into search");
+                    controls.push(("titlebar:search", "search"));
+                }
+                controls.extend([("titlebar:preferences", "settings"), ("appbar:help", "help"), ("titlebar:report", "report")]);
+                let tabs_end = crate::scenario::handles("tab:design:").iter().map(|(_, p)| p.x).fold(0.0, f32::max);
+                let visible: Vec<_> = controls.iter().filter_map(|(handle, _)| crate::scenario::rect_of(handle)).collect();
+                for rect in &visible {
+                    assert!(tabs_end < rect.left(), "{at}: document tabs run into an End control");
+                }
+                for pair in visible.windows(2) {
+                    assert!(pair[0].right() <= pair[1].left(), "{at}: title bar controls overlap or change order");
+                }
+                let hidden: Vec<_> = controls.iter().filter(|(handle, _)| crate::scenario::rect_of(handle).is_none()).map(|(_, id)| *id).collect();
+                if !hidden.is_empty() {
+                    let sketch_before = h.app.session.active_sketch;
+                    h.step(&json!({"click":{"handle":"appbar:overflow"}})).unwrap();
+                    h.frames(2);
+                    for id in hidden {
+                        assert!(
+                            crate::scenario::rect_of(&format!("menu:appbar:overflow:{id}")).is_some(),
+                            "{at}: {id} is neither visible nor reachable"
+                        );
+                    }
+                    h.step(&json!({"key":"Escape"})).unwrap();
+                    h.frames(2);
+                    assert_eq!(h.app.session.active_sketch, sketch_before, "closing More leaves the workspace intact");
                 }
             }
         }

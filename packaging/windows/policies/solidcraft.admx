@@ -5,7 +5,7 @@
   Intune's import takes no combo boxes and wants every namespace it references uploaded first, so
   this file uses none of either. The target namespace never changes; a new policy raises revision.
 -->
-<policyDefinitions xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.1" schemaVersion="1.0">
+<policyDefinitions xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.2" schemaVersion="1.0">
   <policyNamespaces>
     <target prefix="solidcraft" namespace="TangencyLabs.Policies.SolidCraft" />
   </policyNamespaces>
@@ -13,6 +13,7 @@
   <supportedOn>
     <definitions>
       <definition name="SUPPORTED_SolidCraft_0_44" displayName="$(string.SUPPORTED_SolidCraft_0_44)" />
+      <definition name="SUPPORTED_SolidCraft_0_46" displayName="$(string.SUPPORTED_SolidCraft_0_46)" />
     </definitions>
   </supportedOn>
   <categories>
@@ -22,6 +23,16 @@
     <policy name="CheckForUpdates" class="Both" displayName="$(string.CheckForUpdates)" explainText="$(string.CheckForUpdates_Explain)" presentation="$(presentation.CheckForUpdates)" key="Software\Policies\SolidCraft" valueName="CheckForUpdates">
       <parentCategory ref="SolidCraft" />
       <supportedOn ref="SUPPORTED_SolidCraft_0_44" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
+    <policy name="UsageStatistics" class="Both" displayName="$(string.UsageStatistics)" explainText="$(string.UsageStatistics_Explain)" presentation="$(presentation.UsageStatistics)" key="Software\Policies\SolidCraft" valueName="UsageStatistics">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
       <enabledValue>
         <decimal value="1" />
       </enabledValue>

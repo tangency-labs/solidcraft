@@ -27,6 +27,8 @@ mod linked;
 mod mouse_buttons;
 #[cfg(any(target_arch = "wasm32", test))]
 mod space_mouse;
+#[cfg(all(target_arch = "wasm32", feature = "usage-stats"))]
+mod usage;
 
 /// The folder the page serves its fonts from: index.html copies each there, and a drawing's text
 /// fetches its fonts from it (#4890).
@@ -1262,6 +1264,8 @@ mod web {
             }
             let Some(prefs) = self.persisted_prefs(|| Ok(storage.get_string(&crate::prefs_key()))) else { return };
             storage.set_string(&crate::prefs_key(), prefs);
+            #[cfg(feature = "usage-stats")]
+            storage.set_string(&crate::channel::key(solidcraft_ui_egui::usage_stats::STORAGE_KEY), self.app.usage_stats_for_storage());
         }
     }
 
@@ -1411,6 +1415,8 @@ mod web {
                             easyprint_upload: Some(std::sync::Arc::new(crate::easyprint::upload)),
                             browser_files: Some(Box::new(move || shown.panel.set(true))),
                             install_app: Some(crate::install::service(&cc.egui_ctx)),
+                            #[cfg(feature = "usage-stats")]
+                            usage_http: Some(std::sync::Arc::new(crate::usage::post)),
                             ..Default::default()
                         }};
                         // Thumbnails of saves and start-page cards.
@@ -1427,6 +1433,11 @@ mod web {
                         }
                         if launch.persists() && let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(&crate::channel::key(k)))) {
                             app.load_prefs(&p);
+                        }
+                        #[cfg(feature = "usage-stats")]
+                        if launch.persists() {
+                            let key = crate::channel::key(solidcraft_ui_egui::usage_stats::STORAGE_KEY);
+                            app.load_usage_stats(cc.storage.and_then(|s| s.get_string(&key)).as_deref());
                         }
                         if let Some(rs) = &cc.wgpu_render_state {
                             install_viewport(&mut app, rs);
