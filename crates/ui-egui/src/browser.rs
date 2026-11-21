@@ -1344,6 +1344,7 @@ impl Lit {
             Some(Hit::Axis { name }) => Some(Thing::Axis(name.clone())),
             Some(Hit::ConstructionPoint { name }) => Some(Thing::Point(name.clone())),
             Some(Hit::PointCloudPoint { .. }) => None,
+            Some(Hit::MemberEnd { .. } | Hit::Centreline { .. }) => None,
             None => app.viewport.hover_feature.and_then(|id| {
                 app.session.doc.feature(id).and_then(|f| match &f.kind {
                     FeatureKind::Sketch { .. } => Some(Thing::Sketch(id)),

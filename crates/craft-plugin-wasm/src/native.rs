@@ -61,6 +61,9 @@ fn trap(reason: impl Into<String>) -> HostError {
 }
 fn wit_error(error: HostError) -> PluginError {
     match error {
+        error @ HostError::StaleRevision { .. } => {
+            PluginError::CommandFailed(types::CommandFailure { command: "plugin.run".into(), reason: error.to_string() })
+        }
         HostError::PermissionDenied { permission } => PluginError::PermissionDenied(permission),
         HostError::CommandFailed { command, reason } => PluginError::CommandFailed(types::CommandFailure { command, reason }),
         HostError::LimitExceeded { limit } => PluginError::LimitExceeded(limit),
@@ -101,6 +104,7 @@ struct State<H> {
     /// Sensitive command groups both the manifest requests and the app grants.
     groups: BTreeSet<String>,
     effect: Effect,
+    design_tokens: bool,
     folders: BTreeMap<String, Folder>,
     input_folders: BTreeMap<String, Folder>,
     folder_bytes: u64,
@@ -210,6 +214,20 @@ impl<H: PluginHost> commands::Host for State<H> {
         let text = serde_json::to_string(&result).map_err(|e| self.fail(trap(e.to_string())))?;
         if text.len() > MAX_JSON_BYTES {
             return Err(self.fail(limit("command result size")));
+        }
+        Ok(text)
+    }
+}
+impl<H: PluginHost> design_state::Host for State<H> {
+    fn get_token(&mut self) -> std::result::Result<String, PluginError> {
+        self.check()?;
+        if !self.design_tokens {
+            return Err(self.fail(HostError::PermissionDenied { permission: "design@0.1 capability is required".into() }));
+        }
+        let token = self.host.design_token().map_err(|error| self.fail(error))?;
+        let text = serde_json::to_string(&token).map_err(|error| self.fail(trap(error.to_string())))?;
+        if text.len() > MAX_JSON_BYTES {
+            return Err(self.fail(limit("design token JSON size")));
         }
         Ok(text)
     }
@@ -664,6 +682,12 @@ pub(super) fn run<H: PluginHost + 'static>(
     options: RuntimeOptions,
 ) -> (H, Result<Value>) {
     let prepared = (|| {
+        // A direct runtime caller may not have used parse_manifest. Validate only this new
+        // capability here, preserving older imports' existing validated-manifest contract.
+        let design_capabilities: Vec<String> =
+            manifest.capabilities.iter().filter(|capability| capability.split('@').next() == Some("design")).take(17).cloned().collect();
+        craft_plugin::check_capabilities(&design_capabilities, "the host")?;
+        let design_tokens = !design_capabilities.is_empty();
         let runtime = manifest
             .runtime
             .as_ref()
@@ -704,13 +728,13 @@ pub(super) fn run<H: PluginHost + 'static>(
         }
         let input_folders = folder_access::open(&host, manifest)?;
         host.begin_transaction()?;
-        Ok((runtime, entry, params, (engine, component, stack), (commands, groups), (folders, input_folders)))
+        Ok((runtime, entry, params, (engine, component, stack), (commands, groups, design_tokens), (folders, input_folders)))
     })();
     let (runtime, entry, params, compiled, commands, (folders, input_folders)) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
-    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, folders, input_folders);
+    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, (folders, input_folders));
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => state.publish_writes().map(|()| value),
@@ -728,16 +752,14 @@ pub(super) fn run<H: PluginHost + 'static>(
     (state.host, result)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn execute<H: PluginHost + 'static>(
     host: H,
     runtime: &craft_plugin::RuntimeManifest,
     entry: &craft_plugin::Entry,
     params: String,
     (engine, component, stack): (Engine, Component, usize),
-    (commands, groups): (BTreeMap<String, CommandSchema>, BTreeSet<String>),
-    folders: BTreeMap<String, Folder>,
-    input_folders: BTreeMap<String, Folder>,
+    (commands, groups, design_tokens): (BTreeMap<String, CommandSchema>, BTreeSet<String>, bool),
+    (folders, input_folders): (BTreeMap<String, Folder>, BTreeMap<String, Folder>),
 ) -> (State<H>, Result<Value>) {
     let limits = &runtime.limits;
     let state = State {
@@ -745,6 +767,7 @@ fn execute<H: PluginHost + 'static>(
         commands,
         groups,
         effect: entry.effect,
+        design_tokens,
         folders,
         input_folders,
         folder_bytes: 0,
@@ -1094,6 +1117,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
         effect: Effect::Open,
+        design_tokens: false,
         folders: BTreeMap::new(),
         input_folders,
         folder_bytes: 0,

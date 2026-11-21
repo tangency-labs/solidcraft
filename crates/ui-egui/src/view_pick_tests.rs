@@ -148,6 +148,31 @@ fn a_pick_names_the_section_plane_of_the_cap() {
     assert!(beyond.is_null(), "material beyond the first plane is picked: {beyond}");
 }
 
+/// A frame member Ghost Frame Members draws see-through raises no cap where a section cuts it: a
+/// pick goes through it, as it goes through its faces.
+#[test]
+fn a_section_through_a_ghosted_frame_member_raises_no_cap() {
+    let mut h = Harness::new();
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Rail"})),
+        ("sketch.line", json!({"points": [[0, 0], [100, 0]]})),
+        ("sketch.finish", json!({})),
+        ("frame.member", json!({"sketch": "Rail", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}})),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    h.call("engine.execute", json!({"command": "inspect.section", "params": {"plane": {"origin": [0, 0, 5], "normal": [0, 0, 1]}}}));
+    // Down through the tube's wall (y 17…20), cut at z = 5.
+    let ray = json!({"rays": [{"origin": [50, 18.5, 50], "dir": [0, 0, -1]}]});
+    assert_eq!(pick(&mut h, ray.clone())["hits"][0]["section_cap"], true);
+    h.app.start("frame.member");
+    if let Some(crate::dialogs::Kind::Frame(m)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        m.ghost = true;
+    }
+    let r = pick(&mut h, ray);
+    assert!(r["hits"][0].get("section_cap").is_none(), "{r}");
+}
+
 /// A pixel near a silhouette edge reports that edge with its distance; a pixel in the
 /// middle of the face reports none.
 #[test]
