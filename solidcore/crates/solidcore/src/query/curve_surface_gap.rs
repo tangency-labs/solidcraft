@@ -1244,8 +1244,9 @@ pub(crate) fn plane_gap_bound(cn: &NurbsCurve, net: &Nurbs, [lo, hi]: [f64; 2]) 
 ///   the control points whose span meets `range` count.
 /// - **A trim of degree 1 along the whole `u` side of a net of degree 1 in `v`**: `W(s)` runs
 ///   from `(u_a, v)` to `(u_b, v)` at a constant `v` (the trim's weights 1, so `u(s)` is linear
-///   and the `v` exact), `[u_a, u_b]` within the net's `u` domain `[u_0, u_1]`, and `range` the
-///   whole domain of both the trim and the curve. Where `[u_a, u_b]` falls short of `[u_0, u_1]`
+///   and the `v` exact), `[u_a, u_b]` within the net's `u` domain `[u_0, u_1]` in either
+///   direction (one running from `u_1`'s end compared with the row backwards), and `range`
+///   the whole domain of both the trim and the curve. Where `[u_a, u_b]` falls short of `[u_0, u_1]`
 ///   the bound adds the row's speed times the shortfall (`row_lipschitz`). The net's row at `v` has control points `D_i = (1 - β)
 ///   P_i0 + β P_i1` (`β` the fraction of `v` in the net's `v` domain), weights `w_i0 = w_i1`,
 ///   those of the curve (bit for bit), and the curve's degree and number of points. Both
@@ -1339,7 +1340,12 @@ pub(crate) fn structured_trim_gap_bound(
     else {
         return None;
     };
-    if !(w_a == 1.0 && w_b == 1.0 && v_a == v_b && nu0 <= u_a && u_a < u_b && u_b <= nu1) {
+    // (a trim running against the side's `u`, from `u_1`'s end to `u_0`'s, runs the row
+    // backwards: the curve's `i`-th point then faces the row's `n - 1 - i`-th, the row's
+    // segments taken in the reverse order)
+    let rev = u_a > u_b;
+    let (u_lo, u_hi) = if rev { (u_b, u_a) } else { (u_a, u_b) };
+    if !(w_a == 1.0 && w_b == 1.0 && v_a == v_b && nu0 <= u_lo && u_lo < u_hi && u_hi <= nu1) {
         return None;
     }
     let clamped_v = matches!(net.v.as_slice(), [a, b, c, d] if a == b && b < c && c == d);
@@ -1354,30 +1360,36 @@ pub(crate) fn structured_trim_gap_bound(
     // top, `v_a == nv1`, encloses `beta` as `[1 - ulp, 1 + ulp]`)
     let beta = (Ivl::from(v_a) - Ivl::from(nv0)) / (Ivl::from(nv1) - Ivl::from(nv0));
     let beta = Ivl::new(beta.lo.max(0.0), beta.hi.min(1.0));
-    if !(beta.lo <= beta.hi) {
+    if beta.lo.is_nan() || beta.hi.is_nan() || beta.lo > beta.hi {
         return None;
     }
     let one_less = Ivl::from(1.0) - beta;
     let mut worst = 0.0_f64;
     let mut row = Vec::new();
-    for i in 0..cn.n {
-        let (c, wc) = point(&cn.pw, i)?;
-        let (p0, w0) = point(&net.pw, 2 * i)?;
-        let (p1, w1) = point(&net.pw, 2 * i + 1)?;
-        if !(w0.to_bits() == w1.to_bits() && w0.to_bits() == wc.to_bits()) {
+    for j in 0..net.nu {
+        let (p0, w0) = point(&net.pw, 2 * j)?;
+        let (p1, w1) = point(&net.pw, 2 * j + 1)?;
+        if w0.to_bits() != w1.to_bits() {
             return None;
         }
-        let d = plus(scaled(p0, one_less), scaled(p1, beta));
+        row.push((plus(scaled(p0, one_less), scaled(p1, beta)), w0));
+    }
+    for i in 0..cn.n {
+        let (c, wc) = point(&cn.pw, i)?;
+        let &(d, w) = row.get(if rev { cn.n - 1 - i } else { i })?;
+        if w.to_bits() != wc.to_bits() {
+            return None;
+        }
         worst = worst.max(norm_upper(minus(c, d))?);
-        row.push((d, w0));
     }
     // (a trim whose ends fall short of the side's, by `slip` in `u` at most, an ulp in the
     // extrudes of #20373: its image is the row over `[u_a, u_b]`, and the row at `u` is
     // within `L |u - τ(u)| <= L slip` of the row at `τ(u)`, `τ` the linear map of
-    // `[u_a, u_b]` onto the whole side, which the bound above holds for)
-    let slip = (Ivl::from(u_a) - Ivl::from(nu0))
+    // `[u_a, u_b]` onto the whole side keeping its direction, which the bound above holds
+    // for)
+    let slip = (Ivl::from(u_lo) - Ivl::from(nu0))
         .hi
-        .max((Ivl::from(nu1) - Ivl::from(u_b)).hi);
+        .max((Ivl::from(nu1) - Ivl::from(u_hi)).hi);
     if slip > 0.0 {
         let lip = row_lipschitz(&row, &net.u, net.p)?;
         worst = (Ivl::from(worst) + Ivl::from(lip) * Ivl::from(slip)).hi;
@@ -1417,7 +1429,7 @@ fn row_lipschitz(row: &[(V3<Ivl>, f64)], k: &[f64], p: usize) -> Option<f64> {
             w_max = w_max.max(w);
             w_min = w_min.min(w);
         }
-        if !(w_min > 0.0) {
+        if w_min.is_nan() || w_min <= 0.0 {
             return None;
         }
         let speed = Ivl::from(2.0 * p as f64) * Ivl::from(w_max) * Ivl::from(diam)
@@ -4470,6 +4482,38 @@ mod tests {
             .collect();
         let row = NurbCurve::new(cps, net.p, knots).unwrap();
         (k, s, net, BSplineCurve::from_nurb(row, 3, false))
+    }
+
+    /// #20373: the extrudes' other side trims run against the side's `u` (from its end to an
+    /// ulp from its start), with the circle running the row backwards: still bounded by the
+    /// control points at once, and a trim backwards against a curve forwards still shows its
+    /// gap (the circle's diameter).
+    #[test]
+    fn a_circles_backward_iso_trim_on_its_cylinder_is_bounded_without_cutting_it() {
+        let (k, s, net, row) = side_row();
+        let (u0, u1) = (net.u[0], net.u[net.u.len() - 1]);
+        let v1 = net.v[net.v.len() - 1];
+        let last = net.u[net.u.len() - 1];
+        let knots = net.u.iter().rev().map(|x| 1.0 - x / last).collect();
+        let cps = (0..net.nu)
+            .rev()
+            .map(|i| {
+                let q = &net.pw[4 * (2 * i + 1)..4 * (2 * i + 2)];
+                CPoint::new(q[0], q[1], q[2], q[3])
+            })
+            .collect();
+        let back = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(cps, net.p, knots).unwrap(),
+            3,
+            false,
+        ));
+        let trim = iso_trim(u1, u0 + 2.842170943040401e-14, v1);
+        let (cn, wn, probed) = trim_data(&k, &s, &back, &trim, [0.0, 1.0]);
+        let g = structured_trim_gap_bound(&cn, &wn, &probed, [0.0, 1.0]).unwrap();
+        assert_trim_answered(&k, &s, &back, &trim, [0.0, 1.0], g);
+        let (fwd, _, _) = trim_data(&k, &s, &Curve::from(row), &trim, [0.0, 1.0]);
+        let g = structured_trim_gap_bound(&fwd, &wn, &probed, [0.0, 1.0]).unwrap();
+        assert!(g >= 25.0, "{g:e}");
     }
 
     /// The trim of degree 1 from `(u0, v)` to `(u1, v)` over `[0, 1]`.
