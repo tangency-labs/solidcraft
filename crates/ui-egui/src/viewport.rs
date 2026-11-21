@@ -224,6 +224,9 @@ pub struct ViewportState {
     section_index: std::sync::Mutex<
         std::collections::HashMap<usize, (std::sync::Arc<solidcraft_engine::geom::Mesh>, std::sync::Arc<solidcraft_engine::view::SectionIndex>)>,
     >,
+    /// The feature that made the face under the pointer (body, face, design revision), for the
+    /// Features selection mode, which asks every frame (`selection_mode::feature_of`).
+    pub(crate) face_feature: std::sync::Mutex<Option<((String, usize, u64), Option<u64>)>>,
     /// Each body mesh's picking index (made the first time a pick reaches the body), kept while
     /// the mesh is part of the world state.
     pub(crate) pick_index: crate::pick_index::PickIndexes,
@@ -5512,7 +5515,7 @@ pub fn candidate(app: &SolveApp, hits: &[Hit]) -> Option<(Hit, Sel)> {
                 .map(|s| (h.clone(), crate::dialogs_assembly::woken_pick(app, snaps, crate::dialogs_move::component_pick(app, h, s))))
         });
     }
-    hits.iter().filter(|h| pick_allowed(app, h)).find_map(|h| hit_candidate(app, h))
+    hits.iter().filter(|h| crate::selection_mode::allowed(app, h)).find_map(|h| hit_candidate(app, h))
 }
 
 /// Every hit a click could pick, in order, each with its selection (Select Other).
@@ -5531,7 +5534,7 @@ pub fn candidates(app: &SolveApp, hits: &[Hit]) -> Vec<(Hit, Sel)> {
             })
             .collect();
     }
-    hits.iter().filter(|h| pick_allowed(app, h)).filter_map(|h| hit_candidate(app, h)).collect()
+    hits.iter().filter(|h| crate::selection_mode::allowed(app, h)).filter_map(|h| hit_candidate(app, h)).collect()
 }
 
 /// What the selection filter lets a joint origin or trace point take (`snaps`: the dialog's active
@@ -5549,22 +5552,6 @@ pub(crate) fn snap_allowed(app: &SolveApp, snaps: bool, h: &Hit) -> bool {
     }
 }
 
-/// What the selection filter lets a click pick with no dialog.
-fn pick_allowed(app: &SolveApp, h: &Hit) -> bool {
-    let off = |k: &str| app.ui.pick_off.iter().any(|x| x == k);
-    match h {
-        Hit::SketchCurve { .. } => !off("sketch") && !off("sketch_curves"),
-        Hit::SketchPoint { .. } | Hit::SketchPoint3d { .. } | Hit::SketchMidpoint { .. } => !off("sketch") && !off("sketch_points"),
-        Hit::Profile { .. } => !off("sketch"),
-        Hit::Vertex { .. } => !off("vertices") && !app.picks_bodies() && !app.picks_components(),
-        Hit::Edge { .. } => !off("edges") && !app.picks_bodies() && !app.picks_components(),
-        Hit::Face { .. } => !off("faces") || app.picks_bodies() || app.picks_components(),
-        Hit::Plane { .. } | Hit::Axis { .. } | Hit::ConstructionPoint { .. } => true,
-        Hit::PointCloudPoint { .. } => !off("vertices") && !app.picks_bodies() && !app.picks_components(),
-        Hit::MemberEnd { .. } | Hit::Centreline { .. } => false,
-    }
-}
-
 /// The selection a click on `h` makes with no dialog (sketch entities only belong to the active sketch).
 fn hit_candidate(app: &SolveApp, h: &Hit) -> Option<(Hit, Sel)> {
     match h {
@@ -5578,8 +5565,9 @@ fn hit_candidate(app: &SolveApp, h: &Hit) -> Option<(Hit, Sel)> {
         // edited: selecting it painted the zone solid blue over its own tint (#16197). The
         // engine keeps a profile to its sketch as well (a profile goes with its sketch).
         Hit::Profile { sketch, .. } if app.session.active_sketch.is_some_and(|active| active != *sketch) => None,
-        Hit::Face { body, .. } if app.picks_components() => Some((h.clone(), component_selection(app, body))),
-        Hit::Face { body, .. } if app.picks_bodies() => Some((h.clone(), Sel::Body { name: body.clone() })),
+        Hit::Face { body, index, .. } if crate::selection_mode::picks(app).whole() => {
+            crate::selection_mode::whole_pick(app, body, *index).map(|s| (h.clone(), s))
+        }
         _ => hit_sel(h).map(|s| (h.clone(), s)),
     }
 }
@@ -5968,8 +5956,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.session.active_occurrence_path.hash(&mut h);
     app.ui.visual_style.hash(&mut h);
     crate::render_workspace::assign::preview_key(app).hash(&mut h);
-    app.picks_bodies().hash(&mut h);
-    app.picks_components().hash(&mut h);
+    crate::selection_mode::picks(app).hash(&mut h);
     crate::render_workspace::active(app).hash(&mut h);
     app.session.active_sketch.hash(&mut h);
     (app.dialog.is_some(), app.tool.is_some()).hash(&mut h);
@@ -6442,14 +6429,8 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         sel.retain(|x| !lit.iter().any(|y| crate::selection::same_item(x, y)));
     }
     // Component hover expands through the same occurrence selection as a Browser row.
-    let component_hover = crate::render_workspace::assign::hover(app).map(|sel| displayed_selection(app, sel)).or_else(|| {
-        app.viewport
-            .hover
-            .as_ref()
-            .filter(|h| app.picks_components() && matches!(h, Hit::Face { .. }))
-            .and_then(|h| hit_candidate(app, h))
-            .map(|(_, s)| displayed_selection(app, &s))
-    });
+    // Render's appearance drop target; a whole-object selection mode lights its pick below.
+    let component_hover = crate::render_workspace::assign::hover(app).map(|sel| displayed_selection(app, sel));
     let hover = app.viewport.hover.as_ref().filter(|_| component_hover.is_none());
     let size = origin_size(app.cam.half_height());
     // The feature names the origin loops below ask for, once for the pass: the check per item
@@ -6883,10 +6864,12 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             }
         }
     }
-    // Timeline modifiers light only their resulting faces; browser rows light whole bodies.
+    // Timeline modifiers light only their resulting faces; browser rows light whole bodies; in a
+    // whole-object selection mode the face under the pointer lights what a click would pick.
     let mut hovered = app.viewport.hover_feature.map(|id| feature_geometry(app, id)).unwrap_or_default();
     hovered.extend(app.viewport.hover_bodies.iter().map(|name| Sel::Body { name: name.clone() }));
     hovered.extend(crate::select_other::hovered_body(app).map(|name| Sel::Body { name: name.to_owned() }));
+    hovered.extend(crate::selection_mode::hovered(app, hover));
     hovered.extend(component_hover.into_iter().flatten());
     let body_hover = hovered_body(app);
     hovered.extend(body_hover.iter().map(|name| Sel::Body { name: name.clone() }));
@@ -6996,10 +6979,11 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         }
     }
     // Hover (pre-highlight). In a joint origin input, the face whose point or edge is under the
-    // pointer is lit: the face a pick there lies on (#11476).
+    // pointer is lit: the face a pick there lies on (#11476). A whole object the selection mode
+    // picks is lit with the hovered set above.
     let lit = crate::snap_wake::lit_face(app);
     match lit.as_ref().or(hover) {
-        Some(Hit::Face { body, index, .. }) if body_hover.as_ref() != Some(body) && !replaced(body) => {
+        Some(Hit::Face { body, index, .. }) if !crate::selection_mode::lights_whole(app) && body_hover.as_ref() != Some(body) && !replaced(body) => {
             if let Some(b) = st.body(body) {
                 let k = t.hover_face_lift;
                 let m = if outlines { shown(b) } else { drawn(b) };
@@ -7360,6 +7344,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.viewport.scene_target = scene_slot;
     }
     crate::joint_handles::sync(app);
+    crate::selection_mode::prepare(app);
     let t = Tokens::get();
     let rect = ui.max_rect();
     app.viewport.rect = Some(rect);
@@ -10868,6 +10853,25 @@ mod tests {
             let model = taken(&app.viewport.slot).expect("x {x}: the ground moved");
             assert!(blocks(&model) == blocks(&statics) && model.ground_ao != statics.ground_ao, "x {x}: the model scene not built again");
         }
+    }
+
+    /// Switching the selection mode with the pointer still on a face rebuilds the highlights: a
+    /// whole-object mode lights the object, Faces & edges the face (#4255).
+    #[test]
+    fn changing_the_selection_mode_rebuilds_the_highlights() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.call("ui.view", json!({"view": "fit"}));
+        h.frames(2);
+        // The middle of the top face: the fit puts the box's middle, near a corner, at the view's.
+        let p = projection(&h.app, h.app.viewport.rect.unwrap()).to_screen(Vec3::new(20.0, 15.0, 20.0)).unwrap();
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        h.frames(2);
+        assert!(matches!(h.app.viewport.hover, Some(Hit::Face { .. })), "the pointer is on a face");
+        let faces = highlight_geometry_key(&h.app);
+        crate::selection_mode::set(&mut h.app, solidcraft_engine::PickMode::Bodies);
+        h.frames(2);
+        assert_ne!(highlight_geometry_key(&h.app), faces);
     }
 
     #[test]
@@ -17920,7 +17924,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}}));
         h.call("ui.view", json!({"view": "fit"}));
-        h.app.ui.pick_bodies = true;
+        h.app.ui.pick_mode = solidcraft_engine::PickMode::Bodies;
         let p = h.app.viewport.rect.unwrap().center();
         h.call("ui.move", json!({"x": p.x, "y": p.y}));
         let wheel = |phase, unit, y| egui::Event::MouseWheel {
@@ -17952,7 +17956,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}}));
         h.call("ui.view", json!({"view": "fit"}));
-        h.app.ui.pick_bodies = true;
+        h.app.ui.pick_mode = solidcraft_engine::PickMode::Bodies;
         let p = h.app.viewport.rect.unwrap().center();
         h.call("ui.move", json!({"x": p.x, "y": p.y}));
         assert!(h.app.viewport.hover.is_some(), "the test point must hover over the model");
