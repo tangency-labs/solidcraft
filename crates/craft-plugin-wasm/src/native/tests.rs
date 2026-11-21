@@ -915,39 +915,39 @@ fn a_write_into_a_missing_sub_folder_makes_it_and_a_discarded_run_removes_it_aga
     let root = std::env::temp_dir().join(format!("craft-plugin-subfolder-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("plain"), b"file").unwrap();
-    let granted = |state: &mut State<App>| {
-        state.folders.insert(
+    let granted = |host: &mut State<App>| {
+        host.folders.insert(
             "projects".into(),
             Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
         );
     };
 
     // Published: the folders stay with the file in them.
-    let mut state = state(App::default());
-    granted(&mut state);
-    state.write_file("projects".into(), "NewProject/pipes/network.json".into(), b"{}".to_vec()).unwrap();
-    assert_eq!(state.read_file("projects".into(), "NewProject/pipes/network.json".into()).unwrap(), b"{}");
-    assert_eq!(state.failed, None);
-    state.publish_writes().unwrap();
-    state.discard_writes();
+    let mut host = state(App::default());
+    granted(&mut host);
+    host.write_file("projects".into(), "NewProject/pipes/network.json".into(), b"{}".to_vec()).unwrap();
+    assert_eq!(host.read_file("projects".into(), "NewProject/pipes/network.json".into()).unwrap(), b"{}");
+    assert_eq!(host.failed, None);
+    host.publish_writes().unwrap();
+    host.discard_writes();
     assert_eq!(std::fs::read(root.join("NewProject/pipes/network.json")).unwrap(), b"{}");
-    drop(state);
+    drop(host);
 
     // Not published (a trap, a refusal, a failed commit): nothing is left behind, and a folder
     // that was already there stays.
-    let mut state = state(App::default());
-    granted(&mut state);
-    state.write_file("projects".into(), "NewProject/other/a/b.json".into(), b"{}".to_vec()).unwrap();
+    let mut host = state(App::default());
+    granted(&mut host);
+    host.write_file("projects".into(), "NewProject/other/a/b.json".into(), b"{}".to_vec()).unwrap();
     assert!(root.join("NewProject/other/a").is_dir());
-    state.discard_writes();
+    host.discard_writes();
     assert!(!root.join("NewProject/other").exists());
     assert!(root.join("NewProject/pipes/network.json").exists());
 
     // A file where a folder should be is a wrong path, not a denied permission.
-    let refused = state.write_file("projects".into(), "plain/network.json".into(), b"{}".to_vec()).unwrap_err();
+    let refused = host.write_file("projects".into(), "plain/network.json".into(), b"{}".to_vec()).unwrap_err();
     assert!(matches!(&refused, PluginError::InvalidInput(types::FieldFailure { field, .. }) if field == "path"), "{refused:?}");
     assert_eq!(std::fs::read(root.join("plain")).unwrap(), b"file");
-    drop(state);
+    drop(host);
     std::fs::remove_dir_all(root).unwrap();
 }
 
