@@ -591,4 +591,34 @@ mod tests {
         assert!(!t.note(pointer(0b10, false)));
         assert!(t.note(Happened::Lost));
     }
+
+    /// #20011: Firefox takes a Shift+right-click for itself: it opens its own menu and never
+    /// offers the page its context menu event, which no page can stop. The app has to know the
+    /// difference, so it opens no menu of its own under the browser's.
+    #[test]
+    fn a_right_click_the_browser_took_is_reported_as_taken() {
+        let mut t = Tracker::default();
+        assert_eq!(t.menu(), BrowserMenu::Offered, "no click yet: the page may open its menu");
+        // The right button goes down: the browser has not offered the page its context menu
+        // event yet (it comes with the press, and only when the browser lets the page have it).
+        t.note(pointer(0b10, true));
+        assert_eq!(t.menu(), BrowserMenu::Taken);
+        // The browser offers it, as Chrome, Edge and Safari do: the click is the page's.
+        t.note_menu();
+        assert_eq!(t.menu(), BrowserMenu::Offered);
+    }
+
+    /// A right-click the browser took stays taken while the pointer moves with the button held,
+    /// and the next right-click starts over.
+    #[test]
+    fn a_move_keeps_the_browser_having_taken_the_click() {
+        let mut t = Tracker::default();
+        t.note(pointer(0b10, true));
+        assert_eq!(t.menu(), BrowserMenu::Taken);
+        t.note(pointer(0b10, false));
+        assert_eq!(t.menu(), BrowserMenu::Taken, "the pointer moved with the button held");
+        t.note(pointer(0, false));
+        t.note(pointer(0b10, true));
+        assert_eq!(t.menu(), BrowserMenu::Taken, "the next right-click starts over");
+    }
 }

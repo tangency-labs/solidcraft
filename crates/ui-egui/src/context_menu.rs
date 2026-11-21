@@ -3965,6 +3965,26 @@ mod tests {
         assert!(!h.app.menu.radial, "browser menus remain lists when radial menus are enabled");
     }
 
+    /// #20011: in the browser, Firefox takes a Shift+right-click for itself: it opens its own
+    /// menu and never offers the page its context menu event, which no page can stop. SolidCraft
+    /// must open no menu of its own under the browser's, and the user is told what to do.
+    #[test]
+    fn a_right_click_the_browser_took_opens_no_menu() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.settle();
+        let point = h.at(&json!({"world":[0,0,0]})).unwrap();
+        h.step(&json!({"click":point,"button":"right"})).unwrap();
+        assert!(h.app.viewport.context_menu.is_some(), "an ordinary right-click opens the menu");
+        close(&mut h.app);
+        // The browser took this click for itself and opened its own menu.
+        h.app.menu.browser_menu = BrowserMenu::Taken;
+        h.step(&json!({"click":point,"button":"right"})).unwrap();
+        assert!(h.app.viewport.context_menu.is_none(), "the browser's menu is open: ours must not open under it");
+        let status = h.app.status.as_ref().map(|(text, _, _)| text.clone()).unwrap_or_default();
+        assert!(status.contains("browser"), "the user is told why: {status:?}");
+    }
+
     #[test]
     fn disabled_radial_menu_does_not_capture_right_button_hold() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
