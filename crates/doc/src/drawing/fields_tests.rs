@@ -235,18 +235,21 @@ fn the_finish_field_reads_the_finish_property_then_the_free_one() {
     }
     let d = drawing();
     let free = BTreeMap::from([("finish".to_string(), "Zinc plated".to_string())]);
-    let read = |component, key: &str| shown(&d, 0, component, vec![field(Source::Component, key)]);
+    // A fn, not a closure: each call borrows the component for itself.
+    fn read(d: &Drawing, component: Option<Component>, key: &str) -> String {
+        shown(d, 0, component, vec![field(Source::Component, key)])
+    }
     assert!(has_key(Source::Component, "finish") && has_key(Source::Component, "properties.finish"));
     let mut metadata = Metadata::default();
-    assert_eq!(read(part(&metadata, None), "finish"), "", "nothing set");
-    assert_eq!(read(part(&metadata, Some(&free)), "finish"), "Zinc plated", "the free property shows as before");
+    assert_eq!(read(&d, part(&metadata, None), "finish"), "", "nothing set");
+    assert_eq!(read(&d, part(&metadata, Some(&free)), "finish"), "Zinc plated", "the free property shows as before");
     metadata.set(Owner::Component, "finish", json!("Powder coat, RAL 9005, matt")).unwrap();
-    assert_eq!(read(part(&metadata, Some(&free)), "finish"), "Powder coat, RAL 9005, matt", "the part property wins");
-    assert_eq!(read(part(&metadata, None), "finish"), "Powder coat, RAL 9005, matt", "the design has no free properties");
-    assert_eq!(read(part(&metadata, Some(&free)), "properties.finish"), "Zinc plated", "that field is unchanged");
-    assert_eq!(read(None, "finish"), "");
+    assert_eq!(read(&d, part(&metadata, Some(&free)), "finish"), "Powder coat, RAL 9005, matt", "the part property wins");
+    assert_eq!(read(&d, part(&metadata, None), "finish"), "Powder coat, RAL 9005, matt", "the design has no free properties");
+    assert_eq!(read(&d, part(&metadata, Some(&free)), "properties.finish"), "Zinc plated", "that field is unchanged");
+    assert_eq!(read(&d, None, "finish"), "");
     let blank = Metadata(serde_json::from_value(json!({"finish": ""})).unwrap());
-    assert_eq!(read(part(&blank, Some(&free)), "finish"), "Zinc plated", "an empty property is none");
+    assert_eq!(read(&d, part(&blank, Some(&free)), "finish"), "Zinc plated", "an empty property is none");
 }
 
 /// A field its source doesn't have is refused when a block is given and when a drawing is read,
