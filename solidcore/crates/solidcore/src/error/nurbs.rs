@@ -454,6 +454,22 @@ pub enum BSplineFailure {
     /// A boundary curve without a neighbouring surface is taken only when it is degenerate
     /// (a point), and this one is not. [`ErrorKind::InvalidInput`].
     FreeBoundaryNotDegenerate,
+    /// The point's search found no point of the surface within `tolerance` of it.
+    /// [`ErrorKind::NotWithinTolerance`].
+    NoFootWithinTolerance {
+        /// The distance searched within.
+        tolerance: f64,
+    },
+    /// A Coons patch that is not bilinear needs four derivative curves, and none are given.
+    /// [`ErrorKind::InvalidInput`].
+    DerivativeCurvesMissing,
+    /// Expanding the surface's boundary span changed its control point or knot counts,
+    /// which the expansion is to keep; the surface is left unchanged. Class `failed`.
+    ExpansionChangesCounts,
+    /// Joining the curves into one failed after the join's own check of the gap passed; the
+    /// failure's cause says why (for example ends farther apart than the construction takes).
+    /// Class `failed`; whether it is a defect or a refusal is its cause's.
+    JoinNotBuilt,
 }
 
 impl BSplineFailure {
@@ -510,7 +526,8 @@ impl BSplineFailure {
             | Self::SpineRailMissing
             | Self::RailIntersectionsMissing
             | Self::TrimDomainOutside
-            | Self::FreeBoundaryNotDegenerate => ErrorKind::InvalidInput,
+            | Self::FreeBoundaryNotDegenerate
+            | Self::DerivativeCurvesMissing => ErrorKind::InvalidInput,
             Self::NotRational | Self::NotIntersectionCurve | Self::ArcKindUnsupported => {
                 ErrorKind::Unsupported
             }
@@ -522,7 +539,8 @@ impl BSplineFailure {
             Self::DegreeNotReducible { .. }
             | Self::PointOffSurface { .. }
             | Self::SubdivisionCap { .. }
-            | Self::IntervalNotSplittable { .. } => ErrorKind::NotWithinTolerance,
+            | Self::IntervalNotSplittable { .. }
+            | Self::NoFootWithinTolerance { .. } => ErrorKind::NotWithinTolerance,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -709,6 +727,14 @@ impl core::fmt::Display for BSplineFailure {
             Self::FreeBoundaryNotDegenerate => {
                 f.write_str("a boundary curve without a surface is not degenerate")
             }
+            Self::NoFootWithinTolerance { tolerance } => {
+                write!(f, "the point is not within {tolerance} of the surface")
+            }
+            Self::DerivativeCurvesMissing => f.write_str("the derivative curves are missing"),
+            Self::ExpansionChangesCounts => {
+                f.write_str("expanding the boundary span changes the surface's counts")
+            }
+            Self::JoinNotBuilt => f.write_str("the curves could not be joined into one"),
         }
     }
 }
@@ -997,6 +1023,7 @@ mod tests {
             BSplineFailure::TooFewBoundaryCurves { given: 3 },
             BSplineFailure::TrimDomainOutside,
             BSplineFailure::FreeBoundaryNotDegenerate,
+            BSplineFailure::DerivativeCurvesMissing,
         ];
         let unsupported = [
             BSplineFailure::NotRational,
@@ -1030,6 +1057,7 @@ mod tests {
             },
             BSplineFailure::SubdivisionCap { limit: 8192 },
             BSplineFailure::IntervalNotSplittable { lo: 1.0, hi: 1.0 },
+            BSplineFailure::NoFootWithinTolerance { tolerance: 1e-6 },
         ];
         // the caller's missing inputs keep upstream's `NER` status
         for cause in [
@@ -1123,8 +1151,6 @@ mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/nurbs/b_spline_surface/p1.rs", 2),
-            ("solidcore/src/nurbs/b_spline_surface_n_lib/p1.rs", 7),
         ];
         assert_pinned(
             "B-spline phrase-cause sites",
