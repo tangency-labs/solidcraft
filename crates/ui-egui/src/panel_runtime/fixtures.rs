@@ -27,6 +27,10 @@ pub struct FixtureState {
     pub last_state: Option<ControllerState>,
     pub draft: String,
     pub last_clip: Option<egui::Rect>,
+    /// The search specimen's box (#19042): open, taking the keyboard on the next frame, and its query.
+    pub search_open: bool,
+    pub search_focus: bool,
+    pub query: String,
 }
 
 #[derive(Clone, Default)]

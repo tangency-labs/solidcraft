@@ -2111,3 +2111,92 @@ fn docked_assistant_beside_an_inverted_view_area_does_not_panic() {
         assert!(h.app.viewport.layout.is_some(), "{side}: a layout for the next frame");
     }
 }
+
+/// The `search` specimen: a panel that is not the Browser opts in to the shared search box. A lone
+/// panel draws it in its header in the title's place; a panel in a tab group draws it as the first
+/// row of its body. Typing narrows the panel's own rows, and Esc or the × ends the search.
+#[test]
+fn the_search_specimen_opens_its_box_in_the_header_or_the_first_row() {
+    use crate::scenario::handle_at;
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    crate::panel_runtime::enable_host_specimen(&mut h.app, "search").unwrap();
+    h.frames(3);
+    let card = |h: &Harness, instance: &str| {
+        let frame = h.app.universal_panel_frame().unwrap();
+        let card = frame.layout.sections.iter().find(|card| card.instance.0 == instance).unwrap();
+        (crate::panel_runtime::egui_rect(card.header), crate::panel_runtime::egui_rect(card.outer))
+    };
+    let click = |h: &mut Harness, handle: &str| {
+        let p = handle_at(handle).unwrap_or_else(|| panic!("no {handle}"));
+        assert_eq!(h.call("ui.click", json!({"x": p.x, "y": p.y}))["ok"], true);
+        h.frames(2);
+    };
+    for (instance, grouped) in [("specimen-0", false), ("specimen-1", true)] {
+        let field = format!("{instance}:search");
+        assert!(handle_at(&field).is_none(), "{instance}: closed at first");
+        assert!(handle_at(&format!("{instance}:item:3")).is_some() && handle_at(&format!("{instance}:item:4")).is_some());
+        click(&mut h, &format!("{instance}:magnifier"));
+        assert!(handle_at(&field).is_some(), "{instance}: the magnifier opens the box");
+        let (header, outer) = card(&h, instance);
+        let frame = rect_of(&format!("{instance}:search:frame")).unwrap();
+        assert!(outer.contains_rect(frame), "{instance}: {frame:?} in its card {outer:?}");
+        if grouped {
+            assert!(frame.top() >= header.bottom() - 0.5, "{instance}: tabs keep the header, the box is the first row");
+        } else {
+            assert!(header.contains(frame.center()), "{instance}: the box takes the title's place");
+        }
+        h.call("ui.text", json!({"text": "3"}));
+        h.frames(2);
+        assert!(handle_at(&format!("{instance}:item:3")).is_some(), "{instance}: the match stays");
+        assert!(handle_at(&format!("{instance}:item:4")).is_none(), "{instance}: the rest go");
+        h.call("ui.key", json!({"key": "Escape"}));
+        h.frames(2);
+        assert!(handle_at(&field).is_none(), "{instance}: Esc ends the search");
+        assert!(handle_at(&format!("{instance}:item:4")).is_some(), "{instance}: every row is back");
+        click(&mut h, &format!("{instance}:magnifier"));
+        click(&mut h, &format!("{instance}:search:clear"));
+        assert!(handle_at(&field).is_none() && handle_at(&format!("{instance}:magnifier")).is_some(), "{instance}: the × ends it too");
+    }
+}
+
+/// A right-to-left language and a very long query in mixed scripts: the box stays inside its card,
+/// the field inside the box, and the query stops at the panel's limit.
+#[test]
+fn the_search_specimen_holds_a_long_query_in_a_right_to_left_language() {
+    use crate::scenario::handle_at;
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.language = "he".into();
+    crate::panel_runtime::enable_host_specimen(&mut h.app, "search").unwrap();
+    h.frames(3);
+    let p = handle_at("specimen-0:magnifier").unwrap();
+    h.call("ui.click", json!({"x": p.x, "y": p.y}));
+    h.frames(2);
+    h.call("ui.text", json!({"text": "בורג bolt ボルト 螺栓 ".repeat(20)}));
+    h.frames(2);
+    let frame = rect_of("specimen-0:search:frame").unwrap();
+    let field = rect_of("specimen-0:search").unwrap();
+    let outer = h
+        .app
+        .universal_panel_frame()
+        .unwrap()
+        .layout
+        .sections
+        .iter()
+        .find(|card| card.instance.0 == "specimen-0")
+        .map(|card| crate::panel_runtime::egui_rect(card.outer))
+        .unwrap();
+    assert!(outer.contains_rect(frame), "{frame:?} in {outer:?}");
+    assert!(frame.expand(0.5).contains_rect(field), "{field:?} in {frame:?}");
+    let observation = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+    let controller = observation["runtime"]["probe"]["controllers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|controller| controller["instance"] == "specimen-0")
+        .unwrap()
+        .clone();
+    let query = controller["state"]["query"].as_str().unwrap().chars().count() as u64;
+    assert_eq!(Some(query), controller["state"]["query_limit"].as_u64(), "the query stops at the panel's limit");
+}
