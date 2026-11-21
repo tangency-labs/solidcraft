@@ -107,6 +107,8 @@ mod issue_2953_drafted_peg;
 mod measure;
 #[path = "../normal_drop.rs"]
 mod normal_drop;
+#[path = "../offset_history.rs"]
+mod offset_history;
 #[path = "../pie_slices_off_centre_arc.rs"]
 mod pie_slices_off_centre_arc;
 #[path = "../plane_cv_edit.rs"]
