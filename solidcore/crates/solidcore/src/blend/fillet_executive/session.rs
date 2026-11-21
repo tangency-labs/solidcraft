@@ -9452,18 +9452,17 @@ mod tests {
             // the x|torus + y|torus pair alone is another event: its rails are judged to fit
             // their faces (no overflow), and the corner where the two rounds meet leaves the
             // torus face; not this refusal's (see #20314)
-            for which in [&[XY, XTorus, YTorus][..]] {
-                if let Some(fit) = refused_or_built(near, which, 0.1) {
-                    assert!(
-                        matches!(
-                            round_torus_corner(near, which, fit),
-                            TorusCornerFillet::Built(true)
-                        ),
-                        "{which:?} at {near:?} at its fit {fit}"
-                    );
-                }
-                refused_or_built(near, which, 0.0959);
+            let which = &[XY, XTorus, YTorus][..];
+            if let Some(fit) = refused_or_built(near, which, 0.1) {
+                assert!(
+                    matches!(
+                        round_torus_corner(near, which, fit),
+                        TorusCornerFillet::Built(true)
+                    ),
+                    "{which:?} at {near:?} at its fit {fit}"
+                );
             }
+            refused_or_built(near, which, 0.0959);
             for radius in [0.09, 0.095] {
                 assert!(
                     matches!(
