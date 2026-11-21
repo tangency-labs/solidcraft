@@ -168,7 +168,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("joint")
         .contract(&LIMITS_CONTRACT)
         .output(output_schema_for::<SolveResult>)
-        .params("joint; index?: value index (default 0); min?, max? (omit both to clear)"),
+        .params("joint; index?: value index (default 0); min?, max? (numbers, or expressions the limit then follows as the parameters change; omit both to clear)"),
     CommandSpec::new("joint.edit", "Edit Joint", crate::checked!("joint.edit", edit))
         .icon("edit")
         .contract(&EDIT_CONTRACT)
@@ -252,7 +252,8 @@ pub fn place(s: &mut Session) -> joints::Solution {
 fn reexpress(s: &mut Session) {
     let params = joints::Params::new(&s.doc);
     let st = s.model.state();
-    let changed: Vec<(usize, (f64, f64, Vec<f64>))> = s
+    type Expressed = (f64, f64, Vec<f64>, Vec<Option<(f64, f64)>>);
+    let changed: Vec<(usize, Expressed)> = s
         .doc
         .assembly
         .joints
@@ -264,17 +265,23 @@ fn reexpress(s: &mut Session) {
             if j.constraint == Some(joints::Constraint::Tangent) {
                 o += s.doc.origin_radius(&st, &j.b).ok()?;
             }
-            joints::clamp(j, &mut q);
-            ((o, a) != (j.offset, j.angle) || q != j.values).then_some((i, (o, a, q)))
+            // The limits first, so the values are held to the limits as they are now (#20242).
+            let limits = joints::expressed_limits(&params, j).ok()?;
+            for (v, l) in q.iter_mut().zip(&limits) {
+                if let Some((lo, hi)) = l {
+                    *v = v.clamp(lo.min(*hi), hi.max(*lo));
+                }
+            }
+            ((o, a) != (j.offset, j.angle) || q != j.values || limits != j.limits).then_some((i, (o, a, q, limits)))
         })
         .collect();
     if changed.is_empty() {
         return;
     }
     let doc = s.doc_mut();
-    for (i, (o, a, q)) in changed {
+    for (i, (o, a, q, limits)) in changed {
         if let Some(j) = doc.assembly.joints.get_mut(i) {
-            (j.offset, j.angle, j.values) = (o, a, q);
+            (j.offset, j.angle, j.values, j.limits) = (o, a, q, limits);
         }
     }
 }
@@ -1147,6 +1154,18 @@ fn value_exprs(p: &Value) -> Vec<Option<String>> {
     out
 }
 
+/// The expressions among `limits`' minimums and maximums, by value index (#20242).
+fn limit_exprs(p: &Value) -> Vec<[Option<String>; 2]> {
+    let mut out: Vec<[Option<String>; 2]> = match p.get("limits") {
+        Some(Value::Array(a)) => a.iter().map(|l| [typed(l.get(0)), typed(l.get(1))]).collect(),
+        _ => Vec::new(),
+    };
+    while out.last().is_some_and(|l| l == &[None, None]) {
+        out.pop();
+    }
+    out
+}
+
 fn values_param(s: &Session, p: &Value, kind: JointKind, cmd: &str) -> Result<Vec<f64>> {
     let n = kind.dofs().len();
     let list: Vec<Value> = match (p.get("values"), p.get("value")) {
@@ -1470,7 +1489,7 @@ fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: Joi
         offset,
         angle: angle.unwrap_or(0.0),
         suppressed: false,
-        exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p) },
+        exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p), limits: limit_exprs(p) },
         offset_xy,
         captured: None,
         constraint: None,
@@ -1518,7 +1537,7 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
         offset: 0.0,
         angle: 0.0,
         suppressed: false,
-        exprs: Default::default(),
+        exprs: JointExprs { limits: limit_exprs(p), ..Default::default() },
         offset_xy: [0.0; 2],
         captured: None,
         constraint: None,
@@ -2237,6 +2256,8 @@ fn limits(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(slot) = j.limits.get_mut(i) {
         *slot = lim;
     }
+    // An end typed as an expression keeps it, so the limit follows its parameters (#20242).
+    j.exprs.set_limit(i, [typed(p.get("min")), typed(p.get("max"))]);
     let mut q = j.values.clone();
     q.resize(kind.dofs().len(), 0.0);
     joints::clamp(j, &mut q);
@@ -2326,11 +2347,17 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
         j.values.resize(k.dofs().len(), 0.0);
         j.limits.resize(k.dofs().len(), None);
         j.exprs.values.truncate(k.dofs().len());
+        j.exprs.limits.truncate(k.dofs().len());
         // A value that changes unit with the type (a slide becoming a turn) drops its expression,
         // which would no longer work out and leave the joint out of the solve.
         for i in 0..j.exprs.values.len() {
             if was.is_angle(i) != k.is_angle(i) {
                 j.exprs.set_value(i, None);
+            }
+        }
+        for i in 0..j.exprs.limits.len() {
+            if was.is_angle(i) != k.is_angle(i) {
+                j.exprs.set_limit(i, [None, None]);
             }
         }
     }

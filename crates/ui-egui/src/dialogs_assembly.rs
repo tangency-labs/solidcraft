@@ -587,7 +587,9 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     for (i, l) in f.limits.iter_mut().enumerate() {
         if let Some(Some((lo, hi))) = j.limits.get(i) {
             let fmt = |v: f64| if j.kind.is_angle(i) { num(v.to_degrees(), "deg") } else { crate::length_input::model(&app.session.doc, v) };
-            *l = (true, fmt(*lo), fmt(*hi));
+            // An end typed as an expression shows (and is sent back) as that expression (#20242).
+            let [lo_expr, hi_expr] = j.exprs.limit(i);
+            *l = (true, lo_expr.map_or_else(|| fmt(*lo), str::to_string), hi_expr.map_or_else(|| fmt(*hi), str::to_string));
         }
     }
     Some(Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f))), inputs))
