@@ -202,6 +202,8 @@ struct RowRig {
     texts: std::cell::RefCell<Vec<(String, egui::Pos2)>>,
     /// The commands dragged off the row.
     removed: std::cell::RefCell<Vec<String>>,
+    /// The overflow rows offered to the host's hint painter in the last frame.
+    more_hints: std::cell::RefCell<Vec<String>>,
 }
 
 impl RowRig {
@@ -212,6 +214,7 @@ impl RowRig {
             time: std::cell::Cell::new(0.0),
             texts: Default::default(),
             removed: Default::default(),
+            more_hints: Default::default(),
         };
         rig.frame(Vec::new());
         rig
@@ -228,11 +231,10 @@ impl RowRig {
             ..Default::default()
         };
         let t = Tokens::get();
+        let mut group_b = group("B", vec![button("b.on", true), button("b.off", false)]);
+        group_b.more[1].hint = Some("A row's own text hint");
         let row = Row {
-            groups: vec![
-                group("A", vec![button("a.one", true), button("a.two", true)]),
-                group("B", vec![button("b.on", true), button("b.off", false)]),
-            ],
+            groups: vec![group("A", vec![button("a.one", true), button("a.two", true)]), group_b],
             labels: true,
             accent: solidcraft_theme::TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Main),
             exit: false,
@@ -243,7 +245,15 @@ impl RowRig {
         let mut actions = Vec::new();
         let output = crate::test_support::raw_frame(&self.ctx, input, |ui| {
             let rect = Rect::from_min_size(pos2(0.0, 30.0), vec2(self.width, GROUP_HEIGHT + 1.0));
-            actions = show(ui, &row, rect, &mut |_, _| false).actions;
+            let mut hints = self.more_hints.borrow_mut();
+            hints.clear();
+            actions = show(ui, &row, rect, &mut |_, target| {
+                if let Overflow::Hint(entry, _) = target {
+                    hints.push(entry.id.to_owned());
+                }
+                false
+            })
+            .actions;
             let dropped = actions.iter().any(|a| matches!(a, Action::Drop { .. }));
             self.removed.borrow_mut().extend(drag_end(ui, rect, None, dropped, &|_| Some("box".to_string()), &HANDLES));
         });
@@ -305,6 +315,7 @@ fn a_group_that_does_not_fit_is_in_the_more_menu() {
         }
     };
     open_b();
+    assert_eq!(*rig.more_hints.borrow(), ["b.on"], "rows with their own text hint take precedence over the host's illustration");
     let actions = rig.click(rig.at("t:more_row:b.on"));
     let [Action::Run { id, place, .. }] = actions.as_slice() else { panic!("{actions:?}") };
     assert_eq!((id.as_str(), *place), ("b.on", Place::More));
@@ -487,6 +498,98 @@ fn each_newly_hovered_row_waits_the_full_tip_delay() {
         }
     }
     assert_eq!(tips.len(), 2, "both rows showed a tip after their own delay");
+}
+
+#[test]
+fn text_only_plain_and_help_tips_keep_their_original_narrow_window_position() {
+    fn show(width: f32, x: f32, help: bool) -> Rect {
+        let ctx = crate::test_support::context();
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 480.0));
+        let menu = Rect::from_min_size(pos2(x, 20.0), vec2(220.0, 64.0));
+        let text = "Move the selected body to the chosen destination in the design";
+        let tip = if help { RowTip::Help { text, help: Some("The body keeps its original shape and size.") } } else { RowTip::Plain(text) };
+        let entry = MenuEntry { tip: Some(tip), ..entry("text", true) };
+        let mut shown = None;
+        for time in [0.0, 0.1, 0.3, 1.0, 1.2, 1.4, 1.6] {
+            let raw = RawInput {
+                screen_rect: Some(screen),
+                events: vec![Event::PointerMoved(menu.min + vec2(10.0, 16.0))],
+                time: Some(time),
+                ..Default::default()
+            };
+            crate::test_support::raw_frame(&ctx, raw, |_| {
+                crate::Container::new(&ctx, crate::Surface::Popup).area(egui::Id::unique("text_dropdown")).fixed_pos(menu.min).show(&ctx, |ui| {
+                    let (_, resp) = menu_row(ui, &entry, menu.width(), None, &menu_style());
+                    shown = ctx.read_response(resp.id.with("sc_dropdown_tip_area")).map(|response| response.rect);
+                });
+            });
+        }
+        shown.expect("hovered text-only hint")
+    }
+    for help in [false, true] {
+        let ordinary = show(1280.0, 20.0, help);
+        let narrow = show(640.0, 260.0, help);
+        assert_eq!(ordinary.width(), narrow.width(), "text hints retain their original width");
+        assert_eq!(narrow.left(), 0.0, "the original left placement clamps a wide text hint to the screen edge: {narrow:?}");
+        assert_eq!(narrow.top(), 20.0, "text hints keep their row alignment");
+    }
+}
+
+#[test]
+fn illustrated_tip_stays_beside_a_menu_in_a_narrow_window() {
+    for x in [20.0, 400.0] {
+        let ctx = crate::test_support::context();
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 480.0));
+        let menu = Rect::from_min_size(pos2(x, 20.0), vec2(220.0, 64.0));
+        let mut shown = None;
+        for time in [0.0, 0.1, 0.3, 1.0, 1.2, 1.4] {
+            let raw = egui::RawInput {
+                screen_rect: Some(screen),
+                events: vec![egui::Event::PointerMoved(menu.min + vec2(10.0, 16.0))],
+                time: Some(time),
+                ..Default::default()
+            };
+            crate::test_support::raw_frame(&ctx, raw, |_| {
+                crate::Container::new(&ctx, crate::Surface::Popup).area(egui::Id::unique("narrow_dropdown")).fixed_pos(menu.min).show(&ctx, |ui| {
+                    let resp = ui.interact(menu, egui::Id::unique("illustrated_row"), Sense::hover());
+                    shown = illustrated_menu_tip(ui, menu, &resp, "Example command", |ui| {
+                        ui.allocate_exact_size(vec2(ui.available_width().min(480.0), 300.0), Sense::hover());
+                    });
+                });
+            });
+        }
+        let tip = shown.expect("hovered media hint");
+        assert!(!tip.intersects(menu), "{tip:?} covers {menu:?}");
+        assert!(screen.contains_rect(tip), "{tip:?} leaves {screen:?}");
+    }
+}
+
+#[test]
+fn a_wide_menu_uses_a_compact_tip_above_or_below_without_covering_its_rows() {
+    let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 480.0));
+    for top in [20.0, 390.0] {
+        let ctx = crate::test_support::context();
+        let menu = Rect::from_min_size(pos2(0.0, top), vec2(630.0, 64.0));
+        let mut shown = None;
+        for time in [0.0, 0.1, 0.3, 1.0, 1.2, 1.4] {
+            let raw = RawInput {
+                screen_rect: Some(screen),
+                events: vec![Event::PointerMoved(menu.min + vec2(10.0, 16.0))],
+                time: Some(time),
+                ..Default::default()
+            };
+            crate::test_support::raw_frame(&ctx, raw, |_| {
+                crate::Container::new(&ctx, crate::Surface::Popup).area(egui::Id::unique("wide_dropdown")).fixed_pos(menu.min).show(&ctx, |ui| {
+                    let resp = ui.interact(menu, egui::Id::unique("wide_row"), Sense::hover());
+                    shown = illustrated_menu_tip(ui, menu, &resp, "Example command", |_| panic!("no space for an illustration beside this menu"));
+                });
+            });
+        }
+        let tip = shown.expect("the compact hint fits near the menu");
+        assert!(!tip.intersects(menu), "{tip:?} obscures {menu:?}");
+        assert!(screen.contains_rect(tip), "{tip:?} leaves {screen:?}");
+        assert!((tip.top() >= menu.bottom()) == (top < screen.center().y));
+    }
 }
 
 fn menu_style() -> MenuStyle<'static> {

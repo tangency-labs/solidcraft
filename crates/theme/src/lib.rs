@@ -869,6 +869,8 @@ pub struct IconColors {
 pub struct Tokens {
     /// User-assigned document labels: red, orange, green, blue, purple.
     pub library_highlights: [Color32; 5],
+    pub command_hint_media_width: f32,
+    pub command_hint_media_height: f32,
     /// Navigation chrome from the approved Navbar boards.
     pub nav_hover: Color32,
     pub nav_press: Color32,
@@ -1085,6 +1087,13 @@ pub struct Tokens {
     pub construction_plane: Color32,
     /// Construction axes and points.
     pub construction_geom: Color32,
+    /// Construction axes emphasized while capturing command-hint illustrations.
+    pub command_hint_axis: Color32,
+    /// Selected sketch curves emphasized for command-hint captures.
+    pub command_hint_curve: Color32,
+    /// Construction plane fill and outline for command-hint captures.
+    pub command_hint_plane: Color32,
+    pub command_hint_plane_edge: Color32,
     // ---- bodies and live previews ----
     pub body: Color32,
     pub body_edge: Color32,
@@ -1464,6 +1473,10 @@ impl Tokens {
             axis_z: view.axis_z,
             construction_plane: view.construction_plane,
             construction_geom: view.construction_geom,
+            command_hint_axis: view.command_hint_axis,
+            command_hint_curve: view.command_hint_curve,
+            command_hint_plane: view.command_hint_plane,
+            command_hint_plane_edge: view.command_hint_plane_edge,
             body: view.body,
             body_edge: view.body_edge,
             isoparm: view.isoparm,

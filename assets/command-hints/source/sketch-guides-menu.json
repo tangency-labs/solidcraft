@@ -1,0 +1,1672 @@
+{
+  "samples": [
+    {
+      "command": "sketch.construction_line",
+      "slug": "sketch-construction_line",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Guide"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.construction_line",
+          "params": {
+            "at": [
+              -5,
+              5
+            ],
+            "through": [
+              30,
+              5
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          5,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 115
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0,
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The native construction line shows the chosen direction or relationship to the reference geometry. Infinite extents intentionally reach the picture boundary."
+    },
+    {
+      "command": "sketch.construction_line.horizontal",
+      "slug": "sketch-construction_line-horizontal",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Guide"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.construction_line.horizontal",
+          "params": {
+            "at": [
+              -12,
+              0
+            ],
+            "length": 32
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          4,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 115
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0,
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The native construction line shows the chosen direction or relationship to the reference geometry. Infinite extents intentionally reach the picture boundary."
+    },
+    {
+      "command": "sketch.construction_line.vertical",
+      "slug": "sketch-construction_line-vertical",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Guide"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.construction_line.vertical",
+          "params": {
+            "at": [
+              0,
+              -16
+            ],
+            "length": 32
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 115
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0,
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The native construction line shows the chosen direction or relationship to the reference geometry. Infinite extents intentionally reach the picture boundary."
+    },
+    {
+      "command": "sketch.construction_line.angle",
+      "slug": "sketch-construction_line-angle",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Guide"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.construction_line.angle",
+          "params": {
+            "at": [
+              -8,
+              -16
+            ],
+            "angle": 60,
+            "length": 36
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 115
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0,
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The native construction line shows the chosen direction or relationship to the reference geometry. Infinite extents intentionally reach the picture boundary."
+    },
+    {
+      "command": "sketch.construction_line.parallel",
+      "slug": "sketch-construction_line-parallel",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Guide"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -20,
+                -12
+              ],
+              [
+                4,
+                20
+              ]
+            ],
+            "infer": false,
+            "ids": [
+              "reference"
+            ]
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.construction_line.parallel",
+          "params": {
+            "at": [
+              8,
+              -10
+            ],
+            "curve": "reference",
+            "length": 32,
+            "near": [
+              24,
+              12
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 115
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0,
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The native construction line shows the chosen direction or relationship to the reference geometry. Infinite extents intentionally reach the picture boundary."
+    },
+    {
+      "command": "sketch.construction_line.perpendicular",
+      "slug": "sketch-construction_line-perpendicular",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Guide"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -20,
+                -12
+              ],
+              [
+                4,
+                20
+              ]
+            ],
+            "infer": false,
+            "ids": [
+              "reference"
+            ]
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.construction_line.perpendicular",
+          "params": {
+            "at": [
+              5,
+              -5
+            ],
+            "curve": "reference",
+            "length": 32,
+            "near": [
+              20,
+              -20
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 115
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0,
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The native construction line shows the chosen direction or relationship to the reference geometry. Infinite extents intentionally reach the picture boundary."
+    },
+    {
+      "command": "sketch.construction_line.tangent_external",
+      "slug": "sketch-construction_line-tangent_external",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Guide"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.circle.center",
+          "params": {
+            "center": [
+              0,
+              0
+            ],
+            "radius": 12
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.construction_line.tangent_external",
+          "params": {
+            "at": [
+              28,
+              0
+            ],
+            "curve": "c1",
+            "alternate": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          5,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 115
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0,
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The native construction line shows the chosen direction or relationship to the reference geometry. Infinite extents intentionally reach the picture boundary."
+    },
+    {
+      "command": "sketch.construction_line.tangent_at",
+      "slug": "sketch-construction_line-tangent_at",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Guide"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.circle.center",
+          "params": {
+            "center": [
+              0,
+              0
+            ],
+            "radius": 15
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.construction_line.tangent_at",
+          "params": {
+            "at": [
+              15,
+              0
+            ],
+            "curve": "c1"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 115
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0,
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The native construction line shows the chosen direction or relationship to the reference geometry. Infinite extents intentionally reach the picture boundary."
+    },
+    {
+      "command": "sketch.construction_line.tangent_two",
+      "slug": "sketch-construction_line-tangent_two",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Guide"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.circle.center",
+          "params": {
+            "center": [
+              -15,
+              0
+            ],
+            "radius": 9
+          }
+        },
+        {
+          "command": "sketch.circle.center",
+          "params": {
+            "center": [
+              15,
+              0
+            ],
+            "radius": 6
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.construction_line.tangent_two",
+          "params": {
+            "at": [
+              0,
+              16
+            ],
+            "curve": "c1",
+            "curve2": "c2",
+            "solution": 0
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 115
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0,
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The native construction line shows the chosen direction or relationship to the reference geometry. Infinite extents intentionally reach the picture boundary."
+    },
+    {
+      "command": "sketch.construction_line.bisector",
+      "slug": "sketch-construction_line-bisector",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Guide"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                28,
+                0
+              ]
+            ],
+            "infer": false,
+            "ids": [
+              "a"
+            ]
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                0,
+                28
+              ]
+            ],
+            "infer": false,
+            "ids": [
+              "b"
+            ],
+            "connect": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.construction_line.bisector",
+          "params": {
+            "at": [
+              8,
+              8
+            ],
+            "curve": "a",
+            "curve2": "b"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          8,
+          8,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 115
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0,
+        "select": [
+          {
+            "type": "feature",
+            "id": 1
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The native construction line shows the chosen direction or relationship to the reference geometry. Infinite extents intentionally reach the picture boundary."
+    },
+    {
+      "command": "sketch.project",
+      "slug": "sketch-project",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Projection",
+            "offset": 32
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.project",
+          "params": {
+            "refs": [
+              {
+                "body": "Block",
+                "face": [
+                  0,
+                  0,
+                  20
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          18
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 130
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0,
+        "select": [
+          {
+            "type": "feature",
+            "id": 2
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 1,
+        "sketch_count": 1
+      },
+      "explanation": "A linked outline is projected into the parallel sketch plane twelve millimeters above the selected source face."
+    },
+    {
+      "command": "sketch.intersect",
+      "slug": "sketch-intersect",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "base": [
+              0,
+              0,
+              0
+            ],
+            "radius": 14,
+            "height": 36,
+            "body_name": "Cylinder"
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Section",
+            "offset": 15
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.intersect",
+          "params": {
+            "refs": [
+              {
+                "body": "Cylinder"
+              }
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          18
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 2
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 2,
+        "select": [
+          {
+            "type": "feature",
+            "id": 2
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 1,
+        "sketch_count": 1
+      },
+      "explanation": "The linked circular section is shown through the cylinder using native wireframe display."
+    },
+    {
+      "command": "sketch.include_3d",
+      "slug": "sketch-include_3d",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Included"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.include_3d",
+          "params": {
+            "refs": [
+              {
+                "body": "Block",
+                "edge": [
+                  20,
+                  -15,
+                  10
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 115
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 2
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 2,
+        "select": [
+          {
+            "type": "feature",
+            "id": 2
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 1,
+        "sketch_count": 1
+      },
+      "explanation": "The included linked edge preserves its real three-dimensional height, rather than flattening into the XY plane."
+    },
+    {
+      "command": "sketch.project_to_surface",
+      "slug": "sketch-project_to_surface",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "solid.sphere",
+          "params": {
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "radius": 20,
+            "body_name": "Ball"
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Source",
+            "offset": 35
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                -12,
+                0
+              ],
+              [
+                12,
+                0
+              ]
+            ],
+            "infer": false,
+            "ids": [
+              "reference"
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Projected"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.project_to_surface",
+          "params": {
+            "curves": [
+              {
+                "sketch": "Source",
+                "curve": "reference"
+              }
+            ],
+            "body": "Ball",
+            "face": [
+              0,
+              0,
+              20
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          12
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 140
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 0,
+        "select": [
+          {
+            "type": "feature",
+            "id": 3
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 1,
+        "sketch_count": 2
+      },
+      "explanation": "The straight source line above the sphere projects into a real curved wire on its upper surface."
+    },
+    {
+      "command": "sketch.intersection_curve",
+      "slug": "sketch-intersection_curve",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "base": [
+              0,
+              0,
+              -24
+            ],
+            "radius": 12,
+            "height": 48,
+            "body_name": "Vertical"
+          }
+        },
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "base": [
+              -24,
+              0,
+              0
+            ],
+            "axis": [
+              1,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 48,
+            "operation": "new",
+            "body_name": "Horizontal"
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Intersection"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.intersection_curve",
+          "params": {
+            "a": {
+              "body": "Vertical"
+            },
+            "b": {
+              "body": "Horizontal"
+            }
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 145
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 2
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 2,
+        "select": [
+          {
+            "type": "feature",
+            "id": 3
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 2,
+        "sketch_count": 1
+      },
+      "explanation": "Genuine nonplanar intersection curves satisfy both perpendicular cylindrical surfaces."
+    },
+    {
+      "command": "sketch.spun_profile",
+      "slug": "sketch-spun_profile",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "base": [
+              0,
+              0,
+              0
+            ],
+            "radius": 14,
+            "height": 36,
+            "body_name": "Cylinder"
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XZ",
+            "name": "Spun"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.spun_profile",
+          "params": {
+            "body": "Cylinder",
+            "axis": "Z"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          18
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 2
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 2,
+        "select": [
+          {
+            "type": "feature",
+            "id": 2
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 1,
+        "sketch_count": 1
+      },
+      "explanation": "The native spun outline of the cylinder lies in the meridian sketch plane."
+    },
+    {
+      "command": "sketch.isoparametric_curve",
+      "slug": "sketch-isoparametric_curve",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "base": [
+              0,
+              0,
+              0
+            ],
+            "radius": 14,
+            "height": 36,
+            "body_name": "Cylinder"
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Parameters"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.isoparametric_curve",
+          "params": {
+            "body": "Cylinder",
+            "face": [
+              14,
+              0,
+              18
+            ],
+            "direction": "u"
+          }
+        },
+        {
+          "command": "sketch.isoparametric_curve",
+          "params": {
+            "body": "Cylinder",
+            "face": [
+              14,
+              0,
+              18
+            ],
+            "direction": "v"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          18
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 2
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 2,
+        "select": [
+          {
+            "type": "feature",
+            "id": 2
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 1,
+        "sketch_count": 1
+      },
+      "explanation": "Native U and V parameter curves follow the actual cylindrical surface."
+    },
+    {
+      "command": "sketch.fit_curves_to_section",
+      "slug": "sketch-fit_curves_to_section",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "base": [
+              0,
+              0,
+              0
+            ],
+            "radius": 14,
+            "height": 36,
+            "body_name": "Cylinder"
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Fitted",
+            "offset": 15
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": false,
+            "show_profile": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.fit_curves_to_section",
+          "params": {
+            "body": "Cylinder"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          18
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 2
+      },
+      "after_ui": {
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "visualStyle": 2,
+        "select": [
+          {
+            "type": "feature",
+            "id": 2
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 1,
+        "sketch_count": 1
+      },
+      "explanation": "The fitted section is ordinary editable sketch geometry; native wireframe exposes its location inside the solid."
+    }
+  ]
+}

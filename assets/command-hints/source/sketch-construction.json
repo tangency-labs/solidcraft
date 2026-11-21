@@ -1,0 +1,2096 @@
+{
+  "frame_delay_cs": 25,
+  "final_source_delay_cs": 100,
+  "samples": [
+    {
+      "command": "sketch.arc.center_point",
+      "slug": "sketch-arc-center_point",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              100,
+              100
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              120,
+              100
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              91.547635,
+              81.87384399999999
+            ]
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            100,
+            100
+          ]
+        },
+        {
+          "sketch": [
+            120,
+            100
+          ]
+        },
+        {
+          "sketch": [
+            91.547635,
+            81.87384399999999
+          ],
+          "via": [
+            [
+              110.0,
+              117.32050807568876
+            ],
+            [
+              84.67911113762044,
+              112.8557521937308
+            ],
+            [
+              91.54763476518602,
+              81.873844259267
+            ]
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "A 245-degree circular arc remains open at its ends."
+    },
+    {
+      "command": "sketch.arc.tangent",
+      "slug": "sketch-arc-tangent",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                74,
+                88
+              ],
+              [
+                100,
+                88
+              ]
+            ],
+            "infer": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            100,
+            88
+          ]
+        },
+        {
+          "sketch": [
+            120,
+            118
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "A native arc continues tangentially from a straight line."
+    },
+    {
+      "command": "sketch.arc.three_point",
+      "slug": "sketch-arc-three_point",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              78,
+              92
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              122,
+              92
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              100,
+              117
+            ]
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            78,
+            92
+          ]
+        },
+        {
+          "sketch": [
+            122,
+            92
+          ]
+        },
+        {
+          "sketch": [
+            100,
+            117
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "An open arc passes through the third chosen point."
+    },
+    {
+      "command": "sketch.circle.center",
+      "slug": "sketch-circle-center",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              100,
+              100
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              120,
+              100
+            ]
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                100,
+                100
+              ],
+              [
+                120,
+                100
+              ]
+            ],
+            "construction": true,
+            "infer": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            100,
+            100
+          ]
+        },
+        {
+          "sketch": [
+            120,
+            100
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "A radius-20 circle, viewed square to its sketch plane."
+    },
+    {
+      "command": "sketch.circle.three_point",
+      "slug": "sketch-circle-three_point",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              80,
+              100
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              100,
+              120
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              120,
+              100
+            ]
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            80,
+            100
+          ]
+        },
+        {
+          "sketch": [
+            100,
+            120
+          ]
+        },
+        {
+          "sketch": [
+            120,
+            100
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "Three points define a circle; all three lie on the resulting circumference."
+    },
+    {
+      "command": "sketch.circle.three_tangent",
+      "slug": "sketch-circle-three_tangent",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                74,
+                84
+              ],
+              [
+                126,
+                84
+              ],
+              [
+                100,
+                127
+              ]
+            ],
+            "infer": false,
+            "closed": true
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            100,
+            84
+          ]
+        },
+        {
+          "sketch": [
+            113,
+            105.5
+          ]
+        },
+        {
+          "sketch": [
+            87,
+            105.5
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The new incircle is tangent to all three sides of a triangle."
+    },
+    {
+      "command": "sketch.circle.two_point",
+      "slug": "sketch-circle-two_point",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              80,
+              100
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              120,
+              100
+            ]
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                80,
+                100
+              ],
+              [
+                120,
+                100
+              ]
+            ],
+            "construction": true,
+            "infer": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            80,
+            100
+          ]
+        },
+        {
+          "sketch": [
+            120,
+            100
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "Two diameter endpoints define a radius-20 circle."
+    },
+    {
+      "command": "sketch.circle.two_tangent",
+      "slug": "sketch-circle-two_tangent",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                72,
+                90
+              ],
+              [
+                128,
+                90
+              ]
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                90,
+                75
+              ],
+              [
+                90,
+                125
+              ]
+            ],
+            "infer": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            108,
+            90
+          ]
+        },
+        {
+          "sketch": [
+            90,
+            108
+          ]
+        },
+        {
+          "handle": "dialog:"
+        },
+        {
+          "text": "10",
+          "commit": {
+            "command": "sketch.circle.two_tangent",
+            "params": {
+              "curves": [
+                "l1",
+                "l2"
+              ],
+              "radius": 10,
+              "near": [
+                99,
+                99
+              ]
+            }
+          }
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "Two native curve picks and the real Radius input establish the tangent circle. The authoring sequence commits the same native engine command explicitly after recording the radius, because synthetic Enter does not commit this floating field on the capture host.",
+      "circle_geometry": {
+        "center": [
+          100,
+          100
+        ],
+        "radius": 10
+      }
+    },
+    {
+      "camera": {
+        "target": [
+          100,
+          104,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 285
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "command": "sketch.line",
+      "slug": "sketch-line",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Endpoint line"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            80,
+            94
+          ]
+        },
+        {
+          "sketch": [
+            120,
+            106
+          ]
+        },
+        {
+          "sketch": [
+            120,
+            106
+          ],
+          "button": "right"
+        }
+      ],
+      "line_geometry": {
+        "start": [
+          80,
+          94
+        ],
+        "end": [
+          120,
+          106
+        ]
+      },
+      "explanation": "The first click anchors one endpoint. The second click places the other; right-click ends the native line chain."
+    },
+    {
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 285
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "command": "sketch.line.midpoint",
+      "slug": "sketch-line-midpoint",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Line centered on a reference"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              100,
+              100
+            ],
+            "id": "center_ref"
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                100,
+                84
+              ],
+              [
+                100,
+                116
+              ]
+            ],
+            "construction": true,
+            "infer": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            100,
+            100
+          ]
+        },
+        {
+          "sketch": [
+            120,
+            100
+          ]
+        }
+      ],
+      "line_geometry": {
+        "start": [
+          80,
+          100
+        ],
+        "end": [
+          120,
+          100
+        ],
+        "midpoint": [
+          100,
+          100
+        ]
+      },
+      "result_commands": [
+        {
+          "command": "sketch.dimension",
+          "params": {
+            "entities": [
+              "mid:l2",
+              "l2.start"
+            ],
+            "type": "horizontal",
+            "driven": true,
+            "text_at": [
+              90,
+              111
+            ]
+          }
+        },
+        {
+          "command": "sketch.dimension",
+          "params": {
+            "entities": [
+              "mid:l2",
+              "l2.end"
+            ],
+            "type": "horizontal",
+            "driven": true,
+            "text_at": [
+              110,
+              89
+            ]
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "show_dimensions": true
+          }
+        }
+      ],
+      "explanation": "The first click chooses the reference midpoint on a vertical construction guide. Moving the endpoint grows both halves symmetrically. Two genuine driven dimensions show equal 20 mm halves; they do not constrain or move the line.",
+      "preserve_reference_curves": true
+    },
+    {
+      "command": "sketch.rectangle.center",
+      "slug": "sketch-rectangle-center",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              100,
+              100
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              123,
+              114
+            ]
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            100,
+            100
+          ]
+        },
+        {
+          "sketch": [
+            123,
+            114
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "A rectangle is symmetric about its center; native construction diagonals remain visible."
+    },
+    {
+      "command": "sketch.rectangle.rounded",
+      "slug": "sketch-rectangle-rounded",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              76,
+              85
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              124,
+              115
+            ]
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                76,
+                85
+              ],
+              [
+                124,
+                115
+              ]
+            ],
+            "construction": true,
+            "infer": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            76,
+            85
+          ]
+        },
+        {
+          "sketch": [
+            124,
+            115
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "All four rectangle corners receive equal native radius-6 arcs."
+    },
+    {
+      "command": "sketch.rectangle.three_point",
+      "slug": "sketch-rectangle-three_point",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              78,
+              84
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              117,
+              95
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              112,
+              114
+            ]
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            78,
+            84
+          ]
+        },
+        {
+          "sketch": [
+            117,
+            95
+          ]
+        },
+        {
+          "sketch": [
+            112,
+            114
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "An inclined rectangle follows the direction of its first edge."
+    },
+    {
+      "command": "sketch.rectangle.two_point",
+      "slug": "rectangle",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              76,
+              85
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              124,
+              115
+            ]
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                76,
+                85
+              ],
+              [
+                124,
+                115
+              ]
+            ],
+            "construction": true,
+            "infer": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            76,
+            85
+          ]
+        },
+        {
+          "sketch": [
+            124,
+            115
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "Opposite corners establish the rectangle."
+    },
+    {
+      "command": "sketch.slot.arc_center",
+      "slug": "sketch-slot-arc_center",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              100,
+              100
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              122,
+              100
+            ]
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            100,
+            100
+          ]
+        },
+        {
+          "sketch": [
+            122,
+            100
+          ]
+        },
+        {
+          "sketch": [
+            83.14702199999999,
+            114.141327
+          ],
+          "via": [
+            [
+              115.55634918610404,
+              115.55634918610404
+            ],
+            [
+              98.08257365955151,
+              121.9162833580184
+            ],
+            [
+              83.14702225138248,
+              114.14132741310387
+            ]
+          ]
+        },
+        {
+          "sketch": [
+            79.699822,
+            117.033872
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "A 9-wide curved slot follows a radius-22 center arc."
+    },
+    {
+      "command": "sketch.slot.arc_three_point",
+      "slug": "sketch-slot-arc_three_point",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              120,
+              100
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              114.142135624,
+              114.142135624
+            ]
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            120,
+            100
+          ]
+        },
+        {
+          "sketch": [
+            114.142135624,
+            114.142135624
+          ]
+        },
+        {
+          "sketch": [
+            100,
+            120
+          ]
+        },
+        {
+          "sketch": [
+            100,
+            124.5
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "A slot follows a quarter-circle center arc through three points."
+    },
+    {
+      "command": "sketch.slot.center_point",
+      "slug": "sketch-slot-center_point",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              100,
+              100
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              116,
+              100
+            ]
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            100,
+            100
+          ]
+        },
+        {
+          "sketch": [
+            116,
+            100
+          ]
+        },
+        {
+          "sketch": [
+            116,
+            107
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The slot extends symmetrically about its center."
+    },
+    {
+      "command": "sketch.slot.center_to_center",
+      "slug": "sketch-slot-center_to_center",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              84,
+              100
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              116,
+              100
+            ]
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            84,
+            100
+          ]
+        },
+        {
+          "sketch": [
+            116,
+            100
+          ]
+        },
+        {
+          "sketch": [
+            100,
+            107
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "Two semicircular caps are centered 32 mm apart, joined by tangent straight sides."
+    },
+    {
+      "command": "sketch.slot.overall",
+      "slug": "sketch-slot-overall",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              76,
+              100
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              124,
+              100
+            ]
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            76,
+            100
+          ]
+        },
+        {
+          "sketch": [
+            124,
+            100
+          ]
+        },
+        {
+          "sketch": [
+            100,
+            107
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 260
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The complete slot spans 48 mm between its outside ends."
+    },
+    {
+      "command": "sketch.spline.control_point",
+      "slug": "sketch-spline-control_point",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              74,
+              88
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              84,
+              128
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              114,
+              75
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              126,
+              112
+            ]
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                74,
+                88
+              ],
+              [
+                84,
+                128
+              ],
+              [
+                114,
+                75
+              ],
+              [
+                126,
+                112
+              ]
+            ],
+            "construction": true,
+            "infer": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            74,
+            88
+          ]
+        },
+        {
+          "sketch": [
+            84,
+            128
+          ]
+        },
+        {
+          "sketch": [
+            114,
+            75
+          ]
+        },
+        {
+          "sketch": [
+            126,
+            112
+          ]
+        },
+        {
+          "button": "right",
+          "sketch": [
+            126,
+            112
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 340
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "A cubic control-point spline is shaped by four control points."
+    },
+    {
+      "command": "sketch.spline.control_point_5",
+      "slug": "sketch-spline-control_point_5",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              73,
+              90
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              77,
+              128
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              92,
+              130
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              106,
+              71
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              122,
+              74
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              127,
+              112
+            ]
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                73,
+                90
+              ],
+              [
+                77,
+                128
+              ],
+              [
+                92,
+                130
+              ],
+              [
+                106,
+                71
+              ],
+              [
+                122,
+                74
+              ],
+              [
+                127,
+                112
+              ]
+            ],
+            "construction": true,
+            "infer": false
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            73,
+            90
+          ]
+        },
+        {
+          "sketch": [
+            77,
+            128
+          ]
+        },
+        {
+          "sketch": [
+            92,
+            130
+          ]
+        },
+        {
+          "sketch": [
+            106,
+            71
+          ]
+        },
+        {
+          "sketch": [
+            122,
+            74
+          ]
+        },
+        {
+          "sketch": [
+            127,
+            112
+          ]
+        },
+        {
+          "button": "right",
+          "sketch": [
+            127,
+            112
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 340
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "A degree-five control-point spline follows six control points."
+    },
+    {
+      "command": "sketch.spline.fit_point",
+      "slug": "sketch-spline-fit_point",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Construction"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_dimensions": false,
+            "show_constraints": false,
+            "show_points": true,
+            "show_profile": false
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              74,
+              90
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              88,
+              115
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              107,
+              91
+            ]
+          }
+        },
+        {
+          "command": "sketch.point",
+          "params": {
+            "point": [
+              126,
+              110
+            ]
+          }
+        }
+      ],
+      "events": [
+        {
+          "sketch": [
+            74,
+            90
+          ]
+        },
+        {
+          "sketch": [
+            88,
+            115
+          ]
+        },
+        {
+          "sketch": [
+            107,
+            91
+          ]
+        },
+        {
+          "sketch": [
+            126,
+            110
+          ]
+        },
+        {
+          "button": "right",
+          "sketch": [
+            126,
+            110
+          ]
+        }
+      ],
+      "camera": {
+        "target": [
+          100,
+          100,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 340
+      },
+      "crop_scale": 0.5,
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "A smooth spline passes through four original fit points."
+    }
+  ]
+}
