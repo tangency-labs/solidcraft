@@ -314,7 +314,9 @@ pub fn scope_targets(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) -
     let Some(shown) = solidcraft_engine::shown_scope(&app.session) else { return Ok(()) };
     for (_, p) in cmds {
         let changes = p.get("operation").and_then(Value::as_str).is_some_and(|o| OPS.contains(&o) && o != "new");
-        let named = ["targets", "participants"].iter().any(|k| p.get(*k).and_then(Value::as_array).is_some_and(|a| !a.is_empty()));
+        let named = ["targets", "participants"].iter().any(|k| p.get(*k).and_then(Value::as_array).is_some_and(|a| !a.is_empty()))
+            // Extrude's Target Bodies left empty: every body it touches, hidden or not.
+            || p.get("all_bodies_touched").and_then(Value::as_bool) == Some(true);
         if !changes || named {
             continue;
         }

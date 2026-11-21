@@ -423,8 +423,11 @@ pub struct Extent {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub from_level: bool,
     /// A Join To Object leaves the body it runs to as its own body, joining only its targets.
-    /// Designs saved before a Join also took that body (format 39 and older, #8151) open with
-    /// it set, so they keep the bodies they were built with.
+    /// Unset, that body joins too, as every Join To Object did from format 40 (#6424) until the
+    /// commands began putting it in the targets instead, where it can be seen and taken out:
+    /// they set this on every Join To Object they make. Designs saved before a Join also took
+    /// that body (format 39 and older, #8151) open with it set, so they keep the bodies they
+    /// were built with.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub to_body_apart: bool,
     /// Where each other component stood, relative to this extrude's own, when To / From Object

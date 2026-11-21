@@ -1277,7 +1277,9 @@ fn extrude_cut_only_cuts_the_target_bodies_picked_in_the_dialog() {
             }
         }
         h.frames(2);
-        assert_eq!(target_bodies(&h), Some(vec![]), "Cut shows Target Bodies");
+        // With Left hidden, the box shows the shown body OK stores, so Left is left alone.
+        let shown = if hidden_left { vec!["Right".to_string()] } else { vec![] };
+        assert_eq!(target_bodies(&h), Some(shown), "Cut shows Target Bodies");
         if picked {
             let d = h.app.dialog.as_mut().unwrap();
             d.active = d.inputs.iter().position(|i| i.label == "Target Bodies").unwrap();
@@ -1352,7 +1354,7 @@ fn extrude_target_picks_survive_join_cut_switches_but_not_new_body() {
             )
             .unwrap();
         open(&mut h);
-        for (op, tip) in [(2, "ui.extrude_cut_targets_tip"), (1, "ui.extrude_join_targets_tip"), (2, "ui.extrude_cut_targets_tip")] {
+        for (op, tip) in [(2, "dialog.targets_cut_tip"), (1, "dialog.targets_join_tip"), (2, "dialog.targets_cut_tip")] {
             let d = h.app.dialog.as_mut().unwrap();
             let crate::dialogs::Kind::Extrude { operation, .. } = &mut d.kind else { panic!("extrude") };
             *operation = op;
@@ -1381,8 +1383,8 @@ fn extrude_target_picks_survive_join_cut_switches_but_not_new_body() {
     }
 }
 
-/// Extrude's Join shows Target Bodies, and joins the bodies picked there; with none picked it
-/// joins the body its sketch is on, as before. Editing the extrude shows the stored bodies, and
+/// Extrude's Join shows Target Bodies, and joins the bodies picked there; the box starts with the
+/// body its sketch is on, which it joins when nothing more is picked. Editing the extrude shows the stored bodies, and
 /// another operation hides the input (#17657).
 #[test]
 fn extrude_join_joins_the_target_bodies_picked_in_the_dialog() {
@@ -1402,12 +1404,13 @@ fn extrude_join_joins_the_target_bodies_picked_in_the_dialog() {
             *distance = "3 mm".into();
         }
         h.frames(2);
-        assert_eq!(target_bodies(&h), Some(vec![]), "Join shows an empty Target Bodies");
+        assert_eq!(target_bodies(&h), Some(vec!["Left".to_string()]), "Join shows the body its sketch is on");
         assert_eq!(h.app.dialog.as_ref().unwrap().active, 0, "the profiles stay the active input");
         if !picked.is_empty() {
             let d = h.app.dialog.as_mut().unwrap();
             d.active = d.inputs.iter().position(|i| i.label == "Target Bodies").unwrap();
-            for name in &picked {
+            // Left is in the box already: a pick of it would take it out.
+            for name in picked.iter().filter(|n| **n != "Left") {
                 d.pick(&h.app.session, solidcraft_engine::Sel::Body { name: (*name).into() });
             }
             h.frames(2);
@@ -1456,7 +1459,7 @@ fn a_target_body_pick_stops_the_automatic_operation_at_once() {
     d.pick(&h.app.session, solidcraft_engine::Sel::Body { name: "Right".into() });
     assert!(matches!(d.kind, crate::dialogs::Kind::Extrude { auto_op: false, operation: 1, .. }), "{:?}", d.kind);
     h.frames(4);
-    assert_eq!(target_bodies(&h), Some(vec!["Right".to_string()]), "the pick stays");
+    assert_eq!(target_bodies(&h), Some(vec!["Left".to_string(), "Right".to_string()]), "the pick stays, after the body the sketch is on");
 }
 
 /// Switching To Object off keeps From Object the active input when Target Bodies follows it

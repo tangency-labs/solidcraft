@@ -93,6 +93,22 @@ existing picks. With the setting off, picks only add profiles.
 or an edge and click one of the points that light up, its ends or its middle (a hole's centre
 too), the way Move's points are picked. So an extrude can end where two sketch lines meet.
 
+Extrude's **Target Bodies** shows the bodies a Join or Cut will use as soon as you pick a face
+or profile, and OK stores exactly those. A Join starts with the body its profile is sketched on
+(or whose face it extrudes). When some bodies are hidden, a Join or Cut starts with the shown
+bodies instead, so a hidden body is left alone; visibility is read only then, never when the model
+rebuilds. Until you pick or remove a body there, the box follows your other choices; after that
+it keeps yours. Left empty, the box says **Bodies it touches**: the extrusion joins or cuts every
+body it touches each time the model rebuilds, hidden or not. Clearing the box (its **×**) chooses
+that. Editing a feature shows the bodies it stored, or Bodies it touches when it stored none.
+
+A Join **To Object** joins the body it runs to only when that body is one of its **Target
+Bodies**. Picking the To Object puts that body in the box, so you can see it. Take it out of the
+box and it stays a separate body that only sets where the extrusion ends. A hidden body is not put
+in. A Join To Object saved by an earlier release joins the body it runs to whatever its targets
+say, and keeps doing so until you edit it in the Extrude window, which shows that body in
+**Target Bodies** too.
+
 Dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it,
 such as the far side of the block a cut goes into: once the arrow's tip comes within a few
 screen points of such a face, the distance becomes exactly that face's and the face is

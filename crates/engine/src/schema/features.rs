@@ -144,6 +144,17 @@ pub struct ExtrudeParams {
     /// How far past `to` to go.
     #[serde(default)]
     pub to_offset: Option<LengthExpr>,
+    /// A Join To Object: true (the default for a new extrude) joins the body `to` lies on only
+    /// when it is one of the targets; false joins it whatever the targets say, as Joins To
+    /// Object did before. An edit that leaves it out keeps the extrude's own.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub to_body_apart: Option<bool>,
+    /// True with no `targets`: a Join or Cut takes every body it touches each time the model
+    /// rebuilds, without the default a Join from a body's face stores.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub all_bodies_touched: Option<bool>,
     /// Start at this face or point (From Object). On a flat face at a slant the start follows the
     /// face, and a distance moves it along the extrusion.
     #[serde(default, deserialize_with = "present")]
@@ -153,7 +164,7 @@ pub struct ExtrudeParams {
     #[serde(default)]
     pub operation: Option<ExtrudeOperation>,
     /// The bodies a join, cut or intersect works on. Default for a join from a body's face:
-    /// that body.
+    /// that body, and the body a Join To Object runs to.
     #[serde(default)]
     pub targets: Option<StringList>,
     /// What a join makes of pieces that share no face. Default: separate.

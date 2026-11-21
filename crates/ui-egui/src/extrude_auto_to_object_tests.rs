@@ -3,9 +3,11 @@
 use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::dialogs::{Dialog, Kind, apply_commands, face_sel};
 use crate::scenario::Harness;
+use crate::selection::SelectionExt;
 use crate::viewport::Hit;
 
 /// A 10 x 10 profile on XY, a 20 mm box beside it (x 30..50), a cylinder further on (x 65..75)
@@ -347,4 +349,174 @@ fn clicking_into_the_profiles_box_adds_an_off_plane_face_as_a_profile() {
     let d = dialog(&h);
     assert!(to_object(d).is_none(), "the box was chosen, so the pick is a profile");
     assert_eq!(d.inputs[0].items.len(), 2);
+}
+
+/// A base, a target 30 mm above it, and a 20 x 20 profile sketched on the base's top face; the
+/// Extrude dialog open with the profile picked and the operation chosen as Join.
+fn join_to_scene() -> Harness {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 40, "height": 10, "body_name": "Base"})).unwrap();
+    h.app.run("solid.box", json!({"corner": [0, 0, 40], "length": 40, "width": 40, "height": 20, "body_name": "Target"})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane": {"face": [20, 20, 10]}, "name": "Top"})).unwrap()["sketch"].as_u64().unwrap();
+    let plane = h.app.session.model.state().sketch(sketch).unwrap().plane;
+    let at = |x: f64, y: f64| {
+        let p = plane.to_local(Vec3::new(x, y, 10.0));
+        json!([p.x, p.y])
+    };
+    h.app.run("sketch.rectangle.two_point", json!({"p0": at(10.0, 10.0), "p1": at(30.0, 30.0)})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.start("solid.extrude");
+    h.frames(2);
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    set_operation(&mut h, 1);
+    h
+}
+
+/// Choose the operation by hand (an index of `dialogs::OPS`), as the Operation row does.
+fn set_operation(h: &mut Harness, op: usize) {
+    if let Some(Kind::Extrude { operation, auto_op, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *operation = op;
+        *auto_op = false;
+    }
+    h.frames(3);
+}
+
+/// Pick the To Object at `p` as a click into the To Object box does.
+fn pick_to(h: &mut Harness, p: Vec3) {
+    let sel = face_sel(&h.app.session, p).expect("a face there");
+    let d = h.app.dialog.as_mut().unwrap();
+    crate::dialogs::preset_to_object(d, true);
+    d.inputs.iter_mut().find(|i| i.label == "To Object").unwrap().items = vec![sel];
+    h.frames(3);
+}
+
+fn target_bodies(d: &Dialog) -> Vec<String> {
+    d.inputs.iter().find(|i| i.label == "Target Bodies").map(|i| i.items.body_names()).unwrap_or_default()
+}
+
+fn remove_target(h: &mut Harness, name: &str) {
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs.iter_mut().find(|i| i.label == "Target Bodies").unwrap().items.retain(|x| !matches!(x, Sel::Body { name: n } if n == name));
+    h.frames(3);
+}
+
+/// The parameters OK gives `solid.extrude`, directly or through an edit's `timeline.redefine`.
+fn extrude_params(h: &Harness) -> serde_json::Value {
+    let commands = apply_commands(&h.app, dialog(h)).unwrap();
+    commands
+        .into_iter()
+        .find_map(|(id, p)| match id.as_str() {
+            "solid.extrude" => Some(p),
+            "timeline.redefine" if p["command"] == "solid.extrude" => Some(p["params"].clone()),
+            _ => None,
+        })
+        .expect("an extrude")
+}
+
+/// What the empty Target Bodies chip says.
+fn targets_chip(h: &Harness) -> Option<&'static str> {
+    let d = dialog(h);
+    crate::dialogs::empty_field_prompt(d, d.inputs.iter().find(|i| i.label == "Target Bodies").expect("Target Bodies"))
+}
+
+/// Target Bodies shows what OK stores as soon as it is known: the body the profile was sketched
+/// on, then, To Object, the body the Join runs to (#6424); a Cut's automatic scope says so.
+#[test]
+fn target_bodies_follow_the_default_as_the_picks_change() {
+    let mut h = join_to_scene();
+    assert_eq!(target_bodies(dialog(&h)), ["Base"], "the sketch's face's body, before OK");
+    pick_to(&mut h, Vec3::new(20.0, 20.0, 40.0));
+    assert_eq!(target_bodies(dialog(&h)), ["Base", "Target"]);
+    let params = extrude_params(&h);
+    assert_eq!(params["targets"], json!(["Base", "Target"]));
+    assert_eq!(params["to_body_apart"], json!(true));
+    set_operation(&mut h, 2);
+    assert!(target_bodies(dialog(&h)).is_empty(), "a cut takes every body it meets");
+    set_operation(&mut h, 1);
+    assert_eq!(target_bodies(dialog(&h)), ["Base", "Target"]);
+}
+
+/// A body taken out of Target Bodies by hand stays out (#18428), and the Join leaves it alone;
+/// cleared, the box says Automatic and stays so, and OK leaves the choice to `solid.extrude`.
+#[test]
+fn a_target_taken_out_by_hand_stays_out() {
+    let mut h = join_to_scene();
+    pick_to(&mut h, Vec3::new(20.0, 20.0, 40.0));
+    remove_target(&mut h, "Target");
+    assert_eq!(target_bodies(dialog(&h)), ["Base"]);
+    set_operation(&mut h, 2);
+    set_operation(&mut h, 1);
+    assert_eq!(target_bodies(dialog(&h)), ["Base"], "a choice by hand stays");
+    assert_eq!(extrude_params(&h)["targets"], json!(["Base"]));
+    h.app.run("solid.extrude", extrude_params(&h)).unwrap();
+    let state = h.app.session.model.state();
+    assert_eq!(state.bodies.len(), 2, "the target stays its own body");
+    assert!((solidcraft_engine::doc::kernel::measure(&state.body("Target").unwrap().body).unwrap().volume - 32_000.0).abs() < 1e-6);
+    let mut h = join_to_scene();
+    pick_to(&mut h, Vec3::new(20.0, 20.0, 40.0));
+    remove_target(&mut h, "Target");
+    remove_target(&mut h, "Base");
+    assert!(target_bodies(dialog(&h)).is_empty(), "a cleared box stays cleared");
+    assert_eq!(targets_chip(&h), Some("Automatic"));
+    pick_to(&mut h, Vec3::new(20.0, 20.0, 60.0));
+    set_operation(&mut h, 2);
+    set_operation(&mut h, 1);
+    assert!(target_bodies(dialog(&h)).is_empty(), "nothing is put back in");
+    assert!(extrude_params(&h).get("targets").is_none(), "solid.extrude chooses");
+    h.app.run("solid.extrude", extrude_params(&h)).unwrap();
+    assert_eq!(h.app.session.model.state().bodies.len(), 1, "the default, the sketch's body and the To body, joins");
+}
+
+/// With some bodies hidden, Target Bodies shows the shown ones, which OK stores so a hidden body
+/// is left alone (#3961). A profile on no body's face leaves the box empty: the automatic scope.
+#[test]
+fn target_bodies_show_the_shown_bodies_or_say_automatic() {
+    let mut h = join_to_scene();
+    h.app.dialog = None;
+    h.app.run("solid.box", json!({"corner": [100, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Spare"})).unwrap();
+    h.app.run("browser.visibility", json!({"items": ["Target"], "visible": false})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Top").unwrap().id;
+    h.app.start("solid.extrude");
+    h.frames(2);
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    set_operation(&mut h, 1);
+    assert_eq!(target_bodies(dialog(&h)), ["Base", "Spare"]);
+    h.app.dialog = None;
+    h.app.run("browser.visibility", json!({"items": ["Target"], "visible": true})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Floor"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [30, 30]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let floor = h.app.session.doc.find_feature("Floor").unwrap().id;
+    h.app.start("solid.extrude");
+    h.frames(2);
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Profile { sketch: floor, index: 0 }];
+    set_operation(&mut h, 1);
+    assert!(target_bodies(dialog(&h)).is_empty());
+    assert!(extrude_params(&h).get("targets").is_none(), "the automatic scope");
+    assert_eq!(targets_chip(&h), Some("Automatic"));
+}
+
+/// Editing a Join To Object made before the body it runs to was one of its targets, which joins
+/// that body whatever they say, shows that body in Target Bodies, and OK makes them decide.
+/// One made since keeps the targets it was given.
+#[test]
+fn editing_a_join_to_object_shows_the_body_it_joins_in_target_bodies() {
+    for (apart, shown) in [(false, vec!["Base", "Target"]), (true, vec!["Base"])] {
+        let mut h = join_to_scene();
+        h.app.dialog = None;
+        let sketch = h.app.session.doc.find_feature("Top").unwrap().id;
+        h.app
+            .run(
+                "solid.extrude",
+                json!({"sketch": sketch, "to": [20, 20, 40], "operation": "join", "targets": ["Base"], "to_body_apart": apart, "name": "Post"}),
+            )
+            .unwrap();
+        h.step(&json!({"call": "ui.editFeature", "params": {"feature": "Post"}})).unwrap();
+        h.frames(8);
+        assert_eq!(target_bodies(dialog(&h)), shown, "to_body_apart: {apart}");
+        let params = extrude_params(&h);
+        assert_eq!(params["targets"], json!(shown));
+        assert_eq!(params["to_body_apart"], json!(true));
+    }
 }
