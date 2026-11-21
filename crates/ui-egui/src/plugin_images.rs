@@ -51,6 +51,84 @@ pub(crate) fn load(dir: &Path, plugin_id: &str, entries: &[solidcraft_engine::pl
     images
 }
 
+/// Shared across the inventory and open dialogs. Files and decoding stay off the window thread.
+pub(crate) type Swatches = std::sync::Arc<std::sync::OnceLock<BTreeMap<String, Swatch>>>;
+
+#[derive(Debug)]
+pub(crate) struct Swatch {
+    image: egui::ColorImage,
+    key: egui::Id,
+}
+
+impl Swatch {
+    /// Upload once in each egui context. A content key prevents stale textures after a reload.
+    pub(crate) fn texture(&self, ctx: &egui::Context) -> egui::load::SizedTexture {
+        let cached = ctx.data(|data| data.get_temp::<egui::TextureHandle>(self.key));
+        let texture = match cached {
+            Some(texture) => texture,
+            None => {
+                let texture = ctx.load_texture("plugin swatch", self.image.clone(), egui::TextureOptions::LINEAR);
+                ctx.data_mut(|data| data.insert_temp(self.key, texture.clone()));
+                texture
+            }
+        };
+        egui::load::SizedTexture::new(texture.id(), texture.size_vec2())
+    }
+
+pub(crate) fn read_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::Entry]) -> BTreeMap<String, Swatch> {
+    let report = solidcraft_engine::plugin::swatches::check(entries, |rel| solidcraft_engine::plugin::swatches::read_file(dir, rel));
+    for warning in report.warnings {
+        log::warn!("plugin {}: {warning}", dir.display());
+    report
+        .images
+        .into_iter()
+        .map(|(path, image)| {
+            let mut hash = std::collections::hash_map::DefaultHasher::new();
+            image.size.hash(&mut hash);
+            image.rgba.hash(&mut hash);
+            let key = egui::Id::unique(("plugin_swatch", hash.finish()));
+            (path, Swatch { image: egui::ColorImage::from_rgba_unmultiplied(image.size, &image.rgba), key })
+        })
+        .collect()
+
+pub(crate) fn load_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::Entry]) -> Swatches {
+    let swatches = Swatches::default();
+    let referenced = entries.iter().any(|entry| {
+        entry.input_schema.get("properties").and_then(Value::as_object).into_iter().flat_map(|p| p.values()).any(|property| {
+            property
+                .get("oneOf")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|option| option.get(solidcraft_engine::plugin::swatches::KEY).is_some())
+    });
+    if !referenced {
+        let _ = swatches.set(BTreeMap::new());
+        return swatches;
+    let (dir, entries, result) = (dir.to_path_buf(), entries.to_vec(), swatches.clone());
+    if let Err(error) = std::thread::Builder::new().name("plugin-swatches".into()).spawn(move || {
+        let _ = result.set(read_swatches(&dir, &entries));
+    }) {
+        log::warn!("could not load plugin swatches: {error}");
+    swatches
+
+/// The image paths a schema names: at its top, and on its properties' `oneOf` options.
+pub(crate) fn referenced(schema: &Value) -> Vec<String> {
+    let mut out: Vec<String> = schema.get(KEY).and_then(Value::as_str).map(str::to_owned).into_iter().collect();
+    for property in schema.get("properties").and_then(Value::as_object).into_iter().flat_map(|p| p.values()) {
+        for option in property.get("oneOf").and_then(Value::as_array).into_iter().flatten() {
+            out.extend(option.get(KEY).and_then(Value::as_str).map(str::to_owned));
+        }
+    out
+
+/// Whether `rel` is a path this host reads: forward slashes, plain names (letters, digits, `.`,
+/// `_`, `-`), no `.` or `..`, ending in `.svg`, at most 128 characters.
+pub(crate) fn valid_path(rel: &str) -> bool {
+    (5..=128).contains(&rel.len())
+        && rel.ends_with(".svg")
+        && rel.split('/').all(|part| {
+            !part.is_empty() && part != "." && part != ".." && part.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+
 /// Read, check and add the image `rel` of the package at `dir`: the icon name it is drawn by.
 fn read(dir: &Path, plugin_id: &str, rel: &str) -> Result<String, String> {
     if !valid_path(rel) {
