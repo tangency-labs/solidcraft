@@ -118,7 +118,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|sdf|json (default from extension; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|usd|3dm|urdf|sdf|json (default from extension; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md; 3dm: Rhino 8, written by cadmpeg: each body where the design shows it (no components), named and in its colour, as its exact shape when every face is planar and every edge straight, else as its mesh, with warnings for what the file leaves out; fcstd is refused, as cadmpeg cannot write a new FreeCAD file yet); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF); quality?: standard|fine|finest (STL, OBJ, 3MF, GLB, OpenUSD and Rhino: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -2520,8 +2520,8 @@ fn export_to(
     if format == Format::Glb {
         return export_glb(s, cmd, path, bodies, quality);
     }
-    if format == Format::Usd {
-        return export_usd(s, path, bodies);
+    if written_by_cadmpeg(format) {
+        return export_cadmpeg(s, cmd, path, bodies, quality, format);
     }
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // What meshing the bodies reported (STL and 3MF): each face the mesh path left short of the
@@ -2661,6 +2661,18 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         && usd_encoding(f) != usd_encoding(path)
     {
         return Err(bad("file.export", format!("`format: {f}` disagrees with the path's extension, which picks the OpenUSD encoding")));
+    }
+    // A format asked for by name is written whatever the path's extension, as it always was
+    // (`format: stl` writes STL to `part.usda`), but for one cadmpeg writes: a Rhino or OpenUSD
+    // file asked for under another format's extension is refused, rather than written under
+    // the wrong one (OpenUSD's own target check refused that before; Rhino and FreeCAD are new).
+    if let Some(f) = str_(p, "format")
+        && let Ok(by_path) = Format::from_name(path)
+        && by_path != format
+        && written_by_cadmpeg(format)
+        && std::path::Path::new(path).extension().is_some()
+    {
+        return Err(bad("file.export", format!("`format: {f}` disagrees with the path's extension, which names {by_path:?}")));
     }
     if format == Format::Urdf {
         if !string_list(cmd, p, "bodies")?.is_empty() {
@@ -2929,25 +2941,43 @@ fn usd_encoding(name: &str) -> &'static str {
     }
 }
 
-/// The OpenUSD export: the bodies written as STEP, as `file.export` writes STEP (a design with
-/// components, when no bodies are chosen, as a STEP assembly), then restated as OpenUSD by
-/// cadmpeg; the path's extension picks text (`.usda`), binary (`.usdc`, `.usd`) or a package
-/// (`.usdz`). Written atomically, so a refusal or a failed write leaves a file already there as it
-/// was. What the file could not carry is in the reply's warnings.
-fn export_usd(s: &Session, path: &str, bodies: &[String]) -> Result<Value> {
+/// Whether cadmpeg writes `format` from the design ([`export_cadmpeg`]).
+fn written_by_cadmpeg(format: Format) -> bool {
+    matches!(format, Format::Usd | Format::Rhino | Format::FreeCad)
+}
+
+/// An export through cadmpeg (OpenUSD, Rhino): the design written into cadmpeg's neutral model
+/// (its components and placements when no bodies are chosen and the format holds them, each
+/// body's exact B-rep and, where the format takes it, its mesh at `quality`, and the looks the
+/// design shows), then written by cadmpeg's writer for `format`; for OpenUSD the path's extension
+/// picks text (`.usda`), binary (`.usdc`, `.usd`) or a package (`.usdz`). FreeCAD is refused:
+/// cadmpeg cannot write a new FreeCAD file yet. What the view hides is written hidden. Written
+/// atomically, so a refusal or a failed write leaves a file already there as it was. What the
+/// file could not carry is in the reply's warnings, among them each body a render setup gives an
+/// image texture or optics, written with its look alone.
+fn export_cadmpeg(s: &Session, cmd: &str, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality, format: Format) -> Result<Value> {
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
-    let step = if bodies.is_empty() && !s.doc.occurrences.is_empty() {
-        solidcraft_io::step_assembly(&s.doc, &s.doc.painted(&s.model.state()), &name)?
-    } else {
-        let quality = solidcraft_io::MeshQuality::default();
-        solidcraft_io::export_with_parts_noted(&s.doc.painted(&*s.world_state()?), bodies, &[], Format::Step, &name, &s.doc.metadata, quality, None)?
-            .0
+    let world = s.world_state()?;
+    // The placements the world has, uncaptured moves included, so the assembly is written where
+    // the design shows it, as chosen bodies are.
+    let doc = s.placed_document();
+    let hidden = solidcraft_io::Hidden {
+        bodies: world.bodies.iter().filter(|b| !s.body_visible(&b.name)).map(|b| b.name.clone()).collect(),
+        placements: s.visibility.hidden_occurrences.clone(),
     };
-    let (bytes, warnings) = solidcraft_io::usd_from_step(&step, path).map_err(EngineError::Other)?;
+    let options = solidcraft_io::CadmpegOptions { hidden };
+    let (bytes, mut warnings) =
+        solidcraft_io::cadmpeg_export(&doc, &s.model.state(), &world, bodies, &options, path, quality, format).map_err(EngineError::Other)?;
+    let label = if format == Format::Usd { "OpenUSD" } else { "Rhino" };
+    let bound = super::render::bound_bodies(s, cmd)?;
+    for b in world.bodies.iter().filter(|b| bodies.is_empty() || bodies.contains(&b.name)) {
+        if let Some((setup, what)) = bound.get(&b.name) {
+            warnings
+                .push(format!("{}: render setup `{setup}` gives it {what}, which {label} export does not write yet: written with its look", b.name));
+        }
+    }
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let reply =
-        ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{:?}", Format::Usd), warnings, ..ExportResult::default() };
+    let reply = ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), warnings, ..ExportResult::default() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
