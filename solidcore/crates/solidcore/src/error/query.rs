@@ -84,11 +84,18 @@ pub enum QueryFailure {
     BrepWithoutFaces,
     /// The face has no loops: no upward face use, or none with a loop use. Class `failed`.
     FaceWithoutLoops,
+    /// A face of the caller's body has no upward face use. [`ErrorKind::InvalidInput`].
+    FaceWithoutFaceuse,
     /// An edge use of the caller's body has no edge. [`ErrorKind::InvalidInput`].
     EdgeuseWithoutEdge,
     /// An edge use of the caller's body is oriented neither the same as its edge nor
     /// opposite it. [`ErrorKind::InvalidInput`].
     EdgeuseOrientationUnset,
+    /// A loop use of the caller's body lists a vertex use slot that holds none.
+    /// [`ErrorKind::InvalidInput`].
+    LoopuseWithoutVertexuse,
+    /// A vertex use of the caller's body has no vertex. [`ErrorKind::InvalidInput`].
+    VertexuseWithoutVertex,
     /// No edge of the B-rep is at the point. Class `failed`.
     NoEdgeAtPoint,
     /// No face of the B-rep is at the point. Class `failed`.
@@ -108,6 +115,10 @@ pub enum QueryFailure {
     /// the cause). Class `failed`; whether it is a defect or a refusal is its cause's
     /// ([`crate::SolidError::is_defect`] follows the chain).
     BoundingBoxNotFound,
+    /// The classification curve's intersection with the face's trim boundary failed (its
+    /// error is the cause). Class `failed`; whether it is a defect or a refusal is its
+    /// cause's ([`crate::SolidError::is_defect`] follows the chain).
+    BoundaryNotIntersected,
     /// A vector the query unitizes or measures an angle with has zero length, so it has no
     /// direction. Upstream returns `SM_ERR_INVALID_INPUT` as a status here, so its kind is
     /// [`ErrorKind::InvalidInput`].
@@ -132,9 +143,16 @@ pub enum QueryFailure {
     /// The classification curve's touch list holds no entry to start the loop walk from:
     /// no touch, or in a cyclic walk no exit followed by an entry. Class `failed`.
     NoLoopTouches,
+    /// No loop of the face classifies the point (a loop that crosses the face's seam does
+    /// not). The failure is at the face. Class `failed`.
+    NoLoopClassifies,
     /// The surface cache has no poly B-rep: phase 1 has not run on its face.
     /// [`ErrorKind::InvalidInput`].
     NoPolyBrep,
+    /// The face's surface cache is not a trimmed one: its trim curves could not be cached (the
+    /// trimmed build's error is not kept by the cache lease, so there is no cause to chain).
+    /// Status `SM_ERR_NULL_POINTER`, class `missing`.
+    NoTrimmedCache,
     /// The poly edge's segment meets no node of the cache's subdivision tree. Class `failed`.
     SegmentOutsideTree,
     /// No tessellation driver was given where the test needs one.
@@ -169,18 +187,24 @@ impl QueryFailure {
             | Self::CrossingOffEdge
             | Self::RegionNotFound
             | Self::BoundingBoxNotFound
+            | Self::BoundaryNotIntersected
             | Self::NoFoot
             | Self::SteppedOffOnFirstStep
             | Self::TangentAlongEdge
             | Self::RegionWithoutShells
             | Self::NoLoopTouches
+            | Self::NoLoopClassifies
             | Self::SegmentOutsideTree => SM_ERR,
             Self::Missing(_)
             | Self::FaceWithoutSurface
             | Self::EdgeWithoutCurve
+            | Self::FaceWithoutFaceuse
+            | Self::LoopuseWithoutVertexuse
+            | Self::VertexuseWithoutVertex
             | Self::NoEdgeGiven
             | Self::UvLineNotMade
             | Self::NoPolyBrep
+            | Self::NoTrimmedCache
             | Self::NoTessDriver
             | Self::PolyBrepWithoutFace => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) | Self::ZeroLengthVector => SM_ERR_INVALID_INPUT,
@@ -201,8 +225,11 @@ impl QueryFailure {
             Self::NoPatchInBox
             | Self::FaceWithoutSurface
             | Self::EdgeWithoutCurve
+            | Self::FaceWithoutFaceuse
             | Self::EdgeuseWithoutEdge
             | Self::EdgeuseOrientationUnset
+            | Self::LoopuseWithoutVertexuse
+            | Self::VertexuseWithoutVertex
             | Self::InvalidReach
             | Self::NoEdgeGiven
             | Self::UvLineNotMade
@@ -233,10 +260,13 @@ impl core::fmt::Display for QueryFailure {
             Self::BrepWithoutEdges => f.write_str("the B-rep has no edges"),
             Self::BrepWithoutFaces => f.write_str("the B-rep has no faces"),
             Self::FaceWithoutLoops => f.write_str("the face has no loops"),
+            Self::FaceWithoutFaceuse => f.write_str("the face has no upward face use"),
             Self::EdgeuseWithoutEdge => f.write_str("the edge use has no edge"),
             Self::EdgeuseOrientationUnset => {
                 f.write_str("the edge use's orientation is neither same nor opposite")
             }
+            Self::LoopuseWithoutVertexuse => f.write_str("a loop use's vertex use is missing"),
+            Self::VertexuseWithoutVertex => f.write_str("a vertex use has no vertex"),
             Self::NoEdgeAtPoint => f.write_str("no edge is at the point"),
             Self::NoFaceAtPoint => f.write_str("no face is at the point"),
             Self::ClosestPointNotEvaluated => f.write_str("a closest point does not evaluate"),
@@ -246,6 +276,9 @@ impl core::fmt::Display for QueryFailure {
             }
             Self::RegionNotFound => f.write_str("no ray fired from the point found its region"),
             Self::BoundingBoxNotFound => f.write_str("the curve's bounding box could not be found"),
+            Self::BoundaryNotIntersected => f.write_str(
+                "the classification curve's intersection with the face's boundary failed",
+            ),
             Self::ZeroLengthVector => f.write_str("a vector of zero length has no direction"),
             Self::NoFoot => f.write_str("the drop found no foot point"),
             Self::SteppedOffOnFirstStep => f.write_str("the first step stepped off the surface"),
@@ -258,7 +291,11 @@ impl core::fmt::Display for QueryFailure {
             Self::NoLoopTouches => {
                 f.write_str("the touch-direction list is empty or its index is unset")
             }
+            Self::NoLoopClassifies => {
+                f.write_str("the point is in no loop of the face (a loop crosses its seam)")
+            }
             Self::NoPolyBrep => f.write_str("the surface cache has no poly B-rep"),
+            Self::NoTrimmedCache => f.write_str("the face's surface cache has no trim curves"),
             Self::SegmentOutsideTree => f.write_str("the segment meets no subdivision tree node"),
             Self::NoTessDriver => f.write_str("no tessellation driver was given"),
             Self::PolyBrepWithoutFace => f.write_str("the poly B-rep has no face"),
@@ -379,8 +416,19 @@ pub(super) mod tests {
             (F::BrepWithoutEdges, SM_ERR, K::Failed),
             (F::BrepWithoutFaces, SM_ERR, K::Failed),
             (F::FaceWithoutLoops, SM_ERR, K::Failed),
+            (F::FaceWithoutFaceuse, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::EdgeuseWithoutEdge, SM_ERR, K::InvalidInput),
             (F::EdgeuseOrientationUnset, SM_ERR, K::InvalidInput),
+            (
+                F::LoopuseWithoutVertexuse,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                F::VertexuseWithoutVertex,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
             (F::NoEdgeAtPoint, SM_ERR, K::Failed),
             (F::NoFaceAtPoint, SM_ERR, K::Failed),
             (F::ClosestPointNotEvaluated, SM_ERR, K::Failed),
@@ -388,6 +436,7 @@ pub(super) mod tests {
             (F::CrossingOffEdge, SM_ERR, K::Failed),
             (F::RegionNotFound, SM_ERR, K::Failed),
             (F::BoundingBoxNotFound, SM_ERR, K::Failed),
+            (F::BoundaryNotIntersected, SM_ERR, K::Failed),
             (F::ZeroLengthVector, SM_ERR_INVALID_INPUT, K::InvalidInput),
             (F::NoFoot, SM_ERR, K::Failed),
             (F::SteppedOffOnFirstStep, SM_ERR, K::Failed),
@@ -396,7 +445,9 @@ pub(super) mod tests {
             (F::NoEdgeGiven, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::UvLineNotMade, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::NoLoopTouches, SM_ERR, K::Failed),
+            (F::NoLoopClassifies, SM_ERR, K::Failed),
             (F::NoPolyBrep, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::NoTrimmedCache, SM_ERR_NULL_POINTER, K::Missing),
             (F::SegmentOutsideTree, SM_ERR, K::Failed),
             (F::NoTessDriver, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::PolyBrepWithoutFace, SM_ERR_NULL_POINTER, K::InvalidInput),
@@ -478,9 +529,6 @@ pub(super) mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/query/brep/ray.rs", 2),
-            ("solidcore/src/query/brep/ray/live.rs", 4),
-            ("solidcore/src/query/face/p2.rs", 19),
             ("solidcore/src/query/poly.rs", 13),
             ("solidcore/src/query/poly/copy.rs", 11),
             ("solidcore/src/query/poly_properties.rs", 2),

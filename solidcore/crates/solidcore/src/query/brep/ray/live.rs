@@ -24,6 +24,7 @@ use std::sync::Arc;
 
 use super::{cache_handle, face_surface_cache, prepare_surface_cache};
 use crate::curve::curve::Curve;
+use crate::error::query::QueryFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -432,7 +433,7 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
             .curves
             .get(slot_of(edge.index()))
             .and_then(Option::as_ref)
-            .ok_or_else(|| SolidError::query_missing(OP, "the edge's curve slot"))?;
+            .ok_or_else(|| SolidError::query(OP, QueryFailure::EdgeWithoutCurve))?;
         if let Some(curve) = cell.get() {
             return Ok(curve.as_ref());
         }
@@ -440,7 +441,7 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
             b.edge(edge)?
                 .curve
                 .as_ref()
-                .ok_or_else(|| SolidError::query_missing(OP, "the edge's curve"))?
+                .ok_or_else(|| SolidError::query(OP, QueryFailure::EdgeWithoutCurve))?
                 .clone_for_evaluation()
                 .map(Box::new)
         })?;
@@ -454,7 +455,7 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
             .surfaces
             .get(slot_of(face.index()))
             .and_then(Option::as_ref)
-            .ok_or_else(|| SolidError::query_missing(OP, "the face's surface slot"))?;
+            .ok_or_else(|| SolidError::query(OP, QueryFailure::FaceWithoutSurface))?;
         if let Some(surface) = cell.get() {
             return Ok(surface.as_ref());
         }
@@ -462,7 +463,7 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
             b.face(face)?
                 .surface
                 .as_ref()
-                .ok_or_else(|| SolidError::query_missing(OP, "the face's surface"))?
+                .ok_or_else(|| SolidError::query(OP, QueryFailure::FaceWithoutSurface))?
                 .clone_for_evaluation()
                 .map(Box::new)
         })?;
