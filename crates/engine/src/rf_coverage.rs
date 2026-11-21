@@ -230,7 +230,7 @@ impl WallMap {
     }
 
     /// The regions whose boxes the segment `a`→`b`'s buckets touch, each once.
-    fn near(&self, a: [f64; 2], b: [f64; 2], seen: &mut Vec<u32>, stamp: u32, out: &mut Vec<u32>) {
+    fn near(&self, a: [f64; 2], b: [f64; 2], seen: &mut [u32], stamp: u32, out: &mut Vec<u32>) {
         out.clear();
         let g = &self.buckets;
         if g.columns == 0 || g.rows == 0 {
@@ -503,10 +503,13 @@ fn edge_cells(walls: &WallMap, grid: &Grid) -> Vec<bool> {
                 let t = k as f64 / n as f64;
                 let x = (a[0] + (b[0] - a[0]) * t - grid.origin[0]) / grid.step;
                 let y = (a[1] + (b[1] - a[1]) * t - grid.origin[1]) / grid.step;
-                if x >= 0.0 && y >= 0.0 && (x as usize) < grid.columns && (y as usize) < grid.rows {
-                    if let Some(c) = out.get_mut(y as usize * grid.columns + x as usize) {
-                        *c = true;
-                    }
+                if x >= 0.0
+                    && y >= 0.0
+                    && (x as usize) < grid.columns
+                    && (y as usize) < grid.rows
+                    && let Some(c) = out.get_mut(y as usize * grid.columns + x as usize)
+                {
+                    *c = true;
                 }
             }
         }
@@ -685,7 +688,7 @@ pub fn colour(dbm: f64) -> [u8; 3] {
 /// floor cells in their signal's colour, walls dark, the rest clear.
 pub fn rgba(values: &[f32], cells: &[Cell], grid: &Grid) -> Vec<u8> {
     let mut out = vec![0u8; grid.len() * 4];
-    for (i, px) in out.chunks_exact_mut(4).enumerate() {
+    for (i, px) in out.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         let (cell, v) = (cells.get(i).copied().unwrap_or(Cell::Outside), values.get(i).copied().unwrap_or(f32::NAN));
         let rgba = match cell {
             Cell::Wall => [40, 46, 52, 235],
