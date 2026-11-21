@@ -209,16 +209,18 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
     let first: Vec<u64> = now.iter().map(|(c, _)| *c).filter(|c| !app.docs.link_stamps.iter().any(|(k, _)| k == c)).collect();
     let stale = if first.is_empty() { Vec::new() } else { changed_since_read(&mut app.session) };
     // Only links inside the design's own folder, or in a folder the user allowed linked files from
-    // (`linked_file_folders`), are read unasked when it is met: a design received from someone else
-    // names what it likes as "changed since last read", and one reaching out of its folder would
-    // copy another design of the user's into it. The others stay marked out of date: the user is
-    // asked once whether to load them (`link_folders_prompt`), and Update Links reads them anyway.
+    // (`linked_file_folders`), are read unasked, when the design is met or when their files change
+    // later: a design received from someone else names what it likes as "changed since last read",
+    // and one reaching out of its folder would copy another design of the user's into it. The
+    // others stay marked out of date until their folder is allowed: the user is asked once whether
+    // to load them (`link_folders_prompt`), and Update Links reads them anyway.
     let design = app.session.path.clone();
-    let (mut stale, outside): (Vec<u64>, Vec<u64>) =
-        stale.into_iter().partition(|c| app.session.doc.links.get(c).is_some_and(|l| inside_design_folder(design.as_deref(), &l.path)));
+    let outside: Vec<u64> =
+        now.iter().map(|(c, _)| *c).filter(|c| !app.session.doc.links.get(c).is_some_and(|l| inside_design_folder(design.as_deref(), &l.path))).collect();
     let files = if outside.is_empty() { Vec::new() } else { read_files(&mut app.session) };
+    let mut allowed: Vec<u64> = Vec::new();
     let mut ask: Vec<(u64, String)> = Vec::new();
-    for c in outside {
+    for &c in &outside {
         // The folder of the file the engine reads for the link, as it resolves it.
         let Some(folder) = files.iter().find(|(k, _)| *k == c).and_then(|(_, f)| lexical(f).parent().map(Path::to_path_buf)) else { continue };
         // A design opened by a program reads none of them unasked, allowed folders included: it
@@ -227,14 +229,19 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
             continue;
         }
         if app.preferences.linked_file_folders.iter().any(|f| folder_within(&folder, Path::new(f))) {
-            stale.push(c);
-        } else {
+            allowed.push(c);
+        } else if first.contains(&c) && stale.contains(&c) {
             ask.push((c, folder.to_string_lossy().into_owned()));
         }
     }
+    let may_read = |c: &u64| !outside.contains(c) || allowed.contains(c);
     let changed: Vec<u64> = now
         .iter()
-        .filter(|(c, s)| s.is_some() && (app.docs.link_stamps.iter().any(|(k, was)| k == c && was != s) || (first.contains(c) && stale.contains(c))))
+        .filter(|(c, s)| {
+            s.is_some()
+                && may_read(c)
+                && (app.docs.link_stamps.iter().any(|(k, was)| k == c && was != s) || (first.contains(c) && stale.contains(c)))
+        })
         .map(|(c, _)| *c)
         .collect();
     // Only a file that is there to read is asked about (a missing one, or one on a server not
@@ -999,11 +1006,18 @@ mod tests {
         assert!((volume(&app) - 6000.0).abs() < 1e-6, "{}", volume(&app));
         assert!(out_of_date(&mut app));
         assert!(app.preferences.linked_file_folders.is_empty());
+        // The file changes again while the design is open: coming back to its tab still reads
+        // nothing, as the user hasn't allowed the folder.
+        let housing = root.join("parts").join("housing.solidcraft");
+        save_part(&housing, [10.0, 20.0, 40.0], false);
+        update_changed(&mut app);
+        assert!(app.file_load.idle() && app.link_folders_prompt.is_empty(), "not read, not asked again");
+        assert!((volume(&app) - 6000.0).abs() < 1e-6, "{}", volume(&app));
         let mut request = crate::file_load::Request::new("", crate::file_load::Kind::UpdateLinks);
         request.design.clone_from(&app.session.path);
         crate::file_load::begin_request(&mut app, request).unwrap();
         settle(&mut app);
-        assert!((volume(&app) - 6250.0).abs() < 1e-6, "Update Links reads it: {}", volume(&app));
+        assert!((volume(&app) - 8000.0).abs() < 1e-6, "Update Links reads it: {}", volume(&app));
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -1045,6 +1059,28 @@ mod tests {
         assert!(!app.link_folders_prompt.is_empty(), "still asks");
         assert_eq!(serde_json::to_value(&app.preferences).unwrap(), before, "the design changed no preference");
         assert!(out_of_date(&mut app));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A link in an allowed folder follows its file while the design is open; once the folder is
+    /// removed from the list, a later change is no longer read by itself.
+    #[test]
+    fn removing_an_allowed_folder_stops_reading_its_links_by_themselves() {
+        let (root, case, folder) = outside_link("removed");
+        let housing = root.join("parts").join("housing.solidcraft");
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.preferences.linked_file_folders = vec![folder];
+        open(&mut app, &case, false);
+        assert!((volume(&app) - 6250.0).abs() < 1e-6, "{}", volume(&app));
+        save_part(&housing, [10.0, 20.0, 40.0], false);
+        update_changed(&mut app);
+        settle(&mut app);
+        assert!((volume(&app) - 8000.0).abs() < 1e-6, "an allowed folder's change is read: {}", volume(&app));
+        app.preferences.linked_file_folders.clear();
+        save_part(&housing, [10.0, 20.0, 30.0], true);
+        update_changed(&mut app);
+        assert!(app.file_load.idle(), "no longer read by itself");
+        assert!((volume(&app) - 8000.0).abs() < 1e-6, "{}", volume(&app));
         let _ = std::fs::remove_dir_all(root);
     }
 
