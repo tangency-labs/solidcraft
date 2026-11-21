@@ -1,0 +1,5 @@
+//! Parametric solid modeling feature definitions and solvers.
+
+pub mod lighten;
+
+pub use lighten::{LightenConfig, ManufacturingMethod, PocketDepthSpec};

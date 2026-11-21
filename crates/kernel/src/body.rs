@@ -2228,7 +2228,7 @@ fn edge_chord(e: &brep::Edge, chord: f64) -> f64 {
 
 /// Points of an edge's curve over its interval, within `chord` of it: lines by their ends, the
 /// rest at the evaluator's points (capped).
-fn edge_points(e: &brep::Edge, chord: f64) -> Result<Vec<Vec3>> {
+pub(crate) fn edge_points(e: &brep::Edge, chord: f64) -> Result<Vec<Vec3>> {
     const MAX_POINTS: usize = 4096;
     let curve = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).map_err(|err| KernelError::Invalid(err.to_string()))?;
     let [t0, t1] = e.interval;

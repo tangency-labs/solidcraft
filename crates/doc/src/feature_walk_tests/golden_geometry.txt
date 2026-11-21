@@ -233,3 +233,4 @@ import
 mesh_convert
 mesh_import
 repair
+lighten

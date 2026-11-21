@@ -622,6 +622,7 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
             // the preview holding still until the input stops changing.
             "solid.fillet" => &["radius", "radius2", "mid"],
             "solid.chamfer" => &["distance", "distance2", "angle"],
+            "solid.lighten" => &["wall_offset", "depth", "draft_angle", "corner_radius", "auto_fillet", "auto_chamfer"],
             _ => return None,
         };
         let params = params.as_object_mut()?;
@@ -811,6 +812,9 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
     if let Some(job) = crate::dialogs_assembly::world_preview(s, cmds, colors) {
         return job;
     }
+    if let Some(job) = lighten_preview(s, cmds, colors) {
+        return job;
+    }
     if let Some(p) = mirror_of(cmds) {
         return compute_mirror(s, p, colors);
     }
@@ -835,6 +839,64 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             Ok(b)
         }
     }
+}
+
+fn lighten_preview(s: &Session, cmds: &[(String, Value)], c: Colors) -> Option<Job> {
+    let params = cmds.iter().find_map(|(id, p)| match id.as_str() {
+        "solid.lighten" => Some(p),
+        "timeline.redefine" if p.get("command").and_then(Value::as_str) == Some("solid.lighten") => p.get("params"),
+        _ => None,
+    })?;
+    let cutters = match solidcraft_engine::features::lighten::preview_pockets_for_command(s, params) {
+        Ok(cutters) => cutters,
+        Err(e) => return Some(Err(e)),
+    };
+    let mut sc = GpuScene::default();
+    let removed = sc.color(c.removed);
+    let edge = sc.color([c.removed[0], c.removed[1], c.removed[2], 255]);
+    let mut bounds = state_bounds(&s.model.state());
+    let tol = solidcraft_engine::kernel::MeshTolerance::chord(0.12);
+    let meshes: Vec<_> = if cutters.len() > 1 {
+        solidcraft_engine::kernel::map_with_local_pools(&cutters, usize::MAX, |body| body.mesh(&tol)).into_iter().filter_map(Result::ok).collect()
+    } else {
+        cutters.iter().filter_map(|body| body.mesh(&tol).ok()).collect()
+    };
+    for m in &meshes {
+        bounds = bounds.union(&m.bounds());
+        for t in &m.triangles {
+            for k in t {
+                let i = *k as usize;
+                if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
+                    if c.cut_tint {
+                        sc.xray_tri(p.to_f32(), n.to_f32(), removed);
+                    }
+                }
+            }
+        }
+        for (ei, e) in m.edges.iter().enumerate() {
+            if m.shaded_edge_visible(ei) {
+                for w in e.windows(2) {
+                    sc.line(w[0].to_f32(), w[1].to_f32(), edge, 1.3, true);
+                }
+            }
+        }
+    }
+    Some(Ok(Built {
+        scene: sc,
+        sketches: Vec::new(),
+        replaced: Vec::new(),
+        outlines: Vec::new(),
+        error: None,
+        bounds,
+        applied: None,
+        tapered: Vec::new(),
+        stopped: None,
+        mirror_meets: None,
+        points: Vec::new(),
+        placed: None,
+        layer: None,
+        joints: Vec::new(),
+    }))
 }
 
 /// The tool body of a feature that adds or removes one, built on its own (as a new body): what

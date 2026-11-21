@@ -2446,6 +2446,36 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         patch_holes: bool,
     },
+    /// Lighten / Auto-Pocket: structural pockets on a planar face.
+    Lighten(LightenFeature),
+}
+
+pub use solidcraft_kernel::{ChamferLocation, FilletLocation};
+
+/// Parameters for the face-based `solid.lighten` weight-reduction pocketing feature.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct LightenFeature {
+    pub target_face: u64,
+    pub wall_offset: f64,
+    pub depth: f64,
+    pub draft_angle: f64,
+    pub corner_radius: f64,
+    pub auto_fillet: Option<(f64, FilletLocation)>,
+    pub auto_chamfer: Option<(f64, ChamferLocation)>,
+}
+
+impl Default for LightenFeature {
+    fn default() -> Self {
+        Self {
+            target_face: 0,
+            wall_offset: 4.0,
+            depth: 7.0,
+            draft_angle: 0.0,
+            corner_radius: 3.0,
+            auto_fillet: Some((2.0, FilletLocation::Bottom)),
+            auto_chamfer: Some((1.0, ChamferLocation::Top)),
+        }
+    }
 }
 
 /// A fillet corner set back: the vertex at `vertex`, where every edge is rounded, has its corner
@@ -3248,6 +3278,7 @@ impl FeatureKind {
             FeatureKind::MeshImport { .. } => "MeshFeature",
             FeatureKind::MeshConvert { .. } => "MeshConvertFeature",
             FeatureKind::Repair { .. } => "RepairFeature",
+            FeatureKind::Lighten(_) => "LightenFeature",
         }
     }
 
@@ -3335,6 +3366,7 @@ impl FeatureKind {
             FeatureKind::MeshConvert { .. } => "mesh_convert",
             FeatureKind::MeshImport { .. } => "mesh_import",
             FeatureKind::Repair { .. } => "repair",
+            FeatureKind::Lighten(_) => "solid.lighten",
         }
     }
 
@@ -3421,6 +3453,7 @@ impl FeatureKind {
             "MeshFeature" => "mesh_import",
             "MeshConvertFeature" => "mesh_convert",
             "RepairFeature" => "repair",
+            "LightenFeature" => "solid.lighten",
             _ => return None,
         })
     }
@@ -3511,6 +3544,7 @@ impl FeatureKind {
             FeatureKind::MeshImport { .. } => "Mesh",
             FeatureKind::MeshConvert { .. } => "ConvertMesh",
             FeatureKind::Repair { .. } => "Repair",
+            FeatureKind::Lighten(_) => "Lighten",
         }
     }
 }
