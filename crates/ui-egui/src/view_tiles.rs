@@ -141,8 +141,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Set aside under everything the cards draw: the ground's picture fills the whole area.
     let layer = ui.layer_id();
     if render_ground {
-        let [top, bottom] = crate::render_workspace::tile_background(app);
-        solidcraft_viewport_egui::paint_background(ui.painter(), area, top, bottom);
+        let (top, middle, bottom) = crate::render_workspace::tile_background(app);
+        solidcraft_viewport_egui::paint_background(ui.painter(), area, top, middle, bottom);
     }
     let slots: Vec<_> = (0..BACKDROP_SLOTS).map(|_| ui.painter().add(egui::Shape::Noop)).collect();
     for (id, cell) in places {
@@ -679,12 +679,12 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
     paint_card_header(&painter, top, CARD_RADIUS, name, label.left());
     // The picture is square: the ground's colour fills what the rounded corners leave out.
     let area = ui.max_rect();
-    let [top, bottom] =
-        if crate::render_workspace::active(app) { crate::render_workspace::tile_background(app) } else { [t.viewport_top, t.viewport_bottom] };
-    let backdrop = |y: f32| {
-        let k = ((y - area.top()) / area.height().max(1.0)).clamp(0.0, 1.0);
-        top.lerp_to_gamma(bottom, k)
+    let (top, middle, bottom) = if crate::render_workspace::active(app) {
+        crate::render_workspace::tile_background(app)
+    } else {
+        (t.viewport_top, t.viewport_middle, t.viewport_bottom)
     };
+    let backdrop = |y: f32| background_at(top, middle, bottom, (y - area.top()) / area.height().max(1.0));
     corner_mask(&painter, card.left_bottom(), [1.0, -1.0], backdrop(card.bottom()));
     corner_mask(&painter, card.right_bottom(), [-1.0, -1.0], backdrop(card.bottom()));
     painter.rect_stroke(card.shrink(0.5), radius, Stroke::new(1.0, t.border), StrokeKind::Inside);
@@ -776,6 +776,17 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
 
 /// What a card's square picture leaves outside its rounded corner, at the card's `corner` (the
 /// direction to the card's inside given by `inward`), filled with `color`.
+/// The ground's colour `k` of the way down (0 at the top, 1 at the bottom), as
+/// [`solidcraft_viewport_egui::paint_background`] blends it: through `middle` halfway when given (#9230).
+fn background_at(top: egui::Color32, middle: Option<egui::Color32>, bottom: egui::Color32, k: f32) -> egui::Color32 {
+    let k = k.clamp(0.0, 1.0);
+    match middle {
+        Some(middle) if k < 0.5 => top.lerp_to_gamma(middle, k * 2.0),
+        Some(middle) => middle.lerp_to_gamma(bottom, k * 2.0 - 1.0),
+        None => top.lerp_to_gamma(bottom, k),
+    }
+}
+
 fn corner_mask(painter: &egui::Painter, corner: egui::Pos2, inward: [f32; 2], color: egui::Color32) {
     let r = f32::from(CARD_RADIUS);
     let centre = corner + vec2(inward[0] * r, inward[1] * r);
@@ -1103,6 +1114,21 @@ mod tests {
         let frame = frame_of(cell);
         // The same rectangle for both roles: a header's height below the cell's top, the rest of the cell.
         assert_eq!(frame, Rect::from_min_max(pos2(10.0, 40.0 + HEADER), pos2(500.0, 600.0)));
+    }
+
+    /// The colour a card's rounded corners are masked with follows the ground's gradient: through
+    /// its middle colour halfway when it has one (#9230), straight from top to bottom when not.
+    #[test]
+    fn a_cards_corner_colour_follows_the_grounds_middle_colour() {
+        let (red, green, blue) = (egui::Color32::from_rgb(255, 0, 0), egui::Color32::from_rgb(0, 255, 0), egui::Color32::from_rgb(0, 0, 255));
+        assert_eq!(background_at(red, Some(green), blue, 0.0), red);
+        assert_eq!(background_at(red, Some(green), blue, 0.5), green);
+        assert_eq!(background_at(red, Some(green), blue, 1.0), blue);
+        let lower = background_at(red, Some(green), blue, 0.75);
+        assert!(lower.r() == 0 && lower.g() > 60 && lower.b() > 60, "the bottom band blends green and blue only: {lower:?}");
+        let plain = background_at(red, None, blue, 0.75);
+        assert!(plain.g() == 0 && plain.r() > 40 && plain.b() > 120, "without a middle colour, red into blue: {plain:?}");
+        assert_eq!(background_at(red, Some(green), blue, 2.0), blue, "outside the ground is clamped to its edge");
     }
 
     #[test]

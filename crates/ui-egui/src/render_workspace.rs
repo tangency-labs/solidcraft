@@ -3558,12 +3558,13 @@ fn preview_background(app: &SolveApp) -> Tokens {
 }
 
 /// Paint the continuous backing of a focused Render tile behind the other views.
-pub(crate) fn tile_background(app: &SolveApp) -> [egui::Color32; 2] {
+pub(crate) fn tile_background(app: &SolveApp) -> (egui::Color32, Option<egui::Color32>, egui::Color32) {
     if app.render_workspace.view.result || app.render_workspace.view.compare.is_some() {
-        [Tokens::get().viewport_bottom; 2]
+        let bottom = Tokens::get().viewport_bottom;
+        (bottom, None, bottom)
     } else {
         let background = preview_background(app);
-        [background.viewport_top, background.viewport_bottom]
+        (background.viewport_top, background.viewport_middle, background.viewport_bottom)
     }
 }
 
