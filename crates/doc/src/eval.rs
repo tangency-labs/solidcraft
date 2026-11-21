@@ -8359,8 +8359,7 @@ pub fn to_object_body(doc: &Document, st: &ModelState, component: u64, sketch: u
 const APART_GAP: f64 = 1e-3;
 
 /// The tool bodies a feature adds or removes (extrude, revolve, primitives), in the current state.
-/// `to_body` is the body a To Object extent runs to (an extrude), when it found one, whether or
-/// not the extrude joins it.
+/// `to_body` is the body a To Object extent runs to (an extrude), when it found one.
 fn feature_tools_with_constructor(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -8411,8 +8410,9 @@ fn feature_tools_with_constructor(
             // its own level is the end (#12968), not the surface of one of the faces there.
             let to_end_face = to_face.filter(|face| !extent.to.is_some_and(|p| on_edge_without_cap(&tst, *face, p.0, n)));
             // The body the extent runs to: a Join to it joins that body too (#6424), unless the
-            // extent keeps it apart (see the caller).
-            *to_body = to_face.and_then(|(bi, _)| tst.bodies.get(bi)).map(|b| b.name.clone());
+            // extent keeps it apart: a design built before it did (#8151), or a Join To Object
+            // made since that body became one of its targets, joined only from there.
+            *to_body = to_face.filter(|_| !extent.to_body_apart).and_then(|(bi, _)| tst.bodies.get(bi)).map(|b| b.name.clone());
             let centre = {
                 let pts: Vec<Vec2> = regions.iter().flat_map(|r| r.outer.polyline(1e-2)).collect();
                 let c = pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64);
@@ -12281,7 +12281,7 @@ fn eval_feature_kind(
             }
             // A join one sheet thick in the plane of a flat panel of a sheet made from surfaces
             // becomes part of that panel. A Join to an object (#6424) is left to the generic path
-            // below, which joins the object as well (or, kept apart, when it is a target).
+            // below, which joins the object as well.
             if *operation == Operation::Join
                 && to_body.is_none()
                 && matches!(f.kind, FeatureKind::Extrude { .. })
@@ -12291,11 +12291,8 @@ fn eval_feature_kind(
                 return Ok(());
             }
             // A Join extrude to an object joins that object too (#6424): the tool and the body
-            // it runs to are one body, not only the body the profile was sketched on. Unless the
-            // extent keeps it apart: designs built before #6424 (#8151), and every Join To Object
-            // made since that body became one of its targets instead, joined only from there.
-            let apart = matches!(&f.kind, FeatureKind::Extrude { extent, .. } if extent.to_body_apart);
-            let extra: Vec<String> = if *operation == Operation::Join && !apart { to_body.into_iter().collect() } else { Vec::new() };
+            // it runs to are one body, not only the body the profile was sketched on.
+            let extra: Vec<String> = if *operation == Operation::Join { to_body.into_iter().collect() } else { Vec::new() };
             apply_traced_with(doc, st, f, tools, *operation, &crate::plain(targets), &extra)?;
             unchanged(st, warning);
             Ok(())
