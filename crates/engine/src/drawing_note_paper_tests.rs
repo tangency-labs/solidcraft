@@ -81,6 +81,20 @@ fn a_note_starts_at_is_centred_on_or_ends_at_its_place() {
     }
 }
 
+/// A note saved before alignments (no `align` in its file) reads as centred and draws exactly as it
+/// did: its text centred on its place, however long, and what it saves again has no `align`.
+#[test]
+fn a_note_saved_before_alignments_is_still_centred() {
+    let old = serde_json::json!({"id": "0000000000009", "anchor": {"sheet": "0000000000001"}, "at": [15.0, 60.0], "content": [{"text": "2 x 8.5mm Holes - Smooth Bore"}]});
+    let note: Note = serde_json::from_value(old.clone()).unwrap();
+    assert_eq!(note.align, Align::Centre);
+    assert_eq!(serde_json::to_value(&note).unwrap(), old);
+    let text = "2 x 8.5mm Holes - Smooth Bore";
+    let on = drawn(&note, text, None);
+    let texts = runs(&on.group);
+    assert!(close(texts[0].origin.x + width(text, TEXT_MM) / 2.0, 15.0), "{:?}", texts[0].origin);
+}
+
 /// Each line of a note with several stands as the note does: starting at the place, centred on it or
 /// ending at it, the shorter line against the longer, in the same block whatever the alignment.
 #[test]
