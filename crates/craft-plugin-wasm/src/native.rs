@@ -38,6 +38,19 @@ mod dialog_bindings {
 include!(concat!(env!("OUT_DIR"), "/aliases.rs"));
 include!(concat!(env!("OUT_DIR"), "/importer.rs"));
 
+// A separate package lets both frozen 0.1 and current 0.2 components negotiate capabilities.
+mod host_bindings {
+    wasmtime::component::bindgen!({ path: "../craft-plugin/wit-host", world: "host-query" });
+}
+use host_bindings::craft::host::capabilities;
+
+fn link_host_query<H: PluginHost + 'static>(linker: &mut Linker<State<H>>, granted: &[String]) -> wasmtime::Result<()> {
+    if granted.iter().any(|capability| capability.starts_with("host@")) {
+        host_bindings::HostQuery::add_to_linker::<_, wasmtime::component::HasSelf<_>>(linker, |s| s)?;
+    }
+    Ok(())
+}
+
 const MAX_CALLS: usize = 256;
 /// An importer streams its file in chunks and reports progress as it goes.
 const MAX_IMPORT_CALLS: usize = 1 << 20;
@@ -114,6 +127,7 @@ struct State<H> {
     commands: BTreeMap<String, CommandSchema>,
     /// Sensitive command groups both the manifest requests and the app grants.
     groups: BTreeSet<String>,
+    granted_capabilities: Vec<String>,
     effect: Effect,
     design_tokens: bool,
     folders: BTreeMap<String, Folder>,
@@ -197,6 +211,14 @@ impl<H: PluginHost> State<H> {
             })?;
         }
         Ok(())
+    }
+}
+impl<H: PluginHost> capabilities::Host for State<H> {
+    fn granted(&mut self) -> Vec<String> {
+        if self.check().is_err() {
+            return Vec::new();
+        }
+        self.granted_capabilities.clone()
     }
 }
 impl<H: PluginHost> types::Host for State<H> {}
@@ -757,7 +779,7 @@ fn run_mode<H: PluginHost + 'static>(
         let design_capabilities: Vec<String> =
             manifest.capabilities.iter().filter(|capability| capability.split('@').next() == Some("design")).take(17).cloned().collect();
         craft_plugin::check_capabilities(&design_capabilities, "the host")?;
-        let design_tokens = !design_capabilities.is_empty();
+        let design_tokens = manifest.granted_capabilities().iter().any(|capability| capability.starts_with("design@"));
         let runtime = manifest
             .runtime
             .as_ref()
@@ -804,20 +826,11 @@ fn run_mode<H: PluginHost + 'static>(
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
-    let (mut state, outcome) = execute(
-        host,
-        runtime,
-        entry,
-        params,
-        compiled,
-        commands,
-        folders,
-        manifest
-            .capabilities
-            .iter()
-            .any(|c| c.split_once('@').is_some_and(|(name, version)| name == "forms" && craft_plugin::capability_version(version) == Some((0, 1)))),
-        dialog,
-    );
+    let granted_capabilities = manifest.granted_capabilities();
+    let forms = granted_capabilities
+        .iter()
+        .any(|c| c.split_once('@').is_some_and(|(name, version)| name == "forms" && craft_plugin::capability_version(version) == Some((0, 1))));
+    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, folders, granted_capabilities, forms, dialog);
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => state.publish_writes().map(|()| value),
@@ -844,6 +857,7 @@ fn execute<H: PluginHost + 'static>(
     (engine, component, stack): (Engine, Component, usize),
     (commands, groups, design_tokens): (BTreeMap<String, CommandSchema>, BTreeSet<String>, bool),
     folders: BTreeMap<String, Folder>,
+    granted_capabilities: Vec<String>,
     forms: bool,
     dialog: bool,
 ) -> (State<H>, Result<Value>) {
@@ -852,6 +866,7 @@ fn execute<H: PluginHost + 'static>(
         host,
         commands,
         groups,
+        granted_capabilities,
         effect: if dialog { Effect::Read } else { entry.effect },
         design_tokens,
         folders,
@@ -875,6 +890,7 @@ fn execute<H: PluginHost + 'static>(
             Wit::V0_1 => v0_1::call_entry(&engine, &mut store, &component, &entry.name, &params),
             Wit::Current if dialog => {
                 let mut linker = Linker::new(&engine);
+                link_host_query(&mut linker, &store.data().granted_capabilities)?;
                 if runtime.is_importer() {
                     importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 } else {
@@ -886,6 +902,7 @@ fn execute<H: PluginHost + 'static>(
             }
             Wit::Current => {
                 let mut linker = Linker::new(&engine);
+                link_host_query(&mut linker, &store.data().granted_capabilities)?;
                 bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 let guest = bindings::CommandPlugin::instantiate(&mut store, &component, &linker)?;
                 Ok(call_entry!(guest, &mut store, &entry.name, &params)?.map_err(host_error))
@@ -1055,10 +1072,11 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
     let link = |e: wasmtime::Error| component_error(format!("{e:#}"));
     let hook = check_dialog_export(manifest, &engine, &component)?;
     if wit == Wit::V0_1 {
-        return v0_1::check_link::<Inert>(&engine, &component, importer, hook).map_err(link);
+        return v0_1::check_link::<Inert>(&engine, &component, importer, hook, &manifest.granted_capabilities()).map_err(link);
     }
     if hook {
         let mut linker = Linker::<State<Inert>>::new(&engine);
+        link_host_query(&mut linker, &manifest.granted_capabilities()).map_err(link)?;
         if importer {
             importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         } else {
@@ -1067,6 +1085,7 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
         dialog_bindings::DialogPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
     }
     let mut linker = Linker::<State<Inert>>::new(&engine);
+    link_host_query(&mut linker, &manifest.granted_capabilities()).map_err(link)?;
     if importer {
         importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         importer_bindings::ImporterPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
@@ -1220,7 +1239,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
             read_bytes: 0,
             files: BTreeSet::new(),
             design: Vec::new(),
-            evaluate: manifest.capabilities.iter().any(|capability| capability.starts_with("evaluate@")),
+            evaluate: manifest.granted_capabilities().iter().any(|capability| capability.starts_with("evaluate@")),
             scratch: Vec::new(),
             evaluating: false,
         };
@@ -1238,6 +1257,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         host,
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
+        granted_capabilities: manifest.granted_capabilities(),
         effect: Effect::Open,
         design_tokens: false,
         folders: BTreeMap::new(),
@@ -1261,6 +1281,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
             Wit::V0_1 => v0_1::call_import(&engine, &mut store, &component, &entry.name, &file, &options),
             Wit::Current => {
                 let mut linker = Linker::new(&engine);
+                link_host_query(&mut linker, &store.data().granted_capabilities)?;
                 importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 let guest = importer_bindings::ImporterPlugin::instantiate(&mut store, &component, &linker)?;
                 Ok(call_import!(guest, &mut store, &entry.name, &file, &options)?.map_err(host_error))

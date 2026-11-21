@@ -136,6 +136,13 @@ fn fix_for(field: &str) -> String {
         "id" => "Set \"id\" to 1 to 64 lowercase letters, digits and dashes, not starting or ending with a dash, such as \"gear-maker\".",
         "name" => "Give \"name\" 1 to 80 printable characters on one line.",
         "version" => "Use a version such as \"1.0.0\": at most 32 letters, digits, dots, dashes and plus signs.",
+        "min_host_version" => {
+            "Set \"min_host_version\" to the oldest supported SolidCraft version, such as \"0.1.0\". Update SolidCraft when the plugin needs a newer host."
+        }
+        "optional_capabilities" => {
+            "List capabilities the plugin can do without as name@major.minor; query the granted capabilities before using one. Required capabilities belong in \"capabilities\"."
+        }
+        "extensions" => "Put optional future metadata in an \"extensions\" object; its fields grant no permissions or capabilities.",
         "description" => "Shorten \"description\" to at most 240 characters on one line; longer help goes in a README in the package.",
         "manifest" => "plugin.json must be one JSON object with only the fields the plugin guide lists; the message names the field and where it is.",
         "plugin.json" => "Put plugin.json at the top of the package (in a .zip, at its top or in its one folder), at most 16 KiB.",
@@ -278,6 +285,10 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
         id: None,
         name: None,
         version: None,
+        min_host_version: None,
+        optional_capabilities: Vec::new(),
+        granted_capabilities: Vec::new(),
+        extensions: serde_json::Map::new(),
         kind: None,
         approval: None,
         entries: Vec::new(),
@@ -303,6 +314,10 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
     result.id = Some(manifest.id.clone());
     result.name = Some(manifest.name.clone());
     result.version = Some(manifest.version.clone());
+    result.min_host_version = manifest.min_host_version.clone();
+    result.optional_capabilities = manifest.optional_capabilities.clone();
+    result.granted_capabilities = manifest.granted_capabilities();
+    result.extensions = manifest.extensions.clone();
     result.approval = Some(package.approval.clone());
     if source == Source::Folder {
         let folder = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();

@@ -106,11 +106,86 @@ fn component_for(version: &str, code: &str) -> Vec<u8> {
     assert!(template.contains(original));
     wat::parse_str(template.replacen(original, &format!("      {code}\n"), 1)).unwrap()
 }
+
+/// Add a guest that calls the query while instantiating and traps unless every returned byte
+/// matches. It uses the fixture's memory and allocator within the one-memory sandbox limit.
+fn with_capability_query(component: &str, expected: &[&str]) -> Vec<u8> {
+    let query = r#"
+  (import "craft:host/capabilities@0.1.0" (instance $host-query
+    (type $capability-list (list string))
+    (export "granted" (func (result $capability-list)))))
+  (alias export $host-query "granted" (func $granted))
+  (core func $granted-lowered (canon lower (func $granted)
+    (memory $memory) (realloc __REALLOC__) string-encoding=utf8))
+  (core module $query-probe
+    (import "query" "granted" (func $granted (param i32)))
+    (import "query" "memory" (memory 1))
+    (func $check
+      i32.const 128 call $granted
+      __ASSERTIONS__)
+    (start $check))
+  (core instance $query-imports
+    (export "granted" (func $granted-lowered))
+    (export "memory" (memory $memory)))
+  (core instance $query-probe (instantiate $query-probe
+    (with "query" (instance $query-imports))))
+"#;
+    let mut assertions = format!("i32.const 132 i32.load i32.const {} i32.ne if unreachable end\n", expected.len());
+    for (index, capability) in expected.iter().enumerate() {
+        let offset = index * 8;
+        assertions.push_str(&format!(
+            "i32.const 128 i32.load i32.const {} i32.add i32.load i32.const {} i32.ne if unreachable end\n",
+            offset + 4,
+            capability.len()
+        ));
+        for (at, byte) in capability.bytes().enumerate() {
+            assertions.push_str(&format!(
+                "i32.const 128 i32.load i32.const {offset} i32.add i32.load \
+                 i32.const {at} i32.add i32.load8_u i32.const {byte} i32.ne if unreachable end\n"
+            ));
+        }
+    }
+    let (package, version) = API.split_once('@').unwrap();
+    // Keep the fixture's chosen API version, including 0.1's smaller error variant.
+    let component = component.replace("__PACKAGE__", package).replace("__VERSION__", version);
+    let end = component.rfind(')').unwrap();
+    let realloc = if component.contains("(core func $cabi_realloc") { "$cabi_realloc" } else { "$realloc" };
+    let query = query.replace("__ASSERTIONS__", &assertions).replace("__REALLOC__", realloc);
+    let combined = format!("{}{}\n)", &component[..end], query);
+    wat::parse_str(combined).unwrap()
+}
+
+#[test]
+fn command_guests_query_only_requested_supported_capabilities_at_both_api_versions() {
+    for version in ["0.1.0", "0.2.0"] {
+        let mut manifest = manifest();
+        manifest.capabilities.push("host@0.1".into());
+        manifest.optional_capabilities = vec!["storage@0.1".into(), "forms@0.1".into(), "commands-new@0.1".into(), "dialog@0.1".into()];
+        manifest.runtime.as_mut().unwrap().data_format = Some(1);
+        let source = include_str!("../fixture.wat").replace("__VERSION__", version);
+        let source = if version == "0.1.0" { source.replace(r#" (case "unsupported" string)"#, "") } else { source };
+        let guest = with_capability_query(&source, &["commands@0.1", "host@0.1", "storage@0.1", "forms@0.1", "dialog@0.1"]);
+        crate::check_component(&manifest, &guest).unwrap();
+        let mut app = App::default();
+        run(&mut app, &manifest, &guest, "make", &json!({})).unwrap();
+        assert_eq!((app.value, app.commits), (2, 1));
+        manifest.optional_capabilities.clear();
+        // A previously supported optional capability disappearing changes the reply.
+        assert!(run(&mut app, &manifest, &guest, "make", &json!({})).is_err());
+        manifest.capabilities.pop();
+        assert!(matches!(crate::check_component(&manifest, &guest), Err(HostError::InvalidInput { field, .. }) if field == "component"));
+    }
+}
+
 fn form_component() -> Vec<u8> {
     form_component_with_dialog(false)
 }
 
 fn form_component_with_dialog(hook: bool) -> Vec<u8> {
+    wat::parse_str(form_source_with_dialog(hook)).unwrap()
+}
+
+fn form_source_with_dialog(hook: bool) -> String {
     let (package, version) = API.split_once('@').unwrap();
     let template = include_str!("../fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version);
     let (types, _) = template.split_once(&format!("  (type $ty-{package}/commands@{version}")).unwrap();
@@ -122,7 +197,7 @@ fn form_component_with_dialog(hook: bool) -> Vec<u8> {
     } else {
         String::new()
     };
-    wat::parse_str(format!(
+    format!(
         r#"{types}
       (type $form-type (instance
         (alias outer 1 $json (type $json)) (export "json" (type (eq $json)))
@@ -156,8 +231,36 @@ fn form_component_with_dialog(hook: bool) -> Vec<u8> {
       (instance $entry (export "json" (type $json)) (export "plugin-error" (type $plugin-error)) (export "execute" (func $execute)))
       (export "{package}/entry@{version}" (instance $entry))
       {dialog})"#
-    ))
-    .unwrap()
+    )
+}
+
+#[test]
+fn optional_forms_match_the_capability_query_and_remain_unavailable_to_hooks() {
+    for (capability, supported) in [("forms@0.1", true), ("forms@0.1.3", true), ("forms@0.2", false)] {
+        let mut manifest = hook_manifest();
+        manifest.capabilities.push("host@0.1".into());
+        manifest.optional_capabilities = vec![capability.into()];
+        let mut expected = vec!["commands@0.1", "dialog@0.1", "host@0.1"];
+        if supported {
+            expected.push(capability);
+        }
+        let bytes = with_capability_query(&form_source_with_dialog(true), &expected);
+        crate::check_component(&manifest, &bytes).unwrap();
+        let app = App { interactive: true, ..Default::default() };
+        let (app, result) = crate::run(app, &manifest, &bytes, "make", &json!({}));
+        if supported {
+            assert_eq!(result.unwrap(), json!({}));
+            assert_eq!(app.forms, vec![("make".into(), json!({}))]);
+            let (_, result) = crate::run(App::default(), &manifest, &bytes, "make", &json!({}));
+            assert!(matches!(result, Err(HostError::InteractiveRequired { .. })));
+        } else {
+            assert!(matches!(result, Err(HostError::PermissionDenied { .. })));
+            assert!(app.forms.is_empty());
+        }
+        let (app, result) = crate::dialog_fields(app, &manifest, &bytes, "make", &json!({}), craft_plugin::HostLimits::default());
+        assert!(matches!(result, Err(HostError::PermissionDenied { .. })));
+        assert!(app.forms.is_empty(), "a read-only hook cannot enqueue forms");
+    }
 }
 
 #[test]
@@ -227,6 +330,36 @@ fn hook_manifest() -> Manifest {
 }
 
 #[test]
+fn dialog_hooks_query_capabilities_at_both_api_versions_without_gaining_edit_access() {
+    for version in ["0.1.0", "0.2.0"] {
+        let mut manifest = hook_manifest();
+        manifest.capabilities.push("host@0.1".into());
+        manifest.optional_capabilities = vec!["future@0.1".into()];
+        for code in ["", "call $box"] {
+            let source = include_str!("../dialog_fixture.wat")
+                .replace("__VERSION__", version)
+                .replace("__HOOK_CODE__", code)
+                .replace("__REPLY_LEN__", "2")
+                .replace("__REPLY__", "{}");
+            let source = if version == "0.1.0" { source.replace(r#" (case "unsupported" string)"#, "") } else { source };
+            let bytes = with_capability_query(&source, &["commands@0.1", "dialog@0.1", "host@0.1"]);
+            crate::check_component(&manifest, &bytes).unwrap();
+            let (host, result) = crate::dialog_fields(App::default(), &manifest, &bytes, "make", &json!({}), craft_plugin::HostLimits::default());
+            if code.is_empty() {
+                assert_eq!(result.unwrap(), "{}");
+                assert_eq!((host.value, host.commits, host.rollbacks), (0, 1, 0));
+            } else {
+                assert!(matches!(result, Err(HostError::PermissionDenied { .. })));
+                assert_eq!((host.value, host.commits, host.rollbacks), (0, 0, 1));
+            }
+            manifest.capabilities.pop();
+            assert!(matches!(crate::check_component(&manifest, &bytes), Err(HostError::InvalidInput { field, .. }) if field == "component"));
+            manifest.capabilities.push("host@0.1".into());
+        }
+    }
+}
+
+#[test]
 fn dialog_hook_computes_defaults_looks_up_choices_and_old_worlds_still_link() {
     let reply = r#"{"width":{"default":0},"size":{"choices":["large"]}}"#;
     let digit = reply.find('0').unwrap() + 8192;
@@ -257,6 +390,38 @@ fn dialog_hook_computes_defaults_looks_up_choices_and_old_worlds_still_link() {
         run(&mut app, &manifest(), &old, "make", &json!({})).unwrap();
         assert_eq!(app.value, 1);
     }
+}
+
+#[test]
+fn importer_guests_query_optional_capabilities_without_gaining_file_grants() {
+    let root = import_folder(&[("bracket.smp", b"design bytes"), ("assembly.smp", b"S"), ("part.bin", b"a part")]);
+    for version in ["0.1.0", "0.2.0"] {
+        let mut manifest = importer_manifest(false);
+        manifest.capabilities.push("host@0.1".into());
+        manifest.optional_capabilities = vec!["evaluate@0.1".into(), "evaluate-next@0.1".into(), "forms@0.1".into()];
+        let source = include_str!("../importer_fixture.wat").replace("__VERSION__", version);
+        let source = if version == "0.1.0" { source.replace(r#" (case "unsupported" string)"#, "") } else { source };
+        let guest = with_capability_query(&source, &["formats@0.1", "host@0.1", "evaluate@0.1", "forms@0.1"]);
+        crate::check_component(&manifest, &guest).unwrap();
+        let imported = import_with(&guest, &manifest, root.join("bracket.smp"), false).unwrap();
+        assert_eq!(imported.design, b"design bytes");
+        let failure = import_with(&guest, &manifest, root.join("assembly.smp"), true).unwrap_err();
+        assert!(matches!(failure, HostError::PermissionDenied { permission } if permission.contains("input_folder")));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn capability_query_obeys_cancellation_and_host_call_limits() {
+    let mut state = state(App::default());
+    state.granted_capabilities = vec!["commands@0.1".into()];
+    assert_eq!(capabilities::Host::granted(&mut state), ["commands@0.1"]);
+    state.calls = MAX_CALLS;
+    assert!(capabilities::Host::granted(&mut state).is_empty());
+    assert_eq!(state.failed, Some(limit("host call count")));
+    let mut state = self::state(App { cancelled: true, ..App::default() });
+    assert!(capabilities::Host::granted(&mut state).is_empty());
+    assert_eq!(state.failed, Some(HostError::Cancelled));
 }
 
 #[test]
@@ -376,6 +541,30 @@ fn design_token_import_requires_its_capability_and_returns_identity_and_revision
     }
     let (_, result) = crate::run(App { no_design: true, ..Default::default() }, &manifest, &component, "make", &json!({}));
     assert_eq!(result.unwrap(), Value::Null);
+}
+
+#[test]
+fn capability_query_and_design_token_import_agree_on_optional_design_support() {
+    for (capability, supported) in [("design@0.1", true), ("design@0.1.3", true), ("design@99.0", false)] {
+        let mut manifest = manifest();
+        manifest.capabilities.push("host@0.1".into());
+        manifest.optional_capabilities = vec![capability.into(), "future@0.1".into()];
+        manifest.runtime.as_mut().unwrap().entries[0].effect = Effect::Read;
+        let mut expected = vec!["commands@0.1", "host@0.1"];
+        if supported {
+            expected.push(capability);
+        }
+        let component = with_capability_query(include_str!("../design_fixture.wat"), &expected);
+        crate::check_component(&manifest, &component).unwrap();
+        let (app, result) = crate::run(App::default(), &manifest, &component, "make", &json!({}));
+        if supported {
+            assert_eq!(result.unwrap(), json!({"document_id":"design-one","revision":"0123456789abcdef0123456789abcdef:7"}));
+            assert_eq!((app.commits, app.rollbacks), (1, 0));
+        } else {
+            assert!(matches!(result, Err(HostError::PermissionDenied { permission }) if permission.contains("design@0.1")));
+            assert_eq!((app.commits, app.rollbacks), (0, 1));
+        }
+    }
 }
 
 fn design_token_component() -> Vec<u8> {
@@ -556,6 +745,7 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         host: app,
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
+        granted_capabilities: Vec::new(),
         effect: Effect::Edit,
         design_tokens: false,
         folders: BTreeMap::new(),
