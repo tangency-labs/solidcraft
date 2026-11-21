@@ -647,7 +647,7 @@ fn add_fillet_geom(ops: &mut dyn FilletSolverOps, id: FilletGeomId) {
 /// There the step is taken to the surface in 3D, as the point of `base0` nearest the
 /// binormal's point stepped along it, solved from its UV point (as
 /// `FilletBrep::calc_join_section` finds a join's feet, #18826). Elsewhere the step is the
-/// fork's.
+/// fork's, as it is where the predicate cannot evaluate.
 ///
 /// # Errors
 ///
@@ -670,12 +670,13 @@ fn binormal_guess_point(
     if half {
         bin_vec *= 0.5;
     }
-    // (a predicate that cannot evaluate reads as singular, as for a join's feet: the 3D
-    // step holds at a regular point too)
+    // A predicate that cannot evaluate keeps the fork's step: that is the guess this point had
+    // before the 3D step existed, so a blend that built still builds (propagating the error
+    // would refuse it). The 3D step is taken only where the predicate finds a singularity.
     let singular = match base0.is_singularity(cx.k, b.uv, crate::math::EFF_ZERO, false) {
         Ok(sing) => sing.singular,
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(_) => true,
+        Err(_) => false,
     };
     let uv = if singular {
         let domain = base0.natural_uv_domain_with_nurb(cx.k)?;
