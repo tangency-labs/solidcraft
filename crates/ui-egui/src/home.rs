@@ -902,6 +902,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(action) = start_page::show(ui, page) {
         dispatch(app, ui.ctx(), action);
     }
+    // The first start usually opens on Home: the usage statistics notice shows here as in the view.
+    #[cfg(feature = "usage-stats")]
+    {
+        let t = solidcraft_theme::Tokens::get();
+        let _ = crate::usage_stats::notice_toast(app, ui, ui.max_rect().shrink(t.space_16));
+    }
 }
 
 /// SolidCraft's rail: Start, New, Open, Recover; the design's own entries; the app's.

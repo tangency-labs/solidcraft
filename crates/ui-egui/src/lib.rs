@@ -12,6 +12,7 @@ use crate::ui_kit::recent_colors;
 pub mod access;
 pub mod agent_chat;
 pub mod agent_cursor;
+pub mod agent_label;
 pub mod ai_connect;
 pub use solidcraft_ui_kit::app_bar;
 pub use solidcraft_ui_kit::blur;
@@ -129,6 +130,7 @@ mod kit_gallery_tests;
 mod kit_host_tests;
 mod length_input;
 pub mod library;
+pub mod link_folders_prompt;
 mod linked_source;
 pub mod links;
 #[cfg(test)]
@@ -849,6 +851,12 @@ pub struct SolveApp {
     pub disk_prompt: bool,
     /// Update Links, Open Linked Design or Reload from file waiting for a network server to be allowed.
     pub network_prompt: Option<network_prompt::NetworkPrompt>,
+    /// Designs just opened whose out-of-date links are in other folders, asking whether to load
+    /// them: one question per design, shown while its tab is.
+    pub link_folders_prompt: Vec<link_folders_prompt::LinkFoldersPrompt>,
+    /// Links held back by Not now, by design ([`solidcraft_engine::Session::uid`]) and component:
+    /// not read by themselves, nor asked about again, until their folder is allowed.
+    pub link_folders_held: Vec<(u64, u64)>,
     /// Designs left by crashed apps, offered for recovery.
     pub recoverable: Vec<solidcraft_engine::recovery::Entry>,
     /// The recovery folder holding this launch's reopen-guard marker (#5064); `None` when
@@ -1161,6 +1169,8 @@ impl SolveApp {
             lock_prompts: Vec::new(),
             disk_prompt: false,
             network_prompt: None,
+            link_folders_prompt: Vec::new(),
+            link_folders_held: Vec::new(),
             recoverable: Vec::new(),
             reopen_guard_dir: None,
             recovery_discard_all: false,
@@ -1392,6 +1402,8 @@ impl SolveApp {
     #[cfg(feature = "usage-stats")]
     pub fn load_usage_stats(&mut self, stored: Option<&str>) {
         self.usage.store = usage_stats::Store::from_stored(stored);
+        // Kept between runs from now on: the first start (nothing stored) shows the notice.
+        self.usage.hosted = true;
     }
 
     /// The usage statistics for the host to store under `usage_stats::STORAGE_KEY`.
@@ -1985,7 +1997,7 @@ impl SolveApp {
                 // thread-local scope. The command's own label is translated too, so the echo
                 // reads the same way the toolbar button it came from does.
                 let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
-                let label = language.label(command_label(id));
+                let label = &crate::agent_label::name_in(language, id);
                 // Frames of a gesture (a continuous view move, a part dragged by its joints) are
                 // not echoed one by one.
                 if v.get("continuous").and_then(Value::as_bool) != Some(true) {
@@ -4364,6 +4376,7 @@ impl SolveApp {
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
+        link_folders_prompt::show(self, ui.ctx());
         update::show(self, ui.ctx());
         install::show(self, ui.ctx());
         // Settings › AI's Add agent dialog: Settings opens over Home too (#3483).

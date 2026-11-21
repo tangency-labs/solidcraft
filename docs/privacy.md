@@ -95,6 +95,19 @@ Like any web request, a report passes through Cloudflare's network, and our host
 Railway, keeps request logs that include the sender's IP address for up to 30 days; we don't use
 them.
 
+### Deleting your data
+
+**Preferences › Privacy** shows your installation ID. **Delete my data** asks the server to delete
+every report it holds for that ID, and the app uses a new random ID from then on. The request
+carries only the ID; it is sent in the background, works with statistics turned off, and is tried
+again (once an hour, and at the next start) until the server answers. The server deletes that
+installation's reports and its first-seen date, and answers the same way whether or not it had
+any, so nobody can use it to find out whether an ID exists.
+
+The daily totals are kept: they are counts (how many installations, minutes, runs of each
+command) with no installation ID in them, so they can't be traced back to you. **Reset ID** alone
+starts a new ID without asking the server to delete anything.
+
 ### Turning it off
 
 - **Preferences › Privacy › Share anonymous usage statistics**, or **Turn off** on the notice.

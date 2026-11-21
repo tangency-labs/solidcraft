@@ -1298,6 +1298,7 @@
   "cmd.motion_list": "Lista badań ruchu",
   "cmd.motion_play": "Odtwórz badanie ruchu",
   "cmd.motion_plot": "Wykres badania ruchu",
+  "cmd.motion_simulate": "Symuluj ruch",
   "cmd.motion_study": "Badanie ruchu",
   "cmd.motion_trace": "Ślad ruchu",
   "cmd.motion_trace_edit": "Edytuj ślad ruchu",
