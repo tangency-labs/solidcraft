@@ -221,6 +221,11 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
     for c in outside {
         // The folder of the file the engine reads for the link, as it resolves it.
         let Some(folder) = files.iter().find(|(k, _)| *k == c).and_then(|(_, f)| lexical(f).parent().map(Path::to_path_buf)) else { continue };
+        // A design opened by a program reads none of them unasked, allowed folders included: it
+        // may work within narrower folders than the user's, and it asks nothing.
+        if app.docs.quiet_open {
+            continue;
+        }
         if app.preferences.linked_file_folders.iter().any(|f| folder_within(&folder, Path::new(f))) {
             stale.push(c);
         } else {
@@ -240,10 +245,7 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
             app.docs.link_stamps.push((c, s));
         }
     }
-    // A design opened through the control channel or by the assistant never asks.
-    if !app.docs.quiet_open {
-        crate::link_folders_prompt::ask(app, ask);
-    }
+    crate::link_folders_prompt::ask(app, ask);
     // No room to wait: they are still changed when the tab next comes back.
     if changed.is_empty() || app.file_load.room() == 0 {
         return;
@@ -965,19 +967,19 @@ mod tests {
         let (root, case, folder) = outside_link("load");
         let mut app = SolveApp::new(Session::default(), Default::default());
         open(&mut app, &case, false);
-        let prompt = app.link_folders_prompt.clone().expect("asked");
+        let prompt = app.link_folders_prompt.first().cloned().expect("asked");
         assert_eq!(prompt.folders, std::slice::from_ref(&folder));
         assert_eq!(prompt.session, app.session.uid);
         assert!((volume(&app) - 6000.0).abs() < 1e-6, "nothing is read before the answer: {}", volume(&app));
         assert!(out_of_date(&mut app));
         // Coming back to the tab doesn't ask again.
-        app.link_folders_prompt = None;
+        app.link_folders_prompt.clear();
         update_changed(&mut app);
-        assert!(app.link_folders_prompt.is_none(), "asked once");
-        app.link_folders_prompt = Some(prompt);
+        assert!(app.link_folders_prompt.is_empty(), "asked once");
+        app.link_folders_prompt = vec![prompt];
         crate::link_folders_prompt::answer(&mut app, crate::link_folders_prompt::Answer::Load);
         settle(&mut app);
-        assert!(app.link_folders_prompt.is_none());
+        assert!(app.link_folders_prompt.is_empty());
         assert!((volume(&app) - 6250.0).abs() < 1e-6, "Load reads the link: {}", volume(&app));
         assert!(!out_of_date(&mut app));
         assert_eq!(app.preferences.linked_file_folders, [folder]);
@@ -990,10 +992,10 @@ mod tests {
         let (root, case, _) = outside_link("not-now");
         let mut app = SolveApp::new(Session::default(), Default::default());
         open(&mut app, &case, false);
-        assert!(app.link_folders_prompt.is_some());
+        assert!(!app.link_folders_prompt.is_empty());
         crate::link_folders_prompt::answer(&mut app, crate::link_folders_prompt::Answer::NotNow);
         settle(&mut app);
-        assert!(app.link_folders_prompt.is_none() && app.file_load.idle());
+        assert!(app.link_folders_prompt.is_empty() && app.file_load.idle());
         assert!((volume(&app) - 6000.0).abs() < 1e-6, "{}", volume(&app));
         assert!(out_of_date(&mut app));
         assert!(app.preferences.linked_file_folders.is_empty());
@@ -1013,14 +1015,14 @@ mod tests {
             let mut app = SolveApp::new(Session::default(), Default::default());
             app.preferences.linked_file_folders = vec![allowed];
             open(&mut app, &case, false);
-            assert!(app.link_folders_prompt.is_none(), "no question for an allowed folder");
+            assert!(app.link_folders_prompt.is_empty(), "no question for an allowed folder");
             assert!((volume(&app) - 6250.0).abs() < 1e-6, "{}", volume(&app));
         }
         // A sibling folder that only starts with the same letters is not inside it.
         let mut app = SolveApp::new(Session::default(), Default::default());
         app.preferences.linked_file_folders = vec![format!("{folder}-old"), "parts".into()];
         open(&mut app, &case, false);
-        assert!(app.link_folders_prompt.is_some(), "a relative or neighbouring folder allows nothing");
+        assert!(!app.link_folders_prompt.is_empty(), "a relative or neighbouring folder allows nothing");
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -1040,19 +1042,45 @@ mod tests {
         let mut app = SolveApp::new(Session::default(), Default::default());
         let before = serde_json::to_value(&app.preferences).unwrap();
         open(&mut app, &case, false);
-        assert!(app.link_folders_prompt.is_some(), "still asks");
+        assert!(!app.link_folders_prompt.is_empty(), "still asks");
         assert_eq!(serde_json::to_value(&app.preferences).unwrap(), before, "the design changed no preference");
         assert!(out_of_date(&mut app));
         let _ = std::fs::remove_dir_all(root);
     }
 
-    /// A design opened through the control channel never asks; its link stays out of date.
+    /// Two designs opened one after the other each keep their question: the first is still asked
+    /// when its tab comes back, and answering it reads that design's link only.
+    #[test]
+    fn each_design_keeps_its_own_question() {
+        let (first_root, first, first_folder) = outside_link("first");
+        let (second_root, second, _) = outside_link("second");
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        open(&mut app, &first, false);
+        let first_uid = app.session.uid;
+        open(&mut app, &second, false);
+        assert_ne!(app.session.uid, first_uid);
+        let sessions: Vec<u64> = app.link_folders_prompt.iter().map(|p| p.session).collect();
+        assert_eq!(sessions, [first_uid, app.session.uid], "both questions wait");
+        crate::documents::switch(&mut app, 0);
+        assert_eq!(app.session.uid, first_uid);
+        crate::link_folders_prompt::answer(&mut app, crate::link_folders_prompt::Answer::Load);
+        settle(&mut app);
+        assert!((volume(&app) - 6250.0).abs() < 1e-6, "{}", volume(&app));
+        assert_eq!(app.preferences.linked_file_folders, [first_folder]);
+        assert_eq!(app.link_folders_prompt.len(), 1, "the second design's question still waits");
+        let _ = std::fs::remove_dir_all(first_root);
+        let _ = std::fs::remove_dir_all(second_root);
+    }
+
+    /// A design opened through the control channel never asks, and reads no link in another
+    /// folder, even one the user allowed: it stays out of date.
     #[test]
     fn a_design_opened_by_a_program_never_asks() {
-        let (root, case, _) = outside_link("program");
+        let (root, case, folder) = outside_link("program");
         let mut app = SolveApp::new(Session::default(), Default::default());
+        app.preferences.linked_file_folders = vec![folder];
         open(&mut app, &case, true);
-        assert!(app.link_folders_prompt.is_none() && app.file_load.idle());
+        assert!(app.link_folders_prompt.is_empty() && app.file_load.idle());
         assert!(!app.docs.quiet_open, "only that open is quiet");
         assert!((volume(&app) - 6000.0).abs() < 1e-6, "{}", volume(&app));
         assert!(out_of_date(&mut app));

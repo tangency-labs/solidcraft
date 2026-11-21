@@ -837,8 +837,9 @@ pub struct SolveApp {
     pub disk_prompt: bool,
     /// Update Links, Open Linked Design or Reload from file waiting for a network server to be allowed.
     pub network_prompt: Option<network_prompt::NetworkPrompt>,
-    /// A design just opened whose out-of-date links are in other folders, asking whether to load them.
-    pub link_folders_prompt: Option<link_folders_prompt::LinkFoldersPrompt>,
+    /// Designs just opened whose out-of-date links are in other folders, asking whether to load
+    /// them: one question per design, shown while its tab is.
+    pub link_folders_prompt: Vec<link_folders_prompt::LinkFoldersPrompt>,
     /// Designs left by crashed apps, offered for recovery.
     pub recoverable: Vec<solidcraft_engine::recovery::Entry>,
     /// The recovery folder holding this launch's reopen-guard marker (#5064); `None` when
@@ -1146,7 +1147,7 @@ impl SolveApp {
             lock_prompts: Vec::new(),
             disk_prompt: false,
             network_prompt: None,
-            link_folders_prompt: None,
+            link_folders_prompt: Vec::new(),
             recoverable: Vec::new(),
             reopen_guard_dir: None,
             recovery_discard_all: false,

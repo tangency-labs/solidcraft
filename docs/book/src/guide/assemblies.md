@@ -516,8 +516,8 @@ on; **Not now** leaves them out of date, and **Update Links** reads them wheneve
 The folders you allowed are kept in your own settings, never in a design, and are listed under
 Preferences › General › Files, where you can remove one or forget them all.
 A design opened by a program (the command line, an MCP client, the control channel or the
-assistant) never asks: its parts in other folders stay out of date unless you allowed their
-folder, and running `component.update_links` (all links, or `components: [ids]`) reads them.
+assistant) never asks: its parts in other folders stay out of date, also in folders you
+allowed, and running `component.update_links` (all links, or `components: [ids]`) reads them.
 The command line and a headless MCP session don't read links by themselves when a design
 opens, so there `component.update_links` is the way to bring in changed parts.
 

@@ -6,7 +6,8 @@
 //!
 //! The folders allowed are the user's own settings, never the design's. A design opened through
 //! the control channel or by the assistant never asks; its links in other folders stay out of
-//! date unless their folder was allowed, and `component.update_links` reads them on request.
+//! date, allowed folders included (it may work within narrower folders than the user), and
+//! `component.update_links` reads them on request.
 
 use crate::SolveApp;
 use crate::ui_kit;
@@ -30,17 +31,24 @@ pub enum Answer {
 }
 
 /// Ask about the out-of-date links of the shown design that are in folders not allowed yet
-/// (`links`: each link with its folder). Nothing is asked when there are none. A question still
-/// waiting for another design is dropped: that one's links stay out of date, as after Not now.
+/// (`links`: each link with its folder). Nothing is asked when there are none. Each design keeps
+/// its own question: one waiting for a design in another tab is asked when that tab is shown.
 pub(crate) fn ask(app: &mut SolveApp, links: Vec<(u64, String)>) {
     if links.is_empty() {
         return;
     }
     let session = app.session.uid;
-    if app.link_folders_prompt.as_ref().is_some_and(|p| p.session != session) {
-        app.link_folders_prompt = None;
-    }
-    let prompt = app.link_folders_prompt.get_or_insert_with(|| LinkFoldersPrompt { session, folders: Vec::new(), components: Vec::new() });
+    let at = match app.link_folders_prompt.iter().position(|p| p.session == session) {
+        Some(at) => at,
+        None => {
+            // Questions for designs closed unanswered are dropped first (as after Not now).
+            let open: Vec<u64> = crate::documents::open_sessions(app).iter().map(|s| s.uid).collect();
+            app.link_folders_prompt.retain(|p| open.contains(&p.session));
+            app.link_folders_prompt.push(LinkFoldersPrompt { session, folders: Vec::new(), components: Vec::new() });
+            app.link_folders_prompt.len() - 1
+        }
+    };
+    let Some(prompt) = app.link_folders_prompt.get_mut(at) else { return };
     for (component, folder) in links {
         if !prompt.components.contains(&component) {
             prompt.components.push(component);
@@ -51,10 +59,11 @@ pub(crate) fn ask(app: &mut SolveApp, links: Vec<(u64, String)>) {
     }
 }
 
-/// Act on the answer. Load remembers the folders and reads the links, if their design is still
-/// the one shown (otherwise Update Links reads them there).
+/// Act on the answer to the shown design's question. Load remembers the folders and reads the links.
 pub fn answer(app: &mut SolveApp, answer: Answer) {
-    let Some(LinkFoldersPrompt { session, folders, components }) = app.link_folders_prompt.take() else { return };
+    let shown = app.session.uid;
+    let Some(at) = app.link_folders_prompt.iter().position(|p| p.session == shown) else { return };
+    let LinkFoldersPrompt { session, folders, components } = app.link_folders_prompt.remove(at);
     if answer == Answer::NotNow {
         return;
     }
@@ -71,7 +80,7 @@ pub fn answer(app: &mut SolveApp, answer: Answer) {
 /// The question, when one is waiting for the design shown (one for a design in another tab waits
 /// for its tab to come back).
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
-    let Some(prompt) = app.link_folders_prompt.as_ref().filter(|p| p.session == app.session.uid) else { return };
+    let Some(prompt) = app.link_folders_prompt.iter().find(|p| p.session == app.session.uid) else { return };
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     let folders = prompt.folders.join(", ");
     let detail = solidcraft_ui_text::format("linked_files.other_folders_detail", &[("folders", &folders)]);
