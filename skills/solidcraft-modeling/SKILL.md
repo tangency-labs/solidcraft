@@ -70,7 +70,6 @@ Work the part out as numbers first. Then build it in a few large `batch` calls, 
 | Thought | Do instead |
 |---|---|
 | "List all commands first" | `reference.md`, or `list_commands {"filter":"<distinctive word>"}`. The unfiltered list is over 100 KB. |
-| "Check every position with a full `body_topology` dump" | `body_topology {"body":"Body1","faces":"cylinders"}` for round holes and bosses (a few lines), with the limits in Verify; `measure` COM and bbox for the overall shape. |
 | "Inspect the sketch" | `sketch.solve` returns dof and the profile count in under 100 bytes. Run `sketch.inspect` on its own, never inside a big batch. |
 | "new_design for a clean start" | When the server is bridged, ask first. |
 | "It reported ok, so it worked" | Only a `measure` that matches the computed values counts. |
