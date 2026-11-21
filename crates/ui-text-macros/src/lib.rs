@@ -15,10 +15,10 @@
 //! - `msg!("id", name = value, ...)`: and the names are exactly the message's `{placeholders}`.
 //!   A `Filled`, with its values (`&str`).
 //!
-//! Anything else stops the build at the literal, with the nearest id when there is one. So does
-//! a message that a catalog kept complete ([`COMPLETE`]) has no text for, which is what
-//! `cargo xtask i18n --check` refuses in CI: the error names the languages. A catalog that is
-//! not kept complete may lack the message.
+//! Anything else stops the build at the literal, with the nearest id when there is one. Only the
+//! English catalog is read: whether another language has the message stays with
+//! `cargo xtask i18n` and the catalogs' tests, so a new English message is never held up by a
+//! language its author cannot write.
 //!
 //! The English catalog is what the app builds it from (`crates/ui-egui/build.rs`):
 //! `assets/locales/en.json`, `crates/ui-text/locales/en.json` and the `en` messages of
@@ -31,7 +31,7 @@
 //! (`solidcraft_ui_text::numbered::fingerprint`, computed here by a copy of it: this crate
 //! depends on no other of the workspace), so a table made for another list of ids refuses it.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -48,9 +48,6 @@ type Catalog = BTreeMap<String, String>;
 const MAX_ANCESTORS: usize = 8;
 /// Ids nearer than this many edits are offered as the one meant.
 const MAX_EDITS: usize = 3;
-/// The catalogs delivered complete: a message read with `tr!` must have a text in each. Keep in
-/// step with `COMPLETE` in `xtask/src/i18n.rs` and in `solidcraft-ui-egui`'s `i18n` tests.
-const COMPLETE: [&str; 5] = ["ar", "he", "ja", "vi", "zh"];
 
 /// `"id"`, then `name = value` for each placeholder, if any.
 struct Input {
@@ -176,7 +173,7 @@ fn fingerprint<'a>(ids: impl IntoIterator<Item = &'a str>) -> u32 {
 /// message given without values), or why the message is refused.
 #[allow(clippy::type_complexity)]
 fn check(input: &Input, unfilled: bool) -> syn::Result<((u32, u32), Option<&[(Ident, syn::Expr)]>)> {
-    let Catalogs { english: catalog, ids, complete } = catalog().as_ref().map_err(|why| syn::Error::new(input.id.span(), why))?;
+    let (catalog, ids) = catalog().as_ref().map_err(|why| syn::Error::new(input.id.span(), why))?;
     let ids = *ids;
     let id = input.id.value();
     let Some(text) = catalog.get(&id) else {
@@ -186,10 +183,6 @@ fn check(input: &Input, unfilled: bool) -> syn::Result<((u32, u32), Option<&[(Id
         );
         return Err(syn::Error::new(input.id.span(), message));
     };
-    let lacking: Vec<&str> = complete.iter().filter(|(_, has)| !has.contains(&id)).map(|(language, _)| *language).collect();
-    if !lacking.is_empty() {
-        return Err(syn::Error::new(input.id.span(), untranslated(&id, text, &lacking)));
-    }
     // A `BTreeMap`'s keys are in the order of their bytes, as the tables' ids are.
     let place = u32::try_from(catalog.range::<str, _>((std::ops::Bound::Unbounded, std::ops::Bound::Excluded(id.as_str()))).count())
         .map_err(|_| syn::Error::new(input.id.span(), "the English catalog has too many messages"))?;
@@ -211,15 +204,6 @@ fn check(input: &Input, unfilled: bool) -> syn::Result<((u32, u32), Option<&[(Id
         return Err(syn::Error::new(input.id.span(), format!("`{id}` also has the placeholder `{{{missing}}}`: its text is {text:?}")));
     }
     Ok(((place, ids), Some(values)))
-}
-
-/// What is said of a message that a complete catalog lacks.
-fn untranslated(id: &str, text: &str, lacking: &[&str]) -> String {
-    format!(
-        "`{id}` ({text:?}) has no text in {}: the catalogs of {} are kept complete, so give it one in each, beside its English in your file of assets/locales/pending (`cargo xtask i18n` lists what is missing)",
-        lacking.join(", "),
-        COMPLETE.join(", ")
-    )
 }
 
 /// The names in `{braces}` in `text`, each once, in order. A name is letters, digits and `_`;
@@ -274,18 +258,10 @@ fn edits(a: &str, b: &str) -> usize {
     row.last().copied().unwrap_or(0)
 }
 
-/// What the macros check against.
-struct Catalogs {
-    english: Catalog,
-    /// The fingerprint of the English ids.
-    ids: u32,
-    /// Each complete catalog's language and the ids it has.
-    complete: Vec<(&'static str, BTreeSet<String>)>,
-}
-
-/// The catalogs, read once per compiled crate, or why they could not be read.
-fn catalog() -> &'static Result<Catalogs, String> {
-    static CATALOG: OnceLock<Result<Catalogs, String>> = OnceLock::new();
+/// The English catalog and the fingerprint of its ids, read once per compiled crate, or why it
+/// could not be read.
+fn catalog() -> &'static Result<(Catalog, u32), String> {
+    static CATALOG: OnceLock<Result<(Catalog, u32), String>> = OnceLock::new();
     CATALOG.get_or_init(|| {
         let from = std::env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from).ok_or("msg!: CARGO_MANIFEST_DIR is not set")?;
         let root = from
@@ -293,44 +269,29 @@ fn catalog() -> &'static Result<Catalogs, String> {
             .take(MAX_ANCESTORS)
             .find(|dir| dir.join("assets/locales/en.json").is_file())
             .ok_or_else(|| format!("msg!: no assets/locales/en.json in {} or the {MAX_ANCESTORS} folders above it", from.display()))?;
-        read_catalogs(root)
+        let catalog = read_catalog(root)?;
+        let ids = fingerprint(catalog.keys().map(String::as_str));
+        Ok((catalog, ids))
     })
 }
 
-/// The English messages and the complete catalogs' ids under the workspace `root`.
-fn read_catalogs(root: &Path) -> Result<Catalogs, String> {
-    let pending = pending_files(root)?;
-    let english = read_catalog(root, "en", &pending)?;
-    let ids = fingerprint(english.keys().map(String::as_str));
-    let complete = COMPLETE
-        .iter()
-        .map(|language| Ok((*language, read_catalog(root, language, &pending)?.into_keys().collect())))
-        .collect::<Result<_, String>>()?;
-    Ok(Catalogs { english, ids, complete })
-}
-
-/// The files of `assets/locales/pending`, each a map from language to messages.
-fn pending_files(root: &Path) -> Result<Vec<(PathBuf, serde_json::Map<String, serde_json::Value>)>, String> {
-    let mut files: Vec<PathBuf> = std::fs::read_dir(root.join("assets/locales/pending"))
-        .map(|entries| entries.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "json")).collect())
-        .unwrap_or_default();
-    files.sort();
-    files.into_iter().map(|file| object(&file).map(|messages| (file, messages))).collect()
-}
-
-/// The messages of `language` under the workspace `root`, as `crates/ui-egui/build.rs` merges
-/// them: the app's catalog, the shared crate's and the pending files'.
-fn read_catalog(root: &Path, language: &str, pending: &[(PathBuf, serde_json::Map<String, serde_json::Value>)]) -> Result<Catalog, String> {
+/// The English messages under the workspace `root`, as `crates/ui-egui/build.rs` merges them.
+fn read_catalog(root: &Path) -> Result<Catalog, String> {
     let mut catalog = Catalog::new();
-    let app = root.join(format!("assets/locales/{language}.json"));
-    let shared = root.join(format!("crates/ui-text/locales/{language}.json"));
+    let app = root.join("assets/locales/en.json");
+    let shared = root.join("crates/ui-text/locales/en.json");
     add(&mut catalog, &app, object(&app)?)?;
     if shared.is_file() {
         add(&mut catalog, &shared, object(&shared)?)?;
     }
-    for (file, languages) in pending {
-        if let Some(serde_json::Value::Object(messages)) = languages.get(language) {
-            add(&mut catalog, file, messages.clone())?;
+    let pending = root.join("assets/locales/pending");
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&pending)
+        .map(|entries| entries.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "json")).collect())
+        .unwrap_or_default();
+    files.sort();
+    for file in files {
+        if let Some(serde_json::Value::Object(english)) = object(&file)?.remove("en") {
+            add(&mut catalog, &file, english)?;
         }
     }
     Ok(catalog)
@@ -415,7 +376,7 @@ mod tests {
     /// and every message of one catalog carries the same fingerprint.
     #[test]
     fn a_message_is_numbered_by_its_place_among_the_sorted_ids() {
-        let Catalogs { english: catalog, ids, .. } = catalog().as_ref().unwrap();
+        let (catalog, ids) = catalog().as_ref().unwrap();
         let place = |id: &str| {
             let input: Input = syn::parse_str(&format!("{id:?}")).unwrap();
             check(&input, true).unwrap().0
@@ -431,19 +392,9 @@ mod tests {
     #[test]
     fn the_repositorys_catalog_reads() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let catalogs = read_catalogs(&root).unwrap();
-        assert!(catalogs.english.contains_key("ui.file"));
-        assert!(catalogs.english.len() > 1000);
-        assert_eq!(catalogs.complete.iter().map(|(language, _)| *language).collect::<Vec<_>>(), COMPLETE);
-        assert!(catalogs.complete.iter().all(|(_, has)| has.contains("ui.file")));
-        assert!(read_catalogs(&root.join("crates")).is_err(), "a folder without the catalog says so");
-    }
-
-    /// A message a complete catalog lacks is named with the languages that lack it.
-    #[test]
-    fn a_message_a_complete_catalog_lacks_is_refused_with_the_languages() {
-        let said = untranslated("ui.new_thing", "New thing", &["ja", "zh"]);
-        assert!(said.contains("`ui.new_thing` (\"New thing\") has no text in ja, zh"), "{said}");
-        assert!(said.contains("assets/locales/pending"), "{said}");
+        let catalog = read_catalog(&root).unwrap();
+        assert!(catalog.contains_key("ui.file"));
+        assert!(catalog.len() > 1000);
+        assert!(read_catalog(&root.join("crates")).is_err(), "a folder without the catalog says so");
     }
 }
