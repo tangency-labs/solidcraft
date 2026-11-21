@@ -1472,7 +1472,13 @@ fn a_row_names_the_material_its_mass_is_worked_out_with() {
     assert_eq!(row(&mut s, "Spacer"), Some(weight("Spacer", "Walnut", Some(0.65))));
     s.doc_mut().materials.insert("Spacer".into(), "Unobtainium".into());
     assert_eq!(row(&mut s, "Spacer"), Some(weight("Spacer", "Default", Some(1.29))), "a material the design doesn't have");
-    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial { name: "Broken".into(), density: -3.0, appearance: None, physical_card: None });
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Broken".into(),
+        density: -3.0,
+        appearance: None,
+        physical_card: None,
+        rf_loss_db: None,
+    });
     s.doc_mut().materials.insert("Spacer".into(), "Broken".into());
     assert_eq!(row(&mut s, "Spacer"), Some(weight("Spacer", "Default", Some(1.29))), "a design material with an unusable density");
     // The bracket's plate stored as "steel" beside its cube in "Steel": one material, and both

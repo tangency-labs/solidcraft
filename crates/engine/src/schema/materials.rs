@@ -141,6 +141,26 @@ fn card_or_clear<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Er
     Value::deserialize(d).map(Some)
 }
 
+/// `rf`: the handler reads it (`materials::rf_loss`), with its messages; `null` clears.
+fn rf_or_clear<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    Value::deserialize(d).map(Some)
+}
+
+fn rf_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Wi-Fi loss each time a path crosses this material, for `inspect.rf_coverage`: a preset name (concrete 12/20/24 dB, drywall 3/4/5, interior-glass 2/3/3, low-e-glass 10/15/18, metal 15/20/22, none 0/0/0, wood-door 3/4/5 at 2.4/5/6 GHz) or the losses in dB, 0 to 100. `null`: none (the analysis guesses from the wall's thickness). Left out: none for a new material; an edit keeps the current ones.",
+        "anyOf": [
+            {"type": "string", "enum": ["concrete", "drywall", "interior-glass", "low-e-glass", "metal", "none", "wood-door"]},
+            {"type": "object", "properties": {
+                "2.4": {"type": "number", "minimum": 0, "maximum": 100},
+                "5": {"type": "number", "minimum": 0, "maximum": 100},
+                "6": {"type": "number", "minimum": 0, "maximum": 100}
+            }, "required": ["2.4", "5", "6"], "additionalProperties": false},
+            {"type": "null"}
+        ]
+    })
+}
+
 fn card_schema(generator: &mut SchemaGenerator) -> Schema {
     let card = super::material_properties::card_schema(generator);
     json_schema!({
@@ -174,6 +194,9 @@ pub struct MaterialCreateParams {
     #[serde(default, deserialize_with = "card_or_clear")]
     #[schemars(schema_with = "card_schema")]
     pub physical_card: Option<Value>,
+    #[serde(default, deserialize_with = "rf_or_clear")]
+    #[schemars(schema_with = "rf_schema")]
+    pub rf: Option<Value>,
 }
 
 /// Change a physical material this design defines: its name (its bodies and configuration cells
@@ -207,6 +230,9 @@ pub struct MaterialEditParams {
     #[serde(default, deserialize_with = "card_or_clear")]
     #[schemars(schema_with = "card_schema")]
     pub physical_card: Option<Value>,
+    #[serde(default, deserialize_with = "rf_or_clear")]
+    #[schemars(schema_with = "rf_schema")]
+    pub rf: Option<Value>,
 }
 
 /// Read a material, built-in or this design's: its density, default look and physical card,
@@ -252,6 +278,9 @@ pub struct MaterialReply {
     /// After an edit: the bodies the material is assigned to.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bodies: Option<Vec<String>>,
+    /// Its Wi-Fi loss per crossing, when it has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rf: Option<RfLossReply>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -276,9 +305,26 @@ pub struct MaterialInspected {
     /// How the card's measured density compares with the assigned one, when the card gives one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub density_comparison: Option<DensityComparison>,
+    /// Its Wi-Fi loss per crossing; `null` when it has none, and `inspect.rf_coverage` guesses
+    /// from the wall's thickness.
+    pub rf: Option<RfLossReply>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// A material's Wi-Fi loss each time a path crosses it, in dB.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RfLossReply {
+    #[serde(rename = "2.4")]
+    pub ghz_2_4: f64,
+    #[serde(rename = "5")]
+    pub ghz_5: f64,
+    #[serde(rename = "6")]
+    pub ghz_6: f64,
+    /// The preset these losses are, when they are one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
 }
 
 /// A card's measured density against the material's assigned one.

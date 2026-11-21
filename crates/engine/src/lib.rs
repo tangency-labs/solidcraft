@@ -46,6 +46,7 @@ pub mod render_jobs;
 pub mod render_lights;
 pub mod render_preparation;
 pub mod report_issue;
+pub mod rf_coverage;
 pub mod sample;
 pub mod schema;
 #[cfg(not(target_arch = "wasm32"))]
@@ -827,6 +828,8 @@ pub struct Session {
     /// Pairs `inspect.clearance` measured, by the bodies' geometry where they stood (shared with
     /// scratch copies): a body that did not change or move is not measured again.
     clearance_cache: std::sync::Arc<std::sync::Mutex<cmd::clearance::PairCache>>,
+    /// The walls `inspect.rf_coverage` last sliced, kept so moving an emitter doesn't slice again.
+    rf_walls: std::sync::Arc<std::sync::Mutex<Option<cmd::rf_coverage::WallCache>>>,
     /// Recent body renames: the design before and after each, and the names, so undo and redo
     /// follow them without evaluating either.
     body_renames: Vec<BodyRename>,
@@ -866,6 +869,9 @@ pub struct Session {
     /// The curvature combs `inspect.curvature_comb` shows, for the viewport to draw; `None` when
     /// the analysis is off. View state: not part of the design and not an undo step.
     pub comb: Option<CombView>,
+    /// The Wi-Fi coverage heatmap `inspect.rf_coverage` shows, for the viewport to draw; `None`
+    /// when it is off. View state: not part of the design and not an undo step.
+    pub rf_coverage: Option<Arc<cmd::rf_coverage::RfOverlay>>,
     /// Oldest active slot first; replacing an effect retains its row position.
     status_order: Vec<status_items::StatusId>,
     /// Successful source activations, independently of row order and sharing policy.
@@ -1277,6 +1283,7 @@ impl Session {
             placement_index_cache: Default::default(),
             dirty_cache: Default::default(),
             clearance_cache: Default::default(),
+            rf_walls: Default::default(),
             body_renames: Vec::new(),
             contact_meshes: Default::default(),
             clipboard: Vec::new(),
@@ -1292,6 +1299,7 @@ impl Session {
             continuity: Vec::new(),
             isocurves: Vec::new(),
             comb: None,
+            rf_coverage: None,
             status_order: Vec::new(),
             status_activation: Vec::new(),
             single_surface_analysis: true,
@@ -3004,6 +3012,7 @@ impl Session {
             placement_index_cache: Default::default(),
             dirty_cache: Default::default(),
             clearance_cache: self.clearance_cache.clone(),
+            rf_walls: self.rf_walls.clone(),
             body_renames: self.body_renames.clone(),
             contact_meshes: self.contact_meshes.clone(),
             clipboard: self.clipboard.clone(),
@@ -3019,6 +3028,7 @@ impl Session {
             continuity: Vec::new(),
             isocurves: Vec::new(),
             comb: None,
+            rf_coverage: None,
             status_order: Vec::new(),
             status_activation: Vec::new(),
             single_surface_analysis: self.single_surface_analysis,

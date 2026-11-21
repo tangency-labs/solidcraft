@@ -32,7 +32,7 @@ use crate::{Result, Session};
 #[path = "drawing_view_exact.rs"]
 mod exact;
 #[path = "drawing_view_hatch.rs"]
-mod hatch;
+pub(crate) mod hatch;
 #[path = "drawing_view_lines.rs"]
 mod lines;
 #[path = "drawing_view_threads.rs"]

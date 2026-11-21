@@ -431,7 +431,7 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "INSERT", panel: "LIBRARY", promoted: 3, ids: &["parts.fastener", "parts.library", "parts.resize", "parts.insert"] },
     Section { tab: "INSERT", panel: "LINKS", promoted: 2, ids: &["component.update_links", "component.break_link"] },
     Section { tab: "INSPECT", panel: "MEASURE", promoted: 3, ids: &["inspect.measure", "inspect.center_of_mass", "component.properties"] },
-    Section { tab: "INSPECT", panel: "SECTION", promoted: 1, ids: &["inspect.section"] },
+    Section { tab: "INSPECT", panel: "SECTION", promoted: 2, ids: &["inspect.section", "inspect.rf_coverage"] },
     Section {
         tab: "INSPECT",
         panel: "CHECK",
@@ -692,6 +692,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("inspect.draft", "Draft"),
     ("inspect.interference", "Interference"),
     ("inspect.isocurve", "Isocurve"),
+    ("inspect.rf_coverage", "Wi-Fi"),
     ("inspect.section", "Section"),
     ("inspect.zebra", "Zebra"),
     ("joint.as_built", "As-Built"),
