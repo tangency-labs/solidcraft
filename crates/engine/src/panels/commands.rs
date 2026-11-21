@@ -1,6 +1,7 @@
 //! Application-owned command execution shared by UI, control and headless MCP.
 //! No Session, document, geometry, dialogs or camera are reachable here.
 mod catalogue;
+pub use catalogue::{bytes_from_plain, plain_bytes, snapshot_from_value, snapshot_value};
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

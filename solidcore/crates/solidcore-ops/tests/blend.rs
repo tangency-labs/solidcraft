@@ -5728,6 +5728,128 @@ fn a_round_on_a_sphere_s_rim_turned_about_the_face_normal_builds() {
     }
 }
 
+/// Half a capsule: the cylinder of radius 5 from z = 0 to 10 joined with the spheres of radius
+/// 5 about its ends' centres, less everything below y = 0. The cut face's outline is one
+/// closed tangent chain: the lines x = 5 and x = -5 along the cylinder and, on each sphere, the
+/// half circle in y = 0, which the spheres' poles (on the z axis) split into two quarters.
+fn half_capsule() -> Body {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::{make_sphere, BooleanOp};
+    let c = make_cylinder([0.0; 3], 5.0, 10.0).unwrap();
+    let b = boolean(c, make_sphere([0.0; 3], 5.0).unwrap(), BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let b = boolean(
+        b,
+        make_sphere([0.0, 0.0, 10.0], 5.0).unwrap(),
+        BooleanOp::Union,
+    )
+    .unwrap()
+    .unwrap();
+    let cut = make_box([-10.0, -10.0, -10.0], [20.0, 10.0, 30.0]).unwrap();
+    boolean(b, cut, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// The section a blend of offsets `plane` (from the cut face y = 0) and `round` (from the
+/// curved face) takes off where y = 0 meets a circle of radius 5 about the origin, the body
+/// being the disc's half y >= 0: its area and its first moment about x = 0. The point at those
+/// offsets is c = (sqrt((5 - round)^2 - plane^2), plane); its feet are (c.x, 0) on the plane
+/// and 5 c / |c| on the circle, at angle `th`. A chamfer takes the triangle of the edge (5, 0)
+/// and the feet, with the circle's segment between angles 0 and `th`; a round takes that
+/// less the ball's segment its two feet cut off (from angle -pi/2 to `th` about c). Every
+/// section of the half capsule's outline is this one: along a line in its plane z = const,
+/// along an arc in the half plane through its sphere's centre and the y axis, x being the
+/// distance from that axis.
+fn capsule_section(plane: f64, round: f64, ball: bool) -> (f64, f64) {
+    let r = 5.0_f64;
+    // a circle's segment between angles a0 and a1: area, and its centroid's x about the centre
+    let segment = |radius: f64, a0: f64, a1: f64| {
+        let t = a1 - a0;
+        let area = 0.5 * radius * radius * (t - t.sin());
+        let d = 4.0 * radius * (0.5 * t).sin().powi(3) / (3.0 * (t - t.sin()));
+        (area, d * (0.5 * (a0 + a1)).cos())
+    };
+    let cx = ((r - round).powi(2) - plane * plane).sqrt();
+    let s = r / (r - round);
+    let foot = (cx * s, plane * s);
+    let th = foot.1.atan2(foot.0);
+    let triangle = 0.5 * (r - cx) * foot.1;
+    let (sa, sx) = segment(r, 0.0, th);
+    let mut area = triangle + sa;
+    let mut moment = triangle * (r + cx + foot.0) / 3.0 + sa * sx;
+    if ball {
+        let (ba, bx) = segment(plane, -0.5 * PI, th);
+        area -= ba;
+        moment -= ba * (cx + bx);
+    }
+    (area, moment)
+}
+
+/// The half capsule's volume: half the cylinder and half of each of two hemispheres.
+const HALF_CAPSULE: f64 = 0.5 * PI * 25.0 * 10.0 + 2.0 * PI * 125.0 / 3.0;
+
+/// An unequal chamfer of the half capsule's whole outline, the first size along the cut face,
+/// was refused ("the chamfer size", status 1007). The chain is measured at its narrowest
+/// wedge, a right angle all round, and lifted to where unequal sizes do not fold, from each
+/// edge's widest wedge, which is bounded by its faces' normals enclosed along it. On a quarter
+/// arc that ends at a sphere's pole the normal `S_u x S_v` vanishes there, so the piece of the
+/// arc that holds the pole bounds no cosine however often it is halved: the bound was a half
+/// turn, and a chamfer at a wedge of pi has no definition. A sphere's normal is now enclosed
+/// by its definition, `S - c`, and every arc is bounded at a right angle. At that wedge the
+/// offsets are the setbacks swapped (`ChamferDefinition::offsets`): the cut face is offset by
+/// the second size and the curved faces by the first. The chamfer takes off the section of
+/// [`capsule_section`] along the two lines (10 each) and, by Pappus, turned through pi about
+/// each sphere's centre.
+#[test]
+fn an_unequal_chamfer_of_a_half_capsule_s_outline_is_measured_at_a_right_angle() {
+    use solidcore::blend::chamfer_side::widest_wedge_bound;
+    all_fixes();
+    let b = half_capsule();
+    let line = edge_at(&b, [5.0, 0.0, 5.0]);
+    let chain = tangent_chain(&b, None, &[line], &[], 10f64.to_radians())
+        .unwrap()
+        .members;
+    assert_eq!(chain.len(), 6, "two lines and four quarter arcs");
+    let (k, mut brep) = kernel_copy(&b);
+    let edges = brep.edge_list().to_vec();
+    for &e in &chain {
+        let w = widest_wedge_bound(&k, &mut brep, edges[e], 1e-9).unwrap();
+        assert!(
+            w.wedge >= 0.5 * PI && w.wedge - 0.5 * PI < 1e-6,
+            "edge {e}: {w:?}"
+        );
+    }
+    for (flat, round) in [(2.0, 1.0), (1.0, 2.0)] {
+        let b = half_capsule();
+        let chain = tangent_chain(&b, None, &[line], &[], 10f64.to_radians())
+            .unwrap()
+            .members;
+        let along: Vec<usize> = chain
+            .iter()
+            .map(|&e| {
+                let [(f0, l0), (f1, _)] = edge_faces_along(&b, e, [0.0, -1.0, 0.0]).unwrap();
+                if l0 > 0.5 {
+                    f0
+                } else {
+                    f1
+                }
+            })
+            .collect();
+        chamfer_sides(&b, &chain, &along, flat, ChamferSecond::Distance(round)).unwrap();
+        assert!(
+            b.check(CheckLevel::All).unwrap().is_valid(),
+            "{flat}/{round}"
+        );
+        let (area, moment) = capsule_section(round, flat, false);
+        let want = HALF_CAPSULE - 20.0 * area - 2.0 * PI * moment;
+        assert!(
+            rel(volume(&b), want) < 1e-9,
+            "{flat}/{round}: {} against {want}",
+            volume(&b)
+        );
+    }
+}
+
 /// #17594's slab: the top 1.206 of a hexagonal boss whose six upright corners are rounds of
 /// radius 1 (axes on the circle of radius `HEX_RC` about (0, -69.5), top z = 30.706, bottom
 /// z = 29.5), cut from the imported part as SolidCraft traced it (`b1`).
@@ -5935,5 +6057,40 @@ fn a_full_round_whose_rails_meet_along_part_of_one_of_them() {
                 );
             }
         }
+    }
+}
+
+/// The half capsule's outline from pole to pole (the line x = 5 and its two quarter arcs) is
+/// one chain that ends at the spheres' poles, where it runs on into the arcs left sharp. A
+/// chamfer or a round of it failed ("Fillet Surface Computation Failure", status 1001): the
+/// end's section was solved from a guess whose step off the edge was the binormal's
+/// first-order image in the sphere's parameters, which is 0 at a pole, so the solve started on
+/// the pole, where the longitude is undetermined, and found none. The step is now taken in
+/// 3D. Each end is the section in the plane through the pole square to the edge, so the blend
+/// takes off [`capsule_section`] along the line (10) and, by Pappus, turned through pi/2 about
+/// each sphere's centre. An equal chamfer of 1 has offsets 1 at a right angle.
+#[test]
+fn a_chamfer_or_round_of_a_half_capsule_s_outline_from_pole_to_pole_builds() {
+    all_fixes();
+    let pick = |b: &Body| {
+        [
+            edge_at(b, [3.0, 0.0, -4.0]),
+            edge_at(b, [5.0, 0.0, 5.0]),
+            edge_at(b, [3.0, 0.0, 14.0]),
+        ]
+    };
+    for ball in [false, true] {
+        let b = half_capsule();
+        let edges = pick(&b);
+        let kind = if ball { Blend::Round } else { Blend::Chamfer };
+        blend(&b, kind, &edges, &[1.0], &[], Corners::Filled).unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{kind:?}");
+        let (area, moment) = capsule_section(1.0, 1.0, ball);
+        let want = HALF_CAPSULE - 10.0 * area - PI * moment;
+        assert!(
+            rel(volume(&b), want) < 1e-9,
+            "{kind:?}: {} against {want}",
+            volume(&b)
+        );
     }
 }

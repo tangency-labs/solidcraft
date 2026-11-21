@@ -1,0 +1,1 @@
+keeps a selection's face or edge index through the display mesh
