@@ -290,6 +290,66 @@ themselves; to show words instead, list the options as `oneOf`, each `{"const": 
 ]}
 ```
 
+### Folder fields and read access for one run
+
+A string property with `"format": "directory"` has a text box and, on a desktop host with a
+folder picker, a **Browse…** button. Without an annotation it passes a path and keeps its existing
+install-grant check. It grants no new access.
+
+Add `"x-solidcraft-grant": "read"` to ask for read access to a selected directory and its
+subdirectories for this entry invocation:
+
+```json
+"library": {
+  "type": "string", "title": "Parts library", "format": "directory",
+  "x-solidcraft-grant": "read"
+}
+```
+
+The dialog explains this permission beside the field. Browsing or editing/pasting its path gives
+consent when Run (or Choose file…) submits the entry. A default, including a conditional default,
+is not consent: the user must select or edit it, or it must already have read approval. The path
+must name an existing absolute local directory. Empty optional fields grant nothing. A hidden field
+is omitted and grants nothing; a disabled field cannot create new consent. Replacing the value
+replaces that field's root. Cancelling the entry or file picker grants nothing. Preview receives no
+folder grants. Closing or reopening a dialog starts fresh.
+
+Consent is bound to the reviewed package's content hash, entry and field, carried separately from
+parameters to that request's worker and consumed for that invocation. It is never saved to the design,
+Preferences or the shared grant store. To remember access, use the existing approvals in
+**Preferences › Plugins**: the plugin declares a named read folder in `runtime.permissions.files`
+and the user approves its path when installing or reviewing it. A later annotated field may name that
+folder or a permitted subdirectory; its property key need not match the install-time permission name.
+
+Scripts, CLI, MCP and direct `plugin.run` or `file.import` requests open no dialog and gain no
+permission from field values. A non-empty annotated value must already be covered by a current,
+package-bound **read** approval that the manifest requests, and by the caller's file scope.
+Write-only approvals do not imply read access. Hidden conditional values are removed before this check.
+
+To read these folders, add `"folders@0.1"` to `capabilities` alongside `commands@0.2` or `formats@0.2`.
+Build against the additive `command-with-folders` or `importer-with-folders` world in
+`craft:plugin@0.2.0`. They include the existing command/importer world and import the new read-only
+`folders` interface. Existing worlds and the 0.1 API are unchanged; existing components still load.
+
+- `folders.read(grant, path, offset, len)` reads 1 byte to 1 MiB per call, returning fewer bytes at EOF.
+- `folders.size(grant, path)` returns a regular file's size, or none if absent or not a regular file.
+- `folders.resolve(grant, path)` returns the relative spelling of an existing file, or the unique
+  case-insensitive match of its final name, or none. An empty path resolves to the selected root (`""`).
+
+`grant` is the annotated **property key**, such as `"library"`; `path` is relative to that field's
+root, such as `"parts/bracket.bin"`, never the absolute path from the options. No operation writes.
+These grants do not widen `source`, `files`, host commands, other entries or another invocation.
+Absolute paths, parent traversal, hidden descendants, symbolic links and Windows device paths are
+refused. The approved root itself may have hidden ancestors. There are at most 32 annotated fields;
+reads share the import's 1 GiB total byte and 4,096-file budgets with `source`, as well as its
+cancellation, call and runtime limits. Command entries use the same folder byte/file limits and
+retain their command call limits.
+
+The annotation is supported only on top-level string properties with `"format": "directory"`.
+Other placements (including nested schemas and composition branches), modes other than `"read"`,
+malformed values, more than 32 grants, and non-printable or over-128-character property names are
+rejected at manifest load and by `plugin check`. Conditions on these properties use the rules below.
+
 ### Conditional fields, choices and defaults
 
 Command dialogs evaluate declarative conditions on sibling scalar properties. Changing a field

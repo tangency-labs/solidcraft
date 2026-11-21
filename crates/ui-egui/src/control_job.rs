@@ -599,6 +599,7 @@ impl SolveApp {
                 return Some(req);
             }
             let mut copy = self.session.scratch();
+            copy.plugin_state.dialog_folders = crate::plugin_menu::take_folder_consent(self, req.serial);
             if let Some(level) = level {
                 copy.param_check = level;
             }

@@ -114,6 +114,8 @@ pub struct Request {
     pub(crate) auto_verify: bool,
     /// Open the file with an importer plugin (`file.import`) even when SolidCraft reads it too.
     pub plugin_import: bool,
+    /// Consent from an entry dialog for this request only; never populated from command params.
+    pub(crate) plugin_folders: Option<solidcraft_engine::plugin::folders::DialogFolders>,
     /// An export written to be printed: once written it opens in the system's PDF viewer
     /// ([`crate::drawing_workspace::print::written`]).
     pub print: bool,
@@ -139,6 +141,7 @@ impl Request {
             tries: 0,
             auto_verify: false,
             plugin_import: false,
+            plugin_folders: None,
             print: false,
         }
     }
@@ -778,6 +781,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         tries: 0,
         auto_verify: false,
         plugin_import: id == "file.import",
+        plugin_folders: None,
         print: false,
     };
     let _ = begin_request(app, request);
@@ -897,6 +901,7 @@ fn start(app: &mut SolveApp) {
     scratch.set_validation(app.preferences.validation);
     // A file an importer plugin reads opens with the plugins the user installed and left on.
     scratch.plugin_state = app.session.plugin_state.clone();
+    scratch.plugin_state.dialog_folders = request.plugin_folders.clone();
     scratch.disabled_plugins = app.session.disabled_plugins.clone();
     scratch.plugin_limits = app.session.plugin_limits;
     crate::print_face_ui::sync(&mut scratch, &app.preferences);
