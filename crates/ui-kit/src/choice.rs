@@ -609,7 +609,9 @@ pub fn swatch_picker(ui: &mut Ui, id: &str, chosen: &mut Option<usize>, options:
         }
         if preview {
             ui.data_mut(|data| match hovered {
-                Some(index) => data.insert_temp(hover_id, index),
+                Some(index) => {
+                    data.insert_temp(hover_id, index);
+                }
                 None => {
                     data.remove::<usize>(hover_id);
                 }
