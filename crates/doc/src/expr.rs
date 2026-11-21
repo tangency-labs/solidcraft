@@ -470,6 +470,17 @@ fn lex_spans(s: &str) -> Result<Vec<(Tok, usize, usize)>, DocError> {
                 i += 1;
             }
             out.push((Tok::Id(s.get(at(st)..at(i)).unwrap_or_default().to_string()), at(st), at(i)));
+            // A name with dots: a point's coordinate (`p1.x`, `l1.start.x`). The dots are part
+            // of the name, so the name is never a parameter's.
+            while cs.get(i).is_some_and(|(_, c)| *c == '.') && cs.get(i + 1).is_some_and(|(_, c)| c.is_alphabetic() || *c == '_') {
+                out.push((Tok::Op('.'), at(i), at(i + 1)));
+                i += 1;
+                let st = i;
+                while cs.get(i).is_some_and(|(_, c)| c.is_alphanumeric() || *c == '_') {
+                    i += 1;
+                }
+                out.push((Tok::Id(s.get(at(st)..at(i)).unwrap_or_default().to_string()), at(st), at(i)));
+            }
         } else if c == '°' {
             out.push((Tok::Id("deg".into()), at(i), at(i + 1)));
             i += 1;
@@ -575,7 +586,13 @@ fn lex(s: &str) -> Result<Vec<Tok>, DocError> {
 /// Is the identifier token at `i` a reference to a parameter (not a call, unit or constant)?
 fn is_reference(toks: &[Tok], i: usize, id: &str) -> bool {
     let is_call = matches!(toks.get(i + 1), Some(Tok::Op('(')));
-    !is_call && unit(id).is_none() && !is_constant(id)
+    !is_call && unit(id).is_none() && !is_constant(id) && !is_member_part(toks, i)
+}
+
+/// Is the identifier token at `i` part of a name with dots (a point's coordinate, `p1.x`)?
+/// Such a name is never a parameter's.
+fn is_member_part(toks: &[Tok], i: usize) -> bool {
+    matches!(toks.get(i + 1), Some(Tok::Op('.'))) || matches!(i.checked_sub(1).and_then(|k| toks.get(k)), Some(Tok::Op('.')))
 }
 
 /// Identifiers an expression refers to (excluding units, constants and functions).
@@ -611,6 +628,60 @@ fn scan_references(s: &str) -> Vec<String> {
         {
             out.push(id.clone());
         }
+    }
+    out
+}
+
+/// The points an expression reads the coordinate of: the point's name and the coordinate
+/// (`x` or `y`), each once. A name with dots is never a parameter's.
+pub fn point_members(s: &str) -> Vec<(String, String)> {
+    // The points are looked up on every solve, over the same expressions: the answers are kept
+    // (per thread, bounded) as [`references`] keeps its.
+    thread_local! {
+        static SEEN: std::cell::RefCell<std::collections::HashMap<String, Vec<(String, String)>>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    if let Some(hit) = SEEN.with(|seen| seen.borrow().get(s).cloned()) {
+        return hit;
+    }
+    let out = scan_point_members(s);
+    SEEN.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        if seen.len() >= 1 << 16 {
+            seen.clear();
+        }
+        seen.insert(s.to_string(), out.clone());
+    });
+    out
+}
+
+/// [`point_members`], worked out.
+fn scan_point_members(s: &str) -> Vec<(String, String)> {
+    let Ok(toks) = lex(s) else { return Vec::new() };
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut i = 0;
+    while i < toks.len() {
+        let Some(Tok::Id(first)) = toks.get(i).cloned() else {
+            i += 1;
+            continue;
+        };
+        let mut segments = vec![first];
+        let mut j = i + 1;
+        while matches!(toks.get(j), Some(Tok::Op('.'))) {
+            let Some(Tok::Id(next)) = toks.get(j + 1).cloned() else { break };
+            segments.push(next);
+            j += 2;
+        }
+        if segments.len() > 1 {
+            let last = segments.len() - 1;
+            let member = segments.get(last).cloned().unwrap_or_default();
+            let point = segments[..last].join(".");
+            if !out.contains(&(point.clone(), member.clone())) {
+                out.push((point, member));
+            }
+            i = j;
+            continue;
+        }
+        i += 1;
     }
     out
 }
@@ -694,6 +765,9 @@ struct Parser<'a> {
     spans: Vec<(usize, usize)>,
     pos: usize,
     lookup: &'a dyn Fn(&str) -> Result<Value, DocError>,
+    /// The coordinates of points a name with dots reads (`p1.x`), when the expression may
+    /// read them (a sketch point's expression may; a parameter's may not).
+    members: Option<&'a dyn Fn(&str, &str) -> Result<Value, DocError>>,
     depth: usize,
     defaults: Defaults,
 }
@@ -876,6 +950,11 @@ impl Parser<'_> {
                     }
                     return call(&id, &args, self.defaults);
                 }
+                // A name with dots: the coordinate of a point (`p1.x`). It is read as that
+                // whatever the name is, so a point named `pi` is read like any other.
+                if matches!(self.peek(), Some(Tok::Op('.'))) {
+                    return self.coordinate(id);
+                }
                 match id.as_str() {
                     "pi" | "PI" => return Ok(Value::num(std::f64::consts::PI)),
                     _ => {}
@@ -888,6 +967,25 @@ impl Parser<'_> {
             Some(Tok::Op(c)) => Err(DocError::Expr(format!("unexpected `{c}`"))),
             None => Err(DocError::Expr("unexpected end of expression".into())),
         }
+    }
+    /// The coordinate of a point: a name with dots (`p1.x`, `l1.start.x`). The name before the
+    /// last dot is the point; the one after it is the coordinate (`x` or `y`).
+    fn coordinate(&mut self, first: String) -> Result<Value, DocError> {
+        let Some(members) = self.members else {
+            return Err(DocError::Expr("a point's coordinate is only available in a sketch point's expression".into()));
+        };
+        let mut segments = vec![first];
+        while matches!(self.peek(), Some(Tok::Op('.'))) {
+            self.pos += 1;
+            match self.next() {
+                Some(Tok::Id(next)) => segments.push(next),
+                _ => return Err(DocError::Expr("a name with dots names a point's coordinate".into())),
+            }
+        }
+        let last = segments.len().saturating_sub(1);
+        let member = segments.get(last).cloned().unwrap_or_default();
+        let point = segments[..last].join(".");
+        members(&point, &member)
     }
 }
 
@@ -1159,8 +1257,28 @@ pub fn eval_with(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>) -> R
     eval_with_defaults(s, lookup, Defaults::default())
 }
 
+/// Evaluate an expression whose names with dots read a point's coordinate (`p1.x`):
+/// `members` resolves the point's name and the coordinate (`x` or `y`) to its value.
+pub fn eval_with_members(
+    s: &str,
+    lookup: &dyn Fn(&str) -> Result<Value, DocError>,
+    members: &dyn Fn(&str, &str) -> Result<Value, DocError>,
+) -> Result<Value, DocError> {
+    eval_with_defaults_members(s, lookup, Some(members), Defaults::default())
+}
+
 /// Evaluate an expression reading bare numbers next to lengths / angles in `defaults`.
 pub fn eval_with_defaults(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>, defaults: Defaults) -> Result<Value, DocError> {
+    eval_with_defaults_members(s, lookup, None, defaults)
+}
+
+/// [`eval_with_defaults`], with the coordinates of points the expression may read.
+pub fn eval_with_defaults_members(
+    s: &str,
+    lookup: &dyn Fn(&str) -> Result<Value, DocError>,
+    members: Option<&dyn Fn(&str, &str) -> Result<Value, DocError>>,
+    defaults: Defaults,
+) -> Result<Value, DocError> {
     let (toks, spans): (Vec<Tok>, Vec<(usize, usize)>) = lex_spans(s)?.into_iter().map(|(t, a, b)| (t, (a, b))).unzip();
     if toks.is_empty() {
         if let Some((name, _)) = definition(s) {
@@ -1168,7 +1286,7 @@ pub fn eval_with_defaults(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocErr
         }
         return Err(DocError::Expr("empty expression".into()));
     }
-    let mut p = Parser { toks, spans, pos: 0, lookup, depth: 0, defaults };
+    let mut p = Parser { toks, spans, pos: 0, lookup, members, depth: 0, defaults };
     let v = p.expr()?;
     if p.pos < p.toks.len() {
         return Err(DocError::Expr(format!("unexpected input in `{s}`")));

@@ -353,7 +353,9 @@ and `options`. Each has a `plugin` field (`{id, name, version, entry, kind, effe
 plugin's own description reaches the agent between `<plugin-text>` markers, as plugin text. A
 call runs without the plugin's dialogs, under its existing grants, as one undo step; arguments are
 checked as strictly as a command's; a missing grant or a `read` entry's refused import is an error
-naming it, also as `structuredContent.plugin_error`. See [Plugins as tools for
+naming it, also as `structuredContent.plugin_error`. For revision-aware edits, use
+`execute` with the namespaced command's `expected_design` precondition
+([design revisions](plugins.md#design-revisions-and-notifications)). See [Plugins as tools for
 agents](plugins.md#plugins-as-tools-for-agents).
 
 Ordinary tool calls do not query plugin tools. A bridge queries `plugin.tools` only when the
@@ -429,9 +431,15 @@ To change a feature after it is made, read its definition with `execute` `timeli
 `{"extent": {"distance": "30"}}`). The fields per feature type are listed in the book's
 *Solid features* chapter.
 
-To tell whether the design changed since a call, without reading all of it again, `execute`
-`document.revision` answers `{document_id, revision}`: `revision` moves only when the design
-changes, and `document_id` names the open design (another one after `new_design` or `open`).
+To observe changes without reading the whole design again, `execute`
+`document.revision` answers `{document_id, revision}`. Its numeric observation revision
+also follows visibility and uncaptured positions. The document identity belongs to the
+open document's session; opening or importing a design creates a fresh identity,
+including when reopening the same file. Revision-aware plugin edits use the session's
+design-state token, whose revision is an opaque string. Saving preserves that token;
+each committed edit, undo and redo creates a fresh one. Neither token field is saved
+in authored document content or undo snapshots; see
+[design revisions](plugins.md#design-revisions-and-notifications).
 See [control-protocol.md](control-protocol.md#following-the-design).
 
 To compare design proposals with several parameter edits each, call `execute` with
@@ -559,18 +567,24 @@ off the surface, edges off the curve) are counted. Two or more lines of one kind
 that gives how many there were, the bounds or reasons that stopped the mesh, the worst of them and
 the bodies they are on, for example
 `3 faces short of the 25° asked (stopped by: Corner, Points); the sharpest: smallest angle 3.00°
-(Base: face 9); bodies: "Lid" (1), "Base" (2)`. A face past its chord tolerance is never counted with
+("Base": face 9); bodies: "Lid" (1), "Base" (2)`. A face past its chord tolerance is never counted with
 one within it, and a surface or curve summary gives the chord tolerance of the face or edge it
 names. Body names are quoted, and faces that no bound stopped are counted as "nothing stopped
-N faces". `warning_count` gives the number of lines that `verbose: true` lists. A line in a wording
-the compact reply doesn't know stays as it is.
+N faces". `warning_count` gives the number of lines that `verbose: true` lists, and is there only
+when some lines were counted together. An export with one warning, or with no two warnings of one
+kind, keeps its `warnings` list as it is and has no `warning_count`: the length of `warnings` is the
+count. A line in a wording the compact reply doesn't know stays as it is.
 
 A `warning` that is null is left out. A null `error` stays, so a client that reads `error` still
 finds it. A `display_value` the same as `value` (a new parameter in its own unit) is left out.
 
-`timeline.export_script` with a `path` writes the script and replies with `path` (the file
-written, as an absolute path), `bytes` (its size) and `steps`. The compact reply leaves the script
-itself out, as it is in the file. An older app that gives no `bytes` keeps the script in the reply.
+`timeline.export_script` with a `path` writes the script and replies with `path` (as given),
+`absolute_path` (the file written, in full: a relative `path` resolves against the folder the app
+runs in), `bytes` (its size) and `steps`. `absolute_path` is left out when it can't be worked out:
+in browser storage, or when the app's folder has a name that isn't valid UTF-8. On Linux and macOS
+a `..` stays in it, because removing it from the text alone would name another file when the folder
+before it is a symbolic link; Windows removes it, as Windows resolves the path that way itself. The compact reply leaves the script itself out, as it is in the file. An older app
+that gives no `bytes` keeps the script in the reply.
 
 All other fields and errors are unchanged;
 inspection commands still return their complete results. Compaction uses the

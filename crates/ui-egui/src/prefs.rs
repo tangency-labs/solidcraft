@@ -331,7 +331,14 @@ impl TrackpadScroll {
     }
 }
 
+pub use solidcraft_engine::schema::ui_prefs::BrowserScrollWheel;
+
 impl Prefs {
+    /// Whether browser scrolling should bypass automatic wheel and trackpad detection.
+    pub fn browser_wheel_always_zooms(&self) -> bool {
+        self.browser_scroll_wheel == BrowserScrollWheel::AlwaysZoom
+    }
+
     /// Touchpad scroll zooms without overwriting the user's preference for other presets.
     pub fn trackpad_pans(&self) -> bool {
         self.nav != TOUCHPAD_NAV && self.trackpad_pan
@@ -1116,7 +1123,7 @@ preference_settings! {
     /// theme's dark sheet in a dark one), `white`, `blueprint` or `prussian_blue`
     /// (`crate::drawing_sheet_page::SheetColour`). Screen only: printed
     /// and exported sheets are always white, and nothing reaches the design or undo.
-    drawing_sheet_colour: String = "auto".into(), PAGE_DESIGN;
+    drawing_sheet_colour: String = "white".into(), PAGE_DESIGN;
     /// The on-screen drawing canvas pattern: datum_cloud, grid or none (default none, a plain background).
     drawing_sheet_backdrop: String = "none".into(), PAGE_DESIGN;
     /// Where the Drawing workspace shows its sheet chooser.
@@ -1622,6 +1629,10 @@ preference_settings! {
     zoom_stop_at_model: bool = false, PAGE_NAVIGATION => check_id("prefs.zoom_stop_at_model");
     /// Spread discrete wheel input across frames (off: apply each event immediately).
     smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
+    /// Browser-only wheel classification; native platforms keep their scroll phases.
+    browser_scroll_wheel: BrowserScrollWheel = BrowserScrollWheel::Automatic, PAGE_NAVIGATION;
+    /// The browser's one-time question to make a smooth mouse wheel zoom was answered "don't ask again".
+    browser_wheel_hint_dismissed: bool = false, PAGE_NAVIGATION;
     /// The face under the pointer keeps its highlight while the view moves under it (#2130).
     keep_hover_while_navigating: bool = true, PAGE_NAVIGATION;
     /// Two-finger trackpad scroll pans (off: it zooms like the wheel); pinch always zooms.
@@ -1749,6 +1760,10 @@ preference_settings! {
     color_vision: solidcraft_theme::ColorVision = solidcraft_theme::ColorVision::Off, PAGE_APPEARANCE;
     /// Check for updates at start and once a day (docs/updates.md).
     check_updates: bool = true, 0;
+    /// Share anonymous usage statistics (docs/privacy.md, `usage_stats`): on unless the person,
+    /// the environment or the organization turns them off. A build without the `usage-stats`
+    /// feature keeps the value and does nothing with it.
+    usage_statistics: bool = true;
     /// When the last update check ran, and the versions skipped or put off (`update::Memo`).
     update: crate::update::Memo = crate::update::Memo::default();
     /// The variant last started in each split tool family (Rectangle, Circle, Arc, Slot, Polygon, Line,
@@ -1894,6 +1909,13 @@ preference_settings! {
     construction_line_classic: bool = false, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
     sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
+    /// An image (Canvas or Decal) placed on the plane of the sketch being edited gets a
+    /// construction rectangle around it in that sketch and follows it, so the sketch's constraints
+    /// and dimensions place and size the image (#18405). A mode of the Canvas and Decal tools, set
+    /// in the Sketch Palette while one runs and kept for the next time; no Preferences page shows
+    /// or resets it. Off by default, so placing an image works as it always has: on its own, with
+    /// Frame Sketch to tie it to a rectangle when asked.
+    frame_images_in_sketch: bool = false;
     /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
     /// starts the tool or dialog again.
     shortcut_again_ends_tool: bool = true, PAGE_SKETCH;
@@ -3236,9 +3258,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             ok: "OK",
             cancel: "Cancel",
             apply: "Apply",
-            search: solidcraft_ui_text::tr("prefs.search"),
-            no_results: solidcraft_ui_text::tr("prefs.search_empty"),
-            restore_defaults: solidcraft_ui_text::tr("prefs.restore_page_defaults"),
             restore_defaults_hint: solidcraft_ui_text::tr(if layout_page {
                 "ui.panel_layout.page_defaults_hint"
             } else {
@@ -4091,9 +4110,6 @@ fn blur_availability_for(app: &SolveApp, offered: bool) -> crate::theme_options:
     if reduced == Some(true) {
         return Unavailable("prefs.blur_reduce_transparency");
     }
-    if app.home.open || crate::render_workspace::result_active(app) {
-        return Unavailable("prefs.blur_source");
-    }
     match capability {
         crate::blur::Capability::Available => Available,
         crate::blur::Capability::Unavailable(_) => Unavailable("prefs.blur_device"),
@@ -4833,7 +4849,7 @@ fn prepare_preferences(
         return Err("`drawing_sheets_visibility` must be multiple, always, off or legacy".into());
     }
     if !accepted::drawing_calibration(&new) || crate::drawing_sheet_page::SheetColour::parse(&new.drawing_sheet_colour).is_none() {
-        return Err("`drawing_calibration` must be 0.5…2 and `drawing_sheet_colour` auto, white, blueprint or prussian_blue".into());
+        return Err("`drawing_calibration` must be 0.5…2 and `drawing_sheet_colour` white, theme, blueprint or prussian_blue".into());
     }
     if !accepted::drawing_panel_width(&new)
         || !["top", "bottom", "under_browser"].contains(&new.drawing_sheet_dock.as_str())
@@ -5294,6 +5310,33 @@ mod tests {
         let mut restored = crate::SolveApp::new(Default::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
         assert!(restored.preferences.keep_unsaved_in_browser, "it is saved with the settings");
+    }
+
+    #[test]
+    fn browser_scroll_wheel_roundtrips_validates_and_resets() {
+        assert_eq!(Prefs::default().browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        assert_eq!(lenient(&json!({})).browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let initial = control(&mut app, &json!({})).unwrap();
+        assert_eq!(initial["browser_scroll_wheel"], "automatic");
+        control(&mut app, &json!({"open":"Navigation", "browser_scroll_wheel":"always_zoom", "button":"apply"})).unwrap();
+        assert!(app.preferences.browser_wheel_always_zooms());
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert_eq!(restored.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);
+        for invalid in [json!("future"), json!(""), json!(42), json!(null)] {
+            assert!(set(&mut app, &json!({"browser_scroll_wheel": invalid})).is_err());
+            assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);
+            assert_eq!(lenient(&json!({"browser_scroll_wheel": invalid})).browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        }
+        control(&mut app, &json!({"open":"Navigation", "button":"defaults"})).unwrap();
+        assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);
+        set(&mut app, &json!({"browser_scroll_wheel":"always_pan"})).unwrap();
+        assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysPan);
+        set(&mut app, &json!({"browser_scroll_wheel":"automatic"})).unwrap();
+        assert!(!app.preferences.browser_wheel_always_zooms());
     }
 
     #[test]

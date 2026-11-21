@@ -1,5 +1,5 @@
 // Original SolidCraft backdrop dual-Kawase and rounded surface composition.
-struct Params { a: vec4<f32>, rect: vec4<f32>, corners: vec4<f32>, top: vec4<f32>, bottom: vec4<f32>, outside: vec4<f32> }
+struct Params { a: vec4<f32>, rect: vec4<f32>, corners: vec4<f32> }
 @group(0) @binding(0) var image: texture_2d<f32>;
 @group(0) @binding(1) var filtering: sampler;
 @group(0) @binding(2) var<uniform> p: Params;
@@ -38,15 +38,6 @@ fn sample_at(uv: vec2<f32>) -> vec4<f32> {
         + sample_at(v.uv + vec2<f32>(0.0, -2.0*d.y)) + sample_at(v.uv + vec2<f32>(0.0, 2.0*d.y))
         + 2.0 * (sample_at(v.uv + d) + sample_at(v.uv - d)
         + sample_at(v.uv + d * vec2<f32>(1.0, -1.0)) + sample_at(v.uv + d * vec2<f32>(-1.0, 1.0)))) / 12.0;
-}
-@fragment fn background(v: Vertex) -> @location(0) vec4<f32> {
-    let q = v.position.xy;
-    var c = p.outside;
-    if all(q >= p.rect.xy) && all(q < p.rect.zw) && all(q >= p.corners.xy) && all(q < p.corners.zw) {
-        c = mix(p.top, p.bottom, clamp((q.y - p.rect.y) / max(1.0, p.rect.w - p.rect.y), 0.0, 1.0));
-    }
-    if p.a.z > 0.5 { return vec4<f32>(linear(c.rgb), 1.0); }
-    return vec4<f32>(c.rgb, 1.0);
 }
 @fragment fn panel(v: Vertex) -> @location(0) vec4<f32> {
     let center = (p.rect.xy + p.rect.zw) * 0.5;

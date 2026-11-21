@@ -366,6 +366,36 @@ pub fn continuity_on(
     sides: [(&Brep, FaceuseId); 2],
     guess: [Option<Point2>; 2],
 ) -> Result<Option<ContinuityAt>> {
+    continuity_on_surfaces(k, curve, t, resolve_sides(sides)?, guess)
+}
+
+/// Each face use's surface and sense (`+1` where the use runs with the surface's normal).
+fn resolve_sides<'b>(sides: [(&'b Brep, FaceuseId); 2]) -> Result<[(&'b Surface, f64); 2]> {
+    let one = |(b, fu): (&'b Brep, FaceuseId)| -> Result<(&'b Surface, f64)> {
+        let f = b
+            .faceuse(fu)?
+            .face
+            .ok_or_else(|| SolidError::invalid_input(OP, "a faceuse of no face"))?;
+        Ok((surface_of(b, f)?, sense(b, fu, f)?))
+    };
+    let [a, b] = sides;
+    Ok([one(a)?, one(b)?])
+}
+
+/// [`continuity_on`] between two surfaces, each with its normal's sense (`+1` or `-1`):
+/// the measure itself, which [`continuity_on`] takes for the face uses' surfaces and senses.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a `t` that is not finite; those of the evaluations and the
+/// drops.
+pub fn continuity_on_surfaces(
+    k: &Kernel,
+    curve: &Curve,
+    t: f64,
+    sides: [(&Surface, f64); 2],
+    guess: [Option<Point2>; 2],
+) -> Result<Option<ContinuityAt>> {
     if !t.is_finite() {
         return Err(SolidError::invalid_input(
             OP,
@@ -386,13 +416,7 @@ pub fn continuity_on(
     let tangent = d1 * (1.0 / speed);
     let mut feet = Vec::with_capacity(2);
     let mut jets = Vec::with_capacity(2);
-    for (&(b, fu), g) in sides.iter().zip(guess) {
-        let f = b
-            .faceuse(fu)?
-            .face
-            .ok_or_else(|| SolidError::invalid_input(OP, "a faceuse of no face"))?;
-        let sign = sense(b, fu, f)?;
-        let s = surface_of(b, f)?;
+    for (&(s, sign), g) in sides.iter().zip(guess) {
         let Some(one) = side(k, s, sign, point, g)? else {
             return Ok(None);
         };
@@ -588,6 +612,23 @@ pub fn continuity_over(
     sides: [(&Brep, FaceuseId); 2],
     stations: usize,
 ) -> Result<Vec<ContinuityStation>> {
+    continuity_over_surfaces(k, curve, interval, part, resolve_sides(sides)?, stations)
+}
+
+/// [`continuity_over`] between two surfaces, each with its normal's sense
+/// ([`continuity_on_surfaces`]).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a part not finite; those of [`continuity_on_surfaces`].
+pub fn continuity_over_surfaces(
+    k: &Kernel,
+    curve: &Curve,
+    interval: Extent1d,
+    part: [f64; 2],
+    sides: [(&Surface, f64); 2],
+    stations: usize,
+) -> Result<Vec<ContinuityStation>> {
     let [f0, f1] = part;
     if !(f0.is_finite() && f1.is_finite()) {
         return Err(SolidError::invalid_input(
@@ -600,7 +641,7 @@ pub fn continuity_over(
     for step in fractions(stations, false) {
         // the whole interval's fractions exactly as they are: `0 + 1 * step` is `step`
         let f = f0 + (f1 - f0) * step;
-        let Some(m) = continuity_on(k, curve, interval.evaluate(f), sides, guess)? else {
+        let Some(m) = continuity_on_surfaces(k, curve, interval.evaluate(f), sides, guess)? else {
             continue;
         };
         guess = [Some(m.uv[0]), Some(m.uv[1])];
@@ -611,6 +652,103 @@ pub fn continuity_over(
         });
     }
     Ok(out)
+}
+
+/// The parts of a seam that [`seam_normal_angle`] reads (fractions of its interval), each
+/// with its stations: 257 even stations over the whole, and 129 over each end's 1/32, where a
+/// corner patch's kink sits.
+pub const SEAM_PARTS: [([f64; 2], usize); 3] = [
+    ([0.0, 1.0], 257),
+    ([0.0, 1.0 / 32.0], 129),
+    ([31.0 / 32.0, 1.0], 129),
+];
+
+/// The fewest stations that must say something for [`seam_normal_angle`] to read a seam: as
+/// many as the whole part has.
+pub const SEAM_MIN_STATIONS: usize = 257;
+
+/// The rounding of the dot product of two unit normals that [`seam_normal_angle`]'s `acos`
+/// takes: `δ = 8u` (the product `γ_3`, each normal's length within `2u` of 1, twice).
+pub const SEAM_DOT_ROUNDING: f64 = 8.0 * (f64::EPSILON / 2.0);
+
+/// The rounding of a [`seam_normal_angle`] reading `theta`: a bound on `|acos(c + d) - acos(c)|`
+/// for `|d| <= δ` ([`SEAM_DOT_ROUNDING`]). It is at most `acos(1 - δ)` everywhere (worst at
+/// `c = 1`), and `acos(1 - δ) = sqrt(2 δ) (1 + δ / 12 + 3 δ^2 / 160 + ...) <= sqrt(2 δ) (1 + δ)`,
+/// the floor. Where `theta >= 2` floors the exact angle is within a floor `<= theta / 2` of the
+/// reading, so the derivative `1 / sin` of `acos` between them is at most
+/// `1 / sin(theta / 2) <= pi / theta`, and the rounding at most `pi δ / theta`: `4.1e-12` at
+/// `6.8e-4` radians, against `4.22e-8` at 0. The reading `min(θ, π - θ)` has the same bound.
+#[must_use]
+pub fn seam_angle_rounding(theta: f64) -> f64 {
+    let floor = (2.0 * SEAM_DOT_ROUNDING).sqrt() * (1.0 + SEAM_DOT_ROUNDING);
+    if theta >= 2.0 * floor {
+        std::f64::consts::PI * SEAM_DOT_ROUNDING / theta
+    } else {
+        floor
+    }
+}
+
+/// Whether seam reading `angle` is farther from tangent than reading `bar` by more than the
+/// two readings' rounding ([`seam_angle_rounding`], at each). A NaN is farther.
+#[must_use]
+pub fn seam_angle_farther(angle: f64, bar: f64) -> bool {
+    !(angle <= bar + seam_angle_rounding(angle) + seam_angle_rounding(bar))
+}
+
+/// The largest angle between the normals of two surfaces along `curve` over `interval`,
+/// either way round (`min(θ, π - θ)`, so the senses fold out): [`continuity_over_surfaces`]
+/// over each of [`SEAM_PARTS`] with its stations. `None` where fewer than
+/// [`SEAM_MIN_STATIONS`] stations say something or an angle is not finite.
+///
+/// # Errors
+///
+/// Those of [`continuity_over_surfaces`].
+pub fn seam_normal_angle(
+    k: &Kernel,
+    curve: &Curve,
+    interval: Extent1d,
+    sides: [(&Surface, f64); 2],
+) -> Result<Option<f64>> {
+    let mut worst = 0.0_f64;
+    let mut stations = 0_usize;
+    for (part, n) in SEAM_PARTS {
+        for station in continuity_over_surfaces(k, curve, interval, part, sides, n)? {
+            let t = station.measure.normal_angle;
+            if !t.is_finite() {
+                return Ok(None);
+            }
+            worst = worst.max(t.min(std::f64::consts::PI - t));
+            stations += 1;
+        }
+    }
+    Ok((stations >= SEAM_MIN_STATIONS).then_some(worst))
+}
+
+/// [`seam_normal_angle`] of edge `e` of `b` between its two faces (each in the sense of its
+/// first face use), along the edge's curve over its interval.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an edge that is not a seam of two faces, an edge without
+/// a curve, a face without a surface or a face use; those of [`seam_normal_angle`].
+pub fn edge_seam_normal_angle(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Option<f64>> {
+    let mut fs = crate::topology::edge::faces(b, e, None)?;
+    fs.sort();
+    fs.dedup();
+    let &[fa, fb] = fs.as_slice() else {
+        return Err(SolidError::invalid_input(
+            OP,
+            "an edge that is not a seam of two faces",
+        ));
+    };
+    let use_of = |f: FaceId| -> Result<FaceuseId> {
+        crate::topology::face::p2::faceuses(b, f)?
+            .0
+            .ok_or_else(|| SolidError::invalid_input(OP, "a face without a face use"))
+    };
+    let sides = resolve_sides([(b, use_of(fa)?), (b, use_of(fb)?)])?;
+    let interval = b.edge(e)?.interval;
+    seam_normal_angle(k, edge_curve(b, e)?, interval, sides)
 }
 
 /// The comb of edge `e`: [`curve_curvature`] at `teeth` even steps of its interval, the ends

@@ -56,11 +56,10 @@
 //!   [`crate::blend::fillet_corner::p2`]'s, `SmFilletEdge::MakeFilletEdge` is
 //!   `FilletBrep::make_fillet_edge` and `ReCalcFilletGeom` is
 //!   `FilletBrep::re_calc_fillet_geom` on the corner's solvers.
-//! - **Face sides** (not upstream; WR-613, the fork's tangency-labs/smlib@7fd9fb0): with
-//!   `Kernel::fixes.corner_patch_face_side_twist`, `CreateCornerPatch` marks the
-//!   ordered edges that have an original face and builds its patch with
-//!   [`BSplineSurface::create_corner_blend_on_faces`]; without it the marks are `0`,
-//!   upstream's `CreateCornerBlend`.
+//! - **Face sides** (not upstream; WR-613, the fork's tangency-labs/smlib@7fd9fb0):
+//!   `CreateCornerPatch` marks the ordered edges that have an original face and builds
+//!   its patch with [`BSplineSurface::create_corner_blend_on_faces`], so the patch meets
+//!   the body's faces along those edges (upstream's `CreateCornerBlend` has no marks).
 //! - **Nx2 adjustments.** The replaced corner edge of the Nx2 topology adjustment is
 //!   deleted from the pseudo B-rep (`FilletBrep::delete_fillet_edge`, upstream's
 //!   `delete`).
@@ -328,6 +327,9 @@ pub struct FilletCorner {
     /// corner type, exact points and, until the patch takes it, the facet's face; set
     /// with [`Self::blend`] on a 3x3 chamfer corner that is the event.
     pub chamfer_corner: Option<crate::blend::blend_corner::chamfer::ChamferCorner>,
+    /// The chamfer event's configuration at a vertex of three but for chamfers of both
+    /// convexities (`ChamferClass::MixedConvexity`): as a bevel the corner is refused.
+    pub chamfer_mixed_convexity: bool,
     /// The fork's Setback's own members (`m_vSetBacks`, `m_lFillOrder`, `m_bConvexSetBack`,
     /// `m_bSetBackOverflows`, `m_pFill`; smlib#104, WR-697): set at its creation on a blend
     /// corner that is a Setback.
@@ -683,6 +685,7 @@ impl FilletCorner {
             swept: None,
             ball: None,
             chamfer_corner: None,
+            chamfer_mixed_convexity: false,
             setback: None,
             mixed: None,
             end_cap: None,
@@ -887,6 +890,7 @@ impl FilletCorner {
         // locals
         let mut is_open_end_corner = false;
         let mut is_chamfer_corner = true;
+        let mut is_constant_round_corner = true;
 
         // get first to-be-filleted edgeuse connected to vertex
         let start_eu = *solver_eus
@@ -988,7 +992,13 @@ impl FilletCorner {
                     is_chamfer_corner = false;
                 }
             }
+            is_constant_round_corner &= constant_offsets(edge_use)
+                && solver.fsg.as_ref().is_some_and(|generator| {
+                    generator.fillet_surface_generator_type()
+                        == FilletSurfaceGeneratorType::Circular
+                });
         }
+        let can_join_at_cliff = is_chamfer_corner || is_constant_round_corner;
 
         let tan_tol_deg = rad_to_deg(tangency_tol_radians);
         let make = |kind| {
@@ -1022,8 +1032,25 @@ impl FilletCorner {
                 if edge::is_closed(b, e)? {
                     // The fork's (WR-697, smlib#79 step 4d, 543d25a): a closed edge meeting
                     // itself G1 is the blend corner's Join (its shared section)
-                    match total_eus {
-                        1..=3 => {
+                    let cliff_join = if can_join_at_cliff {
+                        super::topology::join::tangent_cliff_join(
+                            k,
+                            b,
+                            vertex,
+                            solver_eus,
+                            &all_eus,
+                            tan_tol_deg,
+                        )?
+                    } else {
+                        None
+                    };
+                    match (cliff_join, total_eus) {
+                        (Some(event), _) => Some(blend_corner(
+                            FilletCornerKind::NByTwo,
+                            event,
+                            BlendEnd::OnEndFace,
+                        )),
+                        (None, 1..=3) => {
                             if test_g1_continuity(k, b, vertex, e, e, tan_tol_deg)? {
                                 Some(blend_corner(
                                     FilletCornerKind::NByTwo,
@@ -1310,7 +1337,7 @@ impl FilletCorner {
                                     }
                                     _ => behind_deg,
                                 };
-                                let blend = crate::blend::blend_corner::classify(
+                                let mut blend = crate::blend::blend_corner::classify(
                                     k,
                                     b,
                                     Some(vertex),
@@ -1319,6 +1346,13 @@ impl FilletCorner {
                                     tan_tol_deg,
                                     join_deg,
                                 )?;
+                                if can_join_at_cliff && !blend.is_join() {
+                                    if let Some(event) = super::topology::join::tangent_cliff_join(
+                                        k, b, vertex, solver_eus, &all_eus, join_deg,
+                                    )? {
+                                        blend.event = event;
+                                    }
+                                }
                                 let mut c = make(FilletCornerKind::NByTwo);
                                 c.blend = Some(blend);
                                 Some(c)
@@ -1608,12 +1642,10 @@ impl FilletCorner {
                             .0
                             .and_then(bspline_part);
                         base_surface.clone_from(&env.target.face(orig_face)?.surface);
-                        if env.k.fixes.corner_patch_face_side_twist {
-                            face_sides |= u32::try_from(ii)
-                                .ok()
-                                .and_then(|ii| 1u32.checked_shl(ii))
-                                .unwrap_or(0);
-                        }
+                        face_sides |= u32::try_from(ii)
+                            .ok()
+                            .and_then(|ii| 1u32.checked_shl(ii))
+                            .unwrap_or(0);
                     } else {
                         // no Original Face branch - curve is only connected to filletSurfaces
                         // use primaryEdgeuse to get (neighborFace,UVTrimCurve) pair

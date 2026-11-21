@@ -819,6 +819,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             self_intersection_handler: None,
             mark_corner_patches: false,
             cliff_overflow: false,
+            continued_cliffs: BTreeMap::new(),
             open_ends: Vec::new(),
             overflow_first: false,
             classify_only: false,
@@ -832,6 +833,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             fit_kind: super::p3::FitKind::Radius,
             fit_setback: -1.0,
             rollover_adjusting: false,
+            rolled_beside_band: false,
         }
     }
 
