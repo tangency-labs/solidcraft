@@ -489,59 +489,351 @@ impl UnitDiff for Runner {
     }
 }
 
+/// Witness challenges of the optima the point solves report, shared by this unit's and the
+/// `surface.surface_point_solve_p2` runner's tests.
+///
+/// A solve claims an optimum when its operation ranks points: minimise (the nearest point
+/// to the test point), maximise (the farthest) and the 3D signed directed maximise (the
+/// farthest along the direction the test point carries). Its objective at `uv`, larger is
+/// better, is the distance, the negated distance, or the surface point dotted with the unit
+/// direction; for the directed maximise only differences matter (the solver minimises along
+/// the negated direction from a corner of the surface's box). Intersect and normalise
+/// rank nothing: they claim a point on the surface, or a normal projection.
+///
+/// What a witness can and cannot show: a witness is an in-domain point whose objective
+/// beats the reported optimum's by more than the solve's tolerance. One such point refutes
+/// the claimed optimum. No witness search proves an optimum: a solve that survives the
+/// challenge may still be wrong between the points tried.
+#[cfg(test)]
+pub(crate) mod witness {
+    use solidcore::geom::global_solver::SolverOperation;
+    use solidcore::kernel::Kernel;
+    use solidcore::surface::surface::Surface;
+
+    use super::{p2, v3};
+    use crate::golden::KnownFailing;
+
+    /// Issues a refuted optimum is listed under: maximise and directed maximise, and
+    /// minimise (nearest point).
+    pub(crate) const MAXIMUM_ISSUE: &str = "tangency-labs/solidcraft#13684";
+    pub(crate) const MINIMUM_ISSUE: &str = "tangency-labs/solidcraft#17773";
+
+    /// Points per side of the global grid, less one.
+    const GRID: u32 = 200;
+
+    /// Whether `op` ranks points, so that its answer claims an optimum.
+    pub(crate) fn ranks(op: SolverOperation) -> bool {
+        matches!(
+            op,
+            SolverOperation::Minimize
+                | SolverOperation::Maximize
+                | SolverOperation::Signed3dDirectedMaximize
+        )
+    }
+
+    /// The objective `op` optimises at `uv`, larger is better (see the module doc).
+    pub(crate) fn objective(
+        k: &Kernel,
+        surface: &Surface,
+        op: SolverOperation,
+        test: [f64; 3],
+        uv: [f64; 2],
+    ) -> f64 {
+        let at = surface.evaluate_point(k, p2(uv)).unwrap();
+        match op {
+            SolverOperation::Maximize => at.distance(v3(test)),
+            SolverOperation::Minimize => -at.distance(v3(test)),
+            SolverOperation::Signed3dDirectedMaximize => {
+                let d = v3(test);
+                at.dot(d) / d.length()
+            }
+            other => panic!("{other:?} ranks no points"),
+        }
+    }
+
+    /// One reported optimum and its best witness.
+    #[derive(Debug)]
+    pub(crate) struct Claim {
+        pub(crate) name: String,
+        pub(crate) op: SolverOperation,
+        /// `global <request>` or `local <reason code>`.
+        pub(crate) solve: String,
+        /// The record's value at its parameters (a distance; the directed maximise's
+        /// error norm).
+        pub(crate) value: f64,
+        /// The objective at the reported parameters, and those parameters.
+        pub(crate) reported: (f64, [f64; 2]),
+        /// The best witness's objective, and where.
+        pub(crate) witness: (f64, [f64; 2]),
+        pub(crate) tol: f64,
+    }
+
+    impl Claim {
+        /// Whether the witness beats the reported optimum by more than the tolerance.
+        pub(crate) fn refuted(&self) -> bool {
+            self.witness.0 > self.reported.0 + self.tol
+        }
+
+        /// The issue a refuted claim is listed under.
+        pub(crate) fn issue(&self) -> &'static str {
+            if self.op == SolverOperation::Minimize {
+                MINIMUM_ISSUE
+            } else {
+                MAXIMUM_ISSUE
+            }
+        }
+    }
+
+    /// The record's value must be the surface's at the record's parameters: the distance
+    /// to the test point (the directed maximise's value is an error norm from a point the
+    /// solver picks, not checked).
+    fn check_value(
+        k: &Kernel,
+        surface: &Surface,
+        name: &str,
+        op: SolverOperation,
+        test: [f64; 3],
+        uv: [f64; 2],
+        value: f64,
+    ) {
+        if op != SolverOperation::Signed3dDirectedMaximize {
+            let actual = objective(k, surface, op, test, uv).abs();
+            assert!(
+                (actual - value).abs() < 1e-11 * actual.max(1.0),
+                "{name}: the surface at {uv:?} is {actual}, the record says {value}"
+            );
+        }
+    }
+
+    /// A global solve's claim: its best solution (every solution is checked against the
+    /// surface) against the best of a 201 by 201 grid over `dom`, corners and edges
+    /// included.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn global(
+        k: &Kernel,
+        surface: &Surface,
+        name: &str,
+        op: SolverOperation,
+        solve: String,
+        test: [f64; 3],
+        dom: [f64; 4],
+        tol: f64,
+        solutions: &[([f64; 2], f64)],
+    ) -> Claim {
+        assert!(!solutions.is_empty(), "{name}: no solution");
+        let mut reported = (f64::NEG_INFINITY, [0.0; 2]);
+        let mut value = f64::NAN;
+        for &(uv, v) in solutions {
+            check_value(k, surface, name, op, test, uv, v);
+            let f = objective(k, surface, op, test, uv);
+            if f > reported.0 {
+                reported = (f, uv);
+                value = v;
+            }
+        }
+        let mut witness = (f64::NEG_INFINITY, [0.0; 2]);
+        for iu in 0..=GRID {
+            for iv in 0..=GRID {
+                let uv = [
+                    dom[0] + (dom[2] - dom[0]) * f64::from(iu) / f64::from(GRID),
+                    dom[1] + (dom[3] - dom[1]) * f64::from(iv) / f64::from(GRID),
+                ];
+                let f = objective(k, surface, op, test, uv);
+                if f > witness.0 {
+                    witness = (f, uv);
+                }
+            }
+        }
+        Claim {
+            name: name.to_owned(),
+            op,
+            solve,
+            value,
+            reported,
+            witness,
+            tol,
+        }
+    }
+
+    /// A local solve's claim: its answer against the points around it at a thousandth
+    /// and a millionth of the domain's size (8 directions each), clamped to `dom`. A local
+    /// solve claims only a local optimum, so a far point is no witness against it.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn local(
+        k: &Kernel,
+        surface: &Surface,
+        name: &str,
+        op: SolverOperation,
+        solve: String,
+        test: [f64; 3],
+        dom: [f64; 4],
+        tol: f64,
+        uv: [f64; 2],
+        value: f64,
+    ) -> Claim {
+        check_value(k, surface, name, op, test, uv, value);
+        let reported = (objective(k, surface, op, test, uv), uv);
+        let mut witness = (f64::NEG_INFINITY, uv);
+        for scale in [1e-3, 1e-6] {
+            for i in 0..8 {
+                let a = f64::from(i) * core::f64::consts::FRAC_PI_4;
+                let w = [
+                    (uv[0] + scale * (dom[2] - dom[0]) * a.cos()).clamp(dom[0], dom[2]),
+                    (uv[1] + scale * (dom[3] - dom[1]) * a.sin()).clamp(dom[1], dom[3]),
+                ];
+                let f = objective(k, surface, op, test, w);
+                if f > witness.0 {
+                    witness = (f, w);
+                }
+            }
+        }
+        Claim {
+            name: name.to_owned(),
+            op,
+            solve,
+            value,
+            reported,
+            witness,
+            tol,
+        }
+    }
+
+    /// Every refuted claim must be listed known failing under its issue, and every case
+    /// listed under either issue must be a refuted claim (so a fix shows).
+    pub(crate) fn check(unit: &str, claims: &[Claim], known: &KnownFailing) {
+        let mut unexplained = Vec::new();
+        for c in claims.iter().filter(|c| c.refuted()) {
+            eprintln!(
+                "{unit} {} {:?} {}: value {:?}, objective {:?} at {:?}; witness {:?} at {:?} \
+                 (better by {:e}, tol {:e})",
+                c.name,
+                c.op,
+                c.solve,
+                c.value,
+                c.reported.0,
+                c.reported.1,
+                c.witness.0,
+                c.witness.1,
+                c.witness.0 - c.reported.0,
+                c.tol
+            );
+            if !known
+                .get(&c.name)
+                .is_some_and(|why| why.starts_with(c.issue()))
+            {
+                unexplained.push(format!("{} ({})", c.name, c.issue()));
+            }
+        }
+        let stale: Vec<&String> = known
+            .iter()
+            .filter(|(_, why)| why.starts_with(MAXIMUM_ISSUE) || why.starts_with(MINIMUM_ISSUE))
+            .map(|(name, _)| name)
+            .filter(|name| !claims.iter().any(|c| &c.name == *name && c.refuted()))
+            .collect();
+        eprintln!(
+            "{unit}: {} claimed optima, {} refuted",
+            claims.len(),
+            claims.iter().filter(|c| c.refuted()).count()
+        );
+        assert!(
+            unexplained.is_empty(),
+            "optima refuted but not listed known failing: {unexplained:?}"
+        );
+        assert!(
+            stale.is_empty(),
+            "listed known failing but no witness refutes them (fixed?): {stale:?}"
+        );
+    }
+}
+
 #[cfg(test)]
 mod review_geometry_tests {
     use super::*;
     use solidcore::geom::global_solver::SolverOperation;
 
-    /// Maximum-distance results are evaluated independently and challenged by in-domain points.
+    /// Every case of the unit whose answer claims an optimum is challenged by in-domain
+    /// witnesses ([`witness`]: one witness refutes an optimum, none proves one).
+    ///
+    /// Which cases claim one, from their inputs and status: a global or local solve
+    /// ([`Operation::Stepper`] cases are single steps, which claim nothing) of an
+    /// operation that [`witness::ranks`] points, that succeeded; a global solve that
+    /// returned a solution, a local solve reported found. Every request type of a global
+    /// solve claims the same optimum: `SurfPtGlobalSolver` ignores both the request and
+    /// the target distance (`SurfacePointSolver::new` drops them) and returns its best
+    /// solution with its across-seam partners, so a nodes or find-ambiguities request is
+    /// answered like a single one.
+    ///
+    /// A global solve's best solution is challenged by a grid over the case's domain; a
+    /// local one by its neighbours only, since it claims a local optimum. A witness better
+    /// by more than the case's `tol` (the global solve's distance tolerance; for a local
+    /// solve, which takes none, the same size-relative `tol` of the case) refutes it, and
+    /// the case must be listed known failing under [`witness::MAXIMUM_ISSUE`] or
+    /// [`witness::MINIMUM_ISSUE`]; a case listed there must still be refuted.
     #[test]
-    fn review_global_maximum_outputs_have_geometric_evidence() {
+    fn review_every_claimed_optimum_survives_its_witnesses() {
         let k = Kernel::default();
         let known =
             crate::golden::known_failing(&crate::golden::default_dir(), Runner.id()).unwrap();
-        let mut unexplained = Vec::new();
-        for name in ["matrix_0267", "matrix_0337"] {
-            let case = crate::case::regression_case(&Runner, name);
+        let context = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let mut claims = Vec::new();
+        for case in Runner.cases(&context).unwrap() {
+            let name = case.name.as_str();
             let input: Inputs = case.parse().unwrap();
-            assert_eq!(input.solver, 4);
-            let surface = geometry(&k, &input).unwrap();
-            let output = rust(&input).unwrap();
-            let values = &output.values["out"];
-            let reported = values[4];
-            let actual = surface
-                .evaluate_point(&k, p2([values[2], values[3]]))
-                .unwrap()
-                .distance(v3(input.test));
-            assert!((actual - reported).abs() < 1e-11 * actual.max(1.0));
-            let mut witness = (0.0_f64, [0.0; 2]);
-            for iu in 0..=10 {
-                for iv in 0..=10 {
-                    let uv = [
-                        input.dom[0] + (input.dom[2] - input.dom[0]) * f64::from(iu) / 10.0,
-                        input.dom[1] + (input.dom[3] - input.dom[1]) * f64::from(iv) / 10.0,
-                    ];
-                    let distance = surface
-                        .evaluate_point(&k, p2(uv))
-                        .unwrap()
-                        .distance(v3(input.test));
-                    if distance > witness.0 {
-                        witness = (distance, uv);
-                    }
-                }
+            let op = solver_op(input.solver).unwrap();
+            if !witness::ranks(op) || matches!(input.op, Operation::Stepper { .. }) {
+                continue;
             }
-            eprintln!(
-                "{name}: reported={reported:?}; farther witness={witness:?}; tol={:?}",
-                input.tol
-            );
-            if witness.0 > reported + input.tol && !known.contains_key(name) {
-                unexplained.push(name);
+            let output = rust(&input).unwrap();
+            if output.deferred.is_some() || output.values["status"] != [0.0] {
+                continue;
+            }
+            let values = &output.values["out"];
+            let surface = geometry(&k, &input).unwrap();
+            match input.op {
+                Operation::Global { request, .. } => {
+                    let n = values[0] as usize;
+                    if n == 0 {
+                        continue;
+                    }
+                    let solutions: Vec<([f64; 2], f64)> = (0..n)
+                        .map(|j| (([values[2 + 7 * j], values[3 + 7 * j]]), values[4 + 7 * j]))
+                        .collect();
+                    claims.push(witness::global(
+                        &k,
+                        &surface,
+                        name,
+                        op,
+                        format!("global request {request}"),
+                        input.test,
+                        input.dom,
+                        input.tol,
+                        &solutions,
+                    ));
+                }
+                Operation::Local { .. } => {
+                    if values[0] != 1.0 {
+                        continue;
+                    }
+                    claims.push(witness::local(
+                        &k,
+                        &surface,
+                        name,
+                        op,
+                        format!("local reason {}", values[1]),
+                        input.test,
+                        input.dom,
+                        input.tol,
+                        [values[4], values[5]],
+                        values[6],
+                    ));
+                }
+                Operation::Stepper { .. } => {}
             }
         }
-        assert!(
-            unexplained.is_empty(),
-            "wrong maxima still blessed: {unexplained:?}"
-        );
+        witness::check(Runner.id(), &claims, &known);
     }
 
     /// WR-57: a maximize stepping into a singular point keeps the farthest iso curve
