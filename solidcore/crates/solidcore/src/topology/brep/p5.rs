@@ -3942,8 +3942,9 @@ mod tests {
     }
 
     /// #20373: an edge the join itself raised (`UpdateObjectTolerance`), with
-    /// more edge uses than before the stitch, has its UV trims covered after the
-    /// orientation, though no face bound raised it. One of the box's line edges has a trim
+    /// more edge uses than before the stitch, is one [`StitchRaises::joined`] gives, and
+    /// [`keep_stitch_raises`] (which the stitch runs after its orientation) covers its UV
+    /// trims and its vertices, though no face bound raised it. One of the box's line edges has a trim
     /// moved `1e-4` off it in UV and its tolerance raised from the box's to twice that (as a
     /// join raises it), below the moved trim's gap: the cover raises it over the gap. A
     /// filter keeping only the joined edges whose tolerance did not rise left it uncovered.
@@ -4030,6 +4031,14 @@ mod tests {
         let tol = b.edge(e).unwrap().tolerance;
         assert!(tol >= gap, "{tol:e} covers the trim's gap {gap:e}");
         assert!(tol <= 2.0 * gap, "{tol:e} near the gap {gap:e}");
+        // (`cover_vertex_ends`: a vertex is kept at least its edges' tolerance)
+        for v in [
+            crate::topology::edge::start_vertex(&b, e).unwrap().unwrap(),
+            crate::topology::edge::end_vertex(&b, e).unwrap().unwrap(),
+        ] {
+            let vt = b.vertex(v).unwrap().tolerance;
+            assert!(vt >= tol, "vertex {} at {vt:e} under {tol:e}", v.index());
+        }
     }
 
     /// #15718: when both ends of a joined line edge grow, each is judged against the
