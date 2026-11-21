@@ -9342,6 +9342,41 @@ mod tests {
         crate::boolean::api_brep::boolean_intersection(k, bx, torus).unwrap()
     }
 
+    /// The tolerances of the edges where the box's +x and +y faces meet the torus at the corner
+    /// of [`box_in_torus`] nearest `near`: a refusal's fit margin is a thousand of the blended
+    /// edge's tolerances (`FitMargin`).
+    fn torus_corner_edge_tolerances(near: Point3) -> Vec<f64> {
+        let mut k = Kernel::default();
+        let body = box_in_torus(&mut k);
+        let corner = crate::topology::brep::p1::vertices(&body, None)
+            .unwrap()
+            .into_iter()
+            .min_by(|a, b| {
+                let d = |v| (crate::topology::vertex::point(&body, v).unwrap() - near).length();
+                d(*a).total_cmp(&d(*b))
+            })
+            .unwrap();
+        let mut out = Vec::new();
+        for e in crate::topology::brep::p1::edges(&body, None).unwrap() {
+            let ends = crate::topology::edge::vertices(&body, e, None).unwrap();
+            if !ends.contains(&Some(corner)) {
+                continue;
+            }
+            let other = ends
+                .iter()
+                .flatten()
+                .find(|v| **v != corner)
+                .copied()
+                .unwrap();
+            let o = crate::topology::vertex::point(&body, other).unwrap();
+            if (o.x - 1.0).abs() < 1e-9 && (o.y - 1.0).abs() < 1e-9 {
+                continue; // the upright edge x|y
+            }
+            out.push(crate::topology::edge::tolerance(&body, e).unwrap());
+        }
+        out
+    }
+
     /// Round `which` edges at the corner of [`box_in_torus`] nearest `near` by `radius`.
     fn round_torus_corner(
         near: Point3,
@@ -9439,8 +9474,13 @@ mod tests {
                         let fit = fit.unwrap_or_else(|| {
                             panic!("{which:?} at {near:?} r {radius}: refused naming no size")
                         });
+                        // the bound is open: r* less the fit margin of the edge it is noted on,
+                        // to the bisection's and the balls' solve accuracy (1e-6)
+                        let margins = torus_corner_edge_tolerances(near);
                         assert!(
-                            fit < r_star && fit > r_star - 0.0105,
+                            margins
+                                .iter()
+                                .any(|tol| (fit - (r_star - 1000.0 * tol)).abs() < 1e-6),
                             "{which:?} at {near:?} r {radius}: fit {fit}, r* {r_star}"
                         );
                         Some(fit)
