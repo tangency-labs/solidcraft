@@ -203,7 +203,7 @@ fn recover_align_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Option
     }
     let origin = b.names.origin.as_ref()?;
     let FeatureKind::Align { bodies, .. } = &origin.feature.kind else { return None };
-    if !bodies.contains(&b.name) {
+    if !bodies.iter().any(|t| *t == b.name) {
         return None;
     }
     let read = EdgeName::parse(name).ok()?;
