@@ -3966,6 +3966,13 @@ impl SurfaceSheet {
         develop(&self.sheet, &flat_anchors(&self.sheet, &self.places, &self.flat))
     }
 
+    /// Each panel's frame in space as the sheet folds now: [`SurfaceSheet::places`], with the
+    /// panels later features added placed where their joints fold them.
+    pub fn folded_places(&self) -> crate::Result<Vec<Option<Rigid3>>> {
+        let dev = self.develop().map_err(|e| crate::DocError::Invalid(e.to_string()))?;
+        Ok(fold_onto(&self.sheet, &dev, &self.places)?.places)
+    }
+
     /// `regions` of a plane parallel to a flat panel, seen through it along the plane's normal,
     /// in the flat: through the panel nearest the plane of those that hold the first region's
     /// inner point (of two as near, the one with more material, then the first by name: never by
