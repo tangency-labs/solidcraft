@@ -1,0 +1,50 @@
+{
+  "ar": {
+    "ui.drawing_sheets.at_end": "هذه هي الورقة الأخيرة.",
+    "ui.drawing_sheets.at_start": "هذه هي الورقة الأولى.",
+    "ui.drawing_sheets.move_down": "نقل للأسفل",
+    "ui.drawing_sheets.move_up": "نقل للأعلى"
+  },
+  "de": {
+    "ui.drawing_sheets.at_end": "Dies ist das letzte Blatt.",
+    "ui.drawing_sheets.at_start": "Dies ist das erste Blatt.",
+    "ui.drawing_sheets.move_down": "Nach unten",
+    "ui.drawing_sheets.move_up": "Nach oben"
+  },
+  "en": {
+    "ui.drawing_sheets.at_end": "This is the last sheet.",
+    "ui.drawing_sheets.at_start": "This is the first sheet.",
+    "ui.drawing_sheets.move_down": "Move down",
+    "ui.drawing_sheets.move_up": "Move up"
+  },
+  "he": {
+    "ui.drawing_sheets.at_end": "זהו הגיליון האחרון.",
+    "ui.drawing_sheets.at_start": "זהו הגיליון הראשון.",
+    "ui.drawing_sheets.move_down": "הזזה למטה",
+    "ui.drawing_sheets.move_up": "הזזה למעלה"
+  },
+  "ja": {
+    "ui.drawing_sheets.at_end": "これは最後のシートです。",
+    "ui.drawing_sheets.at_start": "これは最初のシートです。",
+    "ui.drawing_sheets.move_down": "下へ移動",
+    "ui.drawing_sheets.move_up": "上へ移動"
+  },
+  "ko": {
+    "ui.drawing_sheets.at_end": "마지막 시트입니다.",
+    "ui.drawing_sheets.at_start": "첫 번째 시트입니다.",
+    "ui.drawing_sheets.move_down": "아래로 이동",
+    "ui.drawing_sheets.move_up": "위로 이동"
+  },
+  "vi": {
+    "ui.drawing_sheets.at_end": "Đây là tờ cuối cùng.",
+    "ui.drawing_sheets.at_start": "Đây là tờ đầu tiên.",
+    "ui.drawing_sheets.move_down": "Chuyển xuống",
+    "ui.drawing_sheets.move_up": "Chuyển lên"
+  },
+  "zh": {
+    "ui.drawing_sheets.at_end": "这是最后一张图纸。",
+    "ui.drawing_sheets.at_start": "这是第一张图纸。",
+    "ui.drawing_sheets.move_down": "下移",
+    "ui.drawing_sheets.move_up": "上移"
+  }
+}
