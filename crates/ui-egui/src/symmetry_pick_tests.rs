@@ -217,7 +217,7 @@ fn coincident_onto_a_model_edge_projects_the_edge_first() {
 }
 
 #[test]
-fn another_sketchs_curve_is_projected_not_named_in_this_sketch() {
+fn another_sketchs_curve_uses_legacy_picks_or_the_enhanced_projection_workflow() {
     for enhanced in [false, true] {
         let mut h = Harness::new();
         h.app.preferences.projection_workflow_ui = enhanced;
@@ -225,12 +225,13 @@ fn another_sketchs_curve_is_projected_not_named_in_this_sketch() {
         h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":10})).unwrap();
         h.app.finish_sketch();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-        // Both sketches contain c1: a foreign ID must never select the receiver's circle.
+        // Both sketches contain c1. Enhanced picking projects the foreign curve; the default
+        // retains main's original ID routing and hit order.
         h.app.run("sketch.circle.center", json!({"center":[35,-20],"radius":3})).unwrap();
-        h.app.run("sketch.line", json!({"points":[[20,20],[30,25]]})).unwrap();
+        let receiver_line = h.app.run("sketch.line", json!({"points":[[20,20],[30,25]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
         h.app.cam.distance = 120.0;
         h.settle();
-        h.app.start("sketch.constraint.tangent");
+        h.app.start(if enhanced { "sketch.constraint.tangent" } else { "sketch.constraint.symmetry" });
         let line = h.call("ui.at", json!({"sketch":[25,22.5]}))["result"].clone();
         h.step(&json!({ "click": line })).unwrap();
         let before = h.app.session.doc.to_json();
@@ -238,11 +239,22 @@ fn another_sketchs_curve_is_projected_not_named_in_this_sketch() {
         h.step(&json!({ "click": circle })).unwrap();
         let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         if !enhanced {
-            assert_eq!(h.app.session.doc.to_json(), before, "a foreign curve is neither projected nor mistaken for c1");
-            assert_eq!(h.app.tool.as_ref().unwrap().picks.len(), 1);
+            assert_eq!(h.app.session.doc.to_json(), before, "the default pick does not create a projection");
+            assert_eq!(h.app.tool.as_ref().unwrap().picks, [receiver_line, "c1".to_string()], "main's entity IDs remain in hit order");
             continue;
         }
         assert_eq!(sk.links.len(), 1, "{:?}", h.app.status);
         assert!(sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Tangent { .. })), "{:?}", h.app.status);
+    }
+}
+
+#[test]
+fn fix_keeps_the_generic_constraint_hint_with_projection_ui_off_or_on() {
+    for enhanced in [false, true] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.preferences.projection_workflow_ui = enhanced;
+        h.app.start("sketch.constraint.fix");
+        assert_eq!(h.app.status.as_ref().unwrap().0, h.app.tr("sketch.hint.constraint.generic"));
     }
 }

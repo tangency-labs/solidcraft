@@ -205,7 +205,6 @@ pub fn hint(id: &str) -> String {
         "sketch.constraint.horizontal_vertical" => tr("sketch.hint.constraint.horizontal_vertical").into(),
         "sketch.slot.center_to_center" | "sketch.slot.overall" => tr("sketch.hint.slot").into(),
         "sketch.constraint.midpoint" => tr("sketch.hint.constraint.midpoint").into(),
-        "sketch.constraint.fix" => tr("sketch.hint.constraint.fix").into(),
         _ if id.starts_with("sketch.constraint.") => tr("sketch.hint.constraint.generic").into(),
         _ => crate::sketch_tools::hint(id).unwrap_or_else(|| tr("sketch.hint.fallback").into()),
     }
@@ -388,12 +387,22 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
         }
         Kind::Pick(n) => {
             let hits = curve_operands(tool.cmd, pick(app, proj, pos));
-            // An origin axis, as the tool takes it ([`axis_pick`]).
-            let axis = hits.iter().find_map(|h| match h {
-                Hit::Axis { name } => axis_pick(app, &tool, name),
-                _ => None,
-            });
-            // Projected geometry is already fixed, so Fix takes only the sketch's own entities.
+            let entity = if app.preferences.projection_workflow_ui {
+                active_entity(app, &hits).map(|(id, _)| id).or_else(|| {
+                    hits.iter().find_map(|h| match h {
+                        Hit::Axis { name } => axis_pick(app, &tool, name),
+                        _ => None,
+                    })
+                })
+            } else {
+                // Keep main's hit order unless the enhanced projection workflow is enabled.
+                hits.iter().find_map(|h| match h {
+                    Hit::SketchPoint { id, .. } | Hit::SketchCurve { id, .. } => Some(id.clone()),
+                    Hit::Axis { name } => axis_pick(app, &tool, name),
+                    _ => None,
+                })
+            };
+            // Fix never projects model or foreign-sketch geometry.
             let projects = tool.cmd != "sketch.constraint.fix";
             // With nothing of the sketch there, a body's edge or vertex is picked (kept as its
             // reference): the command projects it, so any body can be constrained to, a mirrored
@@ -410,9 +419,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                     })
                     .map(|r| r.to_string())
             };
-            let own = active_entity(app, &hits).map(|(id, _)| id);
-            if let Some(id) = own
-                .or(axis)
+            if let Some(id) = entity
                 .or_else(model)
                 .or_else(|| if projects && app.preferences.projection_workflow_ui { project_pick(app, &hits).map(|(id, _)| id) } else { None })
             {
