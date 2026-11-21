@@ -194,6 +194,7 @@ mod status_tests {
         assert!(app.session.log.last().is_some_and(|l| l.starts_with("Redo: ") && !l.contains("edit.redo")), "{:?}", app.session.log.last());
     }
 }
+mod app_bar_custom;
 #[cfg(test)]
 mod apply_off_thread_tests;
 mod export_name;
@@ -2266,6 +2267,13 @@ impl SolveApp {
             }
             return;
         }
+        if id == "ui.appBarCustomize" {
+            match self.run(id, json!({})) {
+                Ok(_) => self.toolbar_custom.app_bar_customizing = !self.toolbar_custom.app_bar_customizing,
+                Err(why) => self.set_status(why, true),
+            }
+            return;
+        }
         if id == "ui.appBarReset" {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
@@ -4085,7 +4093,7 @@ impl SolveApp {
         tickets::tick(self, ctx);
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
-        if self.issue_report.draft.is_none() && self.file_picker.is_none() {
+        if self.issue_report.draft.is_none() && self.file_picker.is_none() && !self.toolbar_custom.app_bar_customizing {
             // Completion owns its keys before either CAD shortcuts or text editors see them.
             panel_runtime::reserve_host_input(self, ctx);
             if !keymap::capturing(self) {
@@ -4367,6 +4375,10 @@ impl SolveApp {
         if !self.embedded && !self.embed_editor {
             toolbar::app_bar(self, ui);
         }
+        app_bar_custom::shield(self, ui.ctx());
+        if self.toolbar_custom.app_bar_customizing {
+            ui.disable();
+        }
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());
         kicad_import_dialog::show(self, ui.ctx());
@@ -4385,6 +4397,7 @@ impl SolveApp {
         if self.home.open {
             let workspace = ui.available_rect_before_wrap();
             panel_runtime::hide_app_host(self);
+            app_bar_custom::home_escape(self, ui.ctx());
             home::show(self, ui);
             if self.home.open {
                 // Agent detection runs in the background and is only received by `agent_chat::poll`
@@ -4396,6 +4409,10 @@ impl SolveApp {
                     self.prepare_workspace_panels(ui, workspace, false);
                 }
                 prefs::show(self, ui.ctx());
+                if matches!(self.menu.target, context_menu::Target::AppBar { .. }) {
+                    context_menu::show(self, ui.ctx());
+                }
+                app_bar_custom::show(self, ui.ctx());
                 if settings_open {
                     panel_runtime::hide_app_host(self);
                 }
@@ -4441,9 +4458,10 @@ impl SolveApp {
         import_report::show(self, ui.ctx());
         linked_source::show_copies(self, ui.ctx());
         joint_handles::show_warning(self, ui.ctx());
-        shortcut_box::show(self, ui.ctx());
+        toolbar::command_search(self, ui.ctx());
         prefs::show(self, ui.ctx());
         toolbar_custom::window(self, ui.ctx());
+        app_bar_custom::show(self, ui.ctx());
         // All persistent producers have now registered this pass's actual
         // visible paint. Place independent controls and finish result navigation
         // against those footprints; the render domain stays unchanged.
