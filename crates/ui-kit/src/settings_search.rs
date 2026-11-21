@@ -876,6 +876,11 @@ pub fn set_reveal(ctx: &Context, reveal: Option<Reveal>) {
     });
 }
 
+/// The reveal the context holds: the window's copy, with the outline's time once its row drew.
+pub fn current_reveal(ctx: &Context) -> Option<Reveal> {
+    ctx.data(|data| data.get_temp::<Reveal>(Id::unique(REVEAL_ID)))
+}
+
 pub fn reveal_for(page: usize, label: &str, prefix: &str) -> Reveal {
     Reveal { page, label: label.to_string(), until: f64::NAN, prefix: prefix.to_string() }
 }

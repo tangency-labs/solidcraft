@@ -37,19 +37,30 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     crate::apply_vector(&sketch_transform, ss.plane.y),
                 )
                 .ok_or_else(|| DocError::Invalid("invalid cylinder sketch frame".into()))?;
-                let mut at = crate::apply_point(&crate::mat_mul(&inverse, &author_frame), face.at.0);
+                let at = crate::apply_point(&crate::mat_mul(&inverse, &author_frame), face.at.0);
                 let name = f
                     .face_names
                     .first()
                     .filter(|name| !name.is_empty())
-                    .ok_or_else(|| DocError::Invalid("selected cylinder face has no persistent identity".into()))?;
-                {
+                    .ok_or_else(|| DocError::Invalid("selected emboss face has no persistent identity".into()))?;
+                let hit = {
                     let mut scoped = ModelState::default();
                     scoped.bodies.push(mb.clone());
-                    let hit = crate::name_lookup::locate_face(&scoped, name, at).ok_or_else(|| DocError::reselect(name.as_str()))?;
-                    at = kernel::cylinder_emboss_anchor(&mb.body, hit.face, hit.point)?;
-                }
-                let result = kernel::emboss_cylinder_at(&mb.body, at, &plane, &regions, if *deboss { -d } else { d })?;
+                    crate::name_lookup::locate_face(&scoped, name, at).ok_or_else(|| DocError::reselect(name.as_str()))?
+                };
+                let signed = if *deboss { -d } else { d };
+                // A sketch tangent to a complete cylinder wall, outside or a bore, takes the wrap
+                // (whose refusals stand); a partial wall, a sketch off the wall and every other
+                // face are projected.
+                let result = match kernel::cylinder_emboss_anchor(&mb.body, hit.face, hit.point) {
+                    Ok(at) if kernel::infer_cylinder_emboss(&mb.body, &plane, &regions, signed)?.is_some() => {
+                        kernel::emboss_cylinder_at(&mb.body, at, &plane, &regions, signed)?
+                    }
+                    _ => {
+                        let at = kernel::emboss_anchor(&mb.body, hit.face, hit.point)?;
+                        kernel::emboss_project_face(&mb.body, hit.face, at, &plane, &regions, signed)?
+                    }
+                };
                 if let Some(slot) = st.bodies.get_mut(i) {
                     *slot = ModelBody::new(mb.name, result, mb.feature);
                 }
@@ -190,7 +201,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
                 if let Some(mb) = st.bodies.get_mut(i) {
                     let nb = kernel::transform_matrix(&mb.body, m)?;
-                    *mb = ModelBody::new(mb.name.clone(), nb, mb.feature);
+                    // A rigid alignment keeps each face's identity. Carry the transform's
+                    // exact history, as Move does, instead of naming the result by overlap
+                    // with the body still at its old position (#20288).
+                    *mb = mb.remade(Traced::step(nb, &[&mb.traced()]));
                 }
             }
             Ok(())
@@ -1032,6 +1046,17 @@ impl Document {
         sk.fold_side(a, b, ang, rr, position, *flip, fixed.map(Vec3::from)).map(Some)
     }
 
+    /// Whether a fold's `fixed` point touches no material of the sheet made from surfaces the
+    /// fold is on, as `st` has it before the fold (see `SurfaceSheet::touches`): such a
+    /// point picks no side, and the `sheet.fold` command refuses it (#263). False for a fold with
+    /// no fixed point, or one on no folded sheet (which fails as it is evaluated).
+    pub fn fold_fixed_off_sheet(&self, st: &ModelState, kind: &FeatureKind) -> bool {
+        let FeatureKind::SheetFold { sketch, curve, a, b, fixed: Some(p), body, .. } = kind else { return false };
+        let Some((i, _, _)) = surface_fold_sheet(st, body, sketch, curve, a, b) else { return false };
+        let Some(sk) = st.surface_sheets.get(i).filter(|sk| !sk.unfolded) else { return false };
+        !sk.touches(p.0, (sk.thickness * 1e-3).max(1e-6))
+    }
+
     /// This design with each fold that keeps no side that stays (a design saved before folds
     /// kept one) given the side it folds now, as `model`, this design's evaluation, has the sheet
     /// before it: from then on that side stays, wherever the line moves. None where no fold
@@ -1353,6 +1378,11 @@ pub(super) fn sheet_eval(
                 }
                 None => None,
             };
+            // An outline that reaches none of the sheet's panels holds no holes. A recompute keeps the
+            // field, so an edit that moves the outline off the sheet still builds: it says so (#19631).
+            if outline.as_ref().is_some_and(Vec::is_empty) {
+                append_warning(warning, "the perforation's outline does not overlap the sheet, so it holds no holes".into());
+            }
             let sh = st.surface_sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
             sh.perforations.push(crate::sheet::SheetPerforation { feature: f.id, diameter: d, pitch, margin, square, from_right: false, outline });
             // It keeps clear of the bends the sheet has now; a bend made later runs through it.
@@ -1377,7 +1407,7 @@ pub(super) fn sheet_eval(
             let before = sk.clone();
             let mut found = Vec::with_capacity(edges.len());
             for (k, p) in edges.iter().enumerate() {
-                found.push(surface_edge_pick(st, &before, f.edge_names.get(k), p.0)?);
+                found.push(before.edge_left_by_cuts(surface_edge_pick(st, &before, f.edge_names.get(k), p.0)?, p.0)?);
             }
             let n0 = sk.sheet.panels.len();
             for edge in found {
@@ -1403,17 +1433,9 @@ pub(super) fn sheet_eval(
                 Some(e) => val(vals, e, Kind::Length)?,
                 None => doc.rule_values_at(vals, &doc.sheet_rule(Some(&sk.rule)), Some(sk.thickness))?.bend_radius,
             };
-            // A fixed point that touches no material at all still keeps its fold recomputing (the
-            // side it was made with stays); it says so (#371).
-            let t = sk.thickness;
-            if let Some(p) = fixed
-                && !sk.touches(p.0, (t * 1e-3).max(1e-6))
-            {
-                let kept = if stays.is_some() { "the side the fold was made with stays" } else { "the side of the fold line it lies on stays" };
-                *warning = Some(format!("{} at ({:.3}, {:.3}, {:.3}); {kept}", sheet::FOLD_FIXED_OFF_SHEET, p.x, p.y, p.z));
-            }
             // The side that stays is the fold's own, decided when it was made; a fold saved
-            // before it kept one decides it as it was made (and keeps it once opened).
+            // before it kept one decides it as it was made (and keeps it once opened), by its
+            // fixed point where it has one, wherever that point lies now.
             let stays = match stays {
                 Some(side) => *side,
                 None => sk.fold_side(a, b, ang, rr, position, *flip, fixed.map(Vec3::from))?,
@@ -1737,7 +1759,7 @@ pub(super) fn surface_prism_cut(
                 // stays, a loose piece, as the body's cut reads it; pieces that each hold a joint
                 // are left to the body's cut, which keeps the panel whole. A bore runs in from the
                 // panel's edge, which the cut moves: the body's cut reads what it leaves of one.
-                if out.bores.iter().any(|b| b.panel == Some(p)) {
+                if out.bores.iter().any(|b| b.panel == p) {
                     return Ok(Vec::new());
                 }
                 let Ok((kept, parted)) = crate::sheet_surface_cuts::left_of_panel(&out, p, std::slice::from_ref(&mapped), tol) else {
@@ -1963,7 +1985,7 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
                 panel.region.holes.push(circle.outer.ccw().reversed());
             } else {
                 // Through the panel's material only, a hair past it where it runs out of it.
-                out.bores.push(crate::sheet::SheetBore { panel: Some(p), base: b + a * (u0 - p0), axis: a, radius, height: u1 - u0 + p0 + p1 });
+                out.bores.push(crate::sheet::SheetBore { panel: p, base: b + a * (u0 - p0), axis: a, radius, height: u1 - u0 + p0 + p1 });
             }
         }
         plans.push((i, out));
@@ -2303,6 +2325,20 @@ pub(super) fn tools_inside(mb: &ModelBody, reach: &[Option<Aabb3>]) -> bool {
     }
     let b = b.inflated(2.0 * mb.body.record().tolerance + 1e-6);
     reach.iter().flatten().all(|tool| b.contains(tool.min) && b.contains(tool.max))
+}
+
+/// Whether some tool of `reach` meets the box of `mb`'s vertices, grown as [`exact_box`] grows
+/// the exact box. Every vertex lies in the body's exact box, so such a tool meets the exact box
+/// too and the exact box cannot show it apart of the body: it need not be measured. A tool cut
+/// through a wall of a rounded spline body reaches out of its mesh box ([`tools_inside`]), and
+/// measuring that body's exact box took the kernel over a minute for each of its holes.
+pub(super) fn tools_meet_vertices(mb: &ModelBody, reach: &[Option<Aabb3>]) -> bool {
+    let b: Aabb3 = mb.body.record().vertices.iter().map(|v| Vec3::new(v.point[0], v.point[1], v.point[2])).collect();
+    if b.is_empty() || !b.min.is_finite() || !b.max.is_finite() {
+        return false;
+    }
+    let b = b.inflated(2.0 * mb.body.record().tolerance + 1e-6);
+    reach.iter().flatten().any(|tool| b.meets(tool))
 }
 
 /// Whether the line through `at` along `dir` is known to pass farther than `reach` from the

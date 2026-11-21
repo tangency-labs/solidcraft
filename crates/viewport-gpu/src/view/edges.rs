@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use super::{EDGE_PX, EDGE_SEG_SIZE, INSTANCE_SIZE, InstancedDraw, SharedEdges, Tally, placement_stretch};
+use super::{EDGE_PX, EDGE_SEG_SIZE, INSTANCE_SIZE, InstancedDraw, SharedEdges, Tally};
 
 /// The instanced edge vertex shaders, appended to the viewport's (they draw with its
 /// `line_vertex` and `fs_line`).
@@ -409,13 +409,12 @@ pub(super) struct Pipelines {
 }
 
 /// The edge level each placement in view is drawn from: the coarsest whose deviation stays under
-/// [`EDGE_PX`] where the placement is drawn (`rows`, its box `bounds`, the view `vp` of `size`
-/// pixels), in whichever direction the edges stray ([`placement_stretch`]).
-pub(super) fn level_for(e: &SharedEdges, rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32; 4]; 4], size: [f32; 2]) -> u8 {
+/// [`EDGE_PX`] at `scale`, the most pixels a millimetre of the placement covers where it is drawn
+/// ([`placement_stretch`](super::placement_stretch)).
+pub(super) fn level_for(e: &SharedEdges, scale: f32) -> u8 {
     if e.levels.len() < 2 {
         return 0;
     }
-    let scale = placement_stretch(rows, bounds, vp, size);
     let level = e.levels.iter().rposition(|(_, tolerance)| *tolerance * scale <= EDGE_PX).unwrap_or(0);
     u8::try_from(level).unwrap_or(0)
 }

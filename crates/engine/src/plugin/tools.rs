@@ -32,7 +32,7 @@ pub fn tools(session: &mut Session, name: Option<&str>) -> Vec<PluginTool> {
         session.plugin_state.register_discovered(id.clone(), folder.clone());
         for entry in &runtime.entries {
             let (kind, input_schema) = match entry.kind {
-                EntryKind::Command => (PluginToolKind::Command, craft_plugin::strict_input_schema(&entry.input_schema)),
+                EntryKind::Command => (PluginToolKind::Command, tool_input(entry)),
                 EntryKind::Importer => (PluginToolKind::Importer, importer_schema(entry)),
             };
             found.push(PluginTool {
@@ -71,11 +71,12 @@ pub(super) fn describe(session: &Session, id: &str) -> Result<Option<Value>> {
     let Some(entry) = runtime.entries.iter().find(|e| e.name == name) else { return Ok(None) };
     Ok(Some(match entry.kind {
         EntryKind::Command => {
-            let inputs = craft_plugin::strict_input_schema(&entry.input_schema);
+            let inputs = tool_input(entry);
             json!({"id":id,"label":name,"kind":"command","plugin":plugin,
-                "params":"approval: the package hash (plugin.tools {name} or plugin.inspect), params: the entry's declared inputs; as a tool, the inputs alone",
+                "params":"approval: the package hash (plugin.tools {name} or plugin.inspect), params: the entry's declared inputs, expected_design?: token this edit was computed against; as a tool, the inputs alone",
                 "input":{"type":"object","required":["approval","params"],"additionalProperties":false,"properties":{
-                    "approval":{"type":"string"},"params":inputs.clone()}},
+                    "approval":{"type":"string"},"params":inputs.clone(),
+                    "expected_design":schemars::schema_for!(craft_plugin::DesignToken).to_value()}},
                 "tool":{"name":id,"input":inputs},
                 "output":{},"effect":entry.effect,"slots":entry.slots})
         }
@@ -90,6 +91,18 @@ pub(super) fn describe(session: &Session, id: &str) -> Result<Option<Value>> {
     }))
 }
 
+/// Hook defaults are resolved by the engine, so the transport accepts omitted keys. All other
+/// constraints remain; the original required list is checked after the single hook call.
+fn tool_input(entry: &Entry) -> Value {
+    let mut schema = craft_plugin::strict_input_schema(&entry.input_schema);
+    if entry.dialog_hook
+        && let Some(object) = schema.as_object_mut()
+    {
+        object.remove("required");
+    }
+    schema
+}
+
 /// An importer tool's arguments: the file, and the options the importer declares.
 fn importer_schema(entry: &Entry) -> Value {
     let extensions: Vec<String> = entry.extensions.iter().map(|e| format!(".{e}")).collect();
@@ -97,7 +110,7 @@ fn importer_schema(entry: &Entry) -> Value {
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": format!("The file to open ({})", extensions.join(", "))},
-            "options": craft_plugin::strict_input_schema(&entry.input_schema),
+            "options": tool_input(entry),
         },
         "required": ["path"],
         "additionalProperties": false,
@@ -186,6 +199,12 @@ fn explain(error: HostError, manifest: &Manifest, grants: &Grants, entry: &str) 
 pub fn structured_error(text: &str) -> Option<Value> {
     if text.len() > 8192 {
         return None;
+    }
+    if let Some((_, rest)) = text.split_once("interactive_required: opening ")
+        && let Some((entry, _)) = rest.split_once(" requires the app form;")
+        && entry.split('.').all(valid_id)
+    {
+        return Some(json!({"kind":"interactive_required","entry":entry,"action":"call_entry_with_params"}));
     }
     let start = text.find("plugin `")?;
     let rest = &text[start + "plugin `".len()..];

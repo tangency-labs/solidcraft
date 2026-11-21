@@ -441,7 +441,8 @@ construction's bound, §8 there). After the imprint each vertex a definition mad
 tolerance (`certified_vertex_gaps`, `topology_intersector/p1.rs`), and only while its ball stays
 clear of the far vertex of each of its edges, that vertex taken at its own grown tolerance (or at
 the tolerance a growing edge of it passes on to its ends, whichever is larger): a vertex cannot
-stand for both ends of an edge. The two operands' vertices of one definition become one, which
+stand for both ends of an edge. The tolerance a growing edge passes on is judged the same way at
+each end it raises and at every vertex that end becomes one with. The two operands' vertices of one definition become one, which
 takes the larger tolerance of the two, so each ball is judged at that one, about its own point,
 and the two are covered together or not at all. For a definition placed exactly (each source a
 vertex, a line edge or a plane face) the gap is all there is to cover, so its edges grow to their
@@ -627,7 +628,7 @@ What the port does today:
   outside), far beyond δ, while the circles stay within δ of each other between them; each
   crossing is fixed along the wall only to the tolerance over the crossing angle, so the two
   cannot be told apart. `circle_coplanar_circle_intersect_in_contact`
-  (`geom/geom_utility/p1.rs`) takes an overlap below a contact tolerance of its own as one
+  (`geom/geom_utility/p1.rs`) takes an overlap up to a contact tolerance of its own as one
   touching point midway between their nearest points, apart from the near-miss band in which
   circles that far apart touch. On the boolean's path every site that decides the contact
   passes the same contact tolerance, `contact_tol_3d` (`geom/tol.rs`: the system zone
@@ -644,8 +645,49 @@ What the port does today:
   it) cross in two lines at every site and are still refused as not a solid, as before; with
   the intersection tolerance as the contact tolerance they came out a valid solid that kept the
   second tool whole, as a void.
+  Two more sites read the same contact where a surface intersection meets such a lens. The
+  surface intersection of a curved face with a wall standing on the other face's flat (a
+  ball cut flat, or a half torus, under a boss a hair past its rim) finds the lens where it
+  meets the faces' boundaries, at its two crossings, as isolated points, each on an edge of
+  both faces; with no curve through it, a point classified onto an edge of each operand is
+  the crossing of those two edges, and where they are circles in one plane that touch by the
+  contact rule it is their touching point (`touch_of_edges`, `proto_topology/p3.rs`, before
+  the proto vertex is looked for). And a flat face's domain is the box of its trims, so a
+  side of it runs along the face's round edge where that edge reaches the box: the plane's
+  section of a cylinder or cone standing on the face, a circle a hair past the edge, was
+  cut at the side, its two ends the lens's half length off the touch; it now touches that
+  side when it overlaps it by up to the contact tolerance, where both surfaces are
+  faces' (`Plane::make_new_plane_ellipse_in_contact`, `surface/plane/p2.rs`, from
+  `surface/cone/p3.rs`). The overlap is the cap's exact depth past the side, the ellipse's
+  support distance along the side's normal less the side's offset from the centre, never
+  the sagitta of a circle of the smaller radius, which takes a long ellipse's cap near its
+  major vertex for about a hundredth of its depth at radii 100 and 1. Either left the crossings as vertices of their own beside the
+  touch, or curves ending there, so the union of such a boss failed or kept a vertex a
+  crossing away (`boolean_api.rs`, `a_boss_a_hair_past_a_cut_balls_rim_joins`;
+  `solidcore-ops` `boolean.rs`, the half torus's seam).
   Parallel cones (drill points) are met by the marching intersection and are not decided this
   way, nor are coplanar faces bounded by such circles.
+- **A contact at the tolerance.** Each site decides the contact from its own copy of the two
+  curves (an edge's circle, a face pair's intersection curve, an osculating circle), the same
+  curves by different constructions, a few roundings of their coordinates apart. A boss placed
+  exactly the tolerance over a rim (stress corpus S0051) read its overlap as 9.99999999962e-6 at
+  some sites and 1.0000000000673e-5 at others: a touch at one, two crossings 0.0148 apart at
+  another, and the merge then related the operands' edges across the lens both ways. So the
+  contact is read once, by one predicate, `within_contact_tol` (`geom/tol.rs`): a distance is
+  within the contact tolerance unless proved past it by more than the rounding the copies can
+  differ by (γ₃₂ of the largest coordinate), as two points are one unless proved apart ("One
+  point or two", §5). Every site that decides a contact reads it: the circle/circle and
+  line/circle intersections in contact (`geom/geom_utility/p1.rs`), and through them the walls
+  of parallel cylinders, the edge/curve circles, the classifier's osculating circles and the
+  touching point of two edges (`touch_of_edges`); the plane's section touching a side of its
+  domain (`surface/plane/p2.rs`); and the plane's tangent line on a cylinder or a cone's
+  generator (`surface/cone/p3.rs`, with the faces' zone tolerance). A contact at the tolerance
+  is a touch at every site; one proved past it crosses at every site. What remains open (§10):
+  circles overlapping by more than the contact tolerance and up to the intersection tolerance
+  cross at every site, as above, and two such holes are refused as not a solid; and at a small
+  zone tolerance the marching intersection of a wall with the other face can trace a curve
+  inside the lens, from the touch to a crossing along both edges (a boss 5e-8 past a rim at a
+  zone tolerance of 1e-7), which the contact does not end.
 - **A curve ending tangent to an edge.** A curve that touches an edge in contact of high order
   (where a wall's intersection with a top tangent to the floor ends on the floor's arc, apart from
   it as the fourth power of the distance) stays within the scaled zero of the edge for a while
@@ -802,6 +844,12 @@ A reviewer can check each of these on a change to the boolean.
 - Exact pcurves for sphere, cone and torus sections, so that exact edges stop carrying fitted trims
   (§7).
 - Refusals that name the cause and the place in the body, in place of bare `SM_ERR`.
+- Circles overlapping past touching by more than the contact tolerance and up to the
+  intersection tolerance cross at every site, and two such holes are refused as not a solid
+  (§6, "Circles a hair less than tangent").
+- A curve the marching intersection traces inside a lens of two circles in contact, from the
+  touch to a crossing along both edges (a boss 5e-8 past a rim at a zone tolerance of 1e-7),
+  is kept as a curve; the contact makes it no event (§6).
 
 ## 11. If you're stuck
 

@@ -63,13 +63,13 @@ use crate::blend::fillet_geom::p1::{
     FilletEdgeType, FilletErrorType, FilletGeomId, FilletSurfaceStorage,
 };
 use crate::blend::fillet_overflow::{
-    creases, edge_curve, edge_on_surface, extend, in_material, make_extension_face, ExtendOutcome,
-    Extension, Rail,
+    creases, edge_curve, edge_on_surface, extend, in_material, make_extension_face, outward_plane,
+    ExtendOutcome, Extension, Rail,
 };
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
-use crate::error::blend::BlendFailure;
+use crate::error::blend::{BlendFailure, CliffInput};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::ids;
 use crate::geom::global_solver::SolverOperation;
@@ -78,6 +78,7 @@ use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE};
 use crate::nurbs::b_spline_curve::{BSplineCurve, ControlPointForm};
+use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::iges::clamp_curve;
 use crate::nurbs::knots::Side;
@@ -1867,6 +1868,65 @@ impl FilletSession<'_> {
         trimmed
     }
 
+    /// The two creases that touch at the seam of a closed strip end on different
+    /// parameter sides. Cut it at an interior section first so the following
+    /// face splits retain both arcs of the closed contact rail at the seam.
+    fn divide_closed_cliff_strips(
+        &mut self,
+        k: &mut Kernel,
+        sheet: &mut Brep,
+        solvers: &[FilletObject],
+        round_of: &mut BTreeMap<FaceId, usize>,
+        tol: f64,
+    ) -> Result<()> {
+        if self.executive.continued_cliffs.is_empty() {
+            return Ok(());
+        }
+        for (face, index) in round_of.clone() {
+            let Some(solver) = solvers.get(index) else {
+                continue;
+            };
+            if !self.executive.continued_cliffs.contains_key(solver) {
+                continue;
+            }
+            let domain = face::p2::uv_domain(sheet, face)?;
+            let surface = face::p2::surface(sheet, face)?.ok_or_else(|| {
+                SolidError::blend(
+                    OP,
+                    BlendFailure::CliffInputMissing {
+                        face,
+                        input: CliffInput::Surface,
+                    },
+                )
+            })?;
+            if !surface.is_periodic(k, &domain, SurfParamType::U)? {
+                continue;
+            }
+            let section = surface
+                .create_iso_parametric_curve(
+                    k,
+                    SurfParamType::U,
+                    domain.evaluate(0.5, 0.5).x,
+                    tol,
+                    Some(&domain),
+                    false,
+                )?
+                .curve;
+            let (extra, _) = with_kernel_callbacks(k, sheet, |k, b, env| {
+                merge_curves(k, b, env, face, tol, vec![section], None)
+            })?;
+            if extra.is_empty() {
+                return Err(SolidError::blend(
+                    OP,
+                    BlendFailure::ClosedCliffWouldNotSplit { face },
+                ));
+            }
+            self.copy_divided_blend_face_mark(sheet, face, &extra)?;
+            round_of.extend(extra.into_iter().map(|part| (part, index)));
+        }
+        Ok(())
+    }
+
     /// The fork's `TrimAtCreases` from its tolerances on: `sheet` (the open ends cut)
     /// trimmed and sewn into the target. A refusal is written to `note`.
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one fork routine
@@ -1940,6 +2000,7 @@ impl FilletSession<'_> {
                 }
             }
         }
+        self.divide_closed_cliff_strips(k, &mut sheet, solvers, &mut round_of, tol)?;
         let mut kept_rounds: BTreeSet<usize> = BTreeSet::new();
         // #18646: each kept piece of a round's face, with its round
         let mut piece_round: BTreeMap<FaceId, usize> = BTreeMap::new();
@@ -1967,6 +2028,7 @@ impl FilletSession<'_> {
         let mut edge_creases: Vec<Curve> = Vec::new();
         // #17633: each such crease with the face it crosses
         let mut face_creases: Vec<(FaceId, Curve)> = Vec::new();
+        let mut continued_walls: BTreeMap<FaceId, BTreeSet<EdgeId>> = BTreeMap::new();
         // WR-717: the body's edges those creases stand for
         let mut crease_edges: Vec<EdgeId> = Vec::new();
         for s in crate::topology::brep::p1::faces(&sheet, None)? {
@@ -1974,6 +2036,19 @@ impl FilletSession<'_> {
                 crate::query::face::p1::calculate_bounding_box(k, &sheet, s, false)?;
             sheet_box.expand_absolute(on_tol);
             let sheet_edges = face::p4::edges(&sheet, s, None, false, None)?;
+            let mut cliffs = BTreeMap::new();
+            if let Some(crossings) = round_of
+                .get(&s)
+                .and_then(|&i| solvers.get(i))
+                .and_then(|solver| self.executive.continued_cliffs.get(solver))
+            {
+                for &(rim, wall) in crossings {
+                    continued_walls.entry(wall).or_default().insert(rim);
+                    if let std::collections::btree_map::Entry::Vacant(entry) = cliffs.entry(wall) {
+                        entry.insert(outward_plane(k, self.objects.target, wall)?);
+                    }
+                }
+            }
             let mut pieces: Vec<Curve> = Vec::new();
             let mut only: Option<Surface> = None;
             let mut crossed = 0_usize;
@@ -2007,15 +2082,16 @@ impl FilletSession<'_> {
                 // WR-717: a face that holds a rail only to the looser `on_tol` (a rail that
                 // runs past it by less than that, beside the edge where the sheet crosses
                 // it) is still looked at for creases
-                if bx.are_disjoint(&sheet_box, on_tol) || held.contains(&f) {
+                let continues = cliffs.contains_key(&f);
+                if !continues && (bx.are_disjoint(&sheet_box, on_tol) || held.contains(&f)) {
                     continue;
                 }
                 // fitted to a thousandth of the body's accuracy (#17673, `SECTION_FIT`), so
                 // that creases meeting at a corner of the sheet (on two faces past a cliff)
                 // meet there well within it; exact sections stay exact
-                // Not upstream (#10876): the Roll-over's torus against a cliff face parallel
-                // to its axis, its creases as certified graphs over the face's profile
-                let certified = if self.executive.roll_over_pass {
+                // Where a roll-over or continued cliff meets a torus parallel to its axis,
+                // use the certified creases over the face's profile (#10876).
+                let certified = if self.executive.roll_over_pass || continues {
                     match (
                         face::p2::surface(&sheet, s)?,
                         face::p2::surface(self.objects.target, f)?,
@@ -2044,16 +2120,20 @@ impl FilletSession<'_> {
                 // each crease where it lies inside both faces
                 let mut in_face = Vec::new();
                 let mut along = Vec::new();
-                for c in &found {
-                    pieces_in_face_to_ends(
-                        k,
-                        c,
-                        self.objects.target,
-                        f,
-                        tol,
-                        &mut in_face,
-                        &mut along,
-                    )?;
+                if continues {
+                    in_face = found;
+                } else {
+                    for c in &found {
+                        pieces_in_face_to_ends(
+                            k,
+                            c,
+                            self.objects.target,
+                            f,
+                            tol,
+                            &mut in_face,
+                            &mut along,
+                        )?;
+                    }
                 }
                 // Not the fork's (WR-717, #2385): a crease that runs along an edge of the
                 // face, within tolerance, is that edge. The sheet is split along it as along
@@ -2126,6 +2206,7 @@ impl FilletSession<'_> {
                 })?
                 .0;
             }
+            self.copy_divided_blend_face_mark(&sheet, s, &new_faces)?;
             // keep the pieces inside the target
             let mut all = vec![s];
             all.extend(new_faces);
@@ -2162,7 +2243,10 @@ impl FilletSession<'_> {
                         ),
                     );
                 }
-                if if piece_adds { inside } else { !inside } {
+                let beyond_cliff = cliffs
+                    .values()
+                    .any(|&(at, outward)| (inner - at).dot(outward) > tol);
+                if beyond_cliff || if piece_adds { inside } else { !inside } {
                     with_kernel_callbacks(k, &mut sheet, |k, b, env| delete(k, b, env, p))?;
                 } else if let Some(&i) = round_of.get(&s) {
                     kept_rounds.insert(i);
@@ -2252,47 +2336,65 @@ impl FilletSession<'_> {
         let mut along: Vec<Curve> = Vec::new();
         for &f in &target_faces {
             let mut rails = Vec::new();
+            let mut cliff_rails = Vec::new();
+            let rim = continued_walls.get(&f);
             for (&e, on) in lamina_edges.iter().zip(&on_faces) {
                 if on.contains(&f) {
                     let start = edge::start_vertex(&sheet, e)?
                         .ok_or_else(|| SolidError::blend_missing(OP, "the edge's start vertex"))?;
                     let end = edge::end_vertex(&sheet, e)?
                         .ok_or_else(|| SolidError::blend_missing(OP, "the edge's end vertex"))?;
-                    rails.push(Rail {
+                    let rail = Rail {
                         curve: edge_curve(k, &sheet, e)?,
                         start,
                         end,
                         start_point: vertex::point(&sheet, start)?,
                         end_point: vertex::point(&sheet, end)?,
-                    });
-                }
-            }
-            if rails.is_empty() {
-                continue;
-            }
-            let outcome = extend(k, self.objects.target, f, &rails, blended_edges, tol)?;
-            match outcome {
-                ExtendOutcome::Refused(why) => {
-                    // the fork's NoteFitOnFace(f) (49f393d, WR-696)
-                    let face = FilletObject::Topology(FilletBody::Target, EntityRef::Face(f));
-                    self.executive
-                        .note_fit_on_face(k, &mut self.objects, face)?;
-                    return refuse(
-                        note,
-                        refusal(
-                            FilletErrorType::NoRoom,
-                            Some(NoRoomReason::RailRunsPastFaceIntoMaterial),
-                            why,
-                        ),
-                    );
-                }
-                ExtendOutcome::Extended(made) => {
-                    for ext in &made {
-                        for &e in &ext.along {
-                            along.push(edge_curve(k, self.objects.target, e)?);
-                        }
+                    };
+                    // A shared target face can carry an ordinary rail from a
+                    // different span. Only this span's crease extends into void.
+                    let fills_void = rim.is_some()
+                        && edge::faces(&sheet, e, None)?
+                            .iter()
+                            .filter_map(|face| piece_round.get(face))
+                            .filter_map(|&i| solvers.get(i))
+                            .filter_map(|solver| self.executive.continued_cliffs.get(solver))
+                            .flatten()
+                            .any(|&(_, wall)| wall == f);
+                    if fills_void {
+                        cliff_rails.push(rail);
+                    } else {
+                        rails.push(rail);
                     }
-                    extensions.extend(made);
+                }
+            }
+            for (rails, rim) in [(&rails, None), (&cliff_rails, rim)] {
+                if rails.is_empty() {
+                    continue;
+                }
+                match extend(k, self.objects.target, f, rails, blended_edges, tol, rim)? {
+                    ExtendOutcome::Refused(why) => {
+                        // the fork's NoteFitOnFace(f) (49f393d, WR-696)
+                        let face = FilletObject::Topology(FilletBody::Target, EntityRef::Face(f));
+                        self.executive
+                            .note_fit_on_face(k, &mut self.objects, face)?;
+                        return refuse(
+                            note,
+                            refusal(
+                                FilletErrorType::NoRoom,
+                                Some(NoRoomReason::RailRunsPastFaceIntoMaterial),
+                                why,
+                            ),
+                        );
+                    }
+                    ExtendOutcome::Extended(made) => {
+                        for ext in &made {
+                            for &e in &ext.along {
+                                along.push(edge_curve(k, self.objects.target, e)?);
+                            }
+                        }
+                        extensions.extend(made);
+                    }
                 }
             }
         }

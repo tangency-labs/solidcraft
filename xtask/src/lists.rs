@@ -88,6 +88,7 @@ const FIXED_ARRAYS: &[(&str, &str)] = &[
     ("crates/engine/src/cmd/parts.rs", "METRIC"),            // Standard metric screw diameters and pitches.
     ("crates/engine/src/cmd/parts.rs", "SHCS"),              // ISO 4762 socket-head cap screw dimensions.
     ("crates/engine/src/cmd/parts.rs", "WASHER"),            // ISO 7089 plain washer dimensions.
+    ("crates/io/src/e57.rs", "CRC_TABLE"),                   // CRC-32C lookup table: one entry per byte value.
     ("crates/ui-egui/src/dialogs_assembly.rs", "TYPES"),     // Joint types; TYPE_LABELS must stay the same length.
     ("crates/ui-egui/src/dialogs_assembly.rs", "TYPE_LABELS"), // Labels for TYPES, index for index.
     ("crates/ui-egui/src/space_mouse_calibration.rs", "STEP_PROMPTS"), // Labels for the twelve fixed calibration motions.

@@ -1334,6 +1334,16 @@ const ROUNDING: f64 = f64::EPSILON + 3.0 * (0.5 * f64::EPSILON) / (1.0 - 3.0 * (
 ///   does its first), the end is kept and the run back to it is the wiggle: every point from the
 ///   end of the last forward step to the one before the last is moved onto the last.
 ///
+/// At the line's first point the wiggle is the step before: a run out of the first point, no
+/// longer than `tol`, that the step after it turns back on and carries past the first point by
+/// more than the run. The first point is kept and the run is turned the way the line goes, each
+/// of its points moved to its mirror image through the first point. The steps keep their lengths,
+/// so the curve or surface keeps its speed at its start and leaves it the way it goes on, without
+/// turning. Moved onto the first point, the run would stop it there: a zero-speed end, which the
+/// kernel's check takes as a vanishing radius of curvature (its tests 13 and 14) wherever the
+/// faces at that end are not tangent. A point of the run moves by twice its distance from the
+/// first point.
+///
 /// Each point keeps its weight, and a move is made only when it leaves the point within `tol` of
 /// where `original` has it. With positive weights every point of the curve or surface is a convex
 /// combination of its control points, so it moves by at most `tol`, however many passes moved
@@ -1350,6 +1360,8 @@ fn unfold_line(line: &mut [[f64; 4]], original: &[[f64; 4]], tol: f64) {
     let last = line.len().saturating_sub(1);
     // The last step that had a direction, and the point it ended at.
     let mut before: Option<(Vec3, usize)> = None;
+    // No step with a direction has turned back yet: the line is on its run out of its first point.
+    let mut running_out = true;
     for k in 0..last {
         let (Some(a), Some(b)) = (line.get(k).map(point), line.get(k + 1).map(point)) else { break };
         let step = Vec3::new(b.x - a.x, b.y - a.y, b.z - a.z);
@@ -1360,12 +1372,10 @@ fn unfold_line(line: &mut [[f64; 4]], original: &[[f64; 4]], tol: f64) {
         if length <= ROUNDING * (a.dist(origin) + b.dist(origin)) {
             continue;
         }
+        let back = before.filter(|(d, _)| (d.x * step.x + d.y * step.y + d.z * step.z) < cos_back * d.dist(origin) * length);
         // Back on the step before it, and shorter than that step: a wiggle on the way, not the
         // polygon running back (a curve that turns round, or one written back and forth).
-        let turn = before.filter(|(d, _)| {
-            let dl = d.dist(origin);
-            length <= tol && length < dl && (d.x * step.x + d.y * step.y + d.z * step.z) < cos_back * dl * length
-        });
+        let turn = back.filter(|(d, _)| length <= tol && length < d.dist(origin));
         if let Some((_, from)) = turn {
             // The points that move, and where to.
             let (run, onto) = if k + 1 < last { (k + 1..=k + 1, a) } else { (from..=k, b) };
@@ -1379,6 +1389,26 @@ fn unfold_line(line: &mut [[f64; 4]], original: &[[f64; 4]], tol: f64) {
                 continue;
             }
         }
+        // Back past the first point, farther than the run out of it went: the run is the
+        // wiggle, and is turned the way the line goes.
+        if let (true, Some(_), Some(first)) = (running_out, back, line.first().map(point)) {
+            let run = first.dist(a);
+            let mirror = |p: Vec3| Vec3::new(2.0 * first.x - p.x, 2.0 * first.y - p.y, 2.0 * first.z - p.z);
+            let run_points: Vec<Vec3> = (1..=k).filter_map(|i| line.get(i).map(point)).collect();
+            if run <= tol && first.dist(b) > run && run_points.len() == k && run_points.iter().zip(1..).all(|(&p, i)| within(i, mirror(p))) {
+                for (p, i) in run_points.into_iter().zip(1..) {
+                    if let Some(h) = line.get_mut(i) {
+                        let (m, w) = (mirror(p), h[3]);
+                        *h = [m.x * w, m.y * w, m.z * w, w];
+                    }
+                }
+                let tip = mirror(a);
+                before = Some((Vec3::new(b.x - tip.x, b.y - tip.y, b.z - tip.z), k + 1));
+                running_out = false;
+                continue;
+            }
+        }
+        running_out &= back.is_none();
         before = Some((step, k + 1));
     }
 }

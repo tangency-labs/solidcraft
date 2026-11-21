@@ -2186,7 +2186,7 @@ fn list_commands_narrows_by_prefix_panel_fields_and_page() {
 #[test]
 fn legacy_design_files_open_by_contents() {
     let mut s = server();
-    let saved = String::from_utf8(solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::default())).unwrap();
+    let saved = String::from_utf8(solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::default()).unwrap()).unwrap();
     assert!(saved.contains("\"solidcraft/"), "{saved}");
     let legacy = saved.replace("\"solidcraft/", "\"solvecraft/");
     let path = std::env::temp_dir().join(format!("solidcraft-mcp-legacy-{}.solvecraft", std::process::id()));
@@ -3374,6 +3374,17 @@ fn mechanisms_skill_example_moves_as_documented() {
     let hinge = value(&list, "Hinge");
     assert!((hinge - stop).abs() < 0.01, "stopped at {hinge}, the rod's limit is at {stop}");
     assert!(value(&list, "Stroke") <= 10.0 + 1e-6 && (value(&list, "Stroke") - stroke(hinge)).abs() < 1e-6, "{list}");
+}
+
+/// Every tool the server offers has a name for the person watching an agent use it (the UI shows
+/// that name, never the tool's id).
+#[test]
+fn every_tool_has_a_name_for_the_person_watching() {
+    use solidcraft_engine::agent_tools::{MESSAGE_TOOLS, tool_command};
+    for tool in tool_definitions() {
+        let name = tool["name"].as_str().unwrap();
+        assert!(tool_command(name).is_some() || MESSAGE_TOOLS.contains(&name), "tool `{name}` needs a name in solidcraft_engine::agent_tools");
+    }
 }
 
 /// Every tool and command the agent skills call exists, so a rename or removal can't leave the

@@ -1008,6 +1008,8 @@ mod tests {
         // The new design: Plate's history at its root, with Pin, the joint and the parameter it uses
         let mut part = Session::default();
         run(&mut part, "doc.open", json!({"path": file}));
+        assert_ne!(part.design_token().document_id, s.design_token().document_id, "the extracted part is a distinct design");
+        assert_ne!(part.design_token().revision, s.design_token().revision);
         assert_eq!(part.doc.name, "plate");
         assert_eq!(part.doc.components.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Pin"]);
         assert_eq!(part.doc.occurrences.len(), 1);

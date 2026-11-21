@@ -24,6 +24,9 @@
 //! | [`FilletLaw::bspline`] | `SmBSplineFilletLaw::SmBSplineFilletLaw(SmBSplineCurve*, const SmExtent1d&)` |
 //!
 //! Deviations:
+//! - **Split rails** (WR-19502, not upstream). Before `SetFilletBrepEdgeMap` maps a
+//!   geometry's rails, [`EdgeMapAccess::mapping_split_rail`] splits any rail that the
+//!   stitched fillet B-rep splits and no one edge matches. The pieces join its other rails.
 //! - **Solver approximation tolerance.** `SetFilletParameters` takes `TOL_FACTOR` times
 //!   the edge's fit tolerance (`topology::edgeuse::p3::fit_tolerance`), not times an edge
 //!   tolerance the healer raised only to cover the edge's edge/face gap; elsewhere the
@@ -145,6 +148,18 @@ pub trait EdgeMapAccess<O: ClassObject + SolutionObject + Ord> {
         candidates: &[O],
         multiple: bool,
     ) -> Result<()>;
+    /// (Not upstream; #19502) Split rail `rail` of geometry `geom` where the candidate
+    /// edges split it end to end and none matches it whole, the pieces after the first
+    /// joining the geometry's other rails on that side; nothing otherwise.
+    /// # Errors
+    /// Invalid or missing object; those of the lookup and the split.
+    fn mapping_split_rail(
+        &mut self,
+        k: &mut Kernel,
+        geom: O,
+        rail: O,
+        candidates: &[O],
+    ) -> Result<()>;
 }
 impl<O, A> EdgeMapAccess<O> for A
 where
@@ -189,6 +204,11 @@ where
         multiple: bool,
     ) -> Result<()> {
         ExecutiveAccess::find_fillet_brep_edge(self, k, edge, candidates, multiple)
+    }
+    /// The executive's access has no pseudo B-rep of its own to split: its rails map as
+    /// upstream's do.
+    fn mapping_split_rail(&mut self, _: &mut Kernel, _: O, _: O, _: &[O]) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -663,6 +683,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         };
         // the fork's (WR-631): no cliff overflow, no open ends yet
         self.cliff_overflow = false;
+        self.continued_cliffs.clear();
         self.open_ends.clear();
         // the fork's (WR-634): no overflow edges yet, no mitred edges (9ba2b12)
         self.overflow_edges.clear();
@@ -1208,6 +1229,18 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         while let Some(solver) = self.solvers.get(index).copied() {
             index += 1;
             for geom in access.mapping_solver_geoms(solver)? {
+                // (not upstream; #19502) a rail the stitch split, where another round's
+                // rail meets it along part of it, is split there too, each piece mapping
+                // to its own edge
+                for rail in access
+                    .mapping_geom_rails(geom)?
+                    .into_iter()
+                    .take(2)
+                    .flatten()
+                {
+                    access.mapping_split_rail(k, geom, rail, &edges)?;
+                }
+
                 // set every rail's fillet B-rep edge
                 for rail in access.mapping_geom_rails(geom)? {
                     let rail = rail.ok_or_else(|| null!("the rail"))?;

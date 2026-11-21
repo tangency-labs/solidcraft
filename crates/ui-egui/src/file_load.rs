@@ -114,6 +114,9 @@ pub struct Request {
     pub(crate) auto_verify: bool,
     /// Open the file with an importer plugin (`file.import`) even when SolidCraft reads it too.
     pub plugin_import: bool,
+    /// An export written to be printed: once written it opens in the system's PDF viewer
+    /// ([`crate::drawing_workspace::print::written`]).
+    pub print: bool,
 }
 
 impl Request {
@@ -136,6 +139,7 @@ impl Request {
             tries: 0,
             auto_verify: false,
             plugin_import: false,
+            print: false,
         }
     }
     /// It adds what it reads to the active design.
@@ -167,6 +171,8 @@ impl Request {
             Kind::InsertDesign => ("component.insert_design", self.params()),
             Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir})),
             Kind::ExportDxf => ("file.export_view_dxf", Value::Object(self.options.clone())),
+            // Printing writes the whole drawing's PDF that asks for actual size.
+            Kind::ExportSheet if self.print => ("drawing.print", Value::Object(self.options.clone())),
             Kind::ExportSheet => ("drawing.export", Value::Object(self.options.clone())),
             Kind::UpdateLinks => ("component.update_links", Value::Object(self.options.clone())),
             Kind::ReloadCloud => ("pointcloud.reload", Value::Object(self.options.clone())),
@@ -772,6 +778,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         tries: 0,
         auto_verify: false,
         plugin_import: id == "file.import",
+        print: false,
     };
     let _ = begin_request(app, request);
     None
@@ -1709,6 +1716,10 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
     {
         let request = &running.request;
         match job {
+            Ok(made) if request.kind.exports() && request.print => {
+                crate::drawing_workspace::print::written(app, &request.path);
+                request.answer(Ok(made.result));
+            }
             Ok(made) if request.kind.exports() => {
                 if !request.path.is_empty() {
                     app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &request.path)]), false);
@@ -1760,7 +1771,12 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     app.big_operation = true;
                 } else {
                     // No tab left for it: `adopt` said why, and nothing else of the open happens.
-                    if !crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| crate::documents::adopt(app, made.session)) {
+                    // Opened by a program, not the user: nothing is asked about its links.
+                    app.docs.quiet_open = request.reply.is_some() || request.chat_turn.is_some();
+                    let adopted =
+                        crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| crate::documents::adopt(app, made.session));
+                    app.docs.quiet_open = false;
+                    if !adopted {
                         app.open_meshing_next = false;
                         // A design to recover stays offered, as when its read fails.
                         if let Kind::Recover { id, dir } = &request.kind {

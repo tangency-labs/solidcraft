@@ -232,13 +232,6 @@ pub(crate) fn ensure_session(app: &mut SolveApp, ctx: &egui::Context) {
     app.tree.content.context = Some(ctx.clone());
 }
 
-/// An external producer replaced this slot. Its ownership supersedes our previous write even
-/// when the new vector contains precisely the same names (Select Other is one such producer).
-pub(crate) fn set_external_body_hover(app: &mut SolveApp, bodies: Vec<String>) {
-    app.tree.content.last_bodies.clear();
-    app.viewport.hover_bodies = bodies;
-}
-
 /// The timeline's own write of the hovered feature. A Browser row that lit the same feature a
 /// frame earlier no longer owns it, so expiring the Browser's hover leaves the timeline's alone.
 pub(crate) fn set_timeline_feature_hover(app: &mut SolveApp, feature: Option<u64>) {
