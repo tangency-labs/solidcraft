@@ -653,7 +653,97 @@ mod tests {
     use crate::geom::extent2d::Extent2d;
     use crate::geom::vector2d::Vec2;
     use crate::kernel::KernelOptions;
+    use crate::nurbs::b_spline_surface::BSplineSurface;
+    use crate::nurbs::math::{CPoint, NOW};
     use crate::surface::plane::Plane;
+
+    /// The blossom of `x^k` in degree `n` at `i` copies of `hi` and `n - i` of `lo`: the
+    /// elementary symmetric sum of degree `k` over its arguments, divided by `C(n, k)`.
+    fn blossom(n: u32, k: u32, i: u32, lo: f64, hi: f64) -> f64 {
+        let choose = |n: u32, k: u32| -> f64 {
+            (0..k).fold(1.0, |c, j| c * f64::from(n - j) / f64::from(j + 1))
+        };
+        let power = |x: f64, e: u32| (0..e).fold(1.0, |p, _| p * x);
+        let sum: f64 = (0..=k.min(i))
+            .filter(|&r| k - r <= n - i)
+            .map(|r| choose(i, r) * choose(n - i, k - r) * power(hi, r) * power(lo, k - r))
+            .sum();
+        sum / choose(n, k)
+    }
+
+    /// The surface `(u, v, 1e8 (v - u^2) (v - u^2 - 5e-5))` over `[-0.02, 0.02] x
+    /// [-2e-4, 4e-4]`, one Bézier patch of degrees 4 and 2 (its control points the polynomial's
+    /// blossoms, so it is the polynomial exactly). The plane `z = 0` crosses it on two branches,
+    /// `v = u^2` and `v = u^2 + 5e-5`.
+    fn two_parabolas() -> Surface {
+        let (u0, u1, v0, v1) = (-0.02, 0.02, -2.0e-4, 4.0e-4);
+        let (a, d) = (1.0e8, 5.0e-5);
+        // f = a (v^2 - 2 u^2 v + u^4 - d v + d u^2), as (coefficient, power of u, power of v)
+        let terms = [
+            (a, 0, 2),
+            (-2.0 * a, 2, 1),
+            (a, 4, 0),
+            (-a * d, 0, 1),
+            (a * d, 2, 0),
+        ];
+        let net: Vec<Vec<CPoint>> = (0..=4_u32)
+            .map(|i| {
+                (0..=2_u32)
+                    .map(|j| {
+                        let x = blossom(4, 1, i, u0, u1);
+                        let y = blossom(2, 1, j, v0, v1);
+                        let z = terms
+                            .iter()
+                            .map(|&(c, p, q)| {
+                                c * blossom(4, p, i, u0, u1) * blossom(2, q, j, v0, v1)
+                            })
+                            .sum();
+                        CPoint::new(x, y, z, NOW)
+                    })
+                    .collect()
+            })
+            .collect();
+        let uk = [u0, u0, u0, u0, u0, u1, u1, u1, u1, u1];
+        let vk = [v0, v0, v0, v1, v1, v1];
+        Surface::from(BSplineSurface::from_data(4, 2, 4, 2, 9, 5, &net, &uk, &vk).unwrap())
+    }
+
+    /// A span is split on the branch its stations trace. Stations at `u = -0.01` and `0.01` on
+    /// `v = u^2` (a turn of 0.04 rad between them) have their chord's middle at `v = 1e-4`,
+    /// above the other branch `v = u^2 + 5e-5`: the crossing's point reached from there lies on
+    /// that other branch, 5e-5 off the stations' one, in the middle of the chord and nearer
+    /// each station than the other is.
+    #[test]
+    fn a_span_is_split_on_the_branch_its_stations_trace_not_on_one_passing_between_them() {
+        let k = Kernel::new(&KernelOptions::default());
+        let surf = two_parabolas();
+        let tr = Tracer {
+            k: &k,
+            surf: &surf,
+            origin: Point3::new(0.0, 0.0, 0.0),
+            normal: Vec3::new(0.0, 0.0, 1.0),
+            plane_u: Vec3::new(1.0, 0.0, 0.0),
+            plane_v: Vec3::new(0.0, 1.0, 0.0),
+            g11: 1.0,
+            g12: 0.0,
+            g22: 1.0,
+            det_g: 1.0,
+            scale: 1.0,
+        };
+        let station = |u: f64| {
+            let mut uv = Point2::new(u, u * u);
+            assert!(tr.onto_plane(&mut uv).unwrap());
+            assert!((uv.y - uv.x * uv.x).abs() <= 1.0e-12, "{uv:?}");
+            let x = surf.evaluate_point(&k, uv).unwrap();
+            let (t, rate) = tr.tangent(uv, Vec3::new(1.0, 0.0, 0.0)).unwrap();
+            Station { uv, x, t, rate }
+        };
+        let (a, b) = (station(-0.01), station(0.01));
+        let uv = tr.between(&a, &b).unwrap().unwrap();
+        // on v = u^2, not on v = u^2 + 5e-5
+        assert!((uv.y - uv.x * uv.x).abs() <= 1.0e-9, "{uv:?}");
+        assert!(uv.x.abs() <= 0.005, "{uv:?}");
+    }
 
     /// A plane `z = 0` whose `u` runs 100 times faster than its `v`, cut by a plane at 45
     /// degrees along a line nearly along `u`, from a start 2e-6 off the crossing. The crossing's
