@@ -5,6 +5,7 @@
 //! list of common finishes) through one `component.metadata.set`
 //! per definition. The toolbar's Bill of Materials (`ui.start` of `assembly.bom`) opens it.
 
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use egui::RichText;
@@ -27,11 +28,12 @@ pub struct BomPanel {
     pub group_children: bool,
     /// The rows for (design revision, top, by_definition, group_children).
     cache: Option<(u64, [bool; 3], Rc<Value>)>,
-    /// The picked row's index, its fields as edited (one for each of [`edit_keys`]), and what they
-    /// were when it was picked.
+    /// The picked row's index, its fields as edited (one for each of [`edit_keys`]), and what each of
+    /// its components holds as far as Apply knows: the row's fields when it was picked, then what
+    /// Apply last wrote to that component (by component id).
     pub picked: Option<usize>,
     pub fields: Vec<String>,
-    opened: Vec<String>,
+    opened: BTreeMap<String, Vec<String>>,
     /// The selected definitions, whose row index can change when the table refreshes.
     target: Option<(Value, Value)>,
     /// The last refusal.
@@ -47,7 +49,7 @@ impl BomPanel {
         self.picked = Some(i);
         self.target = Some((row["components"].clone(), row["definition"].clone()));
         self.fields = opened_fields(row);
-        self.opened = self.fields.clone();
+        self.opened = row["components"].as_array().into_iter().flatten().map(|c| (c.to_string(), self.fields.clone())).collect();
     }
 
     fn clear_pick(&mut self) {
@@ -191,11 +193,18 @@ fn opened_fields(row: &Value) -> Vec<String> {
 
 /// Apply the picked row's fields to each of its definitions (one undo step each). The design is
 /// the part of a design that places nothing (component 0): its properties are the design's own.
+///
+/// What it sends for a component is what differs from what that component holds as far as Apply
+/// knows ([`BomPanel::opened`]: the part properties always, material and finish only when changed, so
+/// a worked-out material is never turned into typed text). Each successful write updates that
+/// component's baseline, a refused one leaves it, so a value typed back to what the row opened with
+/// is still written after another was applied.
 fn apply(app: &mut SolveApp, d: &mut BomPanel, row: &Value) {
-    let sent = |at: usize, now: &String| at < ALWAYS || d.opened.get(at) != Some(now);
-    let params: Map<String, Value> =
-        edit_keys().zip(&d.fields).enumerate().filter(|(at, (_, v))| sent(*at, v)).map(|(_, (k, v))| (k.to_string(), json!(v))).collect();
     for c in row["components"].as_array().into_iter().flatten() {
+        let known = d.opened.get(&c.to_string());
+        let sent = |at: usize, now: &String| at < ALWAYS || known.and_then(|k| k.get(at)) != Some(now);
+        let params: Map<String, Value> =
+            edit_keys().zip(&d.fields).enumerate().filter(|(at, (_, v))| sent(*at, v)).map(|(_, (k, v))| (k.to_string(), json!(v))).collect();
         let r = if c.as_u64() == Some(0) {
             app.run("document.metadata.set", json!({"values": params}))
         } else {
@@ -207,6 +216,7 @@ fn apply(app: &mut SolveApp, d: &mut BomPanel, row: &Value) {
             d.refuse(app.session.revision, e);
             return;
         }
+        d.opened.insert(c.to_string(), d.fields.clone());
     }
     d.error = None;
     d.refused = None;
