@@ -973,6 +973,9 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | crates/look/icons/design/svg/model/plane_square_to_line.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/model/rotate_member.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | tests/step-regressions/net_steps_back_within_tolerance.step | SolidCraft contributors | written entity by entity from formulas (a tetrahedron whose spline face's control net steps back 0.5 um); import regression fixture | MIT OR Apache-2.0 |
+| `assets/locales/pending/linked-file-folders.json` | SolidCraft contributors | Original linked-files-from-other-folders question and preference translations | MIT OR Apache-2.0 |
+| assets/locales/pending/plugin-design-events.json | SolidCraft contributors | Original plugin design-change messages and translations | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/rect_edge_center.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 
 ## Code adapted from sibling projects
 

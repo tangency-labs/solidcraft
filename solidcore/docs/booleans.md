@@ -658,7 +658,10 @@ What the port does today:
   cut at the side, its two ends the lens's half length off the touch; it now touches that
   side when it overlaps it by up to the contact tolerance, where both surfaces are
   faces' (`Plane::make_new_plane_ellipse_in_contact`, `surface/plane/p2.rs`, from
-  `surface/cone/p3.rs`). Either left the crossings as vertices of their own beside the
+  `surface/cone/p3.rs`). The overlap is the cap's exact depth past the side, the ellipse's
+  support distance along the side's normal less the side's offset from the centre, never
+  the sagitta of a circle of the smaller radius, which takes a long ellipse's cap near its
+  major vertex for about a hundredth of its depth at radii 100 and 1. Either left the crossings as vertices of their own beside the
   touch, or curves ending there, so the union of such a boss failed or kept a vertex a
   crossing away (`boolean_api.rs`, `a_boss_a_hair_past_a_cut_balls_rim_joins`;
   `solidcore-ops` `boolean.rs`, the half torus's seam).

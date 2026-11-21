@@ -26,19 +26,24 @@ pub(crate) struct Windows {
     hosts: Vec<Host>,
     returned: Option<Returned>,
     choices: Vec<WindowChoice>,
-    pending_move: Option<PendingMove>,
+    foreign_views: Vec<(WindowId, DesignView)>,
+    strip_order: std::collections::BTreeMap<u64, Vec<u64>>,
+    pending_action: Option<PendingAction>,
 }
 
 #[derive(Clone)]
 pub(crate) struct WindowChoice {
     pub(crate) id: WindowId,
     pub(crate) label: String,
+    pub(crate) name: String,
+    pub(crate) number: u32,
     display: Option<String>,
 }
 
-struct PendingMove {
-    view: u64,
-    target: WindowTarget,
+enum PendingAction {
+    Move { view: u64, target: WindowTarget },
+    Focus { view: u64, window: WindowId },
+    Close { view: u64 },
 }
 
 struct Host {
@@ -108,6 +113,78 @@ pub(crate) fn detached_views(app: &SolveApp) -> impl Iterator<Item = (WindowId, 
     app.docs.views.windows().iter().flat_map(|window| window.views.views().iter().map(|view| (window.id, view)))
 }
 
+fn available_strip_views(app: &SolveApp) -> impl Iterator<Item = (WindowId, &DesignView)> {
+    let window = app.view_windows.current_window();
+    app.docs
+        .views
+        .views()
+        .iter()
+        .map(move |view| (window, view))
+        .chain(detached_views(app))
+        .chain(app.view_windows.foreign_views.iter().map(|(window, view)| (*window, view)))
+}
+
+/// Draw every view without changing its position when it moves to another window.
+pub(crate) fn remember_strip_order(app: &mut SolveApp) {
+    if !app.preferences.clear_view_tabs {
+        return;
+    }
+    let available: Vec<_> = available_strip_views(app).map(|(window, view)| (window, view.id)).collect();
+    let tab = app.docs.active_tab();
+    app.view_windows.strip_order.retain(|tab, _| app.docs.tab_open(*tab));
+    let order = app.view_windows.strip_order.entry(tab).or_default();
+    order.retain(|id| available.iter().any(|(_, available)| available == id));
+    for (i, (window, id)) in available.iter().copied().enumerate() {
+        if order.contains(&id) {
+            continue;
+        }
+        let at = available[..i]
+            .iter()
+            .rev()
+            .filter(|(owner, _)| *owner == window)
+            .find_map(|(_, before)| order.iter().position(|known| known == before).map(|at| at + 1))
+            .or_else(|| {
+                available[i + 1..].iter().filter(|(owner, _)| *owner == window).find_map(|(_, after)| order.iter().position(|known| known == after))
+            })
+            .unwrap_or(order.len());
+        order.insert(at, id);
+    }
+}
+
+/// Update the local positions while leaving views in other windows where they were.
+pub(crate) fn remember_local_reorder(app: &mut SolveApp, window: WindowId) {
+    remember_strip_order(app);
+    let local = if app.view_windows.painting == Some(window) { Some(&app.docs.views) } else { app.docs.views.views_of(window) };
+    let Some(views) = local else { return };
+    let Some(order) = app.view_windows.strip_order.get_mut(&app.docs.current_tab()) else { return };
+    let mut local = views.ids();
+    for id in order.iter_mut().filter(|id| views.get(**id).is_some()) {
+        if let Some(next) = local.next() {
+            *id = next;
+        }
+    }
+}
+
+pub(crate) fn strip_views(app: &SolveApp) -> Vec<(WindowId, &DesignView)> {
+    let order = app.view_windows.strip_order.get(&app.docs.current_tab());
+    let mut views: Vec<_> = available_strip_views(app).collect();
+    if app.preferences.clear_view_tabs
+        && let Some(order) = order
+    {
+        views.sort_by_key(|(_, view)| order.iter().position(|id| *id == view.id).unwrap_or(usize::MAX));
+    }
+    views
+}
+
+pub(crate) fn window_name(app: &SolveApp, id: WindowId) -> String {
+    let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
+    if id == 0 {
+        locale.text("view_tab.main_window").to_owned()
+    } else {
+        locale.format("view_tab.window_number", &[("n", &id.saturating_add(1).to_string())])
+    }
+}
+
 pub(crate) fn view_at(app: &SolveApp, window: Option<WindowId>, index: usize) -> Result<u64, String> {
     if let Some(child) = app.view_windows.painting
         && window.is_none_or(|window| window == child)
@@ -124,10 +201,17 @@ pub(crate) fn view_at(app: &SolveApp, window: Option<WindowId>, index: usize) ->
 }
 
 pub(crate) fn focus_view(app: &mut SolveApp, view: u64, window: Option<WindowId>) -> Result<(), String> {
-    if let Some(child) = app.view_windows.painting
-        && window.is_none_or(|window| window == child)
-    {
-        return documents::activate_local_view(app, view).then_some(()).ok_or_else(|| "no_such_view".into());
+    if let Some(child) = app.view_windows.painting {
+        if window.is_none_or(|window| window == child) && app.docs.views.get(view).is_some() {
+            return documents::activate_local_view(app, view).then_some(()).ok_or_else(|| "no_such_view".into());
+        }
+        if let Some((owner, _)) =
+            app.view_windows.foreign_views.iter().find(|(owner, candidate)| candidate.id == view && window.is_none_or(|window| window == *owner))
+        {
+            app.view_windows.pending_action = Some(PendingAction::Focus { view, window: *owner });
+            return Ok(());
+        }
+        return Err("no_such_view".into());
     }
     let owner = app.docs.views.window_of(view).ok_or("no_such_view")?;
     if let Some(window) = window.filter(|window| *window != owner) {
@@ -155,6 +239,14 @@ fn focus(app: &mut SolveApp, id: WindowId) -> Result<(), String> {
     app.view_windows.focus = Some(target);
     app.view_windows.last_focus = Some(target);
     Ok(())
+}
+
+pub(crate) fn defer_close_view(app: &mut SolveApp, view: u64) -> bool {
+    if !app.view_windows.foreign_views.iter().any(|(_, candidate)| candidate.id == view) {
+        return false;
+    }
+    app.view_windows.pending_action = Some(PendingAction::Close { view });
+    true
 }
 
 fn placement(app: &SolveApp, view: u64, request: &Value, pointer: Option<egui::Pos2>) -> Option<WindowPlacement> {
@@ -329,10 +421,14 @@ fn collect_choices(app: &SolveApp) -> Vec<WindowChoice> {
         let position = (rect.center().to_vec2() * scale).to_pos2();
         displays.iter().find(|display| display.bounds.contains(position))
     });
-    std::iter::once(WindowChoice { id: 0, label: label(&app.session.doc.name, root_display.map(|display| display.name.as_str())), display: None })
+    let choice = |id: WindowId, fallback: &str, display: Option<String>, label_display: Option<&str>| {
+        let name = if app.preferences.clear_view_tabs { window_name(app, id) } else { fallback.to_owned() };
+        WindowChoice { id, label: label(&name, label_display), name, number: id.saturating_add(1), display }
+    };
+    std::iter::once(choice(0, &app.session.doc.name, None, root_display.map(|display| display.name.as_str())))
         .chain(app.docs.views.windows().iter().map(|window| {
-            let display = window.placement.as_ref().and_then(|placement| placement.display.clone());
-            WindowChoice { id: window.id, label: label(&window.views.active().name, display.as_deref()), display }
+            let display = window.placement.as_ref().and_then(|placement| placement.display.as_deref());
+            choice(window.id, &window.views.active().name, display.map(str::to_owned), display)
         }))
         .collect()
 }
@@ -346,8 +442,13 @@ pub(crate) fn can_create(app: &SolveApp) -> bool {
 }
 
 fn apply_move(app: &mut SolveApp, view: u64, target: WindowTarget) -> Result<Value, String> {
+    remember_strip_order(app);
     let tab = app.docs.active_tab();
+    let indexed = matches!(target, WindowTarget::Existing { index: Some(_), .. });
     let moved = documents::move_view_to_window(app, view, target).map_err(|error| error.code().to_owned())?;
+    if indexed {
+        remember_local_reorder(app, moved.window);
+    }
     if moved.from != moved.window {
         app.view_windows.focus = Some((tab, moved.window));
         app.view_windows.last_focus = Some((tab, moved.window));
@@ -361,9 +462,11 @@ fn move_view(app: &mut SolveApp, view: u64, target: WindowTarget) -> Result<Valu
         return Err("windows_unavailable".into());
     }
     if let Some(source) = app.view_windows.painting {
-        if app.docs.views.get(view).is_none() {
-            return Err("no_such_view".into());
-        }
+        let source = if app.docs.views.get(view).is_some() {
+            source
+        } else {
+            app.view_windows.foreign_views.iter().find(|(_, candidate)| candidate.id == view).map(|(owner, _)| *owner).ok_or("no_such_view")?
+        };
         match &target {
             WindowTarget::New { .. } if !can_create(app) => return Err("too_many_windows".into()),
             WindowTarget::Existing { window, .. } | WindowTarget::Dock { window, .. }
@@ -375,7 +478,7 @@ fn move_view(app: &mut SolveApp, view: u64, target: WindowTarget) -> Result<Valu
         }
         // The callback owns the source strip until it finishes drawing. Apply membership changes
         // after the strip has been put back in the design.
-        app.view_windows.pending_move = Some(PendingMove { view, target });
+        app.view_windows.pending_action = Some(PendingAction::Move { view, target });
         return Ok(json!({"view": view, "from": source}));
     }
     apply_move(app, view, target)
@@ -838,6 +941,9 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             }
             documents::park_active_look(app);
             app.view_windows.parked = Some((tab, app.docs.views.ids().collect()));
+            if app.preferences.clear_view_tabs {
+                app.view_windows.foreign_views = available_strip_views(app).map(|(owner, view)| (owner, view.clone())).collect();
+            }
             std::mem::swap(&mut app.docs.views, &mut window.views);
             host.swap(app);
             let decorations = (app.custom_titlebar, app.integrated_titlebar);
@@ -867,6 +973,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             (app.custom_titlebar, app.integrated_titlebar) = decorations;
             app.view_windows.painting = None;
             app.view_windows.parked = None;
+            app.view_windows.foreign_views.clear();
             host.swap(app);
             documents::exchange_window_views(app, tab, &mut window.views);
             if on_child_design {
@@ -882,9 +989,14 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             continue;
         }
         documents::put_view_window(app, tab, window);
-        if let Some(pending) = app.view_windows.pending_move.take() {
+        if let Some(pending) = app.view_windows.pending_action.take() {
             documents::select_tab(app, tab);
-            if let Err(reason) = apply_move(app, pending.view, pending.target) {
+            let result = match pending {
+                PendingAction::Move { view, target } => apply_move(app, view, target).map(|_| ()),
+                PendingAction::Focus { view, window } => focus_view(app, view, Some(window)).and_then(|()| focus(app, window)),
+                PendingAction::Close { view } => app.run("tab.view.close", json!({"id": view})).map(|_| ()),
+            };
+            if let Err(reason) = result {
                 crate::design_view_ui::show_move_error(app, reason);
             }
             if app.view_windows.focus == Some((tab, 0)) {
