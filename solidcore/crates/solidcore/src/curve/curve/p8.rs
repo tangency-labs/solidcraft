@@ -150,6 +150,7 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, ProjectionType};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{gamma, NOZ};
 use crate::nurbs::nurbs_crv::{crv_accel_bound, crv_point_error, crv_speed_bound};
+use crate::profile::profile_scope;
 
 const OP_GCI: &str = "curve::curve::p8::Curve::global_curve_intersect";
 
@@ -1070,6 +1071,7 @@ impl Curve {
         // get target curves' caches (kept in the caller's slots, see
         // `global_curve_intersect_cached`), each at its owner's zone tolerance when the
         // caller resolved one
+        profile_scope!(k, "curve::global_curve_intersect::cached");
         if cache1_slot.is_none() {
             *cache1_slot = Some(build_cache(k, self, h_this, zone_tols[0])?);
         }
