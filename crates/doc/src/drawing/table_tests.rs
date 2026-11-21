@@ -229,7 +229,7 @@ fn damaged(d: &Drawing, change: impl Fn(&mut Value)) -> String {
 #[test]
 fn a_parts_list_saved_before_the_finish_column_keeps_its_columns() {
     let (d, first) = tabled();
-    let mut v: Value = serde_json::from_str(&d.to_json().unwrap()).unwrap();
+    let v: Value = serde_json::from_str(&d.to_json().unwrap()).unwrap();
     let old = ["item", "quantity", "name", "description", "material", "mass", "ballooned"];
     // A list saved by an older release, and one whose editor added a FINISH column before the mass.
     let with_finish = |v: &mut Value| {
