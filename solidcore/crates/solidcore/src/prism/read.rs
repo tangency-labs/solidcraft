@@ -534,10 +534,23 @@ pub fn circular_boundary(
     if !(start.distance(vertex_a) <= tol && end.distance(vertex_b) <= tol) {
         return None;
     }
-    arc(
+    let pieces = arc(
         &spans, center, radius, start, end, tol, error, work, true, true,
-    )
-    .map(|pieces| pieces.into_iter().map(PlanarPiece::Seg).collect())
+    )?;
+    // The arc is computed from its sweep, so its own end points can differ from `start` and `end`
+    // (by the end tolerance `arc` allows): they too must lie within the tolerance of the vertices,
+    // up to the rounding of computing them.
+    let rounding = |p: Point2, q: Point2| {
+        (p.x.abs() + p.y.abs() + q.x.abs() + q.y.abs() + radius) * f64::EPSILON * 8.0
+    };
+    let (first, last) = (pieces.first()?, pieces.last()?);
+    let (arc_start, arc_end) = (first.start(), last.end());
+    if !(arc_start.distance(vertex_a) <= tol + rounding(arc_start, vertex_a)
+        && arc_end.distance(vertex_b) <= tol + rounding(arc_end, vertex_b))
+    {
+        return None;
+    }
+    Some(pieces.into_iter().map(PlanarPiece::Seg).collect())
 }
 
 /// The spans (from `a` to `b`) as one circular arc about `center` of `radius`, when every span
