@@ -1221,27 +1221,6 @@ mod local_operation {
         assert_eq!(looser, super::RAISED_TO_A_LOOSE_BOUND.len());
     }
 
-    #[test]
-    fn tmp_linux_values() {
-        use crate::refit::with_fitted_spheres;
-        use crate::tolsub::with_trim_cover_put_back;
-        use std::fmt::Write as _;
-        let row = ROWS.iter().find(|r| r.case == "fc0000").unwrap();
-        let case = crate::case::regression_case(&Runner, row.case);
-        let (out, _) = with_fitted_spheres(|| with_trim_cover_put_back(|| Runner.run_rust(&case).unwrap()));
-        let moved: Vec<super::Moved> = row.moved.iter().map(|&(k, i, m, _)| (k, i, m, out.values[k][i])).collect();
-        let mut t = String::new();
-        writeln!(t, "TMPV moved {:?}", moved).unwrap();
-        writeln!(t, "TMPV blinded new {:#018x} main {:#018x} want {:#018x}", super::blinded_digest(&out, &moved, false), super::blinded_digest(&out, &moved, true), row.main).unwrap();
-        writeln!(t, "TMPV plain new {:#018x} main {:#018x}", super::plain_digest(&out, &moved, false), super::plain_digest(&out, &moved, true)).unwrap();
-        let asis = Runner.run_rust(&case).unwrap();
-        let v: Vec<(usize, f64)> = row.moved.iter().map(|&(k, i, _, _)| (i, asis.values[k][i])).collect();
-        writeln!(t, "TMPV asis {:?}", v).unwrap();
-        writeln!(t, "TMPV record {:?}", &asis.values["record"][1452..1454]).unwrap();
-        writeln!(t, "TMPV line {}", crate::golden::encode(row.case, &asis)).unwrap();
-        panic!("{t}");
-    }
-
     /// A trim off its edge's tolerance on an edge no moved value touches passes only as
     /// main's own trim (#19318). `box_face0_in` moves no value; the first two trimmed uses of
     /// its first edge with two swap their trims (each now in the other face's parameters),

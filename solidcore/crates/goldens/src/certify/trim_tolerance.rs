@@ -1920,3 +1920,32 @@ fn stitched_corner_fix_keeps_its_edges_covering_their_trims() {
     assert!(trims > 0, "no trims");
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
+
+#[test]
+fn tmp_main_digests() {
+    use std::fmt::Write as _;
+    let dir = crate::golden::default_dir();
+    let mut t = String::new();
+    for unit in [
+        "blend.fillet_executive_p3",
+        "offset.offset_geometry_creation",
+        "topology.api_files",
+        "topology.brep_local_operation",
+        "topology.edgeuse_p3",
+        "topology.face_p3",
+    ] {
+        let text = std::fs::read_to_string(dir.join(format!("{unit}.jsonl"))).unwrap();
+        let known = crate::golden::known_failing(&dir, unit).unwrap();
+        let (_, rows): (Vec<Row>, Vec<Row>) = rows(unit)
+            .into_iter()
+            .partition(|r| known.contains_key(&r.case));
+        let mut replay = |case: &str| replay_case(unit, case);
+        writeln!(
+            t,
+            "TMPD {unit}	{:016x}",
+            expected_digest(&text, &rows, &mut replay).unwrap()
+        )
+        .unwrap();
+    }
+    panic!("{t}");
+}
