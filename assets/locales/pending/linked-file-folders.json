@@ -1,0 +1,82 @@
+{
+  "en": {
+    "linked_files.other_folders_detail": "This design uses files from {folders}. Load them?",
+    "linked_files.other_folders_load": "Load",
+    "linked_files.other_folders_not_now": "Not now",
+    "linked_files.other_folders_title": "Linked files in other folders",
+    "prefs.link_folders_clear": "Forget all",
+    "prefs.link_folders_none": "No folders yet. A design that links to files in another folder asks before loading them.",
+    "prefs.link_folders_note": "Linked files from other folders: a design opening loads them from these folders without asking. A folder is added when you choose Load.",
+    "prefs.link_folders_remove": "Remove"
+  },
+  "ar": {
+    "linked_files.other_folders_detail": "يستخدم هذا التصميم ملفات من {folders}. هل تريد تحميلها؟",
+    "linked_files.other_folders_load": "تحميل",
+    "linked_files.other_folders_not_now": "ليس الآن",
+    "linked_files.other_folders_title": "ملفات مرتبطة في مجلدات أخرى",
+    "prefs.link_folders_clear": "نسيان الكل",
+    "prefs.link_folders_none": "لا توجد مجلدات بعد. التصميم الذي يرتبط بملفات في مجلد آخر يسأل قبل تحميلها.",
+    "prefs.link_folders_note": "المجلدات التي يمكن للتصميم تحميل الملفات المرتبطة منها عند فتحه، إضافة إلى مجلده. يُضاف كل مجلد عندما تختار تحميل.",
+    "prefs.link_folders_remove": "إزالة"
+  },
+  "de": {
+    "linked_files.other_folders_detail": "Dieses Design verwendet Dateien aus {folders}. Laden?",
+    "linked_files.other_folders_load": "Laden",
+    "linked_files.other_folders_not_now": "Nicht jetzt",
+    "linked_files.other_folders_title": "Verknüpfte Dateien in anderen Ordnern",
+    "prefs.link_folders_clear": "Alle vergessen",
+    "prefs.link_folders_none": "Noch keine Ordner. Ein Design, das auf Dateien in einem anderen Ordner verweist, fragt vor dem Laden.",
+    "prefs.link_folders_note": "Verknüpfte Dateien aus anderen Ordnern: Ein Design lädt sie beim Öffnen ohne Nachfrage aus diesen Ordnern. Ein Ordner wird hinzugefügt, wenn Sie Laden wählen.",
+    "prefs.link_folders_remove": "Entfernen"
+  },
+  "he": {
+    "linked_files.other_folders_detail": "העיצוב הזה משתמש בקבצים מתוך {folders}. לטעון אותם?",
+    "linked_files.other_folders_load": "טעינה",
+    "linked_files.other_folders_not_now": "לא עכשיו",
+    "linked_files.other_folders_title": "קבצים מקושרים בתיקיות אחרות",
+    "prefs.link_folders_clear": "לשכוח הכול",
+    "prefs.link_folders_none": "אין עדיין תיקיות. עיצוב שמקשר לקבצים בתיקייה אחרת שואל לפני טעינתם.",
+    "prefs.link_folders_note": "תיקיות שמהן עיצוב רשאי לטעון קבצים מקושרים כשהוא נפתח, מלבד התיקייה שלו. כל תיקייה נוספת כשבוחרים טעינה.",
+    "prefs.link_folders_remove": "הסרה"
+  },
+  "ja": {
+    "linked_files.other_folders_detail": "このデザインは {folders} のファイルを使用しています。読み込みますか？",
+    "linked_files.other_folders_load": "読み込む",
+    "linked_files.other_folders_not_now": "後で",
+    "linked_files.other_folders_title": "ほかのフォルダーにあるリンクファイル",
+    "prefs.link_folders_clear": "すべて消去",
+    "prefs.link_folders_none": "フォルダーはまだありません。ほかのフォルダーのファイルにリンクしているデザインは、読み込む前に確認します。",
+    "prefs.link_folders_note": "デザインを開くときに、そのデザインのフォルダー以外でリンクファイルを読み込めるフォルダー。「読み込む」を選ぶと追加されます。",
+    "prefs.link_folders_remove": "削除"
+  },
+  "ko": {
+    "linked_files.other_folders_detail": "이 디자인은 {folders}의 파일을 사용합니다. 불러올까요?",
+    "linked_files.other_folders_load": "불러오기",
+    "linked_files.other_folders_not_now": "나중에",
+    "linked_files.other_folders_title": "다른 폴더의 링크된 파일",
+    "prefs.link_folders_clear": "모두 지우기",
+    "prefs.link_folders_none": "아직 폴더가 없습니다. 다른 폴더의 파일에 링크된 디자인은 불러오기 전에 묻습니다.",
+    "prefs.link_folders_note": "디자인을 열 때 자체 폴더 외에 링크된 파일을 불러올 수 있는 폴더입니다. 불러오기를 선택하면 추가됩니다.",
+    "prefs.link_folders_remove": "제거"
+  },
+  "vi": {
+    "linked_files.other_folders_detail": "Thiết kế này dùng tệp từ {folders}. Tải chúng không?",
+    "linked_files.other_folders_load": "Tải",
+    "linked_files.other_folders_not_now": "Để sau",
+    "linked_files.other_folders_title": "Tệp liên kết trong thư mục khác",
+    "prefs.link_folders_clear": "Quên tất cả",
+    "prefs.link_folders_none": "Chưa có thư mục nào. Thiết kế liên kết tới tệp trong thư mục khác sẽ hỏi trước khi tải.",
+    "prefs.link_folders_note": "Các thư mục mà thiết kế có thể tải tệp liên kết khi mở, ngoài thư mục của chính nó. Mỗi thư mục được thêm khi bạn chọn Tải.",
+    "prefs.link_folders_remove": "Xóa"
+  },
+  "zh": {
+    "linked_files.other_folders_detail": "此设计使用了 {folders} 中的文件。要加载吗？",
+    "linked_files.other_folders_load": "加载",
+    "linked_files.other_folders_not_now": "暂不",
+    "linked_files.other_folders_title": "其他文件夹中的链接文件",
+    "prefs.link_folders_clear": "全部清除",
+    "prefs.link_folders_none": "还没有文件夹。链接到其他文件夹中文件的设计会在加载前询问。",
+    "prefs.link_folders_note": "设计打开时除自身文件夹外可以加载链接文件的文件夹。选择“加载”时会添加。",
+    "prefs.link_folders_remove": "移除"
+  }
+}

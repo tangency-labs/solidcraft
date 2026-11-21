@@ -61,6 +61,7 @@ pub mod file;
 pub mod fit_projection;
 pub mod hatch;
 pub mod heal;
+pub mod history;
 pub mod hlr;
 pub mod import_geometry;
 pub mod joint_turn;

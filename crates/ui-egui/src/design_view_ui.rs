@@ -129,6 +129,12 @@ pub fn handle(app: &mut SolveApp, _ctx: &egui::Context, action: TabAction) -> bo
                 documents::view_activate(app, id);
             }
         }
+        TabAction::ReturnView(i) => {
+            if let Some(id) = view_id(app, i) {
+                let window = app.view_windows.current_window();
+                move_to_window(app, id, serde_json::json!(window));
+            }
+        }
         TabAction::CloseView(i) => {
             if let Some(id) = view_id(app, i) {
                 documents::view_close(app, id);
@@ -137,7 +143,15 @@ pub fn handle(app: &mut SolveApp, _ctx: &egui::Context, action: TabAction) -> bo
         TabAction::NewView => {
             documents::view_open(app, ViewKind::Model, None, false);
         }
-        TabAction::ReorderView { from, to } => documents::view_move(app, from, to),
+        TabAction::ReorderView { from, to } => {
+            let local_index = |i| {
+                let id = view_id(app, i)?;
+                app.docs.views.views().iter().position(|view| view.id == id)
+            };
+            if let Some((from, to)) = local_index(from).zip(local_index(to)) {
+                documents::view_move(app, from, to);
+            }
+        }
         TabAction::ViewMenu { view, id } => return view_menu(app, view, &id),
         TabAction::PlusMenu { id } | TabAction::LayoutMenu { id } => return plus_row(app, &id),
         TabAction::SwitcherMenu { id } => return switcher_menu(app, &id),
@@ -173,7 +187,9 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
         VIEW_NEW_WINDOW => move_to_window(app, view, serde_json::json!("new")),
         id if let Some(window) = window_menu_target(id) => move_to_window(app, view, serde_json::json!(window)),
         VIEW_CLOSE => {
-            documents::view_close(app, view);
+            if !crate::view_windows::defer_close_view(app, view) {
+                documents::view_close(app, view);
+            }
         }
         VIEW_CLOSE_OTHERS => documents::view_close_others(app, view),
         VIEW_CLOSE_RIGHT => documents::view_close_right_of(app, view),
