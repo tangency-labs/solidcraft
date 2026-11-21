@@ -346,6 +346,33 @@ now and is never saved: if the thing is lost, the note stays and has no leader.
 - **Elsewhere:** leader, leader line.
 - **For translators:** a drawn line; not a person who leads.
 
+### library entry
+
+One material or one appearance kept in a *material library*, known by an id that stays the same
+when the entry is edited.
+
+Each edit gives the entry a new revision. A library folder holds one file per entry; the file's
+name is only a label.
+
+- **In SolidCraft:** `solidcraft_io::library::Listed` and the catalog's `Entry` (`id`, `revision`,
+  `provenance`, `definition`); the `materials/` and `appearances/` folders of a library folder.
+- **Don't use:** item, record, preset (a starter appearance's own word).
+- **Elsewhere:** library material, library appearance, asset.
+- **For translators:** one thing kept in a library; not a line of a list or a table.
+
+### library place
+
+Where SolidCraft reads material libraries from: the built-in library, one library folder, or a
+folder of library folders.
+
+A place that can't be read stays listed, with the reason. Where a library's data came from is
+its provenance, not its place.
+
+- **In SolidCraft:** `solidcraft_io::library::Place` (`built_in`, `library`, `folder`).
+- **Don't use:** source (that is where the data came from), location, path.
+- **Elsewhere:** library location, library path.
+- **For translators:** a place on a disk or a drive; not a place in a design.
+
 ### material
 
 The physical substance of a body, which sets its density and mechanical properties.
@@ -358,6 +385,22 @@ A material sets mass, centre of gravity and strength values. How the body looks 
 - **Don't use:** material for a render or visual material.
 - **Elsewhere:** material, physical material.
 - **For translators:** not an appearance.
+
+### material library
+
+A named collection of *materials* and *appearances* kept outside any design, which designs copy
+from.
+
+A design keeps its own copy of what it uses, so a change to a library never changes a design by
+itself. A library folder is marked by its `<Library name>.sclibrary.json` file; the built-in
+library can't be changed.
+
+- **In SolidCraft:** `solidcraft_io::library::Library` and `Set`; `library.inspect`, `library.export`
+  and `library.apply`; the `solidcraft-library/2` file and the `solidcraft-library-folder/1`
+  manifest.
+- **Don't use:** catalogue for the library itself (the single-file format is the catalog), pack.
+- **Elsewhere:** material library, material database, appearance library.
+- **For translators:** a collection of materials; not a code library or a book library.
 
 ### moment of inertia
 
