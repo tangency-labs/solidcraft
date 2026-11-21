@@ -255,6 +255,13 @@ pub enum NoRoomReason {
     /// Named for the typed failure record ([`crate::error::ErrorKind::EndOverflowsSideEdge`]);
     /// its refusal notes it once it moves onto the record.
     EndOverflowsSideEdge,
+    /// An End on its end face whose rail passes over that face: the face falls away under
+    /// the round (a ridge between the round's other face and it), so the rail on a face of
+    /// the blended edge never reaches its surface and no section of it ends the round. Noted
+    /// only after the End's vertices or edges failed. The fit is the largest ball whose rail
+    /// still ends on the end face, less the fit margin, on the blended edge (not the fork's,
+    /// SolidCraft #19454).
+    EndPassesOverEndFace,
     /// An End's rail rolls over its face's tangent edge where the round ends at a smooth
     /// vertex. Named for the typed failure record
     /// ([`crate::error::ErrorKind::EndRollsIntoSmoothEnd`]); its refusal notes it once it moves
@@ -3694,6 +3701,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 let edges = ignore(access.edges_calculate(k, corner, self));
                 self.rollover_adjusting = false;
                 if edges?.is_none() {
+                    // an End refused as passing over its end face keeps that reason and
+                    // its fit (noted by the corner's edges)
+                    if self.error.no_room_reason() == Some(NoRoomReason::EndPassesOverEndFace) {
+                        return Err(failure());
+                    }
                     self.corner_vertex_failure(
                         access,
                         corner,
@@ -3751,6 +3763,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             let mut geom_index = 0;
             while let Some(geom) = access.faces_solver_geom(solver, geom_index)? {
                 if ignore(access.faces_make_face(k, geom, fillet, self))?.is_none() {
+                    // an End refused as passing over its end face keeps that reason and
+                    // its fit (noted by the face's blend's corner)
+                    if self.error.no_room_reason() == Some(NoRoomReason::EndPassesOverEndFace) {
+                        return Err(failure());
+                    }
                     self.record_solver_failure(
                         access.geometry_edge(solver)?,
                         2,

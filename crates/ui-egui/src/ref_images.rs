@@ -44,7 +44,7 @@ fn pixels(c: &Canvas) -> Option<Decoded> {
         {
             return d.clone();
         }
-        let d = c.bytes().and_then(|b| decode_reference(&b)).map(|i| {
+        let d = decode_reference(c.bytes()).map(|i| {
             let i = if i.width() > MAX_SIDE || i.height() > MAX_SIDE { i.thumbnail(MAX_SIDE, MAX_SIDE) } else { i };
             let rgba = i.to_rgba8();
             let v = VERSION.with(|v| {
@@ -162,7 +162,7 @@ mod codec_tests {
         let mut h = crate::scenario::Harness::new();
         let mut png = std::io::Cursor::new(Vec::new());
         image::DynamicImage::new_rgba8(2, 2).write_to(&mut png, image::ImageFormat::Png).unwrap();
-        let data = solidcraft_engine::doc::canvas::base64_encode(png.get_ref());
+        let data = crate::scenario::image_file(png.get_ref());
         h.app
             .run(
                 "construct.plane.three_points",
@@ -170,7 +170,7 @@ mod codec_tests {
             )
             .unwrap();
         for plane in ["XY", "Three"] {
-            h.app.run("canvas.insert", json!({"data": data, "plane": plane, "name": plane, "width": 40})).unwrap();
+            h.app.run("canvas.insert", json!({"path": data, "plane": plane, "name": plane, "width": 40})).unwrap();
         }
         let images = super::gpu_images(&h.app);
         assert_eq!(images.len(), 2, "both visible canvases must reach the renderer");

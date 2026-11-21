@@ -1219,7 +1219,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
             }
         }),
         FileAction::Import => app.pick_open_for(
-            &["step", "stp", "iges", "igs", "stl", "obj", "3mf", "gltf", "glb", "usd", "usda", "usdc", "usdz", "ply", "xyz", "pts"],
+            &[
+                "step", "stp", "iges", "igs", "stl", "obj", "3mf", "gltf", "glb", "usd", "usda", "usdc", "usdz", "ply", "pcd", "e57", "xyz", "pts",
+                "asc",
+            ],
             |app, path| {
                 if let Some(path) = path {
                     app.open_path_async(&path);

@@ -106,6 +106,7 @@ disallowed-methods = [
     { path = "solidcore::Vec3::rotate_project_to_plane", reason = "ops computes no geometry (docs/layers.md §4)" },
     { path = "solidcore::Vec3::rotate_vec_about_axis", reason = "ops computes no geometry (docs/layers.md §4)" },
     { path = "solidcore::Vec3::solve_two_linear_equations", reason = "ops computes no geometry (docs/layers.md §4)" },
+    { path = "solidcore::Vec3::square_turn", reason = "ops computes no geometry (docs/layers.md §4)" },
     { path = "solidcore::Vec3::triple_product", reason = "ops computes no geometry (docs/layers.md §4)" },
     { path = "solidcore::Vec3::unit_ortho_vectors_on_failure", reason = "ops computes no geometry (docs/layers.md §4)" },
     { path = "solidcore::Vec3::unitize", reason = "ops computes no geometry (docs/layers.md §4)" },

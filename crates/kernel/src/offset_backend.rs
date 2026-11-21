@@ -49,6 +49,11 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
         SmError::NoMatch { point } => KernelError::Invalid(format!("{op}: no face at selection point {}", point + 1)),
         SmError::Ambiguous { point } => KernelError::Invalid(format!("{op}: selection point {} is as near to two faces", point + 1)),
         SmError::Unsupported => KernelError::Failed(format!("not supported yet: SMLib {op} for this geometry")),
+        // A tangent blend that cannot follow the moved faces, in solidcore's words (#18575).
+        SmError::BlendsNotFollowed { exact: false, why } => KernelError::Failed(format!("not supported yet: SMLib {op}: {why}")),
+        SmError::BlendsNotFollowed { exact: true, why } => {
+            KernelError::Failed(format!("SMLib {op}: SMLib cannot build this exactly in the input's geometry: {why}"))
+        }
         SmError::NoEffect => KernelError::Failed(format!("SMLib made no change: the {op} reported success but moved no face onto its new surface")),
         e => failed(op, "operation", e),
     }
