@@ -1763,6 +1763,8 @@ preference_settings! {
     /// whole model, as Home does (#10091). Off by default: the view turns in place, keeping its
     /// target and zoom.
     navigator_fit: bool = false, PAGE_NAVIGATION;
+    /// Show the axes navigator's half-turn button; disabling it restores the previous layout.
+    navigator_turn_around: bool = true, PAGE_NAVIGATION;
     /// The navigator's directional arrows orbit the camera the way the arrow points, as in
     /// Fusion and Inventor (`invert_navigator_arrows`, #10254). Off by default: an arrow rotates
     /// the view toward the side it sits on, so the arrow on the left swings the camera left.
@@ -5267,6 +5269,22 @@ mod tests {
             assert_eq!(super::lenient(&saved).length_decimals, 4, "{removed}");
             assert!(serde_json::to_value(&p).unwrap().get(removed).is_none(), "{removed} is not written back");
         }
+    }
+
+    #[test]
+    fn navigator_turn_around_defaults_on_persists_and_resets() {
+        assert!(Prefs::default().navigator_turn_around);
+        assert!(serde_json::from_value::<Prefs>(json!({})).unwrap().navigator_turn_around);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(app.preferences.navigator_turn_around);
+        let reply = control(&mut app, &json!({"navigator_turn_around":false})).unwrap();
+        assert_eq!(reply["navigator_turn_around"], false);
+        assert_eq!(serde_json::to_value(&app.preferences).unwrap()["navigator_turn_around"], false);
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(!restored.preferences.navigator_turn_around);
+        super::reset_preferences(&mut app.preferences, super::PAGE_NAVIGATION);
+        assert!(app.preferences.navigator_turn_around);
     }
 
     /// #10254: the invert toggle is off by default, persists, and the Navigation page's
@@ -14320,6 +14338,7 @@ mod settings_search_tests {
                 ("Origin", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:Origin"),
                 ("View navigator", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
                 ("Axes", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
+                ("Turn Around button", crate::prefs::PAGE_NAVIGATION, "prefs:navigator_turn_around"),
                 ("Turntable", crate::prefs::PAGE_NAVIGATION, "prefs:turntable"),
                 ("Wheel zoom speed", crate::prefs::PAGE_NAVIGATION, "prefs:wheel_zoom_speed"),
                 ("Zoom with two-finger scroll while holding", crate::prefs::PAGE_NAVIGATION, "prefs:trackpad_zoom_modifier"),
@@ -14332,8 +14351,20 @@ mod settings_search_tests {
                 h.frames(5);
                 let (_, _, hits) = nav(&h.ctx);
                 let matching: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == page).collect();
-                assert_eq!(matching.len(), 1, "{theme}: {query} has one indexed setting");
-                set_cursor(&h.ctx, matching[0].0);
+                // Axes matches both the navigator's choice and the Turn Around checkbox's label.
+                let expected = if query == "Axes" { 2 } else { 1 };
+                assert_eq!(matching.len(), expected, "{theme}: {query} has the expected indexed settings");
+                let cursor = if query == "Axes" {
+                    assert!(matching.iter().any(|(_, hit)| hit.label == h.app.tr("prefs.navigator_turn_around")));
+                    matching
+                        .iter()
+                        .find(|(_, hit)| hit.label == h.app.tr("prefs.navigation.axes_signed"))
+                        .expect("the signed-axes choice matches Axes")
+                        .0
+                } else {
+                    matching[0].0
+                };
+                set_cursor(&h.ctx, cursor);
                 h.frames(2);
                 h.step(&serde_json::json!({"key":"Enter"})).unwrap();
                 h.frames(20);
