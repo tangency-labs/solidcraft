@@ -5353,6 +5353,9 @@ mod app_bar_tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.preferences.design_views_as_tabs = true;
+        // The classic strip, whose design pill has its close button: the clear view tabs (#19640)
+        // leave it out of the pill.
+        h.app.preferences.clear_view_tabs = false;
         h.call("ui.resize", json!({"width":1280,"height":720}));
         h.frames(4);
         assert!(crate::scenario::rect_of("tab:view_new").is_some(), "normal mode keeps Open another view");
