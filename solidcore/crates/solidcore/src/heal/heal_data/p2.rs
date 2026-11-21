@@ -89,6 +89,12 @@
 //!   bound is under the limit. The gap gain is a margin over 20 samples; an enclosure needs
 //!   none. Upstream gave an imported edge whose gap is under the limit a tolerance the check
 //!   refuses.
+//! - **`Fix_TolSizes` vertex tolerances** (not upstream, #17739): a vertex's new tolerance is
+//!   at least the gap gain times twice its largest gap. The check holds a vertex's gaps to half
+//!   its tolerance (WR-679, `SmBrep` Tests #0-#3), and upstream's `gain * gap / 2` and
+//!   `gain * gap - def` are under twice the gap. As the check's own tolerance update, it grows
+//!   no further than the limit past which Test #82 refuses a vertex (a misplaced vertex, not a
+//!   gap to absorb).
 //! - No recursion; no allocation from caller counts beyond the target lists given.
 
 use crate::error::{Result, SolidError};
@@ -109,6 +115,7 @@ use crate::heal::face_props::{
 };
 use crate::kernel::Kernel;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, UNDEF_DOUBLE};
+use crate::topology::brep::validation::GROWTH_PAST_RATIO;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face_p2;
 use crate::topology::{
@@ -3205,6 +3212,20 @@ impl<O: LoopObject> HealData<O> {
                 b,
                 Some(max_edge_tol_3d),
             );
+            // not upstream (#17739): `gain * gap / 2` and `gain * gap - def` are under twice the
+            // gap, and the check holds a vertex's gaps to half its tolerance (WR-679), so a fixed
+            // vertex failed a gap its tolerance had covered. The tolerance covers twice the gap
+            // with the gap gain, as the edge branch above covers the edge/face gap, unless that
+            // passes the limit past which Test #82 refuses the vertex (as `validate_and_update`).
+            let twice_gap = 2.0 * max_vertex_edge_gap_3d_length.max(max_vertex_face_gap_3d_length);
+            let covered = zone_tol3d(k, gap_gain(k) * twice_gap);
+            let zone_tol_3d = if twice_gap > zone_tol_3d
+                && covered < GROWTH_PAST_RATIO * LARGE_SMALL_SIZE_RATIO * b.tolerance()
+            {
+                covered
+            } else {
+                zone_tol_3d
+            };
             if p.orig_zone_tol_3d == UNDEF_DOUBLE {
                 let t = vertex::tolerance(b, bad_tol_vertex)?;
                 self.vertex_props.props_mut(id)?.orig_zone_tol_3d = t;
