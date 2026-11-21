@@ -890,27 +890,33 @@ pub struct DraftedThrough {
 /// (in the same order) would cut through. A draft replaces each face by its drafted plane and
 /// extends or trims the faces around it ([`crate::topology::brep::local_operation`]); a face that
 /// meets no drafted face, not even at a vertex, but has a point between a drafted face's plane
-/// and its drafted plane, on the face's own span, would be cut through, a change of topology the
+/// and its drafted plane, over the face itself, would be cut through, a change of topology the
 /// draft does not make (a hole whose wall passes within the draft of the side, #19686).
 ///
 /// The point is proved, not estimated: it is one of the face's vertices or a point evaluated on
 /// one of its edges' curves, and it lies past each plane by more than the edge's or vertex's
-/// tolerance and the rounding of the comparison. Its span is the box of the drafted face's
-/// vertices in its plane, shrunk by the same margin. A face with no such point among those tried
-/// is not reported; a pair that is not two planes is skipped.
+/// tolerance and the rounding of the comparison. It lies over the drafted face when its foot on
+/// the face's plane is classified inside the face's trimmed area, off its edges and vertices, by
+/// the face's own point classification against its loops
+/// ([`crate::query::face::p1::point_3d_classify_at`]), so a point beside a face that is not a
+/// rectangle (an L, a face with a hole) is not taken for one over it. The classification runs on
+/// `b` in place, its lazy caches as upstream's const query keeps them. A face with no such point
+/// among those tried is not reported; a pair that is not two planes is skipped.
 ///
 /// # Errors
 ///
-/// Those of reading the faces, edges, vertices and surfaces and of evaluating the curves.
+/// Those of reading the faces, edges, vertices and surfaces, of evaluating the curves and of
+/// the point classification.
 pub fn drafted_through(
     k: &Kernel,
-    b: &Brep,
+    b: &mut Brep,
     faces: &[FaceId],
     surfaces: &[Surface],
 ) -> Result<Option<DraftedThrough>> {
+    use crate::intersect::point_class::{PointClassType, PointClassification};
+    use crate::query::face::p1::{point_3d_classify_at, Point3dClassifyOptions};
     use crate::topology::face::p4::{edges, vertices};
-    // each drafted plane face: its plane's origin and outward normal, its drafted plane's,
-    // its plane's frame and the box of its vertices in it
+    // each drafted plane face: its plane's origin and outward normal, and its drafted plane's
     let mut bands = Vec::new();
     for (&f, drafted) in faces.iter().zip(surfaces) {
         let (Some(surf), Some(fu)) = (b.face(f)?.surface.as_ref(), outer_faceuse(b, f)?) else {
@@ -927,31 +933,12 @@ pub fn drafted_through(
             -1.0
         };
         let (at, tilted_at) = (plane.position(), tilted.position());
-        let (u, v) = (at.x_axis(), at.y_axis());
-        let mut span = [
-            f64::INFINITY,
-            f64::NEG_INFINITY,
-            f64::INFINITY,
-            f64::NEG_INFINITY,
-        ];
-        for vx in vertices(b, f, None, false, None)? {
-            let d = b.vertex(vx)?.point - at.origin();
-            let (x, y) = (d.dot(u), d.dot(v));
-            span = [
-                span[0].min(x),
-                span[1].max(x),
-                span[2].min(y),
-                span[3].max(y),
-            ];
-        }
         bands.push((
             f,
             at.origin(),
             at.z_axis() * sense,
             tilted_at.origin(),
             tilted_at.z_axis() * sense,
-            (u, v),
-            span,
         ));
     }
     if bands.is_empty() {
@@ -995,7 +982,7 @@ pub fn drafted_through(
             }
         }
         let mut deepest: Option<DraftedThrough> = None;
-        for &(f, origin, n, hinge, normal, (u, v), span) in &bands {
+        for &(f, origin, n, hinge, normal) in &bands {
             for &(q, tol) in &points {
                 let (to_face, to_drafted) = (q - origin, q - hinge);
                 // the comparisons' rounding: a few units in the last place of the largest term
@@ -1006,13 +993,23 @@ pub fn drafted_through(
                 .fold(1.0_f64, |m, c| m.max(c.abs()));
                 let margin = tol.max(0.0) + 64.0 * f64::EPSILON * scale;
                 let (a, d) = (n.dot(to_face), normal.dot(to_drafted));
-                let (x, y) = (to_face.dot(u), to_face.dot(v));
-                let within = x > span[0] + margin
-                    && x < span[1] - margin
-                    && y > span[2] + margin
-                    && y < span[3] - margin;
                 let between = (a < -margin && d > margin) || (a > margin && d < -margin);
-                if within && between && deepest.is_none_or(|w| d.abs() > w.depth) {
+                if !between || deepest.is_some_and(|w| d.abs() <= w.depth) {
+                    continue;
+                }
+                // its foot on the face's plane, inside the face's trimmed area
+                let mut pc = PointClassification::new(margin);
+                point_3d_classify_at(
+                    k,
+                    b,
+                    f,
+                    q - n * a,
+                    margin,
+                    true,
+                    &mut pc,
+                    Point3dClassifyOptions::default(),
+                )?;
+                if pc.point_class() == PointClassType::Face {
                     deepest = Some(DraftedThrough {
                         drafted: f,
                         through: g,
