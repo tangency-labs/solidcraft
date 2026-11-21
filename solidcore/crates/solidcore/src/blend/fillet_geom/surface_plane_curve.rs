@@ -14,7 +14,12 @@
 //! net's bound is within the tenth of `tol` the curve is held to (#2510). An end goes onto
 //! the crossing by the least 3D step, not `OntoPlane`'s least uv step, and the curve ends
 //! there, not at the given point (#2907): a point within `tol` of both surfaces is what the
-//! vertices are, and the curve is held to the crossing itself. Not the fork's: a station off
+//! vertices are, and the curve is held to the crossing itself. Not the fork's: the march's
+//! last step, onto the end, takes no turn test, so one turning past a right angle leaves the
+//! end's tangent reversed, and a span ending on it can't be fitted however often it is split
+//! (the goldens' generated `blend.fillet_geom_p2` case `gen0177`, at `ang_tol` 1.2, was fitted
+//! only by chance in its last pass); each refinement pass orients every station's tangent
+//! along the tangent of the station before it. Not the fork's: a station off
 //! the surface's domain in a direction the surface is not closed in is the curve leaving the
 //! surface, and the trace reports leaving its domain (`SM_ERR`), where the fork marches on
 //! along the B-spline's extrapolation (the goldens' generated `blend.fillet_geom_p2` case
@@ -29,8 +34,7 @@
 //! surface's speed varies steeply along the crossing (a chamfer's ruled surface between rails
 //! whose weights differ 58-fold, #19967), a station's uv rate is large, the uv cubic leaves
 //! the span, and its middle put back on the plane lies outside the span: every pass split the
-//! same spans again until the passes ran out. A span with no such point (none in the middle
-//! half of its chord, or one nearer the other station than its own) is left as it is; a pass
+//! same spans again until the passes ran out. A span with no such point is left as it is; a pass
 //! that splits no span while one still misses ends the fit as one past its cap
 //! ([`BlendFailure::PlaneCurveFitCap`]), as every later pass would repeat it.
 //!
@@ -209,18 +213,20 @@ impl Tracer<'_> {
 
     /// A point of the crossing between two stations, to split their span at, marched from
     /// `a` as the trace marches: a step along the tangent, onto the plane's equation by
-    /// [`Tracer::onto_plane`], its tangent turning by at most `ang_tol`. Each step starts on
-    /// the stretch of the crossing `a` lies on and is shorter than the step that reached `b`,
-    /// so its point is on that stretch as far as the trace's own stations are, not on another
-    /// branch passing between the stations (where a point put back on the plane from the
-    /// chord's middle in uv can land). Taken once it lies in the middle half of their chord
-    /// (its side of the plane through the chord's middle, normal to it, at most a quarter of
-    /// the chord's length from that plane), so each new span keeps at least a quarter of the
-    /// old one, and nearer each station than the other is. The first step is half the chord; a
-    /// step off the plane, turning too far or landing past the middle half is halved, one short
-    /// of it is taken and marched on from. `None` where a station has no speed, a side is not
-    /// a number, a step does not move on towards `b`, 64 steps find no point in the middle
-    /// half, or the one found is not nearer each station than the other.
+    /// [`Tracer::onto_plane`], its tangent turning by at most `ang_tol`, halved where it turns
+    /// too far and grown by half where it turns by under a quarter of that. Each step starts on
+    /// the stretch of the crossing `a` lies on, so its point is on that stretch as far as the
+    /// trace's own stations are, not on another branch passing between the stations (where a
+    /// point put back on the plane from the chord's middle in uv can land). Taken once it lies
+    /// in the middle half of their chord (its side of the plane through the chord's middle,
+    /// normal to it, at most a quarter of the chord's length from that plane), so each new
+    /// span keeps at least a quarter of the old one; a step landing past the middle half is
+    /// halved. The crossing runs from `a` behind the middle half to `b` past it, so it crosses
+    /// the middle half on the way; neither its distance to the stations nor its side tells
+    /// its progress: on a deep span (a hairpin, its chord across the bend) it first runs away
+    /// from the chord, and the point in the middle lies farther from either station than the
+    /// chord is long. The first step is half the chord. `None` where a station has no speed,
+    /// a side is not a number, or 256 steps find no point in the middle half.
     fn between(&self, a: &Station, b: &Station, ang_tol: f64) -> Result<Option<Point2>> {
         let chord = b.x - a.x;
         let mid = a.x + chord * 0.5;
@@ -228,8 +234,8 @@ impl Tracer<'_> {
         if !(length > 0.0) {
             return Ok(None);
         }
-        let (mut last, mut behind, mut h) = (*a, -0.5 * length, 0.5 * length);
-        for _ in 0..64 {
+        let (mut last, mut h) = (*a, 0.5 * length);
+        for _ in 0..256 {
             let (_, su, sv, _) = self.eval(last.uv)?;
             let speed = (su * last.rate.x + sv * last.rate.y).length();
             if !(speed > 0.0) {
@@ -250,18 +256,17 @@ impl Tracer<'_> {
             if !side.is_finite() {
                 return Ok(None);
             }
-            if !(t.angle_between(last.t)? <= ang_tol) || side > 0.25 * length {
+            let turn = t.angle_between(last.t)?;
+            if !(turn <= ang_tol) || side > 0.25 * length {
                 h *= 0.5;
                 continue;
             }
             if side >= -0.25 * length {
-                let near = x.distance(a.x) < length && x.distance(b.x) < length;
-                return Ok(near.then_some(uv));
+                return Ok(Some(uv));
             }
-            if !(side > behind) {
-                return Ok(None);
+            if turn < 0.25 * ang_tol {
+                h *= 1.5;
             }
-            behind = side;
             last = Station { uv, x, t, rate };
         }
         Ok(None)
@@ -494,6 +499,16 @@ pub fn surface_plane_curve(
     // the Hermite spans, by arc length estimated by the chords, split until their quarter
     // points are on the exact curve
     for pass in 0..20 {
+        // each station's tangent along the one before it (the march's last step takes no
+        // turn test; a split station takes the one before it, which may lie across a bend)
+        let mut before: Option<Vec3> = None;
+        for here in &mut st {
+            if before.is_some_and(|t| here.t.dot(t) < 0.0) {
+                here.t = -here.t;
+                here.rate = Point2::new(-here.rate.x, -here.rate.y);
+            }
+            before = Some(here.t);
+        }
         // one arc-length entry per station: neither span loop below can lack its pair
         let mut s = Vec::with_capacity(st.len());
         let mut along = 0.0;
