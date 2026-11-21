@@ -6300,6 +6300,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             // extrusion touches, with no default stored at OK (the box says so).
             let extrude_targets = extrude_targets(d);
             if let Some(input) = extrude_targets {
+                // Target Bodies alone say which bodies take part: an edit drops participants
+                // stored before (the bodies shown when it was made, #2464).
+                common["participants"] = json!([]);
                 if input.items.is_empty() {
                     common["all_bodies_touched"] = json!(true);
                 } else {
@@ -8193,10 +8196,15 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 set_extrude_targets(&mut d.inputs, &mut d.active, &mut d.extra, op_index(operation));
                 if let Some(input) = d.inputs.iter_mut().find(|i| i.label == EXTRUDE_TARGETS) {
                     input.items = targets.iter().map(|name| Sel::Body { name: name.0.clone() }).collect();
+                    // No targets but participants (the bodies shown when it was made, #2464):
+                    // those are what it changes, so the box shows them. Every body (`*`) is All.
+                    if input.items.is_empty() && !f.participants.iter().any(|b| b == "*") {
+                        input.items = f.participants.iter().map(|name| Sel::Body { name: name.clone() }).collect();
+                    }
                 }
                 // Its stored targets are kept as chosen, and already say whether the To body
                 // joins. An older Join To Object, which joined it whatever they said, gets it put
-                // in instead ([`sync_targets`]). None stored shows Automatic.
+                // in instead ([`sync_targets`]). None stored shows All.
                 d.auto_targets.by_hand = true;
                 if extent.to_body_apart {
                     let pick = d.inputs.iter().find(|i| i.label == TO_OBJECT).and_then(|i| i.items.first()).cloned();

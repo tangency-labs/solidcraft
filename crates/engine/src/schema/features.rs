@@ -151,7 +151,8 @@ pub struct ExtrudeParams {
     #[schemars(with = "bool")]
     pub to_body_apart: Option<bool>,
     /// True with no `targets`: a Join or Cut takes every body it touches each time the model
-    /// rebuilds, without the default a Join from a body's face stores.
+    /// rebuilds, hidden or not, without the default a Join from a body's face stores or the
+    /// shown bodies kept as its participants.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub all_bodies_touched: Option<bool>,
