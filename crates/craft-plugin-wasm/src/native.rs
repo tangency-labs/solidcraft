@@ -38,6 +38,9 @@ mod dialog_bindings {
 include!(concat!(env!("OUT_DIR"), "/aliases.rs"));
 include!(concat!(env!("OUT_DIR"), "/importer.rs"));
 include!(concat!(env!("OUT_DIR"), "/dialog.rs"));
+include!(concat!(env!("OUT_DIR"), "/folders.rs"));
+
+mod folder_access;
 
 // A separate package lets both frozen 0.1 and current 0.2 components negotiate capabilities.
 mod host_bindings {
@@ -132,6 +135,9 @@ struct State<H> {
     effect: Effect,
     design_tokens: bool,
     folders: BTreeMap<String, Folder>,
+    input_folders: BTreeMap<String, Folder>,
+    folder_bytes: u64,
+    folder_files: BTreeSet<(String, PathBuf)>,
     staged: BTreeMap<(String, PathBuf), PendingWrite>,
     clock: bool,
     forms: bool,
@@ -421,7 +427,7 @@ impl<H: PluginHost> State<H> {
     }
     fn count_file(&mut self, path: &Path) -> std::result::Result<(), PluginError> {
         let Some(import) = self.import.as_mut() else { return Ok(()) };
-        if import.files.len() >= MAX_IMPORT_FILES && !import.files.contains(path) {
+        if import.files.len().saturating_add(self.folder_files.len()) >= MAX_IMPORT_FILES && !import.files.contains(path) {
             return Err(self.fail(limit("input_folder: more than 4096 files")));
         }
         import.files.insert(path.to_path_buf());
@@ -469,7 +475,7 @@ impl<H: PluginHost> source::Host for State<H> {
         let bytes = read.map_err(|e| self.fail(HostError::PermissionDenied { permission: format!("source.read {path}: {e}") }))?;
         if let Some(import) = self.import.as_mut() {
             import.read_bytes = import.read_bytes.saturating_add(bytes.len() as u64);
-            if import.read_bytes > MAX_IMPORT_INPUT_BYTES {
+            if import.read_bytes.saturating_add(self.folder_bytes) > MAX_IMPORT_INPUT_BYTES {
                 return Err(self.fail(limit("source: more than 1 GiB read in one import")));
             }
         }
@@ -840,10 +846,11 @@ fn run_mode<H: PluginHost + 'static>(
         if host.is_cancelled() {
             return Err(HostError::Cancelled);
         }
+        let input_folders = folder_access::open(&host, manifest)?;
         host.begin_transaction()?;
-        Ok((runtime, entry, params, (engine, component, stack), (commands, groups, design_tokens), folders))
+        Ok((runtime, entry, params, (engine, component, stack), (commands, groups, design_tokens), (folders, input_folders)))
     })();
-    let (runtime, entry, params, compiled, commands, folders) = match prepared {
+    let (runtime, entry, params, compiled, commands, (folders, input_folders)) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
@@ -851,7 +858,8 @@ fn run_mode<H: PluginHost + 'static>(
     let forms = granted_capabilities
         .iter()
         .any(|c| c.split_once('@').is_some_and(|(name, version)| name == "forms" && craft_plugin::capability_version(version) == Some((0, 1))));
-    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, folders, granted_capabilities, forms, dialog);
+    let (mut state, outcome) =
+        execute(host, runtime, entry, params, compiled, commands, (folders, input_folders), granted_capabilities, forms, dialog);
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => state.publish_writes().map(|()| value),
@@ -877,7 +885,7 @@ fn execute<H: PluginHost + 'static>(
     params: String,
     (engine, component, stack): (Engine, Component, usize),
     (commands, groups, design_tokens): (BTreeMap<String, CommandSchema>, BTreeSet<String>, bool),
-    folders: BTreeMap<String, Folder>,
+    (folders, input_folders): (BTreeMap<String, Folder>, BTreeMap<String, Folder>),
     granted_capabilities: Vec<String>,
     forms: bool,
     dialog: bool,
@@ -891,6 +899,9 @@ fn execute<H: PluginHost + 'static>(
         effect: if dialog { Effect::Read } else { entry.effect },
         design_tokens,
         folders,
+        input_folders,
+        folder_bytes: 0,
+        folder_files: BTreeSet::new(),
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
         forms: forms && !dialog,
@@ -912,6 +923,7 @@ fn execute<H: PluginHost + 'static>(
             Wit::Current if dialog => {
                 let mut linker = Linker::new(&engine);
                 link_host_query(&mut linker, &store.data().granted_capabilities)?;
+                folders::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 if runtime.is_importer() {
                     importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 } else {
@@ -924,6 +936,7 @@ fn execute<H: PluginHost + 'static>(
             Wit::Current => {
                 let mut linker = Linker::new(&engine);
                 link_host_query(&mut linker, &store.data().granted_capabilities)?;
+                folders::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 let guest = bindings::CommandPlugin::instantiate(&mut store, &component, &linker)?;
                 Ok(call_entry!(guest, &mut store, &entry.name, &params)?.map_err(host_error))
@@ -1098,6 +1111,7 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
     if hook {
         let mut linker = Linker::<State<Inert>>::new(&engine);
         link_host_query(&mut linker, &manifest.granted_capabilities()).map_err(link)?;
+        folders::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         if importer {
             importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         } else {
@@ -1106,6 +1120,7 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
         dialog_bindings::DialogPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
     }
     let mut linker = Linker::<State<Inert>>::new(&engine);
+    folders::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
     link_host_query(&mut linker, &manifest.granted_capabilities()).map_err(link)?;
     if importer && !hook && component.component_type().exports(&engine).any(|(name, _)| name.starts_with("craft:plugin/dialog-provider@")) {
         importer_dialog_bindings::ImporterDialogPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
@@ -1344,9 +1359,10 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
             scratch: Vec::new(),
             evaluating: false,
         };
-        Ok((runtime, entry, options, (engine, component, stack), import, source::FileInfo { name, size }, dialog_deadline))
+        let input_folders = if dialog { BTreeMap::new() } else { folder_access::open(&host, manifest)? };
+        Ok((runtime, entry, options, (engine, component, stack), import, source::FileInfo { name, size }, dialog_deadline, input_folders))
     })();
-    let (runtime, entry, options, (engine, component, stack), import, file, dialog_deadline) = match prepared {
+    let (runtime, entry, options, (engine, component, stack), import, file, dialog_deadline, input_folders) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
@@ -1362,6 +1378,9 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
         effect: Effect::Open,
         design_tokens: false,
         folders: BTreeMap::new(),
+        input_folders,
+        folder_bytes: 0,
+        folder_files: BTreeSet::new(),
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
         forms: false,
@@ -1386,6 +1405,7 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
             Wit::Current if dialog => {
                 let mut linker = Linker::new(&engine);
                 link_host_query(&mut linker, &store.data().granted_capabilities)?;
+                folders::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 importer_dialog_bindings::ImporterDialogPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 let guest = importer_dialog_bindings::ImporterDialogPlugin::instantiate(&mut store, &component, &linker)?;
                 Ok(call_dialog!(guest, &mut store, &entry.name, &options)?.map_err(host_error))
@@ -1393,6 +1413,7 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
             Wit::Current => {
                 let mut linker = Linker::new(&engine);
                 link_host_query(&mut linker, &store.data().granted_capabilities)?;
+                folders::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 let guest = importer_bindings::ImporterPlugin::instantiate(&mut store, &component, &linker)?;
                 Ok(call_import!(guest, &mut store, &entry.name, &file, &options)?.map_err(host_error))

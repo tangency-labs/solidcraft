@@ -115,12 +115,19 @@ pub fn describe(session: &Session) -> Vec<ImporterInfo> {
 /// anywhere yet. Nothing changes unless the whole import succeeds; a failure starts with the
 /// plugin's name and the file's.
 pub fn import_file(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
+    let consent = session.plugin_state.dialog_folders.take();
     session.plugin_state.refresh_stored();
     let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
-    convert(session, importer, path, options).map_err(super::messages::named(&importer.name, Some(&file)))
+    convert(session, importer, path, options, consent.as_ref()).map_err(super::messages::named(&importer.name, Some(&file)))
 }
 
-fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
+fn convert(
+    session: &mut Session,
+    importer: &Importer,
+    path: &str,
+    options: &Value,
+    consent: Option<&folders::DialogFolders>,
+) -> Result<ImportedDesign> {
     let package = with_installed(session, &importer.folder, || read_package(&importer.folder))?;
     if package.manifest.id != importer.plugin_id || session.disabled_plugins.contains(&importer.plugin_id) {
         return Err(error("plugin is disabled or was replaced; open the file again"));
@@ -138,7 +145,8 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
     if !options.is_object() {
         return Err(HostError::InvalidInput { field: "options".into(), reason: "the importer's options are an object".into() }.into());
     }
-    let declared = runtime.entries.iter().find(|entry| entry.name == importer.entry).ok_or_else(|| error("unknown entry"))?;
+    // Use the checked package, not a schema cached when discovery or a dialog ran.
+    let declared = runtime.entries.iter().find(|e| e.name == importer.entry).ok_or_else(|| error("unknown importer entry"))?;
     let facts = conditions::uses_file_facts(&declared.input_schema).then(|| file_facts(path, &importer.id, 0)).transpose()?;
     let schema = conditions::bind_file_conditions(&declared.input_schema, facts.as_ref())?;
     let prepared = if declared.dialog_hook {
@@ -152,6 +160,7 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
         craft_plugin::prepare_input(&schema, options)?
     };
     let options = &prepared;
+    let input_folders = folders::for_entry(session, &package, &importer.entry, options, consent)?;
     // The caller's file scope covers the file, and with input_folder, the folder it is in. The
     // folder is read only when the manifest asks for it and the user approved it at install, for
     // this exact package (the grant above).
@@ -165,6 +174,7 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
         let request = craft_plugin_wasm::ImportRequest { path: PathBuf::from(path), input_folder };
         let host = SolidCraftHost {
             session: Session::default(),
+            input_folders,
             transaction: None,
             sketch_exits: Vec::new(),
             view: None,
@@ -229,7 +239,7 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
-        let _ = (package, input_folder, options);
+        let _ = (package, input_folder, options, input_folders);
         Err(error("opening a file with an importer plugin needs the desktop app"))
     }
 }
@@ -305,6 +315,7 @@ pub fn import_dialog(
     {
         let host = SolidCraftHost {
             session: Session::default(),
+            input_folders: Vec::new(),
             transaction: None,
             sketch_exits: Vec::new(),
             view: None,

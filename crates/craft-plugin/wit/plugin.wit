@@ -137,6 +137,33 @@ world importer-plugin {
     export importer;
 }
 
+// Optional read-only access to annotated directory fields (capability folders@0.1).
+// The grant is the top-level property key. Paths are relative to its approved root;
+// empty path names that directory only for resolve. There is no write operation.
+interface folders {
+    use types.{plugin-error};
+    read: func(grant: string, path: string, offset: u64, len: u32) -> result<list<u8>, plugin-error>;
+    size: func(grant: string, path: string) -> result<option<u64>, plugin-error>;
+    resolve: func(grant: string, path: string) -> result<option<string>, plugin-error>;
+}
+world folder-reader {
+    import folders;
+}
+world command-with-folders {
+    // Keep this world's original imports: design-state is optional and belongs to command-plugin.
+    import commands;
+    import log;
+    import control;
+    import files;
+    import clock;
+    import folders;
+    export entry;
+}
+world importer-with-folders {
+    include importer-plugin;
+    import folders;
+}
+
 // Optional, additive capability dialog@0.1. Existing worlds retain their exports.
 interface dialog-provider {
     use types.{json, plugin-error};

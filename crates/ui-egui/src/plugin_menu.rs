@@ -63,6 +63,8 @@ pub(crate) struct State {
     next_dialog: u64,
     /// The runs waiting in the control queue: each one's request serial and the session it is for.
     pending: Vec<(u64, u64)>,
+    /// Trusted folder consent keyed by an internal request serial, never by JSON arguments.
+    folder_consents: std::collections::BTreeMap<u64, solidcraft_engine::plugin::folders::DialogFolders>,
 }
 
 #[cfg(test)]
@@ -95,6 +97,9 @@ pub(crate) struct Field {
     available: Vec<usize>,
     pub(crate) edited: bool,
     prefilled: bool,
+    pub(crate) grant_read: bool,
+    /// Actual folder interaction, separate from stored values protected as edits.
+    folder_chosen: bool,
     controls: Option<Map<String, Value>>,
     hook: Option<solidcraft_engine::plugin::dialog::FieldPatch>,
     hook_baseline: Option<Input>,
@@ -185,6 +190,7 @@ pub(crate) enum Problem {
 /// dialog does not draw (the entry is then run from the agent or the CLI).
 pub(crate) fn form(schema: &Value) -> Option<Vec<(Field, Input)>> {
     validate_conditions(schema).ok()?;
+    solidcraft_engine::plugin::directory_read_fields(schema).ok()?;
     let conditions = InputConditions::parse(schema).ok()?;
     let schema = schema.as_object()?;
     if schema.get("type").is_some_and(|t| t != "object") || ["$ref", "oneOf", "anyOf", "allOf", "if", "not"].iter().any(|k| schema.contains_key(*k)) {
@@ -247,6 +253,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         "x-solidcraft-visible-when",
         "x-solidcraft-enabled-when",
         "x-solidcraft-defaults",
+        "x-solidcraft-grant",
     ];
     if p.keys().any(|k| !ANNOTATIONS.contains(&k.as_str()) && !allowed.contains(&k.as_str())) {
         return None;
@@ -359,6 +366,8 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             available: Vec::new(),
             edited: false,
             prefilled: false,
+            grant_read: p.get("x-solidcraft-grant").is_some(),
+            folder_chosen: false,
             controls: None,
             hook: None,
             hook_baseline: None,
@@ -435,6 +444,8 @@ fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<
             available: Vec::new(),
             edited: false,
             prefilled: false,
+            grant_read: p.get("x-solidcraft-grant").is_some(),
+            folder_chosen: false,
             controls: None,
             hook: None,
             hook_baseline: None,
@@ -1165,6 +1176,7 @@ fn poll_hooks(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// A run waiting for its reply.
 pub(crate) struct Running {
+    serial: u64,
     reply: std::sync::mpsc::Receiver<Value>,
     ticket: std::sync::Arc<solidcraft_control::Ticket>,
     /// A successful reply waits here while another design tab is active.
@@ -1694,6 +1706,7 @@ fn retain_edits(fields: &mut [(Field, Input)], previous: &[(Field, Input)]) {
         if let Some(value) = retained {
             *input = value;
             field.edited = old.edited;
+            field.folder_chosen = old.folder_chosen;
         }
     }
 }
@@ -1956,19 +1969,53 @@ impl EntryDialog {
         if let (Some(values), Some(extra)) = (values.as_object_mut(), self.prefill_extra.as_ref().and_then(Value::as_object)) {
             values.extend(extra.clone());
         }
-        // A picked or pasted folder does not add a grant. Run uses the install grant's check.
+        // Only folder paths selected or edited by the person can add consent for this request.
         directories_allowed(app, &self.plugin.id, fields, &values)?;
         Ok(values)
     }
+
+    fn folder_consent(&self) -> Result<solidcraft_engine::plugin::folders::DialogFolders, String> {
+        let mut folders = Vec::new();
+        for (field, input) in self.fields.iter().flatten() {
+            if field.grant_read
+                && field.folder_chosen
+                && field.visible
+                && field.enabled
+                && let Input::Text(path) = input
+                && !path.is_empty()
+            {
+                let folder = solidcraft_engine::plugin::folders::directory(Path::new(path)).map_err(|e| e.to_string())?;
+                folders.push(solidcraft_engine::plugin::FileGrant { name: field.key.clone(), folder, read: true, write: false });
+            }
+        }
+        Ok(solidcraft_engine::plugin::folders::DialogFolders {
+            plugin: self.plugin.id.clone(),
+            approval: self.plugin.approval.clone(),
+            entry: self.entry.clone(),
+            folders,
+        })
+    }
 }
 
-/// A directory field's path must already lie in a folder approved at install.
+/// Unannotated fields keep their install-grant check; an edited read field grants this run only.
 fn directories_allowed(app: &SolveApp, plugin_id: &str, fields: &[(Field, Input)], value: &Value) -> Result<(), String> {
     let grants = app.session.plugin_state.grants.get(plugin_id).map(|grants| grants.folders.as_slice()).unwrap_or(&[]);
     let Some(object) = value.as_object() else { return Ok(()) };
     for (field, _) in fields {
         let Kind::Text { directory: true, .. } = field.kind else { continue };
         let Some(path) = object.get(&field.key).and_then(Value::as_str) else { continue };
+        if field.grant_read {
+            if path.is_empty() {
+                continue;
+            }
+            solidcraft_engine::plugin::folders::check_directory_path(Path::new(path)).map_err(|e| e.to_string())?;
+            if field.folder_chosen && field.enabled {
+                continue;
+            }
+            let read: Vec<_> = grants.iter().filter(|g| g.read).map(|g| solidcraft_engine::plugin::FileGrant { write: false, ..g.clone() }).collect();
+            solidcraft_engine::plugin::require_folder_grant(&read, Path::new(path)).map_err(|e| e.to_string())?;
+            continue;
+        }
         if let Err(error) = solidcraft_engine::plugin::require_folder_grant(grants, Path::new(path)) {
             return Err(error.to_string());
         }
@@ -2029,6 +2076,7 @@ pub(crate) fn dry_run(scratch: &mut solidcraft_engine::Session, id: &str) {
         grants.input_folder = false;
     }
     scratch.plugin_state.file_grants.clear();
+    scratch.plugin_state.dialog_folders = None;
 }
 
 /// Run the most recently opened dialog's entry.
@@ -2046,6 +2094,7 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
         return Ok(());
     }
     let params = dialog.ready(app)?;
+    let consent = dialog.folder_consent()?;
     // The picks are sent as they are now: picking stops while the entry runs.
     if picking(app) == Some(id)
         && let Some(d) = app.dialog.take()
@@ -2058,6 +2107,7 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
     if let Some(source) = dialog.source.clone() {
         let mut request = crate::file_load::Request::new(&source, crate::file_load::Kind::Open);
         request.plugin_import = true;
+        request.plugin_folders = Some(consent);
         request.options.insert("format".into(), json!(format!("{}.{}", dialog.plugin.id, dialog.entry)));
         request.options.insert("options".into(), params);
         crate::file_load::begin_request(app, request)?;
@@ -2072,6 +2122,7 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
             let Some(path) = path else { return };
             let mut request = crate::file_load::Request::new(&path, crate::file_load::Kind::Open);
             request.plugin_import = true;
+            request.plugin_folders = Some(consent);
             request.options.insert("format".into(), json!(format));
             request.options.insert("options".into(), params);
             if let Err(error) = crate::file_load::begin_request(app, request) {
@@ -2084,10 +2135,12 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
         "path": dialog.plugin.path, "approval": dialog.plugin.approval, "entry": dialog.entry, "params": params, "form_guard": dialog.form_guard}});
     let (req, reply) = solidcraft_control::ControlRequest::new("engine.execute", request);
     let ticket = req.ticket.clone();
+    let serial = req.serial;
     app.plugin_menu.pending.push((req.serial, app.session.uid));
+    app.plugin_menu.folder_consents.insert(req.serial, consent);
     app.control_held.push_back(req);
     if let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id) {
-        dialog.running = Some(Running { reply, ticket, received: None });
+        dialog.running = Some(Running { serial, reply, ticket, received: None });
         dialog.revalidated = false;
         dialog.error = None;
         dialog.result = None;
@@ -2107,8 +2160,14 @@ pub(crate) fn check_dispatch(app: &mut SolveApp, req: &solidcraft_control::Contr
         Ok(())
     } else {
         app.plugin_menu.pending.remove(at);
+        app.plugin_menu.folder_consents.remove(&req.serial);
         Err(app.tr("ui.plugin_dialog_other_design").into())
     }
+}
+
+/// Only the internal dialog request with this serial can take its consent onto the worker.
+pub(crate) fn take_folder_consent(app: &mut SolveApp, serial: u64) -> Option<solidcraft_engine::plugin::folders::DialogFolders> {
+    app.plugin_menu.folder_consents.remove(&serial)
 }
 
 /// Take the finished runs' replies: an edit closes its dialog, a read shows its result, an error
@@ -2145,6 +2204,7 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
             Err(std::sync::mpsc::TryRecvError::Disconnected) => json!({"ok":false,"error":solidcraft_ui_text::tr("ui.plugin_no_result")}),
         },
     };
+    app.plugin_menu.folder_consents.remove(&running.serial);
     if reply["ok"] != true {
         dialog.running = None;
         let error = reply["error"].as_str().unwrap_or_default();
@@ -2329,6 +2389,7 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
         // A run still computing is stopped: nothing of it is applied.
         if let Some(running) = &dialog.running {
             running.ticket.stop();
+            app.plugin_menu.folder_consents.remove(&running.serial);
         }
         return (false, false, None);
     }
@@ -2356,6 +2417,7 @@ fn apply_browsed_folder(app: &mut SolveApp, id: u64, key: &str, path: String) {
     {
         *text = path;
         field.edited = true;
+        field.folder_chosen = true;
     }
 }
 
@@ -2408,6 +2470,7 @@ fn body(
                         continue;
                     }
                     let before = input.clone();
+                    let mut row_edited = false;
                     ui.add_enabled_ui(field.enabled, |ui| {
                         let mut row = |ui: &mut egui::Ui| {
                             if let Input::Selection(items) = input {
@@ -2415,8 +2478,12 @@ fn body(
                                 let mut idle = None;
                                 let (index, target) = if let Some(index) = slot { (index, &mut *picker) } else { (pick_index, &mut idle) };
                                 selection_row(app, ui, id, index, field, items, target, claim);
-                            } else if field_row(app, ui, plugin, field, input) {
-                                browse = Some(field.key.clone());
+                            } else {
+                                let (browsed, edited) = field_row(app, ui, plugin, field, input);
+                                row_edited |= edited;
+                                if browsed {
+                                    browse = Some(field.key.clone());
+                                }
                             }
                         };
                         if let Some(tip) = field.tip.as_deref() {
@@ -2425,12 +2492,16 @@ fn body(
                             row(ui);
                         }
                     });
-                    field.edited |= *input != before;
+                    field.edited |= row_edited || *input != before;
+                    field.folder_chosen |= row_edited || *input != before;
                     if matches!(input, Input::Selection(_)) {
                         picks += 1;
                     }
                     if let Some(error) = field_errors.get(&field.key) {
                         ui_kit::status_line(ui, error, ui_kit::StatusTone::Error);
+                    }
+                    if field.grant_read {
+                        ui_kit::text(ui, app.tr("ui.plugin_dialog_folder_read_once"), ui_kit::Text::Note("plugin_folder_read_once"));
                     }
                 }
             });
@@ -2517,9 +2588,9 @@ fn selection_row(
     }
 }
 
-/// Draws one field. Returns whether its Browse button was pressed. `plugin` gives the package's
+/// Draws one field. Returns whether Browse was pressed and whether its value was edited. `plugin` gives the package's
 /// pictures and swatches, used by a choice whose options name them.
-fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, input: &mut Input) -> bool {
+fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, input: &mut Input) -> (bool, bool) {
     let label = if field.required { format!("{} *", field.label) } else { field.label.clone() };
     let suffix = |unit: &Option<String>| unit.as_ref().map(|u| format!(" {u}")).unwrap_or_default();
     if let Input::Raw(text) = input {
@@ -2531,7 +2602,7 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
         {
             *input = value;
         }
-        return false;
+        return (false, response.changed());
     }
     let mut browse = false;
     let response = match (&field.kind, input) {
@@ -2652,10 +2723,11 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
         _ => ui.response(),
     };
     crate::scenario::publish_handle(&format!("plugin_dialog:field:{}", field.key), response.rect.center());
+    let edited = response.changed();
     if let Some(tip) = &field.tip {
         response.backing_on_hover_text(tip);
     }
-    browse
+    (browse, edited)
 }
 
 #[cfg(test)]

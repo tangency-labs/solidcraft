@@ -3168,13 +3168,16 @@ impl Session {
     }
 
     fn compute_commands_under(
-        self,
+        mut self,
         commands: &[(String, Value)],
         marker: Option<Option<usize>>,
         original: Option<Session>,
     ) -> Result<ComputedCommands> {
         let editor_original = original.as_ref().map(|session| session.doc.clone());
         let mut computed = self.scratch();
+        // UI consent travels to the worker invocation, never to the source identity that is
+        // compared with the live session when accepting its result.
+        self.plugin_state.dialog_folders = None;
         let mut steps = Vec::new();
         if let Some(marker) = marker {
             let before = computed.doc.clone();

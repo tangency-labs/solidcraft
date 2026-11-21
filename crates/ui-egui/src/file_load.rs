@@ -114,6 +114,8 @@ pub struct Request {
     pub(crate) auto_verify: bool,
     /// Open the file with an importer plugin (`file.import`) even when SolidCraft reads it too.
     pub plugin_import: bool,
+    /// Consent from an entry dialog for this request only; never populated from command params.
+    pub(crate) plugin_folders: Option<solidcraft_engine::plugin::folders::DialogFolders>,
     /// An export written to be printed: once written it opens in the system's PDF viewer
     /// ([`crate::drawing_workspace::print::written`]).
     pub print: bool,
@@ -139,6 +141,7 @@ impl Request {
             tries: 0,
             auto_verify: false,
             plugin_import: false,
+            plugin_folders: None,
             print: false,
         }
     }
@@ -782,6 +785,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         tries: 0,
         auto_verify: false,
         plugin_import: id == "file.import",
+        plugin_folders: None,
         print: false,
     };
     let _ = begin_request(app, request);
@@ -901,6 +905,7 @@ fn start(app: &mut SolveApp) {
     scratch.set_validation(app.preferences.validation);
     // A file an importer plugin reads opens with the plugins the user installed and left on.
     scratch.plugin_state = app.session.plugin_state.clone();
+    scratch.plugin_state.dialog_folders = request.plugin_folders.clone();
     scratch.disabled_plugins = app.session.disabled_plugins.clone();
     scratch.plugin_limits = app.session.plugin_limits;
     crate::print_face_ui::sync(&mut scratch, &app.preferences);
@@ -2117,6 +2122,66 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn file_first_import_carries_the_chosen_folder_outside_its_json_options() {
+        let mut h = crate::scenario::Harness::new();
+        let library = h.dir.join("library");
+        std::fs::create_dir_all(&library).unwrap();
+        let entry = serde_json::from_value(json!({"name":"convert","kind":"importer","effect":"open","extensions":["smp"],
+            "input_schema":{"type":"object","properties":{
+                "library":{"type":"string","format":"directory","x-solidcraft-grant":"read"}
+            }}}))
+        .unwrap();
+        h.app.plugin_menu.listed = vec![crate::plugins::Plugin {
+            id: "sample".into(),
+            name: "Sample".into(),
+            version: "1".into(),
+            description: String::new(),
+            path: String::new(),
+            approval: "reviewed".into(),
+            disabled: false,
+            groups: Default::default(),
+            entries: vec![entry],
+            images: Default::default(),
+            swatches: Default::default(),
+        }];
+        h.app.plugin_menu.loaded = true;
+        crate::plugin_menu::open_entry(&mut h.app, 0, 0);
+        h.frames(2);
+        h.step(&json!({"handle":"plugin_dialog:field:library"})).unwrap();
+        h.step(&json!({"text":library.to_string_lossy()})).unwrap();
+        let path = h.dir.join("part.smp").to_string_lossy().into_owned();
+        let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+        let id = dialog.id;
+        dialog.source = Some(path.clone());
+        dialog.file = Some(solidcraft_engine::plugin::dialog::FileFacts {
+            name: "part.smp".into(),
+            extension: "smp".into(),
+            size: 0,
+            format: "sample.convert".into(),
+            generation: dialog.file_generation,
+        });
+        // Keep file execution queued while inspecting the exact request the form submits.
+        h.app.services.pick_open = Some(Box::new(|_| Box::pin(std::future::pending())));
+        h.app.pick_open_for(&["smp"], |_, _| {});
+        assert!(h.app.file_picker_busy());
+        crate::plugin_menu::run_dialog(&mut h.app, id).unwrap();
+        let request = h.app.file_load.queued.back().unwrap();
+        assert_eq!(request.path, path);
+        assert!(request.plugin_import);
+        assert_eq!(request.options["options"]["library"], library.to_string_lossy().as_ref());
+        assert!(!request.options.contains_key("dialog_folders"));
+        let consent = request.plugin_folders.as_ref().unwrap();
+        assert_eq!((consent.plugin.as_str(), consent.entry.as_str(), consent.approval.as_str()), ("sample", "convert", "reviewed"));
+        assert_eq!(consent.folders.len(), 1);
+        assert_eq!(consent.folders[0].folder, std::fs::canonicalize(&library).unwrap());
+        assert!(consent.folders[0].read && !consent.folders[0].write);
+        assert!(h.app.plugin_menu.dialogs.is_empty());
+        h.app.file_load.cancel();
+        assert!(h.app.file_load.idle() && h.app.session.plugin_state.dialog_folders.is_none());
+    }
 
     /// Cancelling the queued retry forgets the session it read the file into: nothing runs again
     /// for a request that is gone.

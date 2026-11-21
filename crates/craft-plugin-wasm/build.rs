@@ -54,6 +54,11 @@ fn main() -> Result<(), Box<dyn Error>> {
          macro_rules! call_dialog {{ ($guest:expr, $store:expr, $entry:expr, $context:expr) => {{ $guest.{namespace}_{name}_dialog_provider().call_update_fields($store, $entry, $context) }}; }}\n"
     );
     fs::write(PathBuf::from(env::var("OUT_DIR")?).join("dialog.rs"), dialog)?;
+    let folders = format!(
+        "mod folder_bindings {{ wasmtime::component::bindgen!({{ path: \"../craft-plugin/wit\", world: \"folder-reader\", with: {{ \"{package_name}/types\": super::bindings::{namespace}::{name}::types }} }}); }}\n\
+         use folder_bindings::{namespace}::{name}::folders;\n"
+    );
+    fs::write(PathBuf::from(env::var("OUT_DIR")?).join("folders.rs"), folders)?;
     // Keep the shipped 0.1 WIT frozen. Only the optional export world is additive, generated
     // against its original error type so legacy command/importer bindings remain unchanged.
     let older = "../craft-plugin/wit-0.1/plugin.wit";

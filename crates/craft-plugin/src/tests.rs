@@ -1320,3 +1320,55 @@ fn dialog_field_updates_are_bounded_and_preserve_types_conditions_and_directory_
     command["capabilities"] = json!(["commands@0.2"]);
     assert!(parse_manifest(command.to_string().as_bytes(), "sample").is_err());
 }
+
+#[test]
+fn folder_read_annotations_are_explicit_bounded_and_only_on_top_level_directories() {
+    let directory = json!({"type":"string","format":"directory","x-solidcraft-grant":"read"});
+    let schema = json!({"type":"object","properties":{"library":directory}});
+    assert_eq!(directory_read_fields(&schema).unwrap(), BTreeSet::from(["library".into()]));
+    let mut value = manifest();
+    value["capabilities"] = json!(["commands@0.2", "folders@0.1"]);
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":schema}]);
+    assert!(parse(&value).is_ok());
+    for property in [
+        json!({"type":"string","format":"directory","x-solidcraft-grant":"write"}),
+        json!({"type":"string","x-solidcraft-grant":"read"}),
+        json!({"type":"integer","format":"directory","x-solidcraft-grant":"read"}),
+        json!({"type":"string","format":"directory","x-solidcraft-grant":true}),
+        json!({"type":"object","properties":{"nested":directory}}),
+        json!({"type":"array","items":directory}),
+    ] {
+        value["runtime"]["entries"][0]["input_schema"] = json!({"type":"object","properties":{"library":property}});
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { .. })), "{property}");
+    }
+    assert!(directory_read_fields(&json!({"type":"object","oneOf":[schema]})).is_err());
+    let properties: serde_json::Map<_, _> = (0..33).map(|i| (format!("folder{i}"), directory.clone())).collect();
+    assert!(directory_read_fields(&json!({"type":"object","properties":properties})).is_err());
+    assert!(directory_read_fields(&json!({"type":"object","properties":{"old":{"type":"string","format":"directory"}}})).unwrap().is_empty());
+}
+
+#[test]
+fn folder_read_annotations_under_other_schema_keywords_are_rejected_at_manifest_load() {
+    let directory = json!({"type":"string","format":"directory","x-solidcraft-grant":"read"});
+    let plain_directory = json!({"type":"string","format":"directory"});
+    for keyword in ["additionalItems", "contains", "contentSchema", "dependencies", "propertyNames", "unevaluatedItems", "unevaluatedProperties"] {
+        for top_level_grant in [false, true] {
+            let mut schema = json!({"type":"object","properties":{}});
+            if top_level_grant {
+                schema["properties"]["library"] = directory.clone();
+            }
+            schema[keyword] = if keyword == "dependencies" { json!({"mode":directory}) } else { directory.clone() };
+            let error = directory_read_fields(&schema).unwrap_err();
+            assert!(matches!(error, HostError::InvalidManifest { ref field, .. } if field.contains(keyword)), "{keyword}: {error}");
+            let mut value = manifest();
+            value["runtime"]["entries"] = json!([{"name":"make","input_schema":schema}]);
+            assert!(matches!(parse(&value), Err(HostError::InvalidManifest { .. })), "{keyword}: {top_level_grant}");
+
+            schema[keyword] = if keyword == "dependencies" { json!({"mode":plain_directory}) } else { plain_directory.clone() };
+            let expected = if top_level_grant { BTreeSet::from(["library".into()]) } else { BTreeSet::new() };
+            assert_eq!(directory_read_fields(&schema).unwrap(), expected, "{keyword}: {top_level_grant}");
+            value["runtime"]["entries"][0]["input_schema"] = schema;
+            assert!(parse(&value).is_ok(), "{keyword}: {top_level_grant}");
+        }
+    }
+}

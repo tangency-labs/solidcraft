@@ -152,6 +152,7 @@ pub const CAPABILITIES: &[(&str, (u32, u32))] = &[
     ("design", (0, 1)),
     ("dialog", (0, 1)),
     ("evaluate", (0, 2)),
+    ("folders", (0, 1)),
     ("formats", (0, 2)),
     ("forms", (0, 1)),
     ("host", (0, 1)),
@@ -292,6 +293,16 @@ pub trait PluginHost {
     fn commit_transaction(&mut self) -> Result<()>;
     fn rollback_transaction(&mut self) -> Result<()>;
     fn granted_folders(&self) -> Vec<FileGrant>;
+    /// Read-only roots for annotated entry fields, already authorised by the app for this call.
+    /// Names are property keys, not install-time permission names. No grants by default.
+    fn granted_input_folders(&self) -> Vec<FileGrant> {
+        Vec::new()
+    }
+    /// Apply the caller's scope to a file beneath an input folder. Separate from the legacy
+    /// files interface so an input grant cannot widen any other host operation.
+    fn authorize_input_file_path(&self, path: &Path) -> Result<()> {
+        self.authorize_file_path(path, false)
+    }
     /// The sensitive command groups the user granted. A guest may call a grouped command only
     /// when its manifest requests the group too. None by default.
     fn granted_command_groups(&self) -> BTreeSet<String> {
@@ -647,6 +658,7 @@ impl RuntimeManifest {
                 return Err(invalid(&field, "entry inputs must be an object schema"));
             }
             validate_list_inputs(&entry.input_schema, &field)?;
+            directory_read_fields(&entry.input_schema)?;
             conditions::validate_conditions(&entry.input_schema)?;
             if entry.slots.len() > 16
                 || entry.slots.iter().any(|slot| match slot {
@@ -787,6 +799,103 @@ impl LossReport {
         }
         Ok(())
     }
+}
+
+/// Top-level directory properties that request read access for the entry's current run.
+/// Other placements and access modes are refused rather than silently ignored.
+pub fn directory_read_fields(schema: &Value) -> Result<BTreeSet<String>> {
+    // Keep discovery and placement validation in step across schema drafts.
+    const SCHEMA_MAPS: &[&str] = &["$defs", "definitions", "dependencies", "dependentSchemas", "patternProperties", "properties"];
+    const SCHEMAS: &[&str] = &[
+        "additionalItems",
+        "additionalProperties",
+        "allOf",
+        "anyOf",
+        "contains",
+        "contentSchema",
+        "else",
+        "if",
+        "items",
+        "not",
+        "oneOf",
+        "prefixItems",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+    ];
+    // Existing schemas with no annotation keep their previous loading limits.
+    let mut pending = vec![schema];
+    let mut annotated = false;
+    while let Some(node) = pending.pop() {
+        if node.get("x-solidcraft-grant").is_some() {
+            annotated = true;
+            break;
+        }
+        match node {
+            Value::Object(object) => {
+                for &key in SCHEMA_MAPS {
+                    if let Some(children) = object.get(key).and_then(Value::as_object) {
+                        pending.extend(children.values());
+                    }
+                }
+                for &key in SCHEMAS {
+                    pending.extend(object.get(key));
+                }
+            }
+            Value::Array(array) => pending.extend(array),
+            _ => {}
+        }
+    }
+    if !annotated {
+        return Ok(BTreeSet::new());
+    }
+    fn visit(schema: &Value, field: &str, allowed: bool, depth: usize, steps: &mut usize) -> Result<()> {
+        *steps += 1;
+        if depth > 32 || *steps > 16384 {
+            return Err(invalid(field, "folder annotations are nested too deeply or too numerous"));
+        }
+        if let Some(grant) = schema.get("x-solidcraft-grant")
+            && (!allowed
+                || grant.as_str() != Some("read")
+                || schema.get("type").and_then(Value::as_str) != Some("string")
+                || schema.get("format").and_then(Value::as_str) != Some("directory"))
+        {
+            return Err(invalid(field, "x-solidcraft-grant must be read on a top-level string property with format directory"));
+        }
+        for &key in SCHEMA_MAPS {
+            if let Some(properties) = schema.get(key).and_then(Value::as_object) {
+                for (name, property) in properties {
+                    visit(property, &format!("{field}.{key}.{name}"), depth == 0 && key == "properties", depth + 1, steps)?;
+                }
+            }
+        }
+        for &key in SCHEMAS {
+            if let Some(child) = schema.get(key) {
+                if let Some(children) = child.as_array() {
+                    for child in children {
+                        visit(child, &format!("{field}.{key}"), false, depth + 1, steps)?;
+                    }
+                } else {
+                    visit(child, &format!("{field}.{key}"), false, depth + 1, steps)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    visit(schema, "input_schema", false, 0, &mut 0)?;
+    let fields: BTreeSet<_> = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(_, property)| property.get("x-solidcraft-grant").is_some())
+        .map(|(key, _)| key.clone())
+        .collect();
+    if fields.len() > 32 || fields.iter().any(|key| !plain(key, 128)) {
+        return Err(invalid("input_schema", "at most 32 folder grants, with printable property names of at most 128 characters"));
+    }
+    Ok(fields)
 }
 
 fn validate_list_inputs(schema: &Value, field: &str) -> Result<()> {

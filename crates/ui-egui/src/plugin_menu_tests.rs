@@ -176,7 +176,7 @@ fn validation_worker_disconnect_retries_and_field_errors_stay_cached() {
 fn deliver_form_reply(app: &mut SolveApp, value: Value) {
     let (request, reply) = solidcraft_control::ControlRequest::new("engine.execute", json!({}));
     request.reply.send(value).unwrap();
-    app.plugin_menu.dialogs.last_mut().unwrap().running = Some(Running { reply, ticket: request.ticket, received: None });
+    app.plugin_menu.dialogs.last_mut().unwrap().running = Some(Running { serial: request.serial, reply, ticket: request.ticket, received: None });
 }
 
 #[test]
@@ -773,6 +773,7 @@ fn set_input(fields: &mut [(Field, Input)], key: &str, input: Input) {
     let (field, value) = fields.iter_mut().find(|(f, _)| f.key == key).unwrap();
     *value = input;
     field.edited = true;
+    field.folder_chosen |= field.grant_read;
     refresh_conditions(fields);
 }
 
@@ -2787,6 +2788,27 @@ mod native {
         assert!(same_camera(&h.app.cam, &stayed), "a failed run does not move the camera: {:?} vs {stayed:?}", h.app.cam);
         let _ = std::fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn one_run_folder_consent_reaches_the_command_worker_without_changing_its_source_identity() {
+        let root = package("folder-consent");
+        let path = root.join("boxes/plugin.json");
+        let mut manifest: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        manifest["runtime"]["entries"][0]["input_schema"]["properties"]["library"] =
+            json!({"type":"string","format":"directory","x-solidcraft-grant":"read"});
+        std::fs::write(&path, manifest.to_string()).unwrap();
+        let mut h = crate::scenario::Harness::new();
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        open_entry(&mut h.app, 0, 0);
+        let id = h.app.plugin_menu.dialog().unwrap().id;
+        apply_browsed_folder(&mut h.app, id, "library", root.to_string_lossy().into_owned());
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        assert!(h.app.plugin_menu.dialogs.is_empty(), "a successful edit must be accepted from its worker");
+        assert!(h.app.session.plugin_state.dialog_folders.is_none());
+        assert!(h.app.session.plugin_state.grants.is_empty() && h.app.preferences.plugin_grants.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[test]
@@ -3174,4 +3196,121 @@ fn hook_defaults_trigger_another_update_until_submitted_values_match_the_form() 
     assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"mode":true,"part":"same"}));
     poll(&mut h.app);
     assert!(h.app.plugin_menu.dialog().unwrap().file_job.is_none(), "unchanged values must not queue another update");
+}
+
+#[test]
+fn dialog_hook_folder_defaults_do_not_grant_access_or_overwrite_a_browsed_folder() {
+    use solidcraft_engine::plugin::dialog::apply;
+
+    let mut h = hook_dialog_harness();
+    let root = h.dir.join("hook-library");
+    let other = h.dir.join("hook-other");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&other).unwrap();
+    let schema = json!({"type":"object","properties":{
+        "folder":{"type":"string","format":"directory","x-solidcraft-grant":"read"}
+    }});
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.fields = form(&schema);
+    dialog.hook.as_mut().unwrap().schema = schema.clone();
+    let reply = json!({"folder":{"default":root}}).to_string();
+    let update = apply(&schema, &json!({}), &Default::default(), Some(&reply), false).unwrap();
+    assert!(apply_hook_reply(dialog, 0, update));
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["folder"], root.to_string_lossy().as_ref());
+    assert!(dialog.folder_consent().unwrap().folders.is_empty(), "a hook default is not user consent");
+    let id = dialog.id;
+    apply_browsed_folder(&mut h.app, id, "folder", root.to_string_lossy().into_owned());
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let protected = std::collections::BTreeSet::from(["folder".into()]);
+    let reply = json!({"folder":{"value":other}}).to_string();
+    let update = apply(&schema, &hook_values(dialog.fields.as_ref().unwrap()), &protected, Some(&reply), false).unwrap();
+    assert!(apply_hook_reply(dialog, 0, update));
+    let consent = dialog.folder_consent().unwrap();
+    assert_eq!(consent.folders.len(), 1);
+    assert_eq!(consent.folders[0].folder, std::fs::canonicalize(&root).unwrap(), "the browsed value remains the granted root");
+    for patch in [json!({"folder":{"visible":false}}), json!({"folder":{"enabled":false}})] {
+        let reply = patch.to_string();
+        let update = apply(&schema, &hook_values(dialog.fields.as_ref().unwrap()), &protected, Some(&reply), false).unwrap();
+        assert!(apply_hook_reply(dialog, 0, update));
+        assert!(dialog.folder_consent().unwrap().folders.is_empty(), "hook-hidden or disabled fields add no consent");
+    }
+}
+
+#[test]
+fn annotated_folder_fields_grant_only_edited_visible_values_for_the_internal_request() {
+    let mut h = crate::scenario::Harness::new();
+    let root = h.dir.join("library");
+    let pasted = h.dir.join("pasted");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&pasted).unwrap();
+    let mut command = entry("load", "read", json!([]));
+    command.input_schema = json!({"type":"object","properties":{
+        "use_library":{"type":"boolean","default":true},
+        "folder":{"type":"string","title":"Library","format":"directory","default":root,
+            "x-solidcraft-grant":"read","x-solidcraft-visible-when":{"field":"use_library","eq":true}}
+    }});
+    h.app.plugin_menu.listed = vec![listed("files", vec![command])];
+    open_entry(&mut h.app, 0, 0);
+    h.frames(2);
+    let note = h.app.tr("ui.plugin_dialog_folder_read_once").to_owned();
+    assert!(!h.widgets(&note).is_empty(), "the field explains the run-only read permission");
+    assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_err(), "a default is not consent");
+    let id = h.app.plugin_menu.dialog().unwrap().id;
+    apply_browsed_folder(&mut h.app, id, "folder", root.to_string_lossy().into_owned());
+    assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_ok(), "Browse consents even when it selects the default");
+    h.frames(2);
+    h.step(&json!({"handle":"plugin_dialog:field:folder"})).unwrap();
+    h.step(&json!({"key":"A","ctrl":true,"cmd":true})).unwrap();
+    h.step(&json!({"text":pasted.to_string_lossy()})).unwrap();
+    let consent = h.app.plugin_menu.dialog().unwrap().folder_consent().unwrap();
+    assert_eq!(consent.folders[0].folder, std::fs::canonicalize(&pasted).unwrap());
+    run(&mut h.app).unwrap();
+    let request = h.app.control_held.back().unwrap();
+    let serial = request.serial;
+    assert_eq!(request.params["params"]["params"]["folder"], pasted.to_string_lossy().as_ref());
+    assert!(request.params["params"].get("dialog_folders").is_none(), "consent is not a JSON parameter");
+    assert!(take_folder_consent(&mut h.app, serial + 100).is_none());
+    assert_eq!(take_folder_consent(&mut h.app, serial), Some(consent));
+    assert!(take_folder_consent(&mut h.app, serial).is_none(), "one request consumes it");
+    assert!(h.app.session.plugin_state.grants.is_empty() && h.app.preferences.plugin_grants.is_empty());
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let fields = dialog.fields.as_mut().unwrap();
+    fields.iter_mut().find(|(f, _)| f.key == "use_library").unwrap().1 = Input::Boolean(false);
+    refresh_conditions(fields);
+    assert!(dialog.folder_consent().unwrap().folders.is_empty(), "a hidden value adds no grant");
+}
+
+#[test]
+fn stored_folder_values_need_actual_consent_and_file_refresh_keeps_a_chosen_folder() {
+    let mut h = crate::scenario::Harness::new();
+    let root = h.dir.join("stored-library");
+    std::fs::create_dir_all(&root).unwrap();
+    let schema = json!({"type":"object","properties":{
+        "library":{"type":"string","format":"directory","x-solidcraft-grant":"read"}
+    }});
+    let mut command = entry("load", "read", json!([]));
+    command.input_schema = schema.clone();
+    h.app.plugin_menu.listed = vec![listed("files", vec![command])];
+    h.app.plugin_menu.loaded = true;
+    open_form(&mut h.app, "files", "load", &json!({"library":root})).unwrap();
+    checked_prefill(&h.app);
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    assert!(dialog.fields.as_ref().unwrap()[0].0.edited, "stored input remains protected from hook defaults");
+    assert!(dialog.folder_consent().unwrap().folders.is_empty(), "stored values do not grant read access");
+    assert!(dialog.ready(&h.app).is_err());
+    let id = dialog.id;
+    apply_browsed_folder(&mut h.app, id, "library", root.to_string_lossy().into_owned());
+    assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_ok(), "choosing the same path supplies consent");
+    h.app.plugin_menu.dialogs.clear();
+    let mut importer = importing_entry();
+    importer.input_schema = schema.clone();
+    h.app.plugin_menu.listed = vec![listed("files", vec![importer])];
+    open_entry(&mut h.app, 0, 0);
+    let id = h.app.plugin_menu.dialog().unwrap().id;
+    apply_browsed_folder(&mut h.app, id, "library", root.to_string_lossy().into_owned());
+    let before = h.app.plugin_menu.dialog().unwrap().folder_consent().unwrap();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    // A completed file-first form refresh rebuilds fields, retaining real user interaction.
+    finish_import_fields(dialog, schema);
+    assert_eq!(dialog.folder_consent().unwrap(), before);
 }
