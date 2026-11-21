@@ -307,8 +307,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
                 f,
             )?;
-            if extent.through_all || extent.taper.is_some() || extent.to.is_some() || extent.from.is_some() {
-                return Err(DocError::Invalid("not supported yet: a surface extrude through all, to or from an object, or with a taper".into()));
+            if extent.through_all || extent.taper.is_some() || extent.to.is_some() || extent.from.is_some() || extent.symmetric_offset {
+                return Err(DocError::Invalid(
+                    "not supported yet: a surface extrude through all, to or from an object, with a taper, or with symmetric offset".into(),
+                ));
             }
             let d = val(vals, &extent.distance, Kind::Length)?;
             let off = extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
