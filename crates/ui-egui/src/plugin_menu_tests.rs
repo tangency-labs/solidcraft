@@ -2274,6 +2274,7 @@ fn importer_file_conditions_and_general_patches_share_defaults_without_overwriti
     assert_eq!(params(fields).unwrap()["width"], 24.0);
     assert_eq!(params(fields).unwrap()["part"], "chosen");
     assert!(!dialog.has_hook, "general patches do not resubmit the file-aware schema hook");
+    let dialog = h.app.plugin_menu.dialogs.last().unwrap();
     assert!(dialog.ready(&h.app).is_ok());
 }
 
