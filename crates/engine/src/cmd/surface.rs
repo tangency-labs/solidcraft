@@ -1843,6 +1843,31 @@ mod tests {
         assert!((area(&s, "Floor") - 30.0).abs() < 1e-9, "an explicit face still extends that face");
     }
 
+    /// A cutting sheet in a component placed 50 mm along X cuts where it is shown. The wall is
+    /// drawn at local x = -47 (y from -5 to 15, z from -5 to 5), so it is shown at x = -47 + 50 = 3,
+    /// across the root's 10 × 10 floor (x 0 to 10, y 0 to 10): the kept side x > 3 is 7 × 10 = 70.
+    /// At its local x = -47 it would miss the floor, which would stay 100 or be refused. The
+    /// tool-face form picks the wall at its shown point (3, 5, 0) and keeps the same 70.
+    #[test]
+    fn trim_by_a_cutting_body_in_a_placed_component_cuts_where_it_is_shown() {
+        let mut s = Session::default();
+        sheet(&mut s, "XY", "Floor", [0.0, 0.0], [10.0, 10.0]);
+        run(&mut s, "component.create", json!({"name": "CutPart", "grounded": false}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Wall sketch"}));
+        let made = run(&mut s, "sketch.line", json!({"points": [[-47, -5], [-47, 15]]}));
+        let ids = made["created"]["curves"].clone();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.extrude", json!({"sketch": "Wall sketch", "curves": ids, "start_offset": -5, "distance": 10, "body_name": "Wall"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "occurrence.move", json!({"occurrence": "CutPart:1", "space": "world", "translate": [50, 0, 0]}));
+        run(&mut s, "surface.trim", json!({"body": "Floor", "tool": {"body": "Wall"}, "keep": [6, 5, 0]}));
+        assert!((area(&s, "Floor") - 70.0).abs() < 1e-9);
+        run(&mut s, "edit.undo", json!({}));
+        assert!((area(&s, "Floor") - 100.0).abs() < 1e-9);
+        run(&mut s, "surface.trim", json!({"body": "Floor", "tool": {"body": "Wall", "point": [3, 5, 0]}, "keep": [6, 5, 0]}));
+        assert!((area(&s, "Floor") - 70.0).abs() < 1e-9);
+    }
+
     /// A U-shaped sheet (legs at x = 0 and 10, 10 high; base along y = 0; 10 deep) cut by the
     /// plane y = 5: one point keeps its side (both legs' tops, 100), a list of points the regions
     /// they pick (one leg's top, 50; the base region, 200).
