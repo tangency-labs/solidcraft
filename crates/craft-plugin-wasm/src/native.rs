@@ -24,6 +24,9 @@ mod bindings {
 }
 include!(concat!(env!("OUT_DIR"), "/aliases.rs"));
 include!(concat!(env!("OUT_DIR"), "/importer.rs"));
+include!(concat!(env!("OUT_DIR"), "/folders.rs"));
+
+mod folder_access;
 
 const MAX_CALLS: usize = 256;
 /// An importer streams its file in chunks and reports progress as it goes.
@@ -99,6 +102,9 @@ struct State<H> {
     groups: BTreeSet<String>,
     effect: Effect,
     folders: BTreeMap<String, Folder>,
+    input_folders: BTreeMap<String, Folder>,
+    folder_bytes: u64,
+    folder_files: BTreeSet<(String, PathBuf)>,
     staged: BTreeMap<(String, PathBuf), PendingWrite>,
     clock: bool,
     limits: StoreLimits,
@@ -348,7 +354,7 @@ impl<H: PluginHost> State<H> {
     }
     fn count_file(&mut self, path: &Path) -> std::result::Result<(), PluginError> {
         let Some(import) = self.import.as_mut() else { return Ok(()) };
-        if import.files.len() >= MAX_IMPORT_FILES && !import.files.contains(path) {
+        if import.files.len().saturating_add(self.folder_files.len()) >= MAX_IMPORT_FILES && !import.files.contains(path) {
             return Err(self.fail(limit("input_folder: more than 4096 files")));
         }
         import.files.insert(path.to_path_buf());
@@ -384,7 +390,7 @@ impl<H: PluginHost> source::Host for State<H> {
         let bytes = read.map_err(|e| self.fail(HostError::PermissionDenied { permission: format!("source.read {path}: {e}") }))?;
         if let Some(import) = self.import.as_mut() {
             import.read_bytes = import.read_bytes.saturating_add(bytes.len() as u64);
-            if import.read_bytes > MAX_IMPORT_INPUT_BYTES {
+            if import.read_bytes.saturating_add(self.folder_bytes) > MAX_IMPORT_INPUT_BYTES {
                 return Err(self.fail(limit("source: more than 1 GiB read in one import")));
             }
         }
@@ -696,14 +702,15 @@ pub(super) fn run<H: PluginHost + 'static>(
         if host.is_cancelled() {
             return Err(HostError::Cancelled);
         }
+        let input_folders = folder_access::open(&host, manifest)?;
         host.begin_transaction()?;
-        Ok((runtime, entry, params, (engine, component, stack), (commands, groups), folders))
+        Ok((runtime, entry, params, (engine, component, stack), (commands, groups), (folders, input_folders)))
     })();
-    let (runtime, entry, params, compiled, commands, folders) = match prepared {
+    let (runtime, entry, params, compiled, commands, (folders, input_folders)) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
-    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, folders);
+    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, folders, input_folders);
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => state.publish_writes().map(|()| value),
@@ -730,6 +737,7 @@ fn execute<H: PluginHost + 'static>(
     (engine, component, stack): (Engine, Component, usize),
     (commands, groups): (BTreeMap<String, CommandSchema>, BTreeSet<String>),
     folders: BTreeMap<String, Folder>,
+    input_folders: BTreeMap<String, Folder>,
 ) -> (State<H>, Result<Value>) {
     let limits = &runtime.limits;
     let state = State {
@@ -738,6 +746,9 @@ fn execute<H: PluginHost + 'static>(
         groups,
         effect: entry.effect,
         folders,
+        input_folders,
+        folder_bytes: 0,
+        folder_files: BTreeSet::new(),
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
         failed: None,
@@ -756,6 +767,7 @@ fn execute<H: PluginHost + 'static>(
             Wit::V0_1 => v0_1::call_entry(&engine, &mut store, &component, &entry.name, &params),
             Wit::Current => {
                 let mut linker = Linker::new(&engine);
+                folders::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 let guest = bindings::CommandPlugin::instantiate(&mut store, &component, &linker)?;
                 Ok(call_entry!(guest, &mut store, &entry.name, &params)?.map_err(host_error))
@@ -909,6 +921,7 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
         return v0_1::check_link::<Inert>(&engine, &component, importer).map_err(link);
     }
     let mut linker = Linker::<State<Inert>>::new(&engine);
+    folders::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
     if importer {
         importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         importer_bindings::ImporterPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
@@ -1065,9 +1078,10 @@ pub(super) fn run_import<H: PluginHost + 'static>(
             scratch: Vec::new(),
             evaluating: false,
         };
-        Ok((runtime, entry, options, (engine, component, stack), import, source::FileInfo { name, size }))
+        let input_folders = folder_access::open(&host, manifest)?;
+        Ok((runtime, entry, options, (engine, component, stack), import, source::FileInfo { name, size }, input_folders))
     })();
-    let (runtime, entry, options, (engine, component, stack), import, file) = match prepared {
+    let (runtime, entry, options, (engine, component, stack), import, file, input_folders) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
@@ -1081,6 +1095,9 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         groups: BTreeSet::new(),
         effect: Effect::Open,
         folders: BTreeMap::new(),
+        input_folders,
+        folder_bytes: 0,
+        folder_files: BTreeSet::new(),
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
         failed: None,
@@ -1100,6 +1117,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
             Wit::V0_1 => v0_1::call_import(&engine, &mut store, &component, &entry.name, &file, &options),
             Wit::Current => {
                 let mut linker = Linker::new(&engine);
+                folders::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 let guest = importer_bindings::ImporterPlugin::instantiate(&mut store, &component, &linker)?;
                 Ok(call_import!(guest, &mut store, &entry.name, &file, &options)?.map_err(host_error))

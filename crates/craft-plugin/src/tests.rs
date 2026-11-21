@@ -725,3 +725,29 @@ fn schema_composition_does_not_implicitly_close_object_constraints() {
         assert!(check_input(&schema, &json!({"a":1})).is_err());
     }
 }
+
+#[test]
+fn folder_read_annotations_are_explicit_bounded_and_only_on_top_level_directories() {
+    let directory = json!({"type":"string","format":"directory","x-solidcraft-grant":"read"});
+    let schema = json!({"type":"object","properties":{"library":directory}});
+    assert_eq!(directory_read_fields(&schema).unwrap(), BTreeSet::from(["library".into()]));
+    let mut value = manifest();
+    value["capabilities"] = json!(["commands@0.2","folders@0.1"]);
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":schema}]);
+    assert!(parse(&value).is_ok());
+    for property in [
+        json!({"type":"string","format":"directory","x-solidcraft-grant":"write"}),
+        json!({"type":"string","x-solidcraft-grant":"read"}),
+        json!({"type":"integer","format":"directory","x-solidcraft-grant":"read"}),
+        json!({"type":"string","format":"directory","x-solidcraft-grant":true}),
+        json!({"type":"object","properties":{"nested":directory}}),
+        json!({"type":"array","items":directory}),
+    ] {
+        value["runtime"]["entries"][0]["input_schema"] = json!({"type":"object","properties":{"library":property}});
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { .. })), "{property}");
+    }
+    assert!(directory_read_fields(&json!({"type":"object","oneOf":[schema]})).is_err());
+    let properties: serde_json::Map<_, _> = (0..33).map(|i| (format!("folder{i}"), directory.clone())).collect();
+    assert!(directory_read_fields(&json!({"type":"object","properties":properties})).is_err());
+    assert!(directory_read_fields(&json!({"type":"object","properties":{"old":{"type":"string","format":"directory"}}})).unwrap().is_empty());
+}

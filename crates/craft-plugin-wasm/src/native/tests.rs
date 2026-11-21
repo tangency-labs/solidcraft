@@ -12,6 +12,7 @@ struct App {
     commits: usize,
     rollbacks: usize,
     grants: Vec<FileGrant>,
+    input_grants: Vec<FileGrant>,
     cancelled: bool,
     fail_commit: bool,
     unchanged_at_commit: Option<PathBuf>,
@@ -53,6 +54,9 @@ impl PluginHost for App {
         self.value = self.saved.take().unwrap();
         self.rollbacks += 1;
         Ok(())
+    }
+    fn granted_input_folders(&self) -> Vec<FileGrant> {
+        self.input_grants.clone()
     }
     fn granted_folders(&self) -> Vec<FileGrant> {
         self.grants.clone()
@@ -271,6 +275,9 @@ fn cancellation_prevents_running_plugin_code() {
 
 fn state<H: PluginHost>(app: H) -> State<H> {
     State {
+        input_folders: BTreeMap::new(),
+        folder_bytes: 0,
+        folder_files: BTreeSet::new(),
         host: app,
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
@@ -382,7 +389,14 @@ fn files_component_after(write: bool, swallow_error: bool, after: &str) -> Vec<u
 /// An entry that makes these file calls in order (`true`: write "changed" to `secret.txt` of the
 /// grant `project`; `false`: read it), ignoring what each returns unless it is the last.
 fn files_component_calls(writes: &[bool], swallow_error: bool, after: &str) -> Vec<u8> {
+    folder_or_files_component(writes, swallow_error, after, false)
+}
+fn folder_or_files_component(writes: &[bool], swallow_error: bool, after: &str, folder: bool) -> Vec<u8> {
+    wat::parse_str(folder_or_files_source(writes, swallow_error, after, folder)).unwrap()
+}
+fn folder_or_files_source(writes: &[bool], swallow_error: bool, after: &str, folder: bool) -> String {
     let (package, version) = API.split_once('@').unwrap();
+    let interface = if folder { "folders" } else { "files" };
     let template = include_str!("../fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version);
     // Keep exactly the shared WIT types, then exercise the real files interface.
     let (types, _) = template.split_once(&format!("  (type $ty-{package}/commands@{version}")).unwrap();
@@ -391,6 +405,8 @@ fn files_component_calls(writes: &[bool], swallow_error: bool, after: &str) -> V
     for write in [false, true].into_iter().filter(|write| writes.contains(write)) {
         let (id, operation, result, parameters, core_parameters) = if write {
             ("write", "write-file", "(result (error $error))", "(param \"data\" (list u8))", "i32 i32 i32 i32 i32 i32 i32")
+        } else if folder {
+            ("read", "read", "(result (list u8) (error $error))", "(param \"offset\" u64) (param \"len\" u32)", "i32 i32 i32 i32 i64 i32 i32")
         } else {
             ("read", "read-file", "(result (list u8) (error $error))", "", "i32 i32 i32 i32 i32")
         };
@@ -403,7 +419,11 @@ fn files_component_calls(writes: &[bool], swallow_error: bool, after: &str) -> V
         imports += &format!("(import \"host\" \"{id}\" (func ${id} (param {core_parameters})))\n");
     }
     for write in writes {
-        let (id, arguments) = if *write { ("write", "i32.const 128 i32.const 7") } else { ("read", "") };
+        let (id, arguments) = if *write {
+            ("write", "i32.const 128 i32.const 7")
+        } else {
+            ("read", if folder { "i64.const 0 i32.const 1048576" } else { "" })
+        };
         calls += &format!("  i32.const 64 i32.const 7 i32.const 96 i32.const 10 {arguments} i32.const 0 call ${id}\n");
     }
     let reply =
@@ -414,7 +434,7 @@ fn files_component_calls(writes: &[bool], swallow_error: bool, after: &str) -> V
 (alias outer 1 $plugin-error (type $error))
 (export "plugin-error" (type (eq $error)))
 {exports}  ))
-  (import "{package}/files@{version}" (instance $files (type $files-type)))
+  (import "{package}/{interface}@{version}" (instance $files (type $files-type)))
 {aliases}  (core module $allocation
 (memory (export "memory") 1)
 (global $heap (mut i32) i32.const 4096)
@@ -448,7 +468,7 @@ fn files_component_calls(writes: &[bool], swallow_error: bool, after: &str) -> V
   (export "{package}/entry@{version}" (instance $command))
 )"#
     );
-    wat::parse_str(source).unwrap()
+    source
 }
 #[test]
 fn file_import_denial_rolls_back_even_when_guest_swallows_it_and_grants_enable_reads() {
@@ -817,5 +837,123 @@ fn an_importer_built_against_wit_0_1_still_runs() {
     assert_eq!(failure, HostError::InvalidInput { field: "file".into(), reason: "the model has no solids".into() });
     let failure = import_with(&old, &importer_manifest(false), root.join("loop.smp"), false).unwrap_err();
     assert_eq!(failure, HostError::Exhausted { limit: "fuel".into(), allowed: 10_000_000 });
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn the_optional_folder_interface_links_and_reads_only_host_approved_roots() {
+    let root = import_folder(&[("secret.txt", b"{}")]);
+    let mut manifest = manifest();
+    manifest.capabilities = vec!["commands@0.2".into(), "folders@0.1".into()];
+    let component = folder_or_files_component(&[false], false, "", true);
+    crate::check_component(&manifest, &component).unwrap();
+    let mut app = App::default();
+    assert!(matches!(run(&mut app, &manifest, &component, "make", &json!({})), Err(HostError::PermissionDenied { .. })));
+    app.input_grants.push(FileGrant { name: "project".into(), folder: root.clone(), read: true, write: false });
+    assert_eq!(run(&mut app, &manifest, &component, "make", &json!({})).unwrap(), json!({}));
+    manifest.capabilities.retain(|c| !c.starts_with("folders@"));
+    assert!(matches!(run(&mut app, &manifest, &component, "make", &json!({})), Err(HostError::PermissionDenied { .. })));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn folder_reads_confine_paths_resolve_case_and_share_the_import_budgets() {
+    use folders::Host as _;
+    let root = import_folder(&[("Part.BIN", b"abcdef"), (".secret", b"hidden")]);
+    std::fs::create_dir_all(root.join("parts")).unwrap();
+    std::fs::write(root.join("parts/sub.bin"), b"sub").unwrap();
+    let make = || {
+        let mut state = state(App::default());
+        state.input_folders.insert("library".into(), Folder {
+            dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: false,
+        });
+        state
+    };
+    let mut allowed = make();
+    assert_eq!(allowed.read("library".into(), "Part.BIN".into(), 2, 3).unwrap(), b"cde");
+    assert_eq!(allowed.read("library".into(), "parts/sub.bin".into(), 0, 4).unwrap(), b"sub");
+    assert_eq!(allowed.size("library".into(), "Part.BIN".into()).unwrap(), Some(6));
+    assert_eq!(allowed.size("library".into(), "absent".into()).unwrap(), None);
+    assert_eq!(allowed.resolve("library".into(), "part.bin".into()).unwrap(), Some("Part.BIN".into()));
+    assert_eq!(allowed.resolve("library".into(), "".into()).unwrap(), Some("".into()));
+    assert_eq!(allowed.resolve("library".into(), "absent".into()).unwrap(), None);
+    for path in ["../outside", "/outside", ".secret", "parts/../../outside", "C:\\outside", "parts\\..\\outside"] {
+        assert!(make().read("library".into(), path.into(), 0, 1).is_err(), "{path}");
+    }
+    assert!(make().read("other".into(), "Part.BIN".into(), 0, 1).is_err());
+    assert!(files::Host::write_file(&mut make(), "library".into(), "Part.BIN".into(), b"changed".to_vec()).is_err());
+    assert_eq!(std::fs::read(root.join("Part.BIN")).unwrap(), b"abcdef");
+    assert!(make().read("library".into(), "Part.BIN".into(), 0, 0).is_err());
+    assert!(make().read("library".into(), "Part.BIN".into(), 0, MAX_IMPORT_CHUNK_BYTES as u32 + 1).is_err());
+    let mut exhausted = make();
+    exhausted.folder_bytes = MAX_IMPORT_INPUT_BYTES;
+    assert!(exhausted.read("library".into(), "Part.BIN".into(), 0, 1).is_err());
+    let mut exhausted = make();
+    exhausted.folder_files = (0..MAX_IMPORT_FILES).map(|i| ("library".into(), PathBuf::from(format!("file{i}")))).collect();
+    assert!(exhausted.size("library".into(), "Part.BIN".into()).is_err());
+    let mut cancelled = make();
+    cancelled.host.cancelled = true;
+    assert!(matches!(cancelled.size("library".into(), "Part.BIN".into()), Err(PluginError::Cancelled)));
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(root.join("Part.BIN"), root.join("linked")).unwrap();
+        assert!(make().read("library".into(), "linked".into(), 0, 1).is_err());
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// The same read fixture as an importer, copying the folder file into design.write.
+fn folder_import_component() -> Vec<u8> {
+    let (package, version) = API.split_once('@').unwrap();
+    let source = folder_or_files_source(&[false], false, "i32.const 4 i32.load i32.const 8 i32.load i32.const 32 call $write", true);
+    let design = format!(
+        r#"
+(type $design-type (instance
+    (alias outer 1 $plugin-error (type $error))
+    (export "plugin-error" (type (eq $error)))
+    (type $write (func (param "bytes" (list u8)) (result (result (error $error)))))
+    (export "write" (func (type $write)))))
+(import "{package}/design@{version}" (instance $design (type $design-type)))
+(alias export $design "write" (func $write))
+(type $file-info (record (field "name" string) (field "size" u64)))
+"#
+    );
+    let source = source
+        .replace("  (core module $allocation", &format!("{design}  (core module $allocation"))
+        .replace(
+            "  (core instance $imports",
+            "  (core func $write-core (canon lower (func $write) (memory $memory) (realloc $realloc)))\n  (core instance $imports",
+        )
+        .replace("(export \"memory\" (memory $memory))", "(export \"write\" (func $write-core)) (export \"memory\" (memory $memory))")
+        .replace("  (core module $main", "  (core module $main (import \"host\" \"write\" (func $write (param i32 i32 i32)))")
+        .replace(
+            "(func (export \"execute\") (param i32 i32 i32 i32)",
+            "(func (export \"execute\") (param i32 i32 i32 i32 i64 i32 i32)",
+        )
+        .replace("(param \"params\" $json)", "(param \"file\" $file-info) (param \"options\" $json)")
+        .replace("(export \"execute\" (func $execute))", "(export \"file-info\" (type $file-info)) (export \"import-file\" (func $execute))")
+        .replace(&format!("{package}/entry@{version}"), &format!("{package}/importer@{version}"));
+    wat::parse_str(source).unwrap()
+}
+
+#[test]
+fn an_importer_can_read_an_approved_external_library_without_widening_source() {
+    let root = import_folder(&[("assembly.smp", b"source")]);
+    let library = root.join("library");
+    std::fs::create_dir_all(&library).unwrap();
+    std::fs::write(library.join("secret.txt"), b"{}").unwrap();
+    let mut manifest = importer_manifest(false);
+    manifest.capabilities = vec!["formats@0.2".into(), "folders@0.1".into()];
+    let component = folder_import_component();
+    crate::check_component(&manifest, &component).unwrap();
+    let request = crate::ImportRequest { path: root.join("assembly.smp"), input_folder: false };
+    let (_, denied) = crate::run_import(App::default(), &manifest, &component, "convert", &json!({}), &request);
+    assert!(matches!(denied, Err(HostError::PermissionDenied { .. })));
+    let app = App {
+        input_grants: vec![FileGrant { name: "project".into(), folder: library, read: true, write: false }],
+        ..Default::default()
+    };
+    let (_, imported) = crate::run_import(app, &manifest, &component, "convert", &json!({}), &request);
+    assert_eq!(imported.unwrap().design, b"{}");
     std::fs::remove_dir_all(root).unwrap();
 }

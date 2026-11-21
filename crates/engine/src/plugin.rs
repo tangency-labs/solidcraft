@@ -3,7 +3,7 @@
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
     API, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
-    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, valid_id,
+    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, directory_read_fields, valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
@@ -67,6 +67,8 @@ pub struct AppState {
     pub grants: BTreeMap<String, Grants>,
     /// Adapter folder grants for the active call; runtime calls use the package's approved grants.
     pub file_grants: Vec<FileGrant>,
+    /// One UI request's consent, never serialised or persisted. Consumed before entering a guest.
+    pub dialog_folders: Option<folders::DialogFolders>,
     /// Legacy embedding state. Runtime permissions come exclusively from grants bound to package hashes.
     pub command_groups: BTreeSet<String>,
     /// Where `plugin.install` writes and `plugin.list` looks; `None`: the per-user
@@ -316,6 +318,7 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
 }
 
 fn run_package(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {
+    let consent = session.plugin_state.dialog_folders.take();
     session.plugin_state.refresh_stored();
     if session.disabled_plugins.contains(&package.manifest.id) {
         return Err(error("plugin is disabled"));
@@ -331,9 +334,12 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
     let rt = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
     host_limits_for(session, &package.manifest.id, &package.approval).check(&rt.limits)?;
     let declared = rt.entries.iter().find(|e| e.name == entry).ok_or_else(|| error("unknown entry"))?;
-    let prepared =
-        conditions::has_conditions(&declared.input_schema).then(|| craft_plugin::prepare_input(&declared.input_schema, params)).transpose()?;
+    let fields = craft_plugin::directory_read_fields(&declared.input_schema)?;
+    let prepared = (conditions::has_conditions(&declared.input_schema) || !fields.is_empty())
+        .then(|| craft_plugin::prepare_input(&declared.input_schema, params))
+        .transpose()?;
     let params = prepared.as_ref().unwrap_or(params);
+    let input_folders = folders::for_entry(session, &package, entry, params, consent.as_ref())?;
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         // What this call may reach: the groups both the manifest asks for and the user granted,
@@ -353,6 +359,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
             });
         let host = SolidCraftHost {
             session: scratch,
+            input_folders,
             transaction: None,
             sketch_exits: Vec::new(),
             view: None,
@@ -381,12 +388,13 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
-        let _ = params;
+        let _ = (params, input_folders);
         Err(error("plugin execution requires an x86-64 or AArch64 native build with the plugins feature"))
     }
 }
 
 pub mod check;
+pub mod folders;
 pub mod grant_store;
 mod import;
 pub mod install;
@@ -407,6 +415,7 @@ pub use tools::{explain_importer, explain_named, missing_grant, structured_error
 /// The application adapter owns a scratch transaction. Wasmtime sees only PluginHost.
 pub struct SolidCraftHost {
     pub session: Session,
+    input_folders: Vec<FileGrant>,
     transaction: Option<Session>,
     sketch_exits: Vec<Option<u64>>,
     /// The last view command in this run. Cleared on rollback, like `sketch_exits`.
@@ -550,6 +559,9 @@ impl PluginHost for SolidCraftHost {
     fn granted_command_groups(&self) -> BTreeSet<String> {
         self.groups.clone()
     }
+    fn granted_input_folders(&self) -> Vec<FileGrant> {
+        self.input_folders.clone()
+    }
     fn granted_folders(&self) -> Vec<FileGrant> {
         let scope = solidcraft_io::vfs::current_scope();
         self.session
@@ -566,6 +578,17 @@ impl PluginHost for SolidCraftHost {
         }
         grant_covers(&self.session.plugin_state.file_grants, path, write)
     }
+    fn authorize_input_file_path(&self, path: &Path) -> craft_plugin::Result<()> {
+        if cfg!(windows)
+            && let Some(reason) = solidcraft_io::vfs::windows_refusal(&path.to_string_lossy())
+        {
+            return Err(HostError::PermissionDenied { permission: reason.into() });
+        }
+        if let Some(scope) = solidcraft_io::vfs::current_scope() {
+            return scope.check(&path.to_string_lossy()).map_err(|e| HostError::PermissionDenied { permission: e.to_string() });
+        }
+        grant_covers(&self.input_folders, path, false)
+    }
     fn log(&mut self, message: &str) {
         if let Some(s) = self.transaction.as_mut() {
             s.echo(format!("plugin: {}", message.chars().filter(|c| !c.is_control()).collect::<String>()));
@@ -581,7 +604,7 @@ impl PluginHost for SolidCraftHost {
 
 /// Whether `path` is covered by a folder grant, for reading or for writing.
 /// A refusal is the same error [`PluginHost::authorize_file_path`] returns when no caller
-/// scope is set. Choosing a folder in a dialog does not add a grant.
+/// scope is set. Unannotated directory fields do not add a grant.
 pub fn require_folder_grant(grants: &[FileGrant], path: &Path) -> craft_plugin::Result<()> {
     if grant_covers(grants, path, false).is_ok() || grant_covers(grants, path, true).is_ok() { Ok(()) } else { grant_covers(grants, path, false) }
 }

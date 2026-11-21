@@ -108,6 +108,7 @@ fn capability_refusals_are_plain_and_name_solidcraft() {
 #[test]
 fn an_importer_checks_its_own_design_apart_from_the_open_one() {
     let mut host = SolidCraftHost {
+        input_folders: Vec::new(),
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
@@ -138,6 +139,7 @@ fn an_importer_checks_its_own_design_apart_from_the_open_one() {
 #[test]
 fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
     let host = SolidCraftHost {
+        input_folders: Vec::new(),
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
@@ -225,6 +227,7 @@ fn read_only_folder_allows_step_insert_but_refuses_file_writes() {
     assert!(source_path.is_file());
 
     let mut host = SolidCraftHost {
+        input_folders: Vec::new(),
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
@@ -255,6 +258,7 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
     let granted = root.join("granted");
     std::fs::create_dir_all(&granted).unwrap();
     let mut host = SolidCraftHost {
+        input_folders: Vec::new(),
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
@@ -287,6 +291,7 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
 #[test]
 fn a_command_in_another_spelling_is_never_granted() {
     let mut host = SolidCraftHost {
+        input_folders: Vec::new(),
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
@@ -854,6 +859,7 @@ mod native {
                     assert_eq!(std::fs::read(&target).unwrap(), b"private contents");
                 }
                 let host = SolidCraftHost {
+                    input_folders: Vec::new(),
                     session: s,
                     transaction: None,
                     sketch_exits: Vec::new(),
@@ -1398,6 +1404,7 @@ fn host_resource_policy_is_exact_user_state_and_never_design_data() {
 #[test]
 fn command_effects_are_explicit_and_independent_of_undo() {
     let host = SolidCraftHost {
+        input_folders: Vec::new(),
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
@@ -1432,6 +1439,7 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         FileGrant { name: "hidden".into(), folder: root.join(".hidden"), read: true, write: false },
     ];
     let host = SolidCraftHost {
+        input_folders: Vec::new(),
         session,
         transaction: None,
         sketch_exits: Vec::new(),
@@ -1514,6 +1522,33 @@ mod importers {
         assert!(s.execute("doc.open", &json!({"path": stl})).map_or(true, |r| r.get("loss_report").is_none()));
         assert_eq!(s.execute("file.import", &json!({"path": stl})).unwrap()["format"], "smp.convert");
         assert_eq!(s.execute("doc.open", &json!({"path": stl, "format": "smp.convert"})).unwrap()["bodies"], 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn importer_dialog_consent_is_consumed_and_cannot_be_replayed_as_options() {
+        let (mut s, root) = installed("entry-folder-consent", &[("smp", &["smp"], false)]);
+        let library = root.join("library");
+        std::fs::create_dir_all(&library).unwrap();
+        let library = std::fs::canonicalize(library).unwrap();
+        let mut manifest = importer_manifest("smp", &["smp"], false);
+        manifest["capabilities"] = json!(["formats@0.2","folders@0.1"]);
+        manifest["runtime"]["entries"][0]["input_schema"] = json!({"type":"object","properties":{
+            "library":{"type":"string","format":"directory","x-solidcraft-grant":"read"}
+        }});
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+        let package = read_package(&root.join("plugins/smp").to_string_lossy()).unwrap();
+        let file = put(&root, "bracket.smp", &design());
+        let importer = importer_for(&s, &file, None).unwrap().unwrap();
+        let params = json!({"library":library});
+        assert!(import_file(&mut s, &importer, &file, &params).is_err());
+        s.plugin_state.dialog_folders = Some(folders::DialogFolders {
+            plugin: "smp".into(), approval: package.approval, entry: "convert".into(),
+            folders: vec![FileGrant { name: "library".into(), folder: library, read: true, write: false }],
+        });
+        assert!(import_file(&mut s, &importer, &file, &params).is_ok());
+        assert!(s.plugin_state.dialog_folders.is_none() && s.plugin_state.grants.is_empty());
+        assert!(import_file(&mut s, &importer, &file, &params).is_err(), "a later programmatic call gets no consent");
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -2345,4 +2380,63 @@ mod stored_grants {
         assert_eq!(restarted, desktop_grants);
         std::fs::remove_dir_all(plugins).unwrap();
     }
+}
+
+#[test]
+fn annotated_folders_need_bound_ui_consent_or_a_current_read_approval() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-entry-folders-{}", std::process::id()));
+    let library = root.join("library");
+    let other = root.join("other");
+    std::fs::create_dir_all(library.join("parts")).unwrap();
+    std::fs::create_dir_all(&other).unwrap();
+    let library = std::fs::canonicalize(library).unwrap();
+    let other = std::fs::canonicalize(other).unwrap();
+    let schema = json!({"type":"object","properties":{
+        "use_library":{"type":"boolean"},
+        "library":{"type":"string","format":"directory","x-solidcraft-grant":"read",
+            "x-solidcraft-visible-when":{"field":"use_library","eq":true}}
+    }});
+    let manifest = parse_manifest(json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.2","folders@0.1"],
+        "runtime":{"module":"plugin.wasm","entries":[{"name":"make","input_schema":schema}],
+            "permissions":{"files":[{"name":"work","read":true,"write":false}]}}}).to_string().as_bytes(), "sample").unwrap();
+    let package = Package { manifest, approval: "reviewed".into(), component: Vec::new() };
+    let mut s = Session::default();
+    let params = json!({"use_library":true,"library":library});
+    assert!(folders::for_entry(&s, &package, "make", &params, None).is_err(), "a field value grants nothing");
+    let grant = FileGrant { name: "library".into(), folder: library.clone(), read: true, write: false };
+    let consent = folders::DialogFolders { plugin: "sample".into(), approval: "reviewed".into(), entry: "make".into(), folders: vec![grant.clone()] };
+    let host = SolidCraftHost {
+        session: Session::default(), input_folders: vec![grant.clone()], transaction: None, sketch_exits: Vec::new(),
+        view: None, groups: BTreeSet::new(), file_folders: Vec::new(), file_read_folders: Vec::new(), evaluation: None,
+    };
+    assert!(host.authorize_input_file_path(&library.join("parts/part.bin")).is_ok());
+    assert!(host.authorize_file_path(&library.join("parts/part.bin"), false).is_err(), "legacy file reads gain nothing");
+    assert!(host.authorize_file_path(&library.join("parts/part.bin"), true).is_err(), "no writes are granted");
+    assert_eq!(folders::for_entry(&s, &package, "make", &params, Some(&consent)).unwrap(), vec![grant.clone()]);
+    for changed in [
+        folders::DialogFolders { plugin: "another".into(), ..consent.clone() },
+        folders::DialogFolders { approval: "changed".into(), ..consent.clone() },
+        folders::DialogFolders { entry: "other".into(), ..consent.clone() },
+        folders::DialogFolders { folders: vec![FileGrant { folder: other, ..grant.clone() }], ..consent.clone() },
+    ] {
+        assert!(folders::for_entry(&s, &package, "make", &params, Some(&changed)).is_err());
+    }
+    let hidden = craft_plugin::prepare_input(&schema, &json!({"use_library":false,"library":"/unapproved"})).unwrap();
+    assert!(folders::for_entry(&s, &package, "make", &hidden, Some(&consent)).unwrap().is_empty());
+    assert!(s.plugin_state.grants.is_empty(), "one-run consent never persists");
+    let approved = FileGrant { name: "work".into(), ..grant };
+    s.plugin_state.grants.insert("sample".into(), Grants { package_hash: Some("reviewed".into()), folders: vec![approved], ..Default::default() });
+    let child = json!({"use_library":true,"library":library.join("parts")});
+    assert_eq!(folders::for_entry(&s, &package, "make", &child, None).unwrap()[0].folder, library.join("parts"));
+    s.plugin_state.grants.get_mut("sample").unwrap().folders[0].read = false;
+    assert!(folders::for_entry(&s, &package, "make", &params, None).is_err(), "write approval cannot imply read");
+    s.plugin_state.grants.get_mut("sample").unwrap().folders[0].read = true;
+    s.plugin_state.grants.get_mut("sample").unwrap().package_hash = Some("stale".into());
+    assert!(folders::for_entry(&s, &package, "make", &params, None).is_err());
+    for path in [Path::new("relative"), Path::new("/missing-folder-for-plugin-test")] {
+        assert!(folders::directory(path).is_err());
+    }
+    let scoped = solidcraft_io::vfs::PathScope::new([root.join("other")]);
+    solidcraft_io::vfs::scoped(Some(scoped), || assert!(folders::for_entry(&s, &package, "make", &params, Some(&consent)).is_err()));
+    std::fs::remove_dir_all(root).unwrap();
 }
