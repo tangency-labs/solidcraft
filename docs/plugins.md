@@ -807,8 +807,9 @@ relative path to an `.svg` file inside the package:
   ]}}}
 ```
 
-- At the top of the schema it is the command's icon: its ribbon button, its rows in the Plugins,
-  File and Help menus, and its dialog's header. Without one the command has the generic plugin icon.
+- At the top of a command or importer entry's `input_schema` it is the entry's icon: its ribbon
+  button, its rows in the Plugins, File and Help menus, and its dialog's header. Without one the
+  entry has the generic plugin icon. Importers use the same image checks and fallback as commands.
 - On a `oneOf` option it is that option's picture in the dropdown. Pictures show when every option
   of the choice names one that passed the check below; otherwise the dropdown shows the titles alone.
 - The image is drawn like the app's own icons, and must be one: SolidCraft's icon SVG subset
@@ -822,7 +823,8 @@ relative path to an `.svg` file inside the package:
   and stays inside the package: no `..`, no absolute path, no link. A file is at most 64 KiB and a
   package names at most 64 images. Images are read from the installed package when the plugins are
   listed; nothing is fetched from the network. A refused or missing image is logged and left out,
-  and the command works as before.
+  and the entry works as before. `plugin.check` reports missing or invalid images for both commands
+  and importers.
 - Images are not part of the `approval` hash: changing one changes only what is drawn.
 
 An option may also name a material swatch with `x-solidcraft-swatch`. This is a separate

@@ -1539,6 +1539,33 @@ fn the_menu_lists_install_then_entries_with_a_submenu_for_several() {
     assert_eq!(labels, ["measure…", "tidy…"]);
 }
 
+#[test]
+fn importer_menu_rows_use_the_same_entry_icon_for_single_entries_and_submenus() {
+    use crate::app_bar::FileRow;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let importer = |name: &str| {
+        serde_json::from_value(json!({"name":name,"kind":"importer","extensions":["sample"],
+            "input_schema":{"type":"object","x-solidcraft-icon":"format.svg"}}))
+        .unwrap()
+    };
+    let mut plugin = listed("imports", vec![importer("convert")]);
+    plugin.images.insert("format.svg".into(), "checked-format-icon".into());
+    app.plugin_menu.listed = vec![plugin];
+    assert!(matches!(&rows(&app)[3], FileRow::Item(item) if item.icon == "checked-format-icon"));
+    app.plugin_menu.listed[0].entries.push(importer("other"));
+    let menu = rows(&app);
+    let FileRow::Sub { rows, .. } = &menu[3] else { panic!("several importers have a submenu") };
+    assert!(rows.iter().all(|row| matches!(row, FileRow::Item(item) if item.icon == "checked-format-icon")));
+    app.plugin_menu.listed[0].images.clear();
+    let menu = super::rows(&app);
+    let FileRow::Sub { rows, .. } = &menu[3] else { panic!("several importers have a submenu") };
+    assert!(rows.iter().all(|row| matches!(row, FileRow::Item(item) if item.icon == crate::plugin_images::GENERIC)));
+    app.plugin_menu.listed[0].entries.truncate(1);
+    app.plugin_menu.listed[0].entries[0].input_schema = json!({"type":"object"});
+    assert!(matches!(&super::rows(&app)[3], FileRow::Item(item) if item.icon.is_empty()), "no annotation keeps the old menu row");
+    assert_eq!(ribbon_buttons(&app)[0].icon, crate::plugin_images::GENERIC);
+}
+
 /// Each plugin is its own thing: every command gets its own menu row (several under the plugin's
 /// name) and its own ribbon button, and a plugin turned off in Preferences shows in neither.
 #[test]

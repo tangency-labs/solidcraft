@@ -179,6 +179,30 @@ fn metadata_normalization_and_legacy_entries() {
 }
 
 #[test]
+fn entry_images_share_bounded_paths_and_sources() {
+    let schema = json!({"type":"object", "x-solidcraft-icon":"entry.svg", "properties":{
+        "series":{"oneOf":[{"const":"a","x-solidcraft-icon":"icons/a.svg"},{"const":"b","x-solidcraft-icon":7}]}
+    }});
+    assert_eq!(images::referenced(&schema), ["entry.svg", "icons/a.svg"]);
+    assert_eq!(images::annotations(&schema).len(), 3, "lint also sees non-string annotations");
+    assert!(images::annotations(&json!({"type":"object"})).is_empty());
+    for path in ["entry.svg", "icons/a-1.svg"] {
+        assert!(images::valid_path(path));
+    }
+    for path in ["/entry.svg", "../entry.svg", "icons/../entry.svg", "icons\\entry.svg", "entry.png", "icons//entry.svg"] {
+        assert!(!images::valid_path(path), "{path}");
+    }
+    let mut svg = b"<svg viewBox=\"0 0 64 64\"></svg>".to_vec();
+    assert!(images::source(&svg).is_ok());
+    svg.resize(images::MAX_BYTES, b' ');
+    assert!(images::source(&svg).is_ok(), "the size limit is inclusive");
+    svg.push(b' ');
+    assert!(images::source(&svg).is_err());
+    assert!(images::source(b"<svg viewBox='0 0 32 32'></svg>").is_err());
+    assert!(images::source(&[0xff]).is_err());
+}
+
+#[test]
 fn declared_inputs_effects_and_slots_are_readable() {
     let mut value = manifest();
     value["runtime"]["entries"] = json!([{"name":"inspect","effect":"read",

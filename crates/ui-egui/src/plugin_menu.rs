@@ -735,7 +735,7 @@ fn within(kind: &Kind, value: &Value) -> bool {
     }
 }
 
-/// A plugin command's icon, on its ribbon button, its menu rows and its dialog's header: the image
+/// A plugin command or importer's icon, on its ribbon button, menu rows and dialog's header: the image
 /// its schema names with `x-solidcraft-icon` when the package has it and it passed the icon check
 /// (`plugin_images`), else the generic plugin icon.
 pub(crate) fn command_icon<'a>(plugin: &'a Listed, entry: &solidcraft_engine::plugin::Entry) -> &'a str {
@@ -866,7 +866,20 @@ pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
             .entries
             .iter()
             .enumerate()
-            .map(|(e, entry)| item(format!("entry:{p}:{e}"), format!("{}…", command_title(plugin, entry)), true))
+            .map(|(e, entry)| {
+                FileRow::Item(FileItem {
+                    id: format!("entry:{p}:{e}"),
+                    label: format!("{}…", command_title(plugin, entry)),
+                    key: String::new(),
+                    // Keep the menu's unillustrated rows for entries without an annotation.
+                    icon: if entry.input_schema.get(crate::plugin_images::KEY).is_some() {
+                        command_icon(plugin, entry).to_owned()
+                    } else {
+                        String::new()
+                    },
+                    enabled: true,
+                })
+            })
             .collect();
         match <[FileRow; 1]>::try_from(entries) {
             Ok([one]) => rows.push(one),

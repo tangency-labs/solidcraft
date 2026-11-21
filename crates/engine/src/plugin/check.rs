@@ -277,6 +277,50 @@ fn install_problem(e: &InstallError) -> CheckProblem {
     }
 }
 
+/// Image refusals are warnings: the entry still works with the generic plugin icon. Both
+/// commands and importers name their images in the same schema and pass the same checks.
+fn image_problems(entries: &[Entry], files: &[safe_zip::File]) -> Vec<CheckProblem> {
+    let mut named: Vec<_> = entries.iter().flat_map(|entry| images::referenced(&entry.input_schema)).collect();
+    named.sort();
+    named.dedup();
+    let palette = include_str!("../../../look/icons/design/palette.toml").parse::<toml_edit::DocumentMut>();
+    let check = |rel: &str| -> std::result::Result<(), String> {
+        if !images::valid_path(rel) {
+            return Err("not a relative .svg path inside the package".into());
+        }
+        if named.binary_search_by(|path| path.as_str().cmp(rel)).is_ok_and(|index| index >= images::MAX_IMAGES) {
+            return Err(format!("the package names more than {} images", images::MAX_IMAGES));
+        }
+        let bytes = &files.iter().find(|file| file.path == rel).ok_or("not found in the package")?.bytes;
+        let src = images::source(bytes)?;
+        let palette = palette.as_ref().map_err(ToString::to_string)?;
+        let roles = palette.get("roles").and_then(toml_edit::Item::as_table).ok_or("the icon palette has no roles")?;
+        let (names, hexes): (Vec<_>, Vec<_>) = roles
+            .iter()
+            .map(|(name, role)| role.get("source").or_else(|| role.get("light")).and_then(toml_edit::Item::as_str).map(|hex| (name, hex)))
+            .collect::<Option<Vec<_>>>()
+            .ok_or("the icon palette has a role without a source colour")?
+            .into_iter()
+            .unzip();
+        solidcraft_icon_svg::parse(src, &names, &hexes).map(|_| ())
+    };
+    let mut problems = Vec::new();
+    for entry in entries {
+        for (field, annotation) in images::annotations(&entry.input_schema) {
+            let checked = annotation.as_str().ok_or_else(|| "not a relative .svg path string".to_string()).and_then(check);
+            if let Err(reason) = checked {
+                problems.push(problem(
+                    Severity::Warning,
+                    format!("runtime.entries.{}.input_schema.{field}", entry.name),
+                    format!("image {annotation}: {reason}"),
+                    "Name an SVG file in the package that follows the plugin guide's icon rules, or remove the annotation to use the generic plugin icon.",
+                ));
+            }
+        }
+    }
+    problems
+}
+
 /// Checks the package at `path` (a folder or a `.zip`) against this session's plugin ceilings.
 pub fn check(session: &Session, path: &str) -> CheckResult {
     let mut result = CheckResult {
@@ -343,6 +387,7 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
     };
     result.kind = Some(if runtime.is_importer() { "importer" } else { "command" }.into());
     result.entries = runtime.entries.clone();
+    result.problems.extend(image_problems(&runtime.entries, &package.files));
     let ceilings = session.plugin_limits;
     if runtime.limits.fuel > ceilings.max_fuel {
         result.problems.push(error_problem(

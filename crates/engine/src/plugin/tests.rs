@@ -1966,6 +1966,105 @@ mod native {
     }
 
     #[test]
+    fn check_reports_the_same_package_image_problems_for_commands_and_importers() {
+        let valid = br#"<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="8" fill="currentColor"/></svg>"#;
+        let invalid = br#"<svg viewBox="0 0 64 64"><rect width="64" height="64"/></svg>"#;
+        let f = Fixture::new("unreachable");
+        let mut s = Session::default();
+        let command = std::fs::read(f.0.join("sample/plugin.wasm")).unwrap();
+        let (package, version) = API.split_once('@').unwrap();
+        let importer = wat::parse_str(include_str!("importer_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap();
+        let mut command_problems = Vec::new();
+        for kind in ["command", "importer"] {
+            let mut m = manifest();
+            m["runtime"]["entries"] = json!([{"name":"make","kind":kind,"input_schema":{"type":"object"}}]);
+            let component = if kind == "importer" {
+                m["capabilities"] = json!(["formats@0.1"]);
+                m["runtime"]["commands"] = json!([]);
+                m["runtime"]["entries"][0]["extensions"] = json!(["smp"]);
+                &importer
+            } else {
+                &command
+            };
+            std::fs::write(f.0.join("sample/plugin.wasm"), component).unwrap();
+            let large = vec![b' '; images::MAX_BYTES + 1];
+            let files = [
+                ("valid.svg", valid.as_slice()),
+                ("invalid.svg", invalid.as_slice()),
+                ("small.svg", b"<svg viewBox='0 0 32 32'></svg>".as_slice()),
+                ("binary.svg", &[0xff]),
+                ("large.svg", large.as_slice()),
+                ("colour.svg", br##"<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="8" fill="#ff00ff"/></svg>"##.as_slice()),
+                ("clip.svg", br#"<svg viewBox="0 0 64 64"><g clip-path="url(other.svg#c)"></g></svg>"#.as_slice()),
+                ("mask.svg", br#"<svg viewBox="0 0 64 64"><path d="M8 8L56 56" mask="url(other.svg#m)"/></svg>"#.as_slice()),
+                ("closing-tag.svg", br#"<svg viewBox="0 0 64 64"><g></defs></svg>"#.as_slice()),
+                ("close-path.svg", br#"<svg viewBox="0 0 64 64"><path d="M8 8L56 8L56 56Z 1 2"/></svg>"#.as_slice()),
+            ];
+            for (name, bytes) in &files {
+                std::fs::write(f.0.join("sample").join(name), bytes).unwrap();
+            }
+            let mut actual = Vec::new();
+            for (annotation, warning) in [
+                (None, false),
+                (Some(json!("valid.svg")), false),
+                (Some(json!("missing.svg")), true),
+                (Some(json!("invalid.svg")), true),
+                (Some(json!("small.svg")), true),
+                (Some(json!("binary.svg")), true),
+                (Some(json!("large.svg")), true),
+                (Some(json!("colour.svg")), true),
+                (Some(json!("clip.svg")), true),
+                (Some(json!("mask.svg")), true),
+                (Some(json!("closing-tag.svg")), true),
+                (Some(json!("close-path.svg")), true),
+                (Some(json!("../valid.svg")), true),
+                (Some(json!(7)), true),
+            ] {
+                m["runtime"]["entries"][0]["input_schema"] = json!({"type":"object"});
+                if let Some(annotation) = annotation {
+                    m["runtime"]["entries"][0]["input_schema"][images::KEY] = annotation;
+                }
+                let manifest = serde_json::to_vec(&m).unwrap();
+                std::fs::write(f.0.join("sample/plugin.json"), &manifest).unwrap();
+                let folder = s.execute("plugin.check", &json!({"path":f.path()})).unwrap();
+                assert_eq!((folder["ok"].as_bool(), folder["kind"].as_str()), (Some(true), Some(kind)), "{folder}");
+                assert_eq!(folder["problems"].as_array().unwrap().len(), usize::from(warning), "{folder}");
+                if warning {
+                    assert_eq!(folder["problems"][0]["severity"], "warning");
+                    assert_eq!(folder["problems"][0]["field"], "runtime.entries.make.input_schema.x-solidcraft-icon");
+                    assert!(folder["problems"][0]["fix"].as_str().unwrap().contains("generic plugin icon"));
+                }
+                let mut zipped = vec![("plugin.json", manifest.as_slice()), ("plugin.wasm", component.as_slice())];
+                zipped.extend(files.iter().copied());
+                let path = f.0.join("package.zip");
+                std::fs::write(&path, solidcraft_io::safe_zip::write(&zipped).unwrap()).unwrap();
+                let zip = s.execute("plugin.check", &json!({"path":path})).unwrap();
+                assert_eq!(zip["problems"], folder["problems"], "a folder and its zip use the same image checks");
+                actual.push(folder["problems"].clone());
+            }
+            let options: Vec<_> = (0..=images::MAX_IMAGES)
+                .map(|index| {
+                    let name = format!("option-{index:02}.svg");
+                    std::fs::write(f.0.join("sample").join(&name), valid).unwrap();
+                    json!({"const":index.to_string(),"x-solidcraft-icon":name})
+                })
+                .collect();
+            m["runtime"]["entries"][0]["input_schema"] = json!({"type":"object","properties":{"choice":{"type":"string","oneOf":options}}});
+            std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+            let crowded = s.execute("plugin.check", &json!({"path":f.path()})).unwrap();
+            assert_eq!(crowded["ok"], true);
+            assert_eq!(crowded["problems"].as_array().unwrap().len(), 1, "only images after the limit are left out");
+            assert_eq!(crowded["problems"][0]["field"], "runtime.entries.make.input_schema.properties.choice.oneOf.64.x-solidcraft-icon");
+            actual.push(crowded["problems"].clone());
+            if kind == "command" {
+                command_problems = actual;
+            } else {
+                assert_eq!(actual, command_problems, "importer annotations get exactly the command image checks");
+            }
+        }
+    }
+
+    #[test]
     fn installed_plugins_run_with_only_the_approved_folders() {
         let f = Fixture::new("call $box");
         std::fs::write(f.0.join("secret.txt"), "{}").unwrap();
