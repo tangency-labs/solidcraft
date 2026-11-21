@@ -397,7 +397,7 @@ builds it.
 | `new_design` | `name?` | Start an empty design. |
 | `cancel` | — | Bridged: cancel this server's request that was still running in the app when its call returned (`control.cancel`, see [Cancelling a request](#cancelling-a-request)). Headless: an error, as nothing is ever left running. Not a `batch` step. |
 | `open` | `path` | Open a `.sc` design (or a `.solidcraft` one from an earlier release), a STEP file (`.step`/`.stp`) as a new design holding its bodies (an Import base feature), or a 3MF/STL file as mesh bodies. |
-| `save` | `path?` | Save the design (to its current file without `path`). |
+| `save` | `path?`, `format?` (container, json), `overwrite?` (default false) | Save the design (to its current file without `path`). A save over a design file that another program or computer changed since it was opened or saved is refused; `overwrite: true` replaces it. |
 
 `measure` with `items` reports each item under `items` (`length_mm`, `area_mm2` or `position`).
 A circle, arc, hole or other cylindrical face also gives `diameter`, `radius`, `center` and
