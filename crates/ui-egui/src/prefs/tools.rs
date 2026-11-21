@@ -72,6 +72,16 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::scenario::publish_target("prefs:snap_points", response.rect);
                     });
                 });
+                create_row(ui, app.tr("cmd.frame_member"), None, &["frame_member"], false, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        let tip = app.tr("prefs.frame_hot_points_tip");
+                        let response = setting::frame_hot_points(app, ui).backing_on_hover_text(tip);
+                        crate::scenario::publish_target("prefs:frame_hot_points", response.rect);
+                        if !crate::ui_kit::settings_search::suppress_chrome(ui) {
+                            ui_kit::help_icon(ui, tip);
+                        }
+                    });
+                });
             });
         });
         ui_kit::settings_section(ui, "command_dialog_values", app.tr("prefs.command_dialog_values"), |ui| {

@@ -42,6 +42,23 @@ the selected body (or the last body of the active component).
   gap). A new Frame Member starts on Auto (see Auto below); the command's own default stays None.
 - **Anchor**, **Angle** and **Mirror** place the section on each line, as below. **Name** names
   the members (default: after the profile).
+- **Offset A** and **Offset B** move the section from its anchor by a length, along the
+  section's own axes as drawn (A across its width, B across its height; they turn with **Angle**,
+  so they are not the world's X and Y): Anchor **Bottom Middle** with Offset B `50 mm` puts a
+  tube's bottom 50 mm above its line. Both empty: the anchor sits on the line. They are kept as the member's `locate`
+  (the point of the section on the line), so a member made with `locate` shows it here from its
+  anchor; changing the anchor keeps the member where it is and shows the offset from the new one.
+- **Hot points**: while the dialog is open, the view draws the section at the start of the first
+  chosen line, as the member will be placed (angle and mirror applied), with a dot at each anchor
+  (origin, centre, centroid and the corners and edge middles of its bounding box; anchors that
+  fall on the same point share one dot). The anchor in use is ringed. Click a dot to make it the
+  **Anchor**; a located point the member had is dropped. Drag the marker at the line's start over
+  the section, or past it to put the member off its line, to put that point on the line
+  (`locate`, rounded to 0.1 mm; hold Alt or Ctrl for no rounding; Offset A and B follow); let go
+  near a dot and it takes that anchor instead. A click on a dot empties Offset A and B. Only the first line
+  gets the section; the anchor is the same on every line. Nothing is drawn until the lines and
+  the profile make a member. Turn the hot points off in Preferences › Tools › Frame Member (the
+  `frame_hot_points` preference, on by default); off, the section is placed by **Anchor** alone.
 - The preview shows the members as you change the values. **Edit Feature** reopens the dialog with
   the feature's values; the members keep their names through the edit, and a new **Name**
   renames them all. A member made with a whole profile sketch keeps it (the **Section** row shows
