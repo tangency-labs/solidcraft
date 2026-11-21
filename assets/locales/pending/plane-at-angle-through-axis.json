@@ -1,0 +1,37 @@
+{
+  "en": {
+    "Through the axis": "Through the axis",
+    "prefs.plane_at_angle_through_axis": "New angle planes go through their axis",
+    "prefs.plane_at_angle_through_axis_note": "When the axis is off the base plane, the plane is first brought onto the axis, so it goes through the edge or line you picked. Off: the base plane turns about the axis where it is, as in earlier versions. Planes already made keep how they were made."
+  },
+  "de": {
+    "Through the axis": "Durch die Achse",
+    "prefs.plane_at_angle_through_axis": "Neue Winkelebenen gehen durch ihre Achse",
+    "prefs.plane_at_angle_through_axis_note": "Liegt die Achse nicht in der Grundebene, wird die Ebene zuerst an die Achse gebracht und geht so durch die gewählte Kante oder Linie. Aus: Die Grundebene dreht sich um die Achse, wo sie ist, wie in früheren Versionen. Schon erstellte Ebenen bleiben, wie sie erstellt wurden."
+  },
+  "ar": {
+    "Through the axis": "عبر المحور",
+    "prefs.plane_at_angle_through_axis": "المستويات المائلة الجديدة تمر عبر محورها",
+    "prefs.plane_at_angle_through_axis_note": "إذا لم يقع المحور على المستوى الأساسي، يُنقل المستوى أولًا إلى المحور، فيمر عبر الحافة أو الخط المختار. عند الإيقاف: يدور المستوى الأساسي حول المحور حيث هو، كما في الإصدارات السابقة. المستويات المنشأة سابقًا تبقى كما أُنشئت."
+  },
+  "he": {
+    "Through the axis": "דרך הציר",
+    "prefs.plane_at_angle_through_axis": "מישורים חדשים בזווית עוברים דרך הציר שלהם",
+    "prefs.plane_at_angle_through_axis_note": "כשהציר אינו על מישור הבסיס, המישור מובא קודם אל הציר, כך שהוא עובר דרך הקצה או הקו שנבחר. כבוי: מישור הבסיס מסתובב סביב הציר במקומו, כמו בגרסאות קודמות. מישורים שכבר נוצרו נשארים כפי שנוצרו."
+  },
+  "ja": {
+    "Through the axis": "軸を通る",
+    "prefs.plane_at_angle_through_axis": "新しい角度平面は軸を通る",
+    "prefs.plane_at_angle_through_axis_note": "軸が基準平面上にない場合、平面をまず軸に合わせるため、選択したエッジや線を通ります。オフ: 以前のバージョンと同じく、基準平面がその位置の軸を中心に回転します。作成済みの平面は作成時のままです。"
+  },
+  "vi": {
+    "Through the axis": "Đi qua trục",
+    "prefs.plane_at_angle_through_axis": "Mặt phẳng góc mới đi qua trục của nó",
+    "prefs.plane_at_angle_through_axis_note": "Khi trục không nằm trên mặt phẳng gốc, mặt phẳng được đưa tới trục trước, nên nó đi qua cạnh hoặc đường đã chọn. Tắt: mặt phẳng gốc xoay quanh trục tại vị trí của nó, như các phiên bản trước. Các mặt phẳng đã tạo giữ nguyên như lúc tạo."
+  },
+  "zh": {
+    "Through the axis": "穿过轴",
+    "prefs.plane_at_angle_through_axis": "新的角度平面穿过其轴",
+    "prefs.plane_at_angle_through_axis_note": "当轴不在基准平面上时，先将平面移到轴上，使其穿过所选的边或线。关闭：基准平面绕其所在位置的轴旋转，与早期版本相同。已创建的平面保持创建时的状态。"
+  }
+}
