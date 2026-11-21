@@ -1244,3 +1244,14 @@ fn a_projected_plane_of_another_component_lands_where_the_two_planes_meet() {
 
 /// Where the part of the test above stands: turned half about X and lifted 100 mm.
 const PART_FRAME: crate::Mat = [[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 100.0, 0.0, 1.0]];
+
+/// A deleted member of a face projection is kept by its edge family's name. One saved before
+/// nested names were written in parentheses (#5857) names the same family as today's name, so it
+/// stays deleted in a design opened after that change.
+#[test]
+fn a_deleted_member_saved_in_the_older_name_form_names_the_same_family() {
+    let old = crate::project::omit_name("F5:blend:F2:+x|F2:+z");
+    let now = crate::project::omit_name("F5:blend(F2:+x|F2:+z)");
+    assert_eq!(old, now);
+    assert_eq!(crate::project::omit_name("F2:+x|F3:+z"), "F2:+x|F3:+z", "a name with nothing nested is kept as it is");
+}

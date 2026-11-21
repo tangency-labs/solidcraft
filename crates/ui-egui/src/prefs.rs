@@ -1881,6 +1881,9 @@ preference_settings! {
     sketch_snap_to_visible_grid: bool = true, PAGE_SKETCH;
     /// Open Project's options before picking; off restores its previous direct-pick workflow.
     project_options_dialog: bool = true, PAGE_SKETCH;
+    /// Opt in to projection point colours, grouped link actions and projecting another
+    /// sketch's geometry while adding constraints or dimensions. Off keeps the prior UI.
+    projection_workflow_ui: bool = false, PAGE_SKETCH;
     /// The most points or curves one sketch holds (#10874): from the default (20000), which
     /// sketches have always had, up to 200000, so a dense SVG or DXF drawing fits in one sketch.
     max_sketch_points: usize = solidcraft_engine::sketch::limits::DEFAULT_POINTS, PAGE_SKETCH,
@@ -5270,6 +5273,24 @@ mod tests {
         assert!(!app.preferences.invert_curved_roll_arrows);
     }
 
+    #[test]
+    fn projection_workflow_ui_defaults_off_persists_and_resets() {
+        assert!(!Prefs::default().projection_workflow_ui);
+        assert!(!serde_json::from_value::<Prefs>(json!({})).unwrap().projection_workflow_ui);
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        super::control(&mut app, &json!({"projection_workflow_ui":true})).unwrap();
+        assert!(app.preferences.projection_workflow_ui);
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(restored.preferences.projection_workflow_ui);
+        assert!(super::control(&mut app, &json!({"projection_workflow_ui":"yes"})).is_err());
+        assert!(app.preferences.projection_workflow_ui, "a malformed update keeps the previous value");
+        super::reset_preferences(&mut app.preferences, super::PAGE_GRAPHICS);
+        assert!(app.preferences.projection_workflow_ui);
+        super::reset_preferences(&mut app.preferences, super::PAGE_SKETCH);
+        assert!(!app.preferences.projection_workflow_ui);
+    }
+
     /// #10220: off by default, offered on Preferences › General only where designs are kept in
     /// a browser (the web app), set through `ui.prefs` and saved with the settings.
     #[test]
@@ -7341,6 +7362,7 @@ mod tests {
             ("sketch_tracking_guides", json!(false), PAGE_SKETCH),
             ("sketch_tracking_points", json!(false), PAGE_SKETCH),
             ("sketch_align_points", json!(true), PAGE_SKETCH),
+            ("projection_workflow_ui", json!(true), PAGE_SKETCH),
             ("sketch_recent_snap", json!(true), PAGE_SKETCH),
             ("sketch_snap_to_visible_grid", json!(false), PAGE_SKETCH),
             ("line_hover_tangent_arc", json!(true), PAGE_SKETCH),
@@ -8943,6 +8965,7 @@ mod tests {
                 ("shortcut_cycles_modes", "prefs.sketch.shortcut_cycles_modes"),
                 ("ribbon_click_ends_tool", "prefs.ribbon_click_ends_tool"),
                 ("project_options_dialog", "prefs.sketch.project_options"),
+                ("projection_workflow_ui", "prefs.sketch.projection_workflow_ui"),
                 ("sketch_cursor_coordinates", "prefs.sketch.cursor_coordinates"),
                 ("sketch_face_activates_part", "prefs.sketch_face_activates_part"),
                 ("sketch_open_look_at", "prefs.sketch_open_look_at"),

@@ -565,6 +565,46 @@ fn painted_in(shapes: &[egui::epaint::ClippedShape], colour: egui::Color32) -> u
 }
 
 #[test]
+fn projected_and_lost_point_colours_show_with_the_projection_ui_option_off_or_on() {
+    fn points_in(shapes: &[egui::epaint::ClippedShape], colour: egui::Color32) -> usize {
+        fn walk(shape: &egui::Shape, colour: egui::Color32) -> usize {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().map(|shape| walk(shape, colour)).sum(),
+                egui::Shape::Rect(rect) => usize::from(rect.fill == colour && rect.rect.size() == egui::vec2(5.0, 5.0)),
+                _ => 0,
+            }
+        }
+        shapes.iter().map(|shape| walk(&shape.shape, colour)).sum()
+    }
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call(
+        "ui.prefs",
+        json!({"theme_import":{"format":"solidcraft-theme/1","name":"Projection markers","base":"light",
+            "colors":{"sketch_projected":"#12ab34","sketch_lost":"#ef1256","sketch_point":"#ab3412","sketch_point_free":"#3412ab"}}}),
+    );
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
+    let source = h.app.session.doc.features.last().unwrap().id;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.project", json!({"refs":[{"body":"Body1"}]})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.app.cam.distance = 80.0;
+    for lost in [false, true] {
+        if lost {
+            h.app.run("sketch.finish", json!({})).unwrap();
+            h.app.run("timeline.suppress", json!({"feature":source,"suppressed":true})).unwrap();
+            h.app.edit_sketch(sketch);
+        }
+        for enhanced in [false, true, false] {
+            h.call("ui.prefs", json!({"projection_workflow_ui":enhanced}));
+            h.settle();
+            let expected = if lost { egui::Color32::from_rgb(0xef, 0x12, 0x56) } else { egui::Color32::from_rgb(0x12, 0xab, 0x34) };
+            assert!(points_in(&h.shapes, expected) >= 4, "lost={lost}, enhanced={enhanced}: projected corners show their reference status");
+        }
+    }
+}
+
+#[test]
 fn conflicting_curves_points_glyphs_and_dimensions_take_the_conflict_colour_until_the_conflict_is_gone() {
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
