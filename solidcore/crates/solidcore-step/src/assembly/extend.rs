@@ -90,6 +90,12 @@ fn extend_direction(knots: &[f64], lines: &mut Lines, [lo, hi]: [f64; 2], tol: f
     if !(lo.is_finite() && hi.is_finite()) || closes(lines, tol)? {
         return None;
     }
+    // Each end's limit is a share of its end span on the patch as given: continuing one end first
+    // lengthens a single span, which must not let the other end reach farther.
+    let (high_span, low_span) = (end - *knots.get(n - 1)?, *knots.get(p + 1)? - start);
+    if (high && !(hi - end <= MAX_EXTENSION * high_span)) || (low && !(start - lo <= MAX_EXTENSION * low_span)) {
+        return None;
+    }
     let mut knots = knots.to_vec();
     if high {
         knots = extend_high(&knots, lines, hi)?;
@@ -105,16 +111,30 @@ fn extend_direction(knots: &[f64], lines: &mut Lines, [lo, hi]: [f64; 2], tol: f
     Some(Some(knots))
 }
 
-/// Whether every line's two ends meet to within `tol`: the patch closes in that direction.
+/// Whether the patch closes in the lines' direction: its two boundary curves (each line's first
+/// and last control points) are one curve to within `tol`. They are where each pair of
+/// corresponding control points is within `tol` and the pairs' weights are in one ratio (to
+/// rounding): each boundary point is then the same convex combination of its curve's points, so
+/// the two curves lie within `tol` of each other everywhere. Boundaries whose weights are not
+/// in one ratio are not taken to close, however near their control points.
 pub(super) fn closes(lines: &Lines, tol: f64) -> Option<bool> {
     let euclid = |h: &[f64; 4]| [h[0] / h[3], h[1] / h[3], h[2] / h[3]];
-    let mut all = true;
+    let mut ratio: Option<f64> = None;
     for l in lines {
-        let (a, b) = (euclid(l.first()?), euclid(l.last()?));
+        let (s, e) = (l.first()?, l.last()?);
+        let (a, b) = (euclid(s), euclid(e));
         let d = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
-        all &= d <= tol;
+        if !(d <= tol) {
+            return Some(false);
+        }
+        let r = e[3] / s[3];
+        match ratio {
+            None => ratio = Some(r),
+            Some(r0) if (r - r0).abs() <= 1e-12 * r0.abs().max(r.abs()) => {}
+            Some(_) => return Some(false),
+        }
     }
-    Some(all)
+    Some(true)
 }
 
 /// Clamped `knots` and `lines` continued past their high end to `to`: the end span made one Bézier
@@ -136,20 +156,18 @@ fn extend_high(knots: &[f64], lines: &mut Lines, to: f64) -> Option<Vec<f64>> {
     if !(span > 0.0 && to > end && to - end <= MAX_EXTENSION * span) {
         return None;
     }
-    // The end span's inner knot raised to the degree (Boehm's insertion, one at a time); a span
-    // that starts at the patch's start is one segment already.
+    // The end span's inner knot raised to the degree (Boehm's insertion, one at a time). A span
+    // that starts at a clamped start is one segment already (its knot there `p + 1` times); one
+    // that starts at an unclamped start is not, and is raised as an inner knot is.
     let mut knots = knots.to_vec();
-    let start = *knots.get(p)?;
-    if first > start {
+    let r = knots.iter().filter(|t| **t == first).count();
+    for _ in r..p {
+        let k = knots.iter().rposition(|t| *t == first)?;
         let r = knots.iter().filter(|t| **t == first).count();
-        for _ in r..p {
-            let k = knots.iter().rposition(|t| *t == first)?;
-            let r = knots.iter().filter(|t| **t == first).count();
-            for line in lines.iter_mut() {
-                *line = inserted(&knots, line, p, k, r, first)?;
-            }
-            knots = knots.iter().take(k + 1).chain(std::iter::once(&first)).chain(knots.iter().skip(k + 1)).copied().collect();
+        for line in lines.iter_mut() {
+            *line = inserted(&knots, line, p, k, r, first)?;
         }
+        knots = knots.iter().take(k + 1).chain(std::iter::once(&first)).chain(knots.iter().skip(k + 1)).copied().collect();
     }
     // De Casteljau at s past 1: the left piece's polygon is each level's first point.
     let s = (to - first) / span;

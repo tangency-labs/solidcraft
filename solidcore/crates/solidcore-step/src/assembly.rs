@@ -637,24 +637,32 @@ impl<'t> Assembly<'t> {
     /// uses each on its side), making a body of `kind`.
     ///
     /// A body with faces narrower than the tolerance ([`slivers`]) is read with them first; where
-    /// that is refused (such a face has no area in its own parameters), they are left out, their
-    /// sides made one, and it is read again.
+    /// that is refused, the slivers the refusal names (each refused on its own: such a face has
+    /// no area in its own parameters) are left out, their sides made one, and it is read again. A
+    /// sliver the refusal does not name reads, and is kept; a refusal that names none stands.
     pub fn finish(mut self, item: u64, name: String, shells: Vec<Vec<(u32, bool)>>, kind: Kind) -> R<Solid> {
         if !self.has_slivers()? {
-            return self.finish_as_given(item, name, shells, kind);
+            return self.finish_as_given(item, name, shells, kind, &mut Vec::new());
         }
-        if let Ok(solid) = self.clone().finish_as_given(item, name.clone(), shells.clone(), kind) {
-            return Ok(solid);
+        let mut named = Vec::new();
+        let refusal = match self.clone().finish_as_given(item, name.clone(), shells.clone(), kind, &mut named) {
+            Ok(solid) => return Ok(solid),
+            Err(m) => m,
+        };
+        let (shells, slivers) = self.collapse_slivers(shells, &named)?;
+        if slivers == 0 {
+            return Err(refusal);
         }
-        let (shells, slivers) = self.collapse_slivers(shells)?;
         let note = format!("{slivers} faces narrower than {} mm left out, their two sides made one edge", self.tol);
-        let mut solid = self.finish_as_given(item, name, shells, kind)?;
+        let mut solid = self.finish_as_given(item, name, shells, kind, &mut Vec::new())?;
         solid.notes.insert(0, note);
         Ok(solid)
     }
 
-    /// [`Self::finish`] with the faces as the reader gave them.
-    fn finish_as_given(mut self, item: u64, name: String, shells: Vec<Vec<(u32, bool)>>, kind: Kind) -> R<Solid> {
+    /// [`Self::finish`] with the faces as the reader gave them. The file faces a refusal names
+    /// (each whose pcurves failed, up to [`MAX_NAMED_FAILURES`], or the one the record check
+    /// disagrees on) are added to `named`.
+    fn finish_as_given(mut self, item: u64, name: String, shells: Vec<Vec<(u32, bool)>>, kind: Kind, named: &mut Vec<u64>) -> R<Solid> {
         let mut notes = Vec::new();
         let twins = self.merge_twin_edges()?;
         if twins > 0 {
@@ -766,6 +774,7 @@ impl<'t> Assembly<'t> {
                     let origin = self.faces.get(fi).map_or(0, |f| f.origin);
                     if failed_faces.len() < MAX_NAMED_FAILURES {
                         failed_faces.push(format!("face #{origin}"));
+                        named.push(origin);
                     }
                     first_failure.get_or_insert_with(|| format!("face #{origin}: {m}"));
                     pcs.push(Vec::new());
@@ -1121,7 +1130,15 @@ impl<'t> Assembly<'t> {
         }
         solidcore_ops::record_check::validate(&brep).map_err(|e| format!("the record is invalid: {e}"))?;
         // A disagreement on a face names the file's face too, so a reader can leave it out.
-        solidcore_ops::record_check::agreement(&brep).map_err(|e| disagreement(&e, &face_origin))?;
+        solidcore_ops::record_check::agreement(&brep).map_err(|e| {
+            use solidcore_ops::record_check::Record;
+            if let Record::Face(f) | Record::Use { face: f, .. } | Record::VertexLoop { face: f, .. } | Record::Loop { face: f, .. } = e.record
+                && let Some(o) = face_origin.get(f as usize)
+            {
+                named.push(*o);
+            }
+            disagreement(&e, &face_origin)
+        })?;
         Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes, turned: turned_faces })
     }
 
@@ -1547,8 +1564,12 @@ impl<'t> Assembly<'t> {
                         // leaves round it ([`reseam`]), and the face's pcurves made on that
                         // (once: a face whose loop still jumps is refused).
                         if closed && form.is_none() && !self.reseamed.contains(&fi) {
-                            let along: Vec<f64> = pcs.iter().flatten().flat_map(|c| pcurve_samples(c, d)).collect();
-                            if let Some(moved) = reseam::gap_middle(&along, [*a, *b]).and_then(|at| reseam::reseamed(&surface, d, at, reach)) {
+                            // Each pcurve's control hull along `d` encloses it there, so the gap
+                            // the seam goes in is one no pcurve reaches into.
+                            let along: Option<Vec<[f64; 2]>> = pcs.iter().flatten().map(|c| pcurve_span(c, d)).collect();
+                            if let Some(moved) =
+                                along.and_then(|along| reseam::gap_middle_of(&along, [*a, *b])).and_then(|at| reseam::reseamed(&surface, d, at))
+                            {
                                 self.reseamed.insert(fi);
                                 self.faces.get_mut(fi).ok_or("face reference")?.surface = moved;
                                 return self.face_pcurves(fi);
@@ -1876,20 +1897,18 @@ fn uses_of<'e>(edges: &'e [EdgeB], edge_loops: &[Vec<(u32, bool)>], given: Optio
     Ok(uses)
 }
 
-/// Coordinate `d` of `c` at 33 parameters evenly along it.
-/// The refusal of a record whose geometry disagrees with its topology: on a face (not an edge
-/// alone), naming the file's face too (`face #origin`, of `face_origin`), so a reader can leave it
-/// out.
 /// Points along a side of a spline face measured against the vertex it was made ([`side_reach`]).
 const SIDE_SAMPLES: usize = 32;
 
 /// The tolerance a vertex at `start` (its point `vertex`, its tolerance `tolerance`) needs for a
 /// loop to run along the face's side through `start` in direction `d` over `[a, b]` as at a pole:
-/// `None` unless every point of the side lies within `tolerance` of the vertex (so the vertex
-/// already stands for all of it): the least of a few steps past the side's farthest point from
-/// `start` at which the side, certified, stays within that of `start`
-/// ([`SurfaceEval::pole_within`], which the record check asks). That point is at most twice the
-/// tolerance away; a reach past two and a half times it is not taken.
+/// the least of a few steps past the side's farthest sampled point from `start` at which the
+/// side, certified, stays within that of `start` ([`SurfaceEval::pole_within`], which the record
+/// check asks again of the finished record: what the vertex's raised tolerance claims is that
+/// certificate, not the samples). `None` unless the side's points at `SIDE_SAMPLES + 1`
+/// parameters lie within `tolerance` of the vertex: a screen for a side the file made one vertex
+/// (it decides only whether the certificate is asked for), and where no step's reach is certified
+/// up to two and a half times the tolerance.
 fn side_reach(surface: &SurfaceEval, start: [f64; 2], d: usize, [a, b]: [f64; 2], vertex: Vec3, tolerance: f64) -> Option<f64> {
     let at = |x: f64| {
         let mut q = start;
@@ -1912,6 +1931,9 @@ fn side_reach(surface: &SurfaceEval, start: [f64; 2], d: usize, [a, b]: [f64; 2]
         .find(|r| surface.pole_within(start, *r).ok().and_then(|p| p.get(d).copied()).unwrap_or(false))
 }
 
+/// The refusal of a record whose geometry disagrees with its topology: on a face (not an edge
+/// alone), naming the file's face too (`face #origin`, of `face_origin`), so a reader can leave it
+/// out.
 pub(crate) fn disagreement(e: &solidcore_ops::record_check::Mismatch, face_origin: &[u64]) -> String {
     use solidcore_ops::record_check::Record;
     let face = match e.record {
@@ -1924,9 +1946,18 @@ pub(crate) fn disagreement(e: &solidcore_ops::record_check::Mismatch, face_origi
     }
 }
 
-fn pcurve_samples(c: &Curve2, d: usize) -> Vec<f64> {
-    let Some([a, b]) = c.interval() else { return Vec::new() };
-    (0..=32).filter_map(|k| solidcore_ops::pcurve::eval(c, a + (b - a) * f64::from(k) / 32.0)?.get(d).copied()).collect()
+/// The interval a pcurve's control points span along `d`: the pcurve lies within it (its control
+/// hull). `None` for a rational pcurve with a weight that is not positive, whose hull does not
+/// enclose it, or for no control points.
+fn pcurve_span(c: &Curve2, d: usize) -> Option<[f64; 2]> {
+    let xs: Vec<f64> = match c {
+        Curve2::Spline { points, .. } => points.iter().map(|p| p.get(d).copied()).collect::<Option<_>>()?,
+        Curve2::RationalSpline { homogeneous, .. } => {
+            homogeneous.iter().map(|h| if h[2] > 0.0 { h.get(d).map(|x| x / h[2]) } else { None }).collect::<Option<_>>()?
+        }
+    };
+    let out = xs.iter().fold([f64::INFINITY, f64::NEG_INFINITY], |o, x| [o[0].min(*x), o[1].max(*x)]);
+    (out[0] <= out[1]).then_some(out)
 }
 
 /// A spline surface's parameter box: its knot ranges.
@@ -2050,7 +2081,11 @@ pub(crate) fn onto_form(form: &BSurface, label: &BSurface, domain: [[f64; 2]; 2]
     let reach = form_reach(label, domain[1], tolerance);
     let ranges = solidcore_ops::label::surface_natural(form);
     let mut moved = 0;
+    // A move along one direction by its whole reach moves the surface by up to `tolerance`; moves
+    // along both add (the triangle inequality), so a point is moved along a second direction only
+    // while the two moves' shares of their reaches sum to at most one.
     let mut onto = |p: &mut [f64; 2]| {
+        let mut spent = 0.0;
         for (d, reach) in reach.iter().enumerate() {
             let (Some(Natural::Range(a, b)), Some(x)) = (ranges.get(d), p.get_mut(d)) else { continue };
             let end = if *x < *a {
@@ -2060,7 +2095,9 @@ pub(crate) fn onto_form(form: &BSurface, label: &BSurface, domain: [[f64; 2]; 2]
             } else {
                 continue;
             };
-            if (*x - end).abs() <= *reach {
+            let share = (*x - end).abs() / *reach;
+            if *reach > 0.0 && spent + share <= 1.0 {
+                spent += share;
                 *x = end;
                 moved += 1;
             }

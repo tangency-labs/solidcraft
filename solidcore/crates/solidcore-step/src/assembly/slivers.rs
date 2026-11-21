@@ -6,7 +6,7 @@
 //! left out, the short edges' vertices made one (each short edge with them), and its two long
 //! edges made one, so the faces either side of it meet along it. A face narrower than a loose
 //! tolerance may be one the part has (a chamfer a few µm wide on a tiny part), so the body is read
-//! with its slivers first, and they are left out only where that is refused
+//! with its slivers first, and only the slivers that read names as refused are left out
 //! ([`Assembly::finish`]).
 
 use crate::vec::Vec3Geom as _;
@@ -67,11 +67,15 @@ impl Assembly<'_> {
         Ok(false)
     }
 
-    /// Leave out each sliver face of `shells` (above), returning the shells with the faces
-    /// renumbered and how many were left out.
-    pub(crate) fn collapse_slivers(&mut self, shells: Vec<Vec<(u32, bool)>>) -> R<(Vec<Vec<(u32, bool)>>, usize)> {
+    /// Leave out each sliver face of `shells` (above) whose file face is in `named` (one a read
+    /// refused), returning the shells with the faces renumbered and how many were left out. A
+    /// sliver not named reads as it is, and is kept.
+    pub(crate) fn collapse_slivers(&mut self, shells: Vec<Vec<(u32, bool)>>, named: &[u64]) -> R<(Vec<Vec<(u32, bool)>>, usize)> {
         let mut gone: HashSet<usize> = HashSet::new();
         for fi in 0..self.faces.len() {
+            if !self.faces.get(fi).is_some_and(|f| named.contains(&f.origin)) {
+                continue;
+            }
             if let Some(c) = self.sliver(fi)? {
                 self.apply(&c);
                 gone.insert(c.face);

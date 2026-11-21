@@ -14,44 +14,76 @@ use solidcore_record::brep::Surface as BSurface;
 use super::extend::{self, Lines};
 
 /// `surface` with its seam along `d` (0 for u, 1 for v) moved to `at`, inside its knot range;
-/// `None` where the surface is no spline, does not close along `d` to within `tol`, has knots
-/// that are not clamped or a weight that differs across the seam, or `at` is not inside its range.
-pub(crate) fn reseamed(surface: &BSurface, d: usize, at: f64, tol: f64) -> Option<BSurface> {
+/// `None` where the surface is no spline, does not close exactly along `d` (each control line's
+/// two ends the same point and weight: a patch whose ends meet within the tolerance has had them
+/// made one when its face was added, `topology::closed_within`), has knots that are not clamped,
+/// or `at` is not inside its range. The result is the same surface: nothing is moved.
+pub(crate) fn reseamed(surface: &BSurface, d: usize, at: f64) -> Option<BSurface> {
     let (rational, u_knots, v_knots, grid) = extend::grid(surface)?;
     match d {
         // Along u the lines are the grid's columns (one per v index); along v its rows.
         0 => {
             let mut columns = extend::transpose(&grid)?;
-            let u = reseam_direction(u_knots, &mut columns, at, tol)?;
+            let u = reseam_direction(u_knots, &mut columns, at)?;
             extend::from_grid(rational, u, v_knots.clone(), extend::transpose(&columns)?)
         }
         1 => {
             let mut rows = grid;
-            let v = reseam_direction(v_knots, &mut rows, at, tol)?;
+            let v = reseam_direction(v_knots, &mut rows, at)?;
             extend::from_grid(rational, u_knots.clone(), v, rows)
         }
         _ => None,
     }
 }
 
-/// The middle of the widest gap that `values` (parameters along a closed direction over
-/// `[a, b]`, taken round its period) leave, inside the range; `None` where there are none, or
-/// where that middle is the range's own end (the seam already lies in the gap).
-pub(crate) fn gap_middle(values: &[f64], [a, b]: [f64; 2]) -> Option<f64> {
+/// The middle of the widest gap that `spans` (intervals along a closed direction over `[a, b]`,
+/// each taken round its period: a pcurve's control hull there, which encloses it) leave, inside
+/// the range; `None` where there are none, where they cover a whole period, or where that middle
+/// is the range's own end (the seam already lies in the gap). The gap is proved: no point of a
+/// curve enclosed by a span lies in it.
+pub(crate) fn gap_middle_of(spans: &[[f64; 2]], [a, b]: [f64; 2]) -> Option<f64> {
     let period = b - a;
     if !(period > 0.0 && period.is_finite()) {
         return None;
     }
-    let mut on: Vec<f64> = values.iter().filter(|x| x.is_finite()).map(|x| a + (x - a).rem_euclid(period)).collect();
-    on.sort_by(f64::total_cmp);
-    let (first, last) = (*on.first()?, *on.last()?);
+    let mut on: Vec<[f64; 2]> = Vec::new();
+    for &[lo, hi] in spans {
+        if !(lo.is_finite() && hi.is_finite()) {
+            continue;
+        }
+        let width = (hi - lo).max(0.0);
+        if width >= period {
+            return None;
+        }
+        let s = a + (lo.min(hi) - a).rem_euclid(period);
+        let e = s + width;
+        if e <= b {
+            on.push([s, e]);
+        } else {
+            on.push([s, b]);
+            on.push([a, e - period]);
+        }
+    }
+    on.sort_by(|x, y| x[0].total_cmp(&y[0]));
+    // The covered parts, merged where they meet or overlap.
+    let mut merged: Vec<[f64; 2]> = Vec::new();
+    for x in on {
+        match merged.last_mut() {
+            Some(m) if x[0] <= m[1] => m[1] = m[1].max(x[1]),
+            _ => merged.push(x),
+        }
+    }
+    let (first, last) = (merged.first()?[0], merged.last()?[1]);
     // The gap across the range's ends first, then each between neighbours.
     let mut best = (first + period - last, last);
-    for w in on.windows(2) {
+    for w in merged.windows(2) {
         match w {
-            [x, y] if y - x > best.0 => best = (y - x, *x),
+            [x, y] if y[0] - x[1] > best.0 => best = (y[0] - x[1], x[1]),
             _ => {}
         }
+    }
+    if !(best.0 > 0.0) {
+        return None;
     }
     let middle = a + (best.1 + 0.5 * best.0 - a).rem_euclid(period);
     let margin = 1e-6 * period;
@@ -59,7 +91,7 @@ pub(crate) fn gap_middle(values: &[f64], [a, b]: [f64; 2]) -> Option<f64> {
 }
 
 /// Clamped `knots` and closed `lines` started at `at`: the new knots, the lines rewritten.
-fn reseam_direction(knots: &[f64], lines: &mut Lines, at: f64, tol: f64) -> Option<Vec<f64>> {
+fn reseam_direction(knots: &[f64], lines: &mut Lines, at: f64) -> Option<Vec<f64>> {
     let n = lines.first()?.len();
     let p = knots.len().checked_sub(n)?.checked_sub(1)?;
     if p == 0 {
@@ -72,15 +104,9 @@ fn reseam_direction(knots: &[f64], lines: &mut Lines, at: f64, tol: f64) -> Opti
     if knots.get(..=p)?.iter().any(|t| *t != a) || knots.get(n..)?.iter().any(|t| *t != b) {
         return None;
     }
-    if !extend::closes(lines, tol)? {
+    // Closed exactly: each line's two ends, which become one interior control point, are one.
+    if !lines.iter().all(|l| l.first() == l.last()) {
         return None;
-    }
-    // The two ends of each line, which become one interior control point, carry one weight.
-    for l in lines.iter() {
-        let (s, e) = (l.first()?, l.last()?);
-        if (s[3] - e[3]).abs() > 1e-12 * s[3].abs().max(e[3].abs()) {
-            return None;
-        }
     }
     // `at` raised to the degree (Boehm's insertion, one at a time).
     let mut knots = knots.to_vec();
@@ -110,12 +136,8 @@ fn reseam_direction(knots: &[f64], lines: &mut Lines, at: f64, tol: f64) -> Opti
         .chain(std::iter::repeat_n(at + period, p + 1))
         .collect();
     for line in lines.iter_mut() {
-        let (first, last) = (*line.first()?, *line.last()?);
-        // The old seam, one point of the line now: its two ends met to within `tol`.
-        let mut joint = first;
-        for (j, x) in joint.iter_mut().zip(last) {
-            *j = 0.5 * (*j + x);
-        }
+        // The old seam, one point of the line now: its two ends are the same point.
+        let joint = *line.first()?;
         let mut out: Vec<[f64; 4]> = line.get(m..)?.to_vec();
         if let Some(x) = out.last_mut() {
             *x = joint;

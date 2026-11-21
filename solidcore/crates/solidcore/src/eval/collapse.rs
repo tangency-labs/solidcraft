@@ -1622,6 +1622,65 @@ fn rational_partial_bound(
     Ok((bound, eps))
 }
 
+/// A certified bound on how far a spline surface moves when a point of the strip `along` × `across`
+/// (`along` on the knot range along `d` or past either end of it, `across` across it) moves along
+/// `d` by at most `o` within the strip. On a polynomial net it is `o` times the [`partial_bound`]
+/// over `across` (past the range across by what it reaches past it) with `d` past its range by
+/// what `along` reaches past it; on a rational net `o B + 2ε` of [`rational_partial_bound`] over
+/// the strip, which takes `across` on its range only. Rounded up.
+///
+/// Refused as those bounds are (a rational strip off its range across, a weight not certified
+/// positive on it, knots that do not fit), for a surface that is not a spline, and for a strip
+/// or a move that is not finite or a move that is negative.
+pub fn strip_shift_bound(
+    s: &EvalSurface,
+    d: usize,
+    along: [f64; 2],
+    across: [f64; 2],
+    o: f64,
+) -> Result<f64, EvalError> {
+    let EvalSurface::Nurbs(n) = s else {
+        return Err(refused("a shift bound of a surface that is not a spline"));
+    };
+    if d > 1 {
+        return Err(past(d));
+    }
+    if !(o >= 0.0
+        && o.is_finite()
+        && along.iter().chain(&across).all(|x| x.is_finite())
+        && along[0] <= along[1]
+        && across[0] <= across[1])
+    {
+        return Err(malformed("a strip or a move that is not finite"));
+    }
+    let range = |e: usize| -> Result<[f64; 2], EvalError> {
+        match s.interval(e) {
+            Some((a, b)) if a <= b && a.is_finite() && b.is_finite() => Ok([a, b]),
+            _ => Err(malformed("knots that do not fit")),
+        }
+    };
+    let past_by =
+        |[a, b]: [f64; 2], [lo, hi]: [f64; 2]| (a - lo).max(hi - b).max(0.0) * (1.0 + UNIT);
+    let (rd, rf) = (range(d)?, range(1 - d)?);
+    let w0 = n.ctrl().first().map_or(0.0, |c| c[3]);
+    let shift = if w0 > 0.0 && n.ctrl().iter().all(|c| c[3] == w0) {
+        let on = [
+            across[0].max(rf[0]).min(rf[1]),
+            across[1].max(rf[0]).min(rf[1]),
+        ];
+        o * partial_bound(s, d, on, past_by(rd, along), past_by(rf, across))?
+    } else {
+        let (bound, eps) = rational_partial_bound(s, d, along, across, f64::INFINITY)?;
+        o * bound + 2.0 * eps
+    };
+    let shift = shift * (1.0 + gamma(4));
+    if shift.is_finite() {
+        Ok(shift)
+    } else {
+        Err(refused("a shift bound that is not finite"))
+    }
+}
+
 /// A pcurve put on a spline's knot range ([`pcurve_onto_knots`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct OntoKnots {

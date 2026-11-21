@@ -570,7 +570,8 @@ fn knot_range(s: &BSurface) -> [[f64; 2]; 2] {
     [[u[p], u[n]], [v[q], v[m]]]
 }
 
-/// Every point of `a` over `range` is `b`'s at the same parameters.
+/// `a` and `b` agree on a 21 × 21 grid of parameters over `range`: a sampled regression check
+/// that a continuation left the surface as it was there, not a proof of it.
 fn same_over(a: &BSurface, b: &BSurface, range: [[f64; 2]; 2]) {
     let (ea, eb) = (SurfaceEval::new(a).unwrap(), SurfaceEval::new(b).unwrap());
     for i in 0..=20 {
@@ -634,6 +635,50 @@ fn a_patch_is_not_continued_far_round_where_it_closes_or_where_its_trims_are_on_
     assert!(extend::extended(&cylinder, [[0.0, 4.01], [0.0, 1.0]], 1e-6).is_none());
     // Along v it does not close: continued there.
     assert!(extend::extended(&cylinder, [[0.0, 4.0], [0.0, 1.01]], 1e-6).is_some());
+}
+
+#[test]
+fn a_patch_continuation_keeps_its_shape_on_an_unclamped_start_and_its_limits_on_the_given_spans() {
+    // A quadratic along u whose knots are not clamped at its start: its one span [0, 1] is no
+    // Bézier segment as given, so it is made one before it is continued, and the patch is the
+    // same on [0, 1].
+    let s = BSurface::Spline {
+        u_knots: vec![-2.0, -1.0, 0.0, 1.0, 1.0, 1.0],
+        v_knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![vec![[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]], vec![[1.0, 1.0, 0.0], [1.0, 1.0, 1.0]], vec![[2.0, 0.0, 0.0], [2.0, 0.0, 1.0]]],
+    };
+    let longer = extend::extended(&s, [[0.0, 1.04], [0.0, 1.0]], 1e-6).expect("continued");
+    assert!(knot_range(&longer)[0][1] >= 1.04, "{:?}", knot_range(&longer));
+    same_over(&s, &longer, [[0.0, 1.0], [0.0, 1.0]]);
+    // A single span [0, 1]: each end may be continued by 5% of it as given, both together; a
+    // low end past that is refused whether or not the high end is continued first.
+    let flat = BSurface::Spline {
+        u_knots: vec![0.0, 0.0, 1.0, 1.0],
+        v_knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![vec![[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]], vec![[1.0, 0.0, 0.0], [1.0, 1.0, 0.0]]],
+    };
+    assert!(extend::extended(&flat, [[-0.049, 1.049], [0.0, 1.0]], 1e-6).is_some());
+    assert!(extend::extended(&flat, [[-0.052, 1.0], [0.0, 1.0]], 1e-6).is_none());
+    assert!(extend::extended(&flat, [[-0.052, 1.049], [0.0, 1.0]], 1e-6).is_none());
+}
+
+#[test]
+fn a_rational_patch_whose_boundaries_share_control_points_but_not_weights_is_open() {
+    // Rows 0 and 2 have the same points, (0, 0, 0) and (0, 10, 0), but weights [1, 1] and [1, 9]:
+    // half way along v the first boundary is at y = 5 and the last at y = 9. The patch does not
+    // close along u, so it is continued there.
+    let h = |[x, y, z]: [f64; 3], w: f64| [x * w, y * w, z * w, w];
+    let s = BSurface::RationalSpline {
+        u_knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        v_knots: vec![0.0, 0.0, 1.0, 1.0],
+        homogeneous: vec![
+            vec![h([0.0, 0.0, 0.0], 1.0), h([0.0, 10.0, 0.0], 1.0)],
+            vec![h([5.0, 0.0, 5.0], 1.0), h([5.0, 10.0, 5.0], 1.0)],
+            vec![h([0.0, 0.0, 0.0], 1.0), h([0.0, 10.0, 0.0], 9.0)],
+        ],
+    };
+    let longer = extend::extended(&s, [[0.0, 1.02], [0.0, 1.0]], 1e-6).expect("continued: it does not close");
+    same_over(&s, &longer, [[0.0, 1.0], [0.0, 1.0]]);
 }
 
 /// A wedge of a cylinder (radius 10, height 5) from angle −δ to π/2, its curved face's bottom and
@@ -721,7 +766,7 @@ fn whole_cylinder() -> BSurface {
 fn a_closed_patch_started_elsewhere_is_the_same_surface_a_period_on() {
     let s = whole_cylinder();
     for (d, at) in [(0, 1.5), (0, 2.0), (0, 3.25)] {
-        let moved = reseam::reseamed(&s, d, at, 1e-9).expect("started elsewhere");
+        let moved = reseam::reseamed(&s, d, at).expect("started elsewhere");
         let range = knot_range(&moved);
         assert!((range[0][0] - at).abs() < 1e-15 && (range[0][1] - (at + 4.0)).abs() < 1e-15, "{range:?}");
         assert_eq!(range[1], [0.0, 1.0]);
@@ -736,10 +781,10 @@ fn a_closed_patch_started_elsewhere_is_the_same_surface_a_period_on() {
         }
     }
     // Along v the cylinder does not close; its start, or a parameter past its range, is no seam.
-    assert!(reseam::reseamed(&s, 1, 0.5, 1e-9).is_none());
-    assert!(reseam::reseamed(&s, 0, 0.0, 1e-9).is_none());
-    assert!(reseam::reseamed(&s, 0, 4.5, 1e-9).is_none());
-    assert!(reseam::reseamed(&half_cylinder(), 0, 1.0, 1e-9).is_none());
+    assert!(reseam::reseamed(&s, 1, 0.5).is_none());
+    assert!(reseam::reseamed(&s, 0, 0.0).is_none());
+    assert!(reseam::reseamed(&s, 0, 4.5).is_none());
+    assert!(reseam::reseamed(&half_cylinder(), 0, 1.0).is_none());
 }
 
 /// The seam goes in the middle of the widest gap a face's boundary leaves round the closed
@@ -747,12 +792,21 @@ fn a_closed_patch_started_elsewhere_is_the_same_surface_a_period_on() {
 #[test]
 fn a_seam_is_moved_into_the_widest_gap_round_the_face() {
     // A face across the seam at 0 (of [0, 4]): from 3.6 round to 0.4, the gap 0.4 to 3.6.
-    assert_eq!(reseam::gap_middle(&[3.6, 3.8, 4.0, 0.0, 0.2, 0.4, -0.1], [0.0, 4.0]), Some(2.0));
+    assert_eq!(reseam::gap_middle_of(&[[3.6, 3.6], [3.8, 3.8], [4.0, 4.0], [0.0, 0.0], [0.2, 0.2], [0.4, 0.4], [-0.1, -0.1]], [0.0, 4.0]), Some(2.0));
     // Values a period off are taken round it.
-    assert_eq!(reseam::gap_middle(&[7.6, 4.4], [0.0, 4.0]), Some(2.0));
+    assert_eq!(reseam::gap_middle_of(&[[7.6, 7.6], [4.4, 4.4]], [0.0, 4.0]), Some(2.0));
     // A face away from the seam: the widest gap is across it, so the seam stays.
-    assert_eq!(reseam::gap_middle(&[1.0, 2.0, 3.0], [0.0, 4.0]), None);
-    assert_eq!(reseam::gap_middle(&[], [0.0, 4.0]), None);
+    assert_eq!(reseam::gap_middle_of(&[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]], [0.0, 4.0]), None);
+    assert_eq!(reseam::gap_middle_of(&[], [0.0, 4.0]), None);
+    // Pcurves are taken by their control hulls, which enclose them: one whose ends lie at 0.4
+    // and 3.6 but whose hull reaches 2.2 between them leaves no gap round 2, and the seam goes in
+    // the gap no hull reaches into. A hull across the seam counts on both sides of it.
+    let near = |x: Option<f64>, y: f64| x.is_some_and(|x| (x - y).abs() < 1e-12);
+    assert!(near(reseam::gap_middle_of(&[[0.0, 0.4], [0.4, 2.2], [3.6, 4.0]], [0.0, 4.0]), 2.9));
+    assert!(near(reseam::gap_middle_of(&[[3.6, 4.4], [1.0, 1.5]], [0.0, 4.0]), 2.55));
+    // Hulls that cover the whole period leave no gap.
+    assert_eq!(reseam::gap_middle_of(&[[0.5, 4.5]], [0.0, 4.0]), None);
+    assert_eq!(reseam::gap_middle_of(&[[0.0, 2.1], [2.0, 4.0]], [0.0, 4.0]), None);
 }
 
 /// A face on a plane whose pcurves the kernel makes is trimmed within its own boundary's box,
@@ -790,6 +844,13 @@ fn a_disagreement_on_a_face_names_the_files_face() {
 /// of the y = 0 plane between them, bounded by the two and the short edges joining their ends
 /// (which the x = 0 and x = 10 faces use too).
 fn box_with_sliver(width: f64) -> R<Solid> {
+    box_with_slivers(width, None)
+}
+
+/// [`box_with_sliver`], and where `top` is given a second sliver of that width at the opposite
+/// edge: between the top face's edge from corner 6 to corner 7 and the y = 20 face's from
+/// corners 6 and 7 lowered by `top`.
+fn box_with_slivers(width: f64, top: Option<f64>) -> R<Solid> {
     let tol = 1e-6;
     let mut asm = Assembly::new(tol, None);
     let raised = |c: usize| {
@@ -797,14 +858,28 @@ fn box_with_sliver(width: f64) -> R<Solid> {
         p[2] += width;
         p
     };
-    // Corners 0..8, then corner 0 and 1 raised (8 and 9).
+    let lowered = |c: usize| {
+        let mut p = corner(c);
+        p[2] -= top.unwrap_or(0.0);
+        p
+    };
+    // Corners 0..8, then corner 0 and 1 raised (8 and 9), and with a second sliver corners 6 and
+    // 7 lowered (10 and 11).
     let mut vertices = Vec::new();
     for c in 0..8 {
         vertices.push(asm.add_vertex(corner(c))?);
     }
     vertices.push(asm.add_vertex(raised(0))?);
     vertices.push(asm.add_vertex(raised(1))?);
-    let point = |v: usize| if v < 8 { corner(v) } else { raised(v - 8) };
+    if top.is_some() {
+        vertices.push(asm.add_vertex(lowered(6))?);
+        vertices.push(asm.add_vertex(lowered(7))?);
+    }
+    let point = |v: usize| match v {
+        0..8 => corner(v),
+        8 | 9 => raised(v - 8),
+        _ => lowered(v - 4),
+    };
     let mut edges: HashMap<(usize, usize), u32> = HashMap::new();
     let mut edge = |asm: &mut Assembly<'_>, a: usize, z: usize| -> R<(u32, bool)> {
         let key = (a.min(z), a.max(z));
@@ -820,7 +895,7 @@ fn box_with_sliver(width: f64) -> R<Solid> {
         Ok((e, a < z))
     };
     // Each face's corners counter-clockwise about its outward normal, and its plane's axes.
-    let faces: [(Vec<usize>, [f64; 3], [f64; 3]); 7] = [
+    let mut faces: Vec<(Vec<usize>, [f64; 3], [f64; 3])> = vec![
         (vec![0, 2, 3, 1], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]),
         (vec![4, 5, 7, 6], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
         (vec![8, 9, 5, 4], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
@@ -830,6 +905,13 @@ fn box_with_sliver(width: f64) -> R<Solid> {
         // The sliver.
         (vec![0, 1, 9, 8], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
     ];
+    if top.is_some() {
+        faces[3].0 = vec![2, 10, 11, 3];
+        faces[4].0 = vec![8, 4, 6, 10, 2, 0];
+        faces[5].0 = vec![1, 3, 11, 7, 5, 9];
+        // The second sliver.
+        faces.push((vec![11, 10, 6, 7], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]));
+    }
     let mut shell = Vec::new();
     for (f, (corners, u_axis, v_axis)) in faces.into_iter().enumerate() {
         let mut uses = Vec::new();
@@ -864,6 +946,13 @@ fn a_face_narrower_than_the_tolerance_that_cannot_be_read_is_left_out_its_sides_
         assert_eq!((kept.brep.faces.len(), kept.brep.edges.len(), kept.brep.vertices.len()), (7, 15, 10), "{width}");
         assert!(!kept.notes.iter().any(|n| n.contains("narrower than")), "{:?}", kept.notes);
     }
+
+    // Both in one body: the sliver that cannot be read is left out, the one that reads is kept.
+    // Which is left out is decided by each face's own refusal, not by the body's.
+    let both = box_with_slivers(0.0, Some(1e-7)).unwrap();
+    assert_eq!(both.brep.faces.len(), 7, "{:?}", both.notes);
+    assert!(!both.face_origin.contains(&6) && both.face_origin.contains(&7), "{:?}", both.face_origin);
+    assert!(both.notes.iter().any(|n| n.contains("1 faces narrower than")), "{:?}", both.notes);
 }
 
 /// A side of a spline face 5 µm long that the file made one vertex, at its middle: a vertex

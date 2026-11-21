@@ -639,7 +639,7 @@ fn face_properties_in(
         boundary(k, b, f)?
     };
     let shift = match b.face(f)?.surface.as_ref() {
-        Some(surface) => period_shift(k, surface, &trims)?,
+        Some(surface) => period_shift(surface, &trims)?,
         None => None,
     };
     if let Some(shift) = shift {
@@ -675,13 +675,18 @@ fn face_properties_in(
     )
 }
 /// Not upstream: the move by whole periods that puts a face's `trims` onto its B-spline
-/// surface's knot range along a direction it closes in, where the middle of their control
-/// points' box lies off it (a face whose trims a builder left a period round); `None` where
-/// none is needed. The surface is the same there, but the integral over trims off the range is
-/// taken on its clamped or continued evaluation, which is not: the face's integration and its
-/// closure ([`gap_closure`]) both run on the trims moved ([`shifted`]).
+/// surface's knot range along a direction it closes in, where their control points' box lies a
+/// whole period or more off it (a face whose trims a builder left a period round); `None` where
+/// none is needed or none puts them all on it. The surface is the same there, but the integral
+/// over trims off the range is taken on its clamped or continued evaluation, which is not: the
+/// face's integration and its closure ([`gap_closure`]) both run on the trims moved
+/// ([`shifted`]).
+///
+/// The move is the one that puts the box's low end on the range, taken only where it puts the
+/// whole box there (to a billionth of the period): a trim lies within its control points' box
+/// (positive weights), so then every trim does. Trims across the seam, or a box wider than the
+/// range, are left where they are. The direction must close exactly ([`closes_exactly`]).
 fn period_shift(
-    k: &Kernel,
     surface: &Surface,
     trims: &[Curve],
 ) -> Result<Option<crate::geom::axis2_placement::Axis2Placement>> {
@@ -721,14 +726,18 @@ fn period_shift(
         let (Some(&l), Some(&h)) = (lo.get(d), hi.get(d)) else {
             continue;
         };
-        let (period, mid) = (z - a, 0.5 * (l + h));
-        if !(period > 0.0 && mid.is_finite()) || (mid >= a && mid < z) {
+        let period = z - a;
+        if !(period > 0.0 && period.is_finite() && l.is_finite() && h.is_finite()) {
             continue;
         }
-        if !crate::surface::surface::p7::base_is_closed(k, base, &domain, dir, None, false)?.0 {
+        let slack = 1e-9 * period;
+        let by = -((l - a + slack) / period).floor() * period;
+        if by == 0.0 || !(l + by >= a - slack && h + by <= z + slack) {
             continue;
         }
-        let by = -((mid - a) / period).floor() * period;
+        if !closes_exactly(base, dir)? {
+            continue;
+        }
         if d == 0 {
             shift.x = by;
         } else {
@@ -743,6 +752,74 @@ fn period_shift(
         Vec3::new(1.0, 0.0, 0.0),
         Vec3::new(0.0, 1.0, 0.0),
     )))
+}
+
+/// Not upstream: whether a clamped B-spline surface closes along `dir`, decided on its control
+/// data: its first and last control rows across `dir` are the same Euclidean points (to
+/// `1000 ε (1 + |P|)`, the rounding of their division by a weight) with weights in one ratio, so
+/// its two boundary curves there are one curve to that rounding at every parameter (each point a
+/// convex combination of its row's with the same coefficients). Knots not clamped at both ends,
+/// or no NURBS form, are not shown closed.
+fn closes_exactly(
+    base: &crate::nurbs::b_spline_surface::BSplineSurface,
+    dir: SurfParamType,
+) -> Result<bool> {
+    let c = base.canonical()?;
+    let count = |m: &[usize], p: usize| m.iter().sum::<usize>().checked_sub(p + 1);
+    let (Some(nu), Some(nv)) = (
+        count(&c.u_multiplicities, c.u_degree),
+        count(&c.v_multiplicities, c.v_degree),
+    ) else {
+        return Ok(false);
+    };
+    let clamped = |m: &[usize], p: usize| {
+        m.first().is_some_and(|x| *x == p + 1) && m.last().is_some_and(|x| *x == p + 1)
+    };
+    let along_u = dir == SurfParamType::U;
+    let (mults, degree) = if along_u {
+        (&c.u_multiplicities, c.u_degree)
+    } else {
+        (&c.v_multiplicities, c.v_degree)
+    };
+    if !clamped(mults, degree) || nu == 0 || nv == 0 || c.control_points.len() != nu * nv {
+        return Ok(false);
+    }
+    // Control point (i along u, j along v) is `i * nv + j`; the rows across `dir` are its ends.
+    let pairs: Vec<(usize, usize)> = if along_u {
+        (0..nv).map(|j| (j, (nu - 1) * nv + j)).collect()
+    } else {
+        (0..nu).map(|i| (i * nv, i * nv + nv - 1)).collect()
+    };
+    let mut ratio: Option<f64> = None;
+    for (s, e) in pairs {
+        let (Some(p), Some(q)) = (c.control_points.get(s), c.control_points.get(e)) else {
+            return Ok(false);
+        };
+        let size = 1.0 + p.x.abs().max(p.y.abs()).max(p.z.abs());
+        let gap = (p.x - q.x)
+            .abs()
+            .max((p.y - q.y).abs())
+            .max((p.z - q.z).abs());
+        if gap.partial_cmp(&(1000.0 * f64::EPSILON * size)) != Some(core::cmp::Ordering::Less) {
+            return Ok(false);
+        }
+        if !c.weights.is_empty() {
+            let (Some(&ws), Some(&we)) = (c.weights.get(s), c.weights.get(e)) else {
+                return Ok(false);
+            };
+            let positive = |w: f64| w.partial_cmp(&0.0) == Some(core::cmp::Ordering::Greater);
+            if !(positive(ws) && positive(we)) {
+                return Ok(false);
+            }
+            let r = we / ws;
+            match ratio {
+                None => ratio = Some(r),
+                Some(r0) if (r - r0).abs() <= 1e-12 * r0.max(r) => {}
+                Some(_) => return Ok(false),
+            }
+        }
+    }
+    Ok(true)
 }
 
 /// A 2D trim moved by a [`period_shift`].
@@ -1794,7 +1871,7 @@ fn gap_closure(
     // on trims moved onto a closed surface's range, as the face's integral is
     // ([`period_shift`])
     let shift = match b.face(f)?.surface.as_ref() {
-        Some(surface) => period_shift(k, surface, &integrated.curves)?,
+        Some(surface) => period_shift(surface, &integrated.curves)?,
         None => None,
     };
     if let Some(shift) = shift {
@@ -3146,7 +3223,7 @@ mod tests {
         let k = Kernel::default();
         let tube = triangle_tube(true);
         let mut trims = uv_box(1.1, 1.4, 0.2, 0.8);
-        let shift = period_shift(&k, &tube, &trims).unwrap().expect("moved");
+        let shift = period_shift(&tube, &trims).unwrap().expect("moved");
         for c in &mut trims {
             shifted(&k, c, &shift).unwrap();
         }
@@ -3159,17 +3236,28 @@ mod tests {
         );
         // A period below the range: moved up.
         let below = uv_box(-0.9, -0.6, 0.2, 0.8);
-        assert!(period_shift(&k, &tube, &below).unwrap().is_some());
+        assert!(period_shift(&tube, &below).unwrap().is_some());
         // On the range: nothing to move.
-        assert!(period_shift(&k, &tube, &uv_box(0.1, 0.4, 0.2, 0.8))
+        assert!(period_shift(&tube, &uv_box(0.1, 0.4, 0.2, 0.8))
             .unwrap()
             .is_none());
         // A surface that does not close: trims off its range are not a period round.
         assert!(
-            period_shift(&k, &triangle_tube(false), &uv_box(1.1, 1.4, 0.2, 0.8))
+            period_shift(&triangle_tube(false), &uv_box(1.1, 1.4, 0.2, 0.8))
                 .unwrap()
                 .is_none()
         );
+        // Trims across the seam (no one move puts them all on the range), and trims whose control
+        // box starts on the range but reaches past it (a rational trim's control points may lie
+        // off the range while the trim does not), are left where they are.
+        for (u0, u1) in [(0.9, 1.2), (0.1, 2.1), (1.1, 2.3)] {
+            assert!(
+                period_shift(&tube, &uv_box(u0, u1, 0.2, 0.8))
+                    .unwrap()
+                    .is_none(),
+                "[{u0}, {u1}]"
+            );
+        }
     }
 
     #[test]

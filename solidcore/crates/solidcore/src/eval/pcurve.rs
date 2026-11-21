@@ -986,29 +986,35 @@ impl On {
             } else if low.is_finite() && high.is_finite() && !inside(base) {
                 // Within neither: a period lower, where the loop runs past the range by less than
                 // where its lowest point puts it, and by a step that moves the surface within
-                // `tol` (at the surface's fastest along `d` over the loop's points put on the
-                // range). A loop that starts on the range's start, its lowest point a writer's
-                // rounding below it, stays on the range rather than moving a whole period on;
-                // one farther below stays where its lowest point puts it.
+                // `tol`: each point past an end moves along `d` by at most that end's overrun,
+                // within the strip from the end to the overrun and across the loop's span, which
+                // a certified bound on the surface's speed there encloses
+                // (`SurfaceEval::strip_shift_bound`); where no bound is decided it stays. A loop
+                // that starts on the range's start, its lowest point a writer's rounding below
+                // it, stays on the range rather than moving a whole period on; one farther below
+                // stays where its lowest point puts it.
                 let spill = |by: f64| (lo - (low - by)).max(0.0) + ((high - by) - hi).max(0.0);
                 let lower = base + period;
-                let over = spill(lower);
-                if over < spill(base) {
-                    let mut speed = 0.0f64;
-                    for ((c, _), s) in uses.iter().zip(&shift) {
-                        for mut q in points(c) {
-                            if let Some(x) = q.get_mut(d) {
-                                *x = (*x + s - lower).max(lo).min(hi);
-                            }
-                            let [qu, qv] = q;
-                            let along =
-                                self.surface
-                                    .derivs(qu, qv)
-                                    .map(|(_, du, dv)| if d == 0 { du } else { dv });
-                            speed = speed.max(along.map_or(f64::INFINITY, VecExt::len));
+                if spill(lower) < spill(base) {
+                    let (below, above) = (
+                        (lo - (low - lower)).max(0.0),
+                        ((high - lower) - hi).max(0.0),
+                    );
+                    let across = uses
+                        .iter()
+                        .flat_map(|(c, _)| points(c).into_iter().map(|q| at(q, 1 - d)))
+                        .fold([f64::INFINITY, f64::NEG_INFINITY], |[a, b], x| {
+                            [a.min(x), b.max(x)]
+                        });
+                    let shift = |along: [f64; 2], o: f64| -> Option<f64> {
+                        if o > 0.0 {
+                            self.surface.strip_shift_bound(d, along, across, o).ok()
+                        } else {
+                            Some(0.0)
                         }
-                    }
-                    if over * speed <= tol {
+                    };
+                    let moved = shift([lo - below, lo], below).zip(shift([hi, hi + above], above));
+                    if moved.is_some_and(|(x, y)| x.max(y) <= tol) {
                         base = lower;
                     }
                 }

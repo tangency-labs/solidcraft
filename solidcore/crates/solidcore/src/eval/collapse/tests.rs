@@ -1393,3 +1393,30 @@ fn what_a_rational_net_cannot_bound_is_refused() {
         Err(EvalError::Invalid(_))
     ));
 }
+
+/// A move along a direction within a strip is bounded by the surface's speed over the strip: at
+/// least the overrun times that speed, not loose by much, on a polynomial patch (speed 2) and on
+/// a rational quarter cylinder of radius 3 (speed about 4.24 at its end); a strip a rational net
+/// does not bound (across off its range) and a move that is not finite are refused.
+#[test]
+fn a_strip_shift_bound_covers_the_speed_over_the_strip() {
+    let o = 1e-3;
+    let s = flat((0.0, 1.0), (0.0, 1.0), 2.0);
+    let b = strip_shift_bound(&s, 0, [1.0, 1.0 + o], [0.2, 0.8], o).unwrap();
+    assert!(b >= 2.0 * o && b < 2.5 * o, "{b}");
+    let b = strip_shift_bound(&s, 1, [-o, 0.0], [0.0, 1.0], o).unwrap();
+    assert!(b >= 2.0 * o && b < 2.5 * o, "{b}");
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let s = spline(
+        [2, 1],
+        &[
+            vec![([3.0, 0.0, 0.0], 1.0), ([3.0, 0.0, 2.0], 1.0)],
+            vec![([3.0, 3.0, 0.0], w), ([3.0, 3.0, 2.0], w)],
+            vec![([0.0, 3.0, 0.0], 1.0), ([0.0, 3.0, 2.0], 1.0)],
+        ],
+    );
+    let b = strip_shift_bound(&s, 0, [1.0 - o, 1.0], [0.0, 1.0], o).unwrap();
+    assert!(b >= o * 2.0 * w * 3.0 && b < o * 20.0, "{b}");
+    assert!(strip_shift_bound(&s, 0, [1.0 - o, 1.0], [0.0, 1.5], o).is_err());
+    assert!(strip_shift_bound(&s, 0, [1.0 - o, 1.0], [0.0, 1.0], f64::NAN).is_err());
+}
