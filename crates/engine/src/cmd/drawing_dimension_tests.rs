@@ -466,6 +466,33 @@ fn a_point_on_a_curved_edge_finds_it_between_its_chords() {
     reads(&add(&mut s, view, json!({"length": {"edge": [74.99, 0, 30]}})), 75.0, "75.00");
 }
 
+/// A round edge the view sees edge-on is drawn as a line, and its length is that line's (#19950):
+/// a Ø10 boss's end circle on the box's right side spans 10 up the sheet; a half Ø10 rod along the
+/// box's top shows its end half circle 5 high, its top between its two ends; and a 4 mm fillet's
+/// quarter arc on the front top edge shows 4 high. Each is read from the circle the edge lies on,
+/// not from its mesh. A hole's rim the view sees round is no line, and stays refused.
+#[test]
+fn a_round_edge_seen_edge_on_reads_the_length_of_its_line() {
+    let (mut s, view) = front_view();
+    let drawing = s.drawing("test").unwrap().id;
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "base": [80, 20, 15], "axis": "X", "operation": "join", "targets": ["Box"]}));
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 80, "base": [0, 20, 30], "axis": "X", "operation": "join", "targets": ["Box"]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 30]], "radius": 4, "body": "Box"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 42, "base": [20, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"]}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let (sin, cos) = 45f64.to_radians().sin_cos();
+    let boss_end = json!({"body": "Box", "index": round_index(&s, [100.0, 20.0, 15.0], 5.0)});
+    reads(&add(&mut s, view, json!({"length": {"edge": boss_end}})), 10.0, "10.00");
+    reads(&add(&mut s, view, json!({"length": {"edge": boss_end, "direction": "vertical"}})), 10.0, "10.00");
+    reads(&add(&mut s, view, json!({"length": {"edge": [100.0, 20.0 - 5.0 * cos, 15.0 + 5.0 * sin]}})), 10.0, "10.00");
+    reads(&add(&mut s, view, json!({"length": {"edge": [0.0, 20.0 + 5.0 * cos, 30.0 + 5.0 * sin]}})), 5.0, "5.00");
+    reads(&add(&mut s, view, json!({"length": {"edge": [80.0, 4.0 - 4.0 * cos, 26.0 + 4.0 * sin]}})), 4.0, "4.00");
+    let rim = json!({"view": ids::encode(view), "kind": {"length": {"edge": [20.0 + 3.0 * cos, 0.0, 15.0 + 3.0 * sin]}}});
+    let e = refused(&mut s, rim);
+    assert!(e.contains("isn't straight"), "{e}");
+}
+
 /// A linear dimension measures from the centre of a hole or an arc, each named by its edge: the
 /// hole through the box about (40, 15) on the front, and the fillet's quarter arc about (75, 25).
 /// A straight edge has no centre, and a centre's edge has no path of its own.
