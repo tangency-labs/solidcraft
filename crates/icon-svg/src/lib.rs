@@ -387,4 +387,3 @@ enum Frame {
     Clip(usize),
     Defs,
 }
-

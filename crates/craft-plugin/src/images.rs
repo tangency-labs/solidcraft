@@ -47,9 +47,10 @@ pub fn source(bytes: &[u8]) -> Result<&str, String> {
         return Err(format!("not a file of at most {} KiB", MAX_BYTES / 1024));
     }
     let src = std::str::from_utf8(bytes).map_err(|_| "not UTF-8 text".to_string())?;
-    let square = src.find("<svg").and_then(|start| src[start..].split('>').next()).is_some_and(|tag| {
-        ["viewBox=\"0 0 64 64\"", "viewBox='0 0 64 64'"].iter().any(|view_box| tag.contains(view_box))
-    });
+    let square = src
+        .find("<svg")
+        .and_then(|start| src[start..].split('>').next())
+        .is_some_and(|tag| ["viewBox=\"0 0 64 64\"", "viewBox='0 0 64 64'"].iter().any(|view_box| tag.contains(view_box)));
     if !square {
         return Err("its <svg> needs viewBox=\"0 0 64 64\", as the app's icons have".into());
     }

@@ -258,15 +258,7 @@ impl RibbonGroup {
             more: self
                 .entries
                 .iter()
-                .map(|e| ribbon::MoreRow {
-                    id: &e.command,
-                    label: &e.label,
-                    icon: &e.icon,
-                    shortcut: "",
-                    enabled: true,
-                    checked: None,
-                    hint: None,
-                })
+                .map(|e| ribbon::MoreRow { id: &e.command, label: &e.label, icon: &e.icon, shortcut: "", enabled: true, checked: None, hint: None })
                 .collect(),
         }
     }

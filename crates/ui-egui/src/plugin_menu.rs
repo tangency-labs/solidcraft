@@ -790,7 +790,11 @@ pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
                     label: format!("{}…", command_title(plugin, entry)),
                     key: String::new(),
                     // Keep the menu's unillustrated rows for entries without an annotation.
-                    icon: if entry.input_schema.get(crate::plugin_images::KEY).is_some() { command_icon(plugin, entry).to_owned() } else { String::new() },
+                    icon: if entry.input_schema.get(crate::plugin_images::KEY).is_some() {
+                        command_icon(plugin, entry).to_owned()
+                    } else {
+                        String::new()
+                    },
                     enabled: true,
                 })
             })

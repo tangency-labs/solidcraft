@@ -1017,8 +1017,7 @@ mod native {
         let mut s = Session::default();
         let command = std::fs::read(f.0.join("sample/plugin.wasm")).unwrap();
         let (package, version) = API.split_once('@').unwrap();
-        let importer =
-            wat::parse_str(include_str!("importer_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap();
+        let importer = wat::parse_str(include_str!("importer_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap();
         let mut command_problems = Vec::new();
         for kind in ["command", "importer"] {
             let mut m = manifest();

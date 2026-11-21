@@ -6187,6 +6187,7 @@ dependencies = [
  "solidcraft-develop",
  "solidcraft-doc",
  "solidcraft-geom",
+ "solidcraft-icon-svg",
  "solidcraft-io",
  "solidcraft-kernel",
  "solidcraft-panel-layout",
@@ -6248,6 +6249,13 @@ dependencies = [
  "solidcraft-viewport-gpu",
  "thiserror 2.0.21",
  "wgpu",
+]
+
+[[package]]
+name = "solidcraft-icon-svg"
+version = "0.45.0"
+dependencies = [
+ "tiny-skia",
 ]
 
 [[package]]
@@ -6503,6 +6511,7 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcraft-color",
+ "solidcraft-icon-svg",
  "solidcraft-theme",
  "solidcraft-ui-registry",
  "solidcraft-ui-text",
