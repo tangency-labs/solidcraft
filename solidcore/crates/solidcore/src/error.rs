@@ -1364,7 +1364,7 @@ pub enum ErrorKind {
     /// A fillet or chamfer is too large to build; the error names the largest size
     /// that builds.
     FilletTooLarge = 100,
-    // The blend's classes, 101 to 131 (the classes of the typed blend failure record,
+    // The blend's classes, 101 to 132 (the classes of the typed blend failure record,
     // `error::blend`), in their order: the record's numbers less 200, then the classes added
     // after them.
     /// The rolling ball does not fit a face it rolls on.
@@ -1444,6 +1444,14 @@ pub enum ErrorKind {
     /// faces across them or their surfaces are not those of a fillet between two faces. Not a
     /// matter of size ([`crate::error::blend::RemovalRefusal`]).
     NotARemovableFillet = 131,
+    /// A blend's construction needs a kind of surface or curve that the body's face or edge
+    /// there is not (a planar support where a bevel's split end is cut, a surface or curve
+    /// with a B-spline form): the kernel does not build that construction on that kind. Not
+    /// a matter of size: the way out is a face or edge of another kind there
+    /// ([`crate::error::blend::BlendFailure::SplitEndSupportNotPlanar`],
+    /// [`crate::error::blend::BlendFailure::SurfaceKindNotBuilt`],
+    /// [`crate::error::blend::BlendFailure::CurveKindNotBuilt`]).
+    KindNotBuilt = 132,
     /// An offset face's offset folds: the wall is thicker than a radius of curvature.
     OffsetFolds = 200,
     /// Loops of an offset face touch without crossing: the offset walls would meet.
@@ -1531,6 +1539,7 @@ impl ErrorKind {
                 | Self::OverflowKeepsNothing
                 | Self::RemovalNotExact
                 | Self::NotARemovableFillet
+                | Self::KindNotBuilt
                 | Self::OffsetFolds
                 | Self::OffsetWallsTouch
                 | Self::OffsetLoopsCross
@@ -1552,6 +1561,7 @@ impl ErrorKind {
                     | Self::TangentContinuationEnd
                     | Self::RemovalNotExact
                     | Self::NotARemovableFillet
+                    | Self::KindNotBuilt
                     | Self::OffsetWallsTouch
                     | Self::OffsetLoopsCross
                     | Self::OffsetEdgeVanishes
@@ -1608,6 +1618,7 @@ impl ErrorKind {
             Self::OverflowKeepsNothing => "overflow_keeps_nothing",
             Self::RemovalNotExact => "removal_not_exact",
             Self::NotARemovableFillet => "not_a_removable_fillet",
+            Self::KindNotBuilt => "kind_not_built",
             Self::OffsetFolds => "offset_folds",
             Self::OffsetWallsTouch => "offset_walls_touch",
             Self::OffsetLoopsCross => "offset_loops_cross",
@@ -2595,6 +2606,7 @@ mod tests {
                 131,
                 "not_a_removable_fillet",
             ),
+            (ErrorKind::KindNotBuilt, 132, "kind_not_built"),
             (ErrorKind::OffsetFolds, 200, "offset_folds"),
             (ErrorKind::OffsetWallsTouch, 201, "offset_walls_touch"),
             (ErrorKind::OffsetLoopsCross, 202, "offset_loops_cross"),
@@ -2649,11 +2661,12 @@ mod tests {
                 ErrorKind::OverflowKeepsNothing => 43,
                 ErrorKind::RemovalNotExact => 44,
                 ErrorKind::NotARemovableFillet => 45,
-                ErrorKind::OffsetFolds => 46,
-                ErrorKind::OffsetWallsTouch => 47,
-                ErrorKind::OffsetLoopsCross => 48,
-                ErrorKind::OffsetEdgeVanishes => 49,
-                ErrorKind::OffsetCollapses => 50,
+                ErrorKind::KindNotBuilt => 46,
+                ErrorKind::OffsetFolds => 47,
+                ErrorKind::OffsetWallsTouch => 48,
+                ErrorKind::OffsetLoopsCross => 49,
+                ErrorKind::OffsetEdgeVanishes => 50,
+                ErrorKind::OffsetCollapses => 51,
             }
         };
         for (i, &(kind, code, name)) in PINNED.iter().enumerate() {
@@ -2667,17 +2680,17 @@ mod tests {
             "codes are unique and ascending"
         );
         // the blend's classes: 101 to 127 are the record's numbers less 200, with no gap; 128
-        // to 131 follow them
+        // to 132 follow them
         let blend: Vec<u16> = PINNED
             .iter()
             .map(|r| r.1)
             .filter(|c| (101..200).contains(c))
             .collect();
-        assert_eq!(blend, (101..=131).collect::<Vec<u16>>());
+        assert_eq!(blend, (101..=132).collect::<Vec<u16>>());
         // defects, refusals and the sized ones
         let defects = [115, 125, 126, 127];
-        let unsized_refusals = [102, 128, 130, 131];
-        for &(kind, code, _) in PINNED.iter().filter(|r| (101..=131).contains(&r.1)) {
+        let unsized_refusals = [102, 128, 130, 131, 132];
+        for &(kind, code, _) in PINNED.iter().filter(|r| (101..=132).contains(&r.1)) {
             assert_eq!(kind.is_defect(), defects.contains(&code), "{kind:?}");
             assert_eq!(kind.is_refusal(), !defects.contains(&code), "{kind:?}");
             assert_eq!(

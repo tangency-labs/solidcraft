@@ -15,15 +15,22 @@
 //! in a loop (a zero-speed rib's grows by the spans it halves, to at most 1024), each
 //! Newton solve takes at most 40 steps.
 //!
-//! Failures (#15034): no check here decides a refusal. A contact order that cannot be
-//! taken, and a rib that cannot be solved, fitted or certified within tolerance (an end
-//! off a surface or its rails, a singular tangent end, a station without its point, a
-//! rib that does not reach its other end, a stop of #10876 that does not fit) are each
-//! a [`BlendFailure::StageFailed`], a defect, built where it happens (its origin is that
-//! file and line), keeping upstream's status for the goldens: `SM_ERR_NULL_POINTER` for
-//! the missing surface generator (a `NER`), `SM_ERR` otherwise. The caller,
-//! `calc_fillet_int_side_face`, returns an order's failure at once and takes a rib's
-//! down its failure branch, as upstream.
+//! Failures (#15034): no check here decides a refusal. A step that fails through the
+//! kernel's fault (a contact order of a generator the kernel does not build, a rib end, or
+//! a stop of #10876, that the kernel placed on a surface or a rail and that lies off it, a
+//! rib that does not reach its other end, a list or an interpolation that does not hold
+//! what was just put in it) is a [`BlendFailure::Defect`] whose reason (one of the named
+//! `const`s at the end of the file) says why, built where it happens (its origin is that
+//! file and line). A drop of a rib point that stops without a foot is a solve that stopped
+//! ([`BlendFailure::RibPointNotDropped`], a defect with its numbers); one that finds its
+//! foot farther than the tolerance is a [`BlendFailure::Defect`]. A zero-speed rib's
+//! midpoint whose Newton solve stops is [`BlendFailure::RibStationNotSolved`], a rib on a
+//! face not enclosed that no station count fits [`BlendFailure::RibFitCap`], and an end
+//! surface singular at the tangent end a construction not built
+//! ([`BlendFailure::TangentEndSingular`]). Each keeps upstream's status for the goldens:
+//! `SM_ERR_NULL_POINTER` for the missing surface generator (a `NER`), `SM_ERR` otherwise.
+//! The caller, `calc_fillet_int_side_face`, returns an order's failure at once and takes a
+//! rib's down its failure branch, keeping it as the cause, as upstream.
 
 mod certificate;
 
@@ -31,7 +38,7 @@ use crate::blend::fillet_section::certificate::NurbsCurve;
 use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGeneratorType};
 use crate::curve::curve::Curve;
-use crate::error::blend::BlendFailure;
+use crate::error::blend::{BlendFailure, RibPoint};
 use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::krawczyk::{inverse_of_columns3, newton, Linearised};
@@ -71,14 +78,14 @@ fn smax(a: f64, b: f64) -> f64 {
 pub fn section_contact_order(solver: &FilletSolver) -> Result<u32> {
     let fsg = solver
         .fillet_surface_generator()
-        .ok_or_else(|| missing(OP_ORDER))?;
+        .ok_or_else(|| broken_link(OP_ORDER, NO_SURFACE_GENERATOR))?;
     match fsg.fillet_surface_generator_type() {
         FilletSurfaceGeneratorType::Linear => Ok(1),
         FilletSurfaceGeneratorType::Circular => Ok(2),
         // ((SmBlendCurveCrossSectionFSG*)pFSG)->GetContinuity() + 1: that generator is
         // retired (WR-685); a G^n section's order is [`gn_section_contact_order`]'s
         FilletSurfaceGeneratorType::BlendCurve | FilletSurfaceGeneratorType::Unknown => {
-            Err(stage_failed(OP_ORDER))
+            Err(defect(OP_ORDER, GENERATOR_WITHOUT_ORDER))
         }
     }
 }
@@ -127,7 +134,7 @@ pub fn gn_section_contact_order(
     }
     if rail > 1 || best > tol {
         // "sm_SectionContactOrder(): the point is on no rail"
-        return Err(stage_failed(OP_ORDER));
+        return Err(defect(OP_ORDER, TANGENT_END_ON_NO_RAIL));
     }
     let [uv0, uv1] = uvs;
     let [r0, r1] = rails;
@@ -136,7 +143,7 @@ pub fn gn_section_contact_order(
     let seed = [w0.x, w0.y, w1.x, w1.y];
     let points = [r0.evaluate_point(k, s)?, r1.evaluate_point(k, s)?];
     let order = g.contact_order_at(k, faces, center, s, seed, points, rail)?;
-    u32::try_from(order).map_err(|_| stage_failed(OP_ORDER))
+    u32::try_from(order).map_err(|_| defect(OP_ORDER, ORDER_PAST_U32))
 }
 
 /// `D[0][0]`, `D[1][0]` (u) and `D[0][1]` (v) of `surface` at `uv`
@@ -153,7 +160,7 @@ fn first_derivs(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(Vec3, Vec3
         d.get(i)
             .and_then(|row| row.get(j))
             .copied()
-            .ok_or_else(|| stage_failed(OP_RIB))
+            .ok_or_else(|| defect(OP_RIB, NO_FIRST_DERIVATIVES))
     };
     Ok((at(0, 0)?, at(1, 0)?, at(0, 1)?))
 }
@@ -311,17 +318,19 @@ pub struct TangentEndRib {
 ///
 /// # Errors
 ///
-/// `SM_ERR` when an end is off either surface, the ends are not on the fillet surface's
-/// two rails or lie on one section, the rib does not reach its other end, a station
-/// has no exact point, or (where a face is not enclosed) no station count gives the rib's
-/// midpoints within tolerance; [`BlendFailure::NotCertified`] (#17744)
+/// `SM_ERR` throughout: [`BlendFailure::RibPointNotDropped`] when the drop of an end or
+/// of the stop onto either surface stops without a foot; a [`BlendFailure::Defect`] when an
+/// end or the stop lies off either surface, the ends are not on the fillet surface's two
+/// rails or lie on one section, the stop is not strictly between the rails on the other
+/// rail's side, the rib does not reach its other end, or, for a zero-speed rib, the fillet
+/// surface's section leaves the end surface's tangent plane there or an interpolation's
+/// second control point leaves its end; [`BlendFailure::TangentEndSingular`] when the end
+/// surface is singular at a zero-speed rib's tangent end;
+/// [`BlendFailure::RibStationNotSolved`] when a zero-speed rib's midpoint has no exact
+/// point; [`BlendFailure::RibFitCap`] where a face is not enclosed and no station count
+/// gives the rib's midpoints within tolerance; [`BlendFailure::NotCertified`] (#17744)
 /// where both faces are enclosed and no station count certifies the rib within tolerance;
-/// for a zero-speed rib, when the end surface is
-/// singular at the tangent end, the fillet surface's section leaves its tangent plane
-/// there, or an interpolation's second control point leaves its end; a stage failure
-/// ([`BlendFailure::StageFailed`], a defect) for a `stop` off either
-/// surface or not strictly between the rails on the other rail's side; those of the drops,
-/// evaluations and fits.
+/// those of the drops, evaluations and fits.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
 pub fn tangent_end_rib(
     k: &Kernel,
@@ -341,11 +350,19 @@ pub fn tangent_end_rib(
     let mut fil_uv = [Point2::new(0.0, 0.0); 2];
     let mut end_uv = [Point2::new(0.0, 0.0); 2];
     for (kk, p) in [tangent_end, other_end].into_iter().enumerate() {
+        let point = if kk == 0 {
+            RibPoint::TangentEnd
+        } else {
+            RibPoint::OtherEnd
+        };
         let d =
             fillet.drop_point::<crate::surface::surface::p4::NoObject>(k, p, &fil_dom, &opts)?;
-        if !d.success || d.gap > approx_tol {
+        if !d.success {
+            return Err(not_dropped(point, false, approx_tol));
+        }
+        if d.gap > approx_tol {
             // an end of the rib is off the fillet surface
-            return Err(stage_failed(OP_RIB));
+            return Err(defect(OP_RIB, END_OFF_FILLET));
         }
         // with a stop, the other rail's end orients the section only: it is off the end
         // surface where the rib passes onto the next face before reaching it
@@ -356,9 +373,12 @@ pub fn tangent_end_rib(
             continue;
         }
         let e = end.drop_point::<crate::surface::surface::p4::NoObject>(k, p, &end_dom, &opts)?;
-        if !e.success || e.gap > approx_tol {
+        if !e.success {
+            return Err(not_dropped(point, true, approx_tol));
+        }
+        if e.gap > approx_tol {
             // an end of the rib is off the end surface
-            return Err(stage_failed(OP_RIB));
+            return Err(defect(OP_RIB, END_OFF_END_SURFACE));
         }
         if let (Some(f), Some(g)) = (fil_uv.get_mut(kk), end_uv.get_mut(kk)) {
             *f = d.result_uv;
@@ -383,7 +403,7 @@ pub fn tangent_end_rib(
         1
     } else {
         // the rib's ends are not on the fillet surface's two rails
-        return Err(stage_failed(OP_RIB));
+        return Err(defect(OP_RIB, ENDS_NOT_ON_RAILS));
     };
     let (sigma0, mut sigma1, alpha0, mut alpha1) = if section == 0 {
         (fil0.x, fil1.x, fil0.y, fil1.y)
@@ -396,13 +416,19 @@ pub fn tangent_end_rib(
     if let Some(stop) = stop {
         let d =
             fillet.drop_point::<crate::surface::surface::p4::NoObject>(k, stop, &fil_dom, &opts)?;
-        if !d.success || d.gap > approx_tol {
-            return Err(stage_failed(OP_RIB)); // the rib's stop is off the fillet surface
+        if !d.success {
+            return Err(not_dropped(RibPoint::Stop, false, approx_tol));
+        }
+        if d.gap > approx_tol {
+            return Err(defect(OP_RIB, STOP_OFF_FILLET)); // the rib's stop is off the fillet surface
         }
         let e =
             end.drop_point::<crate::surface::surface::p4::NoObject>(k, stop, &end_dom, &opts)?;
-        if !e.success || e.gap > approx_tol {
-            return Err(stage_failed(OP_RIB)); // the rib's stop is off the end surface
+        if !e.success {
+            return Err(not_dropped(RibPoint::Stop, true, approx_tol));
+        }
+        if e.gap > approx_tol {
+            return Err(defect(OP_RIB, STOP_OFF_END_SURFACE)); // the rib's stop is off the end surface
         }
         let (sigma_stop, alpha_stop) = if section == 0 {
             (d.result_uv.x, d.result_uv.y)
@@ -416,7 +442,7 @@ pub fn tangent_end_rib(
             && (sigma1 - sigma_stop).abs() > tol_sigma
             && (sigma1 - sigma_stop) * (sigma1 - sigma0) > 0.0;
         if !between {
-            return Err(stage_failed(OP_RIB)); // the rib's stop is not between the rails
+            return Err(defect(OP_RIB, STOP_NOT_BETWEEN_RAILS)); // the rib's stop is not between the rails
         }
         sigma1 = sigma_stop;
         alpha1 = alpha_stop;
@@ -425,7 +451,7 @@ pub fn tangent_end_rib(
     }
     if (alpha1 - alpha0).abs() <= EFF_ZERO_SQRT * smax(1.0, alpha0.abs()) {
         // the rib's ends lie on one section
-        return Err(stage_failed(OP_RIB));
+        return Err(defect(OP_RIB, ENDS_ON_ONE_SECTION));
     }
     let odd = order % 2 == 1;
     let sigma_at = |t: f64| sigma0 + (sigma1 - sigma0) * (if odd { t * t } else { t });
@@ -452,8 +478,15 @@ pub fn tangent_end_rib(
         let c = e_v.dot(e_v);
         let det = a * c - b * b;
         if det <= EFF_ZERO * a * c {
-            // the end surface is singular at the tangent end
-            return Err(stage_failed(OP_RIB));
+            // the end surface is singular at the tangent end: no zero-speed rib is built
+            // at a singular point of its parametrization
+            return Err(SolidError::blend(
+                OP_RIB,
+                BlendFailure::TangentEndSingular {
+                    u: end0.x,
+                    v: end0.y,
+                },
+            ));
         }
         let r_u = e_u.dot(d2_x);
         let r_v = e_v.dot(d2_x);
@@ -463,7 +496,7 @@ pub fn tangent_end_rib(
         if off_plane.length() > EFF_ZERO_SQRT * smax(1.0, d2_x.length()) {
             // the fillet surface's section leaves the end surface's tangent plane at the
             // tangent end
-            return Err(stage_failed(OP_RIB));
+            return Err(defect(OP_RIB, SECTION_OFF_TANGENT_PLANE));
         }
         (d2_x, d2_fil, d2_end)
     } else {
@@ -487,13 +520,13 @@ pub fn tangent_end_rib(
             // the interpolation's solve gives the second to rounding, and it is the
             // first.
             if c.number_control_points()? < 2 {
-                return Err(stage_failed(OP_RIB));
+                return Err(defect(OP_RIB, INTERPOLATION_TOO_FEW_POINTS));
             }
             let (cpt0, _) = c.control_point(ControlPointForm::NonRational, 0)?;
             let (cpt1, _) = c.control_point(ControlPointForm::NonRational, 1)?;
             if cpt1.distance(cpt0) > EFF_ZERO_SQRT * smax(1.0, cpt0.max_dimension()) {
                 // the zero-speed end's interpolation leaves its end
-                return Err(stage_failed(OP_RIB));
+                return Err(defect(OP_RIB, ZERO_SPEED_END_MOVED));
             }
             c.set_control_point(ControlPointForm::NonRational, 1, cpt0, 1.0)?;
             return Ok(c);
@@ -551,6 +584,8 @@ pub fn tangent_end_rib(
     // a zero-speed rib's midpoint without an exact point ends the refinement (upstream's
     // break), with upstream's failure, not as not certified
     let mut unsolved = false;
+    // the midpoint whose exact point was last not found
+    let mut unsolved_at = f64::NAN;
     while spans <= max_spans {
         if !stations {
             // stations t = j / spans, solved from the tangent end outward
@@ -583,7 +618,7 @@ pub fn tangent_end_rib(
                         es.get(jj - 1),
                         es.get(jj - 2),
                     ) else {
-                        return Err(stage_failed(OP_RIB));
+                        return Err(defect(OP_RIB, GUESS_STATIONS_GONE));
                     };
                     (
                         2.0 * a1 - a2,
@@ -607,10 +642,12 @@ pub fn tangent_end_rib(
                 spans *= 2;
                 continue;
             }
-            let last = xs.get_mut(spans).ok_or_else(|| stage_failed(OP_RIB))?;
+            let last = xs
+                .get_mut(spans)
+                .ok_or_else(|| defect(OP_RIB, LAST_STATION_GONE))?;
             if last.distance(last_point) > approx_tol {
                 // the rib does not reach its other end
-                return Err(stage_failed(OP_RIB));
+                return Err(defect(OP_RIB, RIB_MISSES_OTHER_END));
             }
             *last = last_point;
             stations = true;
@@ -669,7 +706,7 @@ pub fn tangent_end_rib(
                 es.get(jj),
                 es.get(jj + 1),
             ) else {
-                return Err(stage_failed(OP_RIB));
+                return Err(defect(OP_RIB, SPAN_ENDS_GONE));
             };
             let t = 0.5 * (t0 + t1);
             let alpha = 0.5 * (a0 + a1);
@@ -700,6 +737,7 @@ pub fn tangent_end_rib(
             }
             let Some((alpha, uv, exact)) = solve(t, alpha, uv)? else {
                 solved = false;
+                unsolved_at = t;
                 break;
             };
             // a face not enclosed, or the tangent end's span open: upstream's check, the
@@ -755,7 +793,7 @@ pub fn tangent_end_rib(
         for &(jj, alpha, uv, exact) in off.iter().rev() {
             let at = jj + 1;
             let (Some(&t0), Some(&t1)) = (ts.get(at - 1), ts.get(at)) else {
-                return Err(stage_failed(OP_RIB));
+                return Err(defect(OP_RIB, SPAN_ENDS_GONE));
             };
             ts.insert(at, 0.5 * (t0 + t1));
             alphas.insert(at, alpha);
@@ -777,24 +815,116 @@ pub fn tangent_end_rib(
             },
         ));
     }
-    // no station count gives the rib within the tolerance
-    Err(stage_failed(OP_RIB))
+    // a zero-speed rib's midpoint whose solve stopped; else no station count gives the rib
+    // within the tolerance
+    Err(SolidError::blend(
+        OP_RIB,
+        if unsolved {
+            BlendFailure::RibStationNotSolved { t: unsolved_at }
+        } else {
+            BlendFailure::RibFitCap {
+                stations: ts.len(),
+                halvings,
+            }
+        },
+    ))
 }
 
-/// A step whose object is not there (upstream's `NER`): a defect keeping
-/// `SM_ERR_NULL_POINTER` (#15034).
+/// The drop of the rib's `point` onto the fillet surface (or, `onto_end`, the end surface)
+/// that stopped without a foot within `tolerance` ([`BlendFailure::RibPointNotDropped`]).
 #[track_caller]
-fn missing(op: &'static str) -> SolidError {
-    Failure::new(op, BlendFailure::StageFailed)
+fn not_dropped(point: RibPoint, onto_end: bool, tolerance: f64) -> SolidError {
+    SolidError::blend(
+        OP_RIB,
+        BlendFailure::RibPointNotDropped {
+            point,
+            onto_end,
+            tolerance,
+        },
+    )
+}
+
+/// A defect ([`BlendFailure::Defect`]) with the status `SM_ERR` of the `SER` it replaces.
+#[track_caller]
+fn defect(op: &'static str, why: &'static str) -> SolidError {
+    SolidError::blend(op, BlendFailure::Defect { why })
+}
+
+/// A defect ([`BlendFailure::Defect`]) of an object the kernel built and that is not
+/// there, with the status `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+#[track_caller]
+fn broken_link(op: &'static str, why: &'static str) -> SolidError {
+    Failure::new(op, BlendFailure::Defect { why })
         .with_status(SM_ERR_NULL_POINTER)
         .into_error()
 }
 
-/// A step that could not go on, with nothing finer to say (#15034 rule 2).
-#[track_caller]
-fn stage_failed(op: &'static str) -> SolidError {
-    SolidError::blend(op, BlendFailure::StageFailed)
-}
+// Why each step that fails here is the kernel's fault (`BlendFailure::Defect`).
+
+/// Why a solver has no surface generator ([`section_contact_order`]).
+const NO_SURFACE_GENERATOR: &str = "the fillet's solver has no surface generator, though the \
+     solver traced the fillet surface with it";
+/// Why a generator's contact order is not known ([`section_contact_order`]).
+const GENERATOR_WITHOUT_ORDER: &str = "the fillet's surface generator is neither linear nor \
+     circular, though a G^n section's order is taken by its own routine and the kernel builds \
+     no other generator";
+/// Why the tangent end is on no rail ([`gn_section_contact_order`]).
+const TANGENT_END_ON_NO_RAIL: &str = "the tangent end does not drop onto either rail of the \
+     G^n fillet within its tolerance, though the corner placed it at a rail's end";
+/// Why a contact order does not fit 32 bits ([`gn_section_contact_order`]).
+const ORDER_PAST_U32: &str = "the G^n section's contact order does not fit 32 bits, though it \
+     is its order of continuity plus one or two";
+/// Why an evaluation has no first derivatives (`first_derivs`).
+const NO_FIRST_DERIVATIVES: &str = "the surface's evaluation succeeded but returned no point or \
+     first derivative, which it returns for every order asked";
+/// Why an end of the rib is off the fillet surface.
+const END_OFF_FILLET: &str = "an end of the rib lies farther than the tolerance from the fillet \
+     surface, though the corner placed both ends at the ends of the fillet's rails, on that \
+     surface";
+/// Why an end of the rib is off the end surface.
+const END_OFF_END_SURFACE: &str = "an end of the rib lies farther than the tolerance from the \
+     end surface, though the corner placed both ends where the fillet's rails meet the end \
+     face";
+/// Why the rib's ends are not on the rails.
+const ENDS_NOT_ON_RAILS: &str = "the rib's ends do not lie on the fillet surface's two rails, \
+     its boundaries across a section parameter, though they are the rails' own ends";
+/// Why the rib's stop is off the fillet surface.
+const STOP_OFF_FILLET: &str = "the rib's stop lies farther than the tolerance from the fillet \
+     surface, though the kernel computed it on that surface (the rollover's seam end)";
+/// Why the rib's stop is off the end surface.
+const STOP_OFF_END_SURFACE: &str = "the rib's stop lies farther than the tolerance from the end \
+     surface, though it lies on the end face's seam line by construction";
+/// Why the rib's stop is not between the rails.
+const STOP_NOT_BETWEEN_RAILS: &str = "the rib's stop is not strictly between the rails on the \
+     other rail's side, though the kernel computed it where the rib crosses a tangent seam \
+     between the two rails";
+/// Why the rib's ends lie on one section.
+const ENDS_ON_ONE_SECTION: &str = "the rib's two ends lie on one section of the fillet surface, \
+     though at a tangent end the rib leaves along the rail (a ~ s^(k/2)), so its other end \
+     lies past that section";
+/// Why the section leaves the end surface's tangent plane.
+const SECTION_OFF_TANGENT_PLANE: &str = "the fillet surface's section leaves the end surface's \
+     tangent plane at the tangent end, though the corner marks an end tangent only where the \
+     fillet surface touches the end face";
+/// Why an interpolation has fewer than two control points.
+const INTERPOLATION_TOO_FEW_POINTS: &str = "the zero-speed interpolation has fewer than two \
+     control points, though it interpolates at least nine stations";
+/// Why a zero-speed interpolation's second control point leaves its end.
+const ZERO_SPEED_END_MOVED: &str = "the zero-speed interpolation's second control point is off \
+     its first, though its zero first derivative at the tangent end puts them together";
+/// Why the guesses' stations are not there.
+const GUESS_STATIONS_GONE: &str = "the last two solved stations are not there, though the \
+     loop solves each station after the two before it";
+/// Why the last station is not there.
+const LAST_STATION_GONE: &str = "the rib's last station is not there, though every station was \
+     just solved";
+/// Why the rib does not reach its other end.
+const RIB_MISSES_OTHER_END: &str = "the rib's exact point at its other end's section lies \
+     farther than the tolerance from that end, though the end lies on both surfaces at that \
+     section and seeds the solve there";
+/// Why a span's ends are not there.
+const SPAN_ENDS_GONE: &str = "a span's end stations are not there, though the spans are taken \
+     between consecutive stations of the list";
 
 #[cfg(test)]
 mod tests {
@@ -806,8 +936,8 @@ mod tests {
         BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
     };
 
-    /// A solver without a surface generator has no contact order: a stage failure, a
-    /// defect, that keeps the bare `Upstream`'s status (#13790, #15034).
+    /// A solver without a surface generator has no contact order: a defect with its
+    /// reason, that keeps the bare `Upstream`'s status (#13790, #15034).
     #[test]
     fn a_solver_without_surface_generator_has_no_contact_order() {
         let solver = FilletSolver::new(1e-5, 1e-3, 0.017);
@@ -815,7 +945,12 @@ mod tests {
         assert_eq!(e.operation(), OP_ORDER);
         assert_eq!(
             (e.blend_failure(), e.upstream_status()),
-            (Some(&BlendFailure::StageFailed), Some(SM_ERR_NULL_POINTER))
+            (
+                Some(&BlendFailure::Defect {
+                    why: NO_SURFACE_GENERATOR
+                }),
+                Some(SM_ERR_NULL_POINTER)
+            )
         );
     }
 
@@ -825,6 +960,11 @@ mod tests {
     /// `[0.38, 0.42]`, between the station t = 3/8 and its span's midpoint 7/16, zero at
     /// every station and midpoint of 8 spans.
     fn bumped_rib_surfaces(bump: f64) -> (Surface, Surface) {
+        bumped_rib_surfaces_at(bump, 0.38)
+    }
+
+    /// [`bumped_rib_surfaces`] with the bump on `[from, from + 0.04]`.
+    fn bumped_rib_surfaces_at(bump: f64, from: f64) -> (Surface, Surface) {
         let p = Point3::new;
         let fillet = BSplineSurface::create_bilinear_surface(
             p(-1.0, 0.0, 0.0),
@@ -833,7 +973,18 @@ mod tests {
             p(1.0, 1.0, 0.0),
         )
         .unwrap();
-        let knots = [0.0, 0.25, 0.38, 0.39, 0.4, 0.41, 0.42, 0.5, 0.75, 1.0];
+        let knots = [
+            0.0,
+            0.25,
+            from,
+            from + 0.01,
+            from + 0.02,
+            from + 0.03,
+            from + 0.04,
+            0.5,
+            0.75,
+            1.0,
+        ];
         let mult = [4, 1, 1, 1, 1, 1, 1, 1, 1, 4];
         let full: Vec<f64> = knots
             .iter()
@@ -992,6 +1143,81 @@ mod tests {
         assert_eq!(rib.bound, None);
         let worst = farthest_off(&k, &rib, &fillet, &end);
         assert!(worst <= tol, "{worst:e}");
+    }
+
+    /// A rib on a face the certificate does not enclose (the offset of the flat fillet) to
+    /// the end surface bumped on `[0.42, 0.46]`, over the midpoint 7/16 of 8 spans, asked
+    /// within 1e-9: the cubic through 1024 stations still
+    /// misses the bump's third-derivative jumps by more at a span's midpoint, so no station
+    /// count fits it. Not within the tolerance, with its stations and halvings, keeping
+    /// upstream's `SM_ERR`.
+    #[test]
+    fn a_rib_on_a_face_not_enclosed_that_no_station_count_fits_names_the_cap() {
+        let k = Kernel::default();
+        let (plane, end) = bumped_rib_surfaces_at(1e-3, 0.42);
+        let fillet = Surface::from(
+            crate::surface::offset_surface::OffsetSurface::new(
+                &k,
+                0.1,
+                plane,
+                true,
+                crate::surface::offset_surface::SS_UNKNOWN,
+            )
+            .unwrap(),
+        );
+        let c = fillet.evaluate_point(&k, Point2::new(0.5, 0.5)).unwrap().z;
+        let (p, q) = (Point3::new(-0.5, 0.0, c), Point3::new(0.5, 1.0, c));
+        let err = tangent_end_rib(&k, &fillet, &end, 2, p, q, None, false, 1e-9).unwrap_err();
+        assert!(
+            matches!(err.blend_failure(), Some(BlendFailure::RibFitCap { .. })),
+            "{err:?}"
+        );
+        assert_eq!(err.kind(), crate::error::ErrorKind::NotWithinTolerance);
+        assert!(!err.is_defect() && !err.is_refusal());
+        assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR));
+    }
+
+    /// A zero-speed rib (contact order 3) whose end surface is singular at the tangent end:
+    /// `E(u, v) = (u − 1/2, u, (2v − 1) u)` collapses its row u = 0 to the tangent end, so its
+    /// derivatives there span no plane. No zero-speed rib is built at a singular point: a
+    /// construction not built, named with the end surface's parameters there, keeping
+    /// upstream's `SM_ERR`.
+    #[test]
+    fn a_zero_speed_rib_at_a_singular_end_surface_is_not_built() {
+        let k = Kernel::default();
+        let p = Point3::new;
+        let (fillet, _) = bumped_rib_surfaces(0.0);
+        let end = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                p(-0.5, 0.0, 0.0),
+                p(0.5, 1.0, -1.0),
+                p(-0.5, 0.0, 0.0),
+                p(0.5, 1.0, 1.0),
+            )
+            .unwrap(),
+        );
+        let err = tangent_end_rib(
+            &k,
+            &fillet,
+            &end,
+            3,
+            p(-0.5, 0.0, 0.0),
+            p(0.5, 1.0, 0.0),
+            None,
+            false,
+            1e-6,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                err.blend_failure(),
+                Some(BlendFailure::TangentEndSingular { u, .. }) if *u == 0.0
+            ),
+            "{err:?}"
+        );
+        assert_eq!(err.kind(), crate::error::ErrorKind::Unsupported);
+        assert!(!err.is_defect() && !err.is_refusal());
+        assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR));
     }
 
     /// The same surfaces without the bump: the rib is the line `x = y − 1/2` on `z = 0`. It
