@@ -45,6 +45,9 @@ pub struct Gesture {
     /// The edge is part of the selection (one of its edges, or an edge of a selected face): the
     /// drag takes the whole selection rather than this edge alone.
     keep: bool,
+    /// The token of the Fillet or Chamfer window this drag opened (`Dialog::gesture`), once
+    /// started.
+    window: u64,
 }
 
 #[derive(Debug, Default)]
@@ -89,7 +92,7 @@ pub fn press(app: &mut SolveApp, proj: &Proj, at: Pos2) {
     let along = app.session.world_state().ok().and_then(|st| edge_on_screen(&st.body(&body)?.mesh(), index, proj, at));
     crate::drag_extrude::forget(app);
     let keep = in_selection(app, &body, index);
-    app.viewport.drag_fillet.gesture = Some(Gesture { press: at, sel, base: point, out, grab, along, push: false, started: false, keep });
+    app.viewport.drag_fillet.gesture = Some(Gesture { press: at, sel, base: point, out, grab, along, push: false, started: false, keep, window: 0 });
 }
 
 /// The screen direction of edge `index`'s segment nearest the press at `at`.
@@ -140,6 +143,11 @@ fn crossing(proj: &Proj, g: &Gesture, p: Pos2) -> Option<bool> {
 /// The pointer is at `p` with the button down.
 pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
     let Some(mut g) = app.viewport.drag_fillet.gesture.clone() else { return };
+    // The window it opened is gone (closed, or replaced by another one): the drag is over.
+    if g.started && !crate::drag_extrude::owns(app, g.window) {
+        app.viewport.drag_fillet.gesture = None;
+        return;
+    }
     if !g.started {
         if app.dialog.is_some() || crate::drag_extrude::started(app) {
             return;
@@ -155,6 +163,10 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
         }
         g.push = push;
         g.started = true;
+        g.window = crate::drag_extrude::token();
+        if let Some(d) = app.dialog.as_mut() {
+            d.gesture = Some(g.window);
+        }
     }
     let Some(v) = crate::canvas::along(proj, p, g.base, g.out) else {
         app.viewport.drag_fillet.gesture = Some(g);
@@ -178,10 +190,19 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
     }
 }
 
-/// The button is up: the release applies the fillet or chamfer as OK would.
-pub fn end(app: &mut SolveApp) {
-    let dragged = app.viewport.drag_fillet.gesture.take().is_some_and(|g| g.started);
-    if dragged && let Some(d) = app.dialog.as_mut().filter(|d| matches!(d.kind, Kind::Fillet { .. })) {
+/// The button is up: the release applies the fillet or chamfer as OK would. `release` is where
+/// the pointer was let go, when it is known: a drag already under way takes it first, so the
+/// last movement counts (a press let go in the same frame starts nothing).
+pub fn end(app: &mut SolveApp, release: Option<(&Proj, Pos2)>) {
+    if let Some((proj, p)) = release
+        && started(app)
+    {
+        to(app, proj, p);
+    }
+    let Some(g) = app.viewport.drag_fillet.gesture.take().filter(|g| g.started) else { return };
+    if crate::drag_extrude::owns(app, g.window)
+        && let Some(d) = app.dialog.as_mut().filter(|d| matches!(d.kind, Kind::Fillet { .. }))
+    {
         d.confirm = true;
     }
 }

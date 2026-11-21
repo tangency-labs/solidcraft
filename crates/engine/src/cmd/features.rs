@@ -224,7 +224,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         )),
     CommandSpec::new("solid.combine", "Combine", crate::checked!("solid.combine", combine)).begins_edit()
         .at("SOLID", "MODIFY")
-        .icon("boolean_union")
+        .icon("combine")
         .contract(&COMBINE_CONTRACT)
         .output(output_schema_for::<CombineResult>)
         .params(concat!(
