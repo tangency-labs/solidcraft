@@ -87,6 +87,7 @@ pub use file::open_steps::OpenSteps;
 pub use file::runs_plugin_importer;
 pub use file::use_import_cache_dir;
 pub(crate) use file::{GEOMETRY_MESSAGE, NAMES_MESSAGE, READER_MESSAGE, UP_MESSAGE, names_form, up_form, usable_path};
+pub use frame::member_section_view;
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
 pub use parts::part_length_label;
