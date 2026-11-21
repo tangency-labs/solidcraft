@@ -1226,6 +1226,7 @@ pub(super) fn run_export<H: PluginHost + 'static>(
         commands,
         groups: BTreeSet::new(),
         effect: Effect::Read,
+        design_tokens: false,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
