@@ -42,6 +42,10 @@
 //! - **Handle space.** `CurveCache::retag` (not upstream) copies a cache into
 //!   another handle space; the memo of `curve.curve_p5` (`make_curve_cache`) keeps one
 //!   handle-free cache per curve value and hands each caller such a copy.
+//! - **Continuity storage.** Handle-free continuity labels are shared across
+//!   clones and handle conversions. Tessellation appends through copy-on-write,
+//!   so writing one cache leaves the others unchanged. Empty lists have no shared
+//!   allocation.
 //! - **Memory managers.** `m_sBezMgr` / `m_sParentMgr` are `Vec`s; the NLib Bezier
 //!   blocks (`sSegmentBeziersMgr`, `sBezStack`, the working Bezier) are owned
 //!   [`Nurb`] values and a `Vec` used as the split stack (same push/pop order). The
@@ -91,6 +95,8 @@
 //! - **Not ported.** `GetTessellation`, `GetStart`, `GetEnd`, `GetDegree`,
 //!   `GetBrep`, `GetBSplineCurve`, `GetMemoryUsed`, `SetComputeAuxTreeData`, `Dump`
 //!   and `Draw` belong to other units or are debug output.
+
+use std::sync::Arc;
 
 use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p2::{at, Curve, CurveKind, FindCurveDistanceExtrema};
@@ -309,7 +315,7 @@ pub struct CurveCache<O> {
     /// `m_pTree`.
     tree: Option<Tree<O>>,
     /// `m_pContinuities`: continuity at every knot of the curve (full trees only).
-    continuities: Vec<ContinuityType>,
+    continuities: Option<Arc<Vec<ContinuityType>>>,
     /// `m_bTriedToCreateAnalytical`.
     tried_analytic: bool,
     /// `m_pAnalyticalCurve`.
@@ -356,7 +362,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
             curve_handle: None,
             interval,
             tree: None,
-            continuities: Vec::new(),
+            continuities: None,
             tried_analytic: false,
             analytic: None,
             spans: Vec::new(),
@@ -453,7 +459,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
     /// tessellations (`GetContinuitiesArray`).
     #[must_use]
     pub fn continuities(&self) -> &[ContinuityType] {
-        &self.continuities
+        self.continuities.as_deref().map_or(&[], Vec::as_slice)
     }
 
     /// The leaf spans in curve order (`m_sBezMgr`).
@@ -523,7 +529,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
 
     /// The continuity of the knot `index` (`(*m_pContinuities)[index]`).
     fn continuity(&self, index: usize) -> Result<ContinuityType> {
-        self.continuities
+        self.continuities()
             .get(index)
             .copied()
             .ok_or_else(|| invalid(OP_TESS, "continuity index out of range"))
@@ -652,7 +658,12 @@ impl<O: Copy + PartialEq> CurveCache<O> {
         // When not simplifying the decomposition-tree
         if self.opts.make_full_tree {
             let (_, conts) = self.curve.calculate_continuities(k, CONTINUITY_ANGLE)?;
-            self.continuities.extend(conts);
+            if !conts.is_empty() {
+                match &mut self.continuities {
+                    Some(current) => Arc::make_mut(current).extend(conts),
+                    None => self.continuities = Some(Arc::new(conts)),
+                }
+            }
         }
 
         // 1. build a Bezier span for each unique-knot span
@@ -1662,6 +1673,112 @@ mod tests {
         cur.knots_mut()
             .copy_from_slice(&[0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0]);
         Curve::from(BSplineCurve::from_nurb(cur, 3, false))
+    }
+
+    fn continuity_cache() -> CurveCache<u32> {
+        // Two straight segments meeting at a right angle: only C0 at the joint.
+        let curve = Nurb::new(
+            vec![
+                CPoint::new(0.0, 0.0, 0.0, NOW),
+                CPoint::new(1.0, 0.0, 0.0, NOW),
+                CPoint::new(1.0, 1.0, 0.0, NOW),
+            ],
+            1,
+            vec![0.0, 0.0, 0.5, 1.0, 1.0],
+        )
+        .unwrap();
+        let mut cache = CurveCache::new(
+            Curve::from(BSplineCurve::from_nurb(curve, 3, false)),
+            Extent1d::from_min_max(0.0, 1.0),
+            CurveCacheOptions {
+                make_full_tree: true,
+                compute_aux_tree_data: true,
+                chord_height_tolerance: 0.01,
+                angle_tol_deg: 10.0,
+                ..CurveCacheOptions::default()
+            },
+        );
+        cache.set_curve_handle(Some(7));
+        cache.tessellate(&Kernel::default()).unwrap();
+        assert_eq!(
+            cache.continuities(),
+            &[
+                ContinuityType::Discontinuous,
+                ContinuityType::C0,
+                ContinuityType::Discontinuous,
+            ]
+        );
+        cache
+    }
+
+    #[test]
+    fn retag_shares_continuities() {
+        let cache = continuity_cache();
+        let mapped = cache.retag(Some(19_u64)).unwrap();
+        assert_eq!(mapped.continuities(), cache.continuities());
+        assert_eq!(mapped.spans(), cache.spans());
+        assert_eq!(cache.tree().unwrap().owner_object().unwrap(), Some(7));
+        assert_eq!(mapped.tree().unwrap().owner_object().unwrap(), Some(19));
+        assert_eq!(
+            mapped.continuities().as_ptr(),
+            cache.continuities().as_ptr()
+        );
+        drop(cache);
+        assert_eq!(mapped.continuities()[1], ContinuityType::C0);
+    }
+
+    #[test]
+    fn clone_shares_continuities() {
+        let cache = continuity_cache();
+        let mut cloned = cache.clone();
+        assert_eq!(cloned.continuities(), cache.continuities());
+        assert_eq!(
+            cloned.continuities().as_ptr(),
+            cache.continuities().as_ptr()
+        );
+        cloned.set_curve_handle(Some(23));
+        assert_eq!(cache.tree().unwrap().owner_object().unwrap(), Some(7));
+    }
+
+    #[test]
+    fn tessellating_shared_continuities_keeps_other_caches_unchanged() {
+        let cache = continuity_cache();
+        let cloned = cache.clone();
+        let mut mapped = cache.retag(Some(19_u64)).unwrap();
+        let original = cache.continuities().to_vec();
+        let original_tree = cache.tree().unwrap().clone();
+        // Tessellate is documented as a once-after-construction operation. Keep
+        // its existing append behavior on a repeat, and detach before writing.
+        mapped.tessellate(&Kernel::default()).unwrap();
+        assert_eq!(mapped.continuities(), original.repeat(2));
+        assert_ne!(
+            mapped.continuities().as_ptr(),
+            cache.continuities().as_ptr()
+        );
+        assert_eq!(cache.continuities(), original);
+        assert_eq!(cloned.continuities(), original);
+        assert_eq!(cache.tree().unwrap(), &original_tree);
+        assert_eq!(cloned.tree().unwrap(), &original_tree);
+    }
+
+    #[test]
+    fn empty_and_simplified_continuities_stay_empty() {
+        let mut cache: CurveCache<u32> = CurveCache::new(
+            cubic(),
+            Extent1d::from_min_max(0.0, 1.0),
+            CurveCacheOptions {
+                chord_height_tolerance: 0.01,
+                ..CurveCacheOptions::default()
+            },
+        );
+        for built in [false, true] {
+            if built {
+                cache.tessellate(&Kernel::default()).unwrap();
+            }
+            assert!(cache.continuities().is_empty());
+            assert!(cache.clone().continuities().is_empty());
+            assert!(cache.retag(Some(19_u64)).unwrap().continuities().is_empty());
+        }
     }
 
     #[test]
