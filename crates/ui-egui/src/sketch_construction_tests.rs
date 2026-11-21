@@ -373,6 +373,12 @@ fn a_waiting_offset_box_leaves_letters_to_the_shortcuts_and_takes_a_digit() {
         h.step(&json!({"move":{"sketch":[5,10]}})).unwrap();
         h.settle();
         assert!(crate::scenario::rect_of("viewport:readout").is_some(), "{id}: the pointer's coordinates");
+        h.call("ui.prefs", json!({"sketch_cursor_coordinates": false}));
+        h.frames(2);
+        assert!(crate::scenario::rect_of("viewport:readout").is_none(), "{id}: hidden with the preference off");
+        h.call("ui.prefs", json!({"sketch_cursor_coordinates": true}));
+        h.frames(2);
+        assert!(crate::scenario::rect_of("viewport:readout").is_some(), "{id}: restored with the preference on");
         let tool = h.app.tool.as_ref().unwrap();
         assert_eq!(tool.dims.iter().map(|b| b.label).collect::<Vec<_>>(), vec!["Offset"], "{id}");
         assert!(!tool.dims[0].locked, "{id}");
@@ -383,6 +389,7 @@ fn a_waiting_offset_box_leaves_letters_to_the_shortcuts_and_takes_a_digit() {
 
         let mut h = sketch();
         steps(&mut h, id, &[]);
+        h.call("ui.prefs", json!({"sketch_cursor_coordinates": false}));
         h.step(&json!({"move":{"sketch":[5,10]}})).unwrap();
         h.settle();
         digit(&mut h, '2');
