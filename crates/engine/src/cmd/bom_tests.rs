@@ -1257,6 +1257,10 @@ fn a_static_material_is_what_every_list_says_until_it_is_cleared() {
     let mut back = Session::default();
     run(&mut back, "doc.open", json!({"path": path}));
     assert_eq!(bom(&mut back, json!({"levels": "all", "mass": true})), all);
+    // A part saved before finishes existed reads back as it did: its typed material, and no finish.
+    let rows = run(&mut back, "assembly.bom", json!({"levels": "all"}));
+    assert!(rows["rows"].as_array().unwrap().iter().all(|r| r["finish"] == ""), "{rows}");
+    assert_eq!(back.doc.metadata.text("material"), None, "and the design holds none");
     // Cleared, by empty text or null: the worked-out materials again.
     run(&mut s, "component.metadata.set", json!({"component": "Block", "material": ""}));
     run(&mut s, "component.metadata.set", json!({"component": "Frame", "material": null}));
