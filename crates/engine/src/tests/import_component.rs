@@ -157,6 +157,57 @@ fn a_step_part_comes_in_as_one_component_named_after_the_file() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Body folders go out as STEP layers and come back as folders: a body in a nested folder is on
+/// the layer its path names (`Frame/Rails`), and inserting the file puts each body into that
+/// folder of the import's component, nested as it was; a body in no folder is on no layer and
+/// stays loose.
+#[test]
+fn body_folders_go_out_as_step_layers_and_come_back_as_folders() {
+    let dir = temp_dir("layers");
+    let mut s = Session::default();
+    for corner in [[0, 0, 0], [20, 0, 0], [40, 0, 0]] {
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": corner}));
+    }
+    let names = body_names(&s);
+    let [a, b, c] = [names[0].clone(), names[1].clone(), names[2].clone()];
+    let frame = run(&mut s, "browser.group", json!({"folder": "bodies", "name": "Frame", "items": [a]}))["group"].clone();
+    run(&mut s, "browser.group", json!({"folder": "bodies", "name": "Rails", "parent": frame, "items": [b]}));
+    let path = dir.join("layers.step").to_string_lossy().to_string();
+    run(&mut s, "file.export", json!({"path": path}));
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(text.matches("PRESENTATION_LAYER_ASSIGNMENT('Frame',").count(), 1, "{text}");
+    assert_eq!(text.matches("PRESENTATION_LAYER_ASSIGNMENT('Frame/Rails',").count(), 1, "{text}");
+    assert_eq!(text.matches("PRESENTATION_LAYER_ASSIGNMENT(").count(), 2, "{c} is on no layer: {text}");
+
+    let mut n = Session::default();
+    let r = run(&mut n, "file.insert_step", json!({"path": path}));
+    let component = r["component"].as_u64().unwrap();
+    let groups: Vec<_> = n.doc.browser_groups.iter().filter(|g| g.component == component && g.folder == "bodies").collect();
+    assert_eq!(groups.len(), 2, "{groups:?}");
+    let top = groups.iter().find(|g| g.name == "Frame").unwrap();
+    let rails = groups.iter().find(|g| g.name == "Rails").unwrap();
+    assert_eq!((top.parent, rails.parent), (None, Some(top.id)), "{groups:?}");
+    // Imported bodies are named after the file: each group holds the body at the place of the one
+    // that was in its folder.
+    let state = n.model.state();
+    let left_x = |g: &solidcraft_doc::BrowserGroup| -> Vec<i64> {
+        g.item_keys()
+            .map(|k| state.bodies.iter().find(|b| b.name == k).unwrap())
+            .map(|b| solidcraft_kernel::measure(&b.body).unwrap().bbox.min.x.round() as i64)
+            .collect()
+    };
+    assert_eq!((left_x(top), left_x(rails)), (vec![0], vec![20]), "{groups:?}");
+    let foldered: Vec<&str> = groups.iter().flat_map(|g| g.item_keys()).collect();
+    assert_eq!(state.bodies.iter().filter(|b| !foldered.contains(&b.name.as_str())).count(), 1, "the third body stays loose");
+    // Exported again, the folders are the same layers.
+    let again = dir.join("again.step").to_string_lossy().to_string();
+    run(&mut n, "file.export", json!({"path": again}));
+    let text = std::fs::read_to_string(&again).unwrap();
+    assert_eq!(text.matches("PRESENTATION_LAYER_ASSIGNMENT(").count(), 2, "{text}");
+    assert!(text.contains("PRESENTATION_LAYER_ASSIGNMENT('Frame/Rails',"), "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_step_assembly_comes_in_as_nested_components_with_its_instances() {
     let dir = temp_dir("assembly");
