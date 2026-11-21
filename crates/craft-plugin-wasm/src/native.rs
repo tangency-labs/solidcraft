@@ -66,6 +66,11 @@ fn wit_error(error: HostError) -> PluginError {
         HostError::LimitExceeded { limit } => PluginError::LimitExceeded(limit),
         HostError::InvalidManifest { field, reason } => PluginError::InvalidManifest(types::FieldFailure { field, reason }),
         HostError::InvalidInput { field, reason } => PluginError::InvalidInput(types::FieldFailure { field, reason }),
+        // Commit conflicts normally return directly to the caller after guest execution. Keep
+        // the frozen WIT error set when a host also reports one during a guest import.
+        error @ HostError::UserStorageConflict { .. } => {
+            PluginError::CommandFailed(types::CommandFailure { command: "user-storage.commit".into(), reason: error.to_string() })
+        }
         HostError::Trap { reason } => PluginError::Trap(reason),
         HostError::Cancelled => PluginError::Cancelled,
         HostError::UnsupportedCapability { reason, .. } => PluginError::InvalidManifest(types::FieldFailure { field: "capabilities".into(), reason }),
@@ -101,6 +106,7 @@ struct State<H> {
     /// Sensitive command groups both the manifest requests and the app grants.
     groups: BTreeSet<String>,
     effect: Effect,
+    user_storage: bool,
     design_tokens: bool,
     folders: BTreeMap<String, Folder>,
     staged: BTreeMap<(String, PathBuf), PendingWrite>,
@@ -210,6 +216,56 @@ impl<H: PluginHost> commands::Host for State<H> {
             return Err(self.fail(limit("command result size")));
         }
         Ok(text)
+    }
+}
+impl<H: PluginHost> State<H> {
+    fn user_storage_check(&mut self, key: Option<&str>, write: Option<&str>) -> std::result::Result<(), PluginError> {
+        self.check()?;
+        if !self.user_storage {
+            return Err(self.fail(HostError::PermissionDenied { permission: "user-storage@0.1 is not requested".into() }));
+        }
+        if let Some(import) = write.filter(|_| self.effect == Effect::Read) {
+            return Err(self.fail(craft_plugin::read_entry_refusal(import)));
+        }
+        if let Some(key) = key {
+            craft_plugin::check_user_storage_key(key).map_err(|e| self.fail(e))?;
+        }
+        Ok(())
+    }
+}
+impl<H: PluginHost> user_storage::Host for State<H> {
+    fn get(&mut self, key: String) -> std::result::Result<Option<String>, PluginError> {
+        self.user_storage_check(Some(&key), None)?;
+        let value = self.host.user_storage_get(&key).map_err(|e| self.fail(e))?;
+        let json = value.map(|v| serde_json::to_string(&v)).transpose().map_err(|e| self.fail(trap(e.to_string())))?;
+        if json.as_ref().is_some_and(|v| v.len() > craft_plugin::MAX_USER_STORAGE_BYTES) {
+            return Err(self.fail(limit("user-storage total bytes (65536)")));
+        }
+        Ok(json)
+    }
+    fn set(&mut self, key: String, value: String) -> std::result::Result<(), PluginError> {
+        self.user_storage_check(Some(&key), Some("user-storage.set"))?;
+        if value.len() > MAX_JSON_BYTES {
+            return Err(self.fail(limit("user-storage JSON input bytes (1048576)")));
+        }
+        let value = serde_json::from_str(&value)
+            .map_err(|e| self.fail(HostError::InvalidInput { field: "user-storage.value".into(), reason: e.to_string() }))?;
+        self.host.user_storage_set(&key, &value).map_err(|e| self.fail(e))
+    }
+    fn remove(&mut self, key: String) -> std::result::Result<bool, PluginError> {
+        self.user_storage_check(Some(&key), Some("user-storage.remove"))?;
+        self.host.user_storage_remove(&key).map_err(|e| self.fail(e))
+    }
+    fn list(&mut self) -> std::result::Result<Vec<String>, PluginError> {
+        self.user_storage_check(None, None)?;
+        let keys = self.host.user_storage_list().map_err(|e| self.fail(e))?;
+        if keys.len() > craft_plugin::MAX_USER_STORAGE_KEYS {
+            return Err(self.fail(limit("user-storage keys (128)")));
+        }
+        for key in &keys {
+            craft_plugin::check_user_storage_key(key).map_err(|e| self.fail(e))?;
+        }
+        Ok(keys)
     }
 }
 impl<H: PluginHost> design_state::Host for State<H> {
@@ -721,7 +777,8 @@ pub(super) fn run<H: PluginHost + 'static>(
             return Err(HostError::Cancelled);
         }
         host.begin_transaction()?;
-        Ok((runtime, entry, params, (engine, component, stack), (commands, groups, design_tokens), folders))
+        let user_storage = manifest.capabilities.iter().any(|c| c.starts_with("user-storage@"));
+        Ok((runtime, entry, params, (engine, component, stack), (commands, groups, design_tokens, user_storage), folders))
     })();
     let (runtime, entry, params, compiled, commands, folders) = match prepared {
         Ok(prepared) => prepared,
@@ -751,7 +808,7 @@ fn execute<H: PluginHost + 'static>(
     entry: &craft_plugin::Entry,
     params: String,
     (engine, component, stack): (Engine, Component, usize),
-    (commands, groups, design_tokens): (BTreeMap<String, CommandSchema>, BTreeSet<String>, bool),
+    (commands, groups, design_tokens, user_storage): (BTreeMap<String, CommandSchema>, BTreeSet<String>, bool, bool),
     folders: BTreeMap<String, Folder>,
 ) -> (State<H>, Result<Value>) {
     let limits = &runtime.limits;
@@ -760,6 +817,7 @@ fn execute<H: PluginHost + 'static>(
         commands,
         groups,
         effect: entry.effect,
+        user_storage,
         design_tokens,
         folders,
         staged: BTreeMap::new(),
@@ -1104,6 +1162,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
         effect: Effect::Open,
+        user_storage: false,
         design_tokens: false,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),

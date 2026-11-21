@@ -2,7 +2,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use schemars::JsonSchema;
@@ -70,7 +70,7 @@ pub use input::{check_input, prepare_input, strict_input_schema};
 
 /// The host imports that change something outside the design. A `read` entry is refused every
 /// one of them, whatever folders its plugin was granted, as it is refused edit commands.
-pub const WRITING_IMPORTS: &[&str] = &["write-file"];
+pub const WRITING_IMPORTS: &[&str] = &["user-storage.remove", "user-storage.set", "write-file"];
 
 /// The refusal of a writing host import to a `read` entry: it names the import.
 pub fn read_entry_refusal(import: &str) -> HostError {
@@ -78,6 +78,32 @@ pub fn read_entry_refusal(import: &str) -> HostError {
 }
 /// How [`read_entry_refusal`]'s permission starts; the import's name follows it.
 pub const READ_ENTRY_IMPORT: &str = "read entry may not use the host import ";
+
+/// Per-plugin settings budgets: the entire compact JSON object, including keys and punctuation.
+pub const MAX_USER_STORAGE_BYTES: usize = 64 * 1024;
+pub const MAX_USER_STORAGE_KEYS: usize = 128;
+pub const MAX_USER_STORAGE_KEY_BYTES: usize = 128;
+
+pub fn check_user_storage_key(key: &str) -> Result<()> {
+    if key.is_empty() || key.len() > MAX_USER_STORAGE_KEY_BYTES || key.chars().any(char::is_control) {
+        return Err(HostError::InvalidInput { field: "user-storage.key".into(), reason: "requires 1..128 bytes without control characters".into() });
+    }
+    Ok(())
+}
+
+pub fn check_user_storage(data: &BTreeMap<String, Value>) -> Result<()> {
+    if data.len() > MAX_USER_STORAGE_KEYS {
+        return Err(HostError::LimitExceeded { limit: "user-storage keys (128)".into() });
+    }
+    for key in data.keys() {
+        check_user_storage_key(key)?;
+    }
+    let bytes = serde_json::to_vec(data).map_err(|e| HostError::InvalidInput { field: "user-storage".into(), reason: e.to_string() })?;
+    if bytes.len() > MAX_USER_STORAGE_BYTES {
+        return Err(HostError::LimitExceeded { limit: "user-storage total bytes (65536)".into() });
+    }
+    Ok(())
+}
 
 /// Failures are actionable data at the app boundary, including failures before instantiation.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema, thiserror::Error)]
@@ -96,6 +122,10 @@ pub enum HostError {
     InvalidManifest { field: String, reason: String },
     #[error("invalid input {field}: {reason}")]
     InvalidInput { field: String, reason: String },
+    /// Another run changed this plugin's user settings or is committing them. Retry the run
+    /// from freshly loaded settings; the refused transaction published nothing.
+    #[error("user settings for {plugin} changed or are being written; retry the plugin run")]
+    UserStorageConflict { plugin: String },
     #[error("plugin trap: {reason}")]
     Trap { reason: String },
     #[error("plugin cancelled")]
@@ -145,7 +175,7 @@ fn exhausted(limit: &str, allowed: u64) -> String {
 /// a plugin names in its manifest's `capabilities` list. While a major version is 0, a minor
 /// version may break the one before it, so 0.x matches only the same minor.
 pub const CAPABILITIES: &[(&str, (u32, u32))] =
-    &[("commands", (0, 2)), ("design", (0, 1)), ("evaluate", (0, 2)), ("formats", (0, 2)), ("storage", (0, 1))];
+    &[("commands", (0, 2)), ("design", (0, 1)), ("evaluate", (0, 2)), ("formats", (0, 2)), ("storage", (0, 1)), ("user-storage", (0, 1))];
 /// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
 /// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
 pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
@@ -250,6 +280,19 @@ pub struct FileGrant {
 /// removes staged files without replacing their targets. Publication errors after app
 /// commit can leave a subset of files applied and must be reported to the caller.
 pub trait PluginHost {
+    /// Only the host-authenticated plugin's per-user JSON settings. Optional for existing hosts.
+    fn user_storage_get(&mut self, _key: &str) -> Result<Option<Value>> {
+        Err(HostError::PermissionDenied { permission: "user-storage is unavailable".into() })
+    }
+    fn user_storage_set(&mut self, _key: &str, _value: &Value) -> Result<()> {
+        Err(HostError::PermissionDenied { permission: "user-storage is unavailable".into() })
+    }
+    fn user_storage_remove(&mut self, _key: &str) -> Result<bool> {
+        Err(HostError::PermissionDenied { permission: "user-storage is unavailable".into() })
+    }
+    fn user_storage_list(&mut self) -> Result<Vec<String>> {
+        Err(HostError::PermissionDenied { permission: "user-storage is unavailable".into() })
+    }
     /// The active document's identity and committed revision (`design@0.1`), or none when closed.
     /// Existing hosts need not implement this additive read-only capability.
     fn design_token(&self) -> Result<Option<DesignToken>> {
@@ -757,6 +800,12 @@ fn plain(value: &str, max: usize) -> bool {
 /// A plugin that keeps data in designs asks for `storage@0.1` and says its data's format number;
 /// only a command plugin does: an importer makes a new design and keeps nothing in the open one.
 fn check_storage(manifest: &Manifest) -> Result<()> {
+    if manifest.capabilities.iter().any(|capability| capability.starts_with("user-storage@"))
+        && manifest.runtime.as_ref().is_none_or(RuntimeManifest::is_importer)
+    {
+        return Err(invalid("capabilities", "user-storage requires a command plugin runtime"));
+    }
+
     let storage = manifest.capabilities.iter().any(|capability| capability.starts_with("storage@"));
     let runtime = manifest.runtime.as_ref();
     let format = runtime.and_then(|runtime| runtime.data_format);

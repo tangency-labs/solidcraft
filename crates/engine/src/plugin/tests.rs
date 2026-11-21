@@ -116,6 +116,7 @@ fn an_importer_checks_its_own_design_apart_from_the_open_one() {
         file_folders: Vec::new(),
         file_read_folders: Vec::new(),
         evaluation: None,
+        user_data: None,
     };
     let mut made = Session::new(solidcraft_doc::Document::new("Bracket"));
     made.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
@@ -146,6 +147,7 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
         file_folders: Vec::new(),
         file_read_folders: Vec::new(),
         evaluation: None,
+        user_data: None,
     };
     let catalog = host.command_catalog();
     let built = crate::command_specs().into_iter().filter(|c| c.planned.is_none()).count();
@@ -233,6 +235,7 @@ fn read_only_folder_allows_step_insert_but_refuses_file_writes() {
         file_folders: Vec::new(),
         file_read_folders: vec![read.clone()],
         evaluation: None,
+        user_data: None,
     };
     host.begin_transaction().unwrap();
     let inserted = host.run_command("file.insert_step", &json!({"path":source_path}));
@@ -263,6 +266,7 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
         file_folders: Vec::new(),
         file_read_folders: Vec::new(),
         evaluation: None,
+        user_data: None,
     };
     host.begin_transaction().unwrap();
     s_box(&mut host);
@@ -294,6 +298,7 @@ fn nested_plugin_edits_save_their_current_token_without_retagging_at_acceptance(
         file_folders: vec![folder.0.clone()],
         file_read_folders: Vec::new(),
         evaluation: None,
+        user_data: None,
     };
     let before = host.session.design_token();
     let mut accepted = Session::default();
@@ -333,6 +338,7 @@ fn a_command_in_another_spelling_is_never_granted() {
         file_folders: Vec::new(),
         file_read_folders: Vec::new(),
         evaluation: None,
+        user_data: None,
     };
     host.begin_transaction().unwrap();
     for id in ["file.save_as", "file.export_step", "doc.open", "plugin.run", "plugin.list", "settings.get", "diagnostics.crash_reports", "solid.box"]
@@ -546,20 +552,72 @@ mod native {
     #[test]
     fn a_plugin_prepared_under_an_old_host_policy_is_not_adopted() {
         for command in ["plugin.run", "PLUGIN.RUN"] {
-            let f = Fixture::new("call $box");
-            let mut s = Session::default();
-            let i = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
-            let params = json!({"path":f.path(),"approval":i["approval"],"entry":"make"});
-            let prepared = s.scratch().compute_commands(&[(command.into(), params)], None).unwrap();
-            assert!(prepared.is_current(&s));
-            s.plugin_limits.max_memory_mib = 512;
-            assert!(!prepared.is_current(&s));
-            let before = s.doc.to_json();
-            assert!(s.accept_commands(prepared).is_err());
-            assert_eq!(s.doc.to_json(), before);
-            assert!(s.undo.is_empty());
+            for change in [
+                |s: &mut Session| s.plugin_limits.max_memory_mib = 512,
+                |s: &mut Session| s.plugin_state.user_settings_dir = Some(PathBuf::from("other-settings")),
+                |s: &mut Session| s.plugin_state.user_storage_caller = Some("other-plugin".into()),
+            ] {
+                let f = Fixture::new("call $box");
+                let mut s = Session::default();
+                let i = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
+                let params = json!({"path":f.path(),"approval":i["approval"],"entry":"make"});
+                let prepared = s.scratch().compute_commands(&[(command.into(), params)], None).unwrap();
+                assert!(prepared.is_current(&s));
+                change(&mut s);
+                assert!(!prepared.is_current(&s));
+                let before = s.doc.to_json();
+                assert!(s.accept_commands(prepared).is_err());
+                assert_eq!(s.doc.to_json(), before);
+                assert!(s.undo.is_empty());
+            }
         }
     }
+    #[test]
+    fn user_storage_component_runs_keep_settings_between_designs_without_undo_and_rollback_failures() {
+        let f = Fixture::new("");
+        let settings = f.0.join("settings");
+        let mut m = manifest();
+        m["capabilities"] = json!(["commands@0.2", "user-storage@0.1.0"]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let fixture = include_str!("../../../craft-plugin-wasm/src/user_storage_fixture.wat");
+        let write = "i32.const 512 i32.const 5 i32.const 2048 i32.const 2 i32.const 128 call $set";
+        let put_component = |code: &str| {
+            std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(fixture.replace("__CODE__", code)).unwrap()).unwrap();
+        };
+        let mut first = Session::new(solidcraft_doc::Document::new("First design"));
+        first.plugin_state.user_settings_dir = Some(settings.clone());
+        let before = first.doc.clone();
+        put_component(write);
+        f.run(&mut first).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&before, &first.doc) && first.undo.is_empty());
+        assert!(first.doc.plugin_data.is_empty());
+        drop(first);
+        let mut second = Session::new(solidcraft_doc::Document::new("Another design"));
+        second.plugin_state.user_settings_dir = Some(settings.clone());
+        put_component("i32.const 512 i32.const 5 i32.const 128 call $get i32.const 132 i32.load i32.const 1 i32.ne if unreachable end");
+        f.run(&mut second).unwrap();
+        assert_eq!(user_storage::load(&settings, "sample").unwrap()["hinge"], json!(42));
+        put_component("i32.const 512 i32.const 5 i32.const 128 call $remove unreachable");
+        assert!(f.run(&mut second).is_err());
+        assert_eq!(user_storage::load(&settings, "sample").unwrap()["hinge"], json!(42));
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{"type":"object"}}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        put_component(write);
+        assert!(matches!(f.run(&mut second).unwrap_err().host_error(), Some(HostError::PermissionDenied { .. })));
+        assert!(second.undo.is_empty() && second.doc.plugin_data.is_empty());
+        assert_eq!(user_storage::load(&settings, "sample").unwrap()["hinge"], json!(42));
+        // A second plugin with the identical guest component cannot read the first one's key.
+        let other = f.0.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        m["id"] = json!("other");
+        std::fs::write(other.join("plugin.json"), m.to_string()).unwrap();
+        let missing = "i32.const 512 i32.const 5 i32.const 128 call $get i32.const 132 i32.load if unreachable end";
+        std::fs::write(other.join("plugin.wasm"), wat::parse_str(fixture.replace("__CODE__", missing)).unwrap()).unwrap();
+        let inspected = second.execute("plugin.inspect", &json!({"path":other})).unwrap();
+        second.execute("plugin.run", &json!({"path":other,"approval":inspected["approval"],"entry":"make"})).unwrap();
+        assert!(user_storage::load(&settings, "other").unwrap().is_empty());
+    }
+
     #[test]
     fn component_edits_are_one_undo_step_and_reopen_without_the_plugin() {
         let f = Fixture::new("call $box call $box");
@@ -934,6 +992,7 @@ mod native {
             file_folders: Vec::new(),
             file_read_folders: Vec::new(),
             evaluation: None,
+            user_data: None,
         };
         assert_eq!(catalog_command("pointcloud.deviation").unwrap().effect, Effect::Read);
         host.begin_transaction().unwrap();
@@ -1102,6 +1161,7 @@ mod native {
                     file_folders: Vec::new(),
                     file_read_folders: Vec::new(),
                     evaluation: None,
+                    user_data: None,
                 };
                 solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([f.0.clone()])), || {
                     assert!(host.authorize_file_path(&target, write).is_ok(), "explicit scope grants hidden access");
@@ -1276,7 +1336,7 @@ mod native {
         .unwrap();
         assert_eq!(s.plugin_state.grants["sample"].folders[0].folder, f.0);
         assert!(s.execute("plugin.run", &params).is_ok());
-        s.execute("plugin.remove", &json!({"id":"sample"})).unwrap();
+        s.execute("plugin.remove", &json!({"id":"sample","remove_user_data":false})).unwrap();
         assert!(!s.plugin_state.grants.contains_key("sample"));
         assert!(s.execute("plugin.run", &params).is_err());
     }
@@ -1496,7 +1556,7 @@ mod native {
         assert_eq!(s.execute("plugin.tools", &json!({})).unwrap()["tools"], json!([]));
         s.disabled_plugins.clear();
         assert_eq!(s.execute("plugin.tools", &json!({})).unwrap()["tools"].as_array().unwrap().len(), 1);
-        s.execute("plugin.remove", &json!({"id":"sample"})).unwrap();
+        s.execute("plugin.remove", &json!({"id":"sample","remove_user_data":false})).unwrap();
         assert_eq!(s.execute("plugin.tools", &json!({})).unwrap()["tools"], json!([]));
     }
 
@@ -1646,6 +1706,7 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         file_folders: Vec::new(),
         file_read_folders: Vec::new(),
         evaluation: None,
+        user_data: None,
     };
     let catalog = host.command_catalog();
     for command in ["sketch.edit", "sketch.finish", "sketch.cancel", "solid.box", "sketch.export_dxf"] {
@@ -1680,6 +1741,7 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         file_folders: Vec::new(),
         file_read_folders: Vec::new(),
         evaluation: None,
+        user_data: None,
     };
     solidcraft_io::vfs::scoped(None, || {
         for write in [false, true] {
@@ -1999,10 +2061,10 @@ mod importers {
         // deleted, so nothing is removed and the error says why.
         let mut s = stored_session(&plugins);
         let scope = solidcraft_io::vfs::PathScope::new([plugins.join("smp")]);
-        let refused = solidcraft_io::vfs::scoped(Some(scope), || s.execute("plugin.remove", &json!({"id": "smp"})));
+        let refused = solidcraft_io::vfs::scoped(Some(scope), || s.execute("plugin.remove", &json!({"id": "smp","remove_user_data":false})));
         assert!(refused.unwrap_err().to_string().contains("approvals"));
         assert!(record.is_file() && plugins.join("smp/plugin.json").is_file());
-        s.execute("plugin.remove", &json!({"id": "smp"})).unwrap();
+        s.execute("plugin.remove", &json!({"id": "smp","remove_user_data":false})).unwrap();
         assert!(!record.exists() && !plugins.join("smp").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -2028,6 +2090,53 @@ mod install_zip {
         m["version"] = json!(version);
         zip(&[("gears-0.1.0/plugin.json", &serde_json::to_vec(&m).unwrap()[..]), ("gears-0.1.0/plugin.wasm", b"\0asm"), ("__MACOSX/._x", b"")])
     }
+    #[test]
+    fn uninstall_keeps_user_data_unless_explicitly_removed() {
+        let (mut s, root) = session("user-data-removal");
+        s.plugin_state.user_settings_dir = Some(root.join("settings"));
+        let settings = s.plugin_state.user_settings_dir.clone().unwrap();
+        user_storage::save(&settings, "sample", &BTreeMap::from([("hinge".into(), json!(42))])).unwrap();
+        user_storage::save(&settings, "other", &BTreeMap::from([("keep".into(), json!(true))])).unwrap();
+        for params in [json!({"id":"sample"}), json!({"id":"sample", "remove_user_data":false}), json!({"id":"sample", "remove_user_data":true})] {
+            std::fs::create_dir_all(root.join("plugins/sample")).unwrap();
+            assert_eq!(s.execute("plugin.remove", &params).unwrap()["removed"], true);
+            assert!(!root.join("plugins/sample").exists());
+            assert_eq!(user_storage::load(&settings, "sample").unwrap().is_empty(), params["remove_user_data"] == true);
+            assert_eq!(user_storage::load(&settings, "other").unwrap()["keep"], true);
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn uninstall_refuses_user_data_outside_the_callers_scope_before_removing_anything() {
+        let (mut s, root) = session("user-data-removal-scope");
+        let plugins = root.join("plugins");
+        let settings = root.join("settings");
+        s.plugin_state.user_settings_dir = Some(settings.clone());
+        std::fs::create_dir_all(plugins.join("sample")).unwrap();
+        let saved = BTreeMap::from([("hinge".into(), json!(42))]);
+        user_storage::save(&settings, "sample", &saved).unwrap();
+        // This helper's sessions keep grants in memory unless store synchronisation is enabled.
+        s.plugin_state.stored = Some(Default::default());
+        s.plugin_state.grants.insert("sample".into(), Grants::default());
+        s.plugin_state.persist_stored().unwrap();
+        let record = plugins.join(".grants/sample.json");
+        let approval = std::fs::read(&record).unwrap();
+        let scope = solidcraft_io::vfs::PathScope::new([plugins.join("sample"), plugins.join(".grants")]);
+        solidcraft_io::vfs::scoped(Some(scope), || {
+            let error = s.execute("plugin.remove", &json!({"id":"sample", "remove_user_data":true})).unwrap_err();
+            assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { .. })), "{error}");
+            assert!(plugins.join("sample").is_dir());
+            assert_eq!(std::fs::read(&record).unwrap(), approval);
+            assert!(s.plugin_state.grants.contains_key("sample"));
+            // The same caller can remove the package and its grants while retaining settings.
+            assert_eq!(s.execute("plugin.remove", &json!({"id":"sample"})).unwrap()["removed"], true);
+        });
+        assert!(!record.exists() && !plugins.join("sample").exists());
+        assert_eq!(user_storage::load(&settings, "sample").unwrap(), saved);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     /// A session whose plugins folder is a fresh temporary one, and the folder of the zip files.
     fn session(name: &str) -> (Session, std::path::PathBuf) {
         let root = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-install-{}-{name}", std::process::id()));
@@ -2202,9 +2311,9 @@ mod install_zip {
         // A refused replacement cannot discard the original grants or package.
         assert!(s.execute("plugin.install", &json!({"path":path})).is_err());
         assert_eq!(s.plugin_state.grants["sample"], granted);
-        assert!(s.execute("plugin.remove", &json!({"id":"../outside"})).is_err());
+        assert!(s.execute("plugin.remove", &json!({"id":"../outside","remove_user_data":false})).is_err());
         s.disabled_plugins.insert("sample".into());
-        let removed = s.execute("plugin.remove", &json!({"id":"sample"})).unwrap();
+        let removed = s.execute("plugin.remove", &json!({"id":"sample","remove_user_data":false})).unwrap();
         assert_eq!(removed["removed"], true);
         assert!(!root.join("plugins/sample").exists());
         assert!(
@@ -2297,7 +2406,7 @@ mod install_zip {
         let hidden = root.join("plugins/sample/.private");
         std::fs::write(&hidden, "private").unwrap();
         solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::default().with_design_folder(&root)), || {
-            assert!(s.execute("plugin.remove", &json!({"id":"sample"})).is_err());
+            assert!(s.execute("plugin.remove", &json!({"id":"sample","remove_user_data":false})).is_err());
         });
         // Replacement must not erase hidden descendants that this caller cannot remove.
         let prior_grants = s.plugin_state.grants["sample"].clone();
@@ -2307,7 +2416,7 @@ mod install_zip {
         assert_eq!(s.plugin_state.grants["sample"], prior_grants);
         assert!(hidden.exists() && s.plugin_state.grants.contains_key("sample"));
         solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([root.join("plugins")])), || {
-            s.execute("plugin.remove", &json!({"id":"sample"})).unwrap();
+            s.execute("plugin.remove", &json!({"id":"sample","remove_user_data":false})).unwrap();
         });
         let hidden_zip = put(
             &root,
@@ -2368,6 +2477,163 @@ mod install_zip {
         assert!(!root.join("plugins").exists() && !root.join("evil").exists());
         let _ = std::fs::remove_dir_all(root);
     }
+}
+
+fn user_storage_host(root: &Path, id: &str) -> SolidCraftHost {
+    let mut session = Session::new(solidcraft_doc::Document::new("A different design"));
+    session.plugin_state.user_settings_dir = Some(root.to_path_buf());
+    session.plugin_state.user_storage_caller = Some(id.into());
+    SolidCraftHost {
+        session,
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
+        evaluation: None,
+        user_data: None,
+    }
+}
+
+#[test]
+fn user_storage_persists_across_sessions_and_designs_and_is_private_and_undo_free() {
+    let root = std::env::temp_dir().join(format!("solidcraft-user-storage-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let mut host = user_storage_host(&root, "gears");
+    let original = host.session.doc.clone();
+    let token = host.session.design_token();
+    host.begin_transaction().unwrap();
+    host.user_storage_set("hinge", &json!({"type":"concealed"})).unwrap();
+    assert_eq!(host.user_storage_get("hinge").unwrap(), Some(json!({"type":"concealed"})));
+    host.commit_transaction().unwrap();
+    assert!(std::sync::Arc::ptr_eq(&original, &host.session.doc));
+    assert_eq!(host.session.design_token(), token, "per-user settings do not revise the design");
+    assert!(host.session.undo.is_empty() && host.session.doc.plugin_data.is_empty());
+    let mut reopened = user_storage_host(&root, "gears");
+    reopened.begin_transaction().unwrap();
+    assert_eq!(reopened.user_storage_list().unwrap(), vec!["hinge"]);
+    assert_eq!(reopened.user_storage_get("hinge").unwrap(), Some(json!({"type":"concealed"})));
+    reopened.user_storage_set("hinge", &json!("discarded")).unwrap();
+    reopened.rollback_transaction().unwrap();
+    let mut other = user_storage_host(&root, "other");
+    other.begin_transaction().unwrap();
+    assert_eq!(other.user_storage_get("hinge").unwrap(), None);
+    other.user_storage_set("hinge", &json!(17)).unwrap();
+    other.commit_transaction().unwrap();
+    reopened.begin_transaction().unwrap();
+    assert_eq!(reopened.user_storage_get("hinge").unwrap(), Some(json!({"type":"concealed"})));
+    assert!(reopened.user_storage_remove("hinge").unwrap());
+    assert!(!reopened.user_storage_remove("hinge").unwrap());
+    reopened.commit_transaction().unwrap();
+    assert_eq!(user_storage::load(&root, "other").unwrap()["hinge"], json!(17));
+    host.session.plugin_state.user_storage_caller = None;
+    host.begin_transaction().unwrap();
+    assert!(matches!(host.user_storage_list(), Err(HostError::PermissionDenied { .. })));
+    assert!(user_storage::load(&root, "../other").is_err());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn user_storage_stale_commits_conflict_without_losing_keys_and_can_be_retried() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-user-storage-conflict-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    for initial in [None, Some(BTreeMap::from([("existing".into(), json!(0))]))] {
+        if let Some(data) = &initial {
+            user_storage::save(&root, "gears", data).unwrap();
+        }
+        let mut first = user_storage_host(&root, "gears");
+        let mut second = user_storage_host(&root, "gears");
+        let mut reader = user_storage_host(&root, "gears");
+        first.begin_transaction().unwrap();
+        second.begin_transaction().unwrap();
+        reader.begin_transaction().unwrap();
+        assert_eq!(reader.user_storage_get("first").unwrap(), None);
+        first.user_storage_set("first", &json!(1)).unwrap();
+        second.user_storage_set("second", &json!(2)).unwrap();
+        let original = second.session.doc.clone();
+        second.transaction.as_mut().unwrap().doc_mut().name = "Uncommitted".into();
+        first.commit_transaction().unwrap();
+        reader.commit_transaction().unwrap();
+        let committed = user_storage::load(&root, "gears").unwrap();
+        let error = second.commit_transaction().unwrap_err();
+        assert_eq!(error, HostError::UserStorageConflict { plugin: "gears".into() });
+        assert_eq!(serde_json::to_value(&error).unwrap(), json!({"kind":"user_storage_conflict", "plugin":"gears"}));
+        let message = PluginFailure { plugin: "Gears".into(), file: None, error }.text();
+        assert!(message.starts_with("Gears:"), "{message}");
+        assert!(message.contains("Retry the plugin run"), "{message}");
+        assert!(std::sync::Arc::ptr_eq(&original, &second.session.doc));
+        assert_eq!(user_storage::load(&root, "gears").unwrap(), committed);
+        assert!(second.session.undo.is_empty() && second.session.doc.plugin_data.is_empty());
+        second.rollback_transaction().unwrap();
+        second.begin_transaction().unwrap();
+        assert_eq!(second.user_storage_get("first").unwrap(), Some(json!(1)));
+        second.user_storage_set("second", &json!(2)).unwrap();
+        second.commit_transaction().unwrap();
+        let mut expected = initial.unwrap_or_default();
+        expected.extend([("first".into(), json!(1)), ("second".into(), json!(2))]);
+        assert_eq!(user_storage::load(&root, "gears").unwrap(), expected);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+}
+
+#[test]
+fn user_storage_serialises_publication_and_refuses_a_deleted_snapshot() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-user-storage-lock-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    user_storage::save(&root, "gears", &BTreeMap::from([("existing".into(), json!(0))])).unwrap();
+    let mut host = user_storage_host(&root, "gears");
+    host.begin_transaction().unwrap();
+    host.user_storage_set("new", &json!(1)).unwrap();
+    let lock = std::fs::OpenOptions::new().read(true).write(true).open(root.join("plugin-user-data/gears.lock")).unwrap();
+    lock.try_lock().unwrap();
+    let conflict = HostError::UserStorageConflict { plugin: "gears".into() };
+    assert_eq!(host.commit_transaction().unwrap_err(), conflict);
+    assert_eq!(user_storage::save(&root, "gears", &BTreeMap::new()).unwrap_err(), conflict);
+    assert_eq!(user_storage::remove(&root, "gears").unwrap_err(), conflict);
+    assert_eq!(user_storage::load(&root, "gears").unwrap(), BTreeMap::from([("existing".into(), json!(0))]));
+    drop(lock);
+    user_storage::remove(&root, "gears").unwrap();
+    assert_eq!(host.commit_transaction().unwrap_err(), conflict, "a stale run must not resurrect removed settings");
+    assert!(user_storage::load(&root, "gears").unwrap().is_empty());
+    host.rollback_transaction().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn user_storage_bounds_hostile_files_and_keys_before_writing() {
+    let root = std::env::temp_dir().join(format!("solidcraft-user-storage-limits-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let mut host = user_storage_host(&root, "gears");
+    host.begin_transaction().unwrap();
+    for key in ["", "bad\nkey", &"x".repeat(129)] {
+        assert!(matches!(host.user_storage_set(key, &json!(1)), Err(HostError::InvalidInput { .. })));
+    }
+    for n in 0..craft_plugin::MAX_USER_STORAGE_KEYS {
+        host.user_storage_set(&format!("k{n}"), &json!(null)).unwrap();
+    }
+    assert_eq!(host.user_storage_set("overflow", &json!(1)).unwrap_err(), HostError::LimitExceeded { limit: "user-storage keys (128)".into() });
+    assert_eq!(
+        host.user_storage_set("k0", &json!("x".repeat(craft_plugin::MAX_USER_STORAGE_BYTES))).unwrap_err(),
+        HostError::LimitExceeded { limit: "user-storage total bytes (65536)".into() }
+    );
+    host.commit_transaction().unwrap();
+    let path = root.join("plugin-user-data/gears.json");
+    std::fs::write(&path, vec![b' '; craft_plugin::MAX_USER_STORAGE_BYTES + 1]).unwrap();
+    assert!(matches!(user_storage::load(&root, "gears"), Err(HostError::LimitExceeded { .. })));
+    std::fs::write(&path, b"invalid JSON").unwrap();
+    assert!(matches!(user_storage::load(&root, "gears"), Err(HostError::InvalidInput { .. })));
+    #[cfg(unix)]
+    {
+        std::fs::remove_file(&path).unwrap();
+        let outside = root.join("outside.json");
+        std::fs::write(&outside, b"{}").unwrap();
+        std::os::unix::fs::symlink(&outside, &path).unwrap();
+        assert!(user_storage::load(&root, "gears").is_err());
+        assert!(user_storage::save(&root, "gears", &BTreeMap::new()).is_err());
+        assert_eq!(std::fs::read(&outside).unwrap(), b"{}");
+    }
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 /// The `storage.*` commands as a running plugin sees them: its own data only, files in parts, a
