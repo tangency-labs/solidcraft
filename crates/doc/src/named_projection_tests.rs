@@ -733,6 +733,72 @@ fn an_edge_saved_with_faces_named_by_index_in_its_qualifiers_is_found_at_its_pic
     assert_eq!(crate::naming::face_names(after), crate::naming::face_names(today));
 }
 
+#[test]
+fn a_face_saved_with_a_neighbour_since_named_by_index_is_found_at_its_pick() {
+    // #20027: a sweep along a plate's top edges round a rounded corner. History names the faces
+    // past the bend by index (#18481); 0.44 named them from geometry, and the bend's top as the
+    // piece of the sweep's top between its two sides. A hole saved there by 0.44 keeps that name.
+    const SAVED: &str = "F4:side:l3#[F4:side:l2,F4:side:l4]";
+    let pick = Vec3::new(99.1, 58.75, 14.);
+    let design = |hole: bool| {
+        let mut features = serde_json::json!([
+            {"id": 1, "name": "plate", "type": "box", "body_names": ["plate"], "corner": [0, 0, 0], "length": "100", "width": "60", "height": "10", "operation": "new_body"},
+            {
+                "id": 2, "name": "corner", "type": "fillet", "radius": "3", "tangent_chain": false, "edges": [[100., 60., 5.]],
+                "edge_names": ["F1:+x|F1:+y"], "edge_refs": [{"dir": [0., 0., 1.], "min": [0., 0., 0.], "max": [100., 60., 10.]}]
+            },
+            {
+                "id": 3, "name": "profile", "type": "sketch", "plane": {"name": "YZ", "type": "origin"},
+                "sketch": {
+                    "points": [
+                        {"fixed": true, "id": "origin", "pos": [0., 0.]},
+                        {"fixed": false, "id": "p1", "pos": [58., 10.]},
+                        {"fixed": false, "id": "p2", "pos": [60., 10.]},
+                        {"fixed": false, "id": "p3", "pos": [60., 14.]},
+                        {"fixed": false, "id": "p4", "pos": [58., 14.]}
+                    ],
+                    "curves": [
+                        {"a": 1, "b": 2, "construction": false, "id": "l1", "type": "line"},
+                        {"a": 2, "b": 3, "construction": false, "id": "l2", "type": "line"},
+                        {"a": 3, "b": 4, "construction": false, "id": "l3", "type": "line"},
+                        {"a": 4, "b": 1, "construction": false, "id": "l4", "type": "line"}
+                    ],
+                    "constraints": [],
+                    "counters": {"l": 4}
+                }
+            },
+            {
+                "id": 4, "name": "sweep", "type": "sweep", "body_names": ["swept"], "operation": "new_body", "sketch": 3, "profiles": {"type": "all"},
+                "path": [], "path_sketch": 0, "path_body": "plate", "path_edges": [[50., 60., 10.], [99.12132, 59.12132, 10.], [100., 30., 10.]]
+            }
+        ]);
+        if let Some(list) = features.as_array_mut().filter(|_| hole) {
+            list.push(serde_json::json!({
+                "id": 5, "name": "pin-hole", "type": "hole", "depth": "1", "diameter": "0.5", "direction": [0., 0., -1.],
+                "face_names": [SAVED], "hole": {"type": "simple"}, "position": [pick.x, pick.y, pick.z]
+            }));
+        }
+        let doc = Document { features: serde_json::from_value(features).unwrap(), ..Document::default() };
+        let doc = crate::format::read(&doc.to_json()).unwrap();
+        let mut model = crate::Model::new();
+        model.evaluate(&doc);
+        model
+    };
+    let swept = design(false);
+    assert!(swept.result(4).unwrap().error.is_none(), "{:?}", swept.result(4));
+    let state = swept.state();
+    let body = state.body("swept").unwrap();
+    let names = crate::naming::names(body);
+    let hit = crate::name_lookup::locate_face(&state, SAVED, pick).unwrap_or_else(|| panic!("{SAVED}: {:?}", names.faces));
+    assert!(hit.on_point, "the face under the saved pick");
+    assert_eq!(names.faces.get(hit.face).map(String::as_str), Some("F4:side:l3"), "{:?}", names.faces);
+    // The same name at a point on another piece of the sweep's top (the first leg's) finds nothing.
+    assert!(crate::name_lookup::locate_face(&state, SAVED, Vec3::new(50., 59., 14.)).is_none(), "{:?}", names.faces);
+
+    let saved = design(true);
+    assert!(saved.result(5).unwrap().error.is_none(), "{:?}", saved.result(5));
+}
+
 /// #18459: an edge picked on the start cap of a one-sided extrude is still found once an edit
 /// makes the extrude symmetric, on the cap at the end where the start cap lay, facing the same
 /// way: the low cap of an extrude that went along the sketch normal, the high cap of one that went

@@ -65,6 +65,7 @@ impl std::fmt::Display for DesignToken {
 
 pub mod conditions;
 mod input;
+pub mod swatches;
 pub use input::{check_input, prepare_input, strict_input_schema};
 
 /// The host imports that change something outside the design. A `read` entry is refused every
