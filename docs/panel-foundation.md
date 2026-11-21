@@ -98,8 +98,8 @@ camera state and live controllers. Restored Content/Fill geometry is measured at
 the current width through the same host admission path.
 
 The Layout page exposes registered workspaces and named layouts. Its controls use `layout.workspace.select`,
-`layout.apply`, `layout.save` and `layout.reset`. Built-ins remain immutable;
-replacing a user layout is explicit. Reset affects the current workspace and
+`layout.apply`, `layout.save`, `layout.delete` and `layout.reset`. Built-ins remain immutable;
+replacing or deleting a user layout is explicit and asks first. Reset affects the current workspace and
 preserves the named layout library. Preferences Apply/Cancel and held writes
 cover layout changes too. A refused restore keeps the Preferences dialog and its
 snapshot available rather than discarding the restore obligation.
