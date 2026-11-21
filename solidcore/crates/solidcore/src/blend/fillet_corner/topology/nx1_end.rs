@@ -909,6 +909,92 @@ pub(crate) struct Nx1End<'a> {
     pub turned_back: [Option<TurnedBack>; 2],
 }
 
+/// A candidate end face of an `NByOne` corner: the face across side edge use `side` (0 or 1
+/// of the pair passed) from the blend.
+struct AcrossFace {
+    side: usize,
+    face: FaceId,
+}
+
+/// The unit tangent of `e`'s curve at its end on `vertex`, pointing away from it.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for an edge without a curve; those of the evaluation.
+fn tangent_leaving_vertex(k: &Kernel, target: &Brep, e: EdgeId, vertex: VertexId) -> Result<Vec3> {
+    let curve = need(edge::curve(target, e)?, "side edge without curve")?;
+    let ivl = edge::interval(target, e)?;
+    let at_start = edge::start_vertex(target, e)? == Some(vertex);
+    let t = if at_start { ivl.min() } else { ivl.max() };
+    let d = need(
+        curve.evaluate(k, t, 1, true, true)?.get(1).copied(),
+        "edge without derivative",
+    )?;
+    let d = if at_start { d } else { -d };
+    d.unitize()
+}
+
+/// Of the faces across the two side edge uses `sides` from the blend on `filleted`, at a
+/// corner of four edges, the one the blended edge crosses most squarely at `vertex`. Each
+/// such face holds its side edge and the corner's fourth edge (the edge between the two
+/// faces), so its normal there is the cross product of their tangents. `None` where the
+/// corner has not four edges, a face is missing, or a normal cannot be found.
+///
+/// # Errors
+/// Those of the topology lookups and curve evaluations.
+fn squarest_end_face(
+    k: &Kernel,
+    target: &Brep,
+    filleted: EdgeuseId,
+    sides: [EdgeuseId; 2],
+    vertex: VertexId,
+) -> Result<Option<AcrossFace>> {
+    let blended = need(
+        eu1::edge(target, filleted)?,
+        "filleted edge use without edge",
+    )?;
+    let mut side_edges = [blended; 2];
+    for (slot, &side) in side_edges.iter_mut().zip(sides.iter()) {
+        *slot = need(eu1::edge(target, side)?, "side edge use without edge")?;
+    }
+    let at_vertex = crate::topology::vertex::edges(target, vertex, None)?;
+    let mut rest = at_vertex
+        .iter()
+        .copied()
+        .filter(|&e| e != blended && !side_edges.contains(&e));
+    let (Some(middle), None) = (rest.next(), rest.next()) else {
+        return Ok(None);
+    };
+    if at_vertex.len() != 4 {
+        return Ok(None);
+    }
+    let along = tangent_leaving_vertex(k, target, blended, vertex)?;
+    let t_mid = tangent_leaving_vertex(k, target, middle, vertex)?;
+    let mut best: Option<(f64, AcrossFace)> = None;
+    for (i, (&side, &e)) in sides.iter().zip(side_edges.iter()).enumerate() {
+        let near = eu1::face(target, side)?;
+        let face = if super::is_fillet_side_face(target, filleted, near)? {
+            eu1::face(target, super::radial(target, side)?)?
+        } else {
+            near
+        };
+        let Some(face) = face else {
+            return Ok(None);
+        };
+        let t_side = tangent_leaving_vertex(k, target, e, vertex)?;
+        let Ok(normal) = t_side.cross(t_mid).unitize() else {
+            return Ok(None);
+        };
+        let square = along.dot(normal).abs();
+        if square.is_nan() {
+            return Ok(None);
+        }
+        if best.as_ref().is_none_or(|(b, _)| square > *b) {
+            best = Some((square, AcrossFace { side: i, face }));
+        }
+    }
+    Ok(best.map(|(_, a)| a))
+}
+
 /// The gap checks `SmFilletNx1Corner::MakeCornerTopology` ends with when the end face
 /// of a mixed-convexity corner connects to more than the fillet surface and one other
 /// face: `CalcCornerVertGeom`, `CalcCornerEdgeGeom` of the two new side edges (statuses
@@ -1128,7 +1214,29 @@ impl FilletCorner {
                             (first, second)
                         }
                     };
+                    let (mut pick, mut other) = (pick, other);
                     end_face = eu1::face(target, pick)?;
+                    // (not upstream) The end face lies across a side edge from the blend. Where
+                    // the picked edge use runs on the blend's own face instead (the rail's face:
+                    // a slanted side whose top edge meets an upright standing on the part), the
+                    // rail lay in the end face's surface, its end was found far off along it and
+                    // the corner was refused. The end face is then the face across one of the
+                    // two side edges: the one the blended edge crosses most squarely at the
+                    // vertex, which closes the blend's section. The face across the other side
+                    // can run almost along the blended edge (the upright's back face, nearly
+                    // flush with the slanted side), so the rail would meet it far off.
+                    if super::is_fillet_side_face(target, filleted, end_face)? {
+                        if let Some(across) =
+                            squarest_end_face(k, target, filleted, [pick, other], vertex)?
+                        {
+                            if across.side == 1 {
+                                core::mem::swap(&mut pick, &mut other);
+                            }
+                            end_face = Some(across.face);
+                        } else {
+                            end_face = eu1::face(target, super::radial(target, pick)?)?;
+                        }
+                    }
                     extend_edge = eu1::edge(target, pick)?;
                     other_side_edgeuse = Some(other);
                 } else {
