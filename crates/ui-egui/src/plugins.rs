@@ -83,6 +83,8 @@ pub struct Plugin {
     /// The images its entries name, read from the package (`plugin_images`): each relative path
     /// with the icon name it is drawn by.
     pub images: std::collections::BTreeMap<String, String>,
+    /// The GitHub `owner/repo` its updates come from (`plugin_updates`).
+    pub updates: Option<String>,
     pub(crate) swatches: crate::plugin_images::Swatches,
 }
 
@@ -150,6 +152,7 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         groups: Default::default(),
         entries: Vec::new(),
         images: Default::default(),
+        updates: None,
         swatches: Default::default(),
     })
 }
@@ -165,6 +168,7 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
     let mut plugin = check(Manifest { id: parsed.id, name: parsed.name, version: parsed.version, description: parsed.description }, folder)?;
     plugin.path = dir.to_string_lossy().into_owned();
     plugin.approval = package.approval;
+    plugin.updates = parsed.updates.map(|updates| updates.github);
     let executable = parsed.runtime.is_some();
     if let Some(runtime) = parsed.runtime {
         plugin.entries = runtime.entries;
@@ -250,6 +254,12 @@ pub(crate) fn host_limits(p: &crate::prefs::Prefs) -> solidcraft_engine::plugin:
     solidcraft_engine::plugin::HostLimits { max_fuel: p.plugin_max_fuel, max_memory_mib: p.plugin_max_memory_mib }
 }
 pub(crate) fn sync_policy(app: &mut SolveApp) {
+    app.session.plugin_state.http = app
+        .services
+        .http_get
+        .clone()
+        .zip(app.services.http_download.clone())
+        .map(|(get, download)| solidcraft_engine::plugin::github::Client { get, download });
     // A failed write is retried by the next sync; the command that changed the grants reports it.
     if let Err(e) = sync_store(app) {
         log::warn!("plugins: {e}");
@@ -576,19 +586,25 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     page_in_dir(app, ui, dir.as_deref());
 }
 
-fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
+pub(crate) fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
     crate::ui_kit::settings_page(ui, |ui| {
         crate::ui_kit::settings_heading(ui, solidcraft_ui_text::tr("ui.plugins"), solidcraft_ui_text::tr("prefs.plugins_intro"));
         let Some(dir) = dir else {
             ui.label(solidcraft_ui_text::tr("ui.plugins_desktop"));
             return;
         };
-        // Install plugin…: pick a .zip, review what it asks for, install it.
-        let install = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("plugin_install.menu"), "import", !busy(app), false);
-        crate::scenario::publish_target("prefs:plugins:install", install.rect);
-        if install.clicked() {
-            crate::plugin_install::start(app);
-        }
+        ui.horizontal_wrapped(|ui| {
+            let install = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("plugin_install.zip_menu"), "import", !busy(app), false);
+            crate::scenario::publish_target("prefs:plugins:install", install.rect);
+            if install.clicked() {
+                crate::plugin_install::start(app);
+            }
+            let url = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("plugin_install.url_menu"), "import", !busy(app), false);
+            crate::scenario::publish_target("prefs:plugins:install_url", url.rect);
+            if url.clicked() {
+                app.plugin_install.url = Some(String::new());
+            }
+        });
         ui.add_space(8.0);
         let t = solidcraft_theme::Tokens::get();
         let path = dir.display().to_string();
@@ -715,9 +731,12 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
     use crate::ui_kit;
     let mut on = enabled(app, &plugin.id);
     let was_on = on;
+    let offer = crate::plugin_updates::offered(app, plugin).map(|offer| offer.version.clone());
+    let update_label = offer.as_ref().map(|version| solidcraft_ui_text::format("plugin_update.button", &[("version", version)]));
     let labels = ui_kit::PluginCardLabels {
         show_in_folder: solidcraft_ui_text::tr_label("Show in folder"),
         enabled: solidcraft_ui_text::tr("prefs.plugins_enabled"),
+        update: update_label.as_deref(),
     };
     let remove_label = app.tr("prefs.plugin_remove").to_owned();
     let can_remove = !busy(app) && Path::new(&plugin.path) == dir.join(&plugin.id);
@@ -736,7 +755,7 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
         })
         .inner;
     let response = card.response;
-    let ((folder, check), remove) = card.inner;
+    let ((folder, check, update), remove) = card.inner;
     // What the user approved for this exact package, under its card.
     ui.add_space(solidcraft_theme::Tokens::get().space_2);
     let approved = approved_text(app, plugin);
@@ -764,6 +783,12 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
             app.preferences.disabled_plugins.remove(&plugin.id);
         } else if app.preferences.disabled_plugins.len() < MAX_DISABLED {
             app.preferences.disabled_plugins.insert(plugin.id.clone());
+        }
+    }
+    if let Some(update) = update {
+        crate::scenario::publish_target(&format!("prefs:plugin:{}:update", plugin.id), update.rect);
+        if update.clicked() {
+            crate::plugin_updates::start(app, plugin);
         }
     }
     crate::scenario::publish_target(&format!("prefs:plugin:{}:remove", plugin.id), remove.rect);
@@ -1621,6 +1646,7 @@ mod tests {
             groups: Default::default(),
             entries: Vec::new(),
             images: Default::default(),
+            updates: None,
             swatches: Default::default(),
             id: "ftc-frc-parts".into(),
             name: "FTC and FRC parts".into(),

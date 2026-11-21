@@ -105,7 +105,14 @@ bounded JSON result through a plain function for a future panel adapter.
 
 ## Installing
 
-**Install plugin…** in **Preferences > Plugins** (desktop only) picks a plugin `.zip`.
+**Install from .zip…** in **Preferences > Plugins** (desktop only) picks a plugin `.zip`.
+**Install from URL…** beside it accepts a GitHub repository URL. Paste the URL and choose
+**Review package** to download its release package, then review it on the same confirmation screen.
+Accepted URLs use `https://github.com/owner/repo`, optionally followed by `/releases/latest`,
+`/releases/tag/<tag>` or `/tree/<tag>`. A tag must be one safe URL path segment. Other hosts,
+protocols and URL forms are refused. The repository must have exactly one plugin `.zip` in a stable, versioned release
+with a SHA256 digest. Missing or ambiguous packages are refused; source archives are not installed.
+Downloads use the same bounded GitHub fetch and digest verification as plugin updates.
 One confirmation screen shows its name, version, summary, requested permissions and entry placements.
 Each command group explains its access in plain words: files, designs, application settings or other plugins.
 Enter an absolute local path for each requested folder. Each folder shows its requested read/write access.
@@ -142,7 +149,8 @@ files or grants. The response includes an `approval` hash of the exact manifest 
 It also includes `archive`, a hash of the whole `.zip`, which covers the plugin's other files too.
 Send both as `approval` and `archive` when installing the reviewed package. A changed package returns
 a typed `invalid_input` error for `approval` or `archive` before any files or grants are written. The dialog always
-sends both hashes; programmatic callers may omit it to install directly without a prior review.
+sends both hashes; programmatic callers installing a local `path` may omit them to install directly
+without a prior review.
 Replacing an installed plugin with the same id requires `"replace": true`.
 The response includes name, version, description, capabilities, permissions, requested `limits`, the app's
 `host_limits`, app commands,
@@ -150,12 +158,62 @@ namespaced `entries`, declared `entry_points` with input schemas and slots, repl
 the target `folder` and whether it was `installed`. A dry run reports `installed: false`.
 Dry-run description is the package review path; there is no separate review command or folder installer.
 
+For a URL install, give exactly one of `path` or `url`. First call `plugin.install` with the URL and
+`"dry_run": true`, review the returned package and permissions, then install with the same URL,
+both returned hashes and the selected approvals:
+
+```json
+{"url": "https://github.com/maker/gears", "dry_run": true}
+```
+
+```json
+{
+  "url": "https://github.com/maker/gears",
+  "approval": "COPY_THE_APPROVAL_FROM_THE_REVIEWED_DRY_RUN",
+  "archive": "COPY_THE_ARCHIVE_FROM_THE_REVIEWED_DRY_RUN",
+  "approve": {"command_groups": []}
+}
+```
+
+URL installation requires both hashes. It fetches the package again and refuses to install if either
+hash has changed since review. The same zip checks, limits and permission review apply. The host
+stores the selected `owner/repo` for later updates even if the manifest has no `updates.github`.
+Later updates retain that repository; a package naming a different repository is refused.
+For a downloaded update installed from a local `path`, `repository` can name the reviewed
+`owner/repo` to retain; the returned approval covers that metadata too. URL installs infer it from `url`.
+These calls never open a dialog, and neither review nor installation runs plugin code.
+
 A zip holds one plugin, with `plugin.json` and its component at the top or inside one top-level folder.
 The existing `solidcraft_io::safe_zip` reader refuses absolute paths, `..`, symlinks and device entries.
 The installer limits the archive to 256 entries, each file to 16 MiB (an importer component may be up to 64 MiB), and input and unpacked content to
 64 MiB. The manifest has a separate 16 KiB cap. Before publication, the host parses the manifest and
 refuses unknown or newer capabilities. It unpacks into a hidden `.install-…` folder beside the installed
 plugins, then renames it to `plugins/<id>/`. The entries resolve immediately, with no restart.
+
+## Updates
+
+A plugin can name the GitHub repository it is released from, and SolidCraft 0.45 and later offer its
+new versions on its card. Installing from a URL also records that repository for updates.
+Older versions refuse a manifest with this field.
+
+```json
+{"id": "gears", "name": "Gears", "version": "1.0.0", "updates": {"github": "maker/gears"}}
+```
+
+- At every start, and once a day while SolidCraft stays open, one background request per such
+  plugin (at most 20) asks GitHub for that repository's latest release. Nothing else is sent, and a
+  failed request (offline, rate limited) says nothing. The app's **Check at start and once a day**
+  update setting, or the organization's policy over it, turns these checks off too.
+- The release is offered when it is a stable release, its tag is a version (`v1.1.0` or `1.1.0`)
+  newer than the installed `version`, and it has an asset named `<id>.zip` or `<id>-<version>.zip`
+  under that repository's releases, for which GitHub lists a sha256 digest. Both versions must be
+  `major.minor.patch` versions.
+- **Update to 1.1.0** then shows beside the card's on/off control, also on a turned-off plugin. It downloads
+  the `.zip` into the hidden `plugins/.updates/` folder and checks it against the sha256 digest GitHub
+  lists for the asset. The same confirmation as Install follows, titled Update plugin: the package
+  must be the same id and the offered version, every install check applies, and the folders the
+  installed version was given are filled in by name. **Update** replaces the plugin, with no restart;
+  **Cancel** or any failure leaves the installed version. The downloaded `.zip` is then deleted.
 
 ## Removing
 
@@ -172,7 +230,7 @@ The command surface exposes management without opening dialogs:
 | Command | Parameters | Result |
 |---|---|---|
 | `plugin.check` | `{path}`: a package folder or `.zip` | `{ok, id, name, version, kind, approval, entries, problems: [{severity, field, problem, fix}]}`; installs nothing |
-| `plugin.install` | `{path, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?, input_folder?}}` | Package description and installation status, including declared `entry_points` |
+| `plugin.install` | `{path?, url?, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?, input_folder?}}`; exactly one of `path` or `url`; URL installation requires both reviewed hashes | Package description and installation status, including declared `entry_points` |
 | `plugin.list` | `{}` | `{plugins: [{manifest, commands, disabled}]}` |
 | `plugin.remove` | `{id}` | `{id, removed: true}` |
 | `plugin.grants` | `{}` | `{grants: [{id, status, package_hash, command_groups, folders, memory_mib?, input_folder?}]}` |
@@ -260,7 +318,8 @@ then its button chooses the file and opens it as a new design with `file.import`
 ## Integration APIs
 
 Preferences and the Plugins menu share `plugin_install::start(app)` in
-`crates/ui-egui/src/plugin_install.rs`. It selects a zip, calls `plugin.install` with `dry_run: true`,
+`crates/ui-egui/src/plugin_install.rs`. The local path selects a zip, and the URL form supplies a
+GitHub repository URL. Both call `plugin.install` with `dry_run: true`,
 draws the confirmation screen and submits `plugin.install` with the reviewed `approval` and `archive` hashes and selected `approve` object.
 Successful installation persists grants in desktop preferences and the shared grant store; successful
 removal and `plugin.revoke` delete them. `SolveApp::share_plugin_grants`, called once after the

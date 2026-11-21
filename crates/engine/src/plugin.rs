@@ -63,6 +63,8 @@ pub struct Grants {
 /// Trusted host state, never loaded from a design or supplied by guest code.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AppState {
+    /// Host fetch service for URL installation; native CLI/MCP use the bounded GitHub client by default.
+    pub http: Option<github::Client>,
     /// Listener failures are application state, displayed in Preferences, never design data.
     pub listener_failures: BTreeMap<String, String>,
     /// Last successful listener result; the future panel adapter may consume this data.
@@ -90,7 +92,8 @@ pub struct AppState {
 impl AppState {
     /// Background cache/panel updates do not revoke an in-flight command's authority.
     pub(crate) fn same_execution_context(&self, other: &Self) -> bool {
-        self.packages == other.packages
+        self.http == other.http
+            && self.packages == other.packages
             && self.grants == other.grants
             && self.file_grants == other.file_grants
             && self.command_groups == other.command_groups
@@ -405,6 +408,9 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
 pub mod check;
 mod events;
 pub use events::design_changed;
+pub mod github;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod github_http;
 pub mod grant_store;
 mod import;
 pub mod install;
