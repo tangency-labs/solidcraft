@@ -268,7 +268,7 @@ Section 1 fixes a panel's layout at install time and changes only its data. That
 Two additions cover it, both still host-drawn from reviewed widget kinds, so a plugin never paints and never ships UI code:
 
 1. **`repeat`, for layouts that follow data.** A `repeat` node names a data path holding a list and a template subtree. The host draws the template once per list item, with the template's paths relative to that item. Adding, removing or reordering items is then an ordinary `set-data`, with no layout call. A row's kind can choose between templates (`templates` keyed by a field of the item, for example `/ops/3/kind`), so a pocket row and a drilling row each get their own fields.
-2. **`update-layout`, for structural changes data can't express.** Nodes may carry a `key`, unique within the panel's layout (a template's keys are unique within that template); a layout or an update that would give two nodes the same key is refused with a typed error. An operation names its node with a `node-ref`: the node's `key`, and for a node inside a repeated row also the key of its `repeat` node and the row's index in that list, so two repeats bound to the same data path, or the same template key in two rows, are never ambiguous. A plugin sends a list of operations on keyed nodes: insert a subtree under a parent at an index, remove a node, move it, or replace one node's widget. The host applies one call's operations together: an invalid operation (unknown key, a cycle, an unreviewed widget kind, a limit exceeded) refuses the whole call with a typed error and leaves the layout as it was.
+2. **`update-layout`, for structural changes data can't express.** Nodes may carry a `key`, unique within the panel's layout (a template's keys are unique within that template); a layout or an update that would give two nodes the same key is refused with a typed error. An operation names its node with a `node-ref`: the node's `key`, and for a node inside repeated rows the chain of rows it lies in, outermost first, each as the key of its `repeat` node and the row's index in that list. So nested repeats, two repeats bound to the same data path, and the same template key in two rows are never ambiguous; a `node-ref` whose rows don't lead to exactly one node is refused with a typed error. A plugin sends a list of operations on keyed nodes: insert a subtree under a parent at an index, remove a node, move it, or replace one node's widget. The host applies one call's operations together: an invalid operation (unknown key, a cycle, an unreviewed widget kind, a limit exceeded) refuses the whole call with a typed error and leaves the layout as it was.
 
 ```wit
 interface ui {
@@ -286,9 +286,10 @@ interface ui {
     templates: list<tuple<string, u32>>,
   }
 
-  /// A node to act on: `key` alone for a node of the static layout; for a node inside a
-  /// repeated row, also the key of its `repeat` node and the row's index in that list.
-  record node-ref { key: string, repeat: option<string>, item: option<u32> }
+  /// A node to act on: `key` alone for a node of the static layout; for a node inside
+  /// repeated rows, `rows` from the outermost in: each its `repeat` node's key and the row's
+  /// index in that list.
+  record node-ref { key: string, rows: list<tuple<string, u32>> }
 
   variant layout-op {
     /// Insert the subtree `nodes` (its first node is its root) under `parent` at `index`.
