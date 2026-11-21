@@ -1388,7 +1388,9 @@ fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String
             .find(|r| r.case == case)
             .ok_or_else(|| format!("{case}: unlisted original row"))?;
         if change.reason.trim().is_empty() || rows.iter().any(|r| r.case == case) {
-            return Err(format!("{case}: missing reason or overlap with tolerance rows"));
+            return Err(format!(
+                "{case}: missing reason or overlap with tolerance rows"
+            ));
         }
         let got = crate::rng::fnv1a64(&to_canonical_string(&v));
         if got != change.old_hash {
