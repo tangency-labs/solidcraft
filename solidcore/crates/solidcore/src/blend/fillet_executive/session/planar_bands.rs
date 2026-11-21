@@ -14,6 +14,9 @@
 //! do not establish a constant kept domain and therefore name no size here. Interior
 //! witnesses must clear every incident selected planar straight-edge chamfer strip;
 //! unsupported moving corners name no size. All clearance products use expansions.
+//! The width event itself is compared exactly but read through the rounding of the feet's
+//! own coordinates (`gamma(32)` of their size): bands that meet to that rounding do not
+//! overlap, and a gap proved under the widths by more than it does.
 
 mod family;
 mod interval;
@@ -592,9 +595,20 @@ pub(super) fn retained_contact(
         gap_squared = interval::add(&gap_squared, &interval::mul(&delta, &delta)?)?;
     }
     let exact_widths = interval::add(&[a.width], &[b.width])?;
-    let overlapping = exact::sign(&interval::sub(
-        &gap_squared,
-        &interval::mul(&exact_widths, &exact_widths)?,
+    // The feet are the model's own points, each coordinate a few roundings off the designed
+    // one: a face meant 2 wide measured 1.9999999999999991 between an edge a cut left at
+    // z = 6.000000000000001 and one at 8 (#20450), and two 1 mm bands that exactly meet on it
+    // read as overlapping by 9e-16. The bands overlap only when the gap is proved under
+    // their widths by more than those roundings can account for, as a contact is read
+    // ([`crate::geom::tol::within_contact_tol`]): `gamma(32)` of the largest coordinate
+    // involved. With `e` that bound, `gap < widths - e` is `gap^2 - widths^2 < -(2 widths -
+    // e) e`, compared exactly.
+    let size = foot_a.max_dimension().max(foot_b.max_dimension()) + widths;
+    let rounding = crate::nurbs::math::gamma(32) * size;
+    let slack = interval::mul(&[2.0 * widths - rounding], &[rounding])?;
+    let overlapping = exact::sign(&interval::add(
+        &interval::sub(&gap_squared, &interval::mul(&exact_widths, &exact_widths)?)?,
+        &slack,
     )?) < 0;
     let rho = a
         .offsets
