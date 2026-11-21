@@ -1780,3 +1780,151 @@ mod native {
         let _ = std::fs::remove_dir_all(root);
     }
 }
+
+fn importing_entry() -> solidcraft_engine::plugin::Entry {
+    serde_json::from_value(json!({"name":"convert","kind":"importer","effect":"open","extensions":["smp"],
+        "input_schema":{"type":"object","properties":{"part":{"type":"string","default":"initial"}}}}))
+    .unwrap()
+}
+
+#[test]
+fn importer_menu_picks_first_and_cancel_opens_no_form_with_a_legacy_preference() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.plugin_menu.listed = vec![listed("sample", vec![importing_entry()])];
+    h.app.plugin_menu.loaded = true;
+    assert!(h.app.preferences.plugin_import_file_first);
+    h.app.services.pick_open = Some(Box::new(|extensions| {
+        assert_eq!(extensions, &["smp"]);
+        Box::pin(std::future::ready(None))
+    }));
+    open_entry(&mut h.app, 0, 0);
+    assert!(h.app.plugin_menu.dialogs.is_empty(), "the picker comes before the form");
+    h.frames(2);
+    assert!(h.app.plugin_menu.dialogs.is_empty(), "cancel never runs the importer or opens a form");
+    assert!(h.app.file_load.idle());
+    h.app.preferences.plugin_import_file_first = false;
+    open_entry(&mut h.app, 0, 0);
+    assert!(h.app.plugin_menu.dialog().unwrap().source.is_none(), "the preference restores options first");
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app), Ok(json!({"part":"initial"})));
+    let saved = serde_json::to_value(&h.app.preferences).unwrap();
+    let restored: crate::prefs::Prefs = serde_json::from_value(saved).unwrap();
+    assert!(!restored.plugin_import_file_first, "the legacy choice persists");
+    h.app.plugin_menu.dialogs.clear();
+    h.app.preferences.plugin_import_file_first = true;
+    h.app.services.pick_open = Some(Box::new(|_| Box::pin(std::future::ready(Some("picked.smp".into())))));
+    open_entry(&mut h.app, 0, 0);
+    crate::file_picker::tick(&mut h.app, &h.ctx);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().source.as_deref(), Some("picked.smp"));
+    assert!(h.app.file_load.idle(), "choosing the file only starts its form");
+}
+
+#[test]
+fn importer_file_generations_discard_late_updates_and_close_disconnects_the_worker() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.plugin_import_file_first = false;
+    h.app.plugin_menu.listed = vec![listed("sample", vec![importing_entry()])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.source = Some("new.smp".into());
+    dialog.file_generation = 2;
+    let result = |generation, name: &str| solidcraft_engine::plugin::ImportDialog {
+        file: solidcraft_engine::plugin::dialog::FileFacts {
+            name: name.into(),
+            extension: "smp".into(),
+            size: 24,
+            format: "sample.convert".into(),
+            generation,
+        },
+        schema: json!({"type":"object","properties":{"part":{"type":"string","enum":[name],"default":name}}}),
+        hook: true,
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    dialog.file_job = Some(FileJob { generation: 1, reply: rx });
+    tx.send(Ok(result(1, "old.smp"))).unwrap();
+    poll_file(dialog);
+    assert!(dialog.file.is_none());
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap(), json!({"part":"initial"}));
+    let (tx, rx) = std::sync::mpsc::channel();
+    dialog.file_job = Some(FileJob { generation: 2, reply: rx });
+    assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_err());
+    tx.send(Ok(result(2, "new.smp"))).unwrap();
+    poll_file(h.app.plugin_menu.dialogs.last_mut().unwrap());
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    assert_eq!(dialog.file.as_ref().unwrap().name, "new.smp");
+    assert_eq!(dialog.ready(&h.app).unwrap(), json!({"part":"new.smp"}));
+    h.app.plugin_menu.dialogs.last_mut().unwrap().hook_values = Some(json!({"part":"previous input"}));
+    assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_err(), "Open cannot race the next input update");
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.plugin_menu.dialogs.last_mut().unwrap().file_job = Some(FileJob { generation: 2, reply: rx });
+    h.app.plugin_menu.dialogs.clear();
+    assert!(tx.send(Ok(result(2, "late.smp"))).is_err(), "closing drops the result receiver");
+}
+
+#[test]
+fn interactive_open_and_drop_reuse_the_file_and_do_not_start_importing_before_the_form() {
+    let root = solidcraft_engine::io::vfs::temp_dir().join(format!("sc-plugin-file-form-{}", std::process::id()));
+    let folder = root.join("plugins/sample");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.2"],"runtime":{
+        "module":"sample.wasm","commands":[],"entries":[importing_entry()]}});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    std::fs::write(folder.join("sample.wasm"), b"not run while choosing a file").unwrap();
+    let path = root.join("part.smp").to_string_lossy().into_owned();
+    std::fs::write(&path, b"header").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.session.plugin_state.plugins_dir = Some(root.join("plugins"));
+    for generation in 1..=2 {
+        if generation == 1 {
+            h.app.open_path_async(&path);
+        } else {
+            h.app.drop_path(&path);
+        }
+        let dialog = h.app.plugin_menu.dialog().unwrap();
+        assert_eq!(dialog.source.as_deref(), Some(path.as_str()));
+        assert_eq!(dialog.file_generation, generation);
+        assert_eq!(h.app.plugin_menu.dialogs.len(), 1);
+        assert!(h.app.file_load.idle(), "the form holds the path until Open is pressed");
+        assert!(!h.app.file_picker_busy(), "Open and drops already have a file");
+    }
+    // Join the bounded file reader through its channel before removing the fixture's files.
+    if let Some(job) = h.app.plugin_menu.dialogs.last_mut().and_then(|d| d.file_job.take()) {
+        let _ = job.reply.recv();
+    }
+    h.app.plugin_menu.dialogs.clear();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn importer_file_facts_drive_visibility_enabled_choices_and_defaults_without_running_wasm() {
+    let schema = json!({"type":"object","properties":{
+        "count":{"type":"integer","default":1,"x-solidcraft-defaults":[{"when":{"file":"extension","eq":"asm"},"value":3}]},
+        "part":{"type":"string","default":"whole","oneOf":[{"const":"whole"},
+            {"const":"assembly","x-solidcraft-when":{"file":"extension","eq":"asm"}}]},
+        "flatten":{"type":"boolean","x-solidcraft-visible-when":{"file":"format","eq":"sample.convert"},
+            "x-solidcraft-enabled-when":{"file":"extension","eq":"asm"}}
+    }});
+    let mut file = solidcraft_engine::plugin::dialog::FileFacts {
+        name: "parts.asm".into(),
+        extension: "asm".into(),
+        size: 42,
+        format: "sample.convert".into(),
+        generation: 1,
+    };
+    let mut fields = form(&solidcraft_engine::plugin::conditions::bind_file_conditions(&schema, Some(&file)).unwrap()).unwrap();
+    assert_eq!(params(&fields).unwrap()["count"], 3);
+    assert!(fields.iter().find(|(f, _)| f.key == "flatten").unwrap().0.enabled);
+    set_input(&mut fields, "part", Input::Choice(Some(1)));
+    set_input(&mut fields, "count", Input::Integer(8));
+    file.extension = "txt".into();
+    file.generation = 2;
+    let mut updated = form(&solidcraft_engine::plugin::conditions::bind_file_conditions(&schema, Some(&file)).unwrap()).unwrap();
+    retain_edits(&mut updated, &fields);
+    refresh_conditions(&mut updated);
+    assert_eq!(params(&updated).unwrap()["part"], "whole", "an unavailable edited choice resets");
+    assert_eq!(params(&updated).unwrap()["count"], 8, "custom input survives the file change");
+    assert!(!updated.iter().find(|(f, _)| f.key == "flatten").unwrap().0.enabled);
+    file.format = "different.convert".into();
+    let fields = form(&solidcraft_engine::plugin::conditions::bind_file_conditions(&schema, Some(&file)).unwrap()).unwrap();
+    assert!(params(&fields).unwrap().get("flatten").is_none());
+}

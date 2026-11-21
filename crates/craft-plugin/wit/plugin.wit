@@ -7,6 +7,7 @@ package craft:plugin@0.2.0;
 // - `evaluate@0.2`: with `formats`, evaluate, so an importer can check its result;
 // - `storage@0.1`: with `commands`, the app's `storage.*` commands, so a plugin keeps its own data
 //   in the open design (no interface of its own).
+// - `dialog@0.1`: with `formats@0.2`, dialog-provider (additive world `importer-dialog-plugin`).
 // Later capabilities (ui, viewport) arrive as their own interfaces. While the version is
 // 0.x, a minor version may break the one before it. 0.2 added `plugin-error.unsupported`. A host
 // still runs plugins built against 0.1 (`../wit-0.1/plugin.wit`): it reads the version from the
@@ -117,4 +118,16 @@ world importer-plugin {
     import design;
     import evaluate;
     export importer;
+}
+
+// Additive dialog@0.1 capability. Existing worlds and interface signatures are frozen.
+interface dialog-provider {
+    use types.{json, plugin-error};
+    // context = {values: {...}, file: {name, extension, size, format, generation}}.
+    // Reply = {fields: {declared-field: {title?, description?, default?, enum?/oneOf?}}}.
+    update-fields: func(entry: string, context: json) -> result<json, plugin-error>;
+}
+world importer-dialog-plugin {
+    include importer-plugin;
+    export dialog-provider;
 }

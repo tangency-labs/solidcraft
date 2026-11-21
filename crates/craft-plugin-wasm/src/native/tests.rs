@@ -819,3 +819,92 @@ fn an_importer_built_against_wit_0_1_still_runs() {
     assert_eq!(failure, HostError::Exhausted { limit: "fuel".into(), allowed: 10_000_000 });
     std::fs::remove_dir_all(root).unwrap();
 }
+
+/// Extend the existing original importer fixture with the additive dialog export. The hook
+/// echoes context by default; actions can read a JSON header instead, trap or attempt writes.
+fn dialog_component(action: &str) -> Vec<u8> {
+    let (package, version) = API.split_once('@').unwrap();
+    let source = include_str!("../importer_fixture.wat");
+    let hook = format!(
+        r#"
+    (export "dialog" (func $dialog))
+    (func $dialog (param i32 i32 i32 i32) (result i32)
+      {action}
+      i32.const 80 i32.const 0 i32.store
+      i32.const 84 local.get 2 i32.store
+      i32.const 88 local.get 3 i32.store
+      i32.const 80)
+    (func $import"#
+    );
+    let source = source.replacen("(func $import (;3;)", &format!("{hook} (;3;)"), 1);
+    let (prefix, _) = source.rsplit_once(')').unwrap();
+    let source = format!(
+        r##"{prefix}
+      (alias core export $main "dialog" (core func $dialog-core))
+      (type $dialog-result (result $json (error $"#type6 plugin-error")))
+      (type $dialog-type (func (param "entry" string) (param "context" $json) (result $dialog-result)))
+      (func $update (type $dialog-type) (canon lift (core func $dialog-core) (memory $memory) (realloc $cabi_realloc) string-encoding=utf8))
+      (instance $dialog-export
+        (export "json" (type $json))
+        (export "plugin-error" (type $"#type6 plugin-error"))
+        (export "update-fields" (func $update)))
+      (export "__PACKAGE__/dialog-provider@__VERSION__" (instance $dialog-export))
+    )"##
+    )
+    .replace("__PACKAGE__", package)
+    .replace("__VERSION__", version);
+    wat::parse_str(source).unwrap()
+}
+
+fn dialog_manifest() -> Manifest {
+    let mut manifest = importer_manifest(true);
+    manifest.capabilities = vec!["formats@0.2".into(), "dialog@0.1".into()];
+    manifest
+}
+
+#[test]
+fn dialog_hooks_read_only_a_bounded_prefix_and_never_start_an_import_transaction() {
+    let header = br#"{"fields":{"part":{"enum":["plate","cover"],"default":"plate"}}}"#;
+    let root = import_folder(&[("header.smp", header), ("part.bin", b"private")]);
+    let request = ImportRequest { path: root.join("header.smp"), input_folder: true };
+    let read = r#"
+      i32.const 0 i32.const 0 i64.const 0 i32.const 65536 i32.const 16 call $read
+      i32.const 16 i32.load8_u if i32.const 16 return end
+      i32.const 20 i32.load local.set 2
+      i32.const 24 i32.load local.set 3
+    "#;
+    let component = dialog_component(read);
+    crate::check_component(&dialog_manifest(), &component).unwrap();
+    let (host, fields) = crate::update_fields(App::default(), &dialog_manifest(), &component, "convert", &json!({}), &request);
+    assert_eq!(fields.unwrap(), serde_json::from_slice::<Value>(header).unwrap());
+    assert_eq!((host.begins, host.commits, host.rollbacks, host.value), (0, 0, 0, 0));
+    for action in [
+        // A read past the prefix, repeated reads over the total budget, a sibling despite the
+        // install grant, a design write, a trap, and an infinite guest loop.
+        "i32.const 0 i32.const 0 i64.const 65536 i32.const 1 i32.const 16 call $read",
+        "i32.const 0 i32.const 0 i64.const 0 i32.const 65536 i32.const 16 call $read i32.const 0 i32.const 0 i64.const 0 i32.const 1 i32.const 16 call $read",
+        "i32.const 1024 i32.const 8 i64.const 0 i32.const 1 i32.const 16 call $read",
+        "i32.const 0 i32.const 0 i32.const 16 call $write",
+        "unreachable",
+        "(loop $forever br $forever)",
+    ] {
+        let result = crate::update_fields(App::default(), &dialog_manifest(), &dialog_component(action), "convert", &json!({}), &request).1;
+        assert!(result.is_err(), "{action}: {result:?}");
+    }
+    assert!(crate::update_fields(App::default(), &importer_manifest(false), &component, "convert", &json!({}), &request).1.is_err());
+    assert!(crate::check_component(&dialog_manifest(), &importer_component()).is_err(), "the capability requires its export");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn dialog_context_is_data_and_legacy_importers_keep_loading() {
+    let root = import_folder(&[("file.smp", b"header")]);
+    let request = ImportRequest { path: root.join("file.smp"), input_folder: false };
+    let context = json!({"values":{"mode":"parts"},"file":{"name":"file.smp","extension":"smp","size":6,"format":"sample.convert","generation":7}});
+    let result = crate::update_fields(App::default(), &dialog_manifest(), &dialog_component(""), "convert", &context, &request).1.unwrap();
+    assert_eq!(result, context);
+    for version in ["0.1.0", "0.2.0"] {
+        crate::check_component(&importer_manifest(false), &importer_component_for(version)).unwrap();
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}

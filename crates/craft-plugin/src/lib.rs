@@ -34,6 +34,7 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 pub type Result<T> = std::result::Result<T, HostError>;
 
 pub mod conditions;
+pub mod dialog;
 mod input;
 pub use input::{check_input, prepare_input, strict_input_schema};
 
@@ -110,7 +111,8 @@ fn exhausted(limit: &str, allowed: u64) -> String {
 /// The capabilities this host serves, as name and `major.minor`. Each is a set of WIT interfaces
 /// a plugin names in its manifest's `capabilities` list. While a major version is 0, a minor
 /// version may break the one before it, so 0.x matches only the same minor.
-pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 2)), ("evaluate", (0, 2)), ("formats", (0, 2)), ("storage", (0, 1))];
+pub const CAPABILITIES: &[(&str, (u32, u32))] =
+    &[("commands", (0, 2)), ("dialog", (0, 1)), ("evaluate", (0, 2)), ("formats", (0, 2)), ("storage", (0, 1))];
 /// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
 /// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
 pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
@@ -761,6 +763,9 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         return Err(invalid("description", "requires at most 240 printable characters"));
     }
     check_capabilities(&manifest.capabilities, app)?;
+    if manifest.capabilities.iter().any(|c| c.starts_with("dialog@")) && !manifest.runtime.as_ref().is_some_and(RuntimeManifest::is_importer) {
+        return Err(invalid("capabilities", "dialog@0.1 currently needs an importer runtime"));
+    }
     if let Some(runtime) = &manifest.runtime {
         if runtime.is_importer() {
             if !manifest.capabilities.iter().any(|capability| capability.starts_with("formats@")) {

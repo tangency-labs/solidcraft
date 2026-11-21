@@ -485,6 +485,10 @@ impl SolveApp {
 }
 
 pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
+    // Only interactive entry points ask for options. MCP and scripts use begin_request directly.
+    if !insert && crate::plugin_menu::offer_import(app, path) {
+        return;
+    }
     // An STL or OBJ file states no unit: ask which, then import (see `crate::mesh_units`).
     if crate::mesh_units::ask(app, path, insert) {
         return;

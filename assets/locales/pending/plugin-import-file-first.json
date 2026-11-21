@@ -1,0 +1,79 @@
+{
+  "ar": {
+    "prefs.plugin_import_file_first": "اختيار الملف قبل خيارات الاستيراد",
+    "prefs.plugin_import_file_first_help": "اعرض خيارات المستورد للملف المحدد. أوقف هذا لعرض الخيارات أولاً.",
+    "ui.plugin_dialog_change_file": "تغيير الملف…",
+    "ui.plugin_dialog_open_file": "فتح الملف",
+    "ui.plugin_dialog_reading_file": "جارٍ قراءة خيارات الملف…"
+  },
+  "de": {
+    "prefs.plugin_import_file_first": "Datei vor den Importoptionen auswählen",
+    "prefs.plugin_import_file_first_help": "Importoptionen für die ausgewählte Datei anzeigen. Ausschalten, um zuerst die Optionen anzuzeigen.",
+    "ui.plugin_dialog_change_file": "Datei ändern…",
+    "ui.plugin_dialog_open_file": "Datei öffnen",
+    "ui.plugin_dialog_reading_file": "Dateioptionen werden gelesen…"
+  },
+  "en": {
+    "prefs.plugin_import_file_first": "Choose the file before import options",
+    "prefs.plugin_import_file_first_help": "Show importer options for the selected file. Turn off to show the options first.",
+    "ui.plugin_dialog_change_file": "Change file…",
+    "ui.plugin_dialog_open_file": "Open file",
+    "ui.plugin_dialog_reading_file": "Reading file options…"
+  },
+  "en-GB": {
+    "prefs.plugin_import_file_first": "Choose the file before import options",
+    "prefs.plugin_import_file_first_help": "Show importer options for the selected file. Turn off to show the options first.",
+    "ui.plugin_dialog_change_file": "Change file…",
+    "ui.plugin_dialog_open_file": "Open file",
+    "ui.plugin_dialog_reading_file": "Reading file options…"
+  },
+  "es": {
+    "prefs.plugin_import_file_first": "Elegir el archivo antes de las opciones de importación",
+    "prefs.plugin_import_file_first_help": "Mostrar las opciones de importación del archivo seleccionado. Desactive esta opción para mostrar primero las opciones.",
+    "ui.plugin_dialog_change_file": "Cambiar archivo…",
+    "ui.plugin_dialog_open_file": "Abrir archivo",
+    "ui.plugin_dialog_reading_file": "Leyendo las opciones del archivo…"
+  },
+  "he": {
+    "prefs.plugin_import_file_first": "בחירת הקובץ לפני אפשרויות הייבוא",
+    "prefs.plugin_import_file_first_help": "הצגת אפשרויות הייבוא עבור הקובץ שנבחר. כיבוי יציג את האפשרויות תחילה.",
+    "ui.plugin_dialog_change_file": "החלפת קובץ…",
+    "ui.plugin_dialog_open_file": "פתיחת קובץ",
+    "ui.plugin_dialog_reading_file": "קריאת אפשרויות הקובץ…"
+  },
+  "ja": {
+    "prefs.plugin_import_file_first": "インポート設定の前にファイルを選択",
+    "prefs.plugin_import_file_first_help": "選択したファイルのインポート設定を表示します。オフにすると設定を先に表示します。",
+    "ui.plugin_dialog_change_file": "ファイルを変更…",
+    "ui.plugin_dialog_open_file": "ファイルを開く",
+    "ui.plugin_dialog_reading_file": "ファイルの設定を読み込み中…"
+  },
+  "ko": {
+    "prefs.plugin_import_file_first": "가져오기 옵션 전에 파일 선택",
+    "prefs.plugin_import_file_first_help": "선택한 파일의 가져오기 옵션을 표시합니다. 끄면 옵션을 먼저 표시합니다.",
+    "ui.plugin_dialog_change_file": "파일 변경…",
+    "ui.plugin_dialog_open_file": "파일 열기",
+    "ui.plugin_dialog_reading_file": "파일 옵션을 읽는 중…"
+  },
+  "uk": {
+    "prefs.plugin_import_file_first": "Вибирати файл перед параметрами імпорту",
+    "prefs.plugin_import_file_first_help": "Показувати параметри імпорту для вибраного файлу. Вимкніть, щоб спочатку показувати параметри.",
+    "ui.plugin_dialog_change_file": "Змінити файл…",
+    "ui.plugin_dialog_open_file": "Відкрити файл",
+    "ui.plugin_dialog_reading_file": "Читання параметрів файлу…"
+  },
+  "vi": {
+    "prefs.plugin_import_file_first": "Chọn tệp trước các tùy chọn nhập",
+    "prefs.plugin_import_file_first_help": "Hiển thị tùy chọn nhập cho tệp đã chọn. Tắt để hiển thị tùy chọn trước.",
+    "ui.plugin_dialog_change_file": "Đổi tệp…",
+    "ui.plugin_dialog_open_file": "Mở tệp",
+    "ui.plugin_dialog_reading_file": "Đang đọc tùy chọn tệp…"
+  },
+  "zh": {
+    "prefs.plugin_import_file_first": "在导入选项之前选择文件",
+    "prefs.plugin_import_file_first_help": "显示所选文件的导入选项。关闭后先显示选项。",
+    "ui.plugin_dialog_change_file": "更换文件…",
+    "ui.plugin_dialog_open_file": "打开文件",
+    "ui.plugin_dialog_reading_file": "正在读取文件选项…"
+  }
+}
