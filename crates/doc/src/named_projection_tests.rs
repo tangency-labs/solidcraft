@@ -302,7 +302,10 @@ fn a_lost_projection_names_the_features_that_made_it() {
     let mut doc = Document::default();
     let ids: Vec<u64> = made
         .iter()
-        .map(|name| doc.add_feature(crate::FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::default() }, Some(name)).unwrap())
+        .map(|name| {
+            doc.add_feature(crate::FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::default() }, Some(name))
+                .unwrap()
+        })
         .collect();
     let [a, b, c] = ids[..] else { panic!("{ids:?}") };
     let mut initial = ModelState::default();
