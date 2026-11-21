@@ -12,6 +12,7 @@
 
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::json;
+use solidcore_ops::affine::{distance_along, line_plane_parameter, line_point_at};
 use solidcore_ops::{point_displacement, point_distance, point_set_summary};
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::prelude::*;
@@ -1549,8 +1550,9 @@ pub(crate) fn device_camera(
             let p = match pivot {
                 DeviceOrbitPivot::Point(p) => p,
                 DeviceOrbitPivot::ViewDepth(reference) => {
-                    let depth = cam.frame_coords(reference).z;
-                    let p = cam.target + cam.back() * depth;
+                    let back = cam.back().into();
+                    let depth = distance_along(cam.target.into(), back, reference.into());
+                    let p = Vec3::from(line_point_at(cam.target.into(), back, depth));
                     if p.is_finite() && (cam.fov <= 0.0 || depth < cam.distance - 1e-9) { p } else { cam.target }
                 }
             };
@@ -1858,11 +1860,7 @@ fn view_pivot_at(app: &SolveApp, proj: &Proj, at: Pos2) -> Option<Vec3> {
     let centre = proj.rect.center();
     let centred = at.distance(centre) < 0.5;
     let (origin, dir, material) = crate::view_pick::orbit_ray(app, proj, if centred { centre } else { at });
-    let along = dir.dot(proj.cam.back());
-    if along.abs() < 1e-9 {
-        return None;
-    }
-    let target = -proj.cam.frame_coords(origin).z / along;
+    let target = line_plane_parameter(origin.into(), dir.into(), proj.cam.target.into(), proj.cam.back().into(), 1e-9)?;
     let depth = match material {
         Some((near, far)) if !(near..=far).contains(&target) => f64::midpoint(near, far),
         _ => target,
@@ -1871,7 +1869,7 @@ fn view_pivot_at(app: &SolveApp, proj: &Proj, at: Pos2) -> Option<Vec3> {
     if centred && depth == target {
         return None;
     }
-    let pivot = origin + dir * depth;
+    let pivot = Vec3::from(line_point_at(origin.into(), dir.into(), depth));
     pivot.is_finite().then_some(pivot)
 }
 

@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::{Value, json};
 
+use solidcore_ops::affine::{clipped_line_box_interval, line_halfspace_interval, line_parameter_from_start, line_point_at};
 use solidcore_record::Vec3;
 use solidcraft_engine::SectionPlane;
 use solidcraft_engine::doc::{apply_point, is_identity};
@@ -315,7 +316,7 @@ fn visible_body_interval(
     origin: Vec3,
     dir: Vec3,
 ) -> Option<(f64, f64)> {
-    use crate::viewport::{frame_ghosted, ray_box, section_planes};
+    use crate::viewport::{frame_ghosted, section_planes};
 
     let ((near, far), _) = section_ray_interval(&section_planes(app), origin, dir)?;
     let clip = (near.max(0.0), far);
@@ -326,10 +327,8 @@ fn visible_body_interval(
         if bounds.is_empty() || !bounds.min.is_finite() || !bounds.max.is_finite() {
             return Some(clip.0);
         }
-        let pad = bounds.diagonal() * 1e-6 + 1e-9;
-        let near = ray_box(origin, dir, bounds, pad)?.max(clip.0);
-        let far = -ray_box(origin, -dir, bounds, pad)?;
-        (near.is_finite() && near <= far.min(clip.1)).then_some(near)
+        let (near, _) = clipped_line_box_interval([bounds.min.into(), bounds.max.into()], origin.into(), dir.into(), clip, (1e-6, 1e-9), 1e-15)?;
+        near.is_finite().then_some(near)
     };
     let replaced = app.preview.effective_replaced();
     let mut candidates: Vec<_> = tree
@@ -371,10 +370,10 @@ fn visible_body_interval(
 /// The nearest displayed triangle in the kept part of the ray, using the mesh's own index.
 fn mesh_hit_in_clip(app: &SolveApp, body: &solidcraft_engine::doc::ModelBody, origin: Vec3, dir: Vec3, clip: (f64, f64)) -> Option<f64> {
     let (mesh, place) = body.mesh_in_place();
-    let (local_origin, local_dir) = crate::viewport::local_ray(&place, origin + dir * clip.0, dir)?;
+    let clipped_origin = Vec3::from(line_point_at(origin.into(), dir.into(), clip.0));
+    let (local_origin, local_dir) = crate::viewport::local_ray(&place, clipped_origin, dir)?;
     let (t, _) = crate::pick_index::raycast(app.viewport.pick_index.of(&mesh).as_deref(), &mesh, local_origin, local_dir)?;
-    let depth = t + clip.0;
-    (depth <= clip.1).then_some(depth)
+    line_parameter_from_start(clip, t)
 }
 
 /// The hit point and outward surface normal in world space. A flat face (constant mesh
@@ -447,16 +446,10 @@ pub(crate) fn section_entry(planes: &[SectionPlane], o: Vec3, d: Vec3) -> Option
 fn section_ray_interval(planes: &[SectionPlane], o: Vec3, d: Vec3) -> Option<((f64, f64), Option<usize>)> {
     let (mut lo, mut hi, mut through) = (f64::NEG_INFINITY, f64::INFINITY, None);
     for (i, c) in planes.iter().enumerate() {
-        // n·(o + d·t) <= n·origin: t·dn <= s.
-        let (dn, s) = (c.normal.dot(d), c.normal.dot(c.origin - o));
-        if dn.abs() < 1e-12 {
-            if s < 0.0 {
-                return None;
-            }
-        } else if dn > 0.0 {
-            hi = hi.min(s / dn);
-        } else if s / dn > lo {
-            (lo, through) = (s / dn, Some(i));
+        let (near, far) = line_halfspace_interval(o.into(), d.into(), c.origin.into(), c.normal.into(), 1e-12)?;
+        hi = hi.min(far);
+        if near > lo {
+            (lo, through) = (near, Some(i));
         }
     }
     (lo <= hi).then_some(((lo, hi), through))

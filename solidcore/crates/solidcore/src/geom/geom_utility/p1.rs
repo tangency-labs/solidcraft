@@ -414,16 +414,90 @@ pub fn line_plane_intersect(
 
     let plane_eq_d = -plane_norm.dot(plane_pnt);
     let tol = EFF_ZERO * line_vec.max_dimension() + EFF_ZERO_SQ;
+    line_plane_parameter_from_offset(line_vec.dot(plane_norm), tol, || {
+        plane_eq_d + line_pnt.dot(plane_norm)
+    })
+    .ok_or_else(|| SolidError::geom_failed(OP, "the line is parallel to the plane"))
+}
+
+/// The signed parameter where a line meets the plane through the given point.
+/// `min_abs_dot` is the caller's positive cutoff on the absolute dot product of the
+/// line direction and plane normal. Below that cutoff the line is considered parallel.
+/// The offset is measured from the plane's point before projecting, preserving small
+/// offsets when both points are far from the world origin. Returns no parameter for
+/// invalid inputs or non-finite results.
+#[must_use]
+pub fn line_plane_parameter(
+    line_pnt: Point3,
+    line_vec: Vec3,
+    plane_pnt: Point3,
+    plane_norm: Vec3,
+    min_abs_dot: f64,
+) -> Option<f64> {
     let denom = line_vec.dot(plane_norm);
-
-    if denom.abs() < tol {
-        return Err(SolidError::geom_failed(
-            OP,
-            "the line is parallel to the plane",
-        )); // Parallel case
+    if !(min_abs_dot.is_finite() && min_abs_dot > 0.0 && denom.is_finite()) {
+        return None;
     }
+    line_plane_parameter_from_offset(denom, min_abs_dot, || {
+        line_pnt.distance_along(plane_pnt, plane_norm)
+    })
+    .filter(|parameter| parameter.is_finite())
+}
 
-    Ok(-(plane_eq_d + line_pnt.dot(plane_norm)) / denom)
+fn line_plane_parameter_from_offset(
+    denom: f64,
+    min_abs_dot: f64,
+    offset: impl FnOnce() -> f64,
+) -> Option<f64> {
+    if denom.abs() < min_abs_dot {
+        return None;
+    }
+    Some(-offset() / denom)
+}
+
+/// Line parameters kept by the closed half-space on the non-positive side of the plane.
+/// The caller sets the minimum absolute dot product to treat a line as non-parallel.
+/// An intercept beyond a representable parameter is kept as a signed unbounded end.
+/// Returns `None` when no finite parameter lies in the half-space or the input is invalid.
+#[must_use]
+pub fn line_halfspace_interval(
+    line_pnt: Point3,
+    line_vec: Vec3,
+    plane_pnt: Point3,
+    plane_norm: Vec3,
+    min_abs_dot: f64,
+) -> Option<(f64, f64)> {
+    let finite = |v: Vec3| v.to_array().into_iter().all(f64::is_finite);
+    let denom = line_vec.dot(plane_norm);
+    if !(min_abs_dot.is_finite()
+        && min_abs_dot > 0.0
+        && denom.is_finite()
+        && [line_pnt, line_vec, plane_pnt, plane_norm]
+            .into_iter()
+            .all(finite))
+    {
+        return None;
+    }
+    let offset = line_pnt.distance_along(plane_pnt, plane_norm);
+    if offset.is_nan() {
+        return None;
+    }
+    let full = (f64::NEG_INFINITY, f64::INFINITY);
+    let Some(t) = line_plane_parameter_from_offset(denom, min_abs_dot, || offset) else {
+        return (offset <= 0.0).then_some(full);
+    };
+    let (near, far) = if denom > 0.0 {
+        (full.0, t)
+    } else {
+        (t, full.1)
+    };
+    (near < full.1 && far > full.0).then_some((near, far))
+}
+
+/// A point at a signed parameter along a line, `origin + parameter * direction`.
+#[must_use]
+pub fn line_point_at(origin: Point3, direction: Vec3, parameter: f64) -> Point3 {
+    origin + direction * parameter
 }
 
 /// Intersection of the line `line_pt + t * line_vec` with the plane
@@ -1931,6 +2005,91 @@ mod tests {
         let (a, p) = segment_point_angle_deg_to_perp(Vec3::ZERO, Vec3::X, v(2., 1., 0.));
         assert_eq!(p, 1.0);
         assert!((a - 45.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn line_plane_parameter_uses_the_caller_cutoff_and_relative_origin() {
+        let origin = v(1e16, 1e16, 4.0);
+        let plane = v(1e16, 1e16, 3.0);
+        let direction = v(0.0, 0.0, 2.0);
+        let parameter = line_plane_parameter(origin, direction, plane, v(1.0, 1.0, 1.0), 1e-9);
+        // Subtracting the world-coordinate projections would lose the 1 mm offset.
+        assert_eq!(parameter, Some(-0.5));
+        assert_eq!(line_point_at(origin, direction, parameter.unwrap()), plane);
+
+        let point = v(0.0, 0.0, 1e-9);
+        assert_eq!(
+            line_plane_parameter(Vec3::ZERO, v(1.0, 0.0, 0.5e-9), point, Vec3::Z, 1e-9),
+            None
+        );
+        assert_eq!(
+            line_plane_parameter(Vec3::ZERO, v(1.0, 0.0, 1e-9), point, Vec3::Z, 1e-9),
+            Some(1.0)
+        );
+        assert_eq!(
+            line_plane_parameter(Vec3::ZERO, v(f64::NAN, 0.0, 1.0), point, Vec3::Z, 1e-9),
+            None
+        );
+        assert_eq!(
+            line_plane_parameter(
+                Vec3::ZERO,
+                v(f64::MAX, 0.0, 0.0),
+                Vec3::X,
+                v(2.0, 0.0, 0.0),
+                1e-9
+            ),
+            None
+        );
+        assert_eq!(
+            line_plane_parameter(
+                v(f64::MAX, 0.0, 0.0),
+                Vec3::X,
+                v(-f64::MAX, 0.0, 0.0),
+                Vec3::X,
+                1e-9
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn line_halfspace_interval_keeps_the_right_side_and_parallel_lines() {
+        let full = (f64::NEG_INFINITY, f64::INFINITY);
+        let clip = |line_pnt, line_vec, plane_pnt| {
+            line_halfspace_interval(line_pnt, line_vec, plane_pnt, Vec3::Z, 1e-12)
+        };
+        assert_eq!(
+            clip(Vec3::ZERO, Vec3::Z, v(0.0, 0.0, 5.0)),
+            Some((full.0, 5.0))
+        );
+        assert_eq!(
+            clip(Vec3::ZERO, -Vec3::Z, v(0.0, 0.0, -5.0)),
+            Some((5.0, full.1))
+        );
+        assert_eq!(clip(-Vec3::Z, Vec3::X, Vec3::ZERO), Some(full));
+        assert_eq!(clip(Vec3::ZERO, Vec3::X, Vec3::ZERO), Some(full));
+        assert_eq!(clip(Vec3::Z, v(1.0, 0.0, 0.5e-12), Vec3::ZERO), None);
+    }
+
+    #[test]
+    fn line_halfspace_interval_handles_intercepts_that_overflow() {
+        let d = v(0.75_f64.sqrt(), 0.0, 0.5);
+        let full = (f64::NEG_INFINITY, f64::INFINITY);
+        let plane = v(0.0, 0.0, 1e308);
+        for direction in [d, -d] {
+            assert_eq!(
+                line_halfspace_interval(Vec3::ZERO, direction, plane, Vec3::Z, 1e-12),
+                Some(full)
+            );
+            assert_eq!(
+                line_halfspace_interval(Vec3::ZERO, direction, -plane, Vec3::Z, 1e-12),
+                None
+            );
+            assert_eq!(
+                line_plane_parameter(Vec3::ZERO, direction, plane, Vec3::Z, 1e-12),
+                None
+            );
+        }
     }
 
     #[test]
