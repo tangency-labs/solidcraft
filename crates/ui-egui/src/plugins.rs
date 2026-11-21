@@ -83,6 +83,7 @@ pub struct Plugin {
     /// The images its entries name, read from the package (`plugin_images`): each relative path
     /// with the icon name it is drawn by.
     pub images: std::collections::BTreeMap<String, String>,
+    pub declarations: solidcraft_engine::plugin::UiDeclarations,
     pub(crate) swatches: crate::plugin_images::Swatches,
 }
 
@@ -150,6 +151,7 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         groups: Default::default(),
         entries: Vec::new(),
         images: Default::default(),
+        declarations: Default::default(),
         swatches: Default::default(),
     })
 }
@@ -163,6 +165,7 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
     let package = solidcraft_engine::plugin::read_package(&dir.to_string_lossy()).map_err(|e| e.to_string())?;
     let parsed = package.manifest;
     let mut plugin = check(Manifest { id: parsed.id, name: parsed.name, version: parsed.version, description: parsed.description }, folder)?;
+    plugin.declarations = parsed.declarations;
     plugin.path = dir.to_string_lossy().into_owned();
     plugin.approval = package.approval;
     let executable = parsed.runtime.is_some();
@@ -1621,6 +1624,7 @@ mod tests {
             groups: Default::default(),
             entries: Vec::new(),
             images: Default::default(),
+            declarations: Default::default(),
             swatches: Default::default(),
             id: "ftc-frc-parts".into(),
             name: "FTC and FRC parts".into(),

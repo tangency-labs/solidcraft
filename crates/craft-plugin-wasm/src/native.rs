@@ -24,6 +24,7 @@ mod bindings {
 }
 include!(concat!(env!("OUT_DIR"), "/aliases.rs"));
 include!(concat!(env!("OUT_DIR"), "/importer.rs"));
+include!(concat!(env!("OUT_DIR"), "/workbench.rs"));
 
 const MAX_CALLS: usize = 256;
 /// An importer streams its file in chunks and reports progress as it goes.
@@ -185,6 +186,7 @@ impl<H: PluginHost> State<H> {
     }
 }
 impl<H: PluginHost> types::Host for State<H> {}
+impl<H: PluginHost> ui::Host for State<H> {}
 impl<H: PluginHost> commands::Host for State<H> {
     fn run(&mut self, command: String, args: String) -> std::result::Result<String, PluginError> {
         self.check()?;
@@ -276,7 +278,12 @@ impl<H: PluginHost> files::Host for State<H> {
         let read = (|| -> std::io::Result<Option<Vec<u8>>> {
             let folder = self.folders.get(&grant).ok_or_else(|| std::io::Error::other("grant disappeared"))?;
             let staged = self.staged.get(&(grant.clone(), Path::new(&path).components().collect()));
-            let file = match folder.dir.open(staged.map(|pending| pending.temporary.as_path()).unwrap_or(Path::new(&path))) {
+            // Reject named pipes without waiting for a writer before checking the opened handle.
+            let mut options = OpenOptions::new();
+            options.read(true);
+            #[cfg(unix)]
+            options.custom_flags(O_NONBLOCK);
+            let file = match folder.dir.open_with(staged.map(|pending| pending.temporary.as_path()).unwrap_or(Path::new(&path)), &options) {
                 Err(error) if staged.is_none() && error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
                 opened => opened?,
             };
@@ -727,7 +734,7 @@ pub(super) fn run<H: PluginHost + 'static>(
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
-    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, folders);
+    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, folders, is_workbench(manifest));
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => state.publish_writes().map(|()| value),
@@ -745,6 +752,7 @@ pub(super) fn run<H: PluginHost + 'static>(
     (state.host, result)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute<H: PluginHost + 'static>(
     host: H,
     runtime: &craft_plugin::RuntimeManifest,
@@ -753,6 +761,7 @@ fn execute<H: PluginHost + 'static>(
     (engine, component, stack): (Engine, Component, usize),
     (commands, groups, design_tokens): (BTreeMap<String, CommandSchema>, BTreeSet<String>, bool),
     folders: BTreeMap<String, Folder>,
+    workbench: bool,
 ) -> (State<H>, Result<Value>) {
     let limits = &runtime.limits;
     let state = State {
@@ -776,8 +785,17 @@ fn execute<H: PluginHost + 'static>(
     let outcome = (|| {
         prepare_store(&mut store, limits)?;
         let wit = check_imports(&engine, &component)?;
+        if workbench && wit != Wit::Current {
+            return Err(component_error("workbench-plugin requires the current WIT version"));
+        }
         let response = with_interrupts(&engine, || match wit {
             Wit::V0_1 => v0_1::call_entry(&engine, &mut store, &component, &entry.name, &params),
+            Wit::Current if workbench => {
+                let mut linker = Linker::new(&engine);
+                workbench_bindings::WorkbenchPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
+                let guest = workbench_bindings::WorkbenchPlugin::instantiate(&mut store, &component, &linker)?;
+                Ok(call_workbench_entry!(guest, &mut store, &entry.name, &params)?.map_err(host_error))
+            }
             Wit::Current => {
                 let mut linker = Linker::new(&engine);
                 bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
@@ -886,7 +904,8 @@ fn stack_bytes(limits: &Limits, options: RuntimeOptions, importer: bool) -> Resu
 /// The first eight bytes of a core WebAssembly module; a component's header names layer 1 instead.
 const CORE_MODULE_HEADER: [u8; 8] = *b"\0asm\x01\0\0\0";
 
-/// A host that answers nothing: [`check_component`] links against it and never instantiates.
+/// A host with no app or filesystem authority: component checks only link it, and `describe`
+/// instantiates it to read the typed catalog.
 struct Inert;
 impl PluginHost for Inert {
     fn command_catalog(&self) -> Vec<CommandSchema> {
@@ -930,17 +949,166 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
     let wit = check_imports(&engine, &component)?;
     let link = |e: wasmtime::Error| component_error(format!("{e:#}"));
     if wit == Wit::V0_1 {
+        if is_workbench(manifest) {
+            return Err(component_error("workbench-plugin requires the current WIT version"));
+        }
         return v0_1::check_link::<Inert>(&engine, &component, importer).map_err(link);
     }
     let mut linker = Linker::<State<Inert>>::new(&engine);
     if importer {
         importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         importer_bindings::ImporterPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
+    } else if is_workbench(manifest) {
+        workbench_bindings::WorkbenchPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        workbench_bindings::WorkbenchPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
     } else {
         bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         bindings::CommandPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
     }
     Ok(())
+}
+
+fn is_workbench(manifest: &Manifest) -> bool {
+    manifest.capabilities.iter().any(|capability| capability.starts_with("workspaces@"))
+}
+
+/// Declarations run without a design host, file grants, clock permission or command grants.
+/// Even a start function cannot acquire authority before `describe` is called.
+pub(super) fn describe(manifest: &Manifest, bytes: &[u8], options: RuntimeOptions) -> Result<craft_plugin::UiDeclarations> {
+    if !is_workbench(manifest) {
+        return Err(HostError::InvalidManifest { field: "capabilities".into(), reason: "describe requires workspaces@0.1".into() });
+    }
+    let runtime = manifest
+        .runtime
+        .as_ref()
+        .filter(|runtime| !runtime.is_importer())
+        .ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "describe requires a command runtime".into() })?;
+    runtime.validate()?;
+    manifest.declarations.validate(runtime)?;
+    if bytes.len() > runtime.max_component_bytes() {
+        return Err(limit("component size"));
+    }
+    let limits = Limits {
+        fuel: runtime.limits.fuel.min(1_000_000),
+        memory_mib: runtime.limits.memory_mib.min(16),
+        deadline_ms: runtime.limits.deadline_ms.min(craft_plugin::WORKSPACE_HOOK_DEADLINE_MS),
+        stack_kib: None,
+    };
+    let stack = stack_bytes(&limits, options, false)?;
+    let (engine, component) = compile(bytes, stack)?;
+    if check_imports(&engine, &component)? != Wit::Current {
+        return Err(component_error("workbench-plugin requires the current WIT version"));
+    }
+    let state = State {
+        host: Inert,
+        commands: BTreeMap::new(),
+        groups: BTreeSet::new(),
+        effect: Effect::Read,
+        design_tokens: false,
+        folders: BTreeMap::new(),
+        staged: BTreeMap::new(),
+        clock: false,
+        limits: store_limits(&limits, 10_000),
+        failed: None,
+        calls: 0,
+        max_calls: MAX_CALLS,
+        log_bytes: 0,
+        deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
+        import: None,
+    };
+    let mut store = Store::new(&engine, state);
+    let result = (|| {
+        prepare_store(&mut store, &limits)?;
+        let response = with_interrupts(&engine, || {
+            let mut linker = Linker::new(&engine);
+            workbench_bindings::WorkbenchPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
+            let guest = workbench_bindings::WorkbenchPlugin::instantiate(&mut store, &component, &linker)?;
+            call_describe!(guest, &mut store)
+        })?;
+        if let Some(error) = store.data().failed.clone() {
+            return Err(error);
+        }
+        let described = response.map_err(|error| execution_error(&error, store.get_fuel().ok(), &limits, stack))?;
+        if Instant::now() >= store.data().deadline {
+            return Err(deadline());
+        }
+        let declarations = declarations(described);
+        declarations.validate(runtime)?;
+        if declarations != manifest.declarations {
+            return Err(HostError::InvalidManifest {
+                field: "declarations".into(),
+                reason: "ui-provider.describe differs from the declarations reviewed in the manifest".into(),
+            });
+        }
+        Ok(declarations)
+    })();
+    result.map_err(|error| with_limits(error, &limits))
+}
+
+fn dock_zone(zone: ui::DockZone) -> craft_plugin::DockZone {
+    match zone {
+        ui::DockZone::Left => craft_plugin::DockZone::Left,
+        ui::DockZone::Right => craft_plugin::DockZone::Right,
+        ui::DockZone::Bottom => craft_plugin::DockZone::Bottom,
+    }
+}
+
+fn design_kind(kind: ui::DesignKind) -> craft_plugin::DesignKind {
+    match kind {
+        ui::DesignKind::Part => craft_plugin::DesignKind::Part,
+        ui::DesignKind::Assembly => craft_plugin::DesignKind::Assembly,
+        ui::DesignKind::Sketch => craft_plugin::DesignKind::Sketch,
+        ui::DesignKind::Drawing => craft_plugin::DesignKind::Drawing,
+    }
+}
+
+fn panel_node(node: ui::Node) -> craft_plugin::PanelNode {
+    craft_plugin::PanelNode {
+        widget: match node.widget {
+            ui::Widget::Group(children) => craft_plugin::PanelWidget::Group { children },
+            ui::Widget::Text(text) => craft_plugin::PanelWidget::Text { text },
+            ui::Widget::Button(button) => craft_plugin::PanelWidget::Button { label: button.label, icon: button.icon, entry: button.entry },
+            ui::Widget::Unknown => craft_plugin::PanelWidget::Unknown,
+        },
+    }
+}
+
+fn panel_spec(panel: ui::PanelSpec) -> craft_plugin::PanelSpec {
+    craft_plugin::PanelSpec {
+        id: panel.id,
+        title: panel.title,
+        zones: panel.zones.into_iter().map(dock_zone).collect(),
+        layout: craft_plugin::PanelLayout { root: panel.layout.root, nodes: panel.layout.nodes.into_iter().map(panel_node).collect() },
+    }
+}
+
+fn ribbon_tab(tab: ui::RibbonTab) -> craft_plugin::RibbonTab {
+    craft_plugin::RibbonTab {
+        name: tab.name,
+        groups: tab.groups.into_iter().map(|group| craft_plugin::RibbonGroup { name: group.name, entries: group.entries }).collect(),
+    }
+}
+
+fn workspace_spec(workspace: ui::WorkspaceSpec) -> craft_plugin::WorkspaceSpec {
+    craft_plugin::WorkspaceSpec {
+        id: workspace.id,
+        name: workspace.name,
+        icon: workspace.icon,
+        applies_to: workspace.applies_to.into_iter().map(design_kind).collect(),
+        ribbon: workspace.ribbon.into_iter().map(ribbon_tab).collect(),
+        panels: workspace.panels.into_iter().map(|(zone, panels)| (dock_zone(zone), panels)).collect(),
+        builtin_panels: workspace.builtin_panels,
+        on_enter: workspace.on_enter,
+        on_exit: workspace.on_exit,
+    }
+}
+
+fn declarations(declared: ui::Declarations) -> craft_plugin::UiDeclarations {
+    craft_plugin::UiDeclarations {
+        ui_version: declared.ui_version,
+        panels: declared.panels.into_iter().map(panel_spec).collect(),
+        workspaces: declared.workspaces.into_iter().map(workspace_spec).collect(),
+    }
 }
 
 type Compiled = (Arc<[u8]>, usize, Engine, Component);

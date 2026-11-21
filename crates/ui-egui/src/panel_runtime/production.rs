@@ -163,6 +163,9 @@ impl Product {
         Self::ALL.iter().copied().find(|product| product.id() == instance.0).ok_or_else(|| error(Rule::MissingTarget, "unknown application panel"))
     }
     fn available(self, app: &crate::SolveApp) -> bool {
+        if !crate::plugin_workspaces::builtin_available(app, self.id()) {
+            return false;
+        }
         let render = crate::render_workspace::active(app);
         match self {
             Self::Browser => !render && !crate::render_ui::focused(app),
@@ -862,6 +865,9 @@ pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResu
 }
 
 fn sync_bom(app: &mut crate::SolveApp) -> PanelResult<()> {
+    if !crate::plugin_workspaces::builtin_available(app, Product::Bom.id()) {
+        return Ok(());
+    }
     let Some(integration) = app.panel_runtime.as_ref() else { return Ok(()) };
     let Some(state) = integration.production.clone() else { return Ok(()) };
     let mut snapshot = state.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "BOM focus is borrowed"))?;
@@ -911,6 +917,9 @@ fn open_bom(integration: &AppPanelRuntime, layout: &Layout, instance: InstanceId
 }
 
 fn sync_sketch_options(app: &mut crate::SolveApp) -> PanelResult<()> {
+    if !crate::plugin_workspaces::builtin_available(app, Product::SketchOptions.id()) {
+        return Ok(());
+    }
     let Some(integration) = app.panel_runtime.as_ref() else { return Ok(()) };
     let Some(state) = integration.production.clone() else { return Ok(()) };
     let mut snapshot = state.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "application panel visibility is borrowed"))?;
@@ -1315,7 +1324,7 @@ struct ProductionServices {
 }
 impl AppPanelServices for ProductionServices {
     fn refresh_workspace(&mut self, workspace: &WorkspaceId) -> PanelResult<()> {
-        if !WORKSPACES.iter().any(|(id, _, _)| *id == workspace.0) {
+        if !WORKSPACES.iter().any(|(id, _, _)| *id == workspace.0) && !workspace.0.starts_with("plugin:") {
             return Err(error(Rule::Placement, "unregistered application layout workspace"));
         }
         self.local.workspace = workspace.clone();
@@ -1342,7 +1351,9 @@ struct ProductionLocal {
 impl ProductionLocal {
     fn validate(&self, scope: &LocalScope, instance: &InstanceId) -> PanelResult<()> {
         scope.validate()?;
-        Product::from_instance(instance)?;
+        if Product::from_instance(instance).is_err() && !instance.0.starts_with("plugin.") {
+            return Err(error(Rule::MissingTarget, "unknown application panel"));
+        }
         if scope.workspace != self.workspace || scope.document.as_ref() != Some(&self.document) || scope.viewport != self.viewport {
             return Err(error(Rule::Placement, "application panel service has a different owner scope"));
         }
@@ -1466,9 +1477,12 @@ impl FramePanelContent for ProductionFrame<'_> {
         slot: ContentSlot,
         ui: &mut egui::Ui,
         context: &PanelContext,
-        _content: &mut dyn PanelController,
+        content: &mut dyn PanelController,
         services: &mut ContentServices<'_>,
     ) -> PanelResult<()> {
+        if Product::from_instance(&context.instance).is_err() {
+            return content.render(slot, ui, context, services);
+        }
         if slot == ContentSlot::Title {
             // Only the Browser asks for the title's place (`set_header_content`): its search field.
             if Product::from_instance(&context.instance)? == Product::Browser && crate::browser_search::bar_shown(self.app) {

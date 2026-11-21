@@ -51,6 +51,13 @@ pub fn tab_label(tab: &str) -> &str {
 
 /// Workspace switching has one lifecycle for menus and automation.
 pub fn enter(app: &mut crate::SolveApp, workspace: &str) -> Result<(), String> {
+    if workspace.starts_with("plugin:") {
+        return crate::plugin_workspaces::enter(app, workspace);
+    }
+    if !matches!(workspace, "design" | "render" | "drawing") {
+        return Err(app.tr("ui.plugin_workspace.unknown").to_owned());
+    }
+    crate::plugin_workspaces::leave(app)?;
     match workspace {
         "drawing" => {
             if crate::render_workspace::active(app) {
@@ -977,7 +984,7 @@ pub fn starts_a_sketch(app: &crate::SolveApp, id: &str) -> bool {
 /// other tabs to remain usable for the rest of that context. Sketch takes precedence over sheet
 /// metal, and sheet metal over weldments.
 pub fn sync_context(app: &mut crate::SolveApp) {
-    if crate::render_workspace::active(app) || crate::drawing_workspace::active(app) {
+    if crate::plugin_workspaces::active_id(app).is_some() || crate::render_workspace::active(app) || crate::drawing_workspace::active(app) {
         return;
     }
     let context = app
@@ -1085,6 +1092,295 @@ pub fn legacy_buttons(tab: &str, panel: &str) -> Vec<&'static str> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn workspace_plugin() -> crate::plugins::Plugin {
+        let manifest = solidcraft_engine::plugin::parse_manifest(
+            &serde_json::to_vec(&json!({
+                "id":"manufacture", "name":"Manufacture", "version":"1",
+                "capabilities":["commands@0.2", "workspaces@0.1"],
+                "runtime":{"module":"cam.wasm", "commands":[], "entries":[
+                    {"name":"pocket", "effect":"edit"}, {"name":"enter", "effect":"read"}, {"name":"exit", "effect":"read"}
+                ]},
+                "declarations":{"ui_version":1, "panels":[{
+                    "id":"operations", "title":"Operations", "zones":["left", "right", "bottom"],
+                    "layout":{"root":0, "nodes":[{"widget":{"kind":"text", "text":"Ready"}}]}
+                }], "workspaces":[{
+                    "id":"cam", "name":"Machining", "icon":"ws_design", "applies_to":["part"],
+                    "ribbon":[{"name":"Machining", "groups":[{"name":"Operations", "entries":["pocket"]}]}],
+                    "panels":[["right", ["operations"]]], "builtin_panels":["browser"],
+                    "on_enter":"enter", "on_exit":"exit"
+                }]}
+            }))
+            .unwrap(),
+            "manufacture",
+        )
+        .unwrap();
+        crate::plugins::Plugin {
+            id: manifest.id,
+            name: manifest.name,
+            version: manifest.version,
+            description: manifest.description,
+            path: String::new(),
+            approval: "reviewed-cam".into(),
+            disabled: false,
+            groups: Default::default(),
+            entries: manifest.runtime.unwrap().entries,
+            images: Default::default(),
+            declarations: manifest.declarations,
+            swatches: Default::default(),
+        }
+    }
+
+    #[test]
+    fn plugin_workspace_switcher_entry_uses_the_shared_command_and_live_enablement() {
+        let mut h = crate::scenario::Harness::new();
+        let plugin = workspace_plugin();
+        crate::plugin_workspaces::discovered(&mut h.app, &[plugin]);
+        let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Workspace);
+        let item = items.iter().find(|item| item.params.as_ref().is_some_and(|params| params["workspace"] == "plugin:manufacture/cam")).unwrap();
+        assert_eq!(item.label, "Machining");
+        assert!(item.enabled);
+        assert!(items.iter().any(|item| item.id == "ui.workspace.design"));
+        assert!(items.iter().any(|item| item.id == "ui.workspace.render"));
+        h.app.preferences.disabled_plugins.insert("manufacture".into());
+        assert!(crate::plugin_workspaces::switcher_items(&h.app).is_empty());
+        assert!(enter(&mut h.app, "plugin:manufacture/cam").is_err());
+        assert_eq!(h.app.ui.tab, "MODEL");
+    }
+
+    #[test]
+    fn plugin_workspace_enter_and_leave_restore_layout_and_queue_read_hooks() {
+        use solidcraft_engine::panels::*;
+        let mut h = crate::scenario::Harness::new();
+        crate::panel_runtime::ensure_production(&mut h.app).unwrap();
+        let original = h.app.panel_runtime.as_ref().unwrap().runtime().layout().layout().clone();
+        let document = h.app.session.doc.clone();
+        crate::plugin_workspaces::discovered(&mut h.app, &[workspace_plugin()]);
+        enter(&mut h.app, "plugin:manufacture/cam").unwrap();
+        assert_eq!(crate::plugin_workspaces::active_id(&h.app), Some("plugin:manufacture/cam"));
+        assert_eq!(crate::plugin_workspaces::pending_hooks(&h.app), [("plugin:manufacture/cam".into(), true)]);
+        // Selecting the current workspace is observational and does not re-run its hook.
+        enter(&mut h.app, "plugin:manufacture/cam").unwrap();
+        let key = crate::plugin_workspaces::identity("manufacture", "operations");
+        let instance = InstanceId::new(&key).unwrap();
+        let layout = h.app.panel_runtime.as_ref().unwrap().runtime().layout().layout();
+        assert_eq!(layout.workspace.0, "plugin:manufacture/cam");
+        let section = layout.containing(&instance).unwrap().id.clone();
+        assert_eq!(layout.containing(&instance).unwrap().location.zone(), Zone::Right);
+        h.app
+            .dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::Collapse { section, collapsed: true }] })
+            .unwrap();
+        enter(&mut h.app, "design").unwrap();
+        assert_eq!(h.app.ui.tab, "MODEL");
+        assert_eq!(h.app.panel_runtime.as_ref().unwrap().runtime().layout().layout(), &original);
+        assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+        assert_eq!(
+            crate::plugin_workspaces::pending_hooks(&h.app),
+            [("plugin:manufacture/cam".into(), true), ("plugin:manufacture/cam".into(), false)]
+        );
+        enter(&mut h.app, "plugin:manufacture/cam").unwrap();
+        assert!(h.app.panel_runtime.as_ref().unwrap().runtime().layout().layout().containing(&instance).unwrap().collapsed);
+    }
+
+    #[test]
+    fn plugin_workspace_saved_layout_reopens_after_host_startup() {
+        let mut h = crate::scenario::Harness::new();
+        crate::plugin_workspaces::discovered(&mut h.app, &[workspace_plugin()]);
+        enter(&mut h.app, "plugin:manufacture/cam").unwrap();
+        let key = crate::plugin_workspaces::identity("manufacture", "operations");
+        let section = solidcraft_engine::panels::SectionId::new(&key).unwrap();
+        h.app
+            .dispatch_panel_layout(solidcraft_engine::panels::LayoutAction::Apply {
+                expected_revision: None,
+                mutations: vec![solidcraft_engine::panels::Mutation::Collapse { section, collapsed: true }],
+            })
+            .unwrap();
+        let saved = crate::panel_runtime::persistent_preferences_value(&h.app).unwrap().unwrap();
+        assert_eq!(saved["selected"], "solidcraft.classic");
+        let mut reopened = crate::scenario::Harness::new();
+        // The persisted preference record restores the host workspace before discovery.
+        reopened.app.disable_panel_runtime().unwrap();
+        crate::panel_runtime::load_preferences(&mut reopened.app, &json!({"panel_layout":saved}));
+        crate::panel_runtime::ensure_production(&mut reopened.app).unwrap();
+        reopened.frames(2);
+        crate::plugin_workspaces::discovered(&mut reopened.app, &[workspace_plugin()]);
+        enter(&mut reopened.app, "plugin:manufacture/cam").unwrap();
+        let key = crate::plugin_workspaces::identity("manufacture", "operations");
+        let layout = reopened.app.panel_runtime.as_ref().unwrap().runtime().layout().layout();
+        assert!(layout.instances.iter().any(|instance| instance.id.0 == key));
+        assert!(layout.containing(&solidcraft_engine::panels::InstanceId::new(&key).unwrap()).unwrap().collapsed);
+    }
+
+    #[test]
+    fn plugin_workspaces_keep_builtin_panels_when_switching_between_plugins() {
+        let mut h = crate::scenario::Harness::new();
+        let mut plugin = workspace_plugin();
+        let mut second = plugin.declarations.workspaces[0].clone();
+        second.id = "review".into();
+        second.name = "Review".into();
+        plugin.declarations.workspaces[0].builtin_panels.clear();
+        plugin.declarations.workspaces.push(second);
+        crate::plugin_workspaces::discovered(&mut h.app, &[plugin]);
+        enter(&mut h.app, "plugin:manufacture/cam").unwrap();
+        enter(&mut h.app, "plugin:manufacture/review").unwrap();
+        assert!(h.app.panel_runtime.as_ref().unwrap().runtime().layout().layout().instances.iter().any(|instance| instance.id.0 == "browser"));
+        enter(&mut h.app, "design").unwrap();
+        assert!(crate::plugin_workspaces::active_id(&h.app).is_none());
+    }
+
+    fn plugin_workspace_enabled(app: &crate::SolveApp, id: &str) -> bool {
+        crate::plugin_workspaces::switcher_items(app)
+            .iter()
+            .any(|item| item.enabled && item.params.as_ref().is_some_and(|params| params["workspace"] == id))
+    }
+
+    #[test]
+    fn plugin_workspace_eligibility_follows_live_design_kind_and_document() {
+        let mut h = crate::scenario::Harness::new();
+        let mut plugin = workspace_plugin();
+        let mut assembly = plugin.declarations.workspaces[0].clone();
+        assembly.id = "assembly".into();
+        assembly.applies_to = vec![solidcraft_engine::plugin::DesignKind::Assembly];
+        plugin.declarations.workspaces.push(assembly);
+        crate::plugin_workspaces::discovered(&mut h.app, &[plugin]);
+        enter(&mut h.app, "plugin:manufacture/cam").unwrap();
+        assert!(plugin_workspace_enabled(&h.app, "plugin:manufacture/cam"));
+        assert!(!plugin_workspace_enabled(&h.app, "plugin:manufacture/assembly"));
+
+        let uid = h.app.session.uid;
+        h.app.session.execute("component.create", &json!({"name":"Sub", "activate":false})).unwrap();
+        assert_eq!(h.app.session.uid, uid);
+        assert!(!h.app.session.doc.occurrences.is_empty());
+        assert!(!plugin_workspace_enabled(&h.app, "plugin:manufacture/cam"));
+        assert!(plugin_workspace_enabled(&h.app, "plugin:manufacture/assembly"));
+
+        h.app.session = solidcraft_engine::Session::default();
+        assert_ne!(h.app.session.uid, uid);
+        assert!(plugin_workspace_enabled(&h.app, "plugin:manufacture/cam"));
+        assert!(!plugin_workspace_enabled(&h.app, "plugin:manufacture/assembly"));
+    }
+
+    #[test]
+    fn plugin_workspace_drawing_context_is_kept_only_for_its_document() {
+        let mut h = crate::scenario::Harness::new();
+        let mut plugin = workspace_plugin();
+        let mut drawing = plugin.declarations.workspaces[0].clone();
+        drawing.id = "drawing".into();
+        drawing.applies_to = vec![solidcraft_engine::plugin::DesignKind::Drawing];
+        plugin.declarations.workspaces.push(drawing);
+        crate::plugin_workspaces::discovered(&mut h.app, &[plugin]);
+        enter(&mut h.app, "drawing").unwrap();
+        enter(&mut h.app, "plugin:manufacture/drawing").unwrap();
+        assert_eq!(h.app.ui.tab, "PLUGIN");
+        assert!(plugin_workspace_enabled(&h.app, "plugin:manufacture/drawing"));
+        assert!(!plugin_workspace_enabled(&h.app, "plugin:manufacture/cam"));
+
+        h.app.session = solidcraft_engine::Session::default();
+        assert!(!plugin_workspace_enabled(&h.app, "plugin:manufacture/drawing"));
+        assert!(plugin_workspace_enabled(&h.app, "plugin:manufacture/cam"));
+    }
+
+    #[test]
+    fn plugin_ribbon_clicks_report_whether_the_tab_was_already_selected() {
+        fn frame(h: &mut crate::scenario::Harness, events: Vec<egui::Event>, folded: bool) -> (Option<bool>, egui::FullOutput) {
+            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 160.0));
+            let mut clicked = None;
+            let mut output = h.ctx.run_ui(egui::RawInput { screen_rect: Some(rect), events, focused: true, ..Default::default() }, |ui| {
+                clicked = crate::plugin_workspaces::ribbon(&mut h.app, ui, rect, folded);
+            });
+            output.textures_delta.clear();
+            (clicked, output)
+        }
+        let mut h = crate::scenario::Harness::new();
+        let mut plugin = workspace_plugin();
+        let mut second_tab = plugin.declarations.workspaces[0].ribbon[0].clone();
+        second_tab.name = "Review".into();
+        plugin.declarations.workspaces[0].ribbon.push(second_tab);
+        crate::plugin_workspaces::discovered(&mut h.app, &[plugin]);
+        enter(&mut h.app, "plugin:manufacture/cam").unwrap();
+        let (_, output) = frame(&mut h, Vec::new(), false);
+        let title = crate::test_support::text_shapes(&output).find(|shape| shape.galley.text() == "Review").unwrap();
+        let point = title.pos + title.galley.size() * 0.5;
+        for (folded, already_selected) in [(true, false), (false, true)] {
+            let button =
+                |pressed| egui::Event::PointerButton { pos: point, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+            let _ = frame(&mut h, vec![egui::Event::PointerMoved(point), button(true)], folded);
+            let (clicked, _) = frame(&mut h, vec![button(false)], folded);
+            assert_eq!(clicked, Some(already_selected), "folded ribbon closing uses the previous selection");
+        }
+    }
+
+    #[test]
+    fn queued_workspace_hooks_are_dropped_when_their_document_changes() {
+        for replace_session in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            crate::plugin_workspaces::discovered(&mut h.app, &[workspace_plugin()]);
+            enter(&mut h.app, "plugin:manufacture/cam").unwrap();
+            assert_eq!(crate::plugin_workspaces::pending_hooks(&h.app).len(), 1);
+            enter(&mut h.app, "design").unwrap();
+            assert_eq!(crate::plugin_workspaces::pending_hooks(&h.app).len(), 2, "both enter and exit hooks belong to the old design");
+            if replace_session {
+                h.app.session = solidcraft_engine::Session::default();
+            } else {
+                h.app.session.document_id.push_str("-replacement");
+            }
+            crate::plugin_workspaces::tick(&mut h.app, &h.ctx);
+            assert!(crate::plugin_workspaces::pending_hooks(&h.app).is_empty());
+            assert!(!crate::plugin_workspaces::hook_running(&h.app), "a stale hook must never start on the replacement design");
+        }
+    }
+
+    #[test]
+    fn workspace_exit_hook_failures_remain_visible_after_leaving() {
+        let mut h = crate::scenario::Harness::new();
+        crate::plugin_workspaces::discovered(&mut h.app, &[workspace_plugin()]);
+        enter(&mut h.app, "plugin:manufacture/cam").unwrap();
+        let reply = crate::plugin_workspaces::hook_reply_channel(&mut h.app, "plugin:manufacture/cam");
+        enter(&mut h.app, "design").unwrap();
+        h.app.set_status("After leaving", false);
+        let status = h.app.status.clone();
+        reply.send(Err("exit hook failed".into())).unwrap();
+        crate::plugin_workspaces::poll_hook(&mut h.app);
+        assert!(crate::plugin_workspaces::active_id(&h.app).is_none());
+        assert_eq!(h.app.ui.tab, "MODEL");
+        assert_eq!(h.app.status, status, "an inactive workspace reports to Messages without replacing the current status");
+        let message = h.app.messages.iter().next_back().unwrap();
+        assert!(message.error && message.text.contains("plugin:manufacture/cam") && message.text.contains("exit hook failed"));
+    }
+
+    #[test]
+    fn running_workspace_hook_errors_do_not_overwrite_a_replacement_design() {
+        let mut h = crate::scenario::Harness::new();
+        crate::plugin_workspaces::discovered(&mut h.app, &[workspace_plugin()]);
+        enter(&mut h.app, "plugin:manufacture/cam").unwrap();
+        let reply = crate::plugin_workspaces::hook_reply_channel(&mut h.app, "plugin:manufacture/cam");
+        h.app.session = solidcraft_engine::Session::default();
+        h.app.set_status("Replacement design", false);
+        let status = h.app.status.clone();
+        reply.send(Err("previous design hook failed".into())).unwrap();
+        crate::plugin_workspaces::poll_hook(&mut h.app);
+        assert_eq!(h.app.status, status);
+        assert!(h.app.messages.iter().any(|message| message.error && message.text.contains("previous design hook failed")));
+        // The same workspace id in another design must not inherit the old design's ribbon error.
+        let mut output = h.ctx.run_ui(egui::RawInput::default(), |ui| {
+            let rect = ui.max_rect();
+            let _ = crate::plugin_workspaces::ribbon(&mut h.app, ui, rect, false);
+        });
+        output.textures_delta.clear();
+        assert!(!crate::test_support::text_shapes(&output).any(|shape| shape.galley.text().contains("previous design hook failed")));
+    }
+
+    #[test]
+    fn plugins_without_workspace_capability_keep_the_builtin_switcher_and_layout() {
+        let mut h = crate::scenario::Harness::new();
+        let mut plugin = workspace_plugin();
+        plugin.declarations = Default::default();
+        crate::plugin_workspaces::discovered(&mut h.app, &[plugin]);
+        assert!(crate::plugin_workspaces::switcher_items(&h.app).is_empty());
+        assert!(enter(&mut h.app, "plugin:manufacture/cam").is_err());
+        assert_eq!(h.app.ui.tab, "MODEL");
+        assert!(crate::plugin_workspaces::active_id(&h.app).is_none());
+    }
 
     /// Every Construct command appears once, under its entity heading, including filtered menus.
     #[test]

@@ -2,8 +2,9 @@
 
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
-    API, DesignToken, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES,
-    MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, swatches, valid_id,
+    API, DesignKind, DesignToken, DockZone, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity,
+    MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, PanelLayout, PanelNode, PanelSpec as UiPanelSpec, PanelWidget,
+    RibbonGroup, RibbonTab, RuntimeManifest, UiDeclarations, UiSlot, WorkspaceSpec, check_input, conditions, swatches, valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
@@ -329,6 +330,76 @@ pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
 pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {
     let name = package.manifest.name.clone();
     run_package(session, package, entry, params).map_err(messages::named(&name, None))
+}
+
+/// Read typed workspace declarations with no access to a session or granted files.
+/// Discovery calls this on its worker; the component must describe exactly the declarations
+/// covered by the package approval, and its code runs within short fixed budgets.
+pub fn describe_workspace_ui(package: &Package) -> Result<craft_plugin::UiDeclarations> {
+    #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        craft_plugin_wasm::describe(&package.manifest, &package.component)
+            .map_err(EngineError::from)
+            .map_err(messages::named(&package.manifest.name, None))
+    }
+    #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+    {
+        let _ = package;
+        Err(error("plugin UI requires an x86-64 or AArch64 native build with the plugins feature"))
+    }
+}
+
+/// Run a workspace's optional enter or exit entry against a discarded snapshot.
+///
+/// The window calls this on its worker, so switching never waits for guest code. Hooks have
+/// at most one second, one million fuel and 32 MiB, or the package's or user's lower budget.
+/// The execution copy retains the original approval hash: narrowing a call's limits never
+/// changes which exact package the user approved. No computed state, camera or history is
+/// adopted, even if a host command classified as read changes transient session state.
+pub fn run_workspace_hook(session: &mut Session, mut package: Package, workspace: &str, entering: bool) -> Result<crate::schema::plugin::RunResult> {
+    let name = package.manifest.name.clone();
+    let result = (|| {
+        let mut scratch = session.scratch();
+        scratch.plugin_state.refresh_stored();
+        if scratch.disabled_plugins.contains(&package.manifest.id) {
+            return Err(error("plugin is disabled"));
+        }
+        if !package.manifest.capabilities.iter().any(|capability| capability.starts_with("workspaces@")) {
+            return Err(error("workspace hooks require workspaces@0.1"));
+        }
+        let declarations = &package.manifest.declarations;
+        let workspace_spec = declarations.workspaces.iter().find(|spec| spec.id == workspace).ok_or_else(|| error("unknown workspace"))?;
+        let hook = if entering { &workspace_spec.on_enter } else { &workspace_spec.on_exit };
+        let Some(entry) = hook.clone() else {
+            return Ok(crate::schema::plugin::RunResult { result: json!({}), sketch_exits: vec![], view: None, param_warnings: vec![] });
+        };
+        let ceilings = host_limits_for(&scratch, &package.manifest.id, &package.approval);
+        let runtime = package.manifest.runtime.as_mut().ok_or_else(|| error("no executable runtime"))?;
+        let declared = runtime.entries.iter().find(|declared| declared.name == entry).ok_or_else(|| error("unknown workspace hook entry"))?;
+        if declared.kind != EntryKind::Command || declared.effect != Effect::Read {
+            return Err(error("workspace hooks must be read-only command entries"));
+        }
+        runtime.limits = workspace_hook_limits(&runtime.limits, ceilings);
+        // Grouped read commands also receive no write authority. The component's own
+        // files interface already rejects writes from a read entry.
+        for grant in scratch.plugin_state.grants.values_mut() {
+            for folder in &mut grant.folders {
+                folder.write = false;
+            }
+        }
+        let result = run_package(&mut scratch, package, &entry, &json!({"workspace": workspace}))?;
+        Ok(crate::schema::plugin::RunResult { result: result.result, sketch_exits: vec![], view: None, param_warnings: result.param_warnings })
+    })();
+    result.map_err(messages::named(&name, None))
+}
+
+fn workspace_hook_limits(requested: &Limits, ceilings: HostLimits) -> Limits {
+    Limits {
+        fuel: requested.fuel.min(1_000_000).min(ceilings.max_fuel),
+        memory_mib: requested.memory_mib.min(32).min(ceilings.max_memory_mib),
+        deadline_ms: requested.deadline_ms.min(craft_plugin::WORKSPACE_HOOK_DEADLINE_MS),
+        stack_kib: requested.stack_kib.map(|kib| kib.min(256)),
+    }
 }
 
 fn run_package(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {

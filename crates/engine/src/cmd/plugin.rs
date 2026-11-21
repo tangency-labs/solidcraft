@@ -145,6 +145,7 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         version: manifest.version.clone(),
         description: manifest.description.clone(),
         capabilities: manifest.capabilities.clone(),
+        declarations: manifest.declarations.clone(),
         permissions: runtime.map(|r| r.permissions.clone()).unwrap_or_default(),
         limits: runtime.map(|r| r.limits.clone()),
         host_limits: s.plugin_limits,

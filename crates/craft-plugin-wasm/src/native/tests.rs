@@ -355,6 +355,32 @@ fn files_inside_grant_work_and_escape_is_refused() {
 }
 
 #[test]
+#[cfg(unix)]
+fn reading_a_granted_fifo_without_a_writer_is_refused_without_blocking() {
+    use files::Host;
+    let root = std::env::temp_dir().join(format!("craft-plugin-fifo-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    assert!(std::process::Command::new("mkfifo").arg(root.join("pipe")).status().unwrap().success());
+    let folder = Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: false };
+    let (tx, rx) = mpsc::channel();
+    // Keep a regression from hanging the test process: no writer ever opens the pipe.
+    let worker = std::thread::spawn(move || {
+        let mut state = state(App::default());
+        state.effect = Effect::Read;
+        state.folders.insert("data".into(), folder);
+        let refused = matches!(
+            state.read_file("data".into(), "pipe".into()),
+            Err(PluginError::PermissionDenied(reason)) if reason.contains("only regular files are supported")
+        );
+        let _ = tx.send(refused);
+    });
+    let refused = rx.recv_timeout(Duration::from_secs(5));
+    std::fs::remove_dir_all(root).unwrap();
+    assert_eq!(refused, Ok(true), "a FIFO must be rejected before opening can block");
+    worker.join().unwrap();
+}
+
+#[test]
 fn staged_writes_publish_in_guest_order_across_grant_aliases_and_normalize_separators() {
     use files::Host;
     let root = std::env::temp_dir().join(format!("craft-plugin-write-order-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
@@ -855,4 +881,163 @@ fn an_importer_built_against_wit_0_1_still_runs() {
     let failure = import_with(&old, &importer_manifest(false), root.join("loop.smp"), false).unwrap_err();
     assert_eq!(failure, HostError::Exhausted { limit: "fuel".into(), allowed: 10_000_000 });
     std::fs::remove_dir_all(root).unwrap();
+}
+
+fn workbench_manifest() -> Manifest {
+    let mut manifest = manifest();
+    manifest.capabilities.push("workspaces@0.1".into());
+    manifest
+}
+
+/// Extends the command fixture with a typed, empty UI catalog. Keeping the command export lets
+/// the same component exercise both discovery and ordinary workbench entries.
+fn workbench_component(describe_code: &str, command_code: &str) -> Vec<u8> {
+    let (package, version) = API.split_once('@').unwrap();
+    let template = include_str!("../fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version).replace("\r\n", "\n");
+    let template = template.replacen("      call $box\n      call $box\n", &format!("      {command_code}\n"), 1);
+    let mut component = template.trim_end().strip_suffix(')').unwrap().to_owned();
+    component.push_str(
+        r##"
+  (type $dock-zone (enum "left" "right" "bottom"))
+  (type $design-kind (enum "part" "assembly" "sketch" "drawing"))
+  (type $button (record (field "label" string) (field "icon" (option string)) (field "entry" string)))
+  (type $widget (variant (case "group" (list u32)) (case "text" string) (case "button" $button) (case "unknown")))
+  (type $node (record (field "widget" $widget)))
+  (type $layout (record (field "root" u32) (field "nodes" (list $node))))
+  (type $panel (record (field "id" string) (field "title" string) (field "zones" (list $dock-zone)) (field "layout" $layout)))
+  (type $ribbon-group (record (field "name" string) (field "entries" (list string))))
+  (type $ribbon-tab (record (field "name" string) (field "groups" (list $ribbon-group))))
+  (type $workspace (record
+    (field "id" string) (field "name" string) (field "icon" string)
+    (field "applies-to" (list $design-kind)) (field "ribbon" (list $ribbon-tab))
+    (field "panels" (list (tuple $dock-zone (list string))))
+    (field "builtin-panels" (list string)) (field "on-enter" (option string)) (field "on-exit" (option string))))
+  (type $declarations (record (field "ui-version" u32) (field "panels" (list $panel)) (field "workspaces" (list $workspace))))
+  (type $describe-type (func (result $declarations)))
+  (core module $ui-module
+    (import "" "memory" (memory 1))
+    (import "" "run" (func $ui-run (param i32 i32 i32 i32 i32)))
+    (data (i32.const 64) "\01\00\00\00")
+    (func (export "describe") (result i32) __DESCRIBE_CODE__ i32.const 64))
+  (core instance $ui-args
+    (export "memory" (memory $memory))
+    (export "run" (func $"#core-func2 indirect-__PACKAGE__/commands@__VERSION__-run")))
+  (core instance $ui-instance (instantiate $ui-module (with "" (instance $ui-args))))
+  (alias core export $ui-instance "describe" (core func $describe-core))
+  (func $describe (type $describe-type) (canon lift (core func $describe-core) (memory $memory) (realloc $realloc)))
+  (instance $provider (export "declarations" (type $declarations)) (export "describe" (func $describe)))
+  (export "__PACKAGE__/ui-provider@__VERSION__" (instance $provider))
+)
+"##,
+    );
+    wat::parse_str(component.replace("__PACKAGE__", package).replace("__VERSION__", version).replace("__DESCRIBE_CODE__", describe_code)).unwrap()
+}
+
+#[test]
+fn typed_workbench_describe_returns_only_the_approved_catalog() {
+    let manifest = workbench_manifest();
+    let bytes = workbench_component("", "");
+    check_component(&manifest, &bytes, RuntimeOptions::default()).unwrap();
+    assert_eq!(describe(&manifest, &bytes, RuntimeOptions::default()).unwrap(), manifest.declarations);
+    let mut changed = manifest;
+    changed.declarations.ui_version = 2;
+    assert!(matches!(
+        describe(&changed, &bytes, RuntimeOptions::default()),
+        Err(HostError::InvalidManifest { field, .. }) if field == "declarations"
+    ));
+}
+
+#[test]
+fn workbench_entries_keep_the_command_transaction_contract() {
+    let mut app = App::default();
+    run(&mut app, &workbench_manifest(), &workbench_component("", "call $box call $box"), "make", &json!({})).unwrap();
+    assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (2, 1, 1, 0));
+}
+
+#[test]
+fn workbench_capability_requires_a_typed_provider_but_plain_plugins_do_not() {
+    assert!(check_component(&manifest(), &component(""), RuntimeOptions::default()).is_ok());
+    assert!(check_component(&workbench_manifest(), &component(""), RuntimeOptions::default()).is_err());
+    assert!(matches!(
+        describe(&manifest(), &component(""), RuntimeOptions::default()),
+        Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"
+    ));
+}
+
+#[test]
+fn workbench_describe_has_small_fuel_and_memory_budgets() {
+    let mut manifest = workbench_manifest();
+    let limits = &mut manifest.runtime.as_mut().unwrap().limits;
+    limits.fuel = 10_000_000;
+    limits.memory_mib = 128;
+    assert!(matches!(
+        describe(&manifest, &workbench_component("(loop $forever br $forever)", ""), RuntimeOptions::default()),
+        Err(HostError::Exhausted { limit, allowed: 1_000_000 }) if limit == "fuel"
+    ));
+    assert!(matches!(
+        describe(&manifest, &workbench_component("i32.const 256 memory.grow drop", ""), RuntimeOptions::default()),
+        Err(HostError::Exhausted { limit, allowed: 16 }) if limit == "memory_mib"
+    ));
+}
+
+#[test]
+fn workbench_describe_cannot_call_even_manifest_granted_commands() {
+    let attempted_write = "i32.const 512 i32.const 9 i32.const 1024 i32.const 33 i32.const 128 call $ui-run";
+    assert!(matches!(
+        describe(&workbench_manifest(), &workbench_component(attempted_write, ""), RuntimeOptions::default()),
+        Err(HostError::PermissionDenied { permission }) if permission.contains("app.write")
+    ));
+}
+
+#[test]
+fn typed_workbench_declarations_preserve_layout_ribbon_and_hooks() {
+    let typed = ui::Declarations {
+        ui_version: 1,
+        panels: vec![ui::PanelSpec {
+            id: "tools".into(),
+            title: "Tools".into(),
+            zones: vec![ui::DockZone::Left, ui::DockZone::Right, ui::DockZone::Bottom],
+            layout: ui::Layout {
+                root: 0,
+                nodes: vec![
+                    ui::Node { widget: ui::Widget::Group(vec![1, 2, 3]) },
+                    ui::Node { widget: ui::Widget::Text("Ready".into()) },
+                    ui::Node { widget: ui::Widget::Button(ui::ButtonSpec { label: "Run".into(), icon: Some("play".into()), entry: "make".into() }) },
+                    ui::Node { widget: ui::Widget::Unknown },
+                ],
+            },
+        }],
+        workspaces: vec![ui::WorkspaceSpec {
+            id: "cam".into(),
+            name: "Manufacturing".into(),
+            icon: "tool".into(),
+            applies_to: vec![ui::DesignKind::Part, ui::DesignKind::Assembly, ui::DesignKind::Sketch, ui::DesignKind::Drawing],
+            ribbon: vec![ui::RibbonTab {
+                name: "Tools".into(),
+                groups: vec![ui::RibbonGroup { name: "Prepare".into(), entries: vec!["make".into()] }],
+            }],
+            panels: vec![(ui::DockZone::Right, vec!["tools".into()])],
+            builtin_panels: vec!["browser".into()],
+            on_enter: Some("enter".into()),
+            on_exit: Some("exit".into()),
+        }],
+    };
+    let expected = serde_json::from_value::<craft_plugin::UiDeclarations>(json!({
+        "ui_version": 1,
+        "panels": [{"id": "tools", "title": "Tools", "zones": ["left", "right", "bottom"], "layout": {
+            "root": 0, "nodes": [
+                {"widget": {"kind": "group", "children": [1, 2, 3]}},
+                {"widget": {"kind": "text", "text": "Ready"}},
+                {"widget": {"kind": "button", "label": "Run", "icon": "play", "entry": "make"}},
+                {"widget": {"kind": "unknown"}}
+            ]
+        }}],
+        "workspaces": [{
+            "id": "cam", "name": "Manufacturing", "icon": "tool", "applies_to": ["part", "assembly", "sketch", "drawing"],
+            "ribbon": [{"name": "Tools", "groups": [{"name": "Prepare", "entries": ["make"]}]}],
+            "panels": [["right", ["tools"]]], "builtin_panels": ["browser"], "on_enter": "enter", "on_exit": "exit"
+        }]
+    }))
+    .unwrap();
+    assert_eq!(declarations(typed), expected);
 }
