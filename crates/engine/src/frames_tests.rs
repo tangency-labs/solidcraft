@@ -1369,6 +1369,17 @@ fn a_mirror_or_pattern_of_a_root_cut_lands_where_shown_in_a_placed_component() {
     assert!((body_volume(&s, "BoxA") - 15600.0).abs() < 1e-6, "{}", body_volume(&s, "BoxA"));
     assert!((body_volume(&s, "BoxB") - 15800.0).abs() < 1e-6, "{}", body_volume(&s, "BoxB"));
     assert_eq!(faces(&s, "BoxB"), 11);
+    // Moving B's occurrence after the mirror gives what mirroring after the move gives, not the
+    // mirror's earlier result from the cache: 10 mm along -x takes B clear of the copy.
+    let moved = json!({"occurrence": "B:1", "axis": [0, 0, 1], "angle": "0 deg", "origin": [0, 0, 0], "translate": [-10, 0, 0]});
+    run(&mut s, "occurrence.move", moved.clone());
+    let later = body_volume(&s, "BoxB");
+    let mut first = setup();
+    run(&mut first, "occurrence.move", moved);
+    run(&mut first, "construct.plane.offset", json!({"base": "YZ", "offset": 5, "name": "MirrorPlane"}));
+    run(&mut first, "solid.mirror", json!({"features": ["Cut"], "plane": "MirrorPlane", "name": "Mirror"}));
+    let moved_first = body_volume(&first, "BoxB");
+    assert!((later - moved_first).abs() < 1e-6 && (later - 15800.0).abs() > 1.0, "moved after {later}, before {moved_first}");
     // Patterned 10 mm along -y: the copy is at y -5..0, apart from the cut (A 600, B 300 mm³).
     let mut s = setup();
     run(&mut s, "solid.pattern.rectangular", json!({"features": ["Cut"], "dir1": [0, -1, 0], "count1": 2, "spacing1": 10, "name": "Pat"}));
