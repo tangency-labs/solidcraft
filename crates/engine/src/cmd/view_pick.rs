@@ -164,9 +164,6 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"frame": "rays", "hits": hits}))
 }
 
-/// Crossings of one body a ray follows before giving up on finding kept material.
-const MAX_CROSSINGS: usize = 64;
-
 /// How far past a crossing the next ray starts, so it does not meet the same face again.
 const CROSSING_STEP: f64 = 1e-6;
 
@@ -183,40 +180,70 @@ fn kept_material_from(
 ) -> std::result::Result<Option<f64>, String> {
     use solidcraft_geom::prelude::*;
     let Some(d) = d.normalized() else { return Ok(Some(first)) };
-    let keeps = |p: Vec3| crate::point_cloud_pick::section_keeps(section, p);
-    // The first surface crossing the section keeps.
-    let mut surface = None;
-    let mut t = first;
-    for _ in 0..MAX_CROSSINGS {
-        if keeps(o + d * t) {
-            surface = Some(t);
-            break;
-        }
-        let from = t + CROSSING_STEP;
-        match body.fire_ray(o + d * from, d).map_err(|e| e.to_string())? {
-            Some(h) => t = from + h.depth,
-            None => break,
-        }
-    }
-    // A cut face nearer than that: a section plane the ray crosses inside the material, where
-    // the other planes keep it.
-    let mut best = surface;
+    // Clip the forward ray `t >= 0` against every section half-space `n · (p - origin) <= 0` to
+    // obtain the retained interval `[t_lo, t_hi]`. Jumping straight to `t_lo` avoids stepping
+    // through arbitrarily many cut-away crossings on comb-shaped bodies.
+    let mut t_lo = 0.0f64;
+    let mut t_hi = f64::INFINITY;
     for plane in section {
         let along = plane.normal.dot(d);
+        let rhs = plane.normal.dot(plane.origin - o);
         if along.abs() < 1e-12 {
-            continue;
-        }
-        let at = plane.normal.dot(plane.origin - o) / along;
-        if !(at.is_finite() && at >= first) || best.is_some_and(|b| at >= b) {
-            continue;
-        }
-        let p = o + d * at;
-        let others_keep = section.iter().filter(|q| q.id != plane.id).all(|q| q.keeps(p, 1e-6));
-        if others_keep && body.classify_point(p).map_err(|e| e.to_string())? == solidcraft_kernel::PointClass::Inside {
-            best = Some(at);
+            if rhs < -1e-6 {
+                return Ok(None);
+            }
+        } else if along > 0.0 {
+            t_hi = t_hi.min(rhs / along);
+        } else {
+            t_lo = t_lo.max(rhs / along);
         }
     }
-    Ok(best)
+    if !t_lo.is_finite() || t_lo > t_hi + 1e-6 {
+        return Ok(None);
+    }
+
+    let keeps = |p: Vec3| crate::point_cloud_pick::section_keeps(section, p);
+    // If the ray enters the kept interval through a section plane (`t_lo > 0`) inside the body,
+    // that cut face is the nearest kept material — including when the ray starts inside the
+    // removed half of the body (`t_lo < first`).
+    if t_lo > 0.0 {
+        let p = o + d * t_lo;
+        let aabb = body.outline_bounds();
+        let pad = 1e-3;
+        let in_box = !aabb.is_empty()
+            && p.x >= aabb.min.x - pad
+            && p.x <= aabb.max.x + pad
+            && p.y >= aabb.min.y - pad
+            && p.y <= aabb.max.y + pad
+            && p.z >= aabb.min.z - pad
+            && p.z <= aabb.max.z + pad;
+        if in_box && keeps(p) && matches!(body.classify_point(p), Ok(solidcraft_kernel::PointClass::Inside)) {
+            return Ok(Some(t_lo));
+        }
+    }
+
+    // Otherwise find the first kept surface crossing in `[t_lo, t_hi]`.
+    if keeps(o + d * first) {
+        return Ok(Some(first));
+    }
+    if first > t_hi + 1e-6 {
+        return Ok(None);
+    }
+    let mut start = (t_lo - 1e-7).max(first + CROSSING_STEP);
+    for _ in 0..2 {
+        let Some(h) = body.fire_ray(o + d * start, d).map_err(|e| e.to_string())? else {
+            return Ok(None);
+        };
+        let hit_t = start + h.depth;
+        if keeps(o + d * hit_t) {
+            return Ok(Some(hit_t));
+        }
+        if hit_t > t_hi + 1e-6 {
+            return Ok(None);
+        }
+        start = hit_t.max(t_lo) + CROSSING_STEP;
+    }
+    Ok(None)
 }
 
 /// Body world name → its outermost placement (path, name) and the component it places,
@@ -430,6 +457,35 @@ mod tests {
         // The same with a ray that is not of unit length.
         let long = json!({"origin": [0, 110, 50], "dir": [0, 0, -7]});
         let r = run(&mut s, "view.pick", json!({"rays": [long], "clouds": true}));
+        assert_eq!(r["hits"][0]["body"], "Shield", "{r}");
+        // Ray starting inside the cut-away top half (z = 32) looking down into the kept half
+        // (z = 25..30): the cut face at z = 30 (depth 2) is nearer than the far wall at z = 25
+        // (depth 7) and still hides a scan point embedded at z = 28 (depth 4).
+        {
+            let mut embedded = s.doc.point_clouds[0].clone();
+            embedded.id = 2;
+            embedded.name = "Embedded".into();
+            embedded.origin = Vec3::ZERO;
+            embedded.transform = solidcraft_doc::IDENTITY;
+            embedded.points = Points::new(vec![0.0, 110.0, 28.0].into());
+            embedded.filters.clear();
+            embedded.complex = Complex::default();
+            s.doc_mut().point_clouds.push(embedded);
+            let inside_ray = json!({"origin": [0, 110, 32], "dir": [0, 0, -1]});
+            let r = run(&mut s, "view.pick", json!({"rays": [inside_ray], "clouds": true}));
+            assert_eq!(r["hits"][0]["body"], "Shield", "{r}");
+            s.doc_mut().point_clouds.pop();
+        }
+        run(&mut s, "inspect.section", json!({"clear": true}));
+
+        // Section entering through an air gap of a single body (two teeth joined on the side:
+        // upper tooth z=40..45 removed, air gap z=35..40, lower tooth z=25..35 kept). The section
+        // plane at z=37 lies outside material, yet the kept lower tooth still hides the scan at z=20.
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [-5, 105, 40], "body_name": "UpperTooth"}));
+        run(&mut s, "solid.box", json!({"length": 2, "width": 10, "height": 20, "corner": [3, 105, 25], "body_name": "Spine"}));
+        run(&mut s, "solid.combine", json!({"target": "Shield", "tools": ["UpperTooth", "Spine"], "operation": "join"}));
+        run(&mut s, "inspect.section", json!({"plane": {"origin": [0, 0, 37], "normal": [0, 0, 1]}}));
+        let r = run(&mut s, "view.pick", json!({"rays": [ray], "clouds": true}));
         assert_eq!(r["hits"][0]["body"], "Shield", "{r}");
         run(&mut s, "inspect.section", json!({"clear": true}));
 
