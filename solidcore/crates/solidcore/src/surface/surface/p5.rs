@@ -2687,7 +2687,7 @@ mod tests {
         let s = Surface::from(StepSurface::new(Surface::from(basis), true).unwrap());
         let k = Kernel::default();
         // (a domain that holds the iso line: its `v` range contains `v = 0`; outside it this
-        // body answers where the B-spline override refuses, see
+        // body answers where the B-spline override refuses, tangency-labs/solidcraft#20378,
         // plan/findings/surface.surface_p5--generic-iso-body-ignores-the-domain-in-the-iso-direction.md)
         let domain = Extent2d::from_bounds(0.2, 0.0, 0.9, 0.7);
         for (dom, ivl) in [(None, (0.0, 1.0)), (Some(&domain), (0.2, 0.9))] {

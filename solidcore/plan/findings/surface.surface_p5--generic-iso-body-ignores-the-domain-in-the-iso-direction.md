@@ -11,4 +11,5 @@
   - On the net itself, or on a curve-bounded surface over it: `SM_ERR`, "parameter 0 is outside the domain [0.1, 0.7]".
 - **Consequence:** the answer depends on the surface kind, not on the geometry. The unit test `an_iso_line_through_a_singularity_of_a_step_surface_is_a_point_curve` uses a domain whose v range holds v = 0, so it tests the singular branch without relying on either answer.
 - **Suspected cause:** the generic body was written for the singular case and its non-singular fallback, and it uses the domain only to trim the curve.
+- **Issue:** tangency-labs/solidcraft#20378.
 - **PR:** the curve-bounded geometry queries (issue 20163).
