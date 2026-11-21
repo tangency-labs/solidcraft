@@ -201,8 +201,9 @@ pub use emboss::{
     cylinder_emboss_anchor, emboss_anchor, emboss_cylinder, emboss_cylinder_at, emboss_project_face, has_cylinder_emboss_wall, infer_cylinder_emboss,
 };
 pub use face_pattern::{
-    FaceStation, Falloff, MAX_EDGE_POINTS, MAX_STATION_COUNT, Noise, PointDistance, attraction, face_edge_points, face_placement,
-    face_random_stations, face_stations, ramp,
+    FaceEdgeFrame, FaceLayout, FaceStation, Falloff, MAX_EDGE_POINTS, MAX_FACES, MAX_GEODESIC_FREQUENCY, MAX_STATION_COUNT, Noise, PointDistance,
+    attraction, face_edge_frames_across, face_edge_points, face_edge_points_across, face_layout_stations, face_placement, face_random_stations,
+    face_stations, ramp,
 };
 pub use failure::ErrorCode;
 pub use fair::{

@@ -2820,3 +2820,160 @@ fn a_random_face_pattern_refuses_bad_input() {
     }
     assert!(s.execute("solid.pattern.face", &json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}})).is_err(), "no counts and no random");
 }
+
+/// A ball of radius 20 about (0, 0, 40) and a pin of radius 1, 2 mm tall, standing on the origin.
+fn ball_and_pin(s: &mut Session) {
+    run(s, "solid.sphere", json!({"radius": 20, "center": [0, 0, 40], "body_name": "Ball"}));
+    run(s, "solid.cylinder", json!({"radius": 1, "height": 2, "body_name": "Pin"}));
+}
+
+fn on_ball(s: &mut Session, extra: Value) -> Vec<solidcore_record::Vec3> {
+    let mut p = json!({"bodies": ["Pin"], "face": {"face": [20, 0, 40]}, "group": false, "overhang": true});
+    if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
+        p.extend(extra.clone());
+    }
+    let r = run(s, "solid.pattern.face", p);
+    copies_of(s, &r).iter().map(|(_, a, b)| centre(*a, *b)).collect()
+}
+
+/// The nearest of the copies' distances to their nearest neighbours, and the farthest.
+fn neighbours(points: &[solidcore_record::Vec3]) -> (f64, f64) {
+    let each = points
+        .iter()
+        .enumerate()
+        .map(|(i, p)| points.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, q)| (*p - *q).len()).fold(f64::INFINITY, f64::min));
+    each.fold((f64::INFINITY, 0.0), |(lo, hi), d| (lo.min(d), hi.max(d)))
+}
+
+/// On a sphere the layouts spaced by distance stay even round its poles, where the grid crowds:
+/// the geodesic of frequency 2 stands its 42 copies, the poles' among them; the spaced rows and
+/// the spiral keep every copy about as far from its nearest as the rest.
+#[test]
+fn a_face_pattern_spaced_by_distance_is_even_on_a_sphere() {
+    let mut s = Session::default();
+    ball_and_pin(&mut s);
+    let geodesic = on_ball(&mut s, json!({"layout": {"type": "geodesic", "frequency": 2}}));
+    assert_eq!(geodesic.len(), 42);
+    assert!(geodesic.iter().any(|c| c.x.abs() < 1e-6 && c.y.abs() < 1e-6 && c.z > 60.0), "a copy at the north pole");
+    let rows = on_ball(&mut s, json!({"layout": {"type": "spacing", "spacing": 8}}));
+    let (lo, hi) = neighbours(&rows);
+    assert!(rows.len() > 50 && lo > 5.0 && hi < 10.0, "{} {lo} {hi}", rows.len());
+    let spiral = on_ball(&mut s, json!({"layout": {"type": "spiral", "count": 100}}));
+    let (lo, hi) = neighbours(&spiral);
+    assert!(spiral.len() == 100 && lo > 0.6 * hi, "{lo} {hi}");
+    let grid = on_ball(&mut s, json!({"count1": 10, "count2": 10}));
+    let (lo, hi) = neighbours(&grid);
+    assert!(lo < 0.3 * hi, "the grid crowds the poles: {lo} {hi}");
+    assert_eq!(on_ball(&mut s, json!({"layout": {"type": "fill", "count": 60}})).len(), 60);
+}
+
+/// Faces of one body together are one region: the top and front of the plate share an edge, so
+/// copies may stand by it on either; the spiral shares its count by area (top 100 × 60, front
+/// 100 × 10, of 70 copies 60 on top). Faces of two bodies are refused.
+#[test]
+fn a_face_pattern_spans_several_faces_of_one_body() {
+    let mut s = Session::default();
+    plate_and_pin(&mut s);
+    let r = run(
+        &mut s,
+        "solid.pattern.face",
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "faces": [{"face": [50, 0, 5]}], "layout": {"type": "spiral", "count": 70}, "overhang": true, "group": false}),
+    );
+    let copies = copies_of(&s, &r);
+    assert_eq!(copies.len(), 70);
+    let on_top = copies.iter().filter(|(_, a, b)| centre(*a, *b).z > 10.0).count();
+    assert_eq!(on_top, 60);
+    // `faces` alone lists them all.
+    let r = run(
+        &mut s,
+        "solid.pattern.face",
+        json!({"bodies": ["Pin"], "faces": [{"face": [50, 30, 10]}, {"face": [50, 0, 5]}], "layout": {"type": "fill", "count": 20}, "overhang": true, "group": false}),
+    );
+    assert_eq!(copies_of(&s, &r).len(), 20);
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [200, 0, 0], "body_name": "Other"}));
+    let two =
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "faces": [{"face": [205, 5, 10]}], "layout": {"type": "spiral", "count": 10}});
+    assert!(s.execute("solid.pattern.face", &two).is_err());
+}
+
+/// The layouts check their input: one of `layout` and `random`, a known type, its numbers in range.
+#[test]
+fn a_face_pattern_layout_checks_its_input() {
+    let mut s = Session::default();
+    ball_and_pin(&mut s);
+    let face = json!({"face": [20, 0, 40]});
+    for layout in [
+        json!({"type": "geodesic", "frequency": 10}),
+        json!({"type": "geodesic", "frequency": 0}),
+        json!({"type": "spacing", "spacing": 0}),
+        json!({"type": "spiral"}),
+        json!({"type": "hexagons", "count": 3}),
+        json!({"count": 3}),
+    ] {
+        let p = json!({"bodies": ["Pin"], "face": face, "layout": layout});
+        assert!(s.execute("solid.pattern.face", &p).is_err(), "{layout}");
+    }
+    let both = json!({"bodies": ["Pin"], "face": face, "layout": {"type": "spiral", "count": 5}, "random": {"count": 5}});
+    assert!(s.execute("solid.pattern.face", &both).is_err());
+    // A geodesic needs a sphere.
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "body_name": "Cube"}));
+    let flat = json!({"bodies": ["Pin"], "face": {"face": [105, 5, 10]}, "layout": {"type": "geodesic", "frequency": 2}});
+    assert!(s.execute("solid.pattern.face", &flat).is_err());
+}
+
+/// A layout and the faces survive saving: the design read back makes the same copies.
+#[test]
+fn a_face_pattern_layout_survives_saving() {
+    let mut s = Session::default();
+    ball_and_pin(&mut s);
+    let before = on_ball(&mut s, json!({"layout": {"type": "spacing", "spacing": 10, "row_spacing": 12}, "staggered": true}));
+    let text = serde_json::to_string(&s.doc).unwrap();
+    assert!(text.contains("\"layout\"") && text.contains("\"spacing\""), "{text}");
+    let doc: solidcraft_doc::Document = serde_json::from_str(&text).unwrap();
+    assert_eq!(doc, *s.doc);
+    assert!(!before.is_empty());
+}
+
+/// The pin copies' centres from a pattern on the plate's top face, rounded to 0.001 mm, each way.
+fn top_centres(s: &mut Session, extra: Value) -> (Vec<i64>, Vec<i64>) {
+    let mut p = json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "group": false, "fit_edges": true});
+    if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
+        p.extend(extra.clone());
+    }
+    let r = run(s, "solid.pattern.face", p);
+    let centres: Vec<_> = copies_of(s, &r).iter().map(|(_, a, b)| centre(*a, *b)).collect();
+    let axis = |f: fn(&solidcore_record::Vec3) -> f64| {
+        let mut v: Vec<i64> = centres.iter().map(|c| (f(c) * 1000.0).round() as i64).collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    };
+    (axis(|c| c.x), axis(|c| c.y))
+}
+
+/// Fitted to the edges, the grid's outer copies sit flush with the plate's edges (the pins, 2 mm
+/// in radius, centred 2 mm in) and none is left out for touching them; the edge margin moves them
+/// in by that much; with overhang their centres sit on the edges.
+#[test]
+fn a_face_pattern_fitted_to_the_edges_sits_flush_with_them() {
+    let mut s = Session::default();
+    plate_and_pin(&mut s);
+    let grid = json!({"count1": 5, "count2": 3});
+    let (xs, ys) = top_centres(&mut s, grid.clone());
+    let ends = |v: &[i64]| (v.first().copied(), v.last().copied(), v.len());
+    // Whichever of the face's parameters runs along x, the copies span it edge to edge.
+    let (along_x, along_y) = if xs.len() == 5 { (5, 3) } else { (3, 5) };
+    assert_eq!(ends(&xs), (Some(2000), Some(98_000), along_x), "{xs:?}");
+    assert_eq!(ends(&ys), (Some(2000), Some(58_000), along_y), "{ys:?}");
+    let mut with_margin = grid.clone();
+    with_margin["margin"] = json!(3);
+    let (xs, ys) = top_centres(&mut s, with_margin);
+    assert_eq!((ends(&xs).0, ends(&xs).1, ends(&ys).0, ends(&ys).1), (Some(5000), Some(95_000), Some(5000), Some(55_000)));
+    let mut over = grid;
+    over["overhang"] = json!(true);
+    let (xs, ys) = top_centres(&mut s, over);
+    assert_eq!((ends(&xs).0, ends(&xs).1, ends(&ys).0, ends(&ys).1), (Some(0), Some(100_000), Some(0), Some(60_000)));
+    // Spaced rows fit the same way: 10 mm apart from 2 mm in to 2 mm in.
+    let (xs, ys) = top_centres(&mut s, json!({"layout": {"type": "spacing", "spacing": 12}}));
+    assert_eq!((ends(&xs).0, ends(&xs).1, ends(&ys).0, ends(&ys).1), (Some(2000), Some(98_000), Some(2000), Some(58_000)));
+}

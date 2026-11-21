@@ -356,6 +356,29 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
 
+### layout (pattern)
+
+How Pattern on Face lays its copies out on the faces it is given.
+
+The *grid* divides each face's parameters into rows and columns, and *staggered* moves every other
+column half a cell along; *random* places them by a [noise](#noise-pattern). The other layouts
+space the copies by distance on the surface, so they stay even where a face's parameters crowd, as
+round a sphere's poles: *spacing* lays rows a distance apart with as many copies in each as fit
+its length (round a sphere, its circles of latitude); *spiral* puts a count of them on a Fibonacci
+spiral, even over the area; *even fill* relaxes them until they are evenly spread, round holes
+and across the edges between faces; *geodesic* stands them on the vertices of a geodesic sphere,
+its *frequency* how often each triangle of the icosahedron is divided, on faces of one sphere.
+Several faces of one body make one region: the edges they share are not edges of it, and a count
+is shared over them by area. Fitted to the edges, the grid's and the spaced rows' outer copies
+sit flush with the face's edges and the edge margin moves them in.
+
+- **In SolidCraft:** `solid.pattern.face`'s `layout` (`type`: `spacing`, `spiral`, `fill`,
+  `geodesic`), `faces` and `fit_edges`; the Layout choice of Pattern on Face.
+- **Don't use:** distribution, arrangement mode.
+- **Elsewhere:** Fibonacci lattice, golden-angle spiral, centroidal Voronoi layout (for even fill),
+  geodesic dome.
+- **For translators:** the way the copies are set out, not a page or screen layout.
+
 ### leader
 
 The line from a note to what it points at on the model. It is worked out from where that thing is
@@ -372,7 +395,8 @@ How near a copy of Pattern on Face may come to something before it is left out, 
 copy itself, not its centre.
 
 The *edge margin* keeps copies away from the face's edges, round its holes and the foot of a boss
-too; even at 0, no copy hangs over them. With *Allow overhang* on, only each copy's centre has to
+too; even at 0, no copy hangs over them. Where the layout is fitted to the edges, the margin also
+moves its outer copies in from them by that much. With *Allow overhang* on, only each copy's centre has to
 be on the face, and the edge margin is measured from that centre. The *avoid margin* keeps
 them away from what the Avoid pick holds: points, faces and bodies. With no avoid margin, a copy is
 left out only when it touches or overlaps one of those, or one holds the other. Distances are

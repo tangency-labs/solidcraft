@@ -2477,3 +2477,41 @@ fn a_pattern_of_whole_components_bodies_offers_and_places_the_components() {
     assert_eq!(h.app.session.doc.occurrences.len(), occurrences + 4);
     assert_eq!(h.app.session.model.state().bodies.len(), 2);
 }
+
+/// Pattern on Face's layouts spaced by distance send their type and numbers in place of the
+/// grid, a new pattern fitted to the face's edges, and an edit brings them back.
+#[test]
+fn face_pattern_spaced_layouts_send_and_restore() {
+    let mut h = fixture();
+    let mut d = representative(&h, "solid.pattern.face");
+    let (_, plain) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(plain["fit_edges"], json!(true), "{plain}");
+    for (layout, want) in [
+        (4, json!({"type": "spiral", "count": "50"})),
+        (5, json!({"type": "fill", "count": "50"})),
+        (6, json!({"type": "geodesic", "frequency": "3"})),
+    ] {
+        if let Kind::FacePattern(f) = &mut d.kind {
+            f.layout = layout;
+        }
+        let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+        assert_eq!(p["layout"], want, "{p}");
+        assert!(p.get("count1").is_none() && p.get("random").is_none(), "{p}");
+    }
+    if let Kind::FacePattern(f) = &mut d.kind {
+        f.layout = 3;
+        f.spacing = "4".into();
+        f.row_spacing = "5".into();
+        f.staggered_rows = true;
+        // The fixture's cylinders, 20 mm across, stand on a side face 5 mm tall: they hang over it.
+        f.overhang = true;
+    }
+    let (command, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(p["layout"], json!({"type": "spacing", "spacing": "4", "row_spacing": "5"}), "{p}");
+    assert_eq!(p["staggered"], json!(true));
+    let reply = h.app.run(&command, p).unwrap();
+    let feature = reply["feature"].as_u64().unwrap();
+    let edit = super::for_feature(&h.app, feature, None).expect("the pattern opens for editing");
+    let Kind::FacePattern(f) = &edit.kind else { panic!("{:?}", edit.kind) };
+    assert_eq!((f.layout, f.spacing.as_str(), f.row_spacing.as_str(), f.staggered_rows, f.fit_edges), (3, "4", "5", true, true));
+}
