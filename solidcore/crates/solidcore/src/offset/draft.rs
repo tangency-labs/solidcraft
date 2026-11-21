@@ -72,7 +72,7 @@ use crate::surface::implicit::{lies_on, AnalyticSupport, Implicit};
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::face::p2::outer_faceuse;
 use crate::topology::{Brep, FaceId};
-use crate::{EntityRef, Result, SolidError};
+use crate::{Result, SolidError};
 
 const OP: &str = "offset::draft";
 const OP_RECERTIFY: &str = "offset::draft::DraftDefinition::recertify";

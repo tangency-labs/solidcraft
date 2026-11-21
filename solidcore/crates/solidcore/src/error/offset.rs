@@ -619,9 +619,9 @@ impl OffsetFailure {
             | Self::LoopGapPassLimit { .. }
             | Self::LoopGapEndsAmbiguous { .. }
             | Self::SplitWithinVertexTolerance { .. } => SM_ERR,
-            Self::Missing(_) | Self::FaceHasNoSurface { .. } | Self::FaceHasNoOuterFaceuse { .. } => {
-                SM_ERR_NULL_POINTER
-            }
+            Self::Missing(_)
+            | Self::FaceHasNoSurface { .. }
+            | Self::FaceHasNoOuterFaceuse { .. } => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::WallsTouch { .. } => SM_ERR_OFFSET_WALLS_TOUCH,
@@ -1092,7 +1092,12 @@ mod tests {
                 None,
                 ErrorKind::Unsupported,
             ),
-            ("offset::op", OffsetFailure::Failed("x"), None, ErrorKind::Failed),
+            (
+                "offset::op",
+                OffsetFailure::Failed("x"),
+                None,
+                ErrorKind::Failed,
+            ),
         ];
         let statuses = [
             SM_ERR_ASSERT_FAILURE,
