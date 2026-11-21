@@ -1243,9 +1243,10 @@ pub(crate) fn plane_gap_bound(cn: &NurbsCurve, net: &Nurbs, [lo, hi]: [f64; 2]) 
 ///   fractions) is in `[0, 1]^2`, so the trim is (convex hull). `ψ` is the identity; only
 ///   the control points whose span meets `range` count.
 /// - **A trim of degree 1 along the whole `u` side of a net of degree 1 in `v`**: `W(s)` runs
-///   from `(u_0, v)` to `(u_1, v)` at a constant `v` (the trim's weights 1, so `u(s)` is linear
-///   and the `v` exact), `[u_0, u_1]` the net's `u` domain, and `range` the whole domain of
-///   both the trim and the curve. The net's row at `v` has control points `D_i = (1 - β)
+///   from `(u_a, v)` to `(u_b, v)` at a constant `v` (the trim's weights 1, so `u(s)` is linear
+///   and the `v` exact), `[u_a, u_b]` within the net's `u` domain `[u_0, u_1]`, and `range` the
+///   whole domain of both the trim and the curve. Where `[u_a, u_b]` falls short of `[u_0, u_1]`
+///   the bound adds the row's speed times the shortfall (`row_lipschitz`). The net's row at `v` has control points `D_i = (1 - β)
 ///   P_i0 + β P_i1` (`β` the fraction of `v` in the net's `v` domain), weights `w_i0 = w_i1`,
 ///   those of the curve (bit for bit), and the curve's degree and number of points. Both
 ///   knot vectors clamped, with every interior knot of multiplicity the degree, each is a
@@ -1338,7 +1339,7 @@ pub(crate) fn structured_trim_gap_bound(
     else {
         return None;
     };
-    if !(w_a == 1.0 && w_b == 1.0 && v_a == v_b && u_a == nu0 && u_b == nu1 && nu0 < nu1) {
+    if !(w_a == 1.0 && w_b == 1.0 && v_a == v_b && nu0 <= u_a && u_a < u_b && u_b <= nu1) {
         return None;
     }
     let clamped_v = matches!(net.v.as_slice(), [a, b, c, d] if a == b && b < c && c == d);
@@ -1358,6 +1359,7 @@ pub(crate) fn structured_trim_gap_bound(
     }
     let one_less = Ivl::from(1.0) - beta;
     let mut worst = 0.0_f64;
+    let mut row = Vec::new();
     for i in 0..cn.n {
         let (c, wc) = point(&cn.pw, i)?;
         let (p0, w0) = point(&net.pw, 2 * i)?;
@@ -1367,8 +1369,62 @@ pub(crate) fn structured_trim_gap_bound(
         }
         let d = plus(scaled(p0, one_less), scaled(p1, beta));
         worst = worst.max(norm_upper(minus(c, d))?);
+        row.push((d, w0));
+    }
+    // (a trim whose ends fall short of the side's, by `slip` in `u` at most, an ulp in the
+    // extrudes of #20373: its image is the row over `[u_a, u_b]`, and the row at `u` is
+    // within `L |u - τ(u)| <= L slip` of the row at `τ(u)`, `τ` the linear map of
+    // `[u_a, u_b]` onto the whole side, which the bound above holds for)
+    let slip = (Ivl::from(u_a) - Ivl::from(nu0))
+        .hi
+        .max((Ivl::from(nu1) - Ivl::from(u_b)).hi);
+    if slip > 0.0 {
+        let lip = row_lipschitz(&row, &net.u, net.p)?;
+        worst = (Ivl::from(worst) + Ivl::from(lip) * Ivl::from(slip)).hi;
     }
     worst.is_finite().then_some(worst)
+}
+
+/// An upper bound on the speed `|r'|` of the chain of rational Bézier segments with the
+/// control points and weights `row` of degree `p` over the knots `k` ([`bezier_chain`]'s), for
+/// [`structured_trim_gap_bound`]. On a segment over `[a, b]` with points `D_k`, weights `w_k`
+/// and `W = Σ w_k B_k`, `r' = Σ (w_k B_k)' (D_k - r) / W` (as `Σ (w_k B_k)' = W'`), where
+/// `Σ |B_k'| <= 2p / (b - a)` (each `B_k'` is `p / (b - a)` times a difference of two
+/// Bernstein polynomials of degree `p - 1`, which sum to 1) and `|D_k - r|` is at most the
+/// largest distance between two of the segment's points (`r` in their hull), so
+/// `|r'| <= 2p w_max diam / ((b - a) w_min)`; the chain's speed is at most the largest
+/// segment's. `None` for data not of that shape or a bound that is not finite.
+fn row_lipschitz(row: &[(V3<Ivl>, f64)], k: &[f64], p: usize) -> Option<f64> {
+    if p == 0 || row.len() < p + 1 || (row.len() - 1) % p != 0 {
+        return None;
+    }
+    let mut most = 0.0_f64;
+    for j in 0..(row.len() - 1) / p {
+        let seg = row.get(j * p..=j * p + p)?;
+        let (a, b) = (*k.get(p + j * p)?, *k.get(p + (j + 1) * p)?);
+        let span = Ivl::from(b) - Ivl::from(a);
+        if !span.is_positive() {
+            return None;
+        }
+        let mut diam = 0.0_f64;
+        for (x, _) in seg {
+            for (y, _) in seg {
+                diam = diam.max(norm_upper(minus(*x, *y))?);
+            }
+        }
+        let (mut w_max, mut w_min) = (0.0_f64, f64::INFINITY);
+        for &(_, w) in seg {
+            w_max = w_max.max(w);
+            w_min = w_min.min(w);
+        }
+        if !(w_min > 0.0) {
+            return None;
+        }
+        let speed = Ivl::from(2.0 * p as f64) * Ivl::from(w_max) * Ivl::from(diam)
+            / (span * Ivl::from(w_min));
+        most = most.max(speed.hi);
+    }
+    most.is_finite().then_some(most)
 }
 
 /// The corner `P00`, the sides `E1 = P10 - P00`, `E2 = P01 - P00` and an upper bound on the
@@ -4440,12 +4496,19 @@ mod tests {
         let (cn, wn, probed) = trim_data(&k, &s, &curve, &trim, [0.0, 1.0]);
         let g = structured_trim_gap_bound(&cn, &wn, &probed, [0.0, 1.0]).unwrap();
         assert_trim_answered(&k, &s, &curve, &trim, [0.0, 1.0], g);
-        // (a trim that stops short of the side, or with a weight not 1: left to the bisection)
-        let (_, short, _) = trim_data(&k, &s, &curve, &iso_trim(u0, 0.5 * u1, v1), [0.0, 1.0]);
-        assert_eq!(
-            structured_trim_gap_bound(&cn, &short, &probed, [0.0, 1.0]),
-            None
-        );
+        // (a trim an ulp short of the side's end, as the extrudes of #20373 give: bounded with
+        // the row's speed times the ulp, still far under `1e-5`)
+        let ulp_short = u1 - f64::EPSILON * u1;
+        assert!(ulp_short < u1);
+        let trim = iso_trim(u0, ulp_short, v1);
+        let (_, short, _) = trim_data(&k, &s, &curve, &trim, [0.0, 1.0]);
+        let g = structured_trim_gap_bound(&cn, &short, &probed, [0.0, 1.0]).unwrap();
+        assert_trim_answered(&k, &s, &curve, &trim, [0.0, 1.0], g);
+        // (a trim that stops halfway along the side: its gap, across the circle at the end,
+        // is still seen; one with a weight not 1 is left to the bisection)
+        let (_, half, _) = trim_data(&k, &s, &curve, &iso_trim(u0, 0.5 * u1, v1), [0.0, 1.0]);
+        let g = structured_trim_gap_bound(&cn, &half, &probed, [0.0, 1.0]).unwrap();
+        assert!(g >= 25.0, "{g:e}");
         let mut heavy = wn.clone();
         for x in heavy.pw.iter_mut() {
             *x *= 2.0;
