@@ -26,6 +26,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("view.pick", "Pick by R
     .output(output_schema_for::<ViewPickResult>)
     .params(
         "rays: [{origin: [x,y,z], dir: [x,y,z]}] (at most 1024); all?: bool (every body and point cloud each ray meets, nearest first); \
+         clouds?: bool (pick visible point-cloud points too; default: only when cloud_radius or point_px is given), \
          cloud_radius?: mm (default 1.0, 0 disables point-cloud picks on rays) → frame: \"rays\", \
          hits: one per ray, null where it meets nothing, else for a body {pixel (the ray, echoed as the app echoes it), body, face, point, normal, depth} with edge or vertex (record index) where \
          the ray passes through one and occurrence, occurrence_name, component for a placed part's body, or for a point cloud {pixel, body: null, face: null, cloud, cloud_name, point_index, point, depth, distance_mm}; decided on exact geometry, the same \
@@ -42,6 +43,7 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(ID, format!("give 1 to {MAX_RAYS} rays")));
     }
     let all = p.get("all").and_then(Value::as_bool).unwrap_or(false);
+    let clouds_on = crate::point_cloud_pick::clouds_requested(p).map_err(|e| bad(ID, e))?;
     let cloud_radius = match p.get("cloud_radius") {
         None | Some(Value::Null) => crate::point_cloud_pick::DEFAULT_CLOUD_RADIUS_MM,
         Some(v) => v
@@ -71,13 +73,16 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
     let comps = component_names(s);
     let names: BTreeMap<u64, &str> = s.doc.components.iter().map(|c| (c.id, c.name.as_str())).collect();
     let shown: Vec<_> = st.bodies.iter().filter(|b| s.body_visible(&b.name)).collect();
-    let clouds: Vec<_> = if cloud_radius > 0.0 { crate::view::shown_point_clouds(s).collect() } else { Vec::new() };
+    let clouds: Vec<_> = if clouds_on && cloud_radius > 0.0 { crate::view::shown_point_clouds(s).collect() } else { Vec::new() };
     let cloud_indexes: Vec<Option<solidcraft_geom::PointCloudIndex>> =
         clouds.iter().map(|c| (inputs.len() > 1 && c.len() > 512).then(|| solidcraft_geom::PointCloudIndex::new(c.points.values()))).collect();
     let mut hits = Vec::with_capacity(inputs.len());
     for (raw, o, d) in inputs {
         let mut found: Vec<Value> = Vec::new();
         let mut depths: Vec<f64> = Vec::new();
+        // What hides a cloud point: the nearest body crossing the section keeps. A crossing the
+        // section cuts away shows nothing, so it hides nothing.
+        let mut cover: Option<f64> = None;
         for b in &shown {
             let hit = b.body.fire_ray(o, d).map_err(|e| bad(ID, format!("body {}: {e}", b.name)))?;
             let Some(h) = hit else { continue };
@@ -106,11 +111,16 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(name) = component {
                 j["component"] = json!(name);
             }
+            if crate::point_cloud_pick::section_keeps(&s.section, h.point) {
+                cover = Some(cover.map_or(h.depth, |c: f64| c.min(h.depth)));
+            }
             let at = depths.partition_point(|x| *x <= h.depth);
             depths.insert(at, h.depth);
             found.insert(at, j);
         }
-        let max_depth = if all { None } else { depths.first().copied() };
+        let max_depth = if all { None } else { cover };
+        // The nearest cloud point no kept body stands in front of.
+        let mut front_cloud: Option<(f64, Value)> = None;
         for (c, index) in clouds.iter().zip(&cloud_indexes) {
             let Some(h) = crate::point_cloud_pick::pick_cloud_ray(c, index.as_ref(), o, d, cloud_radius, 0.0, max_depth, &s.section) else {
                 continue;
@@ -126,11 +136,23 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
                 "depth": h.depth,
                 "distance_mm": h.ray_dist,
             });
+            if !all {
+                // A body at the same depth keeps the pick, as before clouds could be picked.
+                if cover.is_none_or(|c| h.depth < c) && front_cloud.as_ref().is_none_or(|(t, _)| h.depth < *t) {
+                    front_cloud = Some((h.depth, j));
+                }
+                continue;
+            }
             let at = depths.partition_point(|x| *x <= h.depth);
             depths.insert(at, h.depth);
             found.insert(at, j);
         }
-        hits.push(if all { Value::Array(found) } else { found.into_iter().next().unwrap_or(Value::Null) });
+        hits.push(match (all, front_cloud) {
+            (true, _) => Value::Array(found),
+            // In front of every kept body: a body the section cuts away there shows nothing.
+            (false, Some((_, cloud))) => cloud,
+            (false, None) => found.into_iter().next().unwrap_or(Value::Null),
+        });
     }
     Ok(json!({"frame": "rays", "hits": hits}))
 }
@@ -242,6 +264,7 @@ mod tests {
         assert!(refused(&mut s, json!({"rays": [{"origin": [0, 0], "dir": [0, 0, 1]}]})).contains("origin"));
         assert!(refused(&mut s, json!({"rays": []})).contains("1 to 1024"));
         assert!(refused(&mut s, json!({"rays": [{"origin": [0, 0, 0], "dir": [0, 0, 1]}], "cloud_radius": -1})).contains("cloud_radius"));
+        assert!(refused(&mut s, json!({"rays": [{"origin": [0, 0, 0], "dir": [0, 0, 1]}], "clouds": "yes"})).contains("clouds"));
     }
 
     /// Headless `view.pick` picks visible point-cloud points in world space (origin + transform),
@@ -286,7 +309,7 @@ mod tests {
         // Ray straight down through (0, 110, 50): front point (index 1 at z=20) beats back wall (index 0 at z=5)
         // and off-axis point (index 2 at x=-0.2).
         let ray = json!({"origin": [0, 110, 50], "dir": [0, 0, -1]});
-        let r = run(&mut s, "view.pick", json!({"rays": [ray]}));
+        let r = run(&mut s, "view.pick", json!({"rays": [ray], "clouds": true}));
         let hit = &r["hits"][0];
         assert_eq!(hit["cloud"], 1, "{hit}");
         assert_eq!(hit["cloud_name"], "Scan", "{hit}");
@@ -295,34 +318,51 @@ mod tests {
         assert!(px.abs() < 1e-9 && (py - 110.0).abs() < 1e-9 && (pz - 20.0).abs() < 1e-9, "{hit}");
         assert!((hit["depth"].as_f64().unwrap_or(f64::NAN) - 30.0).abs() < 1e-9, "{hit}");
 
+        // A call that does not ask for clouds keeps its earlier answer: the ray meets nothing.
+        let r = run(&mut s, "view.pick", json!({"rays": [ray]}));
+        assert_eq!(r["hits"][0], Value::Null, "{r}");
+
         // cloud_radius: 0 disables cloud ray hits.
         let r = run(&mut s, "view.pick", json!({"rays": [ray], "cloud_radius": 0}));
         assert_eq!(r["hits"][0], Value::Null);
 
         // Active filter removes index 1 (intensity 0.5 < 0.7), so index 2 (intensity 0.9, z=20) wins.
         s.doc_mut().point_clouds[0].filters.push(Filter { property: "intensity".into(), keep: Keep::Range { range: [0.7, 1.0] } });
-        let r = run(&mut s, "view.pick", json!({"rays": [ray]}));
+        let r = run(&mut s, "view.pick", json!({"rays": [ray], "clouds": true}));
         assert_eq!(r["hits"][0]["point_index"], 2, "{r}");
 
         // Section plane at z=15 removes z>15 (indices 1 & 2), leaving index 0 (z=5, intensity 1.0).
         run(&mut s, "inspect.section", json!({"plane": {"origin": [0, 0, 15], "normal": [0, 0, 1]}}));
-        let r = run(&mut s, "view.pick", json!({"rays": [ray]}));
+        let r = run(&mut s, "view.pick", json!({"rays": [ray], "clouds": true}));
         assert_eq!(r["hits"][0]["point_index"], 0, "{r}");
         run(&mut s, "inspect.section", json!({"clear": true}));
 
         // A solid box in front (z=25..35) occludes the cloud, while `all: true` returns both nearest first.
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-5, 105, 25], "body_name": "Shield"}));
-        let r = run(&mut s, "view.pick", json!({"rays": [ray]}));
+        let r = run(&mut s, "view.pick", json!({"rays": [ray], "clouds": true}));
         assert_eq!(r["hits"][0]["body"], "Shield", "{r}");
-        let r = run(&mut s, "view.pick", json!({"rays": [ray], "all": true}));
+        let r = run(&mut s, "view.pick", json!({"rays": [ray], "all": true, "clouds": true}));
         let list = r["hits"][0].as_array().cloned().unwrap_or_default();
         assert_eq!(list.len(), 2, "{r}");
         assert_eq!(list[0]["body"], "Shield", "{r}");
         assert_eq!(list[1]["cloud"], 1, "{r}");
 
+        // Without `clouds` the box answers as it always has, and `all` lists only the box.
+        let r = run(&mut s, "view.pick", json!({"rays": [ray], "all": true}));
+        assert_eq!(r["hits"][0].as_array().map(Vec::len), Some(1), "{r}");
+
+        // A section keeping z <= 22 cuts the whole box away: it no longer hides the cloud, and
+        // the scan point the filter keeps at z = 20 (index 2) answers instead of the box the
+        // section removed.
+        run(&mut s, "inspect.section", json!({"plane": {"origin": [0, 0, 22], "normal": [0, 0, 1]}}));
+        let r = run(&mut s, "view.pick", json!({"rays": [ray], "clouds": true}));
+        assert_eq!(r["hits"][0]["cloud"], 1, "{r}");
+        assert_eq!(r["hits"][0]["point_index"], 2, "{r}");
+        run(&mut s, "inspect.section", json!({"clear": true}));
+
         // Hidden cloud is not picked even with `all: true`.
         s.doc_mut().point_clouds[0].visible = false;
-        let r = run(&mut s, "view.pick", json!({"rays": [ray], "all": true}));
+        let r = run(&mut s, "view.pick", json!({"rays": [ray], "all": true, "clouds": true}));
         let list = r["hits"][0].as_array().cloned().unwrap_or_default();
         assert_eq!(list.len(), 1, "{r}");
         assert_eq!(list[0]["body"], "Shield", "{r}");
