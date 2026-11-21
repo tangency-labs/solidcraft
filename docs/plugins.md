@@ -531,6 +531,8 @@ plugin and importer.
 - `solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] [--require-cases]` checks
   the package, installs it into a scratch plugins folder with the app's installer, and runs its
   test cases, `tests/*.json`, through `plugin.run` and `file.import` with the app's limits. A
+  case uses its own temporary user-settings folder, removed after the run. Cases never read or
+  write the native settings folder or the folder named by `SOLIDCRAFT_SETTINGS_DIR`. A
   folder's cases are in its `tests/` folder; a `.zip`'s are the `tests/` folder it holds, so a
   `.zip` made without one has none. A case names the entry, its parameters or file, the grants
   (default: everything the manifest asks for, stored in the scratch folder's grant store as an
@@ -702,6 +704,7 @@ another plugin. Desktop, scripts, MCP and CLI plugin calls use the same folder:
 `~/Library/Application Support/SolidCraft` on macOS, and `%APPDATA%/SolidCraft/data` on Windows.
 `SOLIDCRAFT_SETTINGS_DIR` selects an isolated settings folder for desktop and headless runs;
 `--plugins-dir` changes installed packages, not the settings folder.
+`plugin test` gives each case a temporary settings folder and removes it after the run.
 
 Removing a plugin in Preferences offers to remove its saved user settings too; the box starts
 unchecked (keep). Scripts and MCP may omit `remove_user_data`:

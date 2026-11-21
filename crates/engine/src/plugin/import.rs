@@ -185,7 +185,7 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
                 })
                 .map_err(|e| HostError::Trap { reason: format!("could not start the import: {e}") })?
                 .join()
-                .map_err(|_| HostError::Trap { reason: "the import stopped unexpectedly".into() })?
+                .map_err(|_| HostError::Trap { reason: "the import stopped unexpectedly".into() })
         });
         // Keep settings staged while the app validates and evaluates the output. Any early
         // return drops the private host and its pending settings without publishing them.

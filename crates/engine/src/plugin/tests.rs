@@ -1994,6 +1994,7 @@ mod install_zip {
         let plugins = root.join("plugins");
         let settings = root.join("settings");
         s.plugin_state.user_settings_dir = Some(settings.clone());
+        s.plugin_state.stored = Some(Default::default());
         std::fs::create_dir_all(plugins.join("sample")).unwrap();
         let saved = BTreeMap::from([("hinge".into(), json!(42))]);
         user_storage::save(&settings, "sample", &saved).unwrap();
