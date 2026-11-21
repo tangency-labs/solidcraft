@@ -11,7 +11,7 @@ The board's geometry is built once, at import: the design stores the resulting s
 
 The board substrate always comes in:
 
-- **Outline**: the closed contours on the `Edge.Cuts` layer at board level and inside footprints — lines, rectangles, arcs, circles, filled polygons, curves and Bézier curves (arcs, circles and curves are drawn as polylines within 0.02 mm). An open contour is dropped with a warning.
+- **Outline**: the closed contours on the `Edge.Cuts` layer at board level and inside footprints — lines, rectangles, arcs, circles, filled polygons, curves and Bézier curves (arcs, circles and curves are drawn as polylines within 0.02 mm). Ends of outline items up to 0.01 mm apart are joined as one corner, as KiCad's STEP export joins them by default, so an outline drawn with gaps of a few nanometres is closed. An open contour is dropped with a warning.
 - **Cutouts**: a closed contour inside the outline is a hole through the board (even-odd nesting, so an island inside a cutout is board again).
 - **Drilled holes**: pad drills and via drills, round or slotted, are removed from the substrate. If a drill that touches a cutout defeats the profile, the board is rebuilt without the drills rather than failing.
 - **Placement**: the board's lower-left corner (the smallest X and Y of its outline) comes in at X = Y = 0. A board drawn anywhere on KiCad's project sheet lands at the design's origin with its corner there, not at the coordinates the file stores; the import's component carries that one shift, so its contents keep the board's own coordinates inside it.

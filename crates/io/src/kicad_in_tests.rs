@@ -150,6 +150,86 @@ fn builds_a_closed_mesh_from_a_concave_outline() {
 }
 
 #[test]
+fn an_outline_whose_lines_miss_each_other_by_nanometres_is_closed() {
+    // A 20 x 10 board as KiCad can save it: every corner has a gap of 1 to 6 nm between the end of
+    // one line and the start of the next. KiCad reads this outline as closed.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 20.000006 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10.000001) (end 0.000002 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0.000004) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "gaps.kicad_pcb").unwrap();
+    assert!(board.warnings.is_empty(), "{:?}", board.warnings);
+    let [outline] = board.outlines.as_slice() else { panic!("expected one outline: {:?}", board.outlines) };
+    assert_eq!(outline.len(), 4, "one point per corner: {outline:?}");
+    let mesh = kicad_board_mesh(&board, board.thickness).unwrap();
+    let body = solidcraft_kernel::mesh_body(&mesh.positions, &mesh.triangles).unwrap();
+    let measure = solidcraft_kernel::measure(&body).unwrap();
+    assert!((measure.volume - 200.0 * 1.6).abs() < 1e-3, "{measure:?}");
+}
+
+#[test]
+fn an_outline_piece_shorter_than_the_joining_distance_is_kept() {
+    // The outline's last piece is 0.005 mm long, so the corner before it is already within the
+    // joining distance of the start. The piece still belongs to the outline: five corners, and
+    // nothing left over.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 20 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10) (end 0 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0.005) (layer "Edge.Cuts"))
+      (gr_line (start 0 0.005) (end 0 0) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "short.kicad_pcb").unwrap();
+    assert!(board.warnings.is_empty(), "{:?}", board.warnings);
+    let [outline] = board.outlines.as_slice() else { panic!("expected one outline: {:?}", board.outlines) };
+    assert_eq!(outline.len(), 5, "{outline:?}");
+    // Short pieces right after the start do not close on themselves either.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 0.003 0) (layer "Edge.Cuts"))
+      (gr_line (start 0.003 0) (end 0.006 0) (layer "Edge.Cuts"))
+      (gr_line (start 0.006 0) (end 0.009 0) (layer "Edge.Cuts"))
+      (gr_line (start 0.009 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 20 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10) (end 0 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "short-start.kicad_pcb").unwrap();
+    assert!(board.warnings.is_empty(), "{:?}", board.warnings);
+    let [outline] = board.outlines.as_slice() else { panic!("expected one outline: {:?}", board.outlines) };
+    assert_eq!(outline.len(), 7, "{outline:?}");
+}
+
+#[test]
+fn an_outline_with_a_real_gap_stays_open() {
+    // The last line stops 0.02 mm short of the first corner: more than the 0.01 mm KiCad joins.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 20 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10) (end 0 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0.02) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "open.kicad_pcb").unwrap();
+    assert!(board.outlines.is_empty(), "{:?}", board.outlines);
+    assert_eq!(board.warnings, ["skipped an open Edge.Cuts contour"]);
+}
+
+#[test]
+fn an_exact_continuation_is_joined_before_one_across_a_gap() {
+    // Two squares whose corners are 5 nm apart: each closes on its own lines, not on the other's.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 10 0) (layer "Edge.Cuts"))
+      (gr_line (start 10.000005 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 10 0) (end 10 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 10 10) (end 0 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10) (end 10.000005 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0) (layer "Edge.Cuts"))
+      (gr_line (start 10.000005 10) (end 10.000005 0) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "pair.kicad_pcb").unwrap();
+    assert!(board.warnings.is_empty(), "{:?}", board.warnings);
+    assert_eq!(board.outlines.len(), 2, "{:?}", board.outlines);
+    assert!(board.outlines.iter().all(|outline| outline.len() == 4), "{:?}", board.outlines);
+}
+
+#[test]
 fn the_import_reports_the_outlines_lower_left_corner() {
     // A board drawn away from KiCad's origin: world X 30..90, and KiCad's Y 40..70 becomes
     // world Y -70..-40, so the lower-left corner is (30, -70).
