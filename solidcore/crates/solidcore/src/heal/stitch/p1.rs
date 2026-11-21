@@ -143,6 +143,7 @@ fn smos_min(a: f64, b: f64) -> f64 {
 }
 
 /// The stitch failed with a named cause, which keeps the status of the phrase it replaced.
+#[track_caller]
 fn named(cause: HealFailure) -> SolidError {
     SolidError::heal(OP, cause)
 }
@@ -858,7 +859,7 @@ impl StitchEditContext for BorrowedStitchEdits<'_, '_> {
             self.curve_identity,
         )?;
         if !out.split {
-            return Err(named(HealFailure::SplitPointAtEnd));
+            return Err(named(HealFailure::EdgeNotSplit));
         }
         let [e1, e2] = out.edges.ok_or_else(|| null_defect(OP, NO_SPLIT_EDGES))?;
         Ok((Some(e1), Some(e2), out.vertex))
@@ -1479,9 +1480,11 @@ impl<'c> Stitch<'c> {
 
                 // determine the corresponding DVerts
                 let pair_of = |v: Option<VertexId>| -> Result<Option<VertexId>> {
+                    // an edge of the face to keep with a missing end: the caller's faces
+                    let v = v.ok_or_else(|| named(HealFailure::FacesDoNotMatch))?;
                     let i = k_vertices
                         .iter()
-                        .position(|&x| Some(x) == v)
+                        .position(|&x| x == v)
                         .ok_or_else(|| {
                             defect(
                                 "an edge of the face to keep ends at a vertex the pairing did \
@@ -2719,7 +2722,7 @@ pub(crate) fn make_vertex_split_edge(
     let out = out?;
     restored?;
     if !out.split {
-        return Err(named(HealFailure::SplitPointAtEnd));
+        return Err(named(HealFailure::EdgeNotSplit));
     }
     let [e1, e2] = out.edges.ok_or_else(|| null_defect(OP, NO_SPLIT_EDGES))?;
     Ok((Some(e1), Some(e2), out.vertex))
@@ -3274,12 +3277,27 @@ mod tests {
             assert_eq!(err.upstream_status(), Some(SM_ERR));
             assert_eq!(err.kind(), ErrorKind::InvalidInput);
         }
-        // a split at an end of the edge is declined by name
-        b.set_editing_enabled(true);
+        // a declined split (at an end of the edge, or with editing off) is named
         let start = b.edge(e).unwrap().interval.min();
-        let err = make_vertex_split_edge(&mut k, &mut b, e, start).unwrap_err();
-        assert_eq!(err.heal_failure(), Some(&HealFailure::SplitPointAtEnd));
+        for editing in [false, true] {
+            b.set_editing_enabled(editing);
+            let err = make_vertex_split_edge(&mut k, &mut b, e, start).unwrap_err();
+            assert_eq!(err.heal_failure(), Some(&HealFailure::EdgeNotSplit));
+            assert_eq!(err.upstream_status(), Some(SM_ERR));
+        }
+        // vertex lists with no vertex in a B-rep
+        let err = stitch
+            .stitch_vertex_pairs(&mut k, &mut b, &mut [None], &mut [None])
+            .unwrap_err();
+        assert_eq!(err.heal_failure(), Some(&HealFailure::NotInBrep));
         assert_eq!(err.upstream_status(), Some(SM_ERR));
+        // an edge without its curve
+        let point = b.vertex(v).unwrap().point;
+        b.edge_mut(e).unwrap().curve = None;
+        let err = test_and_split_edge(&mut k, &mut b, e, point, 0.01).unwrap_err();
+        assert_eq!(err.heal_failure(), Some(&HealFailure::EdgeWithoutCurve));
+        assert_eq!(err.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
     }
 
     /// The kernel's reused arena record map is bound to one B-rep value: a later edit of

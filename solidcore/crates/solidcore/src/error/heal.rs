@@ -15,13 +15,16 @@
 //! | the named causes, from [`HealFailure::PairOfDifferentKinds`] on | the status of the phrase each replaced (`comparison_status`) |
 //!
 //! [`HealFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
-//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
-//! not yet converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
+//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The named causes from
+//! [`HealFailure::PairOfDifferentKinds`] on say what happened, with their numbers where a
+//! check measured them. The phrase causes ([`HealFailure::Failed`], `Missing`,
+//! `Inconsistent`) are sites not yet converted (the conversion guide:
+//! `docs/failure-codes-and-reproduction.md` §6).
 //!
-//! Deviations: not upstream. A failure says in a phrase (or by its variant) what went
-//! wrong; the failure's `operation` path says which routine. No failure names an
-//! entity: the sites they replace named none. The failures that are checks of a
-//! caller's arguments stay [`crate::SolidError::InvalidInput`].
+//! Deviations: not upstream. A failure says by its variant (or a phrase) what went wrong;
+//! the failure's `operation` path says which routine. No failure names an entity: the
+//! sites they replace named none. Checks of a caller's arguments that report no status
+//! (upstream dereferences null) stay [`crate::SolidError::InvalidInput`].
 
 use super::{
     ErrorKind, Failure, Reason, SM_ERR, SM_ERR_ASSERT_FAILURE, SM_ERR_NOTYET_HEAL_FACE,
@@ -61,9 +64,10 @@ pub enum HealFailure {
     /// The edge's parameter interval is empty or reversed, so a parameter on the edge
     /// cannot be placed in it. [`ErrorKind::Degenerate`]; status `SM_ERR`.
     DegenerateEdgeInterval,
-    /// The point to split the edge at is within tolerance of one of its ends, so the edge
-    /// is not split. Class `failed`; status `SM_ERR`.
-    SplitPointAtEnd,
+    /// The edge split declined: the point to split at is within tolerance of one of the
+    /// edge's ends or outside its interval, or the B-rep is not open for editing. Class
+    /// `failed`; status `SM_ERR`.
+    EdgeNotSplit,
     /// The caller's lists of faces to keep and to delete are empty or of different
     /// lengths. [`ErrorKind::InvalidInput`]; status `SM_ERR`.
     FaceListsDiffer,
@@ -71,8 +75,9 @@ pub enum HealFailure {
     /// lists hold none). [`ErrorKind::InvalidInput`]; status `SM_ERR`.
     NotInBrep,
     /// A face to keep and its face to delete do not match: they have different numbers of
-    /// vertices or edges, or an edge of one has no edge of the other between the paired
-    /// vertices. [`ErrorKind::InvalidInput`]; status `SM_ERR`.
+    /// vertices or edges, an edge of the face to keep lacks an end vertex, or an edge of one
+    /// has no edge of the other between the paired vertices. [`ErrorKind::InvalidInput`];
+    /// status `SM_ERR`.
     FacesDoNotMatch,
     /// Two vertices to stitch are `distance` apart, farther than `tolerance`.
     /// [`ErrorKind::NotWithinTolerance`]; status `SM_ERR`.
@@ -104,7 +109,7 @@ impl HealFailure {
             Self::Failed(_)
             | Self::Defect { .. }
             | Self::DegenerateEdgeInterval
-            | Self::SplitPointAtEnd
+            | Self::EdgeNotSplit
             | Self::FaceListsDiffer
             | Self::NotInBrep
             | Self::FacesDoNotMatch
@@ -136,7 +141,7 @@ impl HealFailure {
             | Self::FacesDoNotMatch => ErrorKind::InvalidInput,
             Self::DegenerateEdgeInterval => ErrorKind::Degenerate,
             Self::VerticesApart { .. } | Self::EdgesApart { .. } => ErrorKind::NotWithinTolerance,
-            Self::SplitPointAtEnd | Self::EdgesNotGlued => ErrorKind::Failed,
+            Self::EdgeNotSplit | Self::EdgesNotGlued => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -159,9 +164,7 @@ impl core::fmt::Display for HealFailure {
             Self::DegenerateEdgeInterval => {
                 f.write_str("the edge's parameter interval has no length")
             }
-            Self::SplitPointAtEnd => {
-                f.write_str("the point to split the edge at is at one of its ends")
-            }
+            Self::EdgeNotSplit => f.write_str("the edge was not split"),
             Self::FaceListsDiffer => f.write_str(
                 "the lists of faces to keep and to delete are empty or of different lengths",
             ),
@@ -192,6 +195,7 @@ impl crate::SolidError {
     /// [`crate::SolidError::Failed`] for a healing or stitching step that fails with
     /// `failure`.
     #[must_use]
+    #[track_caller]
     pub(crate) fn heal(operation: &'static str, failure: HealFailure) -> Self {
         Failure::new(operation, failure).into_error()
     }
@@ -320,7 +324,7 @@ mod tests {
                 K::InvalidInput,
             ),
             (HealFailure::DegenerateEdgeInterval, SM_ERR, K::Degenerate),
-            (HealFailure::SplitPointAtEnd, SM_ERR, K::Failed),
+            (HealFailure::EdgeNotSplit, SM_ERR, K::Failed),
             (HealFailure::FaceListsDiffer, SM_ERR, K::InvalidInput),
             (HealFailure::NotInBrep, SM_ERR, K::InvalidInput),
             (HealFailure::FacesDoNotMatch, SM_ERR, K::InvalidInput),
