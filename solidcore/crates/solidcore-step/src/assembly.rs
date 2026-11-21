@@ -1569,11 +1569,11 @@ impl<'t> Assembly<'t> {
         let shapes: Vec<Option<f64>> = edge_loops.iter().zip(&pcs).map(|(l, pc)| loop_area(l, pc, periods)).collect();
         let face = self.faces.get_mut(fi).ok_or("face reference")?;
         let marked = face.outer.and_then(|o| positions.iter().position(|p| *p == o));
-        // Which loop is largest is decided on areas whose sampling error is taken out: nested
-        // loops of nearly one size (a thin ring) must not swap places by how finely, or in how
-        // many edges, each is sampled.
+        // Which loop is largest is decided on the areas the loops' pcurves enclose, integrated
+        // along them, not on polygons: nested loops of nearly one size (a thin ring) must not swap
+        // places by how finely, or in how many edges, each is sampled.
         let sizes: Vec<Option<f64>> = if edge_loops.len() > 1 {
-            edge_loops.iter().zip(&pcs).zip(&shapes).map(|((l, pc), coarse)| coarse.and(loop_area_extrapolated(l, pc, periods))).collect()
+            edge_loops.iter().zip(&pcs).zip(&shapes).map(|((l, pc), coarse)| coarse.and(loop_area_integrated(l, pc))).collect()
         } else {
             shapes.clone()
         };
@@ -1921,16 +1921,61 @@ fn loop_area(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2]) -> Option<f
     loop_area_sampled(l, pcs, periodic, 16)
 }
 
-/// [`loop_area`] with the polygon's sampling error taken out. A polygon of `n` chords per edge
-/// misses each smooth edge's area by an amount that falls as `1 / n^2`, with a constant that
-/// depends on the edge (its turning, how its parameter runs), so loops of the same size split into
-/// different numbers of edges are missed by different amounts. Two polygons, `n` and `2 n` chords
-/// per edge, cancel that leading term for every edge at once (Richardson): what is left falls as
-/// `1 / n^4`, whatever the edge count.
-fn loop_area_extrapolated(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2]) -> Option<f64> {
-    let coarse = loop_area_sampled(l, pcs, periodic, 128)?;
-    let fine = loop_area_sampled(l, pcs, periodic, 256)?;
-    Some((4.0 * fine - coarse) / 3.0)
+/// The signed area a closed loop of pcurves encloses in (u, v), integrated along the curves:
+/// half of the integral of `(u - u0) dv - (v - v0) du` (Green), with `(u0, v0)` the loop's first
+/// point. Each edge is integrated knot span by knot span (the curve is smooth within a span),
+/// four Gauss–Legendre pieces of eight points to a span, so a rational arc is measured to
+/// rounding, not to a polygon's chord error, whatever the number of edges. A gap between one
+/// edge's end and the next edge's start (within the file's tolerance) is closed by a straight
+/// chord. `None` for a malformed pcurve. Only call it on a loop [`loop_area`] found closed.
+fn loop_area_integrated(l: &[(u32, bool)], pcs: &[Curve2]) -> Option<f64> {
+    // Eight-point Gauss–Legendre nodes on [-1, 1] and their weights.
+    const NODES: &[f64] = &[0.1834346424956498, 0.5255324099163290, 0.7966664774136267, 0.9602898564975363];
+    const WEIGHTS: &[f64] = &[0.3626837833783620, 0.3137066458778873, 0.2223810344533745, 0.1012285362903763];
+    const PIECES: u32 = 4;
+    let ends = |c: &Curve2, forward: bool| -> Option<([f64; 2], [f64; 2])> {
+        let [a, b] = c.interval()?;
+        let (p, q) = (solidcore_ops::pcurve::eval(c, a)?, solidcore_ops::pcurve::eval(c, b)?);
+        Some(if forward { (p, q) } else { (q, p) })
+    };
+    let (&(_, first_forward), first_curve) = (l.first()?, pcs.first()?);
+    let origin = ends(first_curve, first_forward)?.0;
+    let cross = |p: [f64; 2], q: [f64; 2]| (p[0] - origin[0]) * (q[1] - origin[1]) - (q[0] - origin[0]) * (p[1] - origin[1]);
+    let mut twice = 0.0;
+    let mut previous_end: Option<[f64; 2]> = None;
+    for (&(_, forward), c) in l.iter().zip(pcs) {
+        let [t0, t1] = c.interval()?;
+        let knots = match c {
+            Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. } => knots,
+        };
+        let mut breaks = vec![t0];
+        breaks.extend(knots.iter().copied().filter(|k| *k > t0 && *k < t1));
+        breaks.push(t1);
+        breaks.dedup();
+        let mut edge = 0.0;
+        for span in breaks.windows(2) {
+            let (a, b) = (*span.first()?, *span.get(1)?);
+            for k in 0..PIECES {
+                let lo = a + (b - a) * f64::from(k) / f64::from(PIECES);
+                let hi = a + (b - a) * f64::from(k + 1) / f64::from(PIECES);
+                let (mid, half) = (0.5 * (lo + hi), 0.5 * (hi - lo));
+                for (x, w) in NODES.iter().zip(WEIGHTS) {
+                    for t in [mid - half * x, mid + half * x] {
+                        let (p, d) = solidcore_ops::pcurve::eval_d1(c, t)?;
+                        edge += w * half * ((p[0] - origin[0]) * d[1] - (p[1] - origin[1]) * d[0]);
+                    }
+                }
+            }
+        }
+        let (start, end) = ends(c, forward)?;
+        if let Some(prev) = previous_end {
+            twice += cross(prev, start);
+        }
+        twice += if forward { edge } else { -edge };
+        previous_end = Some(end);
+    }
+    twice += cross(previous_end?, origin);
+    twice.is_finite().then_some(0.5 * twice)
 }
 
 /// [`loop_area`] with `steps` chords on each edge. A rational arc sampled evenly in its parameter
