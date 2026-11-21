@@ -247,6 +247,7 @@ pub mod pencil;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
+mod plugin_events;
 mod plugin_images;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
@@ -395,6 +396,7 @@ mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
+pub mod wheel_hint;
 pub use solidcraft_ui_kit::window_chrome;
 mod wireframe_silhouettes;
 pub mod workspace;
@@ -951,6 +953,7 @@ pub struct SolveApp {
     /// in the plugins folder's grant store too, shared with the command line and headless MCP.
     plugin_grant_store: Option<solidcraft_engine::plugin::grant_store::Synced>,
     plugin_slots: plugin_slots::State,
+    plugin_events: plugin_events::State,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -973,6 +976,8 @@ pub struct SolveApp {
     pub library: library::LibraryState,
     /// The 3D mouse: which device, its reading, and the calibration window.
     pub space_mouse: space_mouse::Input,
+    /// The one-time question to make a smooth-scrolling mouse wheel zoom (`wheel_hint`).
+    pub wheel_hint: wheel_hint::State,
     pub file_load: file_load::FileLoad,
     /// An opened design's bodies still being meshed, off the UI thread.
     pub(crate) open_meshing: Option<open_meshing::Meshing>,
@@ -1207,6 +1212,7 @@ impl SolveApp {
             plugin_inspection_versions: Default::default(),
             plugin_grant_store: None,
             plugin_slots: Default::default(),
+            plugin_events: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
@@ -1219,6 +1225,7 @@ impl SolveApp {
             home: home::HomeState::default(),
             library: library::LibraryState::default(),
             space_mouse: Default::default(),
+            wheel_hint: Default::default(),
             file_load: file_load::FileLoad::default(),
             open_meshing: None,
             open_meshing_next: false,
@@ -1961,6 +1968,7 @@ impl SolveApp {
             r => r,
         };
         self.finish_command(id, &r);
+        plugin_events::command_completed(self, id, r.is_ok());
         if render_workspace::active(self)
             && matches!(id, "appearance.assign" | "appearance.paste")
             && let Ok(value) = &r
@@ -2236,6 +2244,8 @@ impl SolveApp {
             && let Some(spec) = solidcraft_engine::find_command(id)
         {
             solidcraft_engine::usage::note(solidcraft_engine::usage::Bucket::Tools, spec.id);
+            // Timed from here until it is applied or cancelled (`usage_stats::tick`).
+            self.usage.started_tool = Some(spec.id);
         }
         self.tree.clear_folder_pick();
         // A command started from the folded ribbon's open panels closes them (#10112).
@@ -4326,6 +4336,7 @@ impl SolveApp {
         render_workspace::displayed::finish(self, ui.ctx());
         documents::sync_views(self);
         documents::sync_window_title(self, ui.ctx());
+        plugin_events::tick(self, ui.ctx());
     }
 
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {

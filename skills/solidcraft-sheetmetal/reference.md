@@ -38,6 +38,8 @@ Edge: `edges`, `height`, `angle?` (default 90°), `radius?` (default: the rule's
 An `edges` entry is `[x,y,z]` on a top or bottom edge, `{x,y,z}`, or
 `{point:[x,y,z], angle?, height?, segments?}` for an edge with its own values. `then` lists up to
 16 further bends `{angle?, height, flip?}`, each on the far edge of the one before.
+When you supply `name`, the first bend takes that name and the command returns its feature ID and
+name. When you omit `name`, the command returns the last bend's feature ID and name.
 
 ```json
 {"command":"sheet.flange","params":{"type":"edge","edges":[{"point":[100,0,2],"segments":[

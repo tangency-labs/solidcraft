@@ -3111,6 +3111,38 @@ fn the_silhouette_of_conic_rounds_closes() {
     assert!((area - exact).abs() < exact * 2e-4, "area {area}, exact {exact}");
 }
 
+/// The silhouette of a letter-sized outline with small conic rounds, far from the origin, is one
+/// closed outline (#14987). A round projected as two fitted arcs (or a line and an arc) left
+/// their shared end 0.0003 to 0.001 mm apart, wider than profiles and Offset join ends, so the
+/// projected outline of an extruded letter made no profile and could not be offset.
+#[test]
+fn the_silhouette_of_small_conic_rounds_far_out_closes() {
+    for (rho, r, (cx, cz)) in [(0.5, 0.7, (-60., 250.)), (0.5, 0.4, (-140., 240.)), (0.45, 0.9, (90., -270.)), (0.5, 0.25, (200., 180.))] {
+        let mut s = Session::default();
+        let h = 6.0;
+        // A square of side 2h round (cx, cz), each corner a conic round of size r.
+        let corners = [
+            ([cx - h, cz + h - r], [cx - h, cz + h], [cx - h + r, cz + h]),
+            ([cx + h - r, cz + h], [cx + h, cz + h], [cx + h, cz + h - r]),
+            ([cx + h, cz - h + r], [cx + h, cz - h], [cx + h - r, cz - h]),
+            ([cx - h + r, cz - h], [cx - h, cz - h], [cx - h, cz - h + r]),
+        ];
+        run(&mut s, "sketch.create", json!({"plane": "YZ"}));
+        for (i, (start, apex, end)) in corners.iter().enumerate() {
+            run(&mut s, "sketch.conic", json!({"start": start, "apex": apex, "end": end, "rho": rho}));
+            let next = corners[(i + 1) % 4].0;
+            run(&mut s, "sketch.line", json!({"points": [end, next]}));
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 100, "body_name": "Letter"}));
+        run(&mut s, "sketch.create", json!({"plane": "YZ"}));
+        run(&mut s, "sketch.project", json!({"refs": [{"body": "Letter"}], "construction": false}));
+        let si = inspect(&mut s);
+        let profiles = si["profiles"].as_array().unwrap();
+        assert_eq!(profiles.len(), 1, "rho {rho}, round {r} at ({cx}, {cz}): {}", si["profiles"]);
+    }
+}
+
 /// A second placement's body is projected where that placement puts it (#9957): a sketch sees
 /// "Block (Part:2)" as the browser shows it, not only the first placement's "Block", on a plane
 /// and on a face alike.
