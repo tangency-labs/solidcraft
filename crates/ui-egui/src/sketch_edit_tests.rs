@@ -792,6 +792,27 @@ mod open_view_preference {
         crate::scenario::check(&mut h, &json!({"sketching": true, "camera": {"yaw_deg": 0, "pitch_deg": 90}})).unwrap();
     }
 
+    /// With design views as tabs, a new sketch opens its own view: the turn to face it carries
+    /// into that view, and Finish Sketch's turn back carries into the Model view.
+    #[test]
+    fn with_views_as_tabs_a_new_sketch_turns_to_face_it_and_back() {
+        let mut h = Harness::new();
+        h.app.preferences.design_views_as_tabs = true;
+        h.app.preferences.sketch_exit_view = crate::prefs::SketchExitView::Previous;
+        h.call("ui.view", json!({"view": "iso"}));
+        h.settle();
+        let iso = h.app.cam;
+        h.step(&json!({"start": "sketch.create"})).unwrap();
+        h.step(&json!({"click": {"plane": "XY"}})).unwrap();
+        h.settle();
+        assert_eq!(h.app.docs.views.active().kind, solidcraft_views::ViewKind::Sketch, "the sketch has its own view");
+        crate::scenario::check(&mut h, &json!({"sketching": true, "camera": {"yaw_deg": 0, "pitch_deg": 90}})).unwrap();
+        h.app.finish_sketch();
+        h.settle();
+        assert_eq!(h.app.docs.views.active().kind, solidcraft_views::ViewKind::Model);
+        assert!((h.app.cam.pitch - iso.pitch).abs() < 1e-6 && (h.app.cam.yaw - iso.yaw).abs() < 1e-6, "back to the view from before");
+    }
+
     #[test]
     fn off_editing_a_sketch_keeps_the_view() {
         let mut app = crate::test_support::sample_app();

@@ -746,7 +746,12 @@ pub(crate) fn sync_views(app: &mut SolveApp) {
     }
     let after = views.active().id;
     if before != after {
+        // The app moved into or out of a sketch or Render here, and the camera stays as it is,
+        // so the camera's running turn stays too: the turn to face a new sketch, or Finish
+        // Sketch's turn back, would otherwise be parked with the view just left.
+        let turn = app.cam_anim.take();
         switch_navigation(app, before, after);
+        app.cam_anim = turn;
     }
 }
 
