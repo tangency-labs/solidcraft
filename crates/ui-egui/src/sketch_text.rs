@@ -512,6 +512,8 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
     }
     let response = ui_kit::multiline_text_field(ui, "Text", id, &mut k.text).backing_on_hover_text(solidcraft_ui_text::tr("sketch_text.formula"));
     crate::scenario::publish_handle("dialog:Text", response.rect.center());
+    // Say how to type several lines: Enter finishes the text, so it is not found by trying (#16738).
+    ui_kit::text(ui, solidcraft_ui_text::tr("sketch_text.new_line_hint"), ui_kit::Text::Hint("sketch_text_new_line"));
     if k.focus {
         response.request_focus();
         let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
@@ -1455,6 +1457,8 @@ mod tests {
         let (mut h, link, _) = setup();
         h.app.start("sketch.edit_text");
         h.frames(3);
+        // The dialog says how (#16738).
+        assert!(h.widget(solidcraft_ui_text::tr("sketch_text.new_line_hint")).is_some(), "the new-line hint under the Text box");
         h.step(&json!({"text":"A"})).unwrap();
         h.step(&json!({"key":"Enter","shift":true})).unwrap();
         h.step(&json!({"text":"B"})).unwrap();
