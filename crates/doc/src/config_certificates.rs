@@ -859,11 +859,12 @@ impl Document {
     /// follow exact history and lie on one oriented plane.
     pub(crate) fn lineage_face_indices(&self, body: &ModelBody, name: &str) -> Result<Vec<usize>> {
         let names = crate::naming::names(body);
-        // `face` is `name` itself or a piece of it (a piece of a piece, …).
+        // `face` is `name` itself or a piece of it (a piece of a piece, …). Compare the
+        // identities in either saved spelling: 0.40 rc.3 wrote `blend:…`, now `blend(…)`.
         let piece_of = |face: &str| {
             let mut n = face;
             loop {
-                if n == name {
+                if crate::persistent_name::same_face(n, name) {
                     return true;
                 }
                 match crate::piece_names::parent_piece(n) {
@@ -878,7 +879,7 @@ impl Document {
                 .info
                 .iter()
                 .enumerate()
-                .filter(|(_, info)| info.synonyms.iter().chain(&info.aliases).any(|other| other == name))
+                .filter(|(_, info)| info.synonyms.iter().chain(&info.aliases).any(|other| crate::persistent_name::same_face(other, name)))
                 .map(|(index, _)| index)
                 .collect();
         }
