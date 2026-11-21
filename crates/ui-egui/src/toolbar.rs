@@ -5369,6 +5369,25 @@ mod app_bar_tests {
         assert!(crate::scenario::rect_of("tab:view_new").is_some(), "the view control returns on leaving edit mode");
     }
 
+    /// The same on the default clear view tabs, whose design pill has no close button.
+    #[test]
+    fn app_bar_editing_hides_only_the_inner_view_plus_on_clear_view_tabs() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.design_views_as_tabs = true;
+        assert!(h.app.preferences.clear_view_tabs, "the default strip");
+        h.call("ui.resize", json!({"width":1280,"height":720}));
+        h.frames(4);
+        assert!(crate::scenario::rect_of("tab:view_new").is_some(), "normal mode keeps Open another view");
+        h.app.start("ui.appBarCustomize");
+        h.frames(4);
+        assert!(crate::scenario::rect_of("tab:view_new").is_none());
+        assert!(crate::scenario::handle_at("tab:new").is_some());
+        h.app.start("ui.appBarCustomize");
+        h.frames(4);
+        assert!(crate::scenario::rect_of("tab:view_new").is_some(), "the view control returns on leaving edit mode");
+    }
+
     #[test]
     fn app_bar_right_click_opens_the_shared_menu_and_hides_the_target() {
         let mut h = crate::scenario::Harness::new();
