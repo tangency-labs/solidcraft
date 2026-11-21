@@ -24,14 +24,15 @@
 //! its 20 passes run out. Each pass splits every span that misses, so without the bound a
 //! curve that never fits doubles its stations each pass (the goldens' generated
 //! `blend.fillet_geom_p2` case `gen0014` ran out of memory). Not the fork's: a span off the
-//! exact curve is split at a point of the crossing in the middle half of its chord, not at the
-//! uv cubic's middle put back on the plane. Where the surface's speed varies steeply along the
-//! crossing (a chamfer's ruled surface between rails whose weights differ 58-fold, #19967), a
-//! station's uv rate is large, the uv cubic leaves the span, and its middle put back on the
-//! plane lies outside the span: every pass split the same spans again until the passes ran
-//! out. A span with no such point (none in the middle half of its chord, or one nearer the other
-//! station than its own) is left as it is, and the fit ends at its cap as before if it still
-//! misses.
+//! exact curve is split at a point of the crossing in the middle half of its chord, marched
+//! from its first station, not at the uv cubic's middle put back on the plane. Where the
+//! surface's speed varies steeply along the crossing (a chamfer's ruled surface between rails
+//! whose weights differ 58-fold, #19967), a station's uv rate is large, the uv cubic leaves
+//! the span, and its middle put back on the plane lies outside the span: every pass split the
+//! same spans again until the passes ran out. A span with no such point (none in the middle
+//! half of its chord, or one nearer the other station than its own) is left as it is; a pass
+//! that splits no span while one still misses ends the fit as one past its cap
+//! ([`BlendFailure::PlaneCurveFitCap`]), as every later pass would repeat it.
 //!
 //! Failures (#15034): three reviewed defects report a successful evaluation missing its
 //! promised first derivatives, a non-positive plane Gram determinant after its axes' cross
@@ -206,48 +207,62 @@ impl Tracer<'_> {
         Ok((t, Point2::new(a, b)))
     }
 
-    /// A point of the crossing between two stations, to split their span at: in the middle
-    /// half of their chord (its side of the plane through the chord's middle, normal to it, at
-    /// most a quarter of the chord's length from that plane), so each new span keeps at least a
-    /// quarter of the old one, and nearer each station than the other is (a point of the same
-    /// stretch of the crossing, not of another branch passing by). Found by bisection on `l`
-    /// in [0, 1] over the crossing's points [`Tracer::onto_plane`] reaches from
-    /// `(1 - l) a + l b` in uv, by that side (behind the middle at `a`, past it at `b`).
-    /// `None` where a candidate is not on the plane, its side is not a number, 52 halvings
-    /// (the last bit of `l`) find none in the middle half, or the one found is not nearer
-    /// each station than the other.
-    fn between(&self, a: &Station, b: &Station) -> Result<Option<Point2>> {
+    /// A point of the crossing between two stations, to split their span at, marched from
+    /// `a` as the trace marches: a step along the tangent, onto the plane's equation by
+    /// [`Tracer::onto_plane`], its tangent turning by at most `ang_tol`. Each step starts on
+    /// the stretch of the crossing `a` lies on and is shorter than the step that reached `b`,
+    /// so its point is on that stretch as far as the trace's own stations are, not on another
+    /// branch passing between the stations (where a point put back on the plane from the
+    /// chord's middle in uv can land). Taken once it lies in the middle half of their chord
+    /// (its side of the plane through the chord's middle, normal to it, at most a quarter of
+    /// the chord's length from that plane), so each new span keeps at least a quarter of the
+    /// old one, and nearer each station than the other is. The first step is half the chord; a
+    /// step off the plane, turning too far or landing past the middle half is halved, one short
+    /// of it is taken and marched on from. `None` where a station has no speed, a side is not
+    /// a number, a step does not move on towards `b`, 64 steps find no point in the middle
+    /// half, or the one found is not nearer each station than the other.
+    fn between(&self, a: &Station, b: &Station, ang_tol: f64) -> Result<Option<Point2>> {
         let chord = b.x - a.x;
         let mid = a.x + chord * 0.5;
         let length = chord.length();
         if !(length > 0.0) {
             return Ok(None);
         }
-        let (mut behind, mut past) = (0.0_f64, 1.0_f64);
-        for _ in 0..52 {
-            let l = 0.5 * (behind + past);
-            let mut uv = Point2::new(
-                (1.0 - l) * a.uv.x + l * b.uv.x,
-                (1.0 - l) * a.uv.y + l * b.uv.y,
-            );
-            if !self.onto_plane(&mut uv)? {
+        let (mut last, mut behind, mut h) = (*a, -0.5 * length, 0.5 * length);
+        for _ in 0..64 {
+            let (_, su, sv, _) = self.eval(last.uv)?;
+            let speed = (su * last.rate.x + sv * last.rate.y).length();
+            if !(speed > 0.0) {
                 return Ok(None);
             }
+            let mut uv = Point2::new(
+                last.uv.x + h * last.rate.x / speed,
+                last.uv.y + h * last.rate.y / speed,
+            );
+            if !self.onto_plane(&mut uv)? {
+                h *= 0.5;
+                continue;
+            }
+            let (t, rate) = self.tangent(uv, last.t)?;
             let x = self.eval(uv)?.0;
             // the signed distance from the middle plane, along the chord
             let side = (x - mid).dot(chord) / length;
             if !side.is_finite() {
                 return Ok(None);
             }
-            if side.abs() <= 0.25 * length {
+            if !(t.angle_between(last.t)? <= ang_tol) || side > 0.25 * length {
+                h *= 0.5;
+                continue;
+            }
+            if side >= -0.25 * length {
                 let near = x.distance(a.x) < length && x.distance(b.x) < length;
                 return Ok(near.then_some(uv));
             }
-            if side < 0.0 {
-                behind = l;
-            } else {
-                past = l;
+            if !(side > behind) {
+                return Ok(None);
             }
+            behind = side;
+            last = Station { uv, x, t, rate };
         }
         Ok(None)
     }
@@ -530,7 +545,7 @@ pub fn surface_plane_curve(
         // each span at its quarters against the exact curve there, to a tenth of the tolerance;
         // a span off is split at the crossing's point between its stations
         let mut off: Vec<(usize, Point2)> = Vec::new();
-        // a span that misses with no point to split at stays as it is: the passes go on
+        // a span that misses with no point to split at stays as it is
         let mut missed = false;
         for (j, ((&sa, &sb), (a, b))) in s
             .iter()
@@ -552,13 +567,23 @@ pub fn surface_plane_curve(
                 }
             }
             if !span_ok {
-                match tr.between(a, b)? {
+                match tr.between(a, b, ang_tol)? {
                     Some(mid_uv) => off.push((j, mid_uv)),
                     None => missed = true,
                 }
             }
         }
-        if off.is_empty() && !missed {
+        if off.is_empty() {
+            if missed {
+                // nothing to split: the next pass would repeat this one exactly
+                return Err(SolidError::blend(
+                    OP,
+                    BlendFailure::PlaneCurveFitCap {
+                        stations: st.len(),
+                        passes: pass + 1,
+                    },
+                ));
+            }
             return Ok(SurfacePlaneCurves {
                 curve_3d: c3d,
                 uv_surface,
@@ -739,7 +764,7 @@ mod tests {
             Station { uv, x, t, rate }
         };
         let (a, b) = (station(-0.01), station(0.01));
-        let uv = tr.between(&a, &b).unwrap().unwrap();
+        let uv = tr.between(&a, &b, 0.1).unwrap().unwrap();
         // on v = u^2, not on v = u^2 + 5e-5
         assert!((uv.y - uv.x * uv.x).abs() <= 1.0e-9, "{uv:?}");
         assert!(uv.x.abs() <= 0.005, "{uv:?}");
