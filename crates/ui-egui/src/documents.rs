@@ -2691,7 +2691,7 @@ fn view_tab<'a>(
         on_screen,
         tip,
         to_window,
-        window_name: window.map(|window| window.name.as_str()),
+        window_name: window.and_then(|window| window.custom_name.as_deref()),
         window_number: window.map(|window| window.number),
     }
 }
@@ -2771,7 +2771,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 .iter()
                 .map(|(view, _, _, window)| {
                     let other = window.and_then(|id| window_choices.iter().find(|choice| choice.id == id));
-                    if let Some(other) = other.filter(|_| app.preferences.clear_view_tabs) {
+                    if let Some(other) = other {
                         locale.format("view_tab.elsewhere", &[("view", &view.name), ("window", &other.name)])
                     } else if window.is_some() {
                         format!("{} · {}", view.name, app.tr("multi_window.window_mark"))
@@ -2883,6 +2883,37 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             switcher_menu: &switcher_menu,
             tear_off_below: TEAR_OFF_BELOW,
         };
+        if child {
+            let width = crate::app_bar::preferred_pill_width(ui, &strip);
+            let key = strip.id.with("preferred_width");
+            let changed = ui.ctx().data_mut(|data| {
+                let previous = data.get_temp::<f32>(key);
+                data.insert_temp(key, width);
+                previous != Some(width)
+            });
+            if changed {
+                ui.ctx().request_repaint();
+            }
+        }
+        let linked = crate::view_window_drag::hovered_view(app)
+            .and_then(|id| design_views.get(selected)?.iter().position(|(view, _, _, window)| view.id == id && window.is_none()));
+        let detached = design_views.get(selected).and_then(|views| {
+            views.iter().position(|(view, _, _, window)| window.is_none() && crate::view_window_drag::unanchored(app, ui.ctx(), view.id))
+        });
+        ui.ctx().data_mut(|data| {
+            let detached_key = strip.id.with("unanchored_view");
+            if let Some(detached) = detached {
+                data.insert_temp(detached_key, detached);
+            } else {
+                data.remove::<usize>(detached_key);
+            }
+            let key = strip.id.with("linked_view_hover");
+            if let Some(linked) = linked {
+                data.insert_temp(key, linked);
+            } else {
+                data.remove::<usize>(key);
+            }
+        });
         crate::app_bar::tabs_with_view_drop_zones(ui, &mut strip, r, x0, x1)
     };
     let drop_zones = drop_zones
@@ -2893,6 +2924,11 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             Some((tab, count, zone))
         })
         .collect();
+    let hovered = ui
+        .ctx()
+        .data(|data| data.get_temp::<usize>(tab_strip_id(ui.ctx().viewport_id()).with("view_hover")))
+        .and_then(|view| strip_view_id(app, view));
+    crate::view_window_drag::hover(app, ui.ctx(), hovered);
     let drag_continues = !app.file_load_holds() && actions.iter().any(|action| matches!(action, crate::app_bar::TabAction::DockView { .. }));
     crate::view_window_drag::record(app, ui.ctx(), drop_zones, drag_continues);
     // The name typed into the selected tab: kept when it changed and isn't blank, given up on
@@ -3300,6 +3336,12 @@ pub(crate) fn uses_file(app: &SolveApp, path: &str) -> bool {
         || app.docs.slots.iter().flatten().any(|slot| solidcraft_engine::session_uses_file(&slot.session, path))
 }
 
+/// The last measured width of a pop-out's complete view strip, before labels collapse.
+/// Until the first layout, reserve all available space for the views.
+pub(crate) fn preferred_tab_width(ctx: &egui::Context) -> f32 {
+    ctx.data(|data| data.get_temp::<f32>(tab_strip_id(ctx.viewport_id()).with("preferred_width"))).unwrap_or(f32::INFINITY)
+}
+
 /// Where SolidCraft's document tab strip keeps its state.
 pub(crate) fn tab_strip_id(viewport: egui::ViewportId) -> egui::Id {
     egui::Id::unique(("sc_doc_tabs", viewport))
@@ -3386,7 +3428,23 @@ mod tests {
         let second = view_duplicate(&mut app, first).unwrap();
         let third = view_duplicate(&mut app, second).unwrap();
         assert!(view_rename(&mut app, third, "Original angle"));
-        app.run("tab.view.move_to_window", json!({"view":third})).unwrap();
+        let window = app.run("tab.view.move_to_window", json!({"view":third})).unwrap()["window"].clone();
+        let migrated = crate::prefs::lenient(&json!({"pop_out_window_defaults":{"card_headers":"hover","keep_on_top":true}}));
+        assert!(migrated.pop_out_window_defaults.ribbon && migrated.pop_out_window_defaults.ribbon_auto_hide);
+        assert_eq!(migrated.pop_out_window_defaults.card_headers, solidcraft_views::CardHeaders::Hover);
+        let options = app.run("tab.window.options", json!({"window":window})).unwrap()["options"].clone();
+        assert_eq!(
+            options,
+            json!({"card_headers":"always","interface_size":100,"keep_on_top":false,"panels":false,"ribbon":true,"ribbon_auto_hide":true,"top_bar":"always"})
+        );
+        let edited = app
+            .run(
+                "tab.window.set_options",
+                json!({"window":window,"card_headers":"hidden","interface_size":150,"keep_on_top":true,"panels":true,"ribbon":false,"ribbon_auto_hide":false,"top_bar":"edge"}),
+            )
+            .unwrap();
+        app.run("window.options.use_as_default", json!({"window":window})).unwrap();
+        assert_eq!(serde_json::to_value(app.preferences.pop_out_window_defaults).unwrap(), edited["options"]);
         app.run("tab.view.layout", json!({"window":0,"layout":"side_by_side"})).unwrap();
         assert_eq!(app.run("tab.layout.save", json!({"name":"Side monitors"})).unwrap()["name"], "Side monitors");
         assert_eq!(app.run("tab.layout.list", json!({})).unwrap()["layouts"], json!(["Side monitors"]));
@@ -3411,13 +3469,21 @@ mod tests {
         assert_eq!(child.views.ids().collect::<Vec<_>>(), [b]);
         assert_eq!(child.views.active().name, "Keep this name");
         let id = child.id;
+        assert_eq!(serde_json::to_value(child.options).unwrap(), edited["options"]);
+        target.run("tab.window.set_options", json!({"window":id,"keep_on_top":false})).unwrap();
+        assert_eq!(crate::view_setups::matching_name(&target), None);
         target.run("tab.layout.apply", json!({"name":"Side monitors"})).unwrap();
         assert_eq!(target.docs.views.windows().first().unwrap().id, id);
+        assert_eq!(target.run("tab.window.options", json!({"window":id})).unwrap()["options"], edited["options"]);
         assert!(target.docs.views.check());
         assert_eq!(target.run("tab.layout.rename", json!({"name":"Side monitors","new_name":"Review"})).unwrap()["new_name"], "Review");
         assert_eq!(target.run("tab.layout.list", json!({})).unwrap()["layouts"], json!(["Review"]));
         assert_eq!(target.run("tab.layout.remove", json!({"name":"Review"})).unwrap()["name"], "Review");
         assert_eq!(target.run("tab.layout.list", json!({})).unwrap()["layouts"], json!([]));
+        target.run("tab.window.close", json!({"window":id})).unwrap();
+        assert_eq!(target.run("tab.window.options", json!({"window":id})).unwrap_err(), "window_not_found");
+        let reopened = target.run("tab.view.move_to_window", json!({"view":b})).unwrap()["window"].clone();
+        assert_eq!(target.run("tab.window.options", json!({"window":reopened})).unwrap()["options"], edited["options"]);
     }
 
     #[test]

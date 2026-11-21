@@ -396,6 +396,7 @@ mod view_setups;
 mod view_setups_ui;
 mod view_tiles;
 mod view_window_drag;
+mod view_window_scale;
 pub mod view_windows;
 pub mod viewport;
 mod viewport_details;
@@ -1741,7 +1742,9 @@ impl SolveApp {
             Some(layout) if layout.starts_with("tab.layout.") => r.and_then(|v| view_setups::command(self, layout, v)),
             Some("view.set_compass") => r.and_then(|v| documents::set_compass(self, v)),
             Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
-            Some(window) if window.starts_with("tab.window.") => r.and_then(|v| view_windows::command(self, window, v)),
+            Some(window) if window.starts_with("tab.window.") || window == "window.options.use_as_default" => {
+                r.and_then(|v| view_windows::command(self, window, v))
+            }
             _ => r,
         };
         // A grant taken back here that the shared store still holds is not taken back: say so.
@@ -2832,6 +2835,7 @@ impl SolveApp {
             if d.wants_picks() && !self.session.selection.is_empty() {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
+            self.view_windows.start_tool_panel(self.docs.current_tab());
             self.dialog = Some(d);
             return;
         }
@@ -2908,6 +2912,7 @@ impl SolveApp {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             let extrude = matches!(d.kind, dialogs::Kind::Extrude { .. });
+            self.view_windows.start_tool_panel(self.docs.current_tab());
             self.dialog = Some(d);
             if extrude {
                 self.turn_for_extrude();
@@ -4438,8 +4443,12 @@ impl SolveApp {
         self.viewport.host_windows = ui_kit::Container::host_window_regions(ui.ctx());
         viewport::refresh_layout(self, ui.ctx());
         // Before the dialog: a click on the view's OK or Cancel is for this frame's dialog.
-        view_confirm::show(self, ui.ctx());
-        dialogs::show(self, ui.ctx());
+        if self.view_windows.child_tool_owner(self.docs.current_tab()).is_none() {
+            view_confirm::show(self, ui.ctx());
+            dialogs::show(self, ui.ctx());
+        } else {
+            self.viewport.host_confirm = None;
+        }
         issue_report::CadInput::block(self, ui, report_input);
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
@@ -4470,9 +4479,12 @@ impl SolveApp {
             if view_tiles::shown(self) {
                 view_tiles::card_controls(self, ui);
             }
-            let mut controls = view_tiles::controls_ui(ui, self.session.uid, self.docs.views.active().id, rect);
-            render_workspace::host_result_overlays(self, &mut controls);
-            viewport::show_host_controls(self, &mut controls, rect);
+            let ctx = ui.ctx().clone();
+            view_tiles::with_visible_ground(self, &ctx, |app| {
+                let mut controls = view_tiles::controls_ui(ui, app.session.uid, app.docs.views.active().id, rect);
+                render_workspace::host_result_overlays(app, &mut controls);
+                viewport::show_host_controls(app, &mut controls, rect);
+            });
         }
         view_tiles::placement_overlay(self, ui.ctx());
         self.resolve_fit(ui.ctx());
@@ -4497,12 +4509,28 @@ impl SolveApp {
             }
         } else if view_tiles::shown(self) {
             view_tiles::show(self, ui);
+        } else if view_window_drag::unanchored(self, ui.ctx(), self.docs.views.active().id) {
+            self.viewport.rect = Some(ui.max_rect());
+            let t = solidcraft_theme::Tokens::get();
+            solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_bottom);
         } else if render_workspace::active(self) {
             // The model view is not drawn, so no shown dimension can be double-clicked.
             dim_view::set_model_drawn(Vec::new());
             render_workspace::show(self, ui);
         } else {
             viewport::show(self, ui);
+        }
+        if let Some(view) = view_window_drag::hovered_view(self) {
+            let rect = if view == self.docs.views.active().id {
+                self.viewport.rect
+            } else {
+                self.viewport.cards.iter().find(|(id, _)| *id == view).map(|(_, rect)| *rect)
+            };
+            if let Some(rect) = rect.filter(|rect| rect.is_positive()) {
+                let t = solidcraft_theme::Tokens::get();
+                ui.painter().rect_filled(rect.shrink(2.0), 6, t.accent.gamma_multiply(0.035));
+                ui.painter().rect_stroke(rect.shrink(2.0), 6, egui::Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
+            }
         }
     }
 
