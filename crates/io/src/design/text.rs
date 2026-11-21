@@ -33,10 +33,16 @@ use super::{PackageReader, is_design_container, part_limit};
 /// The deepest nesting laid out, the 127 levels serde_json reads in a design.
 const MAX_DEPTH: usize = 127;
 
-/// The most bytes JSON text of `length` bytes may lay out to. That is 8 times its size, or 64 MiB
-/// for small text. A real design lays out to about twice its size.
+/// How many times its size JSON text may grow when laid out. A real design lays out to about twice
+/// its size.
+const GROWTH: usize = 4;
+
+/// The laid-out bytes always allowed, so small text with long lines still prints.
+const FLOOR: usize = 64 << 20;
+
+/// The most bytes JSON text of `length` bytes may lay out to.
 fn budget(length: usize) -> usize {
-    length.saturating_mul(8).max(64 << 20)
+    length.saturating_mul(GROWTH).max(FLOOR)
 }
 
 /// Whether a part is printed as laid-out JSON. These are the design or drawing itself and a
@@ -58,12 +64,11 @@ fn summary(what: &str, bytes: &[u8]) -> String {
 }
 
 /// JSON text laid out as a `.json` save lays it out, with a final line feed. Text nested too deeply,
-/// or that would lay out past its [`budget`], is summed up in one line instead.
-fn laid_out(text: &str) -> String {
+/// or that would lay out past `budget` bytes, is summed up in one line instead.
+fn laid_out(text: &str, budget: usize) -> String {
     if depth(text) > MAX_DEPTH {
         return summary(&format!("JSON nested more than {MAX_DEPTH} levels deep"), text.as_bytes());
     }
-    let budget = budget(text.len());
     let Some(mut out) = pretty_within(&compact(text), budget) else {
         return summary(&format!("JSON that would lay out to more than {budget} bytes"), text.as_bytes());
     };
@@ -78,7 +83,7 @@ pub fn design_text(bytes: &[u8]) -> String {
         return container_text(bytes);
     }
     match std::str::from_utf8(bytes) {
-        Ok(text) if serde_json::from_str::<IgnoredAny>(text).is_ok() => laid_out(text),
+        Ok(text) if serde_json::from_str::<IgnoredAny>(text).is_ok() => laid_out(text, budget(text.len())),
         Ok(_) => summary("not JSON and not a SolidCraft container", bytes),
         Err(_) => summary("not text and not a SolidCraft container", bytes),
     }
@@ -113,6 +118,9 @@ fn container_text(bytes: &[u8]) -> String {
     let mut out = String::new();
     let mut parts = String::new();
     let mut damaged = false;
+    // One budget for every laid-out part together, so a container of many parts cannot add up to
+    // more than [`FLOOR`] and [`GROWTH`] times the text it holds.
+    let mut allowance = FLOOR;
     for name in names.iter().filter(|name| !is_cache(name)) {
         let part = match reader.limited_part(name, part_limit(name)) {
             Ok(part) => part,
@@ -129,7 +137,10 @@ fn container_text(bytes: &[u8]) -> String {
             }
             Some(text) if is_text_part(name) => {
                 let _ = writeln!(out, "# {name}");
-                out.push_str(&laid_out(text));
+                allowance = allowance.saturating_add(text.len().saturating_mul(GROWTH));
+                let laid = laid_out(text, allowance);
+                allowance = allowance.saturating_sub(laid.len());
+                out.push_str(&laid);
             }
             _ => {
                 let hash = digest(&part);

@@ -59,7 +59,8 @@ fn a_container_prints_its_design_and_one_line_per_part() {
     assert!(text.starts_with("# SolidCraft container {\"format\":\"solidcraft-container/1\""), "{text}");
     let mut reader = PackageReader::new(std::io::Cursor::new(bytes.as_slice())).unwrap();
     let document = reader.limited_part("document.json", part_limit("document.json")).unwrap();
-    assert!(text.contains(&format!("# document.json\n{}", laid_out(std::str::from_utf8(&document).unwrap()))), "{text}");
+    let document = std::str::from_utf8(&document).unwrap();
+    assert!(text.contains(&format!("# document.json\n{}", laid_out(document, budget(document.len())))), "{text}");
     let mut blobs = 0;
     for name in reader.part_names() {
         if name.starts_with("blobs/") {
@@ -146,6 +147,24 @@ fn json_that_lays_out_too_large_is_summed_up() {
     let wide = format!("{}{}1{}", "[".repeat(100), "1,".repeat(400_000), "]".repeat(100));
     let text = design_text(wide.as_bytes());
     assert_eq!(text, summary(&format!("JSON that would lay out to more than {} bytes", budget(wide.len())), wide.as_bytes()));
+}
+
+/// The laid-out parts of a container share one budget, so many parts that each fit cannot add up to
+/// more than the budget allows together. Here each of three drawings would lay out to about 31 MB,
+/// and the third is summed up.
+#[test]
+fn a_containers_parts_share_one_budget() {
+    let part = format!("{}{}1{}", "[".repeat(50), "1,".repeat(300_000), "]".repeat(50));
+    let bytes = container(&[
+        ("container.json", br#"{"format":"solidcraft-container/1"}"#),
+        ("drawings/a.json", part.as_bytes()),
+        ("drawings/b.json", part.as_bytes()),
+        ("drawings/c.json", part.as_bytes()),
+    ]);
+    let text = design_text(&bytes);
+    assert_eq!(text.matches("# JSON that would lay out to more than").count(), 1, "only one part is summed up");
+    assert!(text.contains("# drawings/c.json\n# JSON that would lay out to more than"), "the third part is the one summed up");
+    assert!(text.len() < FLOOR + 3 * GROWTH * part.len(), "{} bytes", text.len());
 }
 
 /// A part that does not read (here its bytes no longer match the CRC-32 the ZIP keeps) is named
