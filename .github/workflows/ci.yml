@@ -1188,12 +1188,44 @@ jobs:
     permissions:
       contents: read
 
+  # A build without the `usage-stats` feature (distribution packagers, universities; see
+  # docs/privacy.md) compiles usage statistics out: the app and the web app build, and the app's
+  # binary holds no trace of the endpoint.
+  no-usage-stats:
+    name: Build without usage statistics
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 40 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: no-usage-stats
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Build the app and the web app without the feature
+        run: |
+          cargo build -p solidcraft --no-default-features --profile ci --locked
+          cargo check -p solidcraft-web --target wasm32-unknown-unknown --no-default-features --locked
+      - name: The binary has no usage statistics endpoint
+        run: |
+          endpoint=$(sed -n 's/^pub const ENDPOINT: &str = "\(.*\)";$/\1/p' crates/ui-egui/src/usage_stats.rs)
+          test -n "$endpoint" || { echo "::error::ENDPOINT not found in crates/ui-egui/src/usage_stats.rs"; exit 1; }
+          path=${endpoint#https://*/}
+          if grep -a -c -F -e "$endpoint" -e "/$path" target/ci/solidcraft; then
+            echo "::error::the build without usage-stats still holds the endpoint ($endpoint)"; exit 1
+          fi
+          echo "no trace of $endpoint"
+
   ci:
     # On a run another label starts (every other job skipped), this job reports the result of the
     # commit's real run instead: the merge queue reads `ci` from the newest run of a commit, so a
     # run without a passing `ci` would block a pull request that passed (#1850, #3182, #3252).
     name: ci
-    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-build, windows-startup, dependency-advisories, wasm, solidcore, solidcore-tests, solidcore-standalone, kernel-rig]
+    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-build, windows-startup, dependency-advisories, wasm, solidcore, solidcore-tests, solidcore-standalone, kernel-rig, no-usage-stats]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
     permissions:
@@ -1286,6 +1318,7 @@ jobs:
             ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' &&
             contains(github.event.pull_request.labels.*.name, 'approved-for-ci') && needs.changes.outputs.carried == '') }}
           RIG: ${{ needs.kernel-rig.result }}
+          NO_USAGE_STATS: ${{ needs.no-usage-stats.result }}
         run: |
           test "$CHANGES" = success
           test "$CHECKS" = success
@@ -1300,6 +1333,7 @@ jobs:
               test "$BUILD" = success
             fi
             test "$TESTS" = success
+            test "$NO_USAGE_STATS" = success
           fi
           # The same output decides whether the GPU path tests run (their job's `if`).
           if [ "$GPU_RUN" = true ]; then

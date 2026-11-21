@@ -300,6 +300,7 @@ fn joint_and_drive_preview_on_the_placed_model() {
         ghost: true,
         tint_new: true,
         cut_tint: true,
+        glass_new: false,
     };
     let cmds = preview_commands(&app, &d).unwrap();
     let b = world_preview(&app.session, &cmds, colors).unwrap().unwrap();
@@ -1248,6 +1249,7 @@ fn drive_says_where_a_loop_stopped_it() {
         ghost: true,
         tint_new: true,
         cut_tint: true,
+        glass_new: false,
     };
     let rocker = app.session.doc.assembly.joints.iter().position(|j| j.name == "Rocker").unwrap();
     let mut d = drive_joint(&app, app.session.doc.assembly.joints[rocker].id).unwrap();
@@ -1313,6 +1315,7 @@ fn drive_says_when_its_joint_is_joined_to_nothing_grounded() {
         ghost: true,
         tint_new: true,
         cut_tint: true,
+        glass_new: false,
     };
     let b = world_preview(&app.session, &apply_commands(&app, &d).unwrap(), colors).unwrap().unwrap();
     let why = b.stopped.as_ref().and_then(drive_stop).unwrap();

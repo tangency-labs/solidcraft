@@ -748,7 +748,17 @@ impl crate::Brep {
     }
 
     pub(crate) fn from_arrays(a: &Arrays) -> crate::Result<crate::Brep> {
-        crate::core::from_arrays(a).map(crate::Brep::made_core)
+        let (body, proven) = crate::core::from_arrays_with_shell_order(a, false)?;
+        Ok(Self { enclosing_shell_order_proven: proven, ..Self::made_core(body) })
+    }
+
+    /// Rebuild only the canonical record of a body whose enclosing shells were checked.
+    pub(crate) fn from_proven_shell_order(record: &b::Brep) -> crate::Result<Self> {
+        let arrays = arrays(record, true).map_err(crate::Error::Record)?;
+        let (body, proven) = crate::core::from_arrays_with_shell_order(&arrays, true)?;
+        let rebuilt = Self { enclosing_shell_order_proven: proven, ..Self::made_core(body) }.adopt(record);
+        crate::trace::imported(&rebuilt, record, true, false);
+        rebuilt
     }
 
     /// The SMLib B-rep of a schema 4 record. `trusted` as in [`arrays`].
