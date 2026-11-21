@@ -447,6 +447,9 @@ struct Reader {
     used_items: HashSet<u64>,
     /// Items already instanced for the product being read.
     node_items: HashSet<u64>,
+    /// Items already instanced for the product being read, each with the placement it got: one
+    /// solid mapped several times at different places is one body per place.
+    node_placed: HashSet<(u64, [u64; 16])>,
     /// Occurrences and mapped representations visited so far.
     visits: usize,
     /// Items whose meshing was checked.
@@ -506,6 +509,7 @@ impl Reader {
             oriented: HashMap::new(),
             used_items: HashSet::new(),
             node_items: HashSet::new(),
+            node_placed: HashSet::new(),
             visits: 0,
             unmeshed_checked: HashSet::new(),
             modelling_checked: HashSet::new(),
@@ -951,7 +955,14 @@ impl Reader {
                     self.batches.push(Batch { m: *m, path: path.to_vec(), product: product.to_string(), instance: instance.map(str::to_string) });
                     for item in batch {
                         self.used_items.insert(item);
-                        if !self.node_items.insert(item) {
+                        if self.node_items.contains(&item) {
+                            continue;
+                        }
+                        let mut key = [0u64; 16];
+                        for (k, x) in key.iter_mut().zip(m.iter().flatten()) {
+                            *k = (*x + 0.0).to_bits();
+                        }
+                        if !self.node_placed.insert((item, key)) {
                             continue;
                         }
                         if self.bodies_so_far() >= MAX_BODIES {
@@ -1355,6 +1366,7 @@ impl Reader {
         let reps = self.rep_closure(&own);
         let mut bodies = Vec::new();
         self.node_items.clear();
+        self.node_placed.clear();
         for r in &reps {
             self.rep_bodies(*r, &world, &path, &name, instance, &mut bodies, 0);
         }
