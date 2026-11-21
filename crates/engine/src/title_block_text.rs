@@ -18,11 +18,11 @@ use solidcore_record::Vec2;
 use solidcraft_doc::Document;
 use solidcraft_doc::bom::{Mass, Tree};
 use solidcraft_doc::drawing::Drawing;
-use solidcraft_doc::drawing::fields::{Component, Documented, Values};
+use solidcraft_doc::drawing::fields::{Component, Documented, SHEET_METAL, SheetBody, SheetMetal, Values};
 use solidcraft_geom::cell::{Content, HAlign, Part, Source, Warning, place_lines};
 use solidcraft_geom::paper::text::{Font, TextRun};
 use solidcraft_geom::title_block::{CellKind, TextCell, TitleBlock, TitleBlockLayout};
-use solidcraft_geom::{Aabb2, EPS};
+use solidcraft_geom::{Aabb2, EPS, Seg2Geom};
 use solidcraft_sketch::{Outcome, PaperFonts, PaperLines, SketchError, TextAlign, TextStyle};
 
 use crate::Session;
@@ -114,18 +114,25 @@ pub fn read<'c>(s: &Session, tree: &mut Tree<'_>, d: &Drawing, at: usize, conten
 /// `answer` given what sheet `at` of `d` reads its fields from ([`Values`]), for `contents`: the
 /// component the sheet documents, in the design its source names ([`Session::drawn`]; one that
 /// can't be read has nothing to show), weighed in `tree`, the tree of `s`'s design, only when one of
-/// them reads its material or mass. [`read`] and a note's inspect read through this one rule.
+/// them reads its material or mass, and its sheet metal bodies read ([`sheet_metal`]) only when one
+/// reads a sheet metal field. [`read`] and a note's inspect read through this one rule.
 pub fn with_values<'c, R>(
     s: &Session,
     tree: &mut Tree<'_>,
     d: &Drawing,
     at: usize,
-    mut contents: impl Iterator<Item = &'c Content>,
+    contents: impl Iterator<Item = &'c Content>,
     answer: impl FnOnce(&Values) -> R,
 ) -> R {
-    let weighs = contents.any(|content| {
-        content.0.iter().any(|part| matches!(part, Part::Field { source: Source::Component, key, .. } if key == "material" || key == "mass"))
-    });
+    let component_keys: Vec<&str> = contents
+        .flat_map(|content| &content.0)
+        .filter_map(|part| match part {
+            Part::Field { source: Source::Component, key, .. } => Some(key.as_str()),
+            _ => None,
+        })
+        .collect();
+    let weighs = component_keys.iter().any(|key| *key == "material" || *key == "mass");
+    let sheets = component_keys.iter().any(|key| SHEET_METAL.contains(key));
     // What the model says of the component it documents: a component since deleted, or of a design
     // that can't be read, has nothing.
     let documents = d.sheets.get(at).and_then(|sheet| sheet.documents);
@@ -135,9 +142,13 @@ pub fn with_values<'c, R>(
     let (mass, materials) = weighed.and_then(|id| tree.component(id).ok()).unzip();
     let mass = mass.and_then(|mass| if let Mass::Grams(grams) = mass { Some(format_mass(grams)) } else { None });
     let material = materials.filter(|m| !m.is_empty()).map(|m| m.join("; "));
+    let sheet = match (design, id) {
+        (Some(Some(design)), Some(id)) if sheets => Some(sheet_metal(design, d, id)),
+        _ => None,
+    };
     let component = match (design, id) {
         (Some(Some(design)), Some(id)) => {
-            documented(&design.doc, id, material.as_deref(), mass.as_deref()).map_or(Documented::Gone, Documented::Present)
+            documented(&design.doc, id, material.as_deref(), mass.as_deref(), sheet.as_ref()).map_or(Documented::Gone, Documented::Present)
         }
         (Some(None), _) => Documented::Gone,
         _ => Documented::Nothing,
@@ -147,12 +158,45 @@ pub fn with_values<'c, R>(
 
 /// Component `id` of the design (0: the design itself) as a title block's fields read it, with
 /// what the model says of it; none when the design has no such component.
-fn documented<'a>(doc: &'a Document, id: u64, material: Option<&'a str>, mass: Option<&'a str>) -> Option<Component<'a>> {
+fn documented<'a>(
+    doc: &'a Document,
+    id: u64,
+    material: Option<&'a str>,
+    mass: Option<&'a str>,
+    sheet_metal: Option<&'a SheetMetal>,
+) -> Option<Component<'a>> {
     if id == 0 {
-        return Some(Component { name: &doc.name, metadata: &doc.metadata, properties: None, material, mass });
+        return Some(Component { name: &doc.name, metadata: &doc.metadata, properties: None, material, mass, sheet_metal });
     }
     let c = doc.components.iter().find(|c| c.id == id)?;
-    Some(Component { name: &c.name, metadata: &c.metadata, properties: Some(&c.properties), material, mass })
+    Some(Component { name: &c.name, metadata: &c.metadata, properties: Some(&c.properties), material, mass, sheet_metal })
+}
+
+/// What the sheet metal bodies component `id` (0: the design) of `design` owns agree on, as
+/// drawing `d` writes it ([`SheetMetal::of`], in the drawing's units). Its own bodies only, not
+/// those of the components it places; its bodies that aren't sheet metal don't count.
+fn sheet_metal(design: &Session, d: &Drawing, id: u64) -> SheetMetal {
+    let state = design.model.state();
+    let owners = design.doc.model_body_components(&state);
+    let own: std::collections::HashSet<&str> =
+        state.bodies.iter().zip(owners).filter(|(_, owner)| *owner == id).map(|(body, _)| body.name.as_str()).collect();
+    let bodies: Vec<SheetBody> = state.surface_sheets.iter().filter(|sheet| own.contains(sheet.body.as_str())).map(sheet_body).collect();
+    SheetMetal::of(&bodies, design.doc.drawing_units(d))
+}
+
+/// A sheet metal body as a component's fields read it: its rule, thickness and K-factor; the
+/// radius its bend table's bends share; and its flat's exact extent. The bends and the flat only
+/// while the flat describes the body (`sheet.flat_pattern` refuses it otherwise).
+fn sheet_body(sheet: &solidcraft_doc::SurfaceSheet) -> SheetBody<'_> {
+    let described = sheet.flat_matches_body().is_ok();
+    let radii: Vec<f64> = if described { sheet.bend_infos().iter().map(|bend| bend.radius).collect() } else { Vec::new() };
+    let bend_radius = radii.first().copied().filter(|first| radii.iter().all(|r| (r - first).abs() <= EPS));
+    let flat = described.then(|| {
+        let outline = sheet.regions.iter().flat_map(|region| &region.outer.segs);
+        let size = outline.fold(Aabb2::EMPTY, |b, seg| b.union(&seg.bounds())).size();
+        [size.x, size.y]
+    });
+    SheetBody { rule: &sheet.rule, thickness: sheet.thickness, k_factor: sheet.k_factor, bend_radius, flat }
 }
 
 /// A mass as a sheet shows it: kilograms to two places, until #4867 gives drawings their units.

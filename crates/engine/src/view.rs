@@ -150,17 +150,7 @@ fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> R
         b = b.union(&of(body));
     }
     for ss in st.sketches.iter().filter(|x| sketch_shown(s, x.feature)) {
-        // All four corners: on a tilted plane two opposite ones don't span the rectangle.
-        if let Some((lo, hi)) = ss.sketch.bounds() {
-            for p in [lo, hi, solidcore_record::Vec2::new(lo.x, hi.y), solidcore_record::Vec2::new(hi.x, lo.y)] {
-                b.add(ss.plane.to_world(p));
-            }
-        }
-        for w in ss.sketch.wires.iter().filter(|w| !w.fit.is_empty() || !ss.sketch.view.hide_projected) {
-            for p in &w.pts {
-                b.add(*p);
-            }
-        }
+        b = b.union(&sketch_bounds(ss));
     }
     for c in shown_point_clouds(s) {
         for p in c.world_corners().into_iter().flatten() {
@@ -168,6 +158,23 @@ fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> R
         }
     }
     Ok(b)
+}
+
+/// World bounds of a sketch's visible geometry, shared by Home/Fit and scratch previews.
+pub fn sketch_bounds(ss: &solidcraft_doc::SolvedSketch) -> Aabb3 {
+    let mut b = Aabb3::EMPTY;
+    // All four corners: on a tilted plane two opposite ones don't span the rectangle.
+    if let Some((lo, hi)) = ss.sketch.bounds() {
+        for p in [lo, hi, solidcore_record::Vec2::new(lo.x, hi.y), solidcore_record::Vec2::new(hi.x, lo.y)] {
+            b.add(ss.plane.to_world(p));
+        }
+    }
+    for w in ss.sketch.wires.iter().filter(|w| !w.fit.is_empty() || !ss.sketch.view.hide_projected) {
+        for p in &w.pts {
+            b.add(*p);
+        }
+    }
+    b
 }
 
 /// The origin plane a grid lies on.
@@ -1924,6 +1931,26 @@ mod tests {
                 }
                 assert!(wrong.is_empty(), "fov {fov}, angled {angled}, post first {post_first}: not the post's cap at {wrong:?}");
             }
+        }
+    }
+
+    #[test]
+    fn preview_sketch_visibility_uses_the_state_after_the_commands() {
+        let mut s = Session::default();
+        let sketch = s.execute("sketch.create", &json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        s.execute("sketch.line", &json!({"points":[[100,20],[120,30]],"construction":true})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        assert!(sketch_shown(&s, sketch));
+        assert_eq!(sketch_bounds(s.world_state().unwrap().sketch(sketch).unwrap()).max.x, 120.0);
+        for command in [
+            ("browser.visibility".into(), json!({"items":[sketch],"visible":false})),
+            ("solid.extrude".into(), json!({"sketch":sketch,"distance":10})),
+        ] {
+            let preview = s.preview_visible_world(std::slice::from_ref(&command)).unwrap();
+            assert!(preview.after.sketch(sketch).is_some(), "{} retains geometry for the preview diff", command.0);
+            assert!(!preview.shown_sketches.contains(&sketch), "{} leaves the sketch hidden after the run", command.0);
+            assert!(sketch_shown(&s, sketch), "the live session is unchanged");
         }
     }
 

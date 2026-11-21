@@ -808,10 +808,14 @@ impl On {
     }
 
     /// The loop's uses moved by whole periods so each starts where the one before it ends (in
-    /// loop order and direction), then all together into the surface's base period where the
-    /// loop's lowest point allows; a loop that lies outside the surface's range there but within
-    /// it a period lower, to within how far its uses miss each other at its vertices away from a
-    /// pole and a billionth of the period, goes there (and may start below the range by that).
+    /// loop order and direction), then all together into the surface's base period. Which
+    /// translate depends on whether the loop's control hull fits in the surface's range, to
+    /// within how far its uses miss each other at its vertices away from a pole and a billionth
+    /// of the period at each end. A loop that fits goes where its lowest point allows; one that
+    /// lies outside the range there but within it a period lower, to that rounding, goes there
+    /// (and may start below the range by that). A loop wider than that, which no translate puts
+    /// in the range, goes where its hull's midpoint allows: a small overrun at either seam must
+    /// not move the rest of a full-period loop one whole period outside the patch.
     /// Where uses meet at a pole (within `tol`) the periodic parameter is free: there the offsets
     /// that turn the loop counter-clockwise in (u, v) (a face boundary seen from the natural
     /// normal) by more than rounding are taken, else the nearest. A seam used twice from pole to
@@ -940,11 +944,6 @@ impl On {
                 .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| {
                     (a.min(x), b.max(x))
                 });
-            let mut base = if low.is_finite() {
-                ((low - lo) / period + 1e-9).floor() * period
-            } else {
-                0.0
-            };
             // Its uses meet at its vertices only to within their rounding: how far apart they
             // are there, short of whole periods, but at a pole, where the parameter is free.
             let slack = (0..n)
@@ -957,9 +956,6 @@ impl On {
                     Some((gap - (gap / period).round() * period).abs())
                 })
                 .fold(0.0, f64::max);
-            // A loop that lies outside the range where its lowest point puts it, but within it a
-            // period lower to that rounding and the base's own (above), lies there: its lowest
-            // point is a rounding short of a period's start (#19315).
             let hi = self
                 .dom
                 .range
@@ -968,6 +964,22 @@ impl On {
                 .flatten()
                 .map_or(lo + period, |(a, b)| a.max(b));
             let room = slack + 1e-9 * period;
+            // A loop that fits in the range to that rounding is placed by its lowest point; one
+            // wider, which no translate puts in the range, by its midpoint, so an overrun at
+            // either seam leaves the rest of it in the range (#19560).
+            let anchor = if high - low <= hi - lo + 2.0 * room {
+                low
+            } else {
+                0.5 * low + 0.5 * high
+            };
+            let mut base = if anchor.is_finite() {
+                ((anchor - lo) / period + 1e-9).floor() * period
+            } else {
+                0.0
+            };
+            // A loop that lies outside the range where its lowest point puts it, but within it a
+            // period lower to that rounding and the base's own (above), lies there: its lowest
+            // point is a rounding short of a period's start (#19315).
             let inside = |by: f64| low - by >= lo - room && high - by <= hi + room;
             if low.is_finite() && !inside(base) && inside(base + period) {
                 base += period;

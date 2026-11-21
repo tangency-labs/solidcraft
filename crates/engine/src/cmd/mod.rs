@@ -128,6 +128,7 @@ mod mesh;
 mod metadata;
 mod model_selection;
 pub(crate) mod motion;
+mod motion_simulate;
 mod notes;
 mod parts;
 mod plugin;
@@ -169,10 +170,11 @@ pub(crate) use sheet::{
 };
 mod silhouette;
 mod sketch;
+pub use sketch::SNAP_PREFIXES;
 pub(crate) use sketch::author_path_for_rebind;
 pub(crate) use sketch::collapse_reason;
 pub(crate) use sketch::created as sketch_created;
-pub(crate) use sketch::{PLANE_REF_FORMS, custom_plane_form, point_arg_form};
+pub(crate) use sketch::{CORNER_MUST, PLANE_REF_FORMS, custom_plane_form, is_snap, point_arg_form};
 mod canvas_sketch;
 mod canvas_svg;
 mod sketch_3d;
@@ -513,6 +515,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(joints::constraint::COMMANDS.iter());
     v.extend(clearance::COMMANDS.iter());
     v.extend(motion::COMMANDS.iter());
+    v.extend(motion_simulate::COMMANDS.iter());
     v.extend(panels::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());

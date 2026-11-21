@@ -148,6 +148,23 @@ fn a_table_draws_where_its_record_says() {
     assert_eq!(exported["svg"], s.execute("drawing.export", &json!({"sheet": sheet, "format": "svg"})).unwrap()["svg"], "the same bytes");
 }
 
+/// A design of one part, with no component placed, lists that part (#19883): a row for it, item 1,
+/// one of it, its heading and that row drawn.
+#[test]
+fn a_design_of_one_part_lists_the_part() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+    s.execute("drawing.create", &json!({})).unwrap();
+    let sheet = sheet_of(&s);
+    let list = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "parts_list"})));
+    let reply = inspected(&mut s, list);
+    assert_eq!((reply["status"].as_str(), reply["listed"].as_u64()), (Some("ok"), Some(1)), "{reply}");
+    let rows = reply["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "{reply}");
+    let bounds = on_sheet(&s, list).1.unwrap();
+    assert!((bounds.size().y - 2.0 * 7.0).abs() < 1e-9, "a heading and one row: {bounds:?}");
+}
+
 /// An offset moves an anchored table; a heading at the bottom keeps the same corner of the outline;
 /// a free place names the outline's top left. A change of paper takes an anchored table along and
 /// leaves a free one where it was.

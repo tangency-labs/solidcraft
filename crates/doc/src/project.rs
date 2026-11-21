@@ -1012,7 +1012,7 @@ fn lost(reference: &str) -> DocError {
 /// finds an edge.
 fn locate_named_edge(st: &ModelState, kind: LinkKind, body: &str, name: &str, at: Vec3) -> Option<(String, crate::naming::EdgeHit)> {
     let locate = |b: &crate::ModelBody| match kind {
-        LinkKind::Project => crate::name_lookup::locate_projected_edge(b, name, at),
+        LinkKind::Project => crate::name_lookup::locate_projected_edge_from(b, body, name, at),
         _ => crate::naming::locate_edge(b, name, at),
     };
     let hit = |b: &crate::ModelBody| locate(b).ok().map(|hit| (b.name.clone(), hit));
@@ -1420,7 +1420,7 @@ fn refresh_links_in(
                 }
             });
             let Some((index, p)) = found else {
-                lost_by_name.push(lose_named(sk, l, name, lost_names, &mut warn));
+                lost_by_name.push(lose_named(doc, sk, l, name, lost_names, &mut warn));
                 continue;
             };
             *at = p;
@@ -1431,7 +1431,7 @@ fn refresh_links_in(
         let mut named_edge = None;
         if let (Some(name), LinkSource::Edge { body, at }) = (&l.edge_name, &source) {
             let Some((body, hit)) = locate_named_edge(st, l.kind, body, name, *at) else {
-                lost_by_name.push(lose_named(sk, l, name, lost_names, &mut warn));
+                lost_by_name.push(lose_named(doc, sk, l, name, lost_names, &mut warn));
                 continue;
             };
             warn.extend(hit.note(name).map(|note| format!("projected {note}")));
@@ -1442,7 +1442,7 @@ fn refresh_links_in(
         let mut named_vertex = None;
         if let (Some(name), LinkSource::Vertex { body, at }) = (&l.vertex_name, &source) {
             let Some((body, hit)) = locate_named_vertex(st, l.kind, body, name, *at) else {
-                lost_by_name.push(lose_named(sk, l, name, lost_names, &mut warn));
+                lost_by_name.push(lose_named(doc, sk, l, name, lost_names, &mut warn));
                 continue;
             };
             warn.extend(hit.note(name).map(|note| format!("projected {note}")));
@@ -1541,7 +1541,7 @@ fn refresh_links_in(
 
 /// A link whose face or edge `name` finds nothing, keeping its geometry. The sketch fails naming
 /// every such link; or, built to be shown, the link is marked lost and gets a warning.
-fn lose_named(sk: &mut Sketch, l: &Link, name: &str, lost_names: LostNames, warn: &mut Vec<String>) -> crate::LostProjection {
+fn lose_named(doc: &Document, sk: &mut Sketch, l: &Link, name: &str, lost_names: LostNames, warn: &mut Vec<String>) -> crate::LostProjection {
     let what = match l.kind {
         LinkKind::Intersect => format!("intersected {}", l.source.describe()),
         LinkKind::Include => format!("included {}", l.source.describe()),
@@ -1553,12 +1553,23 @@ fn lose_named(sk: &mut Sketch, l: &Link, name: &str, lost_names: LostNames, warn
         curves: sk.link_curves(&l.id).into_iter().filter_map(|i| sk.curves.get(i)).map(|c| c.id.clone()).collect(),
         points: sk.link_points(&l.id).into_iter().filter_map(|i| sk.points.get(i)).map(|p| p.id.clone()).collect(),
         name: name.to_string(),
+        from: features_named_in(doc, name),
     };
     if lost_names == LostNames::Mark {
         sk.set_link_lost(&l.id, true);
         warn.push(lost.warning());
     }
     lost
+}
+
+/// The names of the design's features that a face, edge or vertex name `name` refers to, each
+/// once, in timeline order. Nothing for a name that does not read, or that names no feature
+/// (`Body1:face:3`); a feature no longer in the design is left out.
+fn features_named_in(doc: &Document, name: &str) -> Vec<String> {
+    use crate::persistent_name::EdgeName;
+    let Ok(read) = EdgeName::parse(name) else { return Vec::new() };
+    let ids: std::collections::BTreeSet<u64> = read.faces.iter().flat_map(|f| f.features()).map(|f| f.0).collect();
+    doc.features.iter().filter(|f| ids.contains(&f.id)).map(|f| f.name.clone()).collect()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2372,6 +2383,52 @@ fn exact_silhouette(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGe
     outline
 }
 
+/// Whether face `f` of `rec` is a straight extrusion along `n`: a B-spline or NURBS surface of
+/// degree 1 one way with two rows of controls, each control of the second row its partner of the
+/// first moved by one vector parallel to `n` (with the same weight). Seen along `n`, such a face
+/// is edge-on everywhere and shows only its edges.
+fn extruded_along(rec: &solidcore_record::brep::Brep, f: usize, n: Vec3) -> bool {
+    use solidcore_record::brep::Surface;
+    let Some(face) = rec.faces.get(f) else { return false };
+    // Each control as a point and its weight, by rows along u.
+    let (u_knots, v_knots, rows): (&[f64], &[f64], Vec<Vec<(Vec3, f64)>>) = match &face.surface {
+        Surface::Spline { u_knots, v_knots, points } => {
+            (u_knots, v_knots, points.iter().map(|row| row.iter().map(|p| (Vec3::new(p[0], p[1], p[2]), 1.0)).collect()).collect())
+        }
+        Surface::RationalSpline { u_knots, v_knots, homogeneous } => (
+            u_knots,
+            v_knots,
+            homogeneous
+                .iter()
+                .map(|row| {
+                    row.iter()
+                        .map(|h| if h[3] > 0.0 { (Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]), h[3]) } else { (Vec3::ZERO, 0.0) })
+                        .collect()
+                })
+                .collect(),
+        ),
+        _ => return false,
+    };
+    if rows.iter().flatten().any(|(p, w)| !(*w > 0.0 && p.is_finite())) {
+        return false;
+    }
+    // The pairs a straight extrusion moves by one vector: the two rows along u (degree 1 in u:
+    // four knots), or the two controls of each row (degree 1 in v).
+    let pairs: Vec<((Vec3, f64), (Vec3, f64))> = match rows.as_slice() {
+        [first, second] if u_knots.len() == 4 && first.len() == second.len() => first.iter().copied().zip(second.iter().copied()).collect(),
+        _ if v_knots.len() == 4 && rows.iter().all(|row| row.len() == 2) => {
+            rows.iter().filter_map(|row| Some((*row.first()?, *row.get(1)?))).collect()
+        }
+        _ => return false,
+    };
+    let Some(&((p0, _), (q0, _))) = pairs.first() else { return false };
+    let step = q0 - p0;
+    let scale = pairs.iter().fold(step.len(), |s, ((p, _), (q, _))| s.max(p.len()).max(q.len())).max(1.0);
+    let tol = 1e-9 * scale;
+    let Some(dir) = step.normalized() else { return false };
+    dir.cross(n).len() <= 1e-9 && pairs.iter().all(|((p, wp), (q, wq))| ((*q - *p) - step).len() <= tol && (wp - wq).abs() <= 1e-12 * wp.max(*wq))
+}
+
 /// The outline of a solid seen along the sketch normal, from its exact faces and edges: the
 /// stretches of its edges between a face that faces the sketch and one that does not (and of an
 /// open sheet's border where its face faces the sketch; the kernel's
@@ -2383,8 +2440,9 @@ fn exact_silhouette(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGe
 /// elliptical arcs, not lines and circular arcs fitted to the mesh (which bulged the wrong way and
 /// ran to hundreds of curves on a sketch at 45 degrees).
 ///
-/// `None` for a mesh body, a body hidden lines leave out (a freeform face, a trim they cannot
-/// read), or an edge or face the kernel cannot read exactly here: the mesh's outline is traced
+/// `None` for a mesh body, a body hidden lines leave out (a freeform face that is not a straight
+/// extrusion along the normal, [`extruded_along`]; a trim they cannot read), or an edge or face
+/// the kernel cannot read exactly here: the mesh's outline is traced
 /// then ([`silhouette`]).
 ///
 /// [`hlr::silhouettes`]: solidcraft_geom::hlr::silhouettes
@@ -2428,7 +2486,13 @@ fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec
     // Prepared once per body: every sketch that projects it, on any plane, shares it.
     let def = body.body.outline_prepared()?;
     let opts = hlr::Options { trim_samples: solidcraft_kernel::OUTLINE_TRIM_SAMPLES, threads: 1, ..hlr::Options::default() };
-    if !def.report.freeform_faces.is_empty() || !def.report.unsupported_trims.is_empty() {
+    // A free-form face hidden lines leave out is no matter when it is a straight extrusion along
+    // the sketch normal (the walls of an extruded letter or spline profile): seen edge-on all
+    // over, its outline is its edges, which the stretches above already hold. Falling back to the
+    // mesh for it fitted arcs that missed each other by thousandths of a millimetre, so a
+    // letter's outline made no profile and could not be offset (#14987).
+    let freeform_matters = def.report.freeform_faces.iter().any(|f| !extruded_along(rec, *f, n));
+    if freeform_matters || !def.report.unsupported_trims.is_empty() {
         return None;
     }
     let view = hlr::View { x: plane.x, y: plane.y, d: n };

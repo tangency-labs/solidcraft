@@ -160,9 +160,17 @@ pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
 /// as Edit Feature on a face finds it (the hole, not the plate it was cut into), else the feature
 /// that made the body.
 fn geometry_feature(app: &SolveApp, body: &str, face: Option<usize>) -> Option<u64> {
-    face.and_then(|index| crate::context_menu::face_feature(app, body, index))
-        .or_else(|| crate::open_meshing::session_world(&app.session).body(body).map(|b| b.feature))
-        .filter(|id| app.session.doc.feature(*id).is_some())
+    let world = crate::open_meshing::session_world(&app.session);
+    let model_body = world.body(body)?;
+    let owner = app.session.doc.feature(model_body.feature);
+    // An imported mesh can only highlight its import feature. Looking up a geometric face
+    // name here would scan the mesh on the UI thread the first time its face is hovered.
+    if model_body.body.triangle_mesh().is_some()
+        && owner.is_some_and(|feature| matches!(feature.kind, FeatureKind::Import { .. } | FeatureKind::MeshImport { .. }))
+    {
+        return Some(model_body.feature);
+    }
+    face.and_then(|index| crate::context_menu::face_feature(app, model_body, index)).or_else(|| owner.map(|feature| feature.id))
 }
 
 /// The feature of the face, edge or vertex under the pointer in the view.
@@ -2803,6 +2811,29 @@ mod tests {
             assert!(shown(&h), "left={left}: the pick scrolled the hole into the timeline");
             assert!(h.app.tree.timeline_reveal.is_none(), "left={left}: once, not on every frame");
         }
+    }
+
+    #[test]
+    fn an_imported_mesh_lights_its_import_feature_in_history() {
+        use solidcraft_engine::doc::{Document, MeshData};
+
+        let mut doc = Document::default();
+        let mesh = MeshData {
+            name: "Scan".into(),
+            positions: [0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0].into(),
+            triangles: [0, 1, 2].into(),
+            color: None,
+            corner_normals: Default::default(),
+        };
+        let imported = doc.add_feature(FeatureKind::MeshImport { file: "scan.stl".into(), meshes: vec![mesh] }, Some("Import Scan")).unwrap();
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
+        let world = crate::open_meshing::session_world(&app.session);
+        let body = world.bodies.first().unwrap().name.clone();
+        let point = solidcore_record::Vec3::new(0.25, 0.25, 0.0);
+        app.viewport.hover = Some(crate::viewport::Hit::Face { body: body.clone(), index: 0, point });
+        assert_eq!(super::hovered_feature(&app), Some(imported));
+        app.session.selection = vec![solidcraft_engine::Sel::Face { body, index: 0, point }];
+        assert_eq!(super::picked_feature(&app), Some(imported));
     }
 
     #[test]

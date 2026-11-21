@@ -291,6 +291,14 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
             return result;
         }
     };
+    for warning in package.swatch_warnings() {
+        result.problems.push(problem(
+            Severity::Warning,
+            craft_plugin::swatches::KEY,
+            warning,
+            "Use a package PNG or JPEG of at most 64 KiB and 256 × 256 pixels.",
+        ));
+    }
     let manifest = &package.manifest;
     result.id = Some(manifest.id.clone());
     result.name = Some(manifest.name.clone());

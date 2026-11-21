@@ -3432,15 +3432,9 @@ mod wr661_open_sheets {
             .expect_err("the invalid open result is refused");
         assert_eq!(solidcore::error::upstream_status(&error), Some(1005), "{name}: {error:?}");
         // the closed-solid orientation's "gathered from both sides" failure, not another one
-        assert!(
-            matches!(
-                error.failure().map(|f| &f.reason),
-                Some(solidcore::error::Reason::Topology(
-                    solidcore::error::topology::TopologyFailure::Inconsistent(
-                        "more face uses are connected than faces remain to be oriented"
-                    )
-                ))
-            ),
+        assert_eq!(
+            error.topology_failure(),
+            Some(&solidcore::error::topology::TopologyFailure::GatheredBothSides),
             "{name}: {error:?}"
         );
         assert_eq!(p1::faces(&body, None).unwrap(), faces, "{name}: the body is put back");
