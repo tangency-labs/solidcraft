@@ -13,6 +13,159 @@ pub use crate::ui_kit::icons::{
 pub(crate) mod markers;
 pub(crate) mod navigation;
 
+pub use crate::ui_kit::icons::wave::{Wave, WaveSet, paint_ribbon_block, paint_ribbon_icon, set_wave, wave_flags};
+
+/// How strongly the wave shows over a panel.
+const WAVE_PANEL_ALPHA: f32 = 0.22;
+
+/// The brand mark, in the RGB wave's faces while the wave is on.
+pub(crate) fn brand_mark(painter: &egui::Painter, at: egui::Pos2) {
+    match wave_logo(painter.ctx(), at.x) {
+        Some(faces) => solidcraft_look::glyphs::brand_mark_coloured(painter, at, faces),
+        None => solidcraft_look::glyphs::brand_mark(painter, at),
+    }
+}
+
+/// The logo's faces while the wave is on: the wave's colour at `x` in its three shades.
+pub(crate) fn wave_logo(ctx: &egui::Context, x: f32) -> Option<[egui::Color32; 3]> {
+    let set = wave_flags(ctx);
+    set.on.then(|| solidcraft_theme::Tokens::logo_shades(set.wave.tint(x, ctx.input(|i| i.time), 1.0)))
+}
+
+/// One colour cycle of the wave, to repeat across a panel.
+fn wave_texture(ctx: &egui::Context) -> egui::TextureId {
+    let id = egui::Id::unique("sc_rgb_wave_texture");
+    if let Some(tex) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return tex.id();
+    }
+    let pixels = (0..256).map(Wave::cycle_colour).collect();
+    let image = egui::ColorImage { size: [256, 1], source_size: egui::vec2(256.0, 1.0), pixels };
+    let options = egui::TextureOptions { wrap_mode: egui::TextureWrapMode::Repeat, ..egui::TextureOptions::LINEAR };
+    let tex = ctx.load_texture("rgb-wave", image, options);
+    let handle = tex.id();
+    ctx.data_mut(|d| d.insert_temp(id, tex));
+    handle
+}
+
+/// With the wave on and its panel target chosen: the wave over the frame's panel fills, as a
+/// gradient by screen position that keeps each panel's rounded corners. Before glass, which finds the
+/// fills in these shapes.
+pub(crate) fn wave_panels(ctx: &egui::Context) {
+    use egui::epaint::{RectShape, Shape};
+    let set = wave_flags(ctx);
+    if !(set.on && set.panels) {
+        return;
+    }
+    ctx.request_repaint_after(std::time::Duration::from_millis(33));
+    let t = solidcraft_theme::Tokens::get();
+    let hosts = [t.panel, t.panel_header, t.toolbar, t.timeline, t.dialog_bg, t.dialog_body, t.app_bar, t.overlay];
+    let wave = set.wave;
+    let phase = wave.phase(ctx.input(|i| i.time));
+    let texture = wave_texture(ctx);
+    let screen = ctx.content_rect();
+    let mut layers = vec![egui::LayerId::background()];
+    layers.extend(ctx.memory(|m| m.layer_ids().filter(|l| *l != egui::LayerId::background()).collect::<Vec<_>>()));
+    let over = |r: &RectShape| {
+        let u = |x: f32| x / wave.length - phase;
+        let uv = egui::Rect::from_min_max(egui::pos2(u(r.rect.left()), 0.0), egui::pos2(u(r.rect.right()), 1.0));
+        let tint = egui::Color32::WHITE.gamma_multiply(WAVE_PANEL_ALPHA);
+        Shape::Rect(RectShape::filled(r.rect, r.corner_radius, tint).with_texture(texture, uv))
+    };
+    ctx.graphics_mut(|g| {
+        for layer in layers {
+            let Some(list) = g.get_mut(layer) else { continue };
+            let mut done: Vec<egui::Rect> = Vec::new();
+            for i in 0..list.next_idx().0 {
+                list.mutate_shape(egui::layers::ShapeIdx(i), |clipped| {
+                    let mut wanted = |r: &RectShape| {
+                        // Once for what is nested: a header inside its panel doesn't deepen it.
+                        let take = hosts.contains(&r.fill)
+                            && r.rect.width() >= 24.0
+                            && r.rect.height() >= 20.0
+                            && r.rect.area() <= screen.area() * 0.6
+                            && !done.iter().any(|d| d.contains_rect(r.rect));
+                        if take {
+                            done.push(r.rect);
+                        }
+                        take
+                    };
+                    match &mut clipped.shape {
+                        Shape::Rect(r) if wanted(r) => {
+                            let tinted = over(r);
+                            let fill = Shape::Rect(r.clone());
+                            clipped.shape = Shape::Vec(vec![fill, tinted]);
+                        }
+                        Shape::Vec(parts) => {
+                            let found = parts.iter().position(|p| matches!(p, Shape::Rect(r) if hosts.contains(&r.fill)));
+                            if let Some(j) = found
+                                && let Shape::Rect(r) = &parts[j]
+                                && wanted(r)
+                            {
+                                let tinted = over(r);
+                                parts.insert(j + 1, tinted);
+                            }
+                        }
+                        _ => {}
+                    }
+                });
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod wave_tests {
+    use super::*;
+
+    /// The wave's tint on a ribbon icon follows screen x and time, and is the artwork's own when off.
+    #[test]
+    fn rgb_wave_tint_follows_screen_x_and_time_and_off_is_normal_artwork() {
+        let ctx = crate::fonts::test_context();
+        let wave = Wave { length: 600.0, speed: 150.0 };
+        let tints = |on: bool, time: f64| {
+            let input = egui::RawInput { time: Some(time), ..Default::default() };
+            let mut out = ctx.run_ui(input, |ui| {
+                set_wave(ui.ctx(), WaveSet { on, icons: on, wave, ..Default::default() });
+                let at = |x: f32, y: f32| egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(32.0, 32.0));
+                paint_ribbon_icon(ui.painter(), at(10.0, 0.0), "extrude", 1.0);
+                paint_ribbon_icon(ui.painter(), at(310.0, 0.0), "extrude", 1.0);
+                paint_ribbon_icon(ui.painter(), at(10.0, 90.0), "save", 1.0);
+            });
+            let colours = out
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::epaint::Shape::Mesh(m) => m.vertices.first().map(|v| v.color),
+                    _ => None,
+                })
+                // With the wave on, each icon is its neutral part and its tinted accent.
+                .filter(|c| !on || *c != egui::Color32::WHITE)
+                .collect::<Vec<_>>();
+            out.textures_delta.clear();
+            colours
+        };
+        let off = tints(false, 0.0);
+        assert!(off.len() >= 3 && off.iter().all(|c| *c == egui::Color32::WHITE), "off: plain artwork {off:?}");
+        let (a, b) = (tints(true, 0.0), tints(true, 1.0));
+        assert!(a.len() >= 3 && a[0] != a[1], "one icon at two x values differs");
+        assert_eq!(a[0], a[2], "two icons at one x agree");
+        assert_ne!(a[0], b[0], "time moves the wave");
+        assert_eq!(wave.tint(10.0, 0.0, 1.0), wave.tint(10.0 + 600.0, 0.0, 1.0), "one cycle per length");
+        assert_eq!(wave.tint(10.0, 2.0, 1.0), wave.tint(310.0, 0.0, 1.0), "it travels at its speed");
+        assert!(wave.tint(10.0, 0.0, 0.35).a() < 120, "a disabled icon stays dim");
+    }
+
+    #[test]
+    fn the_logo_follows_the_wave_only_while_it_is_on() {
+        let ctx = egui::Context::default();
+        let wave = Wave { length: 600.0, speed: 150.0 };
+        set_wave(&ctx, WaveSet { wave, ..Default::default() });
+        assert_eq!(wave_logo(&ctx, 10.0), None, "off: the logo keeps its own colours");
+        set_wave(&ctx, WaveSet { on: true, wave, ..Default::default() });
+        assert_eq!(wave_logo(&ctx, 10.0).map(|faces| faces[1]), Some(wave.tint(10.0, ctx.input(|i| i.time), 1.0)));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

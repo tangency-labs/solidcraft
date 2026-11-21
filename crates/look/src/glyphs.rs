@@ -119,6 +119,11 @@ pub fn brand_mark(p: &egui::Painter, c: Pos2) {
     brand_mark_styled(p, c, 20.0, solidcraft_theme::Tokens::get().logo, true);
 }
 
+/// The brand mark in the given faces (the RGB wave's logo), otherwise as [`brand_mark`].
+pub fn brand_mark_coloured(p: &egui::Painter, c: Pos2, faces: [Color32; 3]) {
+    brand_mark_styled(p, c, 20.0, faces, true);
+}
+
 /// The same original mark as a single quiet silhouette, without face seams or outlines.
 pub fn brand_mark_silhouette(p: &egui::Painter, c: Pos2, height: f32, ink: Color32) {
     brand_mark_styled(p, c, height, [ink; 3], false);
