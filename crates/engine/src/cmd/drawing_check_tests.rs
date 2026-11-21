@@ -761,6 +761,33 @@ fn a_feature_drawn_by_a_split_and_aligned_plate_is_not_covered() {
     assert_eq!(coverage_of(&reply, block)["state"], json!("not_covered"), "{reply}");
 }
 
+/// A quarter cylinder sheet extended by Surface Extend is rebuilt without face history (the
+/// feature that made it stays its faces' maker, but its names are found by geometry): the sheet's
+/// coverage is unknown, with why, and no feature is not covered.
+#[test]
+fn faces_named_from_geometry_give_unknown() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Arc"}));
+    let arc = run(&mut s, "sketch.arc.three_point", json!({"start": [10, 0], "end": [0, 10], "through": [7.0710678, 7.0710678]}));
+    let arc = arc["created"]["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let strip = run(&mut s, "surface.extrude", json!({"sketch": "Arc", "curves": [arc], "distance": 20, "body_name": "Strip"}));
+    let block = id(&strip["feature"]);
+    run(&mut s, "surface.extend", json!({"body": "Strip", "edges": [[7.0710678, 7.0710678, 20]], "distance": "5 mm"}));
+    let state = s.model.state();
+    let from_geometry = state
+        .bodies
+        .iter()
+        .any(|b| naming::face_names(b).iter().enumerate().any(|(i, name)| coverage::made_by(name) == Some(block) && !naming::face_name_exact(b, i)));
+    assert!(from_geometry, "the extended strip's faces are named from geometry");
+    drawn(&mut s);
+    let reply = checked(&mut s, json!({}));
+    let entry = coverage_of(&reply, block);
+    assert_eq!(entry["state"], json!("unknown"), "{reply}");
+    assert!(!entry["why"].as_str().unwrap().is_empty(), "{reply}");
+    assert!(coverage(&reply).iter().all(|(_, state, _)| state != "not_covered"), "{reply}");
+}
+
 /// A saved dimension whose edge name is hostile covers nothing and never panics; the note on the
 /// hole still covers it.
 #[test]
