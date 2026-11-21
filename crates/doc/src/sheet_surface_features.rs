@@ -712,6 +712,10 @@ impl SurfaceSheet {
                 b.lerp(a, s)
             }
         };
+        // The lines of the outline beside the edge, read once off the edge as drawn: a run that
+        // moves its stretch of the edge cuts its corners off before the next run, or its own
+        // flange, is laid on.
+        let slants = self.edge_slants(edge.panel, (a, b, d));
         // Each run's stretch as its bend's anchors run, from `a` to `b`: it starts at its `to`
         // (`hi`) and ends at its `from` (`lo`).
         let mut plans = Vec::with_capacity(runs.len());
@@ -790,7 +794,7 @@ impl SurfaceSheet {
             // plate's, `slant` along for each mm out (square where those edges are, and at a
             // junction, where the next stretch's flange stands beside it). The bend carries them
             // through its zone; the flat follows from that, whatever its rule.
-            let (k0, k1) = self.edge_slants(edge.panel, (a, b, d));
+            let (k0, k1) = slants;
             let (k0, k1) = (if run.junction.0 { 0.0 } else { k0 }, if run.junction.1 { 0.0 } else { k1 });
             let depth = run.leg.max(0.0) + run.sharp;
             let at = |y: f64| (-k0 * y, len - k1 * y);

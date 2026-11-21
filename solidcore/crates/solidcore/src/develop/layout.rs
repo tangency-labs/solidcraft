@@ -11,6 +11,7 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use super::chart::{arc_as_conics, Flatten};
 use super::fold::Wrap;
+use super::hermite;
 use super::plane::{Box2, Planar, X, Y};
 use super::seg::{area, ccw, polygon, SegMeasure};
 use super::{
@@ -18,6 +19,7 @@ use super::{
     JointRefusal, Lap, Mismatch, Panel, PanelRefusal, Refusal, Relief, Rigid2, Rip, RuleRefusal,
     Sheet, Surface, Tail, Trim, Zone,
 };
+use crate::eval::{Curve, Frame};
 use crate::math::{Vec2, Vec3};
 use crate::prism::profile::{Loop2, Region2, Seg2};
 
@@ -1739,17 +1741,12 @@ fn add_zone(
             joint: j,
             why: JointRefusal::TornEnd,
         };
-        let astray = || Refusal::Joint {
-            joint: j,
-            why: JointRefusal::OutlineEnd,
-        };
         let end = |relief: &Relief, (from, to): (f64, f64)| match *relief {
             Relief::Tear { normal, offset } => {
                 torn(sheet, bend, frame, (normal, offset), (from, to)).ok_or_else(stray)
             }
-            Relief::Outline => {
-                outline_end(sheet, joint, bend, frame, placed, (from, to)).ok_or_else(astray)
-            }
+            Relief::Outline => outline_end(sheet, joint, bend, frame, placed, (from, to))
+                .map_err(|why| Refusal::Joint { joint: j, why }),
             _ => Ok(vec![Seg2::Line {
                 a: frame.at(from, near_line),
                 b: frame.at(to, far_line),
@@ -2075,6 +2072,48 @@ impl BendMap {
         self.neutral * (past / self.surface_radius).atan()
     }
 
+    /// Bounds on the lengths of the map's first four derivatives anywhere under the bend, as
+    /// multilinear maps of the flat: along the joint it is the identity, and across it the neutral
+    /// arc `(R + K T) atan(q / r)` of the way `q` past the tangent line, whose `k`th derivative is
+    /// `(R + K T) / r^k` times atan's, which is at most 1, 3√3/8, 2 and, the fourth, 24x(1 − x²)/
+    /// (1 + x²)⁴ at x² = 1 − 2/√5. Rounded out by [`hermite::ROUNDING`].
+    fn bounds(&self) -> [f64; 4] {
+        let (k, r) = (self.neutral / self.surface_radius, self.surface_radius);
+        let x2 = 1.0 - 2.0 / 5f64.sqrt();
+        let fourth = 24.0 * x2.sqrt() * (1.0 - x2) / (1.0 + x2).powi(4);
+        [
+            k.max(1.0),
+            k / r * 3.0 * 3f64.sqrt() / 8.0,
+            k / (r * r) * 2.0,
+            k / (r * r * r) * fourth,
+        ]
+        .map(|g| g * (1.0 + hermite::ROUNDING))
+    }
+
+    /// Where the point `q` of a panel laid flat under the bend lands in the zone: the `b` panel's
+    /// when `on_b`.
+    fn carry(&self, frame: &JointFrame, on_b: bool, q: Vec2) -> Vec2 {
+        let (tangent, way) = self.side(on_b);
+        let p = q - frame.origin;
+        let past = ((p.dot(frame.toward_b) - tangent) * way)
+            .max(0.0)
+            .min(self.setback);
+        frame.at(p.dot(frame.along), tangent + way * self.in_zone(past))
+    }
+
+    /// [`BendMap::carry`] of the point `q`, and of a curve's rate `d` there: along the joint the
+    /// rate stays, across it it is stretched by the neutral arc's `(R + K T) / (r (1 + x²))`,
+    /// `x` the way past the tangent line over `r`.
+    fn carry_rate(&self, frame: &JointFrame, on_b: bool, q: Vec2, d: Vec2) -> (Vec2, Vec2) {
+        let (tangent, way) = self.side(on_b);
+        let x = ((q - frame.origin).dot(frame.toward_b) - tangent) * way / self.surface_radius;
+        let stretch = self.neutral / self.surface_radius / (1.0 + x * x);
+        (
+            self.carry(frame, on_b, q),
+            frame.along * d.dot(frame.along) + frame.toward_b * (d.dot(frame.toward_b) * stretch),
+        )
+    }
+
     /// A panel's tangent line across the joint, and the way from it toward the sharp: the `a`
     /// panel's, or the `b` panel's when `b`.
     fn side(&self, b: bool) -> (f64, f64) {
@@ -2091,8 +2130,10 @@ impl BendMap {
 /// panel's outline, from where it crosses its tangent line there on to the sharp, is carried into
 /// the zone by the bend's map (see [`BendMap`]); where the two reach the sharp apart, a line joins
 /// them along the middle of the zone. A bend with no map (a hem) runs straight across, as at a
-/// notch. `None` where an outline is not found crossing its tangent line at the end, leaves the
-/// band before it reaches the sharp, or no spline follows its image (see [`carried`]).
+/// notch, as does a sheet whose given ends no longer lie on its outlines. Refused
+/// ([`JointRefusal::OutlineEnd`]) where an outline runs along its tangent line at the end or
+/// meets it again before it reaches the sharp, and ([`JointRefusal::OutlineFit`]) where no cubic
+/// pieces are proved to follow an outline's image (see [`carried`]).
 fn outline_end(
     sheet: &Sheet,
     joint: &Joint,
@@ -2100,26 +2141,28 @@ fn outline_end(
     frame: &JointFrame,
     placed: (&Rigid2, &Rigid2),
     (from, to): (f64, f64),
-) -> Option<Vec<Seg2>> {
+) -> Result<Vec<Seg2>, JointRefusal> {
     let t = sheet.thickness;
     let width = bend.allowance(t, sheet.k_factor);
     let (start, end) = (
         frame.at(from, -bend.setback(t)),
         frame.at(to, width - bend.setback(t)),
     );
-    let straight = Some(vec![Seg2::Line { a: start, b: end }]);
+    let straight = vec![Seg2::Line { a: start, b: end }];
     let Some(map) = BendMap::of(sheet, bend) else {
-        return straight;
+        return Ok(straight);
     };
-    // A sheet some change has left before its ends are settled again runs straight across
-    // between its given ends, as at a notch.
+    // A sheet some change has left before its ends are settled again (a given end off its
+    // outline) runs straight across between its given ends, as at a notch, whatever the other
+    // side does.
     let (mut out, back) = match (
         carried(sheet, joint.a.panel, placed.0, frame, &map, false, from),
         carried(sheet, joint.b.panel, placed.1, frame, &map, true, to),
     ) {
         (Carried::Along(a), Carried::Along(b)) => (a, b),
-        (Carried::Astray, _) | (_, Carried::Astray) => return None,
-        _ => return straight,
+        (Carried::Off, _) | (_, Carried::Off) => return Ok(straight),
+        (Carried::Unfit, _) | (_, Carried::Unfit) => return Err(JointRefusal::OutlineFit),
+        _ => return Err(JointRefusal::OutlineEnd),
     };
     let mut back: Vec<Seg2> = back.iter().rev().map(Seg2::reversed).collect();
     let mid = (
@@ -2158,7 +2201,7 @@ fn outline_end(
         }
         joined.push(s);
     }
-    Some(joined)
+    Ok(joined)
 }
 
 /// `s` with its start moved to `a` and its end to `b`, where given: for a line its ends, for a
@@ -2181,41 +2224,83 @@ fn with_ends(s: &Seg2, a: Option<Vec2>, b: Option<Vec2>) -> Seg2 {
 
 /// Panel `panel`'s outline, placed by `place`, from where it crosses its tangent line at `at`
 /// along the joint on to the sharp, carried into the zone by `map` (see [`outline_end`]): the
-/// `b` panel's when `b`. The outline is walked from the crossing the way that runs into the band
-/// between the tangent line and the sharp, up to where it first reaches the sharp. A stretch
-/// square across the joint (a line whose place along the joint does not change) stays a line;
-/// any other is a cubic spline within [`TEAR_TOL`] of its image. [`Carried::Off`] where the
-/// crossing is not on the outline: a sheet some change has left before its bends' ends are
-/// settled again, whose given ends no longer mark its outlines. [`Carried::Astray`] where the
-/// outline runs along the tangent line there, leaves the band back across its tangent line
-/// before it reaches the sharp, never reaches it, or no spline follows its image.
+/// `b` panel's when `on_b`. The outline is walked from the crossing the way that runs into the band
+/// between the tangent line and the sharp, up to where it first meets either line again, found
+/// on the segments' own crossings with them (see [`first_meeting`]). A stretch square across the
+/// joint (a line whose place along the joint does not change) stays a line; any other is carried
+/// by cubic pieces each proved within [`TEAR_TOL`] of its image (see [`follow`]).
+/// [`Carried::Off`] where the crossing is not on the outline: a sheet some change has left before
+/// its bends' ends are settled again, whose given ends no longer mark its outlines.
+/// [`Carried::Astray`] where the outline runs along the tangent line there, meets it again before
+/// it reaches the sharp, or never reaches it; [`Carried::Unfit`] where no cubic pieces are proved
+/// to follow its image.
 fn carried(
     sheet: &Sheet,
     panel: usize,
     place: &Rigid2,
     frame: &JointFrame,
     map: &BendMap,
-    b: bool,
+    on_b: bool,
     at: f64,
 ) -> Carried {
     let Some(p) = sheet.panels.get(panel) else {
         return Carried::Astray;
     };
     let segs: Vec<Seg2> = p.region.outer.segs.iter().map(|s| place.seg(s)).collect();
-    let n = segs.len();
-    if n == 0 {
+    if segs.is_empty() {
         return Carried::Off;
     }
-    let (tangent, way) = map.side(b);
-    let uv = |q: Vec2| {
-        let p = q - frame.origin;
-        (p.dot(frame.along), p.dot(frame.toward_b))
+    let (tangent, way) = map.side(on_b);
+    let sharp = tangent + way * map.setback;
+    let walk = match walk_from(&segs, frame.at(at, tangent), |q: Vec2| {
+        ((q - frame.origin).dot(frame.toward_b) - tangent) * way
+    }) {
+        Walk::Round(walk) => walk,
+        Walk::NotOn => return Carried::Off,
+        Walk::Along => return Carried::Astray,
     };
-    // How far past the tangent line toward the sharp, which lies `setback` past it.
-    let past = |q: Vec2| (uv(q).1 - tangent) * way;
-    let sharp = map.setback;
-    let Some(start) = place_on(&segs, frame.at(at, tangent), EDGE_TOL) else {
-        return Carried::Off;
+    let mut pieces = Vec::new();
+    let mut reached = false;
+    for s in walk {
+        match first_meeting(&s, frame, &[tangent, sharp]) {
+            // Back across the tangent line before the sharp: the outline turns back.
+            Some((_, 0)) => return Carried::Astray,
+            Some((t, _)) => {
+                pieces.push(part(&s, 0.0, t));
+                reached = true;
+                break;
+            }
+            None => pieces.push(s),
+        }
+    }
+    if !reached {
+        return Carried::Astray;
+    }
+    let along = |q: Vec2| (q - frame.origin).dot(frame.along);
+    let mut out = Vec::new();
+    for s in pieces {
+        match s {
+            Seg2::Line { a, b } if (along(a) - along(b)).abs() <= EDGE_TOL => {
+                out.push(Seg2::Line {
+                    a: map.carry(frame, on_b, a),
+                    b: map.carry(frame, on_b, b),
+                });
+            }
+            _ => match follow(&s, frame, map, on_b) {
+                Some(followed) => out.extend(followed),
+                None => return Carried::Unfit,
+            },
+        }
+    }
+    Carried::Along(out)
+}
+
+/// The loop `segs` walked from the point of it at `from` the way `into` grows (the way into a
+/// band), round to where it started, as segments in that order (see [`Walk`]).
+fn walk_from(segs: &[Seg2], from: Vec2, into: impl Fn(Vec2) -> f64) -> Walk {
+    let n = segs.len();
+    let Some(start) = place_on(segs, from, EDGE_TOL) else {
+        return Walk::NotOn;
     };
     let total = n as f64;
     let point = |x: f64| {
@@ -2223,113 +2308,168 @@ fn carried(
         let k = (x.floor() as usize).min(n.saturating_sub(1));
         segs.get(k).map(|s| s.point_at(x - k as f64))
     };
-    // Which way round the loop runs into the band.
     let probe = 1e-4;
     let (Some(ahead), Some(behind)) = (point(start + probe), point(start - probe)) else {
-        return Carried::Astray;
+        return Walk::Along;
     };
-    let (ahead, behind) = (past(ahead), past(behind));
+    let (ahead, behind) = (into(ahead), into(behind));
     if (ahead - behind).abs() <= EDGE_TOL * probe {
-        return Carried::Astray;
+        return Walk::Along;
     }
-    let walk: Vec<Seg2> = if ahead > behind {
-        portion(&segs, start, start + total - probe * 1e-3)
+    Walk::Round(if ahead > behind {
+        portion(segs, start, start + total - probe * 1e-3)
             .into_iter()
             .map(|(s, _)| s)
             .collect()
     } else {
-        portion(&segs, start + probe * 1e-3, start + total)
+        portion(segs, start + probe * 1e-3, start + total)
             .into_iter()
             .rev()
             .map(|(s, _)| s.reversed())
             .collect()
-    };
-    let mut pieces = Vec::new();
-    for s in walk {
-        // The first place along it that reaches the sharp; none where it leaves the band back
-        // across the tangent line first.
-        let reach = if let Seg2::Line { a, b } = s {
-            let (d0, d1) = (past(a), past(b));
-            if d1 < -EDGE_TOL {
-                return Carried::Astray;
+    })
+}
+
+/// What [`walk_from`] finds where it starts.
+enum Walk {
+    /// The point is not on the loop.
+    NotOn,
+    /// The loop runs along the band's edge there, so that no way leads in.
+    Along,
+    /// The loop from there, round to where it started.
+    Round(Vec<Seg2>),
+}
+
+/// Where along `s`, past its start, it first meets one of the lines along the joint at `levels`
+/// across it: the parameter and which level. Read off the segment's own crossings with each line
+/// ([`crossings`]), never off points of it, so that a curve that leaves a band and comes back
+/// between two of its points is caught.
+fn first_meeting(s: &Seg2, frame: &JointFrame, levels: &[f64]) -> Option<(f64, usize)> {
+    // Lines long enough to hold the segment, by a box round its points and control points.
+    let b: Box2 = extremes(s, &[X, Y]).into_iter().collect();
+    let far = (b.min - frame.origin).len() + b.size().len() + 1.0;
+    let mut first: Option<(f64, usize)> = None;
+    for (k, level) in levels.iter().enumerate() {
+        let o = frame.origin + frame.toward_b * *level;
+        let line = [Seg2::Line {
+            a: o - frame.along * far,
+            b: o + frame.along * far,
+        }];
+        for c in crossings(&line, std::slice::from_ref(s)) {
+            // Where the segment starts on the line it is not met again.
+            let t = c.3;
+            if s.point_at(t).dist(s.start()) > EDGE_TOL && first.is_none_or(|(f, _)| t < f) {
+                first = Some((t, k));
             }
-            (d1 >= sharp - EDGE_TOL).then(|| {
-                if d1 - d0 > 1e-15 {
-                    ((sharp - d0) / (d1 - d0)).clamp(0.0, 1.0)
-                } else {
-                    1.0
-                }
-            })
-        } else {
-            let mut found = None;
-            let mut last = 0.0;
-            for k in 1..=TEAR_SAMPLES {
-                let t = k as f64 / TEAR_SAMPLES as f64;
-                let d = past(s.point_at(t));
-                if d < -EDGE_TOL {
-                    return Carried::Astray;
-                }
-                if d >= sharp - EDGE_TOL {
-                    let (mut lo, mut hi) = (last, t);
-                    for _ in 0..60 {
-                        let m = (lo + hi) / 2.0;
-                        if past(s.point_at(m)) >= sharp - EDGE_TOL {
-                            hi = m;
-                        } else {
-                            lo = m;
-                        }
-                    }
-                    found = Some(hi);
-                    break;
-                }
-                last = t;
-            }
-            found
-        };
-        match reach {
-            Some(t) => {
-                if t > 0.0 {
-                    pieces.push(part(&s, 0.0, t));
-                }
-                break;
-            }
-            None => pieces.push(s),
         }
     }
-    let reached = pieces
-        .last()
-        .is_some_and(|s| past(s.end()) >= sharp - EDGE_TOL);
-    if !reached {
-        return Carried::Astray;
-    }
-    // Into the zone: a stretch square across the joint stays straight; any other is followed.
-    let carry = |q: Vec2| {
-        let (along, across) = uv(q);
-        let into = ((across - tangent) * way).max(0.0).min(sharp);
-        frame.at(along, tangent + way * map.in_zone(into))
-    };
+    first
+}
+
+/// Segment `s` of a panel's outline under a bend, carried into the zone by `map` (the `b` panel's
+/// when `on_b`) as cubic pieces proved within [`TEAR_TOL`] of its image: the segment as its record
+/// curve ([`record_curve`]), its proved smooth pieces and their bounds ([`hermite`]), and the
+/// map's bounds ([`BendMap::bounds`]) give each piece's remainder over a step (Faà di Bruno, then
+/// the Hermite remainder), and steps are halved until every piece is within the tolerance, the
+/// rounding of reading the curve carried in. `None` where no such pieces are had.
+fn follow(s: &Seg2, frame: &JointFrame, map: &BendMap, on_b: bool) -> Option<Vec<Seg2>> {
+    let (curve, span) = record_curve(s)?;
+    let g = map.bounds();
     let mut out = Vec::new();
-    for s in pieces {
-        match s {
-            Seg2::Line { a, b } if (uv(a).0 - uv(b).0).abs() <= EDGE_TOL => out.push(Seg2::Line {
-                a: carry(a),
-                b: carry(b),
-            }),
-            _ => match spline(&|t: f64| carry(s.point_at(t)), 0.0, 1.0) {
-                Some(piece) => out.extend(piece),
-                None => return Carried::Astray,
-            },
+    for piece in hermite::smooth_pieces(&curve, span)? {
+        let fourth = hermite::fourth(piece.rates(), g);
+        let slack = piece.slack() * g[0];
+        let nodes = hermite::nodes(
+            |t0, t1| Some(hermite::remainder(t1 - t0, fourth) + slack),
+            piece.span(),
+            TEAR_TOL,
+        )?;
+        let carried_at = |t: f64| {
+            let (p, d) = piece.at(t)?;
+            Some(map.carry_rate(frame, on_b, Vec2::new(p.x, p.y), Vec2::new(d.x, d.y)))
+        };
+        for w in nodes.windows(2) {
+            let [t0, t1] = [*w.first()?, *w.get(1)?];
+            let ((p0, d0), (p3, d3)) = (carried_at(t0)?, carried_at(t1)?);
+            out.push(hermite::cubic(p0, d0, p3, d3, t1 - t0));
         }
     }
-    Carried::Along(out)
+    (!out.is_empty()).then_some(out)
+}
+
+/// A segment as the record's curve in the plane z = 0, and the span of its parameter it runs over.
+fn record_curve(s: &Seg2) -> Option<(Curve, [f64; 2])> {
+    let at = |p: Vec2| [p.x, p.y, 0.0];
+    Some(match *s {
+        Seg2::Line { a, b } => (
+            Curve::Line {
+                start: at(a),
+                end: at(b),
+            },
+            [0.0, 1.0],
+        ),
+        Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => {
+            // A clockwise arc runs forward round a frame whose y axis is turned over.
+            let y = if sweep >= 0.0 {
+                [0.0, 1.0, 0.0]
+            } else {
+                [0.0, -1.0, 0.0]
+            };
+            let from = if sweep >= 0.0 { start } else { -start };
+            (
+                Curve::Circle {
+                    frame: Frame {
+                        origin: at(center),
+                        x_axis: [1.0, 0.0, 0.0],
+                        y_axis: y,
+                    },
+                    radius,
+                },
+                [from, from + sweep.abs()],
+            )
+        }
+        Seg2::Cubic { p0, p1, p2, p3 } => (
+            Curve::Spline {
+                knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+                points: vec![at(p0), at(p1), at(p2), at(p3)],
+            },
+            [0.0, 1.0],
+        ),
+        Seg2::Bezier { n, p } => {
+            let n = usize::from(n);
+            let points: Vec<[f64; 3]> = p.iter().take(n + 1).map(|q| at(*q)).collect();
+            if points.len() != n + 1 {
+                return None;
+            }
+            let knots = (0..=n).map(|_| 0.0).chain((0..=n).map(|_| 1.0)).collect();
+            (Curve::Spline { knots, points }, [0.0, 1.0])
+        }
+        Seg2::Conic { a, apex, b, w } => (
+            Curve::RationalSpline {
+                knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                homogeneous: vec![
+                    [a.x, a.y, 0.0, 1.0],
+                    [apex.x * w, apex.y * w, 0.0, w],
+                    [b.x, b.y, 0.0, 1.0],
+                ],
+            },
+            [0.0, 1.0],
+        ),
+    })
 }
 
 /// How far along the joint panel `panel`'s side at a bend's end reaches inside its band, the
 /// band running from `line` to `line + depth` across the joint: the side is the panel's outline
 /// from where it crosses its tangent line (`line`) at `at` along the joint, walked on through the
-/// band until it leaves it, and its reach is its furthest point the way `way` (−1 past the
-/// zone's start, 1 past its end), never short of `at`. `None` where the crossing is not on the
-/// outline (a sheet whose ends are not settled yet, see [`carried`]).
+/// band until it first meets either of its lines again ([`first_meeting`]), and its reach is its
+/// furthest point the way `way` (−1 past the zone's start, 1 past its end), never short of `at`,
+/// read off the points that hold each segment ([`extremes`]). `None` where the crossing is not on
+/// the outline (a sheet whose ends are not settled yet, see [`carried`]).
 fn side_reach(
     sheet: &Sheet,
     panel: usize,
@@ -2348,85 +2488,23 @@ fn side_reach(
         .iter()
         .map(|s| place.seg(s))
         .collect();
-    let n = segs.len();
-    if n == 0 {
+    if segs.is_empty() {
         return None;
     }
-    let uv = |q: Vec2| {
-        let p = q - frame.origin;
-        (p.dot(frame.along), p.dot(frame.toward_b))
+    let sign = depth.signum();
+    let walk = match walk_from(&segs, frame.at(at, line), |q: Vec2| {
+        ((q - frame.origin).dot(frame.toward_b) - line) * sign
+    }) {
+        Walk::Round(walk) => walk,
+        Walk::Along => Vec::new(),
+        Walk::NotOn => return None,
     };
-    let (sign, deep) = (depth.signum(), depth.abs());
-    let into = |q: Vec2| (uv(q).1 - line) * sign;
-    let start = place_on(&segs, frame.at(at, line), EDGE_TOL)?;
-    let total = n as f64;
-    let point = |x: f64| {
-        let x = x.rem_euclid(total);
-        let k = (x.floor() as usize).min(n.saturating_sub(1));
-        segs.get(k).map(|s| s.point_at(x - k as f64))
-    };
-    let probe = 1e-4;
-    let forward = into(point(start + probe)?) > into(point(start - probe)?);
-    let walk: Vec<Seg2> = if forward {
-        portion(&segs, start, start + total - probe * 1e-3)
-            .into_iter()
-            .map(|(s, _)| s)
-            .collect()
-    } else {
-        portion(&segs, start + probe * 1e-3, start + total)
-            .into_iter()
-            .rev()
-            .map(|(s, _)| s.reversed())
-            .collect()
-    };
-    let inside = |d: f64| (-EDGE_TOL..=deep + EDGE_TOL).contains(&d);
     let mut reach = 0.0f64;
     for s in walk {
-        // Where the piece first leaves the band, exactly: a line's by its ends, any other curve's
-        // by halving between the samples it leaves between.
-        let exit = if let Seg2::Line { a, b } = s {
-            let (d0, d1) = (into(a), into(b));
-            if inside(d1) {
-                None
-            } else {
-                let bound = if d1 > deep { deep } else { 0.0 };
-                Some(if (d1 - d0).abs() > 1e-15 {
-                    ((bound - d0) / (d1 - d0)).clamp(0.0, 1.0)
-                } else {
-                    0.0
-                })
-            }
-        } else {
-            let mut last = 0.0;
-            let mut found = None;
-            for k in 1..=TEAR_SAMPLES {
-                let t = k as f64 / TEAR_SAMPLES as f64;
-                if !inside(into(s.point_at(t))) {
-                    let (mut lo, mut hi) = (last, t);
-                    for _ in 0..60 {
-                        let m = (lo + hi) / 2.0;
-                        if inside(into(s.point_at(m))) {
-                            lo = m;
-                        } else {
-                            hi = m;
-                        }
-                    }
-                    found = Some(lo);
-                    break;
-                }
-                last = t;
-            }
-            found
-        };
-        let end = exit.unwrap_or(1.0);
-        let samples = if matches!(s, Seg2::Line { .. }) {
-            1
-        } else {
-            TEAR_SAMPLES
-        };
-        for k in 0..=samples {
-            let q = s.point_at(end * k as f64 / samples as f64);
-            reach = reach.max((uv(q).0 - at) * way);
+        let exit = first_meeting(&s, frame, &[line, line + depth]).map(|(t, _)| t);
+        let inside = part(&s, 0.0, exit.unwrap_or(1.0));
+        for q in extremes(&inside, &[frame.along]) {
+            reach = reach.max(((q - frame.origin).dot(frame.along) - at) * way);
         }
         if exit.is_some() {
             break;
@@ -2441,8 +2519,10 @@ enum Carried {
     Along(Vec<Seg2>),
     /// The end's given place is not on the outline.
     Off,
-    /// The outline can't be followed there.
+    /// The outline turns back before the sharp, or runs along the tangent line.
     Astray,
+    /// No cubic pieces are proved to follow the outline's image.
+    Unfit,
 }
 
 /// The curve `at` from `a` to `b` as a cubic spline in the fewest even spans that keep within
