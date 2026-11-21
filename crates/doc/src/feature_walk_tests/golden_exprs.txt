@@ -11,6 +11,12 @@ frame_member_turn
   inputs:
     Angle = turn.angle (Angle)
   expressions: turn.angle
+dogbone
+  inputs:
+    Bit Diameter = dogbone.diameter (Length)
+    Gap = dogbone.gap (Length)
+    Largest Angle = dogbone.max_angle (Angle)
+  expressions: dogbone.diameter, dogbone.gap, dogbone.max_angle
 body_transfer
 sketch
   inputs:

@@ -984,6 +984,11 @@ impl ModelState {
         self.kept_separate.get(&feature).copied()
     }
 
+    /// What dogbone `feature` relieved and skipped in this evaluation.
+    pub fn dogbone_report(&self, feature: u64) -> Option<&crate::dogbone::DogboneReport> {
+        self.dogbones.get(&feature)
+    }
+
     /// The sources (indices into its `bodies`) body Pattern `feature` could not copy and left out.
     pub fn pattern_left_out(&self, feature: u64) -> &[usize] {
         self.pattern_left_out.get(&feature).map_or(&[], Vec::as_slice)
@@ -1095,6 +1100,8 @@ pub struct ModelState {
     /// How the pieces a join split off into bodies of their own touched the others (by feature
     /// id), for its notice.
     kept_separate: BTreeMap<u64, KeptSeparate>,
+    /// What each dogbone feature relieved and skipped (by feature id), for its result.
+    pub(crate) dogbones: BTreeMap<u64, crate::dogbone::DogboneReport>,
     /// The sources (indices into its `bodies`) each body Pattern could not copy and left out (by
     /// feature id), so the session keeps the names stored for their copies in their places
     /// ([`crate::Feature::pattern_pins`]).
@@ -1167,6 +1174,7 @@ impl ModelState {
             pattern_left_out,
             legacy_picks,
             cut_extents,
+            dogbones,
         } = self;
         ModelState {
             frame_bodies: frame_bodies.clone(),
@@ -1187,6 +1195,7 @@ impl ModelState {
             pattern_left_out: pattern_left_out.clone(),
             legacy_picks: legacy_picks.clone(),
             cut_extents: cut_extents.clone(),
+            dogbones: dogbones.clone(),
         }
     }
 
@@ -5748,7 +5757,7 @@ fn empty_boolean_targets(doc: &Document, state: &ModelState, f: &Feature, tools:
 }
 
 /// [`apply_op`] with tools whose lineage is known: the bodies it makes or changes keep theirs.
-fn apply_traced(doc: &Document, state: &mut ModelState, f: &Feature, tools: Vec<Traced>, op: Operation, targets: &[String]) -> Result<()> {
+pub(crate) fn apply_traced(doc: &Document, state: &mut ModelState, f: &Feature, tools: Vec<Traced>, op: Operation, targets: &[String]) -> Result<()> {
     apply_traced_with(doc, state, f, tools, op, targets, &[])
 }
 
@@ -6292,7 +6301,7 @@ pub fn through_all_distance(st: &ModelState, plane: &Plane, start: f64, targets:
 
 /// The body a face-based feature applies to: by name, or the one whose surface is nearest the
 /// first point.
-fn body_at(st: &ModelState, body: &Option<crate::BodyName>, points: &[Vec3]) -> Result<usize> {
+pub(crate) fn body_at(st: &ModelState, body: &Option<crate::BodyName>, points: &[Vec3]) -> Result<usize> {
     if let Some(n) = body {
         return st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")));
     }
@@ -6800,7 +6809,13 @@ fn blend_bodies(st: &ModelState, f: &Feature, body: &Option<crate::BodyName>, pt
 /// The edges `idx` of blend `f` found on body `mb`: by name, where the edge was stored with one.
 /// A name that no longer finds exactly its edge fails the blend, asking for the edge to be picked
 /// again; so does a name a build stored for the wrong body (see `trusted_edge_name`).
-fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &[usize], warning: &mut Option<String>) -> Result<Vec<Vec3>> {
+pub(crate) fn blend_edges_on(
+    mb: &ModelBody,
+    f: &Feature,
+    edges: &[crate::Position],
+    idx: &[usize],
+    warning: &mut Option<String>,
+) -> Result<Vec<Vec3>> {
     let pick = |i: usize| edges.get(i).map(|p| p.0).unwrap_or(Vec3::ZERO);
     if !f.edge_names.iter().any(|n| !n.is_empty()) {
         let pts: Vec<Vec3> = idx.iter().map(|i| pick(*i)).collect();
@@ -13282,6 +13297,7 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
+        FeatureKind::Dogbone { .. } => crate::dogbone::evaluate(doc, vals, f, st, warning),
         FeatureKind::FrameMemberTurn { .. } => frame_member::check_turn(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
         FeatureKind::BoundingSolid { bodies, margin, contents, margins } => {

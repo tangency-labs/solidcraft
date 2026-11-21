@@ -69,6 +69,7 @@ pub mod config;
 pub mod construct;
 pub mod delete;
 pub mod diagnostics;
+pub mod dogbone;
 pub mod drawing;
 pub mod drawing_balloon;
 pub mod drawing_break;

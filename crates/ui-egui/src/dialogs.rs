@@ -447,6 +447,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             Frame(crate::dialogs_frame::Member),
             /// End caps on frame members (`dialogs_end_cap`).
             EndCap(crate::dialogs_end_cap::EndCap),
+            /// Dogbone reliefs in inside corners (`dialogs_dogbone`).
+            Dogbone(crate::dialogs_dogbone::Dogbone),
             /// Rotate Member (`dialogs_rotate_member`).
             RotateMember(crate::dialogs_rotate_member::RotateMember),
             /// Appearance (`dialogs_appearance`).
@@ -1228,6 +1230,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_plastic::start(app, id))
                     .or_else(|| crate::dialogs_frame::start(app, id))
                     .or_else(|| crate::dialogs_end_cap::start(app, id))
+                    .or_else(|| crate::dialogs_dogbone::start(app, id))
                     .or_else(|| crate::dialogs_rotate_member::start(app, id))
                     .or_else(|| crate::dialogs_appearance::start(app, id))
                     .or_else(|| crate::dialogs_motion::start(app, id))
@@ -1514,7 +1517,7 @@ impl Dialog {
             Kind::Surface(_) => return true,
             Kind::SketchModify(k) => return k.previews(),
             Kind::Plastic(k) => return k.previews(),
-            Kind::Frame(_) | Kind::EndCap(_) | Kind::RotateMember(_) => return true,
+            Kind::Frame(_) | Kind::EndCap(_) | Kind::Dogbone(_) | Kind::RotateMember(_) => return true,
             Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) | Kind::InsertAirfoil(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
             Kind::Thread { .. } => return !cfg!(target_arch = "wasm32") && self.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false),
@@ -1577,6 +1580,7 @@ impl Dialog {
             }
             Kind::Shell { thickness } => ("Thickness", ValueKind::Length, thickness),
             Kind::Draft { angle } => ("Angle", ValueKind::Angle, angle),
+            Kind::Dogbone(c) => ("Diameter", ValueKind::Length, &mut c.diameter),
             Kind::Hole { diameter, opts, .. } => {
                 // A thread or a bolt size sets the diameter: nothing to type on the canvas.
                 if opts.tapped || opts.clearance {
@@ -3055,6 +3059,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
         Kind::EndCap(_) => "ui.end_cap_title",
+        Kind::Dogbone(_) => "ui.dogbone_title",
         Kind::RotateMember(_) => "ui.rotate_member_title",
         Kind::Appearance(_) => "APPEARANCE",
         Kind::Motion(k) => k.title(),
@@ -4974,6 +4979,7 @@ fn rememberable(kind: &Kind) -> bool {
             )
             | Kind::Frame(_)
             | Kind::EndCap(_)
+            | Kind::Dogbone(_)
     )
 }
 
@@ -7203,6 +7209,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),
         Kind::EndCap(k) => return crate::dialogs_end_cap::commands(app, k, &d.inputs, &d.extra),
+        Kind::Dogbone(k) => return crate::dialogs_dogbone::commands(app, k, &d.inputs, &d.extra),
         Kind::RotateMember(k) => return crate::dialogs_rotate_member::commands(app, k, &d.inputs, &d.extra, d.editing.is_some()),
         Kind::Appearance(k) => return Ok(crate::dialogs_appearance::commands(k, &d.inputs)),
         Kind::Motion(k) => return crate::dialogs_motion::commands(app, k, &d.inputs),
@@ -9185,6 +9192,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 .or_else(|| crate::dialogs_plastic::for_feature(app, other))
                 .or_else(|| crate::dialogs_frame::for_feature(app, &f))
                 .or_else(|| crate::dialogs_end_cap::for_feature(app, other))
+                .or_else(|| crate::dialogs_dogbone::for_feature(app, &f))
                 .or_else(|| crate::dialogs_rotate_member::for_feature(app, id, other))
                 .or_else(|| crate::dialogs_surface::for_feature(app, other, &feature_frame(s, f.component)))?;
             let mut d = Dialog::new(kind, inputs);

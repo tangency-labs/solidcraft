@@ -98,6 +98,7 @@ delete_face	false
 dimension	false
 discord	false
 display	false
+dogbone	false
 dots	false
 draft	false
 draft_analysis	false

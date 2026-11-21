@@ -53,6 +53,7 @@ pub mod curve_knots;
 pub mod curve_plane;
 pub mod cylinder_wall;
 pub mod develop;
+pub mod dogbone;
 pub mod error;
 pub mod export_geometry;
 pub mod extend;

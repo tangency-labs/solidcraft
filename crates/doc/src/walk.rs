@@ -63,6 +63,8 @@ impl Walk for solidcore_record::cell_grid::Clip {}
 impl Walk for crate::document::FilletFit {}
 impl Walk for crate::document::FilletCorner {}
 impl Walk for crate::document::FilletTurn {}
+impl Walk for crate::dogbone::DogboneStyle {}
+impl Walk for crate::dogbone::DogboneSide {}
 impl Walk for crate::document::MeshData {}
 impl Walk for crate::document::RevolveConvention {}
 impl Walk for crate::document::RailFit {}

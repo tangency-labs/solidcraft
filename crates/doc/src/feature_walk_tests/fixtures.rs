@@ -36,6 +36,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         ("frame_member_turn", json!({"type":"frame_member_turn","member":{"feature":7,"line":"l1"},"angle":"turn.angle"})),
         (
+            "dogbone",
+            json!({"type": "dogbone", "edges": [o], "faces": [o], "diameter": "dogbone.diameter", "style": "minimal", "gap": "dogbone.gap",
+                "max_angle": "dogbone.max_angle", "along": [0, 0, 1]}),
+        ),
+        (
             "body_transfer",
             json!({"type": "body_transfer", "bodies": ["B"], "from": 0, "to": 1, "transform": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}),
         ),
@@ -286,6 +291,7 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
         "emboss" => json!({"face": {"body": "B", "at": o}, "targets": ["B"]}),
         "sheet_fold" => json!({"sketch": 7, "body": "B"}),
         "patch" => json!({"sketch": 8, "body": "B"}),
+        "dogbone" => json!({"body": "B"}),
         _ => json!({}),
     };
     if let (Some(o), Some(e)) = (v.as_object_mut(), extra.as_object()) {
