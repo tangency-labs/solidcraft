@@ -51,6 +51,95 @@ fn edit_form_prefill_uses_visible_controllers_and_reports_condition_errors() {
 }
 
 #[test]
+fn edit_form_validates_conditional_root_alternatives_under_the_field_key() {
+    let s = Session::default();
+    let schema = json!({"type":"object","additionalProperties":true,"properties":{
+        "gate":{"type":"boolean"},
+        "mode":{"type":"boolean","x-solidcraft-visible-when":{"field":"gate","eq":true}}
+    },"oneOf":[{
+        "type":"object","properties":{
+            "mode":{"type":"boolean"},
+            "secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}
+        }
+    }]});
+    let invalid = json!({"gate":true,"mode":true,"secret":"invalid"});
+    assert!(matches!(check_input(&schema, &invalid), Err(HostError::InvalidInput { field, .. }) if field == "params.secret"));
+    let errors = form_errors(&s, &schema, &invalid);
+    assert!(matches!(errors.get("secret"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })), "{errors:?}");
+    assert!(!errors.contains_key("params"), "{errors:?}");
+    assert!(form_errors(&s, &schema, &json!({"gate":false,"mode":true,"secret":"hidden"})).is_empty());
+    assert!(form_errors(&s, &schema, &json!({"gate":true,"mode":true,"secret":7})).is_empty());
+}
+
+#[test]
+fn edit_form_validates_values_against_an_additional_property_schema() {
+    let s = Session::default();
+    let mut schema = json!({"type":"object","properties":{"depth":{"type":"integer"}},"additionalProperties":{"type":"integer"}});
+    assert!(form_errors(&s, &schema, &json!({"depth":2,"operation_id":7})).is_empty());
+    let errors = form_errors(&s, &schema, &json!({"depth":"invalid","operation_id":"invalid"}));
+    assert!(matches!(errors.get("depth"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })));
+    assert!(matches!(errors.get("operation_id"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })));
+    schema["additionalProperties"] = json!(false);
+    assert!(form_errors(&s, &schema, &json!({"operation_id":7})).contains_key("operation_id"));
+    schema["additionalProperties"] = json!(true);
+    assert!(form_errors(&s, &schema, &json!({"operation_id":"allowed"})).is_empty());
+}
+
+#[test]
+fn edit_form_keeps_selection_context_in_alternatives_and_ordinary_object_arrays_closed() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":1,"width":1,"height":1,"body_name":"Stock"})).unwrap();
+    let selection = json!({"targets":[{"type":"body","name":"Stock"}]});
+    let schema = json!({"type":"object","properties":{
+        "targets":{"oneOf":[{"type":"array","items":{"type":"object"}}]}
+    }});
+    assert!(check_input(&schema, &selection).is_ok());
+    assert!(form_errors(&s, &schema, &selection).is_empty());
+    let ordinary = json!({"type":"object","properties":{
+        "records":{"oneOf":[{"type":"array","items":{"type":"object"}}]}
+    }});
+    let values = json!({"records":[{"type":"body","name":"Stock"}]});
+    assert!(check_input(&ordinary, &values).is_err());
+    assert!(matches!(
+        form_errors(&s, &ordinary, &values).get("records"),
+        Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })
+    ));
+}
+
+#[test]
+fn edit_form_checks_pick_existence_in_selection_array_alternatives() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":1,"width":1,"height":1,"body_name":"Stock"})).unwrap();
+    for composition in ["oneOf", "anyOf"] {
+        let schema = json!({"type":"object","properties":{
+            "enabled":{"type":"boolean"},
+            "picks":{composition:[{"type":"array","items":{"type":"object"}}],"x-solidcraft-selection":{"version":1,"accept":["body"]},
+                "x-solidcraft-visible-when":{"field":"enabled","eq":true}}
+        }});
+        let values = json!({"enabled":true,"picks":[{"type":"body","name":"Stock"}]});
+        assert!(check_input(&schema, &values).is_ok());
+        assert!(form_errors(&s, &schema, &values).is_empty(), "{composition}");
+        let deleted = json!({"enabled":true,"picks":[{"type":"body","name":"deleted"}]});
+        assert!(check_input(&schema, &deleted).is_ok());
+        assert!(
+            matches!(form_errors(&s, &schema, &deleted).get("picks"), Some(crate::schema::plugin::FormFieldError::MissingPick)),
+            "{composition}"
+        );
+    }
+    let filtered = json!({"type":"object","properties":{
+        "enabled":{"type":"boolean"},
+        "picks":{"x-solidcraft-selection":{"version":1,"accept":["body"]},"oneOf":[{
+            "type":"array","items":{"type":"object"},"x-solidcraft-when":{"field":"enabled","eq":true}
+        }]}
+    }});
+    assert!(form_errors(&s, &filtered, &json!({"enabled":true,"picks":[{"type":"body","name":"Stock"}]})).is_empty());
+    assert!(matches!(
+        form_errors(&s, &filtered, &json!({"enabled":false,"picks":[{"type":"body","name":"Stock"}]})).get("picks"),
+        Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })
+    ));
+}
+
+#[test]
 fn edit_form_accepts_approximate_pick_coordinates_without_substituting_indices() {
     use solidcore_record::Vec3;
     let mut s = Session::default();
