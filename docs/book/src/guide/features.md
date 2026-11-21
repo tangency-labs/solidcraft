@@ -68,9 +68,10 @@ face), **New Body** when it would be a separate piece, and **Cut** when it goes 
 (Extrude) or lies inside one (Revolve and the Box, Cylinder, Sphere and Torus). The window finds
 out by running the Join on a copy of the design in the background, so its choice is what OK
 makes; it changes only when that check is in, and OK waits for it. An operation you pick stays,
-and a feature you edit keeps its own. Pipe, Thicken and Boundary Fill start as a New Body. Only
-shown bodies take part: with some bodies hidden, the feature names the shown ones as its targets,
-so a hidden body is never joined or cut, and showing it again later changes nothing.
+and a feature you edit keeps its own. Pipe, Thicken and Boundary Fill start as a New Body. Except
+in Extrude, only shown bodies take part: with some bodies hidden, the feature names the shown ones
+as its targets, so a hidden body is never joined or cut, and showing it again later changes
+nothing. Extrude's Target Bodies say which bodies it takes instead.
 **Choose the operation automatically** (Preferences › Design, on by default) turns this choice
 off: each window then keeps the operation it opens with, Extrude its own Join or Cut, as before.
 
@@ -95,14 +96,12 @@ too), the way Move's points are picked. So an extrude can end where two sketch l
 
 Extrude's **Target Bodies** shows the bodies a Join, Cut or Intersect will use as soon as you pick
 a face or profile, and OK stores exactly those. It starts with the body the profile is sketched on
-(or whose face it extrudes), for all three. A profile on no body starts with the shown bodies when
-some are hidden, so a hidden body is left alone; visibility is read only then, never when the
-model rebuilds. Until you pick or remove a body there, the box follows your other choices; after
-that it keeps yours. Left empty, the box says **All**: a Join joins every body the extrusion
-touches or intersects, a Cut cuts every body it intersects, and an Intersect intersects every
-body, removing any the extrusion misses, each time the model rebuilds, even hidden bodies.
-Clearing the box (its **×**) chooses that. Editing a feature shows the bodies it stored, or All
-when it stored none.
+(or whose face it extrudes), for all three. A profile on no body leaves it empty. Until you pick
+or remove a body there, the box follows your other choices; after that it keeps yours. Left empty,
+the box says **All**: a Join joins every body the extrusion touches or intersects, a Cut cuts
+every body it intersects, and an Intersect intersects every body, removing any the extrusion
+misses, each time the model rebuilds, even hidden bodies. Clearing the box (its **×**) chooses
+that. Editing a feature shows the bodies it stored, or All when it stored none.
 
 A Join **To Object** joins the body it runs to only when that body is one of its **Target
 Bodies**. Picking the To Object puts that body in the box, so you can see it. Take it out of the

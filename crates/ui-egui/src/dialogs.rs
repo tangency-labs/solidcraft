@@ -5236,9 +5236,8 @@ fn profile_body(s: &Session, d: &Dialog) -> Option<String> {
 /// - Nothing picked to extrude yet: none (All), until a face or profile says which body.
 /// - A face or a sketch on a shown body's face: that body, for Join, Cut and Intersect alike;
 ///   a Join To Object adds the body it runs to (#6424).
-/// - Otherwise, some bodies hidden: the shown ones, so a hidden body is left alone (#3961).
-///   Visibility is read here, never at a rebuild: cleared, the box takes hidden bodies too.
-/// - Otherwise none: All, every body the extrusion meets.
+/// - Otherwise none: All, every body the extrusion meets, hidden or not. Hidden bodies get no
+///   rule of their own: visibility is no part of the design.
 fn default_targets(s: &Session, d: &Dialog, operation: usize) -> (Vec<String>, Option<String>) {
     if d.inputs.first().is_none_or(|i| i.items.is_empty()) {
         return (Vec::new(), None);
@@ -5252,11 +5251,6 @@ fn default_targets(s: &Session, d: &Dialog, operation: usize) -> (Vec<String>, O
         let to =
             (operation == crate::op_auto::JOIN).then(|| join_to_pick(d).and_then(|pick| to_pick_body(s, d, pick))).flatten().filter(|to| *to != body);
         return (std::iter::once(body).chain(to.clone()).collect(), to);
-    }
-    if edited.is_none()
-        && let Some(shown) = solidcraft_engine::shown_scope(s)
-    {
-        return (shown, None);
     }
     (Vec::new(), None)
 }

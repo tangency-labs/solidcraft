@@ -13,7 +13,8 @@
 //! - With Preferences › Design › "Choose the operation automatically" off (`auto_operation`), no
 //!   window chooses: each keeps the operation it opens with, Extrude its own Join or Cut.
 //! - Only shown bodies take part: when some bodies are hidden, the window names the shown ones as
-//!   the feature's `targets` ([`scope_targets`]).
+//!   the feature's `targets` ([`scope_targets`]). Not Extrude, whose Target Bodies say what it
+//!   takes, hidden or not.
 
 use serde_json::Value;
 use solidcraft_engine::Addition;
@@ -308,15 +309,14 @@ pub fn hold_ok(d: &mut Dialog, ok: bool, again: &mut bool, cancel: bool) -> bool
 /// when some bodies are hidden: a hidden body is left alone. With none shown, such a feature has
 /// nothing to change.
 pub fn scope_targets(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) -> Result<(), String> {
-    if rule(&d.kind).is_none() || d.editing.is_some() {
+    // Extrude names its bodies in Target Bodies, All included.
+    if rule(&d.kind).is_none() || d.editing.is_some() || matches!(d.kind, Kind::Extrude { .. }) {
         return Ok(());
     }
     let Some(shown) = solidcraft_engine::shown_scope(&app.session) else { return Ok(()) };
     for (_, p) in cmds {
         let changes = p.get("operation").and_then(Value::as_str).is_some_and(|o| OPS.contains(&o) && o != "new");
-        let named = ["targets", "participants"].iter().any(|k| p.get(*k).and_then(Value::as_array).is_some_and(|a| !a.is_empty()))
-            // Extrude's Target Bodies left empty: every body it touches, hidden or not.
-            || p.get("all_bodies_touched").and_then(Value::as_bool) == Some(true);
+        let named = ["targets", "participants"].iter().any(|k| p.get(*k).and_then(Value::as_array).is_some_and(|a| !a.is_empty()));
         if !changes || named {
             continue;
         }
