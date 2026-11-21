@@ -1,5 +1,5 @@
 //! Contracts and result types for the selection commands in `cmd/edit.rs`: `select.set`,
-//! `select.filter`, `select.clear`, `select.same_look` and
+//! `select.filter`, `select.clear`, `select.same_look`, `select.parallel_edges` and
 //! `select.sharp_edges`.
 //!
 //! `select.set` reads `items` and `add` from the raw JSON. Each item reads as the handler reads
@@ -151,6 +151,23 @@ pub struct SameLookParams {
     /// Which face of that body to take the appearance from. Default: the face of the current
     /// selection, when the call doesn't name another body.
     pub face: Option<usize>,
+}
+
+/// Select every straight edge of a solid body that runs parallel to one straight edge of it (the
+/// edge itself included): four on a box. Directions are the edges' exact lines, never the mesh,
+/// and parallel means within a hundredth of a degree, either way along. `edge` is an edge index of
+/// `body`; both default to the selected edge, so the command runs with no parameters. A curved
+/// edge or a mesh body is refused. What it selects is `select.set`'s own reply. Not an undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct ParallelEdgesParams {
+    /// The name of a solid body in the design. Default: the body of the selected edge.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// The index of a straight edge of that body. Default: the selected edge.
+    #[serde(default)]
+    pub edge: Option<usize>,
 }
 
 /// Select the sharp edges of solid bodies: every edge between two faces whose outward normals

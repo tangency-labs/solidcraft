@@ -20,8 +20,8 @@ use crate::schema::edit::{
     TimelineUngroupParams, TimelineUngrouped,
 };
 use crate::schema::select::{
-    PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem,
-    SelectMode, SelectSetParams, SelectSetResult, SharpEdgesParams, read_item,
+    ParallelEdgesParams, PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult,
+    SelectItem, SelectMode, SelectSetParams, SelectSetResult, SharpEdgesParams, read_item,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
@@ -243,6 +243,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SAME_LOOK_CONTRACT)
         .output(output_schema_for::<SelectSetResult>)
         .params("body?: world body name, face?: face index; defaults to the current body/face selection → selects objects using the resolved appearance"),
+    CommandSpec::new("select.parallel_edges", "Select Parallel Edges", crate::checked!("select.parallel_edges", select_parallel_edges))
+        .icon("select")
+        .noundo()
+        .doc_only()
+        .contract(&PARALLEL_EDGES_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>)
+        .params("body?: solid body name, edge?: edge index; both default to the selected edge → selects the body's straight edges parallel to that straight edge (exact lines)"),
     CommandSpec::new("select.sharp_edges", "Select Sharp Edges", crate::checked!("select.sharp_edges", select_sharp_edges))
         .icon("select")
         .noundo()
@@ -263,6 +270,7 @@ const SELECT_FILTER_CONTRACT: TypedContract<SelectFilterParams> = TypedContract:
 const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
 const SELECT_ALL_CONTRACT: TypedContract<SelectAllParams> = TypedContract::new();
 const SAME_LOOK_CONTRACT: TypedContract<SameLookParams> = TypedContract::new();
+const PARALLEL_EDGES_CONTRACT: TypedContract<ParallelEdgesParams> = TypedContract::new();
 const SHARP_EDGES_CONTRACT: TypedContract<SharpEdgesParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new();
@@ -1855,6 +1863,75 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("select.same_look", "too many objects"));
     }
     select_set(s, &json!({"items":items}))
+}
+
+/// Lines within this angle (radians) of each other, either way along, are parallel: a hundredth
+/// of a degree.
+const PARALLEL: f64 = 0.01 * std::f64::consts::PI / 180.0;
+
+/// The ends of edge `edge` of `rec` when its exact curve is one straight line, from its start to
+/// its end; `None` for a curved or degenerate edge ([`straight_path`]).
+fn straight_edge(rec: &solidcore_record::brep::Brep, edge: usize) -> Option<(solidcore_record::Vec3, solidcore_record::Vec3)> {
+    let e = rec.edges.get(edge)?;
+    let path = crate::kernel::curve_path(e.parameters(), e.interval).ok()?;
+    straight_path(&path, rec.tolerance.max(1e-9))
+}
+
+/// The ends of `path` when it is one straight line: line pieces only, every one of whose ends lies
+/// within `tolerance` of the line through the path's first and last point. A polyline that bends,
+/// however little, by more than that is not straight; how parallel two straight edges must be is
+/// [`PARALLEL`]'s business, not this one's.
+fn straight_path(path: &[crate::kernel::PathSeg], tolerance: f64) -> Option<(solidcore_record::Vec3, solidcore_record::Vec3)> {
+    let ends = |seg: &crate::kernel::PathSeg| match seg {
+        crate::kernel::PathSeg::Line { a, b } => Some((*a, *b)),
+        _ => None,
+    };
+    let (start, _) = ends(path.first()?)?;
+    let (_, end) = ends(path.last()?)?;
+    if !((end - start).len() > 1e-9) {
+        return None;
+    }
+    let along = (end - start).normalized()?;
+    let on_line = |q: solidcore_record::Vec3| (q - start).cross(along).len() <= tolerance;
+    path.iter().all(|seg| ends(seg).is_some_and(|(a, b)| on_line(a) && on_line(b))).then_some((start, end))
+}
+
+fn select_parallel_edges(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "select.parallel_edges";
+    if !p.is_object() {
+        return Err(bad(CMD, "the parameters must be an object"));
+    }
+    let request: ParallelEdgesParams = serde_json::from_value(p.clone()).map_err(|e| bad(CMD, e.to_string()))?;
+    let selected = s.selection.iter().rev().find_map(|sel| match sel {
+        Sel::Edge { body, index, .. } if request.body.as_ref().is_none_or(|b| b == body) => Some((body.clone(), *index)),
+        _ => None,
+    });
+    let (name, index) = match (request.body, request.edge) {
+        (Some(body), Some(edge)) => (body, edge),
+        (None, Some(edge)) => (selected.map(|(body, _)| body).ok_or_else(|| bad(CMD, "name the `body` the edge is on"))?, edge),
+        (_, None) => selected.ok_or_else(|| bad(CMD, "select a straight edge, or name a `body` and an `edge`"))?,
+    };
+    let state = s.world_state()?;
+    let body = state.body(&name).ok_or_else(|| bad(CMD, format!("no body `{name}`")))?;
+    if body.body.is_mesh() {
+        return Err(bad(CMD, format!("`{name}` is a mesh body: parallel edges are found on solid bodies")));
+    }
+    let rec = body.body.record();
+    if rec.edges.len() > 100_000 {
+        return Err(bad(CMD, "the body has more than 100,000 edges"));
+    }
+    if index >= rec.edges.len() {
+        return Err(bad(CMD, format!("`{name}` has no edge {index}")));
+    }
+    let (a, b) = straight_edge(rec, index).ok_or_else(|| bad(CMD, format!("edge {index} of `{name}` is not straight")))?;
+    let along = (b - a).normalized().ok_or_else(|| bad(CMD, format!("edge {index} of `{name}` is not straight")))?;
+    let items: Vec<Sel> = (0..rec.edges.len())
+        .filter_map(|i| {
+            let (a, b) = straight_edge(rec, i)?;
+            ((b - a).normalized()?.dot(along).abs() >= PARALLEL.cos()).then(|| Sel::Edge { body: name.clone(), index: i, point: a.lerp(b, 0.5) })
+        })
+        .collect();
+    select_set(s, &json!({"items": items}))
 }
 
 /// Faces whose normals turn by no more than this many degrees across an edge meet tangentially:
