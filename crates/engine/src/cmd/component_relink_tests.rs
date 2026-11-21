@@ -215,20 +215,19 @@ fn linked_cosmetic_threads_refuse_invalid_saved_records_without_partial_state() 
 /// sketch points comes in where they put it, and a name the assembly already uses is told apart.
 #[test]
 fn linked_designs_bring_their_canvases_and_decals() {
-    use solidcraft_doc::canvas::base64_encode;
     let png = |w: u32, h: u32| {
         let mut b = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
         b.extend(w.to_be_bytes());
         b.extend(h.to_be_bytes());
         b.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-        base64_encode(&b)
+        crate::tests::image_file(&b)
     };
     let dir = folder("images-insert");
     let file = dir.join("panel.sc");
     let mut source = Session::default();
     run(&mut source, "solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0,0,0]}));
-    run(&mut source, "canvas.decal", json!({"data": png(20, 10), "face": [10,10,10], "width": 10, "name": "Logo"}));
-    let tag = run(&mut source, "canvas.insert", json!({"data": png(10, 10), "plane": "XY", "center": [30,10], "width": 8, "name": "Tag"}))["canvas"]
+    run(&mut source, "canvas.decal", json!({"path": png(20, 10), "face": [10,10,10], "width": 10, "name": "Logo"}));
+    let tag = run(&mut source, "canvas.insert", json!({"path": png(10, 10), "plane": "XY", "center": [30,10], "width": 8, "name": "Tag"}))["canvas"]
         .as_u64()
         .unwrap();
     run(&mut source, "canvas.frame_sketch", json!({"canvas": tag}));
@@ -240,7 +239,7 @@ fn linked_designs_bring_their_canvases_and_decals() {
     };
     let expected = [corners(&source, "Logo"), corners(&source, "Tag")];
     let mut s = Session::default();
-    run(&mut s, "canvas.insert", json!({"data": png(10, 10), "plane": "XY", "width": 5, "name": "Logo"}));
+    run(&mut s, "canvas.insert", json!({"path": png(10, 10), "plane": "XY", "width": 5, "name": "Logo"}));
     let inserted = run(&mut s, "component.insert_design", json!({"path": file, "translate": [100,0,0]}));
     let component = inserted["component"].as_u64().unwrap();
     let carried: Vec<_> = s.doc.canvases.iter().filter(|c| c.component == component).cloned().collect();

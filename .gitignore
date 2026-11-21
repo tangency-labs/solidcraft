@@ -14,9 +14,6 @@ __pycache__/
 .claude/settings.local.json
 .claude/*.sh
 
-# Local personal folders
-tmp/
-
 # Compiled target
 /target*/
 /target-snapshot
