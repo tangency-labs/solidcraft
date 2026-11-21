@@ -1129,6 +1129,13 @@ pub(crate) fn curve_face_gap_bound_within_counted(
 /// [`NetSurface::of`] takes it) whose net agrees with the surface at its four corners. `None`
 /// for other kinds, a net that is not bilinear, and where [`plane_gap_bound`] gives none.
 ///
+/// It bounds the distance to the surface over its whole parameter box (the net's), not over
+/// the face's `uv_domain`. That is sound: it is the quantity [`curve_face_gap_bound_within`]
+/// bounds, whose bisection takes each nearest point as a witness anywhere in the box
+/// (`dist(C(t), S) <= |C(t) - S(w)|` for any `w` there), so a bound over the box is an upper
+/// bound on that same distance; the face's extent within the surface is its trims', which the
+/// trim bounds cover ([`trim_image_gap_bound_within`]).
+///
 /// # Errors
 ///
 /// The kernel's unported and cancelled statuses.
@@ -2784,6 +2791,117 @@ pub fn trim_image_gap_bound_up_to(
     )
 }
 
+/// The exact data [`trim_image_gap_bound_within`] bounds a trim pair from: the curve's data
+/// and its slack, the trim's (exactly evaluated), and the surface's net at the trim.
+struct TrimPair {
+    cn: NurbsCurve,
+    c_slack: f64,
+    wn: NurbsCurve,
+    net: NetSurface,
+}
+
+impl TrimPair {
+    /// The data of `curve` over `range` against `surface` through the UV trim `uv`; `None`
+    /// where `range` is not a finite interval within both curves' domains, the surface has no
+    /// exact NURBS data or net, a curve no exact data, or the trim is not evaluated exactly.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's unported and cancelled statuses.
+    fn of(
+        k: &Kernel,
+        surface: &Surface,
+        curve: &Curve,
+        uv: &Curve,
+        [lo, hi]: [f64; 2],
+    ) -> Result<Option<Self>> {
+        use crate::error::ignored;
+        use crate::surface::surface::exact_pieces::exact_nurbs_surface;
+
+        if !(lo.is_finite() && hi.is_finite() && lo < hi) {
+            return Ok(None);
+        }
+        k.check_cancelled(OP)?;
+        if exact_nurbs_surface(k, surface)?.is_none() {
+            return Ok(None);
+        }
+        let (Some((cn, c_slack)), Some((wn, w_slack))) =
+            (exact_curve_data(curve, false)?, exact_curve_data(uv, true)?)
+        else {
+            return Ok(None);
+        };
+        // A trim's own rounding (a line's) moves its parameters, not a point: no bound follows from
+        // it, so only an exactly evaluated trim is enclosed.
+        if w_slack != 0.0 {
+            return Ok(None);
+        }
+        let within = |n: &NurbsCurve| match (n.u.get(n.p), n.u.get(n.n)) {
+            (Some(&d0), Some(&d1)) => d0 <= lo && hi <= d1,
+            _ => false,
+        };
+        if !(within(&cn) && within(&wn)) {
+            return Ok(None);
+        }
+        let mut probes = Vec::new();
+        for i in 0..TRIM_PROBES {
+            let t = if i + 1 == TRIM_PROBES {
+                hi
+            } else {
+                lo + (hi - lo) * (i as f64) / ((TRIM_PROBES - 1) as f64)
+            };
+            let Some(p) = ignored(uv.evaluate_point(k, t))? else {
+                return Ok(None);
+            };
+            probes.push(Point2::new(p.x, p.y));
+        }
+        let Some(net) = NetSurface::of(k, surface, &probes)? else {
+            return Ok(None);
+        };
+        Ok(Some(Self {
+            cn,
+            c_slack,
+            wn,
+            net,
+        }))
+    }
+}
+
+/// Not upstream (#20373): [`structured_trim_gap_bound`] of a pair, the curve's slack added;
+/// `None` where it does not apply or is not finite.
+fn structured_pair_bound(
+    cn: &NurbsCurve,
+    c_slack: f64,
+    wn: &NurbsCurve,
+    net: &NetSurface,
+    range: [f64; 2],
+) -> Option<f64> {
+    let g = structured_trim_gap_bound(cn, wn, &net.net, range)?;
+    let bound = (Ivl::from(g) + Ivl::from(c_slack)).hi;
+    bound.is_finite().then_some(bound)
+}
+
+/// Not upstream (#20373): the bound [`trim_image_gap_bound_within`] takes at once for a trim
+/// whose image has the curve's own structure ([`structured_trim_gap_bound`], the curve's slack
+/// added), whatever the fit: `None` where the pair has no such structure.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub(crate) fn structured_trim_image_gap_bound(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    uv: &Curve,
+    range: [f64; 2],
+) -> Result<Option<f64>> {
+    let Some(p) = TrimPair::of(k, surface, curve, uv, range)? else {
+        return Ok(None);
+    };
+    Ok(structured_pair_bound(
+        &p.cn, p.c_slack, &p.wn, &p.net, range,
+    ))
+}
+
 /// [`trim_image_gap_bound_up_to`] for a caller that also takes any bound at most `enough` as
 /// it comes: a piece whose bound (with the curve's slack) is at most `enough` is not cut
 /// further. The bound is still a proved bound, but where it is at most `enough` it may be any
@@ -2810,55 +2928,24 @@ pub fn trim_image_gap_bound_within(
     [enough, over]: [f64; 2],
     budget: Option<usize>,
 ) -> Result<Option<f64>> {
-    use crate::error::ignored;
-    use crate::surface::surface::exact_pieces::exact_nurbs_surface;
-
-    let [lo, hi] = range;
-    if !(lo.is_finite() && hi.is_finite() && lo < hi && floor.is_finite() && floor >= 0.0) {
+    if !(floor.is_finite() && floor >= 0.0) {
         return Ok(None);
     }
-    k.check_cancelled(OP)?;
-    if exact_nurbs_surface(k, surface)?.is_none() {
-        return Ok(None);
-    }
-    let (Some((cn, c_slack)), Some((wn, w_slack))) =
-        (exact_curve_data(curve, false)?, exact_curve_data(uv, true)?)
+    let Some(TrimPair {
+        cn,
+        c_slack,
+        wn,
+        net,
+    }) = TrimPair::of(k, surface, curve, uv, range)?
     else {
         return Ok(None);
     };
-    // A trim's own rounding (a line's) moves its parameters, not a point: no bound follows from
-    // it, so only an exactly evaluated trim is enclosed.
-    if w_slack != 0.0 {
-        return Ok(None);
-    }
-    let within = |n: &NurbsCurve| match (n.u.get(n.p), n.u.get(n.n)) {
-        (Some(&d0), Some(&d1)) => d0 <= lo && hi <= d1,
-        _ => false,
-    };
-    if !(within(&cn) && within(&wn)) {
-        return Ok(None);
-    }
-    let mut probes = Vec::new();
-    for i in 0..TRIM_PROBES {
-        let t = if i + 1 == TRIM_PROBES {
-            hi
-        } else {
-            lo + (hi - lo) * (i as f64) / ((TRIM_PROBES - 1) as f64)
-        };
-        let Some(p) = ignored(uv.evaluate_point(k, t))? else {
-            return Ok(None);
-        };
-        probes.push(Point2::new(p.x, p.y));
-    }
-    let Some(net) = NetSurface::of(k, surface, &probes)? else {
-        return Ok(None);
-    };
     // (#20373: a trim whose image has the curve's own structure is bounded by their control
-    // points at once, the curve's slack added; where that is at most `enough` (and `over`) it
-    // is the answer, otherwise the bisection runs as without it)
+    // points at once, the curve's slack added ([`structured_pair_bound`]); where that is
+    // at most `enough` (and `over`) it is the answer, otherwise the bisection runs as without
+    // it)
     if enough.is_finite() {
-        if let Some(g) = structured_trim_gap_bound(&cn, &wn, &net.net, range) {
-            let bound = (Ivl::from(g) + Ivl::from(c_slack)).hi;
+        if let Some(bound) = structured_pair_bound(&cn, c_slack, &wn, &net, range) {
             if bound <= enough && bound <= over {
                 return Ok(Some(bound));
             }
@@ -4472,6 +4559,85 @@ mod tests {
         assert!(
             planes >= 2 && sides >= 2,
             "{planes} cap and {sides} side trims structured"
+        );
+    }
+
+    /// #20373: a round profile swept along a straight path (`sweep_along_segments`: the wall
+    /// copied from a linear sweep, planar caps built from the circles, then
+    /// `stitch_and_orient`, as SolidCraft's straight members are built) has every trim of its
+    /// circle edges, on the caps and on the wall as the stitch and orientation leave it,
+    /// answered by the structured bound far below `1e-5`: the bisection that cut each of them
+    /// into about 1000 pieces is not reached.
+    #[test]
+    fn an_extruded_round_profiles_circle_trims_are_answered_at_once() {
+        use crate::curve::arc::ArcDefinition;
+        use crate::curve::ellipse::Ellipse;
+        use crate::curve::path::{PathTolerances, Segment};
+        use crate::math::Vec3;
+        use crate::surface::surface::SurfaceKind;
+        use crate::sweep::segments::sweep_along_segments;
+        let mut k = Kernel::default();
+        let d = ArcDefinition {
+            centre: Point3::ZERO,
+            axis: Vec3::X,
+            reference: Vec3::Y,
+            radius: 12.5,
+            start: 0.0,
+            end: std::f64::consts::TAU,
+        };
+        let profile = vec![Curve::from(Ellipse::arc(&k, &d).unwrap())];
+        let path = [Segment::Line {
+            start: Point3::ZERO,
+            end: Point3::new(50.0, 0.0, 0.0),
+        }];
+        let tol = PathTolerances {
+            gap: 1e-9,
+            turn: 1e-12,
+            length: 1e-12,
+            closed: 1e-6,
+        };
+        let (b, _) = sweep_along_segments(&mut k, &profile, &path, true, &tol).unwrap();
+        let (mut planes, mut sides) = (0, 0);
+        for e in crate::query::api_queries::get_edges(&b).unwrap() {
+            let rec = b.edge(e).unwrap();
+            let Some(curve) = rec.curve.as_ref() else {
+                continue;
+            };
+            if matches!(curve.kind(), crate::curve::curve::CurveKind::Line(_)) {
+                continue;
+            }
+            for &eu in &rec.edgeuses {
+                let Some(trim) = b.edgeuse(eu).unwrap().uv_trim_curve.as_ref() else {
+                    continue;
+                };
+                let f = crate::topology::edgeuse::p1::face(&b, eu).unwrap().unwrap();
+                let mut s = b
+                    .face(f)
+                    .unwrap()
+                    .surface
+                    .as_ref()
+                    .unwrap()
+                    .clone_for_evaluation()
+                    .unwrap();
+                let _ = s.set_owner(None);
+                let range = [rec.interval.min(), rec.interval.max()];
+                let g = structured_trim_image_gap_bound(&k, &s, curve, trim, range)
+                    .unwrap()
+                    .unwrap_or_else(|| {
+                        panic!("edge {} trim on {:?} not structured", e.index(), s.kind())
+                    });
+                assert!(g <= 1e-9, "{g:e}");
+                match s.kind() {
+                    SurfaceKind::Plane(_) => planes += 1,
+                    _ => sides += 1,
+                }
+            }
+        }
+        // Both wall trims, and the cap trims there are (the stitch leaves the cap built at
+        // the path's start without UV trims: a trimless face, covered as one).
+        assert!(
+            sides == 2 && planes >= 1,
+            "{planes} cap and {sides} wall trims structured"
         );
     }
 
