@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use super::{
     AppearanceAssignParams, AppearanceAssignResult, AppearanceCopyParams, AppearanceCopyResult, AppearanceFavoriteParams, AppearanceFavoriteResult,
     AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult, AppearancePaintParams, AppearancePaintResult,
-    AppearancePickUpParams, AppearancePickUpResult, ChainTarget,
+    AppearancePickUpParams, AppearancePickUpResult, AppearanceReplaceParams, AppearanceReplaceResult, ChainTarget,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -20,6 +20,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<AppearanceListParams>(), &["body"]);
     assert_keys(input_schema_for::<AppearancePaintParams>(), &["appearance", "color", "done", "name", "opacity", "pbr"]);
     assert_keys(input_schema_for::<AppearancePickUpParams>(), &["target"]);
+    assert_keys(input_schema_for::<AppearanceReplaceParams>(), &["from", "scope", "to"]);
 }
 
 #[test]
@@ -45,6 +46,17 @@ fn strict_keeps_todays_errors() {
         // handler's to refuse in both modes; the contract only sees the two keys around it.
         ("appearance.favorite", json!({"look": {}, "favorite": true})),
         ("appearance.favorite", json!({"look": {"appearance": "not in the library"}, "favorite": true})),
+        // A replacement reads its two looks and its scope with the handler's own wording, so the
+        // contract and the handler refuse the same calls. A look or a scope name the design doesn't
+        // have stays the handler's to refuse.
+        ("appearance.replace", json!({"from": 5, "to": "ABS - Blue"})),
+        ("appearance.replace", json!({"from": {}, "to": "ABS - Blue"})),
+        ("appearance.replace", json!({"from": {"appearance": "not in the library"}, "to": "ABS - Blue"})),
+        ("appearance.replace", json!({"from": "Copper", "to": "ABS - Blue", "scope": {}})),
+        ("appearance.replace", json!({"from": "Copper", "to": "ABS - Blue", "scope": null})),
+        ("appearance.replace", json!({"from": "Copper", "to": "ABS - Blue", "scope": {"bodies": "Box1"}})),
+        ("appearance.replace", json!({"from": "Copper", "to": "ABS - Blue", "scope": {"components": [null]}})),
+        ("appearance.replace", json!({"from": "Copper", "to": "ABS - Blue", "scope": {"bodies": ["NoSuchBody"]}})),
     ]);
 }
 
@@ -348,4 +360,107 @@ fn favourite_refusals_name_the_command_called() {
             "{level:?}"
         );
     }
+}
+
+/// `appearance.replace`'s two looks and its scope, as `cmd::appearance_chain::replace` reads them:
+/// a name and a look object are both reads, a scope that names its two lists is one, and what the
+/// handler refuses comes back with the handler's own message. A missing look is the published
+/// schema's to name, which is the one wording on purpose: below strict the handler has always said
+/// `from is required`.
+#[test]
+fn the_replace_look_and_scope_are_read_as_the_handler_reads_them() {
+    for p in [
+        json!({"from": "Copper", "to": "ABS - Blue"}),
+        json!({"from": {"appearance": "Copper"}, "to": {"color": "#123456", "name": "Signal", "opacity": 0.5}}),
+        json!({"from": "Copper", "to": "ABS - Blue", "scope": {"bodies": ["Box1"]}}),
+        json!({"from": "Copper", "to": "ABS - Blue", "scope": {"components": ["K:2", 7]}}),
+        json!({"from": "Copper", "to": "ABS - Blue", "scope": {"bodies": ["Box1"], "components": ["K"]}}),
+    ] {
+        assert!(issues("appearance.replace", &p).is_empty(), "{p}");
+    }
+    let refused = |p: Value| issues("appearance.replace", &p).into_iter().map(|i| i.message).collect::<Vec<_>>();
+    for (p, message) in [
+        (json!({"to": "Copper"}), "`from` is required"),
+        (json!({"from": "Copper"}), "`to` is required"),
+        (json!({"from": 5, "to": "ABS - Blue"}), "from and to must be library names or look objects"),
+        (json!({"from": [], "to": "ABS - Blue"}), "from and to must be library names or look objects"),
+        (json!({"from": "", "to": "ABS - Blue"}), "target name must have 1..4096 bytes"),
+        (json!({"from": "Copper", "to": "ABS - Blue", "scope": {}}), "scope must contain bodies and/or components lists"),
+        (json!({"from": "Copper", "to": "ABS - Blue", "scope": null}), "scope must contain bodies and/or components lists"),
+        (json!({"from": "Copper", "to": "ABS - Blue", "scope": "all"}), "scope must contain bodies and/or components lists"),
+        (json!({"from": "Copper", "to": "ABS - Blue", "scope": {"faces": ["Box1"]}}), "scope must contain bodies and/or components lists"),
+        (json!({"from": "Copper", "to": "ABS - Blue", "scope": {"bodies": "Box1"}}), "scope targets must be lists"),
+        (json!({"from": "Copper", "to": "ABS - Blue", "scope": {"bodies": ["Box1"], "components": 3}}), "scope targets must be lists"),
+        (json!({"from": "Copper", "to": "ABS - Blue", "scope": {"bodies": [""]}}), "target name must have 1..4096 bytes"),
+        (json!({"from": "Copper", "to": "ABS - Blue", "scope": {"bodies": [7]}}), "target name must have 1..4096 bytes"),
+        (json!({"from": "Copper", "to": "ABS - Blue", "scope": {"components": [null]}}), "unknown component in scope"),
+        (json!({"from": "Copper", "to": "ABS - Blue", "scope": {"components": [-1]}}), "unknown component in scope"),
+        (json!({"from": "Copper", "to": "ABS - Blue", "scope": {"components": [1.5]}}), "unknown component in scope"),
+        (json!({"from": "Copper", "to": "ABS - Blue", "scope": {"bodies": vec!["Box1"; 10_001]}}), "scope has more than 10000 targets"),
+    ] {
+        assert_eq!(refused(p.clone()), [message], "{p}");
+    }
+}
+
+/// A replacement's own refusals: a look the schema requires is the contract's in strict and the
+/// handler's below it, and a key the command doesn't take is the contract's to refuse in strict
+/// while the handler has always ignored it.
+#[test]
+fn replace_refusals_name_the_command_called() {
+    let error = |p: Value, level: ParamCheck| {
+        let mut s = Session { param_check: level, ..Session::default() };
+        s.execute("appearance.replace", &p).err().map(|e| e.to_string())
+    };
+    for level in [ParamCheck::Off, ParamCheck::Warn] {
+        assert_eq!(error(json!({"to": "ABS - Blue"}), level), bad_params("appearance.replace", "from is required"), "{level:?}");
+    }
+    assert_eq!(error(json!({"to": "ABS - Blue"}), ParamCheck::Strict), bad_params("appearance.replace", "`from` is required"));
+    // A key the command doesn't take is the contract's to refuse in strict; below it the handler
+    // has always ignored it, and a call that matches nothing is still a call that runs.
+    for level in [ParamCheck::Off, ParamCheck::Warn] {
+        assert_eq!(error(json!({"from": "Copper", "to": "ABS - Blue", "scop": {"bodies": ["Box1"]}}), level), None, "{level:?}");
+    }
+    assert_eq!(
+        error(json!({"from": "Copper", "to": "ABS - Blue", "scop": {"bodies": ["Box1"]}}), ParamCheck::Strict),
+        bad_params("appearance.replace", "unknown key `scop`; did you mean `scope`?")
+    );
+}
+
+/// Replacing a look the design saves answers with the count of overrides it rewrote, and one that
+/// matches nothing with zero: both replies match the published output schema, and the look that was
+/// written is what `appearance.list` reports. A misspelt key's warning still matches.
+#[test]
+fn a_replacement_answers_with_its_schema() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    let matches = |reply: &Value| {
+        let schema = output_schema_for::<AppearanceReplaceResult>();
+        let schema = schema.as_value();
+        assert!(conforms(schema, schema, reply), "appearance.replace: {reply} doesn't match {schema}");
+    };
+    let described = run("engine.describe", json!({"command": "appearance.replace"}));
+    assert_eq!(described["id"], "appearance.replace", "the command is described by its own id");
+    let input = input_schema_for::<AppearanceReplaceParams>();
+    let input = input.as_value();
+    let mut required: Vec<&str> = input["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    required.sort_unstable();
+    assert_eq!(required, ["from", "to"], "a replacement names both looks");
+    let made = run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]}));
+    let body = made["created_bodies"][0].as_str().unwrap_or_default().to_string();
+    run("appearance.assign", json!({"bodies": [body], "appearance": "Copper"}));
+    let replaced = run("appearance.replace", json!({"from": "Copper", "to": {"color": "#123456", "name": "Signal"}}));
+    assert_eq!(replaced["count"], 1, "{replaced}");
+    assert!(replaced.get("param_warnings").is_none(), "{replaced}");
+    matches(&replaced);
+    // The look that went in is what the design saves now, and its label is inert: only the look
+    // itself names it, so the same call matches nothing more and answers zero without a change.
+    let signal = json!({"color": "#123456", "name": "Signal"});
+    let same = run("appearance.replace", json!({"from": signal, "to": signal}));
+    assert_eq!(same, json!({"count": 0}), "{same}");
+    matches(&same);
+    let listed = run("appearance.list", json!({"body": body}));
+    assert_eq!(listed["body"]["appearance"]["name"], "Signal", "{listed}");
+    let warned = run("appearance.replace", json!({"from": signal, "to": "Copper", "scop": {"bodies": [body]}}));
+    assert!(warned["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{warned}");
+    matches(&warned);
 }

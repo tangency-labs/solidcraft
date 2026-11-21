@@ -9,11 +9,12 @@ use crate::params::bad;
 use crate::schema::TypedContract;
 use crate::schema::output_schema_for;
 use crate::schema::tab_views::{
-    MAX_NAME, TabViewActivateParams, TabViewBesideParams, TabViewEdge, TabViewIdParams, TabViewLayoutParams, TabViewMoveParams, TabViewNoParams,
-    TabViewOpenParams, TabViewRenameParams, TabViewReply,
+    MAX_NAME, TabViewActivateParams, TabViewBesideParams, TabViewEdge, TabViewIdParams, TabViewLayoutParams, TabViewLinkParams, TabViewMoveParams,
+    TabViewNoParams, TabViewOpenParams, TabViewRenameParams, TabViewReply, TabViewWindowParams,
 };
 use crate::schema::tab_windows::{
-    TabViewMoveToWindowParams, TabWindowCloseReply, TabWindowIdParams, TabWindowListParams, TabWindowListReply, TabWindowMoveReply, TabWindowTarget,
+    TabViewMoveToWindowParams, TabWindowCleanParams, TabWindowCloseReply, TabWindowIdParams, TabWindowListParams, TabWindowListReply,
+    TabWindowMoveReply, TabWindowTarget,
 };
 use crate::{Result, Session};
 
@@ -23,6 +24,9 @@ const ACTIVATE_CONTRACT: TypedContract<TabViewActivateParams> = TypedContract::n
 const RENAME_CONTRACT: TypedContract<TabViewRenameParams> = TypedContract::new();
 const MOVE_CONTRACT: TypedContract<TabViewMoveParams> = TypedContract::new();
 const LAYOUT_CONTRACT: TypedContract<TabViewLayoutParams> = TypedContract::new();
+const VIEW_WINDOW_CONTRACT: TypedContract<TabViewWindowParams> = TypedContract::new();
+const LINK_CONTRACT: TypedContract<TabViewLinkParams> = TypedContract::new();
+const CLEAN_CONTRACT: TypedContract<TabWindowCleanParams> = TypedContract::new();
 const BESIDE_CONTRACT: TypedContract<TabViewBesideParams> = TypedContract::new();
 const NO_PARAMS_CONTRACT: TypedContract<TabViewNoParams> = TypedContract::new();
 const MOVE_TO_WINDOW_CONTRACT: TypedContract<TabViewMoveToWindowParams> = TypedContract::new();
@@ -48,6 +52,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("tab.window.focus", "Show Window", crate::checked!("tab.window.focus", focus_window))
         .icon("panel_float").noundo().doc_only().contract(&WINDOW_ID_CONTRACT).output(output_schema_for::<TabWindowIdParams>)
         .params("window: a window id, including 0 for the main window → window; brings it forward"),
+    CommandSpec::new("tab.window.clean", "Clean Window (Present)", crate::checked!("tab.window.clean", clean_window))
+        .icon("panel_float").noundo().doc_only().key("F11").contract(&CLEAN_CONTRACT).output(output_schema_for::<TabWindowCleanParams>)
+        .params("window?: id (default: last focused); on?: bool (default: toggle) → window, on; hide or restore window chrome; never opens a dialog"),
     CommandSpec::new("tab.window.close", "Close Window", crate::checked!("tab.window.close", close_window))
         .icon("close").noundo().doc_only().contract(&WINDOW_ID_CONTRACT).output(output_schema_for::<TabWindowCloseReply>)
         .params("window: a pop-out id → returned: view ids sent back to the main window, in order"),
@@ -69,6 +76,15 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("tab.view.layout", "Show Views Together", crate::checked!("tab.view.layout", layout))
         .icon("list").noundo().doc_only().contract(&LAYOUT_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("layout: single|side_by_side|stacked|large_and_two|grid; window?: id (default: last focused) → layout, shown: how many views the window shows together; fills the layout with the window's Model and Render views in tab order (the active one among them); single shows one view at a time again; never edits the design"),
+    CommandSpec::new("tab.view.equal_sizes", "Equal Sizes", crate::checked!("tab.view.equal_sizes", equal_sizes))
+        .icon("list").noundo().doc_only().contract(&VIEW_WINDOW_CONTRACT).output(output_schema_for::<TabViewReply>)
+        .params("window?: id (default: last focused) → window; equalizes tile areas, keeping the same cells and views"),
+    CommandSpec::new("tab.view.reset_cameras", "Reset All Cameras", crate::checked!("tab.view.reset_cameras", reset_cameras))
+        .icon("fit").noundo().doc_only().contract(&VIEW_WINDOW_CONTRACT).output(output_schema_for::<TabViewReply>)
+        .params("window?: id (default: last focused) → window; fits the visible views in that window"),
+    CommandSpec::new("tab.view.link", "Link Cameras Between Views", crate::checked!("tab.view.link", link))
+        .icon("list").noundo().doc_only().contract(&LINK_CONTRACT).output(output_schema_for::<TabViewLinkParams>)
+        .params("window?: id (default: last focused); mode: off|orientation|zoom|both → window, mode; sets how visible Model views share camera changes"),
     CommandSpec::new("tab.view.beside", "Show View Beside", crate::checked!("tab.view.beside", beside))
         .icon("copy").noundo().doc_only().contract(&BESIDE_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("id?: the open Model or Render view to show (default: a new Model angle); edge?: left|right|top|bottom of the active view (default: right); placement?: requires id and replaces edge, {kind:empty,index}, {kind:replace,target}, or {kind:split,target,edge}; window?: id (default: last focused) → id, edge or placement, shown; allows up to four views, including one Render view"),
@@ -145,6 +161,11 @@ fn focus_window(_s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, parse::<TabWindowIdParams>(cmd, p)?)
 }
 
+fn clean_window(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "tab.window.clean";
+    reply(cmd, parse::<TabWindowCleanParams>(cmd, p)?)
+}
+
 fn close_window(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "tab.window.close";
     let request: TabWindowIdParams = parse(cmd, p)?;
@@ -194,6 +215,24 @@ fn move_view(_s: &mut Session, p: &Value) -> Result<Value> {
 fn layout(_s: &mut Session, p: &Value) -> Result<Value> {
     let request: TabViewLayoutParams = parse("tab.view.layout", p)?;
     reply("tab.view.layout", TabViewReply { layout: Some(request.layout), window: request.window, ..Default::default() })
+}
+
+fn equal_sizes(_s: &mut Session, p: &Value) -> Result<Value> {
+    window_request("tab.view.equal_sizes", p)
+}
+
+fn reset_cameras(_s: &mut Session, p: &Value) -> Result<Value> {
+    window_request("tab.view.reset_cameras", p)
+}
+
+fn window_request(cmd: &str, p: &Value) -> Result<Value> {
+    let request: TabViewWindowParams = parse(cmd, p)?;
+    reply(cmd, TabViewReply { window: request.window, ..Default::default() })
+}
+
+fn link(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "tab.view.link";
+    reply(cmd, parse::<TabViewLinkParams>(cmd, p)?)
 }
 
 fn beside(_s: &mut Session, p: &Value) -> Result<Value> {

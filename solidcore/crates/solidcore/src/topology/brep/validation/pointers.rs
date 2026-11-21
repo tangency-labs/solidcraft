@@ -972,8 +972,8 @@ fn wide_vertex_limit(b: &Brep) -> f64 {
 /// millimetre off its edges in a 10 mm box 50 times. A tolerance covers a rounding or intersection
 /// gap, never a misplaced vertex, so past this many times the limit Test #82 refuses it whatever
 /// its ball clears. The boolean's tolerance update grows a vertex no further than this either
-/// (`validate_and_update`).
-pub(super) const GROWTH_PAST_RATIO: f64 = 2.0;
+/// (`validate_and_update`), nor does the healer's `Fix_TolSizes` (`heal::heal_data`).
+pub(crate) const GROWTH_PAST_RATIO: f64 = 2.0;
 
 fn check_vertices(b: &Brep, r: &mut Reports<'_>) -> Result<()> {
     for &v in b.vertex_list() {
