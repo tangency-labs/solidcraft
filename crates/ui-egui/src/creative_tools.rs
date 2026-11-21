@@ -395,13 +395,14 @@ mod tests {
         assert_eq!(h.app.session.doc.features.len(), before + 1);
     }
 
-    /// Where the pole made last stands: its line's point at z = 0.
+    /// Where the upright pole made last stands: its line's x and y (a move along X keeps it
+    /// upright).
     fn pole_foot(h: &Harness) -> (f64, f64) {
         let st = h.app.session.model.state();
         let c = st.construct.last().expect("a pole");
         let solidcraft_engine::doc::construct::ConstructGeom::Axis { origin, dir } = c.geom else { panic!("not an axis") };
-        let t = -origin.z / dir.z;
-        (origin.x + t * dir.x, origin.y + t * dir.y)
+        assert!(dir.x.abs() < 1e-9 && dir.y.abs() < 1e-9, "the pole stays upright: {dir:?}");
+        (origin.x, origin.y)
     }
 
     /// Move Body1 30 mm along X with the Move window, Keep Axes With Body set to `keep`.
