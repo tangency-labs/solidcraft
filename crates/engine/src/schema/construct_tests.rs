@@ -1,9 +1,10 @@
 use serde_json::{Value, json};
 
 use super::{
-    AxisEdgeParams, AxisNormalToFaceParams, AxisThroughCylinderParams, AxisTwoPlanesParams, AxisTwoPointsParams, MidplaneParams,
-    PlaneAlongPathParams, PlaneAxisPointParams, PlanePerpendicularParams, PlaneTangentParams, PlaneThreePointsParams, PlaneTwoEdgesParams,
-    PointAlongPathParams, PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams, PointTwoEdgesParams, PointVertexParams,
+    AxisEdgeParams, AxisNormalToFaceParams, AxisThroughCylinderParams, AxisTwoPlanesParams, AxisTwoPointsParams, CoordinateSystemParams,
+    MidplaneParams, PlaneAlongPathParams, PlaneAxisPointParams, PlanePerpendicularParams, PlaneTangentParams, PlaneThreePointsParams,
+    PlaneTwoEdgesParams, PointAlongPathParams, PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams, PointTwoEdgesParams,
+    PointVertexParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -18,6 +19,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<AxisTwoPointsParams>(), &["a", "b", "name", "participants"]);
     assert_keys(input_schema_for::<AxisEdgeParams>(), &["edge", "name", "participants"]);
     assert_keys(input_schema_for::<PointVertexParams>(), &["name", "participants", "point"]);
+    assert_keys(input_schema_for::<CoordinateSystemParams>(), &["name", "origin", "participants", "x", "x_flip", "z", "z_flip"]);
     assert_keys(input_schema_for::<PointTwoEdgesParams>(), &["a", "b", "name", "participants"]);
     assert_keys(input_schema_for::<PointThreePlanesParams>(), &["a", "b", "c", "name", "participants"]);
     assert_keys(input_schema_for::<PointCenterParams>(), &["name", "of", "participants"]);

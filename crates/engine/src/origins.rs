@@ -45,7 +45,8 @@ pub fn key(path: &[u64], item: &str) -> String {
 /// The datum an item key names, by the document's shared datum grammar: `o:<ids>/origin/<item>`
 /// with its strict bounds. Resolvers save it, so the reference follows the placement.
 pub fn datum(name: &str) -> Option<DatumRef> {
-    DatumRef::parse_key(name)
+    // A coordinate system's datum (#14644) is no origin's: `construct::datum_param` reads it.
+    DatumRef::parse_key(name).filter(|d| d.source == solidcraft_doc::construct::DatumSource::Origin)
 }
 
 impl Session {

@@ -1341,6 +1341,27 @@ pub enum FeatureKind {
     ConstructionPoint {
         def: PointDef,
     },
+    /// A coordinate system (#14644): a frame of its component's, found again on every
+    /// evaluation from `origin` (a vertex, a round edge's or face's centre, a point on a face, a
+    /// construction point or typed coordinates) and its Z and X directions (an edge, an axis, a
+    /// face's or plane's normal, or a typed direction; `flip` reverses one). Z defaults to the
+    /// component's Z, X to the component's X laid square to Z. Nothing before it changes; its
+    /// origin, axes and planes are datums (`DatumRef` with `DatumSource::Frame`).
+    CoordinateSystem {
+        origin: GeoRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        z: Option<GeoRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        z_dir: Option<Dir>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        z_flip: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x: Option<GeoRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x_dir: Option<Dir>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        x_flip: bool,
+    },
     /// Split faces (at the given points) where a tool meets them, the solid unchanged: a plane,
     /// a face of a body (`tool`, its surface extended) or a sketch's curves (`sketch`, swept
     /// along its normal). The pieces are named after the face (`#k`).
@@ -3162,10 +3183,16 @@ impl FeatureKind {
         matches!(self, FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. })
     }
 
-    /// Construction geometry: a construction plane, axis or point (the browser's Construction
+    /// Construction geometry: a construction plane, axis or point, or a coordinate system (the browser's Construction
     /// folder; every feature may read them by name).
     pub fn is_construction(&self) -> bool {
-        matches!(self, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
+        matches!(
+            self,
+            FeatureKind::ConstructionPlane { .. }
+                | FeatureKind::ConstructionAxis { .. }
+                | FeatureKind::ConstructionPoint { .. }
+                | FeatureKind::CoordinateSystem { .. }
+        )
     }
 
     /// A sheet metal feature (its result depends on the sheet metal rules).
@@ -3228,6 +3255,7 @@ impl FeatureKind {
             FeatureKind::SplitFace { .. } => "SplitFaceFeature",
             FeatureKind::ConstructionAxis { .. } => "ConstructionAxis",
             FeatureKind::ConstructionPoint { .. } => "ConstructionPoint",
+            FeatureKind::CoordinateSystem { .. } => "CoordinateSystem",
             FeatureKind::Move { .. } => "MoveFeature",
             FeatureKind::Scale { .. } => "ScaleFeature",
             FeatureKind::OffsetFace { .. } => "OffsetFacesFeature",
@@ -3316,6 +3344,7 @@ impl FeatureKind {
             FeatureKind::Split { .. } => "split",
             FeatureKind::ConstructionAxis { .. } => "construction_axis",
             FeatureKind::ConstructionPoint { .. } => "construction_point",
+            FeatureKind::CoordinateSystem { .. } => "coordinate_system",
             FeatureKind::SplitFace { .. } => "split_face",
             FeatureKind::Scale { .. } => "scale",
             FeatureKind::OffsetFace { .. } => "offset_face",
@@ -3404,6 +3433,7 @@ impl FeatureKind {
             "SplitFaceFeature" => "split_face",
             "ConstructionAxis" => "construction_axis",
             "ConstructionPoint" => "construction_point",
+            "CoordinateSystem" => "coordinate_system",
             "MoveFeature" => "move",
             "ScaleFeature" => "scale",
             "OffsetFacesFeature" => "offset_face",
@@ -3492,6 +3522,7 @@ impl FeatureKind {
             FeatureKind::SplitFace { .. } => "SplitFace",
             FeatureKind::ConstructionAxis { .. } => "Axis",
             FeatureKind::ConstructionPoint { .. } => "Point",
+            FeatureKind::CoordinateSystem { .. } => "Coordinate System",
             FeatureKind::Move { .. } => "Move",
             FeatureKind::Scale { .. } => "Scale",
             FeatureKind::OffsetFace { .. } => "OffsetFace",
@@ -5311,7 +5342,7 @@ impl Document {
                 }
                 Plane::new(o, *x_dir, *y_dir).ok_or_else(|| DocError::Invalid("degenerate plane".into()))
             }
-            PlaneRef::Datum { datum } => match crate::construct::resolve_datum_in(self, datum, component)? {
+            PlaneRef::Datum { datum } => match crate::construct::resolve_datum_in(self, st, datum, component)? {
                 crate::construct::ConstructGeom::Plane(p) => Ok(p),
                 _ => Err(DocError::Invalid("the datum is not a plane (pick the XY, XZ or YZ of a component)".into())),
             },

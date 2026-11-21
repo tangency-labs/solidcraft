@@ -14,10 +14,10 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<ExportStepParams>(), &["bodies", "path"]);
-    assert_keys(input_schema_for::<ExportMeshParams>(), &["bodies", "path", "quality"]);
-    assert_keys(input_schema_for::<ExportStlParams>(), &["bodies", "lay_on_print_faces", "path", "quality"]);
-    assert_keys(input_schema_for::<Export3mfParams>(), &["bodies", "lay_on_print_faces", "objects", "path", "quality"]);
+    assert_keys(input_schema_for::<ExportStepParams>(), &["bodies", "frame", "path"]);
+    assert_keys(input_schema_for::<ExportMeshParams>(), &["bodies", "frame", "path", "quality"]);
+    assert_keys(input_schema_for::<ExportStlParams>(), &["bodies", "frame", "lay_on_print_faces", "path", "quality"]);
+    assert_keys(input_schema_for::<Export3mfParams>(), &["bodies", "frame", "lay_on_print_faces", "objects", "path", "quality"]);
     assert_keys(input_schema_for::<ExportUrdfParams>(), &["effort", "images", "mesh_prefix", "path", "velocity"]);
     assert_keys(input_schema_for::<ExportSdfParams>(), &["bodies", "model_uris", "name", "path", "quality", "static"]);
     assert_keys(
@@ -26,6 +26,7 @@ fn schemas_and_the_key_check_agree() {
             "bodies",
             "effort",
             "format",
+            "frame",
             "images",
             "lay_on_print_faces",
             "mesh_prefix",

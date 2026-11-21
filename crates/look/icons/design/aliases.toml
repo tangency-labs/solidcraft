@@ -3,6 +3,8 @@
 #   alias = { master = "m", accent = "surface" }  same artwork in another accent (palette.toml)
 # Icons that mean the same operation in another workspace belong here, so they stay identical.
 [alias]
+# A coordinate system is a frame like the origin's.
+coordinate_system = "origin"
 sketch_rect_pattern = { master = "pattern_rect", accent = "sketch" }
 sketch_circ_pattern = { master = "pattern_circ", accent = "sketch" }
 surface_extrude = { master = "extrude", accent = "surface" }

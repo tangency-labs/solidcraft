@@ -79,6 +79,10 @@ pub struct SaveMeshKeys {
     /// this says. Default: false.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// Write the bodies in a coordinate system's frame (#14644), by name (`CS1`) or datum key,
+    /// instead of the world's. Not with `slicer`.
+    #[serde(default)]
+    pub frame: Option<String>,
 }
 
 /// Leaves out the keys the handler never reads for this call: `ascii` unless `format` is `stl`,
