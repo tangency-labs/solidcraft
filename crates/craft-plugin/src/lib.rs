@@ -65,6 +65,7 @@ impl std::fmt::Display for DesignToken {
 
 pub mod conditions;
 pub mod dialog;
+pub mod images;
 mod input;
 pub mod swatches;
 pub use input::{check_input, prepare_input, strict_input_schema};

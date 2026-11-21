@@ -214,3 +214,45 @@ fn added_artwork_outside_the_subset_is_refused() {
         assert!(ADDING.resolve(&format!("plugin:bad:{name}")).placeholder, "{name}");
     }
 }
+
+#[test]
+fn masks_and_clips_require_defined_local_references_when_present() {
+    let defs = "<defs><mask id='m'><path d='M8 8L56 8L56 56Z' fill='white'/></mask><clipPath id='c'><path d='M8 8L56 8L56 56Z'/></clipPath></defs>";
+    let svg = |clip: &str, mask: &str| format!("<svg>{defs}<g{clip}><path d='M8 8L56 56'{mask}/></g></svg>");
+    for (clip, mask, expected) in [("", "", None), (" clip-path='url(#c)'", " mask='url(#m)'", Some(0))] {
+        let doc = TEST_SET.parse(&svg(clip, mask)).unwrap();
+        let Item::Group { clip, items, .. } = &doc.items[0] else { panic!("a group") };
+        let Item::Node(node) = &items[0] else { panic!("a shape") };
+        assert_eq!(*clip, expected);
+        assert_eq!(node.mask, expected);
+    }
+    for value in ["", "none", "#c", "url(other.svg#c)", "url(https://example.com/icon.svg#c)", "url(#missing)", "url(#)", "url(#c"] {
+        assert!(TEST_SET.parse(&svg(&format!(" clip-path='{value}'"), "")).is_err(), "clip-path={value}");
+        assert!(TEST_SET.parse(&svg("", &format!(" mask='{value}'"))).is_err(), "mask={value}");
+    }
+}
+
+#[test]
+fn closing_tags_must_match_the_open_group_or_definition() {
+    let frames = [("g", "g"), ("defs", "defs"), ("mask id='m'", "mask"), ("clipPath id='c'", "clipPath")];
+    for (open, matching) in frames {
+        for close in ["g", "defs", "mask", "clipPath"] {
+            let svg = format!("<svg><{open}><path d='M8 8L56 56'/></{close}></svg>");
+            assert_eq!(TEST_SET.parse(&svg).is_ok(), close == matching, "{svg}");
+        }
+    }
+    let nested = "<svg><defs><mask id='m'><path d='M8 8L56 56' fill='white'/></mask></defs><g><g><path d='M8 8L56 56' mask='url(#m)'/></g></g></svg>";
+    assert!(TEST_SET.parse(nested).is_ok(), "matched nested groups and definitions stay valid");
+    assert!(TEST_SET.parse("<svg></g></svg>").is_err(), "a closing group needs an open frame");
+}
+
+#[test]
+fn closing_a_path_clears_the_command_before_the_next_token() {
+    for path in ["M8 8L56 8L56 56Z0", "M8 8L56 8L56 56Z 1 2", "M8 8L56 8L56 56Z,-1 .5"] {
+        assert!(TEST_SET.parse(&format!("<svg><path d='{path}'/></svg>")).is_err(), "{path}");
+    }
+    for path in ["M8 8L56 8L56 56Z", "M8 8L56 8L56 56ZM16 16L24 24", "M8 8L56 8L56 56ZL8 56"] {
+        let doc = TEST_SET.parse(&format!("<svg><path d='{path}'/></svg>")).unwrap();
+        assert_eq!(doc.items.len(), 1, "Z at the end or followed by a new command stays valid: {path}");
+    }
+}
