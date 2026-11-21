@@ -454,6 +454,28 @@ pub enum BSplineFailure {
     /// A boundary curve without a neighbouring surface is taken only when it is degenerate
     /// (a point), and this one is not. [`ErrorKind::InvalidInput`].
     FreeBoundaryNotDegenerate,
+    /// The evaluation's output has no slot, not even one for the point.
+    /// [`ErrorKind::InvalidInput`].
+    NoOutputSlot,
+    /// A weight is given for the end of a curve that is not rational.
+    /// [`ErrorKind::InvalidInput`].
+    WeightOnNonRational,
+    /// No NURB is given to take the curve from. [`ErrorKind::InvalidInput`].
+    NoNurbGiven,
+    /// The arc's sweep of `angle` radians is (nearly) zero or half a turn, where the centre
+    /// and the two points are on one line. [`ErrorKind::Degenerate`].
+    ArcSweepDegenerate {
+        /// The sweep, in radians.
+        angle: f64,
+    },
+    /// The blend's derivatives are faired for two points with a tangent each, and `points`
+    /// points and `tangents` tangents are given. [`ErrorKind::InvalidInput`].
+    FairBlendInputs {
+        /// The points given.
+        points: usize,
+        /// The tangents given.
+        tangents: usize,
+    },
 }
 
 impl BSplineFailure {
@@ -510,7 +532,11 @@ impl BSplineFailure {
             | Self::SpineRailMissing
             | Self::RailIntersectionsMissing
             | Self::TrimDomainOutside
-            | Self::FreeBoundaryNotDegenerate => ErrorKind::InvalidInput,
+            | Self::FreeBoundaryNotDegenerate
+            | Self::NoOutputSlot
+            | Self::WeightOnNonRational
+            | Self::NoNurbGiven
+            | Self::FairBlendInputs { .. } => ErrorKind::InvalidInput,
             Self::NotRational | Self::NotIntersectionCurve | Self::ArcKindUnsupported => {
                 ErrorKind::Unsupported
             }
@@ -518,7 +544,8 @@ impl BSplineFailure {
             | Self::GeneratorOnAxis
             | Self::TangentsVanish
             | Self::PatchWithoutSpan
-            | Self::PatchTooCoarse { .. } => ErrorKind::Degenerate,
+            | Self::PatchTooCoarse { .. }
+            | Self::ArcSweepDegenerate { .. } => ErrorKind::Degenerate,
             Self::DegreeNotReducible { .. }
             | Self::PointOffSurface { .. }
             | Self::SubdivisionCap { .. }
@@ -709,6 +736,19 @@ impl core::fmt::Display for BSplineFailure {
             Self::FreeBoundaryNotDegenerate => {
                 f.write_str("a boundary curve without a surface is not degenerate")
             }
+            Self::NoOutputSlot => f.write_str("the output has no slot for the point"),
+            Self::WeightOnNonRational => {
+                f.write_str("a weight is given for a curve that is not rational")
+            }
+            Self::NoNurbGiven => f.write_str("no NURB is given"),
+            Self::ArcSweepDegenerate { angle } => write!(
+                f,
+                "the arc's sweep of {angle} radians is nearly zero or half a turn"
+            ),
+            Self::FairBlendInputs { points, tangents } => write!(
+                f,
+                "{points} points and {tangents} tangents are given, not two of each"
+            ),
         }
     }
 }
@@ -879,12 +919,15 @@ impl crate::SolidError {
     /// Maps the error of a failed NLib call inside a B-spline method (upstream
     /// `if (NL_YES == N_...) SER(SM_ERR)`) to a [`BSplineFailure::RoutineFailed`] of
     /// `operation` that keeps the call's error as its cause. [`crate::SolidError::Unported`],
-    /// [`crate::SolidError::Cancelled`] and [`crate::SolidError::PreparationRequired`] pass
-    /// through unchanged: no upstream status stands for them, and callers match them at
-    /// the top. Use as `.map_err(SolidError::nurbs_routine(OP))`.
+    /// [`crate::SolidError::Cancelled`], [`crate::SolidError::PreparationRequired`] and a
+    /// blend certificate past its budget pass through unchanged, as through
+    /// `SolidError::nl_ser`, which this replaces: no upstream status stands for
+    /// them, and callers match them at the top. Use as
+    /// `.map_err(SolidError::nurbs_routine(OP))`.
     pub(crate) fn nurbs_routine(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
             Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
+            e if e.is_not_certified() => e,
             _ => Failure::new(
                 operation,
                 NurbsFailure::BSpline(BSplineFailure::RoutineFailed),
@@ -997,6 +1040,13 @@ mod tests {
             BSplineFailure::TooFewBoundaryCurves { given: 3 },
             BSplineFailure::TrimDomainOutside,
             BSplineFailure::FreeBoundaryNotDegenerate,
+            BSplineFailure::NoOutputSlot,
+            BSplineFailure::WeightOnNonRational,
+            BSplineFailure::NoNurbGiven,
+            BSplineFailure::FairBlendInputs {
+                points: 2,
+                tangents: 1,
+            },
         ];
         let unsupported = [
             BSplineFailure::NotRational,
@@ -1018,6 +1068,7 @@ mod tests {
                 u_degree: 3,
                 v_degree: 3,
             },
+            BSplineFailure::ArcSweepDegenerate { angle: 0.0 },
         ];
         let tolerance = [
             BSplineFailure::DegreeNotReducible {
@@ -1102,7 +1153,7 @@ mod tests {
     fn the_nurbs_routines_build_no_bare_statuses() {
         assert_eq!(
             super::super::query::tests::bare_statuses_in("nurbs", 60),
-            [("nurbs/b_spline_curve/p1.rs".to_owned(), 23)]
+            Vec::<(String, usize)>::new()
         );
     }
 
