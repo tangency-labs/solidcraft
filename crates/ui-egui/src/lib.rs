@@ -247,6 +247,7 @@ pub mod pencil;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
+mod plugin_events;
 mod plugin_images;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
@@ -952,6 +953,7 @@ pub struct SolveApp {
     /// in the plugins folder's grant store too, shared with the command line and headless MCP.
     plugin_grant_store: Option<solidcraft_engine::plugin::grant_store::Synced>,
     plugin_slots: plugin_slots::State,
+    plugin_events: plugin_events::State,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -1210,6 +1212,7 @@ impl SolveApp {
             plugin_inspection_versions: Default::default(),
             plugin_grant_store: None,
             plugin_slots: Default::default(),
+            plugin_events: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
@@ -1960,6 +1963,7 @@ impl SolveApp {
             r => r,
         };
         self.finish_command(id, &r);
+        plugin_events::command_completed(self, id, r.is_ok());
         if render_workspace::active(self)
             && matches!(id, "appearance.assign" | "appearance.paste")
             && let Ok(value) = &r
@@ -4327,6 +4331,7 @@ impl SolveApp {
         render_workspace::displayed::finish(self, ui.ctx());
         documents::sync_views(self);
         documents::sync_window_title(self, ui.ctx());
+        plugin_events::tick(self, ui.ctx());
     }
 
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {

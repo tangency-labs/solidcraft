@@ -25,6 +25,84 @@ are lists. Entries may declare named menu or ribbon slots; each app decides
 which slots exist and draws forms from the input schemas. Plugins ship no UI
 code. SolidCraft retains approval, cancellation and plugin preferences.
 
+## Design revisions and notifications
+
+Declare `design@0.1` alongside `commands@0.2` to import the optional
+`craft:plugin/design-state@0.2.0` interface. Its read-only `get-token()` returns
+JSON `{ "document_id": "…", "revision": "0123456789abcdef0123456789abcdef:42" }`,
+or `null` without an open design.
+Existing plugins need no new imports or capabilities.
+
+The host keeps the identity and revision in the open document's session, outside
+the authored document, saved files and undo snapshots. Every committed edit,
+undo and redo gets a fresh token, including a redo that restores earlier content.
+Tokens never identify different history states. Saving does not change the token.
+Opening or importing a design creates a fresh identity and token, including when
+reopening the same file; switching between open tabs retains each tab's identity.
+Different open documents have different identities. Display-only changes do not
+invalidate calculations. These observations add no metadata to saved designs and
+do not alter the authored bytes restored by cancellation or undo.
+
+Both fields are bounded opaque strings. Compare the complete token for equality
+and pass it back unchanged. A token is valid only for its open document session;
+discard cached tokens after closing or reopening a design. Revisions do not order
+edits across sessions.
+Use this token for edit preconditions; `document.revision` reports the separate
+observation revision, which also follows visibility and uncaptured positions.
+
+An editing call may pass `expected_design` beside `entry` and `params` to
+`plugin.run`, or beside `approval` and `params` to `<plugin>.<entry>`:
+
+```json
+{
+  "path": "/plugins/example",
+  "approval": "PACKAGE_HASH",
+  "entry": "apply",
+  "expected_design": {
+    "document_id": "DESIGN_ID",
+    "revision": "0123456789abcdef0123456789abcdef:42"
+  },
+  "params": {}
+}
+```
+
+The host checks the token inside the edit transaction before invoking the guest.
+A mismatch refuses the entire edit with typed `stale_revision` data containing
+both `expected` and `actual` tokens. No history step is added. Omitting the token
+preserves unconditional calls.
+MCP clients can supply this precondition through `execute` with the wrapped
+command arguments. Direct plugin tools keep the plugin's declared input schema.
+
+A command plugin can declare invalidation listeners under the same capability:
+
+```json
+"listeners": [{"entry": "refresh", "on": ["design.changed"]}]
+```
+
+Place this in `runtime`; `refresh` must name a declared command entry with
+`"effect": "read"`. Approval covers the exact declaration and component. Disabled,
+unapproved or replaced packages receive no background calls.
+
+The window sends whole-document invalidations after finished host edits,
+undo/redo, and active-document switches, opens and closes. A burst is coalesced
+into the latest state, at most about ten deliveries a second. The entry receives
+`{"design":{"document_id":"…","revision":"0123456789abcdef0123456789abcdef:42"}}`,
+or `{"design":null}` without an active design. Closing the window's last tab
+creates a blank design, so that notification names the new active design.
+Events carry no file contents and are not an edit log.
+
+Handlers run on the command worker, away from the window thread, with their own
+budget: at most 1,000,000 fuel, 16 MiB memory, 512 KiB stack and 100 ms execution time, further
+limited by their requested budgets. They may refresh caches or panel data.
+Editing, file writes and starting jobs are refused with existing typed permission
+errors. A failure is shown in Preferences › Plugins and never fails the action
+that triggered the notification. Each invocation uses a fresh guest instance.
+Handler results use the existing 1 MiB JSON reply limit; retained panel data is
+limited to 16 MiB in total. Exceeding either limit reports a typed limit error.
+
+Panel support from #19516 is not present here. The host keeps the handler's
+bounded JSON result through a plain function for a future panel adapter.
+
 ## Installing
 
 **Install plugin…** in **Preferences > Plugins** (desktop only) picks a plugin `.zip`.

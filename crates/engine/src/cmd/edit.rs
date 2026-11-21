@@ -427,7 +427,8 @@ fn drawing_from(doc: &Arc<Document>, step: &Document, id: u64) -> Arc<Document> 
     if let Some(then) = step.drawing(id)
         && !doc.drawing(id).is_some_and(|now| Arc::ptr_eq(then, now))
     {
-        Arc::make_mut(&mut doc).put_drawing(then.clone());
+        let doc = Arc::make_mut(&mut doc);
+        doc.put_drawing(then.clone());
     }
     doc
 }
@@ -443,7 +444,8 @@ fn drawings_from(mut step: Arc<Document>, now: &Document) -> Arc<Document> {
             }
         }
         drawing::sort(&mut drawings);
-        Arc::make_mut(&mut step).drawings = drawings;
+        let step = Arc::make_mut(&mut step);
+        step.drawings = drawings;
     }
     step
 }
