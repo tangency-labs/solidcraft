@@ -1,0 +1,58 @@
+{
+  "en": {
+    "ui.drawing_attention.clear": "No dimensions need attention",
+    "ui.drawing_attention.count": "dimensions need attention",
+    "ui.drawing_attention.dimension": "Dimension",
+    "ui.drawing_attention.held": "Drawing updates are held",
+    "ui.drawing_attention.title": "Drawing status",
+    "ui.drawing_attention.waiting": "views waiting for update"
+  },
+  "de": {
+    "ui.drawing_attention.clear": "Keine Bemaßungen erfordern Aufmerksamkeit",
+    "ui.drawing_attention.count": "Bemaßungen erfordern Aufmerksamkeit",
+    "ui.drawing_attention.dimension": "Bemaßung",
+    "ui.drawing_attention.held": "Zeichnungsaktualisierungen sind angehalten",
+    "ui.drawing_attention.title": "Zeichnungsstatus",
+    "ui.drawing_attention.waiting": "Ansichten warten auf Aktualisierung"
+  },
+  "ar": {
+    "ui.drawing_attention.clear": "لا توجد أبعاد تحتاج إلى انتباه",
+    "ui.drawing_attention.count": "أبعاد تحتاج إلى انتباه",
+    "ui.drawing_attention.dimension": "بُعد",
+    "ui.drawing_attention.held": "تحديثات الرسم معلّقة",
+    "ui.drawing_attention.title": "حالة الرسم",
+    "ui.drawing_attention.waiting": "عروض تنتظر التحديث"
+  },
+  "he": {
+    "ui.drawing_attention.clear": "אין מידות הדורשות טיפול",
+    "ui.drawing_attention.count": "מידות דורשות טיפול",
+    "ui.drawing_attention.dimension": "מידה",
+    "ui.drawing_attention.held": "עדכוני השרטוט מושהים",
+    "ui.drawing_attention.title": "מצב השרטוט",
+    "ui.drawing_attention.waiting": "תצוגות ממתינות לעדכון"
+  },
+  "ja": {
+    "ui.drawing_attention.clear": "確認が必要な寸法はありません",
+    "ui.drawing_attention.count": "個の寸法に確認が必要です",
+    "ui.drawing_attention.dimension": "寸法",
+    "ui.drawing_attention.held": "図面の更新は保留中です",
+    "ui.drawing_attention.title": "図面の状態",
+    "ui.drawing_attention.waiting": "個のビューが更新待ちです"
+  },
+  "vi": {
+    "ui.drawing_attention.clear": "Không có kích thước nào cần chú ý",
+    "ui.drawing_attention.count": "kích thước cần chú ý",
+    "ui.drawing_attention.dimension": "Kích thước",
+    "ui.drawing_attention.held": "Đã tạm dừng cập nhật bản vẽ",
+    "ui.drawing_attention.title": "Trạng thái bản vẽ",
+    "ui.drawing_attention.waiting": "khung nhìn đang chờ cập nhật"
+  },
+  "zh": {
+    "ui.drawing_attention.clear": "没有需要处理的尺寸",
+    "ui.drawing_attention.count": "个尺寸需要处理",
+    "ui.drawing_attention.dimension": "尺寸",
+    "ui.drawing_attention.held": "图纸更新已暂停",
+    "ui.drawing_attention.title": "图纸状态",
+    "ui.drawing_attention.waiting": "个视图等待更新"
+  }
+}

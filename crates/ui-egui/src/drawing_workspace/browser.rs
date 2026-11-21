@@ -32,6 +32,8 @@ pub(crate) fn show(app: &mut SolveApp, rows: &mut Rows<'_>) {
         crate::ui_kit::text(rows.ui(), app.tr_label("No drawing objects"), Text::Note("drawing_objects"));
     }
 
+    show_attention(app, rows.ui());
+
     let label = app.tr_label("Source design").to_string();
     if branch(app, rows, "drawing:browser:source", Row { icon: "ws_design", label: &label, name: true, ..Row::default() }, false) {
         let name = app.session.doc.name.clone();
@@ -274,4 +276,62 @@ fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> S
         return app.tr(key).to_string();
     }
     solidcraft_ui_text::format("ui.drawing_browser_view", &[("number", &number.to_string())])
+}
+
+fn show_attention(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if app.session.drawing("drawing.inspect").is_err() {
+        super::invalidate_status(app);
+        return;
+    }
+    super::refresh_status_if_needed(app);
+    ui.push_id("drawing_attention_status", |ui| {
+        if let Some(error) = &app.drawing_workspace.status_error {
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.heading(solidcraft_ui_text::tr("ui.issue15776_attention.title"));
+                ui.label(solidcraft_ui_text::format("ui.issue15776_attention.status_error", &[("error", error)]));
+            });
+        } else if let Some(snapshot) = app.drawing_workspace.status_controller.snapshot().cloned() {
+            if snapshot.dimensions_needing_attention() == 0 && !snapshot.held && snapshot.waiting_views == 0 && snapshot.warnings.is_empty() {
+                return;
+            }
+            // Use the same sheet and browser labels the drawing already displays.
+            // Keep unknown IDs visible rather than inventing a location.
+            let mut dimension_names = std::collections::BTreeMap::new();
+            let mut view_names = std::collections::BTreeMap::new();
+            let mut sheet_names = std::collections::BTreeMap::new();
+            if let Ok(drawing) = app.session.drawing("drawing.inspect") {
+                for sheet in &drawing.sheets {
+                    sheet_names.insert(solidcraft_engine::doc::ids::encode(sheet.id), sheet.name.clone());
+                    let objects = drawing.on_sheet(sheet.id);
+                    for (index, id) in objects.dimensions.iter().enumerate() {
+                        dimension_names.insert(
+                            solidcraft_engine::doc::ids::encode(*id),
+                            solidcraft_ui_text::format("ui.drawing_browser_dimension", &[("number", &(index + 1).to_string())]),
+                        );
+                    }
+                    for (index, id) in objects.views.iter().enumerate() {
+                        view_names.insert(
+                            solidcraft_engine::doc::ids::encode(*id),
+                            drawing
+                                .views
+                                .iter()
+                                .find(|view| view.id == *id)
+                                .map(|view| view_name(app, drawing, view, index + 1))
+                                .unwrap_or_else(|| solidcraft_engine::doc::ids::encode(*id)),
+                        );
+                    }
+                }
+            }
+            crate::drawing_attention_card::show(ui, &snapshot, &dimension_names, &view_names, &sheet_names);
+            let selection = app.session.selection.clone();
+            let mut repair_state = std::mem::take(&mut app.drawing_workspace.repair_ui);
+            let repaired = crate::drawing_repair_ui::show(ui, &selection, &mut repair_state, &snapshot, |command, args| {
+                app.run(command, args).map_err(|error| error.to_string())
+            });
+            app.drawing_workspace.repair_ui = repair_state;
+            if repaired {
+                super::invalidate_status(app);
+            }
+        }
+    });
 }
