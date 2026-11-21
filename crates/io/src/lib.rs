@@ -67,9 +67,11 @@ pub mod vfs;
 pub use airfoil::{Airfoil, AirfoilFormat, MAX_AIRFOIL_BYTES, MAX_AIRFOIL_POINTS, read_airfoil};
 pub use dxf::{DxfReadProfile, DxfWriteOptions, read_dxf, read_dxf_file, read_dxf_file_with_profile, write_dxf, write_dxf_entities, write_dxf_opts};
 pub use dxf_out::{
-    DxfEntity, DxfEntityWeight, DxfFile, DxfFileEntity, DxfFileLayer, DxfGeometryBounds, DxfLayer, DxfLayerId, DxfLinetype, DxfPath, DxfPathStyle,
-    DxfShape, DxfSourceBlock, DxfStandardWeight, DxfTextHorizontalAlignment, DxfTextRecordKind, DxfTextSource, DxfTextVerticalAlignment, DxfVertex,
-    admit_path, loop_lwpolyline, loop_lwpolyline_scaled, path_shapes, write_dxf_drawing_units, write_dxf_file, write_dxf_file_with_text_bounds,
+    DXF_PROFILE_FORMAT, DXF_PROFILE_VERSION, DxfEntity, DxfEntityWeight, DxfExportProfile, DxfFile, DxfFileEntity, DxfFileLayer, DxfGeometryBounds,
+    DxfLayer, DxfLayerId, DxfLinetype, DxfPath, DxfPathStyle, DxfRole, DxfRoleStyle, DxfShape, DxfSourceBlock, DxfStandardWeight,
+    DxfTextHorizontalAlignment, DxfTextRecordKind, DxfTextSource, DxfTextVerticalAlignment, DxfVertex, MAX_DXF_PROFILE_BYTES, admit_path,
+    loop_lwpolyline, loop_lwpolyline_scaled, path_shapes, write_dxf_drawing_units, write_dxf_file, write_dxf_file_as,
+    write_dxf_file_with_text_bounds,
 };
 pub use excellon::{DrillArc, DrillHit, DrillSlot, Drills, read_excellon};
 pub use gerber::{GerberLayer, GerberOutline, read_gerber_layer, read_gerber_outline};
