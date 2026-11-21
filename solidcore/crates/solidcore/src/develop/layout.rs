@@ -2095,9 +2095,9 @@ impl BendMap {
     fn carry(&self, frame: &JointFrame, on_b: bool, q: Vec2) -> Vec2 {
         let (tangent, way) = self.side(on_b);
         let p = q - frame.origin;
-        let past = ((p.dot(frame.toward_b) - tangent) * way)
-            .max(0.0)
-            .min(self.setback);
+        // Not held to the band: the map runs on smoothly past its lines, as its bounds and
+        // rates do, so a point a hair outside it is carried by the same map they prove.
+        let past = (p.dot(frame.toward_b) - tangent) * way;
         frame.at(p.dot(frame.along), tangent + way * self.in_zone(past))
     }
 
@@ -2165,6 +2165,17 @@ fn outline_end(
         _ => return Err(JointRefusal::OutlineEnd),
     };
     let mut back: Vec<Seg2> = back.iter().rev().map(Seg2::reversed).collect();
+    // Moving a cubic's end by `d` moves none of its points further than `d`: the ends are moved
+    // onto the zone's corners, and the two sides onto one point at the sharp, only within the
+    // quarter of the tolerance `follow` leaves for it.
+    let moved = |a: Option<Vec2>, b: Vec2| a.map_or(0.0, |a| a.dist(b));
+    let snaps = [
+        moved(out.first().map(Seg2::start), start),
+        moved(back.last().map(Seg2::end), end),
+    ];
+    if snaps.iter().any(|d| !(*d <= TEAR_TOL / 4.0)) {
+        return Err(JointRefusal::OutlineFit);
+    }
     let mid = (
         out.last().map_or(start, Seg2::end),
         back.first().map_or(end, Seg2::start),
@@ -2367,11 +2378,14 @@ fn first_meeting(s: &Seg2, frame: &JointFrame, levels: &[f64]) -> Option<(f64, u
 }
 
 /// Segment `s` of a panel's outline under a bend, carried into the zone by `map` (the `b` panel's
-/// when `on_b`) as cubic pieces proved within [`TEAR_TOL`] of its image: the segment as its record
-/// curve ([`record_curve`]), its proved smooth pieces and their bounds ([`hermite`]), and the
-/// map's bounds ([`BendMap::bounds`]) give each piece's remainder over a step (Faà di Bruno, then
-/// the Hermite remainder), and steps are halved until every piece is within the tolerance, the
-/// rounding of reading the curve carried in. `None` where no such pieces are had.
+/// when `on_b`) as cubic pieces proved within three quarters of [`TEAR_TOL`] of its image: the
+/// segment as its record curve ([`record_curve`]), its proved smooth pieces and their bounds
+/// ([`hermite`]), and the map's bounds ([`BendMap::bounds`]) give each piece's remainder over a
+/// step (Faà di Bruno, then the Hermite remainder), and steps are halved until every piece is
+/// within half the tolerance, the rounding of reading the curve carried in; the rounding of the
+/// cubics' own control points takes at most a quarter more. The last quarter is
+/// [`outline_end`]'s, for moving the pieces' ends onto the zone's corners. `None` where no such
+/// pieces are had.
 fn follow(s: &Seg2, frame: &JointFrame, map: &BendMap, on_b: bool) -> Option<Vec<Seg2>> {
     let (curve, span) = record_curve(s)?;
     let g = map.bounds();
@@ -2382,7 +2396,7 @@ fn follow(s: &Seg2, frame: &JointFrame, map: &BendMap, on_b: bool) -> Option<Vec
         let nodes = hermite::nodes(
             |t0, t1| Some(hermite::remainder(t1 - t0, fourth) + slack),
             piece.span(),
-            TEAR_TOL,
+            TEAR_TOL / 2.0,
         )?;
         let carried_at = |t: f64| {
             let (p, d) = piece.at(t)?;
@@ -2391,7 +2405,17 @@ fn follow(s: &Seg2, frame: &JointFrame, map: &BendMap, on_b: bool) -> Option<Vec
         for w in nodes.windows(2) {
             let [t0, t1] = [*w.first()?, *w.get(1)?];
             let ((p0, d0), (p3, d3)) = (carried_at(t0)?, carried_at(t1)?);
-            out.push(hermite::cubic(p0, d0, p3, d3, t1 - t0));
+            let cubic = hermite::cubic(p0, d0, p3, d3, t1 - t0);
+            // Its control points are read with the rounding of a few operations on numbers as
+            // large as they are.
+            let size = extremes(&cubic, &[X, Y])
+                .iter()
+                .map(|p| p.len())
+                .fold(0.0, f64::max);
+            if !(hermite::ROUNDING * size <= TEAR_TOL / 4.0) {
+                return None;
+            }
+            out.push(cubic);
         }
     }
     (!out.is_empty()).then_some(out)

@@ -4391,6 +4391,60 @@ mod tests {
 
     use super::extent_across;
 
+    /// A plate whose side runs at a slant to its bend has the side cut in two where it crosses the
+    /// tangent line (a cut-out's corner there). The two pieces are one line, wherever the loop
+    /// starts: with the cut the loop's first vertex they are its last segment and its first, and
+    /// read either way the side crosses the tangent line, so the end follows the outlines. The
+    /// plate's sharp runs along x from the origin, its material above; 2 mm sheet, R 2, a right
+    /// angle toward the material, so its tangent line lies at y = (R + T) tan 45° = 4, which its
+    /// side x = −0.75 y crosses at x = −3. The flange's side carries the plate's on across the
+    /// sharp and crosses the flange's tangent line 3 along.
+    #[test]
+    fn a_side_split_where_its_loop_starts_still_crosses_the_tangent_line() {
+        use solidcore_record::Vec3;
+        use solidcraft_develop::{Anchor, Bend, Datum, Panel, Relief, Sheet, Tail, ZoneEnds};
+
+        use super::{BendEdge, outline_ends};
+        let poly =
+            |pts: &[(f64, f64)]| Region2 { outer: Loop2::polygon(&pts.iter().map(|&(x, y)| Vec2::new(x, y)).collect::<Vec<_>>()), holes: Vec::new() };
+        let flange = Panel { name: "flange".into(), region: poly(&[(0.0, 0.0), (15.0, -20.0), (100.0, -20.0), (100.0, 0.0)]), ..Panel::default() };
+        let bend = Bend {
+            angle: PI / 2.0,
+            radius: 2.0,
+            toward_material: true,
+            datum: Datum::Sharp,
+            length: 100.0,
+            ends: ZoneEnds { near: (0.0, 100.0), far: (0.0, 100.0) },
+            tails: (Tail::Keep, Tail::Keep),
+            relief: (Relief::None, Relief::None),
+        };
+        let edge = BendEdge {
+            joint: 0,
+            ends: [Vec3::new(0.0, 0.0, 0.0), Vec3::new(100.0, 0.0, 0.0)],
+            normals: (Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 0.0)),
+            toward: true,
+            len: 100.0,
+            a: Anchor { panel: 0, origin: Vec2::new(0.0, 0.0), dir: Vec2::new(1.0, 0.0) },
+            b: Anchor { panel: 1, origin: Vec2::new(0.0, 0.0), dir: Vec2::new(1.0, 0.0) },
+            setback: 4.0,
+            radius: 2.0,
+        };
+        let read = |plate: &[(f64, f64)]| {
+            let sheet = Sheet {
+                thickness: 2.0,
+                k_factor: 0.44,
+                panels: vec![Panel { name: "plate".into(), region: poly(plate), ..Panel::default() }, flange.clone()],
+                ..Sheet::default()
+            };
+            outline_ends(&sheet, &edge, &bend, 0.0, 1e-9)
+        };
+        let starts_at_the_cut = read(&[(-3.0, 4.0), (0.0, 0.0), (100.0, 0.0), (100.0, 60.0), (-45.0, 60.0)]);
+        let cut_inside = read(&[(100.0, 0.0), (100.0, 60.0), (-45.0, 60.0), (-3.0, 4.0), (0.0, 0.0)]);
+        let near = |got: Option<(f64, bool)>, want: f64| got.is_some_and(|(s, across)| (s - want).abs() < 1e-9 && across);
+        assert!(near(starts_at_the_cut.0, -3.0) && near(starts_at_the_cut.1, 3.0), "{starts_at_the_cut:?}");
+        assert_eq!(starts_at_the_cut, cut_inside);
+    }
+
     /// Where a line crosses an outline is read off its curves. A disc of radius 2 round the
     /// origin (two half turns), crossed along x through (−5, 1): its circle meets y = 1 at
     /// x = ±√3, so 5 − √3 (3.2679…) and 5 + √3 (6.7320…) along from (−5, 1); chords 1e-4 inside
