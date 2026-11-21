@@ -31,6 +31,18 @@ use crate::agent_chat::backend::HttpRequest;
 /// Where reports go: the one address the app ever posts them to.
 pub const ENDPOINT: &str = "https://metrics.solidcraft.io/v1/report";
 
+/// Where Delete my data goes: this followed by the installation id, sent as `DELETE`.
+pub const INSTALL_ENDPOINT: &str = "https://metrics.solidcraft.io/v1/install/";
+
+/// The most deletions waiting to be sent.
+pub const MAX_FORGET: usize = 10;
+
+/// The only addresses the host's HTTP for usage statistics may reach: the report endpoint, and
+/// an installation's delete address.
+pub fn allowed_url(url: &str) -> bool {
+    url == ENDPOINT || url.strip_prefix(INSTALL_ENDPOINT).is_some_and(valid_id)
+}
+
 /// The version of the report's fields ([`Report::v`]).
 pub const SCHEMA: u32 = 1;
 
@@ -126,6 +138,8 @@ pub struct Store {
     pub notice_shown: bool,
     /// Days counted and not sent yet, by `YYYY-MM-DD` (UTC).
     pub days: BTreeMap<String, Day>,
+    /// Earlier installation ids whose reports the server is still to delete (Delete my data).
+    pub forget: Vec<String>,
 }
 
 impl Store {
@@ -136,6 +150,8 @@ impl Store {
             store.install_id.clear();
         }
         store.days.retain(|day, _| day_number(day).is_some());
+        store.forget.retain(|id| valid_id(id));
+        store.forget.truncate(MAX_FORGET);
         store
     }
 
@@ -183,6 +199,10 @@ pub struct UsageStats {
     started: Option<f64>,
     /// A tool or dialog the person started, until it is applied or cancelled.
     open_tool: Option<OpenTool>,
+    /// The deletion on its way: the id and the answer to come.
+    deleting: Option<(String, crate::tickets::Call)>,
+    /// When the last deletion was tried (the app's clock); None: none since the last request.
+    last_delete_try: Option<f64>,
     /// A tool just started (`SolveApp::start`), stamped at the next tick.
     pub(crate) started_tool: Option<&'static str>,
 }
@@ -261,6 +281,25 @@ fn valid_id(id: &str) -> bool {
 pub fn reset_id(app: &mut SolveApp) {
     app.usage.store.install_id = new_id().unwrap_or_default();
     app.usage.store.days.clear();
+}
+
+/// Delete my data: the server is asked to delete everything it has for this installation id
+/// (sent in the background, retried like a report until the server answers), and a new id is
+/// used from now on. False when there is nothing to delete or the organization or the environment
+/// turned statistics off (then nothing is sent at all).
+pub fn delete_my_data(app: &mut SolveApp) -> bool {
+    if matches!(off(app), Some(Off::Policy | Off::Environment)) {
+        return false;
+    }
+    let old = std::mem::take(&mut app.usage.store.install_id);
+    if valid_id(&old) && !app.usage.store.forget.contains(&old) {
+        app.usage.store.forget.push(old);
+        let extra = app.usage.store.forget.len().saturating_sub(MAX_FORGET);
+        app.usage.store.forget.drain(..extra);
+    }
+    reset_id(app);
+    app.usage.last_delete_try = None;
+    !app.usage.store.forget.is_empty()
 }
 
 /// Days since 1970-01-01 of a `YYYY-MM-DD` date; None when it isn't one.
@@ -395,6 +434,7 @@ pub fn tick_at(app: &mut SolveApp, unix: i64, now: f64, input: bool) {
     if !app.usage.hosted {
         return;
     }
+    forget(app, now);
     let counted = solidcraft_engine::usage::take();
     if !on {
         if off(app).is_some() {
@@ -481,6 +521,42 @@ fn time_tools(usage: &mut UsageStats, now: f64, open: bool, operations: bool) ->
         }
     }
     done
+}
+
+/// Send the deletions asked for (Delete my data), one at a time, whether or not statistics are on;
+/// none when the organization or the environment turned them off. A deletion the server didn't
+/// take is tried again an hour later, never in a loop.
+fn forget(app: &mut SolveApp, now: f64) {
+    if matches!(off(app), Some(Off::Policy | Off::Environment)) {
+        app.usage.store.forget.clear();
+        app.usage.deleting = None;
+        return;
+    }
+    if let Some((id, call)) = &app.usage.deleting {
+        let Some(reply) = call.poll() else { return };
+        let id = id.clone();
+        app.usage.deleting = None;
+        match reply {
+            Ok((status, _)) if done(status) => {
+                app.usage.store.forget.retain(|old| *old != id);
+                if app.usage.store.forget.is_empty() {
+                    let text = app.tr("prefs.privacy.delete_done").to_string();
+                    app.set_status(text, false);
+                }
+            }
+            Ok((status, _)) => log::info!("usage statistics: delete answered {status}; it waits"),
+            Err(why) => log::info!("usage statistics: delete not sent ({why}); it waits"),
+        }
+        return;
+    }
+    if app.usage.last_delete_try.is_some_and(|at| now - at < 3600.0) || !may_send() {
+        return;
+    }
+    let Some(id) = app.usage.store.forget.first().cloned() else { return };
+    let Some(http) = app.services.usage_http.clone() else { return };
+    let request = HttpRequest { method: "DELETE", url: format!("{INSTALL_ENDPOINT}{id}"), headers: Vec::new(), body: None, timeout_s: 30 };
+    app.usage.last_delete_try = Some(now);
+    app.usage.deleting = Some((id, crate::tickets::Call::start(&http, request)));
 }
 
 /// Reports go only from release builds (`update::release_build`): a development build counts but

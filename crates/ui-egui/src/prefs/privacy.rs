@@ -43,12 +43,28 @@ fn usage(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Wrapped: the note is a few lines long.
     ui.horizontal_wrapped(|ui| ui_kit::settings_inline_note(ui, app.tr("prefs.privacy.share_help")));
     let on = off.is_none();
+    // The installation id the reports carry, and what can be done with it.
+    let id = if app.usage.store.install_id.is_empty() { app.tr("prefs.privacy.no_id").to_string() } else { app.usage.store.install_id.clone() };
+    ui.horizontal_wrapped(|ui| {
+        ui_kit::settings_inline_note(ui, app.tr("prefs.privacy.install_id"));
+        let shown = ui.add(egui::Label::new(egui::RichText::new(&id).monospace()).selectable(true));
+        crate::scenario::publish_target("prefs:usage_statistics:install_id", shown.rect);
+    });
     ui.horizontal_wrapped(|ui| {
         let reset = ui_kit::button(ui, app.tr("prefs.privacy.reset_id"), ui_kit::Button::Enabled(on));
         crate::scenario::publish_target("prefs:usage_statistics:reset_id", reset.rect);
         if on && reset.clicked() {
             usage_stats::reset_id(app);
             let text = app.tr("prefs.privacy.reset_done").to_string();
+            app.set_status(text, false);
+        }
+        // Delete my data works with statistics off too (data sent earlier stays until deleted);
+        // not when the organization or the environment turned them off, which sends nothing.
+        let can_delete = !matches!(off, Some(Off::Policy | Off::Environment));
+        let delete = ui_kit::button(ui, app.tr("prefs.privacy.delete"), ui_kit::Button::Enabled(can_delete));
+        crate::scenario::publish_target("prefs:usage_statistics:delete", delete.rect);
+        if can_delete && delete.clicked() && usage_stats::delete_my_data(app) {
+            let text = app.tr("prefs.privacy.delete_queued").to_string();
             app.set_status(text, false);
         }
         let label = app.tr(if app.usage.show_report { "prefs.privacy.hide" } else { "prefs.privacy.show" }).to_string();
