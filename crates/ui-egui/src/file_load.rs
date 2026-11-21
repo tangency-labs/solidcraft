@@ -391,6 +391,12 @@ impl FileLoad {
         }
     }
     /// Drop the `index`th queued request (from 0), answering it as cancelled.
+    /// The requests waiting to start, oldest first.
+    #[cfg(test)]
+    pub(crate) fn queued_requests(&self) -> &VecDeque<Request> {
+        &self.queued
+    }
+
     pub(crate) fn cancel_queued(&mut self, index: usize) {
         if let Some(q) = self.queued.remove(index) {
             self.drop_warm(q.serial);

@@ -3375,7 +3375,7 @@ fn scoped_ui_file_import_keeps_its_caller_scope_when_submitted_from_a_normal_fra
     h.app.services.pick_open = Some(Box::new(|_| Box::pin(std::future::pending())));
     h.app.pick_open_for(&["smp"], |_, _| {});
     run_dialog(&mut h.app, id).unwrap();
-    let request = h.app.file_load.queued.back().unwrap();
+    let request = h.app.file_load.queued_requests().back().unwrap();
     assert_eq!(request.kind, crate::file_load::Kind::Open);
     assert_eq!(request.path, path);
     let scope = request.scope.as_ref().expect("the scoped ui.file authority survives the form");
