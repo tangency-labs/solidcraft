@@ -706,11 +706,7 @@ fn a_sketch_saved_on_a_chamfer_in_either_name_form_reopens_on_its_face() {
 
     // The bevel lies in z - y = 7, with outward normal (0, -1, 1) / sqrt(2).
     let point = Vec3::new(20.0, 1.5, 8.5);
-    let made = run(
-        &mut s,
-        "sketch.create",
-        json!({"plane": {"face": [point.x, point.y, point.z]}, "project_edges": false, "name": "OnChamfer"}),
-    );
+    let made = run(&mut s, "sketch.create", json!({"plane": {"face": [point.x, point.y, point.z]}, "project_edges": false, "name": "OnChamfer"}));
     assert_eq!(made["attachment"], "exact_face", "{made}");
     let sketch = made["sketch"].as_u64().unwrap();
     let local = s.model.state().sketches.iter().find(|solved| solved.feature == sketch).unwrap().plane.to_local(point);
