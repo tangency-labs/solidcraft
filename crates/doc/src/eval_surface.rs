@@ -93,17 +93,24 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             if let Some(other) = with {
                 return mutual_trim(st, i, other, keeps, &crate::plain(keep_with), *stitch, *extend);
             }
+            // A cutting body or tool face is used where it is shown: the model as seen from this
+            // feature's component, as Revolve's To does (a body is kept in its own component's frame).
+            let tst = if tool_body.is_some() || tool.is_some() {
+                crate::eval::state_in_frame(doc, st, f.component)?
+            } else {
+                std::borrow::Cow::Borrowed(&*st)
+            };
             let trimmed = match (tool_body, tool, curves) {
                 (Some(name), None, None) => {
                     if name == body {
                         return Err(DocError::Invalid("the cutting sheet must be another body".into()));
                     }
-                    let tb = st.body(name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?;
+                    let tb = tst.body(name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?;
                     kernel::trim_sheet_keep(&mb.body, &tb.body, keeps)?
                 }
                 (Some(_), _, _) => return Err(DocError::Invalid("give a cutting sheet, a tool face or curves, not several tools".into())),
                 (None, Some(t), _) => {
-                    let tb = st.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
+                    let tb = tst.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
                     let (_, face) = tb
                         .body
                         .nearest_face(t.point.0)
