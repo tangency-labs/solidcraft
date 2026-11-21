@@ -3503,6 +3503,13 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.placed_body(st, &b.0);
             }
         }
+        FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {
+            for g in replayed_sources(doc, features) {
+                if drawn_tools_change_bodies(&g.kind) {
+                    reads.drawn_targets(st, g);
+                }
+            }
+        }
         // Joins, cuts and intersects meet their targets where those are placed (#3383).
         kind if drawn_tools_change_bodies(kind) => reads.drawn_targets(st, f),
         // So does a hole at sketch points, in its sketch's frame (#17623).
@@ -13792,6 +13799,7 @@ fn tools_component(doc: &Document, f: &Feature) -> Option<u64> {
     match &f.kind {
         FeatureKind::Hole { points: Some(sp), .. } => doc.feature(sp.sketch.0).map(|s| s.component),
         FeatureKind::Rib { sketch, .. } => doc.feature(sketch.0).map(|s| s.component),
+        FeatureKind::Pattern { bodies, .. } | FeatureKind::Mirror { bodies, .. } if bodies.is_empty() => Some(f.component),
         kind if drawn_tools_change_bodies(kind) => Some(f.component),
         _ => None,
     }

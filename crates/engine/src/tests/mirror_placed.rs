@@ -598,3 +598,31 @@ fn a_revolve_about_a_mirrored_copys_edge_follows_a_joint_drive() {
         assert_ne!(after, before, "the cut turned about the old axis at {angle}°");
     }
 }
+
+/// #19451: a cut mirrored across a plane from the root cuts a placed component's body where it is shown.
+#[test]
+fn a_cut_mirrored_from_the_root_cuts_a_placed_component_where_it_is_shown() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "center": [0, 0, 5], "body_name": "BoxA"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-10, -20, 0], "body_name": "BoxB"}));
+    run(&mut s, "component.create", json!({"name": "A", "parent": "root", "activate": false}));
+    run(&mut s, "component.create", json!({"name": "B", "parent": "root", "activate": false}));
+    run(&mut s, "component.move_bodies", json!({"bodies": ["BoxA"], "component": "A"}));
+    run(&mut s, "component.move_bodies", json!({"bodies": ["BoxB"], "component": "B"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "B:1", "axis": [0, 0, 1], "angle": "180 deg", "origin": [0, 0, 0], "translate": [0, 0, 20]}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 25, "name": "CutSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [1, 5], "p1": [7, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"distance": 10, "through_all": true, "direction": "negative", "operation": "cut", "targets": ["BoxA", "BoxB"], "name": "Cut"}),
+    );
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 5, "name": "MirrorPlane"}));
+    run(&mut s, "solid.mirror", json!({"features": ["Cut"], "plane": "MirrorPlane", "name": "Mirror"}));
+    let vol = |s: &mut Session, b: &str| run(s, "inspect.measure", json!({"bodies": [b]}))["total"]["volume_mm3"].as_f64().unwrap();
+    let a_vol = vol(&mut s, "BoxA");
+    let b_vol = vol(&mut s, "BoxB");
+    assert!((a_vol - 15600.0).abs() < 1.0, "BoxA volume: {a_vol}, expected 15600");
+    assert!((b_vol - 15800.0).abs() < 1.0, "BoxB volume: {b_vol}, expected 15800");
+}
