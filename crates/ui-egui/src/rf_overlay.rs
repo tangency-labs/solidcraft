@@ -347,7 +347,7 @@ pub fn card(app: &mut SolveApp, ui: &mut egui::Ui, viewport: egui::Rect) {
         .show(ui.ctx(), |ui| {
             let frame = container.frame(ui.ctx(), t.overlay, crate::frame::Side::Right).inner_margin(t.space_8);
             frame.show(ui, |ui| {
-                ui.set_max_width(260.0);
+                ui.set_width(280.0);
                 events = crate::ui_kit::details(ui, "rf_coverage_card", &description, viewport.height() * 0.7, None);
             });
         });
