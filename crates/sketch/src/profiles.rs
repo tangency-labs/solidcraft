@@ -294,7 +294,7 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
             _ => false,
         };
         runs.push(match full {
-            Some(seg) if whole => Run::Exact { seg, t0: 0.0, t1: 1.0, fixed: (true, true), plain },
+            Some(seg) if whole => Run::Exact { seg, t0: 0.0, t1: 1.0, fixed: (true, true), plain, moved: (false, false) },
             Some(seg) => {
                 let (a, b) = (plain.first().map(Seg2::start).unwrap_or_default(), plain.last().map(Seg2::end).unwrap_or_default());
                 let (t0, t1) = (seg.closest_param(a), seg.closest_param(b));
@@ -302,7 +302,7 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
                 let snap = |t: f64, p: Vec2, at: f64| (t - at).abs() < 1e-6 && seg.point_at(at).dist(p) < 1e-6;
                 let fixed = (snap(t0, a, 0.0), snap(t1, b, 1.0));
                 let (t0, t1) = (if fixed.0 { 0.0 } else { t0 }, if fixed.1 { 1.0 } else { t1 });
-                if t1 - t0 > 1e-9 { Run::Exact { seg, t0, t1, fixed, plain } } else { Run::Plain(plain) }
+                if t1 - t0 > 1e-9 { Run::Exact { seg, t0, t1, fixed, plain, moved: (false, false) } } else { Run::Plain(plain) }
             }
             None => Run::Plain(plain),
         });
@@ -368,6 +368,7 @@ enum Run {
         t1: f64,
         fixed: (bool, bool),
         plain: Vec<Seg2>,
+        moved: (bool, bool),
     },
 }
 
@@ -399,7 +400,10 @@ impl Run {
                     *s = with_end(*s, p);
                 }
             }
-            Run::Exact { t1, .. } => *t1 = t,
+            Run::Exact { t1, moved, .. } => {
+                *t1 = t;
+                moved.1 = true;
+            }
         }
     }
     fn set_start(&mut self, p: Vec2, t: f64) {
@@ -409,12 +413,27 @@ impl Run {
                     *s = with_end(s.reversed(), p).reversed();
                 }
             }
-            Run::Exact { t0, .. } => *t0 = t,
+            Run::Exact { t0, moved, .. } => {
+                *t0 = t;
+                moved.0 = true;
+            }
         }
     }
+    /// Back to the polyline, keeping ends a junction put on the true crossing (#16098).
     fn give_up(&mut self) {
-        if let Run::Exact { fixed: (false, _) | (_, false), plain, .. } = self {
-            *self = Run::Plain(std::mem::take(plain));
+        if let Run::Exact { seg, t0, t1, fixed: (false, _) | (_, false), plain, moved } = self {
+            let mut v = std::mem::take(plain);
+            if moved.0
+                && let Some(s) = v.first_mut()
+            {
+                *s = with_end(s.reversed(), seg.point_at(*t0)).reversed();
+            }
+            if moved.1
+                && let Some(s) = v.last_mut()
+            {
+                *s = with_end(*s, seg.point_at(*t1));
+            }
+            *self = Run::Plain(v);
         }
     }
     fn into_segs(self) -> Vec<Seg2> {
@@ -1945,7 +1964,7 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 kept(&mut hs, &keep);
                 kept(&mut edge_nodes, &keep);
                 kept(&mut edge_analytic, &keep);
-                kept(&mut ids, &keep);
+                // `ids` keeps the lobe's curves: a pick by curves made with the lobe still matches.
                 kept(&mut ptags, &keep);
                 kept(&mut coverage_tags, &keep);
             }
@@ -1995,10 +2014,12 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
 }
 
 /// Which half-edges of a traced loop stay: a lobe (a stretch back to the node it left) of no area
-/// is left out, as the lens two near-tangent crossings leave (#14182).
+/// is left out, as the lens two near-tangent crossings leave (#14182), and so is a sliver lobe
+/// unless the whole loop is that thin (#16098).
 fn without_lobes_of_no_area(segs: &[Seg2], edge_nodes: &[(usize, usize)]) -> Vec<bool> {
     let n = segs.len();
     let mut keep = vec![true; n];
+    let thin_loop = area_about_start(segs).abs() < SLIVER_AREA;
     let mut i = 0;
     while i < n {
         let from = edge_nodes.get(i).map(|e| e.0);
@@ -2007,7 +2028,10 @@ fn without_lobes_of_no_area(segs: &[Seg2], edge_nodes: &[(usize, usize)]) -> Vec
         let lobe = back.filter(|_| keep.get(i).copied().unwrap_or(false)).and_then(|j| {
             let idx: Vec<usize> = (0..n).map(|d| (i + d) % n).take_while(|&k| k != j).collect();
             let lobe: Vec<Seg2> = idx.iter().filter_map(|&k| segs.get(k).copied()).collect();
-            (idx.len() < n && area_about_start(&lobe).abs() <= 1e-9).then_some(idx)
+            let area = area_about_start(&lobe).abs();
+            let perimeter: f64 = lobe.iter().map(Seg2::length).sum();
+            let sliver = area < SLIVER_AREA && 2.0 * area / perimeter.max(1e-12) < SLIVER_WIDTH;
+            (idx.len() < n && (area <= 1e-9 || (sliver && !thin_loop))).then_some(idx)
         });
         match lobe {
             Some(idx) => idx.into_iter().for_each(|k| {
