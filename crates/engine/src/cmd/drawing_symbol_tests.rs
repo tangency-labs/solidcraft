@@ -327,6 +327,22 @@ fn inspect_says_where_a_placement_stands_and_what_it_says() {
     assert!(unknown.contains("the drawing has no placed symbol"), "{unknown}");
 }
 
+/// A placement on a view of another configuration row is inspected on that row's model, as Check
+/// Drawing reads it: the block's top front edge has its middle at Long's 60 mm, not the active
+/// row's 50 mm.
+#[test]
+fn inspect_reads_a_placement_on_its_views_configuration_row() {
+    let (mut s, _, [front, _], _) = crate::drawing_scene::tests::configured_front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"configuration": "Long"}}));
+    let mark = run(&mut s, DEFINE, json!({"name": "Mark", "pieces": mark()}))["symbol"].clone();
+    let edge = json!({"edge": {"view": ids::encode(front), "edge": {"point": [50, 0, 20], "path": []}}});
+    let placed = place_one(&mut s, json!({"symbol": mark, "anchor": edge, "at": [60, 40]}));
+    let reply = inspect_placed(&mut s, &placed["placement"]);
+    assert_eq!(reply["status"], json!("ok"), "{reply}");
+    let point: Vec<f64> = reply["point"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+    assert!(point.iter().zip([60.0, 0.0, 20.0]).all(|(a, b)| (a - b).abs() < 1e-6), "Long's edge middle: {point:?}");
+}
+
 /// A placed symbol's delete is refused, naming its placements, unless they go too: then both go in
 /// one undo step.
 #[test]
@@ -372,6 +388,9 @@ fn hostile_placements_are_refused() {
         (at(json!({"anchor": {"sheet": "Sheet 9"}})), "Sheet 9"),
         (at(json!({"anchor": {"edge": {"view": ids::encode(view), "edge": {"point": [1e9, 0, 0], "path": [part]}}}})), ""),
         (at(json!({"angle": "ninety"})), ""),
+        // Past MAX_REAL radians, reading the drawing back would refuse it: about 5.7e10 degrees.
+        (at(json!({"angle": 1e300})), "its angle is at most 1000000000 radians each way"),
+        (at(json!({"angle": 6e10})), "its angle is at most 1000000000 radians each way"),
         (at(json!({"leader": true})), "leader"),
     ];
     for (p, why) in cases {
@@ -379,13 +398,14 @@ fn hostile_placements_are_refused() {
         assert!(got.contains(why), "{p}: {got}");
         assert_eq!(saved(&s), before, "{p}: a refusal changes nothing");
     }
-    // Every finite angle is a turn, and the bounds themselves are kept.
-    for p in [at(json!({"scale": 0.01})), at(json!({"scale": 100})), at(json!({"angle": 1e300})), at(json!({"angle": -720}))] {
+    // Every angle a drawing reads back is a turn, and the bounds themselves are kept.
+    for p in [at(json!({"scale": 0.01})), at(json!({"scale": 100})), at(json!({"angle": 5e10})), at(json!({"angle": -720}))] {
         place_one(&mut s, p);
     }
     let id = place_one(&mut s, at(json!({})))["placement"].clone();
     let edited = |set: Value| json!({"placement": id, "set": set});
     assert!(refused(&mut s, PLACED_EDIT, edited(json!({"scale": 100.01}))).contains("its scale is 0.01 to 100"));
+    assert!(refused(&mut s, PLACED_EDIT, edited(json!({"angle": 6e10}))).contains("its angle is at most"));
     assert!(refused(&mut s, PLACED_EDIT, edited(json!({"answers": {"weld": "x"}}))).contains("doesn't prompt for"));
     assert!(refused(&mut s, PLACED_EDIT, edited(json!({"symbol": mark}))).contains("symbol"), "what it places stays");
     assert!(refused(&mut s, PLACED_EDIT, json!({"placement": ids::encode(1), "set": {}})).contains("the drawing has no placed symbol"));

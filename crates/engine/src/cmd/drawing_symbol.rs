@@ -246,7 +246,10 @@ fn placed_inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.drawing(PLACED_INSPECT)?;
     let placed = d.placed_symbols.by_id(id).ok_or_else(|| placement_missing(PLACED_INSPECT, id))?;
     let symbol = d.symbols.by_id(placed.symbol).ok_or_else(|| missing(PLACED_INSPECT, placed.symbol))?;
-    let read = s.doc.resolve_placements(&s.model, d, &[id]).map_err(|e| bad(PLACED_INSPECT, e.to_string()))?;
+    // On the model its view shows (another configuration row's, if it shows one), as Check Drawing reads it.
+    let read = crate::drawing_view::ViewSessions::new(s)
+        .read_on(d, &[(id, placed.anchor.view().unwrap_or_default())], solidcraft_doc::Document::resolve_placements)
+        .map_err(|e| bad(PLACED_INSPECT, e.to_string()))?;
     let end = read.into_iter().next().ok_or_else(|| bad(PLACED_INSPECT, format!("placed symbol {} wasn't read", ids::encode(id))))?;
     let (status, why, candidates) = status_words(end.status);
     let at = d.sheet_of(&placed.anchor).ok_or_else(|| bad(PLACED_INSPECT, format!("placed symbol {} is on no sheet", ids::encode(id))))?;

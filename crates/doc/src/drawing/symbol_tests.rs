@@ -369,13 +369,14 @@ fn the_placements_rules_are_kept_on_reading() {
     assert_eq!(set("answers", json!({"rev": "x".repeat(4096)})), "read");
     let line = rule("its answer to `rev`: a label is one line of at most 4096 bytes");
     assert_eq!([set("answers", json!({"rev": "a\nb"})), set("answers", json!({"rev": "x".repeat(4097)}))], [line.clone(), line]);
-    // A NaN or infinite angle can't be written as JSON: the record refuses it before it is saved.
-    for angle in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+    // An angle the file's own number check refuses on reading (NaN and infinity can't even be
+    // written as JSON) is refused before it is saved, so a saved drawing always opens again.
+    for angle in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, MAX_REAL * (1.0 + f64::EPSILON), -1e300] {
         let mut bad = d.clone();
         let at = bad.placed_symbols.index_of(on_view).unwrap();
         Arc::make_mut(bad.placed_symbols.get_mut(at).unwrap()).angle = angle;
         let why = bad.validate().unwrap_err().to_string();
-        assert!(why.ends_with("its angle is a number"), "{angle}: {why}");
+        assert!(why.ends_with(&format!("its angle is at most {MAX_REAL} radians each way")), "{angle}: {why}");
     }
     // Its id is the drawing's, and fields it doesn't know aren't read.
     let edge_id = ids::encode(on_edge);

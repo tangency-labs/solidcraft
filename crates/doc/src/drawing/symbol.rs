@@ -20,9 +20,10 @@
 //! its definition by id and keeps none of it, so a changed definition changes every placement.
 //! Where its anchor stands with the model is worked out, never saved, as a note's is
 //! ([`Document::resolve_placements`]). The rules: its symbol is one of the drawing's; its anchor's as a note's
-//! ([`Drawing::check_anchor`]); `at` on paper; `scale` in [`SCALE`]; `angle` finite; each answer
-//! names one of the definition's prompts and is one line of text ([`check_label`]); at most
-//! [`MAX_PLACEMENTS`], listed by id.
+//! ([`Drawing::check_anchor`]); `at` on paper; `scale` in [`SCALE`]; `angle` at most `MAX_REAL`
+//! radians each way, as the file's own number check reads it; each answer names one of the
+//! definition's prompts and is one line of text ([`check_label`]); at most [`MAX_PLACEMENTS`],
+//! listed by id.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::RangeInclusive;
@@ -40,6 +41,7 @@ use super::by_id::Record;
 use super::dimension::Lookup;
 use super::note::{Anchor, CAP_MM, End};
 use super::{Drawing, check_name, require};
+use crate::format::MAX_REAL;
 use crate::{DocError, Document, Model, Result, ids};
 
 /// The most symbols a drawing may have.
@@ -180,7 +182,8 @@ impl Drawing {
         let [x, y] = p.at;
         require(is_paper_coordinate(x) && is_paper_coordinate(y), || format!("its place is at most {MAX_SIDE_MM} mm on paper"))?;
         require(SCALE.contains(&p.scale), || format!("its scale is {} to {}", SCALE.start(), SCALE.end()))?;
-        require(p.angle.is_finite(), || "its angle is a number".into())?;
+        // Past `MAX_REAL` the file's own number check refuses the drawing on reading, so it is refused here.
+        require(p.angle.is_finite() && p.angle.abs() <= MAX_REAL, || format!("its angle is at most {MAX_REAL} radians each way"))?;
         let prompts = symbol.prompts();
         for (key, answer) in &p.answers {
             require(prompts.contains(key.as_str()), || format!("it answers `{key}`, which symbol `{}` doesn't prompt for", symbol.name))?;
