@@ -223,6 +223,37 @@ fn damaged(d: &Drawing, change: impl Fn(&mut Value)) -> String {
 }
 
 /// A table saves as it is, in any order read back by id, and what a table doesn't set stays out.
+/// A table saved before parts lists had a FINISH column keeps its columns, by name and in its own
+/// order, whatever a new list starts with: the saved columns are the table's, `default_table` only
+/// gives a new one its start. Its rows still fill every column it has, and the finish a part has
+/// shows in a column only a table that has one.
+#[test]
+fn a_parts_list_saved_before_the_finish_column_keeps_its_columns() {
+    let (d, first) = tabled();
+    let mut v: Value = serde_json::from_str(&d.to_json().unwrap()).unwrap();
+    let old = ["item", "quantity", "name", "description", "material", "mass", "ballooned"];
+    for table in v["tables"].as_array_mut().unwrap() {
+        if let Some(columns) = table["table"]["columns"].as_array_mut()
+            && columns.iter().any(|c| c["name"] == "material")
+        {
+            columns.retain(|c| c["name"] != "finish");
+        }
+    }
+    let back = Drawing::from_value(v).unwrap();
+    let names = |d: &Drawing| d.tables.by_id(first).unwrap().table.columns.iter().map(|c| c.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&back), old, "the same columns in the same order, with no finish");
+    assert_eq!(names(&Drawing::from_json(&back.to_json().unwrap()).unwrap()), old, "and again after a save");
+    let unprinted: Vec<_> = back.tables.by_id(first).unwrap().table.columns.iter().filter(|c| !c.printed).map(|c| c.name.as_str()).collect();
+    assert_eq!(unprinted, ["ballooned"], "the unprinted column is still the one named ballooned");
+    // Its rows fill its columns by name: a row that has a finish and a list without the column lay out.
+    let mut row = bom_row(7, 1, 1);
+    row.finish = "Powder coat, RAL 9005, matt".into();
+    let Kind::PartsList(list) = &back.tables.by_id(first).unwrap().kind else { panic!("a parts list") };
+    let rows = list.rows(&bom_of(vec![row]), "mm");
+    let table = &back.tables.by_id(first).unwrap().table;
+    table.layout(&rows, solidcore_record::Vec2::new(400.0, 280.0), &|t, cap| t.len() as f64 * cap / 2.0).unwrap();
+}
+
 #[test]
 fn tables_save_and_read_back_by_id() {
     let (d, first) = tabled();

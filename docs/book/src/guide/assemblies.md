@@ -683,7 +683,7 @@ one (all it holds) and an inseparable one (all but its purchased parts). A refer
 nothing. Every part is measured for it, once per definition, so it takes longer. It is `null` when nothing
 in the part has a body, a body can't be measured, or the definitions sharing the row's part number weigh
 differently (by more than the measurement can tell apart: one part modelled two ways weighs the same). `path` writes them to a `.csv` file
-(the columns item, part_number, description, revision, count, definition, material and quantity, every field
+(the columns item, part_number, description, revision, count, definition, material, quantity and finish (a column added later goes last, so the others keep their places), every field
 quoted, and a field that a spreadsheet would run as a formula written with a `'` before it so the
 spreadsheet shows it as text; children follow their row) or a `.json` file. A formula field is one that
 starts with `=`, `+`, `-` or `@`, their full-width forms, a tab or a line break, after any spaces and
