@@ -558,19 +558,21 @@ Only an importer may say `open`.
    "permissions": {"input_folder": true}}}
 ```
 
-Importer options dialogs remember the last values used to start an import, separately for each
-plugin id and entry name. These values live in the app's user preferences, outside every design.
+With **Preferences > Plugins > Remember importer options** enabled, importer options dialogs
+remember the last values used to start an import, separately for each plugin id and entry name.
+These values live in the app's user preferences, outside every design.
 The next dialog keeps remembered fields that still satisfy the current input schema; missing or
 invalid fields start from the schema defaults. Changing a field or cancelling the dialog or file
 picker does not change the stored values. **Restore defaults** resets the whole form; the stored
 values change only when the next import starts.
 
-**File > Open** and drag-and-drop use the same options dialog after choosing a file for an importer.
-The dialog's Run button opens that file without asking for it again. Native readers retain priority
-for formats SolidCraft already supports. **Preferences > Plugins > Remember importer options**
-(`plugin_remember_importer_options`, on by default) controls reuse and recording. Turn it off to
-start each importer dialog from schema defaults, preserving the previous behaviour. The Plugins
-page's defaults turn remembering back on without clearing the last-run values.
+**Remember importer options** (`plugin_remember_importer_options`) is off by default. With it off,
+menu dialogs start from schema defaults, and **File > Open** and drag-and-drop start the import
+directly, preserving the previous interaction. With it on, File > Open and drag-and-drop show the
+same options dialog after choosing a file for an importer. The dialog's Run button opens that file
+without asking for it again. If the form cannot render the importer's schema, the file still opens
+directly with schema defaults. Native readers retain priority for formats SolidCraft already supports.
+The Plugins page's defaults turn remembering off without clearing the last-run values.
 Removing a plugin forgets all of its entries' remembered values, including when Preferences is cancelled.
 
 Scripts, CLI and MCP opens never read or update this memory and never open an options dialog.

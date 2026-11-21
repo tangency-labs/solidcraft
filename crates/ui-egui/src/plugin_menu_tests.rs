@@ -1081,6 +1081,7 @@ fn importer_entry(name: &str) -> solidcraft_engine::plugin::Entry {
 #[test]
 fn importer_options_are_remembered_per_entry_on_run_and_survive_preferences_reload() {
     let mut h = crate::scenario::Harness::new();
+    h.app.preferences.plugin_remember_importer_options = true;
     h.app.plugin_menu.listed =
         vec![listed("gears", vec![importer_entry("open"), importer_entry("other")]), listed("other", vec![importer_entry("open")])];
     h.app.plugin_menu.loaded = true;
@@ -1121,6 +1122,7 @@ fn importer_options_are_remembered_per_entry_on_run_and_survive_preferences_relo
 #[test]
 fn stale_importer_values_fall_back_individually_to_the_current_schema_defaults() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.preferences.plugin_remember_importer_options = true;
     app.plugin_menu.listed = vec![listed("gears", vec![importer_entry("open")])];
     remember_options(
         &mut app,
@@ -1155,6 +1157,7 @@ fn remembered_importer_choices_validate_against_the_remembered_controller() {
 #[test]
 fn restore_importer_defaults_changes_the_form_and_only_a_run_changes_memory() {
     let mut h = crate::scenario::Harness::new();
+    h.app.preferences.plugin_remember_importer_options = true;
     h.app.plugin_menu.loaded = true;
     h.app.plugin_menu.listed = vec![listed("gears", vec![importer_entry("open")])];
     remember_options(&mut h.app, "gears", "open", &json!({"teeth":42,"module":3,"hub":true,"pressure_angle":"25","name":"Gear","bore":4}));
@@ -1173,8 +1176,11 @@ fn restore_importer_defaults_changes_the_form_and_only_a_run_changes_memory() {
 }
 
 #[test]
-fn remember_importer_options_preference_off_restores_schema_defaults_and_page_reset_enables_it() {
+fn remember_importer_options_is_opt_in_and_page_reset_disables_it() {
     let mut h = crate::scenario::Harness::new();
+    assert!(!h.app.preferences.plugin_remember_importer_options, "new users keep schema defaults");
+    assert!(!crate::prefs::lenient(&json!({})).plugin_remember_importer_options, "older preferences keep schema defaults");
+    crate::prefs::control(&mut h.app, &json!({"plugin_remember_importer_options":true})).unwrap();
     h.app.plugin_menu.listed = vec![listed("gears", vec![importer_entry("open")])];
     remember_options(&mut h.app, "gears", "open", &json!({"teeth":42}));
     crate::prefs::control(&mut h.app, &json!({"plugin_remember_importer_options":false})).unwrap();
@@ -1185,8 +1191,9 @@ fn remember_importer_options_preference_off_restores_schema_defaults_and_page_re
     let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     restored.load_prefs(&h.app.prefs());
     assert!(!restored.preferences.plugin_remember_importer_options);
+    crate::prefs::control(&mut h.app, &json!({"plugin_remember_importer_options":true})).unwrap();
     crate::prefs::control(&mut h.app, &json!({"open":"Plugins","button":"defaults"})).unwrap();
-    assert!(h.app.preferences.plugin_remember_importer_options);
+    assert!(!h.app.preferences.plugin_remember_importer_options, "page defaults restore the opt-in behaviour");
     assert_eq!(h.app.preferences.plugin_importer_options["gears"]["open"]["teeth"], 42, "page reset keeps last-run bookkeeping");
 }
 

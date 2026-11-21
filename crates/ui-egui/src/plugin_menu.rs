@@ -901,13 +901,20 @@ pub(crate) fn forget_options(app: &mut SolveApp, plugin: &str) {
     app.plugin_menu.dialogs.retain(|dialog| dialog.plugin.id != plugin);
 }
 
-/// An interactive file open uses the engine's importer resolution, retaining native-reader priority.
-/// Programmatic opens never call this function.
+/// Opted-in interactive opens use the options form when it supports the importer's schema.
+/// Other interactive opens retain the direct route; programmatic opens never call this function.
 pub(crate) fn open_importer_file(app: &mut SolveApp, path: &str) -> bool {
-    if cfg!(target_arch = "wasm32") || !solidcraft_engine::cmd::runs_plugin_importer(&app.session, "doc.open", &json!({"path": path})) {
+    if cfg!(target_arch = "wasm32")
+        || !app.preferences.plugin_remember_importer_options
+        || !solidcraft_engine::cmd::runs_plugin_importer(&app.session, "doc.open", &json!({"path": path}))
+    {
         return false;
     }
     let Ok(Some(importer)) = solidcraft_engine::plugin::importer_for(&app.session, path, None) else { return false };
+    // Unsupported forms cannot submit options. Let the ordinary open run the importer directly.
+    if form(&importer.input_schema).is_none() {
+        return false;
+    }
     let dir = app.session.plugin_state.plugins_dir();
     let Some(plugin) = list(app, dir.as_deref()).into_iter().find(|p| p.id == importer.plugin_id) else { return false };
     let Some(entry) = plugin.entries.iter().position(|e| e.name == importer.entry) else { return false };

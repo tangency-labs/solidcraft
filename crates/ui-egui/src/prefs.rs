@@ -2024,8 +2024,9 @@ preference_settings! {
     /// Remember a moved plugin command window's position for the current design, until the
     /// application closes (#18684). Off keeps the previously centred reopen behaviour.
     plugin_remember_dialog_position: bool = false, PAGE_PLUGINS;
-    /// Importer dialogs reuse the last options run by this user. Off starts from schema defaults.
-    plugin_remember_importer_options: bool = true, PAGE_PLUGINS => check_id_help("prefs.plugin_remember_importer_options", "prefs.plugin_remember_importer_options_help");
+    /// Opt in to reusing last-run options and asking for them on File > Open and drop.
+    /// Off starts menu dialogs from schema defaults and opens chosen files directly.
+    plugin_remember_importer_options: bool = false, PAGE_PLUGINS => check_id_help("prefs.plugin_remember_importer_options", "prefs.plugin_remember_importer_options_help");
     /// Last-run importer options, by plugin id and entry name. Bookkeeping, never design data.
     plugin_importer_options: std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>> = std::collections::BTreeMap::new();
     /// Approved install permissions survive page resets and Cancel, like installed files.
