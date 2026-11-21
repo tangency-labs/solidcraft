@@ -42,8 +42,9 @@
 use super::original_trim::OriginalSurfaceDeletion;
 use super::{invalid, FilletBody, FilletObject, FilletSession, SessionObjects};
 use crate::blend::fillet_cliff_overflow::Refusal;
+use crate::blend::fillet_corner::p1::keeping_cause;
 use crate::blend::fillet_executive::p3::{
-    ErrorInfo, FilletExecutive, FilletFinishAccess, StitchAttempt, StitchSettings,
+    caught, ErrorInfo, FilletExecutive, FilletFinishAccess, StitchAttempt, StitchSettings,
 };
 use crate::blend::fillet_geom::p1::FilletErrorType;
 use crate::error::{EntityRef, Result, SolidError};
@@ -1079,11 +1080,15 @@ impl FilletSession<'_> {
                 // its own status
                 session.note_unnoted(&format!("Fillet Surface Computation Failure: {error}"));
             }
-            if ignore(made)?.is_none() {
+            // the step's error is kept as the failure's cause (#13790)
+            if let Err(stage) = caught(made)? {
                 if let Some(output) = error_out.as_deref_mut() {
                     output.assign(&session.executive.error);
                 }
-                return Err(failure("the fillet body is not built"));
+                return Err(keeping_cause(
+                    failure("the fillet body is not built"),
+                    stage,
+                ));
             }
             let faces = session
                 .objects
@@ -1646,6 +1651,71 @@ mod ball_fit_tests {
         assert_eq!(e.operation(), OP);
         assert_eq!(e.entity(), None);
         assert_eq!(refusable(&e), Some((OP, 1001, None)));
+    }
+
+    /// A fillet body whose building failed at a stage is not built, as before (the same
+    /// failure, status and error info), keeping the executive's failure as its cause, which
+    /// keeps the stage's error (#13790): the closed corner of a disc's rim round past its
+    /// wall, without the trace reaching its rails (WR-610), whose vertex geometry fails.
+    #[test]
+    fn a_fillet_body_not_built_keeps_the_executives_failure() {
+        let mut k = Kernel::default();
+        k.fixes.fillet_trace_reaches_rails = false;
+        let mut body =
+            crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 13.0, 2.0)
+                .unwrap();
+        let rim = p1::edges(&body, None)
+            .unwrap()
+            .into_iter()
+            .find(|&e| {
+                let interval = edge::interval(&body, e).unwrap();
+                let curve = edge::curve(&body, e).unwrap().unwrap();
+                (0..=8).all(|i| {
+                    let p = curve
+                        .evaluate_point(&k, interval.evaluate(f64::from(i) / 8.0))
+                        .unwrap();
+                    (p.z - 2.0).abs() < 1e-9
+                })
+            })
+            .unwrap();
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &[rim], 2.5, 1, 1, 1.0)
+            .unwrap();
+        let e = session.do_fillet(&mut k).unwrap_err();
+        let info = session.error_info().clone();
+        // as before: the session's failure, its status and the corner's note
+        let bare = failure("the fillet body is not built");
+        assert_eq!(e.operation(), OP, "{e:?}");
+        assert_eq!(e.blend_failure(), bare.blend_failure(), "{e:?}");
+        assert_eq!(e.sm_status(), Some(1001), "{e:?}");
+        assert_eq!(refusable(&e), refusable(&bare), "{e:?}");
+        assert_eq!(info.code, 3);
+        assert_eq!(
+            info.comment,
+            "Fillet Corner Error: Unable to Compute Geometry"
+        );
+        // now keeping the executive's failure, which keeps the corner's error
+        let executive = e.cause().expect("the executive's failure is kept");
+        assert_eq!(
+            executive.operation(),
+            "blend::fillet_executive::p3",
+            "{e:?}"
+        );
+        assert_eq!(
+            executive.blend_failure(),
+            Some(&BlendFailure::Failed(
+                "a step of the fillet executive failed"
+            ))
+        );
+        assert_eq!(executive.sm_status(), Some(1001));
+        let stage = executive.cause().expect("the stage's error is kept");
+        assert!(!stage.is_unported_or_cancelled(), "{stage:?}");
+        assert_eq!(
+            e.to_string(),
+            format!("{bare}; caused by {executive}"),
+            "{e:?}"
+        );
     }
 
     /// #13790: the executive's decision on a bare `Upstream` (the WR-696 refusal with a fit

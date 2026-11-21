@@ -369,7 +369,10 @@ Windows PowerShell 5.1 drops the double quotes inside an argument it passes to a
 A command that fails stops the script. A feature can also fail later, when a parameter change
 rebuilds it; `run` then exits with status 1, lists the failing features and writes none of
 its `--out` and `--save` files, because the bodies lack what those features should have made.
-`--allow-errors` writes them anyway.
+`--allow-errors` writes them anyway. `eval` prints its report in full, with each failing
+feature's `error` in `timeline`, and then exits with status 1 for the same reason and lists the
+failing features on stderr; `eval --allow-errors` exits with status 0, for a design you are
+inspecting because it fails.
 
 A mesh export that cannot mesh any selected body also exits with status 1, naming that
 body and face. `--allow-missing` explicitly permits `--out` to write the remaining bodies;

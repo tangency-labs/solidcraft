@@ -4856,11 +4856,11 @@ mod tests {
             .unwrap_err();
         // the NULL corner (`CornerLookup::corner`, p1): a stage failure (#15034)
         assert_eq!(
-            (e.operation(), e.blend_failure()),
             (
-                "blend::fillet_geom::p1::CornerLookup::corner",
-                Some(&BlendFailure::StageFailed)
+                e.operation(),
+                e.kind() == crate::error::ErrorKind::StageFailed && e.is_defect()
             ),
+            ("blend::fillet_geom::p1::CornerLookup::corner", true),
             "{e:?}"
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
@@ -4870,11 +4870,11 @@ mod tests {
             .calc_set_back_vert(&k, v, CornerLookup::table(&[]), &mut solvers, &target)
             .unwrap_err();
         assert_eq!(
-            (e.operation(), e.blend_failure()),
             (
-                "blend::fillet_geom::p1::CornerLookup::corner",
-                Some(&BlendFailure::StageFailed)
+                e.operation(),
+                e.kind() == crate::error::ErrorKind::StageFailed && e.is_defect()
             ),
+            ("blend::fillet_geom::p1::CornerLookup::corner", true),
             "{e:?}"
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
