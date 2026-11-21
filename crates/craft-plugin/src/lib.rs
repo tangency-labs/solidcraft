@@ -674,6 +674,26 @@ impl LossReport {
 /// Top-level directory properties that request read access for the entry's current run.
 /// Other placements and access modes are refused rather than silently ignored.
 pub fn directory_read_fields(schema: &Value) -> Result<BTreeSet<String>> {
+    // Keep discovery and placement validation in step across schema drafts.
+    const SCHEMA_MAPS: &[&str] = &["$defs", "definitions", "dependencies", "dependentSchemas", "patternProperties", "properties"];
+    const SCHEMAS: &[&str] = &[
+        "additionalItems",
+        "additionalProperties",
+        "allOf",
+        "anyOf",
+        "contains",
+        "contentSchema",
+        "else",
+        "if",
+        "items",
+        "not",
+        "oneOf",
+        "prefixItems",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+    ];
     // Existing schemas with no annotation keep their previous loading limits.
     let mut pending = vec![schema];
     let mut annotated = false;
@@ -684,12 +704,12 @@ pub fn directory_read_fields(schema: &Value) -> Result<BTreeSet<String>> {
         }
         match node {
             Value::Object(object) => {
-                for key in ["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"] {
+                for &key in SCHEMA_MAPS {
                     if let Some(children) = object.get(key).and_then(Value::as_object) {
                         pending.extend(children.values());
                     }
                 }
-                for key in ["items", "additionalProperties", "not", "if", "then", "else", "oneOf", "anyOf", "allOf", "prefixItems"] {
+                for &key in SCHEMAS {
                     pending.extend(object.get(key));
                 }
             }
@@ -713,27 +733,20 @@ pub fn directory_read_fields(schema: &Value) -> Result<BTreeSet<String>> {
         {
             return Err(invalid(field, "x-solidcraft-grant must be read on a top-level string property with format directory"));
         }
-        for key in ["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"] {
+        for &key in SCHEMA_MAPS {
             if let Some(properties) = schema.get(key).and_then(Value::as_object) {
                 for (name, property) in properties {
                     visit(property, &format!("{field}.{key}.{name}"), depth == 0 && key == "properties", depth + 1, steps)?;
                 }
             }
         }
-        for key in ["items", "additionalProperties", "not", "if", "then", "else"] {
+        for &key in SCHEMAS {
             if let Some(child) = schema.get(key) {
                 if let Some(children) = child.as_array() {
                     for child in children {
                         visit(child, &format!("{field}.{key}"), false, depth + 1, steps)?;
                     }
                 } else {
-                    visit(child, &format!("{field}.{key}"), false, depth + 1, steps)?;
-                }
-            }
-        }
-        for key in ["oneOf", "anyOf", "allOf", "prefixItems"] {
-            if let Some(children) = schema.get(key).and_then(Value::as_array) {
-                for child in children {
                     visit(child, &format!("{field}.{key}"), false, depth + 1, steps)?;
                 }
             }
