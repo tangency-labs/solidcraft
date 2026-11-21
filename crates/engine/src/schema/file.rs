@@ -172,15 +172,15 @@ pub struct ExportParams {
     /// The file to write.
     #[serde(default)]
     pub path: Option<String>,
-    /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, urdf, sdf or json, or a file name
-    /// whose extension names it. Default: from the path's extension.
+    /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, usd, 3dm, urdf, sdf or json, or a
+    /// file name whose extension names it. Default: from the path's extension.
     #[serde(default)]
     pub format: Option<String>,
     /// The bodies to export, by name. Default: every body. Design JSON and URDF export the
     /// complete design, so they refuse a list.
     #[serde(default)]
     pub bodies: Option<StringList>,
-    /// How closely the mesh follows curved faces (STL, OBJ, 3MF and GLB). Default: standard. Not read
+    /// How closely the mesh follows curved faces (STL, OBJ, 3MF, GLB, OpenUSD and Rhino). Default: standard. Not read
     /// for URDF.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
@@ -197,13 +197,22 @@ pub struct ExportParams {
     /// URDF only: each joint's velocity limit, a positive number. Default: 10.
     #[serde(default)]
     pub velocity: Option<f64>,
-    /// URDF only: also write each picture shown on the model as a textured visual. Default: false.
+    /// URDF and OpenUSD only: also write each picture shown on the model as a textured visual
+    /// (OpenUSD: in a `.usdz` package). Default: false.
     #[serde(default)]
     pub images: Option<bool>,
     /// STL and 3MF only: true writes each body with a print face laid on it, as
     /// `file.export_stl` has it; refused for the other formats. Default: false. Not read for URDF.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// OpenUSD only: also write the joints, the grounded placements and each component's mass as
+    /// OpenUSD physics, for a simulator. Default: false.
+    #[serde(default)]
+    pub physics: Option<bool>,
+    /// OpenUSD only: the saved render setup whose image textures a `.usdz` package holds.
+    /// Default: none, each body written with its look.
+    #[serde(default)]
+    pub render_setup: Option<String>,
     /// SDF only: the model's name. Default: the folder's name.
     #[serde(default)]
     pub name: Option<String>,
@@ -285,6 +294,8 @@ impl<'de> Deserialize<'de> for ExportParams {
             velocity: None,
             images: None,
             lay_on_print_faces: None,
+            physics: None,
+            render_setup: None,
             name: None,
             is_static: None,
             model_uris: None,
@@ -302,6 +313,23 @@ impl<'de> Deserialize<'de> for ExportParams {
             return Ok(out);
         };
         out.bodies = names::<D::Error>(&m)?;
+        // Read before URDF and SDF read their own keys, as the handler reads them.
+        out.physics = match m.get("physics") {
+            None | Some(Value::Null) => None,
+            Some(Value::Bool(false)) => Some(false),
+            Some(Value::Bool(true)) if format == Format::Usd => Some(true),
+            Some(Value::Bool(true)) => {
+                return Err(refuse("`physics` is for OpenUSD: URDF and SDF always write their joints and masses, and the other formats hold none"));
+            }
+            Some(_) => return Err(refuse("`physics` must be true or false")),
+        };
+        out.render_setup = match m.get("render_setup") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(n)) if format == Format::Usd && !n.trim().is_empty() => Some(n.clone()),
+            Some(Value::String(_)) if format == Format::Usd => return Err(refuse("`render_setup` must name a render setup")),
+            Some(Value::String(_)) => return Err(refuse("`render_setup` is for OpenUSD: other formats written here hold no image textures")),
+            Some(_) => return Err(refuse("`render_setup` must be the name of a render setup")),
+        };
         if format == Format::Urdf {
             // URDF reads its own keys; `quality` and `objects` are not read.
             out.mesh_prefix = text::<D::Error>(&m, "mesh_prefix")?;
@@ -341,6 +369,12 @@ impl<'de> Deserialize<'de> for ExportParams {
                 _ => return Err(refuse(format!("`objects` must be body or component, not {v}"))),
             },
         };
+        if format == Format::Usd {
+            out.images = match m.get("images") {
+                None | Some(Value::Null) => None,
+                Some(v) => Some(v.as_bool().ok_or_else(|| refuse::<D::Error>("`images` must be true or false"))?),
+            };
+        }
         out.lay_on_print_faces = match m.get("lay_on_print_faces") {
             None | Some(Value::Null) => None,
             Some(Value::Bool(false)) => Some(false),
@@ -360,7 +394,8 @@ pub struct ExportResult {
     /// Its size in bytes.
     pub bytes: usize,
     /// The format written: Step, StlBinary, ThreeMf or Obj (and for `file.export` and
-    /// `file.save_mesh` also StlAscii or ThreeMfTagged, and for `file.export` also Design and Glb).
+    /// `file.save_mesh` also StlAscii or ThreeMfTagged, and for `file.export` also Design, Glb, Usd
+    /// and Rhino).
     pub format: String,
     /// OBJ only: every file written, the material library first and the mesh file last.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
