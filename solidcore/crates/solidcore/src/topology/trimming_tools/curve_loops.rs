@@ -44,7 +44,8 @@
 //!   A failing curve evaluation, whose status upstream ignores, is returned.
 
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{Result, SolidError, SM_ERR_INVALID_INPUT};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -58,7 +59,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
 
-use super::{invalid_value, OP};
+use super::{failure, failure_with_status, OP};
 
 /// The unset index of an [`IsoXSectSegment`] (upstream `9999`).
 pub const NO_INDEX: usize = 9999;
@@ -270,7 +271,10 @@ impl CurveLoops {
     /// `SM_ERR_INVALID_INPUT` for a loop index out of range.
     pub fn loop_start_index(&self, loop_index: usize) -> Result<usize> {
         if loop_index >= self.loop_counts.len() {
-            return Err(invalid_value("the loop index is past the last loop"));
+            return Err(failure(TopologyFailure::LoopIndexOutOfRange {
+                index: loop_index,
+                loops: self.loop_counts.len(),
+            }));
         }
         Ok(self
             .loop_counts
@@ -309,10 +313,9 @@ impl CurveLoops {
     pub fn loop_start_end(&self, curve_index: usize) -> Result<(usize, usize)> {
         match self.loop_start_end_raw(curve_index) {
             (true, s, e) => Ok((s, e)),
-            _ => Err(SolidError::topology_failed(
-                OP,
-                "the curve index is past every loop",
-            )),
+            _ => Err(failure(TopologyFailure::CurveIndexOutOfRange {
+                index: curve_index,
+            })),
         }
     }
 
@@ -331,10 +334,7 @@ impl CurveLoops {
         param: f64,
     ) -> Result<usize> {
         let Some(idx) = self.curves.iter().position(|&c| c == key) else {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the curve is not in the loops",
-            ));
+            return Err(failure(TopologyFailure::CurveNotInLoops));
         };
         // status ignored upstream
         let (_, start, end) = self.loop_start_end_raw(idx);
@@ -364,7 +364,7 @@ impl CurveLoops {
         index2: usize,
     ) -> Result<(usize, usize)> {
         if self.loop_counts.is_empty() {
-            return Err(SolidError::topology_failed(OP, "there are no loops"));
+            return Err(failure(TopologyFailure::NoLoops));
         }
 
         let mut loop_number = 0usize;
@@ -382,10 +382,7 @@ impl CurveLoops {
         let end = next_loop_start.wrapping_sub(1);
 
         if index2 < start || index2 > end {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the two curves are not in the same loop",
-            ));
+            return Err(failure(TopologyFailure::CurvesNotInOneLoop));
         }
 
         if count > 2 {
@@ -403,10 +400,7 @@ impl CurveLoops {
         } else if index1 == index2.wrapping_add(1) {
             Ok((index2, index1))
         } else {
-            Err(SolidError::topology_failed(
-                OP,
-                "the two curves are not adjacent in their loop",
-            ))
+            Err(failure(TopologyFailure::CurvesNotAdjacent))
         }
     }
 
@@ -536,9 +530,10 @@ impl CurveLoops {
     /// for counts past `other`'s curves.
     pub fn append_loop(&mut self, other: &Self, other_loop: usize) -> Result<()> {
         if other_loop >= other.num_loops() {
-            return Err(invalid_value(
-                "the loop index is past the other loops' last loop",
-            ));
+            return Err(failure(TopologyFailure::LoopIndexOutOfRange {
+                index: other_loop,
+                loops: other.num_loops(),
+            }));
         }
         let start = other.loop_start_index(other_loop)?;
         let count = get(&other.loop_counts, other_loop)?;
@@ -562,7 +557,10 @@ impl CurveLoops {
     /// [`SolidError::InvalidInput`] for orientations shorter than the curves.
     pub fn insert_into_loops(&mut self, new_curve: CurveKey, loop_curve: CurveKey) -> Result<()> {
         let Some(idx) = self.curves.iter().position(|&c| c == loop_curve) else {
-            return Err(invalid_value("the loop curve is not in the loops"));
+            return Err(failure_with_status(
+                TopologyFailure::CurveNotInLoops,
+                SM_ERR_INVALID_INPUT,
+            ));
         };
         let o = get(&self.orients, idx)?;
         self.curves.insert(idx + 1, new_curve);
@@ -605,10 +603,9 @@ impl CurveLoops {
         // Find which loop the iso edge will go into.
         let min_idx = seg.min_index();
         if min_idx >= self.curves.len() {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the segment's first curve index is past the curves",
-            ));
+            return Err(failure(TopologyFailure::CurveIndexOutOfRange {
+                index: min_idx,
+            }));
         }
 
         let mut loop_number = self.loop_counts.len();
@@ -621,20 +618,16 @@ impl CurveLoops {
             total = total.wrapping_add(c);
         }
         if loop_number >= self.loop_counts.len() {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the segment's first curve is in no loop",
-            ));
+            return Err(failure(TopologyFailure::CurveIndexOutOfRange {
+                index: min_idx,
+            }));
         }
 
         // check state - highest index is in the same loop.
         let max_idx = seg.max_index();
         let this_count = get(&self.loop_counts, loop_number)?;
         if max_idx >= total.wrapping_add(this_count) {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the segment's curves are not in one loop",
-            ));
+            return Err(failure(TopologyFailure::CurvesNotInOneLoop));
         }
 
         // Copy any previous loops into the new loop structures.

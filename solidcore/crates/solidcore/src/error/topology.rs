@@ -123,6 +123,22 @@
 //! | [`TopologyFailure::NoClassifiablePoint`] | `SM_ERR` |
 //! | [`TopologyFailure::UvTrimCurvesNotMade`] | `SM_ERR` |
 //! | [`TopologyFailure::FacesNotCopiedOnce`] | `SM_ERR` |
+//! | [`TopologyFailure::NoRegionGiven`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::UnorientedLoopsOnNonG1Surface`] | `SM_ERR` |
+//! | [`TopologyFailure::FaceWithoutLoops`] | `SM_ERR` |
+//! | [`TopologyFailure::LoopsNotClosedOrPlanar`] | `SM_ERR` |
+//! | [`TopologyFailure::CurveEndWithoutTangent`] | `SM_ERR` |
+//! | [`TopologyFailure::LoopWithoutArea`] | `SM_ERR` |
+//! | [`TopologyFailure::NoCurvesGiven`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::LoopsMisoriented`] | `SM_ERR` |
+//! | [`TopologyFailure::LoopCrossesClosure`] | `SM_ERR` |
+//! | [`TopologyFailure::SurfaceDiscontinuous`] | `SM_ERR` |
+//! | [`TopologyFailure::LoopIndexOutOfRange`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::CurveIndexOutOfRange`] | `SM_ERR` |
+//! | [`TopologyFailure::CurveNotInLoops`] | `SM_ERR` |
+//! | [`TopologyFailure::NoLoops`] | `SM_ERR` |
+//! | [`TopologyFailure::CurvesNotInOneLoop`] | `SM_ERR` |
+//! | [`TopologyFailure::CurvesNotAdjacent`] | `SM_ERR` |
 //!
 //! A named cause keeps the status of the phrase it replaced, unless its site overrides it
 //! through `with_status`.
@@ -444,6 +460,58 @@ pub enum TopologyFailure {
     /// A requested face has no copy, or more than one, after the copy: the merge passed
     /// over a face it failed to make, or split one. Class `failed`.
     FacesNotCopiedOnce,
+    /// The caller gave no region. [`ErrorKind::InvalidInput`].
+    NoRegionGiven,
+    /// The surface to trim is not G1 and the caller's loops are not oriented, which the trim
+    /// does not take: it orients loops only on a G1 surface. [`ErrorKind::Unsupported`].
+    UnorientedLoopsOnNonG1Surface,
+    /// The face has no loops. [`ErrorKind::InvalidInput`].
+    FaceWithoutLoops,
+    /// The caller's curves do not close into loops, or one lies off the loops' plane.
+    /// [`ErrorKind::InvalidInput`].
+    LoopsNotClosedOrPlanar {
+        /// Whether every loop closed.
+        closed: bool,
+        /// Whether every curve lies on the loops' plane.
+        on_plane: bool,
+    },
+    /// A curve meeting a loop vertex has a zero tangent at its end there, so the curves round
+    /// the vertex cannot be ordered by direction. [`ErrorKind::Unsupported`].
+    CurveEndWithoutTangent,
+    /// A loop encloses no area (its points give no normal). [`ErrorKind::InvalidInput`].
+    LoopWithoutArea,
+    /// The caller gave no curves. [`ErrorKind::InvalidInput`].
+    NoCurvesGiven,
+    /// The face's first loop is not outer, or a later loop is not inner.
+    /// [`ErrorKind::InvalidInput`].
+    LoopsMisoriented,
+    /// A loop crosses the surface's closure more than once without a singular side.
+    /// [`ErrorKind::InvalidInput`].
+    LoopCrossesClosure,
+    /// The surface is discontinuous in a parameter direction, which the trim does not take.
+    /// [`ErrorKind::Unsupported`].
+    SurfaceDiscontinuous,
+    /// A loop index the caller gave is not below the number of loops.
+    /// [`ErrorKind::InvalidInput`].
+    LoopIndexOutOfRange {
+        /// The index given.
+        index: usize,
+        /// The number of loops.
+        loops: usize,
+    },
+    /// A curve index the caller gave lies in no loop. [`ErrorKind::InvalidInput`].
+    CurveIndexOutOfRange {
+        /// The index given.
+        index: usize,
+    },
+    /// A curve the caller named is not in the loops. [`ErrorKind::InvalidInput`].
+    CurveNotInLoops,
+    /// The curve loops hold no loop. [`ErrorKind::InvalidInput`].
+    NoLoops,
+    /// Two curves the caller named are not in one loop. [`ErrorKind::InvalidInput`].
+    CurvesNotInOneLoop,
+    /// Two curves the caller named are not adjacent in their loop. [`ErrorKind::InvalidInput`].
+    CurvesNotAdjacent,
     /// The caller gave no file contents to read. [`ErrorKind::InvalidInput`].
     NoDataGiven,
     /// The caller gave no curve. [`ErrorKind::InvalidInput`].
@@ -679,7 +747,20 @@ impl TopologyFailure {
             | Self::NoSectorForNewEdgeuse
             | Self::NoClassifiablePoint
             | Self::UvTrimCurvesNotMade
-            | Self::FacesNotCopiedOnce => SM_ERR,
+            | Self::FacesNotCopiedOnce
+            | Self::UnorientedLoopsOnNonG1Surface
+            | Self::FaceWithoutLoops
+            | Self::LoopsNotClosedOrPlanar { .. }
+            | Self::CurveEndWithoutTangent
+            | Self::LoopWithoutArea
+            | Self::LoopsMisoriented
+            | Self::LoopCrossesClosure
+            | Self::SurfaceDiscontinuous
+            | Self::CurveIndexOutOfRange { .. }
+            | Self::CurveNotInLoops
+            | Self::NoLoops
+            | Self::CurvesNotInOneLoop
+            | Self::CurvesNotAdjacent => SM_ERR,
             Self::Missing(_)
             | Self::RadialFaceWithoutSurface
             | Self::RadialRimWithoutEdge
@@ -709,7 +790,10 @@ impl TopologyFailure {
             | Self::ZeroLengthVector
             | Self::NoDataGiven
             | Self::NoCurveGiven
-            | Self::PartNotEmpty => SM_ERR_INVALID_INPUT,
+            | Self::PartNotEmpty
+            | Self::NoRegionGiven
+            | Self::NoCurvesGiven
+            | Self::LoopIndexOutOfRange { .. } => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) | Self::GatheredBothSides => SM_ERR_ASSERT_FAILURE,
             Self::OutOfMemory(_) | Self::TooManyOutputSlots { .. } | Self::AllocationFailed => {
                 SM_ERR_OUT_OF_MEMORY
@@ -782,7 +866,20 @@ impl TopologyFailure {
             | Self::NoRegionsToKeepGiven
             | Self::NoFiniteRegion
             | Self::FaceListedTwice
-            | Self::EdgesNotSharingVertices => ErrorKind::InvalidInput,
+            | Self::EdgesNotSharingVertices
+            | Self::NoRegionGiven
+            | Self::FaceWithoutLoops
+            | Self::LoopsNotClosedOrPlanar { .. }
+            | Self::LoopWithoutArea
+            | Self::NoCurvesGiven
+            | Self::LoopsMisoriented
+            | Self::LoopCrossesClosure
+            | Self::LoopIndexOutOfRange { .. }
+            | Self::CurveIndexOutOfRange { .. }
+            | Self::CurveNotInLoops
+            | Self::NoLoops
+            | Self::CurvesNotInOneLoop
+            | Self::CurvesNotAdjacent => ErrorKind::InvalidInput,
             Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
             | Self::FaceWithoutEdges
@@ -795,7 +892,10 @@ impl TopologyFailure {
             | Self::NoPlaneProjection
             | Self::VertexLoopInSharedFace
             | Self::EdgeCurveNotJoinable { .. }
-            | Self::SurfaceNotTransformable { .. } => ErrorKind::Unsupported,
+            | Self::SurfaceNotTransformable { .. }
+            | Self::UnorientedLoopsOnNonG1Surface
+            | Self::CurveEndWithoutTangent
+            | Self::SurfaceDiscontinuous => ErrorKind::Unsupported,
             Self::CurveNotApproximated
             | Self::NoTrimmedBSpline
             | Self::AllocationFailed
@@ -1057,6 +1157,22 @@ impl core::fmt::Display for TopologyFailure {
             Self::FacesNotCopiedOnce => {
                 f.write_str("a requested face has no copy, or more than one")
             }
+            Self::NoRegionGiven => f.write_str("no region was given"),
+            Self::UnorientedLoopsOnNonG1Surface => f.write_str("the surface is not G1 and the loops are not oriented"),
+            Self::FaceWithoutLoops => f.write_str("the face has no loops"),
+            Self::LoopsNotClosedOrPlanar { closed, on_plane } => write!(f, "the curves do not form closed loops in one plane (closed: {closed}, on the plane: {on_plane})"),
+            Self::CurveEndWithoutTangent => f.write_str("a curve has a zero tangent at its end"),
+            Self::LoopWithoutArea => f.write_str("a loop encloses no area"),
+            Self::NoCurvesGiven => f.write_str("no curves were given"),
+            Self::LoopsMisoriented => f.write_str("the first loop is not outer, or a later loop is not inner"),
+            Self::LoopCrossesClosure => f.write_str("a loop crosses the surface's closure more than once"),
+            Self::SurfaceDiscontinuous => f.write_str("the surface is discontinuous"),
+            Self::LoopIndexOutOfRange { index, loops } => write!(f, "loop index {index} is past the last of {loops} loops"),
+            Self::CurveIndexOutOfRange { index } => write!(f, "curve index {index} lies in no loop"),
+            Self::CurveNotInLoops => f.write_str("the curve is not in the loops"),
+            Self::NoLoops => f.write_str("there are no loops"),
+            Self::CurvesNotInOneLoop => f.write_str("the curves are not in one loop"),
+            Self::CurvesNotAdjacent => f.write_str("the two curves are not adjacent in their loop"),
         }
     }
 }
@@ -1821,6 +1937,57 @@ mod tests {
             (TopologyFailure::NoClassifiablePoint, SM_ERR, K::Failed),
             (TopologyFailure::UvTrimCurvesNotMade, SM_ERR, K::Failed),
             (TopologyFailure::FacesNotCopiedOnce, SM_ERR, K::Failed),
+            (
+                TopologyFailure::NoRegionGiven,
+                SM_ERR_INVALID_INPUT,
+                K::InvalidInput,
+            ),
+            (
+                TopologyFailure::UnorientedLoopsOnNonG1Surface,
+                SM_ERR,
+                K::Unsupported,
+            ),
+            (TopologyFailure::FaceWithoutLoops, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::LoopsNotClosedOrPlanar {
+                    closed: false,
+                    on_plane: true,
+                },
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (
+                TopologyFailure::CurveEndWithoutTangent,
+                SM_ERR,
+                K::Unsupported,
+            ),
+            (TopologyFailure::LoopWithoutArea, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::NoCurvesGiven,
+                SM_ERR_INVALID_INPUT,
+                K::InvalidInput,
+            ),
+            (TopologyFailure::LoopsMisoriented, SM_ERR, K::InvalidInput),
+            (TopologyFailure::LoopCrossesClosure, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::SurfaceDiscontinuous,
+                SM_ERR,
+                K::Unsupported,
+            ),
+            (
+                TopologyFailure::LoopIndexOutOfRange { index: 2, loops: 2 },
+                SM_ERR_INVALID_INPUT,
+                K::InvalidInput,
+            ),
+            (
+                TopologyFailure::CurveIndexOutOfRange { index: 7 },
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (TopologyFailure::CurveNotInLoops, SM_ERR, K::InvalidInput),
+            (TopologyFailure::NoLoops, SM_ERR, K::InvalidInput),
+            (TopologyFailure::CurvesNotInOneLoop, SM_ERR, K::InvalidInput),
+            (TopologyFailure::CurvesNotAdjacent, SM_ERR, K::InvalidInput),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::topology(op, failure);
@@ -1858,11 +2025,6 @@ mod tests {
                 Builder::Method("topology_failed", Some(1)),
                 Builder::Method("topology_missing", Some(1)),
                 Builder::Method("topology_invalid_value", Some(1)),
-                Builder::Shared(
-                    "solidcore/src/topology/trimming_tools",
-                    "invalid_value",
-                    Some(0),
-                ),
             ],
             wrappers: Wrappers::Phrase,
         };
@@ -1891,8 +2053,6 @@ mod tests {
             ("solidcore/src/topology/proto_topology/p1/proto.rs", 16),
             ("solidcore/src/topology/proto_topology/p2.rs", 8),
             ("solidcore/src/topology/proto_topology/p3.rs", 6),
-            ("solidcore/src/topology/trimming_tools.rs", 22),
-            ("solidcore/src/topology/trimming_tools/curve_loops.rs", 12),
         ];
         assert_pinned(
             "topology phrase-cause sites",
