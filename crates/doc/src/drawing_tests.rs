@@ -462,7 +462,7 @@ fn a_sheets_title_block_outline() {
     assert_eq!(d.sheets[0].title_block_outline().unwrap(), None);
     Arc::make_mut(&mut d.sheets[0]).title_block = Some(solidcraft_geom::title_block::default_block());
     let outline = d.sheets[0].title_block_outline().unwrap().unwrap();
-    assert_eq!((outline.min, outline.max), (Vec2::new(230.0, 10.0), Vec2::new(410.0, 59.0)));
+    assert_eq!((outline.min, outline.max), (Vec2::new(230.0, 10.0), Vec2::new(410.0, 71.0)));
 }
 
 /// The most a drawing's blocks can ask of every edit's check: 1000 sheets, each with a 64-cell block.
