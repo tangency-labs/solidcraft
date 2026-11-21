@@ -1426,6 +1426,10 @@ preference_settings! {
     /// cadmpeg's STEP writer and read by SolidCraft's STEP reader. Off (the default) keeps
     /// SolidCraft's STEP reader for all three, as before.
     cadmpeg_import: bool = false, PAGE_GENERAL => check_id("settings.cadmpeg_import");
+    /// Export STEP and IGES with cadmpeg: File › Export of a STEP or IGES file asks `file.export`
+    /// for cadmpeg's writer (`writer: cadmpeg`), which writes the design through cadmpeg's model.
+    /// Off (the default) keeps SolidCraft's own STEP and IGES writers, as before.
+    cadmpeg_export: bool = false, PAGE_GENERAL => check_id("settings.cadmpeg_export");
     /// Explicit assembly Move uses joint handles; off keeps the previous Move panel.
     assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
     /// Degrees per step near the assembly Move ring.

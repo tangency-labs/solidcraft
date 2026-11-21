@@ -100,6 +100,15 @@ fn an_assembly_exports_to_openusd_and_reads_back_in_place() {
     }
     let e = s.execute("file.export", &json!({"path": path, "format": "usda"})).unwrap_err().to_string();
     assert!(e.contains("disagrees with the path's extension"), "{e}");
+    // A format SolidCraft writes itself, named, is written whatever the extension, as it always
+    // was; another format cadmpeg writes is not written under an OpenUSD name.
+    let stl = dir.join("named-stl.usda").to_string_lossy().to_string();
+    assert_eq!(run(&mut s, "file.export", json!({"path": stl, "format": "stl"}))["format"], "StlBinary");
+    assert!(!std::fs::read(&stl).unwrap().starts_with(b"#usda"));
+    let rhino = dir.join("named-rhino.usda").to_string_lossy().to_string();
+    let e = s.execute("file.export", &json!({"path": rhino, "format": "3dm"})).unwrap_err().to_string();
+    assert!(e.contains("disagrees with the path's extension"), "{e}");
+    assert!(!std::path::Path::new(&rhino).exists());
     // Chosen bodies only.
     let path = dir.join("loose.usda").to_string_lossy().to_string();
     run(&mut s, "file.export", json!({"path": path, "bodies": ["Loose"]}));
@@ -238,5 +247,95 @@ fn exact_geometry_stands_a_y_up_stage_up() {
         let e = Session::default().execute(cmd, &p).unwrap_err().to_string();
         assert!(e.contains(why), "{cmd} {p}: {e}");
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The points of every `Mesh` prim of a text layer.
+fn mesh_points(text: &str) -> usize {
+    // A long array goes on over several lines, up to its closing bracket.
+    text.split("point3f[] points = [").skip(1).map(|rest| rest.split(']').next().unwrap_or("").matches('(').count()).sum()
+}
+
+/// `quality` is the export's Mesh quality, as for STL: a finer one writes more points for a
+/// cylinder, whose round faces are what it refines.
+#[test]
+fn mesh_quality_changes_the_points_written() {
+    let dir = temp_dir("quality");
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 10, "body_name": "Disc"}));
+    let mut points = Vec::new();
+    for quality in ["standard", "fine"] {
+        let path = dir.join(format!("{quality}.usda")).to_string_lossy().to_string();
+        let out = run(&mut s, "file.export", json!({"path": path, "quality": quality}));
+        assert_eq!(out["format"], "Usd", "{out}");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("def BrepArray"), "the exact shape goes with the mesh:\n{text}");
+        points.push(mesh_points(&text));
+    }
+    assert!(points[0] > 0 && points[1] > points[0], "fine writes more points than standard: {points:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A mesh body (an inserted STL) has no exact shape: it is written as its mesh alone, and reads
+/// back as the same box.
+#[test]
+fn a_mesh_body_exports_as_a_mesh() {
+    let dir = temp_dir("meshbody");
+    let stl = dir.join("cube.stl").to_string_lossy().to_string();
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30}));
+    run(&mut s, "file.save_mesh", json!({"path": stl}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl}));
+    assert!(s.world_state().unwrap().bodies.iter().all(|b| b.body.is_mesh()));
+    let path = dir.join("cube.usda").to_string_lossy().to_string();
+    let out = run(&mut s, "file.export", json!({"path": path}));
+    assert!(out.get("warnings").is_none_or(|w| w.as_array().is_some_and(Vec::is_empty)), "{out}");
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("def Mesh") && !text.contains("def BrepArray"), "{text}");
+    let mut back = Session::default();
+    run(&mut back, "file.insert_mesh", json!({"path": path}));
+    assert_eq!(shown_boxes(&back), vec![mm([0.0, 0.0, 0.0, 10.0, 20.0, 30.0])]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A placement that mirrors (not a rigid one) is not written as one: every body is written where
+/// the design shows it, with a warning naming the occurrence, and reads back there.
+#[test]
+fn a_mirroring_placement_writes_the_bodies_where_they_are_shown() {
+    let dir = temp_dir("mirror");
+    let mut s = bracket();
+    let o = s.doc_mut().occurrences.iter_mut().find(|o| o.name.starts_with("Bracket")).unwrap();
+    o.transform[0][0] = -1.0;
+    let name = o.name.clone();
+    let shown = shown_boxes(&s);
+    assert_ne!(shown, bracket_boxes(), "the mirror moves the first bracket");
+    let path = dir.join("mirror.usda").to_string_lossy().to_string();
+    let out = run(&mut s, "file.export", json!({"path": path}));
+    assert!(out["warnings"].to_string().contains(&name), "{out}");
+    let mut back = Session::default();
+    run(&mut back, "file.insert_mesh", json!({"path": path}));
+    assert_eq!(shown_boxes(&back), shown);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A component moved and not captured yet is written where the design shows it, in the
+/// assembly as when the bodies are chosen by name.
+#[test]
+fn an_uncaptured_move_is_written_where_it_is_shown() {
+    let dir = temp_dir("moved");
+    let mut s = bracket();
+    let o = s.doc.occurrences.iter().find(|o| o.name.starts_with("Bracket")).unwrap();
+    let mut moved = o.transform;
+    moved[3][0] += 25.0;
+    s.pending_moves.insert(o.id, moved);
+    let shown = shown_boxes(&s);
+    assert_ne!(shown, bracket_boxes(), "the move shows");
+    let path = dir.join("moved.usda").to_string_lossy().to_string();
+    let out = run(&mut s, "file.export", json!({"path": path}));
+    assert!(out.get("warnings").is_none_or(|w| w.as_array().is_some_and(Vec::is_empty)), "{out}");
+    let mut back = Session::default();
+    run(&mut back, "file.insert_mesh", json!({"path": path}));
+    assert_eq!(shown_boxes(&back), shown);
     let _ = std::fs::remove_dir_all(&dir);
 }

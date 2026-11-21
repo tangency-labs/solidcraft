@@ -687,6 +687,10 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("file.export_obj", app.tr_label("Export OBJ…"), &key("file.export_obj"), "export", shown));
     rows.push(row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown));
     rows.push(row("export_usd", &format!("{}…", app.tr("ui.export_usd")), "", "export", shown));
+    // cadmpeg's Rhino writer needs a temporary file, which the browser has not.
+    if !cfg!(target_arch = "wasm32") {
+        rows.push(row("export_3dm", &format!("{}…", app.tr("ui.export_3dm")), "", "export", shown));
+    }
     rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
     rows.push(row("file.export_sdf", app.tr_label("Export SDF Model…"), &key("file.export_sdf"), "export", shown));
     rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
@@ -766,6 +770,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         }
         "export_glb" => FileAction::Export("glb").run(app),
         "export_usd" => FileAction::Export("usd").run(app),
+        "export_3dm" => FileAction::Export("3dm").run(app),
         "export_json" => FileAction::Export("json").run(app),
         "install" => {
             if let Some(offer) = crate::install::offered(app) {
@@ -917,6 +922,17 @@ pub(crate) fn start_export(app: &mut SolveApp, id: &str) -> bool {
     true
 }
 
+/// `file.export`'s `writer` for a file `name` (a path or a format): cadmpeg's for a STEP or IGES
+/// file while Preferences › General › Export STEP and IGES with cadmpeg is on; else left out, so
+/// SolidCraft's own writer writes it. The command never reads the preference itself.
+pub(crate) fn with_export_writer(app: &SolveApp, name: &str, params: &mut Value) {
+    let step_or_iges =
+        matches!(solidcraft_engine::io::Format::from_name(name), Ok(solidcraft_engine::io::Format::Step | solidcraft_engine::io::Format::Iges));
+    if app.preferences.cadmpeg_export && step_or_iges {
+        params["writer"] = json!("cadmpeg");
+    }
+}
+
 /// Export to a file with extension `ext`, in `format` when the extension alone doesn't name it.
 fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
     let body = crate::export_name::first_body(app);
@@ -928,9 +944,10 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
     app.pick_save(&name, exts, move |app, path| {
         let Some(path) = path else { return };
         let mut params = json!({"path": path});
-        if let Some(format) = format {
+        if let Some(format) = &format {
             params["format"] = json!(format);
         }
+        with_export_writer(app, format.as_deref().unwrap_or(&path), &mut params);
         if let Ok(result) = app.run("file.export", params) {
             let skipped =
                 result.get("skipped").and_then(Value::as_array).map_or(Vec::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>());

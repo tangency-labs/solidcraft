@@ -40,6 +40,34 @@ pub enum ObjectsParam {
     Component,
 }
 
+/// Which program writes a STEP or IGES file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportWriter {
+    /// SolidCraft's own STEP and IGES writers (the default).
+    Solidcraft,
+    /// cadmpeg's, from the design written into its neutral model.
+    Cadmpeg,
+}
+
+/// `writer` as `file.export` reads it for `format`: `None` when left out (SolidCraft's own writer);
+/// refused for a format other than STEP and IGES, and for any other word.
+pub(crate) fn export_writer(value: Option<&Value>, format: Format) -> Result<Option<ExportWriter>, String> {
+    let writer = match value {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(w)) => match w.trim().to_ascii_lowercase().as_str() {
+            "solidcraft" => ExportWriter::Solidcraft,
+            "cadmpeg" => ExportWriter::Cadmpeg,
+            _ => return Err(format!("`writer` must be solidcraft or cadmpeg, not {w}")),
+        },
+        Some(v) => return Err(format!("`writer` must be solidcraft or cadmpeg, not {v}")),
+    };
+    if !matches!(format, Format::Step | Format::Iges) {
+        return Err(format!("`writer` is for STEP and IGES only: {format:?} has one writer"));
+    }
+    Ok(Some(writer))
+}
+
 /// Export bodies as a STEP file. With no `bodies`, a design with components exports as a STEP
 /// assembly, otherwise its bodies as placed. The file is STEP whatever the path's extension.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -172,15 +200,15 @@ pub struct ExportParams {
     /// The file to write.
     #[serde(default)]
     pub path: Option<String>,
-    /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, urdf, sdf or json, or a file name
-    /// whose extension names it. Default: from the path's extension.
+    /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, usd, 3dm, urdf, sdf or json, or a
+    /// file name whose extension names it. Default: from the path's extension.
     #[serde(default)]
     pub format: Option<String>,
     /// The bodies to export, by name. Default: every body. Design JSON and URDF export the
     /// complete design, so they refuse a list.
     #[serde(default)]
     pub bodies: Option<StringList>,
-    /// How closely the mesh follows curved faces (STL, OBJ, 3MF and GLB). Default: standard. Not read
+    /// How closely the mesh follows curved faces (STL, OBJ, 3MF, GLB, OpenUSD and Rhino). Default: standard. Not read
     /// for URDF.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
@@ -204,6 +232,12 @@ pub struct ExportParams {
     /// `file.export_stl` has it; refused for the other formats. Default: false. Not read for URDF.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// STEP and IGES only: which program writes the file. Default: solidcraft, SolidCraft's own
+    /// writers; cadmpeg writes it from the design through cadmpeg's neutral model (STEP AP242 with
+    /// the components, IGES 5.3 with each body where the design shows it), with warnings for what
+    /// it leaves out. Refused for the other formats.
+    #[serde(default)]
+    pub writer: Option<ExportWriter>,
     /// SDF only: the model's name. Default: the folder's name.
     #[serde(default)]
     pub name: Option<String>,
@@ -285,6 +319,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             velocity: None,
             images: None,
             lay_on_print_faces: None,
+            writer: None,
             name: None,
             is_static: None,
             model_uris: None,
@@ -302,6 +337,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             return Ok(out);
         };
         out.bodies = names::<D::Error>(&m)?;
+        out.writer = export_writer(m.get("writer"), format).map_err(refuse::<D::Error>)?;
         if format == Format::Urdf {
             // URDF reads its own keys; `quality` and `objects` are not read.
             out.mesh_prefix = text::<D::Error>(&m, "mesh_prefix")?;
@@ -360,7 +396,8 @@ pub struct ExportResult {
     /// Its size in bytes.
     pub bytes: usize,
     /// The format written: Step, StlBinary, ThreeMf or Obj (and for `file.export` and
-    /// `file.save_mesh` also StlAscii or ThreeMfTagged, and for `file.export` also Design and Glb).
+    /// `file.save_mesh` also StlAscii or ThreeMfTagged, and for `file.export` also Design, Glb, Usd
+    /// and Rhino).
     pub format: String,
     /// OBJ only: every file written, the material library first and the mesh file last.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
