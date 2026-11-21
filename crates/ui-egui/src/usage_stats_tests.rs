@@ -65,7 +65,8 @@ fn a_finished_day_is_sent_once_to_the_endpoint_with_exactly_the_reported_fields(
     assert_eq!((request.method, request.url.as_str()), ("POST", ENDPOINT));
     let body: serde_json::Value = serde_json::from_slice(request.body.as_deref().unwrap()).unwrap();
     let keys: Vec<&str> = body.as_object().unwrap().keys().map(String::as_str).collect();
-    let mut allowed = ["v", "install_id", "day", "version", "os", "arch", "platform", "active_minutes", "operations", "tools"];
+    let mut allowed =
+        ["v", "install_id", "day", "version", "os", "arch", "platform", "active_minutes", "operations", "tools", "failed", "compute_ms", "dialog_s"];
     allowed.sort_unstable();
     assert_eq!(keys, allowed, "these fields and nothing else");
     assert_eq!(body["v"], SCHEMA);
@@ -261,10 +262,81 @@ fn a_tool_started_from_the_ui_counts_even_when_cancelled() {
     let (mut app, _) = app_with_server(Some(200));
     tick_at(&mut app, T0, 0.0, false);
     app.start("solid.box");
+    tick_at(&mut app, T0, 1.0, false);
     crate::dialogs::cancel(&mut app);
-    tick_at(&mut app, T0, 0.0, false);
+    tick_at(&mut app, T0, 40.0, false);
     assert_eq!(counts(&app, "2023-11-14", true, "ui"), Some(&[("solid.box".to_string(), 1)].into()));
     assert!(counts(&app, "2023-11-14", false, "ui").is_none(), "a cancelled tool changed nothing");
+    let timed = &app.usage.store.days["2023-11-14"].dialog_s;
+    assert_eq!(timed["solid.box"]["cancelled"], [("30s-2m".to_string(), 1)].into(), "open for 39 s, then cancelled: {timed:?}");
+}
+
+#[test]
+fn a_tool_applied_is_timed_as_applied() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _ = solidcraft_engine::usage::take();
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.usage = UsageStats::default();
+    h.app.usage.store.notice_shown = true;
+    h.frames(2);
+    h.app.start("solid.box");
+    h.frames(3);
+    assert!(h.app.dialog.is_some(), "Box opens its dialog");
+    crate::dialogs::confirm(&mut h.app);
+    // The apply may run off the window thread: the dialog counts as open until its result is in.
+    for _ in 0..200 {
+        h.frames(1);
+        if h.app.applying.is_none() && h.app.dialog.is_none() && h.app.usage.open_tool.is_none() {
+            break;
+        }
+    }
+    let timed: Vec<&Dialogs> = h.app.usage.store.days.values().map(|day| &day.dialog_s).collect();
+    let applied = timed.iter().find_map(|d| d.get("solid.box")).expect("Box was timed");
+    assert_eq!(applied.get("applied").map(|b| b.values().sum::<u32>()), Some(1), "{applied:?}");
+    assert!(!applied.contains_key("cancelled"));
+    for (bucket, expected) in [(0.0, "0-5s"), (4.99, "0-5s"), (5.0, "5-30s"), (29.9, "5-30s"), (30.0, "30s-2m"), (119.0, "30s-2m"), (120.0, "2m+")] {
+        assert_eq!(dialog_bucket(bucket), expected, "{bucket}");
+    }
+}
+
+#[test]
+fn failures_count_the_kind_of_error_only_and_operations_their_time() {
+    use solidcraft_engine::usage::{compute_bucket, error_kind};
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut app, _) = app_with_server(Some(200));
+    tick_at(&mut app, T0, 0.0, false);
+    make_box(&mut app);
+    let secret = "Secret Bracket C:\\Users\\someone";
+    // Whichever of these fails first (each refers to what isn't there); its parameters carry
+    // words that must never reach a report.
+    let tries = [
+        ("solid.fillet", json!({"edges": [secret], "radius": 1})),
+        ("body.delete", json!({"bodies": [secret]})),
+        ("solid.extrude", json!({"profile": secret, "distance": 5})),
+    ];
+    let (failed_id, error) =
+        tries.iter().find_map(|(id, params)| app.session.execute(id, params).err().map(|e| (*id, e))).expect("one of them fails");
+    tick_at(&mut app, T0, 0.0, false);
+    let day = &app.usage.store.days["2023-11-14"];
+    let kinds = &day.failed["ui"][failed_id];
+    assert_eq!(kinds.values().sum::<u32>(), 1, "{kinds:?}");
+    let kind = kinds.keys().next().unwrap();
+    assert_eq!(Some(kind.clone()), error_kind(&error));
+    assert!(kind.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.'), "{kind}");
+    let all = serde_json::to_string(&report(&app.usage.store, "2023-11-14", day)).unwrap();
+    assert!(!all.contains("Secret") && !all.contains("Users"), "no message, no parameter: {all}");
+    assert_eq!(day.compute_ms["solid.box"].values().sum::<u32>(), 1, "the operation is timed: {:?}", day.compute_ms);
+    assert_eq!(day.compute_ms[failed_id].values().sum::<u32>(), 1, "and the failure: {:?}", day.compute_ms);
+    for (ms, expected) in [(0.0, "0-100ms"), (99.9, "0-100ms"), (100.0, "100ms-1s"), (999.0, "100ms-1s"), (1000.0, "1s-10s"), (10_000.0, "10s+")] {
+        assert_eq!(compute_bucket(ms), expected, "{ms}");
+    }
+    assert_eq!(error_kind(&solidcraft_engine::EngineError::Cancelled("x".into())), None, "a cancel is no failure");
+    let feature = solidcraft_engine::EngineError::Feature(Box::new(solidcraft_engine::FeatureFailure {
+        error: "the fillet radius is too large for the Secret Bracket".into(),
+        code: solidcraft_engine::kernel::ErrorCode { call: "Blend".into(), kind: 7, operation: "smlib::blend::rolling".into() },
+    }));
+    assert_eq!(error_kind(&feature).as_deref(), Some("kernel.blend.7"), "the call and the kernel's number only");
 }
 
 #[test]
@@ -313,7 +385,7 @@ fn show_whats_sent_is_the_next_report() {
 fn a_stored_store_comes_back_and_a_hostile_one_is_a_new_one() {
     let mut store = Store { install_id: new_id().unwrap(), notice_shown: true, days: BTreeMap::new() };
     let ui: Counts = [("ui".to_string(), [("solid.box".to_string(), 2)].into())].into();
-    store.days.insert("2023-11-14".into(), Day { active_minutes: 5, operations: ui.clone(), tools: ui });
+    store.days.insert("2023-11-14".into(), Day { active_minutes: 5, operations: ui.clone(), tools: ui, ..Day::default() });
     assert_eq!(Store::from_stored(Some(&store.to_stored())), store);
     for hostile in ["", "[]", "null", "{", r#"{"install_id": 7}"#] {
         assert_eq!(Store::from_stored(Some(hostile)), Store::default(), "{hostile}");

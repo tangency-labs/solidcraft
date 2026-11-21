@@ -85,6 +85,7 @@ pub struct Plugin {
     pub images: std::collections::BTreeMap<String, String>,
     /// The GitHub `owner/repo` its updates come from (`plugin_updates`).
     pub updates: Option<String>,
+    pub(crate) swatches: crate::plugin_images::Swatches,
 }
 
 /// A folder under the plugins directory that is not a plugin.
@@ -152,6 +153,7 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         entries: Vec::new(),
         images: Default::default(),
         updates: None,
+        swatches: Default::default(),
     })
 }
 
@@ -173,6 +175,7 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
         plugin.groups = runtime.permissions.command_groups;
     }
     plugin.images = crate::plugin_images::load(dir, &plugin.id, &plugin.entries);
+    plugin.swatches = crate::plugin_images::load_swatches(dir, &plugin.entries);
     Ok((plugin, executable))
 }
 
@@ -1589,6 +1592,7 @@ mod tests {
             entries: Vec::new(),
             images: Default::default(),
             updates: None,
+            swatches: Default::default(),
             id: "ftc-frc-parts".into(),
             name: "FTC and FRC parts".into(),
             version: "0.1.0".into(),
