@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    TabViewActivateParams, TabViewBesideParams, TabViewIdParams, TabViewLayoutParams, TabViewLinkParams, TabViewMoveParams, TabViewNoParams,
-    TabViewOpenParams, TabViewRenameParams, TabViewReply, TabViewWindowParams,
+    TabViewActivateParams, TabViewBesideParams, TabViewCloseGroupParams, TabViewIdParams, TabViewLayoutParams, TabViewLinkParams, TabViewMoveParams,
+    TabViewNoParams, TabViewOpenParams, TabViewRenameParams, TabViewReply, TabViewWindowParams,
 };
 use crate::Session;
 use crate::schema::tab_windows::{
@@ -18,6 +18,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<TabViewLayoutParams>(), &["layout", "window"]);
     assert_keys(input_schema_for::<TabViewBesideParams>(), &["edge", "id", "placement", "window"]);
     assert_keys(input_schema_for::<TabViewIdParams>(), &["id"]);
+    assert_keys(input_schema_for::<TabViewCloseGroupParams>(), &["id", "window"]);
     assert_keys(input_schema_for::<TabViewActivateParams>(), &["id", "index", "window"]);
     assert_keys(input_schema_for::<TabViewRenameParams>(), &["id", "name"]);
     assert_keys(input_schema_for::<TabViewMoveParams>(), &["from", "to"]);
@@ -39,6 +40,10 @@ fn the_view_commands_check_and_echo_without_editing_the_design() {
         ("tab.view.open", json!({"window": null}), json!({"reuse": false})),
         ("tab.view.close", json!({}), json!({})),
         ("tab.view.close", json!({"id": 3}), json!({"id": 3})),
+        ("tab.view.close_others", Value::Null, json!({})),
+        ("tab.view.close_others", json!({"id": 3}), json!({"id": 3})),
+        ("tab.view.close_right", json!({"id": 3, "window": 1}), json!({"id": 3, "window": 1})),
+        ("tab.view.close_right", json!({"window": 0}), json!({"window": 0})),
         ("tab.view.reopen", json!({}), json!({})),
         ("tab.view.activate", json!({"id": 2}), json!({"id": 2})),
         ("tab.view.activate", json!({"index": 0}), json!({"index": 0})),
@@ -82,6 +87,10 @@ fn bad_view_requests_are_refused() {
         ("tab.view.open", json!({"unknown": 1})),
         ("tab.view.close", json!({"id": "1"})),
         ("tab.view.close", json!({"id": -1})),
+        ("tab.view.close_others", json!({"id": "1"})),
+        ("tab.view.close_others", json!({"window": -1})),
+        ("tab.view.close_right", json!({"window": 4_294_967_296_u64})),
+        ("tab.view.close_right", json!({"index": 1})),
         ("tab.view.reopen", json!({"id": 1})),
         ("tab.view.activate", json!({})),
         ("tab.view.activate", json!({"id": 1, "index": 0})),
@@ -232,6 +241,47 @@ fn window_commands_refuse_malformed_requests() {
         assert!(session.execute("tab.view.move_to_window", &size).unwrap_err().to_string().contains("bad_geometry"));
     }
     assert!(session.execute("tab.window.close", &json!({"window": 0})).unwrap_err().to_string().contains("cannot_close_main_window"));
+}
+
+#[test]
+fn saved_layout_commands_check_and_echo_without_editing_the_design() {
+    use crate::schema::tab_layouts::{TabLayoutListReply, TabLayoutNameParams, TabLayoutRenameParams};
+
+    assert_keys(input_schema_for::<TabLayoutNameParams>(), &["name"]);
+    assert_keys(input_schema_for::<TabLayoutRenameParams>(), &["name", "new_name"]);
+
+    let mut session = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let before = session.doc.to_json();
+    let undo = session.undo.len();
+    for (command, params, echo, schema) in [
+        ("tab.layout.save", json!({"name": "  Review "}), json!({"name": "Review"}), output_schema_for::<TabLayoutNameParams>()),
+        ("tab.layout.apply", json!({"name": "Review"}), json!({"name": "Review"}), output_schema_for::<TabLayoutNameParams>()),
+        ("tab.layout.remove", json!({"name": "Review"}), json!({"name": "Review"}), output_schema_for::<TabLayoutNameParams>()),
+        ("tab.layout.list", Value::Null, json!({"layouts": []}), output_schema_for::<TabLayoutListReply>()),
+        (
+            "tab.layout.rename",
+            json!({"name": "Review", "new_name": "  Tall "}),
+            json!({"name": "Review", "new_name": "Tall"}),
+            output_schema_for::<TabLayoutRenameParams>(),
+        ),
+    ] {
+        let result = session.execute(command, &params).unwrap_or_else(|e| panic!("{command} {params}: {e}"));
+        assert_eq!(result, echo, "{command} {params}");
+        let schema = schema.as_value();
+        assert!(conforms(schema, schema, &result), "{result} doesn't match {schema}");
+    }
+    for (command, params) in [
+        ("tab.layout.save", json!({})),
+        ("tab.layout.save", json!({"name": " "})),
+        ("tab.layout.apply", json!({"name": 1})),
+        ("tab.layout.remove", json!({"name": "x".repeat(65)})),
+        ("tab.layout.rename", json!({"name": "Old", "new_name": "bad\nname"})),
+        ("tab.layout.list", json!({"all": true})),
+    ] {
+        assert!(session.execute(command, &params).is_err(), "{command} {params}");
+    }
+    assert_eq!(session.doc.to_json(), before);
+    assert_eq!(session.undo.len(), undo);
 }
 
 #[test]
