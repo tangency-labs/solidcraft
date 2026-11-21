@@ -199,6 +199,22 @@ fn an_outline_piece_shorter_than_the_joining_distance_is_kept() {
 }
 
 #[test]
+fn an_outline_with_its_ends_piled_in_one_place_is_given_up_not_searched_forever() {
+    // 12,000 short pieces zigzag inside one 0.01 mm square, so every step of the join would look at
+    // every end left: about 144 million looks. The join stops at its limit and says so.
+    let mut source = String::from("(kicad_pcb (general (thickness 1.6))\n");
+    let point = |i: usize| (0.002 + 0.002 * (i % 2) as f64, 0.0005 + 5e-7 * i as f64);
+    for i in 0..12_000 {
+        let ((x0, y0), (x1, y1)) = (point(i), point(i + 1));
+        source.push_str(&format!("(gr_line (start {x0:.7} {y0:.7}) (end {x1:.7} {y1:.7}) (layer \"Edge.Cuts\"))\n"));
+    }
+    source.push(')');
+    let board = parse_kicad_board(source.as_bytes(), "pile.kicad_pcb").unwrap();
+    assert!(board.outlines.is_empty(), "{} outlines", board.outlines.len());
+    assert!(board.warnings.iter().any(|w| w == "the Edge.Cuts outline has too many ends in one place to join"), "{:?}", board.warnings);
+}
+
+#[test]
 fn an_outline_with_a_real_gap_stays_open() {
     // The last line stops 0.02 mm short of the first corner: more than the 0.01 mm KiCad joins.
     let source = r#"(kicad_pcb (general (thickness 1.6))
