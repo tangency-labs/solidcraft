@@ -446,6 +446,68 @@ fn one_model_named_in_both_formats_is_placed_once() {
     assert_eq!(imported.plan.places.len(), 1, "placed once, not once per reference");
 }
 
+/// KiCad 10's 3D library ships `….stpZ`: a zip archive holding one STEP file.
+fn stpz(step: &str) -> Vec<u8> {
+    use std::io::Write;
+    let mut out = std::io::Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(&mut out);
+    zip.start_file("part.step", zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated)).unwrap();
+    zip.write_all(step.as_bytes()).unwrap();
+    zip.finish().unwrap();
+    out.into_inner()
+}
+
+#[test]
+fn a_zipped_stpz_model_is_read_as_step() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (model "${KICAD10_3DMODEL_DIR}/Package.3dshapes/part.stpZ")))"#;
+    let bytes = stpz(include_str!("../../../tests/step-conformance/cylinder.step"));
+    let mut load = |path: &str| Ok(KicadModelFile { path: path.to_string(), bytes: bytes.clone() });
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    assert_eq!(meshes.len(), 1, "the zipped STEP comes in: {meshes:?} {:?}", imported.feature.warnings);
+    assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
+    // The model is placed for U1, and its mesh goes into U1's component, not the board's.
+    assert_eq!(imported.plan.places.len(), 1, "{:?}", imported.plan.places);
+    assert_eq!(imported.plan.places[0].slot, 0);
+    assert_eq!(imported.plan.bodies, vec![Some(0)], "{:?}", imported.plan.bodies);
+    assert!(imported.feature.warnings.iter().all(|w| !w.contains("part.stpZ")), "{:?}", imported.feature.warnings);
+}
+
+/// A `….wrl` reference that the installed library only has as `….stpZ` (KiCad 10) is answered
+/// by the zipped STEP: the format follows the file that was read.
+#[test]
+fn a_wrl_reference_answered_by_an_stpz_file_is_read_as_step() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (model "part.wrl")))"#;
+    let bytes = stpz(include_str!("../../../tests/step-conformance/cylinder.step"));
+    let mut load = |_: &str| Ok(KicadModelFile { path: "part.stpZ".to_string(), bytes: bytes.clone() });
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    assert_eq!(meshes.len(), 1, "{:?}", imported.feature.warnings);
+    // The model is placed for U1, and its mesh goes into U1's component, not the board's.
+    assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
+    assert_eq!(imported.plan.places.len(), 1, "{:?}", imported.plan.places);
+    assert_eq!(imported.plan.places[0].slot, 0);
+    assert_eq!(imported.plan.bodies, vec![Some(0)], "{:?}", imported.plan.bodies);
+}
+
+#[test]
+fn a_corrupt_stpz_is_warned_and_the_board_is_kept() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (model "part.stpZ")))"#;
+    let mut load = |path: &str| Ok(KicadModelFile { path: path.to_string(), bytes: b"not a zip".to_vec() });
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    assert!(imported.plan.slots.is_empty());
+    assert!(imported.feature.warnings.iter().any(|w| w.starts_with("part.stpZ: not imported")), "{:?}", imported.feature.warnings);
+}
+
 #[test]
 fn text_on_silk_and_copper_is_built_and_mirrored_text_flips() {
     let source = r#"(kicad_pcb (general (thickness 1.6))

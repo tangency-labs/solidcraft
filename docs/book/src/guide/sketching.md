@@ -277,9 +277,10 @@ retain their source sketch, even when the active sketch uses the same point or c
 
 A projection kept by the name of a face or edge that no longer has that name (a change before
 the sketch removed it or made it again) fails the sketch, and the features built on it fail too.
-The sketch's message names each such projection by its source and its curves: `Outline:
-projected face of Block (curves l5, l6, l7, l8) is lost; delete the projection or project it
-again`. When several are lost it gives their number and lists the first three. In its editor
+The sketch's message names each such projection by its source, its curves and the features
+that made what it projected: `Outline: projected face of Block (curves l5, l6, l7, l8; made by
+Extrude1) is lost; delete the projection or project it again`. Look at those features for the
+change that removed it. When several are lost it gives their number and lists the first three. In its editor
 the sketch shows its last geometry, the lost projections in the lost colour; deleting a lost
 projection's curves there removes it. **Redefine Sketch Plane** still moves the sketch to
 another plane, where it fails for the same projections, and so it does when the sketch's own

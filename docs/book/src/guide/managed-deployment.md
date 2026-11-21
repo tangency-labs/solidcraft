@@ -1,9 +1,10 @@
 # Managing SolidCraft in an organization
 
-An administrator can set some SolidCraft settings for everyone who uses a computer, with Group
-Policy or Microsoft Intune. A setting under policy shows in Preferences as **Set by your
+An administrator can set some SolidCraft settings for everyone who uses a computer: with Group
+Policy or Microsoft Intune on Windows, a configuration profile or MDM on macOS, and a file in
+`/etc` on Linux and FreeBSD. A setting under policy shows in Preferences as **Set by your
 organization**, and people cannot change it. While any policy is set, SolidCraft says it is
-**Managed by** the organization. This works on Windows today.
+**Managed by** the organization.
 
 A computer without a policy behaves exactly as before. SolidCraft only reads the policy: it
 writes nothing, and it sends nothing about the policy anywhere.
@@ -19,9 +20,10 @@ can run it.
 | Policy | Registry value | Type | Values |
 |---|---|---|---|
 | Check for updates | `CheckForUpdates` | `REG_DWORD` | `1`: checks at start and once a day, and people cannot turn them off. `0`: no checks at all, as with `SOLIDCRAFT_UPDATE_CHECK=0` ([Updates and privacy](updates.md)). |
+| Anonymous usage statistics | `UsageStatistics` | `REG_DWORD` | `0`: SolidCraft sends no usage statistics, keeps none to send later and shows no notice about them, and people cannot turn them on. `1`: each person chooses. SolidCraft 0.46 or later; what is sent is in [Privacy](https://github.com/tangency-labs/solidcraft/blob/main/docs/privacy.md). |
 | Organization name | `OrganizationName` | `REG_SZ` | The name shown as **Managed by** and the name, up to 64 characters on one line. It changes no setting. |
 
-The values live in the key `Software\Policies\SolidCraft`:
+On Windows the values live in the key `Software\Policies\SolidCraft`:
 
 - under `HKEY_LOCAL_MACHINE` for everyone on the computer, or
 - under `HKEY_CURRENT_USER` for one person.
@@ -63,6 +65,29 @@ result, for example:
 reg add HKLM\Software\Policies\SolidCraft /v CheckForUpdates /t REG_DWORD /d 0 /f
 reg add HKLM\Software\Policies\SolidCraft /v OrganizationName /t REG_SZ /d "Example Corp" /f
 ```
+
+## macOS
+
+SolidCraft 0.46 and later read the same value names as managed preferences of the domain
+`io.tangencylabs.solidcraft`, which a configuration profile installs: numbers as `integer`, the
+name as `string`. `packaging/macos/policies/solidcraft.mobileconfig` in the source is a sample
+profile; remove the keys you don't set and give it your own identifiers before you deploy it with
+your MDM (or install it by opening it). A profile for the computer (`/Library/Managed
+Preferences/io.tangencylabs.solidcraft.plist`) wins over one for the user, value by value.
+Values under a `Recommended` dictionary are reserved, as on Windows.
+
+## Linux and FreeBSD
+
+SolidCraft 0.46 and later read `/etc/solidcraft/policy.json`, a JSON object of the same value
+names (`packaging/linux/policies/policy.json` in the source is a sample):
+
+```json
+{ "CheckForUpdates": 0, "UsageStatistics": 0, "OrganizationName": "Example Corp" }
+```
+
+Make it owned by root and not writable by others (`chmod 644`): a file anyone may write is
+ignored. A Flatpak or Snap sees its own `/etc`, not the computer's, so use the distribution's
+package (deb, rpm, AppImage or the FreeBSD package) where you need the policy to apply.
 
 ## Check that a policy applies
 

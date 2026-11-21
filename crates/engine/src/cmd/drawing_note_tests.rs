@@ -56,6 +56,28 @@ fn ends_at(reply: &Value, p: [f64; 3]) {
     assert!(point.iter().zip(p).all(|(a, b)| (a - b).abs() < 1e-9), "{reply}");
 }
 
+/// A note's text is centred on its place, so one placed near the paper's edge can run past it: its
+/// reply warns, naming where its text spans, and one that fits says nothing. A note on a view is held
+/// to the paper where its view puts it.
+#[test]
+fn a_note_whose_text_runs_off_the_paper_is_warned_about() {
+    let (mut s, _, view, _) = placed();
+    let off_paper =
+        |reply: &Value| reply["warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().unwrap_or("").contains("runs off the paper")));
+    let long = "ALL HOLES THROUGH. MATERIAL: AL 6061.";
+    let edge = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [10, 40], "content": long}));
+    assert!(off_paper(&edge), "{edge}");
+    let note = edge["note"].as_str().unwrap().to_string();
+    assert!(off_paper(&run(&mut s, INSPECT, json!({"note": note}))), "inspect warns too");
+    let inside = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [200, 40], "content": long}));
+    assert!(!off_paper(&inside), "{inside}");
+    // 200 mm left of a view at x = 200 is the paper's left edge.
+    let on_view = run(&mut s, ADD, json!({"anchor": {"view": ids::encode(view)}, "at": [-195, 0], "content": long}));
+    assert!(off_paper(&on_view), "{on_view}");
+    let centred = run(&mut s, ADD, json!({"anchor": {"view": ids::encode(view)}, "at": [0, -60], "content": long}));
+    assert!(!off_paper(&centred), "{centred}");
+}
+
 /// Every anchor: a sheet by name, a view, an edge and a corner, each one undo step; a note that points
 /// at nothing reads no model, and one on an edge has its leader end on the edge's middle.
 #[test]
@@ -377,6 +399,60 @@ fn a_notes_fields_read_its_sheet_and_inspect_tells_a_lost_one() {
     // A note on plain text reads no field.
     let plain = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [20, 40], "content": "Deburr"}));
     assert_eq!((&plain["text"], plain.get("fields")), (&json!("Deburr"), None), "{plain}");
+}
+
+/// A note on a drawing of a sheet metal part reads the part's sheet metal fields, and follows the
+/// rule's thickness and K-factor when they change. The part is oracle 71's: rule `Custom`, 1.5 mm
+/// (the parameter `Thick`), K-factor 0.33, radius 3 mm, an 80 x 50 base flanged 20 mm on both long
+/// edges. Its flat is 80 wide and 50 − 2·(1.5 + 3) + 2·(π/2)(3 + 0.33·1.5) + 2·15.5 = 82.980 long;
+/// at 2 mm, 50 − 10 + π(3 + 0.66) + 30 = 81.498; and with K 0.5, 70 + π(3 + 1) = 82.566.
+#[test]
+fn a_notes_sheet_metal_fields_follow_the_rule() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name": "Thick", "expression": "1.5 mm"}));
+    run(&mut s, "sheet.manage_rules", json!({"name": "Custom", "thickness": "Thick", "k_factor": 0.33, "bend_radius": "3 mm", "active": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [80, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[40, 50, 1.5], [40, 0, 1.5]], "height": 20}));
+    run(&mut s, "drawing.create", json!({}));
+    let source = ids::encode(s.drawing("test").unwrap().sources[0].id);
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "documents": {"source": source}}));
+    let field = |key: &str| json!({"field": {"source": "component", "key": key}});
+    let content = json!([
+        {"text": "T "}, field("thickness"), {"text": " "}, field("sheet_rule"), {"text": " K "}, field("k_factor"),
+        {"text": " R "}, field("bend_radius"), {"text": " FLAT "}, field("flat_length"), {"text": " x "}, field("flat_width"),
+    ]);
+    let note = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [20, 20], "content": content}))["note"].clone();
+    let text = |s: &mut Session| run(s, INSPECT, json!({"note": note}))["text"].clone();
+    let on_model = |s: &mut Session, id: &str, p: Value| {
+        let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+        run(s, "drawing.close", json!({}));
+        run(s, id, p);
+        run(s, "drawing.open", drawing);
+    };
+    assert_eq!(text(&mut s), json!("T 1.50 mm Custom K 0.33 R 3.00 mm FLAT 82.98 mm x 80.00 mm"));
+    on_model(&mut s, "parameters.change", json!({"name": "Thick", "expression": "2 mm"}));
+    assert_eq!(text(&mut s), json!("T 2.00 mm Custom K 0.33 R 3.00 mm FLAT 81.50 mm x 80.00 mm"));
+    on_model(&mut s, "sheet.manage_rules", json!({"name": "Custom", "k_factor": 0.5}));
+    assert_eq!(text(&mut s), json!("T 2.00 mm Custom K 0.5 R 3.00 mm FLAT 82.57 mm x 80.00 mm"));
+    let fields = run(&mut s, INSPECT, json!({"note": note}))["fields"].clone();
+    assert_eq!(fields[0], json!({"source": "component", "key": "thickness", "state": "shown", "value": "2.00 mm"}), "{fields}");
+}
+
+/// A note's sheet metal field on a part that isn't sheet metal reads empty, never a number: the
+/// box's drawing shows nothing for its thickness, and inspect says the field is empty.
+#[test]
+fn a_sheet_metal_field_on_a_part_without_a_sheet_reads_empty() {
+    let (mut s, _, view, _) = placed();
+    let content = json!([{"text": "T "}, {"field": {"source": "component", "key": "thickness"}}]);
+    let source = ids::encode(s.drawing("test").unwrap().sources[0].id);
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "documents": {"source": source}}));
+    let note = run(&mut s, ADD, json!({"anchor": {"view": ids::encode(view)}, "at": [0, -30], "content": content}))["note"].clone();
+    let reply = run(&mut s, INSPECT, json!({"note": note}));
+    assert_eq!(reply["text"], json!("T "), "{reply}");
+    assert_eq!(reply["fields"], json!([{"source": "component", "key": "thickness", "state": "empty"}]), "{reply}");
 }
 
 /// A field its source doesn't have is refused when a note is added or edited, and the note is left
