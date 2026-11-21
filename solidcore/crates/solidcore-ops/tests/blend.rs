@@ -5937,3 +5937,343 @@ fn a_full_round_whose_rails_meet_along_part_of_one_of_them() {
         }
     }
 }
+
+/// One support of a chamfer's section at its edge point E, in the plane square to the edge
+/// (#13710): `t` the unit tangent into the face, `w` the unit normal toward the other
+/// support, `k` the signed curvature of the section (> 0 with its centre on the `w` side, a
+/// convex support; < 0 a socket or groove), `d` the setback, a straight line from E.
+#[derive(Debug, Clone, Copy)]
+struct LegSide {
+    t: [f64; 2],
+    w: [f64; 2],
+    k: f64,
+    d: f64,
+}
+
+/// The section a chamfer of straight setbacks takes off at E (#13710's definition): its area
+/// and its centroid's first coordinate. Each foot is the point of its support's section at
+/// chord `d` from E, `F = E + d (cos b t + sin b w)` with `b = asin(d k / 2)`, the angle
+/// between a chord of a circle and its tangent. The section is the triangle (E, F1, F2), and
+/// on a curved support the segment between its arc E..F and the chord, of angle `2 |b|` and
+/// area `rho² (2|b| − sin 2|b|) / 2` with its centroid `4 rho sin³|b| / (3 (2|b| − sin 2|b|))`
+/// from the centre toward the chord: taken off with the triangle where the support is convex,
+/// left on it where it is concave.
+fn straight_leg_section(e: [f64; 2], sides: [LegSide; 2]) -> (f64, f64) {
+    let foot = |s: &LegSide| {
+        let b = (0.5 * s.d * s.k).asin();
+        [
+            e[0] + s.d * (b.cos() * s.t[0] + b.sin() * s.w[0]),
+            e[1] + s.d * (b.cos() * s.t[1] + b.sin() * s.w[1]),
+        ]
+    };
+    let [f1, f2] = [foot(&sides[0]), foot(&sides[1])];
+    let mut area = 0.5 * ((f1[0] - e[0]) * (f2[1] - e[1]) - (f1[1] - e[1]) * (f2[0] - e[0])).abs();
+    let mut moment = area * (e[0] + f1[0] + f2[0]) / 3.0;
+    for (s, f) in sides.iter().zip([f1, f2]) {
+        if s.k == 0.0 {
+            continue;
+        }
+        let rho = 1.0 / s.k.abs();
+        let theta = 2.0 * (0.5 * s.d * s.k).asin().abs();
+        let piece = 0.5 * rho * rho * (theta - theta.sin());
+        let c = [e[0] + s.w[0] / s.k, e[1] + s.w[1] / s.k];
+        let m = [0.5 * (e[0] + f[0]) - c[0], 0.5 * (e[1] + f[1]) - c[1]];
+        let reach = 4.0 * rho * (0.5 * theta).sin().powi(3) / (3.0 * (theta - theta.sin()));
+        let x = c[0] + reach * m[0] / m[0].hypot(m[1]);
+        let sign = s.k.signum();
+        area += sign * piece;
+        moment += sign * piece * x;
+    }
+    (area, moment / area)
+}
+
+/// Chamfers `edges` of `body` at `sizes`, the first along the face that leans most along
+/// `along`, and grades the result against `want`: valid, one solid, the closed-form volume to
+/// 1e-9.
+fn grade_straight_legs(
+    case: &str,
+    body: &Body,
+    edges: &[usize],
+    along: [f64; 3],
+    sizes: [f64; 2],
+    want: f64,
+) {
+    let faces: Vec<usize> = edges
+        .iter()
+        .map(|&e| {
+            let f = edge_faces_along(body, e, along).unwrap();
+            if f[0].1 > f[1].1 {
+                f[0].0
+            } else {
+                f[1].0
+            }
+        })
+        .collect();
+    chamfer_sides(
+        body,
+        edges,
+        &faces,
+        sizes[0],
+        ChamferSecond::Distance(sizes[1]),
+    )
+    .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+    let report = body.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{case}: {report}");
+    assert_eq!(body.solid_count().unwrap(), 1, "{case}");
+    let got = body.volume(1e-11).unwrap();
+    assert!(
+        (got - want).abs() <= 1e-9 * want,
+        "{case}: {got} vs closed form {want}"
+    );
+}
+
+/// #13710: a chamfer's distances are setbacks, straight lines from the edge in the plane
+/// square to it, at every station, also where a support's section is a circle. Rims of
+/// surfaces sharing an axis, graded by Pappus (the section turned about the axis at its
+/// centroid). The hemisphere of radius 5 (#20162's): 2 on the flat and 1 on the ball, then
+/// equal 0.5 and equal 2. Its rim at (5, 0) in the plane (radius, z): along the flat inward,
+/// along the ball upward, curvature 1/5. A plate less a ball of radius 5 at its top centre, a
+/// socket (a concave support, curvature −1/5): 1 and 1. The upper half of a torus 10 / 2, both
+/// rims at once, equal 0.5. A sector of the ball of radius 5 within a cone of half angle 45°
+/// about +z from its centre: its rim, 2 on the cone and 1 on the ball.
+#[test]
+fn chamfers_on_rims_of_curved_sections_hold_their_straight_setbacks() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::revolve;
+    use solidcore_ops::{make_sphere, make_torus, BooleanOp};
+
+    all_fixes();
+    let pappus = |e: [f64; 2], sides: [LegSide; 2]| {
+        let (area, x) = straight_leg_section(e, sides);
+        2.0 * PI * area * x
+    };
+    let flat = |d: f64, inward: f64| LegSide {
+        t: [inward, 0.0],
+        w: [0.0, 1.0],
+        k: 0.0,
+        d,
+    };
+    let hemisphere = || {
+        let ball = make_sphere([0.0; 3], 5.0).unwrap();
+        let below = make_box([-6.0, -6.0, -6.0], [12.0, 12.0, 6.0]).unwrap();
+        boolean(ball, below, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    for [on_flat, on_ball] in [[2.0, 1.0], [0.5, 0.5], [2.0, 2.0]] {
+        let b = hemisphere();
+        let rim = edge_at(&b, [3.0, 4.0, 0.0]);
+        let ball = LegSide {
+            t: [0.0, 1.0],
+            w: [-1.0, 0.0],
+            k: 0.2,
+            d: on_ball,
+        };
+        let want = 250.0 * PI / 3.0 - pappus([5.0, 0.0], [flat(on_flat, -1.0), ball]);
+        grade_straight_legs(
+            &format!("hemisphere, {on_flat} on the flat, {on_ball} on the ball"),
+            &b,
+            &[rim],
+            [0.0, 0.0, -1.0],
+            [on_flat, on_ball],
+            want,
+        );
+    }
+
+    let plate = make_box([-10.0, -10.0, 0.0], [20.0, 20.0, 10.0]).unwrap();
+    let ball = make_sphere([0.0, 0.0, 10.0], 5.0).unwrap();
+    let b = boolean(plate, ball, BooleanOp::Subtract).unwrap().unwrap();
+    let rim = edge_at(&b, [3.0, 4.0, 10.0]);
+    let top = LegSide {
+        t: [1.0, 0.0],
+        w: [0.0, -1.0],
+        k: 0.0,
+        d: 1.0,
+    };
+    let socket = LegSide {
+        t: [0.0, -1.0],
+        w: [1.0, 0.0],
+        k: -0.2,
+        d: 1.0,
+    };
+    let want = 4000.0 - 250.0 * PI / 3.0 - pappus([5.0, 10.0], [top, socket]);
+    grade_straight_legs(
+        "socket, 1 and 1",
+        &b,
+        &[rim],
+        [0.0, 0.0, 1.0],
+        [1.0, 1.0],
+        want,
+    );
+
+    let ring = make_torus([0.0; 3], 10.0, 2.0).unwrap();
+    let below = make_box([-13.0, -13.0, -3.0], [26.0, 26.0, 3.0]).unwrap();
+    let b = boolean(ring, below, BooleanOp::Subtract).unwrap().unwrap();
+    let rims = [edge_at(&b, [7.2, 9.6, 0.0]), edge_at(&b, [4.8, 6.4, 0.0])];
+    let tube = |w: f64| LegSide {
+        t: [0.0, 1.0],
+        w: [w, 0.0],
+        k: 0.5,
+        d: 0.5,
+    };
+    let want = PI * PI * 10.0 * 4.0
+        - pappus([12.0, 0.0], [flat(0.5, -1.0), tube(-1.0)])
+        - pappus([8.0, 0.0], [flat(0.5, 1.0), tube(1.0)]);
+    grade_straight_legs(
+        "half torus 10 / 2, both rims, equal 0.5",
+        &b,
+        &rims,
+        [0.0, 0.0, -1.0],
+        [0.5, 0.5],
+        want,
+    );
+
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let sector = revolve(
+        &[
+            Curve::Line {
+                start: [0.0; 3],
+                end: [5.0 * s, 0.0, 5.0 * s],
+            },
+            Curve::Arc {
+                center: [0.0; 3],
+                axis: [0.0, -1.0, 0.0],
+                reference: [1.0, 0.0, 0.0],
+                radius: 5.0,
+                start: 0.25 * PI,
+                end: 0.5 * PI,
+            },
+            Curve::Line {
+                start: [0.0, 0.0, 5.0],
+                end: [0.0; 3],
+            },
+        ],
+        [0.0; 3],
+        [0.0, 0.0, 1.0],
+        2.0 * PI,
+        true,
+    )
+    .unwrap();
+    let rim = edge_at(&sector, [3.0 * s, 4.0 * s, 5.0 * s]);
+    let cone = LegSide {
+        t: [-s, -s],
+        w: [-s, s],
+        k: 0.0,
+        d: 2.0,
+    };
+    let cap = LegSide {
+        t: [-s, s],
+        w: [-s, -s],
+        k: 0.2,
+        d: 1.0,
+    };
+    let want = 2.0 * PI / 3.0 * 125.0 * (1.0 - s) - pappus([5.0 * s, 5.0 * s], [cone, cap]);
+    grade_straight_legs(
+        "ball sector within a 45° cone, 2 on the cone, 1 on the ball",
+        &sector,
+        &[rim],
+        [0.0, 0.0, -1.0],
+        [2.0, 1.0],
+        want,
+    );
+}
+
+/// #13710 along straight edges: a support's section square to the edge is the same circle at
+/// every station, so the setbacks hold all along. A bar of radius 5 and length 10 along z with
+/// a flat at y = c (its part y <= c): at c = 3 and c = 0, 1 on the flat and 1.5 on the round;
+/// at c = −3, equal 1. Its edge at (sqrt(25 − c²), c): along the flat toward the axis, along
+/// the round downward. A plate with a groove of radius 3 along z in its face y = 0, one of
+/// the groove's edges, equal 1 (a concave support). The lens where bars of radius 5 along z,
+/// their axes 6 apart, overlap: one of its edges, equal 1 (two convex supports).
+#[test]
+fn chamfers_along_straight_edges_of_curved_sections_hold_their_straight_setbacks() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::BooleanOp;
+
+    all_fixes();
+    let prism = |e: [f64; 2], sides: [LegSide; 2]| 10.0 * straight_leg_section(e, sides).0;
+    for (c, sizes) in [(3.0_f64, [1.0, 1.5]), (0.0, [1.0, 1.5]), (-3.0, [1.0, 1.0])] {
+        let bar = make_cylinder([0.0; 3], 5.0, 10.0).unwrap();
+        let above = make_box([-6.0, c, -1.0], [12.0, 6.0 - c, 12.0]).unwrap();
+        let b = boolean(bar, above, BooleanOp::Subtract).unwrap().unwrap();
+        let x = (25.0 - c * c).sqrt();
+        let edge = edge_at(&b, [x, c, 5.0]);
+        let on_flat = LegSide {
+            t: [-1.0, 0.0],
+            w: [0.0, -1.0],
+            k: 0.0,
+            d: sizes[0],
+        };
+        let on_round = LegSide {
+            t: [c / 5.0, -x / 5.0],
+            w: [-x / 5.0, -c / 5.0],
+            k: 0.2,
+            d: sizes[1],
+        };
+        // the disc less its segment past y = c
+        let kept = 25.0 * PI - (25.0 * (c / 5.0).acos() - c * x);
+        let want = 10.0 * kept - prism([x, c], [on_flat, on_round]);
+        grade_straight_legs(
+            &format!("bar flat at y = {c}, {sizes:?}"),
+            &b,
+            &[edge],
+            [0.0, 1.0, 0.0],
+            sizes,
+            want,
+        );
+    }
+
+    let plate = make_box([-10.0, -10.0, 0.0], [20.0, 10.0, 10.0]).unwrap();
+    let groove = make_cylinder([0.0, 0.0, -1.0], 3.0, 12.0).unwrap();
+    let b = boolean(plate, groove, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let edge = edge_at(&b, [3.0, 0.0, 5.0]);
+    let face = LegSide {
+        t: [1.0, 0.0],
+        w: [0.0, -1.0],
+        k: 0.0,
+        d: 1.0,
+    };
+    let wall = LegSide {
+        t: [0.0, -1.0],
+        w: [1.0, 0.0],
+        k: -1.0 / 3.0,
+        d: 1.0,
+    };
+    let want = 2000.0 - 45.0 * PI - prism([3.0, 0.0], [face, wall]);
+    grade_straight_legs(
+        "groove of radius 3, equal 1",
+        &b,
+        &[edge],
+        [0.0, 1.0, 0.0],
+        [1.0, 1.0],
+        want,
+    );
+
+    let left = make_cylinder([-3.0, 0.0, 0.0], 5.0, 10.0).unwrap();
+    let right = make_cylinder([3.0, 0.0, 0.0], 5.0, 10.0).unwrap();
+    let b = boolean(left, right, BooleanOp::Intersect).unwrap().unwrap();
+    let edge = edge_at(&b, [0.0, 4.0, 5.0]);
+    // the face toward +x is the left bar's (centre (−3, 0)), the other the right bar's
+    let east = LegSide {
+        t: [0.8, -0.6],
+        w: [-0.6, -0.8],
+        k: 0.2,
+        d: 1.0,
+    };
+    let west = LegSide {
+        t: [-0.8, -0.6],
+        w: [0.6, -0.8],
+        k: 0.2,
+        d: 1.0,
+    };
+    let lens = 2.0 * (25.0 * (0.6_f64).acos() - 12.0);
+    let want = 10.0 * lens - prism([0.0, 4.0], [east, west]);
+    grade_straight_legs(
+        "lens of two bars, equal 1",
+        &b,
+        &[edge],
+        [1.0, 0.0, 0.0],
+        [1.0, 1.0],
+        want,
+    );
+}
