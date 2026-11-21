@@ -27,13 +27,16 @@ pub struct PartsLibraryParams {
 #[schemars(deny_unknown_fields)]
 pub struct PartsInsertParams {
     /// The family, as `parts.library` lists it: socket_head_cap_screw, button_head_cap_screw,
-    /// countersunk_socket_screw, hex_bolt, hex_nut, washer, set_screw, dowel_pin, bearing, hex_bolt_gost,
-    /// socket_head_cap_screw_gost, set_screw_gost, hex_nut_gost, hex_nut_thin_gost, washer_gost,
-    /// washer_large_gost, dowel_pin_gost, hex_cap_screw_inch, hex_nut_inch, washer_sae or washer_uss.
+    /// countersunk_socket_screw, hex_bolt, hex_nut, washer, set_screw, dowel_pin, bearing,
+    /// heat_set_insert_cnc_kitchen, heat_set_insert_ruthex, hex_bolt_gost, socket_head_cap_screw_gost,
+    /// set_screw_gost, hex_nut_gost, hex_nut_thin_gost, washer_gost, washer_large_gost, dowel_pin_gost,
+    /// hex_cap_screw_inch, hex_nut_inch, washer_sae, washer_uss, heat_set_insert_cnc_kitchen_inch or
+    /// heat_set_insert_ruthex_inch.
     #[serde(deserialize_with = "family")]
     pub family: String,
     /// The size, as `parts.library` lists it: `M6`, `608` for a bearing, `1/2-13 UNC` for an
-    /// inch screw or nut, `1/2` for an inch washer.
+    /// inch screw or nut, `1/2` for an inch washer, `M3x5.7` or `#4-40 UNC x 5.7` for a heat-set
+    /// insert (its size names its length).
     #[serde(deserialize_with = "size")]
     pub size: String,
     #[serde(default, deserialize_with = "length")]
@@ -243,12 +246,14 @@ pub struct PartFamily {
     /// Its id, as `parts.insert` takes it.
     pub family: String,
     pub name: String,
-    /// The standard its sizes follow.
+    /// The standard its sizes follow, or for heat-set inserts, which have none, the maker whose
+    /// sizes they are.
     pub standard: String,
     /// `metric` or `inch`.
     pub system: String,
     /// Each size with its dimensions in mm (which depend on the family), and `default_length`
-    /// where the part has a length.
+    /// where the part has a length. A heat-set insert's size also says what the printed part
+    /// needs: `hole_diameter`, `blind_hole_depth` (the least) and `min_wall` around the hole.
     #[schemars(schema_with = "sizes_schema")]
     pub sizes: Vec<Value>,
     /// The standard lengths (mm), for the families that have one; else `null`.

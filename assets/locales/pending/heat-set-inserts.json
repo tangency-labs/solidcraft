@@ -1,0 +1,90 @@
+{
+  "en": {
+    "parts.dimension.blind_hole_depth": "Minimum blind hole depth",
+    "parts.dimension.hole_diameter": "Hole diameter",
+    "parts.dimension.length": "Length",
+    "parts.dimension.min_wall": "Minimum wall thickness",
+    "parts.dimension.thread": "Thread",
+    "parts.family.heat_set_insert_cnc_kitchen": "Heat-set insert",
+    "parts.family.heat_set_insert_cnc_kitchen_inch": "Heat-set insert (inch)",
+    "parts.family.heat_set_insert_ruthex": "Heat-set insert",
+    "parts.family.heat_set_insert_ruthex_inch": "Heat-set insert (inch)"
+  },
+  "ar": {
+    "parts.dimension.blind_hole_depth": "أدنى عمق للثقب الأعمى",
+    "parts.dimension.hole_diameter": "قطر الثقب",
+    "parts.dimension.length": "الطول",
+    "parts.dimension.min_wall": "أدنى سماكة للجدار",
+    "parts.dimension.thread": "اللولب",
+    "parts.family.heat_set_insert_cnc_kitchen": "حشوة ملولبة بالتثبيت الحراري",
+    "parts.family.heat_set_insert_cnc_kitchen_inch": "حشوة ملولبة بالتثبيت الحراري (بوصة)",
+    "parts.family.heat_set_insert_ruthex": "حشوة ملولبة بالتثبيت الحراري",
+    "parts.family.heat_set_insert_ruthex_inch": "حشوة ملولبة بالتثبيت الحراري (بوصة)"
+  },
+  "de": {
+    "parts.dimension.blind_hole_depth": "Mindesttiefe des Sacklochs",
+    "parts.dimension.hole_diameter": "Lochdurchmesser",
+    "parts.dimension.length": "Länge",
+    "parts.dimension.min_wall": "Mindestwandstärke",
+    "parts.dimension.thread": "Gewinde",
+    "parts.family.heat_set_insert_cnc_kitchen": "Gewindeeinsatz zum Einschmelzen",
+    "parts.family.heat_set_insert_cnc_kitchen_inch": "Gewindeeinsatz zum Einschmelzen (Zoll)",
+    "parts.family.heat_set_insert_ruthex": "Gewindeeinsatz zum Einschmelzen",
+    "parts.family.heat_set_insert_ruthex_inch": "Gewindeeinsatz zum Einschmelzen (Zoll)"
+  },
+  "he": {
+    "parts.dimension.blind_hole_depth": "עומק מינימלי של קדח עיוור",
+    "parts.dimension.hole_diameter": "קוטר קדח",
+    "parts.dimension.length": "אורך",
+    "parts.dimension.min_wall": "עובי דופן מינימלי",
+    "parts.dimension.thread": "הברגה",
+    "parts.family.heat_set_insert_cnc_kitchen": "תותב הברגה להטמעה בחום",
+    "parts.family.heat_set_insert_cnc_kitchen_inch": "תותב הברגה להטמעה בחום (אינץ')",
+    "parts.family.heat_set_insert_ruthex": "תותב הברגה להטמעה בחום",
+    "parts.family.heat_set_insert_ruthex_inch": "תותב הברגה להטמעה בחום (אינץ')"
+  },
+  "ja": {
+    "parts.dimension.blind_hole_depth": "止まり穴の最小深さ",
+    "parts.dimension.hole_diameter": "穴径",
+    "parts.dimension.length": "長さ",
+    "parts.dimension.min_wall": "最小肉厚",
+    "parts.dimension.thread": "ねじ",
+    "parts.family.heat_set_insert_cnc_kitchen": "熱圧入インサート",
+    "parts.family.heat_set_insert_cnc_kitchen_inch": "熱圧入インサート（インチ）",
+    "parts.family.heat_set_insert_ruthex": "熱圧入インサート",
+    "parts.family.heat_set_insert_ruthex_inch": "熱圧入インサート（インチ）"
+  },
+  "ko": {
+    "parts.dimension.blind_hole_depth": "막힌 구멍 최소 깊이",
+    "parts.dimension.hole_diameter": "구멍 지름",
+    "parts.dimension.length": "길이",
+    "parts.dimension.min_wall": "최소 벽 두께",
+    "parts.dimension.thread": "나사",
+    "parts.family.heat_set_insert_cnc_kitchen": "열압입 인서트",
+    "parts.family.heat_set_insert_cnc_kitchen_inch": "열압입 인서트 (인치)",
+    "parts.family.heat_set_insert_ruthex": "열압입 인서트",
+    "parts.family.heat_set_insert_ruthex_inch": "열압입 인서트 (인치)"
+  },
+  "vi": {
+    "parts.dimension.blind_hole_depth": "Độ sâu tối thiểu của lỗ tịt",
+    "parts.dimension.hole_diameter": "Đường kính lỗ",
+    "parts.dimension.length": "Chiều dài",
+    "parts.dimension.min_wall": "Độ dày thành tối thiểu",
+    "parts.dimension.thread": "Ren",
+    "parts.family.heat_set_insert_cnc_kitchen": "Đai ốc cấy nhiệt",
+    "parts.family.heat_set_insert_cnc_kitchen_inch": "Đai ốc cấy nhiệt (inch)",
+    "parts.family.heat_set_insert_ruthex": "Đai ốc cấy nhiệt",
+    "parts.family.heat_set_insert_ruthex_inch": "Đai ốc cấy nhiệt (inch)"
+  },
+  "zh": {
+    "parts.dimension.blind_hole_depth": "盲孔最小深度",
+    "parts.dimension.hole_diameter": "孔径",
+    "parts.dimension.length": "长度",
+    "parts.dimension.min_wall": "最小壁厚",
+    "parts.dimension.thread": "螺纹",
+    "parts.family.heat_set_insert_cnc_kitchen": "热熔螺母嵌件",
+    "parts.family.heat_set_insert_cnc_kitchen_inch": "热熔螺母嵌件（英制）",
+    "parts.family.heat_set_insert_ruthex": "热熔螺母嵌件",
+    "parts.family.heat_set_insert_ruthex_inch": "热熔螺母嵌件（英制）"
+  }
+}

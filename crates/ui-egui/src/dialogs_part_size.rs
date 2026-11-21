@@ -125,7 +125,8 @@ impl Resize {
                 .ok()
                 .is_some_and(|d| row.get("d").and_then(Value::as_f64) == Some(d)),
             "bearing" => s == part.size.trim(),
-            _ => s.eq_ignore_ascii_case(&part.size),
+            // `parts.insert` accepts a size with spaces around it and stores it as given.
+            _ => s.eq_ignore_ascii_case(part.size.trim()),
         })?;
         Some(Self { component, size, original_size: size, length: part.length, family, source: app.session.doc.clone() })
     }
@@ -486,6 +487,8 @@ mod tests {
             ("set_screw", "M5", Some(10.0)),
             ("dowel_pin", "6", Some(20.0)),
             ("bearing", "608", None),
+            ("heat_set_insert_cnc_kitchen", "M3x4 VORON", None),
+            ("heat_set_insert_ruthex", "M3x5x4", None),
             ("hex_bolt_gost", "M6", Some(20.0)),
             ("socket_head_cap_screw_gost", "M6", Some(20.0)),
             ("set_screw_gost", "M6", Some(10.0)),
@@ -498,6 +501,8 @@ mod tests {
             ("hex_nut_inch", "1/2-13 UNC", None),
             ("washer_sae", "1/2", None),
             ("washer_uss", "1/2", None),
+            ("heat_set_insert_cnc_kitchen_inch", "#4-40 UNC x 5.7", None),
+            ("heat_set_insert_ruthex_inch", "#2-56 UNC x 4", None),
         ] {
             let (app, id) = part(family, size, length);
             let k = Resize::new(&app, id).unwrap();
@@ -505,6 +510,19 @@ mod tests {
             assert_eq!(k.family.sizes[k.size].0, size);
             assert_eq!(k.length, length);
             assert!(commands(&app, &k).unwrap().is_empty(), "confirming unchanged values does not rebuild");
+        }
+    }
+
+    /// `parts.insert` takes a heat-set insert's size in any case and with spaces around it, as a
+    /// script may write it; Change Part Size still opens on that part, at the library's size.
+    #[test]
+    fn part_size_opens_on_a_size_written_with_spaces_or_another_case() {
+        for (family, written, listed) in
+            [("heat_set_insert_cnc_kitchen", " m3x4 voron ", "M3x4 VORON"), ("heat_set_insert_ruthex_inch", "#2-56 unc x 4 ", "#2-56 UNC x 4")]
+        {
+            let (app, id) = part(family, written, None);
+            let k = Resize::new(&app, id).unwrap();
+            assert_eq!(k.family.sizes[k.size].0, listed, "{family}");
         }
     }
 
