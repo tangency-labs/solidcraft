@@ -441,9 +441,19 @@ impl SolveApp {
         let (tx, rx) = std::sync::mpsc::channel();
         let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
         let watching = progress.clone();
+        // Tests hold the result until let go (`apply_gate`), so a window thread held up under load
+        // cannot find the work already in where the command should still be computing.
+        #[cfg(test)]
+        let gate = self.apply_gate.clone();
         let spawned = std::thread::Builder::new().name("history".into()).spawn(move || {
             let cancelled = watching.clone();
             let evaluated = solidcraft_engine::doc::progress::watch(watching, || ahead.evaluate(&commands).ok());
+            #[cfg(test)]
+            if let Some(gate) = gate
+                && let Ok(gate) = gate.lock()
+            {
+                let _ = gate.recv();
+            }
             // A cancelled evaluation skipped features: what it holds is not the design's.
             let _ = tx.send(evaluated.filter(|_| !cancelled.is_cancelled()));
         });

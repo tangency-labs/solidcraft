@@ -73,7 +73,7 @@ pub enum Error {
     /// folds (solidcore's `OffsetFailure::Folds`). The largest wall that works,
     /// when solidcore names one.
     WallFolds { largest: Option<f64> },
-    /// SMLib cannot build this exactly yet (a variable radius whose law has a corner).
+    /// SMLib cannot build this operation exactly.
     Unsupported,
     /// A face move whose tangent blends cannot follow the moved faces, with solidcore's reason
     /// (`SmOffsetFacesExecutive`'s refusal comment): `exact` false where the blend cannot be taken

@@ -781,7 +781,7 @@ pub struct DocumentRevisionParams {}
 /// What `document.revision` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RevisionResult {
-    /// This open design's id: kept while it stays open, another for each design started or opened.
+    /// The design's persistent identity, kept through saving and reopening.
     pub document_id: String,
     /// What the design was last seen under: a new number whenever the design, what is hidden or a
     /// component's uncaptured position changes, never on a selection or a view; from one counter

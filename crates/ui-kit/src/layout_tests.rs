@@ -398,48 +398,43 @@ fn layout_picture_choices_wrap_inside_the_indexed_row_and_keep_real_targets() {
 #[test]
 fn row_label_tooltips_override_full_label_text_only_inside_their_scope() {
     let label = "A long parameter label that must elide";
-    for tip in [None, Some("What this parameter controls")] {
-        let ctx = crate::test_support::context();
-        ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
-        let draw = |ui: &mut Ui| {
-            with_row_label_tooltip(ui, tip, |ui| row(ui, label, |ui| ui.label("Value")));
-            row(ui, "Radius", |ui| ui.label("Value"));
-        };
-        let paint = |events| {
-            raw_frame(
-                &ctx,
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0))),
-                    time: Some(ctx.cumulative_frame_nr() as f64 / 15.0),
-                    focused: true,
-                    events,
-                    ..Default::default()
-                },
-                |ui| {
-                    ui.set_width(280.0);
-                    scope(ui, draw);
-                },
-            )
-        };
+    let tip = "What this parameter controls";
+    let ctx = crate::test_support::context();
+    ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+    let draw = |ui: &mut Ui| {
+        with_row_label_tooltip(ui, tip, |ui| row(ui, label, |ui| ui.label("Value")));
+        row(ui, "Radius", |ui| ui.label("Value"));
+    };
+    let paint = |events| {
+        raw_frame(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0))),
+                time: Some(ctx.cumulative_frame_nr() as f64 / 15.0),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                ui.set_width(280.0);
+                scope(ui, draw);
+            },
+        )
+    };
+    for _ in 0..3 {
+        paint(vec![]);
+    }
+    for (name, expected) in [(label, tip), ("Radius", "Radius")] {
+        let output = paint(vec![egui::Event::PointerGone]);
+        let text = text_shapes(&output).find(|text| text.galley.text() == name).expect("painted row label");
+        let at = text.pos + text.galley.size() / 2.0;
+        paint(vec![egui::Event::PointerMoved(at)]);
         for _ in 0..3 {
             paint(vec![]);
         }
-        for (name, expected) in [(label, tip), ("Radius", Some("Radius"))] {
-            let output = paint(vec![egui::Event::PointerGone]);
-            let text = text_shapes(&output).find(|text| text.galley.text() == name).expect("painted row label");
-            let at = text.pos + text.galley.size() / 2.0;
-            paint(vec![egui::Event::PointerMoved(at)]);
-            for _ in 0..3 {
-                paint(vec![]);
-            }
-            let output = paint(vec![]);
-            if let Some(expected) = expected {
-                let count = text_shapes(&output).filter(|text| text.galley.text() == expected).count();
-                assert_eq!(count, if name == "Radius" { 2 } else { 1 }, "{name}: only the intended tooltip is painted");
-            } else {
-                assert!(egui::Tooltip::seconds_since_last_tooltip(&ctx) > 0.0, "even an elided label has no tooltip");
-            }
-        }
+        let output = paint(vec![]);
+        let count = text_shapes(&output).filter(|text| text.galley.text() == expected).count();
+        assert_eq!(count, if name == "Radius" { 2 } else { 1 }, "{name}: only the intended tooltip is painted");
     }
 }
 

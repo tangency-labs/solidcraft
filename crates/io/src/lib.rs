@@ -294,33 +294,88 @@ pub struct StepFeature {
     pub import: std::sync::Arc<solidcraft_kernel::StepImport>,
 }
 
-/// Bytes the encoding detector sees at most: the lines with 8-bit bytes, which in a STEP or IGES
-/// file are the names and descriptions.
+/// Bytes the encoding detector sees at most: the strings that are not UTF-8, which in a STEP or
+/// IGES file are names and descriptions.
 const ENCODING_SAMPLE_BYTES: usize = 64 << 10;
 
 /// STEP or IGES bytes as text. UTF-8 stays as it is. Some exporters write names in the system's
 /// legacy encoding instead of Part 21 escapes (GBK from Chinese vendors, Shift_JIS from Japanese
-/// ones): that encoding is detected from the lines holding 8-bit bytes and the file decoded with
-/// it, so a name reads `圆角` rather than U+FFFD noise (#2344). The syntax itself is ASCII in every
-/// such encoding.
+/// ones), so a name reads `圆角` rather than U+FFFD noise (#2344). The syntax itself is ASCII in
+/// every such encoding. The file is decoded string by string ([`step_pieces`]), and the legacy
+/// encoding is detected from the strings that are not UTF-8. SolidWorks writes raw GBK and raw
+/// UTF-8 strings into one file (#19750), so a UTF-8 string beside them stays UTF-8:
+///
+/// - Beside a single-byte encoding (windows-1252 and the like), every UTF-8 string does. Text in
+///   such an encoding is seldom valid UTF-8 by chance (it takes pairs such as `Ã©`).
+/// - Beside a double-byte encoding (GBK, Big5, Shift_JIS, EUC), short strings are often valid
+///   UTF-8 by chance: 930 of the 6763 GB2312 characters are (a byte C2 to DF, then one 80 to BF).
+///   And two Chinese characters in UTF-8 are valid GBK too more often than not. So only a UTF-8
+///   string that the legacy encoding cannot read shows that the file mixes encodings. Without
+///   one, every string reads in the legacy encoding, as before. With one, a string stays UTF-8
+///   when it has a three-byte character, as CJK text in UTF-8 has and chance UTF-8 seldom has.
 fn step_text(bytes: &[u8]) -> String {
     if let Ok(text) = std::str::from_utf8(bytes) {
         return text.to_owned();
     }
     let mut detector = chardetng::EncodingDetector::new();
     let mut fed = 0;
-    for line in bytes.split(|b| *b == b'\n').filter(|line| !line.is_ascii()) {
+    for piece in step_pieces(bytes).filter(|piece| std::str::from_utf8(piece).is_err()) {
         if fed >= ENCODING_SAMPLE_BYTES {
             break;
         }
-        let line = line.get(..line.len().min(ENCODING_SAMPLE_BYTES - fed)).unwrap_or_default();
-        detector.feed(line, false);
+        let piece = piece.get(..piece.len().min(ENCODING_SAMPLE_BYTES - fed)).unwrap_or_default();
+        detector.feed(piece, false);
         detector.feed(b"\n", false);
-        fed += line.len() + 1;
+        fed += piece.len() + 1;
     }
     detector.feed(&[], true);
     let encoding = detector.guess(None, false);
-    encoding.decode_without_bom_handling(bytes).0.into_owned()
+    let single_byte = encoding.is_single_byte();
+    let mixed = single_byte
+        || step_pieces(bytes).any(|piece| {
+            !piece.is_ascii() && std::str::from_utf8(piece).is_ok() && encoding.decode_without_bom_handling_and_without_replacement(piece).is_none()
+        });
+    let reads_as_utf8 = |utf8: &str| utf8.is_ascii() || (mixed && (single_byte || utf8.chars().any(|c| c.len_utf8() == 3)));
+    let mut text = String::with_capacity(bytes.len());
+    for piece in step_pieces(bytes) {
+        match std::str::from_utf8(piece) {
+            Ok(utf8) if reads_as_utf8(utf8) => text.push_str(utf8),
+            _ => text.push_str(&encoding.decode_without_bom_handling(piece).0),
+        }
+    }
+    text
+}
+
+/// `bytes` cut so that each quoted string (with its quotes) and each `/* */` comment is a piece
+/// of its own; the pieces put together are `bytes`. A `''` inside a string is a quote, and an
+/// unclosed string or comment runs to the end. No byte of a GBK, GB18030, Big5, Shift_JIS, EUC or
+/// UTF-8 character outside ASCII is `'`, `/` or `*`, so the cuts fall between characters. This
+/// only cuts the bytes for decoding; the STEP reader parses the text. IGES strings are not quoted
+/// (`12HJane O'Brien`), so an IGES file gets coarser pieces, down to one for the whole file.
+fn step_pieces(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
+    let mut rest = bytes;
+    std::iter::from_fn(move || {
+        let find =
+            |from: usize, pattern: &[u8]| rest.get(from..)?.windows(pattern.len()).position(|w| w == pattern).map(|at| from + at + pattern.len());
+        let end = match rest {
+            [] => return None,
+            [b'\'', ..] => {
+                let mut at = 1;
+                loop {
+                    match find(at, b"'") {
+                        Some(next) if rest.get(next) == Some(&b'\'') => at = next + 1,
+                        Some(next) => break next,
+                        None => break rest.len(),
+                    }
+                }
+            }
+            [b'/', b'*', ..] => find(2, b"*/").unwrap_or(rest.len()),
+            _ => (1..rest.len()).find(|&at| rest.get(at) == Some(&b'\'') || rest.get(at..at + 2) == Some(b"/*")).unwrap_or(rest.len()),
+        };
+        let (piece, after) = rest.split_at_checked(end).unwrap_or((rest, &[]));
+        rest = after;
+        Some(piece)
+    })
 }
 
 /// Read STEP bytes (`file` is the source file name) into an Import base feature. The file is
@@ -810,6 +865,75 @@ fn mesh_notes(stats: &solidcraft_kernel::PlanStats, spec: &solidcraft_kernel::Me
 /// GLB export, a format for viewing, and the mass properties.
 pub(crate) fn display_mesh_at(b: &solidcraft_kernel::Body, quality: MeshQuality) -> Result<Mesh> {
     Ok(b.mesh(&solidcraft_kernel::MeshTolerance::chord(quality.chord(b.size())))?)
+}
+
+/// The export's warning for a closed body whose welded mesh is not a clean closed surface: the
+/// sides used by one triangle only (a hole) and those used by more than two (non-manifold, as
+/// slicers report them: a defect, or parts of the body touching along an edge), with a vertex
+/// of the first such side, so a mesh a slicer would refuse or repair is never written silently.
+/// `as_f32`: the file stores its coordinates as `f32` (STL, plain 3MF), so vertices that round
+/// to the same point are one, as a reader sees them. `None` when every side is used twice.
+/// Open surfaces are not asked (their edges are meant to be used once).
+pub(crate) fn unsealed_note(positions: &[Vec3], triangles: &[[u32; 3]], as_f32: bool) -> Option<String> {
+    use std::collections::HashMap;
+    // The vertex each index is in the file: itself, or the first with the same f32 point.
+    let canon: Vec<u32> = if as_f32 {
+        let mut first: HashMap<[u32; 3], u32> = HashMap::with_capacity(positions.len());
+        positions
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let key = [p.x as f32, p.y as f32, p.z as f32].map(|c| (c + 0.0).to_bits());
+                *first.entry(key).or_insert(u32::try_from(i).unwrap_or(u32::MAX))
+            })
+            .collect()
+    } else {
+        (0..positions.len()).map(|i| u32::try_from(i).unwrap_or(u32::MAX)).collect()
+    };
+    let at = |i: u32| canon.get(i as usize).copied().unwrap_or(i);
+    let mut uses: HashMap<(u32, u32), u32> = HashMap::with_capacity(triangles.len() * 3 / 2);
+    for t in triangles {
+        let t = t.map(at);
+        if t[0] == t[1] || t[1] == t[2] || t[2] == t[0] {
+            continue;
+        }
+        for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+            *uses.entry((a.min(b), a.max(b))).or_insert(0) += 1;
+        }
+    }
+    let (mut over, mut once, mut first) = (0usize, 0usize, None::<(u32, u32)>);
+    for (&side, &n) in &uses {
+        if n == 2 {
+            continue;
+        }
+        if n > 2 {
+            over += 1
+        } else {
+            once += 1
+        }
+        // the lowest side, so the place named is the same from one run to the next
+        if first.is_none_or(|f| side < f) {
+            first = Some(side);
+        }
+    }
+    let p = positions.get(first?.0 as usize)?;
+    // (to the micrometre, a hair below zero reading 0)
+    let um = |v: f64| (v * 1e6).round() / 1e6 + 0.0;
+    let sides = |n: usize| if n == 1 { "1 side".to_string() } else { format!("{n} sides") };
+    let mut what = Vec::new();
+    if once > 0 {
+        what.push(format!("{} used by one triangle only (a hole)", sides(once)));
+    }
+    if over > 0 {
+        what.push(format!("{} used by more than two triangles (non-manifold: a defect, or parts touching along an edge)", sides(over)));
+    }
+    Some(format!(
+        "the mesh written is not a clean closed surface: {}; a vertex of the first is at ({}, {}, {}). Slicers will report or repair it",
+        what.join("; "),
+        um(p.x),
+        um(p.y),
+        um(p.z)
+    ))
 }
 
 /// Distance within which an exported mesh's vertices are welded (STL, 3MF and OBJ alike).
@@ -1372,8 +1496,11 @@ pub fn export_with_parts_noted(
             // Each body welded on its own (as for 3MF), so shared vertices are written identically
             // and the file is closed where faces meet.
             let (items, notes) = per_placed_body(&sel, |b, body| {
-                let (m, n) = body_mesh(b, body, quality)?;
+                let (m, mut n) = body_mesh(b, body, quality)?;
                 let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(&b.body));
+                if !b.body.is_surface() && !b.body.is_mesh() {
+                    n.extend(unsealed_note(&positions, &triangles, true).map(|note| format!("{}: {note}", b.name)));
+                }
                 Ok((Mesh { positions, triangles, ..Mesh::default() }, n))
             })?;
             let meshes: Vec<Mesh> = items.into_iter().map(|(_, m)| m).collect();
@@ -1420,7 +1547,7 @@ const EXPORT_THREADS: usize = 16;
 /// A body as a 3MF mesh: welded watertight (T-junctions split), coloured, and with `tagged`
 /// each triangle keeps the B-rep face it came from.
 fn mesh_object(b: &solidcraft_doc::ModelBody, body: &Placed, tagged: bool, quality: MeshQuality) -> Result<(MeshObject, Vec<String>)> {
-    let (m, notes) = body_mesh(b, body, quality)?;
+    let (m, mut notes) = body_mesh(b, body, quality)?;
     let eps = weld_eps(&b.body);
     // Faces with colours of their own tag their triangles.
     let paint = b.body.paint();
@@ -1434,6 +1561,9 @@ fn mesh_object(b: &solidcraft_doc::ModelBody, body: &Placed, tagged: bool, quali
     // and its colour and face follow from it.
     let n = u32::try_from(m.triangles.len()).map_err(|_| IoError::Invalid("mesh too large".into()))?;
     let (positions, triangles, origin) = threemf::weld_tagged(&m.positions, &m.triangles, &(0..n).collect::<Vec<_>>(), eps);
+    if !b.body.is_surface() && !b.body.is_mesh() {
+        notes.extend(unsealed_note(&positions, &triangles, !tagged).map(|note| format!("{}: {note}", b.name)));
+    }
     let face_of = |t: &u32| m.tri_face.get(*t as usize).copied().unwrap_or(0);
     let tri_looks =
         if looks.is_empty() { Vec::new() } else { origin.iter().map(|t| by_face.get(&(face_of(t) as usize)).copied().unwrap_or(0)).collect() };
@@ -1996,6 +2126,55 @@ mod tests {
     }
 
     #[test]
+    fn step_names_in_mixed_encodings() {
+        // SolidWorks writes a solid's name as raw GBK bytes and some other strings as raw UTF-8 in
+        // the same file, sometimes cut off inside a character (#19750). Each string is read in its
+        // own encoding.
+        let (_, m) = model();
+        let step = export(&m.state(), &[], Format::Step, "t").unwrap();
+        // `step` with the first string of the first `entity` replaced by `with`.
+        let with_name = |step: &[u8], entity: &str, with: &[u8]| {
+            let open = format!("{entity}('");
+            let start = step.windows(open.len()).position(|w| w == open.as_bytes()).unwrap() + open.len();
+            let end = start + step[start..].iter().position(|b| *b == b'\'').unwrap();
+            [&step[..start], with, &step[end..]].concat()
+        };
+        let solid = with_name(&step, "MANIFOLD_SOLID_BREP", &encoding_rs::GBK.encode("切除-拉伸3").0);
+        assert_eq!(step_import_feature(&solid, "t.step").unwrap().body_names, ["切除-拉伸3"], "GBK alone");
+        for (case, other) in [("a UTF-8 string", "未".as_bytes()), ("a cut-off UTF-8 string", b"\xe6\x9c".as_slice())] {
+            let bytes = with_name(&solid, "PRODUCT_DEFINITION", other);
+            assert_eq!(step_import_feature(&bytes, "t.step").unwrap().body_names, ["切除-拉伸3"], "GBK with {case}");
+        }
+        // The body name of `step` with the solid named `solid`, the product `product` and the
+        // product definition `definition` (empty: as exported).
+        let body = |solid: &[u8], product: &[u8], definition: &[u8]| {
+            let mut bytes = with_name(&step, "MANIFOLD_SOLID_BREP", solid);
+            for (entity, name) in [("PRODUCT", product), ("PRODUCT_DEFINITION", definition)] {
+                if !name.is_empty() {
+                    bytes = with_name(&bytes, entity, name);
+                }
+            }
+            step_import_feature(&bytes, "t.step").unwrap().body_names
+        };
+        let (gbk, sjis) = (|s: &str| encoding_rs::GBK.encode(s).0.into_owned(), |s: &str| encoding_rs::SHIFT_JIS.encode(s).0.into_owned());
+        // The UTF-8 string reads as UTF-8 beside the GBK one.
+        assert_eq!(body("外壳 1".as_bytes(), &gbk("切除-拉伸3"), "未".as_bytes()), ["外壳 1"], "UTF-8 beside GBK");
+        // 某 in GBK is C4 B3, also valid UTF-8 (ĳ), and stays 某 beside GBK, with or without UTF-8.
+        assert_eq!(body(&gbk("某"), &gbk("切除-拉伸3"), b""), ["某"], "a GBK name that is also UTF-8");
+        assert_eq!(body(&gbk("某"), &gbk("切除-拉伸3"), "未".as_bytes()), ["某"], "the same beside UTF-8");
+        // These are also valid UTF-8 with a three-byte character (GBK E2 8B AA 42 is ⋪B, Shift_JIS
+        // E6 84 8A 4B is 愊K). In a file with no other UTF-8 they read in the file's encoding.
+        assert_eq!(body(&gbk("鈰狟"), &gbk("切除-拉伸3"), b""), ["鈰狟"], "GBK, three-byte UTF-8 by chance");
+        assert_eq!(body(&sjis("諢階"), &sjis("ネジ穴の面取り"), b""), ["諢階"], "Shift_JIS, three-byte UTF-8 by chance");
+        // Beside a single-byte encoding, UTF-8 reads as UTF-8.
+        assert_eq!(body("Größe".as_bytes(), &encoding_rs::WINDOWS_1252.encode("Gehäuse").0, b""), ["Größe"], "UTF-8 beside windows-1252");
+        // Strings and comments are pieces of their own; a doubled quote stays inside its string.
+        let text: &[u8] = b"#1=A('it''s',/* a 'note' */'x');'open";
+        let pieces: Vec<&[u8]> = step_pieces(text).collect();
+        assert_eq!(pieces, [&b"#1=A("[..], b"'it''s'", b",", b"/* a 'note' */", b"'x'", b");", b"'open"]);
+    }
+
+    #[test]
     fn step_and_design() {
         let (doc, m) = model();
         let s = String::from_utf8(export(&m.state(), &[], Format::Step, "t").unwrap()).unwrap();
@@ -2248,6 +2427,63 @@ mod tests {
         assert!(notes[0].starts_with("face 3: smallest angle 18.50°, short of the 25° asked"), "{}", notes[0]);
         assert!(!notes[1].contains("short"), "{}", notes[1]);
         assert!(notes[1].contains("face 7") && notes[1].contains("reached") && notes[1].contains("27.25°"), "{}", notes[1]);
+    }
+
+    /// A closed mesh has no unsealed note; one missing a triangle (a hole) or with a fin on a side
+    /// (three triangles on it) has one, counting each kind and naming where. Two vertices that
+    /// round to one f32 point are one in a file that stores f32 (they would seal a side there).
+    #[test]
+    fn an_unsealed_mesh_is_noted_and_a_closed_one_is_not() {
+        let p =
+            vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 1.0, 1.0)];
+        let tetra = vec![[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]];
+        assert_eq!(unsealed_note(&p, &tetra, false), None);
+        let note = unsealed_note(&p, &tetra[..3], false).unwrap();
+        assert!(note.contains("3 sides used by one triangle only (a hole)") && !note.contains("more than two"), "{note}");
+        let mut fin = tetra.clone();
+        fin.push([1, 2, 4]);
+        let note = unsealed_note(&p, &fin, false).unwrap();
+        assert!(note.contains("1 side used by more than two triangles") && note.contains("2 sides used by one triangle only"), "{note}");
+        // vertex 5 is vertex 3 moved less than an f32 step: one point in an f32 file
+        let mut q = p.clone();
+        q.push(Vec3::new(0.0, 0.0, 1.0 + 1e-12));
+        let split = vec![[0, 2, 1], [0, 1, 3], [1, 2, 5], [2, 0, 5]];
+        assert!(unsealed_note(&q, &split, false).is_some());
+        assert_eq!(unsealed_note(&q, &split, true), None);
+    }
+
+    /// Closed bodies with curved faces (a cylinder's seam, a sphere's poles) and a box export as
+    /// STL and 3MF with no unsealed note: no false alarm where faces are meshed apart.
+    #[test]
+    fn closed_bodies_export_with_no_unsealed_note() {
+        let mut doc = Document::new("t");
+        let mut add = |kind| {
+            doc.add_feature(kind, None).unwrap();
+        };
+        add(FeatureKind::Box {
+            corner: point_expr(Vec3::ZERO),
+            length: "10".into(),
+            width: "20".into(),
+            height: "30".into(),
+            operation: Operation::NewBody,
+            centred: false,
+        });
+        add(FeatureKind::Cylinder {
+            base: point_expr(Vec3::new(40.0, 0.0, 0.0)),
+            axis: solidcraft_doc::Dir(Vec3::Z),
+            radius: "6".into(),
+            height: "15".into(),
+            operation: Operation::NewBody,
+            references: Vec::new(),
+        });
+        add(FeatureKind::Sphere { center: point_expr(Vec3::new(80.0, 0.0, 0.0)), radius: "7".into(), operation: Operation::NewBody });
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        assert_eq!(m.state().bodies.len(), 3);
+        for format in [Format::StlBinary, Format::ThreeMf, Format::ThreeMfTagged] {
+            let (_, notes) = export_with_parts_noted(&m.state(), &[], &[], format, "t", &Metadata::default(), MeshQuality::Standard, None).unwrap();
+            assert!(notes.iter().all(|n| !n.contains("clean closed surface")), "{format:?}: {notes:?}");
+        }
     }
 
     /// A 10 × 20 × 30 box exported as STL has no triangle sharper than the mesh export's smallest

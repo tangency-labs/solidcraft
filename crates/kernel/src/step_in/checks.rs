@@ -483,6 +483,14 @@ impl ImportChecks {
         ImportChecks::shared(Some(Settled { issues: Arc::new(issues), stopped: false, heals })).0
     }
 
+    /// Checks still running until the returned function ends them, finding `issues`: for
+    /// callers' tests of what happens while an import's check runs.
+    #[doc(hidden)]
+    pub fn running_for_tests() -> (ImportChecks, impl FnOnce(Vec<ImportIssue>) + Send) {
+        let (checks, shared) = ImportChecks::shared(None);
+        (checks, move |issues: Vec<ImportIssue>| shared.finish(Settled { issues: Arc::new(issues), stopped: false, heals: None }))
+    }
+
     /// Checks that have already run, with these outcomes (a read with no threads ran them in its
     /// steps).
     /// The heal of the parts they fail runs here, on this thread.

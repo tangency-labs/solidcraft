@@ -355,6 +355,17 @@ impl Quat {
     }
 }
 
+/// A ball joint's yaw, pitch and roll (radians) for a rotation vector in A's frame.
+/// Choose the equivalent Z-Y-Z branch nearest `near`, preserving its yaw at either Euler
+/// singularity. Non-finite inputs or a turn that cannot be represented return `None`.
+pub fn ball_values_from_rotation_vector(turn: Vec3, near: [f64; 3]) -> Option<[f64; 3]> {
+    if !turn.is_finite() || !near.iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let values = Quat::exp([turn.x, turn.y, turn.z]).to_zyz(near);
+    values.iter().all(|v| v.is_finite()).then_some(values)
+}
+
 /// How far (radians) a ball joint turns from the (yaw, pitch, roll) `a` to `b`: near pitch 0 a
 /// small turn changes its yaw and roll a lot.
 pub(super) fn ball_turn_between(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -637,6 +648,34 @@ mod tests {
         // turn is as far either way.
         assert!((ball_turn_between([0.0; 3], tilted) - 0.05).abs() < 1e-9, "{tilted:?}");
         assert!((ball_turn_between([0.3, 0.4, -1.2], [-2.0, -0.5, 0.7]) - ball_turn_between([-2.0, -0.5, 0.7], [0.3, 0.4, -1.2])).abs() < 1e-12);
+    }
+
+    #[test]
+    fn ball_rotation_vectors_keep_the_near_branch_and_refuse_non_finite_values() {
+        for degrees in [
+            [90.0_f64, 0.0, 0.0],
+            [-90.0, 90.0, 90.0],
+            [0.0, 90.0, 0.0],
+            [20.0, -40.0, 10.0],
+            [450.0, 30.0, -390.0],
+            [450.0, 0.0, -360.0],
+            [35.0, 180.0, -25.0],
+        ] {
+            let near = degrees.map(f64::to_radians);
+            let mut q = Quat::zyz(near).0;
+            if q[0] < 0.0 {
+                q = q.map(|v| -v);
+            }
+            let [w, x, y, z] = q;
+            let sine = x.hypot(y).hypot(z);
+            let scale = if sine < 1e-12 { 2.0 } else { 2.0 * sine.atan2(w) / sine };
+            let values = ball_values_from_rotation_vector(Vec3::new(x, y, z) * scale, near).unwrap();
+            assert!(values.iter().zip(near).all(|(a, b)| (a - b).abs() < 1e-9), "{degrees:?}: {values:?}");
+        }
+        for turn in [Vec3::new(f64::NAN, 0.0, 0.0), Vec3::new(0.0, f64::INFINITY, 0.0), Vec3::new(f64::MAX, 0.0, 0.0)] {
+            assert!(ball_values_from_rotation_vector(turn, [0.0; 3]).is_none());
+        }
+        assert!(ball_values_from_rotation_vector(Vec3::ZERO, [f64::NAN, 0.0, 0.0]).is_none());
     }
 
     /// Exercise the IK callback itself: removing sharing at this call site must fail even if
