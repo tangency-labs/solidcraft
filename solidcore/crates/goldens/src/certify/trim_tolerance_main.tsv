@@ -1,4 +1,5 @@
 # main ee673a19bf
+# topology.brep_validation: main's file without the coincidence search (WR-798): its 43 search cases and the `pairs` key gone, and the 7 generated cases that drew the search checking their bodies' pointers instead
 blend.feature_executive	9ca7c0200e1392d9
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -261,7 +262,7 @@ topology.brep_p7	96f18aab926bd38b
 topology.brep_p8	48612bd9ea9202ed
 topology.brep_p9	d9233137f377380a
 topology.brep_planar_section	a976f4fa434ae901
-topology.brep_validation	f18d2a8577796970
+topology.brep_validation	29cd4704562201a9
 topology.database_io	262a4cfd7e00c533
 topology.edge	90c4e2112d651d63
 topology.edgeuse_p1	8d285f9e2eb6f32d

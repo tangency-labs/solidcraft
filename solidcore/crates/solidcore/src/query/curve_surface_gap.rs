@@ -29,6 +29,8 @@
 //! continue, and a piece the bisection cannot close all give `None`: the gap is then not
 //! enclosed.
 
+use std::collections::{btree_map::Entry, BTreeMap};
+
 use crate::blend::fillet_section::certificate::{
     curve_derivs_over, knot_cuts, nurbs_partials_over_piece, partials_hull, EndContinuation,
     NurbsCurve,
@@ -539,6 +541,44 @@ struct Sides<'a> {
     range: [f64; 2],
 }
 
+/// The enclosure of the gap at one trim parameter.
+fn reparametrised_endpoint(sides: &Sides<'_>, s: &NetSurface, t: f64) -> Result<Option<f64>> {
+    let at = Ivl::from(t);
+    let Some(r) = psi_over(sides.psi, at, 0, sides.range)? else {
+        return Ok(None);
+    };
+    let Some(&r0) = r.first() else {
+        return Ok(None);
+    };
+    let c = curve_derivs_over(sides.curve, r0, 0, None)?;
+    let w = curve_derivs_over(sides.trim, at, 0, None)?;
+    let (Some(c0), Some(_)) = (c.first().copied(), w.first()) else {
+        return Ok(None);
+    };
+    let surf = s.partials(&w, 0, 0)?.0.at(0, 0);
+    Ok(norm_upper(minus(c0, surf)))
+}
+
+/// A split adds one new endpoint. The original endpoints are also used by its children, and
+/// neighbouring pieces share an endpoint. The rounded enclosure depends only on the parameter
+/// bits and the geometry and correspondence fixed for this cache.
+fn cached_trim_endpoint(
+    bounds: &mut BTreeMap<u64, f64>,
+    t: f64,
+    evaluate: impl FnOnce() -> Result<Option<f64>>,
+) -> Result<Option<f64>> {
+    match bounds.entry(t.to_bits()) {
+        Entry::Occupied(entry) => Ok(Some(*entry.get())),
+        Entry::Vacant(entry) => {
+            let bound = evaluate()?;
+            if let Some(value) = bound {
+                entry.insert(value);
+            }
+            Ok(bound)
+        }
+    }
+}
+
 /// The bound of one piece `[a, b]` of the trim's parameter `s` of `g = C(ψ(s)) - S(W(s))`:
 /// `(end values, second-order term)`, with `(C o ψ)' = C'(ψ) ψ'` and
 /// `(C o ψ)'' = C''(ψ) ψ'^2 + C'(ψ) ψ''`, `C`'s derivatives enclosed over the range `ψ` sweeps.
@@ -550,6 +590,7 @@ fn piece_reparametrised(
     s: &NetSurface,
     a: f64,
     b: f64,
+    mut endpoint: impl FnMut(f64) -> Result<Option<f64>>,
 ) -> Result<Option<PieceBound>> {
     let Sides {
         curve: cn,
@@ -560,20 +601,7 @@ fn piece_reparametrised(
     } = *sides;
     let mut ends = 0.0_f64;
     for t in [a, b] {
-        let at = Ivl::from(t);
-        let Some(r) = psi_over(psi, at, 0, range)? else {
-            return Ok(None);
-        };
-        let Some(&r0) = r.first() else {
-            return Ok(None);
-        };
-        let c = curve_derivs_over(cn, r0, 0, None)?;
-        let w = curve_derivs_over(wn, at, 0, None)?;
-        let (Some(c0), Some(_)) = (c.first().copied(), w.first()) else {
-            return Ok(None);
-        };
-        let surf = s.partials(&w, 0, 0)?.0.at(0, 0);
-        let Some(g) = norm_upper(minus(c0, surf)) else {
+        let Some(g) = endpoint(t)? else {
             return Ok(None);
         };
         ends = ends.max(g);
@@ -756,7 +784,7 @@ fn bisect(
     floor: f64,
     [enough, over]: [f64; 2],
     budget: Option<usize>,
-    piece: impl Fn(f64, f64) -> Result<Option<PieceBound>>,
+    mut piece: impl FnMut(f64, f64) -> Result<Option<PieceBound>>,
 ) -> Result<Option<f64>> {
     if !(lo.is_finite() && hi.is_finite() && lo < hi) || first_pieces == 0 {
         return Ok(None);
@@ -2313,7 +2341,8 @@ pub fn trim_image_gap_bound_within(
                cn: &NurbsCurve,
                net: &NetSurface,
                enough: f64,
-               cuts: &[f64]|
+               cuts: &[f64],
+               endpoints: &mut BTreeMap<u64, f64>|
      -> Result<Option<f64>> {
         let sides = Sides {
             curve: cn,
@@ -2339,7 +2368,9 @@ pub fn trim_image_gap_bound_within(
             budget,
             |a, b| {
                 k.check_cancelled(OP)?;
-                piece_reparametrised(&sides, net, a, b)
+                piece_reparametrised(&sides, net, a, b, |t| {
+                    cached_trim_endpoint(endpoints, t, || reparametrised_endpoint(&sides, net, t))
+                })
             },
         )?
         else {
@@ -2363,7 +2394,8 @@ pub fn trim_image_gap_bound_within(
     // [`PSI_MAX_POINTS`]. The first pieces are then at most [`FIRST_PIECES`] plus the cuts,
     // and no piece is cut further past [`MAX_PIECES`]: the work stays bounded.)
     let with_psi = |psi: &NurbsCurve| -> Result<Option<f64>> {
-        let mut first = run(psi, &cn, &net, enough, &[])?;
+        let mut endpoints = BTreeMap::new();
+        let mut first = run(psi, &cn, &net, enough, &[], &mut endpoints)?;
         let mut cuts: Vec<f64> = Vec::new();
         if !first.is_some_and(|g| g <= enough) {
             cuts = psi
@@ -2374,13 +2406,15 @@ pub fn trim_image_gap_bound_within(
                 .collect();
             cuts.dedup();
             if !cuts.is_empty() {
-                if let Some(g) = run(psi, &cn, &net, enough, &cuts)? {
+                if let Some(g) = run(psi, &cn, &net, enough, &cuts, &mut endpoints)? {
                     first = Some(first.map_or(g, |b| b.min(g)));
                 }
             }
         }
+        drop(endpoints);
         recentred_retry(first, [enough, over], &cn, &net, |cn, net, enough| {
-            run(psi, cn, net, enough, &cuts)
+            // Translation rounds the points in the enclosure, so it gets its own cache.
+            run(psi, cn, net, enough, &cuts, &mut BTreeMap::new())
         })
     };
     let mut bound = with_psi(&psi)?;
@@ -2720,6 +2754,51 @@ mod tests {
         fn bound(&self, curve: &Curve, trim: &Curve) -> Option<f64> {
             trim_image_gap_bound(&self.k, &self.surface, curve, trim, [0.0, 1.0], 1e-9).unwrap()
         }
+    }
+
+    #[test]
+    fn trim_subdivision_reuses_certified_endpoints() {
+        let t = Top::new();
+        let lift = 1.0 / 4096.0;
+        let (a, b) = ([0.2, 0.3], [0.7, 0.6]);
+        let knots = vec![0.0, 0.0, 1.0, 1.0];
+        let trim = Top::curve(&[t.uv(a), t.uv(b)], 1, knots.clone(), true);
+        let curve = Top::curve(&[t.point(a, lift), t.point(b, 2.0 * lift)], 1, knots, false);
+        let net = NetSurface::of(&t.k, &t.surface, &[]).unwrap().unwrap();
+        let (cn, _) = exact_curve_data(&curve, false).unwrap().unwrap();
+        let (wn, _) = exact_curve_data(&trim, true).unwrap().unwrap();
+        let range = [0.0, 1.0];
+        let psi = hermite_psi(&[(0.0, 0.0), (1.0, 1.0)], range).unwrap();
+        let sides = Sides {
+            curve: &cn,
+            trim: &wn,
+            psi: &psi,
+            curve_kinks: vec![],
+            trim_kinks: vec![],
+            range,
+        };
+        let mut endpoints = BTreeMap::new();
+        let mut evaluations = 0;
+        for [a, b] in [[0.0, 1.0], [0.0, 0.5], [0.5, 1.0], [0.0, 0.5]] {
+            let direct = piece_reparametrised(&sides, &net, a, b, |at| {
+                reparametrised_endpoint(&sides, &net, at)
+            })
+            .unwrap()
+            .unwrap();
+            let reused = piece_reparametrised(&sides, &net, a, b, |at| {
+                cached_trim_endpoint(&mut endpoints, at, || {
+                    evaluations += 1;
+                    reparametrised_endpoint(&sides, &net, at)
+                })
+            })
+            .unwrap()
+            .unwrap();
+            assert!(reused.ends >= (1.0 + b) * lift);
+            let bits = |p: PieceBound| [p.ends, p.term, p.slack, p.with_slack].map(f64::to_bits);
+            assert_eq!(bits(direct), bits(reused));
+        }
+        // The parent, two children and a repeated visit use only three distinct endpoints.
+        assert_eq!(evaluations, 3);
     }
 
     /// A trim of the edge curve lifted `lift` off the plane, the curve parameterised at another
