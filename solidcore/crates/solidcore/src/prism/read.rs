@@ -520,18 +520,15 @@ pub fn circular_boundary(
         let length = d.length();
         (length.is_finite() && length > tol).then(|| center + d * (radius / length))
     };
-    arc(
-        &spans,
-        center,
-        radius,
-        on_circle(a)?,
-        on_circle(b)?,
-        tol,
-        error,
-        work,
-        true,
-    )
-    .map(|pieces| pieces.into_iter().map(PlanarPiece::Seg).collect())
+    // Each returned end must itself be within the tolerance of its vertex: the marched end and
+    // its move onto the circle are each bounded by it, but their sum is not.
+    let (start, end) = (on_circle(a)?, on_circle(b)?);
+    let (vertex_a, vertex_b) = (to_local(frame, run.ends[0]), to_local(frame, run.ends[1]));
+    if !(start.distance(vertex_a) <= tol && end.distance(vertex_b) <= tol) {
+        return None;
+    }
+    arc(&spans, center, radius, start, end, tol, error, work, true)
+        .map(|pieces| pieces.into_iter().map(PlanarPiece::Seg).collect())
 }
 
 /// The spans (from `a` to `b`) as one circular arc about `center` of `radius`, when every span

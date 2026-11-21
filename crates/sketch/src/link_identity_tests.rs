@@ -34,6 +34,10 @@ fn named_projection_kind_changes_keep_ids_and_offset_direction_only_for_the_same
             let made = sk.offset_freeform_chain(&[(source, true)], 0.2).unwrap();
             sk.record_freeform_chain_offset(&[(source, true)], &made, 0.2).unwrap();
             let outputs = sk.freeform_chain_offsets[0].outputs.clone();
+            // A point of the sketch's own held on the saved spline (#20327 review).
+            let held = sk.add_point(Vec2::new(0.7071067811865476, 0.7071067811865476), None).unwrap();
+            let held_id = sk.points[held].id.clone();
+            sk.add_constraint(ConstraintKind::PointOnCurve { p: held, c: source }, None).unwrap();
             let arc = LinkGeom::Arc { c: Vec2::ZERO, a: Vec2::new(1., 0.), b: Vec2::new(0., 1.) };
             let (fresh, names) = match change {
                 "split" => (
@@ -56,6 +60,11 @@ fn named_projection_kind_changes_keep_ids_and_offset_direction_only_for_the_same
             if change == "same" {
                 assert!(matches!(sk.curves[sk.curve_index("s1").unwrap()].kind, CurveKind::Arc { .. }));
                 assert_eq!(sk.freeform_chain_offsets[0].sources, vec![("s1".into(), !reverse)]);
+                let (held, s1) = (sk.point_index(&held_id).unwrap(), sk.curve_index("s1").unwrap());
+                assert!(
+                    sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { p, c } if p == held && c == s1)),
+                    "a point held on the spline stays held on the arc it is again"
+                );
                 sk.refresh_offsets().unwrap();
                 assert_eq!(sk.freeform_chain_offsets[0].outputs, outputs);
             } else {

@@ -380,8 +380,10 @@ impl Sketch {
             }
         }
         let to_point = |p: usize| if old_point.contains_key(&p) { new_point(p).or_else(|| free.get(&p).copied()) } else { Some(p) };
+        // A curve whose kind changed (a spline that is an arc again) has no geometric match in
+        // `curve_map`, but a named identity says which new curve it is: constraints on it follow.
         let to_curve = |c: usize| match old_curve.get(&c) {
-            Some(k) => curve_map.get(k).map(|(j, _)| first_curve + j),
+            Some(k) => curve_map.get(k).or_else(|| identities.get(k)).map(|(j, _)| first_curve + j),
             None => Some(c),
         };
         for c in self.curves.iter_mut().filter(|c| c.link.as_deref() != Some(id)) {
