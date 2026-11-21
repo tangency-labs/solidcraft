@@ -8,9 +8,10 @@ use solidcraft_engine::geom::prelude::*;
 use crate::scenario::Harness;
 
 #[test]
-fn same_body_select_other_refresh_survives_disappearing_semantic_owners() {
+fn select_other_feedback_is_local_when_the_browser_hover_expires() {
     let mut h = Harness::new();
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Body1"})).unwrap();
+    let view = crate::documents::view_beside(&mut h.app, None, solidcraft_views::Edge::Right).unwrap();
     h.frames(4);
     let body_row = crate::browser::drawn_rows().into_iter().find(|(label, ..)| label == "Body1").unwrap().1.center();
     h.step(&json!({"move":[body_row.x,body_row.y]})).unwrap();
@@ -30,7 +31,6 @@ fn same_body_select_other_refresh_survives_disappearing_semantic_owners() {
         revision: h.app.session.revision,
         dialog: false,
         include_hidden: h.app.preferences.select_other_hidden,
-        lit_body: false,
         held: Default::default(),
     });
     let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), ..Default::default() };
@@ -41,14 +41,31 @@ fn same_body_select_other_refresh_survives_disappearing_semantic_owners() {
             // Its new body name is deliberately identical to the previous Browser contribution.
             super::hover_override(&mut h.app);
             assert_eq!(h.app.viewport.hover_bodies, ["Body1"]);
+            assert_eq!(super::hovered_body(&h.app), Some("Body1"));
             crate::semantic_content::finalize(&mut h.app, ui.ctx());
         })
         .textures_delta
         .clear();
-    assert_eq!(h.app.viewport.hover_bodies, ["Body1"], "fresh external ownership survives missing semantic owners");
+    assert!(h.app.viewport.hover_bodies.is_empty(), "the Browser's hover expires independently");
     assert!(crate::browser::drawn_rows().is_empty());
-    super::close(&mut h.app);
-    assert!(h.app.viewport.hover_bodies.is_empty(), "Select Other retains responsibility for clearing its own contribution");
+    assert!(h.app.session.selection.is_empty());
+    let focused_key = crate::viewport::highlight_key(&h.app);
+    let focused_lines = crate::viewport::build_highlight(&h.app).merged().lines.len();
+
+    h.app.viewport.card = true;
+    super::hover_override(&mut h.app);
+    assert!(super::hovered_body(&h.app).is_none());
+    let card_key = crate::viewport::highlight_key(&h.app);
+    let card_lines = crate::viewport::build_highlight(&h.app).merged().lines.len();
+    assert_ne!(card_key, focused_key);
+    assert!(card_lines < focused_lines, "the body's preview lines belong only to the focused tile");
+    h.app.viewport.card = false;
+
+    assert!(crate::documents::view_activate(&mut h.app, view));
+    assert!(!super::is_open(&h.app), "changing the focused tile closes the popup");
+    assert!(crate::documents::view_activate(&mut h.app, 1));
+    assert!(!super::is_open(&h.app), "returning to a tile must not restore its closed popup");
+    assert_eq!(crate::viewport::build_highlight(&h.app).merged().lines.len(), card_lines);
 }
 
 /// A sketch with two lines drawn on top of each other (l1, then l2), off the origin axes.

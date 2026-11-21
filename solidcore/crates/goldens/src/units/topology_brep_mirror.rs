@@ -171,6 +171,8 @@ fn surface_samples(
 /// curves too.
 pub(super) fn geometry(k: &Kernel, b: &Brep, uv_trim: bool) -> SolidResult<Vec<f64>> {
     use solidcore::topology::brep::p1;
+    #[cfg(test)]
+    crate::certify::written(b);
     let mut out = Vec::new();
     let edges = p1::edges(b, None)?;
     out.push(edges.len() as f64);

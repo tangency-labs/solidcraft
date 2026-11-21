@@ -320,18 +320,18 @@ cases!(
     pick_ambiguous,
 );
 
-/// What solidcore does not have yet is refused as not supported, after the capi's own checks.
+/// A cornered radius law builds, and a chamfer pick that misses still reports no match.
 #[test]
-fn fork_only_blends_are_not_supported_yet() {
-    let r = timed("unsupported", || {
+fn cornered_variable_fillet_builds_and_chamfer_pick_reports_no_match() {
+    let r = timed("cornered_fillet_and_missing_chamfer_edge", || {
         let b = BLOCK.core();
         // 1 to 2 and back to 1: a corner at the middle.
-        let bent = fillet_variable(&b, TOP_FRONT, TOL, [0.0, 0.0, 10.0], 1, &[0.0, 0.0, 0.5, 1.0, 1.0], &[1.0, 2.0, 1.0]).err();
+        let bent = fillet_variable(&b, TOP_FRONT, TOL, [0.0, 0.0, 10.0], 1, &[0.0, 0.0, 0.5, 1.0, 1.0], &[1.0, 2.0, 1.0]).map(|_| ());
         // A pick that fails still says so first.
         let far = chamfer_sides(&b, &[[100.0; 3]], TOL, 2.0, ChamferSecond::Distance(3.0), [0.0, 0.0, 1.0]).err();
         (bent, far)
     });
-    assert_eq!(r.0, Some(Error::Unsupported));
+    assert_eq!(r.0, Ok(()));
     assert_eq!(r.1, Some(Error::NoMatch { point: 0 }));
 }
 

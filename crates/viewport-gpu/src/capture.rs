@@ -250,7 +250,13 @@ impl Capturer {
         // is built), so the previous picture's highlight would show in this one.
         frame.hl_key = state.key;
         frame.hl_slot = Arc::new(Mutex::new(Some(highlight.unwrap_or_default())));
-        self.picture(state, &frame, scene.background.unwrap_or(BACKGROUND), [width, height])
+        let result = self.picture(state, &frame, scene.background.unwrap_or(BACKGROUND), [width, height]);
+        // Each capture uploads its own scene. Release the picture's buffers after readback or
+        // error so a long-lived capturer keeps its pipelines without holding the last mesh.
+        if let Some(gpu) = &mut state.gpu {
+            gpu.renderer.retain_views(&[]);
+        }
+        result
     }
 
     /// `frame` drawn over the `background` gradient, read back as straight RGBA, and what it
@@ -769,6 +775,23 @@ mod tests {
             single.rgba(&Scene::default(), &Camera::default(), 32, 24).unwrap();
             assert_eq!(single.state.lock().map(|s| s.resolve_clears).ok(), Some(0));
         }
+    }
+
+    #[test]
+    fn a_capture_releases_its_scene_uploads_after_readback() {
+        let capturer = match Capturer::headless(crate::test_env::policy()) {
+            Ok(capturer) => capturer,
+            Err(error) if crate::test_env::skip_unless_required(crate::test_env::required(), &error) => return,
+            Err(error) => panic!("required GPU unavailable: {error}"),
+        };
+        let scene = Scene { meshes: vec![SceneMesh::solid(sheet(), Rgb(200, 30, 30))], ..Default::default() };
+        let cam = Camera::default();
+        let first = capturer.rgba_with_stats(&scene, &cam, 32, 24).unwrap();
+        assert!(first.1.triangles > 0, "the capture drew the mesh");
+        assert_eq!(capturer.rgba_with_stats(&scene, &cam, 32, 24).unwrap(), first);
+        let state = capturer.state.lock().unwrap();
+        let renderer = &state.gpu.as_ref().unwrap().renderer;
+        assert_eq!(renderer.uploads().geometry, 0, "the renderer released the model scene after readback");
     }
 
     /// A closed capturer has dropped its device and everything it drew with, and a picture asked

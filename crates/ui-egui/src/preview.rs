@@ -143,6 +143,8 @@ pub struct Built {
     /// ones it moved (a motion link's follower, a joint a closed loop moved). Empty when the
     /// preview posed no joint.
     pub joints: Vec<solidcraft_engine::schema::joints::ReachedJoint>,
+    /// The last view command from a previewed plugin run, applied with its first drawn result.
+    pub plugin_view: Option<Value>,
 }
 
 /// The solved joint pose a preview shows: the joints it posed, with what posed them and the
@@ -217,6 +219,8 @@ pub struct PreviewState {
     pub busy: bool,
     /// Extent of the preview scene.
     pub bounds: Aabb3,
+    /// The view command belonging to the currently shown plugin result.
+    plugin_view: Option<Value>,
     /// Time the last preview took (ms), for `ui.inspect`.
     pub ms: f64,
     started: f64,
@@ -348,6 +352,7 @@ impl PreviewState {
         self.running_stream_key = None;
         self.shown_key = None;
         self.error = None;
+        self.plugin_view = None;
         self.applied = None;
         self.stopped = None;
         self.placed = None;
@@ -426,6 +431,7 @@ impl PreviewState {
                 self.replaced = b.replaced;
                 self.outlines = b.outlines;
                 self.bounds = b.bounds;
+                self.plugin_view = b.plugin_view;
                 self.active = true;
                 self.error = b.error;
                 self.applied = b.applied;
@@ -463,6 +469,7 @@ impl PreviewState {
             // them (a 1 mm extrusion still drawn at 0 mm), so nothing is drawn.
             Err(e) => {
                 self.hide_scene();
+                self.plugin_view = None;
                 self.sketches.clear();
                 self.error = Some(e);
                 self.applied = None;
@@ -668,6 +675,12 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     colors.tint_new = app.preferences.preview_tint_new_faces;
     colors.cut_tint = app.preferences.cut_preview_tint;
     let mut key = job_key(&cmds, app.session.revision, colors);
+    // A reopened dialog must not inherit a result (or an in-flight run) from the old dialog.
+    if let Some((id, _, _)) = &plugin {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (key, id).hash(&mut h);
+        key = h.finish();
+    }
     // A Move is drawn as a layer where the view allows it (`move_preview::layered`), and built
     // where it lands where not: when the view changes between the two, it is computed again.
     if crate::move_preview::is_move(&cmds) {
@@ -708,6 +721,15 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
         spawn(&mut app.preview, key, scratch, cmds, colors, tool, Arc::new(Progress::default()));
     }
     app.preview.busy = app.preview.running.is_some();
+    // Both worker results and the web's synchronous results are ready before their first draw.
+    if app.preview.shown_key == Some(key)
+        && app.preview.active
+        && app.preview.error.is_none()
+        && let Some((id, _, _)) = &plugin
+    {
+        let view = app.preview.plugin_view.take();
+        crate::plugin_menu::preview_drawn(app, *id, view);
+    }
     if app.preview.busy {
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }
@@ -1001,6 +1023,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         placed: None,
         layer: None,
         joints: Vec::new(),
+        plugin_view: None,
     }
 }
 
@@ -1054,6 +1077,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         placed: None,
         layer: None,
         joints: Vec::new(),
+        plugin_view: None,
     }
 }
 
@@ -1155,20 +1179,24 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
     }
     for a in &after.bodies {
         let am = a.mesh();
-        let old = before.body(&a.name).map(|b| b.mesh());
+        let old_body = before.body(&a.name);
+        // A placement changes no surface: compare the shared source geometry before asking
+        // which faces differ in world coordinates (or reading the source's old history).
+        let moved = old_body.is_some_and(|b| a.display_moved_from(b).is_some());
+        let old = old_body.map(|b| b.mesh());
         if old.as_ref().is_some_and(|bm| same(bm, &am)) {
             continue;
         }
         // Material removed from a body (a hole, a pocket): its new faces also show through the
         // body in the cut colour, so the cut is seen from any side. A combine's cut shows its
         // tools instead, as ghosts that bodies in front of them hide.
-        let cut = c.cut_tint && combine.is_none() && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
+        let cut = !moved && c.cut_tint && combine.is_none() && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
         // Which of the body's faces the feature made, asked only when something is drawn from
         // the answer: the cut above, and the tint the preference offers. A changed body is
         // otherwise drawn as itself, so a preview looks like the model and nothing has to be
         // worked out face by face.
         let new_face: Vec<bool> = match &old {
-            Some(bm) if cut || tint_new => {
+            Some(bm) if !moved && (cut || tint_new) => {
                 let mut new = new_faces(&am, am.tri_face.iter().max().map_or(0, |m| *m as usize + 1), bm);
                 // The kernel recorded which faces the operation that made this body generated,
                 // i.e. has no face of an input under it. The two answers are taken together
@@ -1321,6 +1349,7 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
         placed: None,
         layer: None,
         joints: Vec::new(),
+        plugin_view: None,
     }
 }
 
@@ -1756,6 +1785,7 @@ mod tests {
             placed: None,
             layer: None,
             joints: Vec::new(),
+            plugin_view: None,
         }
     }
 

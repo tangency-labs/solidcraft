@@ -35,7 +35,7 @@ use solidcore::topology::{edge, loopuse};
 use solidcore::{EdgeId, FaceId, Point2, Vec3};
 use solidcore_record::brep::Brep as Record;
 
-use solidcore_ops::sweep::{extrude, Curve, DraftCorner, SweepFrame};
+use solidcore_ops::sweep::{extrude, loft_to_point, Curve, DraftCorner, SweepFrame};
 use solidcore_ops::{
     blend, blend_ordered, blend_with, chamfer_sides, chamfer_sides_facing, edge_faces_along,
     edges_share_wedge, fillet_variable, fillet_variable_from, make_box, make_cone, make_cylinder,
@@ -3590,6 +3590,106 @@ fn a_round_ending_on_a_ridge_names_the_largest_ball_along_its_end_faces_crossing
     assert!(b.volume(1e-12).unwrap() > before);
 }
 
+/// The volume of the tetrahedron `v` with every edge rounded `r` and a ball at every corner:
+/// the inner tetrahedron (`v` drawn in about its incentre until its faces are `r` nearer,
+/// by `k = (rho - r) / rho`, rho the inradius `3 V / S`) with the ball of radius `r` rolled
+/// all over it, by Steiner's formula `V k^3 + S k^2 r + M k r^2 + 4 pi r^3 / 3`, where
+/// `M` is half the sum over the edges of each edge's length times the angle between its
+/// faces' outward normals.
+fn tetrahedron_rounded_all_over(v: &[Vec3; 4], r: f64) -> f64 {
+    let centre = (v[0] + v[1] + v[2] + v[3]) * 0.25;
+    let volume = (v[1] - v[0]).cross(v[2] - v[0]).dot(v[3] - v[0]).abs() / 6.0;
+    let faces = [[0, 1, 2], [0, 1, 3], [1, 2, 3], [2, 0, 3]];
+    let mut normals = Vec::new();
+    let mut area = 0.0;
+    for f in faces {
+        let n = (v[f[1]] - v[f[0]]).cross(v[f[2]] - v[f[0]]);
+        area += 0.5 * n.length();
+        let n = n.unitize().unwrap();
+        normals.push(if n.dot(v[f[0]] - centre) < 0.0 { -n } else { n });
+    }
+    let mut mean = 0.0;
+    for i in 0..4 {
+        for j in i + 1..4 {
+            let shared: Vec<usize> = faces[i]
+                .iter()
+                .copied()
+                .filter(|a| faces[j].contains(a))
+                .collect();
+            let turn = normals[i].dot(normals[j]).clamp(-1.0, 1.0).acos();
+            mean += 0.5 * (v[shared[0]] - v[shared[1]]).length() * turn;
+        }
+    }
+    let k = (3.0 * volume / area - r) / (3.0 * volume / area);
+    volume * k.powi(3) + area * k * k * r + mean * k * r * r + 4.0 * PI * r.powi(3) / 3.0
+}
+
+/// A tetrahedron's corner is sharp: its three faces' normals stand far apart, and so do the
+/// contacts of the ball that three equal rounds end on there. The Ball's face was one patch
+/// of the sphere between those contacts, which holds only up to a regular tetrahedron's
+/// corner (normals arccos(-1/3) apart). At a sharper one, and at the regular one itself, the
+/// three rounds failed with "Corner Edge Computation Failure"; the triangle is now three
+/// patches about the ball's point facing the vertex.
+///
+/// The tetrahedron on the triangle of circumradius 16.3 with its apex 16.33 above the
+/// middle (its base corners' normals 116.5, 116.5 and 101.6 degrees apart, its apex's
+/// 101.6 each, which was one patch already), and the regular one on the same base (apex
+/// `16.3 sqrt 2` up): the three edges at a base corner build, and every edge rounded at 0.1
+/// and at 2 gives the closed form of a solid rounded all over
+/// (`tetrahedron_rounded_all_over`). Its faces are the 4 faces, the 6 rounds, and at each
+/// corner one patch where the triangle is one (the first one's apex) and three where it is
+/// not: 20 and 22.
+#[test]
+fn every_edge_of_a_tetrahedron_rounds_to_its_closed_form() {
+    rig_fixes();
+    let base: [[f64; 2]; 3] = [-30.0_f64, 90.0, 210.0].map(|a| {
+        let a = a.to_radians();
+        [16.3 * a.cos(), 16.3 * a.sin()]
+    });
+    for (height, faces) in [(16.33, 20), (16.3 * 2.0_f64.sqrt(), 22)] {
+        let apex = [0.0, 0.0, height];
+        let section: Vec<Curve> = (0..3)
+            .map(|i| Curve::Line {
+                start: [base[i][0], base[i][1], 0.0],
+                end: [base[(i + 1) % 3][0], base[(i + 1) % 3][1], 0.0],
+            })
+            .collect();
+        let tetrahedron = || loft_to_point(&section, apex).unwrap();
+        let v = [
+            Vec3::new(base[0][0], base[0][1], 0.0),
+            Vec3::new(base[1][0], base[1][1], 0.0),
+            Vec3::new(base[2][0], base[2][1], 0.0),
+            Vec3::new(0.0, 0.0, height),
+        ];
+        let middle = |i: usize, j: usize| {
+            let m = (v[i] + v[j]) * 0.5;
+            [m.x, m.y, m.z]
+        };
+        // the three edges at the base corner 0: two base edges and the edge to the apex
+        let b = tetrahedron();
+        let corner = [(0, 1), (0, 2), (0, 3)].map(|(i, j)| nearest_edge(&b, middle(i, j)));
+        blend(&b, Blend::Round, &corner, &[2.0], &[], Corners::Filled).unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid());
+        for r in [0.1, 2.0] {
+            let b = tetrahedron();
+            let whole = b.volume(1e-12).unwrap();
+            let sharp = (v[1] - v[0]).cross(v[2] - v[0]).dot(v[3] - v[0]).abs() / 6.0;
+            assert!(rel(whole, sharp) < 1e-12, "{whole} {sharp}");
+            let all = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]
+                .map(|(i, j)| nearest_edge(&b, middle(i, j)));
+            blend(&b, Blend::Round, &all, &[r], &[], Corners::Filled).unwrap();
+            assert!(b.check(CheckLevel::All).unwrap().is_valid());
+            let want = tetrahedron_rounded_all_over(&v, r);
+            let got = b.volume(1e-12).unwrap();
+            assert!(
+                rel(got, want) < 1e-11,
+                "height {height}, r {r}: {got} {want}"
+            );
+            assert_eq!(b.counts().unwrap()[0], faces, "height {height}, r {r}");
+        }
+    }
+}
+
 /// In the Roll-over's second pass only the corner at V (where the concave chain meets the
 /// cliff) looks for its rail ends across the cliff's tangent seam: on the stair twin's chain
 /// (E1 rounded first), the corner at V = (0, 0, -1) carries the Roll-over's search and the
@@ -4047,6 +4147,98 @@ fn both_flat_face_loops_of_a_notched_half_torus_round() {
     let expected = 18892.19338975647;
     let actual = body.volume(1e-10).unwrap();
     assert!(rel(actual, expected) < 1e-8, "{actual} vs {expected}");
+}
+
+/// The volume a round of radius `r` (`chamfer: false`) or a chamfer of distance `r` takes off
+/// one rim of the upper half of a torus (ring radius `a`, tube radius `b`) cut by the plane
+/// through its axis' middle: the outer rim for `side` 1, the inner for -1. The blend is the
+/// revolved meridian blend of the tube's circle and the cut line, which meet square. Both are
+/// fixed by where the circle's and the line's offsets by `r` meet, the centre (x, r) with
+/// |x - a| = sqrt((b - r)^2 - r^2): the round is the circle about it, and the chamfer joins its
+/// feet, (x, 0) on the line and the point of the tube's circle along the centre's direction from
+/// the tube's centre. By Pappus, the volume is 2 pi times the first moment about the axis of the
+/// region between the blend and the corner, integrated over z (the substitution
+/// z = h (1 - cos t) / 2 takes the square roots' ends smoothly).
+fn half_torus_rim_blend_takes(a: f64, b: f64, r: f64, side: f64, chamfer: bool) -> f64 {
+    let x = a + side * ((b - r).powi(2) - r * r).sqrt();
+    let foot = [a + (x - a) * b / (b - r), r * b / (b - r)];
+    let n = 20_000;
+    let mut moment = 0.0;
+    for i in 0..n {
+        let t = (f64::from(i) + 0.5) * PI / f64::from(n);
+        let z = foot[1] * (1.0 - t.cos()) / 2.0;
+        let dz = foot[1] * t.sin() / 2.0 * PI / f64::from(n);
+        let tube = a + side * (b * b - z * z).sqrt();
+        let blend = if chamfer {
+            x + (foot[0] - x) * z / foot[1]
+        } else {
+            x + side * (r * r - (z - r).powi(2)).max(0.0).sqrt()
+        };
+        moment += (tube * tube - blend * blend).abs() / 2.0 * dz;
+    }
+    2.0 * PI * moment
+}
+
+/// #18270: a round or a chamfer of both rims of a half torus's flat face took minutes on a
+/// Ø300 / Ø80 ring and did not finish at Ø3000 / Ø800 or on the Ø1000 / Ø1 ring, the time
+/// growing with the edges' length in tolerances; the rims are circles, so the blend is exact
+/// (#19190). Each ring is the issue's (blend size 0.05 x the tube's diameter) and takes the
+/// closed-form volume.
+#[test]
+fn both_flat_face_rims_of_a_large_half_torus_blend_to_their_closed_forms() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::revolve;
+    use solidcore_ops::BooleanOp;
+
+    all_fixes();
+    for (a, b) in [(150.0, 40.0), (1500.0, 400.0), (500.0, 0.5)] {
+        let r = 0.1 * b;
+        for kind in [Blend::Round, Blend::Chamfer] {
+            let ring = revolve(
+                &[Curve::Arc {
+                    center: [a, 0.0, 0.0],
+                    axis: [0.0, -1.0, 0.0],
+                    reference: [1.0, 0.0, 0.0],
+                    radius: b,
+                    start: 0.0,
+                    end: 2.0 * PI,
+                }],
+                [0.0; 3],
+                [0.0, 0.0, 1.0],
+                2.0 * PI,
+                true,
+            )
+            .unwrap();
+            let reach = a + b + 1.0;
+            let below = make_box(
+                [-reach, -reach, -b - 1.0],
+                [2.0 * reach, 2.0 * reach, b + 1.0],
+            )
+            .unwrap();
+            let body = boolean(ring, below, BooleanOp::Subtract).unwrap().unwrap();
+            let picks: Vec<_> = [[0.0, -(a + b), 0.0], [0.0, -(a - b), 0.0]]
+                .into_iter()
+                .map(|point| nearest_edge(&body, point))
+                .collect();
+            let edges = tangent_chain(&body, None, &picks, &[], 2.0 * PI / 180.0)
+                .unwrap()
+                .members;
+            let result = blend(&body, kind, &edges, &[r], &[], Corners::Filled).unwrap();
+            assert!(result.dropped.iter().all(|dropped| !dropped));
+            let report = body.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{}", report.text);
+            assert_eq!(body.solid_count().unwrap(), 1);
+            let chamfer = kind == Blend::Chamfer;
+            let expected = PI * PI * a * b * b
+                - half_torus_rim_blend_takes(a, b, r, 1.0, chamfer)
+                - half_torus_rim_blend_takes(a, b, r, -1.0, chamfer);
+            let actual = volume(&body);
+            assert!(
+                rel(actual, expected) < 1e-6,
+                "{kind:?} a {a} b {b}: {actual} vs {expected}"
+            );
+        }
+    }
 }
 
 /// A revolved r8 corner, clipped on x = +/-10. Its torus support must survive the
@@ -4934,6 +5126,154 @@ fn a_round_on_a_revolved_end_cap_that_closes_to_a_cusp_builds() {
     assert!(report.is_valid(), "{report}");
     let added = volume(&b) - before;
     assert!((0.0360..=0.0381).contains(&added), "{added}");
+}
+
+/// A round of radius `r` in the corner `c` of a meridian section (x, rho), between the
+/// rays from `c` along the unit directions `d1` and `d2` (the side of the angle less than pi
+/// between them): its area and the rho of its centroid. The region is the kite of `c`, the
+/// two feet at `r cot(phi / 2)` along the rays and the ball's centre, less the ball's sector
+/// between the feet, of angle `pi - phi`.
+fn corner_round(c: [f64; 2], d1: [f64; 2], d2: [f64; 2], r: f64) -> (f64, f64) {
+    let phi = (d1[0] * d2[0] + d1[1] * d2[1]).acos();
+    let t = r / (phi / 2.0).tan();
+    let bisector = [d1[0] + d2[0], d1[1] + d2[1]];
+    let length = bisector[0].hypot(bisector[1]);
+    let b = [bisector[0] / length, bisector[1] / length];
+    let reach = r / (phi / 2.0).sin();
+    let centre = c[1] + b[1] * reach;
+    let foot = |d: [f64; 2]| c[1] + d[1] * t;
+    // each of the kite's two triangles c, foot, centre has area r t / 2
+    let kite = r * t;
+    let kite_rho = (2.0 * c[1] + foot(d1) + foot(d2) + 2.0 * centre) / 6.0;
+    let half = (PI - phi) / 2.0;
+    let sector = r * r * half;
+    // a sector's centroid lies 2 r sin(half) / (3 half) from its centre, towards c
+    let sector_rho = centre - b[1] * 2.0 * r * half.sin() / (3.0 * half);
+    let area = kite - sector;
+    (area, (kite * kite_rho - sector * sector_rho) / area)
+}
+
+/// #19724: a frustum about x (radius 24 at x = 0, 36 at x = 48) with a 12 degree rib on it,
+/// whose side leaves the cone at (18, 28.5) 15 degrees off the cone's straight side, the edge
+/// there rounded 1 mm: the body SolidCraft wrote after that round
+/// (`tests/data/issue_19724_cone_rib_round.bodies.json.gz`), read here with that round as its
+/// net. The rib's two sides are cones of one 12 degree arc span each, whose NURBS forms carry
+/// the rounding of the conversions that made them: their own numbers prove them, the cones
+/// read off their control rows do not (`AnalyticSupport::build`'s parametrisation test).
+///
+/// Rounding the rib's top edge makes an exact round of the `Circle` class between the two
+/// sides, its supports the sides' surfaces. On main its record labelled them cones, and
+/// reading it back refused the body ("a support's analytic surface is not its NURBS form's
+/// parametrisation"), as SolidCraft's measuring did after the issue's round. A support is
+/// now labelled only where reading derives it back from its form, and the body reads back
+/// with its round.
+///
+/// The volume before is the frustum's, the rib's (its triangle turned 12 degrees about x, its
+/// base on the cone's side) and the 15 degree round's (the corner between the cone's side and
+/// the rib's, filled to the ball, turned 12 degrees), each by Pappus; the top round takes off
+/// the rib's 75 degree corner at its top, turned 12 degrees. It ends on the rib's two end
+/// planes as the 15 degree round does: one face more, three edges (the top edge split in two,
+/// an arc on each end plane) and two vertices.
+#[test]
+fn a_round_on_a_short_rib_s_cones_reads_back_from_its_record() {
+    use solidcore::topology::face::p2 as face;
+    use solidcore_record::brep::Surface as RecordSurface;
+    rig_fixes();
+    let case = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../solidcore/tests/data/issue_19724_cone_rib_round.bodies.json.gz"
+    );
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(case).unwrap())
+        .read_to_string(&mut text)
+        .unwrap();
+    let records: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let mut record: Record = serde_json::from_value(records["b1"].clone()).unwrap();
+    // the 15 degree round as its net (its definition's supports were written the way this
+    // test shows refused)
+    let mut nets = 0;
+    for f in &mut record.faces {
+        if matches!(f.surface, RecordSurface::Blend { .. }) {
+            f.surface = f.nurbs.take().unwrap();
+            nets += 1;
+        }
+    }
+    assert_eq!(nets, 1);
+    let counts = [
+        record.faces.len(),
+        record.edges.len(),
+        record.vertices.len(),
+    ];
+    assert_eq!(counts, [8, 15, 10]);
+    let b = Body::from_record(&record, true).unwrap().0;
+    assert_eq!(b.counts().unwrap(), counts);
+    // exact rounds on the body itself: a copy through its `.smb` bytes keeps no definitions
+    let exact_rounds = |b: &Body| {
+        let brep = b.kernel();
+        brep.face_list()
+            .iter()
+            .filter(|&&f| {
+                let s = face::surface(&brep, f).unwrap().unwrap();
+                matches!(s.procedural_blend(), Some(BlendRef::Exact { .. }))
+            })
+            .count()
+    };
+    assert_eq!(exact_rounds(&b), 0);
+
+    let theta = 12.0_f64.to_radians();
+    let frustum = PI * 48.0 / 3.0 * (24.0 * 24.0 + 24.0 * 36.0 + 36.0 * 36.0);
+    let p: [[f64; 2]; 3] = [
+        [18.0, 28.5],
+        [26.743_129, 33.353_628],
+        [27.370_857, 30.842_714],
+    ];
+    let cross =
+        (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
+    let rib = cross.abs() / 2.0 * (p[0][1] + p[1][1] + p[2][1]) / 3.0 * theta;
+    let unit = |d: [f64; 2]| {
+        let l = d[0].hypot(d[1]);
+        [d[0] / l, d[1] / l]
+    };
+    let towards = |from: [f64; 2], to: [f64; 2]| unit([to[0] - from[0], to[1] - from[1]]);
+    let along_cone = unit([1.0, 0.25]);
+    let up_rib = towards(p[0], p[1]);
+    let turn = (along_cone[0] * up_rib[0] + along_cone[1] * up_rib[1]).acos();
+    assert!(
+        (turn.to_degrees() - 15.0).abs() < 1e-5,
+        "{}",
+        turn.to_degrees()
+    );
+    // the 15 degree round fills the corner outside both sides: between the cone's side back
+    // towards x = 0 and the rib's side
+    let (area, rho) = corner_round(p[0], [-along_cone[0], -along_cone[1]], up_rib, 1.0);
+    let want = frustum + rib + area * rho * theta;
+    // the volume's accuracy, and the rib's base 2.5e-7 inside the cone at its far end
+    let accuracy = 1e-10;
+    let tol = 2.0 * accuracy * want + 1e-5;
+    let before = b.volume(accuracy).unwrap();
+    assert!((before - want).abs() <= tol, "{before} {want}");
+
+    // the rib's top edge, the arc through its top corner
+    let top = nearest_edge(&b, [p[1][0], p[1][1], 0.0]);
+    let r = 0.5;
+    blend(&b, Blend::Round, &[top], &[r], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("the rib's top does not round: {e:?}"));
+    assert_eq!(b.counts().unwrap(), [9, 18, 12]);
+    assert_eq!(exact_rounds(&b), 1);
+    let (area, rho) = corner_round(p[1], towards(p[1], p[0]), towards(p[1], p[2]), r);
+    let want = want - area * rho * theta;
+
+    let (written, _) = b.to_record().unwrap();
+    let back = Body::from_record(&written, true)
+        .unwrap_or_else(|e| panic!("the body does not read back: {e:?}"))
+        .0;
+    assert_eq!(back.counts().unwrap(), [9, 18, 12]);
+    assert!(back.is_manifold_solid().unwrap());
+    let report = back.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    assert_eq!(exact_rounds(&back), 1);
+    let after = back.volume(accuracy).unwrap();
+    assert!((after - want).abs() <= tol, "{after} {want}");
 }
 
 /// #17616: the issue's sheet-metal part, 3 thick with 2 mm bends: a 90 x 75 base, a three-bend

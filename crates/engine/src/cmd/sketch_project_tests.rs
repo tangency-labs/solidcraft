@@ -657,6 +657,101 @@ fn intersect_cuts_a_body_with_the_sketch_plane() {
     assert_eq!(si["profiles"].as_array().unwrap().len(), 1);
 }
 
+/// The linked points of an Intersect with edge `at` of `body` on the plane through `origin`
+/// spanned by `x` and `y`, in that plane's coordinates.
+fn intersected_edge(s: &mut Session, body: &str, at: [f64; 3], (origin, x, y): ([f64; 3], [f64; 3], [f64; 3])) -> Vec<[f64; 2]> {
+    run(s, "sketch.create", json!({"plane":{"origin":origin,"x_dir":x,"y_dir":y}}));
+    run(s, "sketch.intersect", json!({"refs":[{"edge":at,"body":body}]}));
+    let si = inspect(s);
+    let points = si["points"].as_array().unwrap().iter().filter(|p| !p["link"].is_null());
+    let out = points.map(|p| [p["at"][0].as_f64().unwrap(), p["at"][1].as_f64().unwrap()]).collect();
+    run(s, "sketch.finish", json!({}));
+    out
+}
+
+/// Intersect put a curved edge's points where its display mesh crosses the plane, on a chord:
+/// 0.011 mm inside a radius-10 circle (#19867). A plane through the circle's seam still gives
+/// its two points once each.
+#[test]
+fn intersecting_a_circular_edge_puts_its_points_on_the_circle() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":10,"height":10,"body_name":"C"}));
+    // The plane X = 3 meets the top circle at Y = ±√(10² − 3²).
+    let mut got = intersected_edge(&mut s, "C", [0.0, 10.0, 10.0], ([3.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]));
+    got.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    assert_eq!(got.len(), 2, "{got:?}");
+    for (p, y) in got.iter().zip([-(91f64.sqrt()), 91f64.sqrt()]) {
+        assert!((p[0] - y).abs() < 1e-9 && (p[1] - 10.0).abs() < 1e-9, "{got:?}");
+    }
+    // The plane Y = 0 meets it at X = ±10, one of them where the closed edge starts and ends.
+    let mut got = intersected_edge(&mut s, "C", [0.0, 10.0, 10.0], ([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]));
+    got.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    assert_eq!(got.len(), 2, "{got:?}");
+    for (p, x) in got.iter().zip([-10.0, 10.0]) {
+        assert!((p[0] - x).abs() < 1e-9 && (p[1] - 10.0).abs() < 1e-9, "{got:?}");
+    }
+}
+
+/// An edge where two cylinders meet has no closed form: Intersect crosses the spline the kernel
+/// holds for it, so the points lie on both cylinders within the edge's tolerance.
+#[test]
+fn intersecting_where_two_cylinders_meet_puts_the_points_on_both() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":10,"height":40,"body_name":"C"}));
+    run(&mut s, "solid.cylinder", json!({"radius":5,"height":40,"base":[-20,0,20],"axis":"X","operation":"join","targets":["C"]}));
+    // The kernel holds each meeting curve as a spline within its edge's tolerance of both cylinders.
+    let state = s.model.state();
+    let meeting: Vec<f64> = state
+        .body("C")
+        .unwrap()
+        .body
+        .record()
+        .edges
+        .iter()
+        .filter(|e| matches!(e.curve, solidcore_record::brep::Curve::Spline { .. }))
+        .map(|e| e.tolerance)
+        .collect();
+    assert_eq!(meeting.len(), 2, "the cylinders meet along two splines");
+    let tol = meeting.iter().fold(0.0, |m: f64, t| m.max(*t));
+    drop(state);
+    // The plane Y = 3 meets the meeting curve on the +X side at X = √(10² − 3²), Z = 20 ± √(5² − 3²).
+    let mut got = intersected_edge(&mut s, "C", [91f64.sqrt(), 3.0, 24.0], ([0.0, 3.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]));
+    got.sort_by(|a, b| a[1].total_cmp(&b[1]));
+    assert_eq!(got.len(), 2, "{got:?}");
+    for (p, z) in got.iter().zip([16.0, 24.0]) {
+        let (on_upright, on_cross) = ((p[0].powi(2) + 9.0).sqrt() - 10.0, (9.0 + (p[1] - 20.0).powi(2)).sqrt() - 5.0);
+        assert!(on_upright.abs() <= tol && on_cross.abs() <= tol && (p[1] - z).abs() < 0.5, "{got:?}, edge tolerance {tol}");
+    }
+}
+
+/// An edge lying in the sketch plane meets it along its whole length: Intersect gives the edge
+/// itself (the old mesh section gave one end of a straight edge and every mesh vertex of a circle).
+#[test]
+fn intersecting_an_edge_lying_in_the_plane_gives_the_edge() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Post"}));
+    run(&mut s, "solid.cylinder", json!({"radius":10,"height":10,"base":[100,0,0],"body_name":"C"}));
+    for (body, at, height) in [("Post", [20.0, 0.0, 20.0], 20), ("C", [100.0, 10.0, 10.0], 10)] {
+        run(&mut s, "sketch.create", json!({"plane":"XY","offset":height}));
+        let r = run(&mut s, "sketch.intersect", json!({"refs":[{"edge":at,"body":body}]}));
+        let si = inspect(&mut s);
+        let curves = linked_curves(&si);
+        assert_eq!(curves.len(), 1, "{body}: {r} {si}");
+        let c = &curves[0];
+        if body == "Post" {
+            assert_eq!(c["type"], "line", "{c}");
+            let mut xs = [c["start_at"][0].as_f64().unwrap(), c["end_at"][0].as_f64().unwrap()];
+            xs.sort_by(f64::total_cmp);
+            assert!((xs[0]).abs() < 1e-9 && (xs[1] - 40.0).abs() < 1e-9, "{c}");
+            assert!(c["start_at"][1].as_f64().unwrap().abs() < 1e-9 && c["end_at"][1].as_f64().unwrap().abs() < 1e-9, "{c}");
+        } else {
+            assert_eq!(c["type"], "circle", "{c}");
+            assert!((c["radius"].as_f64().unwrap() - 10.0).abs() < 1e-9, "{c}");
+        }
+        run(&mut s, "sketch.finish", json!({}));
+    }
+}
+
 #[test]
 fn break_link_makes_normal_geometry() {
     let mut s = Session::default();

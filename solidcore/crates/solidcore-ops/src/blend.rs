@@ -40,7 +40,8 @@ use std::collections::{HashMap, HashSet};
 
 use solidcore::blend::band_room::law_fits_band;
 use solidcore::blend::blend_corner::rollover::{
-    concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, RollOver,
+    chain_off_seams, concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, seams_back,
+    RollOver,
 };
 use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
@@ -1279,6 +1280,63 @@ fn overflow_first(
     Ok(Ok(fresh))
 }
 
+/// What the Roll-over's second pass asked on its own is asked ([`chain_alone`]).
+#[derive(Clone, Copy)]
+struct Alone<'a> {
+    /// The concave chain.
+    chain: &'a [EdgeId],
+    /// Its sizes, one an edge.
+    sizes: &'a [f64],
+    /// Its vertices V ([`concave_chain_ends`], never empty).
+    ends: &'a [VertexId],
+    section: fn(&[f64]) -> Section<'_>,
+    turn: Turn,
+}
+
+/// The Roll-over's second pass asked on its own (#10876, #19476), on `copy`, a copy of the
+/// untouched `input`: the chain is taken off its cylinders' seams where the round has no whole
+/// section at a seam's vertex ([`chain_off_seams`], #19505), the pass is run on what is then
+/// the chain, the seams are put back ([`seams_back`]) and the body is finished, taken only
+/// where it is proved a solid as the input is.
+fn chain_alone(
+    k: &mut Kernel,
+    mut copy: Brep,
+    input: &Brep,
+    alone: Alone<'_>,
+    expect: Expect,
+    contract: Contract,
+) -> solidcore::Result<Result<Brep>> {
+    let (chain, sizes, ends, turned) =
+        match chain_off_seams(k, &mut copy, alone.chain, alone.sizes)? {
+            Some(off) => {
+                let ends = concave_chain_ends(k, &mut copy, &off.edges)?;
+                (off.edges, off.sizes, ends, off.turned)
+            }
+            None => (
+                alone.chain.to_vec(),
+                alone.sizes.to_vec(),
+                alone.ends.to_vec(),
+                Vec::new(),
+            ),
+        };
+    if ends.is_empty() {
+        return Ok(Err(Error::Unsupported(
+            "a roll-over's concave chain that does not meet the cliff",
+        )));
+    }
+    let section = alone.section;
+    let p = Pass {
+        roll_over: RollOverStep::Concave(&ends),
+        ..together(&chain, section(&sizes), alone.turn, &[], contract)
+    };
+    if let Err(e) = pass_or_refuse(k, &mut copy, p)? {
+        return Ok(Err(e));
+    }
+    seams_back(k, &mut copy, &turned)?;
+    let proved = proved_as_given(k, input, expect, contract)?;
+    finish(k, copy, proved)
+}
+
 /// The blend corner's Roll-over (#10876, `solidcore::blend::blend_corner::rollover`), which the
 /// first call's corners step refused in `b` at the vertices of `roll_overs` (`edges` the asked
 /// edges, `sizes` theirs): on `fresh` (the untouched input, a copy in `b`'s order), every asked
@@ -1843,18 +1901,14 @@ fn blend_on_body(
                 _ => Vec::new(),
             };
             if let (Some(mapped), false) = (mapped, ends.is_empty()) {
-                let p = Pass {
-                    roll_over: RollOverStep::Concave(&ends),
-                    ..together(&mapped, section(each), turn, &[], contract)
+                let alone = Alone {
+                    chain: &mapped,
+                    sizes: each,
+                    ends: &ends,
+                    section,
+                    turn,
                 };
-                match pass_or_refuse(k, &mut copy, p).and_then(|r| match r {
-                    // taken only where it is proved a solid as the input is
-                    Ok(_) => {
-                        let proved = proved_as_given(k, input, expect, contract)?;
-                        finish(k, copy, proved)
-                    }
-                    Err(e) => Ok(Err(e)),
-                }) {
+                match chain_alone(k, copy, input, alone, expect, contract) {
                     Ok(Ok(rolled)) => {
                         *b = rolled;
                         return Ok(Ok(Blended {
