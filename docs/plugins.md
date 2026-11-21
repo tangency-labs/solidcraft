@@ -923,12 +923,13 @@ saved back untouched when the plugin is missing, and opening a design never fail
 is missing.
 
 A command plugin keeps its own data there with the `storage@0.1` capability and a data format
-number. Its manifest lists the `storage.*` commands it calls, like any other command:
+number. Its manifest lists the `storage.*` commands it calls, like any other command, and it
+reads and writes its files' bytes through the `storage` interface (`plugin.wit`), never as text:
 
 ```json
-{"id": "gears", "name": "Gears", "version": "1.4.0", "capabilities": ["commands@0.1", "storage@0.1"],
+{"id": "gears", "name": "Gears", "version": "1.4.0", "capabilities": ["commands@0.2", "storage@0.1"],
  "runtime": {"module": "gears.wasm", "entries": ["make"], "data_format": 3,
-   "commands": ["solid.box", "storage.get", "storage.patch", "storage.put_blob"]}}
+   "commands": ["solid.box", "storage.get", "storage.patch"]}}
 ```
 
 - **What it keeps.** One main JSON document (`data.json`, at most 16 MiB) and files of its own
@@ -936,23 +937,17 @@ number. Its manifest lists the `storage.*` commands it calls, like any other com
   256 MiB per plugin per design, and all plugin data in a design at most 256 MiB.
   SolidCraft writes `meta.json` beside them: the plugin's id, name and version and the data's format.
 - **Reading.** `storage.get` returns the main document, the data's `format`, the running plugin's
-  `plugin_format`, `read_only` and the list of files. To read a large main document within the
-  plugin host's 1 MiB result limit, supply `offset` or `len`: `storage.get {offset: 0}` returns
-  `{plugin, data, offset, bytes}`, with `data` holding base64 of up to 512 KiB of the saved JSON
-  bytes and `bytes` the whole document size. Advance `offset` by the number of decoded bytes,
-  concatenate the decoded parts, then parse the JSON. `len` defaults to 524288 and accepts
-  1 through 524288; `offset` defaults to 0. Parts omit metadata and the file list. Past the end,
-  or without a saved document, `data` is empty (`bytes` is 0 without a document). Documents
-  still accept up to 16 MiB; plugins should use parts when the full reply could exceed 1 MiB.
-  `storage.get_blob {name, offset?, len?}`
-  returns up to 512 KiB of a file, base64, so a reply stays inside a plugin's 1 MiB. Inside a
-  plugin's run these reach only that plugin's own data. Agents and scripts read any plugin's
-  data by naming it: `storage.get {"plugin": "gears"}`.
+  `plugin_format`, `read_only` and the list of files with their sizes. A main document larger
+  than the 1 MiB a command result may be is read in parts as its saved JSON bytes:
+  `storage.get-document(plugin?, offset, len)`, up to 1 MiB each; join them and parse. A file is
+  read the same way, `storage.get-blob(plugin?, name, offset, len)`, its bytes as they are; past
+  its end the bytes are empty. Inside a plugin's run these reach only that plugin's own data.
+  Agents and scripts read any plugin's data by naming it: `storage.get {"plugin": "gears"}`.
 - **Writing.** `storage.set {document}`, `storage.patch {patch}` (an RFC 7396 merge patch),
-  `storage.put_blob {name, data, cache?, append?}` (base64; `append` writes a large file in
-  parts) and `storage.delete_blob {name}` change only the running plugin's own data, and only
-  from its run: the whole run is one undo step, and a failed run changes nothing. Called from
-  anywhere else they are refused. A `read` entry can't call them.
+  `storage.put-blob(name, data, cache, append)` (the file's bytes, up to 1 MiB a call; `append`
+  writes a large file in parts) and `storage.delete_blob {name}` change only the running plugin's
+  own data, and only from its run: the whole run is one undo step, and a failed run changes
+  nothing. Called from anywhere else they are refused. A `read` entry can't call them.
 - **Formats.** Every write saves the data in the plugin's `data_format`. When `storage.get` says
   `format` is lower than `plugin_format`, the data is from an older version of the plugin: the
   plugin reads it, converts it and writes it back, which saves it in the new format as one undo

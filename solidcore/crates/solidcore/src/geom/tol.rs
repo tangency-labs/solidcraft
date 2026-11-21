@@ -25,6 +25,7 @@
 //! | [`xsect_tol_3d_from_zones`]            | `SmTol::GetXSectTol3d(const SmZoneTol3d&, const SmZoneTol3d&)` |
 //! | [`contact_tol_3d`]                     | not upstream (WR-787, #15429): when circles a hair less than tangent touch |
 //! | [`within_contact_tol`]                 | not upstream: the one reading of a contact at the tolerance, shared by every contact site |
+//! | [`coincidence_tol_3d`], [`coincidence_reach_3d`], [`within_coincidence_tol`] | not upstream: when two places are one, the larger of the contact tolerance and the two zone tolerances |
 //! | [`ang_tol_rad`]                        | `SmTol::GetAngTolRad()`                        |
 //! | [`model_size_estimate`]                | `SmTol::GetModelSizeEstimate()`                |
 //! | [`context_model_size_estimate`]        | `SmTol::GetModelSizeEstimate(const SmContext&)` |
@@ -474,7 +475,72 @@ pub fn contact_tol_3d(k: &Kernel) -> f64 {
 /// tolerance by more than that is past it at every site.
 #[must_use]
 pub fn within_contact_tol(distance: f64, contact: f64, size: f64) -> bool {
-    distance <= contact + gamma(32) * size.abs()
+    distance <= contact + rounding_of_copies(size)
+}
+
+/// How far a distance read off two copies of the same geometry can stand past the true
+/// one by rounding alone: `γ_32` of `size`, the largest coordinate a point of either copy
+/// has ([`within_contact_tol`] derives it). Shared by the contact and the coincidence rule,
+/// so both read a length at their tolerance the same way.
+fn rounding_of_copies(size: f64) -> f64 {
+    gamma(32) * size.abs()
+}
+
+/// The tolerance within which two places coincide (are one place), for two objects with
+/// zone tolerances `zone1` and `zone2`: the larger of the contact tolerance
+/// ([`contact_tol_3d`]) and the two zone tolerances. Not upstream: one rule for every site
+/// that decides whether two places are one (a point on a side of a surface's domain, and,
+/// as the sites move to it, a curve along an edge and two points one vertex), in place of
+/// the intersection tolerance, the two zone tolerances' sum, that upstream reads there.
+///
+/// A zone tolerance is how far an object's stored geometry may stand from the place it
+/// stands for: within it of an object, a place is on the object, by that object's own
+/// statement. Two places farther apart than both objects' zone tolerances are on neither
+/// by either object's statement, so nothing makes them one; the sum makes them one up to
+/// twice the tolerance, where neither object says so. The contact rule already reads two
+/// circles that far into each other (past the contact tolerance, the system zone
+/// tolerance) as two crossings, two places; at the sum, an edge and a curve 1.5e-5 beside
+/// it are one place where the tolerance is 1e-5, and a groove that deep cut into a block
+/// comes out as no groove at all while a site still reads the sum (docs/booleans.md §10,
+/// the coincidence rule in migration). With every site on the larger
+/// tolerance, a place is decided once: within the larger of the two objects' tolerances
+/// (and never under the contact tolerance, so a contact and a coincidence agree), one;
+/// past it, two. An object whose tolerance an earlier operation grew keeps it: whatever
+/// lies within it is on it. Read by [`within_coincidence_tol`], at the tolerance or a
+/// rounding of the copies past it, as [`within_contact_tol`] reads a contact.
+#[must_use]
+pub fn coincidence_tol_3d(k: &Kernel, zone1: f64, zone2: f64) -> f64 {
+    // A NaN zone tolerance stays NaN (`f64::max` would pass over it and let the other
+    // tolerance stand): no distance is within it, so an object whose tolerance is unknown
+    // is never made one with another place, as the two tolerances' sum read it before
+    if zone1.is_nan() || zone2.is_nan() {
+        return f64::NAN;
+    }
+    contact_tol_3d(k).max(zone1).max(zone2)
+}
+
+/// The largest distance at which two places coincide ([`coincidence_tol_3d`]): the
+/// tolerance and the rounding of the copies past it, `size` the largest coordinate of
+/// either place, as [`within_contact_tol`] reads a contact. For a site that compares in
+/// its own measure (a band mapped onto a surface's parameters) rather than a distance.
+#[must_use]
+pub fn coincidence_reach_3d(k: &Kernel, zone1: f64, zone2: f64, size: f64) -> f64 {
+    coincidence_tol_3d(k, zone1, zone2) + rounding_of_copies(size)
+}
+
+/// Whether two places `distance` apart, on objects with zone tolerances `zone1` and
+/// `zone2`, coincide: `distance` is within [`coincidence_reach_3d`]. Not upstream: the
+/// one reading of the coincidence rule ([`coincidence_tol_3d`]). A NaN distance, or a NaN
+/// zone tolerance, is apart.
+#[must_use]
+pub fn within_coincidence_tol(
+    k: &Kernel,
+    distance: f64,
+    zone1: f64,
+    zone2: f64,
+    size: f64,
+) -> bool {
+    distance <= coincidence_reach_3d(k, zone1, zone2, size)
 }
 
 /// The system angle tolerance in radians (`SmTol::GetAngTolRad()`, `SM_ANG_TOL_RAD`).
@@ -1618,6 +1684,35 @@ mod tests {
             SmallTopoType::from_code(3).map(SmallTopoType::code),
             Some(3)
         );
+    }
+
+    #[test]
+    fn coincidence_is_the_larger_tolerance_and_a_nan_tolerance_is_apart() {
+        let k = Kernel::default();
+        let contact = contact_tol_3d(&k);
+        assert_eq!(coincidence_tol_3d(&k, 0.0, 0.0), contact);
+        assert_eq!(
+            coincidence_tol_3d(&k, 4.0 * contact, contact),
+            4.0 * contact
+        );
+        assert!(within_coincidence_tol(&k, contact, 0.0, 0.0, 1.0));
+        assert!(!within_coincidence_tol(
+            &k,
+            2.0 * contact,
+            contact,
+            contact,
+            1.0
+        ));
+        // an unknown tolerance never makes two places one, however near they are
+        for (zone1, zone2) in [
+            (f64::NAN, contact),
+            (contact, f64::NAN),
+            (f64::NAN, f64::NAN),
+        ] {
+            assert!(coincidence_tol_3d(&k, zone1, zone2).is_nan());
+            assert!(!within_coincidence_tol(&k, 0.0, zone1, zone2, 1.0));
+        }
+        assert!(!within_coincidence_tol(&k, f64::NAN, contact, contact, 1.0));
     }
 }
 
