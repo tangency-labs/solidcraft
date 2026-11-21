@@ -66,7 +66,8 @@ pub struct MeshSectionStackParams {
     #[serde(default)]
     pub from: Option<LengthExpr>,
     /// The last section's distance from `plane` along its normal. Default: where the body ends
-    /// along the normal. `from` and `to` may be given either way round.
+    /// along the normal. `from` and `to` may be given either way round; a range wholly outside
+    /// the body is refused.
     #[serde(default)]
     pub to: Option<LengthExpr>,
     /// The distance between sections, more than 0.
@@ -76,12 +77,16 @@ pub struct MeshSectionStackParams {
     #[serde(default)]
     pub max_sections: Option<u32>,
     /// Extrude each section's material (its outlines, not the holes in them) to the next
-    /// plane, the last one a spacing on but never past the body, each slab a new body named
-    /// after the mesh body (`<body> slab 1`, …). They are not joined: neighbouring slabs meet on
-    /// outlines fitted section by section, which a boolean would have to merge. Default: false.
+    /// plane, whether or not that plane met the mesh, the last one a spacing on but never past
+    /// the body, each slab a new body named after the mesh body (`<body> slab 1`, …). They are
+    /// not joined: neighbouring slabs meet on outlines fitted section by section, which a boolean
+    /// would have to merge. A slab that cannot be built is listed in `skipped`, with why, and
+    /// the rest stand. Default: false.
     #[serde(default)]
     pub extrude: Option<bool>,
-    /// The start of the sketches' names, at most 100 characters. Default: `Section`.
+    /// The start of the sketches' names, at most 100 characters. Default: `Section`. When a
+    /// sketch of the stack would take a name already in the design, the stack starts its names
+    /// with the first of `<name> 2`, `<name> 3`… that is free.
     #[serde(default)]
     pub name: Option<String>,
 }

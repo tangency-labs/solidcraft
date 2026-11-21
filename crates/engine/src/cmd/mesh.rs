@@ -51,23 +51,16 @@ const SAME: f64 = 1e-9;
 const DEFAULT_MAX_SECTIONS: u32 = 100;
 const MOST_SECTIONS: u32 = 1000;
 const MAX_NAME: usize = 100;
-/// How Fit Curves to Mesh Section refuses a plane its body doesn't cross
-/// (`solidcraft_doc::project`'s message for a link that resolves to nothing).
-const MISSES_THE_MESH: &str = "projects to nothing on this sketch plane";
 
-/// A length in mm for a name or a message: at most three decimals, without trailing zeros.
-fn mm(v: f64) -> String {
-    let t = format!("{v:.3}");
-    let t = t.trim_end_matches('0').trim_end_matches('.');
-    if t == "-0" { "0".to_string() } else { t.to_string() }
-}
+use super::board_import::mm;
 
 /// The planes' distances along the normal: `from` and `to` (either way round), each kept inside
 /// `[reach[0] + STACK_EDGE, reach[1] - STACK_EDGE]`, then every `step` from the lower one, the
 /// upper one always included. Each distance is `lo + k * step`, never a running sum. A last
 /// multiple closer to the end than [`STACK_HAIR`] (or a tenth of the step) moves onto the end
 /// instead of adding a plane a hair from it, and ends that close are one plane. More than `most`
-/// planes is refused before any is made, naming the spacing that fits.
+/// planes is refused before any is made, naming the spacing that fits; so are ends wholly
+/// outside the reach, which would cut none of the body.
 pub(crate) fn stack_offsets(from: f64, to: f64, step: f64, reach: [f64; 2], most: usize) -> std::result::Result<Vec<f64>, String> {
     let [low, high] = reach;
     if ![from, to, step, low, high].iter().all(|v| v.is_finite()) {
@@ -79,6 +72,15 @@ pub(crate) fn stack_offsets(from: f64, to: f64, step: f64, reach: [f64; 2], most
     let (inner_low, inner_high) = (low + STACK_EDGE, high - STACK_EDGE);
     if inner_high < inner_low {
         return Err(format!("the body is only {} mm thick along the plane's normal: there is nothing to cut", mm(high - low)));
+    }
+    if from.max(to) < low || from.min(to) > high {
+        return Err(format!(
+            "`from` and `to` ({} mm to {} mm) lie outside the mesh body, which reaches from {} mm to {} mm along the plane's normal",
+            mm(from.min(to)),
+            mm(from.max(to)),
+            mm(low),
+            mm(high)
+        ));
     }
     let keep = |v: f64| v.max(inner_low).min(inner_high);
     let (lo, hi) = if from <= to { (keep(from), keep(to)) } else { (keep(to), keep(from)) };
@@ -165,43 +167,11 @@ pub(crate) fn stack_extrudes(ats: &[f64], step: f64, far: f64) -> Vec<Option<f64
     out
 }
 
-/// The outer curve ids of a sketch's material profiles: those at an even depth, where a profile
-/// whose outer loop is another profile's hole is one level deeper than that profile (a disc
-/// filling a hole is depth 1; an island inside the hole, depth 2). Ids only: which loop lies in
-/// which is the profile finder's.
+/// The outer curve ids of a sketch's material profiles, by the rule an extrude takes when it is
+/// given none ([`super::features::material_profiles`]). Read from the sketch, not the model: the
+/// model is evaluated once the whole stack is made.
 fn material_outlines(profiles: &[solidcraft_sketch::Profile]) -> Vec<Vec<String>> {
-    let sorted = |ids: &[String]| {
-        let mut v = ids.to_vec();
-        v.sort();
-        v
-    };
-    let outers: Vec<Vec<String>> = profiles.iter().map(|p| sorted(&p.outer_curves)).collect();
-    // The profile whose hole each profile's outer loop is, if any.
-    let parent: Vec<Option<usize>> = outers
-        .iter()
-        .enumerate()
-        .map(|(i, outer)| profiles.iter().enumerate().position(|(j, q)| j != i && q.hole_curves.iter().any(|h| sorted(h) == *outer)))
-        .collect();
-    profiles
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| {
-            let mut depth = 0usize;
-            let mut at = *i;
-            // At most one step per profile: a cycle (which the finder never makes) ends the walk.
-            for _ in 0..profiles.len() {
-                match parent.get(at).copied().flatten() {
-                    Some(up) => {
-                        depth += 1;
-                        at = up;
-                    }
-                    None => break,
-                }
-            }
-            depth.is_multiple_of(2)
-        })
-        .map(|(_, p)| p.outer_curves.clone())
-        .collect()
+    super::features::material_profiles(profiles).into_iter().map(|p| p.outer_curves.clone()).collect()
 }
 
 /// A length key: `None` when absent, else its value in mm, refused when it doesn't evaluate as a
@@ -232,14 +202,14 @@ fn section_stack(s: &mut Session, p: &Value) -> Result<Value> {
     // are in, as Fit Curves reads it.
     let owner = s.doc.model_body_component(source);
     let at_top = s.active_component == 0 && s.active_occurrence_path.is_none();
-    let bounds = if owner == s.active_component {
-        source.body.exact_bounds()
+    let measured: solidcraft_kernel::Body = if owner == s.active_component {
+        source.body.clone()
     } else if at_top && s.doc.component_within(owner, s.active_component) {
         let world = s.world_state()?;
         let placed: Vec<&solidcraft_doc::ModelBody> =
             world.bodies.iter().filter(|b| s.own_body_name(&b.name).as_deref() == Some(body.as_str())).collect();
         match placed.as_slice() {
-            [one] => one.body.exact_bounds(),
+            [one] => one.body.clone(),
             _ => {
                 let name = s.doc.components.iter().find(|c| c.id == owner).map(|c| c.name.as_str()).unwrap_or("its component");
                 return Err(bad(cmd, format!("the mesh body is placed {} times: activate component '{name}' to cut it there", placed.len())));
@@ -251,8 +221,8 @@ fn section_stack(s: &mut Session, p: &Value) -> Result<Value> {
             cmd,
             format!("activate component '{name}' (or the design's top level) first: the sections are sketched in the active component"),
         ));
-    }
-    .map_err(|e| bad(cmd, format!("the mesh body's size: {e}")))?;
+    };
+    let bounds = measured.exact_bounds().map_err(|e| bad(cmd, format!("the mesh body's size: {e}")))?;
     let plane_value = match p.get("plane") {
         None | Some(Value::Null) => return Err(bad(cmd, "`plane` is required: the first plane of the stack, as sketch.create takes it")),
         Some(v) => v.clone(),
@@ -288,25 +258,60 @@ fn section_stack(s: &mut Session, p: &Value) -> Result<Value> {
     let to = length(s, p, "to", cmd)?.unwrap_or(reach[1]);
     let offsets = stack_offsets(from, to, spacing, reach, most as usize).map_err(|why| bad(cmd, why))?;
     let n = offsets.len();
+    // Each triangle's span along the normal. A plane crosses the mesh where a triangle has
+    // corners both sides of it, and meets it where triangles touch it from both sides (a plane
+    // on a ring of vertices, or on a shoulder's face). The body's box reaches further than the
+    // mesh along a slanted normal, and a mesh of separate pieces has gaps between them.
+    let normal = plane.normal();
+    let (positions, triangles) = measured.triangle_mesh().ok_or_else(|| bad(cmd, "select a mesh body"))?;
+    let height = |k: u32| {
+        positions.get(k as usize).map(|q| (q.x - plane.origin.x) * normal.x + (q.y - plane.origin.y) * normal.y + (q.z - plane.origin.z) * normal.z)
+    };
+    let spans: Vec<(f64, f64)> = triangles
+        .iter()
+        .filter_map(|t| {
+            let (a, b, c) = (height(t[0])?, height(t[1])?, height(t[2])?);
+            Some((a.min(b).min(c), a.max(b).max(c)))
+        })
+        .collect();
+    let hair = (reach[1] - reach[0]).abs().max(1.0) * SAME;
+    let crosses = |at: f64| spans.iter().any(|(lo, hi)| *lo < at - hair && *hi > at + hair);
+    let meets = |at: f64| {
+        spans.iter().any(|(lo, hi)| *lo <= at + hair && *hi > at + hair) && spans.iter().any(|(lo, hi)| *hi >= at - hair && *lo < at - hair)
+    };
+    // The sketches' names, the first of `name`, `name 2`, `name 3`… none of whose names is taken
+    // (a second stack of the same planes).
+    let label = |prefix: &str, i: usize, at: f64| format!("{prefix} {} of {n} ({} mm)", i + 1, mm(at));
+    let taken = |prefix: &str| offsets.iter().enumerate().any(|(i, at)| s.doc.features.iter().any(|f| f.name == label(prefix, i, *at)));
+    let prefix = std::iter::once(name.clone())
+        .chain((2..=MOST_SECTIONS as usize).map(|k| format!("{name} {k}")))
+        .find(|p| !taken(p))
+        .ok_or_else(|| bad(cmd, format!("every name from `{name}` to `{name} {MOST_SECTIONS}` is taken: give the stack another `name`")))?;
 
-    let mut made: Vec<(u64, f64)> = Vec::new();
+    // The sketches made, with the index of their plane.
+    let mut made: Vec<(u64, usize)> = Vec::new();
     let mut empty = 0usize;
     for (i, at) in offsets.iter().enumerate() {
-        let sketch_name = format!("{name} {} of {n} ({} mm)", i + 1, mm(*at));
+        if !meets(*at) {
+            empty += 1;
+            continue;
+        }
+        let sketch_name = label(&prefix, i, *at);
         let created =
             run(s, "sketch.create", &json!({"plane": plane_value, "offset": format!("{at} mm"), "project_edges": false, "name": sketch_name}))?;
         let sketch = created.get("sketch").and_then(Value::as_u64).ok_or_else(|| EngineError::Other("a section's sketch was not made".into()))?;
         let fitted = match run(s, "sketch.fit_curves_to_section", &json!({ "body": body })) {
             Ok(r) => r.get("curves").and_then(Value::as_array).is_some_and(|c| !c.is_empty()),
-            // Fit Curves refuses a plane the mesh doesn't cross: here that plane is only empty.
-            Err(e) if e.to_string().contains(MISSES_THE_MESH) => false,
+            // No triangle crosses this plane: it only touches the mesh where two pieces meet,
+            // which may have no section.
+            Err(_) if !crosses(*at) => false,
             Err(e) => return Err(e),
         };
         run(s, "sketch.finish", &json!({}))?;
         if fitted {
-            made.push((sketch, *at));
+            made.push((sketch, i));
         } else {
-            // The plane missed the mesh: no sketch for it.
+            // The plane only touched the mesh: no sketch for it.
             run(s, "timeline.delete", &json!({ "feature": sketch }))?;
             empty += 1;
         }
@@ -319,10 +324,11 @@ fn section_stack(s: &mut Session, p: &Value) -> Result<Value> {
     let mut bodies: Vec<String> = Vec::new();
     let mut skipped = Vec::new();
     if extrude {
-        let ats: Vec<f64> = made.iter().map(|(_, at)| *at).collect();
-        let heights = stack_extrudes(&ats, spacing, reach[1] - STACK_EDGE);
-        for ((sketch, _), height) in made.iter().zip(heights) {
-            let Some(height) = height else {
+        // Every plane's slab, empty planes included: a section's slab runs to the next plane,
+        // whether or not that plane met the mesh, never on through the gap after it.
+        let heights = stack_extrudes(&offsets, spacing, reach[1] - STACK_EDGE);
+        for (sketch, i) in &made {
+            let Some(height) = heights.get(*i).copied().flatten() else {
                 skipped.push(SkippedSection { sketch: *sketch, reason: "the stack's end: drawn, not extruded".into() });
                 continue;
             };
@@ -340,7 +346,17 @@ fn section_stack(s: &mut Session, p: &Value) -> Result<Value> {
             // merge nearly coincident faces, which fails on ordinary parts.
             call["operation"] = json!("new");
             call["body_name"] = json!(format!("{body} slab {}", slabs.len() + 1));
-            let r = run(s, "solid.extrude", &call)?;
+            // A slab that cannot be built (a scan's outline crossing itself) is left out, with
+            // why: the other sections and slabs stand.
+            let (doc, model) = (s.doc.clone(), s.model.clone());
+            let r = match run(s, "solid.extrude", &call) {
+                Ok(r) => r,
+                Err(e) => {
+                    (s.doc, s.model) = (doc, model);
+                    skipped.push(SkippedSection { sketch: *sketch, reason: format!("its slab could not be built: {e}") });
+                    continue;
+                }
+            };
             for b in r.get("created_bodies").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
                 bodies.push(b.to_string());
             }
@@ -353,7 +369,7 @@ fn section_stack(s: &mut Session, p: &Value) -> Result<Value> {
     let mut features: Vec<u64> = made.iter().map(|(id, _)| *id).collect();
     features.extend(slabs.iter().copied());
     features.sort_unstable();
-    let folder_name: String = format!("{name} stack ({body})").chars().take(128).collect();
+    let folder_name: String = format!("{prefix} stack ({body})").chars().take(128).collect();
     let grouped = run(s, "timeline.group", &json!({"name": folder_name, "features": features}))?;
     let reply = MeshSectionStackResult {
         sketches: made.iter().map(|(id, _)| *id).collect(),
@@ -370,8 +386,7 @@ fn section_stack(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Another command, run inside this one (one undo step for the whole stack).
 fn run(s: &mut Session, id: &str, p: &Value) -> Result<Value> {
-    let spec = super::find_command(id).ok_or_else(|| EngineError::Other(format!("`{id}` is missing")))?;
-    (spec.run)(s, p)
+    super::find_command(id).ok_or_else(|| EngineError::Other(format!("`{id}` is missing")))?.run_nested(s, p)
 }
 
 /// The mesh body to convert: `body`, else the one selected body.

@@ -4180,8 +4180,10 @@ fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
 }
 
 /// #2698: Section Stack opens a dialog that takes the selected mesh body and a plane, and OK
-/// sketches a section on each plane (the 10 x 20 x 30 mm box every 10 mm up from XY, just inside
-/// its ends: 0.001, 10.001, 20.001 and 29.999) without changing the mesh.
+/// sketches a section on each plane (the 10 x 20 x 30 mm box every 10 mm up from XY, from 0 to 30
+/// kept just inside its ends: 0.001, 10.001, 20.001 and 29.999) without changing the mesh. With
+/// dialog values remembered, the next one keeps the spacing but not the ends, which belonged to
+/// that body: it spans its body again.
 #[test]
 fn section_stack_takes_the_mesh_and_a_plane_and_sketches_each_section() {
     use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
@@ -4203,6 +4205,7 @@ fn section_stack_takes_the_mesh_and_a_plane_and_sketches_each_section() {
     )
     .unwrap();
     let mut h = crate::scenario::Harness::new();
+    h.app.preferences.remember_dialog_values = true;
     h.app.session = Session::new(doc);
     h.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
     h.app.start("mesh.section_stack");
@@ -4215,8 +4218,10 @@ fn section_stack_takes_the_mesh_and_a_plane_and_sketches_each_section() {
     assert!(h.app.dialog.is_some(), "no plane yet");
     let d = h.app.dialog.as_mut().unwrap();
     d.inputs[1].items = vec![Sel::Plane { name: "XY".into() }];
-    if let Kind::MeshSectionStack { spacing, .. } = &mut d.kind {
+    if let Kind::MeshSectionStack { spacing, from, to, .. } = &mut d.kind {
         *spacing = "10 mm".into();
+        *from = "0 mm".into();
+        *to = "30 mm".into();
     }
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
@@ -4235,6 +4240,12 @@ fn section_stack_takes_the_mesh_and_a_plane_and_sketches_each_section() {
         assert!((z - want).abs() < 1e-9, "{heights:?}");
     }
     assert!(state.body("Mesh").unwrap().body.is_mesh());
+    h.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
+    h.app.start("mesh.section_stack");
+    h.frames(1);
+    let d = h.app.dialog.as_ref().expect("the Section Stack dialog again");
+    let Kind::MeshSectionStack { spacing, from, to, .. } = &d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!((spacing.as_str(), from.as_str(), to.as_str()), ("10 mm", "", ""));
 }
 
 /// #3745: hovering a large body never waits for its pick index. A long modelled thread's mesh

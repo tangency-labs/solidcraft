@@ -4947,6 +4947,12 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
         }
         (Kind::Hole { opts, .. }, Kind::Hole { opts: fresh, .. }) => opts.refs = fresh.refs.clone(),
         (Kind::Primitive { at, .. }, Kind::Primitive { at: fresh, .. }) => *at = *fresh,
+        // The spacing and slabs come back; where the stack starts and ends belonged to that body
+        // and plane, so a new one spans its body again.
+        (Kind::MeshSectionStack { from, to, .. }, Kind::MeshSectionStack { from: fresh_from, to: fresh_to, .. }) => {
+            *from = fresh_from.clone();
+            *to = fresh_to.clone();
+        }
         (Kind::Sweep { opts, .. }, Kind::Sweep { opts: fresh, .. }) => opts.direction = fresh.direction,
         (
             Kind::Surface(crate::dialogs_surface::Surf::Revolve { axis, .. }),

@@ -125,7 +125,9 @@ fn stack_offsets_space_the_planes_from_the_lower_end_and_always_cut_the_upper_on
     }
     // The ends stay 0.001 mm inside the body's reach.
     assert!(close(&stack_offsets(-50.0, 50.0, 5.0, [0.0, 12.0], 1000).unwrap(), &[0.001, 5.001, 10.001, 11.999]));
-    assert!(close(&stack_offsets(20.0, 30.0, 1.0, [0.0, 12.0], 1000).unwrap(), &[11.999]));
+    assert!(close(&stack_offsets(-50.0, 0.0, 1.0, [0.0, 12.0], 1000).unwrap(), &[0.001]));
+    // Ends wholly outside the reach cut none of the body: refused, naming it.
+    assert!(stack_offsets(20.0, 30.0, 1.0, [0.0, 12.0], 1000).unwrap_err().contains("reaches from 0 mm to 12 mm"));
 }
 
 #[test]
@@ -503,6 +505,11 @@ fn a_second_stack_adds_its_own_sketches_and_folder() {
     assert_eq!(s.doc.timeline_groups.len(), 2);
     let names: Vec<String> = s.doc.features.iter().map(|f| f.name.clone()).collect();
     assert!(names.contains(&"Side 1 of 3 (5 mm)".to_string()), "{names:?}");
+    // The same stack again takes the next free name.
+    let c = run(&mut s, "mesh.section_stack", json!({"body": "Mesh", "plane": "XY", "from": 5, "to": 15, "spacing": 5}));
+    assert_eq!(ids(&c["sketches"]).len(), 3, "{c}");
+    let names: Vec<String> = s.doc.features.iter().map(|f| f.name.clone()).collect();
+    assert!(names.contains(&"Section 1 of 3 (5 mm)".to_string()) && names.contains(&"Section 2 1 of 3 (5 mm)".to_string()), "{names:?}");
     assert!(s.model.results.iter().all(|x| x.error.is_none()), "{:?}", s.model.results);
 }
 
@@ -600,4 +607,82 @@ fn slabs_of_a_mount_with_a_boss_are_built() {
         let got = body_volume(&mut s, name);
         assert!((got - area * h).abs() < 1e-6 * area * h + 1e-6, "{name}: {got} vs {area} × {h}");
     }
+}
+
+/// With the mesh's own component active, moved by (100, 0, 50), the stack is sketched in that
+/// component, its plane given as Sketch takes it: XY is the component's own XY (as a new sketch
+/// there), an explicit plane through the world point (100, 0, 50) the component's own origin, a
+/// face picked where it is shown. The mesh's sections are at z = 0.001…29.999 of its frame.
+#[test]
+fn a_moved_components_mesh_is_cut_in_that_components_frame() {
+    let dir = crate::tests::Folder::new("section-stack-moved");
+    let stl = dir.path("box.stl");
+    let mut src = Session::default();
+    run(&mut src, "solid.box", json!({"length": 10, "width": 20, "height": 30}));
+    run(&mut src, "file.export_stl", json!({ "path": stl }));
+    let mut s = Session::default();
+    let inserted = run(&mut s, "file.insert_mesh", json!({ "path": stl }));
+    let occurrence = inserted["occurrence"].clone();
+    run(&mut s, "occurrence.ground", json!({"occurrence": occurrence, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [100, 0, 50]}));
+    let component = s.doc.components.iter().find(|c| c.id != 0).map(|c| c.id).unwrap();
+    run(&mut s, "component.activate", json!({"component": component}));
+    let body = s.model.state().bodies[0].name.clone();
+    // A solid box beside the mesh in that component, its corner given where it is shown: its
+    // bottom face, picked where it is shown, is a first plane too. Its outward normal points
+    // down, so the stack runs from the mesh's top (offset -29.999) every 10 mm to its bottom.
+    run(&mut s, "solid.box", json!({"corner": [120, 0, 50], "length": 10, "width": 20, "height": 30, "operation": "new"}));
+    let up = [0.001, 10.001, 20.001, 29.999];
+    let down = [29.999, 19.999, 9.999, 0.001];
+    for (plane, want) in
+        [(json!("XY"), up), (json!({"origin": [100, 0, 50], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}), up), (json!({"face": [125, 10, 50]}), down)]
+    {
+        let r = run(&mut s, "mesh.section_stack", json!({"body": body, "plane": plane, "spacing": 10}));
+        let sketches = ids(&r["sketches"]);
+        let zs: Vec<f64> = sketches.iter().map(|id| sketch_of(&s, *id).0.z).collect();
+        assert!(close(&zs, &want), "{plane}: {zs:?} {r}");
+        for id in sketches {
+            let (_, curves, areas) = sketch_of(&s, id);
+            assert!(lines(&curves) == 4 && (areas[0] - 200.0).abs() < 1e-6, "{plane}: {curves:?} {areas:?}");
+        }
+    }
+}
+
+/// A slab never runs through planes that missed the mesh: two boxes 20 mm apart along z
+/// (0…10 and 30…40), cut every 5 mm with slabs, give slabs only where the mesh is. The planes at
+/// 10.001…25.001 make no sketch, and the slab of the plane at 5.001 runs 5 mm (to 10.001, past
+/// the lower box's top by 0.001), not on to the plane at 30.001.
+#[test]
+fn slabs_stop_where_the_next_plane_misses_the_mesh() {
+    let mut s = mesh_session(&[boxed([0., 0., 0.], [10., 20., 10.]), boxed([0., 0., 30.], [10., 20., 40.])]);
+    let r = run(&mut s, "mesh.section_stack", json!({"body": "Mesh", "plane": "XY", "spacing": 5, "extrude": true}));
+    assert_eq!((r["planes"].as_u64(), r["empty"].as_u64()), (Some(9), Some(4)), "{r}");
+    // Slabs of 5 mm from 0.001, 5.001, 30.001 and 35.001, the last to the top at 39.999 (4.998).
+    let want = 200.0 * (5.0 + 5.0 + 5.0 + 4.998);
+    let got = slab_volume(&mut s, &r);
+    assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}: {r}");
+}
+
+/// A plane in the middle of the stack can lie on a flat face inside the mesh: a stepped block
+/// (20 x 20 up to z = 5, then 10 x 20 up to z = 10) cut every 2.5 mm from 2.5 has a plane on
+/// its shoulder at z = 5. Each section is the block's outline at that height.
+#[test]
+fn a_plane_on_a_shoulder_inside_the_mesh_is_cut() {
+    let mut s = mesh_session(&[boxed([0., 0., 0.], [20., 20., 5.]), boxed([0., 0., 5.], [10., 20., 10.])]);
+    let r = run(&mut s, "mesh.section_stack", json!({"body": "Mesh", "plane": "XY", "from": 2.5, "to": 7.5, "spacing": 2.5}));
+    let sketches = ids(&r["sketches"]);
+    assert_eq!(sketches.len(), 3, "{r}");
+    let areas: Vec<f64> = sketches.iter().map(|id| sketch_of(&s, *id).2.iter().sum()).collect();
+    assert!((areas[0] - 400.0).abs() < 1e-6 && (areas[2] - 200.0).abs() < 1e-6, "{areas:?}");
+    assert!(areas[1] > 199.0, "{areas:?}");
+}
+
+/// `from` and `to` wholly outside the body cut nothing of it: refused, naming its reach.
+#[test]
+fn a_range_outside_the_body_is_refused() {
+    let mut s = box_mesh();
+    let why = refusal(&mut s, json!({"body": "Mesh", "plane": "XY", "from": -100, "to": -50, "spacing": 5}));
+    assert!(why.contains("0 mm to 30 mm"), "{why}");
+    let why = refusal(&mut s, json!({"body": "Mesh", "plane": "XY", "from": 40, "to": 50, "spacing": 5}));
+    assert!(why.contains("0 mm to 30 mm"), "{why}");
 }
