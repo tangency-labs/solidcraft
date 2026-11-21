@@ -24,7 +24,7 @@ fn named_projection_kind_changes_keep_ids_and_offset_direction_only_for_the_same
                 control: true,
                 degree: 2,
                 periodic: false,
-                nurbs: Some(crate::Nurbs { knots: vec![0., 0., 0., 1., 1., 1.], weights: vec![1., 0.7071067811865476, 1.] }),
+                nurbs: Some(crate::Nurbs { knots: vec![0., 0., 0., 1., 1., 1.], weights: vec![1., std::f64::consts::FRAC_1_SQRT_2, 1.] }),
             }];
             let link = sk.add_link(LinkKind::Project, LinkSource::Edge { body: "Cap".into(), at: Vec3::ZERO }, &saved).unwrap();
             if change != "unnamed" {
@@ -35,20 +35,32 @@ fn named_projection_kind_changes_keep_ids_and_offset_direction_only_for_the_same
             sk.record_freeform_chain_offset(&[(source, true)], &made, 0.2).unwrap();
             let outputs = sk.freeform_chain_offsets[0].outputs.clone();
             // A point of the sketch's own held on the saved spline (#20327 review).
-            let held = sk.add_point(Vec2::new(0.7071067811865476, 0.7071067811865476), None).unwrap();
+            let held = sk.add_point(Vec2::new(std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2), None).unwrap();
             let held_id = sk.points[held].id.clone();
             sk.add_constraint(ConstraintKind::PointOnCurve { p: held, c: source }, None).unwrap();
             let arc = LinkGeom::Arc { c: Vec2::ZERO, a: Vec2::new(1., 0.), b: Vec2::new(0., 1.) };
             let (fresh, names) = match change {
                 "split" => (
                     vec![
-                        LinkGeom::Arc { c: Vec2::ZERO, a: Vec2::new(1., 0.), b: Vec2::new(0.7071067811865476, 0.7071067811865476) },
-                        LinkGeom::Arc { c: Vec2::ZERO, a: Vec2::new(0.7071067811865476, 0.7071067811865476), b: Vec2::new(0., 1.) },
+                        LinkGeom::Arc {
+                            c: Vec2::ZERO,
+                            a: Vec2::new(1., 0.),
+                            b: Vec2::new(std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2),
+                        },
+                        LinkGeom::Arc {
+                            c: Vec2::ZERO,
+                            a: Vec2::new(std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2),
+                            b: Vec2::new(0., 1.),
+                        },
                     ],
                     vec!["cap-edge".into(), "cap-edge".into()],
                 ),
                 "trimmed" => (
-                    vec![LinkGeom::Arc { c: Vec2::ZERO, a: Vec2::new(1., 0.), b: Vec2::new(0.7071067811865476, 0.7071067811865476) }],
+                    vec![LinkGeom::Arc {
+                        c: Vec2::ZERO,
+                        a: Vec2::new(1., 0.),
+                        b: Vec2::new(std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2),
+                    }],
                     vec!["cap-edge".into()],
                 ),
                 "other edge" => (vec![arc], vec!["different-edge".into()]),
