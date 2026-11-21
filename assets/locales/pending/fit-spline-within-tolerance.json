@@ -1,4 +1,8 @@
 {
+  "en": {
+    "cmd.sketch.spline.fit_tolerance": "Fit Spline Within Tolerance",
+    "help.sketch.spline.fit_tolerance": "Draws one smooth spline through as few of a contour's many points as keep every point within a tolerance, and reports the deviation it reached. Use it for a contour from a computation: a traced outline, a scanned section or a generated shape."
+  },
   "ar": {
     "cmd.sketch.spline.fit_tolerance": "ملاءمة سبلاين ضمن التفاوت",
     "help.sketch.spline.fit_tolerance": "يرسم منحنى سبلاين أملسًا واحدًا يمر بأقل عدد ممكن من نقاط المسار الكثيرة بحيث تبقى كل نقطة ضمن التفاوت، ويبلغ عن الانحراف الذي بلغه. استخدمه لمسار ناتج عن حساب: مخطط متتبَّع أو مقطع ممسوح ضوئيًا أو شكل مُولَّد."

@@ -3046,3 +3046,34 @@ fn a_closed_contour_drops_its_closing_repeat_and_fits() {
     assert!(fit.chosen.len() >= 6);
     assert_ne!(fit.chosen.first(), fit.chosen.last(), "the closing repeat is the caller's");
 }
+
+/// `bezier_distance` measures the curve, not the chords between samples (#20048 review): the
+/// cubic through y = x² has (0.5, 0.5) on its first chord, but the curve is 0.16589 away (the
+/// closest place is x = ∛¼).
+#[test]
+fn bezier_distance_measures_the_curve_not_the_chord() {
+    let parabola = [Vec2::new(0.0, 0.0), Vec2::new(32.0 / 3.0, 0.0), Vec2::new(64.0 / 3.0, 1024.0 / 3.0), Vec2::new(32.0, 1024.0)];
+    let got = crate::bezier_distance(&parabola, Vec2::new(0.5, 0.5));
+    assert!((got - 0.16589).abs() < 1e-3, "distance {got}");
+    assert!(crate::bezier_distance(&parabola, Vec2::new(0.0, 0.0)) < 1e-9);
+}
+
+/// A point the duplicate fold could hide is kept and measured (#20048 review): at coordinates
+/// near 10⁶ mm, a point 0.0005 mm from its neighbour stays when the tolerance is 0.0001.
+#[test]
+fn a_point_the_duplicate_fold_could_hide_is_kept() {
+    let given = [Vec2::new(1_000_000.0, 0.0), Vec2::new(1_000_000.0, 0.0005), Vec2::new(1_000_010.0, 0.0)];
+    let fit = crate::fit_within_tolerance(&given, 0.0001, false).unwrap();
+    assert_eq!(fit.chosen.len(), 3, "{:?}", fit.chosen);
+    assert!(fit.deviation <= 0.0001, "deviation {}", fit.deviation);
+}
+
+/// A closed contour that repeats an end's position away from the end still fits (#20048
+/// review): the seed's middle point comes from positions distinct from both ends.
+#[test]
+fn a_closed_contour_repeating_an_end_position_far_in_still_fits() {
+    let given = [Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0), Vec2::new(5.0, 5.0), Vec2::new(1.0, 0.1), Vec2::new(5.0, 5.0)];
+    let fit = crate::fit_within_tolerance(&given, 0.01, true).unwrap();
+    assert!(fit.deviation <= 0.01, "deviation {}", fit.deviation);
+    assert!(fit.chosen.len() >= 3);
+}

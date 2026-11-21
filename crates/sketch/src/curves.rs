@@ -232,24 +232,43 @@ pub fn fit_beziers_mode(p: &[Vec2], periodic: bool) -> crate::model::Result<Vec<
     }
 }
 
-/// The distance (mm) from `q` to a cubic Bézier piece, sampled along it: 32 samples, each
-/// projected on the chord between it and the next, so the answer is never larger than the
-/// sampling step beside the true nearest place.
+/// The distance (mm) from `q` to a cubic Bézier piece. The closest point on the piece is at a
+/// root of the derivative of the squared distance, a degree-5 polynomial in the parameter, so
+/// the roots are bracketed between samples and bisected, and the nearest of them and the two
+/// ends is the answer: never less than the true distance. (A pair of roots inside one sample
+/// interval would be missed, which can only leave the answer too large, never too small.)
 pub fn bezier_distance(b: &[Vec2; 4], q: Vec2) -> f64 {
-    const STEPS: usize = 32;
     let at = |t: f64| {
         let s = 1.0 - t;
         b[0] * (s * s * s) + b[1] * (3.0 * t * s * s) + b[2] * (3.0 * t * t * s) + b[3] * (t * t * t)
     };
-    let mut best = f64::INFINITY;
-    let mut prev = at(0.0);
-    for i in 1..=STEPS {
-        let next = at(i as f64 / STEPS as f64);
-        let d = next - prev;
-        let l2 = d.len2();
-        let t = if l2 > 0.0 { ((q - prev).dot(d) / l2).clamp(0.0, 1.0) } else { 0.0 };
-        best = best.min(q.dist(prev + d * t));
-        prev = next;
+    let slope = |t: f64| {
+        let s = 1.0 - t;
+        let d1 = (b[1] - b[0]) * (3.0 * s * s) + (b[2] - b[1]) * (6.0 * t * s) + (b[3] - b[2]) * (3.0 * t * t);
+        let d0 = at(t) - q;
+        d0.x * d1.x + d0.y * d1.y
+    };
+    let mut best = at(0.0).dist(q).min(at(1.0).dist(q));
+    const SAMPLES: usize = 64;
+    let (mut prev_t, mut prev_s) = (0.0, slope(0.0));
+    for i in 1..=SAMPLES {
+        let t = i as f64 / SAMPLES as f64;
+        let s = slope(t);
+        if prev_s * s <= 0.0 {
+            // The squared distance turns around between the two samples: bisect the root.
+            let (mut lo, mut hi) = (prev_t, t);
+            for _ in 0..50 {
+                let mid = 0.5 * (lo + hi);
+                if slope(lo) * slope(mid) <= 0.0 {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            best = best.min(at(0.5 * (lo + hi)).dist(q));
+        }
+        prev_t = t;
+        prev_s = s;
     }
     best
 }
@@ -267,10 +286,11 @@ pub struct ToleranceFit {
 }
 
 /// How near (mm) two given points must be to count as one, so spans of no length are not made:
-/// relative to the contour's size, as a tiny contour still dedupes its repeats.
-fn dup_tolerance(points: &[Vec2]) -> f64 {
+/// relative to the contour's size, and never more than a thousandth of the tolerance, so no
+/// point the tolerance could tell apart is folded away (#20048 review).
+fn dup_tolerance(points: &[Vec2], tolerance: f64) -> f64 {
     let size = points.iter().fold(f64::MIN, |m, p| m.max(p.x.abs()).max(p.y.abs()));
-    1e-9 * size.max(1.0)
+    (1e-9 * size.max(1.0)).min(tolerance * 1e-3)
 }
 
 /// The distance (mm) from `given[i]` to the nearest of the pieces `window` indexes: for a point
@@ -297,7 +317,7 @@ pub fn fit_within_tolerance(points: &[Vec2], tolerance: f64, periodic: bool) -> 
         return Err(crate::SketchError::Invalid("the tolerance must be a positive number of mm".into()));
     }
     // Duplicates would make spans of no length between the same place.
-    let eps = dup_tolerance(points);
+    let eps = dup_tolerance(points, tolerance);
     let mut given: Vec<Vec2> = Vec::with_capacity(points.len());
     for p in points {
         if !p.is_finite() {
@@ -319,7 +339,12 @@ pub fn fit_within_tolerance(points: &[Vec2], tolerance: f64, periodic: bool) -> 
     // The closing repeat counts towards the spline's point limit, as the sketch stores it.
     let cap = (MAX_SPLINE_POINTS - usize::from(periodic)).min(n);
     let mut chosen: Vec<usize> = if periodic {
-        let far = (1..n - 1).max_by(|a, b| given[0].dist(given[*a]).total_cmp(&given[0].dist(given[*b]))).unwrap_or(1);
+        // A seed point away from both ends, so no seed chord is of no length: a contour may
+        // repeat a position without being adjacent to it (#20048 review).
+        let away = |i: usize| given[i].dist(given[0]) > eps && given[i].dist(given[n - 1]) > eps;
+        let far = |i: usize| given[0].dist(given[i]);
+        let farthest = |f: &dyn Fn(usize) -> bool| (1..n - 1).filter(|i| f(*i)).max_by(|a, b| far(*a).total_cmp(&far(*b)));
+        let far = farthest(&away).or_else(|| farthest(&|_| true)).unwrap_or(1);
         vec![0, far, n - 1]
     } else {
         vec![0, n - 1]
@@ -356,9 +381,10 @@ pub fn fit_within_tolerance(points: &[Vec2], tolerance: f64, periodic: bool) -> 
         }
         if insert.is_empty() {
             // Every given point is within the tolerance of its span's neighbourhood, and so of
-            // the spline; measure against every piece for the honest deviation to report.
+            // the spline; measure against every piece and every point as supplied, folded
+            // duplicates included, for the honest deviation to report.
             let deviation =
-                given.iter().map(|q| pieces.iter().map(|piece| bezier_distance(piece, *q)).fold(f64::INFINITY, f64::min)).fold(0.0, f64::max);
+                points.iter().map(|q| pieces.iter().map(|piece| bezier_distance(piece, *q)).fold(f64::INFINITY, f64::min)).fold(0.0, f64::max);
             return Ok(ToleranceFit { chosen: chosen.iter().map(|&i| given[i]).collect(), deviation });
         }
         if chosen.len() + insert.len() > cap {
