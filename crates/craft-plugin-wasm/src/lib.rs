@@ -119,3 +119,24 @@ pub fn run_import<H: PluginHost + 'static>(
         (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
     }
 }
+
+/// A dialog hook runs in a fresh importer instance, with no design writes or evaluation and
+/// no sibling-file access. Its source is a snapshot of at most the first 64 KiB.
+pub fn update_fields<H: PluginHost + 'static>(
+    host: H,
+    manifest: &Manifest,
+    component: &[u8],
+    entry: &str,
+    context: &Value,
+    request: &ImportRequest,
+) -> (H, Result<Value>) {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::update_fields(host, manifest, component, entry, context, request)
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (manifest, component, entry, context, request);
+        (host, Err(craft_plugin::HostError::Trap { reason: "dialog hooks require a native build".into() }))
+    }
+}
