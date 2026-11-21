@@ -24,9 +24,15 @@ pub fn common() -> impl Iterator<Item = &'static str> {
     COMMON.iter().map(|id| tr(id))
 }
 
-/// The common finishes as they are written into a design (what a pick stores), in the list's order.
+/// The common finishes as they are written into a design (what a pick stores), in the list's order:
+/// in reading order, as the language's catalog holds them. [`common`] is what the list draws: a
+/// right-to-left line comes back in display order, as egui has no bidirectional layout (see
+/// `solidcraft_ui_text::bidi`), and stored that way it would read backwards everywhere else. A
+/// message the language lacks reads in English, as it does on screen.
 pub fn common_values() -> Vec<String> {
-    common().map(str::to_string).collect()
+    let catalog = solidcraft_ui_text::locale().catalog();
+    let english = solidcraft_ui_text::Locale::for_language("en").catalog();
+    COMMON.iter().map(|id| catalog.messages().get(*id).or_else(|| english.messages().get(*id)).map_or(id.to_string(), String::clone)).collect()
 }
 
 /// The finish's text field with its pick list at the right. Returns whether the text changed.
