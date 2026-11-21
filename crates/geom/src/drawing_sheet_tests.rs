@@ -744,7 +744,9 @@ fn labels(layout: &SheetLayout, text: &[&str]) -> Vec<FrameLabel> {
 
 /// A3 lies with 8 columns and 6 rows and labels every side: each column's number above and below its
 /// field's middle, each row's letter left and right of its field's middle, all in the 5 mm strip
-/// between the drawing border (10 mm in) and the grid reference border (5 mm in), 3.5 mm high.
+/// between the drawing border (10 mm in) and the grid reference border (5 mm in), 3.5 mm high, each
+/// centred in what the two lines leave: the 0.7 mm drawing border takes 0.35 mm of the strip and the
+/// 0.35 mm grid line 0.175 mm.
 #[test]
 fn a_labelled_frame_prints_each_zones_number_and_letter_in_its_strip() {
     let a3 = iso_layout(PaperSize::A3, Orientation::Landscape);
@@ -757,15 +759,15 @@ fn a_labelled_frame_prints_each_zones_number_and_letter_in_its_strip() {
     assert_eq!(one.len(), 2);
     assert!(one.iter().all(|l| (l.at.x - 35.0).abs() < EPS && l.cap_mm == 3.5 && l.align == LabelAlign::Centre), "{one:?}");
     let ys: Vec<f64> = one.iter().map(|l| l.at.y).collect();
-    // The top strip is from 287 to 292, the bottom from 5 to 10.
-    assert_eq!(ys, [289.5, 7.5]);
-    // The top row, A, is centred in its field, in the strip left of the drawing border (5 to 10 mm)
-    // and in the one right of it (410 to 415 mm).
+    // The top strip is from 287.35 to 291.825 and the bottom from 5.175 to 9.65: their middles.
+    assert!(ys.len() == 2 && (ys[0] - 289.5875).abs() < EPS && (ys[1] - 7.4125).abs() < EPS, "{ys:?}");
+    // The top row, A, is centred in its field, in the strip left of the drawing border (5.175 to 9.65
+    // mm) and in the one right of it (410.35 to 414.825 mm).
     let a = zone("A");
     assert_eq!(a.len(), 2);
     assert!(a.iter().all(|l| (l.at.y - (a3.rows[0].from_mm + a3.rows[0].to_mm) / 2.0).abs() < EPS));
     let xs: Vec<f64> = a.iter().map(|l| l.at.x).collect();
-    assert_eq!(xs, [7.5, 412.5]);
+    assert!(xs.len() == 2 && (xs[0] - 7.4125).abs() < EPS && (xs[1] - 412.5875).abs() < EPS, "{xs:?}");
     // Rows are A to F, columns 1 to 8.
     let mut seen: Vec<String> = all.iter().filter(|l| l.align == LabelAlign::Centre).map(|l| l.text.clone()).collect();
     seen.sort();
@@ -792,7 +794,9 @@ fn the_frame_writes_the_sheets_size_below_its_grid_reference_border() {
     let a3 = iso_layout(PaperSize::A3, Orientation::Landscape);
     let size = labels(&a3, &["A3"]);
     assert_eq!(size.len(), 1);
-    assert_eq!((size[0].at, size[0].cap_mm, size[0].align), (Vec2::new(12.0, 2.5), 2.5, LabelAlign::Left));
+    // Level with the drawing border's left edge plus 2 mm, centred between the sheet's edge and the grid
+    // reference border's line (5 mm in, 0.175 mm of it outside): (5 - 0.175) / 2 up.
+    assert_eq!((size[0].at, size[0].cap_mm, size[0].align), (Vec2::new(12.0, 2.4125), 2.5, LabelAlign::Left));
     let custom = |a: f64, b: f64| {
         let sheet = Sheet { size: SheetSize::Custom { sides_mm: [a, b] }, orientation: Orientation::Landscape };
         DrawingBorderProfile::iso().layout(&sheet).unwrap().size_label
@@ -830,13 +834,64 @@ fn a_frame_without_room_or_cut_into_too_many_zones_labels_what_it_can() {
     // clearance each side: no zones, only the size.
     assert_eq!(texts(&with(DrawingBorderProfile { grid_border_mm: 0.0, ..iso() })), ["A3"]);
     assert_eq!(texts(&with(DrawingBorderProfile { grid_border_mm: 2.0, ..iso() })), ["A3"]);
-    // A 3 mm strip: capitals 2 mm high, the least, and the zones are labelled.
-    let thin = with(DrawingBorderProfile { grid_border_mm: 3.0, ..iso() });
-    assert!(thin.len() > 1 && thin.iter().filter(|l| l.align == LabelAlign::Centre).all(|l| l.cap_mm == 2.0), "{thin:?}");
+    assert_eq!(texts(&with(DrawingBorderProfile { grid_border_mm: 3.0, ..iso() })), ["A3"], "2.475 mm between the lines is 1.675 mm of capitals");
+    // A 3.5 mm strip leaves 2.975 mm between the lines: capitals 2.175 mm high, above the least, 2 mm,
+    // and the zones are labelled.
+    let thin = with(DrawingBorderProfile { grid_border_mm: 3.5, ..iso() });
+    assert!(thin.len() > 1 && thin.iter().filter(|l| l.align == LabelAlign::Centre).all(|l| (l.cap_mm - 2.175).abs() < EPS), "{thin:?}");
     // 200 x 200 equal fields: none, but the size.
     let many = with(DrawingBorderProfile { grid: GridRule::Equal { columns: 200, rows: 200 }, ..iso() });
     assert_eq!(many.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["A3"]);
     // No grid at all: nothing to number, the size remains.
     let none = with(DrawingBorderProfile { grid: GridRule::None, ..iso() });
     assert_eq!(none.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["A3"]);
+}
+
+/// No label's capitals reach a line (#20126): each zone label lies wholly in the strip between the
+/// drawing border's line and the grid reference border's, whatever the widths. A 4 mm drawing border
+/// with the grid reference border 5 mm out leaves 5 - 2 - 0.175 = 2.825 mm, of which the capitals take
+/// 2.025 mm with 0.4 mm clear each side.
+#[test]
+fn a_zone_label_never_reaches_the_border_lines() {
+    let a3 = Sheet::standard(PaperSize::A3, Orientation::Landscape);
+    for line in [0.35, 0.7, 1.4, 2.0, 4.0] {
+        let layout = DrawingBorderProfile { drawing_border_line_mm: line, ..DrawingBorderProfile::iso() }.layout(&a3).unwrap();
+        let (d, g) = (layout.drawing_border, layout.grid_border);
+        let (inner, outer) = (line / 2.0, GRID_LINE_MM / 2.0);
+        for label in layout.frame_labels().into_iter().filter(|l| l.align == LabelAlign::Centre) {
+            let half = label.cap_mm / 2.0;
+            // The distance of the capitals' near edge from the drawing border's line, and of the far edge
+            // from the grid line, whichever side the label is on.
+            let (near, far) = if label.at.y > d.max.y {
+                (label.at.y - half - (d.max.y + inner), g.max.y - outer - (label.at.y + half))
+            } else if label.at.y < d.min.y {
+                (d.min.y - inner - (label.at.y + half), label.at.y - half - (g.min.y + outer))
+            } else if label.at.x < d.min.x {
+                (d.min.x - inner - (label.at.x + half), label.at.x - half - (g.min.x + outer))
+            } else {
+                (label.at.x - half - (d.max.x + inner), g.max.x - outer - (label.at.x + half))
+            };
+            assert!(near >= -EPS && far >= -EPS, "line {line}: {label:?} is {near} from the border's line and {far} from the grid line");
+        }
+    }
+    // Too thick a border leaves no room for 2 mm capitals, so none are printed.
+    let thick = DrawingBorderProfile { drawing_border_line_mm: 5.0, ..DrawingBorderProfile::iso() }.layout(&a3).unwrap();
+    assert!(thick.frame_labels().iter().all(|l| l.align != LabelAlign::Centre));
+}
+
+/// The limit on labels counts only the sides labelled (#20126): 80 columns by 30 rows with the top
+/// alone labelled is 80 labels, not the 220 of every side, so they are printed, one for each column.
+#[test]
+fn the_label_limit_counts_only_the_sides_labelled() {
+    let a3 = Sheet::standard(PaperSize::A3, Orientation::Landscape);
+    let top = Sides { top: true, bottom: false, left: false, right: false };
+    let profile =
+        DrawingBorderProfile { grid: GridRule::Equal { columns: 80, rows: 30 }, label_sides: LabelSides::Fixed(top), ..DrawingBorderProfile::iso() };
+    let labels = profile.layout(&a3).unwrap().frame_labels();
+    let zones: Vec<&FrameLabel> = labels.iter().filter(|l| l.align == LabelAlign::Centre).collect();
+    assert_eq!(zones.len(), 80);
+    assert_eq!(zones[0].text, "1");
+    // Every side labelled is 220 labels, over the limit, and prints none.
+    let all = DrawingBorderProfile { grid: GridRule::Equal { columns: 80, rows: 30 }, ..DrawingBorderProfile::iso() };
+    assert!(all.layout(&a3).unwrap().frame_labels().iter().all(|l| l.align != LabelAlign::Centre));
 }

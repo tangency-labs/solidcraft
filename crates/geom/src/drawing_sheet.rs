@@ -522,7 +522,7 @@ const MIN_ZONE_CAP_MM: f64 = 2.0;
 /// The cap height of the sheet size's label.
 const SIZE_CAP_MM: f64 = 2.5;
 /// The room kept between a label's capitals and the line beside them.
-const CLEAR_MM: f64 = 0.5;
+const CLEAR_MM: f64 = 0.4;
 /// The most labels a frame prints: a profile cut into more zones than any drawing needs is left
 /// unlabelled, so it never fills a sheet with text.
 pub const MAX_FRAME_LABELS: usize = 200;
@@ -532,44 +532,52 @@ impl SheetLayout {
     /// each column's number on the top and bottom, each row's letter on the left and right, on the
     /// sides the profile labels, centred in the strip between the drawing border and the grid
     /// reference border; and the sheet's size in the margin outside the grid reference border at
-    /// the bottom left. A text its strip has no room for, a zone shorter than its label is tall, and
-    /// all the zones' labels when there would be more than [`MAX_FRAME_LABELS`], are left out.
+    /// the bottom left. The strip is what the two lines' half widths leave between the borders. A text
+    /// its strip has no room for, a zone shorter than its label is tall, and all the zones' labels when
+    /// the sides labelled would carry more than [`MAX_FRAME_LABELS`], are left out.
     pub fn frame_labels(&self) -> Vec<FrameLabel> {
         let mut out = Vec::new();
         if !self.zone_labels {
             return out;
         }
         let (d, g) = (self.drawing_border, self.grid_border);
-        let strip = (d.min.x - g.min.x).min(d.min.y - g.min.y).min(g.max.x - d.max.x).min(g.max.y - d.max.y);
+        // Each line is centred on its edge, so half of it reaches into the strip: the drawing border's
+        // on the inside, the grid reference border's on the outside. The text lies in what remains.
+        let (inner, outer) = (self.drawing_border_line_mm / 2.0, GRID_LINE_MM / 2.0);
+        let strip = (d.min.x - g.min.x).min(d.min.y - g.min.y).min(g.max.x - d.max.x).min(g.max.y - d.max.y) - inner - outer;
         let cap_mm = ZONE_CAP_MM.min(strip - 2.0 * CLEAR_MM);
-        let zones = self.columns.len() + self.rows.len();
-        if cap_mm >= MIN_ZONE_CAP_MM && zones * 2 <= MAX_FRAME_LABELS {
-            let side = self.label_sides;
+        let side = self.label_sides;
+        // The labels there would be on the sides labelled, before any is left out for its zone's length.
+        let count = self.columns.len() * (usize::from(side.top) + usize::from(side.bottom))
+            + self.rows.len() * (usize::from(side.left) + usize::from(side.right));
+        if cap_mm >= MIN_ZONE_CAP_MM && count <= MAX_FRAME_LABELS {
             let mid = |a: f64, b: f64| (a + b) / 2.0;
             let mut put = |text: &str, at: Vec2| out.push(FrameLabel { text: text.to_string(), at, cap_mm, align: LabelAlign::Centre });
             for column in self.columns.iter().filter(|f| f.to_mm - f.from_mm >= cap_mm * 1.2) {
                 let x = mid(column.from_mm, column.to_mm);
                 if side.top {
-                    put(&column.label, Vec2::new(x, mid(d.max.y, g.max.y)));
+                    put(&column.label, Vec2::new(x, mid(d.max.y + inner, g.max.y - outer)));
                 }
                 if side.bottom {
-                    put(&column.label, Vec2::new(x, mid(g.min.y, d.min.y)));
+                    put(&column.label, Vec2::new(x, mid(g.min.y + outer, d.min.y - inner)));
                 }
             }
             for row in self.rows.iter().filter(|f| f.to_mm - f.from_mm >= cap_mm * 1.2) {
                 let y = mid(row.from_mm, row.to_mm);
                 if side.left {
-                    put(&row.label, Vec2::new(mid(g.min.x, d.min.x), y));
+                    put(&row.label, Vec2::new(mid(g.min.x + outer, d.min.x - inner), y));
                 }
                 if side.right {
-                    put(&row.label, Vec2::new(mid(d.max.x, g.max.x), y));
+                    put(&row.label, Vec2::new(mid(d.max.x + inner, g.max.x - outer), y));
                 }
             }
         }
-        // Below the grid reference border, near the drawing border's left edge.
-        let outside = g.min.y;
-        if outside >= SIZE_CAP_MM + 2.0 * CLEAR_MM && !self.size_label.is_empty() {
-            let at = Vec2::new(d.min.x + 2.0, outside / 2.0);
+        // Below the grid reference border (or the drawing border's own line when there is none), near
+        // the drawing border's left edge.
+        let edge = if g.min.y < d.min.y { outer } else { inner };
+        let room = g.min.y - edge;
+        if room >= SIZE_CAP_MM + 2.0 * CLEAR_MM && !self.size_label.is_empty() {
+            let at = Vec2::new(d.min.x + 2.0, room / 2.0);
             out.push(FrameLabel { text: self.size_label.clone(), at, cap_mm: SIZE_CAP_MM, align: LabelAlign::Left });
         }
         out
