@@ -219,7 +219,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         )),
     CommandSpec::new("solid.combine", "Combine", crate::checked!("solid.combine", combine)).begins_edit()
         .at("SOLID", "MODIFY")
-        .icon("boolean_union")
+        .icon("combine")
         .contract(&COMBINE_CONTRACT)
         .output(output_schema_for::<CombineResult>)
         .params(concat!(
@@ -3229,6 +3229,13 @@ fn copy_components(s: &mut Session, p: &Value, paths: Vec<Vec<u64>>) -> Result<V
 
 /// Move repeated placements in world coordinates, and any root bodies in the same step.
 fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMove) -> Result<Value> {
+    // Carried and left constructions are applied by the body Move; placements moved alone have
+    // none, so the lists would be dropped without a word.
+    if plan.bodies.is_empty()
+        && let Some(key) = ["carry", "leave"].into_iter().find(|k| p.get(*k).and_then(Value::as_array).is_some_and(|l| !l.is_empty()))
+    {
+        return Err(bad("solid.move", format!("`{key}` needs a body to move; it does not apply when only placements are moved")));
+    }
     let transform = world_move(s, p)?;
     let spec = super::find_command("occurrence.move").ok_or_else(|| EngineError::UnknownCommand("occurrence.move".into()))?;
     let mut moved = Vec::new();
@@ -3339,14 +3346,16 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// The construction features listed under `key` (names or feature ids), by id; empty when absent.
-fn construction_ids(s: &Session, cmd: &str, p: &Value, key: &str) -> Result<Vec<u64>> {
+fn construction_ids(s: &Session, cmd: &str, p: &Value, key: &str) -> Result<Vec<solidcraft_doc::FeatureId>> {
     let Some(list) = p.get(key) else { return Ok(Vec::new()) };
     let Some(list) = list.as_array() else { return Err(bad(cmd, format!("`{key}` must list construction features"))) };
     list.iter()
         .map(|v| {
+            // A name is found as Document::resolve_feature_name finds it: an exact name before
+            // the feature id the text reads as, so an axis named "12" is not feature 12.
             let f = match v {
                 Value::Number(n) => n.as_u64().and_then(|id| s.doc.feature(id)),
-                Value::String(name) => s.doc.find_feature(name),
+                Value::String(name) => Some(s.doc.resolve_feature_name(name).map_err(|e| bad(cmd, format!("`{key}`: {e}")))?),
                 _ => None,
             };
             match f {
@@ -3356,7 +3365,7 @@ fn construction_ids(s: &Session, cmd: &str, p: &Value, key: &str) -> Result<Vec<
                         FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. } | FeatureKind::ConstructionPlane { .. }
                     ) =>
                 {
-                    Ok(f.id)
+                    Ok(solidcraft_doc::FeatureId(f.id))
                 }
                 _ => Err(bad(cmd, format!("`{key}`: {v} is not a construction feature"))),
             }

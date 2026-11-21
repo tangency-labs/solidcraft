@@ -1353,7 +1353,7 @@ fn move_carries_and_leaves_the_constructions_it_lists() {
     cold.refresh();
     check(&cold);
     let error = s.execute("solid.move", &json!({"bodies": ["Pin"], "carry": ["Nope"]})).unwrap_err();
-    assert!(error.to_string().contains("not a construction feature"), "{error}");
+    assert!(error.to_string().contains("no feature `Nope`"), "{error}");
 }
 
 /// A carried axis built on a body in another frame is moved once (#16517 review): one Move of a
@@ -1399,6 +1399,50 @@ fn a_carried_pole_follows_its_component_turning_as_a_cold_rebuild_does() {
     cold.refresh();
     let (co, cd) = axis(&cold, "Pole");
     assert!(parallel(d, cd) && on_line(o, d, co), "cached {o:?} {d:?}, cold {co:?} {cd:?}");
+}
+
+/// A name in `carry` is found by its exact name before the feature id it reads as (#20139
+/// review): a pole named after another pole's id is the one carried.
+#[test]
+fn carry_finds_a_name_before_the_id_it_reads_as() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut s, "construct.axis.two_points", json!({"a": {"point": [5, 5, 0]}, "b": {"point": [5, 5, 10]}, "name": "First"}));
+    let first = s.doc.features.last().unwrap().id;
+    let named = first.to_string();
+    run(&mut s, "construct.axis.two_points", json!({"a": {"point": [15, 15, 0]}, "b": {"point": [15, 15, 10]}, "name": named}));
+    run(&mut s, "solid.move", json!({"bodies": ["Block"], "translate": [30, 0, 0], "carry": [named]}));
+    let (o, d) = axis(&s, &named);
+    assert!(on_line(o, d, Vec3::new(45.0, 15.0, 0.0)), "the pole named {named} went with the block: {o:?} {d:?}");
+    let (o, d) = axis(&s, "First");
+    assert!(on_line(o, d, Vec3::new(5.0, 5.0, 0.0)), "feature {first} stayed: {o:?} {d:?}");
+}
+
+/// A copied Move carries the copied pole, not the original (#20139 review): Paste New of a
+/// component remaps `carry` to the pole copied with it.
+#[test]
+fn a_pasted_move_carries_its_own_copy_of_the_pole() {
+    use solidcraft_doc::FeatureKind;
+    let mut s = Session::default();
+    let c = run(&mut s, "component.create", json!({"name": "Arm", "grounded": false}));
+    let cid = c["component"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "ArmBody"}));
+    run(&mut s, "construct.axis.two_points", json!({"a": {"point": [10, 10, 0]}, "b": {"point": [10, 10, 10]}, "name": "Pole"}));
+    run(&mut s, "solid.move", json!({"bodies": ["ArmBody"], "translate": [30, 0, 0], "carry": ["Pole"]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let pasted = run(&mut s, "component.paste_new", json!({"component": cid, "translate": [0, 50, 0]}));
+    let new = pasted["component"].as_u64().expect("the pasted component");
+    assert_ne!(new, cid, "{pasted}");
+    let in_new = |kind: fn(&FeatureKind) -> bool| s.doc.features.iter().filter(|f| f.component == new && kind(&f.kind)).collect::<Vec<_>>();
+    let poles = in_new(|k| matches!(k, FeatureKind::ConstructionAxis { .. }));
+    let moves = in_new(|k| matches!(k, FeatureKind::Move { .. }));
+    let carry = match &moves[0].kind {
+        FeatureKind::Move { carry, .. } => carry.clone(),
+        _ => Vec::new(),
+    };
+    assert_eq!(carry, vec![solidcraft_doc::FeatureId(poles[0].id)], "the copy carries its own pole");
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 /// #11469: a tangent plane picked on an inserted STL said only "no face at …", as if the pick

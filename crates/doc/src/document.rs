@@ -2987,11 +2987,11 @@ pub enum FeatureKind {
         /// Constructions (by feature id) carried along with the bodies although they are not
         /// built only on them, such as a Center Pole placed at fixed points.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        carry: Vec<u64>,
+        carry: Vec<FeatureId>,
         /// Constructions (by feature id) built on the moved bodies that stay where they are
         /// instead of following them.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        leave: Vec<u64>,
+        leave: Vec<FeatureId>,
         /// For each copied body, its captured source frame in the copy's component. Applied
         /// after the source-local move. Empty in older designs, which copy local geometry.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
