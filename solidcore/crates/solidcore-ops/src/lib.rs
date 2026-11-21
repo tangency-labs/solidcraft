@@ -58,6 +58,7 @@ pub mod export_geometry;
 pub mod extend;
 pub mod face_surface;
 pub mod file;
+pub mod finger_joint;
 pub mod fit_projection;
 pub mod hatch;
 pub mod heal;

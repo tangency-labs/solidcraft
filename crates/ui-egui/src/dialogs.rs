@@ -1011,7 +1011,7 @@ impl Dialog {
             "solid.fillet" => Dialog::new(fillet_kind(&fillet_radius_default(app), false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.chamfer" => Dialog::new(fillet_kind(&length_default(s, "1"), true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.finger_joint" => Dialog::new(
-                Kind::FingerJoint { count: "3".into(), clearance: length_default(s, "0"), inverted: false, edge_offset: String::new() },
+                Kind::FingerJoint { count: "3".into(), clearance: length_default(s, "0"), inverted: false, edge_offset: length_default(s, "0") },
                 vec![SelInput::new("ui.finger_joint_bodies", BODIES, true)],
             ),
             "solid.shell" => {
@@ -7194,6 +7194,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             if clearance.trim().is_empty() {
                 return Err(tr("ui.finger_joint_enter_clearance").into());
             }
+            let edge_offset = if edge_offset.trim().is_empty() { Value::Null } else { json!(edge_offset) };
             (
                 "solid.finger_joint",
                 json!({"bodies": bodies, "count": count, "clearance": clearance, "inverted": inverted, "edge_offset": edge_offset}),
@@ -8682,7 +8683,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     count: count.to_string(),
                     clearance: clearance.to_string(),
                     inverted: *inverted,
-                    edge_offset: edge_offset.as_ref().map_or_else(String::new, ToString::to_string),
+                    edge_offset: edge_offset.as_ref().map_or_else(|| length_default(s, "0"), |value| crate::length_input::stored(&s.doc, value)),
                 },
                 vec![SelInput::new("ui.finger_joint_bodies", BODIES, true)],
             );

@@ -63,6 +63,7 @@ use crate::geom::geom_utility::p1::line_point_distance;
 use crate::geom::tol::are_same;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::math::EFF_ZERO;
+use crate::nurbs::math::gamma;
 
 /// A right-handed coordinate system: an origin and unit, perpendicular X and Y axes
 /// (Z is X × Y). As a transformation it maps local coordinates `[u v w]` to
@@ -196,8 +197,8 @@ impl Axis2Placement {
     }
 
     /// Set origin and axes (`SetCanonical`). Axes that are not unit length are
-    /// unitized; axes that are not perpendicular (`|X·Y| > SM_EFF_ZERO`) are replaced
-    /// by the orthonormal frame of `MakeUnitOrthoVectors(X, &Y)`.
+    /// unitized; axes that are not perpendicular to dot-product rounding are replaced by the
+    /// orthonormal frame of `MakeUnitOrthoVectors(X, &Y)`.
     ///
     /// # Errors
     ///
@@ -223,7 +224,7 @@ impl Axis2Placement {
         }
 
         // make sure vectors are perpendicular
-        if self.x_axis.dot(self.y_axis).abs() > EFF_ZERO {
+        if self.x_axis.dot(self.y_axis).abs() > gamma(3) {
             let [x, y, _] = x_axis.make_unit_ortho_vectors(Some(y_axis))?;
             self.x_axis = x;
             self.y_axis = y;

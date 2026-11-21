@@ -317,6 +317,18 @@ fn count_row_to(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label
     ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max, eval: &eval })
 }
 
+/// A finger count is stored as an integer on the feature, so this row follows the literal-integer
+/// rule used when the dialog submits it instead of accepting expressions the command cannot keep.
+fn finger_joint_count_row(ui: &mut egui::Ui, app: &SolveApp, value: &mut String) -> bool {
+    let literal = |text: &str| text.trim().parse::<usize>().ok();
+    let eval = |text: &str| literal(text).map(|count| count as f64);
+    let enter = ui_kit::count_row(ui, "ui.finger_joint_count", value, &ui_kit::Count { min: 1, max: 64, eval: &eval });
+    if !literal(value).is_some_and(|count| (1..=64).contains(&count)) {
+        ui_kit::status_line(ui, app.tr("ui.finger_joint_invalid_count"), ui_kit::StatusTone::Error);
+    }
+    enter
+}
+
 /// One rectangular pattern direction (`index` 0 or 1) as its own titled group: the direction's
 /// pick, then its Quantity, Spacing and (for features) Alignment, in the same order for both
 /// directions, so a direction's settings sit together (#9634).
@@ -1233,9 +1245,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
         }
         Kind::FingerJoint { count, clearance, inverted, edge_offset } => {
-            enter |= count_row_to(ui, &app.session.doc, "ui.finger_joint_count", count, 64);
+            enter |= finger_joint_count_row(ui, app, count);
             enter |= expr_row(ui, "ui.finger_joint_clearance", clearance);
-            enter |= hint_row(ui, "ui.finger_joint_edge_offset", edge_offset, "0");
+            enter |= expr_row(ui, "ui.finger_joint_edge_offset", edge_offset);
             ui_kit::checkbox_grid(ui, &mut [("ui.finger_joint_inverted", inverted)], 1);
         }
         Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k),
@@ -1415,10 +1427,12 @@ mod tests {
         assert_eq!(dialog.inputs[0].items, selected);
         assert!(dialog.inputs[0].multi);
         assert!(dialog.editing.is_none());
+        assert!(matches!(&dialog.kind, Kind::FingerJoint { edge_offset, .. } if edge_offset == "0 mm"));
         let commands = apply_commands(&h.app, dialog).unwrap();
         assert_eq!(commands[0].0, "solid.finger_joint");
         assert_eq!(commands[0].1["bodies"], json!(["C", "A", "B"]));
         assert_eq!(commands[0].1["count"], 3);
+        assert_eq!(commands[0].1["edge_offset"], "0 mm");
     }
 
     #[test]
@@ -1467,7 +1481,7 @@ mod tests {
         assert_eq!(commands[0].1["bodies"], json!(["A", "B", "C"]));
         let added = crate::preview::compute(&h.app.session, &commands, colors).unwrap();
         assert!(added.replaced.contains(&"B".to_string()) && added.replaced.contains(&"C".to_string()));
-        dialog.remove_listed(&h.app.session, 0, &Sel::Body { name: "B".into() });
+        dialog.remove_listed(&h.app.session, 0, 1, &Sel::Body { name: "B".into() });
         let commands = crate::dialogs::preview_commands(&h.app, &dialog).unwrap();
         assert_eq!(commands[0].1["bodies"], json!(["A", "C"]));
         let removed = crate::preview::compute(&h.app.session, &commands, colors).unwrap();
@@ -1484,7 +1498,7 @@ mod tests {
         assert_eq!(dialog.inputs[0].items, vec![Sel::Body { name: "A".into() }, Sel::Body { name: "B".into() }]);
         match &mut dialog.kind {
             Kind::FingerJoint { count, clearance, inverted, edge_offset } => {
-                assert_eq!((count.as_str(), clearance.as_str(), *inverted, edge_offset.as_str()), ("3", "0.1 mm", false, ""));
+                assert_eq!((count.as_str(), clearance.as_str(), *inverted, edge_offset.as_str()), ("3", "0.1 mm", false, "0 mm"));
                 *count = "2".into();
                 *clearance = "0.2 mm".into();
                 *inverted = true;
@@ -1509,6 +1523,21 @@ mod tests {
             &h.app.session.doc.feature(id).unwrap().kind,
             FeatureKind::FingerJoint { count: 3, inverted: false, edge_offset: None, .. }
         ));
+    }
+
+    #[test]
+    fn finger_joint_editor_empty_edge_offset_uses_its_zero_default() {
+        let (mut h, id) = finger_joint_editor();
+        if let Kind::FingerJoint { edge_offset, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+            edge_offset.clear();
+        } else {
+            panic!("expected finger joint editor");
+        }
+        let dialog = h.app.dialog.as_ref().unwrap().clone();
+        let commands = apply_commands(&h.app, &dialog).unwrap();
+        assert_eq!(commands[0].1["params"]["edge_offset"], serde_json::Value::Null);
+        run_dialog(&mut h.app, &dialog).unwrap();
+        assert!(matches!(&h.app.session.doc.feature(id).unwrap().kind, FeatureKind::FingerJoint { edge_offset: None, .. }));
     }
 
     #[test]

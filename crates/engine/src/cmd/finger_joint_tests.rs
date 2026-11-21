@@ -189,14 +189,64 @@ fn finger_joint_clearance_must_leave_a_positive_finger_width() {
 
 #[test]
 fn finger_joint_uses_two_selected_bodies_when_names_are_omitted() {
+    for params in [json!({}), json!({"bodies":null})] {
+        let mut s = crossing_blocks();
+        s.selection = vec![crate::Sel::Body { name: "A".into() }, crate::Sel::Body { name: "B".into() }];
+
+        run(&mut s, "solid.finger_joint", &params);
+
+        assert_eq!(s.doc.features.len(), 3);
+        assert!(s.model.state().body("A").is_some());
+        assert!(s.model.state().body("B").is_some());
+    }
+}
+
+#[test]
+fn finger_joint_rejects_an_explicitly_empty_body_list_instead_of_using_selection() {
     let mut s = crossing_blocks();
     s.selection = vec![crate::Sel::Body { name: "A".into() }, crate::Sel::Body { name: "B".into() }];
 
-    run(&mut s, "solid.finger_joint", &json!({}));
+    assert_bad_finger_joint_params(&mut s, &json!({"bodies":[]}));
+}
 
-    assert_eq!(s.doc.features.len(), 3);
-    assert!(s.model.state().body("A").is_some());
-    assert!(s.model.state().body("B").is_some());
+#[test]
+fn finger_joint_rejects_bodies_outside_the_active_component_before_creating_a_feature() {
+    let mut s = crossing_blocks();
+    run(&mut s, "component.from_bodies", &json!({"bodies":["B"]}));
+
+    assert_bad_finger_joint_params(&mut s, &json!({"bodies":["A","B"]}));
+}
+
+#[test]
+fn finger_joint_null_options_keep_their_defaults() {
+    let mut s = crossing_blocks();
+    run(&mut s, "solid.finger_joint", &json!({"bodies":["A","B"],"clearance":null,"edge_offset":null,"inverted":null}));
+    let kind = &s.doc.features.last().unwrap().kind;
+    assert!(
+        matches!(kind, solidcraft_doc::FeatureKind::FingerJoint { clearance, edge_offset: None, inverted: false, .. } if clearance.as_str() == "0")
+    );
+    no_overlap_after(&s);
+}
+
+#[test]
+fn finger_joint_only_defaults_invalid_or_negative_values_when_they_are_absent_or_null() {
+    for params in [
+        json!({"bodies":["A","B"],"clearance":true}),
+        json!({"bodies":["A","B"],"edge_offset":true}),
+        json!({"bodies":["A","B"],"inverted":"false"}),
+        json!({"bodies":["A","B"],"clearance":"-0.1 mm"}),
+        json!({"bodies":["A","B"],"edge_offset":"-0.1 mm"}),
+    ] {
+        let mut s = crossing_blocks();
+        assert_bad_finger_joint_params(&mut s, &params);
+    }
+}
+
+fn assert_bad_finger_joint_params(s: &mut Session, params: &Value) {
+    let feature_count = s.doc.features.len();
+    let error = s.execute("solid.finger_joint", params).unwrap_err();
+    assert!(matches!(&error, crate::EngineError::BadParams { .. }), "expected BadParams, got {error}");
+    assert_eq!(s.doc.features.len(), feature_count, "invalid input must not add a feature");
 }
 
 #[test]
@@ -209,9 +259,10 @@ fn finger_joint_rejects_bad_counts_and_ambiguous_intersections() {
     run(&mut ambiguous, "solid.box", &json!({"length":10,"width":3,"height":3,"body_name":"A","operation":"new"}));
     run(&mut ambiguous, "solid.box", &json!({"corner":[4,-3,0],"length":3,"width":10,"height":3,"body_name":"B","operation":"new"}));
     let before = solidcraft_kernel::measure(&ambiguous.model.state().body("A").unwrap().body).unwrap().volume;
-    run(&mut ambiguous, "solid.finger_joint", &json!({"bodies":["A","B"],"count":2}));
+    assert!(ambiguous.execute("solid.finger_joint", &json!({"bodies":["A","B"],"count":2})).is_err());
     let after = solidcraft_kernel::measure(&ambiguous.model.state().body("A").unwrap().body).unwrap().volume;
     assert_eq!(before, after);
+    assert_eq!(ambiguous.doc.features.len(), 2, "an ambiguous plate pair must not add a failed feature");
 
     let mut invalid_offset = crossing_blocks();
     assert!(invalid_offset.execute("solid.finger_joint", &json!({"bodies":["A","B"],"edge_offset":"25 mm"})).is_err());
@@ -386,11 +437,14 @@ fn finger_joint_handles_stepped_overlap_without_cutting_the_gap() {
             let a = &state.body("A").unwrap().body;
             let b = &state.body("B").unwrap().body;
             if clearance == 0.0 {
-                let expected = if a_retains_ends { (180.0, 225.0) } else { (270.0, 180.0) };
+                // The notch removes 1.5 mm of the overlap across 10 mm of one slot. When A
+                // owns that slot, clipping therefore removes 3 mm × 1.5 mm × 10 mm less from A.
+                let expected = if a_retains_ends { (180.0, 225.0) } else { (225.0, 180.0) };
                 assert!((before.0 - volume(&s, "A") - expected.0).abs() < 0.005, "{bodies:?} inverted={inverted}");
                 assert!((before.1 - volume(&s, "B") - expected.1).abs() < 0.005, "{bodies:?} inverted={inverted}");
             }
-            assert_eq!(a.classify_point(Vec3::new(50.0, 0.75, 25.0)).unwrap(), if a_retains_ends { Inside } else { Outside });
+            let outside_footprint = if clearance == 0.0 || a_retains_ends { Inside } else { Outside };
+            assert_eq!(a.classify_point(Vec3::new(50.0, 0.75, 25.0)).unwrap(), outside_footprint);
             assert_eq!(b.classify_point(Vec3::new(50.0, 0.75, 25.0)).unwrap(), Outside);
             let overlap_point = Vec3::new(50.0, 2.25, 25.0);
             assert_eq!(a.classify_point(overlap_point).unwrap(), if a_retains_ends { Inside } else { Outside });
@@ -398,6 +452,24 @@ fn finger_joint_handles_stepped_overlap_without_cutting_the_gap() {
             no_overlap_after(&s);
         }
     }
+}
+
+#[test]
+fn finger_joint_zero_clearance_does_not_cut_outside_a_stepped_overlap_footprint() {
+    use solidcore_record::Vec3;
+    use solidcraft_kernel::PointClass::{Inside, Outside};
+
+    let mut s = crossing_blocks();
+    run(&mut s, "solid.box", &json!({"corner":[48,-2,10],"length":4,"width":3.5,"height":10,"operation":"cut","targets":["B"]}));
+
+    run(&mut s, "solid.finger_joint", &json!({"bodies":["A","B"],"count":2,"clearance":0}));
+
+    let state = s.model.state();
+    let a = &state.body("A").unwrap().body;
+    assert_eq!(a.classify_point(Vec3::new(50.0, 0.75, 15.0)).unwrap(), Inside);
+    assert_eq!(a.classify_point(Vec3::new(50.0, 2.25, 15.0)).unwrap(), Outside);
+    assert_eq!(a.classify_point(Vec3::new(50.0, 0.75, 35.0)).unwrap(), Outside);
+    no_overlap_after(&s);
 }
 
 #[test]
@@ -446,7 +518,8 @@ fn finger_joint_stepped_overlap_keeps_pattern_continuous_across_a_step() {
 
     let removed_a = before.0 - volume(&s, "A");
     let removed_b = before.1 - volume(&s, "B");
-    let expected_a = 9.0 * 150.0 / 7.0;
+    // The notch removes 1.5 mm of overlap across 50/7 mm of A's slot.
+    let expected_a = 9.0 * 150.0 / 7.0 - 4.5 * 50.0 / 7.0;
     let expected_b = 9.0 * 200.0 / 7.0 - 4.5 * 20.0 / 7.0;
     assert!((removed_a - expected_a).abs() < 0.005, "{removed_a} vs {expected_a}");
     assert!((removed_b - expected_b).abs() < 0.005, "{removed_b} vs {expected_b}");
@@ -499,6 +572,36 @@ fn finger_joint_multiple_bodies_follow_the_same_order_as_separate_pairs() {
     }
     assert_eq!(combined.doc.features.len(), 4);
     assert!(combined.model.result(combined.doc.features.last().unwrap().id).unwrap().warning.is_none());
+}
+
+fn three_axis_joint() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", &json!({"corner":[-50,-50,-1.5],"length":100,"width":100,"height":3,"body_name":"A","operation":"new"}));
+    run(&mut s, "solid.box", &json!({"corner":[-1.5,-50,-50],"length":3,"width":100,"height":100,"body_name":"B","operation":"new"}));
+    run(&mut s, "solid.box", &json!({"corner":[-50,-1.5,-50],"length":100,"width":3,"height":100,"body_name":"C","operation":"new"}));
+    s
+}
+
+#[test]
+fn finger_joint_multiple_bodies_only_joins_each_later_body_to_the_anchor() {
+    let mut combined = three_axis_joint();
+    let mut sequential = three_axis_joint();
+    let state = combined.model.state();
+    assert!(
+        solidcraft_kernel::boolean(&state.body("B").unwrap().body, &state.body("C").unwrap().body, solidcraft_kernel::BoolOp::Intersect)
+            .unwrap()
+            .is_some()
+    );
+
+    run(&mut combined, "solid.finger_joint", &json!({"bodies":["A","B","C"],"count":2}));
+    for pair in [["A", "B"], ["A", "C"]] {
+        run(&mut sequential, "solid.finger_joint", &json!({"bodies":pair,"count":2}));
+    }
+    for name in ["A", "B", "C"] {
+        let actual = volume(&combined, name);
+        let expected = volume(&sequential, name);
+        assert!((actual - expected).abs() < expected * 1e-6, "{name}: {actual} vs {expected}");
+    }
 }
 
 #[test]

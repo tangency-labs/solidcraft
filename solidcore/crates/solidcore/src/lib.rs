@@ -51,6 +51,7 @@ pub mod cell_grid;
 pub mod curve;
 pub mod develop;
 pub mod eval;
+pub mod finger_joint;
 pub mod geom;
 #[allow(missing_docs)]
 pub mod hatch;

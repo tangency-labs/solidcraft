@@ -132,7 +132,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("finger_joint")
         .contract(&FINGER_JOINT_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("bodies?: [2 to 32 body names] (default: selected plates, in selection order; each intersecting pair is processed in order with the same settings; failed pairs are unchanged and reported); count?: integer 1…64 (default 3; creates 2 × count + 1 segments along the joint line); clearance?: length expr (each cut expands by half the clearance on each side along and across the joint; default 0 mm; less than a finger width); inverted?: bool (default false; starts and ends with fingers instead of slots); edge_offset?: length expr (default 0 mm; adds this length to each end segment and divides the remainder equally among the other segments); name?"),
+        .params("bodies?: [2 to 32 body names] (default: selected plates, in selection order; the first plate is joined to each later plate in order; failed pairs are unchanged and reported); count?: integer 1…64 (default 3; creates 2 × count + 1 segments along the joint line); clearance?: length expr (each cut expands by half the clearance on each side along and across the joint; default 0 mm; less than a finger width); inverted?: bool (default false; starts with a tab instead of a slot without changing which plate supplies tabs); edge_offset?: length expr (default 0 mm; adds this length to each end segment and divides the remainder equally among the other segments); name?"),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", crate::checked!("solid.pattern.rectangular", pattern_rect))
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
@@ -2542,17 +2542,16 @@ pub(crate) fn move_matrix_params(p: &Value) -> Result<Option<Value>> {
 
 fn finger_joint(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.finger_joint";
-    let bodies = string_list(cmd, p, "bodies")?;
-    let bodies = if bodies.is_empty() {
-        s.selection
+    let bodies = match p.get("bodies") {
+        None | Some(Value::Null) => s
+            .selection
             .iter()
             .filter_map(|selection| match selection {
                 crate::Sel::Body { name } => Some(name.clone()),
                 _ => None,
             })
-            .collect()
-    } else {
-        bodies
+            .collect(),
+        Some(_) => string_list(cmd, p, "bodies")?,
     };
     if bodies.len() < 2 || bodies.len() > solidcraft_doc::MAX_FINGER_JOINT_BODIES {
         return Err(bad(cmd, format!("`bodies` must name 2 to {} different bodies", solidcraft_doc::MAX_FINGER_JOINT_BODIES)));
@@ -2569,18 +2568,33 @@ fn finger_joint(s: &mut Session, p: &Value) -> Result<Value> {
             .and_then(|count| usize::try_from(count).ok())
             .ok_or_else(|| bad(cmd, "`count` must be an integer from 1 to 64"))?,
     };
-    for body in &bodies {
-        if s.model.state().body(body).is_none() {
-            return Err(bad(cmd, format!("body `{body}` does not exist")));
+    let state = s.model.state();
+    for name in &bodies {
+        let body = state.body(name).ok_or_else(|| bad(cmd, format!("body `{name}` does not exist")))?;
+        if s.doc.model_body_component(body) != s.active_component {
+            return Err(bad(cmd, format!("body `{name}` does not belong to the active component")));
         }
     }
-    let clearance = expr(p, "clearance").unwrap_or_else(|| "0".into());
-    check_expr(s, &clearance, Kind::Length, cmd, "clearance")?;
-    let edge_offset = expr(p, "edge_offset");
-    if let Some(edge_offset) = &edge_offset {
-        check_expr(s, edge_offset, Kind::Length, cmd, "edge_offset")?;
+    let clearance = match p.get("clearance") {
+        None | Some(Value::Null) => "0".into(),
+        Some(_) => req_expr(cmd, p, "clearance")?,
+    };
+    let edge_offset = match p.get("edge_offset") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(req_expr(cmd, p, "edge_offset")?),
+    };
+    for (key, length) in std::iter::once(("clearance", &clearance)).chain(edge_offset.as_ref().map(|length| ("edge_offset", length))) {
+        check_expr(s, length, Kind::Length, cmd, key)?;
+        let value = s.doc.eval(length, Kind::Length).map_err(|err| bad(cmd, format!("{key}: {err}")))?;
+        if !value.is_finite() || value < 0.0 {
+            return Err(bad(cmd, format!("{key} must be a non-negative length")));
+        }
     }
-    let inverted = bool_(p, "inverted").unwrap_or(false);
+    let inverted = match p.get("inverted") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad(cmd, "`inverted` must be true or false")),
+    };
     add_feature(s, p, FeatureKind::FingerJoint { bodies: bodies.into_iter().map(BodyName).collect(), count, clearance, inverted, edge_offset })
 }
 
