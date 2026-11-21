@@ -4691,8 +4691,10 @@ impl Renderer {
             self.pic.ss_key = None;
         }
         self.timing = time;
-        if let Some(timer) = &mut self.timer {
-            timer.begin(device, time);
+        // A timed frame whose timestamps came back without times (a new query set's first frame
+        // on Apple's GPUs) is drawn and timed once more: a still view times no other frame.
+        if self.timer.as_mut().is_some_and(|timer| timer.begin(device, time)) {
+            self.pic.ss_key = None;
         }
         self.prepare_frame(device, queue, encoder, frame, isolated);
         // The times cover the passes recorded here, in `prepare`. A frame drawn straight into the
@@ -7881,7 +7883,8 @@ mod glass_tests {
         }
         assert_eq!(frames(&mut timed), None, "the times go once the readout stops asking");
         // A still view: the same frame again shows the picture already drawn, which records no
-        // passes. Timing asked for over it draws a frame once, so its times come all the same.
+        // passes. Timing asked for over it draws a frame once, so its times come all the same; and
+        // once more where that frame's timestamps read back empty (a new query set's on Metal).
         let mut still = Renderer::new(&device, target, None);
         let frame = test_frame(two_layers([220, 40, 40, 128], [40, 40, 220, 128], true), 1.0);
         render_frame(&mut still, &device, &queue, &frame, true);
