@@ -32,8 +32,8 @@
 use std::collections::{btree_map::Entry, BTreeMap};
 
 use crate::blend::fillet_section::certificate::{
-    curve_derivs_over, knot_cuts, nurbs_partials_over_piece, partials_hull, past_one_low_line,
-    EndContinuation, NurbsCurve,
+    below_continuity, curve_derivs_over, knot_cuts, nurbs_partials_over_piece, partials_hull,
+    past_one_low_line, EndContinuation, NurbsCurve,
 };
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::offset_box::offset_and_base_partials_over_piece;
@@ -464,8 +464,8 @@ impl NetSurface {
             let (a, b) = (lo.max(d0), hi.min(d1));
             let mut line_over = 0.0_f64;
             let mut past = None;
+            let need = continuity + lift;
             if a <= b {
-                let need = continuity + lift;
                 match knot_cuts(knots, p, count, a, b, need) {
                     Ok(cuts) => out.extend(cuts),
                     // (offsets only: their nets' joins below the continuity asked for are
@@ -490,6 +490,32 @@ impl NetSurface {
                         line_over = sliver;
                     }
                     Err(e) => return Err(e),
+                }
+            }
+            // An offset's box ending on an inner knot line (`knot_cuts` cuts only at lines
+            // strictly inside it): the surface's value at that end is the next span's (the
+            // evaluator takes the span a knot starts), which differs from the last part's
+            // where the base is not C^1 there (#20544 review). Point values (`lk` 0) take the
+            // end on the next span into the hull. With partials, the box is the last part's
+            // polynomial `S~` up to the end, and the end itself a part past the line of width
+            // zero: its jump `|S - S~|` there is added to the slack as for one
+            // (`past_one_low_line`), where the line is below the continuity asked for.
+            // (A box's lower end on a knot line is already the next span's: its part starts
+            // there.)
+            if self.offset.is_some() && a < b && b == hi && hi < d1 && knots.contains(&hi) {
+                let next = span(knots, p, count, hi);
+                if let Some(&(_, _, last)) = out.last().filter(|c| c.2 != next) {
+                    if lift == 0 {
+                        out.push((hi, hi, next));
+                    } else if below_continuity(knots, p, hi, need) {
+                        if past.is_some() {
+                            return Err(refused(
+                                "a box past a knot line and ending on another below its continuity",
+                            ));
+                        }
+                        out.push((hi, hi, last));
+                        past = Some((hi, hi, next));
+                    }
                 }
             }
             if hi > d1 {
@@ -4324,6 +4350,66 @@ mod tests {
                     .length()
             })
             .fold(0.0_f64, f64::max);
+        assert!(jump > 0.38, "{jump:e}");
+        for (lk, continuity) in [(1, 0), (2, 1)] {
+            let (_, slack) = net.partials(&[w], lk, continuity).unwrap();
+            assert!(slack >= 2.0 * jump, "{slack:e} against twice {jump:e}");
+        }
+    }
+
+    /// A box whose upper end lies on its base's kink (#20544 review): the surface's value
+    /// there is the next span's (the evaluator takes the span the knot starts), the tilted
+    /// sheet's, `0.5 / sqrt(2)` high where the flat sheet's is `0.5`. The point values over
+    /// `u` in `[31/32, 1]` hold it, and with the first partials (the flat sheet's polynomial
+    /// over the box) the slack holds twice the jump at the end, as for a part past the line.
+    #[test]
+    fn an_offset_box_ending_on_its_bases_kink_holds_the_next_sheets_end() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        use crate::surface::offset_surface::OffsetSurface;
+        let k = Kernel::default();
+        let (c, sn, d) = (
+            std::f64::consts::FRAC_1_SQRT_2,
+            std::f64::consts::FRAC_1_SQRT_2,
+            0.5,
+        );
+        let net: Vec<Vec<CPoint>> = [[0.0, 0.0], [1.0, 0.0], [1.0 + c, sn]]
+            .iter()
+            .map(|&[x, z]| {
+                [0.0, 1.0]
+                    .iter()
+                    .map(|&y| CPoint::new(x, y, z, NOW))
+                    .collect()
+            })
+            .collect();
+        let base = NurbSurface::new(
+            net,
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 2.0, 2.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let base = Surface::from(BSplineSurface::from_nurb(base, false));
+        let surface = Surface::from(OffsetSurface::new(&k, d, base, true, 0).unwrap());
+        let probes = [Point2::new(0.5, 0.5), Point2::new(1.5, 0.5)];
+        let net = NetSurface::of_exact(&k, &surface, &probes)
+            .unwrap()
+            .unwrap();
+        let w = V3 {
+            x: Ivl::new(31.0 / 32.0, 1.0),
+            y: Ivl::new(0.4, 0.6),
+            z: Ivl::from(0.0),
+        };
+        let end = surface.evaluate_point(&k, Point2::new(1.0, 0.5)).unwrap();
+        assert!((end.z - d * c).abs() < 1e-12, "{end:?}");
+        let (p, _) = net.partials(&[w], 0, 0).unwrap();
+        let v = p.at(0, 0);
+        assert!(
+            v.x.lo <= end.x && end.x <= v.x.hi && v.z.lo <= end.z && end.z <= v.z.hi,
+            "{v:?} against {end:?}"
+        );
+        let jump = (end - Point3::new(1.0, 0.5, d)).length();
         assert!(jump > 0.38, "{jump:e}");
         for (lk, continuity) in [(1, 0), (2, 1)] {
             let (_, slack) = net.partials(&[w], lk, continuity).unwrap();

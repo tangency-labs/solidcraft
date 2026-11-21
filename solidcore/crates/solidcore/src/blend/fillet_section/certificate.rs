@@ -1672,7 +1672,7 @@ fn guess_box(at: &SpanAt) -> ([f64; 4], [Ivl; 4]) {
 /// Whether the knot `x` of `knots` (degree `p`) is below `continuity` by count: degree minus
 /// its multiplicity. [`knot_cuts`] refuses a crossed line by it, and the cell path's
 /// trigger reads it, so the two cannot drift apart.
-fn below_continuity(knots: &[f64], p: usize, x: f64, continuity: usize) -> bool {
+pub(crate) fn below_continuity(knots: &[f64], p: usize, x: f64, continuity: usize) -> bool {
     let m = knots.iter().filter(|&&y| y == x).count();
     p.checked_sub(m).is_none_or(|c| c < continuity)
 }
