@@ -1112,14 +1112,8 @@ impl Body {
     fn nearest_face_query(&self, p: Vec3, reach: f64) -> Result<Option<(f64, usize)>> {
         let Some(form) = self.ops_body() else { return Ok(None) };
         let (ops, order) = &*form;
-        let dists = ops
-            .face_distances_within(order, &[[p.x, p.y, p.z]], reach)
-            .map_err(|e| KernelError::Failed(format!("face at point: {e}")))?;
-        Ok(dists
-            .into_iter()
-            .enumerate()
-            .filter_map(|(f, row)| Some((row.first().copied().flatten()?, f)))
-            .min_by(|a, b| a.0.total_cmp(&b.0)))
+        let dists = ops.face_distances_within(order, &[[p.x, p.y, p.z]], reach).map_err(|e| KernelError::Failed(format!("face at point: {e}")))?;
+        Ok(dists.into_iter().enumerate().filter_map(|(f, row)| Some((row.first().copied().flatten()?, f))).min_by(|a, b| a.0.total_cmp(&b.0)))
     }
 
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.

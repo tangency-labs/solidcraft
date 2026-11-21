@@ -343,8 +343,7 @@ fn offset_an_annular_end_near_either_circular_rim() {
         let (sin, cos) = angle.sin_cos();
         for radius in [3.45, 1.8] {
             let p = Vec3::new(radius * cos, radius * sin, 200.0);
-            let holders: Vec<usize> =
-                (0..b.face_count()).filter(|&f| b.point_lies_on_face(f, p, b.record().tolerance).unwrap().is_some()).collect();
+            let holders: Vec<usize> = (0..b.face_count()).filter(|&f| b.point_lies_on_face(f, p, b.record().tolerance).unwrap().is_some()).collect();
             assert_eq!(holders, [end], "only the annular face holds {p:?}");
             assert_eq!(b.face_at_point(p).unwrap(), Some(end), "{p:?}");
             let moved = crate::offset_faces(&b, &[p], 4.0).unwrap();
