@@ -212,18 +212,25 @@ Send both as `approval` and `archive` when installing the reviewed package. A ch
 a typed `invalid_input` error for `approval` or `archive` before any files or grants are written. The dialog always
 sends both hashes; programmatic callers may omit it to install directly without a prior review.
 Replacing an installed plugin with the same id requires `"replace": true`.
-The response includes name, version, description, capabilities, permissions, requested `limits`, the app's
+The response includes name, version, description, required `capabilities`, `min_host_version`,
+`optional_capabilities`, `granted_capabilities`, `extensions`, permissions, requested `limits`, the app's
 `host_limits`, app commands,
 namespaced `entries`, declared `entry_points` with input schemas and slots, replacement information,
 the target `folder` and whether it was `installed`. A dry run reports `installed: false`.
 Dry-run description is the package review path; there is no separate review command or folder installer.
+Review `min_host_version` for the oldest supported SolidCraft and compare `optional_capabilities`
+with `granted_capabilities` to see which optional features this host supports. Capability grants
+describe host API availability; the separate `approve` object still controls command groups,
+folders and memory. `extensions` contains inert plugin metadata.
 
 A zip holds one plugin, with `plugin.json` and its component at the top or inside one top-level folder.
 The existing `solidcraft_io::safe_zip` reader refuses absolute paths, `..`, symlinks and device entries.
 The installer limits the archive to 256 entries, each file to 16 MiB (an importer component may be up to 64 MiB), and input and unpacked content to
-64 MiB. The manifest has a separate 16 KiB cap. Before publication, the host parses the manifest and
-refuses unknown or newer capabilities. It unpacks into a hidden `.install-…` folder beside the installed
-plugins, then renames it to `plugins/<id>/`. The entries resolve immediately, with no restart.
+64 MiB. The manifest has a separate 64 KiB cap. Before publication, the host checks
+`min_host_version`, then parses and validates the manifest. It refuses unknown or incompatible
+required capabilities; unsupported optional capabilities are left ungranted. It unpacks into a
+hidden `.install-…` folder beside the installed plugins, then renames it to `plugins/<id>/`.
+The entries resolve immediately, with no restart.
 
 ## Removing
 
@@ -723,12 +730,91 @@ for field validation. Nothing runs until Apply or an explicit Preview request.
 
 The WIT package is `craft:plugin@0.2.0`. Its capability `commands@0.2` runs app commands, logs,
 reports progress and cancellation, reads named files and a clock, and exports the entry. A plugin's
-`plugin.json` lists what it needs, for example `"capabilities": ["commands@0.2"]`; the host refuses
-an unknown or newer capability when it reads the manifest, with a plain message such as "needs
-commands 0.3; update SolidCraft or the plugin". `formats@0.2` adds importers, `evaluate@0.2`
+`plugin.json` lists what it needs in `capabilities`, for example `"capabilities": ["commands@0.2"]`;
+the host refuses an unknown or incompatible required capability when it reads the manifest, with
+a plain message such as "needs commands 0.3; update SolidCraft or the plugin". `formats@0.2`
+adds importers, `evaluate@0.2`
 lets an importer check its result, and `storage@0.1` keeps data in a design (below). `ui` and
 `viewport` arrive later as their own
 versioned interfaces. While a version is 0.x, a minor version may break the one before it.
+
+Starting with SolidCraft 0.45.0, manifests may also declare:
+
+- `min_host_version`: the oldest SolidCraft release the plugin supports, as a strict semantic
+  version such as `"0.45.0"` (including a patch number, with optional prerelease or build metadata).
+  This is the host version, independent of the plugin's own `version` and its capability versions.
+  An older host refuses the package before unknown-field or capability errors, naming both the
+  required and running host versions. Omit it to keep the existing behaviour with no minimum.
+- `optional_capabilities`: capabilities the plugin can do without. The host grants each requested
+  capability whose version it supports and ignores unknown or incompatible optional capabilities.
+  Malformed requests still fail validation. Both capability lists accept `name@major.minor` or
+  `name@major.minor.patch`; patch numbers do not change capability compatibility. Each list has
+  at most 16 entries, and a capability name may appear only once across both lists. Major versions
+  must match; for major zero, the minor must match a version the host serves. For later majors,
+  the host may serve a requested older minor. An entry's essential `commands` or `formats`
+  capability must stay in the required list.
+- `extensions`: a JSON object for future optional metadata. Unknown keys and their JSON values
+  inside this object are accepted and ignored by the host. It grants no capability or permission
+  and changes no plugin behaviour. Unknown top-level fields remain errors. This is distinct from
+  an importer entry's `extensions` list of file suffixes.
+
+Existing manifests need no changes. Releases before 0.45.0 cannot understand these new top-level
+fields, including `min_host_version`: their existing unknown-field refusal still applies. Set
+the minimum to a host that supports the fields and APIs the plugin actually needs; placing a
+required feature inside `extensions` does not make an older host implement it.
+
+For example, this importer can run without a future optional feature:
+
+```json
+{
+  "id": "sample", "name": "Sample", "version": "1.1.0",
+  "min_host_version": "0.45.0",
+  "capabilities": ["formats@0.2", "host@0.1"],
+  "optional_capabilities": ["future-import-feature@0.1"],
+  "extensions": {"sample": {"documentation": "Optional importer metadata"}},
+  "runtime": {
+    "module": "sample.wasm", "commands": [],
+    "entries": [{"name": "convert", "kind": "importer", "extensions": ["smp"]}]
+  }
+}
+```
+
+On this host, its granted capabilities are `formats@0.2` and `host@0.1`.
+`future-import-feature@0.1` is an illustrative name, not an implemented interface. The plugin
+chooses its fallback when that string is absent from the query below. The host returns the
+original requested strings, including any patch numbers, for required and supported optional
+capabilities only. It does not report capabilities the plugin did not request.
+
+The small read-only query is a separate additive WIT package, `craft:host@0.1.0`
+(`crates/craft-plugin/wit-host/plugin.wit`):
+
+```wit
+package craft:host@0.1.0;
+
+interface capabilities {
+    granted: func() -> list<string>;
+}
+
+world host-query {
+    import capabilities;
+}
+```
+
+A command or importer component may import `craft:host/capabilities@0.1.0` alongside its existing
+world, with either the 0.1 or 0.2 plugin WIT. Declare required `host@0.1` when the component
+imports this query. The host links the query only when `host@0.1` is granted. A manifest may ask
+for `host@0.1` optionally when its component does not import the query. The bounded result has
+at most 32 strings and reports API availability only; it does not approve file access, command
+groups, input folders or increased memory, run commands, or open dialogs.
+
+An optional manifest capability cannot make a static WIT import optional. A component that
+unconditionally imports an interface absent from a host cannot load there, even if that
+capability is listed as optional. Keep unavailable interfaces out of such a component's imports,
+or require a host that provides them with `min_host_version` and a required capability.
+`forms@0.1` is available for the populated command forms described above; interactive hosts
+defer opening until the entry succeeds, and programmatic hosts return `interactive_required`.
+`dialog@0.1` is available for the field hooks described above; a hook entry declares it in
+the required capabilities and opts in with `dialog_hook`.
 
 0.2 added one error, `plugin-error.unsupported(string)`: the input is valid, but this plugin does
 not handle it, such as a file with no solids or a newer version of its format. Use it instead of

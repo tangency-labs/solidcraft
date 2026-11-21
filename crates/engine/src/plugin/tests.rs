@@ -161,6 +161,8 @@ fn manifest_is_inert_bounded_and_refuses_unknown_capabilities() {
     assert_eq!(Limits::default().fuel, 10_000_000);
     let old = parse_manifest(br#"{"id":"sample","name":" Sample ","version":" 1 ","description":" Old metadata "}"#, "sample").unwrap();
     assert_eq!((old.name.as_str(), old.version.as_str(), old.description.as_str()), ("Sample", "1", "Old metadata"));
+    assert!(old.min_host_version.is_none() && old.optional_capabilities.is_empty() && old.extensions.is_empty());
+    assert!(old.granted_capabilities().is_empty());
     for mutate in [
         |m: &mut Value| m["runtime"]["module"] = json!("../other.wasm"),
         |m: &mut Value| m["runtime"]["commands"] = json!(["file.export"]),
@@ -186,6 +188,39 @@ fn manifest_is_inert_bounded_and_refuses_unknown_capabilities() {
     assert_eq!(MAX_MANIFEST_BYTES, 64 * 1024);
     assert!(parse_manifest(&vec![b' '; MAX_MANIFEST_BYTES + 1], "sample").is_err());
 }
+#[test]
+fn manifest_checks_the_host_version_before_unknown_fields_and_capabilities() {
+    let mut m = manifest();
+    m["min_host_version"] = json!("999999.0.0");
+    m["capabilities"] = json!(["future@0.1"]);
+    m["future_field"] = json!(true);
+    let refused = parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").unwrap_err();
+    assert!(matches!(refused.host_error(), Some(HostError::InvalidManifest { field, .. }) if field == "min_host_version"), "{refused}");
+    let text = refused.to_string();
+    assert!(text.contains("SolidCraft") && text.contains("999999.0.0") && text.contains(env!("CARGO_PKG_VERSION")), "{text}");
+}
+
+#[test]
+fn optional_storage_is_a_capability_without_permission_grants() {
+    let mut m = manifest();
+    m["min_host_version"] = json!(env!("CARGO_PKG_VERSION"));
+    m["optional_capabilities"] = json!(["storage@0.1", "future@0.1"]);
+    m["runtime"]["commands"] = json!(["storage.get"]);
+    m["runtime"]["data_format"] = json!(1);
+    m["extensions"] = json!({"future":{"settings":[1,true,null]},"permissions":{"net":true,"command_groups":["app"]}});
+    let accepted = parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").unwrap();
+    assert_eq!(accepted.granted_capabilities(), ["commands@0.1", "storage@0.1"]);
+    assert_eq!(accepted.extensions["future"], json!({"settings":[1,true,null]}));
+    assert_eq!(accepted.runtime.as_ref().unwrap().permissions, craft_plugin::Permissions::default());
+    // Future metadata cannot approve commands that the manifest did not request.
+    m["runtime"]["commands"] = json!(["settings.profile.list"]);
+    let refused = parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").unwrap_err();
+    assert!(matches!(refused.host_error(), Some(HostError::InvalidManifest { field, .. }) if field == "runtime.commands"), "{refused}");
+    m["runtime"]["commands"] = json!(["storage.get"]);
+    m["future_field"] = json!(true);
+    assert!(parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").is_err());
+}
+
 #[test]
 fn plugin_entries_cannot_shadow_host_commands() {
     let mut m = manifest();
@@ -1783,6 +1818,40 @@ mod native {
     }
 
     #[test]
+    fn inspect_and_check_describe_capability_negotiation_without_running_plugins() {
+        let f = Fixture::new("unreachable");
+        let mut m = manifest();
+        m["min_host_version"] = json!(env!("CARGO_PKG_VERSION"));
+        m["optional_capabilities"] = json!(["storage@0.1", "future@0.1"]);
+        m["runtime"]["data_format"] = json!(1);
+        m["extensions"] = json!({"future":{"revision":2},"permissions":{"net":true}});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        let inspected = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
+        let checked = s.execute("plugin.check", &json!({"path":f.path()})).unwrap();
+        assert_eq!(checked["ok"], true, "{checked}");
+        assert_eq!(inspected["granted_capabilities"], json!(["commands@0.1", "storage@0.1"]));
+        assert_eq!(checked["granted_capabilities"], inspected["granted_capabilities"]);
+        for field in ["min_host_version", "optional_capabilities", "extensions"] {
+            assert_eq!(inspected["manifest"][field], m[field]);
+            assert_eq!(checked[field], m[field]);
+        }
+        assert!(s.plugin_state.grants.is_empty() && s.doc.features.is_empty() && s.undo.is_empty());
+        // A future host requirement wins over both an unknown field and an unknown capability.
+        m["min_host_version"] = json!("999999.0.0");
+        m["capabilities"] = json!(["future@0.1"]);
+        m["future_field"] = json!(true);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let checked = s.execute("plugin.check", &json!({"path":f.path()})).unwrap();
+        assert_eq!(checked["ok"], false);
+        assert_eq!(checked["problems"][0]["field"], "min_host_version");
+        let problem = checked["problems"][0]["problem"].as_str().unwrap();
+        assert!(problem.contains("999999.0.0") && problem.contains(env!("CARGO_PKG_VERSION")), "{checked}");
+        assert!(!checked["problems"][0]["fix"].as_str().unwrap().is_empty());
+        assert!(s.execute("plugin.inspect", &json!({"path":f.path()})).is_err());
+    }
+
+    #[test]
     fn installed_plugins_run_with_only_the_approved_folders() {
         let f = Fixture::new("call $box");
         std::fs::write(f.0.join("secret.txt"), "{}").unwrap();
@@ -2051,6 +2120,26 @@ mod native {
         m["runtime"]["commands"] = json!(["storage.get"]);
         let refused = parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").unwrap_err().to_string();
         assert!(refused.contains("needs the storage capability"), "{refused}");
+    }
+    #[test]
+    fn a_plugin_with_optional_storage_keeps_only_its_own_data() {
+        let f = Fixture::new("call $box");
+        let mut m = manifest();
+        m["optional_capabilities"] = json!(["storage@0.1", "future@0.1"]);
+        m["runtime"]["commands"] = json!(["storage.set"]);
+        m["runtime"]["data_format"] = json!(1);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        std::fs::write(f.0.join("sample/plugin.wasm"), storage_component()).unwrap();
+        let mut s = Session::default();
+        s.doc_mut().plugin_data.insert("other/data.json".into(), br#"{"kept":true}"#.as_slice().into());
+        f.run(&mut s).unwrap();
+        assert_eq!(s.execute("storage.get", &json!({"plugin":"sample"})).unwrap()["document"], json!({"teeth":24}));
+        assert_eq!(s.doc.plugin_data["other/data.json"].as_bytes(), br#"{"kept":true}"#);
+        assert!(s.plugin_state.storage_caller.is_none() && s.plugin_state.grants.is_empty());
+        assert!(s.execute("storage.set", &json!({"document":{}})).is_err());
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(!s.doc.plugin_data.contains_key("sample/data.json"));
+        assert!(s.doc.plugin_data.contains_key("other/data.json"));
     }
     #[test]
     fn named_calls_preserve_input_pass_through() {
@@ -2770,6 +2859,8 @@ mod install_zip {
         assert_eq!(reply["name"], "Gears");
         assert_eq!(reply["version"], "0.1.0");
         assert_eq!(reply["capabilities"], json!(["commands@0.1"]));
+        assert_eq!(reply["granted_capabilities"], reply["capabilities"]);
+        assert!(reply.get("min_host_version").is_none() && reply.get("optional_capabilities").is_none() && reply.get("extensions").is_none());
         assert_eq!(reply["entries"], json!(["gears.make"]));
         assert_eq!(reply["commands"], json!(["solid.box"]));
         assert!(reply["permissions"].is_object() && reply.get("replaces").is_none());
@@ -2782,6 +2873,49 @@ mod install_zip {
         let only = std::fs::read_dir(root.join("plugins")).unwrap().count();
         assert_eq!(only, 1, "no staging folders are left behind");
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn install_describes_optional_capabilities_and_preserves_permissions_and_metadata() {
+        let (mut s, root) = session("optional-capabilities");
+        let mut m = manifest();
+        m["min_host_version"] = json!(env!("CARGO_PKG_VERSION"));
+        m["optional_capabilities"] = json!(["storage@0.1", "future@0.1"]);
+        m["runtime"]["data_format"] = json!(1);
+        m["extensions"] = json!({"future":{"revision":2},"permissions":{"net":true,"command_groups":["app"]}});
+        let path = put(&root, "optional.zip", &zip(&[("plugin.json", &serde_json::to_vec(&m).unwrap()), ("plugin.wasm", b"x")]));
+        let dry = s.execute("plugin.install", &json!({"path":path,"dry_run":true})).unwrap();
+        assert_eq!(dry["granted_capabilities"], json!(["commands@0.1", "storage@0.1"]));
+        for field in ["min_host_version", "optional_capabilities", "extensions"] {
+            assert_eq!(dry[field], m[field]);
+        }
+        assert!(!root.join("plugins").exists() && s.plugin_state.grants.is_empty());
+        let installed = s.execute("plugin.install", &json!({"path":path,"approval":dry["approval"],"archive":dry["archive"]})).unwrap();
+        assert_eq!(installed["granted_capabilities"], dry["granted_capabilities"]);
+        let stored = read_package(&root.join("plugins/sample").to_string_lossy()).unwrap();
+        assert_eq!(stored.manifest.extensions, m["extensions"].as_object().unwrap().clone());
+        let grants = &s.plugin_state.grants["sample"];
+        assert!(grants.command_groups.is_empty() && grants.folders.is_empty() && !grants.input_folder && grants.memory_mib.is_none());
+        assert!(grants.package_hash.is_some());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn install_checks_the_host_version_before_unknown_metadata_and_writes_nothing() {
+        let (mut s, root) = session("minimum-host-version");
+        let mut m = manifest();
+        m["min_host_version"] = json!("999999.0.0");
+        m["capabilities"] = json!(["future@0.1"]);
+        m["future_field"] = json!(true);
+        let path = put(&root, "future.zip", &zip(&[("plugin.json", &serde_json::to_vec(&m).unwrap()), ("plugin.wasm", b"x")]));
+        for dry_run in [true, false] {
+            let refused = s.execute("plugin.install", &json!({"path":path,"dry_run":dry_run})).unwrap_err();
+            assert!(matches!(refused.host_error(), Some(HostError::InvalidManifest { field, .. }) if field == "min_host_version"), "{refused}");
+            let text = refused.to_string();
+            assert!(text.contains("SolidCraft") && text.contains("999999.0.0") && text.contains(env!("CARGO_PKG_VERSION")), "{text}");
+            assert!(!root.join("plugins").exists() && s.plugin_state.grants.is_empty());
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

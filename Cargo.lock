@@ -1375,6 +1375,7 @@ version = "0.46.0"
 dependencies = [
  "image",
  "schemars",
+ "semver",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

@@ -68,6 +68,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         .and_then(|r| limits.check(&r.limits).err())
         .map(|error| plugin::PluginFailure { plugin: package.manifest.name.clone(), file: None, error }.text());
     serde_json::to_value(InspectResult {
+        granted_capabilities: package.manifest.granted_capabilities(),
         manifest: package.manifest,
         approval: package.approval,
         host_limits: limits,
@@ -148,6 +149,10 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         version: manifest.version.clone(),
         description: manifest.description.clone(),
         capabilities: manifest.capabilities.clone(),
+        min_host_version: manifest.min_host_version.clone(),
+        optional_capabilities: manifest.optional_capabilities.clone(),
+        granted_capabilities: manifest.granted_capabilities(),
+        extensions: manifest.extensions.clone(),
         permissions: runtime.map(|r| r.permissions.clone()).unwrap_or_default(),
         limits: runtime.map(|r| r.limits.clone()),
         host_limits: s.plugin_limits,

@@ -180,7 +180,7 @@ impl AppState {
 }
 
 pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
-    let manifest = craft_plugin::parse_manifest_for(text, folder, "SolidCraft")?;
+    let manifest = craft_plugin::parse_manifest_for_version(text, folder, "SolidCraft", env!("CARGO_PKG_VERSION"))?;
     let refuse = |field: &str, reason: String| -> EngineError { HostError::InvalidManifest { field: field.into(), reason }.into() };
     if let Some(runtime) = &manifest.runtime {
         for entry in &runtime.entries {
@@ -195,7 +195,7 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
                 format!("unknown command group `{group}`; SolidCraft has {}", COMMAND_GROUPS.join(", ")),
             ));
         }
-        let storage = manifest.capabilities.iter().any(|capability| capability.starts_with("storage@"));
+        let storage = manifest.granted_capabilities().iter().any(|capability| capability.starts_with("storage@"));
         for command in &runtime.commands {
             if command.starts_with("storage.") && !storage {
                 return Err(refuse("runtime.commands", format!("`{command}` needs the storage capability: add \"storage@0.1\" to capabilities")));
@@ -462,14 +462,14 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
         let groups: BTreeSet<String> = rt.permissions.command_groups.intersection(&grants.command_groups).cloned().collect();
         let mut scratch = session.scratch();
         scratch.plugin_state.file_grants = grants.folders;
-        scratch.plugin_state.storage_caller =
-            rt.data_format.filter(|_| package.manifest.capabilities.iter().any(|c| c.starts_with("storage@"))).map(|data_format| {
-                storage::StorageCaller {
-                    id: package.manifest.id.clone(),
-                    name: package.manifest.name.clone(),
-                    version: package.manifest.version.clone(),
-                    data_format,
-                }
+        scratch.plugin_state.storage_caller = rt
+            .data_format
+            .filter(|_| package.manifest.granted_capabilities().iter().any(|c| c.starts_with("storage@")))
+            .map(|data_format| storage::StorageCaller {
+                id: package.manifest.id.clone(),
+                name: package.manifest.name.clone(),
+                version: package.manifest.version.clone(),
+                data_format,
             });
         let host = SolidCraftHost {
             session: scratch,

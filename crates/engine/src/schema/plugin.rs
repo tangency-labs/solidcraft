@@ -12,6 +12,8 @@ pub struct InspectParams {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InspectResult {
     pub manifest: crate::plugin::Manifest,
+    /// Required capabilities and the optional capabilities this host supports; grants no permissions.
+    pub granted_capabilities: Vec<String>,
     /// SHA-256 of the exact manifest bytes and component. Review the manifest before using it.
     pub approval: String,
     pub host_limits: crate::plugin::HostLimits,
@@ -296,6 +298,18 @@ pub struct InstallResult {
     pub description: String,
     /// Host capabilities it needs, as `name@major.minor`.
     pub capabilities: Vec<String>,
+    /// Oldest SolidCraft version it supports, when declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_host_version: Option<String>,
+    /// Capabilities it uses when available, as `name@major.minor`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub optional_capabilities: Vec<String>,
+    /// Required capabilities and the optional capabilities this host supports; grants no permissions.
+    pub granted_capabilities: Vec<String>,
+    /// Optional metadata reserved for future hosts; never grants permissions.
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    #[schemars(with = "std::collections::BTreeMap<String, Value>")]
+    pub extensions: serde_json::Map<String, Value>,
     /// What it asks for: command groups, named folders, the clock.
     pub permissions: craft_plugin::Permissions,
     /// The fuel, memory and time it asks for. Memory above `host_limits` is approved at install
@@ -476,6 +490,19 @@ pub struct CheckResult {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Oldest SolidCraft version it supports, when declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_host_version: Option<String>,
+    /// Capabilities it uses when available, as `name@major.minor`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub optional_capabilities: Vec<String>,
+    /// Required capabilities and the optional capabilities this host supports; grants no permissions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub granted_capabilities: Vec<String>,
+    /// Optional metadata reserved for future hosts; never grants permissions.
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    #[schemars(with = "std::collections::BTreeMap<String, Value>")]
+    pub extensions: serde_json::Map<String, Value>,
     /// `command`, `importer`, or `metadata` for a manifest with no runtime.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,

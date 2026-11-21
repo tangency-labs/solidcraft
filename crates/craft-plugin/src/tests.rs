@@ -325,6 +325,24 @@ fn design_listeners_require_a_read_entry_and_design_capability() {
 }
 
 #[test]
+fn optional_design_capabilities_authorize_listeners_only_when_supported() {
+    let mut value = manifest();
+    value["capabilities"] = json!(["commands@0.2", "host@0.1"]);
+    value["runtime"]["entries"] = json!([{"name":"refresh","effect":"read"}]);
+    value["runtime"]["listeners"] = json!([{"entry":"refresh","on":["design.changed"]}]);
+    for capability in ["design@0.1", "design@0.1.3"] {
+        value["optional_capabilities"] = json!([capability, "future@0.1"]);
+        let parsed = parse(&value).unwrap();
+        assert_eq!(parsed.granted_capabilities(), ["commands@0.2", "host@0.1", capability]);
+        assert_eq!(parsed.runtime.unwrap().listeners[0].entry, "refresh");
+    }
+    value["optional_capabilities"] = json!(["design@99.0"]);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "runtime.listeners"));
+    value["runtime"]["listeners"] = json!([]);
+    assert_eq!(parse(&value).unwrap().granted_capabilities(), ["commands@0.2", "host@0.1"]);
+}
+
+#[test]
 fn stale_revision_is_a_typed_error_naming_both_tokens() {
     let expected = DesignToken { document_id: "design-one".into(), revision: "0123456789abcdef0123456789abcdef:3".into() };
     let actual = DesignToken { document_id: "design-one".into(), revision: "0123456789abcdef0123456789abcdef:4".into() };
@@ -563,6 +581,183 @@ fn capabilities_are_checked_at_load_with_plain_refusals() {
     assert_eq!(parse_manifest(groups.to_string().as_bytes(), "sample").unwrap().runtime.unwrap().permissions.command_groups.len(), 2);
     groups["runtime"]["permissions"] = json!({"command_groups":["File"]});
     assert!(parse_manifest(groups.to_string().as_bytes(), "sample").is_err());
+}
+
+#[test]
+fn minimum_host_version_is_checked_before_fields_capabilities_and_legacy_api() {
+    let mut value = manifest();
+    value["min_host_version"] = json!("2.1.0");
+    for change in [
+        |value: &mut Value| value["future_field"] = json!(true),
+        |value: &mut Value| value["capabilities"] = json!(["future@0.1"]),
+        |value: &mut Value| value["runtime"]["api"] = json!("future:plugin@9.0.0"),
+    ] {
+        let mut future = value.clone();
+        change(&mut future);
+        let refusal = parse_manifest_for_version(future.to_string().as_bytes(), "sample", "SolidCraft", "2.0.9").unwrap_err();
+        assert!(matches!(&refusal, HostError::InvalidManifest { field, .. } if field == "min_host_version"));
+        let message = refusal.to_string();
+        assert!(message.contains("SolidCraft 2.1.0") && message.contains("SolidCraft is 2.0.9"), "{message}");
+        assert!(!message.contains("future_field") && !message.contains("future@") && !message.contains("future:plugin"), "{message}");
+    }
+    assert!(parse_manifest_for_version(value.to_string().as_bytes(), "sample", "SolidCraft", "2.1.0").is_ok());
+    value["min_host_version"] = json!(env!("CARGO_PKG_VERSION"));
+    assert!(parse(&value).is_ok(), "the default parser uses the crate's host version");
+}
+
+#[test]
+fn minimum_host_versions_use_semantic_version_precedence() {
+    for (minimum, current, supported) in [
+        ("1.2.3", "1.2.2", false),
+        ("1.2.3", "1.2.3", true),
+        ("1.2.3", "1.10.0", true),
+        ("1.2.3", "2.0.0", true),
+        ("1.2.3", "1.2.3-rc.1", false),
+        ("1.2.3-rc.1", "1.2.3", true),
+        ("1.2.3-rc.2", "1.2.3-rc.10", true),
+        ("1.2.3-rc.10", "1.2.3-rc.2", false),
+        ("1.2.3+build.z", "1.2.3+build.a", true),
+        ("1.2.3+build.a", "1.2.3", true),
+        ("0.0.0", "0.0.0", true),
+    ] {
+        let mut value = manifest();
+        value["min_host_version"] = json!(minimum);
+        let parsed = parse_manifest_for_version(value.to_string().as_bytes(), "sample", "SolidCraft", current);
+        assert_eq!(parsed.is_ok(), supported, "minimum {minimum}, current {current}: {parsed:?}");
+        if supported {
+            assert_eq!(parsed.unwrap().min_host_version.as_deref(), Some(minimum));
+        }
+    }
+}
+
+#[test]
+fn minimum_host_version_requires_a_complete_semantic_version_string() {
+    for minimum in [
+        json!(null),
+        json!(true),
+        json!(123),
+        json!([]),
+        json!({}),
+        json!(""),
+        json!("1"),
+        json!("1.2"),
+        json!("v1.2.3"),
+        json!(" 1.2.3"),
+        json!("1.2.3 "),
+        json!("01.2.3"),
+        json!("1.2.3-01"),
+        json!("1.2.3+"),
+        json!("1.2.3.4"),
+        json!("18446744073709551616.0.0"),
+    ] {
+        let mut value = manifest();
+        value["min_host_version"] = minimum.clone();
+        value["unknown_field"] = json!(true);
+        let parsed = parse_manifest_for_version(value.to_string().as_bytes(), "sample", "SolidCraft", "2.0.0");
+        assert!(matches!(parsed, Err(HostError::InvalidManifest { field, .. }) if field == "min_host_version"), "{minimum}");
+    }
+}
+
+#[test]
+fn extension_metadata_accepts_unknown_keys_but_other_manifest_fields_stay_strict() {
+    let mut value = manifest();
+    let legacy = parse(&value).unwrap();
+    assert!(legacy.min_host_version.is_none() && legacy.optional_capabilities.is_empty() && legacy.extensions.is_empty());
+    let serialized = serde_json::to_value(legacy).unwrap();
+    for field in ["min_host_version", "optional_capabilities", "extensions"] {
+        assert!(serialized.get(field).is_none(), "empty {field} is omitted");
+    }
+    value["extensions"] = json!({"future":{"arbitrary":[null,true,3,"text",{"another":false}]},"vendor.example":42,
+        "min_host_version":"999.0.0","capabilities":["future@0.1"]});
+    let parsed = parse(&value).unwrap();
+    assert_eq!(json!(parsed.extensions), value["extensions"]);
+    assert_eq!(parsed.granted_capabilities(), ["commands@0.1"]);
+    for extension in [json!(null), json!(false), json!(42), json!("metadata"), json!([])] {
+        value["extensions"] = extension;
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { .. })));
+    }
+    value["extensions"] = json!({});
+    value["future"] = json!(true);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { reason, .. }) if reason.contains("unknown field `future`")));
+    value.as_object_mut().unwrap().remove("future");
+    value["runtime"]["future"] = json!(true);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { reason, .. }) if reason.contains("unknown field `future`")));
+}
+
+#[test]
+fn optional_capabilities_grant_supported_versions_and_preserve_declared_strings() {
+    let mut value = manifest();
+    value["optional_capabilities"] = json!(["host@0.1.7", "future@0.1", "forms@0.1", "dialog@0.1", "evaluate@0.3"]);
+    let parsed = parse(&value).unwrap();
+    assert_eq!(parsed.optional_capabilities.len(), 5);
+    assert_eq!(parsed.granted_capabilities(), ["commands@0.1", "host@0.1.7", "forms@0.1", "dialog@0.1"]);
+    for version in ["host@0.0", "host@0.2", "host@1.0", "host@0.1"] {
+        value["optional_capabilities"] = json!([version]);
+        assert_eq!(parse(&value).unwrap().granted_capabilities().len(), if version == "host@0.1" { 2 } else { 1 }, "{version}");
+    }
+    let mut importing = importer();
+    importing["optional_capabilities"] = json!(["evaluate@0.1.4", "host@0.1", "future@0.1"]);
+    assert_eq!(parse(&importing).unwrap().granted_capabilities(), ["formats@0.1", "evaluate@0.1.4", "host@0.1"]);
+}
+
+#[test]
+fn optional_capabilities_are_bounded_well_formed_and_never_duplicate_required_names() {
+    for optional in [
+        json!(["future"]),
+        json!(["future@x"]),
+        json!(["Future@0.1"]),
+        json!(["future@0.1.2.3"]),
+        json!(["future@0.1-beta"]),
+        json!(["future@4294967296.1"]),
+        json!(["future@0.1", "future@0.2"]),
+        json!(["commands@0.2"]),
+    ] {
+        let mut value = manifest();
+        value["optional_capabilities"] = optional.clone();
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "optional_capabilities"), "{optional}");
+    }
+    for optional in [json!(null), json!({}), json!("host@0.1"), json!([true])] {
+        let mut value = manifest();
+        value["optional_capabilities"] = optional;
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { .. })));
+    }
+    let mut value = manifest();
+    value["optional_capabilities"] = json!((0..16).map(|index| format!("future-{index}@0.1")).collect::<Vec<_>>());
+    assert_eq!(parse(&value).unwrap().granted_capabilities(), ["commands@0.1"]);
+    value["optional_capabilities"].as_array_mut().unwrap().push(json!("future-16@0.1"));
+    assert!(
+        matches!(parse(&value), Err(HostError::InvalidManifest { field, reason }) if field == "optional_capabilities" && reason.contains("at most 16"))
+    );
+    value["optional_capabilities"] = json!([]);
+    value["capabilities"] = json!((0..17).map(|index| format!("future-{index}@0.1")).collect::<Vec<_>>());
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, reason }) if field == "capabilities" && reason.contains("at most 16")));
+}
+
+#[test]
+fn optional_capabilities_keep_runtime_kind_and_storage_requirements() {
+    let mut command = manifest();
+    command["capabilities"] = json!([]);
+    command["optional_capabilities"] = json!(["commands@0.1"]);
+    assert!(matches!(parse(&command), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    let mut importing = importer();
+    importing["capabilities"] = json!([]);
+    importing["optional_capabilities"] = json!(["formats@0.1"]);
+    assert!(matches!(parse(&importing), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    let mut command = manifest();
+    command["optional_capabilities"] = json!(["evaluate@0.1"]);
+    assert!(matches!(parse(&command), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    command["optional_capabilities"] = json!(["storage@0.1"]);
+    assert!(matches!(parse(&command), Err(HostError::InvalidManifest { field, .. }) if field == "runtime.data_format"));
+    command["runtime"]["data_format"] = json!(1);
+    assert_eq!(parse(&command).unwrap().granted_capabilities(), ["commands@0.1", "storage@0.1"]);
+    command["optional_capabilities"] = json!(["storage@0.2"]);
+    assert!(matches!(parse(&command), Err(HostError::InvalidManifest { field, .. }) if field == "runtime.data_format"));
+    command["runtime"].as_object_mut().unwrap().remove("data_format");
+    assert_eq!(parse(&command).unwrap().granted_capabilities(), ["commands@0.1"]);
+    importing["capabilities"] = json!(["formats@0.1"]);
+    importing["optional_capabilities"] = json!(["storage@0.1"]);
+    importing["runtime"]["data_format"] = json!(1);
+    assert!(matches!(parse(&importing), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
 }
 
 fn importer() -> Value {
