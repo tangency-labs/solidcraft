@@ -7,7 +7,8 @@
     "ui.plugin_edit_checking": "جارٍ التحقق من المدخلات…",
     "ui.plugin_edit_missing_pick": "هذا العنصر المحدد مفقود أو لم يعد يطابق النموذج. حدده مجدداً.",
     "ui.plugin_edit_revalidated": "تغير التصميم. راجع الحقول، ثم اضغط تطبيق مرة أخرى.",
-    "ui.plugin_edit_unknown": "أمر الإضافة هذا غير متاح."
+    "ui.plugin_edit_unknown": "أمر الإضافة هذا غير متاح.",
+    "ui.plugin_edit_unset": "إلغاء التعيين"
   },
   "de": {
     "cmd.plugin.edit": "Plugin-Operation bearbeiten",
@@ -17,7 +18,8 @@
     "ui.plugin_edit_checking": "Eingaben werden geprüft…",
     "ui.plugin_edit_missing_pick": "Diese Auswahl fehlt oder passt nicht mehr zum Modell. Wählen Sie sie erneut.",
     "ui.plugin_edit_revalidated": "Der Entwurf wurde geändert. Prüfen Sie die Felder und klicken Sie dann erneut auf Anwenden.",
-    "ui.plugin_edit_unknown": "Dieser Plugin-Befehl ist nicht verfügbar."
+    "ui.plugin_edit_unknown": "Dieser Plugin-Befehl ist nicht verfügbar.",
+    "ui.plugin_edit_unset": "Nicht angeben"
   },
   "en": {
     "cmd.plugin.edit": "Edit Plugin Operation",
@@ -27,7 +29,8 @@
     "ui.plugin_edit_checking": "Checking inputs…",
     "ui.plugin_edit_missing_pick": "This pick is missing or no longer matches the model. Pick it again.",
     "ui.plugin_edit_revalidated": "The design changed. Review the fields, then press Apply again.",
-    "ui.plugin_edit_unknown": "This plugin command is unavailable."
+    "ui.plugin_edit_unknown": "This plugin command is unavailable.",
+    "ui.plugin_edit_unset": "Unset"
   },
   "he": {
     "cmd.plugin.edit": "עריכת פעולת תוסף",
@@ -37,7 +40,8 @@
     "ui.plugin_edit_checking": "הקלט נבדק…",
     "ui.plugin_edit_missing_pick": "הבחירה חסרה או אינה תואמת עוד למודל. יש לבחור שוב.",
     "ui.plugin_edit_revalidated": "התכנון השתנה. בדקו את השדות ולחצו שוב על החל.",
-    "ui.plugin_edit_unknown": "פקודת תוסף זו אינה זמינה."
+    "ui.plugin_edit_unknown": "פקודת תוסף זו אינה זמינה.",
+    "ui.plugin_edit_unset": "ביטול ערך"
   },
   "ja": {
     "cmd.plugin.edit": "プラグイン操作を編集",
@@ -47,7 +51,8 @@
     "ui.plugin_edit_checking": "入力を確認しています…",
     "ui.plugin_edit_missing_pick": "選択した要素が存在しないか、モデルと一致しません。再選択してください。",
     "ui.plugin_edit_revalidated": "設計が変更されました。各フィールドを確認し、もう一度適用を押してください。",
-    "ui.plugin_edit_unknown": "このプラグインコマンドは利用できません。"
+    "ui.plugin_edit_unknown": "このプラグインコマンドは利用できません。",
+    "ui.plugin_edit_unset": "未指定にする"
   },
   "ko": {
     "cmd.plugin.edit": "플러그인 작업 편집",
@@ -57,7 +62,8 @@
     "ui.plugin_edit_checking": "입력을 확인하는 중…",
     "ui.plugin_edit_missing_pick": "선택한 요소가 없거나 모델과 더 이상 일치하지 않습니다. 다시 선택하세요.",
     "ui.plugin_edit_revalidated": "설계가 변경되었습니다. 필드를 검토한 후 적용을 다시 누르세요.",
-    "ui.plugin_edit_unknown": "이 플러그인 명령을 사용할 수 없습니다."
+    "ui.plugin_edit_unknown": "이 플러그인 명령을 사용할 수 없습니다.",
+    "ui.plugin_edit_unset": "값 해제"
   },
   "vi": {
     "cmd.plugin.edit": "Chỉnh sửa thao tác phần bổ trợ",
@@ -67,7 +73,8 @@
     "ui.plugin_edit_checking": "Đang kiểm tra dữ liệu…",
     "ui.plugin_edit_missing_pick": "Đối tượng đã chọn bị thiếu hoặc không còn khớp với mô hình. Hãy chọn lại.",
     "ui.plugin_edit_revalidated": "Thiết kế đã thay đổi. Hãy xem lại các trường rồi nhấn Áp dụng lần nữa.",
-    "ui.plugin_edit_unknown": "Lệnh phần bổ trợ này không khả dụng."
+    "ui.plugin_edit_unknown": "Lệnh phần bổ trợ này không khả dụng.",
+    "ui.plugin_edit_unset": "Bỏ đặt"
   },
   "zh": {
     "cmd.plugin.edit": "编辑插件操作",
@@ -77,6 +84,7 @@
     "ui.plugin_edit_checking": "正在检查输入…",
     "ui.plugin_edit_missing_pick": "此选择已丢失或不再与模型匹配。请重新选择。",
     "ui.plugin_edit_revalidated": "设计已更改。请检查各字段，然后再次点击应用。",
-    "ui.plugin_edit_unknown": "此插件命令不可用。"
+    "ui.plugin_edit_unknown": "此插件命令不可用。",
+    "ui.plugin_edit_unset": "取消设置"
   }
 }
