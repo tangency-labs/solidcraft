@@ -3283,11 +3283,13 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut round_into_material = false;
         let mut rolls_over = false;
         let mut wraps = false;
+        let mut touches_rim = false;
         let mut overflowing = Vec::new();
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
             index += 1;
             let judged = access.geometry_rails_fit_judged(k, solver, self)?;
+            touches_rim |= judged.touches_rim;
             let continued = !judged.continued_cliffs.is_empty();
             if continued {
                 self.continued_cliffs
@@ -3328,6 +3330,20 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             if judged.into_material && !access.geometry_generator_is_linear(solver)? {
                 round_into_material = true;
             }
+        }
+        if touches_rim {
+            // At the open fit bound a closed rail touches the rim without leaving
+            // its face (#20282). Judge every solver before refusing: another selected
+            // edge may need a smaller radius, even when its rail crosses the rim.
+            let mut index = 0;
+            while let Some(solver) = self.solvers.get(index).copied() {
+                index += 1;
+                self.note_fit_on_its_faces(k, access, solver)?;
+            }
+            return self.record_no_room(
+                NoRoomReason::RailLeavesFace,
+                "Fillet Error: a closed rail touches the boundary of the face it rolls on (the blend is as large as the faces allow)",
+            );
         }
         // whether the other blends add material (concave), when one overflows
         let mut index = 0;
