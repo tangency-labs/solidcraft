@@ -732,7 +732,7 @@ fn folder_read_annotations_are_explicit_bounded_and_only_on_top_level_directorie
     let schema = json!({"type":"object","properties":{"library":directory}});
     assert_eq!(directory_read_fields(&schema).unwrap(), BTreeSet::from(["library".into()]));
     let mut value = manifest();
-    value["capabilities"] = json!(["commands@0.2","folders@0.1"]);
+    value["capabilities"] = json!(["commands@0.2", "folders@0.1"]);
     value["runtime"]["entries"] = json!([{"name":"make","input_schema":schema}]);
     assert!(parse(&value).is_ok());
     for property in [

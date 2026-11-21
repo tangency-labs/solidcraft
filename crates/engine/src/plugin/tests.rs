@@ -1532,7 +1532,7 @@ mod importers {
         std::fs::create_dir_all(&library).unwrap();
         let library = std::fs::canonicalize(library).unwrap();
         let mut manifest = importer_manifest("smp", &["smp"], false);
-        manifest["capabilities"] = json!(["formats@0.2","folders@0.1"]);
+        manifest["capabilities"] = json!(["formats@0.2", "folders@0.1"]);
         manifest["runtime"]["entries"][0]["input_schema"] = json!({"type":"object","properties":{
             "library":{"type":"string","format":"directory","x-solidcraft-grant":"read"}
         }});
@@ -1543,7 +1543,9 @@ mod importers {
         let params = json!({"library":library});
         assert!(import_file(&mut s, &importer, &file, &params).is_err());
         s.plugin_state.dialog_folders = Some(folders::DialogFolders {
-            plugin: "smp".into(), approval: package.approval, entry: "convert".into(),
+            plugin: "smp".into(),
+            approval: package.approval,
+            entry: "convert".into(),
             folders: vec![FileGrant { name: "library".into(), folder: library, read: true, write: false }],
         });
         assert!(import_file(&mut s, &importer, &file, &params).is_ok());
@@ -2396,9 +2398,15 @@ fn annotated_folders_need_bound_ui_consent_or_a_current_read_approval() {
         "library":{"type":"string","format":"directory","x-solidcraft-grant":"read",
             "x-solidcraft-visible-when":{"field":"use_library","eq":true}}
     }});
-    let manifest = parse_manifest(json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.2","folders@0.1"],
+    let manifest = parse_manifest(
+        json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.2","folders@0.1"],
         "runtime":{"module":"plugin.wasm","entries":[{"name":"make","input_schema":schema}],
-            "permissions":{"files":[{"name":"work","read":true,"write":false}]}}}).to_string().as_bytes(), "sample").unwrap();
+            "permissions":{"files":[{"name":"work","read":true,"write":false}]}}})
+        .to_string()
+        .as_bytes(),
+        "sample",
+    )
+    .unwrap();
     let package = Package { manifest, approval: "reviewed".into(), component: Vec::new() };
     let mut s = Session::default();
     let params = json!({"use_library":true,"library":library});
@@ -2406,8 +2414,15 @@ fn annotated_folders_need_bound_ui_consent_or_a_current_read_approval() {
     let grant = FileGrant { name: "library".into(), folder: library.clone(), read: true, write: false };
     let consent = folders::DialogFolders { plugin: "sample".into(), approval: "reviewed".into(), entry: "make".into(), folders: vec![grant.clone()] };
     let host = SolidCraftHost {
-        session: Session::default(), input_folders: vec![grant.clone()], transaction: None, sketch_exits: Vec::new(),
-        view: None, groups: BTreeSet::new(), file_folders: Vec::new(), file_read_folders: Vec::new(), evaluation: None,
+        session: Session::default(),
+        input_folders: vec![grant.clone()],
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
+        evaluation: None,
     };
     assert!(host.authorize_input_file_path(&library.join("parts/part.bin")).is_ok());
     assert!(host.authorize_file_path(&library.join("parts/part.bin"), false).is_err(), "legacy file reads gain nothing");

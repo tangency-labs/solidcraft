@@ -1154,7 +1154,10 @@ impl EntryDialog {
     fn folder_consent(&self) -> Result<solidcraft_engine::plugin::folders::DialogFolders, String> {
         let mut folders = Vec::new();
         for (field, input) in self.fields.iter().flatten() {
-            if field.grant_read && field.edited && field.visible && field.enabled
+            if field.grant_read
+                && field.edited
+                && field.visible
+                && field.enabled
                 && let Input::Text(path) = input
                 && !path.is_empty()
             {

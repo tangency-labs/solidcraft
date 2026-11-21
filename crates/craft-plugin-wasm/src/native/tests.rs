@@ -419,11 +419,8 @@ fn folder_or_files_source(writes: &[bool], swallow_error: bool, after: &str, fol
         imports += &format!("(import \"host\" \"{id}\" (func ${id} (param {core_parameters})))\n");
     }
     for write in writes {
-        let (id, arguments) = if *write {
-            ("write", "i32.const 128 i32.const 7")
-        } else {
-            ("read", if folder { "i64.const 0 i32.const 1048576" } else { "" })
-        };
+        let (id, arguments) =
+            if *write { ("write", "i32.const 128 i32.const 7") } else { ("read", if folder { "i64.const 0 i32.const 1048576" } else { "" }) };
         calls += &format!("  i32.const 64 i32.const 7 i32.const 96 i32.const 10 {arguments} i32.const 0 call ${id}\n");
     }
     let reply =
@@ -864,9 +861,10 @@ fn folder_reads_confine_paths_resolve_case_and_share_the_import_budgets() {
     std::fs::write(root.join("parts/sub.bin"), b"sub").unwrap();
     let make = || {
         let mut state = state(App::default());
-        state.input_folders.insert("library".into(), Folder {
-            dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: false,
-        });
+        state.input_folders.insert(
+            "library".into(),
+            Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: false },
+        );
         state
     };
     let mut allowed = make();
@@ -926,10 +924,7 @@ fn folder_import_component() -> Vec<u8> {
         )
         .replace("(export \"memory\" (memory $memory))", "(export \"write\" (func $write-core)) (export \"memory\" (memory $memory))")
         .replace("  (core module $main", "  (core module $main (import \"host\" \"write\" (func $write (param i32 i32 i32)))")
-        .replace(
-            "(func (export \"execute\") (param i32 i32 i32 i32)",
-            "(func (export \"execute\") (param i32 i32 i32 i32 i64 i32 i32)",
-        )
+        .replace("(func (export \"execute\") (param i32 i32 i32 i32)", "(func (export \"execute\") (param i32 i32 i32 i32 i64 i32 i32)")
         .replace("(param \"params\" $json)", "(param \"file\" $file-info) (param \"options\" $json)")
         .replace("(export \"execute\" (func $execute))", "(export \"file-info\" (type $file-info)) (export \"import-file\" (func $execute))")
         .replace(&format!("{package}/entry@{version}"), &format!("{package}/importer@{version}"));
@@ -949,10 +944,7 @@ fn an_importer_can_read_an_approved_external_library_without_widening_source() {
     let request = crate::ImportRequest { path: root.join("assembly.smp"), input_folder: false };
     let (_, denied) = crate::run_import(App::default(), &manifest, &component, "convert", &json!({}), &request);
     assert!(matches!(denied, Err(HostError::PermissionDenied { .. })));
-    let app = App {
-        input_grants: vec![FileGrant { name: "project".into(), folder: library, read: true, write: false }],
-        ..Default::default()
-    };
+    let app = App { input_grants: vec![FileGrant { name: "project".into(), folder: library, read: true, write: false }], ..Default::default() };
     let (_, imported) = crate::run_import(app, &manifest, &component, "convert", &json!({}), &request);
     assert_eq!(imported.unwrap().design, b"{}");
     std::fs::remove_dir_all(root).unwrap();
