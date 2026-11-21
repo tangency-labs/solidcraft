@@ -2231,6 +2231,8 @@ impl SolveApp {
             && let Some(spec) = solidcraft_engine::find_command(id)
         {
             solidcraft_engine::usage::note(solidcraft_engine::usage::Bucket::Tools, spec.id);
+            // Timed from here until it is applied or cancelled (`usage_stats::tick`).
+            self.usage.started_tool = Some(spec.id);
         }
         self.tree.clear_folder_pick();
         // A command started from the folded ribbon's open panels closes them (#10112).
