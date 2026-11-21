@@ -482,6 +482,8 @@ fn nested_plugin_edits_save_their_current_token_without_retagging_at_acceptance(
     let folder = crate::tests::Folder::new("nested-plugin-save-token");
     let path = folder.path("edited.sc");
     let mut host = SolidCraftHost {
+        forms: Vec::new(),
+        form_source: None,
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
@@ -1161,6 +1163,8 @@ mod native {
         let mut session = Session::default();
         session.plugin_state.listener_design = Some(Some(session.design_token()));
         let mut host = SolidCraftHost {
+            forms: Vec::new(),
+            form_source: None,
             session,
             transaction: None,
             sketch_exits: Vec::new(),
