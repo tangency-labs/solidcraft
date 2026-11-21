@@ -33,7 +33,7 @@ Repeat a hole, a pocket or a whole body in a row or a grid: a row of tapped hole
 
 #### Tips and common mistakes
 
-- **Do** click Pattern Components when the dialog offers it. Placing a component again is much faster and uses far less memory than copying every body in it.
+- **Do** click Pattern Components when the dialog offers it and you want the component placed again. That is much faster and uses far less memory than copying every body in it. Leave Object Type on Bodies when you want separate body copies instead.
 - **Do** count the original in Quantity. Five holes in a row is Quantity 5, not 4.
 - **Do** read Spacing as hole-to-hole pitch, the way the print dimensions it, not the total length of the row.
 - **Do** pattern the Hole feature rather than the body when the holes are all in one part. Change the hole size once and every copy follows.

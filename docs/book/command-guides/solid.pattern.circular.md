@@ -30,7 +30,7 @@ Repeat a hole, a boss or a whole body around an axis: the bolt circle on a flang
 
 #### Tips and common mistakes
 
-- **Do** click Pattern Components when the dialog offers it. Placing a component again is much faster and uses far less memory than copying every body in it.
+- **Do** click Pattern Components when the dialog offers it and you want the component placed again. That is much faster and uses far less memory than copying every body in it. Leave Object Type on Bodies when you want separate body copies instead.
 - **Do** pattern the Hole feature rather than the body when the holes are all in one part. Change the hole size once and every copy follows.
 - **Do** count the original in Quantity. A 6-hole bolt circle is Quantity 6, not 5.
 - **Don't** use 360 deg for a partial pattern you want to end on a copy. Under 360 deg the angle is from the first copy to the last; at 360 deg the last would land on the first, so the copies are spaced evenly instead.
