@@ -54,12 +54,60 @@ pub fn stem(design: &str, path: Option<&str>, uid: u64, bodies: &[String]) -> St
     format!("{}-{:016x}", if name.is_empty() { "design" } else { name }, h)
 }
 
+/// Longest file name (no extension) a caller may give, in UTF-8 bytes: common file systems allow
+/// 255 bytes for a file name, and this leaves room for the extension and a `-9` copy number.
+pub const MAX_NAME_BYTES: usize = 240;
+
+/// Whether `name` can be the file name (no extension) of a sent file, as the caller gave it; else
+/// what is wrong with it. The name goes into the slicer folder as it is, so anything that could
+/// leave that folder (a separator, `..`) or that a common file system refuses is turned down
+/// rather than changed: the caller knows which file the slicer then shows.
+pub fn check_name(name: &str) -> std::result::Result<(), &'static str> {
+    if name.trim().is_empty() {
+        return Err("it is empty");
+    }
+    if name.len() > MAX_NAME_BYTES {
+        return Err("it is longer than 240 bytes");
+    }
+    if name.chars().any(|c| c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')) {
+        return Err("it has a character a file name can't hold (/ \\ : * ? \" < > | or a control character)");
+    }
+    let edge = |c: char| c.is_whitespace() || c == '.';
+    if name.starts_with(edge) || name.ends_with(edge) {
+        return Err("it starts or ends with a space or a dot");
+    }
+    if is_windows_device(name) {
+        return Err("Windows keeps it for a device (CON, PRN, AUX, NUL, COM1 to COM9, LPT1 to LPT9)");
+    }
+    Ok(())
+}
+
+/// Whether Windows reserves `name` for a device, with any extension: its part before the first
+/// dot, without trailing spaces, is CON, PRN, AUX, NUL, COM1 to COM9 or LPT1 to LPT9 in any case
+/// (`con`, `NUL.tar`, `Com1 .x`). A file of that name can't be made there, so the name is refused
+/// on every system: a design's script then names the same file wherever it runs.
+fn is_windows_device(name: &str) -> bool {
+    let base = name.split('.').next().unwrap_or_default().trim_end().to_ascii_uppercase();
+    let numbered = |port: &str| base.strip_prefix(port).is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"));
+    matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL") || numbered("COM") || numbered("LPT")
+}
+
+/// Most bytes of the file's name that the temporary file's name repeats: with the dot, the
+/// extension, the process id and `.tmp` around them, the temporary name stays under the 255 bytes
+/// a file system allows, however long the file's own name is.
+const TMP_STEM_BYTES: usize = 200;
+
 /// Write `bytes` as `<stem>.<ext>` in `dir`: to a temporary name first, then renamed over the
 /// file, so the slicer never reads half a file. When the name can't be replaced (Windows keeps a
 /// file the slicer has open locked) the next free `<stem>-2.<ext>`, … is used; the flag says so.
 pub fn write(dir: &Path, stem: &str, ext: &str, bytes: &[u8]) -> io::Result<(PathBuf, bool)> {
     make_private(dir)?;
-    let tmp = dir.join(format!(".{stem}.{ext}.{}.tmp", std::process::id()));
+    // Cut between characters, never inside one.
+    let mut cut = stem.len().min(TMP_STEM_BYTES);
+    while !stem.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let tmp = dir.join(format!(".{}.{ext}.{}.tmp", stem.get(..cut).unwrap_or_default(), std::process::id()));
     std::fs::write(&tmp, bytes)?;
     let mut failure = None;
     for n in 1..=MAX_COPIES {
@@ -126,6 +174,43 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(a, stem("Untitled", None, 1, &bodies), "one document keeps one file");
         assert_eq!(a.len(), "Untitled-".len() + 16);
+    }
+
+    #[test]
+    fn a_given_name_must_be_a_plain_file_name() {
+        for fine in ["Bracket", "Bracket-Base rev C", "RV-102_revC", "v1.2", "設計", "{design}"] {
+            assert_eq!(check_name(fine), Ok(()), "{fine}");
+        }
+        assert_eq!(check_name(&"a".repeat(MAX_NAME_BYTES)), Ok(()));
+        let refused = ["", "   ", "a/b", "..\\up", "C:part", "what?", "a\nb", "..", ".hidden", "part.", " part", "part "];
+        for bad in refused.into_iter().chain([&*"a".repeat(MAX_NAME_BYTES + 1)]) {
+            assert!(check_name(bad).is_err(), "{bad:?}");
+        }
+        // A name Windows keeps for a device, with any extension, can't be a file there.
+        for device in ["CON", "con", "Nul", "PRN", "aux", "COM1", "lpt9", "NUL.v2", "Com1 .x"] {
+            assert!(check_name(device).is_err(), "{device}");
+        }
+        for fine in ["CONSOLE", "COM10", "COM0", "LPT", "Bracket-CON", "_CON", "v2.NUL"] {
+            assert_eq!(check_name(fine), Ok(()), "{fine}: only the exact device names");
+        }
+    }
+
+    /// The longest name `check_name` takes is written and replaced like any other: the temporary
+    /// file beside it has a name of its own length to fit in.
+    #[test]
+    fn the_longest_name_is_written_and_replaced() {
+        let dir = scratch("longest");
+        // Four-byte characters: the temporary name is cut between two of them.
+        for stem in ["a".repeat(MAX_NAME_BYTES), "🔧".repeat(MAX_NAME_BYTES / 4)] {
+            assert_eq!(check_name(&stem), Ok(()));
+            let (first, numbered) = write(&dir, &stem, "3mf", b"one").unwrap();
+            let (second, numbered_again) = write(&dir, &stem, "3mf", b"two").unwrap();
+            assert_eq!((first.clone(), numbered, numbered_again), (second, false, false));
+            assert_eq!(first.file_name().unwrap().to_string_lossy(), format!("{stem}.3mf"));
+            assert_eq!(std::fs::read(&first).unwrap(), b"two");
+        }
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2, "no temporary file is left");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
