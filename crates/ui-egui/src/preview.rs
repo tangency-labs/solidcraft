@@ -847,7 +847,11 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             Ok(b)
         }
         None => {
-            let p = s.preview(cmds).map_err(|e| e.to_string())?;
+            let p = match crate::dialogs::pattern_edit_all_copies(cmds) {
+                Some(all) => s.preview(&all).or_else(|_| s.preview(cmds)),
+                None => s.preview(cmds),
+            }
+            .map_err(|e| e.to_string())?;
             let guard =
                 |f: &dyn Fn() -> Built| std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|_| "the preview failed".to_string());
             let combine = combine_of(cmds);

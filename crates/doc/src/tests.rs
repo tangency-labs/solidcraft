@@ -2426,6 +2426,316 @@ fn restoring_a_thread_pick_keeps_the_resolved_point_when_a_distance_is_refused()
     assert_eq!(restored_thread_pick(Vec3::new(-f64::MAX, 0.0, 0.0), resolved), resolved);
 }
 
+/// The two source openings share a feature, so vector positions cannot identify them.
+fn pattern_identity_plate(hole_points: bool) -> (Document, Model, u64, u64, u64) {
+    let mut doc = Document::new("stable skipped openings");
+    add_in(
+        &mut doc,
+        0,
+        "Plate",
+        serde_json::json!({"type":"box","corner":["0","0","0"],"length":"70","width":"30","height":"5","operation":"new_body"}),
+    );
+    let mut sketch = Sketch::new();
+    if hole_points {
+        sketch.add_point(Vec2::new(5.0, 5.0), Some("a")).unwrap();
+        sketch.add_point(Vec2::new(5.0, 15.0), Some("b")).unwrap();
+    } else {
+        sketch.add_circle(Vec2::new(5.0, 5.0), 1.0, None, Some("a")).unwrap();
+        sketch.add_circle(Vec2::new(5.0, 15.0), 1.0, None, Some("b")).unwrap();
+    }
+    let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch }, Some("Sources")).unwrap();
+    let source = if hole_points {
+        serde_json::json!({"type":"hole","position":[0,0,0],"direction":[0,0,1],"diameter":"2","points":{"sketch":sketch,"ids":["a","b"]}})
+    } else {
+        serde_json::json!({"type":"extrude","sketch":sketch,"profiles":{"type":"all"},"extent":{"distance":"5","direction":"positive"},"operation":"cut"})
+    };
+    let source = doc.add_feature(serde_json::from_value(source).unwrap(), Some("Openings")).unwrap();
+    let pattern = doc.add_feature(serde_json::from_value(serde_json::json!({"type":"pattern","features":[source],"pattern":{"type":"rectangular","dir1":[1,0,0],"count1":"3","spacing1":"20"}})).unwrap(), Some("Copies")).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|result| result.error.is_none()), "{:?}", model.results);
+    (doc, model, sketch, source, pattern)
+}
+
+fn identity_catalogue(doc: &Document, model: &Model, id: u64) -> PatternCatalogue {
+    let FeatureKind::Pattern { pattern, features, bodies, placements } = &doc.feature(id).unwrap().kind else { panic!("pattern") };
+    pattern_member_catalogue(doc, &model.state_before(id), 0, pattern, features, bodies, placements).unwrap()
+}
+
+fn copy_opening_is_solid(model: &Model, x: f64, y: f64) -> bool {
+    model.state().bodies.iter().any(|body| body.body.classify_point(Vec3::new(x, y, 2.5)).unwrap() == solidcraft_kernel::PointClass::Inside)
+}
+
+#[test]
+fn individual_pattern_exclusions_follow_points_and_profiles_after_deletion_and_restoration() {
+    for point_holes in [true, false] {
+        let (mut doc, mut model, sketch, _, pattern_id) = pattern_identity_plate(point_holes);
+        let choices = identity_catalogue(&doc, &model, pattern_id);
+        assert_eq!(choices.members.len(), 4);
+        let omitted = choices
+            .members
+            .iter()
+            .find(|choice| {
+                choice.number == 2
+                    && match &choice.member.2 {
+                        PatternMemberKey::Stable(PatternMemberIdentity::SketchPoint { point, .. }) => point == "b",
+                        PatternMemberKey::Stable(PatternMemberIdentity::Profile { curves, .. }) => curves == &["b"],
+                        _ => false,
+                    }
+            })
+            .unwrap()
+            .member
+            .clone();
+        if let FeatureKind::Pattern { pattern: PatternKind::Rectangular { skip_members, .. }, .. } = &mut doc.feature_mut(pattern_id).unwrap().kind {
+            *skip_members = vec![omitted.clone()];
+        }
+        model.evaluate(&doc);
+        assert!(copy_opening_is_solid(&model, 25.0, 15.0));
+        assert!(!copy_opening_is_solid(&model, 25.0, 5.0));
+        assert!(!copy_opening_is_solid(&model, 45.0, 15.0));
+        let original = doc.feature(sketch).unwrap().kind.clone();
+        // Removing an earlier member must not move the exclusion to the next vector slot.
+        if let FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(sketch).unwrap().kind {
+            if point_holes {
+                sketch.remove_points(&[sketch.point_index("a").unwrap()]);
+            } else {
+                sketch.remove_curves(&[sketch.curve_index("a").unwrap()]);
+            }
+        }
+        model.evaluate(&doc);
+        assert_eq!(model.result(pattern_id).unwrap().error, None);
+        assert!(copy_opening_is_solid(&model, 25.0, 15.0), "b stays excluded after deleting a");
+        assert!(!copy_opening_is_solid(&model, 45.0, 15.0));
+        assert!(identity_catalogue(&doc, &model, pattern_id).members.iter().any(|choice| choice.member == omitted));
+        // Removing the excluded source preserves a dormant record, with a singular warning.
+        doc.feature_mut(sketch).unwrap().kind = original.clone();
+        if let FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(sketch).unwrap().kind {
+            if point_holes {
+                sketch.remove_points(&[sketch.point_index("b").unwrap()]);
+            } else {
+                sketch.remove_curves(&[sketch.curve_index("b").unwrap()]);
+            }
+        }
+        model.evaluate(&doc);
+        let result = model.result(pattern_id).unwrap();
+        assert_eq!(result.error, None);
+        assert!(result.warning.as_deref().is_some_and(|warning| warning.contains("1 saved exclusion is outside")), "{result:?}");
+        assert!(!copy_opening_is_solid(&model, 25.0, 5.0), "a is still included");
+        if !point_holes {
+            if let FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(sketch).unwrap().kind {
+                sketch.add_circle(Vec2::new(5.0, 15.0), 1.0, None, Some("replacement_b")).unwrap();
+            }
+            model.evaluate(&doc);
+            assert!(
+                !copy_opening_is_solid(&model, 25.0, 15.0),
+                "a new profile at identical geometry does not inherit the deleted profile's exclusion"
+            );
+            assert!(model.result(pattern_id).unwrap().warning.as_deref().is_some_and(|warning| warning.contains("1 saved exclusion is outside")));
+        }
+        let mut reopened = Document::from_json(&doc.to_json()).unwrap();
+        reopened.feature_mut(sketch).unwrap().kind = original;
+        let mut restored = Model::new();
+        restored.evaluate(&reopened);
+        assert_eq!(restored.result(pattern_id).unwrap().error, None);
+        assert_eq!(restored.result(pattern_id).unwrap().warning, None);
+        assert!(copy_opening_is_solid(&restored, 25.0, 15.0));
+        assert!(!copy_opening_is_solid(&restored, 45.0, 15.0));
+    }
+}
+
+#[test]
+fn whole_pattern_exclusions_include_new_source_profiles_and_survive_reordering() {
+    let (mut doc, mut model, sketch, source, pattern_id) = pattern_identity_plate(false);
+    let group = identity_catalogue(&doc, &model, pattern_id).groups.into_iter().find(|group| group.number == 2).unwrap().address;
+    if let FeatureKind::Pattern { pattern: PatternKind::Rectangular { skip, .. }, .. } = &mut doc.feature_mut(pattern_id).unwrap().kind {
+        *skip = vec![group];
+    }
+    if let FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(sketch).unwrap().kind {
+        sketch.add_circle(Vec2::new(5.0, 25.0), 1.0, None, Some("c")).unwrap();
+        sketch.curves.reverse();
+    }
+    model.evaluate(&doc);
+    assert_eq!(model.result(pattern_id).unwrap().error, None);
+    for y in [5.0, 15.0, 25.0] {
+        assert!(copy_opening_is_solid(&model, 25.0, y), "the whole second instance includes the new opening");
+        assert!(!copy_opening_is_solid(&model, 45.0, y));
+    }
+    doc.feature_mut(source).unwrap().suppressed = true;
+    model.evaluate(&doc);
+    let choices = identity_catalogue(&doc, &model, pattern_id);
+    assert_eq!(choices.groups.len(), 2, "whole groups do not depend on active source openings");
+    assert!(choices.members.is_empty());
+}
+
+#[test]
+fn pattern_catalogue_bounds_member_products_before_allocating_them() {
+    let (doc, model, _, _, pattern_id) = pattern_identity_plate(false);
+    let FeatureKind::Pattern { mut pattern, .. } = doc.feature(pattern_id).unwrap().kind.clone() else { panic!("pattern") };
+    if let PatternKind::Rectangular { count1, .. } = &mut pattern {
+        *count1 = "10000".into();
+    }
+    let before = model.state_before(pattern_id);
+    let body = BodyName(before.bodies[0].name.clone());
+    let error = pattern_member_catalogue(&doc, &before, 0, &pattern, &[], &vec![body; 11], &[]).err().unwrap();
+    assert!(error.to_string().contains("too many selectable pattern members"));
+}
+
+#[test]
+fn sweep_profile_exclusions_do_not_become_singletons_when_an_earlier_profile_is_deleted() {
+    let (mut doc, mut model, sketch_id, source, pattern_id) = pattern_identity_plate(false);
+    doc.features.iter_mut().find(|feature| feature.name == "Plate").unwrap().suppressed = true;
+    let mut path = Sketch::new();
+    path.add_line(Vec2::new(0.0, 0.0), Vec2::new(0.0, 5.0), None, None, Some("path")).unwrap();
+    let path_id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XZ".into() }, sketch: path }, Some("Path")).unwrap();
+    let path_feature = doc.features.pop().unwrap();
+    let source_index = doc.features.iter().position(|feature| feature.id == source).unwrap();
+    doc.features.insert(source_index, path_feature);
+    doc.feature_mut(source).unwrap().kind = serde_json::from_value(
+        serde_json::json!({"type":"sweep","sketch":sketch_id,"profiles":{"type":"all"},"path_sketch":path_id,"path":["path"],"operation":"new_body"}),
+    )
+    .unwrap();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|result| result.error.is_none()), "{:?}", model.results);
+    let excluded = identity_catalogue(&doc, &model, pattern_id)
+        .members
+        .into_iter()
+        .find(|choice| {
+            choice.number == 2
+                && matches!(&choice.member.2, PatternMemberKey::Stable(PatternMemberIdentity::Profile { curves, .. }) if curves == &["b"])
+        })
+        .unwrap()
+        .member;
+    let centre = model
+        .state()
+        .bodies
+        .iter()
+        .filter(|body| body.feature == source)
+        .map(|body| body.body.exact_bounds().unwrap().center())
+        .find(|centre| (centre.y - 15.0).abs() < 1e-6)
+        .unwrap();
+    let copied_centre = centre + Vec3::new(20.0, 0.0, 0.0);
+    let material_at_copy = |model: &Model| {
+        model.state().bodies.iter().any(|body| body.body.classify_point(copied_centre).unwrap() == solidcraft_kernel::PointClass::Inside)
+    };
+    assert!(material_at_copy(&model));
+    if let FeatureKind::Pattern { pattern: PatternKind::Rectangular { skip_members, .. }, .. } = &mut doc.feature_mut(pattern_id).unwrap().kind {
+        *skip_members = vec![excluded.clone()];
+    }
+    model.evaluate(&doc);
+    assert!(!material_at_copy(&model));
+    if let FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(sketch_id).unwrap().kind {
+        sketch.remove_curves(&[sketch.curve_index("a").unwrap()]);
+    }
+    model.evaluate(&doc);
+    assert_eq!(model.result(pattern_id).unwrap().error, None);
+    assert!(!material_at_copy(&model));
+    assert!(identity_catalogue(&doc, &model, pattern_id).members.iter().any(|choice| choice.member == excluded));
+}
+
+#[test]
+fn ribs_without_source_provenance_offer_whole_groups_but_never_a_singleton_member() {
+    let (mut doc, mut model, sketch_id, source, pattern_id) = pattern_identity_plate(false);
+    let mut sketch = Sketch::new();
+    sketch.add_line(Vec2::new(5.0, 5.0), Vec2::new(10.0, 5.0), None, None, Some("a")).unwrap();
+    sketch.add_line(Vec2::new(5.0, 15.0), Vec2::new(10.0, 15.0), None, None, Some("b")).unwrap();
+    if let FeatureKind::Sketch { sketch: current, .. } = &mut doc.feature_mut(sketch_id).unwrap().kind {
+        *current = sketch;
+    }
+    doc.feature_mut(source).unwrap().kind = serde_json::from_value(
+        serde_json::json!({"type":"rib","sketch":sketch_id,"curves":["a","b"],"thickness":"1","depth":"10","normal":true,"web":true}),
+    )
+    .unwrap();
+    model.evaluate(&doc);
+    assert_eq!(model.result(source).unwrap().error, None, "{:?}", model.results);
+    let choices = identity_catalogue(&doc, &model, pattern_id);
+    assert_eq!(choices.groups.len(), 2);
+    assert!(choices.members.is_empty());
+    assert_eq!(choices.unavailable_members, 4);
+    if let FeatureKind::Rib { curves, .. } = &mut doc.feature_mut(source).unwrap().kind {
+        curves.remove(0);
+    }
+    model.evaluate(&doc);
+    let choices = identity_catalogue(&doc, &model, pattern_id);
+    assert!(choices.members.is_empty(), "the remaining rib must not inherit a deleted rib's Singleton identity");
+    assert_eq!(choices.unavailable_members, 2);
+}
+
+#[test]
+fn pattern_layout_name_pinning_converts_order_and_keeps_the_multi_source_tail_policy() {
+    let mut doc = Document::new("Pattern names");
+    let id = doc
+        .add_feature(
+            serde_json::from_value(serde_json::json!({
+                "type":"pattern","features":[],"bodies":["A","B"],"pattern":{"type":"rectangular","dir1":[1,0,0],"count1":"3","spacing1":"20"}
+            }))
+            .unwrap(),
+            None,
+        )
+        .unwrap();
+    let feature = doc.feature_mut(id).unwrap();
+    let made = ["A2", "A3", "B2", "B3"].map(str::to_owned);
+    feature.body_names = made.to_vec();
+    feature.pattern_names_in_order = true;
+    let mut without_layout = feature.clone();
+    without_layout.pin_body_names(&made, &[], None);
+    assert!(without_layout.pattern_names_in_order, "the upstream no-layout path keeps its convention");
+    let layout = PatternBodyLayout { copies_per_source: 2, made_slots: vec![0, 1, 2, 3] };
+    feature.pin_body_names(&made, &[], Some(&layout));
+    assert_eq!(feature.body_names, made);
+    assert!(!feature.pattern_names_in_order, "the layout has converted names to source and copy order");
+    let second_source = crate::eval::pattern_name_slot(feature.body_names.len(), 2, 3, 1, 0, feature.pattern_names_in_order).unwrap();
+    assert_eq!(feature.body_names[second_source], "B2", "raising quantity must keep B's first copy name");
+    feature.body_names = ["A2", "A3", "A4", "B2", "B3", "B4"].map(str::to_owned).to_vec();
+    let reduced = PatternBodyLayout { copies_per_source: 1, made_slots: vec![0, 1] };
+    let (names, slots) = feature.pattern_pins(&["A2".to_owned(), "B2".to_owned()], &[], Some(&reduced)).unwrap();
+    assert_eq!(names, ["A2", "B2"], "multiple sources keep the upstream quantity-tail trimming policy");
+    assert_eq!(slots, [0, 1]);
+    assert_eq!(reduced.sources().collect::<Vec<_>>(), [0, 1]);
+}
+
+#[test]
+fn partial_profile_boundaries_do_not_become_persistent_pattern_members_after_region_merging() {
+    let mut doc = Document::new("partial profile identity");
+    let mut sketch = Sketch::new();
+    sketch.add_circle(Vec2::new(-3.0, 0.0), 5.0, None, Some("a")).unwrap();
+    sketch.add_circle(Vec2::new(3.0, 0.0), 5.0, None, Some("b")).unwrap();
+    sketch.add_line(Vec2::new(-4.0, -8.0), Vec2::new(-4.0, 8.0), None, None, Some("c")).unwrap();
+    sketch.add_line(Vec2::new(4.0, -8.0), Vec2::new(4.0, 8.0), None, None, Some("d")).unwrap();
+    let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
+    let source = doc
+        .add_feature(
+            serde_json::from_value(
+                serde_json::json!({"type":"extrude","sketch":sketch,"profiles":{"type":"all"},"extent":{"distance":"2"},"operation":"new_body"}),
+            )
+            .unwrap(),
+            None,
+        )
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|result| result.error.is_none()), "{:?}", model.results);
+    let state = model.state();
+    let profiles = &state.sketch(sketch).unwrap().profiles;
+    assert_eq!(profiles.len(), 5, "the two side chords divide the circle union into five cells");
+    let lens = profiles
+        .iter()
+        .filter(|profile| {
+            profile.curve_ids().into_iter().collect::<std::collections::BTreeSet<_>>() == ["a".to_string(), "b".to_string()].into_iter().collect()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(lens.len(), 1, "the lens has a unique curve set, despite using partial source curves");
+    assert!(lens[0].whole_curve_boundaries().is_none());
+    let pattern: PatternKind = serde_json::from_value(serde_json::json!({"type":"rectangular","dir1":[1,0,0],"count1":"2","spacing1":"30"})).unwrap();
+    let sources = [FeatureId(source)];
+    let catalogue = pattern_member_catalogue(&doc, &state, 0, &pattern, &sources, &[], &[]).unwrap();
+    assert_eq!(catalogue.groups.len(), 1, "whole-placement skipping is still supported");
+    assert!(catalogue.members.is_empty(), "the merged union must not borrow the lens's partial-curve identity");
+    assert_eq!(catalogue.unavailable_members, 1);
+    let preview = pattern_marker_info(&doc, &state, 0, &pattern, &sources, &[], &[]).unwrap();
+    assert!(preview.markers.is_empty(), "the preview must not offer a marker without a certified source identity");
+    assert_eq!(preview.unavailable_members, 1);
+}
+
 /// A closed control-point spline (#19337) is a design the loader accepts: it saves, reopens
 /// unchanged and evaluates with no error.
 #[test]

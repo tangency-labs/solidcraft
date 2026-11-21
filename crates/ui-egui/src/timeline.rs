@@ -1848,6 +1848,8 @@ mod tests {
                 extent: false,
                 flip: false,
                 orient: false,
+                skip: Vec::new(),
+                skip_members: Vec::new(),
             },
         };
         assert_eq!(super::icon_of(&feature), solidcraft_engine::find_command("solid.pattern.path").unwrap().icon);

@@ -687,7 +687,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     for (feature, made, skipped) in imported {
         let Some(f) = d.feature_mut(feature) else { continue };
         // The bodies left keep the names they have now, though a skipped one had a name first.
-        f.pin_body_names(&made, &[]);
+        f.pin_body_names(&made, &[], None);
         if let FeatureKind::Import { skip, .. } = &mut f.kind {
             skip.extend(skipped);
             skip.sort_unstable();
