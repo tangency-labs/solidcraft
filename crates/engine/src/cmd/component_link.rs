@@ -952,9 +952,10 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         let name = s.doc.components.iter().find(|x| x.id == *c).map_or_else(|| c.to_string(), |x| x.name.clone());
         return Err(bad(cmd, format!("{name}: that component is not linked to a design")));
     }
-    // A list goes on past a design it cannot read: that link keeps its bodies and is named in
-    // `failed`, so the others still come in as one step (#9743).
-    let go_on = p.get("components").is_some();
+    // A list, or every link, goes on past a design it cannot read: that link keeps its bodies
+    // and is named in `failed` with the file it looked for, so the others still come in as one
+    // step (#9743). One component asked for by name is refused, as it always was.
+    let go_on = p.get("component").is_none();
     let links: Vec<(u64, DesignLink)> =
         s.doc.links.iter().filter(|(c, _)| only.as_ref().is_none_or(|o| o.contains(c))).map(|(c, l)| (*c, l.clone())).collect();
     let (mut updated, mut unchanged, mut warnings): (Vec<String>, Vec<String>, Vec<String>) = (Vec::new(), Vec::new(), Vec::new());
@@ -973,7 +974,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         let (old, file, bytes) = match read_linked(s, comp, &link) {
             Ok(read) => read,
             Err(e) if go_on => {
-                failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
+                failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone(), path: link.path.clone() });
                 warnings.push(format!("{cname} keeps its bodies: {e}"));
                 continue;
             }
@@ -1016,7 +1017,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                 if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
                     kept.file_sha256.clone_from(&link.file_sha256);
                 }
-                failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.to_string() });
+                failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.to_string(), path: link.path.clone() });
                 warnings.push(format!("{cname} keeps its bodies: {e}"));
                 continue;
             }

@@ -1757,8 +1757,9 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                 }
                 let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
                 app.set_status(language.format("ui.command_done", &[("command", language.command(id, crate::command_label(id)))]), false);
-                // A design it could not read is said as when that was all it was asked.
-                if let Some(f) = r.as_ref().ok().and_then(|v| v["failed"].as_array()).and_then(|f| f.first()) {
+                // Each design it could not read is said as when that was all it was asked: every one
+                // goes to Messages, and the status line keeps the last.
+                for f in r.as_ref().ok().and_then(|v| v["failed"].as_array()).into_iter().flatten() {
                     let (name, why) = (f["name"].as_str().unwrap_or_default(), f["error"].as_str().unwrap_or_default());
                     app.set_status(format!("{name}: {why}"), true);
                 }

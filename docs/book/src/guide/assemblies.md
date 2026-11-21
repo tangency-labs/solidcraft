@@ -504,6 +504,8 @@ With `reuse: true`, insertion reuses the existing linked component but uses the 
 it does not inherit another occurrence's position or rotation. For example, inserts at
 `[20,0,0]` and `[40,0,0]` place the two origins at 20 and 40 mm, even when the second reuses the link.
 After the part file changes, **Update Links** (`component.update_links`) reads it again.
+A part it cannot find or read keeps its bodies and holds up no other: Messages names it with the
+file it looked for, and the command's reply lists it in `failed`.
 An assembly that opens, or whose tab comes back to the front, does that by itself for the parts whose files
 changed since it last read them, whether the part was saved in another tab, another window or by
 a checkout. The parts it reads come in as one step, so one **Undo** takes them all back. A part

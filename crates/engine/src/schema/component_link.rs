@@ -347,7 +347,9 @@ impl JsonSchema for ComponentList {
 
 /// Read the linked designs again and replace the bodies of the components whose file changed,
 /// as one undo step. Without `component` or `components`, every linked component is read. A
-/// component that is not linked is refused.
+/// component that is not linked is refused. Every link, or a list, goes on past a design it
+/// cannot read (that component keeps its bodies and is named in `failed`); one `component` is
+/// refused instead.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct UpdateLinksKeys {
@@ -398,7 +400,7 @@ pub struct UpdateLinksResult {
     pub unchanged: Vec<String>,
     /// What the update noticed, also joints whose faces are gone or that no longer solve.
     pub warnings: Vec<String>,
-    /// With a `components` list: the designs that could not be read.
+    /// Without `component`: the designs that could not be read, by name and file.
     pub failed: Vec<LinkFailure>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -413,6 +415,8 @@ pub struct LinkFailure {
     pub name: String,
     /// Why the design could not be read.
     pub error: String,
+    /// The file the link looked for, whole.
+    pub path: String,
 }
 
 /// Replace the source of a linked component with another saved design, for all its occurrences,

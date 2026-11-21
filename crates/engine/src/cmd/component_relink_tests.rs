@@ -1441,7 +1441,8 @@ fn insert_design_accepts_matrix_and_rotation_placement() {
 /// relative to itself, and a part in a library folder beside the job (`../lib`). Moving the job
 /// folder whole keeps every link inside it, the sub-assembly's own included; a library left
 /// behind is lost by a link that climbs out of the job (`..`), and found again once it moves
-/// along. Nothing here needs the experimental preference: relative links are how links work.
+/// along. Update Links meanwhile reads every file it finds and names, by name and file, the one
+/// it can't. Nothing here needs the experimental preference: relative links are how links work.
 #[test]
 fn a_job_folder_moved_whole_keeps_its_links_and_loses_a_library_left_behind() {
     let root = folder("job-moves");
@@ -1490,13 +1491,20 @@ fn a_job_folder_moved_whole_keeps_its_links_and_loses_a_library_left_behind() {
         stored(&[("../lib/bolt.sc", false), ("parts/bracket.sc", true), ("plate.sc", true), ("sub/hinge.sc", true)])
     );
     assert_eq!(links(&moved.join("sub").join("hinge.sc")), stored(&[("../parts/bracket.sc", true)]));
-    // Update Links stops at the file it can't find, names it, and changes nothing.
+    // Update Links reads every file it finds and names the one it can't, with the file it looked
+    // for; that part keeps its bodies.
     let mut s = Session::default();
     run(&mut s, "doc.open", json!({"path": moved.join("top.sc")}));
-    let before = serde_json::to_value(&*s.doc).unwrap();
-    let refused = s.execute("component.update_links", &json!({})).unwrap_err().to_string();
-    assert!(refused.contains("bolt") && refused.contains("not found"), "{refused}");
-    assert_eq!(serde_json::to_value(&*s.doc).unwrap(), before);
+    let bodies = s.model.state().bodies.len();
+    let updated = run(&mut s, "component.update_links", json!({}));
+    let mut read: Vec<&str> =
+        updated["unchanged"].as_array().unwrap().iter().chain(updated["updated"].as_array().unwrap()).filter_map(Value::as_str).collect();
+    read.sort_unstable();
+    assert_eq!(read, ["bracket", "hinge", "plate"], "{updated}");
+    let failed = &updated["failed"][0];
+    assert!(failed["name"] == "bolt" && failed["error"].as_str().unwrap().contains("not found"), "{updated}");
+    assert!(failed["path"].as_str().unwrap().replace('\\', "/").ends_with("archive/lib/bolt.sc"), "{updated}");
+    assert_eq!(s.model.state().bodies.len(), bodies, "the missing part keeps its bodies");
     // The library moves along, beside the job again: found.
     std::fs::rename(&lib, root.join("archive").join("lib")).unwrap();
     assert!(links(&moved.join("top.sc")).iter().all(|(_, found)| *found));

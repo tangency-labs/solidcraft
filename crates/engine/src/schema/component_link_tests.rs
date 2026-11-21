@@ -260,6 +260,12 @@ fn link_replies_match_the_output_schema() {
     assert!(update["updated"] == json!(["B"]) && update["unchanged"] == json!(["A"]), "{update}");
     assert!(update["failed"][0]["name"] == "C" && update["failed"][0]["component"] == third["component"], "{update}");
     matches(output_schema_for::<UpdateLinksResult>(), "component.update_links", &update);
+    // Every link, as the app's Update Links asks: it goes on past C too, and names its file.
+    let every = run("component.update_links", json!({}));
+    assert!(every["unchanged"] == json!(["A", "B"]) && every["failed"][0]["name"] == "C", "{every}");
+    let looked_for = std::path::Path::new(every["failed"][0]["path"].as_str().unwrap_or_default()).to_path_buf();
+    assert_eq!(looked_for.file_name(), c.file_name(), "{every}");
+    matches(output_schema_for::<UpdateLinksResult>(), "component.update_links", &every);
     save_box(&b, 30);
     let all = run("component.update_links", json!({"component": "B"}));
     assert_eq!(all["updated"], json!(["B"]), "{all}");
