@@ -119,9 +119,32 @@ fn circle_of_arc(c: &LCurve, old: &[Vec2], map: &[Option<usize>], lay: &Layout) 
     }
 }
 
+/// The new arc (an index into `lay.curves`) old arc `c` is when its centre became a different
+/// point: the one arc between the points `c`'s ends became whose centre is where `c`'s was (or
+/// where the point `c`'s centre became is). Two concentric arcs saved on one centre point can be
+/// read again with centres apart by more than the layout merges but within [`TOL`] (#20280: a
+/// shelled wall's rim and its outer rim); the old centre becomes only one of the two, and the
+/// other arc is still the same arc.
+fn arc_about_same_centre(c: &LCurve, old: &[Vec2], map: &[Option<usize>], lay: &Layout) -> Option<usize> {
+    let LCurve::Arc(centre, a, b) = *c else { return None };
+    let (ma, mb) = (map.get(a).copied().flatten()?, map.get(b).copied().flatten()?);
+    let was = *old.get(centre)?;
+    let became = map.get(centre).copied().flatten().and_then(|i| lay.pts.get(i)).copied();
+    let near = |p: Vec2, q: Vec2| p.dist(q) <= TOL * (1.0 + p.len().max(q.len()));
+    let mut hits = lay.curves.iter().enumerate().filter(|(_, n)| {
+        matches!(**n, LCurve::Arc(x, y, z) if y == ma && z == mb
+            && lay.pts.get(x).is_some_and(|p| near(*p, was) || became.is_some_and(|q| near(*p, q))))
+    });
+    match (hits.next(), hits.next()) {
+        (Some((j, _)), None) => Some(j),
+        _ => None,
+    }
+}
+
 /// The new curve (an index into `lay.curves`) old curve `c` becomes, and whether it is only a
 /// piece of the line `c` was: the curve of the same kind on the points `c`'s points became, for
-/// an arc without one the whole circle it lies on ([`circle_of_arc`], a piece too), or for a
+/// an arc without one the arc between the same ends about the same centre
+/// ([`arc_about_same_centre`]) or else the whole circle it lies on ([`circle_of_arc`], a piece too), or for a
 /// line without one, the longest new line along it (where it was, or between the points its
 /// ends became).
 fn match_curve(c: &LCurve, old: &[Vec2], map: &[Option<usize>], lay: &Layout) -> Option<(usize, bool)> {
@@ -156,6 +179,9 @@ fn match_curve(c: &LCurve, old: &[Vec2], map: &[Option<usize>], lay: &Layout) ->
             }
             _ => {}
         }
+    }
+    if let Some(j) = arc_about_same_centre(c, old, map, lay) {
+        return Some((j, false));
     }
     if let Some(j) = circle_of_arc(c, old, map, lay) {
         return Some((j, true));

@@ -1045,3 +1045,31 @@ fn a_face_read_by_its_edge_names_keeps_its_curves_through_any_order() {
     assert_eq!(old.curves, plain.curves);
     assert_eq!(old.constraints, plain.constraints);
 }
+
+/// #20280: a face's outer rim and a shelled wall's rim, concentric arcs saved on one centre point,
+/// are read again with the two centres apart by more than the layout merges (5e-7) but within the
+/// rebuild's matching tolerance. The old centre becomes only one of the new ones; the other arc
+/// is still the same arc and keeps its id, which an offset names.
+#[test]
+fn concentric_arcs_read_with_centres_apart_keep_their_ids() {
+    let (r3, s) = (5.0 * 3f64.sqrt(), 5.0 * std::f64::consts::FRAC_1_SQRT_2);
+    let boundary = |inner: Vec2| {
+        vec![
+            LinkGeom::Arc { c: Vec2::ZERO, a: Vec2::new(r3, -5.), b: Vec2::new(-r3, -5.) },
+            LinkGeom::Line(Vec2::new(-r3, -5.), Vec2::new(r3, -5.)),
+            LinkGeom::Arc { c: inner, a: Vec2::new(s, -s), b: Vec2::new(-s, -s) },
+            LinkGeom::Line(Vec2::new(-s, -s), Vec2::new(s, -s)),
+        ]
+    };
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &boundary(Vec2::ZERO)).unwrap();
+    assert_eq!(sk.link_points(&link).len(), 5, "the saved arcs share one centre point");
+    let ids: Vec<String> = sk.link_curves(&link).iter().map(|&i| sk.curves[i].id.clone()).collect();
+    assert!(sk.update_link(&link, &boundary(Vec2::new(0., 5e-7))).unwrap());
+    assert_eq!(sk.link_points(&link).len(), 6, "the fresh arcs have a centre each");
+    for id in &ids {
+        assert!(sk.curve_index(id).is_some_and(|i| sk.curves[i].link.as_deref() == Some(link.as_str())), "{id} kept");
+    }
+    let CurveKind::Arc { c, .. } = sk.curves[sk.curve_index(&ids[2]).unwrap()].kind else { panic!("the inner rim is an arc") };
+    assert!(sk.points[c].pos.dist(Vec2::new(0., 5e-7)) < 1e-12, "the inner arc keeps its own centre");
+}
