@@ -714,7 +714,18 @@ impl Session {
     /// Whether component `id` can leave the design for a file of its own or a link: what
     /// `component.extract` and `component.replace_with_link` check before they build anything.
     pub fn can_extract(&self, id: u64) -> bool {
-        scope(self, id, CMD).is_ok()
+        self.extract_refusal(id).is_none()
+    }
+
+    /// Why component `id` can't be extracted, as a sentence for a disabled menu entry's hover
+    /// text (#18623), or `None` when it can: the same check as [`Session::can_extract`].
+    pub fn extract_refusal(&self, id: u64) -> Option<String> {
+        let why = match scope(self, id, CMD).err()? {
+            EngineError::BadParams { msg, .. } => msg,
+            other => other.to_string(),
+        };
+        let mut chars = why.chars();
+        Some(chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or(why))
     }
 }
 
