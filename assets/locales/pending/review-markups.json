@@ -1,0 +1,79 @@
+{
+  "en": {
+    "cmd.markup_add": "Add Markup",
+    "cmd.markup_delete": "Delete Markup",
+    "cmd.markup_edit": "Edit Markup",
+    "cmd.markup_image": "Markup Picture",
+    "cmd.markup_list": "List Markups",
+    "cmd.markup_reject": "Reject Markup",
+    "cmd.markup_reopen": "Reopen Markup",
+    "cmd.markup_reply": "Reply to Markup",
+    "cmd.markup_resolve": "Resolve Markup"
+  },
+  "ar": {
+    "cmd.markup_add": "إضافة ملاحظة مراجعة",
+    "cmd.markup_delete": "حذف ملاحظة المراجعة",
+    "cmd.markup_edit": "تعديل ملاحظة المراجعة",
+    "cmd.markup_image": "صورة ملاحظة المراجعة",
+    "cmd.markup_list": "عرض ملاحظات المراجعة",
+    "cmd.markup_reject": "رفض ملاحظة المراجعة",
+    "cmd.markup_reopen": "إعادة فتح ملاحظة المراجعة",
+    "cmd.markup_reply": "الرد على ملاحظة المراجعة",
+    "cmd.markup_resolve": "إنهاء ملاحظة المراجعة"
+  },
+  "de": {
+    "cmd.markup_add": "Markierung hinzufügen",
+    "cmd.markup_delete": "Markierung löschen",
+    "cmd.markup_edit": "Markierung bearbeiten",
+    "cmd.markup_image": "Bild zur Markierung",
+    "cmd.markup_list": "Markierungen auflisten",
+    "cmd.markup_reject": "Markierung ablehnen",
+    "cmd.markup_reopen": "Markierung wieder öffnen",
+    "cmd.markup_reply": "Auf Markierung antworten",
+    "cmd.markup_resolve": "Markierung erledigen"
+  },
+  "he": {
+    "cmd.markup_add": "הוספת הערת סקירה",
+    "cmd.markup_delete": "מחיקת הערת סקירה",
+    "cmd.markup_edit": "עריכת הערת סקירה",
+    "cmd.markup_image": "תמונה להערת סקירה",
+    "cmd.markup_list": "רשימת הערות סקירה",
+    "cmd.markup_reject": "דחיית הערת סקירה",
+    "cmd.markup_reopen": "פתיחה מחדש של הערת סקירה",
+    "cmd.markup_reply": "תגובה להערת סקירה",
+    "cmd.markup_resolve": "סגירת הערת סקירה כטופלה"
+  },
+  "ja": {
+    "cmd.markup_add": "マークアップを追加",
+    "cmd.markup_delete": "マークアップを削除",
+    "cmd.markup_edit": "マークアップを編集",
+    "cmd.markup_image": "マークアップの画像",
+    "cmd.markup_list": "マークアップ一覧",
+    "cmd.markup_reject": "マークアップを却下",
+    "cmd.markup_reopen": "マークアップを再オープン",
+    "cmd.markup_reply": "マークアップに返信",
+    "cmd.markup_resolve": "マークアップを解決"
+  },
+  "vi": {
+    "cmd.markup_add": "Thêm ghi chú duyệt",
+    "cmd.markup_delete": "Xóa ghi chú duyệt",
+    "cmd.markup_edit": "Sửa ghi chú duyệt",
+    "cmd.markup_image": "Ảnh của ghi chú duyệt",
+    "cmd.markup_list": "Danh sách ghi chú duyệt",
+    "cmd.markup_reject": "Từ chối ghi chú duyệt",
+    "cmd.markup_reopen": "Mở lại ghi chú duyệt",
+    "cmd.markup_reply": "Trả lời ghi chú duyệt",
+    "cmd.markup_resolve": "Hoàn tất ghi chú duyệt"
+  },
+  "zh": {
+    "cmd.markup_add": "添加批注",
+    "cmd.markup_delete": "删除批注",
+    "cmd.markup_edit": "编辑批注",
+    "cmd.markup_image": "批注图片",
+    "cmd.markup_list": "批注列表",
+    "cmd.markup_reject": "拒绝批注",
+    "cmd.markup_reopen": "重新打开批注",
+    "cmd.markup_reply": "回复批注",
+    "cmd.markup_resolve": "解决批注"
+  }
+}
