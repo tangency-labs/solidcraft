@@ -325,6 +325,18 @@ impl<'de> Deserialize<'de> for ExportParams {
             return Ok(out);
         };
         out.bodies = names::<D::Error>(&m)?;
+        // `solids` is checked for every format, so URDF and SDF refuse `face` as binary STL does.
+        out.solids = match m.get("solids") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(v)) if v == "body" => Some(SolidsParam::Body),
+            Some(Value::String(v)) if v == "face" && format == Format::StlAscii => Some(SolidsParam::Face),
+            Some(Value::String(v)) if v == "face" => {
+                return Err(refuse(
+                    "`solids: face` needs ASCII STL (format stla, or ascii: true): binary STL and other formats have no named solids",
+                ));
+            }
+            Some(v) => return Err(refuse(format!("`solids` must be body or face, not {v}"))),
+        };
         if format == Format::Urdf {
             // URDF reads its own keys; `quality` and `objects` are not read.
             out.mesh_prefix = text::<D::Error>(&m, "mesh_prefix")?;
@@ -370,17 +382,6 @@ impl<'de> Deserialize<'de> for ExportParams {
             Some(Value::Bool(true)) if matches!(format, Format::StlBinary | Format::StlAscii | Format::ThreeMf | Format::ThreeMfTagged) => Some(true),
             Some(Value::Bool(true)) => return Err(refuse("`lay_on_print_faces` is for STL and 3MF: other formats are not printed")),
             Some(_) => return Err(refuse("`lay_on_print_faces` must be true or false")),
-        };
-        out.solids = match m.get("solids") {
-            None | Some(Value::Null) => None,
-            Some(Value::String(v)) if v == "body" => Some(SolidsParam::Body),
-            Some(Value::String(v)) if v == "face" && format == Format::StlAscii => Some(SolidsParam::Face),
-            Some(Value::String(v)) if v == "face" => {
-                return Err(refuse(
-                    "`solids: face` needs ASCII STL (format stla, or ascii: true): binary STL and other formats have no named solids",
-                ));
-            }
-            Some(v) => return Err(refuse(format!("`solids` must be body or face, not {v}"))),
         };
         Ok(out)
     }

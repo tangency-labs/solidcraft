@@ -2672,6 +2672,8 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad("file.export", format!("`format: {f}` disagrees with the path's extension, which picks the OpenUSD encoding")));
     }
+    // Checked first so URDF and SDF refuse `solids: face` too, rather than ignoring it.
+    let face_solids = stl_solids(p, cmd, format)?;
     if format == Format::Urdf {
         if !string_list(cmd, p, "bodies")?.is_empty() {
             return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));
@@ -2685,7 +2687,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let parts = mesh_parts(s, p, cmd, format)?;
     let bodies = string_list(cmd, p, "bodies")?;
     let lay = lay_on_print_faces(p, cmd, format)?;
-    if stl_solids(p, cmd, format)? {
+    if face_solids {
         return export_face_solids(s, path, &bodies, quality, lay);
     }
     if lay {
@@ -3343,11 +3345,14 @@ mod tests {
         let faces = s.execute("model.faces", &json!({"body": "B"})).unwrap();
         let mut want: Vec<String> = faces["faces"].as_array().unwrap().iter().filter_map(|f| f["name"].as_str().map(str::to_string)).collect();
         want.sort();
-        s.execute("file.export", &json!({"path": at("plain.stl"), "format": "stla"})).unwrap();
-        s.execute("file.export", &json!({"path": at("body.stl"), "format": "stla", "solids": "body"})).unwrap();
-        s.execute("file.export_stl", &json!({"path": at("faces.stl"), "ascii": true, "solids": "face"})).unwrap();
-        let read = |n: &str| std::fs::read_to_string(at(n)).unwrap();
-        let (plain, body, faced) = (read("plain.stl"), read("body.stl"), read("faces.stl"));
+        // Every variant goes to the same path: the solid's name is the file stem.
+        let read = || std::fs::read_to_string(at("part.stl")).unwrap();
+        s.execute("file.export", &json!({"path": at("part.stl"), "format": "stla"})).unwrap();
+        let plain = read();
+        s.execute("file.export", &json!({"path": at("part.stl"), "format": "stla", "solids": "body"})).unwrap();
+        let body = read();
+        s.execute("file.export_stl", &json!({"path": at("part.stl"), "ascii": true, "solids": "face"})).unwrap();
+        let faced = read();
         assert_eq!(plain, body, "solids: body is the plain export, byte for byte");
         let mut names: Vec<String> = faced.lines().filter_map(|l| l.strip_prefix("solid ")).map(str::to_string).collect();
         names.sort();
@@ -3368,6 +3373,8 @@ mod tests {
             ("file.export_stl", json!({"path": at("a.stl"), "solids": "face"})),
             ("file.export", json!({"path": at("a.stl"), "format": "stl", "solids": "face"})),
             ("file.export", json!({"path": at("a.3mf"), "solids": "face"})),
+            ("file.export", json!({"path": at("robot.urdf"), "format": "urdf", "solids": "face"})),
+            ("file.export", json!({"path": at("robot"), "format": "sdf", "solids": "face"})),
             ("file.export_stl", json!({"path": at("a.stl"), "ascii": true, "solids": "patch"})),
         ] {
             let e = s.execute(cmd, &params).unwrap_err().to_string();
