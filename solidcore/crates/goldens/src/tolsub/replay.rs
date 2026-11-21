@@ -84,6 +84,16 @@
 //! line to the bit (its hash, taken from main's expected file, which holds these four lines
 //! unchanged) and this branch's committed line. (The hashes their [`TRIM_COVER`] entries held
 //! were of an older main's run, not of the line main now commits.)
+//!
+//! #17739's vertex step raises a vertex whose gap is over half its new tolerance to
+//! `zone_tol3d(gain * 2 * gap)`. Its raises on these reads were recorded the same way
+//! against #18230's healer and carried into [`DATA`]: a listed vertex holds #17739's bits,
+//! and a vertex only #17739 moved is listed with #18230's (main's) bits.
+//!
+//! Twenty rows the cover moved are moved by #17739 too: the 19 `blend.fillet_executive_p3`
+//! bottle rows (vertex 22) and `corpus.parity`'s `Fillet__bolt.smb` (vertices 8, 9, 11, 12).
+//! They are in [`DATA`] with the cover's main hash: the cover's raises go back first, then
+//! those vertices take main's bits, each recorded on both sides with the raises put back.
 
 use std::collections::BTreeMap;
 
@@ -531,9 +541,9 @@ macro_rules! replay_tests {
 
 replay_tests! {
     feature_executive_rows_move_only_through_the_read_tolerances: "blend.feature_executive", 1;
-    fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 10;
+    fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 29;
     fillet_removal_rows_move_only_through_the_read_tolerances: "blend.fillet_removal", 4;
-    corpus_parity_rows_move_only_through_the_read_tolerances: "corpus.parity", 26;
+    corpus_parity_rows_move_only_through_the_read_tolerances: "corpus.parity", 27;
     stitch_p1_rows_move_only_through_the_read_tolerances: "heal.stitch_p1", 2;
     stitch_p2_rows_move_only_through_the_read_tolerances: "heal.stitch_p2", 4;
     brep_p10_rows_move_only_through_the_read_tolerances: "topology.brep_p10", 38;
@@ -552,9 +562,9 @@ macro_rules! replay_trim_cover_tests {
 
 replay_trim_cover_tests! {
     blend_feature_executive_rows_move_only_through_the_trim_cover: "blend.feature_executive", 3;
-    blend_fillet_executive_p3_rows_move_only_through_the_trim_cover: "blend.fillet_executive_p3", 27;
+    blend_fillet_executive_p3_rows_move_only_through_the_trim_cover: "blend.fillet_executive_p3", 8;
     blend_fillet_removal_rows_move_only_through_the_trim_cover: "blend.fillet_removal", 20;
-    corpus_parity_rows_move_only_through_the_trim_cover: "corpus.parity", 3;
+    corpus_parity_rows_move_only_through_the_trim_cover: "corpus.parity", 2;
     heal_stitch_p1_rows_move_only_through_the_trim_cover: "heal.stitch_p1", 4;
     heal_stitch_p2_rows_move_only_through_the_trim_cover: "heal.stitch_p2", 8;
     topology_api_files_rows_move_only_through_the_trim_cover: "topology.api_files", 12;

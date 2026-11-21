@@ -53,6 +53,35 @@ fn with_card_kind<T>(app: &mut SolveApp, id: u64, draw: impl FnOnce(&mut SolveAp
     }
 }
 
+fn with_card_camera(app: &mut SolveApp, id: u64, draw: impl FnOnce(&mut SolveApp)) {
+    let before = app.docs.views.get(id).and_then(|view| view.spec).map(|spec| spec.camera);
+    crate::documents::with_view_look(app, id, |app| with_card_kind(app, id, draw));
+    if let Some(after) = app.docs.views.get(id).and_then(|view| view.spec).map(|spec| spec.camera) {
+        crate::documents::link_visible_cameras(app, id, after, before);
+    }
+}
+
+pub(crate) fn reset_cameras(app: &mut SolveApp) {
+    let active = app.docs.views.active().id;
+    let home = |app: &mut SolveApp| {
+        app.frame_view(true);
+        if let Some(animation) = app.cam_anim.take() {
+            app.cam = animation.to;
+        }
+    };
+    let ids: Vec<_> =
+        app.docs.views.views().iter().filter(|view| matches!(view.kind, ViewKind::Model | ViewKind::Render)).map(|view| view.id).collect();
+    for id in ids {
+        if id == active {
+            home(app);
+        } else {
+            crate::documents::with_view_look(app, id, |app| with_card_kind(app, id, home));
+        }
+    }
+    crate::documents::keep_look(app);
+    crate::documents::align_linked_cameras(app);
+}
+
 fn draw_canvas(app: &mut SolveApp, ui: &mut egui::Ui, kind: ViewKind) {
     match kind {
         ViewKind::Render => {
@@ -119,6 +148,7 @@ fn layout_bounds(app: &SolveApp, area: Rect) -> (Rect, Rect) {
 }
 
 pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::documents::sync_linked_active(app);
     let area = ui.max_rect();
     let Some(tiles) = app.docs.views.tiles().cloned() else { return };
     let focus = app.docs.views.active().id;
@@ -160,16 +190,15 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.viewport.bleed = (!render_ground).then_some(area);
             app.viewport.window = Some(free);
             draw_canvas(app, &mut tile, kind);
+            crate::documents::sync_linked_active(app);
             if let Some(range) = app.viewport.backdrop.take() {
                 lay_under(ui.ctx(), layer, &slots, range);
             }
             ground = frame;
         } else {
-            crate::documents::with_view_look(app, id, |app| {
-                with_card_kind(app, id, |app| {
-                    app.step_view_animation(ui.ctx());
-                    draw_canvas(app, &mut tile, kind);
-                });
+            with_card_camera(app, id, |app| {
+                app.step_view_animation(ui.ctx());
+                draw_canvas(app, &mut tile, kind);
                 let controls = app.viewport.layout.as_ref().filter(|layout| layout.viewport == frame);
                 if !on_button
                     && press.is_some_and(|p| cell.contains(p) && !controls.is_some_and(|l| l.axis_view.contains(p) || l.navigation.contains(p)))
@@ -185,22 +214,25 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.viewport.window = None;
     }
     // Drawn over the views: the shadow and frame of each card, and the focused view's name.
+    let clean = crate::view_windows::is_clean(app);
     let mut chosen = None;
-    for (id, body) in &cards {
+    for (id, body) in cards.iter().filter(|_| !clean) {
         let card = Rect::from_min_max(body.min - vec2(0.0, HEADER), body.max);
         if let Some(action) = card_chrome(app, ui, *id, card) {
             chosen = Some((*id, action));
         }
     }
     let mut picked = None;
-    for (ordinal, cell) in empties.iter().enumerate() {
+    for (ordinal, cell) in empties.iter().enumerate().filter(|_| !clean) {
         if let Some(action) = empty_picker(app, ui, ordinal, *cell) {
             picked = Some((ordinal, action));
         }
     }
-    ground_chip(app, ui, focus, ground);
-    for splitter in tiles.splitters(to_tile(free), GUTTER) {
-        splitter_handle(app, ui, &splitter);
+    if !clean {
+        ground_chip(app, ui, focus, ground);
+        for splitter in tiles.splitters(to_tile(free), GUTTER) {
+            splitter_handle(app, ui, &splitter);
+        }
     }
     // The shown view's rectangle is the one the panels and the host's controls read.
     app.viewport.rect = Some(ground);
@@ -613,16 +645,14 @@ pub(crate) fn card_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         let mut controls = controls_ui(ui, app.session.uid, *id, *rect);
         app.viewport.rect = Some(*rect);
         app.viewport.card = true;
-        crate::documents::with_view_look(app, *id, |app| {
-            with_card_kind(app, *id, |app| {
-                if crate::render_workspace::active(app) {
-                    crate::render_workspace::finish_result_navigation(app, &mut controls, *rect);
-                }
-                crate::viewport::show_card_controls(app, &mut controls, *rect);
-                if app.pending_fit.is_some() {
-                    app.resolve_fit(ui.ctx());
-                }
-            });
+        with_card_camera(app, *id, |app| {
+            if crate::render_workspace::active(app) {
+                crate::render_workspace::finish_result_navigation(app, &mut controls, *rect);
+            }
+            crate::viewport::show_card_controls(app, &mut controls, *rect);
+            if app.pending_fit.is_some() {
+                app.resolve_fit(ui.ctx());
+            }
         });
         app.viewport.card = false;
     }
@@ -743,7 +773,8 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
                 crate::ui_kit::Menu::text(ui, app.tr("multi_window.move_to_window"), |ui| {
                     let mut chosen = None;
                     let enabled = crate::view_windows::can_create(app);
-                    let new = crate::ui_kit::menu::button_enabled(ui, app.tr("multi_window.new_window"), "window", enabled);
+                    let new =
+                        crate::ui_kit::menu::button_enabled(ui, app.tr("multi_window.new_window"), crate::ui_kit::icons::window_icon(false), enabled);
                     if !enabled {
                         new.clone().backing_on_hover_text(app.tr("multi_window.too_many"));
                     }
@@ -754,8 +785,10 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
                     crate::ui_kit::menu::list_row(ui, &crate::ui_kit::Item::heading(app.tr("multi_window.open_windows")));
                     for choice in crate::view_windows::window_choices(app).iter() {
                         let id = format!("view.window.{}", choice.id);
-                        let mut item = crate::ui_kit::MenuItem::new(&id, &choice.label, "");
-                        item.checked = (choice.id == app.view_windows.current_window()).then_some(true);
+                        let here = choice.id == app.view_windows.current_window();
+                        let label = if here { app.tr("view_layout.this_window") } else { &choice.label };
+                        let mut item = crate::ui_kit::MenuItem::new(&id, label, crate::ui_kit::icons::window_icon(here));
+                        item.checked = here.then_some(true);
                         if item.show(ui).clicked() {
                             chosen = Some(CardAction::MoveToWindow(Some(choice.id)));
                         }

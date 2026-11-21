@@ -198,6 +198,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 start: String,
                 /// Keep Offset selected while its expression is being edited.
                 offset_start: bool,
+                /// Offset both sides symmetrically away from the sketch plane.
+                symmetric_offset: bool,
                 /// Extent type All (through everything) instead of a distance.
                 all: bool,
                 /// Thin Extrude: a wall along the picked curves (or profiles' outlines).
@@ -987,6 +989,7 @@ impl Dialog {
                     to_offset: String::new(),
                     start: String::new(),
                     offset_start: false,
+                    symmetric_offset: false,
                     all: false,
                     thin: false,
                     wall: length_default(s, "2"),
@@ -6198,6 +6201,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             taper_present,
             to_offset,
             start,
+            offset_start,
+            symmetric_offset,
             all,
             thin,
             wall,
@@ -6214,6 +6219,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 common["taper"] = json!(taper);
             }
             put(&mut common, &[("start_offset", start)]);
+            if *direction == 2 && *offset_start && *symmetric_offset {
+                common["symmetric_offset"] = json!(true);
+            }
             if *all {
                 common["through_all"] = json!(true);
             }
@@ -8093,6 +8101,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 to_offset: extent.to_offset.as_deref().map(str::to_string).unwrap_or_default(),
                 start: extent.start_offset.as_deref().map(str::to_string).unwrap_or_default(),
                 offset_start: extent.start_offset.is_some(),
+                symmetric_offset: extent.symmetric_offset,
                 all: extent.through_all,
                 thin: thin.is_some(),
                 wall: thin.as_ref().map_or_else(|| length_default(s, "2"), |t| t.thickness.to_string()),

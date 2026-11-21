@@ -1508,6 +1508,21 @@ fn prepare_model(app: &mut SolveApp) {
     }
 }
 
+/// Walk the placements once for this model, so [`placed_body_path`] can answer without `&mut`
+/// (the Parts and Components selection modes pick while the view draws).
+pub(crate) fn prepare_body_paths(app: &mut SolveApp) {
+    prepare_model(app);
+    if let Some(model) = app.tree.model.as_mut() {
+        model.body_path(&app.session, "");
+    }
+}
+
+/// The placement a placed body (by its world name) belongs to, after [`prepare_body_paths`]; None
+/// for a body of the top-level design.
+pub(crate) fn placed_body_path(app: &SolveApp, body: &str) -> Option<Vec<u64>> {
+    app.tree.model.as_ref().filter(|model| model.matches(&app.session))?.placed_path(body)
+}
+
 fn model_placement(app: &mut SolveApp, path: &[u64]) -> Option<std::sync::Arc<solidcraft_engine::occurrences::OccurrencePlacement>> {
     prepare_model(app);
     app.tree.model.as_mut()?.placement(&app.session, path)
@@ -3754,7 +3769,7 @@ pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewp
     let rect = painter.clip_rect();
     let mut drawn = Vec::new();
     let tk = Tokens::get();
-    let st = crate::open_meshing::session_world(&app.session);
+    let st = crate::open_meshing::still_world(app);
     for id in app
         .session
         .visibility

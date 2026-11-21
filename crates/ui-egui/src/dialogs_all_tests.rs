@@ -1580,6 +1580,162 @@ fn coil_revolutions_arrows_step_whole_turns() {
     assert_eq!(sent(&h), json!("turns + 1"));
 }
 
+fn chamfer_paste_fixture() -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.nav = "blender".into();
+    h.call("ui.view", json!({"view":"front"}));
+    h.step(&json!({"start":"solid.chamfer"})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"dialog:Distance"}})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"12 mm"})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    assert!(h.ctx.text_edit_focused(), "the distance editor has keyboard focus");
+    assert_eq!(chamfer_distance(&h), "12 mm");
+    h
+}
+
+fn chamfer_distance(h: &Harness) -> &str {
+    let Kind::Fillet { radius, chamfer: true, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("Chamfer dialog") };
+    radius
+}
+
+fn middle_at(pos: egui::Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton { pos, button: egui::PointerButton::Middle, pressed, modifiers: egui::Modifiers::NONE }
+}
+
+fn chamfer_viewport_point(h: &Harness) -> egui::Pos2 {
+    let at = h.app.viewport.layout.as_ref().unwrap().drawable.center() - egui::vec2(80.0, 80.0);
+    assert!(!crate::shell::covered(&h.app, at));
+    at
+}
+
+/// #20299: a browser Paste targets the focused field; native PRIMARY paste carries its position.
+/// Both belong to navigation when the middle press starts in the viewport, even if it ends on a field.
+#[test]
+fn viewport_middle_orbit_does_not_paste_into_chamfer_distance() {
+    for native in [false, true] {
+        for release_on_field in [false, true] {
+            let mut h = chamfer_paste_fixture();
+            let at = chamfer_viewport_point(&h);
+            let paste = |pos| {
+                if native { egui::Event::MiddleClickPaste { pos, text: "731 mm".into() } } else { egui::Event::Paste("731 mm".into()) }
+            };
+            let before = h.app.cam;
+            h.frame_with(vec![egui::Event::PointerMoved(at), middle_at(at, true), paste(at)]);
+            assert_eq!(chamfer_distance(&h), "12 mm", "press must not paste");
+            let moved = at + egui::vec2(40.0, 20.0);
+            let mut events = vec![egui::Event::PointerMoved(moved)];
+            if native {
+                events.push(paste(moved));
+            }
+            h.frame_with(events);
+            assert_eq!(chamfer_distance(&h), "12 mm", "drag must not paste");
+            let mut expected = before;
+            expected.orbit(40.0, 20.0);
+            assert!((h.app.cam.yaw - expected.yaw).abs() < 1e-6, "the middle drag orbits");
+            assert!((h.app.cam.pitch - expected.pitch).abs() < 1e-6, "the middle drag orbits");
+            let end = if release_on_field { scenario::handle_at("dialog:Distance").unwrap() } else { moved };
+            h.frame_with(vec![egui::Event::PointerMoved(end), middle_at(end, false), paste(end)]);
+            assert_eq!(chamfer_distance(&h), "12 mm", "release must not paste, including over the field");
+            // Once navigation ends, ordinary keyboard paste still replaces selected text.
+            h.step(&json!({"click":{"handle":"dialog:Distance"}})).unwrap();
+            h.step(&json!({"key":"A","cmd":true})).unwrap();
+            h.frame_with(vec![egui::Event::Paste("27 mm".into())]);
+            assert_eq!(chamfer_distance(&h), "27 mm");
+        }
+    }
+}
+
+#[test]
+fn viewport_middle_click_does_not_paste_into_chamfer_distance() {
+    for single_frame in [false, true] {
+        let mut h = chamfer_paste_fixture();
+        let at = chamfer_viewport_point(&h);
+        let mut events = vec![egui::Event::PointerMoved(at), middle_at(at, true)];
+        if !single_frame {
+            h.frame_with(std::mem::take(&mut events));
+        }
+        events.extend([middle_at(at, false), egui::Event::Paste("731 mm".into())]);
+        // A modifier pressed after PRIMARY paste must not reclassify that earlier paste.
+        events.push(egui::Event::ModifiersChanged(egui::Modifiers::CTRL | egui::Modifiers::COMMAND));
+        h.frame_with(events);
+        assert_eq!(chamfer_distance(&h), "12 mm", "a stationary click also belongs to navigation");
+    }
+}
+
+#[test]
+fn middle_click_on_chamfer_distance_keeps_primary_selection_paste() {
+    let mut h = chamfer_paste_fixture();
+    let editor = h.ctx.memory(|m| m.focused()).unwrap();
+    // Click beyond the short value's text so PRIMARY insertion has a known cursor position.
+    let at = h.ctx.read_response(editor).unwrap().rect.right_center() - egui::vec2(4.0, 0.0);
+    let viewport = chamfer_viewport_point(&h);
+    let before = h.app.cam;
+    // Two clicks can arrive in one slow frame. Only the viewport click's paste is consumed.
+    h.frame_with(vec![
+        egui::Event::PointerMoved(viewport),
+        middle_at(viewport, true),
+        middle_at(viewport, false),
+        egui::Event::Paste("999".into()),
+        egui::Event::PointerMoved(at),
+        middle_at(at, true),
+        egui::Event::MiddleClickPaste { pos: at, text: "731".into() },
+    ]);
+    h.frame_with(vec![middle_at(at, false)]);
+    assert_eq!(chamfer_distance(&h), "12 mm731", "only PRIMARY text is inserted at the end of the field");
+    assert_eq!(h.app.cam.yaw, before.yaw);
+    assert_eq!(h.app.cam.pitch, before.pitch);
+    assert_eq!(h.app.cam.target, before.target);
+}
+
+#[test]
+fn keyboard_paste_into_chamfer_distance_works_during_middle_orbit() {
+    for modifiers in [egui::Modifiers::CTRL | egui::Modifiers::COMMAND, egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND] {
+        for browser in [false, true] {
+            for release in [false, true] {
+                let mut h = chamfer_paste_fixture();
+                let at = chamfer_viewport_point(&h);
+                let before = h.app.cam;
+                h.frame_with(vec![egui::Event::PointerMoved(at), middle_at(at, true)]);
+                h.frame_with(vec![egui::Event::PointerMoved(at + egui::vec2(40.0, 20.0))]);
+                assert!(h.ctx.input(|i| i.pointer.button_down(egui::PointerButton::Middle)));
+                assert!(h.ctx.text_edit_focused());
+                let before_paste = h.app.cam;
+                if !browser {
+                    // Ctrl/Cmd can have been held since an earlier frame. Native sends no V key.
+                    h.frame_with(vec![egui::Event::ModifiersChanged(modifiers)]);
+                }
+                let next = at + egui::vec2(50.0, 20.0);
+                let mut events = vec![egui::Event::PointerMoved(next)];
+                if release {
+                    events.push(middle_at(next, false));
+                }
+                if browser {
+                    // Browser keydown precedes the DOM paste event, possibly with keyup between.
+                    events.push(egui::Event::ModifiersChanged(modifiers));
+                    events.push(egui::Event::Key { key: egui::Key::V, physical_key: None, pressed: true, repeat: false, modifiers });
+                    events.push(egui::Event::Key { key: egui::Key::V, physical_key: None, pressed: false, repeat: false, modifiers });
+                    events.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+                }
+                // Native Ctrl/Cmd+V delivers only Paste, with no V key event.
+                events.push(egui::Event::Paste("27 mm".into()));
+                events.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+                h.frame_with(events);
+                assert_eq!(chamfer_distance(&h), "27 mm", "keyboard paste works (browser: {browser}, release: {release})");
+                assert_ne!(h.app.cam.yaw, before.yaw, "the middle drag still orbits");
+                assert_ne!(h.app.cam.pitch, before.pitch, "the middle drag still orbits");
+                if !release {
+                    assert!(h.ctx.input(|i| i.pointer.button_down(egui::PointerButton::Middle)));
+                    assert_ne!(h.app.cam.yaw, before_paste.yaw, "the orbit continues in the keyboard-paste frame");
+                    h.frame_with(vec![middle_at(next, false)]);
+                }
+            }
+        }
+    }
+}
+
 fn extrude_focus_fixture() -> Harness {
     let mut h = Harness::new();
     h.app.home.open = false;

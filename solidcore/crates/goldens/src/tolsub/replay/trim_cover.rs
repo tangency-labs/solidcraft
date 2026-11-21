@@ -5,6 +5,10 @@
 //! The `stubs4-delete-edge-sphere_diff_3cylinders` rows' main hashes are of main's
 //! run after #18971 (a fillet's rail cut near a knot snaps onto the knot), which moves
 //! those rows apart from the cover.
+//!
+//! The rows #17739's vertex step moves as well (19 `blend.fillet_executive_p3` bottle
+//! rows, `corpus.parity`'s `Fillet__bolt.smb`) are replayed from [`super::DATA`], with
+//! the main hashes this list had for them.
 
 /// The moved rows: unit, case, main's row hash.
 pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
@@ -30,93 +34,8 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
     ),
     (
         "blend.fillet_executive_p3",
-        "stubs4-degenerate-bottle-e0-r0.5",
-        0x2b3eba4d87b2088b,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-degenerate-bottle-e10-r0.5",
-        0x069f4b055f4dce56,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-degenerate-bottle-e13-r0.5",
-        0x377572a24e3cbb49,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-degenerate-bottle-e2-r0.5",
-        0xbe487ce95cacb05f,
-    ),
-    (
-        "blend.fillet_executive_p3",
         "stubs4-degenerate-caps_coons-e5-r0.5",
         0x4ac78ecf10ab2d13,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e16-r0.5",
-        0xdc5057a5f4a8c951,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e19-r0.5",
-        0x785803ebcbada559,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e27-r0.5",
-        0x204c4332528d0932,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e27-r2.0",
-        0xe461d7063a8b188b,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e29-r2.0",
-        0xad4cf00e6aa49cde,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e30-r0.1",
-        0xfd4b4c41b15a0a04,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e30-r2.0",
-        0x863d33c6d0e4d8f3,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e32-r0.1",
-        0xad919117208d863d,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e32-r2.0",
-        0x087acd20a7add494,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e4-r0.5",
-        0x5292049c78d818df,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e6-r0.5",
-        0x0e6b8563d999c792,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e7-r0.1",
-        0x2ab9d1fc119e5997,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e8-r0.5",
-        0x5bbdc75f38f31b45,
     ),
     (
         "blend.fillet_executive_p3",
@@ -135,11 +54,6 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
     ),
     (
         "blend.fillet_executive_p3",
-        "sweep4-bottle-e29-r0.1",
-        0xd146cdf57ddda186,
-    ),
-    (
-        "blend.fillet_executive_p3",
         "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
         0xe1177d70bd81d1ea,
     ),
@@ -147,11 +61,6 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
         "blend.fillet_executive_p3",
         "sweep4-sphere_diff_3cylinders-all-r0.1",
         0xba147c5f32b51254,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "sweep5-bottle-e29-r1.0",
-        0x070e04ad5b72beb7,
     ),
     (
         "blend.fillet_executive_p3",
@@ -258,7 +167,6 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
         "nurb_fillet_face9",
         0xa31f24e121d64dbc,
     ),
-    ("corpus.parity", "Fillet__bolt.smb", 0x974b48b786170bae),
     (
         "corpus.parity",
         "Fillet__sphere_diff_3cylinders.smb",

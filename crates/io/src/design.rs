@@ -921,6 +921,17 @@ pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) 
     }
 }
 
+/// A design container already in memory, with the model it keeps as [`read_design_file`] reads
+/// it, except that a container with a provenance entry gives no model: a signed design is
+/// evaluated from its timeline, never from a cache its signature does not cover. The entry and
+/// the model come from the same bytes, so the decision is about the file the model came from.
+pub fn read_design_with_model(bytes: &[u8]) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
+    let _span = solidcraft_profile::span("io", "read_design_file");
+    let mut reader = DesignContainerReader::new(Cursor::new(bytes))?;
+    let model = if reader.has_provenance() { None } else { reader.geometry_before_document() };
+    Ok((reader.read_document()?, model))
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 type FileSource = std::fs::File;
 #[cfg(target_arch = "wasm32")]
@@ -1221,7 +1232,29 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         let value = metadata.get("point_clouds").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing point cloud metadata"))?;
         decode_cloud(reader.blob(value, "points_blob", "points")?, cloud)?;
     }
-    doc.drawings = drawing::read(reader)?;
+    let (drawings, kept) = drawing::read(reader)?;
+    doc.drawings = drawings;
+    // A drawing a newer build saved that this build can't read is kept as it came: the rest of the
+    // design opens, the notice names it, and saving writes it and its parts back.
+    if !kept.is_empty() {
+        let file = doc.newer_file.get_or_insert_with(|| {
+            let current = solidcraft_doc::format::FORMAT;
+            Arc::new(solidcraft_doc::newer_file::newer_file(&solidcraft_doc::format::Newer {
+                format: current,
+                reads_up_to: current,
+                unknown_changes: vec!["a newer drawing format".into()],
+            }))
+        });
+        let file = Arc::make_mut(file);
+        for drawing in kept {
+            file.not_understood.push(drawing.note);
+            for (name, bytes) in drawing.parts {
+                if !file.parts.iter().any(|(known, _)| *known == name) {
+                    file.parts.push((name, bytes));
+                }
+            }
+        }
+    }
     Ok(doc)
 }
 
