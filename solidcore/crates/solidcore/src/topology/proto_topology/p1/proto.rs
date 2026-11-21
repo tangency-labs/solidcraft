@@ -1285,6 +1285,11 @@ impl<O: ClassObject> VertexDefinition<O> {
         if moved.is_nan() || moved > self.tolerance(k) {
             return Ok(false);
         }
+        // Already at the common point to rounding: left as it is, bit for bit, so a vertex
+        // the crossing placed exactly is not nudged by the last digits of the solve.
+        if moved <= 8.0 * f64::EPSILON * (1.0 + self.position.max_dimension()) {
+            return Ok(false);
+        }
         self.position = x;
         Ok(true)
     }
