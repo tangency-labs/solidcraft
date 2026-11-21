@@ -983,24 +983,89 @@ pub fn stl_binary(meshes: &[Mesh], name: &str) -> Vec<u8> {
 
 /// ASCII STL.
 pub fn stl_ascii(meshes: &[Mesh], name: &str) -> String {
-    use std::fmt::Write as _;
     let name: String = name.chars().filter(|c| c.is_ascii_graphic()).collect();
     let mut s = format!("solid {name}\n");
     for m in meshes {
         for t in &m.triangles {
-            let Some([a, b, c]) = m.tri(t) else { continue };
-            let n = (b - a).cross(c - a).normalized().unwrap_or_default();
-            // Written into the text rather than formatted apart and appended: the same bytes,
-            // without a string made and dropped per line.
-            let _ = write!(s, "  facet normal {:e} {:e} {:e}\n    outer loop\n", n.x, n.y, n.z);
-            for v in [a, b, c] {
-                let _ = writeln!(s, "      vertex {:e} {:e} {:e}", v.x, v.y, v.z);
+            if let Some(tri) = m.tri(t) {
+                push_facet(&mut s, tri);
             }
-            s += "    endloop\n  endfacet\n";
         }
     }
     s += &format!("endsolid {name}\n");
     s
+}
+
+/// One ASCII STL facet. Written into the text rather than formatted apart and appended: the same
+/// bytes, without a string made and dropped per line.
+fn push_facet(s: &mut String, [a, b, c]: [Vec3; 3]) {
+    use std::fmt::Write as _;
+    let n = (b - a).cross(c - a).normalized().unwrap_or_default();
+    let _ = write!(s, "  facet normal {:e} {:e} {:e}\n    outer loop\n", n.x, n.y, n.z);
+    for v in [a, b, c] {
+        let _ = writeln!(s, "      vertex {:e} {:e} {:e}", v.x, v.y, v.z);
+    }
+    *s += "    endloop\n  endfacet\n";
+}
+
+/// A name written after `solid` in an ASCII STL: every character that is not printable ASCII
+/// (white space, control characters, anything beyond ASCII) becomes `_`, so the name is one
+/// word; an empty name becomes `_`.
+fn stl_solid_name(raw: &str) -> String {
+    let name: String = raw.chars().map(|c| if c.is_ascii_graphic() { c } else { '_' }).collect();
+    if name.is_empty() { "_".to_string() } else { name }
+}
+
+/// ASCII STL with one `solid <name>` ... `endsolid <name>` block per B-rep face of the given
+/// bodies (all when `bodies` is empty), for meshers that make a patch of each solid. Meshed and
+/// welded as [`export_with_parts_noted`] does for STL, so the triangles are those of the body
+/// export, grouped by the face each came from.
+///
+/// A block is named by its face's persistent name ([`solidcraft_doc::naming::face_names`]) made
+/// safe by [`stl_solid_name`]; with several bodies each name is led by the body's name and `_`.
+/// A name already used in the file gets `_2`, `_3`, … after it, so names are unique and stable for
+/// a given design. A face without triangles has no block. Returns the bytes and what meshing the
+/// bodies reported.
+pub fn export_stl_face_solids(state: &ModelState, bodies: &[String], quality: MeshQuality) -> Result<(Vec<u8>, Vec<String>)> {
+    let sel = selected(state, bodies)?;
+    let (items, notes) = per_placed_body(&sel, |b, body| {
+        let (m, mut n) = body_mesh(b, body, quality)?;
+        let count = u32::try_from(m.triangles.len()).map_err(|_| IoError::Invalid("mesh too large".into()))?;
+        let (positions, triangles, origin) = threemf::weld_tagged(&m.positions, &m.triangles, &(0..count).collect::<Vec<_>>(), weld_eps(&b.body));
+        if !b.body.is_surface() && !b.body.is_mesh() {
+            n.extend(unsealed_note(&positions, &triangles, true).map(|note| format!("{}: {note}", b.name)));
+        }
+        let faces: Vec<u32> = origin.iter().map(|t| m.tri_face.get(*t as usize).copied().unwrap_or(0)).collect();
+        Ok(((Mesh { positions, triangles, ..Mesh::default() }, faces), n))
+    })?;
+    let several = items.len() > 1;
+    let mut used = std::collections::HashSet::new();
+    let mut out = String::new();
+    for (b, (mesh, faces)) in &items {
+        let names = solidcraft_doc::naming::face_names(b);
+        let mut by_face: std::collections::BTreeMap<u32, Vec<&[u32; 3]>> = std::collections::BTreeMap::new();
+        for (t, f) in mesh.triangles.iter().zip(faces) {
+            by_face.entry(*f).or_default().push(t);
+        }
+        for (face, tris) in by_face {
+            let face_name = names.get(face as usize).cloned().unwrap_or_else(|| format!("face{face}"));
+            let wanted = stl_solid_name(&if several { format!("{}_{face_name}", b.name) } else { face_name });
+            let mut name = wanted.clone();
+            let mut n = 2usize;
+            while !used.insert(name.clone()) {
+                name = format!("{wanted}_{n}");
+                n += 1;
+            }
+            out += &format!("solid {name}\n");
+            for t in tris {
+                if let Some(tri) = mesh.tri(t) {
+                    push_facet(&mut out, tri);
+                }
+            }
+            out += &format!("endsolid {name}\n");
+        }
+    }
+    Ok((out.into_bytes(), notes))
 }
 
 /// A body in an OBJ export: the name it is written with, its mesh and the colour it is shown
