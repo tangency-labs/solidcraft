@@ -6112,6 +6112,25 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         };
         Ok(Some((edge(first)?, edge(second)?)))
     }
+    fn geometry_corner_blended_edges(&self, corner: FilletObject) -> Result<Vec<FilletObject>> {
+        let FilletObject::Corner(id) = corner else {
+            return Err(invalid("object is not a corner"));
+        };
+        let Some(corner) = self.corners.get(id.0 as usize) else {
+            return Ok(Vec::new());
+        };
+        let mut edges = Vec::new();
+        for &edgeuse in corner.solver_eus.as_deref().unwrap_or(&[]) {
+            let Some(edge) = crate::topology::edgeuse::p1::edge(self.target, edgeuse)? else {
+                continue;
+            };
+            let edge = FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge));
+            if !edges.contains(&edge) {
+                edges.push(edge);
+            }
+        }
+        Ok(edges)
+    }
     fn geometry_rails_fit_judged(
         &mut self,
         k: &mut Kernel,
@@ -9250,6 +9269,182 @@ mod tests {
                 assert_eq!(cause, Some(face_without_surface()));
             }
             other => panic!("{other:?}"),
+        }
+    }
+
+    /// Which of the three edges at a corner of [`box_in_torus`] are rounded: the box's upright
+    /// edge `x|y` (x = y = 1) and the edges where the box's +x and +y faces meet the torus.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    enum TorusCornerEdge {
+        XY,
+        XTorus,
+        YTorus,
+    }
+
+    /// What rounding some edges of a corner of [`box_in_torus`] gives.
+    #[derive(Debug)]
+    enum TorusCornerFillet {
+        /// Built: whether the body passes the level-2 check.
+        Built(bool),
+        /// Refused as too large: its reason and the size it names.
+        Refused(
+            Option<crate::blend::fillet_executive::NoRoomReason>,
+            Option<f64>,
+        ),
+        /// Failed otherwise.
+        Failed(SolidError),
+    }
+
+    /// The unit box intersected with the torus about Z through (0, 0, 0.5), radii 1.0 and
+    /// 0.6 (#20314): its corners where the +x and +y faces meet the torus are at
+    /// (1, 1, 0.0659) and (1, 1, 0.934); the torus face ends on the box's bottom and top.
+    fn box_in_torus(k: &mut Kernel) -> Brep {
+        let bx =
+            crate::primitive::api_primitives::create_box(k, Point3::ZERO, 1.0, 1.0, 1.0).unwrap();
+        let torus =
+            crate::primitive::api_primitives::create_torus(k, Point3::new(0.0, 0.0, 0.5), 1.0, 0.6)
+                .unwrap();
+        crate::boolean::api_brep::boolean_intersection(k, bx, torus).unwrap()
+    }
+
+    /// Round `which` edges at the corner of [`box_in_torus`] nearest `near` by `radius`.
+    fn round_torus_corner(
+        near: Point3,
+        which: &[TorusCornerEdge],
+        radius: f64,
+    ) -> TorusCornerFillet {
+        let mut k = Kernel::default();
+        let mut body = box_in_torus(&mut k);
+        let corner = crate::topology::brep::p1::vertices(&body, None)
+            .unwrap()
+            .into_iter()
+            .min_by(|a, b| {
+                let d = |v| (crate::topology::vertex::point(&body, v).unwrap() - near).length();
+                d(*a).total_cmp(&d(*b))
+            })
+            .unwrap();
+        let at = crate::topology::vertex::point(&body, corner).unwrap();
+        assert!((at - near).length() < 1e-3, "{at:?}");
+        let mut edges = Vec::new();
+        for e in crate::topology::brep::p1::edges(&body, None).unwrap() {
+            let ends = crate::topology::edge::vertices(&body, e, None).unwrap();
+            if !ends.contains(&Some(corner)) {
+                continue;
+            }
+            let other = ends
+                .iter()
+                .flatten()
+                .find(|v| **v != corner)
+                .copied()
+                .unwrap();
+            let o = crate::topology::vertex::point(&body, other).unwrap();
+            let kind = if (o.x - 1.0).abs() < 1e-9 && (o.y - 1.0).abs() < 1e-9 {
+                TorusCornerEdge::XY
+            } else if (o.x - 1.0).abs() < 1e-9 {
+                TorusCornerEdge::XTorus
+            } else {
+                TorusCornerEdge::YTorus
+            };
+            if which.contains(&kind) {
+                edges.push(e);
+            }
+        }
+        assert_eq!(edges.len(), which.len(), "{which:?} at {at:?}");
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &edges, radius, 1, 1, 1.0)
+            .unwrap();
+        match session.do_fillet(&mut k) {
+            Ok(()) => {
+                drop(session);
+                let check = crate::topology::brep::validation::check_brep(
+                    &mut k,
+                    &mut body,
+                    crate::topology::brep::validation::CheckLevel::Level2,
+                )
+                .unwrap();
+                TorusCornerFillet::Built(check.lines().is_empty())
+            }
+            Err(e) => match session.error_info().no_room_reason() {
+                Some(reason) => {
+                    TorusCornerFillet::Refused(Some(reason), session.fit_size().map(|f| f.size))
+                }
+                None => TorusCornerFillet::Failed(e),
+            },
+        }
+    }
+
+    /// #20314: two rounds whose rails leave the torus face across its rim (the box's bottom or
+    /// top) meet at a corner of the box cut by a torus. From r* = 0.0958289 (closed form: the
+    /// ball touching the +x and +y faces and the torus has its contact on the torus at the rim)
+    /// both rails overflow; the overflow is not built where two overflowing rounds meet, so
+    /// the blend is refused as leaving its face, naming r* less the fit margin. It failed in
+    /// the rails' trim (a reversed interval) and at 0.0958 returned an invalid body. One
+    /// overflowing round, alone or with the upright edge, still builds.
+    #[test]
+    fn two_overflowing_rounds_meeting_at_a_corner_are_refused_naming_where_the_corner_leaves_the_face(
+    ) {
+        use TorusCornerEdge::{XTorus, YTorus, XY};
+        let r_star = 0.095_828_866_164_137_94;
+        let low = Point3::new(1.0, 1.0, 0.0659);
+        let high = Point3::new(1.0, 1.0, 0.934);
+        let refused_or_built =
+            |near: Point3, which: &[TorusCornerEdge], radius: f64| -> Option<f64> {
+                match round_torus_corner(near, which, radius) {
+                    TorusCornerFillet::Built(valid) => {
+                        assert!(valid, "{which:?} at {near:?} r {radius}: built but invalid");
+                        None
+                    }
+                    TorusCornerFillet::Refused(reason, fit) => {
+                        assert_eq!(
+                            reason,
+                            Some(crate::blend::fillet_executive::NoRoomReason::RailLeavesFace),
+                            "{which:?} at {near:?} r {radius}"
+                        );
+                        let fit = fit.unwrap_or_else(|| {
+                            panic!("{which:?} at {near:?} r {radius}: refused naming no size")
+                        });
+                        assert!(
+                            fit < r_star && fit > r_star - 0.0105,
+                            "{which:?} at {near:?} r {radius}: fit {fit}, r* {r_star}"
+                        );
+                        Some(fit)
+                    }
+                    TorusCornerFillet::Failed(e) => panic!("{which:?} at {near:?} r {radius}: {e}"),
+                }
+            };
+        for near in [low, high] {
+            for which in [&[XY, XTorus, YTorus][..], &[XTorus, YTorus][..]] {
+                if let Some(fit) = refused_or_built(near, which, 0.1) {
+                    assert!(
+                        matches!(
+                            round_torus_corner(near, which, fit),
+                            TorusCornerFillet::Built(true)
+                        ),
+                        "{which:?} at {near:?} at its fit {fit}"
+                    );
+                }
+                refused_or_built(near, which, 0.0959);
+            }
+            for radius in [0.09, 0.095] {
+                assert!(
+                    matches!(
+                        round_torus_corner(near, &[XY, XTorus, YTorus], radius),
+                        TorusCornerFillet::Built(true)
+                    ),
+                    "{near:?} r {radius}"
+                );
+            }
+            refused_or_built(near, &[XY, XTorus, YTorus], 0.0958);
+            for which in [&[XTorus][..], &[XTorus, XY][..]] {
+                assert!(
+                    matches!(
+                        round_torus_corner(near, which, 0.1),
+                        TorusCornerFillet::Built(true)
+                    ),
+                    "{which:?} at {near:?} r 0.1"
+                );
+            }
         }
     }
 

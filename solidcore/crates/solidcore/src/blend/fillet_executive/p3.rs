@@ -2861,6 +2861,16 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
         let _ = corner;
         Ok(None)
     }
+    /// Not upstream (#20314): the target edges `corner` blends (those of its filleted edge
+    /// uses, `m_pSolverEUs`), each once. Only an accessor with live corners can tell; the
+    /// default finds none.
+    ///
+    /// # Errors
+    /// Those of the edge lookups.
+    fn geometry_corner_blended_edges(&self, corner: O) -> Result<Vec<O>> {
+        let _ = corner;
+        Ok(Vec::new())
+    }
     /// The fork's `RailsFitTheirFaces(rbFit, rbRollsOver, rbIntoMaterial)` for `solver`
     /// (not upstream; WR-302, WR-631): whether every rail of its untrimmed fillet stays on
     /// the face it rolls on, whether a rail rolls over a tangent edge, and whether one runs
@@ -3406,6 +3416,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 Some((NoRoomReason::OverflowWithRollover, "Fillet Error: a rail leaves the face it rolls on while a rail rolls over a tangent edge (not supported together)"))
             } else if self.options.global_merge {
                 Some((NoRoomReason::OverflowWithGlobalMerge, "Fillet Error: a rail leaves the face it rolls on, and the fillet ends on more than one face (not supported together)"))
+            } else if self.overflows_meet_at_a_corner(access, &overflowing)? {
+                // not the fork's (#20314): the overflow is built round by round, trimmed at its
+                // crease; at a corner where two overflowing rounds meet, the corner's own
+                // contact leaves the face too, and that corner is not built yet
+                Some((NoRoomReason::RailLeavesFace, "Fillet Error: two rounds whose rails leave the face they roll on meet at a corner (not supported together)"))
             } else {
                 None
             };
@@ -3428,6 +3443,33 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             self.cliff_overflow = true;
         }
         Ok(())
+    }
+
+    /// Whether two of the `overflowing` blended edges meet at one of the executive's corners
+    /// (#20314): the cliff overflow trims each round at its crease, but where two overflowing
+    /// rounds meet, the corner's own contact with the face they leave leaves it too.
+    ///
+    /// # Errors
+    /// Those of the corners' edge lookups.
+    fn overflows_meet_at_a_corner(
+        &self,
+        access: &impl BrepCreationAccess<O>,
+        overflowing: &[O],
+    ) -> Result<bool> {
+        let mut index = 0;
+        while let Some(corner) = self.corners.get(index).copied() {
+            index += 1;
+            let blended = access.geometry_corner_blended_edges(corner)?;
+            if blended
+                .iter()
+                .filter(|edge| overflowing.contains(edge))
+                .count()
+                >= 2
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Refuse blends that take the whole of a face they roll on, some meeting it at an angle
