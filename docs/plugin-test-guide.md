@@ -166,18 +166,20 @@ instantiation, even when the import is unused.
 
 The box sample uses the unchanged invocation defaults; it needs no settings changes. Use the
 following steps only for a separate package whose reviewed manifest requests a larger budget.
-The original host ceilings are 100,000,000,000 fuel and 128 MiB. Raising either ceiling does
+The original command host ceilings are 100,000,000,000 fuel, 128 MiB, 256 host calls and
+30000 ms of guest compute. Raising a ceiling does
 not change the sample's request or run any plugin.
 
 For the desktop:
 
 1. Inspect the package with `plugin.inspect` and read `manifest.runtime.limits`, `host_limits`,
    `within_host_limits` and any `limits_error`. This step does not execute code.
-2. Open **Preferences > Plugins**. Enter a positive integer in **Max plugin fuel** and in
-   **Max plugin memory (MiB)**, large enough for the specific request you reviewed. For
-   example, a request of 200,000,000,000 fuel and 256 MiB fits ceilings of 200000000000 and 512.
-3. Choose **Apply** to accept both fields and keep the dialog open, or **OK** to accept and
-   close it. Enter also accepts both fields. Invalid or incomplete values keep the dialog open.
+2. Open **Preferences > Plugins**. Set **Max plugin fuel**, **Max plugin memory (MiB)**,
+   **Max plugin host calls** and **Max plugin guest time (ms)** high enough for the reviewed
+   request. For example, 200,000,000,000 fuel, 256 MiB, 1588 calls and 5000 ms fit the
+   ceilings in the startup file below.
+3. Choose **Apply** to accept the fields and keep the dialog open, or **OK** to accept and
+   close it. Enter also accepts the fields. Invalid or incomplete values keep the dialog open.
    **Cancel** restores changes since the last Apply; **Restore defaults** resets this page.
 4. Inspect the package again to check `within_host_limits: true`. Review its exact manifest,
    code and grants, then invoke `plugin.run` with that inspection's `approval`. A host ceiling
@@ -191,7 +193,7 @@ For a standalone CLI:
    `.txt`; select **UTF-8** encoding.
 
    ```json
-   {"max_fuel": 200000000000, "max_memory_mib": 512}
+   {"max_fuel": 200000000000, "max_memory_mib": 512, "max_host_calls": 2000, "max_deadline_ms": 120000}
    ```
 
 2. Open a terminal in that folder and include `--plugin-limits plugin-limits.json` in each
@@ -204,14 +206,18 @@ For a standalone CLI:
    Here `inspect-plugin.json` is the inspection script for the package you are reviewing,
    following **Inspect and run another package** above. Keep its package path and reviewed
    approval hash in the run script; use the same startup flag for that run command. Missing
-   settings keys use the original ceilings; omitting the flag uses both original ceilings.
+   settings keys use the original ceilings; omitting the flag uses all original ceilings.
 3. Headless MCP uses the same flag with `mcp --headless`. For a connected desktop, change the
    desktop preferences instead; the CLI refuses to override a connected application's policy.
 
-Fuel accepts positive integers through 18446744073709551615. Memory accepts 1..4096 MiB because
+Fuel, host calls and deadline milliseconds accept positive integers through 18446744073709551615.
+Memory accepts 1..4096 MiB because
 this runtime uses Wasm32. These are guest limits; component compilation, native CAD work and
 other SolidCraft memory are separate. Choose values suitable for available machine resources.
-The execution deadline remains independently capped at 30 seconds.
+The guest compute deadline pauses during native host work. Command plugins still request
+256 calls and 5000 ms when the manifest omits limits; larger host ceilings do not increase
+those requests. Importers retain their 600000 ms default ceiling, or a raised
+`max_deadline_ms` when larger. See [budgets and limits](plugin-runtime.md#budgets-and-limits).
 
 ## Build from source
 

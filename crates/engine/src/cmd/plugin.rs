@@ -62,7 +62,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         .manifest
         .runtime
         .as_ref()
-        .and_then(|r| limits.check(&r.limits).err())
+        .and_then(|r| if r.is_importer() { limits.check_importer(&r.limits) } else { limits.check(&r.limits) }.err())
         .map(|error| plugin::PluginFailure { plugin: package.manifest.name.clone(), file: None, error }.text());
     serde_json::to_value(InspectResult {
         manifest: package.manifest,
