@@ -132,9 +132,9 @@ pub struct RfOverlay {
     pub version: u64,
     /// The legend: (lowest dBm of the step, colour).
     pub legend: Vec<(f64, [u8; 3])>,
-    /// The shown band's figures: % of the floor at −60 dBm or better, at −67 dBm or better, and
-    /// the 5th percentile (dBm).
-    pub summary: Option<[f64; 3]>,
+    /// For each step of the legend, the share of the floor (0–100) at its level or better; for
+    /// the last, open step, the share below the one before it.
+    pub floor_share: Vec<f64>,
 }
 
 fn rf_coverage(s: &mut Session, p: &Value) -> Result<Value> {
@@ -306,7 +306,7 @@ fn rf_coverage(s: &mut Session, p: &Value) -> Result<Value> {
             params: p.clone(),
             version,
             legend: crate::rf_coverage::SCALE.to_vec(),
-            summary: stats_out.iter().find(|st| st.band == shown.name()).map(|st| [st.pct_at_least_60, st.pct_at_least_67, st.p5_dbm]),
+            floor_share: floor_share(&shown_values, &cells),
         }));
         s.refresh_display();
     }
@@ -344,6 +344,26 @@ fn rf_coverage(s: &mut Session, p: &Value) -> Result<Value> {
         param_warnings: Vec::new(),
     };
     reply(out)
+}
+
+/// [`RfOverlay::floor_share`] of `values` over the floor `cells` marks.
+fn floor_share(values: &[f32], cells: &[Cell]) -> Vec<f64> {
+    let floor: Vec<f64> = values.iter().zip(cells).filter(|(v, c)| **c == Cell::Floor && v.is_finite()).map(|(v, _)| f64::from(*v)).collect();
+    let n = floor.len().max(1) as f64;
+    let share = |keep: &dyn Fn(f64) -> bool| (floor.iter().filter(|v| keep(**v)).count() as f64 / n * 1000.0).round() / 10.0;
+    let scale = &crate::rf_coverage::SCALE;
+    scale
+        .iter()
+        .enumerate()
+        .map(|(i, (from, _))| {
+            if from.is_finite() {
+                share(&|v| v >= *from)
+            } else {
+                let above = scale.get(i.wrapping_sub(1)).map_or(f64::NEG_INFINITY, |(t, _)| *t);
+                share(&|v| v < above)
+            }
+        })
+        .collect()
 }
 
 fn elapsed(started: web_time::Instant) -> f64 {

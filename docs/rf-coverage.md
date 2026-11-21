@@ -118,7 +118,8 @@ public spec sheets. An emitter can give `eirp_dbm` instead: one number, or one f
   only the paths are traced again.
 - The card at the bottom right sets the device, the band, the router's height and the slice height.
   It also chooses which component makes the walls (bodies with an RF material always count), adds a
-  router, and clears the map. It shows the coverage figures and the colour key.
+  router, and clears the map. Its colour key shows, for each level, the share of the floor at that
+  level or better, so the −60 and −67 dBm rows are the coverage figures.
 
 ## Example
 

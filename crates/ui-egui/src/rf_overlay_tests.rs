@@ -56,7 +56,9 @@ fn the_card_changes_the_band_device_and_height_and_adds_and_clears() {
     let d = details(&app).unwrap();
     assert_eq!(d.settings.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["device", "band", "height", "slice", "walls"]);
     assert_eq!(d.key.len(), solidcraft_engine::rf_coverage::SCALE.len());
-    assert_eq!(d.readout.len(), 3);
+    // The key shows the share of the floor at each level or better: falling, 100% at the end.
+    let shares: Vec<f64> = d.key.iter().map(|k| k.value.trim_end_matches('%').parse().unwrap()).collect();
+    assert!(shares.windows(2).take(shares.len() - 2).all(|w| w[0] <= w[1]), "{shares:?}");
     dispatch(&mut app, DetailEvent::Change("band".into(), DetailValue::Choice { selected: 2, options: Vec::new() }));
     assert_eq!(app.session.rf_coverage.as_ref().unwrap().band.name(), "6");
     let custom = DEVICES.len();

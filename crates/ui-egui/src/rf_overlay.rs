@@ -7,8 +7,8 @@
 //!   emitter moved: on a coarser grid while it moves, then on the full grid on release. The
 //!   engine keeps the sliced walls, so only the paths are traced again.
 //! - **The card** at the bottom right picks the device, the band, the emitter's height, the slice
-//!   height and which bodies make walls, adds an emitter, and clears the heatmap. It shows the
-//!   coverage figures and the colour key.
+//!   height and which bodies make walls, adds an emitter, and clears the heatmap. Its colour key
+//!   shows, for each level, the share of the floor at that level or better.
 
 use std::cell::Cell;
 
@@ -226,13 +226,8 @@ pub fn details(app: &SolveApp) -> Option<Details> {
         setting("slice", "ui.rf_coverage_slice", length(app, o.height)),
         setting("walls", "ui.rf_coverage_walls", DetailValue::Choice { selected: wall, options: walls }),
     ];
-    if let Some([good, fair, p5]) = o.summary {
-        d.readout = vec![
-            (tr("ui.rf_coverage_fast").to_string(), format!("{good:.0}%")),
-            (tr("ui.rf_coverage_video").to_string(), format!("{fair:.0}%")),
-            (tr("ui.rf_coverage_p5").to_string(), format!("{p5:.0} dBm")),
-        ];
-    }
+    // Each step shows how much of the floor gets that level or better: the −60 and −67 dBm rows
+    // are the coverage figures.
     d.key = o
         .legend
         .iter()
@@ -245,7 +240,7 @@ pub fn details(app: &SolveApp) -> Option<Details> {
             } else {
                 format!("< {:.0} dBm", o.legend.get(i.wrapping_sub(1)).map_or(-80.0, |(t, _)| *t))
             },
-            value: String::new(),
+            value: o.floor_share.get(i).map_or(String::new(), |share| format!("{share:.0}%")),
             numeric: true,
             pattern_colour: None,
         })
