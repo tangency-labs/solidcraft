@@ -30,10 +30,13 @@ The `history` input runs real calls before the query:
 
 Every `domhistNNNN` expectation equals the answer with no history. That equality is the check.
 
-The exception is a history step that fails, so the query never runs. Its record is the marker `-1` (`DOM_CONT_HISTORY_FAILED`), not a status. Only `GetTree` of a curve-bounded surface fails there, because it needs the knots such a surface does not answer (#20163). That holds for 0052, 0074 and 0075 under history `2`, with status 1001 and the same reason on main. Main's harness wrote 1001 for the failed step, which happened to equal the query's own answer without history. Any other failed history step is a harness error.
+The exception is a history step that fails. Its record is the marker `-1` (`DOM_CONT_HISTORY_FAILED`), not a status, followed by the query's own record, so the kernel's answer stays pinned there too. Only `GetTree` of a curve-bounded surface fails there, because it needs the knots such a surface does not answer (#20163). That holds for 0052, 0074 and 0075 under history `2`, with status 1001 and the same reason on main. Main's harness wrote 1001 for the failed step, which happened to equal the query's own answer without history. Any other failed history step is a harness error.
 
 15 outputs changed: 0009, 0011, 0023, 0043, 0049, 0061, 0062, 0063, 0067, 0070, 0071, 0073, 0078, 0079 and 0083.
-- **Proof.** The kernel before this change, run with no history, writes a byte-identical expected file. The old outputs came from the empty arrays of a cache without a tree.
+- **Proof of history-freedom.** The kernel before this change, run with no history, writes a byte-identical expected file. The old outputs came from the empty arrays of a cache without a tree. The harness now checks this on every run: a case with history also queries a fresh surface without history, and any difference is a harness error.
+- **What the new values are.** The 13 non-curve-bounded cases split by where the changed bound comes from (each equals the routine worked by hand on the surface's filled arrays):
+  - **5 interior-knot cases:** 0061 (u), 0062, 0071 (v), 0078 and 0083. The new value is the C-span around the point, correct from the knots.
+  - **10 off-domain cases:** 0009, 0011, 0023, 0043, 0049, 0061 (v), 0063, 0067, 0071 (u) and 0073. They are history-free and equal to the formula on filled arrays, but the formula is defective there: at the first and last knot it compares a component of the direction vector with the knot value, so for a start point off the domain the answer depends on the vector's size, not on the surface (WR-20239, https://github.com/tangency-labs/solidcraft/issues/20239). They are not claimed as correct continuity domains.
 - **0070 and 0079.** Both are curve-bounded surfaces, which answer no `GetKnots`: the base-class `SM_ERR`, as upstream's `SmCurveBoundedSurface`, which does not override it.
   - Both run history `1`, and the query is reached on main and here (checked with a temporary print).
   - The old value was an inverted box with status 0 (the WR-663 branch, reached only without a tree). The new value is status 1001, which main already gave with no history.
@@ -57,6 +60,20 @@ The record is compared with main's op by op, field by field:
 | gen0760 | ExtendTrimEdges | edge tolerance | 1.08423 | 1e-5 | raised by that trim's creation |
 
 No other op status changes, and no other 3D geometry changes.
+
+**Statuses** (records read with a temporary print on both kernels, `[op code, status]` at the op's record index):
+
+| Case | ExtendTrimEdges, main | ExtendTrimEdges, new |
+|---|---|---|
+| gen0152 | index 10: `[12, 1001]` | index 10: `[12, 1001]` |
+| gen0266 | index 99: `[12, 0]` | index 99: `[12, 1001]` |
+| gen0462 | index 225: `[12, 1001]` | index 225: `[12, 1001]` |
+| gen0678 | index 352: `[12, 1001]` | index 352: `[12, 1001]` |
+| gen0760 | index 71: `[12, 1001]` | index 71: `[12, 1001]` |
+
+So in four of the five cases `ExtendTrimEdges` refuses on both kernels, and the edge's curve and interval are unchanged. On main the refused operation still edited its input: the lift's face-cache build made a UV trim on one edge use and, in gen0462 and gen0760, raised the edge tolerance (2e-5 -> 0.993976, 1e-5 -> 1.08423). Here a refusal leaves its input exactly as it came in. That is "a refusal no longer edits its input", a more correct result.
+
+**Contract.** Upstream's `ExtendTrimEdges` (`source/SMLib/src/SmOffsetGeometryCreation.cpp:1384`) sets UV trims only through `ReplaceEdgeCurves`, on its success path (`:1719` and `:1759`). The lift made a trimmed tree in this golden only because the goldens shim seeds the extended-surface cache with each face's own surface (the unit's module doc, `insert_extended_surface`), so `GetCreateExtendedSurface` returns the face's surface. In the real offset executive the extension is a new store surface (`offset/offset_executive/edgeuse.rs:1385-1392`), owned by no face, so its cache build makes no face trims. The solid offset also runs under the Boolean flag (`with_doing_boolean`, `offset/offset_executive/p2.rs:816`), which defers that build; the extended offset (`do_extended_offset`) leaves the flag as it is. So no real offset, shell or thicken lost a trim or a raise.
 - **Check.** Putting back only the old context cache build before the offset lift (a temporary edit) makes the four non-gen0266 cases equal main's records again.
 
 ### Measured gaps, and when or whether
@@ -76,10 +93,10 @@ The "before" values are the same on both kernels.
 | gen0678 | eu3 of b1 e0 | at most 4.2e-15 at the samples (bound 1.9e-13) | 1e-5 | 1e-5 | 1e-5 | **Whether:** no. It is the last op. |
 | gen0760 | eu1 of b0 e1 | [0.6260133565455, 0.6260133565484] | 1e-5 | 1.084233 | 1e-5 | **Whether:** no. It is the last op. |
 
-- **gen0462 and gen0760: the gap is real.**
-  - The script sets the edge's curve (ReplaceEdgeCurves, SetEdgeCurve), and that curve lies 0.4965 and 0.6260 off its face before the op, on both kernels. The tolerance there, 2e-5 and 1e-5, does not cover the gap.
-  - On main, the lift built the face's cache tree as a side effect. That build made a UV trim on one use, and making the trim raised the edge's tolerance to cover the gap: 2.002 and 1.732 times it.
-  - The new record is therefore not "more correct". It is what the operations do without the raise that a read-only lift used to apply as a side effect. The edge leaves the op with a tolerance that does not cover its gap, as it entered it.
+- **gen0462 and gen0760: the input is invalid as the script makes it.**
+  - The script's raw setters (ReplaceEdgeCurves, SetEdgeCurve) put a curve 0.4965 and 0.6260 off its face before the op, on both kernels, against an edge tolerance of 2e-5 and 1e-5.
+  - On main the refused op's lift built the face's cache tree as a side effect; the build made a UV trim on one use, and making it raised the tolerance to cover the gap (2.002 and 1.732 times it).
+  - Here the refusal leaves the invalid input as it came in.
 - **gen0152 and gen0678: only the trim's timing changes.** Their curves lie on the surface (within 1e-15 at the samples), and no tolerance moves.
   - In gen0152 the trim appears two ops later.
   - In gen0678 no later op asks for it. A lazy UV trim is made when something needs it.
@@ -90,9 +107,10 @@ The "before" values are the same on both kernels.
 ### gen0266 refusal
 - `LiftCurve`'s only segment starts at uv (18.834, 34.638), direction (0.6726, -0.7357), over [-43.708, 49.763]. The natural domain is [-0.05, 1.05]².
 - The line meets u ∈ [-0.05, 1.05] only where v ≈ 55, and v ∈ [-0.05, 1.05] only where u ≈ 49.5. So no point of the segment is on the surface.
-- The old lift's curve was 1.847e10 off the surface against a tolerance of 3.3e-6 (largest distance from S(uv(t)) over 2001 t, measured with a temporary probe). The refusal is correct.
+- The old lift's curve was 1.847e10 off the surface against a tolerance of 3.3e-6 (largest distance from S(uv(t)) over 2001 t, measured with a temporary probe). The refusal is right by geometry.
+- **But the code reaches it through WR-20239.** The lift asks `GetDomainWithContinuity` for the segment's domain with the UV curve's derivative, not normalised, as the direction. Both bounds collapse only because that derivative's components compare as they do with the first and last knots. A faster parameterisation of the same segment would be lifted onto the off-surface curve again (https://github.com/tangency-labs/solidcraft/issues/20239).
 - **Per-op record lengths in gen0266, main vs new.** Header 1; VertexOffset 2; AddCurve 3 and 3; HaveTangentGaps 2; MateEdges 88; ExtendTrimEdges 183 vs 87; UpdateFaceDomain 2. Total 284 vs 188.
-- **A note on the harness.** Every record block holds min, max and sum. The control points carry an `f64::MIN` weight sentinel, so the sums are ±inf or NaN, and the golden pins little beyond the counts. This weakness predates the change.
+- **A note on the harness.** Every record block holds min, max and sum. The control points carry an `f64::MIN` weight sentinel, so the sums are ±inf or NaN, and the golden pins little beyond the counts. This weakness predates the change; the same class of harness weakness is tracked in https://github.com/tangency-labs/solidcraft/issues/17001.
 
 ## Side effect removed with the context-free readers
 

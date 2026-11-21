@@ -1,7 +1,7 @@
 # main ee673a19bf
 # topology.brep_validation: main's file without the coincidence search (WR-798): its 43 search cases and the `pairs` key gone, and the 7 generated cases that drew the search checking their bodies' pointers instead
-# offset.offset_geometry_creation: continuity reads make no surface cache (#20054): gen0152, gen0266, gen0462, gen0678 and gen0760 are this branch's lines; gen0462's row is removed because the case's output now changes outside its tolerances (the trim whose raise it certified is no longer made)
-# surface.surface_p1: continuity answers no longer depend on the cache history (#20054): 18 domhist cases are this branch's lines (15 answers, 3 failed-history markers)
+# offset.offset_geometry_creation: continuity reads make no surface cache (#20054): gen0152, gen0266, gen0462, gen0678 and gen0760 are this branch's lines. Tolerances they move against this main: gen0266's extended edge 8.102267117225637e-3 -> 4.0511335586128185e-3 (its ExtendTrimEdges now refuses and keeps its input); gen0462's edge 1.0661352728003874 -> 2e-5 (0.9939759047276184 after #18166) and gen0760's 1.0842329970128302 -> 1e-5, where ExtendTrimEdges refuses on both kernels and no longer leaves the lift's trim and raise on its input; none in gen0152 and gen0678. gen0462's row is removed: its output now changes outside its tolerances
+# surface.surface_p1: continuity answers no longer depend on the cache history (#20054): 18 domhist cases are this branch's lines (15 answers, 3 failed-history markers); no tolerance moves
 blend.feature_executive	9ca7c0200e1392d9
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123

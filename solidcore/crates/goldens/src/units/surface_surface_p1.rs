@@ -26,9 +26,16 @@
 //! discontinuities clamp the domain. Upstream's answer there depends on the history (its
 //! arrays are empty until the tree is built); the port's must not, so every
 //! `domhistNNNN` expectation is the answer without history (`plan/findings/`, "surface
-//! cache history"). The exception is a history step that fails, so the query never runs:
-//! its record is `-1` (`DOM_CONT_HISTORY_FAILED`). Only `GetTree` of a curve-bounded
-//! surface fails there (0052, 0074, 0075); any other failed step is a harness error.
+//! cache history"); the harness checks it on every run: a case with history also queries
+//! a fresh surface without history and fails on any difference. The `history` values
+//! (their meaning changed with #20054; before, they seeded the modelled tree state):
+//! `0`, the query alone, outside a Boolean operation; `1`, the surface's cache requested
+//! during a Boolean operation (its tree deferred), then the query during it; `2`, as `1`
+//! with the cache's `GetTree` before the query; `3`, the cache requested during a Boolean
+//! operation, then the query after it. A history step that fails writes `-1`
+//! (`DOM_CONT_HISTORY_FAILED`) before the query's record: only `GetTree` of a
+//! curve-bounded surface fails there (0052, 0074, 0075); any other failed step is a
+//! harness error.
 //!
 //! Deferred cases: the paths into unported units (every surface cache build needs
 //! `SmSurface::CalculateContinuities`, `surface.surface_p6`: `Cache`, `BBox` of
@@ -668,7 +675,21 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
         } => {
             let s = run()?;
             let c = continuity(*cont)?;
+            let (uv, vec) = (p2(*uv), Vec2::new(vec[0], vec[1]));
+            // the query's record: status 0 and the domain, or the failure's status
+            let query = |s: &Surface, k: &Kernel| -> solidcore::Result<Vec<f64>> {
+                match s.domain_with_continuity(k, c, uv, vec) {
+                    Ok(d) => {
+                        let mut o = vec![0.0];
+                        push_dom(&mut o, &d);
+                        Ok(o)
+                    }
+                    Err(e) if e.is_unported() => Err(e),
+                    Err(e) => Ok(vec![status(&e)]),
+                }
+            };
             let mut k = Kernel::default();
+            let mut failed_step = false;
             if *history != 0 && !matches!(s.kind(), SurfaceKind::Step(_)) {
                 // the cache history: the surface's cache, requested while doing a
                 // Boolean operation (its tree deferred), its tree then built for 2
@@ -686,11 +707,12 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                 match built {
                     Ok(()) => {}
                     Err(e) if e.is_unported() => return Ok(Err(e)),
-                    // a failed history step is not a failed query: its own marker. Only a
-                    // curve-bounded surface is expected to fail here (its `GetTree` needs the
-                    // knots it does not answer, as it did before #20054: #20163)
+                    // a failed history step is not a failed query: its own marker, then
+                    // the query's record. Only a curve-bounded surface is expected to fail
+                    // here (its `GetTree` needs the knots it does not answer, as it did
+                    // before #20054: #20163)
                     Err(_) if matches!(s.kind(), SurfaceKind::CurveBounded(_)) => {
-                        return Ok(Ok(vec![DOM_CONT_HISTORY_FAILED]));
+                        failed_step = true;
                     }
                     Err(e) => {
                         return Err(harness(format!("dom_cont: a history step failed: {e}")));
@@ -698,15 +720,28 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                 }
             }
             k.context.set_doing_boolean(matches!(history, 1 | 2));
-            match s.domain_with_continuity(&k, c, p2(*uv), Vec2::new(vec[0], vec[1])) {
-                Ok(d) => {
-                    let mut o = vec![0.0];
-                    push_dom(&mut o, &d);
-                    Ok(o)
+            let got = query(&s, &k);
+            // the standing check: under every history the answer is the one without
+            // history (a fresh surface, outside a Boolean operation)
+            if *history != 0 {
+                let fresh = run()?;
+                let without = query(&fresh, &Kernel::default());
+                let same = match (&got, &without) {
+                    (Ok(a), Ok(b)) => a.len() == b.len()
+                        && a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits()),
+                    (Err(a), Err(b)) => a.to_string() == b.to_string(),
+                    _ => false,
+                };
+                if !same {
+                    return Err(harness(format!(
+                        "dom_cont: history {history} answers {got:?}, without history {without:?}"
+                    )));
                 }
-                Err(e) if e.is_unported() => Err(e),
-                Err(e) => Ok(vec![status(&e)]),
             }
+            if failed_step {
+                return Ok(got.map(|o| std::iter::once(DOM_CONT_HISTORY_FAILED).chain(o).collect()));
+            }
+            got
         }
     })
 }
@@ -747,9 +782,10 @@ const MAX_CONTINUITY: u8 = 13;
 /// The longest cache history of a `dom_cont` case.
 const MAX_DOM_CONT_HISTORY: u8 = 3;
 
-/// The record of a `DomCont` case whose history step (the cache request or its
-/// `GetTree`) failed, so the query never ran: distinct from every status. Only a
-/// curve-bounded surface's `GetTree` fails there; any other failure is a harness error.
+/// The first value of the record of a `DomCont` case whose history step (the cache
+/// request or its `GetTree`) failed: distinct from every status. The query's own record
+/// follows it. Only a curve-bounded surface's `GetTree` fails there; any other failure
+/// is a harness error.
 const DOM_CONT_HISTORY_FAILED: f64 = -1.0;
 
 fn fins(vs: &[f64]) -> bool {
