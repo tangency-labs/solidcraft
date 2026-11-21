@@ -26,7 +26,7 @@ pub struct AddResult {
     pub image: String,
     /// `png` or `jpeg`.
     pub format: String,
-    /// Its width and height in pixels.
+    /// Its width and height in pixels as it shows, after the file's EXIF orientation.
     pub pixels: [u32; 2],
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

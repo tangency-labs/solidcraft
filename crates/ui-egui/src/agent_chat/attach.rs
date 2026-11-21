@@ -324,7 +324,7 @@ fn picture_within(name: String, bytes: &[u8], limit: usize) -> Result<Attachment
     limits.max_image_height = Some(MAX_DECODE_SIDE);
     limits.max_alloc = Some(1024 * 1024 * 1024);
     reader.limits(limits);
-    let (img, turned) = solidcraft_engine::upright_image::decode_upright(reader).map_err(|e| failed(&name, e))?;
+    let (img, turned) = solidcraft_engine::render::image_orientation::decode_upright(reader).map_err(|e| failed(&name, e))?;
     if img.width() == 0 || img.height() == 0 {
         return Err(refused("ui.agent_chat_file_empty_picture", &name, &[]));
     }

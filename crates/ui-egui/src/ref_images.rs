@@ -17,8 +17,10 @@ const MAX_SIDE: u32 = 2048;
 /// Grid cells per side, so perspective views bend the image only slightly (CPU path).
 const CELLS: usize = 8;
 
-/// Decoded pixels: (data length they came from, version, size, RGBA).
-type Decoded = (usize, u64, [u32; 2], Arc<Vec<u8>>);
+/// Decoded pixels: (the data length and orientation they came from, version, size, RGBA). The orientation
+/// is part of it because another open document can have a canvas with this id and these bytes, turned
+/// otherwise.
+type Decoded = ((usize, u8), u64, [u32; 2], Arc<Vec<u8>>);
 
 thread_local! {
     static PIXELS: RefCell<HashMap<u64, Option<Decoded>>> = RefCell::new(HashMap::new());
@@ -36,22 +38,24 @@ fn decode_reference(bytes: &[u8]) -> Option<image::DynamicImage> {
     }
 }
 
+/// `c`'s picture decoded and turned by its orientation (#19112), at most `MAX_SIDE` on a side.
 fn pixels(c: &Canvas) -> Option<Decoded> {
     PIXELS.with(|m| {
         let mut m = m.borrow_mut();
         if let Some(d) = m.get(&c.id)
-            && d.as_ref().is_none_or(|d| d.0 == c.data.len())
+            && d.as_ref().is_none_or(|d| d.0 == (c.data.len(), c.orientation))
         {
             return d.clone();
         }
-        let d = decode_reference(c.bytes()).map(|i| {
+        let d = decode_reference(c.bytes()).map(|mut i| {
+            solidcraft_engine::render::image_orientation::turn(&mut i, c.orientation);
             let i = if i.width() > MAX_SIDE || i.height() > MAX_SIDE { i.thumbnail(MAX_SIDE, MAX_SIDE) } else { i };
             let rgba = i.to_rgba8();
             let v = VERSION.with(|v| {
                 v.set(v.get() + 1);
                 v.get()
             });
-            (c.data.len(), v, [rgba.width(), rgba.height()], Arc::new(rgba.into_raw()))
+            ((c.data.len(), c.orientation), v, [rgba.width(), rgba.height()], Arc::new(rgba.into_raw()))
         });
         m.insert(c.id, d.clone());
         d
@@ -188,5 +192,32 @@ mod codec_tests {
         let mut png = std::io::Cursor::new(Vec::new());
         image::DynamicImage::new_rgba8(1, 1).write_to(&mut png, image::ImageFormat::Png).unwrap();
         assert!(decode_reference(png.get_ref()).is_some());
+    }
+
+    /// A canvas of a photo stored on its side with an EXIF orientation is drawn upright (#19112): its
+    /// texture is the size the photo shows at, on a quad of that shape.
+    #[test]
+    fn a_turned_photo_canvas_is_drawn_upright() {
+        use image::ImageEncoder;
+        use serde_json::json;
+
+        let mut out = Vec::new();
+        let mut encoder = image::codecs::jpeg::JpegEncoder::new(&mut out);
+        // A big-endian TIFF block whose IFD0 has one entry: Orientation (0x0112) = 6.
+        encoder.set_exif_metadata([b"MM\0\x2a\0\0\0\x08\0\x01\x01\x12\0\x03\0\0\0\x01\0\x06".as_slice(), &[0; 6]].concat()).unwrap();
+        encoder.write_image(&[128; 32 * 16 * 3], 32, 16, image::ExtendedColorType::Rgb8).unwrap();
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("canvas.insert", json!({"path": crate::scenario::image_file(&out), "plane": "XY", "width": 60})).unwrap();
+        let images = super::gpu_images(&h.app);
+        let [image] = images.as_slice() else { panic!("one canvas: {}", images.len()) };
+        assert_eq!(image.size, [16, 32], "the texture is upright");
+        assert_eq!(image.corners, [[-30.0, -60.0, 0.0], [30.0, -60.0, 0.0], [30.0, 60.0, 0.0], [-30.0, 60.0, 0.0]], "60 mm wide, 120 high");
+
+        // Another open document's canvas with this id and these bytes, saved before orientations were
+        // (#19112): its pixels are as stored, not the cached turned ones.
+        std::sync::Arc::make_mut(&mut h.app.session.doc).canvases[0].orientation = 1;
+        let images = super::gpu_images(&h.app);
+        let [image] = images.as_slice() else { panic!("one canvas: {}", images.len()) };
+        assert_eq!(image.size, [32, 16], "the texture as stored");
     }
 }

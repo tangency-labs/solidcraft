@@ -207,3 +207,62 @@ fn an_exif_orientation_is_applied() {
     let grid = PixelGrid::new(0.0, 0.0, 1.0, 2.0, 25.4).unwrap();
     assert_eq!(image.rows(rect(0.0, 0.0, 1.0, 2.0), &grid, all(&grid)).unwrap(), [[255, 0, 0, 255], [0, 0, 255, 255]].concat());
 }
+
+/// The colours of a photo's stored quarters: top-left, top-right, bottom-left, bottom-right.
+pub(crate) const QUARTERS: [[u8; 3]; 4] = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0]];
+
+/// A big-endian TIFF block whose IFD0 holds `entries`, each a tag, a type and one value.
+pub(crate) fn tiff(entries: &[[u16; 3]]) -> Vec<u8> {
+    let mut t = b"MM\0\x2a\0\0\0\x08".to_vec();
+    t.extend((entries.len() as u16).to_be_bytes());
+    for [tag, kind, value] in entries {
+        t.extend([tag.to_be_bytes(), kind.to_be_bytes(), [0, 0], [0, 1], value.to_be_bytes(), [0, 0]].concat());
+    }
+    t.extend([0; 4]);
+    t
+}
+
+/// A JPEG of 32 by 16 pixels in [`QUARTERS`], with `exif` as its EXIF block.
+pub(crate) fn photo(exif: Option<Vec<u8>>) -> Vec<u8> {
+    use image::ImageEncoder;
+    let pixels = image::RgbImage::from_fn(32, 16, |x, y| image::Rgb(QUARTERS[usize::from(y >= 8) * 2 + usize::from(x >= 16)]));
+    let mut out = Vec::new();
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 95);
+    if let Some(exif) = exif {
+        encoder.set_exif_metadata(exif).unwrap();
+    }
+    encoder.write_image(pixels.as_raw(), 32, 16, image::ExtendedColorType::Rgb8).unwrap();
+    out
+}
+
+/// `jpeg` with one more segment, `marker` holding `data`, first after its start.
+pub(crate) fn with_segment(jpeg: &[u8], marker: u8, data: &[u8]) -> Vec<u8> {
+    let length = u16::try_from(data.len() + 2).unwrap().to_be_bytes();
+    [&jpeg[..2], &[0xFF, marker], &length, data, &jpeg[2..]].concat()
+}
+
+/// The EXIF APP1 segment's data for orientation `value`.
+pub(crate) fn app1(value: u16) -> Vec<u8> {
+    [b"Exif\0\0".as_slice(), &tiff(&[[0x0112, 3, value]])].concat()
+}
+
+/// A JPEG's orientation stands it up as the size of its file says (#19106): quarter turns swap the
+/// sides, a half turn and the mirrors don't. Of two EXIF blocks the last counts, as it does for the
+/// size, so the two never disagree.
+#[test]
+fn the_size_and_the_decoder_read_one_orientation() {
+    for (value, size) in [(1, [32, 16]), (2, [32, 16]), (3, [32, 16]), (5, [16, 32]), (6, [16, 32]), (8, [16, 32])] {
+        let image = SheetImage::decode(&photo(Some(tiff(&[[0x0112, 3, value]])))).unwrap();
+        assert_eq!(image.size(), size, "orientation {value}");
+    }
+    // Orientation 6 turns a quarter clockwise: the stored bottom-left quarter shows top-left.
+    let image = SheetImage::decode(&photo(Some(tiff(&[[0x0112, 3, 6]])))).unwrap();
+    let grid = PixelGrid::new(0.0, 0.0, 2.0, 2.0, 25.4).unwrap();
+    let corners = image.rows(rect(0.0, 0.0, 2.0, 2.0), &grid, all(&grid)).unwrap();
+    for (got, want) in corners.chunks(4).zip([QUARTERS[2], QUARTERS[0], QUARTERS[3], QUARTERS[1]]) {
+        assert!(got.iter().zip(want).all(|(a, b)| a.abs_diff(b) < 40), "{got:?} for {want:?}");
+    }
+    // An EXIF block put first says 6; the encoder's own, later, says 1, and the last counts.
+    let twice = with_segment(&photo(Some(tiff(&[[0x0112, 3, 1]]))), 0xE1, &app1(6));
+    assert_eq!(SheetImage::decode(&twice).unwrap().size(), [32, 16]);
+}

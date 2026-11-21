@@ -73,7 +73,7 @@ fn logos(d: &Drawing, sheet: u64) -> Vec<Logo<'_>> {
     let logo = |(cell, placed): (&solidcraft_geom::title_block::Cell, &solidcraft_geom::title_block::CellLayout)| {
         let CellKind::Text(text) = &cell.kind else { return None };
         let file = d.images.by_id(text.image?)?;
-        Some(Logo { source: sources.next()?, file, rect: fitted(placed.value_box, file.pixels) })
+        Some(Logo { source: sources.next()?, file, rect: fitted(placed.value_box, file.shown_pixels()) })
     };
     block.cells.iter().zip(&layout.cells).filter_map(logo).collect()
 }
