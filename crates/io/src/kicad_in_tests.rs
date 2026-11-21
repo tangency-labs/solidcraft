@@ -120,6 +120,17 @@ fn a_back_side_model_is_turned_over_under_the_board() {
 }
 
 #[test]
+fn a_back_side_model_offset_is_turned_over_with_the_model() {
+    let model = KicadModel { path: String::new(), at: [-24.6, -12.8, 0.5], scale: [1.0; 3], rotate: [0.0; 3] };
+    let origin = solidcraft_doc::apply_point(&model_local_matrix(&model, true), Vec3::ZERO);
+    // KiCad 10.0.1 turns a back-side footprint's model over together with its offset: X stays,
+    // Y is reversed, and a positive Z offset moves the model away from the board, which is down.
+    assert!((origin.x + 24.6).abs() < 1e-9 && (origin.y - 12.8).abs() < 1e-9 && (origin.z + 0.5).abs() < 1e-9, "{origin:?}");
+    let front = solidcraft_doc::apply_point(&model_local_matrix(&model, false), Vec3::ZERO);
+    assert!((front.x + 24.6).abs() < 1e-9 && (front.y + 12.8).abs() < 1e-9 && (front.z - 0.5).abs() < 1e-9, "{front:?}");
+}
+
+#[test]
 fn builds_a_closed_mesh_from_a_concave_outline() {
     let source = r#"(kicad_pcb (general (thickness 1.6))
       (gr_line (start 0 0) (end 20 0) (layer "Edge.Cuts"))

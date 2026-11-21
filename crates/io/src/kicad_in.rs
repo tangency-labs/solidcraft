@@ -1262,14 +1262,16 @@ fn footprint_place(footprint: &KicadFootprint, back: bool, thickness: f64) -> Ma
     solidcraft_doc::rigid(Vec3::new(footprint.at[0], -footprint.at[1], z), Vec3::ZERO, Vec3::Z, footprint.at[2].to_radians())
 }
 
-/// A model's transform in the footprint's 3D frame: translation, a half turn about X on the
-/// back, the Euler rotation (X, then Y, then Z) and the scale. KiCad measures the rotation in
-/// the board's Y-down frame, so each angle turns the other way in SolidCraft's Y-up frame; the
-/// offset is applied in the footprint's frame (before the back's half turn, after the rotation).
+/// A model's transform in the footprint's 3D frame: a half turn about X on the back, the
+/// translation, the Euler rotation (X, then Y, then Z) and the scale. KiCad measures the rotation
+/// in the board's Y-down frame, so each angle turns the other way in SolidCraft's Y-up frame. The
+/// offset is the model's own, so the back's half turn carries it too: a back-side model's offset
+/// points the other way in Y and Z (a positive Z offset moves it away from the board, which is
+/// down).
 fn model_local_matrix(model: &KicadModel, back: bool) -> Mat {
     let mut m = solidcraft_doc::rigid(Vec3::new(model.at[0], model.at[1], model.at[2]), Vec3::ZERO, Vec3::Z, 0.0);
     if back {
-        m = solidcraft_doc::mat_mul(&m, &solidcraft_doc::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::X, std::f64::consts::PI));
+        m = solidcraft_doc::mat_mul(&solidcraft_doc::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::X, std::f64::consts::PI), &m);
     }
     let rx = solidcraft_doc::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::X, -model.rotate[0].to_radians());
     let ry = solidcraft_doc::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Y, -model.rotate[1].to_radians());
