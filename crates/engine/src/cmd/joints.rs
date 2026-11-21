@@ -1264,7 +1264,7 @@ fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
     let round = |v: f64| (v * 1e6).round() / 1e6;
     // As the reply shows them: a value that is not a number reads as null, and null is null.
     let same = |a: f64, b: f64| a == b || (a.is_nan() && b.is_nan());
-    let warnings: Vec<String> = named_value_list(&j, &q)
+    let mut warnings: Vec<String> = named_value_list(&j, &q)
         .iter()
         .zip(named_value_list(&j, &j.values))
         .filter(|(now, was)| !same(now.value, was.value))
@@ -1294,6 +1294,13 @@ fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
     let mut sol = resolve(s);
     if sol.conflicts.iter().any(|(c, ..)| *c == id) && close_by_half_turn(s, id, &sol) {
         sol = resolve(s);
+    }
+    // Between two grounded parts it can't hold unless they already meet: say so, and how to let
+    // it place one of them (#12867). Parts that already meet where it puts them list nothing.
+    if sol.conflicts.iter().any(|(c, ..)| *c == id)
+        && let Some(why) = s.doc.assembly.joints.iter().find(|j| j.id == id).and_then(|j| joints::both_held(&s.doc, j))
+    {
+        warnings.push(format!("{name}: {why}; unground one to let the joint place it"));
     }
     reply("joint.create", JointAddedResult { solved: solve_report(&sol, p), joint: id, name, warnings, param_warnings: Vec::new() })
 }
@@ -2406,7 +2413,13 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
     if placed && sol.conflicts.iter().any(|(c, ..)| *c == id) && close_by_half_turn(s, id, &sol) {
         sol = resolve(s);
     }
-    Ok(sol_json(&sol, p))
+    // The reply names the joint, as joint.create's does, so the app can say why an edited joint
+    // doesn't hold (#12867).
+    let mut reply = sol_json(&sol, p);
+    if let Some(o) = reply.as_object_mut() {
+        o.insert("joint".into(), json!(id));
+    }
+    Ok(reply)
 }
 
 /// Shared mutation for individual joints and timeline folders; the caller resolves once.
