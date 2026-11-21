@@ -76,6 +76,8 @@ use crate::blend::fillet_section::certificate::{
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::series::V3;
 use crate::blend::fillet_section::station::{as_b_spline, knot, span, Nurbs, Partials};
+use crate::error::mass::MassFailure;
+use crate::error::{Failure, SM_ERR_NULL_POINTER};
 use crate::kernel::Kernel;
 use crate::mass::integrator::properties::region_material;
 use crate::math::Point3;
@@ -83,8 +85,6 @@ use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId};
-use crate::error::mass::MassFailure;
-use crate::error::{Failure, SM_ERR_NULL_POINTER};
 use crate::{Result, SolidError};
 
 const OP: &str = "mass::enclosure";
@@ -1260,22 +1260,18 @@ impl<'a> Work<'a> {
         zcap: &mut [f64; 3],
     ) -> Result<()> {
         use crate::topology::edgeuse::p1 as eu1;
-        let up = crate::topology::face::p2::upward_faceuse(b, f)?
-            .ok_or_else(|| {
-                null_defect(
-                    "the face has no upward face use, though the kernel makes every face \
+        let up = crate::topology::face::p2::upward_faceuse(b, f)?.ok_or_else(|| {
+            null_defect(
+                "the face has no upward face use, though the kernel makes every face \
                      with its two face uses",
-                )
-            })?;
-        let mate = b
-            .faceuse(up)?
-            .mate
-            .ok_or_else(|| {
-                null_defect(
-                    "the face use has no mate, though the kernel makes a face's two uses \
+            )
+        })?;
+        let mate = b.faceuse(up)?.mate.ok_or_else(|| {
+            null_defect(
+                "the face use has no mate, though the kernel makes a face's two uses \
                      as each other's mates",
-                )
-            })?;
+            )
+        })?;
         let material = |fu| -> Result<bool> {
             match eu1::faceuse_region(b, fu)? {
                 Some(r) => region_material(b, r),
@@ -1328,15 +1324,12 @@ impl<'a> Work<'a> {
                 } else {
                     -1.0
                 };
-                let e = b
-                    .edgeuse(eu)?
-                    .edge
-                    .ok_or_else(|| {
-                        null_defect(
-                            "an edge use of the face's loop has no edge, though the kernel \
+                let e = b.edgeuse(eu)?.edge.ok_or_else(|| {
+                    null_defect(
+                        "an edge use of the face's loop has no edge, though the kernel \
                              makes every edge use of a loop on its edge",
-                        )
-                    })?;
+                    )
+                })?;
                 lp.push((e, pcurve(k, b, eu)?, dir));
             }
             loops.push(lp);
@@ -1377,11 +1370,7 @@ impl<'a> Work<'a> {
                 let (a, z) = if *dir > 0.0 { (t0, t1) } else { (t1, t0) };
                 let pa = curve_derivs_over(c, Ivl::from(a), 0, None)?;
                 let pz = curve_derivs_over(c, Ivl::from(z), 0, None)?;
-                let first = |d: &[V3<Ivl>]| {
-                    d.first()
-                        .copied()
-                        .ok_or_else(|| defect(NO_DERIVATIVE))
-                };
+                let first = |d: &[V3<Ivl>]| d.first().copied().ok_or_else(|| defect(NO_DERIVATIVE));
                 ends.push((first(&pa)?, first(&pz)?));
             }
             let count = lp.len();
@@ -1427,10 +1416,7 @@ impl<'a> Work<'a> {
         open_length: &mut Ivl,
         zcap: &mut [f64; 3],
     ) -> Result<()> {
-        let fg = self
-            .faces
-            .get(face)
-            .ok_or_else(|| defect(NO_ENTRY))?;
+        let fg = self.faces.get(face).ok_or_else(|| defect(NO_ENTRY))?;
         let p = partials_at(&fg.cn, end.x, end.y, 1)?;
         let (s, su, sv) = (p.at(0, 0), p.at(1, 0), p.at(0, 1));
         let (du, dv) = (width(end.x), width(end.y));
@@ -1451,10 +1437,7 @@ impl<'a> Work<'a> {
     /// whose control points are nearly one point (a pole), from their spread
     /// ([`side_length`]); else from the partials over its box.
     fn segment_length(&self, face: usize, seg: &NurbsCurve) -> Result<Ivl> {
-        let fg = self
-            .faces
-            .get(face)
-            .ok_or_else(|| defect(NO_ENTRY))?;
+        let fg = self.faces.get(face).ok_or_else(|| defect(NO_ENTRY))?;
         let (u, v) = piece_hull(seg, seg.p);
         if let Some(len) = side_length(&fg.cn, u, v) {
             return Ok(len);
@@ -1468,10 +1451,7 @@ impl<'a> Work<'a> {
     /// Adds the cells of one pcurve on face `face`: each polynomial piece, cut where it may
     /// cross a knot line of the surface, swept down to the base.
     fn add_piece(&mut self, face: usize, cn: &NurbsCurve, dir: f64) -> Result<()> {
-        let fg = self
-            .faces
-            .get(face)
-            .ok_or_else(|| defect(NO_ENTRY))?;
+        let fg = self.faces.get(face).ok_or_else(|| defect(NO_ENTRY))?;
         let mut lines_u: Vec<f64> = Vec::new();
         for &x in &fg.cn.u {
             if lines_u.last() != Some(&x) {
@@ -1568,10 +1548,7 @@ impl<'a> Work<'a> {
             }
         }
         // cut at both curves' knots
-        let sg = self
-            .strips
-            .get(strip)
-            .ok_or_else(|| defect(NO_ENTRY))?;
+        let sg = self.strips.get(strip).ok_or_else(|| defect(NO_ENTRY))?;
         let mut cuts = vec![t0, t1];
         for (_, cn) in &sg.sides {
             for &x in &cn.u {
@@ -1614,10 +1591,7 @@ impl<'a> Work<'a> {
     fn point(&self, strip: usize, side: usize, t: f64) -> Result<[Ivl; 3]> {
         let (face, cn) = self.strip_side(strip, side)?;
         let d = curve_derivs_over(cn, Ivl::from(t), 0, None)?;
-        let p = d
-            .first()
-            .copied()
-            .ok_or_else(|| defect(NO_DERIVATIVE))?;
+        let p = d.first().copied().ok_or_else(|| defect(NO_DERIVATIVE))?;
         let s = partials_at(&face.cn, p.x, p.y, 0)?.at(0, 0);
         Ok([s.x, s.y, s.z])
     }
@@ -1627,9 +1601,7 @@ impl<'a> Work<'a> {
         let (face, cn) = self.strip_side(strip, side)?;
         let d = curve_derivs_over(cn, Ivl::new(t0, t1), 1, None)?;
         let (p, dp) = (
-            d.first()
-                .copied()
-                .ok_or_else(|| defect(NO_DERIVATIVE))?,
+            d.first().copied().ok_or_else(|| defect(NO_DERIVATIVE))?,
             d.get(1).copied().ok_or_else(|| defect(NO_DERIVATIVE))?,
         );
         let s = partials_at(&face.cn, p.x, p.y, 1)?;
@@ -1645,10 +1617,7 @@ impl<'a> Work<'a> {
             .get(strip)
             .and_then(|s| s.sides.get(side))
             .ok_or_else(|| defect(NO_ENTRY))?;
-        let fg = self
-            .faces
-            .get(*face)
-            .ok_or_else(|| defect(NO_ENTRY))?;
+        let fg = self.faces.get(*face).ok_or_else(|| defect(NO_ENTRY))?;
         Ok((fg, cn))
     }
 
@@ -1690,20 +1659,10 @@ impl<'a> Work<'a> {
         s: (f64, f64),
         ord: usize,
     ) -> Result<(Ivl, bool)> {
-        let p = self
-            .pieces
-            .get(piece)
-            .ok_or_else(|| defect(NO_ENTRY))?;
-        let fg = self
-            .faces
-            .get(p.face)
-            .ok_or_else(|| defect(NO_ENTRY))?;
+        let p = self.pieces.get(piece).ok_or_else(|| defect(NO_ENTRY))?;
+        let fg = self.faces.get(p.face).ok_or_else(|| defect(NO_ENTRY))?;
         let sign = Ivl::from(fg.sign * p.dir);
-        let a = fg
-            .levels
-            .get(j)
-            .copied()
-            .ok_or_else(|| defect(NO_ENTRY))?;
+        let a = fg.levels.get(j).copied().ok_or_else(|| defect(NO_ENTRY))?;
         let next = fg.levels.get(j + 1).copied();
         let z0 = Ivl::from(self.z0);
         let (tc, sc) = (0.5 * (t.0 + t.1), 0.5 * (s.0 + s.1));
@@ -1915,12 +1874,8 @@ impl<'a> Work<'a> {
         let mut mid = Vec::new();
         let mut over = Vec::new();
         let mut taylor = true;
-        for side in 0..2 {
+        for (side, &sp) in spans.iter().enumerate() {
             let (face, cn) = self.strip_side(strip, side)?;
-            let sp = spans
-                .get(side)
-                .copied()
-                .ok_or_else(|| defect(NO_ENTRY))?;
             let (hu, hv) = piece_hull(cn, sp);
             let at = |tt: Ivl, n: usize| -> Result<(Bs, Bs, Ivl, Ivl)> {
                 let d = curve_derivs_over(cn, tt, n, Some(sp))?;
@@ -1995,12 +1950,8 @@ impl<'a> Work<'a> {
             None
         } else {
             let mut middle = Vec::new();
-            for side in 0..2 {
+            for (side, &sp) in spans.iter().enumerate() {
                 let (face, cn) = self.strip_side(strip, side)?;
-                let sp = spans
-                    .get(side)
-                    .copied()
-                    .ok_or_else(|| defect(NO_ENTRY))?;
                 let (hu, hv) = piece_hull(cn, sp);
                 let cell = curve_derivs_over(cn, Ivl::new(t.0, t.1), 0, Some(sp))?;
                 let (uc, _) = curve_series(&cell, 0, 0);
@@ -2302,10 +2253,7 @@ fn crossings(
     }
     let at = |t: f64| -> Result<f64> {
         let d = curve_derivs_over(cn, Ivl::from(t), 0, Some(s))?;
-        let p = d
-            .first()
-            .copied()
-            .ok_or_else(|| defect(NO_DERIVATIVE))?;
+        let p = d.first().copied().ok_or_else(|| defect(NO_DERIVATIVE))?;
         Ok((if c == 0 { p.x } else { p.y }).mid() - line)
     };
     let mut t0 = a;
@@ -2515,9 +2463,7 @@ fn pcurve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<NurbsCurve> {
     let c = crate::topology::edgeuse::p1::uv_trim_curve(b, eu)?
         .0
         .ok_or_else(|| {
-            null_defect(
-                "the edge use has no pcurve just after it was made where it was missing",
-            )
+            null_defect("the edge use has no pcurve just after it was made where it was missing")
         })?;
     let bs: &BSplineCurve = c.b_spline_base().ok_or(SolidError::Unsupported {
         operation: OP,

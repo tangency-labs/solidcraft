@@ -14,17 +14,20 @@
 //! | [`MassFailure::Integrand`]      | `SM_ERR`                 |
 //! | [`MassFailure::SkippedSpan`]    | `SM_ERR`                 |
 //! | [`MassFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
-//! | [`MassFailure::EdgeWithoutCurve`], [`MassFailure::FaceWithoutSurface`] | `SM_ERR_NULL_POINTER` (or the site's, through `with_status`) |
-//! | [`MassFailure::EdgeCurveSingular`] | `SM_ERR`               |
+//! | [`MassFailure::EdgeWithoutCurve`], [`MassFailure::FaceWithoutSurface`], [`MassFailure::FaceuseWithoutRegion`] | `SM_ERR_NULL_POINTER` (or the site's, through `with_status`) |
+//! | [`MassFailure::EdgeCurveSingular`], [`MassFailure::TrimNotFinite`] | `SM_ERR`  |
 //!
 //! [`MassFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
-//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
-//! not yet converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
+//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The named causes from
+//! [`MassFailure::EdgeWithoutCurve`] on are the caller's body ([`ErrorKind::InvalidInput`])
+//! or its degenerate geometry. The phrase variants ([`MassFailure::Failed`],
+//! [`MassFailure::Missing`]) are no longer built here (the conversion guide:
+//! `docs/failure-codes-and-reproduction.md` §6).
 //!
-//! Deviations: not upstream. A failure says in a phrase (or by its variant) what went
-//! wrong; the failure's `operation` path says which routine. No failure names an
-//! entity: the sites they replace named none. The failures that are checks of a
-//! caller's arguments stay [`crate::SolidError::InvalidInput`].
+//! Deviations: not upstream. A failure says by its variant what went wrong; the failure's
+//! `operation` path says which routine. No failure names an entity: the sites they
+//! replace named none. Checks of a caller's arguments that report no status stay
+//! [`crate::SolidError::InvalidInput`].
 
 use super::{ErrorKind, Failure, Reason, SM_ERR, SM_ERR_NULL_POINTER};
 
@@ -61,37 +64,50 @@ pub enum MassFailure {
     /// `SM_ERR_NULL_POINTER`.
     FaceWithoutSurface,
     /// The edge's curve has a zero or non-finite derivative where the face's closure looks
-    /// for the point nearest a trim point, from both seeds, so the strip onto the edge has
-    /// no parameter there. [`ErrorKind::Degenerate`]; status `SM_ERR`.
+    /// for the point nearest a trim point, from both seeds (or the trim point itself is not
+    /// finite), so the strip onto the edge has no parameter there.
+    /// [`ErrorKind::Degenerate`]; status `SM_ERR`.
     EdgeCurveSingular,
+    /// A trim of the face evaluates to a point or tangent that is not finite.
+    /// [`ErrorKind::InvalidInput`]; status `SM_ERR`.
+    TrimNotFinite,
+    /// A face use of the caller's body is in no shell or its shell in no region.
+    /// [`ErrorKind::InvalidInput`]; status `SM_ERR_NULL_POINTER`.
+    FaceuseWithoutRegion,
 }
 
 impl MassFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Missing(_) | Self::EdgeWithoutCurve | Self::FaceWithoutSurface => {
-                SM_ERR_NULL_POINTER
-            }
+            Self::Missing(_)
+            | Self::EdgeWithoutCurve
+            | Self::FaceWithoutSurface
+            | Self::FaceuseWithoutRegion => SM_ERR_NULL_POINTER,
             Self::Failed(_)
             | Self::StepControl
             | Self::Integrand
             | Self::SkippedSpan
             | Self::Defect { .. }
-            | Self::EdgeCurveSingular => SM_ERR,
+            | Self::EdgeCurveSingular
+            | Self::TrimNotFinite => SM_ERR,
         }
     }
 
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::Missing`] for
-    /// [`MassFailure::Missing`], [`ErrorKind::InvalidInput`] for the caller's edge or face
-    /// without its geometry, [`ErrorKind::Degenerate`] for
+    /// [`MassFailure::Missing`], [`ErrorKind::InvalidInput`] for the caller's body (an
+    /// edge or face without its geometry, a trim that is not finite, a face use in no
+    /// region), [`ErrorKind::Degenerate`] for
     /// [`MassFailure::EdgeCurveSingular`], [`ErrorKind::Failed`] otherwise.
     /// [`MassFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::Defect { .. } => ErrorKind::StageFailed,
-            Self::EdgeWithoutCurve | Self::FaceWithoutSurface => ErrorKind::InvalidInput,
+            Self::EdgeWithoutCurve
+            | Self::FaceWithoutSurface
+            | Self::TrimNotFinite
+            | Self::FaceuseWithoutRegion => ErrorKind::InvalidInput,
             Self::EdgeCurveSingular => ErrorKind::Degenerate,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
@@ -115,6 +131,8 @@ impl core::fmt::Display for MassFailure {
                 "the edge curve's derivative is zero or not finite where the face's closure \
                  meets it",
             ),
+            Self::TrimNotFinite => f.write_str("the trim's point or tangent is not finite"),
+            Self::FaceuseWithoutRegion => f.write_str("the face use has no region"),
         }
     }
 }
@@ -123,6 +141,7 @@ impl crate::SolidError {
     /// [`crate::SolidError::Failed`] for a mass-property routine that fails with
     /// `failure`.
     #[must_use]
+    #[track_caller]
     pub(crate) fn mass(operation: &'static str, failure: MassFailure) -> Self {
         Failure::new(operation, failure).into_error()
     }
@@ -204,6 +223,12 @@ mod tests {
                 K::InvalidInput,
             ),
             (MassFailure::EdgeCurveSingular, SM_ERR, K::Degenerate),
+            (MassFailure::TrimNotFinite, SM_ERR, K::InvalidInput),
+            (
+                MassFailure::FaceuseWithoutRegion,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::mass("mass::op", failure);

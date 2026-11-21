@@ -61,6 +61,7 @@
 use super::{OdeIntegrator, OdeOptions};
 use crate::curve::curve::Curve;
 use crate::error::mass::MassFailure;
+use crate::error::{Failure, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::{ids, AttributeStore, AttributeValue, ObjectKey};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -77,7 +78,6 @@ use crate::topology::face::p2::{
     PPF_AREA, PPF_AREA_FIRST_MOMENTS,
 };
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, FaceuseId, RegionId, VertexId};
-use crate::error::{Failure, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::{EntityRef, Result, SolidError};
 
 const OP: &str = "mass::integrator::properties";
@@ -111,9 +111,6 @@ const NO_MATE: &str =
 /// Why the closed boundary and the face's loops disagree.
 const BOUNDARY_LOOPS: &str = "the face's closed boundary and its loops disagree, though the \
                               boundary is built from those loops, one edge use at a time";
-/// Why the integrator's moments are missing a group.
-const NO_MOMENTS: &str = "the integration's result has fewer moment groups than it always \
-                          fills";
 /// The fewest surface v knots inside a face's trims for which the face is integrated in
 /// bands between them (#14460).
 const MIN_BANDS: usize = 12;
@@ -375,15 +372,12 @@ fn close_loops(
     let mut loops = Vec::new();
     let mut start = 0;
     for &n in &trims.loops {
-        let lp = trims
-            .curves
-            .get(start..start + n)
-            .ok_or_else(|| {
-                defect(
-                    "the oriented trim boundary's loop counts add up to more curves than it \
+        let lp = trims.curves.get(start..start + n).ok_or_else(|| {
+            defect(
+                "the oriented trim boundary's loop counts add up to more curves than it \
                      holds, though it counts each loop as it adds the loop's curves",
-                )
-            })?;
+            )
+        })?;
         let mut count = n;
         for (i, c) in lp.iter().enumerate() {
             curves.push(c.clone());
@@ -793,7 +787,7 @@ fn trim_integrand(
     };
     // a non-finite trim point would bisect to the depth bound and fail as step control
     if !(p0.x.is_finite() && p0.y.is_finite() && p1.x.is_finite()) {
-        return Err(SolidError::mass(OP, MassFailure::Integrand));
+        return Err(SolidError::mass(OP, MassFailure::TrimNotFinite));
     }
     dy.fill(0.0);
     if p1.x == 0.0 {
@@ -1374,12 +1368,7 @@ fn vertices(b: &Brep) -> Result<Vec<VertexId>> {
 /// no region is upstream's null pointer.
 fn faceuse_region(b: &Brep, fu: FaceuseId) -> Result<RegionId> {
     crate::topology::edgeuse::p1::faceuse_region(b, fu)?
-        .ok_or_else(|| {
-            null_defect(
-                "the face use has no region, though the kernel makes every face use in a \
-                 shell of a region",
-            )
-        })
+        .ok_or_else(|| SolidError::mass(OP, MassFailure::FaceuseWithoutRegion))
 }
 /// `SmRegion::IsVoid` as a C truth value (`UNSURE`, 2, counts as void).
 fn region_void(b: &Brep, r: RegionId) -> Result<bool> {
@@ -1689,8 +1678,8 @@ fn gap_closure(
     use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
     use crate::nurbs::knots::Side;
     use crate::topology::edgeuse::{p1 as eu1, p3 as eu3};
-    let fu = crate::topology::face::p2::upward_faceuse(b, f)?
-        .ok_or_else(|| null_defect(NO_FACEUSE))?;
+    let fu =
+        crate::topology::face::p2::upward_faceuse(b, f)?.ok_or_else(|| null_defect(NO_FACEUSE))?;
     let mut pools = Vec::new();
     for lu in eu1::faceuse_loopuses(b, fu, false, None)? {
         if crate::topology::loopuse::is_vertex_loopuse(b, lu)? {
@@ -1702,41 +1691,31 @@ fn gap_closure(
             if eu1::uv_trim_curve(b, eu)?.0.is_none() {
                 eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
             }
-            let trim = eu1::uv_trim_curve(b, eu)?
-                .0
-                .cloned()
-                .ok_or_else(|| {
-                    null_defect(
-                        "the edge use has no UV trim just after it was made where it was \
+            let trim = eu1::uv_trim_curve(b, eu)?.0.cloned().ok_or_else(|| {
+                null_defect(
+                    "the edge use has no UV trim just after it was made where it was \
                          missing",
-                    )
-                })?;
-            let vu = b
-                .edgeuse(eu)?
-                .vertexuse
-                .ok_or_else(|| {
-                    null_defect(
-                        "an edge use of the face's loop has no vertex use, though the kernel \
+                )
+            })?;
+            let vu = b.edgeuse(eu)?.vertexuse.ok_or_else(|| {
+                null_defect(
+                    "an edge use of the face's loop has no vertex use, though the kernel \
                          makes every edge use with the vertex use at its start",
-                    )
-                })?;
-            let v = b
-                .vertexuse(vu)?
-                .vertex
-                .ok_or_else(|| {
-                    null_defect(
-                        "a vertex use has no vertex, though the kernel makes every vertex use \
+                )
+            })?;
+            let v = b.vertexuse(vu)?.vertex.ok_or_else(|| {
+                null_defect(
+                    "a vertex use has no vertex, though the kernel makes every vertex use \
                          on its vertex",
-                    )
-                })?;
+                )
+            })?;
             let vertex = b.vertex(v)?.point;
-            let e = eu1::edge(b, eu)?
-                .ok_or_else(|| {
-                    null_defect(
-                        "an edge use of the face's loop has no edge, though the kernel makes \
+            let e = eu1::edge(b, eu)?.ok_or_else(|| {
+                null_defect(
+                    "an edge use of the face's loop has no edge, though the kernel makes \
                          every edge use of a loop on its edge",
-                    )
-                })?;
+                )
+            })?;
             let ivl = b.edge(e)?.interval;
             let edge = edge::curve(b, e)?.map(|c| (c.clone(), ivl.min(), ivl.max()));
             sides.push((
@@ -2115,14 +2094,8 @@ fn properties_in_box(
         if mass.x < EFF_ZERO {
             mass.x = 1.0;
         }
-        let up = b
-            .face(f)?
-            .faceuse
-            .ok_or_else(|| null_defect(NO_FACEUSE))?;
-        let mate = b
-            .faceuse(up)?
-            .mate
-            .ok_or_else(|| null_defect(NO_MATE))?;
+        let up = b.face(f)?.faceuse.ok_or_else(|| null_defect(NO_FACEUSE))?;
+        let mate = b.faceuse(up)?.mate.ok_or_else(|| null_defect(NO_MATE))?;
         let mut separating = faceuse_region(b, up)? != faceuse_region(b, mate)?;
         // the face's closure onto its edges (#16735), made once for both its uses
         let mut closure: Option<PreciseProperties> = None;
@@ -2137,10 +2110,7 @@ fn properties_in_box(
             }
             match behavior.face_area {
                 0 => {
-                    let other = b
-                        .faceuse(fu)?
-                        .mate
-                        .ok_or_else(|| null_defect(NO_MATE))?;
+                    let other = b.faceuse(fu)?.mate.ok_or_else(|| null_defect(NO_MATE))?;
                     if !region_void(b, faceuse_region(b, fu)?)?
                         && region_void(b, faceuse_region(b, other)?)?
                     {
@@ -2280,12 +2250,11 @@ fn properties_in_box(
 /// `SmApiEdgeComputeLength` (the curve's virtual Length). The edge's curve is owned by
 /// the edge, so its zone tolerance (`SmTol::GetZoneTol3d(pCurve)`) is the edge's.
 pub fn edge_length(k: &Kernel, b: &Brep, e: EdgeId, accuracy: f64) -> Result<f64> {
-    let c =
-        edge::curve(b, e)?.ok_or_else(|| {
-            Failure::new(OP, MassFailure::EdgeWithoutCurve)
-                .with_status(SM_ERR)
-                .into_error()
-        })?;
+    let c = edge::curve(b, e)?.ok_or_else(|| {
+        Failure::new(OP, MassFailure::EdgeWithoutCurve)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     let owner_zone_tol_3d = if c.owner().is_some() {
         Some(edge::tolerance(b, e)?)
     } else {
@@ -2336,14 +2305,8 @@ pub fn face_centroid(k: &Kernel, b: &mut Brep, f: FaceId, accuracy: f64) -> Resu
     if p.area.abs() < EFF_ZERO {
         return Err(SolidError::invalid_input(OP, "zero area"));
     }
-    Ok((
-        p.area.abs(),
-        origin
-            + *p.moments
-                .first()
-                .ok_or_else(|| defect(NO_MOMENTS))?
-                / p.area,
-    ))
+    let [first_moments, ..] = p.moments;
+    Ok((p.area.abs(), origin + first_moments / p.area))
 }
 /// `SmApiBrepComputeArea`, including open shells and sheets: [`brep_area_about`] each
 /// face's own box middle.
@@ -2751,14 +2714,7 @@ fn estimate(
     }
     // [4] = static moment S about the midpoint; [7] = moments of inertia
     // (y^2+z^2, ...); [6] = products (yz, zx, xy) as raw positive integrals.
-    let moment = |i: usize| {
-        properties
-            .moments
-            .get(i)
-            .copied()
-            .ok_or_else(|| defect(NO_MOMENTS))
-    };
-    let static_moment = moment(4)?;
+    let [_, _, _, _, static_moment, _, m6, m7] = properties.moments;
     let mass = properties.mass;
     let (inertia, products) = match request.moments_about {
         MomentsAbout::Point(origin) => {
@@ -2776,20 +2732,18 @@ fn estimate(
                     + comp(d, a) * comp(d, b) * mass
             };
             (
-                moment(7)?
-                    + Vec3::new(
-                        shift(1, 1) + shift(2, 2),
-                        shift(0, 0) + shift(2, 2),
-                        shift(0, 0) + shift(1, 1),
-                    ),
-                moment(6)? + Vec3::new(shift(1, 2), shift(2, 0), shift(0, 1)),
+                m7 + Vec3::new(
+                    shift(1, 1) + shift(2, 2),
+                    shift(0, 0) + shift(2, 2),
+                    shift(0, 0) + shift(1, 1),
+                ),
+                m6 + Vec3::new(shift(1, 2), shift(2, 0), shift(0, 1)),
             )
         }
         MomentsAbout::Centroid => {
             // the centroid's offset d = S / m from the midpoint; about the centroid the
             // integral of a b dm loses m d_a d_b
             let d = static_moment / mass;
-            let (m6, m7) = (moment(6)?, moment(7)?);
             (
                 Vec3::new(
                     m7.x - mass * (d.y * d.y + d.z * d.z),
@@ -2956,11 +2910,8 @@ fn faces_area_about(
         area += p.area.abs();
         if first {
             let sign = if p.area < 0.0 { -1.0 } else { 1.0 };
-            sum += *p
-                .moments
-                .first()
-                .ok_or_else(|| defect(NO_MOMENTS))?
-                * sign;
+            let [first_moments, ..] = p.moments;
+            sum += first_moments * sign;
         }
     }
     Ok((area, sum))
@@ -3101,6 +3052,8 @@ mod tests {
         let mut dy = vec![0.0; layout.num_components];
         let err = trim_integrand(&k, &iso, &trim, 0.0, 0.5, &mut scratch, &mut dy).unwrap_err();
         assert!(err.to_string().contains("not finite"), "{err}");
+        assert_eq!(err.mass_failure(), Some(&MassFailure::TrimNotFinite));
+        assert_eq!(err.upstream_status(), Some(SM_ERR));
     }
     /// A constant integrand is integrated exactly: the piece's width times it, whatever its
     /// size (summed weight by weight, the rounded Kronrod weights' sum `2 + 2^-54` put
