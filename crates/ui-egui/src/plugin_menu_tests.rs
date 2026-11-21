@@ -2056,11 +2056,8 @@ fn hook_defaults_trigger_another_update_until_submitted_values_match_the_form() 
         generation: dialog.file_generation,
     };
     let bound = solidcraft_engine::plugin::conditions::bind_file_conditions(&schema, Some(&file)).unwrap();
-    let first = solidcraft_engine::plugin::dialog::apply_update(
-        &bound,
-        &json!({"fields":{"part":{"enum":["same","old"],"default":"same"}}}),
-    )
-    .unwrap();
+    let first =
+        solidcraft_engine::plugin::dialog::apply_update(&bound, &json!({"fields":{"part":{"enum":["same","old"],"default":"same"}}})).unwrap();
     finish_import_fields(dialog, first);
     assert_eq!(dialog.hook_values, submitted, "displayed defaults were never submitted to this hook");
     assert_eq!(dialog_values(dialog), json!({"mode":true,"part":"same"}));
@@ -2069,11 +2066,8 @@ fn hook_defaults_trigger_another_update_until_submitted_values_match_the_form() 
     let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
     assert!(dialog.file_job.is_some(), "poll queues the missing update");
     assert_eq!(dialog.hook_values, Some(json!({"mode":true,"part":"same"})));
-    let second = solidcraft_engine::plugin::dialog::apply_update(
-        &bound,
-        &json!({"fields":{"part":{"enum":["same","new"],"default":"same"}}}),
-    )
-    .unwrap();
+    let second =
+        solidcraft_engine::plugin::dialog::apply_update(&bound, &json!({"fields":{"part":{"enum":["same","new"],"default":"same"}}})).unwrap();
     finish_import_fields(dialog, second);
     assert_eq!(dialog.hook_values.as_ref(), Some(&dialog_values(dialog)));
     assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"mode":true,"part":"same"}));
