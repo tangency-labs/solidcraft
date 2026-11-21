@@ -56,10 +56,13 @@
 //! [`hit`] says which of a scene's objects is under a point of the sheet, the one rule for picking
 //! there: the sheet page's hover and `drawing.scene.hit`.
 //!
-//! A view can also be drawn beside the window (#4892 U3): [`begin`] asks for the first view out of
-//! date, [`Job::run`] works its lines out on a copy of the session (on a worker thread), and
-//! [`finish`] takes them only for the latest request, while nothing it was asked from has changed.
-//! A result that comes too late changes nothing. [`step`] is the same three, run at once.
+//! The provider's work comes in one order (`Next`): a view out of date, then dimensions, then the
+//! sheet's fills and sketches, then a picture's setup, then its bands. The long kinds can also be
+//! done beside the window (#4892 U3): [`begin`] asks for a view's lines or a picture's setup when
+//! one is next, [`Job::run`] works it out on a copy of the session (on a worker thread), and
+//! [`finish`] takes it only for the latest request, while nothing it was asked from has changed. A
+//! result that comes too late changes nothing. [`step`] does whichever comes next, a long one run
+//! at once.
 //!
 //! Lines stand where the design places its parts: an occurrence move not captured yet is left out,
 //! as dimensions leave it out.
@@ -111,7 +114,7 @@ use crate::{EngineError, Result, Session};
 pub mod fill;
 #[path = "drawing_scene_kept.rs"]
 mod kept;
-use kept::{Kept, KeptDimension, KeptFill, KeptLines, KeptSketch, KeptView};
+use kept::{Kept, KeptFill, KeptLines, KeptSketch};
 pub mod sketch;
 
 /// The command the sheet scene answers for, in its errors.
@@ -1921,6 +1924,9 @@ pub struct Cache {
     bodies: Option<Bodies>,
     /// The picture being drawn.
     picturing: Option<Picturing>,
+    /// The pixel tests a view's pictures may cost together, as the files' pictures carry theirs
+    /// ([`crate::drawing_picture::ViewPictures`]): the renderer's [`MAX_PICTURE_PIXEL_TESTS`] when None.
+    max_pixel_tests: Option<u64>,
     /// Views drawn, for tests: a move draws none.
     #[cfg(test)]
     projections: usize,
@@ -2026,7 +2032,8 @@ impl SourceKey {
 }
 
 /// A view's last drawing, and what it was drawn from: the world state (held, so its address can't
-/// be reused while it is compared), what that showed, and the view as it drew.
+/// be reused while it is compared), what that showed, and the view as it drew. Kept whole when its
+/// drawing closes, all but its world state ([`Kept::closing`]), so what is added here is kept too.
 #[derive(Clone)]
 struct Entry {
     state: Arc<ModelState>,
@@ -2105,7 +2112,10 @@ impl Looks {
     fn of(state: &ModelState, scene: Option<&ProductScene>) -> Looks {
         let Some(scene) = scene.filter(|scene| scene.meshes.len() == state.bodies.len()) else { return Looks(None) };
         let look = |(body, mesh): (&solidcraft_doc::ModelBody, &solidcraft_render::ProductMesh)| {
-            Some((body.geometry_key()?, (mesh.color, mesh.opacity, mesh.surface, mesh.transmission, mesh.faces.clone())))
+            // Every field named, so a field the renderer gains stops the build here, to be decided: the
+            // name never changes pixels, and the geometry key stands for the mesh.
+            let solidcraft_render::ProductMesh { name: _, mesh: _, color, opacity, surface, transmission, faces } = mesh;
+            Some((body.geometry_key()?, (*color, *opacity, *surface, *transmission, faces.clone())))
         };
         Looks(state.bodies.iter().zip(&scene.meshes).map(look).collect())
     }
@@ -2139,7 +2149,8 @@ impl Entry {
 
 /// A dimension's last drawing, or a note's or a balloon's, and what it was drawn from: its record, the
 /// world state, its view's drawing (by serial, which holds its frame), the drawing's lettering and, for
-/// one that reads the document, the document's revision ([`Annotation::reads_document`]).
+/// one that reads the document, the document's revision ([`Annotation::reads_document`]). Kept as a
+/// view's entry is ([`Entry`]).
 #[derive(Clone)]
 struct DimensionEntry {
     state: Arc<ModelState>,
@@ -2224,33 +2235,29 @@ impl Cache {
         }
     }
 
-    /// Drawing `drawing`'s lines kept when it closed, as its views' and dimensions' entries: from a
-    /// world state that has gone, so each view is out of date until [`keep_what_shows_the_same`] finds
-    /// it shows the same, and each dimension is read again once its view is up to date. A held
-    /// drawing draws neither, so it shows them as they were.
+    /// Drawing `drawing`'s entries kept when it closed, back as its views' and dimensions', numbered
+    /// again from the cache's serial, which started over at the close. Drawn from a world state that
+    /// has gone ([`Kept::closing`]), so each view is out of date until [`keep_what_shows_the_same`]
+    /// finds it shows the same, and each dimension is read again once its view is up to date (its
+    /// `view_serial`, from before the close, never matches its view's new one either). A held drawing
+    /// draws neither, so it shows them as they were.
     fn take_kept(&mut self, drawing: u64) {
-        let gone: Arc<ModelState> = Arc::default();
-        let kept = self.kept.take(drawing);
-        for (id, kept) in kept.views {
+        let Kept { views, dimensions, sketches, fills } = self.kept.take(drawing);
+        for (id, mut entry) in views {
             self.serial += 1;
-            let entry =
-                Entry { state: gone.clone(), shows: kept.shows, view: kept.view, drawn: kept.drawn, serial: self.serial, pixels: kept.pixels };
+            entry.serial = self.serial;
             self.views.insert(id, entry);
         }
-        // From the same gone state, so read again: its `view_serial`, from before the close, never
-        // matches its view's new one either.
-        for (id, kept) in kept.dimensions {
+        for (id, mut entry) in dimensions {
             self.serial += 1;
-            let KeptDimension { record, view_serial, lettering, drawn } = kept;
-            // Its world state is gone, so it is read again whatever its revision.
-            let entry = DimensionEntry { state: gone.clone(), record, view_serial, lettering, revision: 0, drawn, serial: self.serial };
+            entry.serial = self.serial;
             self.dimensions.insert(id, entry);
         }
-        for (id, kept) in kept.fills {
+        for (id, kept) in fills {
             self.serial = self.serial.wrapping_add(1);
             self.fills.insert(id, FillEntry { source: kept.source, context: kept.context, drawn: kept.drawn, serial: self.serial });
         }
-        for (id, kept) in kept.sketches {
+        for (id, kept) in sketches {
             self.serial = self.serial.wrapping_add(1);
             let entry = SketchEntry { source: kept.source, context: kept.context, drawn: kept.drawn, serial: self.serial };
             self.sketches.insert(id, entry);
@@ -2608,11 +2615,11 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
 /// past it.
 const PICTURE_STEP: std::time::Duration = std::time::Duration::from_millis(8);
 
-/// Draws the first view out of date on the sheet last extracted or, with none, reads the dimensions
-/// out of date of one view or, with none, draws bands of a picture out of date for about
-/// [`PICTURE_STEP`], and says whether more are waiting: a short piece of work for the UI's tick, one
-/// view's projection, one read of a view's dimensions or a few bands. Text that waits for its font
-/// is no work for it: [`extract`] sets it, and its answer says so ([`SheetView::waiting_for_fonts`]).
+/// Does the provider's next piece of work on the sheet last extracted (`Next`), and says whether more
+/// is waiting: a short piece of work for the UI's tick, one view's projection, one read of a view's
+/// dimensions, one fill or sketch, or a picture's bands for about [`PICTURE_STEP`]. Text that waits
+/// for its font is no work for it: [`extract`] sets it, and its answer says so
+/// ([`SheetView::waiting_for_fonts`]).
 pub fn step(s: &mut Session) -> bool {
     let started = web_time::Instant::now();
     step_within(s, &mut || started.elapsed() >= PICTURE_STEP)
@@ -2621,24 +2628,28 @@ pub fn step(s: &mut Session) -> bool {
 /// [`step`], whose picture bands stop once `spent` says so: it is asked after each band.
 fn step_within(s: &mut Session, spent: &mut dyn FnMut() -> bool) -> bool {
     let Some((d, on, state)) = drawable(s) else { return false };
-    let lettering = Lettering::of(s, &d);
-    let waiting: Vec<(u64, ResolvedView)> =
-        on.iter().filter(|(id, view, _)| !s.drawing_scenes.fresh(*id, &state, view)).map(|(id, view, _)| (*id, view.clone())).collect();
-    let Some((id, view)) = waiting.first().cloned() else {
-        return match step_dimensions(s, &d, &on, &state, lettering) {
-            Some(more) => more || fills_waiting(s, &d) || sketches_waiting(s, &d) || waiting_picture(s, &on, &state).is_some(),
-            None if fills_waiting(s, &d) => step_fill(s, &d) || waiting_picture(s, &on, &state).is_some(),
-            None if sketches_waiting(s, &d) => step_sketch(s, &d) || waiting_picture(s, &on, &state).is_some(),
-            None => step_pictures(s, &on, &state, spent),
-        };
+    let Some(work) = next(s, &d, &on, &state) else {
+        s.drawing_scenes.picturing = None;
+        return false;
     };
-    let done = job_for(s, &d, id, view, state.clone()).run();
-    finish_view(s, done);
-    waiting.len() > 1
-        || !s.drawing_scenes.stale_dimensions(&d, &on, &state, &lettering, s.revision).is_empty()
-        || fills_waiting(s, &d)
-        || sketches_waiting(s, &d)
-        || waiting_picture(s, &on, &state).is_some()
+    match work {
+        Next::View(id, view) => {
+            let done = job_for(s, &d, id, view.clone(), state.clone()).run();
+            finish_view(s, done);
+        }
+        Next::Dimensions(stale) => step_dimensions(s, &d, &on, &state, stale),
+        Next::Fills => step_fill(s, &d),
+        Next::Sketches => step_sketch(s, &d),
+        // [`begin`]'s job beside the window; done here first with none in hand, as on the web.
+        Next::PictureSetup(waiting) => {
+            if let Some(job) = picture_job(s, waiting, &state) {
+                finish_picture(s, job.run());
+            }
+            draw_bands(s, spent);
+        }
+        Next::Bands => draw_bands(s, spent),
+    }
+    next(s, &d, &on, &state).is_some()
 }
 
 fn fills_waiting(s: &mut Session, d: &Arc<Drawing>) -> bool {
@@ -2647,11 +2658,11 @@ fn fills_waiting(s: &mut Session, d: &Arc<Drawing>) -> bool {
     fills_on(d, sheet).iter().any(|record| !s.drawing_scenes.fresh_fill(record.id, &source, &context))
 }
 
-fn step_fill(s: &mut Session, d: &Arc<Drawing>) -> bool {
-    let Some(sheet) = s.drawing_scenes.sheet else { return false };
+fn step_fill(s: &mut Session, d: &Arc<Drawing>) {
+    let Some(sheet) = s.drawing_scenes.sheet else { return };
     let (source, context) = s.drawing_scenes.sketch_inputs(&s.doc, d);
     let fill_waiting: Vec<_> = fills_on(d, sheet).into_iter().filter(|record| !s.drawing_scenes.fresh_fill(record.id, &source, &context)).collect();
-    let Some(record) = fill_waiting.first() else { return false };
+    let Some(record) = fill_waiting.first() else { return };
     let fresh_regions = s
         .drawing_scenes
         .fill_regions
@@ -2674,7 +2685,6 @@ fn step_fill(s: &mut Session, d: &Arc<Drawing>) -> bool {
     {
         cache.fill_expansions += 1;
     }
-    fill_waiting.len() > 1 || sketches_waiting(s, d)
 }
 
 fn sketches_waiting(s: &mut Session, d: &Arc<Drawing>) -> bool {
@@ -2684,11 +2694,11 @@ fn sketches_waiting(s: &mut Session, d: &Arc<Drawing>) -> bool {
 }
 
 /// One bounded sketch solve after the view jobs and annotation reads have finished.
-fn step_sketch(s: &mut Session, d: &Arc<Drawing>) -> bool {
-    let Some(sheet) = s.drawing_scenes.sheet else { return false };
+fn step_sketch(s: &mut Session, d: &Arc<Drawing>) {
+    let Some(sheet) = s.drawing_scenes.sheet else { return };
     let (source, context) = s.drawing_scenes.sketch_inputs(&s.doc, d);
     let waiting: Vec<_> = sketches_on(d, sheet).into_iter().filter(|record| !s.drawing_scenes.fresh_sketch(record.id, &source, &context)).collect();
-    let Some(record) = waiting.first() else { return false };
+    let Some(record) = waiting.first() else { return };
     let drawn = draw_sketch(s, d, record);
     let cache = &mut s.drawing_scenes;
     cache.serial = cache.serial.wrapping_add(1);
@@ -2697,7 +2707,6 @@ fn step_sketch(s: &mut Session, d: &Arc<Drawing>) -> bool {
     {
         cache.sketch_solves += 1;
     }
-    waiting.len() > 1
 }
 
 /// What [`step`] and [`begin`] draw from: the drawing open, the views of the sheet last extracted
@@ -2710,6 +2719,44 @@ fn drawable(s: &mut Session) -> Option<(Arc<Drawing>, Vec<(u64, ResolvedView, Ve
     let state = s.world_state().ok()?;
     catch_up(s, &d, on.iter().map(|(id, ..)| *id), &state);
     (!s.drawing_scenes.holds(&d, &state)).then_some((d, on, state))
+}
+
+/// The provider's next piece of work, in its one order: [`begin`] hands out the long kinds and
+/// [`step`] does whichever comes, so the two never take work out of turn.
+enum Next<'a> {
+    /// The first view out of date of `on`, as it resolves: its lines, with its dimensions read in the
+    /// same swap.
+    View(u64, &'a ResolvedView),
+    /// The dimensions and notes out of date on views up to date, by view and id ([`step_dimensions`]).
+    Dimensions(Vec<Annotation>),
+    /// The first fill out of date on the sheet ([`step_fill`]).
+    Fills,
+    /// The first sketch out of date on the sheet ([`step_sketch`]).
+    Sketches,
+    /// The setup of the first picture out of date ([`waiting_picture`]).
+    PictureSetup((u64, Picture, DrawnFrom)),
+    /// More bands of the picture being drawn, the first out of date.
+    Bands,
+}
+
+/// What [`drawable`]'s `d`, `on` and `state` have the provider do next; None when nothing waits.
+fn next<'a>(s: &mut Session, d: &Arc<Drawing>, on: &'a [(u64, ResolvedView, Vec2)], state: &Arc<ModelState>) -> Option<Next<'a>> {
+    if let Some((id, view, _)) = on.iter().find(|(id, view, _)| !s.drawing_scenes.fresh(*id, state, view)) {
+        return Some(Next::View(*id, view));
+    }
+    let stale = s.drawing_scenes.stale_dimensions(d, on, state, &Lettering::of(s, d), s.revision);
+    if !stale.is_empty() {
+        return Some(Next::Dimensions(stale));
+    }
+    if fills_waiting(s, d) {
+        return Some(Next::Fills);
+    }
+    if sketches_waiting(s, d) {
+        return Some(Next::Sketches);
+    }
+    let (view, picture, from) = waiting_picture(s, on, state)?;
+    let drawing = |p: &Picturing| p.view == view && p.source == picture.source && p.from.same(&from);
+    Some(if s.drawing_scenes.picturing.as_ref().is_some_and(drawing) { Next::Bands } else { Next::PictureSetup((view, picture, from)) })
 }
 
 /// A shown set, and the world state it was worked out for.
@@ -2875,22 +2922,17 @@ pub(crate) mod copy_panics {
     }
 }
 
-/// Asks for the work [`step`] would do next that takes long, to do beside the window: the first view
-/// out of date on the sheet last extracted or, once its dimensions are read too, the setup of the
-/// first picture out of date. None when nothing such is waiting (a picture set up draws its bands in
-/// [`step`]), or while a deferred drawing holds. One at a time: asking again replaces the earlier
-/// request.
+/// Asks for the provider's next piece of work (`Next`) when it takes long, to do beside the window:
+/// a view's lines or a picture's setup. None when the next is quick, dimensions, a fill, a sketch or a
+/// picture's bands, which [`step`] does; when nothing waits; or while a deferred drawing holds. One at
+/// a time: asking again replaces the earlier request.
 pub fn begin(s: &mut Session) -> Option<Job> {
     let (d, on, state) = drawable(s)?;
-    if let Some((id, view, _)) = on.iter().find(|(id, view, _)| !s.drawing_scenes.fresh(*id, &state, view)).cloned() {
-        return Some(Job(Work::View(job_for(s, &d, id, view, state))));
+    match next(s, &d, &on, &state)? {
+        Next::View(id, view) => Some(Job(Work::View(job_for(s, &d, id, view.clone(), state)))),
+        Next::PictureSetup(waiting) => picture_job(s, waiting, &state).map(|job| Job(Work::Picture(job))),
+        Next::Dimensions(_) | Next::Fills | Next::Sketches | Next::Bands => None,
     }
-    let lettering = Lettering::of(s, &d);
-    if !s.drawing_scenes.stale_dimensions(&d, &on, &state, &lettering, s.revision).is_empty() {
-        return None;
-    }
-    let waiting = waiting_picture(s, &on, &state)?;
-    picture_job(s, waiting, &state).map(|job| Job(Work::Picture(job)))
 }
 
 /// Asks for view `id` of drawing `d`, resolved as `view`, of the world `state`: the latest request
@@ -2971,18 +3013,17 @@ pub(crate) fn designed(s: &Session) -> Session {
     copy
 }
 
-/// Reads the dimensions and notes out of date of the first view that has any, through its frame,
-/// and says whether another view's are waiting: None when none was.
-fn step_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, lettering: Lettering) -> Option<bool> {
-    let revision = s.revision;
-    let stale = s.drawing_scenes.stale_dimensions(d, on, state, &lettering, revision);
-    let view = stale.first().map(Annotation::view)?;
+/// Reads the dimensions and notes of `stale` (`Next::Dimensions`) on the first view that has any,
+/// through its frame.
+fn step_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, stale: Vec<Annotation>) {
+    let (lettering, revision) = (Lettering::of(s, d), s.revision);
+    let Some(view) = stale.first().map(Annotation::view) else { return };
     // Its copy evaluates the design, which only its job does: its job reads them again with its lines.
     if by_their_jobs(s, on).contains(&view) {
         s.drawing_scenes.redraw(view);
-        return Some(true);
+        return;
     }
-    let (these, others): (Vec<_>, Vec<_>) = stale.into_iter().partition(|record| record.view() == view);
+    let these: Vec<_> = stale.into_iter().filter(|record| record.view() == view).collect();
     let entry = s.drawing_scenes.views.get(&view);
     let frame = entry.and_then(|e| Some((e.drawn.frame?, e.view.line_group.value)));
     let view_serial = entry.map_or(0, |e| e.serial);
@@ -2990,7 +3031,6 @@ fn step_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)
     let cache = &mut s.drawing_scenes;
     cache.serial = cache.serial.wrapping_add(1);
     cache.keep_dimensions(these, lines, state, view_serial, &lettering, revision);
-    Some(!others.is_empty())
 }
 
 /// The views of `on` whose copy evaluates the design ([`Choice::evaluates`]): the window's frame paths
@@ -3170,21 +3210,13 @@ fn no_pixels(picture: &Picture) -> PixelGrid {
     PixelGrid { x0: picture.rect.min.x, y0: picture.rect.min.y, pitch: 1.0, width: 0, height: 0 }
 }
 
-/// Draws bands of the first picture out of date ([`waiting_picture`]) until `spent` says so, and
-/// says whether one is still waiting. Its setup is [`begin`]'s job; with none in hand, it is done
-/// here first, as on the web. A picture in hand for anything else, which would be stale once done,
-/// is dropped; one that can't be drawn keeps why, so it isn't tried again until its view or its
-/// bodies change.
-fn step_pictures(s: &mut Session, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, spent: &mut dyn FnMut() -> bool) -> bool {
-    let Some(waiting) = waiting_picture(s, on, state) else {
-        s.drawing_scenes.picturing = None;
-        return false;
-    };
-    if let Some(job) = picture_job(s, waiting, state) {
-        finish_picture(s, job.run());
-    }
+/// Draws bands of the picture being drawn until `spent` says so, and keeps it once whole. A picture
+/// set up for anything else is replaced by the next setup, so it is never kept stale; one that can't
+/// be drawn keeps why ([`finish_picture`]), so it isn't tried again until its view or its bodies
+/// change.
+fn draw_bands(s: &mut Session, spent: &mut dyn FnMut() -> bool) {
     let cache = &mut s.drawing_scenes;
-    let Some(picturing) = cache.picturing.as_mut() else { return waiting_picture(s, on, state).is_some() };
+    let Some(picturing) = cache.picturing.as_mut() else { return };
     let rows = loop {
         #[cfg(test)]
         {
@@ -3192,14 +3224,13 @@ fn step_pictures(s: &mut Session, on: &[(u64, ResolvedView, Vec2)], state: &Arc<
         }
         match picturing.rows.band() {
             Ok(None) if !spent() => {}
-            Ok(None) => return true,
+            Ok(None) => return,
             Ok(Some(rows)) => break Ok(Arc::from(rows)),
             Err(why) => break Err(why),
         }
     };
-    let Some(Picturing { view, source, from, grid, tests, .. }) = cache.picturing.take() else { return false };
+    let Some(Picturing { view, source, from, grid, tests, .. }) = cache.picturing.take() else { return };
     keep_pixels(s, view, source, Pixels { grid, rows, from, tests });
-    waiting_picture(s, on, state).is_some()
 }
 
 /// A picture's setup, worked out beside the window: the shown set, the parts its view draws and the
@@ -3214,6 +3245,8 @@ struct PictureJob {
     scene: std::result::Result<Arc<ProductScene>, String>,
     /// The pixel tests its view's other pictures cost, as they are now.
     others: u64,
+    /// The pixel tests its view's pictures may cost together.
+    max_pixel_tests: u64,
 }
 
 /// What a picture's setup was asked from: its request, its view, what the picture is drawn from,
@@ -3238,7 +3271,7 @@ impl PictureJob {
     /// Sets the picture up from the frame and the parts its lines were drawn by ([`view_pictures`],
     /// centred on the view), within its view's pixel-test limit.
     fn run(self) -> PictureDone {
-        let PictureJob { copy, ticket, resolved, grid, scene, others } = self;
+        let PictureJob { copy, ticket, resolved, grid, scene, others, max_pixel_tests } = self;
         let started = grid.and_then(|grid| {
             let fail = |why: String| (grid, why);
             let scene = scene.map_err(fail)?;
@@ -3248,8 +3281,8 @@ impl PictureJob {
             let (_, wanted) = pictures.into_iter().find(|(s, _)| *s == source).ok_or_else(|| fail("its view no longer draws it".into()))?;
             let mut rows = PictureRows::new(&scene, &wanted, &grid, GridWindow { x0: 0, y0: 0, x1: grid.width, y1: grid.height }).map_err(fail)?;
             let tests = rows.pixel_tests();
-            if others.saturating_add(tests) > MAX_PICTURE_PIXEL_TESTS {
-                return Err(fail(over_budget(MAX_PICTURE_PIXEL_TESTS)));
+            if others.saturating_add(tests) > max_pixel_tests {
+                return Err(fail(over_budget(max_pixel_tests)));
             }
             rows.prepare().map_err(fail)?;
             Ok((grid, tests, rows))
@@ -3259,22 +3292,19 @@ impl PictureJob {
 }
 
 /// Asks for the setup of `waiting` ([`waiting_picture`]) on its grid at the sheet's dpi: the latest
-/// request from now on. None when it is the picture being drawn, or its view isn't drawn.
+/// request from now on. None when its view isn't drawn.
 fn picture_job(s: &mut Session, waiting: (u64, Picture, DrawnFrom), state: &Arc<ModelState>) -> Option<PictureJob> {
     let (view, picture, from) = waiting;
     let entry = s.drawing_scenes.views.get(&view)?;
     let resolved = entry.view.clone();
     let others = entry.pixels.iter().filter(|(source, p)| **source != picture.source && p.current(&from)).map(|(_, p)| p.tests).sum();
-    let same = |p: &Picturing| p.view == view && p.source == picture.source && p.from.same(&from);
-    if s.drawing_scenes.picturing.as_ref().is_some_and(same) {
-        return None;
-    }
+    let max_pixel_tests = s.drawing_scenes.max_pixel_tests.unwrap_or(MAX_PICTURE_PIXEL_TESTS);
     let grid = page_grid(&picture, from.dpi).map_err(|why| (no_pixels(&picture), why));
     let scene = bodies(s, state).0;
     let request = REQUEST.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
     s.drawing_scenes.requested = Some(request);
     let ticket = PictureTicket { request, revision: s.revision, state: state.clone(), view, picture, from };
-    Some(PictureJob { copy: designed(s), ticket, resolved, grid, scene, others })
+    Some(PictureJob { copy: designed(s), ticket, resolved, grid, scene, others, max_pixel_tests })
 }
 
 /// [`finish`] for a picture's setup: nothing it was asked from has changed, the design, the model,
@@ -3352,21 +3382,11 @@ fn sheet_pictures(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)]
 pub(crate) fn forget_closed(s: &mut Session) {
     let cache = &mut s.drawing_scenes;
     if let Some(drawing) = cache.drawing.filter(|d| s.open_drawing != Some(*d)) {
-        let mut kept = std::mem::take(&mut cache.kept);
-        let views = std::mem::take(&mut cache.views)
-            .into_iter()
-            .map(|(id, e)| (id, KeptView { view: e.view, drawn: e.drawn, shows: e.shows, pixels: e.pixels }));
-        let dimensions = std::mem::take(&mut cache.dimensions)
-            .into_iter()
-            .map(|(id, e)| (id, KeptDimension { record: e.record, view_serial: e.view_serial, lettering: e.lettering, drawn: e.drawn }));
-        let sketches = std::mem::take(&mut cache.sketches)
-            .into_iter()
-            .map(|(id, entry)| (id, KeptSketch { source: entry.source, context: entry.context, drawn: entry.drawn }));
-        let fills = std::mem::take(&mut cache.fills)
-            .into_iter()
-            .map(|(id, entry)| (id, KeptFill { source: entry.source, context: entry.context, drawn: entry.drawn }));
-        kept.keep(drawing, Kept { views: views.collect(), dimensions: dimensions.collect(), sketches: sketches.collect(), fills: fills.collect() });
-        *cache = Cache { kept, ..Cache::default() };
+        let Cache { views, dimensions, sketches, fills, mut kept, .. } = std::mem::take(cache);
+        let sketches = sketches.into_iter().map(|(id, entry)| (id, KeptSketch { source: entry.source, context: entry.context, drawn: entry.drawn }));
+        let fills = fills.into_iter().map(|(id, entry)| (id, KeptFill { source: entry.source, context: entry.context, drawn: entry.drawn }));
+        kept.keep(drawing, Kept { sketches: sketches.collect(), fills: fills.collect(), ..Kept::closing(views, dimensions) });
+        cache.kept = kept;
     }
     cache.kept.retain(|drawing| s.doc.drawings.iter().any(|d| d.id == drawing));
 }
