@@ -5189,9 +5189,9 @@ pub(crate) fn set_object_accepting(inputs: &mut Vec<SelInput>, active: &mut usiz
 /// Extrude's pick input for the bodies a Join joins or a Cut cuts.
 const EXTRUDE_TARGETS: &str = "Target Bodies";
 
-/// The Target Bodies input while an extrude's operation is Join or Cut; `None` otherwise.
+/// The Target Bodies input while an extrude's operation is Join, Cut or Intersect; `None` otherwise.
 fn extrude_targets(d: &Dialog) -> Option<&SelInput> {
-    matches!(d.kind, Kind::Extrude { operation: 1 | 2, .. }).then(|| d.inputs.iter().find(|i| i.label == EXTRUDE_TARGETS)).flatten()
+    matches!(d.kind, Kind::Extrude { operation: 1..=3, .. }).then(|| d.inputs.iter().find(|i| i.label == EXTRUDE_TARGETS)).flatten()
 }
 
 /// Extrude's To Object pick while the operation is Join.
@@ -5232,7 +5232,7 @@ fn default_join_target(s: &Session, d: &Dialog) -> Option<String> {
     }
 }
 
-/// The bodies OK stores as the targets of Extrude's Join or Cut when Target Bodies is left empty,
+/// The bodies OK stores as the targets of Extrude's Join, Cut or Intersect when Target Bodies is left empty,
 /// and among them the To body: what `solid.extrude` and the window choose then.
 /// - Some bodies hidden: the shown ones, so a hidden body is left alone (#3961). Visibility is
 ///   read here, never at a rebuild: cleared, the box takes hidden bodies too.
@@ -5271,8 +5271,8 @@ fn default_targets(s: &Session, d: &Dialog, operation: usize) -> (Vec<String>, O
 pub(crate) fn sync_targets(s: &Session, d: &mut Dialog) {
     let Kind::Extrude { operation, .. } = &d.kind else { return };
     let operation = *operation;
-    let Some(at) = d.inputs.iter().position(|i| i.label == EXTRUDE_TARGETS).filter(|_| matches!(operation, 1 | 2)) else {
-        // No Target Bodies (New Body, Intersect): its picks went with it.
+    let Some(at) = d.inputs.iter().position(|i| i.label == EXTRUDE_TARGETS).filter(|_| matches!(operation, 1..=3)) else {
+        // No Target Bodies (New Body): its picks went with it.
         d.auto_targets = AutoTargets::default();
         return;
     };
@@ -5364,20 +5364,21 @@ pub(crate) fn targets_picked_by_hand(inputs: &[SelInput], auto: &AutoTargets) ->
     auto.by_hand && inputs.iter().any(|i| i.label == EXTRUDE_TARGETS && !i.items.is_empty())
 }
 
-/// Show Extrude's Target Bodies input for Join and Cut, and remove it (with its picks) otherwise.
+/// Show Extrude's Target Bodies input for Join, Cut and Intersect, and remove it (with its picks) otherwise.
 /// Showing it leaves the active input where it is, so the profiles stay the next pick.
 fn set_extrude_targets(inputs: &mut Vec<SelInput>, active: &mut usize, extra: &mut serde_json::Map<String, Value>, operation: usize) {
     let tip = match operation {
         1 => Some("dialog.targets_join_tip"),
         2 => Some("dialog.targets_cut_tip"),
+        3 => Some("dialog.targets_intersect_tip"),
         _ => None,
     };
     let at = inputs.iter().position(|i| i.label == EXTRUDE_TARGETS);
     match (at, tip) {
         (None, Some(tip)) => {
             let mut input = SelInput::new(EXTRUDE_TARGETS, BODIES, true).tip(tip);
-            // An edited Intersect can have stored targets without a pick input. Moving to
-            // Join or Cut transfers them into the input, which now owns the selection.
+            // Stored targets kept aside while the operation had no Target Bodies move into the
+            // input, which now owns the selection.
             if let Some(Value::Array(targets)) = extra.remove("targets") {
                 input.items = targets.iter().filter_map(Value::as_str).map(|name| Sel::Body { name: name.into() }).collect();
             }
@@ -6302,7 +6303,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             if object_on(&d.inputs, FROM_OBJECT) {
                 common["from"] = object_point(&d.inputs, FROM_OBJECT).ok_or("select the object to extrude from")?;
             }
-            // Join and Cut use the bodies picked in Target Bodies. None picked: every body the
+            // Join, Cut and Intersect use the bodies picked in Target Bodies. None picked: every body the
             // extrusion touches, with no default stored at OK (the box says so).
             let extrude_targets = extrude_targets(d);
             if let Some(input) = extrude_targets {
@@ -8194,8 +8195,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     inp.items = items.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
                 }
             }
-            // Join and Cut show their stored target bodies so the picks can be edited.
-            if matches!(operation, Operation::Join | Operation::Cut) {
+            // Join, Cut and Intersect show their stored target bodies so the picks can be edited.
+            if matches!(operation, Operation::Join | Operation::Cut | Operation::Intersect) {
                 set_extrude_targets(&mut d.inputs, &mut d.active, &mut d.extra, op_index(operation));
                 if let Some(input) = d.inputs.iter_mut().find(|i| i.label == EXTRUDE_TARGETS) {
                     input.items = targets.iter().map(|name| Sel::Body { name: name.0.clone() }).collect();

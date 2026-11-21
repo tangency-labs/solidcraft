@@ -552,7 +552,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 // Cutting air does nothing: Cut points into the body unless the direction was set (#18243).
                 smart.point_cut = crate::dialogs::OPS.get(*operation) == Some(&"cut") && !smart.manual_dir;
             }
-            // Join and Cut take their bodies in Target Bodies. A body picked there is a
+            // Join, Cut and Intersect take their bodies in Target Bodies. A body picked there is a
             // choice by hand, so Extrude's automatic operation stops changing it.
             set_extrude_targets(&mut d.inputs, &mut d.active, &mut d.extra, *operation);
             if crate::dialogs::targets_picked_by_hand(&d.inputs, &d.auto_targets) {
