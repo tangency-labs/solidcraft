@@ -1508,6 +1508,90 @@ fn perforate_edit_restores_dimensions_pattern_and_target() {
     }
 }
 
+/// A slotted field: the edit dialog shows its shape, length and row pitch, and applies them.
+#[test]
+fn perforate_edit_restores_shape_length_and_row_pitch() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Docked);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let field = json!({"diameter": "2 mm", "pitch": "9 mm", "shape": "slot", "length": "6 mm", "row_pitch": "4 mm"});
+    app.run("sheet.perforate", field).unwrap();
+    let feature = app.session.doc.features.last().unwrap();
+    let mut dialog = edit_dialog(&app, feature.id, None).expect("Perforate can be edited");
+    let params = apply_commands(&app, &dialog).unwrap()[0].1["params"].clone();
+    for (key, value) in [("shape", "slot"), ("length", "6 mm"), ("row_pitch", "4 mm")] {
+        assert_eq!(params[key], value, "{key} is restored: {params}");
+    }
+    let ctx = crate::fonts::test_context();
+    let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+        if let Kind::Sheet(k) = &mut dialog.kind {
+            rows(&mut app, ui, k, &mut dialog.inputs);
+        }
+    });
+    let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text()).collect();
+    for label in ["Shape", "Slot", "Slot length", "Row pitch"] {
+        assert!(texts.contains(&label), "missing field: {label}");
+    }
+    // Round: no shape is sent, nor a length.
+    let Kind::Sheet(Sm::Perforate { shape, .. }) = &mut dialog.kind else { panic!("perforate dialog") };
+    *shape = 0;
+    let params = apply_commands(&app, &dialog).unwrap()[0].1["params"].clone();
+    assert!(params.get("shape").is_none() && params.get("length").is_none(), "{params}");
+}
+
+/// A slot length and a row pitch stored bare in a millimetre design stay millimetres when the
+/// design changes to inches and Edit Feature is applied: the dialog shows them with their unit.
+/// Typed bare in a new field they are the design's unit, and one left empty is not sent.
+#[test]
+fn perforate_slot_length_and_row_pitch_keep_their_unit_when_the_design_changes_units() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Docked);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    app.run("sheet.perforate", json!({"diameter": "2 mm", "pitch": "9 mm", "shape": "slot", "length": "6", "row_pitch": "4"})).unwrap();
+    app.run("document.units", json!({"units": "in"})).unwrap();
+    let feature = app.session.doc.features.last().unwrap().id;
+    let dialog = edit_dialog(&app, feature, None).expect("Perforate can be edited");
+    let commands = apply_commands(&app, &dialog).unwrap();
+    for (key, value) in [("length", "6 mm"), ("row_pitch", "4 mm")] {
+        assert_eq!(commands[0].1["params"][key], value, "{key}: {}", commands[0].1);
+    }
+    run_all(&mut app, commands);
+    let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
+    let field = &flat["perforations"][0];
+    assert!((field["length"].as_f64().unwrap() - 6.0).abs() < 1e-9 && (field["row_pitch"].as_f64().unwrap() - 4.0).abs() < 1e-9, "{field}");
+    app.start("sheet.perforate");
+    let mut dialog = app.dialog.clone().expect("Perforate opens a dialog");
+    let Kind::Sheet(Sm::Perforate { shape, length, .. }) = &mut dialog.kind else { panic!("perforate dialog") };
+    *shape = PERFORATION_SHAPES.iter().position(|s| *s == "slot").unwrap();
+    *length = "0.5".into();
+    let p = apply_commands(&app, &dialog).unwrap().remove(0).1;
+    assert_eq!(p["length"], json!("0.5 in"), "{p}");
+    assert!(p.get("row_pitch").is_none(), "{p}");
+}
+
+/// Hexagonal holes are drawn as their outlines in the flat pattern view, one closed line a hole.
+#[test]
+fn flat_view_draws_hexagonal_holes_as_their_outlines() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    app.run("sheet.perforate", json!({"diameter": 3, "pitch": 6, "shape": "hex"})).unwrap();
+    let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
+    let n = flat["perforations"][0]["count"].as_u64().unwrap() as usize;
+    app.start("sheet.flat_pattern");
+    let mut dialog = app.dialog.clone().unwrap();
+    let Kind::Sheet(Sm::FlatPattern { data, .. }) = &mut dialog.kind else { panic!("flat dialog") };
+    *data = Some(Ok(flat));
+    let rect = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0));
+    let ctx = crate::fonts::test_context();
+    let input = egui::RawInput { screen_rect: Some(rect), ..Default::default() };
+    let output = crate::test_support::frame(&ctx, input, |ui| {
+        let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("perforation-test")));
+        assert!(overlay(&mut app, &painter, rect, &dialog));
+    });
+    let hexagons = output.shapes.iter().filter(|s| matches!(&s.shape, egui::Shape::Path(p) if p.closed && p.points.len() == 6)).count();
+    assert!(n > 0);
+    assert_eq!(hexagons, n);
+    assert!(output.shapes.iter().all(|s| !matches!(s.shape, egui::Shape::Circle(_))), "no circles for hexagons");
+}
+
 #[test]
 fn flat_pattern_navigation_slots_hide_orbit_controls_and_keep_fit_home() {
     let mut h = crate::scenario::Harness::new();

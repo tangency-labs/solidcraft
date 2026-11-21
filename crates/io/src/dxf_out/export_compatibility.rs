@@ -113,7 +113,8 @@ impl Budget {
             Producer::FlatPattern => match layer {
                 "BEND_UP" | "BEND_DOWN" | "ROLL" => matches!(shape, DxfShape::Line(..)),
                 "BEND_NOTES" => matches!(shape, DxfShape::Text { .. }),
-                "PERFORATION" => matches!(shape, DxfShape::Circle { .. }),
+                // Round holes are circles; a hexagon's or a slot's outline is its lines and arcs.
+                "PERFORATION" => matches!(shape, DxfShape::Circle { .. } | DxfShape::Line(..) | DxfShape::Arc { .. }),
                 _ => matches!(
                     shape,
                     DxfShape::Line(..)
@@ -170,17 +171,19 @@ impl DxfFile<DxfShape> {
     /// Compatibility contract for the existing flat-pattern producer after its
     /// source geometry is admitted. Counts name contours supplied to path_shapes,
     /// bend records (a roll's line and a junction cut's two lines are planned as
-    /// bend records) and already generated perforation holes. Actual consumption
+    /// bend records) and already generated perforation holes: the round ones, one
+    /// CIRCLE each, and the lines and arcs of the others (hexagons, slots) as
+    /// `perforation_pieces`, each planned as an ARC's work. Actual consumption
     /// is checked again by the one writer; a smaller forged plan cannot extend it.
-    pub fn for_flat_pattern_export(contours: usize, bends: usize, perforations: usize) -> Result<Self> {
+    pub fn for_flat_pattern_export(contours: usize, bends: usize, perforations: usize, perforation_pieces: usize) -> Result<Self> {
         let path_entities = mul(contours, path::MAX_PATH_ITEMS)?;
-        let entities = add(add(path_entities, mul(bends, 2)?)?, perforations)?;
+        let entities = add(add(add(path_entities, mul(bends, 2)?)?, perforations)?, perforation_pieces)?;
         // An exact path item has at most 129 sampled extent points (ELLIPSE),
         // or <= 40 SPLINE values; bulged path vertices also fit this ceiling.
         // These are conservative ceilings, not allocated or consumed counts.
         // A modest contour count can exceed usize on wasm32 because every path
         // reserves the maximum curve complexity. Actual work stays checked.
-        let values = (path_entities as u128) * 129 + (bends as u128) * 6 + (perforations as u128) * 2;
+        let values = (path_entities as u128) * 129 + (bends as u128) * 6 + (perforations as u128) * 2 + (perforation_pieces as u128) * 65;
         let values = usize::try_from(values).unwrap_or(usize::MAX);
         let text_bytes = usize::try_from((bends as u128) * 2048).unwrap_or(usize::MAX);
         // Layer 0 and the nine named roles, and at most one pocket layer per contour.

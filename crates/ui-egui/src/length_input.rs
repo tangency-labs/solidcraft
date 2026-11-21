@@ -200,6 +200,8 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
             }
             Sm::Hem { length, gap, .. } => vec![length, gap],
             Sm::Fold { radius, .. } => vec![radius],
+            // A slot length or row pitch not typed stands for the command's default and stays so.
+            Sm::Perforate { length, row_pitch, .. } => [length, row_pitch].into_iter().filter(|v| !v.trim().is_empty()).collect(),
             // K factor is the only dimensionless sheet rule value.
             Sm::Rules { values, .. } => values.iter_mut().enumerate().filter(|(i, _)| *i != 1).map(|(_, value)| value).collect(),
             _ => vec![],

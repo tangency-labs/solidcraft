@@ -1620,7 +1620,7 @@ mod tests {
         assert!(ordinary.declare_layer("中", 3, DxfLinetype::Continuous, None).is_err());
         ordinary.declare_layer("cut", 1, DxfLinetype::Continuous, None).unwrap();
         assert!(ordinary.declare_layer("CUT", 2, DxfLinetype::Continuous, None).is_err());
-        for mut producer in [DxfFile::for_flat_pattern_export(0, 0, 0).unwrap(), DxfFile::for_current_view_export(0, 0, 0).unwrap()] {
+        for mut producer in [DxfFile::for_flat_pattern_export(0, 0, 0, 0).unwrap(), DxfFile::for_current_view_export(0, 0, 0).unwrap()] {
             assert!(
                 producer.declare_legacy_baseline_layer("中", 3, DxfLinetype::Continuous).unwrap_err().to_string().contains("private legacy baseline")
             );

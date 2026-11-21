@@ -13,15 +13,26 @@
 //! the thickness, so a three-point Gauss rule is exact in both. Across the zone the hole's chord
 //! is r cos θ where w = c + r sin θ, which leaves an analytic integrand; composite Gauss–Legendre
 //! takes it to round-off. Nothing is tessellated.
+//!
+//! A hexagonal or slotted hole on a flat panel, and every hole of a sheet laid out flat, is the
+//! prism of its outline through the thickness, its area, centroid and second moments in closed
+//! form. One that a bend runs through is split, as a round one is, into its parts on the two
+//! panels and in the bend, each its own map of its part of the flat. Each part's integrals over
+//! the flat become integrals round its outline by Green's theorem: the outline's lines and arcs
+//! are cut where they cross the zone's edges, and the zone's edges themselves add nothing, since
+//! they run along the joint.
 
-use solidcore_record::{Loop2, Region2, Vec2, Vec3};
+use std::f64::consts::TAU;
+
+use solidcore_record::{Region2, Seg2, Vec2, Vec3};
 use solidcraft_develop::prelude::*;
 use solidcraft_develop::{Bent, Rigid2, Rigid3, Surface};
 use solidcraft_geom::bspline::GAUSS_8;
 use solidcraft_geom::inertia::{self, Tensor3};
 use solidcraft_geom::prelude::*;
 
-use crate::{DocError, Result, SurfaceSheet};
+use crate::sheet_surface_perforation_shapes::GRAZE;
+use crate::{DocError, PerforationShape, Result, ShapedPerforation, SurfaceSheet};
 
 /// What one hole takes out of the body, in the sheet's frame: its volume, the area its walls add
 /// to the body's faces less the area it opens in them, its centroid, and its inertia about that
@@ -41,34 +52,40 @@ const GAUSS_3: [(f64, f64); 3] = [(-0.774_596_669_241_483_4, 5.0 / 9.0), (0.0, 8
 const PANELS: usize = 8;
 
 /// Every hole of `sk`'s perforation fields as what it takes out of the body. Refused: a field's
-/// numbers that make no grid, a hole on a roll, a hole two bends reach, and one a bend's end runs
-/// through (not supported yet).
+/// numbers that make no grid, and (not supported yet) a hole on a roll, a hole two bends reach,
+/// and one a bend's end runs through.
 pub(crate) fn hole_masses(sk: &SurfaceSheet) -> Result<Vec<HoleMass>> {
     let invalid = || DocError::Invalid(format!("invalid perforation physical properties for `{}`", sk.body));
     let t = sk.thickness;
     if !(t.is_finite() && t > 0.0) {
         return Err(invalid());
     }
-    // Each field's numbers before its grid is laid out: a pitch no wider than a hole makes none.
+    // Each field's numbers before its grid is laid out: a pitch no wider than a hole makes none,
+    // and holes of a shape or rows of a pitch of their own leave room between them.
     let shown = sk.shown();
     for p in &shown.perforations {
         if !([p.diameter, p.pitch, p.margin].iter().all(|v| v.is_finite()) && p.diameter > 0.0 && p.pitch > p.diameter && p.margin >= 0.0) {
             return Err(invalid());
         }
+        let field = shown.shaped_perforation(p);
+        if !field.is_plain() {
+            field.check_spacing()?;
+        }
     }
-    // The holes in the flat as the sheet lays it out: the flat as it is read, mirrored back.
-    let holes: Vec<(Vec2, f64)> = shown
-        .perforations
-        .iter()
-        .flat_map(|p| shown.perforation_holes(p).into_iter().map(move |h| (Vec2::new(h.x, -h.y), p.diameter / 2.0)))
-        .collect();
+    // The holes in the flat as the sheet lays it out: the flat as it is read, mirrored back. A
+    // hexagon with a corner up and a slot along the rows are their own mirror images.
+    let mut holes: Vec<(Vec2, ShapedPerforation)> = Vec::new();
+    for p in &shown.perforations {
+        let field = shown.shaped_perforation(p);
+        holes.extend(shown.try_perforation_holes(p)?.into_iter().map(|h| (Vec2::new(h.x, -h.y), field)));
+    }
     if holes.is_empty() {
         return Ok(Vec::new());
     }
     // Laid out flat, the flat is one plane, the sheet's own flat frame (never a panel's, which a
-    // cut can take away): every hole is a cylinder through it.
+    // cut can take away): every hole goes through it, its rows along the flat's X.
     if sk.unfolded {
-        return Ok(holes.iter().map(|(c, r)| cylinder(&sk.flat, *c, *r, t)).collect());
+        return Ok(holes.iter().map(|(c, field)| through(&sk.flat, *c, Vec2::new(1.0, 0.0), field, t)).collect());
     }
     let dev = sk.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
     let fold = crate::sheet_surface_convert::fold_onto(&sk.sheet, &dev, &sk.places)?;
@@ -108,29 +125,66 @@ pub(crate) fn hole_masses(sk: &SurfaceSheet) -> Result<Vec<HoleMass>> {
         }
     };
     let mut out = Vec::with_capacity(holes.len());
-    for (c, r) in holes {
-        let reached: Vec<(&Zone, Reach)> = bends.iter().filter_map(|z| Some((z, z.reach(c, r)?))).collect();
+    for (c, field) in holes {
+        // On one flat panel (or a tab of one) the hole goes through it; one bend bends it.
+        let on_panel = |i: usize| -> Result<HoleMass> {
+            let (frame, flat) = panel(i)?;
+            let back = flat.inverse();
+            Ok(through(&frame, back.point(c), back.vector(Vec2::new(1.0, 0.0)), &field, t))
+        };
+        let reached: Vec<(&Zone, Reach)> = bends.iter().filter_map(|z| Some((z, z.reach(c, &field)?))).collect();
         match reached.as_slice() {
             [] => {
                 let (i, _) = material.iter().find(|(_, g)| g.contains(c)).ok_or_else(invalid)?;
-                let (frame, flat) = panel(*i)?;
-                out.push(cylinder(&frame, flat.inverse().point(c), r, t));
+                out.push(on_panel(*i)?);
             }
             // A tab is laid out with its panel and folds with it: the panel's chart carried on.
-            [(_, Reach::Tab(i))] => {
-                let (frame, flat) = panel(*i)?;
-                out.push(cylinder(&frame, flat.inverse().point(c), r, t));
-            }
+            [(_, Reach::Tab(i))] => out.push(on_panel(*i)?),
             [(zone, Reach::Bends)] => {
-                if !zone.holds_along(c, r) {
+                if !zone.holds_along(c, &field) {
                     return Err(DocError::Invalid(format!("not supported yet: a perforation hole across the end of a bend of `{}`", sk.body)));
                 }
-                out.push(zone.bent_hole(c, r, t, panel(zone.panels[0])?, panel(zone.panels[1])?)?);
+                let (a, b) = (panel(zone.panels[0])?, panel(zone.panels[1])?);
+                out.push(match field.shape {
+                    PerforationShape::Round => zone.bent_hole(c, field.field.diameter / 2.0, t, a, b)?,
+                    PerforationShape::Hex | PerforationShape::Slot { .. } => zone.bent_outline(c, &field, t, a, b)?,
+                });
             }
             _ => return Err(DocError::Invalid(format!("not supported yet: a perforation hole two bends reach on `{}`", sk.body))),
         }
     }
     Ok(out)
+}
+
+/// A hole of `field` through a flat panel whose chart lies in space at `frame`, round the chart's
+/// point `at`, its rows along the chart's unit vector `along`: a round hole's cylinder, else the
+/// prism of its outline.
+fn through(frame: &Rigid3, at: Vec2, along: Vec2, field: &ShapedPerforation, t: f64) -> HoleMass {
+    match field.shape {
+        PerforationShape::Round => cylinder(frame, at, field.field.diameter / 2.0, t),
+        PerforationShape::Hex | PerforationShape::Slot { .. } => prism(frame, at, along, field, t),
+    }
+}
+
+/// A hexagonal or slotted hole of `field` through a flat panel whose chart lies in space at
+/// `frame`: the prism of its outline round the chart's point `at`, its rows along the chart's unit
+/// vector `along`, `t` deep along the frame's `z`. Its area and second moments are its outline's,
+/// in closed form, and its centroid is the outline's centre, mid-depth.
+fn prism(frame: &Rigid3, at: Vec2, along: Vec2, field: &ShapedPerforation, t: f64) -> HoleMass {
+    let face = field.hole_area();
+    let volume = face * t;
+    let (xx, yy) = field.hole_second_moments();
+    let depth = volume * t * t / 12.0;
+    // About the hole's own axes: along its rows, across them, and through the sheet.
+    let own = [[t * yy + depth, 0.0, 0.0], [0.0, t * xx + depth, 0.0], [0.0, 0.0, t * (xx + yy)]];
+    let (u, v) = (frame.vector(Vec3::new(along.x, along.y, 0.0)), frame.vector(Vec3::new(-along.y, along.x, 0.0)));
+    let turn = [[u.x, v.x, frame.z.x], [u.y, v.y, frame.z.y], [u.z, v.z, frame.z.z]];
+    HoleMass {
+        volume,
+        area: field.hole_perimeter() * t - 2.0 * face,
+        centroid: frame.point(Vec3::new(at.x, at.y, t / 2.0)),
+        inertia: inertia::transformed(&own, &turn),
+    }
 }
 
 /// A hole of radius `r` through a flat panel whose chart lies in space at `frame`: a cylinder
@@ -203,22 +257,119 @@ impl Zone {
         ((p - self.start).dot(self.along), (p - self.start).dot(self.across))
     }
 
-    /// What the zone is to the hole of radius `r` round `c`: nothing when the hole keeps clear of
-    /// the zone's region, its ends included, as one beside an end of the bend, level with its zone,
-    /// does; the tab it is on when that is a tab of the zone; else the bend. (A hole lies in the
-    /// sheet's material, clear of its cuts, so the part of it in the zone's region is on the zone's
-    /// material: a piece that bends, or a tab.)
-    fn reach(&self, c: Vec2, r: f64) -> Option<Reach> {
-        if !overlaps(&self.region, c, r) {
+    /// What the zone is to the hole of `field` round `c`: nothing when the hole keeps clear of the
+    /// zone's region, its ends included, as one beside an end of the bend, level with its zone,
+    /// does; the tab it is on when that is a tab of the zone; else the bend. A hole may graze the
+    /// region by [`GRAZE`], as the grid keeps it: it then keeps clear (see
+    /// [`ShapedPerforation::overlaps`]). (A hole lies in the sheet's material, clear of its cuts, so
+    /// the part of it in the zone's region is on the zone's material: a piece that bends, or a
+    /// tab.)
+    fn reach(&self, c: Vec2, field: &ShapedPerforation) -> Option<Reach> {
+        if !field.overlaps(c, &self.region) {
             return None;
         }
-        Some(self.tabs.iter().find(|(tab, _)| overlaps(tab, c, r)).map_or(Reach::Bends, |(_, panel)| Reach::Tab(*panel)))
+        Some(self.tabs.iter().find(|(tab, _)| field.overlaps(c, tab)).map_or(Reach::Bends, |(_, panel)| Reach::Tab(*panel)))
     }
 
-    /// Whether the hole lies between the zone's ends, along the joint.
-    fn holds_along(&self, c: Vec2, r: f64) -> bool {
+    /// Whether the hole of `field` round `c` lies between the zone's ends, along the joint, to
+    /// within what it may graze.
+    fn holds_along(&self, c: Vec2, field: &ShapedPerforation) -> bool {
         let (a, _) = self.coords(c);
-        a - r >= self.span.0 && a + r <= self.span.1
+        let e = field.support(self.along);
+        a - e >= self.span.0 - GRAZE && a + e <= self.span.1 + GRAZE
+    }
+
+    /// Where the line or arc `s` crosses the zone's edges (across it, 0 and its width): its
+    /// parameters there, with its ends, in order. Between two of them it lies in one part. None
+    /// for any other kind of segment, which a hole's outline doesn't have.
+    fn crossings(&self, s: &Seg2) -> Option<Vec<f64>> {
+        let w = |p: Vec2| (p - self.start).dot(self.across);
+        let mut u = vec![0.0, 1.0];
+        for edge in [0.0, self.width] {
+            match *s {
+                Seg2::Line { a, b } => {
+                    let (wa, wb) = (w(a), w(b));
+                    if (wa - edge) * (wb - edge) < 0.0 {
+                        u.push((edge - wa) / (wb - wa));
+                    }
+                }
+                // Across the zone the arc runs w(centre) + radius cos(θ − φ), φ the way across.
+                Seg2::Arc { center, radius, start, sweep } => {
+                    let k = (edge - w(center)) / radius;
+                    if k.abs() < 1.0 && sweep != 0.0 {
+                        let (phi, half) = (self.across.angle(), k.acos());
+                        for theta in [phi + half, phi - half] {
+                            for turns in -2..=2 {
+                                let v = (theta + f64::from(turns) * TAU - start) / sweep;
+                                if v > 0.0 && v < 1.0 {
+                                    u.push(v);
+                                }
+                            }
+                        }
+                    }
+                }
+                // A hole's outline is lines and arcs; any other kind isn't cut here.
+                _ => return None,
+            }
+        }
+        u.sort_by(f64::total_cmp);
+        Some(u)
+    }
+
+    /// The hexagonal or slotted hole of `field` round `c` that the bend runs through, `t` deep:
+    /// its part in the zone as the bend maps it, and its parts on the `a` and `b` panels (each
+    /// panel's frame in space and where the flat lays its chart). Each part is what the pieces of
+    /// the outline in it bound (see [`Sum::piece`]).
+    fn bent_outline(&self, c: Vec2, field: &ShapedPerforation, t: f64, a: (Rigid3, Rigid2), b: (Rigid3, Rigid2)) -> Result<HoleMass> {
+        let unread = || DocError::Invalid("a perforation hole in a bend can't be read".into());
+        let (ca, cw) = self.coords(c);
+        let (axis_point, axis) = self.bent.axis();
+        let flat = |(frame, at): (Rigid3, Rigid2)| {
+            move |p: Vec2, depth: f64| {
+                let q = at.inverse().point(p);
+                Some((frame.point(Vec3::new(q.x, q.y, depth)), 1.0))
+            }
+        };
+        let bend = |p: Vec2, depth: f64| {
+            let x = self.bent.point(p, depth);
+            // The volume of the zone grows with the distance from the axis, against the neutral
+            // radius its width wraps onto.
+            let rho = (x - axis_point).cross(axis).len();
+            Some((x, rho / self.neutral))
+        };
+        let (on_a, on_b) = (flat(a), flat(b));
+        // The part a point across the zone lies in.
+        let part = |w: f64| -> &dyn Fn(Vec2, f64) -> Option<(Vec3, f64)> {
+            if w < 0.0 {
+                &on_a
+            } else if w > self.width {
+                &on_b
+            } else {
+                &bend
+            }
+        };
+        // About the hole's middle, mid-depth, so that its moments keep their digits.
+        let middle = part(cw)(c, t / 2.0).map(|(x, _)| x).ok_or_else(unread)?;
+        let at = |a: f64, w: f64| c + self.along * (a - ca) + self.across * (w - cw);
+        let coords = |p: Vec2| self.coords(p);
+        // The outline runs counter-clockwise in the flat; along and across the zone, the other
+        // way where those two turn the flat over.
+        let turn = self.along.cross(self.across);
+        let mut sum = Sum::default();
+        for s in &field.hole_loop(c).segs {
+            let cuts = self
+                .crossings(s)
+                .ok_or_else(|| DocError::Invalid("not supported yet: a perforation hole in a bend whose outline is not lines and arcs".into()))?;
+            for (&u0, &u1) in cuts.iter().zip(cuts.iter().skip(1)) {
+                if !(u1 > u0) {
+                    continue;
+                }
+                let (_, w) = self.coords(s.point_at((u0 + u1) / 2.0));
+                let piece = Piece { seg: s, span: (u0, u1), along: self.along, across: self.across, turn };
+                sum.piece(part(w), &at, &coords, &piece, ca, t, middle).ok_or_else(unread)?;
+            }
+        }
+        sum.hole(middle)
     }
 
     /// The hole of radius `r` round `c` that the bend runs through, `t` deep: its part in the zone
@@ -338,6 +489,64 @@ impl Sum {
         Some(())
     }
 
+    /// Adds the part of a hole that a piece of its outline bounds in one part of the flat, `t`
+    /// deep, as `map` takes the flat point `at(a, w)` (along and across the zone) and a depth
+    /// into space and gives the volume's stretch there; `coords` gives a flat point's (a, w).
+    /// Moments about `middle`. By Green's theorem a region's integral of F da dw is its outline's
+    /// of G dw, G the integral of F along the joint from the hole's centre line `ca`. Every map is
+    /// of degree one along the joint and through the thickness, and so is its stretch, so F is of
+    /// degree at most three in each and three-point Gauss gives G, and the thickness, exactly;
+    /// composite Gauss–Legendre runs along the piece, a line by its parameter and an arc by its
+    /// angle. The walls round the piece are stretched across by the volume's stretch, and through
+    /// the thickness not. None where the map can't place a point.
+    fn piece(
+        &mut self,
+        map: &dyn Fn(Vec2, f64) -> Option<(Vec3, f64)>,
+        at: &dyn Fn(f64, f64) -> Vec2,
+        coords: &dyn Fn(Vec2) -> (f64, f64),
+        piece: &Piece,
+        ca: f64,
+        t: f64,
+        middle: Vec3,
+    ) -> Option<()> {
+        let (u0, u1) = piece.span;
+        for (u, weight) in panels(u0, u1) {
+            let p = piece.seg.point_at(u);
+            let (pa, pw) = coords(p);
+            let d = piece.seg.derivative(u);
+            let (da, dw) = (d.dot(piece.along), d.dot(piece.across));
+            let half = (pa - ca) / 2.0;
+            for (xa, wa) in GAUSS_3 {
+                let q = at(ca + half * (1.0 + xa), pw);
+                // This node's share of G dw, the outline's turn included.
+                let g = wa * half * dw * weight * piece.turn;
+                for (xd, wd) in GAUSS_3 {
+                    let depth = t / 2.0 * (1.0 + xd);
+                    let (x, stretch) = map(q, depth)?;
+                    let dv = stretch * g * wd * t / 2.0;
+                    let r = x - middle;
+                    self.volume += dv;
+                    self.first += r * dv;
+                    for (row, ri) in self.second.iter_mut().zip([r.x, r.y, r.z]) {
+                        for (cell, rj) in row.iter_mut().zip([r.x, r.y, r.z]) {
+                            *cell += ri * rj * dv;
+                        }
+                    }
+                }
+                // The faces it opens: the sheet's surface and the face a thickness in.
+                for depth in [0.0, t] {
+                    self.faces += map(q, depth)?.1 * g;
+                }
+            }
+            for (xd, wd) in GAUSS_8 {
+                let depth = t / 2.0 * (1.0 + xd);
+                let (_, stretch) = map(p, depth)?;
+                self.walls += weight * (da * da + (dw * stretch).powi(2)).sqrt() * wd * t / 2.0;
+            }
+        }
+        Some(())
+    }
+
     /// The hole these parts make, its moments taken about `middle`.
     fn hole(&self, middle: Vec3) -> Result<HoleMass> {
         let v = self.volume;
@@ -364,16 +573,15 @@ impl Sum {
     }
 }
 
-/// Whether the disk of radius `r` round `c` and `region` overlap. A loop of the region nearer `c`
-/// than `r`, found on its curves, runs through the disk. Otherwise the disk lies on one side of
-/// every loop, the side `c` is on, read from the curves themselves. (Touching is not overlapping.)
-fn overlaps(region: &Region2, c: Vec2, r: f64) -> bool {
-    let loops = || std::iter::once(&region.outer).chain(&region.holes);
-    if loops().flat_map(|l| &l.segs).any(|s| s.point_at(s.closest_param(c)).dist(c) < r) {
-        return true;
-    }
-    let inside = |l: &Loop2| crate::sheet_surface_cuts::holds(l, c);
-    inside(&region.outer) && !region.holes.iter().any(inside)
+/// A piece of a hole's outline in one part of the flat: its segment, between which of its
+/// parameters, the ways along and across the zone, and how the outline turns in those (1
+/// counter-clockwise, −1 clockwise).
+struct Piece<'a> {
+    seg: &'a Seg2,
+    span: (f64, f64),
+    along: Vec2,
+    across: Vec2,
+    turn: f64,
 }
 
 /// Composite Gauss–Legendre on [`PANELS`] equal panels from `a` to `b`: each node and its weight.

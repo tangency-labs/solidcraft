@@ -28,7 +28,7 @@ fn styles() -> [DxfPathStyle; 3] {
 fn drawing(shapes: &[DxfShape]) -> String {
     // These are admitted converter outputs, including the deliberately preserved
     // zero-length LINE. Use the flat producer contract, not stricter new admission.
-    let mut file = DxfFile::for_flat_pattern_export(1, 0, 0).unwrap();
+    let mut file = DxfFile::for_flat_pattern_export(1, 0, 0, 0).unwrap();
     for shape in shapes {
         file.push(file.default_layer(), shape.clone(), None).unwrap();
     }
