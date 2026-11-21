@@ -419,6 +419,11 @@ fn prepare(
         .map(|(_, item)| Some(item.body.body.record()).filter(|_| !item.body.body.is_mesh()))
         .collect();
     let mut made = solidcraft_kernel::map_on_threads(&wanted, mesh_lines::WORKERS, |record| {
+        // A body not started by the time of a cancel is not prepared at all: the workers take
+        // every queued body, and preparing one reads and copies it before the kernel looks.
+        if cancel() {
+            return None;
+        }
         let made = prepare_body(*record, opts, cancel);
         // Only a finished body moves the count; a cancelled one is told by the next check.
         if made.is_some() {
