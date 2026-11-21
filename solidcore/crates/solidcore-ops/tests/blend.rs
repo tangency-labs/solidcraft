@@ -6059,3 +6059,38 @@ fn a_full_round_whose_rails_meet_along_part_of_one_of_them() {
         }
     }
 }
+
+/// The half capsule's outline from pole to pole (the line x = 5 and its two quarter arcs) is
+/// one chain that ends at the spheres' poles, where it runs on into the arcs left sharp. A
+/// chamfer or a round of it failed ("Fillet Surface Computation Failure", status 1001): the
+/// end's section was solved from a guess whose step off the edge was the binormal's
+/// first-order image in the sphere's parameters, which is 0 at a pole, so the solve started on
+/// the pole, where the longitude is undetermined, and found none. The step is now taken in
+/// 3D. Each end is the section in the plane through the pole square to the edge, so the blend
+/// takes off [`capsule_section`] along the line (10) and, by Pappus, turned through pi/2 about
+/// each sphere's centre. An equal chamfer of 1 has offsets 1 at a right angle.
+#[test]
+fn a_chamfer_or_round_of_a_half_capsule_s_outline_from_pole_to_pole_builds() {
+    all_fixes();
+    let pick = |b: &Body| {
+        [
+            edge_at(b, [3.0, 0.0, -4.0]),
+            edge_at(b, [5.0, 0.0, 5.0]),
+            edge_at(b, [3.0, 0.0, 14.0]),
+        ]
+    };
+    for ball in [false, true] {
+        let b = half_capsule();
+        let edges = pick(&b);
+        let kind = if ball { Blend::Round } else { Blend::Chamfer };
+        blend(&b, kind, &edges, &[1.0], &[], Corners::Filled).unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{kind:?}");
+        let (area, moment) = capsule_section(1.0, 1.0, ball);
+        let want = HALF_CAPSULE - 10.0 * area - PI * moment;
+        assert!(
+            rel(volume(&b), want) < 1e-9,
+            "{kind:?}: {} against {want}",
+            volume(&b)
+        );
+    }
+}
