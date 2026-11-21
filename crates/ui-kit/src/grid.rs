@@ -73,6 +73,7 @@ pub struct GridColumn {
     icon_only: bool,
     kind: CellKind,
     edit_on_click: bool,
+    max_width: Option<f32>,
 }
 
 impl GridColumn {
@@ -87,6 +88,7 @@ impl GridColumn {
             icon_only: false,
             kind,
             edit_on_click: false,
+            max_width: None,
         }
     }
 
@@ -99,6 +101,12 @@ impl GridColumn {
     /// Keep room for the cell's controls, as [`Column::min_content_width`].
     pub fn min_content_width(mut self, width: f32) -> Self {
         self.min_content_width = width;
+        self
+    }
+
+    /// Stop growing at `width` while sharing, as [`Column::max_width`].
+    pub fn max_width(mut self, width: f32) -> Self {
+        self.max_width = Some(width);
         self
     }
 
@@ -124,7 +132,8 @@ impl GridColumn {
     }
 
     fn layout(&self, manual: Option<f32>) -> Column<'_> {
-        let mut column = Column::new(&self.label, self.weight).min_content_width(self.min_content_width).manual_width(manual);
+        let mut column =
+            Column::new(&self.label, self.weight).min_content_width(self.min_content_width).manual_width(manual).max_width(self.max_width);
         if self.flex {
             column = column.flex();
         }
