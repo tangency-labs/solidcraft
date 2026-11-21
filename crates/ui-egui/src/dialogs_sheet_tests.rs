@@ -1091,6 +1091,45 @@ fn path_flange_dialog_follows_the_path() {
     }
 }
 
+/// The Tab dialog takes the profile of a sketch on the sheet's face: the profile joins the same
+/// body, and Edit Feature brings the profile back.
+#[test]
+fn tab_dialog_joins_the_profile_to_the_sheet() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        let mut app = plate(mode);
+        app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+        app.run("sketch.create", json!({"plane": {"face": [50, 30, 2.5]}, "name": "Ear"})).unwrap();
+        // From (30, 50) to (70, 90) on the top face: over its y = 60 edge by 30 mm.
+        use solidcraft_engine::geom::prelude::*;
+        let plane = app.session.model.state().sketches.last().map(|ss| ss.plane).unwrap();
+        let (p0, p1) = (plane.to_local(solidcore_record::Vec3::new(30.0, 50.0, 2.5)), plane.to_local(solidcore_record::Vec3::new(70.0, 90.0, 2.5)));
+        app.run("sketch.rectangle.two_point", json!({"p0": [p0.x, p0.y], "p1": [p1.x, p1.y]})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        let ear = app.session.model.state().sketches.last().map(|ss| ss.feature).unwrap();
+        // The face's projected outline parts the profile: the region past the y = 60 edge.
+        let past = plane.to_local(solidcore_record::Vec3::new(50.0, 80.0, 2.5));
+        let ss = crate::open_meshing::session_world(&app.session).sketch(ear).unwrap().clone();
+        let index = ss.profiles.iter().position(|p| p.region.contains(solidcore_record::Vec2::new(past.x, past.y))).unwrap();
+        app.start("sheet.tab");
+        let mut d = app.dialog.clone().unwrap();
+        assert!(matches!(&d.kind, Kind::Sheet(Sm::Tab {})));
+        assert!(apply_commands(&app, &d).is_err(), "no profile picked yet");
+        d.inputs[0].items = vec![Sel::Profile { sketch: ear, index }];
+        let c = apply_commands(&app, &d).unwrap();
+        assert_eq!(c, vec![("sheet.tab".to_string(), json!({"sketch": ear, "profiles": [index], "exact_regions": true}))]);
+        let features = app.session.doc.features.len();
+        run_all(&mut app, c);
+        assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+        assert_eq!(app.session.doc.features.len(), features + 1);
+        assert_eq!(app.session.model.state().bodies.len(), 1, "the tab is part of the sheet");
+        let f = app.session.doc.features.last().cloned().unwrap();
+        let e = edit_dialog(&app, f.id, None).unwrap();
+        assert!(matches!(&e.kind, Kind::Sheet(Sm::Tab {})));
+        assert_eq!(e.inputs[0].items, vec![Sel::Profile { sketch: ear, index }]);
+        assert!(apply_commands(&app, &e).is_ok());
+    }
+}
+
 // ---- flat pattern navigation ----
 
 fn flat_app(preset: &str, mode: crate::ui_kit::LayoutMode) -> SolveApp {
