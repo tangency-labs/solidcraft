@@ -696,6 +696,29 @@ fn library_rules_keep_the_values_given_beside_them_and_refuse_what_the_library_l
     assert!(tight["notes"].to_string().contains("under Aluminium 6061-T6's published minimum of 2.581 mm"), "{tight}");
     assert_eq!(made["rule"]["thickness"], "0.0625 in", "{made}");
     assert_eq!(made["rule"]["material"], "Stainless steel 304", "{made}");
+    // A rule that unfolds from a chart's 90° bend deduction goes back to its K-factor when a gauge
+    // is picked for it: the chart value was for the thickness it had (#6794). Said in the notes,
+    // with the estimate that is now the rule's K-factor (hard column at R = T, air: 0.45).
+    run(
+        &mut s,
+        "sheet.manage_rules",
+        json!({"name": "Chart", "thickness": "2 mm", "bend_radius": "Thickness", "unfold_method": "deduction", "unfold_value": "3.5 mm"}),
+    );
+    let picked = run(&mut s, "sheet.manage_rules", json!({"name": "Chart", "material": "Stainless steel 304", "gauge": "16"}));
+    assert_eq!((picked["rule"]["unfold_method"].as_str(), picked["rule"]["unfold_value"].as_str()), (Some("k_factor"), Some("")), "{picked}");
+    assert_eq!(picked["rule"]["k_factor"], "0.45", "{picked}");
+    let notes = picked["notes"].to_string();
+    assert!(notes.contains("now unfolds from its K-factor") && notes.contains("estimate from the generic air chart"), "{picked}");
+    // A pick that says how the rule unfolds keeps the chart method, with no K-factor estimate:
+    // T 0.0625 in = 1.5875 mm, R = T, BD90 2.7 mm gives BA90 = 4·T − 2.7 = 3.65, K = 3.65/(π/2·T) − 1.
+    let kept = run(
+        &mut s,
+        "sheet.manage_rules",
+        json!({"name": "Chart", "material": "Stainless steel 304", "gauge": "16", "unfold_method": "deduction", "unfold_value": "2.7 mm"}),
+    );
+    assert_eq!((kept["rule"]["unfold_method"].as_str(), kept["rule"]["unfold_value"].as_str()), (Some("deduction"), Some("2.7 mm")), "{kept}");
+    assert!((kept["values"]["k_factor"].as_f64().unwrap_or(0.0) - (3.65 / (FRAC_PI_2 * 1.5875) - 1.0)).abs() < 1e-12, "{kept}");
+    assert!(!kept.to_string().contains("estimate"), "{kept}");
     // A material of one's own is a label.
     let own = run(&mut s, "sheet.manage_rules", json!({"name": "Galv", "material": "Galvanneal", "thickness": "1.6 mm"}));
     assert_eq!(own["rule"]["material"], "Galvanneal", "{own}");
@@ -2957,6 +2980,104 @@ fn the_angle_display_is_a_rule_setting_checked_saved_and_undone() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(display(&mut s).0, "bend");
     assert_eq!(bend_notes(&mut s), ["B1 UP 58%%d R1"]);
+}
+
+/// The bend table's allowance and the flat size of the last sheet body.
+fn allowance_and_flat_size(s: &mut Session) -> (f64, Value) {
+    let f = flat(s);
+    (f["bends"][0]["allowance"].as_f64().unwrap_or(f64::NAN), f["flat_size_mm"].clone())
+}
+
+#[test]
+fn a_rule_unfolds_from_a_press_brake_charts_90_degree_deduction_or_allowance() {
+    // The 2 mm rule `Shop` (R 1) with a chart's BD90 3.2 mm: BA90 = 2·(R + T) − BD90 = 6 − 3.2 =
+    // 2.8 mm, so K = (2.8/(π/2) − 1)/2 = 0.39126768131461387. A bend allowance is proportional to
+    // the bend angle, so a 58° bend allows 2.8 · 58/90 = 1.8044444444444445 mm.
+    const K: f64 = 0.39126768131461387;
+    for (deg, ba) in [(90.0, 2.8), (58.0, 1.8044444444444445)] {
+        let mut by_k = shop_bend(deg, None);
+        run(&mut by_k, "sheet.manage_rules", json!({"name": "Shop", "k_factor": K}));
+        let mut by_chart = shop_bend(deg, None);
+        let r = run(&mut by_chart, "sheet.manage_rules", json!({"name": "Shop", "unfold_method": "deduction", "unfold_value": "3.2 mm"}));
+        assert_eq!((&r["rule"]["unfold_method"], &r["rule"]["unfold_value"]), (&json!("deduction"), &json!("3.2 mm")));
+        assert!((r["values"]["k_factor"].as_f64().unwrap_or(f64::NAN) - K).abs() < 1e-12, "{r}");
+        let (chart_ba, chart_size) = allowance_and_flat_size(&mut by_chart);
+        let (k_ba, k_size) = allowance_and_flat_size(&mut by_k);
+        assert!((chart_ba - ba).abs() < 1e-9 && (k_ba - ba).abs() < 1e-9, "{deg}°: {chart_ba} and {k_ba}, want {ba}");
+        // The same part as the K-factor rule it works out to: the flat sizes agree to the rounding.
+        let sizes = |v: &Value| v.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect::<Vec<_>>()).unwrap_or_default();
+        let (a, b) = (sizes(&chart_size), sizes(&k_size));
+        assert!(a.len() == b.len() && !a.is_empty() && a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 1e-9), "{chart_size} vs {k_size}");
+        // The same 90° value as an allowance: BA90 2.8 mm gives the same K.
+        let r = run(&mut by_chart, "sheet.manage_rules", json!({"name": "Shop", "unfold_method": "Allowance", "unfold_value": "2.8 mm"}));
+        assert!((r["values"]["k_factor"].as_f64().unwrap_or(f64::NAN) - K).abs() < 1e-12, "{r}");
+        assert!((allowance_and_flat_size(&mut by_chart).0 - ba).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn the_unfold_method_is_a_rule_setting_checked_saved_and_undone() {
+    let mut s = shop_bend(90.0, None);
+    let listed = |s: &mut Session| {
+        let r = run(s, "sheet.rules", json!({}));
+        let rule = &r["rules"][0];
+        (rule["rule"]["unfold_method"].clone(), rule["rule"]["unfold_value"].clone(), rule["values"]["k_factor"].as_f64().unwrap_or(f64::NAN))
+    };
+    assert_eq!(listed(&mut s), (json!("k_factor"), json!(""), 0.5));
+    // A design whose rules unfold from their K-factor saves as it did before the setting.
+    let before = s.doc.to_json();
+    assert!(!before.contains("unfold_method") && !before.contains("unfold_value"), "{before}");
+    // A refused method or value changes nothing and makes no rule.
+    let refused = [
+        (json!({"unfold_method": "neutral"}), "`unfold_method` must be k_factor, deduction or allowance"),
+        (json!({"unfold_method": 3}), "`unfold_method` must be k_factor, deduction or allowance"),
+        (json!({"unfold_method": "deduction"}), "needs its 90° bend deduction (`unfold_value`)"),
+        (json!({"unfold_method": "allowance", "unfold_value": "9 mm"}), "outside 0 to 1"),
+        (json!({"unfold_method": "deduction", "unfold_value": "3 deg"}), ""),
+    ];
+    for (params, says) in refused {
+        for name in ["Shop", "Other"] {
+            let mut p = params.clone();
+            p["name"] = json!(name);
+            let e = s.execute("sheet.manage_rules", &p).map(|_| ()).unwrap_err().to_string();
+            assert!(e.contains(says), "{p}: {e}");
+            assert_eq!(s.doc.to_json(), before, "{p}");
+        }
+    }
+    // A flange takes the rule's unfolding and never its own.
+    let e = s.execute("sheet.flange", &json!({"edges": [[50, 60, 2]], "height": 20, "unfold_method": "deduction"})).unwrap_err().to_string();
+    assert!(e.contains("`unfold_method` is not a sheet.flange parameter"), "{e}");
+    let undo = s.undo.len();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Shop", "unfold_method": " bend_deduction ", "unfold_value": "3.2 mm"}));
+    let (_, _, k) = listed(&mut s);
+    assert!((k - 0.39126768131461387).abs() < 1e-12, "{k}");
+    assert!((allowance_and_flat_size(&mut s).0 - 2.8).abs() < 1e-9);
+    // Other settings leave it alone, and so does null.
+    run(&mut s, "sheet.manage_rules", json!({"name": "Shop", "hem_gap": "0.02 mm", "unfold_method": null}));
+    assert_eq!(listed(&mut s).0, "deduction");
+    // Saved with the design and read back; a design saved without it unfolds from its K-factor.
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    assert_eq!((&saved["sheet"]["rules"][0]["unfold_method"], &saved["sheet"]["rules"][0]["unfold_value"]), (&json!("deduction"), &json!("3.2 mm")));
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    assert!((allowance_and_flat_size(&mut reopened).0 - 2.8).abs() < 1e-9);
+    if let Some(rule) = saved["sheet"]["rules"][0].as_object_mut() {
+        rule.remove("unfold_method");
+        rule.remove("unfold_value");
+    }
+    let mut older = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    assert_eq!(listed(&mut older), (json!("k_factor"), json!(""), 0.5));
+    // Back to the K-factor: the rule keeps no 90° value, and saves as it did before the setting.
+    run(&mut s, "sheet.manage_rules", json!({"name": "Shop", "unfold_method": "k_factor"}));
+    assert_eq!(listed(&mut s), (json!("k_factor"), json!(""), 0.5));
+    let back = s.doc.to_json();
+    assert!(!back.contains("unfold_method") && !back.contains("unfold_value"), "{back}");
+    // Undone like the rule's other changes.
+    assert_eq!(s.undo.len(), undo + 3);
+    for _ in 0..3 {
+        run(&mut s, "edit.undo", json!({}));
+    }
+    assert_eq!(listed(&mut s), (json!("k_factor"), json!(""), 0.5));
+    assert_eq!(s.doc.to_json(), before);
 }
 
 #[test]
