@@ -110,7 +110,8 @@ fn count_behind_ahead(
                     return Err(Failure::new(
                         OP,
                         OffsetFailure::Defect {
-                            why: "a face of the merged offset has no surface, though the                                   offset and the merge give every face they make one",
+                            why: "a face of the merged offset has no surface, though the \
+                                  offset and the merge give every face they make one",
                         },
                     )
                     .with_status(SM_ERR_NULL_POINTER)

@@ -996,14 +996,6 @@ impl crate::SolidError {
             .into_error()
     }
 
-    /// [`crate::SolidError::Failed`] for something an offset routine needs that is not
-    /// there, as the phrase says, with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)`
-    /// on a `NULL` pointer).
-    #[must_use]
-    pub(crate) fn offset_missing(operation: &'static str, what: &'static str) -> Self {
-        Self::offset(operation, OffsetFailure::Missing(what))
-    }
-
     /// The offset failure behind this error, for a [`crate::SolidError::Failed`] with a
     /// [`Reason::Offset`].
     #[must_use]
@@ -1153,11 +1145,8 @@ mod tests {
                 },
             )
             .to_string(),
-            "offset::op: the gap search of an offset face's loops closes one gap per pass and              stopped after 64 passes with a gap still open (face 3)"
-        );
-        assert_eq!(
-            SolidError::offset_missing("offset::op", "the face's surface").to_string(),
-            "offset::op: the face's surface is missing"
+            "offset::op: the gap search of an offset face's loops closes one gap per pass and \
+             stopped after 64 passes with a gap still open (face 3)"
         );
         // a refusal replaced no status and does not answer as one
         let folds = SolidError::offset(
