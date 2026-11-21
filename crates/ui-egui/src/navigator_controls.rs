@@ -1,6 +1,6 @@
 //! The orbit and roll arrows, Home button and view command shared by the custom body navigator.
 use super::*;
-use crate::icons::navigation::{arrow, curved_arrow};
+use crate::icons::navigation::{arc_arrow, arrow, curved_arrow};
 
 pub(super) const SIZE: f32 = 112.0;
 // Paint and picking use the same original coordinate space, scaled as a group.
@@ -77,16 +77,62 @@ pub(super) fn home(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     }
 }
 
+/// The four orbit arrows: action, offset from the centre, the way the arrow points, tooltip
+/// (in design units, scaled with the navigator).
+const ORBIT_ARROWS: [(&str, egui::Vec2, egui::Vec2, &str); 4] = [
+    ("left", vec2(-74.0, 0.0), vec2(1.0, 0.0), "Orbit left 90°"),
+    ("right", vec2(74.0, 0.0), vec2(-1.0, 0.0), "Orbit right 90°"),
+    ("up", vec2(0.0, -74.0), vec2(0.0, 1.0), "Orbit up 90°"),
+    ("down", vec2(0.0, 74.0), vec2(0.0, -1.0), "Orbit down 90°"),
+];
+/// The side of an orbit arrow's square button, in design units.
+const ORBIT_BUTTON: f32 = 16.0;
+/// The two roll arrows: action, the button's offset and size, whether it curls clockwise, tooltip.
+const ROLL_ARROWS: [(&str, egui::Vec2, egui::Vec2, bool, &str); 2] = [
+    ("counterclockwise", vec2(42.0, -72.0), vec2(40.0, 20.0), false, "Rotate view counterclockwise 90°"),
+    ("clockwise", vec2(72.0, -42.0), vec2(20.0, 40.0), true, "Rotate view clockwise 90°"),
+];
+
+/// The axes navigator's two roll arrows: action, the arc's span (radians, screen y down, so
+/// positive is down), whether it curls clockwise, tooltip. They run along the outside of the
+/// compass circle in its lower-right corner, where the navigator's box has the most room outside
+/// the circle and no other control sits (the upper corners are Home's and Turn Around's), and meet
+/// at 45°.
+const AXES_ROLL_ARROWS: [(&str, (f32, f32), bool, &str); 2] =
+    [("clockwise", (0.80, 1.08), true, "Rotate view clockwise 90°"), ("counterclockwise", (0.77, 0.49), false, "Rotate view counterclockwise 90°")];
+/// How far outside the compass circle the axes navigator's roll arrows run.
+const AXES_ROLL_GAP: f32 = 6.5;
+
+/// The button of an axes navigator roll arrow spanning `span` round `c`: the box round its arc.
+fn axes_roll_button(c: Pos2, span: (f32, f32)) -> Rect {
+    let r = crate::view_compass::RADIUS + AXES_ROLL_GAP;
+    let at = |a: f32| c + vec2(a.cos(), a.sin()) * r;
+    Rect::from_two_pos(at(span.0), at(span.1)).expand(4.0)
+}
+
+/// `p` is on one of the axes navigator's roll arrows round the compass centred at `c`.
+pub(super) fn on_axes_roll_arrow(c: Pos2, p: Pos2) -> bool {
+    AXES_ROLL_ARROWS.iter().any(|(_, span, _, _)| axes_roll_button(c, *span).contains(p))
+}
+
+/// The axes navigator's two roll arrows round the compass centred at `c`: painted while it is `active`.
+pub(super) fn axes_roll_arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, c: Pos2, active: bool, t: Tokens) {
+    for (action, span, clockwise, tooltip) in AXES_ROLL_ARROWS {
+        let (action, tooltip) = match app.preferences.invert_curved_roll_arrows.then(|| inverted_roll(action)).flatten() {
+            Some(swapped) => (swapped, if swapped == "clockwise" { "Rotate view clockwise 90°" } else { "Rotate view counterclockwise 90°" }),
+            None => (action, tooltip),
+        };
+        let hovered = control(app, ui, axes_roll_button(c, span), action, tooltip);
+        if active {
+            arc_arrow(painter, c, crate::view_compass::RADIUS + AXES_ROLL_GAP, span, clockwise, hovered, t, 0.75);
+        }
+    }
+}
+
 /// The four orbit arrows and the two roll arrows around a gizmo centred at `c`: painted while the gizmo is `active`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, c: Pos2, scale: f32, active: bool, t: Tokens) {
-    let (distance, button_size) = (74.0, 16.0);
-    for (action, offset, direction, tooltip) in [
-        ("left", vec2(-distance, 0.0), vec2(1.0, 0.0), "Orbit left 90°"),
-        ("right", vec2(distance, 0.0), vec2(-1.0, 0.0), "Orbit right 90°"),
-        ("up", vec2(0.0, -distance), vec2(0.0, 1.0), "Orbit up 90°"),
-        ("down", vec2(0.0, distance), vec2(0.0, -1.0), "Orbit down 90°"),
-    ] {
+    for (action, offset, direction, tooltip) in ORBIT_ARROWS {
         let (action, tooltip) = match app.preferences.invert_navigator_arrows.then(|| inverted_arrow(action)).flatten() {
             Some(swapped) => (
                 swapped,
@@ -100,15 +146,17 @@ pub(super) fn arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
             None => (action, tooltip),
         };
         let at = c + offset * scale;
-        let hovered = control(app, ui, Rect::from_center_size(at, vec2(button_size, button_size) * scale), action, tooltip);
+        let hovered = control(app, ui, Rect::from_center_size(at, vec2(ORBIT_BUTTON, ORBIT_BUTTON) * scale), action, tooltip);
         if active {
             arrow(painter, at, direction * scale, hovered, t);
         }
     }
-    for (action, offset, size, clockwise, tooltip) in [
-        ("counterclockwise", vec2(42.0, -72.0), vec2(40.0, 20.0), false, "Rotate view counterclockwise 90°"),
-        ("clockwise", vec2(72.0, -42.0), vec2(20.0, 40.0), true, "Rotate view clockwise 90°"),
-    ] {
+    roll_arrows(app, ui, painter, c, scale, active, t);
+}
+
+/// The two curved roll arrows at the top right of a gizmo centred at `c`: painted while the gizmo is `active`.
+fn roll_arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, c: Pos2, scale: f32, active: bool, t: Tokens) {
+    for (action, offset, size, clockwise, tooltip) in ROLL_ARROWS {
         let (action, tooltip) = match app.preferences.invert_curved_roll_arrows.then(|| inverted_roll(action)).flatten() {
             Some(swapped) => (swapped, if swapped == "clockwise" { "Rotate view clockwise 90°" } else { "Rotate view counterclockwise 90°" }),
             None => (action, tooltip),

@@ -49,7 +49,7 @@ pub fn axis_tip_scaled(painter: &egui::Painter, c: Pos2, name: &str, d: [f64; 3]
         let letter = if hovered { col } else { t.on_accent };
         let label = name.to_uppercase();
         let galley = painter.layout_no_wrap(label, solidcraft_ui_kit::type_face::bold(solidcraft_theme::Tokens::get().font_compass * scale), letter);
-        let origin = at - galley.size() / 2.0;
+        let origin = at - solidcraft_ui_kit::type_face::ink_centre(&galley);
         let ppp = painter.ctx().pixels_per_point().max(0.5);
         let origin = pos2((origin.x * ppp).round() / ppp, (origin.y * ppp).round() / ppp);
         painter.galley(origin, galley, letter);

@@ -12,10 +12,18 @@ pub(crate) fn arrow(painter: &egui::Painter, at: Pos2, direction: egui::Vec2, ho
 pub(crate) fn curved_arrow(painter: &egui::Painter, at: Pos2, clockwise: bool, hover: bool, t: Tokens, scale: f32) {
     let (start, end) =
         if clockwise { (-std::f32::consts::FRAC_PI_4 + 0.12, 0.0) } else { (-std::f32::consts::FRAC_PI_4 - 0.12, -std::f32::consts::FRAC_PI_2) };
+    arc_arrow(painter, at, 32.0 * scale, (start, end), clockwise, hover, t, scale);
+}
+
+/// An arrow along the circle about `centre` of `radius`, from angle `span.0` to `span.1` (radians,
+/// screen y down), its head at the end; `clockwise` says which way the head points along the circle.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn arc_arrow(painter: &egui::Painter, centre: Pos2, radius: f32, span: (f32, f32), clockwise: bool, hover: bool, t: Tokens, scale: f32) {
+    let (start, end) = span;
     let points: Vec<_> = (0..=16)
         .map(|i| {
             let angle = egui::lerp(start..=end, f32::from(i as u8) / 16.0);
-            at + vec2(angle.cos(), angle.sin()) * (32.0 * scale)
+            centre + vec2(angle.cos(), angle.sin()) * radius
         })
         .collect();
     painter.add(Shape::line(points.clone(), Stroke::new(5.0 * scale, if hover { t.accent } else { t.navigator_border })));

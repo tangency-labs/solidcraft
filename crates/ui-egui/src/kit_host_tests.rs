@@ -998,8 +998,8 @@ mod view_compass {
     use crate::ui_kit::view_compass::{Compass, ViewAxes, show, tips};
     use egui::{Event, Pos2, RawInput, Rect, pos2, vec2};
 
-    /// The tooltip text a hovered tip shows, after a few frames with the pointer at rest on it.
-    fn hover_text(snap_hint: bool) -> Vec<String> {
+    /// The text drawn while the pointer rests on a tip, after a few frames.
+    fn hover_text() -> Vec<String> {
         let front = ViewAxes { right: [1.0, 0.0, 0.0], up: [0.0, 0.0, 1.0], back: [0.0, -1.0, 0.0] };
         let centre = pos2(200.0, 200.0);
         let at = tips(&front, centre).iter().find(|tip| tip.0 == "x").map(|tip| tip.2).unwrap();
@@ -1014,8 +1014,7 @@ mod view_compass {
                 ..Default::default()
             };
             let output = crate::ui_kit::test_support::raw_frame(&ctx, input, |ui| {
-                let compass =
-                    Compass { clip: ui.max_rect(), centre, axes: front, hover: Some(at), orbiting: false, snap_hint, home_label: "Home".into() };
+                let compass = Compass { clip: ui.max_rect(), centre, axes: front, hover: Some(at), orbiting: false, home_label: "Home".into() };
                 show(ui, &compass);
             });
             texts = Vec::new();
@@ -1030,17 +1029,18 @@ mod view_compass {
         texts
     }
 
-    /// A tip's hover text is the catalog's whole sentence in the user's language, with the axis
-    /// as its argument, with and without the Shift hint.
+    /// A hovered tip's label names its view in the user's language, and there is no tooltip
+    /// besides it.
     #[test]
-    fn a_tips_hover_text_is_translated() {
+    fn a_tips_label_is_translated_and_alone() {
         crate::test_support::host_data();
         let _japanese = solidcraft_ui_text::scope("ja");
-        for (snap_hint, id) in [(false, "ui.view_compass_tip"), (true, "ui.view_compass_tip_snap")] {
-            let expected = solidcraft_ui_text::format(id, &[("axis", "X")]);
-            assert!(expected.starts_with('X') && !expected.contains("View from"), "{id} is in the Japanese catalog: {expected}");
-            let texts = hover_text(snap_hint);
-            assert!(texts.contains(&expected), "{id}: the tip shows {expected:?}; drawn: {texts:?}");
-        }
+        let right = solidcraft_ui_text::tr("ui.view_compass.right").to_owned();
+        assert_ne!(right, "Right", "the view name is in the Japanese catalog");
+        let texts = hover_text();
+        assert!(texts.contains(&right), "the label shows {right:?}; drawn: {texts:?}");
+        assert!(!texts.iter().any(|t| t.contains("Drag")), "no tooltip: {texts:?}");
+        let tooltip = solidcraft_ui_text::format("ui.view_compass_tip", &[("axis", "X")]);
+        assert!(!texts.contains(&tooltip), "no tooltip: {texts:?}");
     }
 }
