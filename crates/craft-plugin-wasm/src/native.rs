@@ -79,6 +79,11 @@ fn wit_error(error: HostError) -> PluginError {
         HostError::LimitExceeded { limit } => PluginError::LimitExceeded(limit),
         HostError::InvalidManifest { field, reason } => PluginError::InvalidManifest(types::FieldFailure { field, reason }),
         HostError::InvalidInput { field, reason } => PluginError::InvalidInput(types::FieldFailure { field, reason }),
+        // Commit conflicts normally return directly to the caller after guest execution. Keep
+        // the frozen WIT error set when a host also reports one during a guest import.
+        error @ HostError::UserStorageConflict { .. } => {
+            PluginError::CommandFailed(types::CommandFailure { command: "user-storage.commit".into(), reason: error.to_string() })
+        }
         HostError::Trap { reason } => PluginError::Trap(reason),
         HostError::Cancelled => PluginError::Cancelled,
         HostError::UnsupportedCapability { reason, .. } => PluginError::InvalidManifest(types::FieldFailure { field: "capabilities".into(), reason }),
@@ -114,6 +119,7 @@ struct State<H> {
     /// Sensitive command groups both the manifest requests and the app grants.
     groups: BTreeSet<String>,
     effect: Effect,
+    user_storage: bool,
     design_tokens: bool,
     folders: BTreeMap<String, Folder>,
     staged: BTreeMap<(String, PathBuf), PendingWrite>,
@@ -223,6 +229,56 @@ impl<H: PluginHost> commands::Host for State<H> {
             return Err(self.fail(limit("command result size")));
         }
         Ok(text)
+    }
+}
+impl<H: PluginHost> State<H> {
+    fn user_storage_check(&mut self, key: Option<&str>, write: Option<&str>) -> std::result::Result<(), PluginError> {
+        self.check()?;
+        if !self.user_storage {
+            return Err(self.fail(HostError::PermissionDenied { permission: "user-storage@0.1 is not requested".into() }));
+        }
+        if let Some(import) = write.filter(|_| self.effect == Effect::Read) {
+            return Err(self.fail(craft_plugin::read_entry_refusal(import)));
+        }
+        if let Some(key) = key {
+            craft_plugin::check_user_storage_key(key).map_err(|e| self.fail(e))?;
+        }
+        Ok(())
+    }
+}
+impl<H: PluginHost> user_storage::Host for State<H> {
+    fn get(&mut self, key: String) -> std::result::Result<Option<String>, PluginError> {
+        self.user_storage_check(Some(&key), None)?;
+        let value = self.host.user_storage_get(&key).map_err(|e| self.fail(e))?;
+        let json = value.map(|v| serde_json::to_string(&v)).transpose().map_err(|e| self.fail(trap(e.to_string())))?;
+        if json.as_ref().is_some_and(|v| v.len() > craft_plugin::MAX_USER_STORAGE_BYTES) {
+            return Err(self.fail(limit("user-storage total bytes (65536)")));
+        }
+        Ok(json)
+    }
+    fn set(&mut self, key: String, value: String) -> std::result::Result<(), PluginError> {
+        self.user_storage_check(Some(&key), Some("user-storage.set"))?;
+        if value.len() > MAX_JSON_BYTES {
+            return Err(self.fail(limit("user-storage JSON input bytes (1048576)")));
+        }
+        let value = serde_json::from_str(&value)
+            .map_err(|e| self.fail(HostError::InvalidInput { field: "user-storage.value".into(), reason: e.to_string() }))?;
+        self.host.user_storage_set(&key, &value).map_err(|e| self.fail(e))
+    }
+    fn remove(&mut self, key: String) -> std::result::Result<bool, PluginError> {
+        self.user_storage_check(Some(&key), Some("user-storage.remove"))?;
+        self.host.user_storage_remove(&key).map_err(|e| self.fail(e))
+    }
+    fn list(&mut self) -> std::result::Result<Vec<String>, PluginError> {
+        self.user_storage_check(None, None)?;
+        let keys = self.host.user_storage_list().map_err(|e| self.fail(e))?;
+        if keys.len() > craft_plugin::MAX_USER_STORAGE_KEYS {
+            return Err(self.fail(limit("user-storage keys (128)")));
+        }
+        for key in &keys {
+            craft_plugin::check_user_storage_key(key).map_err(|e| self.fail(e))?;
+        }
+        Ok(keys)
     }
 }
 impl<H: PluginHost> design_state::Host for State<H> {
@@ -787,7 +843,8 @@ fn run_mode<H: PluginHost + 'static>(
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
-    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, folders, dialog);
+    let user_storage = manifest.capabilities.iter().any(|c| c.starts_with("user-storage@"));
+    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, folders, user_storage, dialog);
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => state.publish_writes().map(|()| value),
@@ -814,6 +871,7 @@ fn execute<H: PluginHost + 'static>(
     (engine, component, stack): (Engine, Component, usize),
     (commands, groups, design_tokens): (BTreeMap<String, CommandSchema>, BTreeSet<String>, bool),
     folders: BTreeMap<String, Folder>,
+    user_storage: bool,
     dialog: bool,
 ) -> (State<H>, Result<Value>) {
     let limits = &runtime.limits;
@@ -822,6 +880,7 @@ fn execute<H: PluginHost + 'static>(
         commands,
         groups,
         effect: if dialog { Effect::Read } else { entry.effect },
+        user_storage,
         design_tokens,
         folders,
         staged: BTreeMap::new(),
@@ -844,7 +903,7 @@ fn execute<H: PluginHost + 'static>(
             Wit::Current if dialog => {
                 let mut linker = Linker::new(&engine);
                 if runtime.is_importer() {
-                    importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
+                    importer_bindings::ImporterPluginWithStorage::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 } else {
                     // Command hooks may also import design-state; the hook-only WIT world stays unchanged.
                     bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
@@ -1028,7 +1087,7 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
     if hook {
         let mut linker = Linker::<State<Inert>>::new(&engine);
         if importer {
-            importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+            importer_bindings::ImporterPluginWithStorage::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         } else {
             bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         }
@@ -1036,8 +1095,8 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
     }
     let mut linker = Linker::<State<Inert>>::new(&engine);
     if importer {
-        importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
-        importer_bindings::ImporterPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
+        importer_bindings::ImporterPluginWithStorage::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        importer_bindings::ImporterPluginWithStoragePre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
     } else {
         bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         bindings::CommandPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
@@ -1134,7 +1193,7 @@ fn compile_with(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)>
 }
 
 pub(super) fn run_import<H: PluginHost + 'static>(
-    host: H,
+    mut host: H,
     manifest: &Manifest,
     bytes: &[u8],
     entry: &str,
@@ -1201,12 +1260,17 @@ pub(super) fn run_import<H: PluginHost + 'static>(
     if host.is_cancelled() {
         return (host, Err(HostError::Cancelled));
     }
+    let user_storage = manifest.capabilities.iter().any(|c| c.starts_with("user-storage@"));
+    if user_storage && let Err(error) = host.begin_transaction() {
+        return (host, Err(error));
+    }
     let limits = &runtime.limits;
     let state = State {
         host,
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
         effect: Effect::Open,
+        user_storage,
         design_tokens: false,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
@@ -1228,8 +1292,8 @@ pub(super) fn run_import<H: PluginHost + 'static>(
             Wit::V0_1 => v0_1::call_import(&engine, &mut store, &component, &entry.name, &file, &options),
             Wit::Current => {
                 let mut linker = Linker::new(&engine);
-                importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
-                let guest = importer_bindings::ImporterPlugin::instantiate(&mut store, &component, &linker)?;
+                importer_bindings::ImporterPluginWithStorage::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
+                let guest = importer_bindings::ImporterPluginWithStorage::instantiate(&mut store, &component, &linker)?;
                 Ok(call_import!(guest, &mut store, &entry.name, &file, &options)?.map_err(host_error))
             }
         })?;
@@ -1259,6 +1323,12 @@ pub(super) fn run_import<H: PluginHost + 'static>(
     })();
     let mut state = store.into_data();
     state.close_evaluation();
+    // The app accepts and validates the design before committing the pending preferences.
+    // Every execution failure, including an invalid report or missing design, discards them.
+    let outcome = match outcome {
+        Err(error) if user_storage => state.host.rollback_transaction().and(Err(error)),
+        outcome => outcome,
+    };
     (state.host, outcome.map_err(|error| with_limits(error, limits)))
 }
 

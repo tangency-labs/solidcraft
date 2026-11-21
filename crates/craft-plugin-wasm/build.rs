@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let namespace = namespace.replace('-', "_");
     let name = name.replace('-', "_");
     let output = format!(
-        "use bindings::{namespace}::{name}::{{clock, commands, control, design_state, files, log, types::{{self, PluginError}}}};\n\
+        "use bindings::{namespace}::{name}::{{clock, commands, control, design_state, files, log, user_storage, types::{{self, PluginError}}}};\n\
          macro_rules! call_entry {{ ($guest:expr, $store:expr, $entry:expr, $params:expr) => {{ $guest.{namespace}_{name}_entry().call_execute($store, $entry, $params) }}; }}\n"
     );
     fs::write(PathBuf::from(env::var("OUT_DIR")?).join("aliases.rs"), output)?;
@@ -22,12 +22,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         "mod importer_bindings {{\n\
              wasmtime::component::bindgen!({{\n\
                  path: \"../craft-plugin/wit\",\n\
-                 world: \"importer-plugin\",\n\
+                 world: \"importer-plugin-with-storage\",\n\
                  with: {{\n\
                      \"{package_name}/types\": super::bindings::{namespace}::{name}::types,\n\
                      \"{package_name}/log\": super::bindings::{namespace}::{name}::log,\n\
                      \"{package_name}/control\": super::bindings::{namespace}::{name}::control,\n\
                      \"{package_name}/clock\": super::bindings::{namespace}::{name}::clock,\n\
+                     \"{package_name}/user-storage\": super::bindings::{namespace}::{name}::user_storage,\n\
                  }},\n\
              }});\n\
          }}\n\
