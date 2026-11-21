@@ -460,9 +460,9 @@ impl<'a> FeatureExecutive<'a> {
         &self.features
     }
 
-    /// The two retained supports whose extensions span a feature's circular boundary
-    /// loops. Call after adding the feature, before partitioning the base.
-    /// [`Self::do_defeature`] checks their patch against the other retained faces.
+    /// The two retained supports whose surfaces can span a feature's circular
+    /// boundary loops. Call after adding the feature, before partitioning the base.
+    /// [`Self::do_defeature`] checks the extension lengths and the other retained faces.
     ///
     /// # Errors
     ///
@@ -671,8 +671,8 @@ impl<'a> FeatureExecutive<'a> {
     ///
     /// Not upstream (WR-656): a feature that was not partitioned, or whose base patch could
     /// not be built, is not taken off. Upstream leaves its hole open, with success, for the
-    /// caller to put back with `RestoreFeatures`; here it is put back at once
-    /// (`RestoreFeature`), so no base is handed back open. The features kept are returned,
+    /// caller to put back with `RestoreFeatures`; in a batch the base is put back as it
+    /// was before the refused feature, so the next feature sees the intact body. The features kept are returned,
     /// each naming the base loop edge of its open hole and, when its patch's construction
     /// said, why it was not built ([`KeptFeature::limit`], #3218), and the executive drops
     /// them, as `RestoreFeatures` does. When no feature comes off, the call is refused at the
@@ -718,6 +718,7 @@ impl<'a> FeatureExecutive<'a> {
         let mut kept: Vec<KeptFeature> = Vec::new();
         let mut untouched = Vec::new();
         let mut off = 0;
+        let batch = self.features.len() > 1;
         for i in 0..self.features.len() {
             let Some(feature) = self.features.get_mut(i) else {
                 continue;
@@ -735,6 +736,14 @@ impl<'a> FeatureExecutive<'a> {
                 }
                 continue;
             }
+            // Partition cuts the selected faces out even when no patch can be built.
+            // The later features in a batch still refer to the original arena ids.
+            let before = if batch {
+                Some(self.base.snapshot()?)
+            } else {
+                None
+            };
+            let first_patch = self.patches.len();
             keep_unported(partition_feature(k, self.base, feature))?;
             keep_unported(build_patches(k, self.base, feature, &mut self.patches))?;
             // `build_patches` marks the feature rebuilt before it refuses an unpartitioned
@@ -743,8 +752,6 @@ impl<'a> FeatureExecutive<'a> {
                 keep_unported(apply_patches(k, self.base, feature, &mut self.patches))?;
                 off += 1;
             } else {
-                // its hole stays open until it is put back, after the others, as upstream's
-                // caller's RestoreFeatures would
                 kept.push(KeptFeature {
                     feature: i,
                     open_loop: open_loop_edge(feature),
@@ -752,6 +759,15 @@ impl<'a> FeatureExecutive<'a> {
                         .and_then(|l| l.limit)
                         .or_else(|| feature.loops.iter().find_map(|l| l.limit)),
                 });
+                // Only a completed partition with the separated body could have been
+                // restored. A failure during partition still refuses the batch below.
+                if let Some(before) = before.filter(|_| {
+                    feature.is_partitioned && feature.can_restore && feature.fbrep.is_some()
+                }) {
+                    self.base.restore(before);
+                    self.patches.truncate(first_patch);
+                    untouched.push(i);
+                }
             }
         }
         if kept.is_empty() {
@@ -782,7 +798,7 @@ impl<'a> FeatureExecutive<'a> {
             let Some(feature) = self.features.get_mut(f.feature) else {
                 return Err(refusal);
             };
-            // An obstructed joint patch left its source feature intact.
+            // A refused joint patch or a rolled-back partition left the feature intact.
             if !untouched.contains(&f.feature) {
                 match restore_feature(k, self.base, feature) {
                     Ok(true) => {}

@@ -2697,9 +2697,14 @@ fn remove_topological_in(
             if keep_edges.is_some_and(|keep| keep.contains(&edge)) {
                 continue;
             }
-            let Some(topological) =
-                crate::error::ignored(crate::topology::edge::is_topological(k, b, edge, 1.0))?
-            else {
+            // A constructed join already lies on its support. Keep the two faces
+            // separate if covering them would require either tolerance to grow.
+            let topological = if joins.is_some() {
+                crate::topology::edge::is_topological_without_growth(k, b, edge)
+            } else {
+                crate::topology::edge::is_topological(k, b, edge, 1.0)
+            };
+            let Some(topological) = crate::error::ignored(topological)? else {
                 continue;
             };
             if !topological.is_topological {
@@ -2749,7 +2754,7 @@ fn remove_topological_in(
                     .natural_uv_domain_with_nurb(k)?;
                 crate::topology::face::p2::set_uv_domain(b, keep, &domain)?;
                 let tolerance = b.face(keep)?.tolerance;
-                if topological.dist_between > tolerance / 10.0 {
+                if joins.is_none() && topological.dist_between > tolerance / 10.0 {
                     set_face_tolerance(b, keep, tolerance + topological.dist_between, true, true)?;
                 }
             }

@@ -10,7 +10,7 @@ use crate::blend::fillet_section::{interval::Ivl, station::as_b_spline};
 use crate::curve::curve::CurveKind;
 use crate::error::blend::BlendFailure;
 use crate::error::defeature::DefeatureFailure;
-use crate::error::{Result, SolidError};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::tol::{self, SmallTopoType};
 use crate::kernel::Kernel;
 use crate::math::Vec3;
@@ -21,7 +21,7 @@ use crate::surface::surface::Surface;
 use crate::topology::brep::{p3, p5, sheet};
 use crate::topology::face::p3::{face_intersect_breps, FaceBreps, FaceIntersectOptions};
 use crate::topology::{edge, vertex, Brep, FaceId};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy)]
 struct Ring {
@@ -45,6 +45,7 @@ pub(super) struct Closure {
     sides: [Support; 2],
     /// Two different meridians meet on this circle; identical ones need no join.
     intersection: Option<Ring>,
+    shortfall: Option<DefeatureFailure>,
 }
 
 fn neighbour(b: &Brep, f: &Feature, l: &FeatureLoop) -> Result<Option<FaceId>> {
@@ -237,12 +238,28 @@ impl Closure {
                 return Ok(None);
             }
         }
-        let intersection = if surface_lies_on(k, b, z, &locus)? {
-            let reach = |s: Support| s.max_extension / s.slope.hypot(1.0);
-            if reach(lo) + reach(hi) < gap {
-                return Ok(None);
-            }
-            None
+        let available = [lo.max_extension, hi.max_extension];
+        let [lo_scale, hi_scale] = [lo, hi].map(|s| s.slope.hypot(1.0));
+        let (intersection, shortfall) = if surface_lies_on(k, b, z, &locus)? {
+            let missing = gap - (lo.max_extension / lo_scale + hi.max_extension / hi_scale);
+            // Any division closes a shared generator. One sufficient pair leaves
+            // both current reaches in place and shares the remaining gap equally.
+            let shortfall = if missing > 0.0 {
+                let a = lo.max_extension + (0.5 * missing) * lo_scale;
+                let mut b = hi.max_extension + (0.5 * missing) * hi_scale;
+                if a / lo_scale + b / hi_scale < gap {
+                    // The suggested lengths must still close the gap when supplied
+                    // back to this test. Round the remaining meridian length outwards.
+                    b = ((Ivl::from(gap) - Ivl::from(a / lo_scale)) * Ivl::from(hi_scale)).hi;
+                }
+                Some(DefeatureFailure::InsufficientAnnularReach {
+                    available,
+                    sufficient: [a, b],
+                })
+            } else {
+                None
+            };
+            (None, shortfall)
         } else {
             // r_lo + m_lo*t = r_hi + m_hi*(t-gap). Require the intersection
             // of the two generators strictly inside the missing interval.
@@ -253,15 +270,20 @@ impl Closure {
             if !(t.lo > 0.0 && t.hi < gap && radius.lo > 0.0) {
                 return Ok(None);
             }
-            if t.hi * lo.slope.hypot(1.0) > lo.max_extension
-                || (gap - t.lo) * hi.slope.hypot(1.0) > hi.max_extension
-            {
-                return Ok(None);
-            }
-            Some(Ring {
+            let sufficient = [t.hi * lo_scale, (gap - t.lo) * hi_scale];
+            let shortfall = sufficient
+                .iter()
+                .zip(available)
+                .any(|(&need, reach)| need > reach)
+                .then_some(DefeatureFailure::InsufficientAnnularReach {
+                    available,
+                    sufficient,
+                });
+            let join = Ring {
                 height: lo.rim.height + t.mid(),
                 radius: radius.mid(),
-            })
+            };
+            (Some(join), shortfall)
         };
         Ok(Some(Self {
             origin,
@@ -269,6 +291,7 @@ impl Closure {
             x,
             sides: [lo, hi],
             intersection,
+            shortfall,
         }))
     }
 
@@ -309,9 +332,9 @@ impl Closure {
     fn obstruction(
         &self,
         k: &Kernel,
-        base: &mut Brep,
+        base: &Brep,
         selected: &[FaceId],
-        patch: &mut Brep,
+        patch: &Brep,
     ) -> Result<Option<FaceId>> {
         let tolerance = tol::brep_zone_tol_3d(k, base, SmallTopoType::default());
         let approx = tol::approx_tol3d(k, tolerance);
@@ -320,20 +343,29 @@ impl Closure {
             want_points: true,
             ..Default::default()
         };
+        let mut probes = None;
         for wall in bp1::faces(patch, None)? {
-            let wall_box = crate::query::face::p1::calculate_bounding_box(k, &*patch, wall, false)?;
+            let wall_box = crate::query::face::p1::calculate_bounding_box(k, patch, wall, false)?;
             for other in bp1::faces(base, None)? {
                 if sides.contains(&other) || selected.contains(&other) {
                     continue;
                 }
                 let face_box =
-                    crate::query::face::p1::calculate_bounding_box(k, &*base, other, false)?;
+                    crate::query::face::p1::calculate_bounding_box(k, base, other, false)?;
                 if wall_box.are_disjoint(&face_box, tolerance) {
                     continue;
                 }
+                // The intersection may keep UV trims and grow tolerances on both
+                // bodies. Only its decision and the original face id leave the probe.
+                let (patch_probe, base_probe) = match &mut probes {
+                    Some(pair) => pair,
+                    empty @ None => {
+                        empty.insert((patch.clone_for_trial()?, base.clone_for_trial()?))
+                    }
+                };
                 let intersection = face_intersect_breps(
                     k,
-                    FaceBreps::Two(patch, base),
+                    FaceBreps::Two(patch_probe, base_probe),
                     wall,
                     other,
                     approx,
@@ -360,8 +392,11 @@ impl Closure {
         feature: &mut Feature,
         patches: &mut Vec<Option<Brep>>,
     ) -> Result<Option<DefeatureFailure>> {
-        let mut patch = self.patch(k, base.tolerance())?;
-        if let Some(face) = self.obstruction(k, base, &feature.faces, &mut patch)? {
+        if self.shortfall.is_some() {
+            return Ok(self.shortfall);
+        }
+        let patch = self.patch(k, base.tolerance())?;
+        if let Some(face) = self.obstruction(k, base, &feature.faces, &patch)? {
             return Ok(Some(DefeatureFailure::PatchIntersectsFace { face }));
         }
         if bp1::regions(base, None)?.len() <= 2 {
@@ -411,10 +446,23 @@ impl Closure {
         let supports = self.supports();
         let mut rims = Vec::new();
         let mut rim_vertices = Vec::new();
+        let mut certified = BTreeSet::new();
         for e in bp1::edges(base, None)? {
             let faces = edge::faces(base, e, None)?;
-            if faces.iter().any(|f| added.contains(f)) && faces.iter().any(|f| supports.contains(f))
-            {
+            if let (Some(&wall), Some(&neighbour)) = (
+                faces.iter().find(|f| added.contains(f)),
+                faces.iter().find(|f| supports.contains(f)),
+            ) {
+                if certified.insert((wall, neighbour)) {
+                    let reason = BlendFailure::Defect {
+                        why: "the constructed annular patch does not lie on its retained support",
+                    };
+                    let defect = || SolidError::blend_at(super::OP, reason, EntityRef::Edge(e));
+                    let locus = cone_on(base, neighbour)?.ok_or_else(defect)?;
+                    if !surface_lies_on(k, base, wall, &locus)? {
+                        return Err(defect());
+                    }
+                }
                 let (a, z) = edge_vertices(base, e)?;
                 rim_vertices.extend([a, z]);
                 rims.push(e);

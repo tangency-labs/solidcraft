@@ -43,7 +43,7 @@ use solidcore::topology::proto_topology::p1::CopyBrepMap;
 use solidcore::topology::{edge, vertex, Brep, EdgeId, FaceId, NamingScheme, VertexId};
 use solidcore::EntityRef;
 
-use crate::body::{finish, Body, Expect};
+use crate::body::{finish, finish_proved, Body, Expect};
 use crate::error::status;
 use crate::history::{self, History, Made};
 use crate::order::{self, Order};
@@ -570,9 +570,9 @@ pub fn remove_ring_groove(
         .map(|&i| order::face(&mapped, i))
         .collect::<Result<Vec<_>>>()?;
     let selection: HashSet<_> = picked.iter().copied().collect();
-    let mut removed = false;
+    let mut outward = None;
     let history = history::recorded(&result, &mapped, Made::Plain, || {
-        removed = with_body("remove_ring_groove", &result, |k, b| {
+        with_body("remove_ring_groove", &result, |k, b| {
             let mut feature = FeatureExecutive::new(k, b)?;
             let Some(i) = feature.add_feature(
                 k,
@@ -581,7 +581,7 @@ pub fn remove_ring_groove(
                 RebuildBrepType::FromOtherBrep,
             )?
             else {
-                return Ok(false);
+                return Ok(Ok(()));
             };
             // add_feature partitions from the first selected face. Never accept a subset
             // of a disconnected selection as the requested groove.
@@ -589,16 +589,19 @@ pub fn remove_ring_groove(
                 f.faces.len() == selection.len()
                     && f.faces.iter().all(|face| selection.contains(face))
             }) || feature.annular_supports(k, i)?.is_none()
+                || !feature.do_defeature(k)?.is_empty()
             {
-                return Ok(false);
+                return Ok(Ok(()));
             }
-            Ok(feature.do_defeature(k)?.is_empty())
-        })?;
-        Ok(())
+            // Read the history from the finished solid. Clearing its temporary history
+            // tags afterwards changes neither the topology nor the outward proof.
+            Ok(
+                finish_proved(k, std::mem::take(b), Expect::SOLID)?.map(|(solid, proof)| {
+                    *b = solid;
+                    outward = proof;
+                }),
+            )
+        })?
     })?;
-    if !removed {
-        return Ok(None);
-    }
-    result.check_solid()?;
-    Ok(Some((result, history)))
+    Ok(outward.map(|proof| (Body::held(result.into_inner(), Some(proof)), history)))
 }

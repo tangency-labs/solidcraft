@@ -12,6 +12,7 @@
 //! |----------------------------------------------|--------------------------|
 //! | [`DefeatureFailure::ExtensionRefused`]       | `SM_ERR` (WR-656)        |
 //! | [`DefeatureFailure::ExtensionWithinTolerance`] | `SM_ERR` (WR-656)      |
+//! | [`DefeatureFailure::InsufficientAnnularReach`] | no upstream counterpart |
 //! | [`DefeatureFailure::LoopNotPlanar`]          | `SM_ERR` (WR-656)        |
 //! | [`DefeatureFailure::NotEnclosed`]            | `SM_ERR` (WR-656)        |
 //! | [`DefeatureFailure::PatchEnclosesFace`]      | no upstream counterpart  |
@@ -46,6 +47,15 @@ pub enum DefeatureFailure {
         extended_by: f64,
         /// The identity radius at the loop's vertices: extend by more than this.
         identity_radius: f64,
+    },
+    /// The two extensions fall short of a continuous annular patch. Distances are
+    /// lengths along the two meridians, in increasing station order on the first axis.
+    InsufficientAnnularReach {
+        /// The available extension at each rim.
+        available: [f64; 2],
+        /// A sufficient pair. On a shared support the two rims may divide the missing
+        /// length differently; on distinct supports each must reach the meeting circle.
+        sufficient: [f64; 2],
     },
     /// A planar cap was asked for a loop whose curves no plane holds (the planar face's own
     /// refusal is the cause).
@@ -86,6 +96,7 @@ impl DefeatureFailure {
         match self {
             Self::ExtensionRefused { .. }
             | Self::ExtensionWithinTolerance { .. }
+            | Self::InsufficientAnnularReach { .. }
             | Self::LoopNotPlanar
             | Self::NotEnclosed { .. }
             | Self::PatchEnclosesFace { .. }
@@ -100,6 +111,7 @@ impl DefeatureFailure {
         match self {
             Self::ExtensionRefused { .. }
             | Self::ExtensionWithinTolerance { .. }
+            | Self::InsufficientAnnularReach { .. }
             | Self::LoopNotPlanar
             | Self::NotEnclosed { .. }
             | Self::PatchEnclosesFace { .. }
@@ -113,6 +125,9 @@ impl core::fmt::Display for DefeatureFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match *self {
             Self::LoopNotPlanar => f.write_str("a planar cap was asked for a loop no plane holds"),
+            Self::InsufficientAnnularReach { available: [a, b], sufficient: [x, y] } => write!(
+                f, "the circular rim extensions of {a} and {b} fall short. Extending them by {x} and {y} closes the gap"
+            ),
             Self::PatchEnclosesFace { face } => write!(
                 f, "the circular patch would enclose retained face {}", face.index()
             ),
