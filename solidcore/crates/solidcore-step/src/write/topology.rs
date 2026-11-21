@@ -295,6 +295,9 @@ pub fn surface(s: &BSurface) -> R<(Surface, Map)> {
         }
         BSurface::Sphere { frame, radius } => (Surface::Sphere { position: placement(frame), radius: *radius }, Map::IDENTITY),
         BSurface::Torus { frame, major_radius, minor_radius, .. } => {
+            if singular_torus(s, 0.0) {
+                return Err(unsupported("a singular torus without its NURBS form"));
+            }
             (Surface::Torus { position: placement(frame), major_radius: *major_radius, minor_radius: *minor_radius }, Map::IDENTITY)
         }
         BSurface::Spline { u_knots, v_knots, points } => (bspline_surface(u_knots, v_knots, points.clone(), None)?, Map::IDENTITY),
@@ -314,10 +317,19 @@ pub fn surface(s: &BSurface) -> R<(Surface, Map)> {
     })
 }
 
-/// Whether a face is written as its NURBS form, pcurves and all: a ball patch or a blend by its
-/// definition, which STEP has no entity for, is the B-spline surface it is parameterised on.
-fn as_form(face: &Face) -> bool {
-    face.nurbs.is_some() && matches!(face.surface, BSurface::BallPatch { .. } | BSurface::Blend { .. })
+/// A ring torus needs a positive clearance between its tube and axis resolved at the
+/// record's intersection tolerance. Use the same classification for stored and newly
+/// proved labels; keeping the NURBS changes no geometry when the clearance is unresolved.
+fn singular_torus(surface: &BSurface, tolerance: f64) -> bool {
+    matches!(surface, BSurface::Torus { major_radius, minor_radius, .. } if major_radius - minor_radius <= tolerance)
+}
+
+/// Whether a face keeps its NURBS parameters and pcurves: a procedural definition or a
+/// singular torus cannot be written as an ordinary analytic STEP surface. The CADIR writer makes
+/// the same choice, as its own policy: CADIR's torus takes equal radii, but the face is kept on
+/// its NURBS form there too.
+pub fn as_form(face: &Face, tolerance: f64) -> bool {
+    face.nurbs.is_some() && (matches!(face.surface, BSurface::BallPatch { .. } | BSurface::Blend { .. }) || singular_torus(&face.surface, tolerance))
 }
 
 /// A record pcurve in the STEP surface's parameters: its control points through `map` (a linear
@@ -411,8 +423,9 @@ pub fn layout(b: &Brep) -> R<Layout> {
 /// that form: a cylinder's rim rounded is a torus, and STEP has the surface where the record has
 /// its rational net, which a reader measures a little off (volume, bounding box). The proof is
 /// the kernel's ([`analytic_label`]: the form lies on the surface and the surface evaluates as
-/// the form); a form no kind is proved on keeps its NURBS. The record itself is not changed, `b`
-/// borrowed where no face is such a form.
+/// the form). A form with no proved kind, or a horn or spindle torus whose pole topology must
+/// remain a spline, keeps its NURBS. The record itself is not changed, `b` borrowed where no
+/// face is such a form.
 fn analytic_rounds(b: &Brep) -> R<Cow<'_, Brep>> {
     let candidate = |f: &Face| match (&f.surface, &f.nurbs) {
         (BSurface::RationalSpline { .. }, None) => true,
@@ -435,8 +448,14 @@ fn analytic_rounds(b: &Brep) -> R<Cow<'_, Brep>> {
         let form = face.nurbs.as_ref().unwrap_or(&face.surface);
         let net = solidcore_convert::surface(form).map_err(invalid)?;
         if let Some(label) = analytic_label(&k, &net, face.domain).map_err(|e| format!("a round's analytic surface: {e}"))? {
+            let label = solidcore_convert::record_surface(label).map_err(invalid)?;
+            // A horn or spindle has a singular circle parametrisation on the axis.
+            // Keep its NURBS and pole topology instead of promoting it to a ring torus.
+            if singular_torus(&label, b.tolerance) {
+                continue;
+            }
             let form = face.nurbs.take().unwrap_or_else(|| face.surface.clone());
-            face.surface = solidcore_convert::record_surface(label).map_err(invalid)?;
+            face.surface = label;
             face.nurbs = Some(form);
         }
     }
@@ -531,7 +550,7 @@ impl BrepWriter<'_, '_, '_> {
             return Ok(s.clone());
         }
         let face = face_of(self.b, f)?;
-        if as_form(face) {
+        if as_form(face, self.b.tolerance) {
             let s = (Arc::new(surface(face.parameters()).map_err(|m| format!("face {f}: {m}"))?.0), Map::IDENTITY);
             if let Some(slot) = self.surfaces.get_mut(f as usize) {
                 *slot = Some(s.clone());
@@ -594,7 +613,7 @@ impl BrepWriter<'_, '_, '_> {
         let mut associated = Vec::with_capacity(edge.uses.len());
         for u in &edge.uses {
             let face = face_of(b, u.face)?;
-            if face.nurbs.is_some() && !as_form(face) {
+            if face.nurbs.is_some() && !as_form(face, b.tolerance) {
                 continue;
             }
             let Some(Loop::Edges { edges }) = face.loops.get(u.r#loop as usize) else {
@@ -682,7 +701,7 @@ fn signed_area(ring: &[[f64; 2]]) -> f64 {
 /// record's cylinder, cone, sphere and torus have their natural normal pointing away from the
 /// axis (the sphere's centre, the torus's centre circle); `None` when the NURBS has no normal at
 /// its domain's centre.
-fn form_map(analytic: &BSurface, n: &BSurface, domain: [[f64; 2]; 2], map: Map) -> Option<Map> {
+pub fn form_map(analytic: &BSurface, n: &BSurface, domain: [[f64; 2]; 2], map: Map) -> Option<Map> {
     let eval = crate::kernel::SurfaceEval::new(n).ok()?;
     let (p, su, sv) = eval.derivs(0.5 * (domain[0][0] + domain[0][1]), 0.5 * (domain[1][0] + domain[1][1]))?;
     let normal = su.cross(sv);

@@ -3,8 +3,8 @@
 //!
 //! Not upstream: the SolidCraft fork's `source/SMLib/src/SmFilletOverflow.cpp`
 //! (tangency-labs/smlib#79 step 6: 99e57b8, 668fe9f, bacd0bb, 2d4b154, bc8c44d, de5df14 and
-//! 8832ead, at 5e8c9c1 on `replay/1.0.1`), behind `fixes.fillet_overflow_trim_at_creases`
-//! (WR-695). A blend whose rails leave their faces across cliffs keeps its surface, built
+//! 8832ead, at 5e8c9c1 on `replay/1.0.1`; WR-695, unconditional since its flag
+//! `fillet_overflow_trim_at_creases` was removed). A blend whose rails leave their faces across cliffs keeps its surface, built
 //! on the faces continued, and the sharp edge moves: each sheet face is sectioned by the
 //! body's faces past the cliffs ([`creases`]) and split along the creases inside both
 //! faces ([`pieces_in_face`]); a support face whose kept rail runs past its boundary into
@@ -49,6 +49,7 @@
 //! - **Refusals.** `rcWhy` is the returned [`ExtendOutcome::Refused`] comment.
 
 use crate::curve::curve::Curve;
+use crate::error::blend::{BlendFailure, CliffInput};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -109,6 +110,24 @@ pub fn plane_of(k: &Kernel, surface: &Surface) -> Result<Option<(Point3, Vec3)>>
         .unitize()
         .map_err(|_| SolidError::blend_failed(OP, "the plane's normal is zero"))?;
     Ok(Some((planar.point, normal)))
+}
+
+/// The plane of a cliff, with the normal facing the body's exterior.
+pub(crate) fn outward_plane(k: &Kernel, body: &Brep, f: FaceId) -> Result<(Point3, Vec3)> {
+    let missing = |input| SolidError::blend(OP, BlendFailure::CliffInputMissing { face: f, input });
+    let surface = face::p2::surface(body, f)?.ok_or_else(|| missing(CliffInput::Surface))?;
+    let (origin, normal) = plane_of(k, surface)?.ok_or_else(|| missing(CliffInput::Plane))?;
+    let outer =
+        face::p2::outer_faceuse(body, f)?.ok_or_else(|| missing(CliffInput::OutwardFaceUse))?;
+    let orientation = crate::topology::edgeuse::p1::faceuse_orientation(body, outer)?;
+    Ok((
+        origin,
+        if orientation == OrientType::Same {
+            normal
+        } else {
+            -normal
+        },
+    ))
 }
 
 /// `sm_DistanceToSurface`: the distance from `point` to face `f`'s surface: to its plane
@@ -322,6 +341,23 @@ fn pieces_classed(
 /// # Errors
 /// Those of the classification.
 pub fn in_material(k: &Kernel, b: &mut Brep, point: Point3) -> Result<(bool, bool)> {
+    Ok(match material_location(k, b, point)? {
+        MaterialLocation::Inside => (true, false),
+        MaterialLocation::Boundary => (false, true),
+        MaterialLocation::Outside | MaterialLocation::Unknown => (false, false),
+    })
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum MaterialLocation {
+    Inside,
+    Outside,
+    Boundary,
+    Unknown,
+}
+
+/// Keep a proved void distinct from a boundary hit or an unclassified probe.
+fn material_location(k: &Kernel, b: &mut Brep, point: Point3) -> Result<MaterialLocation> {
     let zone = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
     let id = match b.notify_serial() {
         Some(serial) => BrepId::from_index(u32::try_from(serial).map_err(|_| {
@@ -330,19 +366,18 @@ pub fn in_material(k: &Kernel, b: &mut Brep, point: Point3) -> Result<(bool, boo
         None => BrepId::from_index(0),
     };
     let class = BrepQuery::of_brep_with_id(id, b).point_3d_classify(k, b, point, zone, true)?;
-    match class.point_class() {
-        PointClassType::Region => {
-            let inside = match class.object() {
-                Some(EntityRef::Region(r)) => {
-                    b.infinite_region() != Some(r) && b.region(r)?.is_void() == 0
-                }
-                _ => false,
-            };
-            Ok((inside, false))
+    Ok(match (class.point_class(), class.object()) {
+        (PointClassType::Region, Some(EntityRef::Region(region))) => {
+            match crate::mass::integrator::properties::region_material(b, region) {
+                Ok(true) => MaterialLocation::Inside,
+                Ok(false) => MaterialLocation::Outside,
+                Err(SolidError::UnsureRegion { .. }) => MaterialLocation::Unknown,
+                Err(error) => return Err(error),
+            }
         }
-        PointClassType::Unknown => Ok((false, false)),
-        _ => Ok((false, true)),
-    }
+        (PointClassType::Region | PointClassType::Unknown, _) => MaterialLocation::Unknown,
+        _ => MaterialLocation::Boundary,
+    })
 }
 
 /// `sm_LoopCurve`: a curve of a loop, owned until a face takes it, and how it runs.
@@ -722,7 +757,9 @@ pub fn extend(
     rails: &[Rail],
     blended: &[EdgeId],
     tol: f64,
+    continued_rim: Option<&std::collections::BTreeSet<EdgeId>>,
 ) -> Result<ExtendOutcome> {
+    let fills_void = continued_rim.is_some();
     // the runs of the rails off the face, in the material
     let mut runs: Vec<OffRun> = Vec::new();
     for rail in rails {
@@ -741,8 +778,8 @@ pub fn extend(
             }
             let mid = curve.evaluate_point(k, run.evaluate(0.5))?;
             let (inside, _) = in_material(k, target, mid)?;
-            if !inside {
-                continue; // in the open: cut off along a crease elsewhere
+            if inside == fills_void {
+                continue;
             }
             let mut off = curve.copy(k)?;
             if run != off.natural_interval() {
@@ -767,6 +804,14 @@ pub fn extend(
                     None
                 };
                 let end = piece.ends.get(slot).copied().unwrap_or(Vec3::UNDEF);
+                if pc == PointClassType::Edge
+                    && cross.is_some_and(|e| continued_rim.is_some_and(|rim| rim.contains(&e)))
+                {
+                    if let Some(crossing) = piece.crosses.get_mut(slot) {
+                        *crossing = cross;
+                    }
+                    continue;
+                }
                 match rail_end {
                     Some((v, p)) if p.distance(end) <= 10.0 * tol => {
                         if let Some(s) = piece.vertices.get_mut(slot) {
@@ -1047,7 +1092,16 @@ pub fn extend(
                         ext.along_pieces.push((from, to));
                         from = to;
                     }
-                    if takes_off(k, target, &ext, &runs, &chain, (at, normal, x, y), blended)? {
+                    if takes_off(
+                        k,
+                        target,
+                        &ext,
+                        &runs,
+                        &chain,
+                        (at, normal, x, y),
+                        blended,
+                        fills_void,
+                    )? {
                         candidates.push(ext);
                     }
                 }
@@ -1055,6 +1109,9 @@ pub fn extend(
         }
         // each way's loop; the one whose inside beside the chain lies in the material
         for way in &ways {
+            if continued_rim.is_some_and(|rim| way.edges.iter().any(|e| !rim.contains(e))) {
+                continue;
+            }
             let mut ext = Extension::new(at, normal);
             chain_loop(&mut ext)?;
             // the end to the way's first vertex
@@ -1114,7 +1171,16 @@ pub fn extend(
                     ext.along_pieces.push((last_p, ends[0]));
                 }
             }
-            if takes_off(k, target, &ext, &runs, &chain, (at, normal, x, y), blended)? {
+            if takes_off(
+                k,
+                target,
+                &ext,
+                &runs,
+                &chain,
+                (at, normal, x, y),
+                blended,
+                fills_void,
+            )? {
                 candidates.push(ext);
             }
         }
@@ -1141,6 +1207,7 @@ fn takes_off(
     chain: &[(usize, bool)],
     (at, normal, x, y): (Point3, Vec3, Vec3, Vec3),
     blended: &[EdgeId],
+    fills_void: bool,
 ) -> Result<bool> {
     let mut uv = Vec::new();
     loop_polygon(k, &ext.lp, at, x, y, &mut uv)?;
@@ -1183,7 +1250,13 @@ fn takes_off(
         step = step.min(0.5 * width);
     }
     let probe = p + inward * (side * step);
-    let (mut inside, _) = in_material(k, target, probe)?;
+    let location = material_location(k, target, probe)?;
+    let mut belongs = location
+        == if fills_void {
+            MaterialLocation::Outside
+        } else {
+            MaterialLocation::Inside
+        };
     let mut nearest = BIG_DOUBLE;
     let mut toward = Vec3::UNDEF;
     for &e in blended {
@@ -1213,9 +1286,9 @@ fn takes_off(
     let mut off = toward - p;
     off = off - normal * off.dot(normal);
     if off.dot(inward) * side <= 0.0 {
-        inside = false;
+        belongs = false;
     }
-    Ok(inside)
+    Ok(belongs)
 }
 
 /// `sm_MakeExtensionFace`: the face on the plane through `ext.at` square to `ext.normal`
@@ -1291,4 +1364,41 @@ pub fn make_extension_face(
     )?;
     made.face
         .ok_or_else(|| SolidError::blend_missing(OP, "the extension face"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::primitive::api_primitives::create_box;
+
+    #[test]
+    fn a_boundary_probe_is_not_proved_outside() -> Result<()> {
+        let mut kernel = Kernel::default();
+        let mut target = create_box(&mut kernel, Point3::ZERO, 10.0, 10.0, 10.0)?;
+        assert_eq!(
+            material_location(&kernel, &mut target, Point3::new(5.0, 5.0, 5.0))?,
+            MaterialLocation::Inside
+        );
+        assert_eq!(
+            material_location(&kernel, &mut target, Point3::new(10.0, 5.0, 5.0))?,
+            MaterialLocation::Boundary
+        );
+        assert_eq!(
+            material_location(&kernel, &mut target, Point3::new(11.0, 5.0, 5.0))?,
+            MaterialLocation::Outside
+        );
+        let region = target
+            .regions()
+            .ids()
+            .find(|&r| Some(r) != target.infinite_region())
+            .expect("finite region of the box");
+        target
+            .region_mut(region)?
+            .set_is_void(crate::error::SM_UNSURE);
+        assert_eq!(
+            material_location(&kernel, &mut target, Point3::new(5.0, 5.0, 5.0))?,
+            MaterialLocation::Unknown
+        );
+        Ok(())
+    }
 }

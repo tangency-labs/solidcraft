@@ -9,7 +9,8 @@
 //! | [`FilletExecutive::set_fillet_parameters`], [`FilletParameters`] | `SmFilletExecutive::SetFilletParameters` (edge pointers, per-edge parameters; the fork's `pOptSecondRadii`, `f653ac9`) |
 //! | `reset_parameter_state` (crate-private) | `SmFilletExecutive::SetFilletParameters` reset block |
 //! | `check_edges_are_in_brep` (private) | `SmFilletExecutive::CheckEdgesAreInBrep` |
-//! | [`FilletParametersAccess::parameters_split_blended_vertex_fans`] | the fork's `SmFilletExecutive::SplitBlendedVertexFans` (`e418750`, WR-665; with `fixes.fillet_corner_per_vertex_fan`) |
+//! | [`FilletParametersAccess::parameters_split_blended_vertex_fans`] | the fork's `SmFilletExecutive::SplitBlendedVertexFans` (`e418750`, WR-665) |
+//! | [`FilletParametersAccess::parameters_runs_on_across_seams`], [`RunOn`] | none (#2864: a picked edge's blend runs on across a seam's vertex) |
 //! | [`surface_surface_fillet`], [`SurfaceFilletOptions`] | `SmFilletExecutive::SurfaceSurfaceFillet` |
 //! | [`FilletExecutive::do_surface_filleting`] | `SmFilletExecutive::DoSurfaceFilleting` |
 //! | [`FilletExecutive::set_fillet_brep_edge_map`] | `SmFilletExecutive::SetFilletBrepEdgeMap` |
@@ -23,6 +24,13 @@
 //! | [`FilletLaw::bspline`] | `SmBSplineFilletLaw::SmBSplineFilletLaw(SmBSplineCurve*, const SmExtent1d&)` |
 //!
 //! Deviations:
+//! - **Split rails** (WR-19502, not upstream). Before `SetFilletBrepEdgeMap` maps a
+//!   geometry's rails, [`EdgeMapAccess::mapping_split_rail`] splits any rail that the
+//!   stitched fillet B-rep splits and no one edge matches. The pieces join its other rails.
+//! - **Solver approximation tolerance.** `SetFilletParameters` takes `TOL_FACTOR` times
+//!   the edge's fit tolerance (`topology::edgeuse::p3::fit_tolerance`), not times an edge
+//!   tolerance the healer raised only to cover the edge's edge/face gap; elsewhere the
+//!   two are the same.
 //! - **Exact arcs.** A circular round's generator takes the exact circle, as the fork's
 //!   tangency-labs/smlib@523bc25 does, where upstream takes approximated arcs (WR-708);
 //!   the fork builds it as its `SmGnSectionFSG` order-1 circle (3aae1c4), here the pinned
@@ -57,9 +65,8 @@
 //!   plus one step, past which the port returns [`SolidError::InvalidInput`].
 //! - **Law evaluation status.** `SmTemporaryRadiusChange::SetUp` ignores the status of
 //!   `SmFilletLaw::Evaluate` and reads its first value, uninitialised after a failure;
-//!   the port propagates the error before reading that value (UB-252). Constructors
-//!   retain pinned status handling by default; `new_with_fixes` and the matching
-//!   scope helper opt into reporting setup errors before entering the body (#458).
+//!   the port propagates the error before reading that value (UB-252). The constructors
+//!   and the scope helpers report setup errors before entering the body (#458).
 //! - The upstream debug drawing (`SM_GFX_CODE`) is omitted.
 //! - Calls into units that are not ported return [`SolidError::Unported`] through the
 //!   adapter defaults of [`ExecutiveAccess`].
@@ -141,6 +148,18 @@ pub trait EdgeMapAccess<O: ClassObject + SolutionObject + Ord> {
         candidates: &[O],
         multiple: bool,
     ) -> Result<()>;
+    /// (Not upstream; #19502) Split rail `rail` of geometry `geom` where the candidate
+    /// edges split it end to end and none matches it whole, the pieces after the first
+    /// joining the geometry's other rails on that side; nothing otherwise.
+    /// # Errors
+    /// Invalid or missing object; those of the lookup and the split.
+    fn mapping_split_rail(
+        &mut self,
+        k: &mut Kernel,
+        geom: O,
+        rail: O,
+        candidates: &[O],
+    ) -> Result<()>;
 }
 impl<O, A> EdgeMapAccess<O> for A
 where
@@ -185,6 +204,11 @@ where
         multiple: bool,
     ) -> Result<()> {
         ExecutiveAccess::find_fillet_brep_edge(self, k, edge, candidates, multiple)
+    }
+    /// The executive's access has no pseudo B-rep of its own to split: its rails map as
+    /// upstream's do.
+    fn mapping_split_rail(&mut self, _: &mut Kernel, _: O, _: O, _: &[O]) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -446,11 +470,20 @@ pub trait FilletParametersAccess<O: ClassObject + SolutionObject + Ord>:
     /// # Errors
     /// The native topology or geometry query failures.
     fn parameters_blend_edgeuse(&mut self, k: &mut Kernel, edge: O) -> Result<Option<O>>;
-    /// The actual edge tolerance.
+    /// The tolerance geometry is fitted at along the actual edge (upstream: the edge
+    /// tolerance). Not upstream: on a B-rep, the edge tolerance unless that only covers
+    /// the edge's edge/face gap (`topology::edgeuse::p3::fit_tolerance`), so a tolerance
+    /// the healer raised to cover a gap does not loosen the solver's approximation.
     ///
     /// # Errors
-    /// Object resolution or tolerance query failures.
-    fn parameters_edge_tolerance(&self, edge: O) -> Result<f64>;
+    /// Object resolution, tolerance query or edge/face gap failures.
+    fn parameters_edge_tolerance(&mut self, k: &Kernel, edge: O) -> Result<f64>;
+    /// How far the edge lies from its faces: its largest measured edge/face gap. The stored
+    /// tolerance (an upper bound on that gap) where nothing can be measured.
+    ///
+    /// # Errors
+    /// Object resolution or gap query failures.
+    fn parameters_edge_gap(&mut self, k: &Kernel, edge: O) -> Result<f64>;
     /// Construct and retain the concrete solver selected by its native spec.
     ///
     /// # Errors
@@ -466,9 +499,9 @@ pub trait FilletParametersAccess<O: ClassObject + SolutionObject + Ord>:
     /// # Errors
     /// Object resolution failures.
     fn parameters_edge_is_live(&self, brep: O, edge: O) -> Result<bool>;
-    /// The fork's `SplitBlendedVertexFans` (tangency-labs/smlib `e418750`, WR-665; run only
-    /// with `fixes.fillet_corner_per_vertex_fan`): each filleted edge's start and end
-    /// vertex, once each and not one made here, split into one vertex per fan of faces
+    /// The fork's `SplitBlendedVertexFans` (tangency-labs/smlib `e418750`, WR-665): each
+    /// filleted edge's start and end vertex, once each and not one made here, split into
+    /// one vertex per fan of faces
     /// (`SmBrep::SplitVertexByFans`); the points of the vertices split, in order, for
     /// `JoinBlendedVertexFans`. Only an adapter over a live target can split; the default
     /// splits nothing.
@@ -484,6 +517,37 @@ pub trait FilletParametersAccess<O: ClassObject + SolutionObject + Ord>:
         let _ = (k, brep, edges);
         Ok(Vec::new())
     }
+    /// The edges that continue `edges` across seams' vertices: where a picked edge's end is
+    /// a vertex that only a seam splits it at, the rest of its own curve between the same two
+    /// faces is the same edge to the user, and a blend does not end there (#2864). Each
+    /// continuation names the picked edge it continues (its index in `edges`), whether its
+    /// blend edge use lies on the other face of the two than that edge's (so a size given per
+    /// support swaps), and it is a new edge, not picked and not named twice. Not upstream
+    /// (solidcore's). Only an adapter over a live target can walk; the default finds none.
+    ///
+    /// # Errors
+    /// Those of the topology walks and the seam and tangency tests.
+    fn parameters_runs_on_across_seams(
+        &mut self,
+        k: &Kernel,
+        edges: &[O],
+        ang_tol_deg: f64,
+    ) -> Result<Vec<RunOn<O>>> {
+        let _ = (k, edges, ang_tol_deg);
+        Ok(Vec::new())
+    }
+}
+
+/// An edge a picked edge runs on into across a seam's vertex
+/// ([`FilletParametersAccess::parameters_runs_on_across_seams`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunOn<O> {
+    /// The index of the picked edge it continues, among the picked edges.
+    pub source: usize,
+    /// The edge.
+    pub edge: O,
+    /// Whether its blend edge use is on the other face of the two than the picked edge's.
+    pub flipped: bool,
 }
 
 impl<O, A> FilletParametersAccess<O> for A
@@ -504,7 +568,12 @@ where
     fn parameters_blend_edgeuse(&mut self, k: &mut Kernel, edge: O) -> Result<Option<O>> {
         ExecutiveAccess::blend_edgeuse(self, k, edge)
     }
-    fn parameters_edge_tolerance(&self, edge: O) -> Result<f64> {
+    fn parameters_edge_tolerance(&mut self, _k: &Kernel, edge: O) -> Result<f64> {
+        // (an adapter's edge has no edge/face gaps to tell apart: its tolerance)
+        ExecutiveAccess::edge_tolerance(self, edge)
+    }
+    /// An executive adapter measures no gaps: its edge's tolerance, which bounds the gap.
+    fn parameters_edge_gap(&mut self, _k: &Kernel, edge: O) -> Result<f64> {
         ExecutiveAccess::edge_tolerance(self, edge)
     }
     fn parameters_new_solver(&mut self, k: &mut Kernel, spec: &SolverSpec<'_, O>) -> Result<O> {
@@ -554,7 +623,7 @@ pub struct FilletParameters<'a, O> {
     pub second_radii: Option<&'a [f64]>,
 }
 
-/// `SetFilletParameters`' factor from an edge's tolerance to its solver's
+/// `SetFilletParameters`' factor from how accurately an edge is known to its solver's
 /// approximation tolerance (`TOL_FACTOR`, "works well in practice").
 const TOL_FACTOR: f64 = 4.0;
 
@@ -614,12 +683,16 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         };
         // the fork's (WR-631): no cliff overflow, no open ends yet
         self.cliff_overflow = false;
+        self.continued_cliffs.clear();
         self.open_ends.clear();
         // the fork's (WR-634): no overflow edges yet, no mitred edges (9ba2b12)
         self.overflow_edges.clear();
         self.mitred_edges.clear();
-        // the fork's (WR-665, e418750): no fan split points yet
-        self.fan_split_points.clear();
+        // Not the fork's (WR-665, e418750, clears them here): the fan split points are
+        // kept. An earlier preparation's split is still in the body, and this one finds
+        // those vertices split already and records nothing, so clearing them would leave
+        // `JoinBlendedVertexFans` nothing to join. They are cleared by the join and when
+        // the target changes (`set_fillet_parameters`).
     }
 
     /// `SetFilletParameters`: resets the five operation switches to their common
@@ -649,6 +722,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         self.initialized = false;
 
         if let Some(brep) = params.brep {
+            // another body: the points split on the earlier one are not this one's
+            if self.target != Some(brep) {
+                self.fan_split_points.clear();
+            }
             self.target = Some(brep);
         }
 
@@ -660,12 +737,38 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         }
 
         self.check_edges_are_in_brep(access, params.brep, params.edges)?;
-        // the fork's SplitBlendedVertexFans (WR-665, tangency-labs/smlib@e418750)
-        if k.fixes.fillet_corner_per_vertex_fan {
-            let brep = params.brep.ok_or_else(|| null!("the B-rep"))?;
-            let points = access.parameters_split_blended_vertex_fans(k, brep, params.edges)?;
-            self.fan_split_points.extend(points);
+        let mut ang_tol_deg = params.ang_tol_deg;
+        if ang_tol_deg <= EFF_ZERO {
+            ang_tol_deg = 20.0;
         }
+        let mut tan_tol_deg = params.tan_tol_deg;
+        if tan_tol_deg <= EFF_ZERO {
+            tan_tol_deg = 10.0;
+        }
+        // Not upstream (#2864): a seam is the surface's parameterisation, not a feature, so
+        // the blend of a picked edge runs on across a seam's vertex into the rest of its own
+        // curve, which takes the picked edge's parameters. A variable radius's law runs along
+        // its own edge and gives no radius past it: its edge is not run on, and its End at the
+        // seam's vertex is refused (`blend_corner::end`).
+        let mut edges = params.edges.to_vec();
+        // per edge: the index of the picked edge whose parameters it takes, and whether its
+        // supports are that edge's swapped
+        let mut sources: Vec<(usize, bool)> = (0..num_filleted_edges).map(|i| (i, false)).collect();
+        let has_law = |i: usize| {
+            let at = if params.radius_types.len() == 1 { 0 } else { i };
+            params.radius_types.get(at) == Some(&FilletSolverType::VariableRadius)
+        };
+        for run_on in access.parameters_runs_on_across_seams(k, params.edges, tan_tol_deg)? {
+            if !has_law(run_on.source) {
+                edges.push(run_on.edge);
+                sources.push((run_on.source, run_on.flipped));
+            }
+        }
+        let edges = edges.as_slice();
+        // the fork's SplitBlendedVertexFans (WR-665, tangency-labs/smlib@e418750)
+        let brep = params.brep.ok_or_else(|| null!("the B-rep"))?;
+        let points = access.parameters_split_blended_vertex_fans(k, brep, edges)?;
+        self.fan_split_points.extend(points);
 
         let single_xsect_type = single(params.xsect_types.len(), num_filleted_edges);
         let single_radius_type = single(params.radius_types.len(), num_filleted_edges);
@@ -688,14 +791,6 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // tolerance) is computed but never read.
         if params.approx_tol <= EFF_ZERO {
             let _ = 10.0 * access.parameters_tolerance(k, brep, false)?;
-        }
-        let mut ang_tol_deg = params.ang_tol_deg;
-        if ang_tol_deg <= EFF_ZERO {
-            ang_tol_deg = 20.0;
-        }
-        let mut tan_tol_deg = params.tan_tol_deg;
-        if tan_tol_deg <= EFF_ZERO {
-            tan_tol_deg = 10.0;
         }
         let mut xsect_tol = params.xsect_tol;
         if xsect_tol <= EFF_ZERO {
@@ -764,8 +859,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             self.add_fillet_surface_generator(fsg);
         }
 
-        // Now for each Filleted Edge.
-        for (ii, &edge) in params.edges.iter().enumerate() {
+        // Now for each Filleted Edge (and each edge one runs on into, with its parameters).
+        for (&edge, &(ii, flipped)) in edges.iter().zip(&sources) {
             // 1. Find the appropriate Edgeuse for the fillet.
             let Some(eu) = access.parameters_blend_edgeuse(k, edge)? else {
                 // This edge is not filletable.
@@ -792,8 +887,30 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     .ok_or_else(|| first("radius list too short"))?;
             }
 
-            // Note, this works well in practice.  [B332]
-            let approx_tol = TOL_FACTOR * access.parameters_edge_tolerance(edge)?;
+            // The round is approximated TOL_FACTOR times as finely as its edge is known [B332]:
+            // how far the edge actually lies from its faces, at least the B-rep's tolerance, and
+            // never more than the edge's stored tolerance (so no tolerance is widened). Upstream
+            // took the stored tolerance, an upper bound that rounds compound: each made its new
+            // edges at 4 times its edge's, and a round of those took 4 times again. An exact edge
+            // carrying 2.6e-3 on a B-rep of 1e-5 gave the round's edges and vertices about 1e-2,
+            // past the B-rep's bound on them (1000 times its tolerance), and the full check
+            // refused the result.
+            // the tolerance geometry is fitted at along the edge (not one raised to cover its
+            // edge/face gap)
+            let stored = access.parameters_edge_tolerance(k, edge)?;
+            let brep_tol = access.parameters_tolerance(k, brep, false)?;
+            // An edge stored at the B-rep's tolerance or finer keeps it whatever its gap
+            // measures, so the gap (which evaluates the faces' surfaces, a reopened round's
+            // definition among them) is measured only where it can change the result.
+            let accuracy = if stored <= brep_tol {
+                stored
+            } else {
+                access
+                    .parameters_edge_gap(k, edge)?
+                    .max(brep_tol)
+                    .min(stored)
+            };
+            let approx_tol = TOL_FACTOR * accuracy;
 
             let spec = match radius_type {
                 FilletSolverType::ConstRadius => {
@@ -811,6 +928,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                         }
                         second_radius = second_radii.get(ii).copied();
                     }
+                    // a run-on edge whose blend edge use is on the other face: its supports
+                    // are the picked edge's swapped
+                    let (radius, second_radius) = match second_radius {
+                        Some(second) if flipped => (second, Some(radius)),
+                        _ => (radius, second_radius),
+                    };
                     Some(SolverSpec::ConstantRadius {
                         approx_tol,
                         ang_tol_rad,
@@ -1106,6 +1229,18 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         while let Some(solver) = self.solvers.get(index).copied() {
             index += 1;
             for geom in access.mapping_solver_geoms(solver)? {
+                // (not upstream; #19502) a rail the stitch split, where another round's
+                // rail meets it along part of it, is split there too, each piece mapping
+                // to its own edge
+                for rail in access
+                    .mapping_geom_rails(geom)?
+                    .into_iter()
+                    .take(2)
+                    .flatten()
+                {
+                    access.mapping_split_rail(k, geom, rail, &edges)?;
+                }
+
                 // set every rail's fillet B-rep edge
                 for rail in access.mapping_geom_rails(geom)? {
                     let rail = rail.ok_or_else(|| null!("the rail"))?;
@@ -1322,10 +1457,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             if let Some(edge) = start_edge {
                 // fork 873c7c9 (SolidCraft change): GetFilletSolverOfEdge returns NULL
                 // when GetEdgeuses fails
-                let pass_on = k.fixes.fillet_statuses_pass_on;
                 fs = self
                     .fillet_solver_of_edge_with(edge, |e| match access.smooth_edge_edgeuses(e) {
-                        Err(err) if pass_on && !err.is_unported_or_cancelled() => Ok(Vec::new()),
+                        Err(err) if !err.is_unported_or_cancelled() => Ok(Vec::new()),
                         r => r,
                     })?
                     .ok_or_else(|| null!("the edge's solver"))?;
@@ -1623,36 +1757,12 @@ pub struct TemporaryRadiusChange<O> {
 
 impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
     /// The constructor: records the solver, rail and side edge use and runs
-    /// [`TemporaryRadiusChange::set_up`], ignoring ordinary statuses as upstream.
-    /// Use [`Self::new_with_fixes`] to opt into reporting setup failure.
+    /// [`TemporaryRadiusChange::set_up`], reporting its failure (upstream ignores it).
     ///
     /// # Errors
     ///
     /// Unported dependencies or preparation requests from the setup.
     pub fn new<A>(access: &mut A, fs: O, rail_index: usize, side_eu: O) -> Result<Self>
-    where
-        A: ExecutiveAccess<O> + ?Sized,
-    {
-        Self::new_with_fixes(
-            access,
-            fs,
-            rail_index,
-            side_eu,
-            &crate::kernel::UpstreamFixes::default(),
-        )
-    }
-
-    /// Constructs a radius change with the caller's opt-in upstream policy.
-    /// `temporary_radius_setup_errors` reports a failed setup before the caller
-    /// starts filleting; the original constructor keeps its default call shape.
-    /// Unported dependencies still propagate under either policy.
-    pub fn new_with_fixes<A>(
-        access: &mut A,
-        fs: O,
-        rail_index: usize,
-        side_eu: O,
-        fixes: &crate::kernel::UpstreamFixes,
-    ) -> Result<Self>
     where
         A: ExecutiveAccess<O> + ?Sized,
     {
@@ -1664,14 +1774,9 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
             fs,
             rail_idx: rail_index,
         };
-        // fork 873c7c9 SERs inside SetUp (its constructor still cannot report, so the
-        // status reaches the caller only with temporary_radius_setup_errors)
-        let setup = change.set_up_with(access, fixes.fillet_statuses_pass_on);
-        if fixes.temporary_radius_setup_errors {
-            setup?;
-        } else {
-            ignored(setup)?;
-        }
+        // fork 873c7c9 SERs inside SetUp (its constructor still cannot report; here the
+        // status reaches the caller, WR-661)
+        change.set_up(access)?;
         Ok(change)
     }
 
@@ -1685,15 +1790,6 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
     /// `SM_ERR_NULL_POINTER` for a missing edge use or owning edge; those of the law
     /// evaluation (`SmFilletLaw::Evaluate`) and the constant law curve.
     pub fn set_up<A>(&mut self, access: &mut A) -> Result<()>
-    where
-        A: ExecutiveAccess<O> + ?Sized,
-    {
-        self.set_up_with(access, false)
-    }
-
-    /// [`Self::set_up`]; with `pass_on` the constant law curve's re-parameterization
-    /// status is returned (fork 873c7c9 `SER`) instead of ignored.
-    fn set_up_with<A>(&mut self, access: &mut A, pass_on: bool) -> Result<()>
     where
         A: ExecutiveAccess<O> + ?Sized,
     {
@@ -1787,11 +1883,8 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
                 Point3::new(end_rad, 1.0, 0.0),
                 Point3::new(end_rad, 2.0, 0.0),
             )?;
-            // fork 873c7c9 passes this on (SER)
-            ignored(crate::error::passed_on(
-                const_bsp.edit_parameterization(&unit_ivl),
-                pass_on,
-            )?)?;
+            // (status ignored upstream; fork 873c7c9 passes it on, SER, as does this)
+            const_bsp.edit_parameterization(&unit_ivl)?;
 
             let vrfs = access
                 .variable_radius_solver_mut(self.fs)?
@@ -1888,32 +1981,7 @@ where
     O: ClassObject + SolutionObject + Ord,
     A: ExecutiveAccess<O> + ?Sized,
 {
-    with_temporary_radius_change_with_fixes(
-        access,
-        fs,
-        rail_index,
-        side_eu,
-        &crate::kernel::UpstreamFixes::default(),
-        body,
-    )
-}
-
-/// Runs a temporary radius scope using the caller's upstream fix policy.
-/// With `temporary_radius_setup_errors`, a setup failure returns before `body`.
-/// A completed setup is reverted even when `body` fails.
-pub fn with_temporary_radius_change_with_fixes<O, A, T>(
-    access: &mut A,
-    fs: O,
-    rail_index: usize,
-    side_eu: O,
-    fixes: &crate::kernel::UpstreamFixes,
-    body: impl FnOnce(&mut A) -> Result<T>,
-) -> Result<T>
-where
-    O: ClassObject + SolutionObject + Ord,
-    A: ExecutiveAccess<O> + ?Sized,
-{
-    let change = TemporaryRadiusChange::new_with_fixes(access, fs, rail_index, side_eu, fixes)?;
+    let change = TemporaryRadiusChange::new(access, fs, rail_index, side_eu)?;
     let result = body(access);
     let reverted = change.revert(access);
     match result {

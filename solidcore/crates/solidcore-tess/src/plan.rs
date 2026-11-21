@@ -175,6 +175,18 @@ impl TessPlan {
                 }
             }
             let nodes = positions.len();
+            // Every index the face's triangles take must fit the mesh's u32 indices: a face past
+            // them is refused, never numbered at u32::MAX.
+            if base
+                .checked_add(nodes)
+                .is_none_or(|end| u32::try_from(end).is_err())
+            {
+                refused.push(crate::RefusedFace {
+                    face: f.face as usize,
+                    reason: format!("its vertices lie past the mesh's {} index", u32::MAX),
+                });
+                continue;
+            }
             out.positions.extend(positions);
             out.normals.extend(normals);
             for t in triangles.iter() {

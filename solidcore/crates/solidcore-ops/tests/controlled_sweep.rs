@@ -233,7 +233,10 @@ fn solidcraft_s_limits_refuse_here() {
     use solidcore_ops::sweep::controlled::{MAX_SCALE, MAX_TWIST, MIN_SCALE};
     let refused = |laws: ControlledSweep| {
         let got = sweep_controlled(&square(), [0.0, 0.0, 1.0], &up(L), &laws);
-        assert!(matches!(got, Err(Error::Status(_))), "{laws:?}: {got:?}");
+        assert!(
+            matches!(got, Err(Error::Refused { .. })),
+            "{laws:?}: {got:?}"
+        );
     };
     refused(ControlledSweep {
         twist: 5.0 * 2.0 * PI,

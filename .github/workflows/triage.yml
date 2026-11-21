@@ -33,7 +33,7 @@ concurrency:
 jobs:
   triage:
     name: Triage bot
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 30
     # Filtered here so the common events (every comment, every label) start no runner.
     if: >-

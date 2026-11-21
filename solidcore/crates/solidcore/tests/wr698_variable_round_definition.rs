@@ -1,5 +1,5 @@
-//! WR-698 (smlib#79 step 7, the fork's 0d43b4c and b8e3594): with
-//! `fixes.fillet_round_as_definition` a variable round between NURBS faces is its definition: the order-1 section's `Build` takes the
+//! WR-698 (smlib#79 step 7, the fork's 0d43b4c and b8e3594):
+//! a variable round between NURBS faces is its definition: the order-1 section's `Build` takes the
 //! variable radius solver's law (`GnLawRound`), its stations the solver's own, its arcs the
 //! circles the balls' envelope touches each ball along, certified span by span with the
 //! law in the certificate; the rails and the centre line then run over the edge's t.
@@ -36,10 +36,8 @@ const TOL: f64 = 1e-3;
 /// The law's x control values (degree 2 over [0, L]).
 const LAW: [f64; 3] = [1.0, 2.5, 1.5];
 
-fn kernel(definition: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = definition;
-    k
+fn kernel() -> Kernel {
+    Kernel::default()
 }
 
 /// r(t) and r'(t), the quadratic Bezier law.
@@ -209,7 +207,7 @@ fn off_circle(t: f64, p: Point3) -> (f64, f64) {
 
 #[test]
 fn a_variable_round_is_its_definition_on_the_touch_circles() {
-    let k = kernel(true);
+    let k = kernel();
     let round = build(&k);
     let s = round
         .surface
@@ -300,8 +298,8 @@ fn generator_round(k: &Kernel, has_edgeuse: bool) -> Surface {
 
 #[test]
 fn the_circle_generator_builds_an_edge_s_variable_round_as_its_definition() {
-    // flag on: the definition (before 0d43b4c a varying ball was never one)
-    let k = kernel(true);
+    // the definition (before 0d43b4c a varying ball was never one)
+    let k = kernel();
     let s = generator_round(&k, true);
     assert!(
         matches!(s.kind(), SurfaceKind::ProceduralBlend(_)),
@@ -317,13 +315,6 @@ fn the_circle_generator_builds_an_edge_s_variable_round_as_its_definition() {
         matches!(corner.kind(), SurfaceKind::BSpline(_)),
         "{:?}",
         corner.kind()
-    );
-    // flag off: the skinned circles, as upstream
-    let off = generator_round(&kernel(false), true);
-    assert!(
-        matches!(off.kind(), SurfaceKind::BSpline(_)),
-        "{:?}",
-        off.kind()
     );
 }
 
@@ -369,7 +360,7 @@ fn the_law_in_the_edge_s_parameter_is_the_solver_s() {
 fn a_variable_round_rebuilt_from_its_record_is_its_definition() {
     use solidcore::surface::procedural_blend::convert::{rebuild, to_record};
     use solidcore::surface::procedural_blend::record::{ProceduralBlendRecord, RadiusRecord};
-    let k = kernel(true);
+    let k = kernel();
     let round = build(&k);
     let s = round.surface.expect("the definition");
     let SurfaceKind::ProceduralBlend(pb) = s.kind() else {

@@ -23,6 +23,8 @@
 //! | [`calc_vertex_zone_tol_3d`]            | `SmTol::CalcVertexZoneTol3d(double, double, SmZoneTol3d*, const SmContext*)` |
 //! | [`eff_zero`], [`eff_zero_sq`], [`eff_zero_param`], [`eff_zero_ang_rad`] | `SmTol::GetEffZero`, `GetEffZeroSq`, `GetEffZeroParam`, `GetEffZeroAngRad` |
 //! | [`xsect_tol_3d_from_zones`]            | `SmTol::GetXSectTol3d(const SmZoneTol3d&, const SmZoneTol3d&)` |
+//! | [`contact_tol_3d`]                     | not upstream (WR-787, #15429): when circles a hair less than tangent touch |
+//! | [`within_contact_tol`]                 | not upstream: the one reading of a contact at the tolerance, shared by every contact site |
 //! | [`ang_tol_rad`]                        | `SmTol::GetAngTolRad()`                        |
 //! | [`model_size_estimate`]                | `SmTol::GetModelSizeEstimate()`                |
 //! | [`context_model_size_estimate`]        | `SmTol::GetModelSizeEstimate(const SmContext&)` |
@@ -122,6 +124,7 @@ use crate::math::{
     max2, max3, max4, rad_to_deg, Vec3, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_RAD, EFF_ZERO_SQ,
     EFF_ZERO_SQRT, PI,
 };
+use crate::nurbs::math::gamma;
 use crate::surface::volume::Volume;
 use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 
@@ -423,6 +426,55 @@ pub fn context_xsect_tol_3d(k: &Kernel, ctx: Option<&Context>, small: SmallTopoT
 #[must_use]
 pub fn xsect_tol_3d_from_zones(k: &Kernel, zone1: f64, zone2: f64) -> f64 {
     xsect_tol3d(k, zone1 + zone2)
+}
+
+/// The tolerance up to which two circles or parallel cylinders, or a circle and a line in
+/// its plane, that overlap past touching touch on the boolean's path (read by
+/// [`within_contact_tol`]): the system zone
+/// tolerance, 1e-5 by default. Not upstream (WR-787, #15429, #14599): one value for every
+/// site that decides the contact (the walls, the rims, the curve/surface classifier),
+/// whatever tolerances earlier operations grew the edges and faces to, so the same two
+/// holes give the same topology whatever came before. The touching point midway lies δ/2 from each operand, so below it the
+/// point lies within the approximation tolerance (half the zone tolerance) of both, as
+/// the intersection curves through it do. At the intersection tolerance (twice the zone
+/// tolerance) two through holes overlapping by 1.02e-5 to 1.99e-5 came out a valid solid
+/// that kept the second tool whole, as a void.
+#[must_use]
+pub fn contact_tol_3d(k: &Kernel) -> f64 {
+    zone_tol_3d(k, SmallTopoType::NormalSize)
+}
+
+/// Whether `distance`, a length that decides a contact (how far two circles, or a circle
+/// and a line in its plane, overlap past touching; how far a plane dips into a cylinder or
+/// stands off a cone's generator; how far apart such curves lie all round), is within the
+/// contact tolerance `contact`: not proved past it. Not upstream: the one reading of the
+/// contact rule, shared by every site that decides a contact
+/// (`circle_coplanar_circle_intersect_in_contact` and
+/// `line_coplanar_circle_intersect_distinct` in `geom::geom_utility`, which the walls, the
+/// rims and the curve/surface classifier call with [`contact_tol_3d`]; a plane's section
+/// of a cylinder or a cone touching a side of the plane's domain,
+/// `Plane::make_new_plane_ellipse_in_contact`, with it too; and the plane's tangent line
+/// on a cylinder or a cone, `Cone::intersect_with_plane`, with the faces' zone
+/// tolerance), as two points are one unless proved apart
+/// (`ProtoTopologyManager::find_proto_vertex_within`).
+///
+/// Each site decides one contact from its own copies of the two curves: an edge's curve,
+/// a face pair's intersection curve, a surface's osculating circle. They are the same
+/// curves computed by different constructions, so their coordinates differ by a few
+/// roundings of their size, and a length read off them differs by that much from site to
+/// site. Read sharply, a contact at the tolerance (a boss placed exactly the tolerance over
+/// a rim) touched at one site and crossed at another, 9.99999999962e-6 against
+/// 1.0000000000673e-5; and where every site crossed, the vertices on the two sides of the
+/// lens were one point by their tolerances while the curves between them crossed. So a
+/// distance at the tolerance is within it, and so is one up to `γ_32` of `size` past it,
+/// `size` the largest coordinate a point of either curve has: the overlap's own arithmetic
+/// (a projection, a distance and two sums, about fifteen roundings) and as many again for
+/// the constructions of the copies (sixteen failing booleans of the stress corpus read
+/// their copies at most 3.3 unit roundoffs of `size` apart). A distance proved past the
+/// tolerance by more than that is past it at every site.
+#[must_use]
+pub fn within_contact_tol(distance: f64, contact: f64, size: f64) -> bool {
+    distance <= contact + gamma(32) * size.abs()
 }
 
 /// The system angle tolerance in radians (`SmTol::GetAngTolRad()`, `SM_ANG_TOL_RAD`).
