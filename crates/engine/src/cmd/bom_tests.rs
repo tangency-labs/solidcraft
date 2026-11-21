@@ -266,7 +266,7 @@ fn a_csv_field_a_spreadsheet_would_run_opens_as_text() {
     let csv = dir.join("bom.csv");
     run(&mut s, "assembly.bom", json!({"path": csv}));
     let text = std::fs::read_to_string(&csv).unwrap();
-    assert!(text.contains("\n\"1\",\"'=1+1\",\"'-5 mm shim\",\"'@A\",\"3\",\"Plate\",\"Default\",\"\"\n"), "{text}");
+    assert!(text.contains("\n\"1\",\"'=1+1\",\"'-5 mm shim\",\"'@A\",\"3\",\"Plate\",\"Default\",\"\",\"\"\n"), "{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -283,9 +283,9 @@ fn a_part_a_configuration_switches_off_leaves_the_bill_of_materials() {
     let plate = ("PL-100".to_string(), "Plate".to_string(), 3);
     let pins = ("PN-040".to_string(), "Pin".to_string(), 2);
     let csv = dir.join("bom.csv");
-    let header = "\"item\",\"part_number\",\"description\",\"revision\",\"count\",\"definition\",\"material\",\"quantity\"\n\
-                  \"1\",\"PL-100\",\"Plate, 3 mm\",\"B\",\"3\",\"Plate\",\"Default\",\"\"\n";
-    let pin_line = "\"2\",\"PN-040\",\"Pin 4 x 30\",\"\",\"2\",\"Pin\",\"Default\",\"\"\n";
+    let header = "\"item\",\"part_number\",\"description\",\"revision\",\"count\",\"definition\",\"material\",\"quantity\",\"finish\"\n\
+                  \"1\",\"PL-100\",\"Plate, 3 mm\",\"B\",\"3\",\"Plate\",\"Default\",\"\",\"\"\n";
+    let pin_line = "\"2\",\"PN-040\",\"Pin 4 x 30\",\"\",\"2\",\"Pin\",\"Default\",\"\",\"zinc\"\n";
     for (row, listed) in [("No pins", false), ("Default", true)] {
         run(&mut s, "config.activate", json!({"row": row}));
         let r = run(&mut s, "assembly.bom", json!({"path": csv}));
@@ -629,7 +629,7 @@ fn group_children_keeps_an_inseparable_parts_purchased_children_in_its_row() {
     run(&mut s, "assembly.bom", json!({"group_children": true, "path": path}));
     let text = std::fs::read_to_string(path).unwrap();
     let rows: Vec<&str> = text.lines().skip(1).collect();
-    assert_eq!(rows, ["\"1\",\"SUB-1\",\"\",\"\",\"2\",\"Sub\",\"\",\"\"", "\"1.1\",\"M2x10\",\"\",\"\",\"4\",\"Screw\",\"\",\"\""]);
+    assert_eq!(rows, ["\"1\",\"SUB-1\",\"\",\"\",\"2\",\"Sub\",\"\",\"\",\"\"", "\"1.1\",\"M2x10\",\"\",\"\",\"4\",\"Screw\",\"\",\"\",\"\""]);
 
     // In its own context the component still lists all its parts, regardless of its type.
     let own = run(&mut s, "assembly.bom", json!({"component": "Sub", "group_children": true}));
@@ -1368,8 +1368,10 @@ fn hostile_static_materials_are_refused_without_a_change() {
     ] {
         assert!(s.execute("component.metadata.set", &p).is_err(), "{p}");
     }
-    assert!(s.execute("document.metadata.set", &json!({"key": "material", "value": "Steel"})).is_err(), "not a design property");
-    assert!(s.execute("document.metadata.set", &json!({"values": {"material": "Steel"}})).is_err());
+    // A design that is one part holds its own material (#20114), with the same checks.
+    for hostile in [json!("a\u{7}b"), json!(7.85), json!({"name": "Steel"}), json!("x".repeat(solidcraft_doc::metadata::MAX_TEXT_BYTES + 1))] {
+        assert!(s.execute("document.metadata.set", &json!({"key": "material", "value": hostile})).is_err(), "{hostile}");
+    }
     assert_eq!(s.undo.len(), undo, "nothing changed");
     let block = run(&mut s, "component.metadata", json!({"component": "Block"}));
     assert_eq!((block["part_number"].as_str(), block["material"].as_str()), (None, Some("Steel bar")), "all or nothing");
@@ -2169,8 +2171,8 @@ fn a_virtual_component_is_listed_with_its_quantity_and_weighs_nothing() {
     let csv = scratch("quantity").join("bom.csv");
     run(&mut s, "assembly.bom", json!({"path": csv}));
     let text = std::fs::read_to_string(&csv).unwrap();
-    assert!(text.lines().next().unwrap().ends_with(",\"quantity\""), "{text}");
-    assert!(text.lines().any(|l| l.contains("\"Cable\"") && l.ends_with(",\"4000 mm\"")), "{text}");
+    assert!(text.lines().next().unwrap().contains(",\"quantity\","), "{text}");
+    assert!(text.lines().any(|l| l.contains("\"Cable\"") && l.contains(",\"4000 mm\",")), "{text}");
     // A parameter edit changes the quantity; renaming it keeps it working.
     run(&mut s, "parameters.change", json!({"name": "span", "expression": "1.5"}));
     assert_eq!(cable_row(&run(&mut s, "assembly.bom", json!({})))["quantity"], 6000.0);

@@ -52,6 +52,8 @@ mod tests {
     /// can hold (`metadata::check_text`) and the same one never shows twice.
     #[test]
     fn the_common_finishes_are_distinct_text_a_design_can_hold() {
+        crate::i18n::install();
+        let _language = solidcraft_ui_text::scope("en");
         let all: Vec<&str> = common().collect();
         assert!(all.len() >= 6, "{all:?}");
         let mut seen = std::collections::BTreeSet::new();

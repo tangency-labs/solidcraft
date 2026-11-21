@@ -234,7 +234,19 @@ mod tests {
         let names: Vec<&str> = list.lines().filter_map(|l| l.split_once("  ").map(|(n, _)| n)).collect();
         assert_eq!(
             names,
-            ["{design}", "{body}", "{project}", "{part_number}", "{revision}", "{author}", "{organization}", "{description}", "{license}"]
+            [
+                "{design}",
+                "{body}",
+                "{project}",
+                "{part_number}",
+                "{revision}",
+                "{author}",
+                "{organization}",
+                "{description}",
+                "{material}",
+                "{finish}",
+                "{license}"
+            ]
         );
         assert!(list.contains("{part_number}  Part number"), "each with its label: {list}");
     }

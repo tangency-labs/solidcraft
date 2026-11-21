@@ -170,10 +170,10 @@ fn a_lists_rows_lay_out_in_a_table() {
     let measure = |text: &str, cap: f64| text.chars().count() as f64 * cap / 2.0;
     let laid = definition.layout(&rows, solidcore_record::Vec2::new(400.0, 280.0), &measure).unwrap();
     assert_eq!(laid.rows.len(), 3);
-    // ITEM, QTY, FRAME's NAME, DESCRIPTION, MATERIAL, MASS: letters at 1.75 mm, a 1 mm pad each side;
-    // the outer two also hold half an outline line and half a cell line, the rest two half cell lines.
-    let letters = [4.0, 3.0, 5.0, 11.0, 8.0, 4.0];
-    let width: f64 = letters.iter().map(|n: &f64| n * 1.75 + 2.0).sum::<f64>() + 2.0 * 0.35 + 5.0 * 0.35;
+    // ITEM, QTY, FRAME's NAME, DESCRIPTION, MATERIAL, FINISH, MASS: letters at 1.75 mm, a 1 mm pad each
+    // side; the outer two also hold half an outline line and half a cell line, the rest two half cell lines.
+    let letters = [4.0, 3.0, 5.0, 11.0, 8.0, 6.0, 4.0];
+    let width: f64 = letters.iter().map(|n: &f64| n * 1.75 + 2.0).sum::<f64>() + 2.0 * 0.35 + 6.0 * 0.35;
     assert!((laid.outline.max.x - 400.0).abs() < 1e-9 && (laid.outline.min.x - (400.0 - width)).abs() < 1e-9, "{:?} {width}", laid.outline);
     // Four rows of 7 mm down from the corner.
     assert!((laid.outline.min.y - (280.0 - 4.0 * 7.0)).abs() < 1e-9, "{:?}", laid.outline);
@@ -181,7 +181,8 @@ fn a_lists_rows_lay_out_in_a_table() {
     assert!((row.rect.max.y - (280.0 - 2.0 * 7.0)).abs() < 1e-9 && (row.rect.min.y - (280.0 - 3.0 * 7.0)).abs() < 1e-9);
     assert_eq!(row.cells[0].lines[0].text, "2.1");
     // Not weighed: its cell shows the missing value (`cell::MISSING`, nothing), so it has no line.
-    assert!(row.cells[5].lines.is_empty(), "not weighed");
+    assert!(row.cells[6].lines.is_empty(), "not weighed (the mass is the seventh column: the finish is the sixth)");
+    assert!(row.cells[5].lines.is_empty(), "and it has no finish");
 }
 
 /// A row's key fits at the deepest a list goes: 64 levels under the top, every member its longest,
