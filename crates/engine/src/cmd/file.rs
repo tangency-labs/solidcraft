@@ -1322,8 +1322,10 @@ fn read_kicad_model(path: &str) -> std::io::Result<solidcraft_io::KicadModelFile
     let Some(stem) = named.file_stem() else { return Err(missing) };
     let Some(dir) = named.parent() else { return Err(missing) };
     let format = named.extension().and_then(|e| e.to_str()).unwrap_or("");
-    for other in ["step", "stp", "wrl"] {
-        if other.eq_ignore_ascii_case(format) {
+    // KiCad 10's zipped STEP comes after VRML, so a board that already found a `….wrl` keeps it,
+    // and in both spellings, as the file system may tell `….stpZ` from `….stpz`.
+    for other in ["step", "stp", "wrl", "stpZ", "stpz"] {
+        if other == format {
             continue;
         }
         // Not `with_extension`: a model named `DIP-14_W7.62mm` has `62mm` as its extension.
