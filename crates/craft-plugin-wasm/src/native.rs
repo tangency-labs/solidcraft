@@ -70,6 +70,7 @@ fn wit_error(error: HostError) -> PluginError {
         HostError::Cancelled => PluginError::Cancelled,
         HostError::UnsupportedCapability { reason, .. } => PluginError::InvalidManifest(types::FieldFailure { field: "capabilities".into(), reason }),
         HostError::Unsupported { reason } => PluginError::Unsupported(reason),
+        error @ HostError::InteractiveRequired { .. } => PluginError::Unsupported(error.to_string()),
         error @ (HostError::OverCeiling { .. } | HostError::Exhausted { .. }) => PluginError::LimitExceeded(error.to_string()),
     }
 }
@@ -105,6 +106,7 @@ struct State<H> {
     folders: BTreeMap<String, Folder>,
     staged: BTreeMap<(String, PathBuf), PendingWrite>,
     clock: bool,
+    forms: bool,
     limits: StoreLimits,
     failed: Option<HostError>,
     calls: usize,
@@ -261,6 +263,21 @@ impl<H: PluginHost> control::Host for State<H> {
         cancelled
     }
 }
+impl<H: PluginHost> forms::Host for State<H> {
+    fn open(&mut self, entry: String, params: String) -> std::result::Result<(), PluginError> {
+        self.check()?;
+        if !self.forms {
+            return Err(self.fail(HostError::PermissionDenied { permission: "forms@0.1 is not declared".into() }));
+        }
+        if !craft_plugin::valid_id(&entry) || params.len() > MAX_JSON_BYTES {
+            return Err(self.fail(HostError::InvalidInput { field: "form".into(), reason: "invalid entry or parameters exceed 1 MiB".into() }));
+        }
+        let value: Value =
+            serde_json::from_str(&params).map_err(|e| self.fail(HostError::InvalidInput { field: "params".into(), reason: e.to_string() }))?;
+        self.host.open_form(&entry, &value).map_err(|e| self.fail(e))
+    }
+}
+
 impl<H: PluginHost> clock::Host for State<H> {
     fn now(&mut self) -> u64 {
         if !self.clock || self.check().is_err() {
@@ -727,7 +744,19 @@ pub(super) fn run<H: PluginHost + 'static>(
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
-    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, folders);
+    let (mut state, outcome) = execute(
+        host,
+        runtime,
+        entry,
+        params,
+        compiled,
+        commands,
+        folders,
+        manifest
+            .capabilities
+            .iter()
+            .any(|c| c.split_once('@').is_some_and(|(name, version)| name == "forms" && craft_plugin::capability_version(version) == Some((0, 1)))),
+    );
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => state.publish_writes().map(|()| value),
@@ -745,6 +774,7 @@ pub(super) fn run<H: PluginHost + 'static>(
     (state.host, result)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute<H: PluginHost + 'static>(
     host: H,
     runtime: &craft_plugin::RuntimeManifest,
@@ -753,6 +783,7 @@ fn execute<H: PluginHost + 'static>(
     (engine, component, stack): (Engine, Component, usize),
     (commands, groups, design_tokens): (BTreeMap<String, CommandSchema>, BTreeSet<String>, bool),
     folders: BTreeMap<String, Folder>,
+    forms: bool,
 ) -> (State<H>, Result<Value>) {
     let limits = &runtime.limits;
     let state = State {
@@ -764,6 +795,7 @@ fn execute<H: PluginHost + 'static>(
         folders,
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
+        forms,
         failed: None,
         calls: 0,
         max_calls: MAX_CALLS,
@@ -1108,6 +1140,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
+        forms: false,
         failed: None,
         calls: 0,
         max_calls: MAX_IMPORT_CALLS,

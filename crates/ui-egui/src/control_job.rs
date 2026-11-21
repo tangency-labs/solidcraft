@@ -599,6 +599,7 @@ impl SolveApp {
                 return Some(req);
             }
             let mut copy = self.session.scratch();
+            copy.plugin_forms_interactive = crate::plugin_menu::take_interactive_run(self, req.serial);
             if let Some(level) = level {
                 copy.param_check = level;
             }
@@ -893,6 +894,9 @@ impl SolveApp {
                     reply
                 }
             };
+            if let Some(reason) = reply.get("error").and_then(Value::as_str).and_then(solidcraft_engine::plugin::structured_tool_error) {
+                reply["plugin_error"] = reason;
+            }
             if let Some(level) = level {
                 reply["param_check"] = json!(level.name());
             }
