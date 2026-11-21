@@ -40,8 +40,8 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     // Test change: show_design_view_switcher, the setting the owner asked for, is a portable key.
     assert_eq!(
         keys.len(),
-        108,
-        "include document browser visibility and sizing and the repeated-shortcut preference among the current portable settings"
+        109,
+        "include document browser visibility and sizing, the repeated-shortcut preference and the browser scroll wheel preferences among the current portable settings"
     );
     for key in [
         "nav",
@@ -61,6 +61,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "library_thumbnail_size",
         "show_document_browser",
         "suppress_sketch_snap",
+        "browser_scroll_wheel",
     ] {
         assert!(keys.contains(&key), "{key} belongs in a profile");
     }
@@ -810,6 +811,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     let expected = [
         "browser_bodies_folders",
         "browser_eye_left",
+        "browser_scroll_wheel",
         "center_arc_follows_cursor",
         "color_vision",
         "design_reopen_views",
@@ -920,7 +922,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
-    assert_eq!(expected.len(), 108);
+    assert_eq!(expected.len(), 109);
     assert_eq!(actual, expected);
 }
 
@@ -1135,7 +1137,7 @@ fn a_profile_carries_the_view_navigators_body_and_one_without_leaves_it_alone() 
     run(&mut h, "view.navigator", json!({"style": "custom", "body": body, "texture": "modeled", "arrows": false, "home": false}));
     run(&mut h, "settings.profile.save", json!({"name": "Gizmo"}));
     let exported = capture(&h.app, "Gizmo");
-    assert!(exported["view_gizmo"]["v"].is_string(), "the body is packed into the profile: {}", exported["view_gizmo"]);
+    assert!(exported["view_gizmo"]["v"].is_array(), "the body is carried in the profile as plain numbers: {}", exported["view_gizmo"]);
     assert!(exported.to_string().len() < 64 * 1024, "a box costs little");
 
     // Elsewhere: a design without that body, the signed axes, and no custom body yet.

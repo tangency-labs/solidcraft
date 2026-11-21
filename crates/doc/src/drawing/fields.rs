@@ -11,6 +11,9 @@
 //!
 //! - **component:** `name`, `part_number`, `description`, `revision` (its part properties),
 //!   `material`, `mass`, and `properties.<name>` (its free-text properties, such as a finish);
+//!   for a sheet metal part ([`SheetMetal`]), `thickness`, `sheet_rule`, `k_factor`, `bend_radius`,
+//!   `flat_length` and `flat_width`, each shown only when every sheet metal body it owns gives the
+//!   same value;
 //! - **drawing:** `name`, `number` (its `part_number` property: the drawing's identification
 //!   number; without one, the name of the component the sheet documents), `organization`, `author`,
 //!   `project`, and `properties.<key>` (any of its properties);
@@ -27,9 +30,14 @@ use solidcraft_geom::revision::{Field, RevisionRow};
 use solidcraft_geom::title_block::{CellKind, TitleBlock};
 
 use super::Drawing;
+use crate::display_units::format_length;
 use crate::{DocError, Metadata, Result};
 
 const COMPONENT: [&str; 6] = ["name", "part_number", "description", "revision", "material", "mass"];
+/// A component's sheet metal fields ([`SheetMetal`]).
+pub const SHEET_METAL: [&str; 6] = ["bend_radius", "flat_length", "flat_width", "k_factor", "sheet_rule", "thickness"];
+/// The decimals a sheet metal length is shown with: a new dimension's.
+const SHEET_DECIMALS: u8 = 2;
 const DRAWING: [&str; 5] = ["name", "number", "organization", "author", "project"];
 const SHEET: [&str; 4] = ["name", "number", "count", "scale"];
 /// Before a property's name: the field reads that property.
@@ -47,6 +55,91 @@ pub struct Component<'a> {
     pub material: Option<&'a str>,
     /// What one of it weighs, written for the sheet: none when it can't be weighed.
     pub mass: Option<&'a str>,
+    /// What its sheet metal bodies agree on: none when no field asked, or it has none.
+    pub sheet_metal: Option<&'a SheetMetal>,
+}
+
+/// One sheet metal body as a component's fields read it (lengths in mm).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SheetBody<'a> {
+    /// The name of the sheet rule it was made with.
+    pub rule: &'a str,
+    /// The sheet's thickness, in mm.
+    pub thickness: f64,
+    /// The K-factor its bends unfold by (no unit), as its rule works it out.
+    pub k_factor: f64,
+    /// The inner radius every bend of its bend table shares: none when it has no bend, its bends
+    /// differ, or its flat doesn't describe it.
+    pub bend_radius: Option<f64>,
+    /// Its flat pattern's extent along the flat's two axes: none when the flat doesn't describe the
+    /// body (a feature the sheet can't hold changed it).
+    pub flat: Option<[f64; 2]>,
+}
+
+/// What a component's sheet metal fields read, each as the sheet shows it: the value every one of
+/// its sheet metal bodies gives, written the same; none when it has no such body, or they differ.
+/// Lengths are in the drawing's units with a new dimension's decimals; the flat's length is its
+/// longer side and its width the shorter, whichever way its axes run.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SheetMetal {
+    /// The sheet thickness, a length in the drawing's units; none when the bodies differ.
+    pub thickness: Option<String>,
+    /// The name of the sheet rule; none when the bodies were made with different rules.
+    pub sheet_rule: Option<String>,
+    /// The K-factor (no unit); none when the bodies differ.
+    pub k_factor: Option<String>,
+    /// The inner radius all bends share, a length in the drawing's units; none when a body has
+    /// no bend, bends differ in radius, or a flat doesn't describe its body.
+    pub bend_radius: Option<String>,
+    /// The flat pattern's longer side, a length in the drawing's units; none when the bodies'
+    /// flats differ or a flat doesn't describe its body.
+    pub flat_length: Option<String>,
+    /// The flat pattern's shorter side, a length in the drawing's units; none as for `flat_length`.
+    pub flat_width: Option<String>,
+}
+
+impl SheetMetal {
+    /// What `bodies` agree on, written in `units`.
+    pub fn of(bodies: &[SheetBody], units: &str) -> SheetMetal {
+        let length = |mm: f64| mm.is_finite().then(|| format_length(mm, units, SHEET_DECIMALS));
+        let agreed = |read: &dyn Fn(&SheetBody) -> Option<String>| {
+            let mut values = bodies.iter().map(read);
+            let first = values.next()??;
+            values.all(|value| value.as_ref() == Some(&first)).then_some(first)
+        };
+        let sides = |body: &SheetBody| body.flat.filter(|[x, y]| x.is_finite() && y.is_finite()).map(|[x, y]| (x.max(y), x.min(y)));
+        SheetMetal {
+            thickness: agreed(&|b| length(b.thickness)),
+            sheet_rule: agreed(&|b| Some(b.rule.to_string())),
+            k_factor: agreed(&|b| unitless(b.k_factor)),
+            bend_radius: agreed(&|b| b.bend_radius.and_then(length)),
+            flat_length: agreed(&|b| sides(b).and_then(|(long, _)| length(long))),
+            flat_width: agreed(&|b| sides(b).and_then(|(_, short)| length(short))),
+        }
+    }
+
+    /// The field `key` ([`SHEET_METAL`]), when it has a value.
+    fn get(&self, key: &str) -> Option<&str> {
+        match key {
+            "thickness" => self.thickness.as_deref(),
+            "sheet_rule" => self.sheet_rule.as_deref(),
+            "k_factor" => self.k_factor.as_deref(),
+            "bend_radius" => self.bend_radius.as_deref(),
+            "flat_length" => self.flat_length.as_deref(),
+            "flat_width" => self.flat_width.as_deref(),
+            _ => None,
+        }
+    }
+}
+
+/// A unit-less number to at most three decimals, without trailing zeros (`0.44`, `0.5`).
+fn unitless(v: f64) -> Option<String> {
+    if !v.is_finite() {
+        return None;
+    }
+    let text = format!("{v:.3}");
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    Some(if text == "-0" { "0".into() } else { text.into() })
 }
 
 /// The component a sheet documents, as its fields find it.
@@ -84,7 +177,7 @@ pub enum FieldState {
 pub fn has_key(source: Source, key: &str) -> bool {
     let property = key.strip_prefix(PROPERTIES).is_some_and(|name| !name.is_empty());
     match source {
-        Source::Component => COMPONENT.contains(&key) || property,
+        Source::Component => COMPONENT.contains(&key) || SHEET_METAL.contains(&key) || property,
         Source::Drawing => DRAWING.contains(&key) || property,
         Source::Sheet => SHEET.contains(&key),
         Source::Revision => Field::ALL.iter().any(|f| f.key() == key),
@@ -221,6 +314,7 @@ impl Values<'_> {
                     "material" => c.material.map(str::to_string),
                     "mass" => c.mass.map(str::to_string),
                     "part_number" | "description" | "revision" => c.metadata.text(key).map(str::to_string),
+                    _ if SHEET_METAL.contains(&key) => c.sheet_metal?.get(key).map(str::to_string),
                     _ => key.strip_prefix(PROPERTIES).and_then(|name| c.properties?.get(name)).cloned(),
                 }
             }
