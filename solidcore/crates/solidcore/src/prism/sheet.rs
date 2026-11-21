@@ -57,7 +57,8 @@ fn refused(reason: &'static str) -> SolidError {
 /// within ten times `tol` of each other: pieces of material touching at a corner, an outline
 /// passing a point twice), as the kernel's face builder takes no point where more than two
 /// curves meet. Pieces running counter-clockwise are material, the others holes (turned to run
-/// counter-clockwise).
+/// counter-clockwise); a piece no larger than ten times `tol` (a segment of no length the loop
+/// passes) is neither and is left out.
 ///
 /// # Errors
 ///
@@ -83,6 +84,16 @@ pub fn region_loops(region: &Region2, tol: f64) -> Result<RegionLoops> {
     for lp in loops {
         let keyed = lp.segs.into_iter().map(|s| (s.start(), s)).collect();
         for piece in simple_loops(keyed, |a, b| a.distance(*b) < near) {
+            // a piece that lies within `near` of its start is a segment the outline only touches
+            // (a curve of no length a boolean left at a corner): no material and no hole
+            let Some(first) = piece.segs.first().map(Seg2::start) else { continue };
+            if piece
+                .segs
+                .iter()
+                .all(|s| [s.point_at(0.5), s.end()].iter().all(|q| q.distance(first) < near))
+            {
+                continue;
+            }
             match piece.signed_area()?.sign() {
                 Some(true) => out.material.push(piece),
                 Some(false) => out.holes.push(piece.reversed()),
