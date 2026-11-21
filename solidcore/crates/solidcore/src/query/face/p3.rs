@@ -133,6 +133,7 @@ use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{euclidian_step_off, CurveKind, StepOff};
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
+use crate::error::query::QueryFailure;
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -208,7 +209,7 @@ fn null(operation: &'static str, reason: &'static str) -> SolidError {
 
 /// `return(SM_ERR_INVALID_INPUT)`.
 fn invalid_status(operation: &'static str) -> SolidError {
-    SolidError::query_invalid_value(operation, "a vector of zero length has no direction")
+    SolidError::query(operation, QueryFailure::ZeroLengthVector)
 }
 
 /// `SER(v.Unitize())`: the unit vector, or the `SM_ERR_INVALID_INPUT` status of a zero
@@ -1933,8 +1934,11 @@ fn uv_line<O: ClassObject>(
     // build UVLine
     let start = Point3::new(uv_start.x, uv_start.y, 0.0);
     let end = Point3::new(uv_end.x, uv_end.y, 0.0);
-    Line::create_line_segment(2, start, end, None)
-        .map_err(|_| SolidError::query_missing(OP_UV_LINE, "the UV line"))
+    Line::create_line_segment(2, start, end, None).map_err(|e| {
+        crate::error::Failure::new(OP_UV_LINE, QueryFailure::UvLineNotMade)
+            .caused_by(e)
+            .into_error()
+    })
 }
 
 /// `sm_FaceClassifyUVLine` after the tolerance: loads `line` into `cc`.
@@ -2722,7 +2726,7 @@ fn into_loop_period(
 /// [`SolidError::InvalidInput`] where upstream dereferences null (an edge use without
 /// edge or loop use, an edge without curve, a face without surface, a missing vertex use
 /// or mate); `SM_ERR_INVALID_INPUT`
-/// ([`QueryFailure::InvalidValue`](crate::error::query::QueryFailure::InvalidValue)) for a zero vector the
+/// ([`QueryFailure::ZeroLengthVector`]) for a zero vector the
 /// projection or step-off tangents unitize or measure angles with (`SER`); those of the
 /// curve and edge evaluations and of `EvaluateNormalAtSingularity`;
 /// [`SolidError::Unported`]: those of `SmEdgeuse::EvaluateBinormal` and a 2D curve on a

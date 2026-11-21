@@ -67,6 +67,7 @@
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::euclidian_step_off;
 use crate::curve::curve::Curve;
+use crate::error::query::QueryFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -229,15 +230,15 @@ pub fn calculate_bounding_box(
 
     // when asked for a tight Axis Aligned Box
     if tight {
-        let mut ok1 = true;
-        let mut ok2 = true;
+        // the first box's error, which the failure passes on
+        let mut failed: Option<SolidError> = None;
 
         if req.normal {
             match calculate_tight_bounding_box(k, brep, edge) {
                 Ok(Some(b)) => out.normal = Some(b),
                 Ok(None) => {}
                 Err(err) if err.is_unported_or_cancelled() => return Err(err),
-                Err(_) => ok1 = false,
+                Err(err) => failed = Some(err),
             }
         }
 
@@ -253,18 +254,21 @@ pub fn calculate_bounding_box(
                     out.polar = b.polar;
                 }
                 Err(err) if err.is_unported_or_cancelled() => return Err(err),
-                Err(_) => ok2 = false,
+                Err(err) => {
+                    failed.get_or_insert(err);
+                }
             }
         }
 
         // all done
-        if ok1 && ok2 {
+        let Some(err) = failed else {
             return Ok(out);
-        }
-        return Err(SolidError::query_failed(
-            OP_BBOX,
-            "the curve's bounding box could not be found",
-        ));
+        };
+        return Err(
+            crate::error::Failure::new(OP_BBOX, QueryFailure::BoundingBoxNotFound)
+                .caused_by(err)
+                .into_error(),
+        );
     }
 
     // get all the bounding boxes from the curve
@@ -310,7 +314,7 @@ pub fn calculate_tight_bounding_box(
         .calculate_bounding_box(k, &e.interval, req, true)?
         .normal
         .ok_or_else(|| {
-            SolidError::query_failed(OP_TIGHT, "the curve's bounding box has no normal box")
+            SolidError::query(OP_TIGHT, QueryFailure::Defect { why: "the curve's bounding box was asked for with its normal box, which the box of every curve kind computes when asked" })
         })?;
 
     let tol = EFF_ZERO * (1.0 + curve_bbox.max_dimension());
@@ -533,7 +537,7 @@ fn evaluate_binormal_step_off(
 fn vec_status<T>(r: Result<T>, operation: &'static str) -> Result<T> {
     r.map_err(|e| match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
-            SolidError::query_invalid_value(operation, "a vector of zero length has no direction")
+            SolidError::query(operation, QueryFailure::ZeroLengthVector)
         }
         e => e,
     })
@@ -656,7 +660,7 @@ fn holds_coincidence(surfaces: Surfaces, gap: f64) -> bool {
 ///
 /// `SM_ERR` when the point cannot be dropped onto the other edge or the first step-off
 /// leaves a face; `SM_ERR_INVALID_INPUT` (as
-/// [`QueryFailure::InvalidValue`](crate::error::query::QueryFailure::InvalidValue)) when the first
+/// [`QueryFailure::ZeroLengthVector`]) when the first
 /// step-off's tangent or a binormal to measure is zero-length (a failed first step-off
 /// leaves the tangent uninitialised, which `Unitize` rejects before the step-off
 /// failure is looked at); [`SolidError::InvalidInput`] where upstream dereferences a null
@@ -712,15 +716,16 @@ pub fn radial_sector_classify_between(
     // classify edge locals
     let same_brep = other_brep.is_none();
     let other_ref: &Brep = other_brep.as_deref().unwrap_or(&*brep);
-    let other_edge = other_ref
-        .edgeuse(classify_eu)?
-        .edge
-        .ok_or_else(|| SolidError::query_missing(OP_RADIAL, "the other edge use's edge"))?;
+    let other_edge = other_ref.edgeuse(classify_eu)?.edge.ok_or_else(|| {
+        crate::error::Failure::new(OP_RADIAL, QueryFailure::EdgeuseWithoutEdge)
+            .with_status(crate::error::SM_ERR_NULL_POINTER)
+            .into_error()
+    })?;
     let other = other_ref.edge(other_edge)?;
     let other_curve = other
         .curve
         .as_ref()
-        .ok_or_else(|| SolidError::query_missing(OP_RADIAL, "the other edge's curve"))?;
+        .ok_or_else(|| SolidError::query(OP_RADIAL, QueryFailure::EdgeWithoutCurve))?;
     let tolerance = other.tolerance + this.tolerance;
 
     // get the corresponding classify edge parameter value
@@ -749,10 +754,7 @@ pub fn radial_sector_classify_between(
         }
         if !success {
             // Unable to drop point to other curve.
-            return Err(SolidError::query_failed(
-                OP_RADIAL,
-                "the point could not be dropped onto the other curve",
-            ));
+            return Err(SolidError::query(OP_RADIAL, QueryFailure::NoFoot));
         }
         param
     };
@@ -909,9 +911,9 @@ pub fn radial_sector_classify_between(
         if stepped_off_surface {
             // its an error to step off on first pass
             if count == 0 {
-                return Err(SolidError::query_failed(
+                return Err(SolidError::query(
                     OP_RADIAL,
-                    "the first step stepped off the surface",
+                    QueryFailure::SteppedOffOnFirstStep,
                 ));
             }
 
@@ -1194,7 +1196,7 @@ pub fn radial_sector_classify_between(
 /// # Errors
 ///
 /// `SM_ERR` when the curve's projected direction vanishes; `SM_ERR_INVALID_INPUT` (as
-/// [`QueryFailure::InvalidValue`](crate::error::query::QueryFailure::InvalidValue)) for a zero-length vector to unitize or measure;
+/// [`QueryFailure::ZeroLengthVector`]) for a zero-length vector to unitize or measure;
 /// [`SolidError::InvalidInput`]
 /// for a sector edge use without radial partner; those of the step-offs and
 /// evaluations; [`SolidError::Unported`] for the step-offs
@@ -1265,13 +1267,13 @@ pub fn radial_sector_of_curve_classify(
         .unwrap_or(start_param);
         let pv = curve.evaluate(k, step_param, 1, true, true)?;
         let mut tan = *pv.get(1).ok_or_else(|| {
-            SolidError::query_failed(OP_RADIAL_CURVE, "the curve evaluation has no tangent")
+            SolidError::query(OP_RADIAL_CURVE, QueryFailure::Defect { why: "the curve evaluation, asked for the first derivative, returned fewer, though an evaluation that succeeds returns every order it is asked for" })
         })?;
         if orientation == OrientType::Opposite {
             tan = -tan;
         }
         let pnt3 = *pv.first().ok_or_else(|| {
-            SolidError::query_failed(OP_RADIAL_CURVE, "the curve evaluation has no point")
+            SolidError::query(OP_RADIAL_CURVE, QueryFailure::Defect { why: "the curve evaluation, asked for the point and the first derivative, returned no point, though an evaluation that succeeds returns every order it is asked for" })
         })?;
 
         // Project binormals into plane which is perpendicular to edge
@@ -1280,9 +1282,9 @@ pub fn radial_sector_of_curve_classify(
         let bin2 = tan1.cross(s2.binormal).cross(tan1);
         let bin3 = tan1.cross(tan).cross(tan1);
         if bin3.length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::query_failed(
+            return Err(SolidError::query(
                 OP_RADIAL_CURVE,
-                "the curve's tangent is parallel to the edge's tangent",
+                QueryFailure::TangentAlongEdge,
             ));
         }
 
