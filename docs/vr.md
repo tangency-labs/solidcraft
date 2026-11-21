@@ -75,7 +75,10 @@ radio still activates it.
 folder show them), over the model.
 
 **Passthrough** (the real room): where the VR software offers it (an alpha-blended view), the
-model stands in the real room instead of the drawn one, with no backdrop or floor grid.
+model stands in the real room instead of the drawn one, with no backdrop or floor grid. It is off
+by default and not tried on a headset yet: the Steam Frame's firmware doesn't offer the
+alpha-blend mode yet. Where the mode is missing, nothing changes. The log lists the blend modes
+the VR software offers at the start of each session.
 
 **Settings** (Preferences › XR › VR, applied at once, also with the headset on): which inputs
 (trigger, grip, A/X, B/Y, stick click, menu) do Select, Grab, the ring menu, Put back and Section,
