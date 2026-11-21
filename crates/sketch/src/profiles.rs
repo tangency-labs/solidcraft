@@ -1017,9 +1017,8 @@ fn exact_between(seg: &Seg2, from: Vec2, to: Vec2, tol: f64) -> Option<Seg2> {
     if seg.point_at(t0).dist(from) > tol || seg.point_at(t1).dist(to) > tol || (t1 - t0).abs() < 1e-12 {
         return None;
     }
-    let (lo, hi) = (t0.min(t1), t0.max(t1));
-    let (_, right) = seg.split_at(lo);
-    let part = if hi < 1.0 { right.split_at((hi - lo) / (1.0 - lo)).0 } else { right };
+    // `part` carries `hi` into the tail, whose parameter a conic's split re-normalises.
+    let part = seg.part(t0.min(t1), t0.max(t1));
     Some(if t0 <= t1 { part } else { part.reversed() })
 }
 
@@ -2704,6 +2703,18 @@ mod tests {
         let grid = Grid::new(&[small, inf]);
         assert!(grid.cells(&inf).is_none());
         assert!(grid.cells(&huge).is_none());
+    }
+
+    /// The part of a conic between two of its points ends at the second one: a conic's tail
+    /// after a split has its parameter re-normalised, so the end is not at the old fraction.
+    #[test]
+    fn exact_between_ends_a_conic_part_at_its_given_point() {
+        let conic = Seg2::Conic { a: Vec2::new(0.0, 0.0), apex: Vec2::new(1.0, 1.0), b: Vec2::new(2.0, 0.0), w: 0.5 };
+        let (from, to) = (conic.point_at(0.5), conic.point_at(0.75));
+        let part = exact_between(&conic, from, to, 1e-9).expect("both points lie on the conic");
+        assert!(part.start().dist(from) < 1e-9 && part.end().dist(to) < 1e-9, "{part:?}");
+        let back = exact_between(&conic, to, from, 1e-9).expect("both points lie on the conic");
+        assert!(back.start().dist(to) < 1e-9 && back.end().dist(from) < 1e-9, "{back:?}");
     }
 
     fn text_into(sk: &mut Sketch, text: &str, at: Vec2, height: f64) {
